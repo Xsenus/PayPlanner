@@ -135,6 +135,7 @@ WebPush__Enabled=true
 WebPush__PublicKey=<optional-vapid-public-key>
 WebPush__PrivateKey=<optional-vapid-private-key>
 WebPush__Subject=mailto:admin@example.com
+FileStorage__RootPath=/opt/payplanner/shared/files
 Cors__AllowedOrigins__0=https://crm.example.com
 ```
 
@@ -142,6 +143,7 @@ Cors__AllowedOrigins__0=https://crm.example.com
 В Development backend оставляет CORS открытым для локальной разработки. В Production внешние origins берутся только из `Cors:AllowedOrigins`; если список пустой, cross-origin запросы не разрешаются, а работа через тот же домен продолжает идти без CORS.
 
 Production TLS/HSTS закреплены в [deploy runbook](docs/deploy-runbook.md): публичный HTTPS, редирект HTTP->HTTPS и заголовок `Strict-Transport-Security` должны обеспечиваться nginx, а backend слушает внутренний HTTP endpoint `127.0.0.1:5080`.
+В production `FileStorage__RootPath` должен указывать на постоянный каталог вне директории текущего релиза. Стандартный deploy использует `/opt/payplanner/shared/files`, чтобы вложения задач и документы дел сохранялись между обновлениями приложения.
 
 ## Current developer setup
 

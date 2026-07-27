@@ -122,14 +122,17 @@ public class TasksController : ControllerBase
         IWebHostEnvironment? environment = null,
         ICaseDocumentStorage? caseDocumentStorage = null,
         IInvoiceDocumentPdfService? pdfService = null,
-        IExternalCalendarSyncCoordinator? externalCalendarSyncCoordinator = null)
+        IExternalCalendarSyncCoordinator? externalCalendarSyncCoordinator = null,
+        IConfiguration? configuration = null)
     {
         _db = db;
         _notificationService = notificationService;
-        _caseDocumentStorage = caseDocumentStorage ?? new LocalCaseDocumentStorage(environment);
+        _caseDocumentStorage = caseDocumentStorage ?? new LocalCaseDocumentStorage(environment, configuration);
         _pdfService = pdfService;
         _externalCalendarSyncCoordinator = externalCalendarSyncCoordinator;
-        _taskFilesRoot = Path.Combine(environment?.ContentRootPath ?? AppContext.BaseDirectory, "App_Data", "task-files");
+        _taskFilesRoot = Path.Combine(
+            ApplicationFileStoragePaths.ResolveRoot(environment, configuration, AppContext.BaseDirectory),
+            "task-files");
     }
 
     [HttpGet]
@@ -1863,19 +1866,73 @@ public class TasksController : ControllerBase
             .AsNoTracking()
             .Where(item => item.TaskJournalItemId == id);
 
-        if (latestOnly)
+        List<TaskJournalFile> files;
+        if (!latestOnly)
         {
-            filesQuery = filesQuery.Where(item => !_db.TaskJournalFiles.Any(other =>
-                other.TaskJournalItemId == item.TaskJournalItemId
-                && other.DocumentKey == item.DocumentKey
-                && other.Version > item.Version));
+            var storedFiles = await filesQuery
+                .OrderBy(item => item.OriginalFileName)
+                .ThenByDescending(item => item.Version)
+                .ThenByDescending(item => item.Id)
+                .ToListAsync(ct);
+            files = storedFiles
+                .Where(IsTaskFileAvailable)
+                .ToList();
         }
+        else
+        {
+            var latestCandidates = await filesQuery
+                .Where(item => !_db.TaskJournalFiles.Any(other =>
+                    other.TaskJournalItemId == item.TaskJournalItemId
+                    && other.DocumentKey == item.DocumentKey
+                    && other.Version > item.Version))
+                .ToListAsync(ct);
 
-        var files = await filesQuery
-            .OrderBy(item => item.OriginalFileName)
-            .ThenByDescending(item => item.Version)
-            .ThenByDescending(item => item.Id)
-            .ToListAsync(ct);
+            files = [];
+            var missingDocumentKeys = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var candidate in latestCandidates)
+            {
+                if (IsTaskFileAvailable(candidate))
+                {
+                    files.Add(candidate);
+                }
+                else
+                {
+                    missingDocumentKeys.Add(candidate.DocumentKey);
+                }
+            }
+
+            if (missingDocumentKeys.Count > 0)
+            {
+                var missingKeys = missingDocumentKeys.ToArray();
+                var latestCandidateIds = latestCandidates.Select(item => item.Id).ToArray();
+                var fallbackCandidates = await filesQuery
+                    .Where(item => missingKeys.Contains(item.DocumentKey)
+                        && !latestCandidateIds.Contains(item.Id))
+                    .OrderBy(item => item.DocumentKey)
+                    .ThenByDescending(item => item.Version)
+                    .ThenByDescending(item => item.Id)
+                    .ToListAsync(ct);
+
+                var resolvedDocumentKeys = new HashSet<string>(
+                    files.Select(item => item.DocumentKey),
+                    StringComparer.Ordinal);
+                foreach (var candidate in fallbackCandidates)
+                {
+                    if (!resolvedDocumentKeys.Contains(candidate.DocumentKey)
+                        && IsTaskFileAvailable(candidate))
+                    {
+                        files.Add(candidate);
+                        resolvedDocumentKeys.Add(candidate.DocumentKey);
+                    }
+                }
+            }
+
+            files = files
+                .OrderBy(item => item.OriginalFileName)
+                .ThenByDescending(item => item.Version)
+                .ThenByDescending(item => item.Id)
+                .ToList();
+        }
 
         var caseDocumentIds = await ResolveTaskCaseDocumentIdsAsync(task.ClientCaseId, files, ct);
         return Ok(MapFiles(files, caseDocumentIds));
@@ -5976,6 +6033,21 @@ public class TasksController : ControllerBase
         }
 
         return fullPath;
+    }
+
+    private bool IsTaskFileAvailable(TaskJournalFile file)
+    {
+        try
+        {
+            return System.IO.File.Exists(ResolveTaskFilePath(file.StoragePath));
+        }
+        catch (Exception exception) when (
+            exception is InvalidOperationException
+            or ArgumentException
+            or NotSupportedException)
+        {
+            return false;
+        }
     }
 
     private static void TryDeletePhysicalFile(string fullPath)

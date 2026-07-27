@@ -24,12 +24,19 @@ public sealed class YandexDiskController : ControllerBase
     private readonly ICaseDocumentStorage _caseDocumentStorage;
     private readonly string _taskFilesRoot;
 
-    public YandexDiskController(IYandexDiskService service, PaymentContext db, IWebHostEnvironment? environment = null, ICaseDocumentStorage? caseDocumentStorage = null)
+    public YandexDiskController(
+        IYandexDiskService service,
+        PaymentContext db,
+        IWebHostEnvironment? environment = null,
+        ICaseDocumentStorage? caseDocumentStorage = null,
+        IConfiguration? configuration = null)
     {
         _service = service;
         _db = db;
-        _caseDocumentStorage = caseDocumentStorage ?? new LocalCaseDocumentStorage(environment);
-        _taskFilesRoot = Path.Combine(environment?.ContentRootPath ?? AppContext.BaseDirectory, "App_Data", "task-files");
+        _caseDocumentStorage = caseDocumentStorage ?? new LocalCaseDocumentStorage(environment, configuration);
+        _taskFilesRoot = Path.Combine(
+            ApplicationFileStoragePaths.ResolveRoot(environment, configuration, AppContext.BaseDirectory),
+            "task-files");
     }
 
     [HttpGet("connections")]

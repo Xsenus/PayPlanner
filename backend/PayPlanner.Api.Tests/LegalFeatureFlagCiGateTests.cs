@@ -164,6 +164,29 @@ public sealed class LegalFeatureFlagCiGateTests
     }
 
     [Fact]
+    public void DeployWorkflow_PreservesUploadedFilesOutsideReleaseDirectory()
+    {
+        var root = FindRepositoryRoot();
+        var workflow = File.ReadAllText(Path.Combine(root, ".github", "workflows", "deploy.yml"));
+
+        Assert.Contains("PERSISTENT_FILE_ROOT=\"/opt/payplanner/shared/files\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("FileStorage__RootPath=%s", workflow, StringComparison.Ordinal);
+        Assert.Contains("migrate_legacy_file_storage()", workflow, StringComparison.Ordinal);
+        Assert.Contains("\"$BE_DIR/App_Data/\" \"$PERSISTENT_FILE_ROOT/\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("-path '*/backend.previous/App_Data'", workflow, StringComparison.Ordinal);
+        Assert.Contains("rsync -a --ignore-existing", workflow, StringComparison.Ordinal);
+        Assert.Contains("Persistent file storage restored:", workflow, StringComparison.Ordinal);
+        AssertInOrder(
+            workflow,
+            [
+                "Backup current release",
+                "echo \"[6/13] Restore persistent file storage\"",
+                "sudo rsync -a --delete \"$STAGE/be/\" \"$BE_DIR/\"",
+                "sudo systemctl restart payplanner.service",
+            ]);
+    }
+
+    [Fact]
     public void BackendConfiguration_UsesStableEfQueryWarningsPolicy()
     {
         var root = FindRepositoryRoot();

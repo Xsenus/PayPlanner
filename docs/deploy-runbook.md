@@ -222,7 +222,9 @@ Startup logs include start/success/failure messages and duration for these steps
 
 ## Backup And Rollback
 
-The deploy workflow creates a pre-release backup directory under `/opt/payplanner/deploy-backups` and keeps shared database backups under `/opt/payplanner/shared/backups`.
+The deploy workflow creates a pre-release backup directory under `/opt/payplanner/deploy-backups`, keeps shared database backups under `/opt/payplanner/shared/backups`, and stores uploaded task/case files under `/opt/payplanner/shared/files`.
+
+The uploaded-file directory must stay outside `/opt/payplanner/app/backend`, because backend artifacts are synchronized with `rsync --delete`. During the first deployment with persistent file storage enabled, the workflow copies surviving `App_Data` files from the current backend and previous deploy backups into the shared directory without overwriting files already restored.
 
 Before production deploy:
 
@@ -234,10 +236,11 @@ Rollback checklist:
 
 1. Stop the backend service.
 2. Restore the previous backend and frontend artifacts from the deploy backup.
-3. Restore the database backup if migrations or startup maintenance changed data in a way that cannot be fixed forward.
-4. Start the backend service.
-5. Check `http://127.0.0.1:5080/api/health` locally and the public HTTPS health URL. Both checks must return JSON with `{"status":"ok"}`, not the CRM HTML shell.
-6. Confirm that admins can open the CRM and that the What New module still loads release notes.
+3. Keep `/opt/payplanner/shared/files` in place; do not replace it with `backend.previous/App_Data`.
+4. Restore the database backup if migrations or startup maintenance changed data in a way that cannot be fixed forward.
+5. Start the backend service.
+6. Check `http://127.0.0.1:5080/api/health` locally and the public HTTPS health URL. Both checks must return JSON with `{"status":"ok"}`, not the CRM HTML shell.
+7. Confirm that admins can open the CRM and that the What New module still loads release notes.
 
 Do not manually delete production tables, columns, or backup files during rollback unless the recovery plan explicitly requires it.
 

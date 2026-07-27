@@ -4858,6 +4858,55 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task GetFiles_HidesMissingFilesAndFallsBackToLatestAvailableVersion()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author-files@example.com", "Автор");
+        var client = await CreateClientAsync(db, "Иванов Иван Иванович");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, author.Id);
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var firstResult = await controller.UploadFile(
+            task.Id,
+            CreateFormFile("первая версия", "Документ.txt"),
+            null,
+            CancellationToken.None);
+        var first = Assert.IsType<TaskJournalFileDto>(
+            Assert.IsType<CreatedResult>(firstResult.Result).Value);
+        var secondResult = await controller.UploadFile(
+            task.Id,
+            CreateFormFile("вторая версия", "Документ.txt"),
+            first.DocumentKey,
+            CancellationToken.None);
+        var second = Assert.IsType<TaskJournalFileDto>(
+            Assert.IsType<CreatedResult>(secondResult.Result).Value);
+        var secondStored = await db.TaskJournalFiles
+            .AsNoTracking()
+            .SingleAsync(item => item.Id == second.Id);
+        var secondPath = Path.Combine(
+            AppContext.BaseDirectory,
+            "App_Data",
+            "task-files",
+            secondStored.StoragePath);
+        File.Delete(secondPath);
+
+        var allResult = await controller.GetFiles(task.Id, CancellationToken.None);
+        var allFiles = Assert.IsAssignableFrom<IReadOnlyList<TaskJournalFileDto>>(
+            Assert.IsType<OkObjectResult>(allResult.Result).Value);
+        var availableFile = Assert.Single(allFiles);
+        Assert.Equal(first.Id, availableFile.Id);
+        Assert.True(availableFile.IsLatestVersion);
+
+        var latestResult = await controller.GetFiles(task.Id, CancellationToken.None, latestOnly: true);
+        var latestFiles = Assert.IsAssignableFrom<IReadOnlyList<TaskJournalFileDto>>(
+            Assert.IsType<OkObjectResult>(latestResult.Result).Value);
+        Assert.Equal(first.Id, Assert.Single(latestFiles).Id);
+
+        Assert.IsType<NoContentResult>(await controller.DeleteFile(task.Id, first.Id, CancellationToken.None));
+        Assert.IsType<NoContentResult>(await controller.DeleteFile(task.Id, second.Id, CancellationToken.None));
+    }
+
+    [Fact]
     public async Task UploadFile_RejectsEmptyFile()
     {
         await using var db = await CreateContextAsync();

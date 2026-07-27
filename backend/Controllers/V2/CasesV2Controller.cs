@@ -130,7 +130,7 @@ public class CasesV2Controller : ControllerBase
         INotificationService? notificationService = null)
     {
         _db = db;
-        _caseDocumentStorage = caseDocumentStorage ?? new LocalCaseDocumentStorage(environment);
+        _caseDocumentStorage = caseDocumentStorage ?? new LocalCaseDocumentStorage(environment, configuration);
         _pdfService = pdfService;
         _sudrfCourtSyncService = sudrfCourtSyncService;
         _courtSyncProviderRegistry = courtSyncProviderRegistry;
@@ -3771,7 +3771,7 @@ public class CasesV2Controller : ControllerBase
             return NotFound();
         }
 
-        var documents = await _db.ClientCaseDocuments
+        var storedDocuments = await _db.ClientCaseDocuments
             .AsNoTracking()
             .Where(item => item.ClientCaseId == id)
             .OrderBy(item => item.DocumentType)
@@ -3779,6 +3779,9 @@ public class CasesV2Controller : ControllerBase
             .ThenByDescending(item => item.Version)
             .ThenByDescending(item => item.Id)
             .ToListAsync(ct);
+        var documents = storedDocuments
+            .Where(IsCaseDocumentAvailable)
+            .ToList();
 
         var templates = await GetCaseDocumentTemplateLibraryAsync(ct);
         return Ok(MapDocuments(documents, templates));
@@ -9300,6 +9303,21 @@ public class CasesV2Controller : ControllerBase
 
     private static string E(string? value)
         => WebUtility.HtmlEncode(value ?? string.Empty);
+
+    private bool IsCaseDocumentAvailable(ClientCaseDocument document)
+    {
+        try
+        {
+            return _caseDocumentStorage.Exists(document.StoragePath);
+        }
+        catch (Exception exception) when (
+            exception is InvalidOperationException
+            or ArgumentException
+            or NotSupportedException)
+        {
+            return false;
+        }
+    }
 
     private static IReadOnlyList<ClientCaseDocumentDto> MapDocuments(
         IReadOnlyCollection<ClientCaseDocument> documents,

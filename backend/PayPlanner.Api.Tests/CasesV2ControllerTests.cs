@@ -3612,6 +3612,20 @@ public class CasesV2ControllerTests
         Assert.Contains("\"UploadedAt\":\"", JsonSerializer.Serialize(documents), StringComparison.Ordinal);
         Assert.Contains("Z\"", JsonSerializer.Serialize(documents), StringComparison.Ordinal);
 
+        var secondStored = await db.ClientCaseDocuments
+            .AsNoTracking()
+            .SingleAsync(item => item.Id == second.Id);
+        var storage = new LocalCaseDocumentStorage(
+            new TestWebHostEnvironment { ContentRootPath = contentRoot });
+        File.Delete(storage.ResolvePath(secondStored.StoragePath));
+
+        var availableListResult = await controller.GetDocuments(clientCase.Id, CancellationToken.None);
+        var availableDocuments = Assert.IsAssignableFrom<IReadOnlyList<ClientCaseDocumentDto>>(
+            Assert.IsType<OkObjectResult>(availableListResult.Result).Value);
+        var availableDocument = Assert.Single(availableDocuments);
+        Assert.Equal(first.Id, availableDocument.Id);
+        Assert.True(availableDocument.IsLatestVersion);
+
         var deleteResult = await controller.DeleteDocument(clientCase.Id, first.Id, CancellationToken.None);
 
         Assert.IsType<NoContentResult>(deleteResult);
@@ -4134,6 +4148,31 @@ public class CasesV2ControllerTests
 
         storage.DeleteIfExists(relativePath);
         Assert.False(storage.Exists(relativePath));
+    }
+
+    [Fact]
+    public async Task CaseDocumentStorage_UsesConfiguredPersistentRoot()
+    {
+        var contentRoot = Path.Combine(Path.GetTempPath(), "payplanner-content", Guid.NewGuid().ToString("N"));
+        var persistentRoot = Path.Combine(Path.GetTempPath(), "payplanner-storage", Guid.NewGuid().ToString("N"));
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                [ApplicationFileStoragePaths.RootPathConfigurationKey] = persistentRoot,
+            })
+            .Build();
+        var storage = new LocalCaseDocumentStorage(
+            new TestWebHostEnvironment { ContentRootPath = contentRoot },
+            configuration);
+        var relativePath = storage.BuildRelativePath(21, "evidence.txt");
+
+        await storage.SaveAsync(relativePath, Encoding.UTF8.GetBytes("evidence"), CancellationToken.None);
+
+        Assert.Equal(
+            Path.Combine(persistentRoot, "case-documents", "21", "evidence.txt"),
+            storage.ResolvePath(relativePath));
+        Assert.True(storage.Exists(relativePath));
+        storage.DeleteIfExists(relativePath);
     }
 
     [Fact]

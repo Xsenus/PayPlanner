@@ -12,15 +12,39 @@ public interface ICaseDocumentStorage
     void DeleteIfExists(string storagePath);
 }
 
+public static class ApplicationFileStoragePaths
+{
+    public const string RootPathConfigurationKey = "FileStorage:RootPath";
+
+    public static string ResolveRoot(
+        IWebHostEnvironment? environment = null,
+        IConfiguration? configuration = null,
+        string? defaultContentRoot = null)
+    {
+        var contentRoot = environment?.ContentRootPath
+            ?? defaultContentRoot
+            ?? Directory.GetCurrentDirectory();
+        var configuredRoot = configuration?[RootPathConfigurationKey]?.Trim();
+        var root = string.IsNullOrWhiteSpace(configuredRoot)
+            ? Path.Combine(contentRoot, "App_Data")
+            : Path.IsPathRooted(configuredRoot)
+                ? configuredRoot
+                : Path.Combine(contentRoot, configuredRoot);
+
+        return Path.GetFullPath(root);
+    }
+}
+
 public class LocalCaseDocumentStorage : ICaseDocumentStorage
 {
     private readonly string _root;
 
-    public LocalCaseDocumentStorage(IWebHostEnvironment? environment = null)
+    public LocalCaseDocumentStorage(
+        IWebHostEnvironment? environment = null,
+        IConfiguration? configuration = null)
     {
         _root = Path.Combine(
-            environment?.ContentRootPath ?? Directory.GetCurrentDirectory(),
-            "App_Data",
+            ApplicationFileStoragePaths.ResolveRoot(environment, configuration),
             "case-documents");
     }
 

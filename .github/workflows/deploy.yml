@@ -145,6 +145,8 @@ jobs:
             PUBLIC_FRONTEND_URL="${{ env.PUBLIC_FRONTEND_URL }}"
             RUNTIME_ENV_FILE="/opt/payplanner/shared/payplanner.env"
             SYSTEMD_ENV_DROPIN="/etc/systemd/system/payplanner.service.d/20-payplanner-runtime-env.conf"
+            PERSISTENT_FILE_ROOT="/opt/payplanner/shared/files"
+            LEGACY_STORAGE_MIGRATION_MARKER="$PERSISTENT_FILE_ROOT/.legacy-app-data-migrated-v1"
             MIN_FREE_KB=262144
             BACKUP_ROOT="/opt/payplanner/deploy-backups"
             BACKUP_DIR="$BACKUP_ROOT/pre-${{ github.sha }}-$(date +%Y%m%d-%H%M%S)"
@@ -216,11 +218,15 @@ jobs:
               existing_env="$(mktemp)"
 
               if sudo test -f "$RUNTIME_ENV_FILE"; then
-                sudo sed '/^WebPush__/d' "$RUNTIME_ENV_FILE" > "$existing_env"
+                sudo sed \
+                  -e '/^WebPush__/d' \
+                  -e '/^FileStorage__RootPath=/d' \
+                  "$RUNTIME_ENV_FILE" > "$existing_env"
               fi
 
               {
                 cat "$existing_env"
+                printf 'FileStorage__RootPath=%s\n' "$PERSISTENT_FILE_ROOT"
                 printf 'WebPush__Enabled=%s\n' "$webpush_enabled"
                 if [ -n "$webpush_public_key" ]; then printf 'WebPush__PublicKey=%s\n' "$webpush_public_key"; fi
                 if [ -n "$webpush_private_key" ]; then printf 'WebPush__PrivateKey=%s\n' "$webpush_private_key"; fi
@@ -242,56 +248,84 @@ jobs:
               set -x
             }
 
+            migrate_legacy_file_storage() {
+              local before_count
+              local after_count
+
+              sudo mkdir -p "$PERSISTENT_FILE_ROOT/task-files" "$PERSISTENT_FILE_ROOT/case-documents"
+              before_count="$(sudo find "$PERSISTENT_FILE_ROOT" -type f ! -name '.legacy-app-data-migrated-v1' | wc -l)"
+              if sudo test -f "$LEGACY_STORAGE_MIGRATION_MARKER"; then
+                echo "Persistent file storage is ready: files=$before_count"
+                return 0
+              fi
+
+              if sudo test -d "$BE_DIR/App_Data"; then
+                sudo rsync -a --ignore-existing "$BE_DIR/App_Data/" "$PERSISTENT_FILE_ROOT/"
+              fi
+
+              while IFS= read -r -d '' legacy_app_data; do
+                sudo rsync -a --ignore-existing "$legacy_app_data/" "$PERSISTENT_FILE_ROOT/"
+              done < <(sudo find "$BACKUP_ROOT" -mindepth 3 -maxdepth 3 -type d -path '*/backend.previous/App_Data' -print0 | sort -z)
+
+              printf '%s\n' "${{ github.sha }}" | sudo tee "$LEGACY_STORAGE_MIGRATION_MARKER" >/dev/null
+              after_count="$(sudo find "$PERSISTENT_FILE_ROOT" -type f ! -name '.legacy-app-data-migrated-v1' | wc -l)"
+              echo "Persistent file storage restored: before=$before_count after=$after_count restored=$((after_count - before_count))"
+              sudo du -sh "$PERSISTENT_FILE_ROOT"
+            }
+
             trap cleanup EXIT
 
-            echo "[1/12] Preflight disk check"
+            echo "[1/13] Preflight disk check"
             check_space "/" "$MIN_FREE_KB"
 
-            echo "[2/12] Prepare staging"
+            echo "[2/13] Prepare staging"
             resolve_package
             rm -rf "$STAGE"
             mkdir -p "$STAGE"
             tar -xzf "$TAR" -C "$STAGE"
 
-            echo "[3/12] Ensure target dirs"
-            sudo mkdir -p "$BE_DIR" "$FE_APP_DIR" "$FE_PUBLIC_DIR" "$BACKUP_ROOT" /opt/payplanner/shared/backups
+            echo "[3/13] Ensure target dirs"
+            sudo mkdir -p "$BE_DIR" "$FE_APP_DIR" "$FE_PUBLIC_DIR" "$BACKUP_ROOT" /opt/payplanner/shared/backups "$PERSISTENT_FILE_ROOT"
 
-            echo "[4/12] Configure runtime environment"
+            echo "[4/13] Configure runtime environment"
             configure_runtime_env
 
-            echo "[5/12] Backup current release"
+            echo "[5/13] Backup current release"
             sudo mkdir -p "$BACKUP_DIR"
             if [ -d "$BE_DIR" ]; then sudo cp -a "$BE_DIR" "$BACKUP_DIR/backend.previous"; fi
             if [ -d "$FE_APP_DIR" ]; then sudo cp -a "$FE_APP_DIR" "$BACKUP_DIR/frontend.previous"; fi
             if [ -f "$APP_DIR/REVISION" ]; then sudo cp -a "$APP_DIR/REVISION" "$BACKUP_DIR/REVISION.previous"; fi
             if [ -f "$APP_DIR/.deploy-revision" ]; then sudo cp -a "$APP_DIR/.deploy-revision" "$BACKUP_DIR/.deploy-revision.previous"; fi
 
-            echo "[6/12] Rsync backend"
+            echo "[6/13] Restore persistent file storage"
+            migrate_legacy_file_storage
+
+            echo "[7/13] Rsync backend"
             sudo rsync -a --delete "$STAGE/be/" "$BE_DIR/"
 
-            echo "[7/12] Rsync frontend"
+            echo "[8/13] Rsync frontend"
             # Remove stale hashed chunks: the frontend reloads itself if a browser tries to load an old lazy chunk.
             sudo rsync -a --delete "$STAGE/fe/" "$FE_APP_DIR/"
             sudo rsync -a --delete "$STAGE/fe/" "$FE_PUBLIC_DIR/"
 
-            echo "[8/12] Write revision marker"
+            echo "[9/13] Write revision marker"
             printf '%s\n' "${{ github.sha }}" | sudo tee "$APP_DIR/REVISION" >/dev/null
             printf '%s\n' "${{ github.sha }}" | sudo tee "$APP_DIR/.deploy-revision" >/dev/null
 
-            echo "[9/12] Cleanup temp artifacts"
+            echo "[10/13] Cleanup temp artifacts"
             cleanup
 
-            echo "[10/12] Permissions"
+            echo "[11/13] Permissions"
             sudo chown -R payplanner:payplanner /opt/payplanner
             sudo chown -R www-data:www-data "$FE_PUBLIC_DIR"
 
-            echo "[11/12] Restart service"
+            echo "[12/13] Restart service"
             check_space "/" "$MIN_FREE_KB"
             sudo systemctl daemon-reload || true
             sudo systemctl enable payplanner.service
             sudo systemctl restart payplanner.service
 
-            echo "[12/12] Wait for health"
+            echo "[13/13] Wait for health"
             ok=0
             for i in $(seq 1 30); do
               if curl -fsS "$PRIMARY_HEALTH_URL" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"'; then
