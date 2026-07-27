@@ -4396,8 +4396,9 @@ export class ApiService {
     });
   }
 
-  async getTaskJournalFiles(id: number) {
-    return this.request<TaskJournalFile[]>(`/tasks/${id}/files`);
+  async getTaskJournalFiles(id: number, options: { latestOnly?: boolean } = {}) {
+    const query = options.latestOnly ? '?latestOnly=true' : '';
+    return this.request<TaskJournalFile[]>(`/tasks/${id}/files${query}`);
   }
 
   async uploadTaskJournalFile(id: number, file: File, documentKey?: string) {

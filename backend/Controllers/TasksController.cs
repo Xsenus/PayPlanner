@@ -1835,7 +1835,10 @@ public class TasksController : ControllerBase
     }
 
     [HttpGet("{id:int}/files")]
-    public async Task<ActionResult<IReadOnlyList<TaskJournalFileDto>>> GetFiles(int id, CancellationToken ct)
+    public async Task<ActionResult<IReadOnlyList<TaskJournalFileDto>>> GetFiles(
+        int id,
+        CancellationToken ct,
+        [FromQuery] bool latestOnly = false)
     {
         var access = await GetTaskAccessAsync(ct);
         if (access is null)
@@ -1856,9 +1859,19 @@ public class TasksController : ControllerBase
             return NotFound();
         }
 
-        var files = await _db.TaskJournalFiles
+        var filesQuery = _db.TaskJournalFiles
             .AsNoTracking()
-            .Where(item => item.TaskJournalItemId == id)
+            .Where(item => item.TaskJournalItemId == id);
+
+        if (latestOnly)
+        {
+            filesQuery = filesQuery.Where(item => !_db.TaskJournalFiles.Any(other =>
+                other.TaskJournalItemId == item.TaskJournalItemId
+                && other.DocumentKey == item.DocumentKey
+                && other.Version > item.Version));
+        }
+
+        var files = await filesQuery
             .OrderBy(item => item.OriginalFileName)
             .ThenByDescending(item => item.Version)
             .ThenByDescending(item => item.Id)

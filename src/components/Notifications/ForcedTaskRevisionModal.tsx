@@ -1,13 +1,13 @@
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CheckCircle2, Clock3, ExternalLink, Loader2, TimerReset, XCircle } from 'lucide-react';
+import { CheckCircle2, Clock3, Download, ExternalLink, FileText, Loader2, TimerReset, XCircle } from 'lucide-react';
 import { apiService, type UserNotificationDto } from '../../services/api';
 import { emitUserNotificationsChanged, USER_NOTIFICATIONS_EVENT } from '../../utils/userNotifications';
 import { parseUserNotificationMetadata } from '../../utils/userNotificationMetadata';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { formatDateTimeInTimeZone, fromTimeZoneDateTimeInput, toTimeZoneDateTimeInput } from '../../utils/timeZoneDate';
 import { normalizeUserTimeZoneId, USER_TIME_ZONE_SETTING_KEY } from '../../utils/timeZoneOptions';
-import type { TaskJournalItem, TaskJournalParticipant } from '../../utils/taskJournalStore';
+import type { TaskJournalFile, TaskJournalItem, TaskJournalParticipant } from '../../utils/taskJournalStore';
 import {
   FORCED_TASK_SNOOZE_OPTIONS,
   getForcedTaskApprovalSnoozeKey,
@@ -39,6 +39,36 @@ type ForcedTaskQueueItem = {
 
 const FORCED_TASK_QUEUE_PAGE_SIZE = 25;
 const FORCED_TASK_POLL_INTERVAL_MS = 30_000;
+const FORCED_TASK_OPEN_SNOOZE_MINUTES = 10;
+
+function formatFileSize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 Б';
+  if (bytes < 1024) return `${bytes} Б`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} КБ`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} МБ`;
+}
+
+function downloadBlob(fileName: string, blob: Blob) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function getLatestTaskFiles(files: TaskJournalFile[]): TaskJournalFile[] {
+  const latestByDocument = new Map<string, TaskJournalFile>();
+  files.forEach((file) => {
+    const current = latestByDocument.get(file.documentKey);
+    if (!current || file.version > current.version || (file.version === current.version && file.id > current.id)) {
+      latestByDocument.set(file.documentKey, file);
+    }
+  });
+
+  return [...latestByDocument.values()]
+    .sort((left, right) => Date.parse(right.uploadedAt) - Date.parse(left.uploadedAt) || right.id - left.id);
+}
 
 function SnoozeMenu({
   disabled,
@@ -296,6 +326,10 @@ export function ForcedTaskRevisionModal({ onOpenTask }: ForcedTaskRevisionModalP
   const [deadlineChangeSaving, setDeadlineChangeSaving] = useState<'approve' | 'reject' | null>(null);
   const [approvalTask, setApprovalTask] = useState<TaskJournalItem | null>(null);
   const [approvalTaskLoading, setApprovalTaskLoading] = useState(false);
+  const [approvalFiles, setApprovalFiles] = useState<TaskJournalFile[]>([]);
+  const [approvalFilesLoading, setApprovalFilesLoading] = useState(false);
+  const [approvalFilesError, setApprovalFilesError] = useState<string | null>(null);
+  const [approvalFileDownloadingId, setApprovalFileDownloadingId] = useState<number | null>(null);
   const [approvalRevisionText, setApprovalRevisionText] = useState('');
   const [approvalRevisionDueAt, setApprovalRevisionDueAt] = useState('');
   const [approvalError, setApprovalError] = useState<string | null>(null);
@@ -384,6 +418,7 @@ export function ForcedTaskRevisionModal({ onOpenTask }: ForcedTaskRevisionModalP
   const current = currentItem?.notification ?? null;
   const decisionKind = currentItem?.decisionKind ?? null;
   const decisionText = useMemo(() => current && decisionKind ? getDecisionText(current, decisionKind) : '', [current, decisionKind]);
+  const approvalLatestFiles = useMemo(() => getLatestTaskFiles(approvalFiles), [approvalFiles]);
 
   useEffect(() => {
     if (!current || decisionKind !== 'deadlineChangeRequest') {
@@ -401,6 +436,10 @@ export function ForcedTaskRevisionModal({ onOpenTask }: ForcedTaskRevisionModalP
     if (!current || decisionKind !== 'approvalRequest' || !current.taskId) {
       setApprovalTask(null);
       setApprovalTaskLoading(false);
+      setApprovalFiles([]);
+      setApprovalFilesLoading(false);
+      setApprovalFilesError(null);
+      setApprovalFileDownloadingId(null);
       setApprovalRevisionText('');
       setApprovalRevisionDueAt('');
       setApprovalError(null);
@@ -410,27 +449,42 @@ export function ForcedTaskRevisionModal({ onOpenTask }: ForcedTaskRevisionModalP
 
     let cancelled = false;
     setApprovalTaskLoading(true);
+    setApprovalFilesLoading(true);
     setApprovalTask(null);
+    setApprovalFiles([]);
+    setApprovalFilesError(null);
+    setApprovalFileDownloadingId(null);
     setApprovalRevisionText('');
     setApprovalRevisionDueAt('');
     setApprovalError(null);
     setApprovalSaving(null);
 
-    apiService.getTaskJournalItem(current.taskId)
-      .then((task) => {
-        if (!cancelled) {
-          setApprovalTask(task);
-          setApprovalRevisionDueAt(getDefaultRevisionDueAtInput(task, timeZoneId));
+    Promise.allSettled([
+      apiService.getTaskJournalItem(current.taskId),
+      apiService.getTaskJournalFiles(current.taskId, { latestOnly: true }),
+    ])
+      .then(([taskResult, filesResult]) => {
+        if (cancelled) {
+          return;
         }
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          setApprovalError(extractDisplayErrorMessage(error, 'Не удалось загрузить задачу для согласования.'));
+
+        if (taskResult.status === 'fulfilled') {
+          setApprovalTask(taskResult.value);
+          setApprovalRevisionDueAt(getDefaultRevisionDueAtInput(taskResult.value, timeZoneId));
+        } else {
+          setApprovalError(extractDisplayErrorMessage(taskResult.reason, 'Не удалось загрузить задачу для согласования.'));
+        }
+
+        if (filesResult.status === 'fulfilled') {
+          setApprovalFiles(filesResult.value);
+        } else {
+          setApprovalFilesError(extractDisplayErrorMessage(filesResult.reason, 'Не удалось загрузить вложения задачи.'));
         }
       })
       .finally(() => {
         if (!cancelled) {
           setApprovalTaskLoading(false);
+          setApprovalFilesLoading(false);
         }
       });
 
@@ -482,6 +536,38 @@ export function ForcedTaskRevisionModal({ onOpenTask }: ForcedTaskRevisionModalP
       reason: 'forced-task-action-snoozed',
       notificationId: current.id,
     });
+  };
+
+  const openCurrentTask = () => {
+    if (!current?.taskId || !onOpenTask || !currentItem) {
+      return;
+    }
+
+    if (currentItem.rule.action === 'acknowledge') {
+      void acknowledge(true);
+      return;
+    }
+
+    snoozeCurrent(FORCED_TASK_OPEN_SNOOZE_MINUTES);
+    onOpenTask(current.taskId);
+  };
+
+  const downloadApprovalFile = async (file: TaskJournalFile) => {
+    const taskId = current?.taskId;
+    if (!taskId || approvalFileDownloadingId !== null) {
+      return;
+    }
+
+    setApprovalFileDownloadingId(file.id);
+    setApprovalFilesError(null);
+    try {
+      const response = await apiService.downloadTaskJournalFile(taskId, file.id);
+      downloadBlob(response.fileName || file.originalFileName, response.blob);
+    } catch (error) {
+      setApprovalFilesError(extractDisplayErrorMessage(error, 'Не удалось скачать вложение задачи.'));
+    } finally {
+      setApprovalFileDownloadingId(null);
+    }
   };
 
   const approveDeadlineChange = async () => {
@@ -685,6 +771,57 @@ export function ForcedTaskRevisionModal({ onOpenTask }: ForcedTaskRevisionModalP
             <div className="whitespace-pre-wrap">{resultText}</div>
           </div>
 
+          <section className="mt-4 rounded-xl border border-slate-200 bg-white px-3 py-3" aria-labelledby="forced-task-approval-files-title">
+            <div className="flex items-center justify-between gap-3">
+              <div id="forced-task-approval-files-title" className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+                <FileText className="h-4 w-4 text-slate-500" />
+                Вложения к задаче
+              </div>
+              {!approvalFilesLoading ? (
+                <span className="text-xs font-medium text-slate-400">{approvalLatestFiles.length}</span>
+              ) : null}
+            </div>
+            {approvalFilesLoading ? (
+              <div className="mt-3 flex items-center gap-2 text-sm text-slate-500">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Загружаем вложения...
+              </div>
+            ) : approvalLatestFiles.length > 0 ? (
+              <div className="mt-3 space-y-2">
+                {approvalLatestFiles.map((file) => (
+                  <div key={file.id} className="flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                    <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white text-slate-600 ring-1 ring-slate-200">
+                      <FileText className="h-4 w-4" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-semibold text-slate-800" title={file.originalFileName}>
+                        {file.originalFileName}
+                      </div>
+                      <div className="text-xs text-slate-500">
+                        v{file.version} · {formatFileSize(file.sizeBytes)}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void downloadApprovalFile(file)}
+                      disabled={approvalFileDownloadingId !== null}
+                      className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-blue-600 transition hover:bg-blue-50 disabled:cursor-wait disabled:opacity-60"
+                      aria-label={`Скачать файл ${file.originalFileName}`}
+                      title="Скачать файл"
+                    >
+                      {approvalFileDownloadingId === file.id
+                        ? <Loader2 className="h-4 w-4 animate-spin" />
+                        : <Download className="h-4 w-4" />}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="mt-3 text-sm text-slate-500">К задаче не приложены файлы.</div>
+            )}
+            {approvalFilesError ? <p className="mt-2 text-sm font-semibold text-rose-600">{approvalFilesError}</p> : null}
+          </section>
+
           <label className="mt-4 block text-sm font-semibold text-slate-700" htmlFor="forced-task-approval-revision-due-at">
             Срок доработки
           </label>
@@ -725,7 +862,7 @@ export function ForcedTaskRevisionModal({ onOpenTask }: ForcedTaskRevisionModalP
             {current.taskId && onOpenTask ? (
               <button
                 type="button"
-                onClick={() => onOpenTask(current.taskId!)}
+                onClick={openCurrentTask}
                 disabled={isSaving}
                 className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60 sm:w-auto"
               >
@@ -867,7 +1004,7 @@ export function ForcedTaskRevisionModal({ onOpenTask }: ForcedTaskRevisionModalP
             {current.taskId && onOpenTask ? (
               <button
                 type="button"
-                onClick={() => onOpenTask(current.taskId!)}
+                onClick={openCurrentTask}
                 disabled={isSaving}
                 className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60 sm:w-auto"
               >
@@ -957,7 +1094,7 @@ export function ForcedTaskRevisionModal({ onOpenTask }: ForcedTaskRevisionModalP
           {current.taskId && onOpenTask ? (
             <button
               type="button"
-              onClick={() => void acknowledge(true)}
+              onClick={openCurrentTask}
               disabled={acknowledgingId === current.id}
               className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60 sm:w-auto"
             >

@@ -4837,6 +4837,13 @@ public class TasksControllerTests
         Assert.Contains(files, item => item.Id == second.Id && item.IsLatestVersion && item.ClientCaseDocumentId == second.ClientCaseDocumentId);
         Assert.Equal(2, await db.ClientCaseDocuments.CountAsync(item => item.ClientCaseId == clientCase.Id && item.DocumentKey.StartsWith($"task-{task.Id}-")));
 
+        var latestFilesResult = await controller.GetFiles(task.Id, CancellationToken.None, latestOnly: true);
+        var latestFilesOk = Assert.IsType<OkObjectResult>(latestFilesResult.Result);
+        var latestFiles = Assert.IsAssignableFrom<IReadOnlyList<TaskJournalFileDto>>(latestFilesOk.Value);
+        var latestFile = Assert.Single(latestFiles);
+        Assert.Equal(second.Id, latestFile.Id);
+        Assert.True(latestFile.IsLatestVersion);
+
         var download = await controller.DownloadFile(task.Id, second.Id, CancellationToken.None);
         var physicalFile = Assert.IsType<PhysicalFileResult>(download);
         Assert.Equal("Документ.txt", physicalFile.FileDownloadName);

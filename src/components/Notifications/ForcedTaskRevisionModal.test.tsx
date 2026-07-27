@@ -11,6 +11,8 @@ import {
 
 const apiMock = vi.hoisted(() => ({
   approveTaskJournalDeadlineChangeRequest: vi.fn(),
+  downloadTaskJournalFile: vi.fn(),
+  getTaskJournalFiles: vi.fn(),
   getTaskJournalItem: vi.fn(),
   getUserSetting: vi.fn(),
   getUserNotifications: vi.fn(),
@@ -167,6 +169,8 @@ function mockNotificationPages(
 describe('ForcedTaskRevisionModal', () => {
   beforeEach(() => {
     apiMock.approveTaskJournalDeadlineChangeRequest.mockReset();
+    apiMock.downloadTaskJournalFile.mockReset();
+    apiMock.getTaskJournalFiles.mockReset();
     apiMock.getTaskJournalItem.mockReset();
     apiMock.getUserSetting.mockReset();
     apiMock.getUserNotifications.mockReset();
@@ -175,6 +179,7 @@ describe('ForcedTaskRevisionModal', () => {
     apiMock.updateTaskJournalApproval.mockReset();
     window.localStorage.clear();
     apiMock.approveTaskJournalDeadlineChangeRequest.mockResolvedValue({});
+    apiMock.getTaskJournalFiles.mockResolvedValue([]);
     apiMock.getTaskJournalItem.mockResolvedValue(createApprovalTask());
     apiMock.getUserSetting.mockResolvedValue({ key: 'profile.timeZoneId', value: 'Europe/Samara' });
     apiMock.markUserNotificationRead.mockImplementation(async (id: number) => createNotification({ id, isRead: true }));
@@ -394,6 +399,61 @@ describe('ForcedTaskRevisionModal', () => {
     ));
     await waitFor(() => expect(apiMock.markUserNotificationRead).toHaveBeenCalledWith(61));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+
+  it('shows the latest attached files in the forced approval prompt', async () => {
+    mockNotificationPages([], [], [], [createApprovalRequestNotification()]);
+    apiMock.getTaskJournalFiles.mockResolvedValue([
+      {
+        id: 81,
+        taskJournalItemId: 404,
+        documentKey: 'claim',
+        version: 1,
+        originalFileName: 'Иск черновик.docx',
+        contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        sizeBytes: 1024,
+        uploadedByName: 'Мария Юрист',
+        uploadedAt: '2026-06-30T09:00:00Z',
+        isLatestVersion: false,
+      },
+      {
+        id: 82,
+        taskJournalItemId: 404,
+        documentKey: 'claim',
+        version: 2,
+        originalFileName: 'Иск готовый.docx',
+        contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        sizeBytes: 2048,
+        uploadedByName: 'Мария Юрист',
+        uploadedAt: '2026-06-30T10:00:00Z',
+        isLatestVersion: true,
+      },
+    ]);
+
+    render(<ForcedTaskRevisionModal />);
+
+    expect(await screen.findByText('Иск готовый.docx')).toBeTruthy();
+    expect(screen.getByText('v2 · 2.0 КБ')).toBeTruthy();
+    expect(screen.queryByText('Иск черновик.docx')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Скачать файл Иск готовый.docx' })).toBeTruthy();
+    expect(apiMock.getTaskJournalFiles).toHaveBeenCalledWith(404, { latestOnly: true });
+  });
+
+  it('temporarily hides a pending approval before opening its task', async () => {
+    const onOpenTask = vi.fn();
+    mockNotificationPages([], [], [], [createApprovalRequestNotification()]);
+
+    render(<ForcedTaskRevisionModal onOpenTask={onOpenTask} />);
+
+    const prompt = await screen.findByTestId('forced-task-approval-prompt');
+    fireEvent.click(within(prompt).getByRole('button', { name: 'Открыть задачу' }));
+
+    await waitFor(() => expect(screen.queryByTestId('forced-task-approval-prompt')).toBeNull());
+    expect(onOpenTask).toHaveBeenCalledWith(404);
+    expect(apiMock.markUserNotificationRead).not.toHaveBeenCalled();
+    const snoozes = JSON.parse(window.localStorage.getItem(FORCED_TASK_SNOOZE_STORAGE_KEY) || '{}') as Record<string, number>;
+    expect(snoozes['61']).toBeGreaterThan(Date.now());
+    expect(snoozes[getForcedTaskApprovalSnoozeKey(404)]).toBeGreaterThan(Date.now());
   });
 
   it('uses the current pending approver when the notification participant is stale', async () => {

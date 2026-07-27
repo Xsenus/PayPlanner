@@ -78,6 +78,20 @@ describe('apiService task journal settings', () => {
   });
 });
 
+describe('apiService task journal files', () => {
+  it('requests only latest document versions when asked', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify([]), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await apiService.getTaskJournalFiles(404, { latestOnly: true });
+
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/tasks/404/files?latestOnly=true');
+  });
+});
+
 describe('apiService case access requests', () => {
   it('passes the abort signal to the pending access requests call', async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify([]), {
