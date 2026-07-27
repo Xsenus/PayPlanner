@@ -4040,6 +4040,41 @@ describe('TaskJournal', () => {
     ]));
   });
 
+  it.each(['legacy', 'modern'] as const)('returns an actively approved task to work after removing its last approver in the %s task card', async (taskCardWindowMode) => {
+    await renderJournal([
+      createTask({
+        status: 'onApproval',
+        result: 'Документ отправлен на согласование.',
+        approvalDueAt: todayAt(16, 30),
+        participants: [
+          { userId: 7, role: 'assignee', displayName: 'Администратор', email: 'admin@example.com', approvalStatus: 'pending' },
+          { userId: 8, role: 'approver', displayName: 'Ошибочный согласующий', email: 'removed-approver@example.com', approvalStatus: 'pending' },
+        ],
+      }),
+    ], {
+      assignees: [
+        { id: 7, name: 'Администратор', email: 'admin@example.com' },
+        { id: 8, name: 'Ошибочный согласующий', email: 'removed-approver@example.com' },
+      ],
+      settings: { taskCardWindowMode },
+    });
+
+    await openFirstTaskForEdit();
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+
+    fireEvent.click(within(card).getByRole('button', { name: 'Удалить участника Ошибочный согласующий' }));
+
+    expect((within(card).getByTestId('task-editor-status-select') as HTMLSelectElement).value).toBe('inProgress');
+    expect(within(card).queryByTitle('Задача находится на согласовании')).toBeNull();
+    fireEvent.click(within(card).getByRole('button', { name: 'Сохранить' }));
+
+    await waitFor(() => expect(apiMock.updateTaskJournalItem).toHaveBeenCalledTimes(1));
+    const [, payload] = apiMock.updateTaskJournalItem.mock.calls[0];
+    expect(payload.status).toBe('inProgress');
+    expect(payload.approvalDueAt).toBeNull();
+    expect(payload.participants.some((participant: { role: string }) => participant.role === 'approver')).toBe(false);
+  });
+
   it.each(['legacy', 'modern'] as const)('covers participant create edit remove reopen and save in the %s task card', async (taskCardWindowMode) => {
     const assignees: TaskJournalAssignee[] = [
       { id: 7, name: 'Администратор', email: 'admin@example.com' },

@@ -2492,6 +2492,16 @@ public class TasksController : ControllerBase
             return Forbid();
         }
         var approvalQueueRestarted = ShouldRestartApprovalQueue(previousStatus, nextStatus);
+        var approvalEndedBecauseNoApprovers = IsApprovalActiveStatus(previousStatus)
+            && !participants.Items.Any(participant =>
+                string.Equals(participant.Role, "approver", StringComparison.OrdinalIgnoreCase))
+            && (IsApprovalActiveStatus(nextStatus)
+                || string.Equals(nextStatus, "inProgress", StringComparison.OrdinalIgnoreCase));
+        if (approvalEndedBecauseNoApprovers && IsApprovalActiveStatus(nextStatus))
+        {
+            nextStatus = "inProgress";
+            approvalQueueRestarted = false;
+        }
         participants = ResetApprovalQueueIfStartingApproval(previousStatus, nextStatus, participants);
         var nextResult = NormalizeCompletionResult(nextStatus, request.Result);
         var updateAllowAdminForceCompletion = CanAdminForceCompleteTask(access, settings, nextStatus);
@@ -2519,7 +2529,9 @@ public class TasksController : ControllerBase
         var assigneeChanged = HasTaskAssigneeChange(changeLabels);
         var changeComment = NormalizeOptional(request.ChangeComment);
         var updatedAt = DateTime.UtcNow;
-        var approvalDueAt = ResolveApprovalDueAt(nextStatus, request.ApprovalDueAt, settings.ApprovalDueDays, updatedAt);
+        var approvalDueAt = approvalEndedBecauseNoApprovers
+            ? null
+            : ResolveApprovalDueAt(nextStatus, request.ApprovalDueAt, settings.ApprovalDueDays, updatedAt);
 
         entity.ClientId = binding.ClientId;
         entity.LegalEntityId = binding.LegalEntityId;
@@ -2577,6 +2589,10 @@ public class TasksController : ControllerBase
         if (approvalQueueRestarted)
         {
             AddTaskHistory(entity, access, "Очередь согласования запущена заново: все согласующие снова ожидают решения.");
+        }
+        else if (approvalEndedBecauseNoApprovers)
+        {
+            AddTaskHistory(entity, access, "Последний согласующий удалён: задача автоматически возвращена в работу.");
         }
 
         TaskJournalComment? userComment = null;

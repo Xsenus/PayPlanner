@@ -8444,14 +8444,21 @@ function TaskModal({
 
     setForm((prev) => {
       const displayName = getParticipantDisplayName(participant).trim().toLowerCase();
+      const nextParticipants = (prev.participants ?? []).filter((item) => {
+        if (item.role !== role) return true;
+        if (participant.id && item.id === participant.id) return false;
+        if (participant.userId && item.userId === participant.userId) return false;
+        return getParticipantDisplayName(item).trim().toLowerCase() !== displayName;
+      });
+      const approvalEnded = role === 'approver'
+        && (prev.status === 'onApproval' || prev.status === 'overdueApproval')
+        && !nextParticipants.some((item) => item.role === 'approver');
+
       return {
         ...prev,
-        participants: (prev.participants ?? []).filter((item) => {
-          if (item.role !== role) return true;
-          if (participant.id && item.id === participant.id) return false;
-          if (participant.userId && item.userId === participant.userId) return false;
-          return getParticipantDisplayName(item).trim().toLowerCase() !== displayName;
-        }),
+        participants: nextParticipants,
+        status: approvalEnded ? 'inProgress' : prev.status,
+        approvalDueAt: approvalEnded ? null : prev.approvalDueAt,
       };
     });
   };
@@ -8591,6 +8598,19 @@ function TaskModal({
 
   const handleSaveForm = async () => {
     let nextForm = withChangeComment();
+    const removedAllApproversFromActiveApproval = Boolean(
+      state?.task
+      && isTaskAwaitingApproval(state.task)
+      && (nextForm.status === 'onApproval' || nextForm.status === 'overdueApproval')
+      && !(nextForm.participants ?? []).some((participant) => participant.role === 'approver'),
+    );
+    if (removedAllApproversFromActiveApproval) {
+      nextForm = {
+        ...nextForm,
+        status: 'inProgress',
+        approvalDueAt: null,
+      };
+    }
     if ((nextForm.status === 'onApproval' || nextForm.status === 'overdueApproval') && !nextForm.approvalDueAt) {
       nextForm = { ...nextForm, approvalDueAt: getDefaultApprovalDueAtInput(taskSettings) };
     }
@@ -8729,7 +8749,11 @@ function TaskModal({
   };
 
   const availableObservers = getAvailableAssigneesForRole('observer');
-  const isAwaitingApproval = Boolean(state?.task && isTaskAwaitingApproval(state.task));
+  const isAwaitingApproval = Boolean(
+    state?.task
+    && isTaskAwaitingApproval(state.task)
+    && approverParticipants.length > 0,
+  );
   const approvalCompletionDisabled = isAwaitingApproval
     && (taskSettings.approvalQuickActionMode === 'separateButton' || !currentApprovalParticipant);
   const completionButtonLabel = isAwaitingApproval

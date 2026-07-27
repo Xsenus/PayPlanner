@@ -1349,6 +1349,68 @@ public class TasksControllerTests
         Assert.Null(stored.Result);
     }
 
+    [Theory]
+    [InlineData("onApproval")]
+    [InlineData("inProgress")]
+    public async Task UpdateTask_RemovingLastApproverReturnsTaskToInProgress(string requestedStatus)
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "approval-author@example.com", "Постановщик");
+        var approver = await CreateAdminUserAsync(db, "approval-removed@example.com", "Ошибочный согласующий");
+        var client = await CreateClientAsync(db, "Клиент согласования");
+        var approvalDueAt = DateTime.UtcNow.AddDays(2);
+        var task = await CreateTaskAsync(
+            db,
+            author.Id,
+            client.Id,
+            author.Id,
+            result: "Документ отправлен на согласование.",
+            status: "onApproval",
+            approvalDueAt: approvalDueAt);
+        task.Participants.Add(new TaskJournalParticipant
+        {
+            UserId = approver.Id,
+            Role = "approver",
+            DisplayName = approver.FullName,
+            Email = approver.Email,
+            ApprovalStatus = "pending",
+            SortOrder = 0,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.UpdateTask(task.Id, new UpsertTaskJournalItemRequest
+        {
+            ClientId = client.Id,
+            Title = task.Title,
+            AssigneeUserId = author.Id,
+            DueAt = task.DueAt,
+            ApprovalDueAt = approvalDueAt,
+            Status = requestedStatus,
+            Result = task.Result,
+            Participants = [],
+        }, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<TaskJournalItemDto>(ok.Value);
+        Assert.Equal("inProgress", dto.Status);
+        Assert.Null(dto.ApprovalDueAt);
+        Assert.DoesNotContain(dto.Participants, participant => participant.Role == "approver");
+
+        var stored = await db.TaskJournalItems
+            .AsNoTracking()
+            .Include(item => item.Participants)
+            .Include(item => item.Comments)
+            .SingleAsync(item => item.Id == task.Id);
+        Assert.Equal("inProgress", stored.Status);
+        Assert.Null(stored.ApprovalDueAt);
+        Assert.DoesNotContain(stored.Participants, participant => participant.Role == "approver");
+        Assert.Contains(stored.Comments, comment =>
+            comment.Kind == "system"
+            && comment.Text.Contains("Последний согласующий удалён", StringComparison.Ordinal)
+            && comment.Text.Contains("возвращена в работу", StringComparison.Ordinal));
+    }
+
     [Fact]
     public async Task UpdateTask_ReturnsNotFoundForHiddenTask()
     {
