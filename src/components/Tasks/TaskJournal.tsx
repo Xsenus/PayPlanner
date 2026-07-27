@@ -8666,6 +8666,17 @@ function TaskModal({
     : approverParticipants.some((participant) => participant.approvalStatus !== 'approved')
       ? 'На согласование'
       : 'Завершить';
+  const compactCompletionButtonLabel = isAwaitingApproval ? 'Согласование' : completionButtonLabel;
+  const canSendToAuthorApproval = Boolean(
+    state?.task
+      && !isAwaitingApproval
+      && isReadOnly
+      && canCompleteTask
+      && approverParticipants.length === 0
+      && state.task.authorUserId
+      && state.task.authorUserId !== currentUserId,
+  );
+  const sendToAuthorApprovalLabel = 'Отправить постановщику на согласование';
 
   useEffect(() => {
     if (!taskId) {
@@ -9681,7 +9692,7 @@ function TaskModal({
             </main>
 
             <aside className="space-y-3 xl:sticky xl:top-0 xl:self-start">
-              <div className="grid grid-cols-[minmax(0,1fr)_44px] gap-2">
+              <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
                 <SystemSelect
                   value={form.status}
                   onChange={(event) => update('status', event.target.value as TaskJournalStatus)}
@@ -9696,14 +9707,24 @@ function TaskModal({
                     type="button"
                     onClick={() => void handleCompletionAction()}
                     disabled={approvalCompletionDisabled}
-                    className="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+                    className="inline-flex h-11 items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-emerald-50 px-3 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
                     title={completionButtonLabel}
                     aria-label={completionButtonLabel}
                   >
                     <CheckCircle2 className="h-5 w-5" />
+                    <span>{compactCompletionButtonLabel}</span>
                   </button>
                 ) : <span aria-hidden="true" />}
               </div>
+              {canSendToAuthorApproval ? (
+                <button
+                  type="button"
+                  onClick={() => void saveWithStatus('onApproval')}
+                  className="inline-flex w-full items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
+                >
+                  {sendToAuthorApprovalLabel}
+                </button>
+              ) : null}
 
               <section className="space-y-2 rounded-xl border border-slate-200 bg-white p-2">
                 <ModernTaskQuickField icon={<UsersRound className="h-4 w-4" />} label="Исполнители">
@@ -10072,9 +10093,16 @@ function TaskModal({
                   Редактировать задачу
                 </button>
               ) : canCompleteReadOnlyTask || isAwaitingApproval ? (
-                <button type="button" onClick={() => void handleCompletionAction()} disabled={approvalCompletionDisabled} title={completionButtonLabel} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500">
-                  {completionButtonLabel}
-                </button>
+                <>
+                  {canSendToAuthorApproval ? (
+                    <button type="button" onClick={() => void saveWithStatus('onApproval')} className="rounded-lg border border-violet-200 bg-violet-50 px-4 py-2 text-sm font-semibold text-violet-700 transition hover:bg-violet-100">
+                      {sendToAuthorApprovalLabel}
+                    </button>
+                  ) : null}
+                  <button type="button" onClick={() => void handleCompletionAction()} disabled={approvalCompletionDisabled} title={completionButtonLabel} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500">
+                    {completionButtonLabel}
+                  </button>
+                </>
               ) : !isReadOnly ? (
                 <button type="button" onClick={() => void handleSaveForm()} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700">
                   {state?.task ? 'Сохранить' : 'Создать задачу'}
@@ -10130,15 +10158,26 @@ function TaskModal({
                       В работу
                     </button>
                     {!isReadOnly || canCompleteReadOnlyTask || isAwaitingApproval ? (
-                      <button
-                        type="button"
-                        onClick={() => void handleCompletionAction()}
-                        disabled={approvalCompletionDisabled}
-                        title={completionButtonLabel}
-                        className="inline-flex items-center justify-center rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500"
-                      >
-                        {completionButtonLabel}
-                      </button>
+                      <>
+                        {canSendToAuthorApproval ? (
+                          <button
+                            type="button"
+                            onClick={() => void saveWithStatus('onApproval')}
+                            className="inline-flex items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2 text-sm font-semibold text-violet-700 transition hover:bg-violet-100"
+                          >
+                            {sendToAuthorApprovalLabel}
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          onClick={() => void handleCompletionAction()}
+                          disabled={approvalCompletionDisabled}
+                          title={completionButtonLabel}
+                          className="inline-flex items-center justify-center rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500"
+                        >
+                          {completionButtonLabel}
+                        </button>
+                      </>
                     ) : null}
                   </>
                 )}
@@ -11038,9 +11077,16 @@ function TaskModal({
               Редактировать задачу
             </button>
           ) : canCompleteReadOnlyTask || isAwaitingApproval ? (
-            <button type="button" onClick={() => void handleCompletionAction()} disabled={approvalCompletionDisabled} title={completionButtonLabel} className="rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500">
-              {completionButtonLabel}
-            </button>
+            <>
+              {canSendToAuthorApproval ? (
+                <button type="button" onClick={() => void saveWithStatus('onApproval')} className="rounded-xl border border-violet-200 bg-violet-50 px-5 py-2.5 text-sm font-semibold text-violet-700 transition hover:bg-violet-100">
+                  {sendToAuthorApprovalLabel}
+                </button>
+              ) : null}
+              <button type="button" onClick={() => void handleCompletionAction()} disabled={approvalCompletionDisabled} title={completionButtonLabel} className="rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500">
+                {completionButtonLabel}
+              </button>
+            </>
           ) : (
             <button type="button" onClick={() => void handleSaveForm()} className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800">
               {state?.mode === 'edit' ? 'Сохранить' : 'Создать задачу'}

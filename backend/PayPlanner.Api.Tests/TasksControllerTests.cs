@@ -1854,6 +1854,46 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task UpdateStatus_OnApprovalAddsAuthorWhenTaskHasNoApprovers()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author-fallback-approval@example.com", "Постановщик");
+        var assignee = await CreateTaskUserAsync(db, "assignee-fallback-approval@example.com", "Исполнитель", canEdit: false);
+        var client = await CreateClientAsync(db, "Клиент согласования с постановщиком");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, assignee.Id, status: "inProgress");
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = "tasks.executorCompletionAllowedUserIds",
+            Value = $"[{assignee.Id}]",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var notifications = new RecordingNotificationService();
+        var controller = CreateController(db, notifications, assignee);
+
+        var result = await controller.UpdateStatus(task.Id, new UpdateTaskJournalStatusRequest
+        {
+            Status = "onApproval",
+            Result = "Заявление подготовлено и передано постановщику.",
+        }, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<TaskJournalItemDto>(ok.Value);
+        Assert.Equal("onApproval", dto.Status);
+        var approver = Assert.Single(dto.Participants, item => item.Role == "approver");
+        Assert.Equal(author.Id, approver.UserId);
+        Assert.Equal("Постановщик", approver.DisplayName);
+        Assert.Equal("pending", approver.ApprovalStatus);
+        Assert.Contains(task.Id, notifications.ApprovalRequestedTaskIds);
+
+        var storedApprover = await db.TaskJournalParticipants
+            .AsNoTracking()
+            .SingleAsync(item => item.TaskJournalItemId == task.Id && item.Role == "approver");
+        Assert.Equal(author.Id, storedApprover.UserId);
+    }
+
+    [Fact]
     public async Task UpdateStatus_ForbidsExecutorCompletionWithoutPersonalAccess()
     {
         await using var db = await CreateContextAsync();

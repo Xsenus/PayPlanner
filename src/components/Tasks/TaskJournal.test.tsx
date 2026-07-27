@@ -4203,6 +4203,48 @@ describe('TaskJournal', () => {
     expect(apiMock.updateTaskJournalItem).not.toHaveBeenCalled();
   });
 
+  it.each(['legacy', 'modern'] as const)('allows executor to send a task without approvers to its author in the %s card', async (taskCardWindowMode) => {
+    authState.isAdmin = false;
+    authState.user = { id: 7, fullName: 'Исполнитель', email: 'assignee@example.com' };
+    await renderJournal([
+      createTask({
+        status: 'inProgress',
+        assigneeUserId: 7,
+        assigneeName: 'Исполнитель',
+        authorUserId: 8,
+        authorName: 'Постановщик',
+        participants: [
+          { userId: 7, role: 'assignee', displayName: 'Исполнитель', approvalStatus: 'pending' },
+        ],
+      }),
+    ], {
+      settings: {
+        executorCompletionAllowedUserIds: [7],
+        taskCardWindowMode,
+      },
+    });
+
+    fireEvent.click(screen.getByTitle('Просмотр'));
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    const sendButtons = within(card).getAllByRole('button', { name: 'Отправить постановщику на согласование' });
+    expect(sendButtons.length).toBeGreaterThan(0);
+    fireEvent.click(sendButtons[0]);
+
+    expect(await screen.findByRole('heading', { name: 'Добавить результат по задаче' })).toBeTruthy();
+    expect(screen.getByText('Отправка на согласование')).toBeTruthy();
+    fireEvent.change(document.getElementById('task-completion-result')!, {
+      target: { value: 'Заявление подготовлено и приложено к задаче.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Отправить на согласование' }));
+
+    await waitFor(() => expect(apiMock.updateTaskJournalStatus).toHaveBeenCalledWith(
+      101,
+      'onApproval',
+      'Заявление подготовлено и приложено к задаче.',
+    ));
+    expect(apiMock.updateTaskJournalItem).not.toHaveBeenCalled();
+  });
+
   it('opens observed own-scope task in view mode even when role can edit tasks', async () => {
     authState.isAdmin = false;
     authState.user = { id: 7, fullName: 'Observer', email: 'observer@example.com' };
