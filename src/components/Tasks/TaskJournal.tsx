@@ -9124,12 +9124,28 @@ function TaskModal({
     participants: TaskJournalParticipant[],
     testId: string,
   ) => {
-    if (participants.length === 0) return null;
+    if (participants.length === 0) {
+      return (
+        <div
+          className="rounded-lg border border-dashed border-slate-200 bg-white/70 px-2.5 py-3 text-center text-xs text-slate-400"
+          data-testid={testId}
+        >
+          Пока никто не добавлен
+        </div>
+      );
+    }
 
     return (
       <div className="space-y-1.5" data-testid={testId}>
         {participants.map((participant, index) => {
           const participantName = getParticipantDisplayName(participant);
+          const approvalStatus = role === 'approver'
+            ? participant.approvalStatus === 'approved'
+              ? { label: 'Согласовано', className: 'bg-emerald-50 text-emerald-700 ring-emerald-100' }
+              : participant.approvalStatus === 'revisionRequested'
+                ? { label: 'На доработку', className: 'bg-orange-50 text-orange-700 ring-orange-100' }
+                : { label: 'Ожидает решения', className: 'bg-amber-50 text-amber-700 ring-amber-100' }
+            : null;
 
           return (
             <div
@@ -9137,7 +9153,14 @@ function TaskModal({
               className="flex items-start justify-between gap-2 rounded-lg border border-slate-100 bg-slate-50 px-2.5 py-2 text-sm"
             >
               <span className="min-w-0">
-                <span className="block truncate font-semibold text-slate-700">{participantName}</span>
+                <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+                  <span className="min-w-0 break-words font-semibold text-slate-700">{participantName}</span>
+                  {approvalStatus ? (
+                    <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ${approvalStatus.className}`}>
+                      {approvalStatus.label}
+                    </span>
+                  ) : null}
+                </span>
                 {participant.email ? <span className="block truncate text-xs text-slate-400">{participant.email}</span> : null}
               </span>
               {!isReadOnly ? (
@@ -10018,58 +10041,74 @@ function TaskModal({
 
               <section className="rounded-xl border border-slate-200 bg-white p-3">
                 <div className="mb-2 text-sm font-semibold text-slate-700">Участники</div>
-                <ModernParticipantRow label="Согласующие" count={visibleApprovers.length} />
-                <ModernParticipantRow label="Наблюдатели" count={visibleObservers.length} />
-                {isReadOnly && (visibleApprovers.length > 0 || visibleObservers.length > 0) ? (
-                  <div className="mt-2 grid gap-2">
+                <div className="grid gap-2">
+                  <div
+                    className="space-y-2 rounded-xl border border-violet-100 bg-violet-50/40 p-2"
+                    data-testid="task-modern-approver-group"
+                  >
+                    <ModernParticipantRow
+                      label="Согласующие"
+                      count={visibleApprovers.length}
+                      description="Принимают решение по задаче по очереди"
+                      tone="violet"
+                    />
                     {renderModernSelectedParticipantList('approver', visibleApprovers, 'task-modern-approver-list')}
-                    {renderModernSelectedParticipantList('observer', visibleObservers, 'task-modern-observer-list')}
+                    {!isReadOnly ? (
+                      <SystemSelect
+                        aria-label="Добавить согласующего"
+                        value=""
+                        onChange={(event) => {
+                          const selected = assignees.find((assignee) => assignee.id === Number(event.target.value));
+                          if (selected) addParticipant('approver', selected);
+                        }}
+                        className="w-full rounded-lg border border-violet-200 bg-white px-2 py-2 text-sm outline-none focus:border-violet-400"
+                      >
+                        <option value="">Добавить согласующего</option>
+                        {getAvailableAssigneesForRole('approver').map((assignee) => (
+                          <option key={assignee.id} value={assignee.id}>{assignee.name}</option>
+                        ))}
+                      </SystemSelect>
+                    ) : null}
                   </div>
-                ) : null}
+                  <div
+                    className="space-y-2 rounded-xl border border-sky-100 bg-sky-50/40 p-2"
+                    data-testid="task-modern-observer-group"
+                  >
+                    <ModernParticipantRow
+                      label="Наблюдатели"
+                      count={visibleObservers.length}
+                      description="Следят за задачей, но не принимают решение"
+                      tone="sky"
+                    />
+                    {renderModernSelectedParticipantList('observer', visibleObservers, 'task-modern-observer-list')}
+                    {!isReadOnly ? (
+                      <SystemSelect
+                        aria-label="Добавить наблюдателя"
+                        value=""
+                        onChange={(event) => {
+                          const selected = assignees.find((assignee) => assignee.id === Number(event.target.value));
+                          if (selected) addParticipant('observer', selected);
+                        }}
+                        className="w-full rounded-lg border border-sky-200 bg-white px-2 py-2 text-sm outline-none focus:border-sky-400"
+                      >
+                        <option value="">Добавить наблюдателя</option>
+                        {availableObservers.map((assignee) => (
+                          <option key={assignee.id} value={assignee.id}>{assignee.name}</option>
+                        ))}
+                      </SystemSelect>
+                    ) : null}
+                  </div>
+                </div>
                 {isReadOnly && canDeleteTask ? (
                   <button
                     type="button"
                     onClick={() => void handleDeleteTask()}
-                    className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-rose-200 text-rose-600 transition hover:bg-rose-50"
+                    className="mt-2 inline-flex h-10 w-10 items-center justify-center rounded-xl border border-rose-200 text-rose-600 transition hover:bg-rose-50"
                     aria-label="Удалить задачу"
                     title="Удалить задачу безвозвратно"
                   >
                     <Trash2 className="h-5 w-5" />
                   </button>
-                ) : null}
-                {!isReadOnly ? (
-                  <div className="mt-2 grid gap-2">
-                    <SystemSelect
-                      aria-label="Добавить согласующего"
-                      value=""
-                      onChange={(event) => {
-                        const selected = assignees.find((assignee) => assignee.id === Number(event.target.value));
-                        if (selected) addParticipant('approver', selected);
-                      }}
-                      className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-sm outline-none focus:border-blue-400 focus:bg-white"
-                    >
-                      <option value="">Добавить согласующего</option>
-                      {getAvailableAssigneesForRole('approver').map((assignee) => (
-                        <option key={assignee.id} value={assignee.id}>{assignee.name}</option>
-                      ))}
-                    </SystemSelect>
-                    {renderModernSelectedParticipantList('approver', visibleApprovers, 'task-modern-approver-list')}
-                    <SystemSelect
-                      aria-label="Добавить наблюдателя"
-                      value=""
-                      onChange={(event) => {
-                        const selected = assignees.find((assignee) => assignee.id === Number(event.target.value));
-                        if (selected) addParticipant('observer', selected);
-                      }}
-                      className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-sm outline-none focus:border-blue-400 focus:bg-white"
-                    >
-                      <option value="">Добавить наблюдателя</option>
-                      {availableObservers.map((assignee) => (
-                        <option key={assignee.id} value={assignee.id}>{assignee.name}</option>
-                      ))}
-                    </SystemSelect>
-                    {renderModernSelectedParticipantList('observer', visibleObservers, 'task-modern-observer-list')}
-                  </div>
                 ) : null}
               </section>
 
@@ -10679,14 +10718,22 @@ function TaskModal({
                 {additionalParticipantsCount} доп. участников
               </span>
             </div>
-            <div className="mt-4 grid gap-4 lg:grid-cols-3">
+            <div className="mt-4 grid gap-4 md:grid-cols-2">
               {(['approver', 'observer'] as TaskJournalParticipantRole[]).map((role) => {
                 const visibleParticipants = getVisibleParticipantsByRole(role);
                 const availableAssignees = getAvailableAssigneesForRole(role);
 
                 return (
                   <Field key={role} label={PARTICIPANT_ROLE_LABELS[role]}>
-                    <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-3">
+                    <div
+                      className="space-y-3 rounded-xl border border-slate-200 bg-white p-3"
+                      data-testid={`task-legacy-${role}-group`}
+                    >
+                      <p className="text-xs leading-4 text-slate-500">
+                        {role === 'approver'
+                          ? 'Принимают решение по задаче по очереди.'
+                          : 'Следят за задачей, но не принимают решение.'}
+                      </p>
                       <div className="min-h-24 space-y-2">
                         {visibleParticipants.length === 0 ? (
                           <div className="rounded-lg border border-dashed border-slate-200 px-3 py-5 text-center text-sm text-slate-400">
@@ -11245,11 +11292,28 @@ function ModernTaskQuickField({
   );
 }
 
-function ModernParticipantRow({ label, count }: { label: string; count: number }) {
+function ModernParticipantRow({
+  label,
+  count,
+  description,
+  tone,
+}: {
+  label: string;
+  count: number;
+  description: string;
+  tone: 'violet' | 'sky';
+}) {
+  const toneClass = tone === 'violet'
+    ? 'bg-violet-100 text-violet-700 ring-violet-200'
+    : 'bg-sky-100 text-sky-700 ring-sky-200';
+
   return (
-    <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm">
-      <span className="font-semibold text-slate-700">{label}</span>
-      <span className="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-slate-500 ring-1 ring-slate-200">{count}</span>
+    <div className="flex items-start justify-between gap-2 rounded-lg bg-white/80 px-2.5 py-2 text-sm">
+      <span className="min-w-0">
+        <span className="block font-semibold text-slate-800">{label}</span>
+        <span className="mt-0.5 block text-[11px] leading-4 text-slate-500">{description}</span>
+      </span>
+      <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ${toneClass}`}>{count}</span>
     </div>
   );
 }

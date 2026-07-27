@@ -4007,11 +4007,26 @@ describe('TaskJournal', () => {
     const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
 
     if (taskCardWindowMode === 'modern') {
-      expect(within(await within(card).findByTestId('task-modern-approver-list')).getByText('Текущий согласующий')).toBeTruthy();
-      expect(within(await within(card).findByTestId('task-modern-observer-list')).getByText('Текущий наблюдатель')).toBeTruthy();
+      const approverGroup = await within(card).findByTestId('task-modern-approver-group');
+      const observerGroup = await within(card).findByTestId('task-modern-observer-group');
+      const approverList = within(approverGroup).getByTestId('task-modern-approver-list');
+      const observerList = within(observerGroup).getByTestId('task-modern-observer-list');
+      expect(within(approverList).getByText('Текущий согласующий')).toBeTruthy();
+      expect(within(approverList).getByText('Ожидает решения')).toBeTruthy();
+      expect(within(approverGroup).getByText('Принимают решение по задаче по очереди')).toBeTruthy();
+      expect(within(approverList).queryByText('Текущий наблюдатель')).toBeNull();
+      expect(within(observerList).getByText('Текущий наблюдатель')).toBeTruthy();
+      expect(within(observerGroup).getByText('Следят за задачей, но не принимают решение')).toBeTruthy();
+      expect(within(observerList).queryByText('Текущий согласующий')).toBeNull();
     } else {
-      expect(within(card).getByRole('button', { name: 'Удалить участника Текущий согласующий' })).toBeTruthy();
-      expect(within(card).getByRole('button', { name: 'Удалить участника Текущий наблюдатель' })).toBeTruthy();
+      const approverGroup = await within(card).findByTestId('task-legacy-approver-group');
+      const observerGroup = await within(card).findByTestId('task-legacy-observer-group');
+      expect(within(approverGroup).getByRole('button', { name: 'Удалить участника Текущий согласующий' })).toBeTruthy();
+      expect(within(approverGroup).getByText('Принимают решение по задаче по очереди.')).toBeTruthy();
+      expect(within(approverGroup).queryByText('Текущий наблюдатель')).toBeNull();
+      expect(within(observerGroup).getByRole('button', { name: 'Удалить участника Текущий наблюдатель' })).toBeTruthy();
+      expect(within(observerGroup).getByText('Следят за задачей, но не принимают решение.')).toBeTruthy();
+      expect(within(observerGroup).queryByText('Текущий согласующий')).toBeNull();
     }
 
     fireEvent.click(within(card).getByRole('button', { name: 'Сохранить' }));
