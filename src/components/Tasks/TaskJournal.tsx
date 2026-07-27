@@ -1,7 +1,7 @@
 import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import {
   AlarmClock,
   ArrowDown,
@@ -53,6 +53,7 @@ import { useClientCases } from '../../hooks/useClientCases';
 import { useLegalEntities } from '../../hooks/useLegalEntities';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useToast } from '../../hooks/useToast';
+import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings';
 import { apiService, type TaskJournalSettingsDto } from '../../services/api';
 import {
   TaskStickerBadge,
@@ -127,6 +128,11 @@ type TaskCalendarLoadWarningMode = 'strict' | 'standard' | 'relaxed';
 type IcsReminderPreset = 'default' | 'hour' | 'twoHours' | 'day';
 type TaskPlanningReportFormat = 'html' | 'word' | 'pdf';
 type TaskJournalSortKey = 'counterparty' | 'title' | 'assignee' | 'author' | 'dueAt' | 'type' | 'result' | 'status';
+type TaskTableColumnKey = TaskJournalSortKey | 'actions';
+type TaskTableLayoutSettings = {
+  getColumnWidth: (key: TaskTableColumnKey) => number;
+  handleResizeStart: (key: TaskTableColumnKey, event: ReactMouseEvent<HTMLDivElement>) => void;
+};
 type TaskJournalContextFilter = {
   clientId?: number | null;
   legalEntityId?: number | null;
@@ -223,6 +229,18 @@ const DEFAULT_TASK_JOURNAL_SETTINGS: TaskJournalSettingsDto = {
 };
 
 const AUTOMATION_CANDIDATES_SEARCH_DELAY_MS = 300;
+const TASK_JOURNAL_TABLE_SETTINGS_KEY = 'task_journal_table_settings_v1';
+const TASK_JOURNAL_TABLE_COLUMNS: Array<{ key: TaskTableColumnKey; defaultWidth: number }> = [
+  { key: 'counterparty', defaultWidth: 200 },
+  { key: 'title', defaultWidth: 290 },
+  { key: 'assignee', defaultWidth: 180 },
+  { key: 'author', defaultWidth: 170 },
+  { key: 'dueAt', defaultWidth: 180 },
+  { key: 'type', defaultWidth: 130 },
+  { key: 'result', defaultWidth: 260 },
+  { key: 'status', defaultWidth: 160 },
+  { key: 'actions', defaultWidth: 156 },
+];
 
 function buildAutomationCandidatesRequestKey(settings: TaskJournalSettingsDto, searchValue: string) {
   return [
@@ -1966,6 +1984,14 @@ export function TaskJournal({
   const { confirm, prompt } = useDialog();
   const currentUserName = user?.fullName || user?.email || 'Текущий пользователь';
   const currentUserId = user?.id ?? null;
+  const taskTableLayoutSettings = usePersistedTableSettings<TaskTableColumnKey>({
+    storageKey: `pp.task_journal.table_settings.v1.user:${currentUserId ?? 'guest'}`,
+    settingsKey: TASK_JOURNAL_TABLE_SETTINGS_KEY,
+    columns: TASK_JOURNAL_TABLE_COLUMNS,
+    defaultPageSize: 25,
+    minColumnWidth: 96,
+    enabled: currentUserId !== null,
+  });
   const [currentTimeZoneId, setCurrentTimeZoneId] = useState(() => normalizeUserTimeZoneId());
   const isAdminUser = isAdmin();
   const permissions = useRolePermissions(user?.role?.id);
@@ -4903,6 +4929,7 @@ export function TaskJournal({
             sortBy={sortBy}
             sortDir={sortDir}
             onSortChange={handleSortChange}
+            layoutSettings={taskTableLayoutSettings}
           />
           )
         ) : viewMode === 'board' ? (
@@ -5926,6 +5953,7 @@ function TaskTable({
   sortBy,
   sortDir,
   onSortChange,
+  layoutSettings,
 }: {
   tasks: TaskJournalItem[];
   highlightedTaskId: number | null;
@@ -5952,7 +5980,28 @@ function TaskTable({
   sortBy: TaskJournalSortKey;
   sortDir: 'asc' | 'desc';
   onSortChange: (sortBy: TaskJournalSortKey) => void;
+  layoutSettings: TaskTableLayoutSettings;
 }) {
+  const {
+    handleResizeStart,
+    getColumnWidth,
+  } = layoutSettings;
+
+  const getColumnStyle = (columnKey: TaskTableColumnKey) => {
+    const width = getColumnWidth(columnKey);
+    return { width, minWidth: width, maxWidth: width };
+  };
+
+  const renderResizeHandle = (columnKey: TaskTableColumnKey, label: string) => (
+    <div
+      role="separator"
+      aria-label={`Изменить ширину колонки ${label}`}
+      aria-orientation="vertical"
+      onMouseDown={(event) => handleResizeStart(columnKey, event)}
+      className="absolute right-0 top-2 z-30 h-[calc(100%-1rem)] w-1 cursor-col-resize touch-none rounded-full bg-transparent transition hover:bg-blue-300 active:bg-blue-500"
+    />
+  );
+
   const renderSortIcon = (columnKey: TaskJournalSortKey) => {
     if (sortBy !== columnKey) {
       return <ArrowUpDown className="h-3.5 w-3.5 text-slate-400" />;
@@ -5964,22 +6013,27 @@ function TaskTable({
   };
 
   const renderSortHeader = (columnKey: TaskJournalSortKey, label: string, className = '') => {
-    const compactColumnClass = columnKey === 'author' || columnKey === 'result' ? 'hidden xl:table-cell' : '';
+    const compactColumnClass = columnKey === 'author' || columnKey === 'result' ? 'hidden 2xl:table-cell' : '';
 
     return (
-      <th className={`px-2 py-4 sm:px-3 xl:px-4 ${compactColumnClass} ${className}`}>
-      <button
-        type="button"
-        onClick={() => onSortChange(columnKey)}
-        className={`inline-flex min-w-0 items-center gap-1 rounded px-1 py-0.5 text-left uppercase tracking-[0.16em] transition hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-300 ${
-          sortBy === columnKey ? 'text-blue-700' : 'text-slate-500'
-        }`}
-        aria-label={`Сортировать по колонке ${label}`}
-        aria-sort={sortBy === columnKey ? (sortDir === 'desc' ? 'descending' : 'ascending') : 'none'}
+      <th
+        data-testid={`task-column-header-${columnKey}`}
+        className={`relative px-2 py-4 sm:px-3 xl:px-4 ${compactColumnClass} ${className}`}
+        style={getColumnStyle(columnKey)}
       >
-        <span>{label}</span>
-        {renderSortIcon(columnKey)}
-      </button>
+        <button
+          type="button"
+          onClick={() => onSortChange(columnKey)}
+          className={`inline-flex min-w-0 items-center gap-1 rounded px-1 py-0.5 text-left uppercase tracking-[0.16em] transition hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-300 ${
+            sortBy === columnKey ? 'text-blue-700' : 'text-slate-500'
+          }`}
+          aria-label={`Сортировать по колонке ${label}`}
+          aria-sort={sortBy === columnKey ? (sortDir === 'desc' ? 'descending' : 'ascending') : 'none'}
+        >
+          <span>{label}</span>
+          {renderSortIcon(columnKey)}
+        </button>
+        {renderResizeHandle(columnKey, label)}
       </th>
     );
   };
@@ -5987,7 +6041,7 @@ function TaskTable({
   return (
     <div data-testid="task-table-card" className="min-w-0 max-w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div data-testid="task-table-scroll" className="max-w-full overflow-x-auto overscroll-x-contain">
-        <table data-testid="task-table" className="pp-task-journal-table w-full min-w-[920px] lg:min-w-[980px] xl:min-w-[1040px] 2xl:min-w-[1120px]">
+        <table data-testid="task-table" className="pp-task-journal-table w-max min-w-full table-fixed">
           <thead className="border-b border-slate-200 bg-slate-50">
             <tr className="text-left text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
               <th className="w-10 px-2 py-4 sm:px-3 xl:w-12 xl:px-4">
@@ -6008,7 +6062,14 @@ function TaskTable({
               {renderSortHeader('type', 'Тип', 'hidden xl:table-cell')}
               {renderSortHeader('result', 'Результат')}
               {renderSortHeader('status', 'Статус')}
-              <th className="sticky right-0 z-20 bg-slate-50 px-3 py-4 text-right shadow-[-10px_0_18px_-18px_rgba(15,23,42,0.55)] xl:px-4">Действия</th>
+              <th
+                data-testid="task-column-header-actions"
+                className="sticky right-0 z-20 bg-slate-50 px-3 py-4 text-center shadow-[-10px_0_18px_-18px_rgba(15,23,42,0.55)] xl:px-4"
+                style={getColumnStyle('actions')}
+              >
+                Действия
+                {renderResizeHandle('actions', 'Действия')}
+              </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -6078,7 +6139,7 @@ function TaskTable({
                       className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-40"
                     />
                   </td>
-                  <td className="max-w-[190px] px-2 py-4 sm:px-3 xl:max-w-[240px] xl:px-4">
+                  <td className="px-2 py-4 sm:px-3 xl:px-4" style={getColumnStyle('counterparty')}>
                     {canOpenCounterparty ? (
                       <button
                         type="button"
@@ -6117,7 +6178,7 @@ function TaskTable({
                       ))}
                     </div>
                   </td>
-                  <td className="min-w-[250px] max-w-[250px] px-2 py-4 sm:px-3 xl:min-w-[280px] xl:max-w-[320px] xl:px-4">
+                  <td className="px-2 py-4 sm:px-3 xl:px-4" style={getColumnStyle('title')}>
                     <button
                       type="button"
                       onClick={() => onEdit(task)}
@@ -6150,7 +6211,7 @@ function TaskTable({
                       </div>
                     ) : null}
                   </td>
-                  <td className="px-2 py-4 text-sm text-slate-600 sm:px-3 xl:px-4">
+                  <td className="px-2 py-4 text-sm text-slate-600 sm:px-3 xl:px-4" style={getColumnStyle('assignee')}>
                     <div className="font-semibold text-slate-700">
                       {taskAssignees.map(getParticipantDisplayName).filter(Boolean).join(', ') || task.assigneeName}
                     </div>
@@ -6165,22 +6226,28 @@ function TaskTable({
                       </div>
                     ) : null}
                   </td>
-                  <td className="hidden px-2 py-4 text-sm text-slate-600 sm:px-3 xl:table-cell xl:px-4">
+                  <td className="hidden px-2 py-4 text-sm text-slate-600 sm:px-3 2xl:table-cell 2xl:px-4" style={getColumnStyle('author')}>
                     <div className="font-semibold text-slate-700">{getTaskAuthorName(task)}</div>
                   </td>
-                  <td className="px-2 py-4 sm:px-3 xl:px-4">
+                  <td className="px-2 py-4 sm:px-3 xl:px-4" style={getColumnStyle('dueAt')}>
                     <div className={isOverdue ? 'font-semibold text-rose-600' : 'font-medium text-slate-800'}>{formatDateTime(task.dueAt)}</div>
                     <div className="mt-1 text-xs text-slate-500">{formatRelative(task.dueAt)}</div>
                     <div className="mt-1 text-xs font-semibold text-slate-500">Длительность: {formatDuration(task.plannedDurationMinutes)}</div>
                   </td>
-                  <td className="hidden px-2 py-4 sm:px-3 xl:table-cell xl:px-4">
+                  <td className="hidden px-2 py-4 sm:px-3 xl:table-cell xl:px-4" style={getColumnStyle('type')}>
                     <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
                       <TypeIcon className="h-3.5 w-3.5" />
                       {getTypeMeta(task.type).label}
                     </span>
                   </td>
-                  <td className="hidden max-w-[260px] px-4 py-4 text-sm text-slate-600 xl:table-cell 2xl:max-w-[320px]">{task.result || '—'}</td>
-                  <td className="px-2 py-4 sm:px-3 xl:px-4">
+                  <td
+                    className="hidden whitespace-normal break-words px-4 py-4 text-sm text-slate-600 2xl:table-cell"
+                    style={getColumnStyle('result')}
+                    title={task.result || undefined}
+                  >
+                    {task.result || '—'}
+                  </td>
+                  <td className="px-2 py-4 sm:px-3 xl:px-4" style={getColumnStyle('status')}>
                     {isReadOnly ? (
                       <div>
                         <span className={`inline-flex rounded-xl px-3 py-2 text-sm font-semibold ${statusClass(task.status)}`}>
@@ -6203,13 +6270,19 @@ function TaskTable({
                       </div>
                     )}
                   </td>
-                  <td className={`sticky right-0 z-10 px-2 py-4 shadow-[-10px_0_18px_-18px_rgba(15,23,42,0.55)] sm:px-3 xl:px-4 ${isHighlighted ? 'bg-blue-50' : 'bg-white group-hover:bg-slate-50'}`}>
-                    <div className="flex justify-end gap-2">
+                  <td
+                    className={`sticky right-0 z-10 px-2 py-4 shadow-[-10px_0_18px_-18px_rgba(15,23,42,0.55)] sm:px-3 xl:px-4 ${isHighlighted ? 'bg-blue-50' : 'bg-white group-hover:bg-slate-50'}`}
+                    style={getColumnStyle('actions')}
+                  >
+                    <div
+                      data-testid={`task-actions-${task.id}`}
+                      className="grid grid-cols-[repeat(auto-fit,minmax(2.25rem,1fr))] place-items-center gap-1"
+                    >
                       {reviewableDeadlineRequest ? (
                         <button
                           type="button"
                           onClick={() => onReviewDeadlineChange(task, reviewableDeadlineRequest)}
-                          className="rounded-xl p-2 text-amber-600 transition hover:bg-amber-50 hover:text-amber-700"
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-xl text-amber-600 transition hover:bg-amber-50 hover:text-amber-700"
                           title="Рассмотреть запрос переноса срока"
                           aria-label="Рассмотреть запрос переноса срока"
                         >
@@ -6221,7 +6294,7 @@ function TaskTable({
                           type="button"
                           onClick={() => reviewableApprovalParticipant && onReviewApproval(task, reviewableApprovalParticipant)}
                           disabled={!reviewableApprovalParticipant}
-                          className="rounded-xl p-2 text-violet-600 transition hover:bg-violet-50 hover:text-violet-700 disabled:cursor-not-allowed disabled:text-slate-300 disabled:hover:bg-transparent"
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-xl text-violet-600 transition hover:bg-violet-50 hover:text-violet-700 disabled:cursor-not-allowed disabled:text-slate-300 disabled:hover:bg-transparent"
                           title={reviewableApprovalParticipant ? 'Рассмотреть согласование' : 'Задача находится на согласовании у другого сотрудника'}
                           aria-label="Рассмотреть согласование"
                         >
@@ -6229,7 +6302,7 @@ function TaskTable({
                         </button>
                       ) : null}
                       {!isReadOnly && isTaskJournalActive(task.status) && task.status !== 'inProgress' ? (
-                        <button type="button" onClick={() => onStatusChange(task, 'inProgress')} className="rounded-xl p-2 text-blue-600 transition hover:bg-blue-50 hover:text-blue-700" title="Принять в работу">
+                        <button type="button" onClick={() => onStatusChange(task, 'inProgress')} className="inline-flex h-9 w-9 items-center justify-center rounded-xl text-blue-600 transition hover:bg-blue-50 hover:text-blue-700" title="Принять в работу">
                           <Play className="h-4 w-4" />
                         </button>
                       ) : null}
@@ -6237,7 +6310,7 @@ function TaskTable({
                         <button
                           type="button"
                           onClick={() => onToggleControl(task)}
-                          className={`rounded-xl p-2 transition ${task.isUnderControl ? 'text-rose-600 hover:bg-rose-50 hover:text-rose-700' : 'text-slate-400 hover:bg-rose-50 hover:text-rose-600'}`}
+                          className={`inline-flex h-9 w-9 items-center justify-center rounded-xl transition ${task.isUnderControl ? 'text-rose-600 hover:bg-rose-50 hover:text-rose-700' : 'text-slate-400 hover:bg-rose-50 hover:text-rose-600'}`}
                           title={task.isUnderControl ? 'Снять с контроля' : 'Поставить на контроль'}
                         >
                           <ShieldAlert className="h-4 w-4" />
@@ -6248,7 +6321,7 @@ function TaskTable({
                           type="button"
                           onClick={() => onDone(task)}
                           disabled={completionActionDisabled}
-                          className="rounded-xl p-2 text-emerald-600 transition hover:bg-emerald-50 hover:text-emerald-700 disabled:cursor-not-allowed disabled:text-slate-300 disabled:hover:bg-transparent"
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-xl text-emerald-600 transition hover:bg-emerald-50 hover:text-emerald-700 disabled:cursor-not-allowed disabled:text-slate-300 disabled:hover:bg-transparent"
                           title={completionActionDisabled
                             ? taskSettings.approvalQuickActionMode === 'separateButton'
                               ? 'Задача находится на согласовании. Используйте отдельный значок согласования.'
@@ -6261,11 +6334,11 @@ function TaskTable({
                           <CheckCircle2 className="h-4 w-4" />
                         </button>
                       ) : null}
-                      <button type="button" onClick={() => onEdit(task)} className="rounded-xl p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900" title="Просмотр">
+                      <button type="button" onClick={() => onEdit(task)} className="inline-flex h-9 w-9 items-center justify-center rounded-xl text-slate-500 transition hover:bg-slate-100 hover:text-slate-900" title="Просмотр">
                         <Eye className="h-4 w-4" />
                       </button>
                       {canDeleteTasks && canDeleteTaskForCurrentUser(task, currentUserId, isAdminUser, taskSettings, taskPermissions) ? (
-                        <button type="button" onClick={() => onDelete(task)} className="rounded-xl p-2 text-rose-500 transition hover:bg-rose-50 hover:text-rose-700" title="Удалить">
+                        <button type="button" onClick={() => onDelete(task)} className="inline-flex h-9 w-9 items-center justify-center rounded-xl text-rose-500 transition hover:bg-rose-50 hover:text-rose-700" title="Удалить">
                           <Trash2 className="h-4 w-4" />
                         </button>
                       ) : null}

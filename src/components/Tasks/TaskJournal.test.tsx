@@ -20,6 +20,7 @@ const apiMock = vi.hoisted(() => ({
   getTaskJournalSettings: vi.fn(),
   getCalendarSyncSettings: vi.fn(),
   getUserSetting: vi.fn(),
+  upsertUserSetting: vi.fn(),
   updateTaskJournalSettings: vi.fn(),
   getTaskJournalCaseAutomationCandidates: vi.fn(),
   createTaskJournalCaseAutomationTask: vi.fn(),
@@ -439,6 +440,7 @@ describe('TaskJournal', () => {
       { id: 20, shortName: 'ООО Ромашка', inn: '5400000000', email: 'office@example.com' } as LegalEntitySummary,
     ];
     apiMock.getUserSetting.mockRejectedValue(new Error('not found'));
+    apiMock.upsertUserSetting.mockResolvedValue(undefined);
     apiMock.getCalendarSyncSettings.mockResolvedValue({
       externalCalendarSyncEnabled: false,
       googleCalendarSyncEnabled: false,
@@ -639,9 +641,32 @@ describe('TaskJournal', () => {
   it('keeps the task table compact and row actions pinned on smaller workspaces', async () => {
     await renderJournal([createTask()]);
 
-    expect(screen.getByTestId('task-table').className).toContain('min-w-[920px]');
+    expect(screen.getByTestId('task-table').className).toContain('w-max');
+    expect(screen.getByTestId('task-table').className).toContain('min-w-full');
+    expect(screen.getByTestId('task-table').className).toContain('table-fixed');
     expect(screen.getByText('Действия').closest('th')?.className).toContain('sticky');
     expect(screen.getByTitle('Просмотр').closest('td')?.className).toContain('sticky');
+    expect(screen.getByTestId('task-actions-101').className).toContain('grid-cols-[repeat(auto-fit,minmax(2.25rem,1fr))]');
+    expect(screen.getByTestId('task-column-header-result').className).toContain('hidden');
+    expect(screen.getByTestId('task-column-header-result').className).toContain('2xl:table-cell');
+  });
+
+  it('allows users to resize task columns and keeps the selected width', async () => {
+    await renderJournal([createTask()]);
+
+    const titleHeader = screen.getByTestId('task-column-header-title');
+    expect(titleHeader.style.width).toBe('290px');
+
+    fireEvent.mouseDown(screen.getByRole('separator', { name: 'Изменить ширину колонки Наименование задачи' }), {
+      clientX: 290,
+    });
+    fireEvent.mouseMove(window, { clientX: 350 });
+    fireEvent.mouseUp(window);
+
+    expect(titleHeader.style.width).toBe('350px');
+    expect(
+      JSON.parse(window.localStorage.getItem('pp.task_journal.table_settings.v1.user:7') ?? '{}').columnWidths.title,
+    ).toBe(350);
   });
 
   it('opens the daily reminder target as current employees overdue task list', async () => {
@@ -2807,15 +2832,14 @@ describe('TaskJournal', () => {
     expect(screen.getByTestId('task-table-scroll').className).toContain('overflow-x-auto');
     expect(screen.getByTestId('task-table-scroll').className).toContain('overscroll-x-contain');
     expect(screen.getByTestId('task-table').className).toContain('pp-task-journal-table');
-    expect(screen.getByTestId('task-table').className).toContain('min-w-[920px]');
-    expect(screen.getByTestId('task-table').className).toContain('lg:min-w-[980px]');
-    expect(screen.getByTestId('task-table').className).toContain('xl:min-w-[1040px]');
-    expect(screen.getByTestId('task-table').className).toContain('2xl:min-w-[1120px]');
+    expect(screen.getByTestId('task-table').className).toContain('w-max');
+    expect(screen.getByTestId('task-table').className).toContain('min-w-full');
+    expect(screen.getByTestId('task-table').className).toContain('table-fixed');
     expect(screen.getByText('Действия').closest('th')?.className).toContain('sticky');
     expect(screen.getByTitle('Просмотр').closest('td')?.className).toContain('sticky');
-    expect(screen.getByTestId('task-table').className).not.toContain('min-w-[940px]');
-    expect(screen.getByTestId('task-table').className).not.toContain('min-w-[1280px]');
-    expect(screen.getByTestId('task-table').className).not.toContain('2xl:min-w-[1320px]');
+    expect(screen.getByTestId('task-table').className).not.toContain('min-w-[920px]');
+    expect(screen.getByTestId('task-column-header-author').className).toContain('hidden');
+    expect(screen.getByTestId('task-column-header-author').className).toContain('2xl:table-cell');
   });
 
   it('restores the saved journal presentation mode for the current user', async () => {
