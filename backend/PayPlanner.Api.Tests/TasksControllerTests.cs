@@ -1050,6 +1050,48 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task CreateTask_OnApprovalWithoutApproversAddsAuthor()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "create-author-approval-fallback@example.com", "Постановщик");
+        var assignee = await CreateAdminUserAsync(db, "create-assignee-approval-fallback@example.com", "Исполнитель");
+        var client = await CreateClientAsync(db, "Клиент создания с согласованием");
+        var notifications = new RecordingNotificationService();
+        var controller = CreateController(db, notifications, author);
+
+        var result = await controller.CreateTask(new UpsertTaskJournalItemRequest
+        {
+            ClientId = client.Id,
+            Title = "Создать и отправить постановщику",
+            AssigneeUserId = assignee.Id,
+            DueAt = DateTime.UtcNow.AddHours(2),
+            Status = "onApproval",
+            Result = "Результат готов к проверке.",
+            Participants = [],
+        }, CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(result.Result);
+        var dto = Assert.IsType<TaskJournalItemDto>(created.Value);
+        Assert.Equal("onApproval", dto.Status);
+        var approver = Assert.Single(dto.Participants, participant => participant.Role == "approver");
+        Assert.Equal(author.Id, approver.UserId);
+        Assert.Equal("Постановщик", approver.DisplayName);
+        Assert.Equal("pending", approver.ApprovalStatus);
+        Assert.Contains(dto.Id, notifications.ApprovalRequestedTaskIds);
+
+        var stored = await db.TaskJournalItems
+            .AsNoTracking()
+            .Include(item => item.Participants)
+            .Include(item => item.Comments)
+            .SingleAsync(item => item.Id == dto.Id);
+        Assert.Contains(stored.Participants, participant =>
+            participant.Role == "approver" && participant.UserId == author.Id);
+        Assert.Contains(stored.Comments, comment =>
+            comment.Kind == "system"
+            && comment.Text.Contains("постановщик автоматически добавлен", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task CreateTask_DefaultsApprovalDueAtFromSettingsWhenApprovalStarts()
     {
         await using var db = await CreateContextAsync();
@@ -1409,6 +1451,48 @@ public class TasksControllerTests
             comment.Kind == "system"
             && comment.Text.Contains("Последний согласующий удалён", StringComparison.Ordinal)
             && comment.Text.Contains("возвращена в работу", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task UpdateTask_EnteringApprovalWithoutApproversAddsAuthor()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "update-author-approval-fallback@example.com", "Постановщик");
+        var assignee = await CreateAdminUserAsync(db, "update-assignee-approval-fallback@example.com", "Исполнитель");
+        var client = await CreateClientAsync(db, "Клиент редактирования с согласованием");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, assignee.Id, status: "inProgress");
+        var notifications = new RecordingNotificationService();
+        var controller = CreateController(db, notifications, author);
+
+        var result = await controller.UpdateTask(task.Id, new UpsertTaskJournalItemRequest
+        {
+            ClientId = client.Id,
+            Title = task.Title,
+            AssigneeUserId = assignee.Id,
+            DueAt = task.DueAt,
+            Status = "onApproval",
+            Result = "Документы подготовлены.",
+            Participants = [],
+        }, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<TaskJournalItemDto>(ok.Value);
+        Assert.Equal("onApproval", dto.Status);
+        var approver = Assert.Single(dto.Participants, participant => participant.Role == "approver");
+        Assert.Equal(author.Id, approver.UserId);
+        Assert.Equal("pending", approver.ApprovalStatus);
+        Assert.Contains(task.Id, notifications.ApprovalRequestedTaskIds);
+
+        var stored = await db.TaskJournalItems
+            .AsNoTracking()
+            .Include(item => item.Participants)
+            .Include(item => item.Comments)
+            .SingleAsync(item => item.Id == task.Id);
+        Assert.Contains(stored.Participants, participant =>
+            participant.Role == "approver" && participant.UserId == author.Id);
+        Assert.Contains(stored.Comments, comment =>
+            comment.Kind == "system"
+            && comment.Text.Contains("постановщик автоматически добавлен", StringComparison.Ordinal));
     }
 
     [Fact]

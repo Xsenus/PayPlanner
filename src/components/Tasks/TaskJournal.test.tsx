@@ -3557,6 +3557,51 @@ describe('TaskJournal', () => {
     }));
   });
 
+  it.each(['legacy', 'modern'] as const)('allows a fully editable task without approvers to enter approval in the %s card', async (taskCardWindowMode) => {
+    await renderJournal([
+      createTask({
+        status: 'inProgress',
+        result: '',
+        authorUserId: 8,
+        authorName: 'Постановщик',
+        participants: [
+          { userId: 7, role: 'assignee', displayName: 'Администратор', approvalStatus: 'pending' },
+        ],
+      }),
+    ], {
+      settings: {
+        approvalDueDays: 5,
+        taskCardWindowMode,
+      },
+      assignees: [
+        { id: 7, name: 'Администратор', email: 'admin@example.com' },
+        { id: 8, name: 'Постановщик', email: 'author@example.com' },
+      ],
+    });
+
+    await openFirstTaskForEdit();
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    const sendButtons = within(card).getAllByRole('button', { name: 'Отправить постановщику на согласование' });
+    expect(sendButtons.length).toBeGreaterThan(0);
+    fireEvent.click(sendButtons[0]);
+
+    expect(await screen.findByRole('heading', { name: 'Добавить результат по задаче' })).toBeTruthy();
+    fireEvent.change(screen.getByPlaceholderText('Опишите подробно, что было сделано и какой результат был достигнут.'), {
+      target: { value: 'Результат отправлен постановщику.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Отправить на согласование' }));
+
+    await waitFor(() => expect(apiMock.updateTaskJournalItem).toHaveBeenCalledTimes(1));
+    expect(apiMock.updateTaskJournalItem).toHaveBeenCalledWith(101, expect.objectContaining({
+      status: 'onApproval',
+      result: 'Результат отправлен постановщику.',
+      approvalDueAt: expect.any(String),
+      participants: expect.not.arrayContaining([
+        expect.objectContaining({ role: 'approver' }),
+      ]),
+    }));
+  });
+
   it('asks for a result before sending a task to approval in the modern task card', async () => {
     await renderJournal([
       createTask({

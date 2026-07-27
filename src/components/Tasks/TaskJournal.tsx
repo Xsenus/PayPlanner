@@ -8767,7 +8767,6 @@ function TaskModal({
   const canSendToAuthorApproval = Boolean(
     state?.task
       && !isAwaitingApproval
-      && isReadOnly
       && canCompleteTask
       && approverParticipants.length === 0
       && state.task.authorUserId

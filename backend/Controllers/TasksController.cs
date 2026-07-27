@@ -2335,6 +2335,12 @@ public class TasksController : ControllerBase
 
         var nextStatus = NormalizeEnumValue(request.Status, AllowedStatuses, "new");
         var nextResult = NormalizeCompletionResult(nextStatus, request.Result);
+        var authorApproverFallback = await AddAuthorAsApproverIfMissingAsync(
+            participants,
+            access.UserId,
+            nextStatus,
+            ct);
+        participants = authorApproverFallback.Participants;
         var settings = await GetTaskJournalSettingsAsync(ct);
         var createAllowAdminForceCompletion = CanAdminForceCompleteTask(access, settings, nextStatus);
         var statusValidation = ValidateStatusRules(nextStatus, nextResult, participants.Items, settings.RequireCompletionResult, createAllowAdminForceCompletion);
@@ -2393,6 +2399,10 @@ public class TasksController : ControllerBase
         };
 
         AddTaskHistory(entity, access, "Задача создана.");
+        if (authorApproverFallback.Added)
+        {
+            AddTaskHistory(entity, access, "Отдельный согласующий не выбран: постановщик автоматически добавлен как согласующий.");
+        }
         _db.TaskJournalItems.Add(entity);
         await _db.SaveChangesAsync(ct);
         await SyncContractorPaymentAsync(entity, await ResolveContractorPaymentResultBaseDateAsync(null, nextStatus, entity.CreatedAt, ct), ct);
@@ -2490,6 +2500,17 @@ public class TasksController : ControllerBase
             && !CanCompleteTask(entity, access, settings))
         {
             return Forbid();
+        }
+        var authorApproverAdded = false;
+        if (!IsApprovalActiveStatus(previousStatus))
+        {
+            var authorApproverFallback = await AddAuthorAsApproverIfMissingAsync(
+                participants,
+                nextAuthorUserId,
+                nextStatus,
+                ct);
+            participants = authorApproverFallback.Participants;
+            authorApproverAdded = authorApproverFallback.Added;
         }
         var approvalQueueRestarted = ShouldRestartApprovalQueue(previousStatus, nextStatus);
         var approvalEndedBecauseNoApprovers = IsApprovalActiveStatus(previousStatus)
@@ -2589,6 +2610,10 @@ public class TasksController : ControllerBase
         if (approvalQueueRestarted)
         {
             AddTaskHistory(entity, access, "Очередь согласования запущена заново: все согласующие снова ожидают решения.");
+        }
+        if (authorApproverAdded)
+        {
+            AddTaskHistory(entity, access, "Отдельный согласующий не выбран: постановщик автоматически добавлен как согласующий.");
         }
         else if (approvalEndedBecauseNoApprovers)
         {
@@ -6202,22 +6227,84 @@ public class TasksController : ControllerBase
         => string.Equals(status, "done", StringComparison.OrdinalIgnoreCase)
            || string.Equals(status, "onApproval", StringComparison.OrdinalIgnoreCase);
 
+    private async Task<(TaskParticipantsResolution Participants, bool Added)> AddAuthorAsApproverIfMissingAsync(
+        TaskParticipantsResolution participants,
+        int? authorUserId,
+        string nextStatus,
+        CancellationToken ct)
+    {
+        var authorApprover = await ResolveAuthorApproverIfMissingAsync(
+            authorUserId,
+            nextStatus,
+            participants.Items.Any(participant =>
+                string.Equals(participant.Role, "approver", StringComparison.OrdinalIgnoreCase)),
+            ct);
+        if (authorApprover is null)
+        {
+            return (participants, false);
+        }
+
+        var items = participants.Items.ToList();
+        items.Add(authorApprover with
+        {
+            SortOrder = items.Count == 0
+                ? 0
+                : items.Max(participant => participant.SortOrder) + 1,
+        });
+        return (TaskParticipantsResolution.Valid(
+            participants.PrimaryAssigneeUserId,
+            participants.PrimaryAssigneeName,
+            items), true);
+    }
+
     private async Task<bool> AddAuthorAsApproverIfMissingAsync(
         TaskJournalItem entity,
         string nextStatus,
         CancellationToken ct)
     {
-        if (!string.Equals(nextStatus, "onApproval", StringComparison.OrdinalIgnoreCase)
-            || entity.Participants.Any(participant =>
-                string.Equals(participant.Role, "approver", StringComparison.OrdinalIgnoreCase))
-            || !entity.AuthorUserId.HasValue)
+        var authorApprover = await ResolveAuthorApproverIfMissingAsync(
+            entity.AuthorUserId,
+            nextStatus,
+            entity.Participants.Any(participant =>
+                string.Equals(participant.Role, "approver", StringComparison.OrdinalIgnoreCase)),
+            ct);
+        if (authorApprover is null)
         {
             return false;
         }
 
+        entity.Participants.Add(new TaskJournalParticipant
+        {
+            UserId = authorApprover.UserId,
+            Role = authorApprover.Role,
+            DisplayName = authorApprover.DisplayName,
+            Email = authorApprover.Email,
+            SortOrder = entity.Participants.Count == 0
+                ? 0
+                : entity.Participants.Max(participant => participant.SortOrder) + 1,
+            ApprovalStatus = authorApprover.ApprovalStatus,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        return true;
+    }
+
+    private async Task<TaskParticipantDraft?> ResolveAuthorApproverIfMissingAsync(
+        int? authorUserId,
+        string nextStatus,
+        bool hasApprover,
+        CancellationToken ct)
+    {
+        if (!string.Equals(nextStatus, "onApproval", StringComparison.OrdinalIgnoreCase)
+            || hasApprover
+            || !authorUserId.HasValue)
+        {
+            return null;
+        }
+
         var author = await _db.Users
             .AsNoTracking()
-            .Where(user => user.Id == entity.AuthorUserId.Value && user.IsActive && user.IsApproved)
+            .Where(user => user.Id == authorUserId.Value && user.IsActive && user.IsApproved)
             .Select(user => new
             {
                 user.Id,
@@ -6227,23 +6314,17 @@ public class TasksController : ControllerBase
             .SingleOrDefaultAsync(ct);
         if (author is null)
         {
-            return false;
+            return null;
         }
 
-        entity.Participants.Add(new TaskJournalParticipant
-        {
-            UserId = author.Id,
-            Role = "approver",
-            DisplayName = string.IsNullOrWhiteSpace(author.FullName) ? author.Email : author.FullName.Trim(),
-            Email = author.Email,
-            SortOrder = entity.Participants.Count == 0
-                ? 0
-                : entity.Participants.Max(participant => participant.SortOrder) + 1,
-            ApprovalStatus = "pending",
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow,
-        });
-        return true;
+        return new TaskParticipantDraft(
+            author.Id,
+            string.IsNullOrWhiteSpace(author.FullName) ? author.Email : author.FullName.Trim(),
+            author.Email,
+            "approver",
+            0,
+            "pending",
+            null);
     }
 
     private static bool CanUpdateTaskStatus(
