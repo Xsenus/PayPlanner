@@ -111,6 +111,49 @@ public class SudrfCourtSyncServiceTests
     }
 
     [Fact]
+    public async Task FetchCaseAsync_LoadPassOf500Cases_DoesNotRepeatRequestsForSameCard()
+    {
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        var bytes = Encoding.GetEncoding("windows-1251").GetBytes(BuildCourtHtml());
+        using var handler = new FixedResponseHandler(_ => bytes);
+        using var httpClient = new HttpClient(handler);
+        var metrics = new CourtSyncMetrics();
+        var requestPolicy = new SudrfCourtRequestPolicy(
+            new SudrfCourtRequestPolicyOptions
+            {
+                TimeoutSeconds = 10,
+                MaxRetries = 0,
+                RetryBaseDelayMilliseconds = 0,
+                MaxConcurrency = 20,
+                MinimumRequestIntervalMilliseconds = 0,
+            },
+            metrics);
+        var service = new SudrfCourtSyncService(
+            httpClient,
+            NullLogger<SudrfCourtSyncService>.Instance,
+            requestPolicy,
+            metrics);
+        var simulatedCases = Enumerable.Range(0, 500)
+            .Select(index => new
+            {
+                CaseId = index + 1,
+                SourceUrl = $"https://kraevoy--hbr.sudrf.ru/modules.php?name=sud_delo&name_op=case&delo_id={index % 100}",
+            })
+            .ToArray();
+
+        var results = await Task.WhenAll(simulatedCases.Select(item =>
+            service.FetchCaseAsync(item.SourceUrl, CancellationToken.None, "33а-3390/2026")));
+        var snapshot = metrics.GetSnapshot();
+
+        Assert.Equal(500, results.Length);
+        Assert.All(results, result => Assert.Equal("33а-3390/2026", result.CaseNumber));
+        Assert.Equal(100, handler.RequestCount);
+        Assert.Equal(100, snapshot.RequestCount);
+        Assert.Equal(400, snapshot.DuplicateSkipCount);
+        Assert.Equal(0, snapshot.FailedRequestCount);
+    }
+
+    [Fact]
     public async Task FetchCaseAsync_ReusesDiscoveredCardEndpointWithinProviderScope()
     {
         Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
@@ -576,11 +619,13 @@ public class SudrfCourtSyncServiceTests
 
     private sealed class FixedResponseHandler(Func<HttpRequestMessage, byte[]> resolveBytes) : HttpMessageHandler
     {
-        public int RequestCount { get; private set; }
+        private int _requestCount;
+
+        public int RequestCount => Volatile.Read(ref _requestCount);
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            RequestCount++;
+            Interlocked.Increment(ref _requestCount);
             var response = new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new ByteArrayContent(resolveBytes(request)),
