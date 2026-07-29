@@ -6459,6 +6459,78 @@ public class CasesV2ControllerTests
         Assert.Equal("27RS0005-01-2025-002659-56", item.JudicialUid);
         Assert.Equal("appeal", item.Instance);
         Assert.True(item.CanFetch);
+        Assert.False(item.RequiresReview);
+        Assert.Collection(
+            item.Differences.OrderBy(difference => difference.Field),
+            difference =>
+            {
+                Assert.Equal("courtName", difference.Field);
+                Assert.Equal("fill", difference.Kind);
+                Assert.Empty(difference.CurrentValue);
+                Assert.Equal("Хабаровский краевой суд", difference.SourceValue);
+            },
+            difference =>
+            {
+                Assert.Equal("judgeName", difference.Field);
+                Assert.Equal("fill", difference.Kind);
+                Assert.Empty(difference.CurrentValue);
+                Assert.Equal("Казарикова Оксана Витальевна", difference.SourceValue);
+            });
+    }
+
+    [Fact]
+    public async Task BindCourtSyncCase_RejectsReplacingExistingValuesWithoutConfirmation()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "court-bind-review-owner@example.com", "Владелец");
+        var client = new Client
+        {
+            Name = "Клиент с существующей судебной карточкой",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Дело с проверкой замены",
+            Status = ClientCaseStatus.Open,
+            CourtName = "Старый суд",
+            CourtCaseNumber = "СТАРЫЙ-1",
+            CourtUrl = "https://example.sudrf.ru/old-card",
+            JudgeName = "Старый судья",
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+
+        var courtData = new SudrfCourtCaseData
+        {
+            SourceUrl = "https://example.sudrf.ru/new-card",
+            CourtName = "Новый суд",
+            CaseNumber = "НОВЫЙ-2",
+            JudgeName = "Новый судья",
+        };
+        var controller = CreateController(db, owner, sudrfCourtSyncService: new FixedSudrfCourtSyncService(courtData));
+
+        var result = await controller.BindCourtSyncCase(
+            clientCase.Id,
+            new CasesV2Controller.ClientCaseCourtSyncBindRequest
+            {
+                SourceUrl = courtData.SourceUrl,
+                CourtName = courtData.CourtName,
+                CourtCaseNumber = courtData.CaseNumber,
+                JudgeName = courtData.JudgeName,
+            },
+            CancellationToken.None);
+
+        var conflict = Assert.IsType<ConflictObjectResult>(result.Result);
+        Assert.NotNull(conflict.Value);
+
+        await db.Entry(clientCase).ReloadAsync();
+        Assert.Equal("Старый суд", clientCase.CourtName);
+        Assert.Equal("СТАРЫЙ-1", clientCase.CourtCaseNumber);
+        Assert.Equal("https://example.sudrf.ru/old-card", clientCase.CourtUrl);
+        Assert.Empty(await db.ClientCaseCourtInstances.ToListAsync());
     }
 
     [Fact]

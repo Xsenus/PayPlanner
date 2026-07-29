@@ -6790,6 +6790,12 @@ public class CasesV2Controller : ControllerBase
             return NotFound();
         }
 
+        var normalizedInstance = NormalizeCourtInstance(request?.Instance);
+        var currentCourtInstance = await _db.ClientCaseCourtInstances
+            .AsNoTracking()
+            .FirstOrDefaultAsync(
+                item => item.ClientCaseId == id && item.Instance == normalizedInstance,
+                ct);
         var sourceUrl = NormalizeOptional(request?.SourceUrl) ?? NormalizeOptional(clientCase.CourtUrl);
         if (sourceUrl is null)
         {
@@ -6815,10 +6821,10 @@ public class CasesV2Controller : ControllerBase
                     NormalizeOptional(request?.JudicialUid),
                     NormalizeOptional(request?.CourtName) ?? NormalizeOptional(clientCase.CourtName),
                     NormalizeOptional(request?.PartyName),
-                    NormalizeCourtInstance(request?.Instance)),
+                    normalizedInstance),
                 ct);
 
-            return Ok(results.Select(MapCourtSyncSearchResult).ToList());
+            return Ok(results.Select(item => MapCourtSyncSearchResult(clientCase, currentCourtInstance, item)).ToList());
         }
         catch (SudrfCourtSyncException ex)
         {
@@ -6864,6 +6870,26 @@ public class CasesV2Controller : ControllerBase
         }
 
         var normalizedInstance = NormalizeCourtInstance(request?.Instance);
+        var courtInstance = await _db.ClientCaseCourtInstances
+            .Include(item => item.Complaints.Where(complaint => !complaint.IsArchived))
+            .FirstOrDefaultAsync(item => item.ClientCaseId == id && item.Instance == normalizedInstance, ct);
+        var previewDifferences = BuildCourtSyncPreviewDifferences(
+            clientCase,
+            courtInstance,
+            request?.CourtName,
+            NormalizeOptional(request?.CourtCaseNumber) ?? NormalizeOptional(request?.JudicialUid),
+            request?.JudgeName,
+            sourceUrl);
+        if (previewDifferences.Any(static item => item.Kind == "replace") && request?.ConfirmDifferences != true)
+        {
+            return Conflict(new
+            {
+                message = "Найденная судебная карточка отличается от уже заполненных данных дела. Проверьте изменения и подтвердите замену.",
+                requiresConfirmation = true,
+                differences = previewDifferences,
+            });
+        }
+
         var actorUserId = User.GetUserId();
         var actorName = User.GetDisplayName();
         var now = DateTime.UtcNow;
@@ -6880,9 +6906,6 @@ public class CasesV2Controller : ControllerBase
         clientCase.CourtCaseNumber = courtCaseNumber;
         clientCase.CourtUrl = Truncate(sourceUrl, 1000);
 
-        var courtInstance = await _db.ClientCaseCourtInstances
-            .Include(item => item.Complaints.Where(complaint => !complaint.IsArchived))
-            .FirstOrDefaultAsync(item => item.ClientCaseId == id && item.Instance == normalizedInstance, ct);
         if (courtInstance is null)
         {
             courtInstance = new ClientCaseCourtInstance
@@ -11850,8 +11873,20 @@ public class CasesV2Controller : ControllerBase
         };
     }
 
-    private static ClientCaseCourtSyncSearchResultDto MapCourtSyncSearchResult(CourtSyncCaseSearchResult item)
-        => new()
+    private static ClientCaseCourtSyncSearchResultDto MapCourtSyncSearchResult(
+        ClientCase clientCase,
+        ClientCaseCourtInstance? currentCourtInstance,
+        CourtSyncCaseSearchResult item)
+    {
+        var differences = BuildCourtSyncPreviewDifferences(
+            clientCase,
+            currentCourtInstance,
+            item.CourtName,
+            item.CaseNumber,
+            item.JudgeName,
+            item.SourceUrl);
+
+        return new()
         {
             ProviderKey = item.ProviderKey,
             SourceType = item.SourceType,
@@ -11864,7 +11899,75 @@ public class CasesV2Controller : ControllerBase
             Title = item.Title,
             Summary = item.Summary,
             CanFetch = item.CanFetch,
+            Differences = differences,
+            RequiresReview = differences.Any(static difference => difference.Kind == "replace"),
         };
+    }
+
+    private static IReadOnlyList<ClientCaseCourtSyncDifferenceDto> BuildCourtSyncPreviewDifferences(
+        ClientCase clientCase,
+        ClientCaseCourtInstance? currentCourtInstance,
+        string? courtName,
+        string? courtCaseNumber,
+        string? judgeName,
+        string? sourceUrl)
+    {
+        var differences = new List<ClientCaseCourtSyncDifferenceDto>(4);
+        AddCourtSyncPreviewDifference(
+            differences,
+            "courtName",
+            "Суд",
+            NormalizeOptional(currentCourtInstance?.CourtName) ?? clientCase.CourtName,
+            courtName);
+        AddCourtSyncPreviewDifference(
+            differences,
+            "courtCaseNumber",
+            "Номер дела в суде",
+            NormalizeOptional(currentCourtInstance?.CourtCaseNumber) ?? clientCase.CourtCaseNumber,
+            courtCaseNumber);
+        AddCourtSyncPreviewDifference(
+            differences,
+            "judgeName",
+            "Судья",
+            NormalizeOptional(currentCourtInstance?.JudgeName) ?? clientCase.JudgeName,
+            judgeName);
+        AddCourtSyncPreviewDifference(
+            differences,
+            "sourceUrl",
+            "Ссылка на карточку",
+            NormalizeOptional(currentCourtInstance?.CourtUrl) ?? clientCase.CourtUrl,
+            sourceUrl);
+        return differences;
+    }
+
+    private static void AddCourtSyncPreviewDifference(
+        ICollection<ClientCaseCourtSyncDifferenceDto> differences,
+        string field,
+        string label,
+        string? currentValue,
+        string? sourceValue)
+    {
+        var normalizedSource = NormalizeOptional(sourceValue);
+        if (normalizedSource is null)
+        {
+            return;
+        }
+
+        var normalizedCurrent = NormalizeOptional(currentValue);
+        if (string.Equals(normalizedCurrent, normalizedSource, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        differences.Add(new ClientCaseCourtSyncDifferenceDto
+        {
+            Field = field,
+            Label = label,
+            CurrentValue = normalizedCurrent ?? string.Empty,
+            SourceValue = normalizedSource,
+            Kind = normalizedCurrent is null ? "fill" : "replace",
+        });
+    }
 
     private static ClientCaseCourtSyncJournalEntryDto MapCourtSyncJournalEntry(CourtSyncJournalCaseRow row, string line, int index, TimeZoneInfo timeZone)
     {
@@ -12850,6 +12953,17 @@ public class CasesV2Controller : ControllerBase
         public string Title { get; set; } = string.Empty;
         public string Summary { get; set; } = string.Empty;
         public bool CanFetch { get; set; }
+        public bool RequiresReview { get; set; }
+        public IReadOnlyList<ClientCaseCourtSyncDifferenceDto> Differences { get; set; } = [];
+    }
+
+    public sealed class ClientCaseCourtSyncDifferenceDto
+    {
+        public string Field { get; set; } = string.Empty;
+        public string Label { get; set; } = string.Empty;
+        public string CurrentValue { get; set; } = string.Empty;
+        public string SourceValue { get; set; } = string.Empty;
+        public string Kind { get; set; } = string.Empty;
     }
 
     public sealed class ClientCaseCourtSyncBindRequest
@@ -12861,6 +12975,8 @@ public class CasesV2Controller : ControllerBase
         public string? CourtName { get; set; }
         public string? CourtCaseNumber { get; set; }
         public string? JudicialUid { get; set; }
+        public string? JudgeName { get; set; }
+        public bool ConfirmDifferences { get; set; }
     }
 
     public sealed class ClientCaseCourtSyncBindingDto

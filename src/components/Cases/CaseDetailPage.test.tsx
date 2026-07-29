@@ -2300,6 +2300,23 @@ describe('CaseDetailPage', () => {
         title: 'Хабаровский краевой суд',
         summary: 'Хабаровский краевой суд; № 33а-3390/2026; Судья: Казарикова О.В.',
         canFetch: true,
+        requiresReview: true,
+        differences: [
+          {
+            field: 'courtName',
+            label: 'Суд',
+            currentValue: 'Арбитражный суд Самарской области',
+            sourceValue: 'Хабаровский краевой суд',
+            kind: 'replace',
+          },
+          {
+            field: 'judgeName',
+            label: 'Судья',
+            currentValue: '',
+            sourceValue: 'Казарикова О.В.',
+            kind: 'fill',
+          },
+        ],
       },
     ]);
     vi.mocked(apiService.bindCaseCourtSyncCase).mockResolvedValueOnce({
@@ -2343,11 +2360,17 @@ describe('CaseDetailPage', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: /Найти/u }));
 
-    expect(await screen.findByText('Хабаровский краевой суд')).toBeTruthy();
+    expect((await screen.findAllByText('Хабаровский краевой суд')).length).toBeGreaterThan(0);
     expect(screen.getByText(/UID 27RS0005-01-2025-002659-56/u)).toBeTruthy();
+    expect(screen.getByText('Требуется проверка изменений')).toBeTruthy();
+    expect(screen.getByText('Арбитражный суд Самарской области')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /Привязать/u }));
 
     await waitFor(() => {
+      expect(dialogMock.confirm).toHaveBeenCalledWith(expect.objectContaining({
+        title: 'Заменить данные дела?',
+        confirmLabel: 'Подтвердить замену',
+      }));
       expect(apiService.searchCaseCourtSyncCases).toHaveBeenCalledWith(15, {
         sourceUrl: 'https://kraevoy--hbr.sudrf.ru/modules.php?name=sud_delo&name_op=case&delo_id=42',
         courtCaseNumber: '33а-3390/2026',
@@ -2362,6 +2385,8 @@ describe('CaseDetailPage', () => {
         courtName: 'Хабаровский краевой суд',
         courtCaseNumber: '33а-3390/2026',
         judicialUid: '27RS0005-01-2025-002659-56',
+        judgeName: 'Казарикова О.В.',
+        confirmDifferences: true,
       });
       expect(screen.getByText('Судебная карточка привязана к делу.')).toBeTruthy();
     });

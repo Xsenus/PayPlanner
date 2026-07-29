@@ -2336,6 +2336,20 @@ export function CaseDetailPage({
   const bindCourtSyncCase = async (result: ClientCaseCourtSyncSearchResult) => {
     if (!caseItem) return;
 
+    if (result.requiresReview) {
+      const replacementLabels = result.differences
+        .filter((difference) => difference.kind === 'replace')
+        .map((difference) => difference.label);
+      const approved = await confirm({
+        title: 'Заменить данные дела?',
+        description: `Судебная карточка отличается по полям: ${replacementLabels.join(', ')}. Проверьте сравнение в карточке результата перед продолжением.`,
+        confirmLabel: 'Подтвердить замену',
+        cancelLabel: 'Отмена',
+        variant: 'primary',
+      });
+      if (!approved) return;
+    }
+
     setBindingCourtSyncSource(true);
     setError(null);
     setNotice(null);
@@ -2348,6 +2362,8 @@ export function CaseDetailPage({
         courtName: result.courtName,
         courtCaseNumber: result.courtCaseNumber,
         judicialUid: result.judicialUid,
+        judgeName: result.differences.find((difference) => difference.field === 'judgeName')?.sourceValue ?? null,
+        confirmDifferences: result.requiresReview,
       });
       setCourtInstances((current) => {
         const exists = current.some((entry) => entry.instance === binding.courtInstance.instance);
@@ -6089,6 +6105,25 @@ function CourtPanel({
                       {result.judicialUid ? <span>UID {result.judicialUid}</span> : null}
                       {result.sourceUrl ? <span className="max-w-full truncate">{result.sourceUrl}</span> : null}
                     </div>
+                    {result.differences.length > 0 ? (
+                      <div className={`mt-3 rounded-lg border p-3 ${result.requiresReview ? 'border-amber-200 bg-amber-50' : 'border-emerald-200 bg-emerald-50'}`}>
+                        <div className={`text-xs font-semibold uppercase tracking-[0.08em] ${result.requiresReview ? 'text-amber-800' : 'text-emerald-800'}`}>
+                          {result.requiresReview ? 'Требуется проверка изменений' : 'Будут заполнены пустые поля'}
+                        </div>
+                        <div className="mt-2 space-y-2">
+                          {result.differences.map((difference) => (
+                            <div key={difference.field} className="grid gap-1 text-xs sm:grid-cols-[minmax(8rem,0.7fr)_minmax(0,1fr)_auto_minmax(0,1fr)] sm:items-center">
+                              <span className="font-semibold text-slate-700">{difference.label}</span>
+                              <span className="break-words text-slate-500">{difference.currentValue || 'Не заполнено'}</span>
+                              <span className="hidden text-slate-400 sm:inline">→</span>
+                              <span className="break-words font-medium text-slate-900">{difference.sourceValue}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mt-3 text-xs font-medium text-emerald-700">Данные карточки совпадают с делом.</div>
+                    )}
                   </div>
                   <button
                     type="button"

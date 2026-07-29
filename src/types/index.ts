@@ -1183,6 +1183,16 @@ export interface ClientCaseCourtSyncSearchResult {
   title: string;
   summary: string;
   canFetch: boolean;
+  requiresReview: boolean;
+  differences: ClientCaseCourtSyncDifference[];
+}
+
+export interface ClientCaseCourtSyncDifference {
+  field: string;
+  label: string;
+  currentValue: string;
+  sourceValue: string;
+  kind: 'fill' | 'replace';
 }
 
 export interface ClientCaseCourtSyncBindRequest {
@@ -1193,6 +1203,8 @@ export interface ClientCaseCourtSyncBindRequest {
   courtName?: string | null;
   courtCaseNumber?: string | null;
   judicialUid?: string | null;
+  judgeName?: string | null;
+  confirmDifferences?: boolean;
 }
 
 export interface ClientCaseCourtSyncBinding {
