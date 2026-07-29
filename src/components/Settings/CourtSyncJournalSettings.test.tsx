@@ -118,4 +118,22 @@ describe('CourtSyncJournalSettings', () => {
       minAgeDays: undefined,
     }));
   });
+
+  it('shows a journal loading error and retries without losing the filters', async () => {
+    apiMock.getCourtSyncJournal
+      .mockRejectedValueOnce(new Error('Сервис журнала временно недоступен.'))
+      .mockResolvedValueOnce([]);
+
+    render(<CourtSyncJournalSettings />);
+
+    expect(await screen.findByText('Сервис журнала временно недоступен.')).toBeTruthy();
+    expect(screen.getByLabelText('Статус судебной синхронизации')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Обновить' }));
+
+    await waitFor(() => {
+      expect(apiMock.getCourtSyncJournal).toHaveBeenCalledTimes(2);
+      expect(screen.queryByText('Сервис журнала временно недоступен.')).toBeNull();
+    });
+  });
 });

@@ -2355,6 +2355,28 @@ describe('CaseDetailPage', () => {
     });
   });
 
+  it('keeps the court tab available and shows an error when court card search fails', async () => {
+    vi.mocked(apiService.searchCaseCourtSyncCases).mockRejectedValueOnce(
+      new Error('Не удалось получить результаты поиска судебной карточки.'),
+    );
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Суд' }));
+    fireEvent.click(await screen.findByRole('button', { name: /Найти/u }));
+
+    await waitFor(() => {
+      expect(apiService.searchCaseCourtSyncCases).toHaveBeenCalledWith(15, expect.objectContaining({
+        sourceUrl: 'https://kad.arbitr.ru/card',
+        courtCaseNumber: 'А55-12345/2026',
+        instance: 'first',
+      }));
+      expect(screen.getByText('Не удалось получить результаты поиска судебной карточки.')).toBeTruthy();
+    });
+    expect(screen.getByRole('button', { name: /Найти/u })).toBeTruthy();
+  });
+
   it('shows classified court sync changes and keeps user data conflicts untouched', async () => {
     vi.mocked(apiService.runCaseCourtSync).mockResolvedValueOnce({
       clientCaseId: 15,
