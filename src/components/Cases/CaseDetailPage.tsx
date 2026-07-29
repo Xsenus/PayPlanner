@@ -50,6 +50,7 @@ import type {
   ClientCaseCourtInstance,
   ClientCaseCourtParty,
   ClientCaseCourtSyncLog,
+  ClientCaseCourtSyncRun,
   ClientCaseCourtSyncRunRequest,
   ClientCaseCourtSyncSearchResult,
   ClientCaseDocument,
@@ -1116,6 +1117,7 @@ export function CaseDetailPage({
   const [proceduralDeadlines, setProceduralDeadlines] = useState<ClientCaseProceduralDeadline[]>([]);
   const [courtSyncLogs, setCourtSyncLogs] = useState<ClientCaseCourtSyncLog[]>([]);
   const [courtSyncSearchResults, setCourtSyncSearchResults] = useState<ClientCaseCourtSyncSearchResult[]>([]);
+  const [lastCourtSyncResult, setLastCourtSyncResult] = useState<ClientCaseCourtSyncRun | null>(null);
   const [timeline, setTimeline] = useState<ClientCaseTimelineEntry[]>([]);
   const [conversation, setConversation] = useState<ClientCaseConversationEntry[]>([]);
   const [financeDetail, setFinanceDetail] = useState<ClientCaseFinanceDetail | null>(null);
@@ -1693,6 +1695,10 @@ export function CaseDetailPage({
     setEditingCourtComplaint(null);
     setCourtSyncSearchResults([]);
   }, [activeCourtInstance, courtInstances]);
+
+  useEffect(() => {
+    setLastCourtSyncResult(null);
+  }, [caseId]);
 
   useEffect(() => {
     if (activeTab !== 'court' && activeTab !== 'documents') return;
@@ -2281,8 +2287,9 @@ export function CaseDetailPage({
       const result = payload
         ? await apiService.runCaseCourtSync(caseItem.id, payload)
         : await apiService.runCaseCourtSync(caseItem.id);
+      setLastCourtSyncResult(result);
       setNotice(result.message);
-      setActiveTab('history');
+      setActiveTab(result.status === 'external-sync-completed' ? 'court' : 'history');
       setReloadToken((value) => value + 1);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось запустить проверку судебного источника.');
@@ -3534,6 +3541,7 @@ export function CaseDetailPage({
               logs={courtSyncLogs}
               logsLoading={courtSyncLogsLoading}
               courtSyncSearchResults={courtSyncSearchResults}
+              lastCourtSyncResult={lastCourtSyncResult}
               savingCourtInstance={savingCourtInstance}
               savingCourtComplaint={savingCourtComplaint}
               archivingCourtComplaintId={archivingCourtComplaintId}
@@ -5825,6 +5833,7 @@ function CourtPanel({
   logs,
   logsLoading,
   courtSyncSearchResults,
+  lastCourtSyncResult,
   savingCourtInstance,
   savingCourtComplaint,
   archivingCourtComplaintId,
@@ -5914,6 +5923,7 @@ function CourtPanel({
   logs: ClientCaseCourtSyncLog[];
   logsLoading: boolean;
   courtSyncSearchResults: ClientCaseCourtSyncSearchResult[];
+  lastCourtSyncResult: ClientCaseCourtSyncRun | null;
   savingCourtInstance: boolean;
   savingCourtComplaint: boolean;
   archivingCourtComplaintId: number | null;
@@ -6001,6 +6011,32 @@ function CourtPanel({
     || logs.length > 0
     || courtParties.length > 0;
   const showPretrialSafeMode = isPretrialCase && !hasStoredCourtData && !courtSafeModeExpanded;
+  const courtSyncChangeGroups = [
+    {
+      key: 'new',
+      title: 'Новые',
+      items: lastCourtSyncResult?.newItems ?? [],
+      className: 'border-emerald-200 bg-emerald-50 text-emerald-900',
+    },
+    {
+      key: 'changed',
+      title: 'Изменённые',
+      items: lastCourtSyncResult?.changedItems ?? [],
+      className: 'border-blue-200 bg-blue-50 text-blue-900',
+    },
+    {
+      key: 'removed',
+      title: 'Исчезли из источника',
+      items: lastCourtSyncResult?.removedItems ?? [],
+      className: 'border-slate-300 bg-slate-50 text-slate-800',
+    },
+    {
+      key: 'conflict',
+      title: 'Конфликты',
+      items: lastCourtSyncResult?.conflictItems ?? [],
+      className: 'border-amber-300 bg-amber-50 text-amber-950',
+    },
+  ].filter((group) => group.items.length > 0);
 
   if (showPretrialSafeMode) {
     return (
@@ -6054,6 +6090,32 @@ function CourtPanel({
           </button>
         </div>
       </div>
+
+      {lastCourtSyncResult?.status === 'external-sync-completed' ? (
+        courtSyncChangeGroups.length > 0 ? (
+          <section className="rounded-xl border border-slate-200 p-3">
+            <div className="mb-3">
+              <h2 className="text-sm font-semibold text-slate-900">Результат последней проверки</h2>
+              <p className="mt-0.5 text-xs text-slate-500">Исчезнувшие и конфликтующие записи не удаляются и не перезаписываются автоматически.</p>
+            </div>
+            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+              {courtSyncChangeGroups.map((group) => (
+                <div key={group.key} className={`rounded-lg border p-3 ${group.className}`}>
+                  <div className="text-xs font-semibold uppercase tracking-[0.08em]">{group.title} · {group.items.length}</div>
+                  <ul className="mt-2 space-y-1 text-xs">
+                    {group.items.slice(0, 5).map((item) => <li key={item} className="break-words">• {item}</li>)}
+                    {group.items.length > 5 ? <li>Ещё: {group.items.length - 5}</li> : null}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          </section>
+        ) : (
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm font-medium text-emerald-800">
+            Судебный источник проверен: новых изменений и конфликтов нет.
+          </div>
+        )
+      ) : null}
 
       <section className="rounded-xl border border-slate-200 p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">

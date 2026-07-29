@@ -5775,6 +5775,11 @@ public class CasesV2ControllerTests
         Assert.Equal(3, dto.CreatedCourtParties);
         Assert.Equal(1, dto.CreatedCourtActDocuments);
         Assert.Equal(1, dto.CreatedProceduralDeadlines);
+        Assert.Contains(dto.NewItems, item => item == "суд");
+        Assert.Contains(dto.NewItems, item => item.Contains("судебное событие", StringComparison.Ordinal));
+        Assert.Contains(dto.NewItems, item => item.Contains("участник процесса", StringComparison.Ordinal));
+        Assert.Empty(dto.RemovedItems);
+        Assert.Empty(dto.ConflictItems);
         Assert.Contains("обновлены поля", dto.Message, StringComparison.Ordinal);
 
         await db.Entry(clientCase).ReloadAsync();
@@ -5856,6 +5861,20 @@ public class CasesV2ControllerTests
         Assert.Contains("Срок кассационного обжалования", deadlineNotification.BodyPreview, StringComparison.Ordinal);
         Assert.Contains($"\"proceduralDeadlineId\":{deadline.Id}", deadlineNotification.MetadataJson, StringComparison.Ordinal);
 
+        db.ClientCaseCourtEvents.Add(new ClientCaseCourtEvent
+        {
+            ClientCaseId = clientCase.Id,
+            EventType = "hearing",
+            Title = "Заседание другой инстанции",
+            ScheduledAt = new DateTime(2026, 8, 10, 10, 0, 0),
+            SourceType = "sudrf",
+            SourceUrl = "https://another.sudrf.ru/case/100",
+            ExternalKey = "sudrf-event-another-source",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+
         var changedResultController = CreateController(
             db,
             owner,
@@ -5885,6 +5904,11 @@ public class CasesV2ControllerTests
         var repeatedOk = Assert.IsType<OkObjectResult>(repeatedResult.Result);
         var repeatedDto = Assert.IsType<CasesV2Controller.ClientCaseCourtSyncRunDto>(repeatedOk.Value);
         Assert.Equal(0, repeatedDto.CreatedCourtActDocuments);
+        Assert.Contains(repeatedDto.RemovedItems, item => item.Contains("судебное событие", StringComparison.Ordinal));
+        Assert.Contains(repeatedDto.RemovedItems, item => item.Contains("участник процесса", StringComparison.Ordinal));
+        Assert.DoesNotContain(repeatedDto.RemovedItems, item => item.Contains("другой инстанции", StringComparison.Ordinal));
+        Assert.Equal(2, await db.ClientCaseCourtEvents.CountAsync(item => item.ClientCaseId == clientCase.Id));
+        Assert.Equal(3, await db.ClientCaseCourtParties.CountAsync(item => item.ClientCaseId == clientCase.Id && !item.IsArchived));
         Assert.Equal(1, await db.ClientCaseDocuments.CountAsync(item =>
             item.ClientCaseId == clientCase.Id
             && item.DocumentType == "Судебный акт"));
@@ -6079,20 +6103,20 @@ public class CasesV2ControllerTests
         var dto = Assert.IsType<CasesV2Controller.ClientCaseCourtSyncRunDto>(ok.Value);
         Assert.Equal("external-sync-completed", dto.Status);
         Assert.Equal(0, dto.CreatedCourtEvents);
-        Assert.Equal(1, dto.UpdatedCourtEvents);
+        Assert.Equal(0, dto.UpdatedCourtEvents);
+        Assert.Contains(dto.ConflictItems, item => item.Contains("ручное событие", StringComparison.Ordinal));
 
         var events = await db.ClientCaseCourtEvents
             .Where(item => item.ClientCaseId == clientCase.Id)
             .ToListAsync();
         var courtEvent = Assert.Single(events);
         Assert.Equal(manualEvent.Id, courtEvent.Id);
-        Assert.Equal("sudrf", courtEvent.SourceType);
+        Assert.Equal("manual", courtEvent.SourceType);
         Assert.Equal("Предварительное судебное заседание", courtEvent.Title);
-        Assert.Equal("Хабаровский краевой суд", courtEvent.CourtName);
+        Assert.Empty(courtEvent.CourtName);
         Assert.Equal("зал 12", courtEvent.Courtroom);
 
-        var history = await db.ClientCaseCourtEventHistory.SingleAsync(item => item.ClientCaseCourtEventId == courtEvent.Id);
-        Assert.Equal("updated", history.Action);
+        Assert.Empty(await db.ClientCaseCourtEventHistory.Where(item => item.ClientCaseCourtEventId == courtEvent.Id).ToListAsync());
     }
 
     [Fact]

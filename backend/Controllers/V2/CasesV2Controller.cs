@@ -6967,7 +6967,7 @@ public class CasesV2Controller : ControllerBase
             ? string.Empty
             : $" Внешний идентификатор: {Truncate(judicialUid, 120)}.";
         var syncMessage = syncResult.HasValue
-            ? syncResult.Value.ChangedFields.Count == 0 && syncResult.Value.CreatedCourtEvents == 0 && syncResult.Value.UpdatedCourtEvents == 0
+            ? !syncResult.Value.HasChanges
                 ? "Судебный источник проверен: новых изменений не найдено."
                 : $"Судебный источник обновлен: {FormatCourtSyncResult(syncResult.Value)}"
             : $"Автоматическая синхронизация после привязки не выполнена: {syncError}";
@@ -6995,6 +6995,10 @@ public class CasesV2Controller : ControllerBase
             CreatedCourtParties = syncResult?.CreatedCourtParties ?? 0,
             CreatedCourtActDocuments = syncResult?.CreatedCourtActDocuments ?? 0,
             CreatedProceduralDeadlines = syncResult?.CreatedProceduralDeadlines ?? 0,
+            NewItems = syncResult?.NewItems ?? [],
+            ChangedItems = syncResult?.ChangedItems ?? [],
+            RemovedItems = syncResult?.RemovedItems ?? [],
+            ConflictItems = syncResult?.ConflictItems ?? [],
             SyncError = syncError ?? string.Empty,
             CourtInstance = MapCourtInstance(courtInstance),
         });
@@ -7090,7 +7094,7 @@ public class CasesV2Controller : ControllerBase
                 var courtData = await caseReader.ReadCaseAsync(clientCase.CourtUrl, ct, clientCase.CourtCaseNumber);
                 var sourceTimeZone = await ResolveCourtSyncSourceTimeZoneAsync(clientCase, ct);
                 var syncResult = await ApplySudrfCourtSyncAsync(clientCase, courtData, sourceTimeZone, actorName, checkedAt, ct);
-                var syncMessage = syncResult.ChangedFields.Count == 0 && syncResult.CreatedCourtEvents == 0 && syncResult.UpdatedCourtEvents == 0
+                var syncMessage = !syncResult.HasChanges
                     ? $"Судебный источник проверен: новых изменений не найдено. Суд: {FormatCaseTextValue(clientCase.CourtName)}; № в суде: {FormatCaseTextValue(clientCase.CourtCaseNumber)}."
                     : $"Судебный источник обновлен: {FormatCourtSyncResult(syncResult)}";
 
@@ -7117,6 +7121,10 @@ public class CasesV2Controller : ControllerBase
                     CreatedCourtParties = syncResult.CreatedCourtParties,
                     CreatedCourtActDocuments = syncResult.CreatedCourtActDocuments,
                     CreatedProceduralDeadlines = syncResult.CreatedProceduralDeadlines,
+                    NewItems = syncResult.NewItems,
+                    ChangedItems = syncResult.ChangedItems,
+                    RemovedItems = syncResult.RemovedItems,
+                    ConflictItems = syncResult.ConflictItems,
                     NextHearingAt = clientCase.NextHearingAt,
                 });
             }
@@ -7247,6 +7255,10 @@ public class CasesV2Controller : ControllerBase
         var createdCourtParties = 0;
         var createdCourtActDocuments = 0;
         var createdProceduralDeadlines = 0;
+        var newItems = new List<string>();
+        var changedItems = new List<string>();
+        var removedItems = new List<string>();
+        var conflictItems = new List<string>();
 
         UpdateString("суд", clientCase.CourtName, courtData.CourtName, value => clientCase.CourtName = value, 200);
         UpdateString("номер дела в суде", clientCase.CourtCaseNumber, courtData.CaseNumber, value => clientCase.CourtCaseNumber = value, 100);
@@ -7263,6 +7275,7 @@ public class CasesV2Controller : ControllerBase
             : (DateTime?)null;
         if (nextHearingAt.HasValue && clientCase.NextHearingAt != nextHearingAt)
         {
+            (clientCase.NextHearingAt.HasValue ? changedItems : newItems).Add("ближайшее заседание");
             clientCase.NextHearingAt = nextHearingAt;
             changedFields.Add("ближайшее заседание");
         }
@@ -7271,99 +7284,114 @@ public class CasesV2Controller : ControllerBase
             .Where(static item => item.ScheduledAt.HasValue && item.Title.Contains("судебное заседание", StringComparison.OrdinalIgnoreCase))
             .OrderBy(static item => item.ScheduledAt)
             .ToList();
-        if (hearings.Count > 0)
+        var existingEvents = await _db.ClientCaseCourtEvents
+            .Where(item => item.ClientCaseId == clientCase.Id)
+            .ToListAsync(ct);
+        var existingEventsByExternalKey = existingEvents
+            .Where(static item => !string.IsNullOrWhiteSpace(item.ExternalKey))
+            .GroupBy(static item => item.ExternalKey!, StringComparer.Ordinal)
+            .ToDictionary(static group => group.Key, static group => group.First(), StringComparer.Ordinal);
+        var currentEventExternalKeys = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var hearing in hearings)
         {
-            var existingEvents = await _db.ClientCaseCourtEvents
-                .Where(item => item.ClientCaseId == clientCase.Id)
-                .ToListAsync(ct);
-            var existingEventsByExternalKey = existingEvents
-                .Where(static item => !string.IsNullOrWhiteSpace(item.ExternalKey))
-                .GroupBy(static item => item.ExternalKey!, StringComparer.Ordinal)
-                .ToDictionary(static group => group.Key, static group => group.First(), StringComparer.Ordinal);
+            var sourceScheduledAt = hearing.ScheduledAt!.Value;
+            var allDay = sourceScheduledAt.TimeOfDay == TimeSpan.Zero;
+            var scheduledAt = NormalizeCourtSyncSourceDateTime(sourceScheduledAt, sourceTimeZone, allDay);
+            var title = Truncate(NormalizeOptional(hearing.Title) ?? "Судебное заседание", 200);
+            var externalKey = BuildSudrfCourtEventExternalKey(courtData, sourceScheduledAt, title);
+            currentEventExternalKeys.Add(externalKey);
+            var existing = existingEventsByExternalKey.GetValueOrDefault(externalKey)
+                ?? existingEvents.FirstOrDefault(item =>
+                    CourtEventMatchesSudrfHearing(item, scheduledAt, title, courtData, hearing));
+            var summary = Truncate(hearing.SourceSummary, 1000);
 
-            foreach (var hearing in hearings)
+            if (existing is null)
             {
-                var sourceScheduledAt = hearing.ScheduledAt!.Value;
-                var allDay = sourceScheduledAt.TimeOfDay == TimeSpan.Zero;
-                var scheduledAt = NormalizeCourtSyncSourceDateTime(sourceScheduledAt, sourceTimeZone, allDay);
-                var title = Truncate(NormalizeOptional(hearing.Title) ?? "Судебное заседание", 200);
-                var externalKey = BuildSudrfCourtEventExternalKey(courtData, sourceScheduledAt, title);
-                var existing = existingEventsByExternalKey.GetValueOrDefault(externalKey)
-                    ?? existingEvents.FirstOrDefault(item =>
-                        CourtEventMatchesSudrfHearing(item, scheduledAt, title, courtData, hearing));
-                var summary = Truncate(hearing.SourceSummary, 1000);
-
-                if (existing is null)
+                var courtEvent = new ClientCaseCourtEvent
                 {
-                    var courtEvent = new ClientCaseCourtEvent
-                    {
-                        ClientCaseId = clientCase.Id,
-                        EventType = CourtSyncNormalization.EventTypes.Hearing,
-                        Title = title,
-                        Description = Truncate(hearing.SourceSummary, 1000),
-                        ScheduledAt = scheduledAt,
-                        AllDay = allDay,
-                        CourtInstance = courtData.Instance,
-                        CourtName = Truncate(NormalizeOptional(courtData.CourtName) ?? clientCase.CourtName, 200),
-                        CourtCaseNumber = Truncate(NormalizeOptional(courtData.CaseNumber) ?? clientCase.CourtCaseNumber, 100),
-                        Courtroom = Truncate(hearing.Place, 120),
-                        JudgeName = Truncate(NormalizeOptional(courtData.JudgeName) ?? clientCase.JudgeName, 200),
-                        SecretaryName = Truncate(NormalizeOptional(hearing.SecretaryName) ?? courtData.SecretaryName, 200),
-                        MovementStatus = CourtSyncNormalization.ResolveMovementStatusFromResult(hearing.Result),
-                        ResultSummary = Truncate(hearing.Result, 1000),
-                        SourceType = "sudrf",
-                        SourceUrl = Truncate(courtData.SourceUrl, 1000),
-                        SourceCheckedAt = checkedAt,
-                        SourceConfidence = "official-source",
-                        ExternalKey = externalKey,
-                        CreatedAt = checkedAt,
-                        CreatedByUserId = actorUserId,
-                        CreatedByUserName = Truncate(actorName, 256),
-                        UpdatedAt = checkedAt,
-                        UpdatedByUserId = actorUserId,
-                        UpdatedByUserName = Truncate(actorName, 256),
-                    };
-                    _db.ClientCaseCourtEvents.Add(courtEvent);
-                    existingEvents.Add(courtEvent);
-                    existingEventsByExternalKey[externalKey] = courtEvent;
-                    createdEvents.Add(courtEvent);
-                    continue;
-                }
-
-                var updated = false;
-                if (string.IsNullOrWhiteSpace(existing.ExternalKey))
-                {
-                    existing.ExternalKey = externalKey;
-                    existingEventsByExternalKey[externalKey] = existing;
-                }
-                updated |= UpdateCourtEventString(existing.SourceType, "sudrf", value => existing.SourceType = value, 64);
-                existing.SourceUrl = Truncate(courtData.SourceUrl, 1000);
-                existing.SourceCheckedAt = checkedAt;
-                existing.SourceConfidence = "official-source";
-                updated |= UpdateCourtEventString(existing.CourtName, courtData.CourtName, value => existing.CourtName = value, 200);
-                updated |= UpdateCourtEventString(existing.CourtCaseNumber, courtData.CaseNumber, value => existing.CourtCaseNumber = value, 100);
-                updated |= UpdateCourtEventString(existing.Courtroom, hearing.Place, value => existing.Courtroom = value, 120);
-                updated |= UpdateCourtEventString(existing.JudgeName, courtData.JudgeName, value => existing.JudgeName = value, 200);
-                updated |= UpdateCourtEventString(existing.SecretaryName, FirstNonEmpty(hearing.SecretaryName, courtData.SecretaryName), value => existing.SecretaryName = value, 200);
-                updated |= UpdateCourtEventString(existing.Description, hearing.SourceSummary, value => existing.Description = value, 1000);
-                updated |= UpdateCourtEventString(existing.ResultSummary, hearing.Result, value => existing.ResultSummary = value, 1000);
-                var movementStatus = CourtSyncNormalization.ResolveMovementStatusFromResult(hearing.Result);
-                if (!existing.MovementStatus.Equals(movementStatus, StringComparison.OrdinalIgnoreCase))
-                {
-                    existing.MovementStatus = movementStatus;
-                    updated = true;
-                }
-
-                if (updated)
-                {
-                    existing.UpdatedAt = checkedAt;
-                    existing.UpdatedByUserId = actorUserId;
-                    existing.UpdatedByUserName = Truncate(actorName, 256);
-                    AddCourtEventHistory(existing, "updated", $"Событие обновлено из ГАС «Правосудие»: {summary}.", actorUserId, actorName);
-                    updatedEvents.Add(existing);
-                    updatedCourtEvents++;
-                }
+                    ClientCaseId = clientCase.Id,
+                    EventType = CourtSyncNormalization.EventTypes.Hearing,
+                    Title = title,
+                    Description = Truncate(hearing.SourceSummary, 1000),
+                    ScheduledAt = scheduledAt,
+                    AllDay = allDay,
+                    CourtInstance = courtData.Instance,
+                    CourtName = Truncate(NormalizeOptional(courtData.CourtName) ?? clientCase.CourtName, 200),
+                    CourtCaseNumber = Truncate(NormalizeOptional(courtData.CaseNumber) ?? clientCase.CourtCaseNumber, 100),
+                    Courtroom = Truncate(hearing.Place, 120),
+                    JudgeName = Truncate(NormalizeOptional(courtData.JudgeName) ?? clientCase.JudgeName, 200),
+                    SecretaryName = Truncate(NormalizeOptional(hearing.SecretaryName) ?? courtData.SecretaryName, 200),
+                    MovementStatus = CourtSyncNormalization.ResolveMovementStatusFromResult(hearing.Result),
+                    ResultSummary = Truncate(hearing.Result, 1000),
+                    SourceType = "sudrf",
+                    SourceUrl = Truncate(courtData.SourceUrl, 1000),
+                    SourceCheckedAt = checkedAt,
+                    SourceConfidence = "official-source",
+                    ExternalKey = externalKey,
+                    CreatedAt = checkedAt,
+                    CreatedByUserId = actorUserId,
+                    CreatedByUserName = Truncate(actorName, 256),
+                    UpdatedAt = checkedAt,
+                    UpdatedByUserId = actorUserId,
+                    UpdatedByUserName = Truncate(actorName, 256),
+                };
+                _db.ClientCaseCourtEvents.Add(courtEvent);
+                existingEvents.Add(courtEvent);
+                existingEventsByExternalKey[externalKey] = courtEvent;
+                createdEvents.Add(courtEvent);
+                newItems.Add($"судебное событие «{title}»");
+                continue;
             }
+
+            if (!string.Equals(existing.SourceType, "sudrf", StringComparison.OrdinalIgnoreCase))
+            {
+                conflictItems.Add($"ручное событие «{existing.Title}» совпало с событием источника «{title}»");
+                continue;
+            }
+
+            var updated = false;
+            if (string.IsNullOrWhiteSpace(existing.ExternalKey))
+            {
+                existing.ExternalKey = externalKey;
+                existingEventsByExternalKey[externalKey] = existing;
+            }
+            existing.SourceUrl = Truncate(courtData.SourceUrl, 1000);
+            existing.SourceCheckedAt = checkedAt;
+            existing.SourceConfidence = "official-source";
+            updated |= UpdateCourtEventString(existing.CourtName, courtData.CourtName, value => existing.CourtName = value, 200);
+            updated |= UpdateCourtEventString(existing.CourtCaseNumber, courtData.CaseNumber, value => existing.CourtCaseNumber = value, 100);
+            updated |= UpdateCourtEventString(existing.Courtroom, hearing.Place, value => existing.Courtroom = value, 120);
+            updated |= UpdateCourtEventString(existing.JudgeName, courtData.JudgeName, value => existing.JudgeName = value, 200);
+            updated |= UpdateCourtEventString(existing.SecretaryName, FirstNonEmpty(hearing.SecretaryName, courtData.SecretaryName), value => existing.SecretaryName = value, 200);
+            updated |= UpdateCourtEventString(existing.Description, hearing.SourceSummary, value => existing.Description = value, 1000);
+            updated |= UpdateCourtEventString(existing.ResultSummary, hearing.Result, value => existing.ResultSummary = value, 1000);
+            var movementStatus = CourtSyncNormalization.ResolveMovementStatusFromResult(hearing.Result);
+            if (!existing.MovementStatus.Equals(movementStatus, StringComparison.OrdinalIgnoreCase))
+            {
+                existing.MovementStatus = movementStatus;
+                updated = true;
+            }
+
+            if (updated)
+            {
+                existing.UpdatedAt = checkedAt;
+                existing.UpdatedByUserId = actorUserId;
+                existing.UpdatedByUserName = Truncate(actorName, 256);
+                AddCourtEventHistory(existing, "updated", $"Событие обновлено из ГАС «Правосудие»: {summary}.", actorUserId, actorName);
+                updatedEvents.Add(existing);
+                updatedCourtEvents++;
+                changedItems.Add($"судебное событие «{existing.Title}»");
+            }
+        }
+
+        foreach (var missingEvent in existingEvents.Where(item =>
+                     string.Equals(item.SourceType, "sudrf", StringComparison.OrdinalIgnoreCase)
+                     && IsCurrentCourtSyncSource(item.SourceUrl)
+                     && !string.IsNullOrWhiteSpace(item.ExternalKey)
+                     && !currentEventExternalKeys.Contains(item.ExternalKey)))
+        {
+            removedItems.Add($"судебное событие «{missingEvent.Title}»");
         }
 
         if (createdEvents.Count > 0)
@@ -7386,62 +7414,78 @@ public class CasesV2Controller : ControllerBase
         }
 
         var partyCandidates = BuildSudrfCourtPartyCandidates(courtData.Participants);
-        if (partyCandidates.Count > 0)
+        var existingParties = await _db.ClientCaseCourtParties
+            .Where(item => item.ClientCaseId == clientCase.Id)
+            .ToListAsync(ct);
+        var currentPartyIdentities = partyCandidates
+            .Select(static candidate => BuildCourtPartyIdentity(candidate.DisplayName, candidate.Side, candidate.ProcessRole))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var candidate in partyCandidates)
         {
-            var existingParties = await _db.ClientCaseCourtParties
-                .Where(item => item.ClientCaseId == clientCase.Id)
-                .ToListAsync(ct);
-            foreach (var candidate in partyCandidates)
+            var existing = existingParties.FirstOrDefault(item =>
+                string.Equals(NormalizeCourtPartyName(item.DisplayName), NormalizeCourtPartyName(candidate.DisplayName), StringComparison.OrdinalIgnoreCase)
+                && string.Equals(item.Side, candidate.Side, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(NormalizeCourtPartyName(item.ProcessRole), NormalizeCourtPartyName(candidate.ProcessRole), StringComparison.OrdinalIgnoreCase));
+            if (existing is not null)
             {
-                var existing = existingParties.FirstOrDefault(item =>
-                    string.Equals(NormalizeCourtPartyName(item.DisplayName), NormalizeCourtPartyName(candidate.DisplayName), StringComparison.OrdinalIgnoreCase)
-                    && string.Equals(item.Side, candidate.Side, StringComparison.OrdinalIgnoreCase)
-                    && string.Equals(NormalizeCourtPartyName(item.ProcessRole), NormalizeCourtPartyName(candidate.ProcessRole), StringComparison.OrdinalIgnoreCase));
-                if (existing is not null)
+                if (!string.Equals(existing.SourceType, "sudrf", StringComparison.OrdinalIgnoreCase))
                 {
-                    existing.SourceType = "sudrf";
-                    existing.SourceUrl = Truncate(courtData.SourceUrl, 1000);
-                    existing.SourceCheckedAt = checkedAt;
-                    existing.SourceConfidence = "official-source";
-                    if (existing.IsArchived)
-                    {
-                        existing.IsArchived = false;
-                        existing.UpdatedAt = checkedAt;
-                        existing.UpdatedByUserId = actorUserId;
-                        existing.UpdatedByUserName = Truncate(actorName, 256);
-                    }
-
+                    conflictItems.Add($"ручной участник «{existing.DisplayName}» совпал с участником источника");
                     continue;
                 }
 
-                var courtParty = new ClientCaseCourtParty
+                existing.SourceUrl = Truncate(courtData.SourceUrl, 1000);
+                existing.SourceCheckedAt = checkedAt;
+                existing.SourceConfidence = "official-source";
+                if (existing.IsArchived)
                 {
-                    ClientCaseId = clientCase.Id,
-                    DisplayName = candidate.DisplayName,
-                    Side = candidate.Side,
-                    ProcessRole = candidate.ProcessRole,
-                    RepresentativeName = candidate.RepresentativeName,
-                    Notes = candidate.Notes,
-                    SourceType = "sudrf",
-                    SourceUrl = Truncate(courtData.SourceUrl, 1000),
-                    SourceCheckedAt = checkedAt,
-                    SourceConfidence = "official-source",
-                    CreatedAt = checkedAt,
-                    CreatedByUserId = actorUserId,
-                    CreatedByUserName = Truncate(actorName, 256),
-                    UpdatedAt = checkedAt,
-                    UpdatedByUserId = actorUserId,
-                    UpdatedByUserName = Truncate(actorName, 256),
-                };
-                _db.ClientCaseCourtParties.Add(courtParty);
-                existingParties.Add(courtParty);
-                createdCourtParties++;
+                    existing.IsArchived = false;
+                    existing.UpdatedAt = checkedAt;
+                    existing.UpdatedByUserId = actorUserId;
+                    existing.UpdatedByUserName = Truncate(actorName, 256);
+                    changedItems.Add($"участник процесса «{existing.DisplayName}»");
+                }
+
+                continue;
             }
 
-            if (createdCourtParties > 0)
+            var courtParty = new ClientCaseCourtParty
             {
-                changedFields.Add("участники процесса");
-            }
+                ClientCaseId = clientCase.Id,
+                DisplayName = candidate.DisplayName,
+                Side = candidate.Side,
+                ProcessRole = candidate.ProcessRole,
+                RepresentativeName = candidate.RepresentativeName,
+                Notes = candidate.Notes,
+                SourceType = "sudrf",
+                SourceUrl = Truncate(courtData.SourceUrl, 1000),
+                SourceCheckedAt = checkedAt,
+                SourceConfidence = "official-source",
+                CreatedAt = checkedAt,
+                CreatedByUserId = actorUserId,
+                CreatedByUserName = Truncate(actorName, 256),
+                UpdatedAt = checkedAt,
+                UpdatedByUserId = actorUserId,
+                UpdatedByUserName = Truncate(actorName, 256),
+            };
+            _db.ClientCaseCourtParties.Add(courtParty);
+            existingParties.Add(courtParty);
+            createdCourtParties++;
+            newItems.Add($"участник процесса «{courtParty.DisplayName}»");
+        }
+
+        foreach (var missingParty in existingParties.Where(item =>
+                     string.Equals(item.SourceType, "sudrf", StringComparison.OrdinalIgnoreCase)
+                     && IsCurrentCourtSyncSource(item.SourceUrl)
+                     && !item.IsArchived
+                     && !currentPartyIdentities.Contains(BuildCourtPartyIdentity(item.DisplayName, item.Side, item.ProcessRole))))
+        {
+            removedItems.Add($"участник процесса «{missingParty.DisplayName}»");
+        }
+
+        if (createdCourtParties > 0)
+        {
+            changedFields.Add("участники процесса");
         }
 
         var courtActsWithKeys = courtData.CourtActs
@@ -7457,15 +7501,15 @@ public class CasesV2Controller : ControllerBase
             .SelectMany(static item => new[] { item.DocumentKey, item.LegacyDocumentKey })
             .Distinct(StringComparer.Ordinal)
             .ToList();
-        var existingCourtActDocuments = courtActDocumentKeys.Count == 0
-            ? []
-            : (await _db.ClientCaseDocuments
-                .Where(item =>
-                    item.ClientCaseId == clientCase.Id
-                    && (courtActDocumentKeys.Contains(item.DocumentKey)
-                        || item.DocumentType == CourtSyncNormalization.DocumentTypes.CourtAct))
-                .OrderByDescending(item => item.Version)
-                .ToListAsync(ct));
+        var currentCourtActDocumentKeys = courtActDocumentKeys.ToHashSet(StringComparer.Ordinal);
+        var existingCourtActDocuments = await _db.ClientCaseDocuments
+            .Where(item =>
+                item.ClientCaseId == clientCase.Id
+                && (item.SourceType == "sudrf"
+                    || courtActDocumentKeys.Contains(item.DocumentKey)
+                    || item.DocumentType == CourtSyncNormalization.DocumentTypes.CourtAct))
+            .OrderByDescending(item => item.Version)
+            .ToListAsync(ct);
         var existingCourtActDocumentsByKey = existingCourtActDocuments
             .GroupBy(static item => item.DocumentKey, StringComparer.Ordinal)
             .ToDictionary(static group => group.Key, static group => group.First(), StringComparer.Ordinal);
@@ -7473,19 +7517,27 @@ public class CasesV2Controller : ControllerBase
             .Where(static item => item.DocumentType == CourtSyncNormalization.DocumentTypes.CourtAct)
             .GroupBy(static item => item.OriginalFileName, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(static group => group.Key, static group => group.First(), StringComparer.OrdinalIgnoreCase);
-        var existingCourtActDeadlines = courtActsWithKeys.Count == 0
-            ? []
-            : await _db.ClientCaseProceduralDeadlines
-                .Where(item => item.ClientCaseId == clientCase.Id && item.SourceType == "sudrf")
-                .ToListAsync(ct);
+        var existingCourtActDeadlines = await _db.ClientCaseProceduralDeadlines
+            .Where(item => item.ClientCaseId == clientCase.Id && item.SourceType == "sudrf")
+            .ToListAsync(ct);
+        var currentDeadlineIdentities = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var courtActWithKey in courtActsWithKeys)
         {
             var courtAct = courtActWithKey.CourtAct;
             var documentKey = courtActWithKey.DocumentKey;
-            var document = existingCourtActDocumentsByKey.GetValueOrDefault(documentKey)
-                ?? existingCourtActDocumentsByKey.GetValueOrDefault(courtActWithKey.LegacyDocumentKey)
+            var documentByKnownKey = existingCourtActDocumentsByKey.GetValueOrDefault(documentKey)
+                ?? existingCourtActDocumentsByKey.GetValueOrDefault(courtActWithKey.LegacyDocumentKey);
+            var document = documentByKnownKey
                 ?? existingCourtActDocumentsByFileName.GetValueOrDefault(courtActWithKey.FileName);
+            if (document is not null
+                && documentByKnownKey is null
+                && !string.Equals(document.SourceType, "sudrf", StringComparison.OrdinalIgnoreCase))
+            {
+                conflictItems.Add($"ручной документ «{document.OriginalFileName}» совпал с судебным актом «{courtAct.Title}»");
+                continue;
+            }
+
             if (document is null)
             {
                 document = await SaveGeneratedCaseDocumentAsync(
@@ -7500,10 +7552,12 @@ public class CasesV2Controller : ControllerBase
                     $"Судебный акт «{courtAct.Title}» добавлен из ГАС «Правосудие».",
                     ct);
                 createdCourtActDocuments++;
+                newItems.Add($"судебный акт «{courtAct.Title}»");
             }
             else if (!string.Equals(document.DocumentKey, documentKey, StringComparison.Ordinal))
             {
                 document.DocumentKey = documentKey;
+                changedItems.Add($"судебный акт «{courtAct.Title}»");
             }
 
             document.SourceType = "sudrf";
@@ -7513,7 +7567,7 @@ public class CasesV2Controller : ControllerBase
             existingCourtActDocumentsByKey[documentKey] = document;
             existingCourtActDocumentsByFileName[courtActWithKey.FileName] = document;
 
-            createdProceduralDeadlines += await SyncSudrfCourtActDeadlinesAsync(
+            var createdDeadlinesForAct = await SyncSudrfCourtActDeadlinesAsync(
                 clientCase,
                 courtData,
                 courtAct,
@@ -7522,7 +7576,35 @@ public class CasesV2Controller : ControllerBase
                 actorName,
                 checkedAt,
                 existingCourtActDeadlines,
+                currentDeadlineIdentities,
                 ct);
+            createdProceduralDeadlines += createdDeadlinesForAct;
+            if (createdDeadlinesForAct > 0)
+            {
+                newItems.Add($"процессуальные сроки по акту «{courtAct.Title}» ({createdDeadlinesForAct})");
+            }
+        }
+
+        var removedCourtActDocumentIds = existingCourtActDocuments
+            .Where(item =>
+                string.Equals(item.SourceType, "sudrf", StringComparison.OrdinalIgnoreCase)
+                && IsCurrentCourtSyncSource(item.SourceUrl)
+                && !currentCourtActDocumentKeys.Contains(item.DocumentKey))
+            .Select(static item => item.Id)
+            .ToHashSet();
+        foreach (var missingDocument in existingCourtActDocuments.Where(item => removedCourtActDocumentIds.Contains(item.Id)))
+        {
+            removedItems.Add($"судебный акт «{missingDocument.OriginalFileName}»");
+        }
+
+        foreach (var missingDeadline in existingCourtActDeadlines.Where(item =>
+                     IsCurrentCourtSyncSource(item.SourceUrl)
+                     && item.ClientCaseDocumentId.HasValue
+                     && !currentDeadlineIdentities.Contains(BuildCourtDeadlineIdentity(
+                         item.ClientCaseDocumentId.Value,
+                         item.DeadlineType))))
+        {
+            removedItems.Add($"процессуальный срок «{missingDeadline.Title}»");
         }
 
         if (createdCourtActDocuments > 0)
@@ -7535,7 +7617,17 @@ public class CasesV2Controller : ControllerBase
             changedFields.Add("процессуальные сроки");
         }
 
-        return new CourtSyncApplyResult(changedFields, createdEvents.Count, updatedCourtEvents, createdCourtParties, createdCourtActDocuments, createdProceduralDeadlines);
+        return new CourtSyncApplyResult(
+            changedFields,
+            createdEvents.Count,
+            updatedCourtEvents,
+            createdCourtParties,
+            createdCourtActDocuments,
+            createdProceduralDeadlines,
+            newItems.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+            changedItems.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+            removedItems.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+            conflictItems.Distinct(StringComparer.OrdinalIgnoreCase).ToList());
 
         void UpdateString(string label, string currentValue, string sourceValue, Action<string> setValue, int maxLength)
         {
@@ -7553,7 +7645,21 @@ public class CasesV2Controller : ControllerBase
 
             setValue(next);
             changedFields.Add(label);
+            (string.IsNullOrWhiteSpace(currentValue) ? newItems : changedItems).Add(label);
         }
+
+        static string BuildCourtPartyIdentity(string displayName, string side, string processRole)
+            => string.Join(
+                "|",
+                NormalizeCourtPartyName(displayName),
+                NormalizeOptional(side)?.ToLowerInvariant() ?? string.Empty,
+                NormalizeCourtPartyName(processRole));
+
+        bool IsCurrentCourtSyncSource(string? sourceUrl)
+            => string.Equals(
+                NormalizeOptional(sourceUrl),
+                NormalizeOptional(courtData.SourceUrl),
+                StringComparison.OrdinalIgnoreCase);
 
         static bool UpdateCourtEventString(string currentValue, string sourceValue, Action<string> setValue, int maxLength)
         {
@@ -7621,6 +7727,7 @@ public class CasesV2Controller : ControllerBase
         string actorName,
         DateTime checkedAt,
         IList<ClientCaseProceduralDeadline> existingDeadlines,
+        ISet<string> currentDeadlineIdentities,
         CancellationToken ct)
     {
         if (!courtAct.ActDate.HasValue)
@@ -7632,6 +7739,11 @@ public class CasesV2Controller : ControllerBase
         if (deadlineSpecs.Count == 0)
         {
             return 0;
+        }
+
+        foreach (var spec in deadlineSpecs)
+        {
+            currentDeadlineIdentities.Add(BuildCourtDeadlineIdentity(document.Id, spec.DeadlineType));
         }
 
         var created = 0;
@@ -7701,6 +7813,9 @@ public class CasesV2Controller : ControllerBase
 
         return created;
     }
+
+    private static string BuildCourtDeadlineIdentity(int documentId, string deadlineType)
+        => $"{documentId}:{NormalizeOptional(deadlineType)?.ToLowerInvariant()}";
 
     private static IEnumerable<SudrfCourtActDeadlineSpec> BuildSudrfCourtActDeadlineSpecs(
         SudrfCourtCaseData courtData,
@@ -7805,6 +7920,16 @@ public class CasesV2Controller : ControllerBase
     private static string FormatCourtSyncResult(CourtSyncApplyResult result)
     {
         var parts = new List<string>();
+        if (result.NewItems.Count > 0)
+        {
+            parts.Add($"новые данные: {result.NewItems.Count}");
+        }
+
+        if (result.ChangedItems.Count > 0)
+        {
+            parts.Add($"измененные данные: {result.ChangedItems.Count}");
+        }
+
         if (result.ChangedFields.Count > 0)
         {
             parts.Add($"обновлены поля: {string.Join(", ", result.ChangedFields.Distinct(StringComparer.OrdinalIgnoreCase))}");
@@ -7833,6 +7958,16 @@ public class CasesV2Controller : ControllerBase
         if (result.CreatedProceduralDeadlines > 0)
         {
             parts.Add($"добавлено процессуальных сроков: {result.CreatedProceduralDeadlines}");
+        }
+
+        if (result.RemovedItems.Count > 0)
+        {
+            parts.Add($"исчезло из источника: {result.RemovedItems.Count}");
+        }
+
+        if (result.ConflictItems.Count > 0)
+        {
+            parts.Add($"требует проверки конфликтов: {result.ConflictItems.Count}");
         }
 
         return string.Join("; ", parts) + ".";
@@ -12927,6 +13062,10 @@ public class CasesV2Controller : ControllerBase
         public int CreatedCourtParties { get; set; }
         public int CreatedCourtActDocuments { get; set; }
         public int CreatedProceduralDeadlines { get; set; }
+        public IReadOnlyList<string> NewItems { get; set; } = [];
+        public IReadOnlyList<string> ChangedItems { get; set; } = [];
+        public IReadOnlyList<string> RemovedItems { get; set; } = [];
+        public IReadOnlyList<string> ConflictItems { get; set; } = [];
         public DateTime? NextHearingAt { get; set; }
     }
 
@@ -12997,6 +13136,10 @@ public class CasesV2Controller : ControllerBase
         public int CreatedCourtParties { get; set; }
         public int CreatedCourtActDocuments { get; set; }
         public int CreatedProceduralDeadlines { get; set; }
+        public IReadOnlyList<string> NewItems { get; set; } = [];
+        public IReadOnlyList<string> ChangedItems { get; set; } = [];
+        public IReadOnlyList<string> RemovedItems { get; set; } = [];
+        public IReadOnlyList<string> ConflictItems { get; set; } = [];
         public string SyncError { get; set; } = string.Empty;
         public ClientCaseCourtInstanceDto CourtInstance { get; set; } = new();
     }
@@ -13221,7 +13364,18 @@ public class CasesV2Controller : ControllerBase
         int UpdatedCourtEvents,
         int CreatedCourtParties,
         int CreatedCourtActDocuments,
-        int CreatedProceduralDeadlines);
+        int CreatedProceduralDeadlines,
+        IReadOnlyList<string> NewItems,
+        IReadOnlyList<string> ChangedItems,
+        IReadOnlyList<string> RemovedItems,
+        IReadOnlyList<string> ConflictItems)
+    {
+        public bool HasChanges =>
+            NewItems.Count > 0
+            || ChangedItems.Count > 0
+            || RemovedItems.Count > 0
+            || ConflictItems.Count > 0;
+    }
 
     private readonly record struct CourtSyncJournalCaseRow(
         int ClientCaseId,

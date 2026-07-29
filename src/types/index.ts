@@ -1154,6 +1154,12 @@ export interface ClientCaseCourtSyncRun {
   createdCourtEvents?: number;
   updatedCourtEvents?: number;
   createdCourtParties?: number;
+  createdCourtActDocuments?: number;
+  createdProceduralDeadlines?: number;
+  newItems?: string[];
+  changedItems?: string[];
+  removedItems?: string[];
+  conflictItems?: string[];
   nextHearingAt?: string | null;
 }
 
@@ -1221,6 +1227,10 @@ export interface ClientCaseCourtSyncBinding {
   updatedFields?: string[];
   createdCourtEvents?: number;
   updatedCourtEvents?: number;
+  newItems?: string[];
+  changedItems?: string[];
+  removedItems?: string[];
+  conflictItems?: string[];
   createdCourtParties?: number;
   createdCourtActDocuments?: number;
   createdProceduralDeadlines?: number;

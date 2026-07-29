@@ -2286,6 +2286,35 @@ describe('CaseDetailPage', () => {
     });
   });
 
+  it('shows classified court sync changes and keeps user data conflicts untouched', async () => {
+    vi.mocked(apiService.runCaseCourtSync).mockResolvedValueOnce({
+      clientCaseId: 15,
+      status: 'external-sync-completed',
+      hasCourtBinding: true,
+      message: 'Судебный источник обновлен.',
+      checkedAt: '2026-07-29T15:00:00Z',
+      syncedFromExternalSource: true,
+      newItems: ['судебное событие «Заседание»'],
+      changedItems: ['судья'],
+      removedItems: ['участник процесса «Иванов И.И.»'],
+      conflictItems: ['ручное событие «Подготовка» совпало с событием источника'],
+    });
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Суд' }));
+    fireEvent.click(await screen.findByRole('button', { name: /Проверить источник/u }));
+
+    expect(await screen.findByText('Результат последней проверки')).toBeTruthy();
+    expect(screen.getByText('Новые · 1')).toBeTruthy();
+    expect(screen.getByText('Изменённые · 1')).toBeTruthy();
+    expect(screen.getByText('Исчезли из источника · 1')).toBeTruthy();
+    expect(screen.getByText('Конфликты · 1')).toBeTruthy();
+    expect(screen.getByText(/не удаляются и не перезаписываются автоматически/u)).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Проверить источник/u })).toBeTruthy();
+  });
+
   it('searches and binds an external court card from the court tab', async () => {
     vi.mocked(apiService.searchCaseCourtSyncCases).mockResolvedValueOnce([
       {
