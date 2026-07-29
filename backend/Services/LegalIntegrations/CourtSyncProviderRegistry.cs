@@ -8,6 +8,8 @@ public sealed record CourtSyncProviderDescriptor(
     string Key,
     string Label,
     string SourceType,
+    int SchemaVersion,
+    IReadOnlyList<string> Capabilities,
     string Status,
     bool IsAvailable,
     bool FeatureFlagEnabled,
@@ -15,6 +17,19 @@ public sealed record CourtSyncProviderDescriptor(
     bool SupportsBackgroundSync,
     IReadOnlyList<string> SupportedHosts,
     string Message);
+
+[Flags]
+public enum CourtSyncProviderCapability
+{
+    None = 0,
+    SearchCases = 1 << 0,
+    BindCase = 1 << 1,
+    ReadCase = 1 << 2,
+    ReadDocuments = 1 << 3,
+    DetectChanges = 1 << 4,
+    ManualSync = 1 << 5,
+    BackgroundSync = 1 << 6,
+}
 
 public sealed record CourtSyncCaseSearchRequest(
     string? SourceUrl = null,
@@ -47,6 +62,8 @@ public interface ICourtSyncProvider
     string Key { get; }
     string Label { get; }
     string SourceType { get; }
+    int SchemaVersion { get; }
+    CourtSyncProviderCapability Capabilities { get; }
     IReadOnlyList<string> SupportedHosts { get; }
     bool CanHandle(string? sourceUrl);
     Task<IReadOnlyList<CourtSyncCaseSearchResult>> SearchCasesAsync(CourtSyncCaseSearchRequest request, CancellationToken ct);
@@ -74,6 +91,15 @@ public sealed class SudrfCourtSyncProvider : ICourtSyncProvider
     public string Key => "sudrf";
     public string Label => "ГАС Правосудие / sudrf.ru";
     public string SourceType => "sudrf";
+    public int SchemaVersion => 1;
+    public CourtSyncProviderCapability Capabilities =>
+        CourtSyncProviderCapability.SearchCases
+        | CourtSyncProviderCapability.BindCase
+        | CourtSyncProviderCapability.ReadCase
+        | CourtSyncProviderCapability.ReadDocuments
+        | CourtSyncProviderCapability.DetectChanges
+        | CourtSyncProviderCapability.ManualSync
+        | CourtSyncProviderCapability.BackgroundSync;
     public IReadOnlyList<string> SupportedHosts { get; } = ["sudrf.ru"];
 
     public bool CanHandle(string? sourceUrl)
@@ -131,6 +157,17 @@ public sealed class SudrfCourtSyncProvider : ICourtSyncProvider
 
 public sealed class CourtSyncProviderRegistry : ICourtSyncProviderRegistry
 {
+    private static readonly (CourtSyncProviderCapability Capability, string Key)[] CapabilityKeys =
+    [
+        (CourtSyncProviderCapability.SearchCases, "case-search"),
+        (CourtSyncProviderCapability.BindCase, "case-binding"),
+        (CourtSyncProviderCapability.ReadCase, "case-reading"),
+        (CourtSyncProviderCapability.ReadDocuments, "document-reading"),
+        (CourtSyncProviderCapability.DetectChanges, "change-detection"),
+        (CourtSyncProviderCapability.ManualSync, "manual-sync"),
+        (CourtSyncProviderCapability.BackgroundSync, "background-sync"),
+    ];
+
     private readonly IReadOnlyList<ICourtSyncProvider> _providers;
     private readonly IOptionsSnapshot<AppFeatureFlagsOptions> _featureFlags;
 
@@ -173,6 +210,8 @@ public sealed class CourtSyncProviderRegistry : ICourtSyncProviderRegistry
                 provider.Key,
                 provider.Label,
                 provider.SourceType,
+                provider.SchemaVersion,
+                GetCapabilityKeys(provider.Capabilities),
                 externalCourtSyncEnabled ? "active" : "manual-only",
                 true,
                 externalCourtSyncEnabled,
@@ -188,6 +227,15 @@ public sealed class CourtSyncProviderRegistry : ICourtSyncProviderRegistry
             "sudrf",
             "ГАС Правосудие / sudrf.ru",
             "sudrf",
+            1,
+            GetCapabilityKeys(
+                CourtSyncProviderCapability.SearchCases
+                | CourtSyncProviderCapability.BindCase
+                | CourtSyncProviderCapability.ReadCase
+                | CourtSyncProviderCapability.ReadDocuments
+                | CourtSyncProviderCapability.DetectChanges
+                | CourtSyncProviderCapability.ManualSync
+                | CourtSyncProviderCapability.BackgroundSync),
             externalCourtSyncEnabled ? "active" : "manual-only",
             true,
             externalCourtSyncEnabled,
@@ -205,6 +253,8 @@ public sealed class CourtSyncProviderRegistry : ICourtSyncProviderRegistry
                 "kadArbitr",
                 "КАД Арбитр",
                 "kadArbitr",
+                1,
+                [],
                 "planned",
                 false,
                 externalCourtSyncEnabled,
@@ -216,6 +266,8 @@ public sealed class CourtSyncProviderRegistry : ICourtSyncProviderRegistry
                 "mosGorSud",
                 "Мосгорсуд",
                 "mosGorSud",
+                1,
+                [],
                 "planned",
                 false,
                 externalCourtSyncEnabled,
@@ -227,6 +279,8 @@ public sealed class CourtSyncProviderRegistry : ICourtSyncProviderRegistry
                 "regionalCourts",
                 "Региональные и мировые суды",
                 "regionalCourt",
+                1,
+                [],
                 "planned",
                 false,
                 externalCourtSyncEnabled,
@@ -235,4 +289,10 @@ public sealed class CourtSyncProviderRegistry : ICourtSyncProviderRegistry
                 [],
                 "Источник будет подключаться после уточнения обязательных судебных порталов и допустимых способов получения данных."),
         ];
+
+    private static IReadOnlyList<string> GetCapabilityKeys(CourtSyncProviderCapability capabilities)
+        => CapabilityKeys
+            .Where(item => (capabilities & item.Capability) != 0)
+            .Select(static item => item.Key)
+            .ToArray();
 }

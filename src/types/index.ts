@@ -1246,6 +1246,17 @@ export interface ClientCaseCourtSyncProvider {
   key: string;
   label: string;
   sourceType: string;
+  schemaVersion: number;
+  capabilities: Array<
+    | 'case-search'
+    | 'case-binding'
+    | 'case-reading'
+    | 'document-reading'
+    | 'change-detection'
+    | 'manual-sync'
+    | 'background-sync'
+    | string
+  >;
   status: 'active' | 'manual-only' | 'planned' | string;
   isAvailable: boolean;
   featureFlagEnabled: boolean;

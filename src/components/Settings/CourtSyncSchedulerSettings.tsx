@@ -12,6 +12,16 @@ const DEFAULT_LIMITS = {
   maxBatchSize: 100,
 };
 
+const PROVIDER_CAPABILITY_LABELS: Record<string, string> = {
+  'case-search': 'Поиск дел',
+  'case-binding': 'Привязка',
+  'case-reading': 'Карточка дела',
+  'document-reading': 'Документы',
+  'change-detection': 'Изменения',
+  'manual-sync': 'Ручная проверка',
+  'background-sync': 'Фоновая проверка',
+};
+
 function clampNumber(value: number, min: number, max: number) {
   if (!Number.isFinite(value)) return min;
   return Math.min(Math.max(Math.trunc(value), min), max);
@@ -171,8 +181,18 @@ export function CourtSyncSchedulerSettings() {
                 <span className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${getProviderStatusClass(provider.status)}`}>
                   {getProviderStatusLabel(provider.status)}
                 </span>
+                <span className="text-xs font-medium text-gray-500">Схема v{provider.schemaVersion}</span>
               </div>
               <div className="mt-2 text-xs text-gray-600">{provider.message}</div>
+              {provider.capabilities?.length > 0 ? (
+                <div className="mt-2 flex flex-wrap gap-1.5" aria-label={`Возможности источника ${provider.label}`}>
+                  {provider.capabilities.map((capability) => (
+                    <span key={capability} className="rounded-full border border-blue-100 bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">
+                      {PROVIDER_CAPABILITY_LABELS[capability] ?? capability}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
               {provider.supportedHosts.length > 0 ? (
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   {provider.supportedHosts.map((host) => (

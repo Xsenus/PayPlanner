@@ -31,6 +31,8 @@ describe('CourtSyncSchedulerSettings', () => {
         key: 'sudrf',
         label: 'ГАС Правосудие / sudrf.ru',
         sourceType: 'sudrf',
+        schemaVersion: 1,
+        capabilities: ['case-search', 'case-binding', 'case-reading', 'document-reading', 'change-detection', 'manual-sync', 'background-sync'],
         status: 'active',
         isAvailable: true,
         featureFlagEnabled: true,
@@ -43,6 +45,8 @@ describe('CourtSyncSchedulerSettings', () => {
         key: 'kadArbitr',
         label: 'КАД Арбитр',
         sourceType: 'kadArbitr',
+        schemaVersion: 1,
+        capabilities: [],
         status: 'planned',
         isAvailable: false,
         featureFlagEnabled: true,
@@ -72,6 +76,9 @@ describe('CourtSyncSchedulerSettings', () => {
     expect(screen.getByText('ГАС Правосудие / sudrf.ru')).toBeTruthy();
     expect(screen.getByText('КАД Арбитр')).toBeTruthy();
     expect(screen.getByText('Запланирован')).toBeTruthy();
+    expect(screen.getAllByText('Схема v1')).toHaveLength(2);
+    expect(screen.getByText('Поиск дел')).toBeTruthy();
+    expect(screen.getByText('Документы')).toBeTruthy();
   });
 
   it('saves normalized scheduler settings', async () => {

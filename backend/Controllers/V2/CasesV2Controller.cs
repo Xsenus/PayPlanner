@@ -6751,6 +6751,8 @@ public class CasesV2Controller : ControllerBase
                 Key = provider.Key,
                 Label = provider.Label,
                 SourceType = provider.SourceType,
+                SchemaVersion = provider.SchemaVersion,
+                Capabilities = provider.Capabilities,
                 Status = provider.Status,
                 IsAvailable = provider.IsAvailable,
                 FeatureFlagEnabled = provider.FeatureFlagEnabled,
@@ -12885,6 +12887,8 @@ public class CasesV2Controller : ControllerBase
         public string Key { get; set; } = string.Empty;
         public string Label { get; set; } = string.Empty;
         public string SourceType { get; set; } = string.Empty;
+        public int SchemaVersion { get; set; }
+        public IReadOnlyList<string> Capabilities { get; set; } = [];
         public string Status { get; set; } = string.Empty;
         public bool IsAvailable { get; set; }
         public bool FeatureFlagEnabled { get; set; }

@@ -6340,8 +6340,16 @@ public class CasesV2ControllerTests
         var sudrf = Assert.Single(providers, item => item.Key == "sudrf");
         Assert.True(sudrf.IsAvailable);
         Assert.True(sudrf.SupportsManualRun);
+        Assert.Equal(1, sudrf.SchemaVersion);
+        Assert.Contains("case-search", sudrf.Capabilities);
+        Assert.Contains("document-reading", sudrf.Capabilities);
+        Assert.Contains("background-sync", sudrf.Capabilities);
         Assert.Contains("sudrf.ru", sudrf.SupportedHosts);
-        Assert.Contains(providers, item => item.Key == "kadArbitr" && item.Status == "planned");
+        Assert.Contains(providers, item =>
+            item.Key == "kadArbitr"
+            && item.Status == "planned"
+            && item.SchemaVersion == 1
+            && item.Capabilities.Count == 0);
     }
 
     [Fact]
