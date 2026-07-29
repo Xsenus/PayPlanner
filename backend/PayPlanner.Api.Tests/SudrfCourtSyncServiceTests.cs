@@ -113,6 +113,27 @@ public class SudrfCourtSyncServiceTests
     }
 
     [Fact]
+    public async Task SudrfProvider_ExposesOnlyImplementedOperationContracts()
+    {
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        var bytes = Encoding.GetEncoding("windows-1251").GetBytes(BuildCourtHtml());
+        using var httpClient = new HttpClient(new FixedResponseHandler(_ => bytes));
+        var service = new SudrfCourtSyncService(httpClient, NullLogger<SudrfCourtSyncService>.Instance);
+        var provider = new SudrfCourtSyncProvider(service);
+
+        Assert.IsAssignableFrom<ICourtSyncCaseSearchProvider>(provider);
+        var reader = Assert.IsAssignableFrom<ICourtSyncCaseReader>(provider);
+        Assert.IsNotAssignableFrom<ICourtSyncDocumentProvider>(provider);
+        Assert.IsNotAssignableFrom<ICourtSyncChangeDetector>(provider);
+
+        var data = await reader.ReadCaseAsync(
+            new CourtSyncCaseBinding("https://kraevoy--hbr.sudrf.ru/modules.php?name=sud_delo&name_op=case&delo_id=42"),
+            CancellationToken.None);
+
+        Assert.Equal("33а-3390/2026", data.CaseNumber);
+    }
+
+    [Fact]
     public async Task SudrfProvider_SearchCasesAsync_ReturnsEmptyForUnsupportedSource()
     {
         using var httpClient = new HttpClient(new FixedResponseHandler(_ => []));

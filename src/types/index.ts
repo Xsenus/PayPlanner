@@ -1251,7 +1251,7 @@ export interface ClientCaseCourtSyncProvider {
     | 'case-search'
     | 'case-binding'
     | 'case-reading'
-    | 'document-reading'
+    | 'document-download'
     | 'change-detection'
     | 'manual-sync'
     | 'background-sync'

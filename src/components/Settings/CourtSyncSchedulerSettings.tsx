@@ -16,7 +16,7 @@ const PROVIDER_CAPABILITY_LABELS: Record<string, string> = {
   'case-search': 'Поиск дел',
   'case-binding': 'Привязка',
   'case-reading': 'Карточка дела',
-  'document-reading': 'Документы',
+  'document-download': 'Загрузка документов',
   'change-detection': 'Изменения',
   'manual-sync': 'Ручная проверка',
   'background-sync': 'Фоновая проверка',

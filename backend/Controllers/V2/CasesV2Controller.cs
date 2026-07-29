@@ -6801,10 +6801,14 @@ public class CasesV2Controller : ControllerBase
         {
             return BadRequest(new { message = "Для указанного источника пока нет активного провайдера судебной синхронизации." });
         }
+        if (provider is not ICourtSyncCaseSearchProvider searchProvider)
+        {
+            return BadRequest(new { message = "Выбранный судебный источник не поддерживает поиск карточек." });
+        }
 
         try
         {
-            var results = await provider.SearchCasesAsync(
+            var results = await searchProvider.SearchCasesAsync(
                 new CourtSyncCaseSearchRequest(
                     sourceUrl,
                     NormalizeOptional(request?.CourtCaseNumber) ?? NormalizeOptional(clientCase.CourtCaseNumber),
@@ -6913,7 +6917,12 @@ public class CasesV2Controller : ControllerBase
         string? syncError = null;
         try
         {
-            var courtData = await provider.FetchCaseAsync(
+            if (provider is not ICourtSyncCaseReader caseReader)
+            {
+                return BadRequest(new { message = "Выбранный судебный источник не поддерживает чтение карточки дела." });
+            }
+
+            var courtData = await caseReader.ReadCaseAsync(
                 new CourtSyncCaseBinding(clientCase.CourtUrl, courtCaseNumber, judicialUid, normalizedInstance),
                 ct);
             var sourceTimeZone = await ResolveCourtSyncSourceTimeZoneAsync(clientCase, ct);
@@ -7051,11 +7060,11 @@ public class CasesV2Controller : ControllerBase
         }
 
         var courtSyncProvider = manualOnly ? null : ResolveCourtSyncProvider(clientCase.CourtUrl);
-        if (courtSyncProvider is not null && !string.IsNullOrWhiteSpace(clientCase.CourtUrl))
+        if (courtSyncProvider is ICourtSyncCaseReader caseReader && !string.IsNullOrWhiteSpace(clientCase.CourtUrl))
         {
             try
             {
-                var courtData = await courtSyncProvider.FetchCaseAsync(clientCase.CourtUrl, ct, clientCase.CourtCaseNumber);
+                var courtData = await caseReader.ReadCaseAsync(clientCase.CourtUrl, ct, clientCase.CourtCaseNumber);
                 var sourceTimeZone = await ResolveCourtSyncSourceTimeZoneAsync(clientCase, ct);
                 var syncResult = await ApplySudrfCourtSyncAsync(clientCase, courtData, sourceTimeZone, actorName, checkedAt, ct);
                 var syncMessage = syncResult.ChangedFields.Count == 0 && syncResult.CreatedCourtEvents == 0 && syncResult.UpdatedCourtEvents == 0
@@ -7122,7 +7131,7 @@ public class CasesV2Controller : ControllerBase
             ? $"Ручная проверка судебного источника зафиксирована без автоматического обновления. Суд: {FormatCaseTextValue(clientCase.CourtName)}; № в суде: {FormatCaseTextValue(clientCase.CourtCaseNumber)}.{manualCommentSuffix}"
             : string.IsNullOrWhiteSpace(clientCase.CourtUrl)
                 ? $"Ручная проверка судебного источника зафиксирована: для автоматического обновления добавьте ссылку на карточку дела суда. Суд: {FormatCaseTextValue(clientCase.CourtName)}; № в суде: {FormatCaseTextValue(clientCase.CourtCaseNumber)}.{manualCommentSuffix}"
-                : $"Ручная проверка судебного источника зафиксирована: автоматическое обновление сейчас поддерживает ссылки на сайты sudrf.ru. Суд: {FormatCaseTextValue(clientCase.CourtName)}; № в суде: {FormatCaseTextValue(clientCase.CourtCaseNumber)}.{manualCommentSuffix}";
+                : $"Ручная проверка судебного источника зафиксирована: выбранный источник пока не поддерживает автоматическое чтение карточки. Суд: {FormatCaseTextValue(clientCase.CourtName)}; № в суде: {FormatCaseTextValue(clientCase.CourtCaseNumber)}.{manualCommentSuffix}";
 
         AppendCaseEvent(clientCase, $"{message} Инициатор: {actorName}.");
         await _db.SaveChangesAsync(ct);

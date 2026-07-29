@@ -5442,7 +5442,7 @@ public class CasesV2ControllerTests
         Assert.Equal(clientCase.Id, dto.ClientCaseId);
         Assert.Equal("manual-check-recorded", dto.Status);
         Assert.True(dto.HasCourtBinding);
-        Assert.Contains("автоматическое обновление сейчас поддерживает ссылки на сайты sudrf.ru", dto.Message, StringComparison.Ordinal);
+        Assert.Contains("выбранный источник пока не поддерживает автоматическое чтение карточки", dto.Message, StringComparison.Ordinal);
         Assert.Equal("Владелец", dto.CheckedByUserName);
 
         await db.Entry(clientCase).ReloadAsync();
@@ -6342,8 +6342,10 @@ public class CasesV2ControllerTests
         Assert.True(sudrf.SupportsManualRun);
         Assert.Equal(1, sudrf.SchemaVersion);
         Assert.Contains("case-search", sudrf.Capabilities);
-        Assert.Contains("document-reading", sudrf.Capabilities);
+        Assert.Contains("case-reading", sudrf.Capabilities);
         Assert.Contains("background-sync", sudrf.Capabilities);
+        Assert.DoesNotContain("document-download", sudrf.Capabilities);
+        Assert.DoesNotContain("change-detection", sudrf.Capabilities);
         Assert.Contains("sudrf.ru", sudrf.SupportedHosts);
         Assert.Contains(providers, item =>
             item.Key == "kadArbitr"

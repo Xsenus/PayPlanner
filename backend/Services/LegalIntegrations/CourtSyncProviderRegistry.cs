@@ -25,7 +25,7 @@ public enum CourtSyncProviderCapability
     SearchCases = 1 << 0,
     BindCase = 1 << 1,
     ReadCase = 1 << 2,
-    ReadDocuments = 1 << 3,
+    DownloadDocuments = 1 << 3,
     DetectChanges = 1 << 4,
     ManualSync = 1 << 5,
     BackgroundSync = 1 << 6,
@@ -57,6 +57,21 @@ public sealed record CourtSyncCaseBinding(
     string? JudicialUid = null,
     string? Instance = null);
 
+public sealed record CourtSyncDocumentReference(
+    string ExternalId,
+    string SourceUrl,
+    string Title,
+    string FileName,
+    string ContentType);
+
+public sealed record CourtSyncChangeCheckRequest(
+    CourtSyncCaseBinding Binding,
+    string? Checkpoint = null);
+
+public sealed record CourtSyncChangeCheckResult(
+    bool HasChanges,
+    string? NextCheckpoint = null);
+
 public interface ICourtSyncProvider
 {
     string Key { get; }
@@ -66,11 +81,30 @@ public interface ICourtSyncProvider
     CourtSyncProviderCapability Capabilities { get; }
     IReadOnlyList<string> SupportedHosts { get; }
     bool CanHandle(string? sourceUrl);
-    Task<IReadOnlyList<CourtSyncCaseSearchResult>> SearchCasesAsync(CourtSyncCaseSearchRequest request, CancellationToken ct);
-    Task<SudrfCourtCaseData> FetchCaseAsync(CourtSyncCaseBinding binding, CancellationToken ct);
+}
 
-    Task<SudrfCourtCaseData> FetchCaseAsync(string sourceUrl, CancellationToken ct, string? courtCaseNumber = null)
-        => FetchCaseAsync(new CourtSyncCaseBinding(sourceUrl, courtCaseNumber), ct);
+public interface ICourtSyncCaseSearchProvider : ICourtSyncProvider
+{
+    Task<IReadOnlyList<CourtSyncCaseSearchResult>> SearchCasesAsync(CourtSyncCaseSearchRequest request, CancellationToken ct);
+}
+
+public interface ICourtSyncCaseReader : ICourtSyncProvider
+{
+    Task<SudrfCourtCaseData> ReadCaseAsync(CourtSyncCaseBinding binding, CancellationToken ct);
+
+    Task<SudrfCourtCaseData> ReadCaseAsync(string sourceUrl, CancellationToken ct, string? courtCaseNumber = null)
+        => ReadCaseAsync(new CourtSyncCaseBinding(sourceUrl, courtCaseNumber), ct);
+}
+
+public interface ICourtSyncDocumentProvider : ICourtSyncProvider
+{
+    Task<IReadOnlyList<CourtSyncDocumentReference>> GetDocumentsAsync(CourtSyncCaseBinding binding, CancellationToken ct);
+    Task<Stream> OpenDocumentAsync(CourtSyncDocumentReference document, CancellationToken ct);
+}
+
+public interface ICourtSyncChangeDetector : ICourtSyncProvider
+{
+    Task<CourtSyncChangeCheckResult> CheckForChangesAsync(CourtSyncChangeCheckRequest request, CancellationToken ct);
 }
 
 public interface ICourtSyncProviderRegistry
@@ -79,7 +113,7 @@ public interface ICourtSyncProviderRegistry
     ICourtSyncProvider? Resolve(string? sourceUrl);
 }
 
-public sealed class SudrfCourtSyncProvider : ICourtSyncProvider
+public sealed class SudrfCourtSyncProvider : ICourtSyncCaseSearchProvider, ICourtSyncCaseReader
 {
     private readonly ISudrfCourtSyncService _service;
 
@@ -96,8 +130,6 @@ public sealed class SudrfCourtSyncProvider : ICourtSyncProvider
         CourtSyncProviderCapability.SearchCases
         | CourtSyncProviderCapability.BindCase
         | CourtSyncProviderCapability.ReadCase
-        | CourtSyncProviderCapability.ReadDocuments
-        | CourtSyncProviderCapability.DetectChanges
         | CourtSyncProviderCapability.ManualSync
         | CourtSyncProviderCapability.BackgroundSync;
     public IReadOnlyList<string> SupportedHosts { get; } = ["sudrf.ru"];
@@ -112,7 +144,7 @@ public sealed class SudrfCourtSyncProvider : ICourtSyncProvider
             return [];
         }
 
-        var courtData = await FetchCaseAsync(
+        var courtData = await ReadCaseAsync(
             new CourtSyncCaseBinding(
                 request.SourceUrl,
                 FirstNonEmpty(request.CourtCaseNumber, request.JudicialUid),
@@ -123,7 +155,7 @@ public sealed class SudrfCourtSyncProvider : ICourtSyncProvider
         return [MapSearchResult(courtData)];
     }
 
-    public Task<SudrfCourtCaseData> FetchCaseAsync(CourtSyncCaseBinding binding, CancellationToken ct)
+    public Task<SudrfCourtCaseData> ReadCaseAsync(CourtSyncCaseBinding binding, CancellationToken ct)
         => _service.FetchCaseAsync(binding.SourceUrl, ct, FirstNonEmpty(binding.CourtCaseNumber, binding.JudicialUid));
 
     private CourtSyncCaseSearchResult MapSearchResult(SudrfCourtCaseData courtData)
@@ -162,7 +194,7 @@ public sealed class CourtSyncProviderRegistry : ICourtSyncProviderRegistry
         (CourtSyncProviderCapability.SearchCases, "case-search"),
         (CourtSyncProviderCapability.BindCase, "case-binding"),
         (CourtSyncProviderCapability.ReadCase, "case-reading"),
-        (CourtSyncProviderCapability.ReadDocuments, "document-reading"),
+        (CourtSyncProviderCapability.DownloadDocuments, "document-download"),
         (CourtSyncProviderCapability.DetectChanges, "change-detection"),
         (CourtSyncProviderCapability.ManualSync, "manual-sync"),
         (CourtSyncProviderCapability.BackgroundSync, "background-sync"),
@@ -204,23 +236,36 @@ public sealed class CourtSyncProviderRegistry : ICourtSyncProviderRegistry
     }
 
     private static CourtSyncProviderDescriptor BuildActiveDescriptor(ICourtSyncProvider provider, bool externalCourtSyncEnabled)
-        => provider.Key == "sudrf"
-            ? BuildSudrfDescriptor(externalCourtSyncEnabled)
-            : new CourtSyncProviderDescriptor(
-                provider.Key,
-                provider.Label,
-                provider.SourceType,
-                provider.SchemaVersion,
-                GetCapabilityKeys(provider.Capabilities),
-                externalCourtSyncEnabled ? "active" : "manual-only",
-                true,
-                externalCourtSyncEnabled,
-                true,
-                externalCourtSyncEnabled,
-                provider.SupportedHosts,
-                externalCourtSyncEnabled
-                    ? "Источник доступен для ручной и фоновой судебной синхронизации."
-                    : "Источник доступен для ручной проверки; фоновый режим включается через серверный feature flag.");
+    {
+        if (provider.Key == "sudrf")
+        {
+            return BuildSudrfDescriptor(externalCourtSyncEnabled);
+        }
+
+        var capabilities = GetEffectiveCapabilities(provider);
+        var supportsManualRun = (capabilities & CourtSyncProviderCapability.ManualSync) != 0;
+        var supportsBackgroundSync =
+            externalCourtSyncEnabled
+            && (capabilities & CourtSyncProviderCapability.BackgroundSync) != 0;
+
+        return new CourtSyncProviderDescriptor(
+            provider.Key,
+            provider.Label,
+            provider.SourceType,
+            provider.SchemaVersion,
+            GetCapabilityKeys(capabilities),
+            externalCourtSyncEnabled ? "active" : "manual-only",
+            true,
+            externalCourtSyncEnabled,
+            supportsManualRun,
+            supportsBackgroundSync,
+            provider.SupportedHosts,
+            supportsBackgroundSync
+                ? "Источник доступен для ручной и фоновой судебной синхронизации."
+                : supportsManualRun
+                    ? "Источник доступен для ручной проверки; фоновая синхронизация для него недоступна."
+                    : "Источник подключён, но не поддерживает ручное или фоновое чтение карточки.");
+    }
 
     private static CourtSyncProviderDescriptor BuildSudrfDescriptor(bool externalCourtSyncEnabled)
         => new(
@@ -232,8 +277,6 @@ public sealed class CourtSyncProviderRegistry : ICourtSyncProviderRegistry
                 CourtSyncProviderCapability.SearchCases
                 | CourtSyncProviderCapability.BindCase
                 | CourtSyncProviderCapability.ReadCase
-                | CourtSyncProviderCapability.ReadDocuments
-                | CourtSyncProviderCapability.DetectChanges
                 | CourtSyncProviderCapability.ManualSync
                 | CourtSyncProviderCapability.BackgroundSync),
             externalCourtSyncEnabled ? "active" : "manual-only",
@@ -295,4 +338,33 @@ public sealed class CourtSyncProviderRegistry : ICourtSyncProviderRegistry
             .Where(item => (capabilities & item.Capability) != 0)
             .Select(static item => item.Key)
             .ToArray();
+
+    private static CourtSyncProviderCapability GetEffectiveCapabilities(ICourtSyncProvider provider)
+    {
+        var capabilities = provider.Capabilities;
+        if (provider is not ICourtSyncCaseSearchProvider)
+        {
+            capabilities &= ~CourtSyncProviderCapability.SearchCases;
+        }
+
+        if (provider is not ICourtSyncCaseReader)
+        {
+            capabilities &=
+                ~CourtSyncProviderCapability.ReadCase
+                & ~CourtSyncProviderCapability.ManualSync
+                & ~CourtSyncProviderCapability.BackgroundSync;
+        }
+
+        if (provider is not ICourtSyncDocumentProvider)
+        {
+            capabilities &= ~CourtSyncProviderCapability.DownloadDocuments;
+        }
+
+        if (provider is not ICourtSyncChangeDetector)
+        {
+            capabilities &= ~CourtSyncProviderCapability.DetectChanges;
+        }
+
+        return capabilities;
+    }
 }

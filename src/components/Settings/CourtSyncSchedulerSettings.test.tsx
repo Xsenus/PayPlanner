@@ -32,7 +32,7 @@ describe('CourtSyncSchedulerSettings', () => {
         label: 'ГАС Правосудие / sudrf.ru',
         sourceType: 'sudrf',
         schemaVersion: 1,
-        capabilities: ['case-search', 'case-binding', 'case-reading', 'document-reading', 'change-detection', 'manual-sync', 'background-sync'],
+        capabilities: ['case-search', 'case-binding', 'case-reading', 'manual-sync', 'background-sync'],
         status: 'active',
         isAvailable: true,
         featureFlagEnabled: true,
@@ -78,7 +78,7 @@ describe('CourtSyncSchedulerSettings', () => {
     expect(screen.getByText('Запланирован')).toBeTruthy();
     expect(screen.getAllByText('Схема v1')).toHaveLength(2);
     expect(screen.getByText('Поиск дел')).toBeTruthy();
-    expect(screen.getByText('Документы')).toBeTruthy();
+    expect(screen.getByText('Карточка дела')).toBeTruthy();
   });
 
   it('saves normalized scheduler settings', async () => {
