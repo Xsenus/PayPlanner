@@ -53,6 +53,9 @@ jobs:
       - name: Test backend
         run: dotnet test backend/PayPlanner.Api.Tests/PayPlanner.Api.Tests.csproj --no-restore
 
+      - name: Test deploy backup retention
+        run: bash scripts/prune-deploy-backups.test.sh
+
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
@@ -99,6 +102,11 @@ jobs:
           mkdir -p "${{ env.OUT_DIR }}/fe"
           cp -r dist/* "${{ env.OUT_DIR }}/fe/"
           printf '%s\n' "${{ github.sha }}" > "${{ env.OUT_DIR }}/fe/deploy-revision.txt"
+
+      - name: Prepare deploy scripts
+        run: |
+          mkdir -p "${{ env.OUT_DIR }}/deploy"
+          cp scripts/prune-deploy-backups.sh "${{ env.OUT_DIR }}/deploy/"
 
       - name: Create tarball
         run: tar -czf "${{ env.TAR_NAME }}" -C "${{ env.OUT_DIR }}" .
@@ -150,6 +158,7 @@ jobs:
             MIN_FREE_KB=262144
             BACKUP_ROOT="/opt/payplanner/deploy-backups"
             BACKUP_DIR="$BACKUP_ROOT/pre-${{ github.sha }}-$(date +%Y%m%d-%H%M%S)"
+            DEPLOY_BACKUP_KEEP_COUNT=10
 
             cleanup() {
               rm -rf "$STAGE" "$TAR" "/tmp/${{ env.TAR_NAME }}"
@@ -275,57 +284,54 @@ jobs:
 
             trap cleanup EXIT
 
-            echo "[1/13] Preflight disk check"
+            echo "[1/14] Preflight disk check"
             check_space "/" "$MIN_FREE_KB"
 
-            echo "[2/13] Prepare staging"
+            echo "[2/14] Prepare staging"
             resolve_package
             rm -rf "$STAGE"
             mkdir -p "$STAGE"
             tar -xzf "$TAR" -C "$STAGE"
 
-            echo "[3/13] Ensure target dirs"
+            echo "[3/14] Ensure target dirs"
             sudo mkdir -p "$BE_DIR" "$FE_APP_DIR" "$FE_PUBLIC_DIR" "$BACKUP_ROOT" /opt/payplanner/shared/backups "$PERSISTENT_FILE_ROOT"
 
-            echo "[4/13] Configure runtime environment"
+            echo "[4/14] Configure runtime environment"
             configure_runtime_env
 
-            echo "[5/13] Backup current release"
+            echo "[5/14] Backup current release"
             sudo mkdir -p "$BACKUP_DIR"
             if [ -d "$BE_DIR" ]; then sudo cp -a "$BE_DIR" "$BACKUP_DIR/backend.previous"; fi
             if [ -d "$FE_APP_DIR" ]; then sudo cp -a "$FE_APP_DIR" "$BACKUP_DIR/frontend.previous"; fi
             if [ -f "$APP_DIR/REVISION" ]; then sudo cp -a "$APP_DIR/REVISION" "$BACKUP_DIR/REVISION.previous"; fi
             if [ -f "$APP_DIR/.deploy-revision" ]; then sudo cp -a "$APP_DIR/.deploy-revision" "$BACKUP_DIR/.deploy-revision.previous"; fi
 
-            echo "[6/13] Restore persistent file storage"
+            echo "[6/14] Restore persistent file storage"
             migrate_legacy_file_storage
 
-            echo "[7/13] Rsync backend"
+            echo "[7/14] Rsync backend"
             sudo rsync -a --delete "$STAGE/be/" "$BE_DIR/"
 
-            echo "[8/13] Rsync frontend"
+            echo "[8/14] Rsync frontend"
             # Remove stale hashed chunks: the frontend reloads itself if a browser tries to load an old lazy chunk.
             sudo rsync -a --delete "$STAGE/fe/" "$FE_APP_DIR/"
             sudo rsync -a --delete "$STAGE/fe/" "$FE_PUBLIC_DIR/"
 
-            echo "[9/13] Write revision marker"
+            echo "[9/14] Write revision marker"
             printf '%s\n' "${{ github.sha }}" | sudo tee "$APP_DIR/REVISION" >/dev/null
             printf '%s\n' "${{ github.sha }}" | sudo tee "$APP_DIR/.deploy-revision" >/dev/null
 
-            echo "[10/13] Cleanup temp artifacts"
-            cleanup
-
-            echo "[11/13] Permissions"
+            echo "[10/14] Permissions"
             sudo chown -R payplanner:payplanner /opt/payplanner
             sudo chown -R www-data:www-data "$FE_PUBLIC_DIR"
 
-            echo "[12/13] Restart service"
+            echo "[11/14] Restart service"
             check_space "/" "$MIN_FREE_KB"
             sudo systemctl daemon-reload || true
             sudo systemctl enable payplanner.service
             sudo systemctl restart payplanner.service
 
-            echo "[13/13] Wait for health"
+            echo "[12/14] Wait for health"
             ok=0
             for i in $(seq 1 30); do
               if curl -fsS "$PRIMARY_HEALTH_URL" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"'; then
@@ -346,9 +352,17 @@ jobs:
               exit 1
             fi
 
-            echo "Check public endpoints"
+            echo "[13/14] Check public endpoints"
             curl -fsS "$PUBLIC_API_HEALTH_URL" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"'
             curl -fsS -o /dev/null "$PUBLIC_FRONTEND_URL"
+
+            echo "[14/14] Prune old automatic deploy backups"
+            sudo bash "$STAGE/deploy/prune-deploy-backups.sh" \
+              "$BACKUP_ROOT" \
+              "$DEPLOY_BACKUP_KEEP_COUNT" \
+              "$BACKUP_DIR"
+            cleanup
+            trap - EXIT
 
       - name: Check production deploy readiness
         run: |

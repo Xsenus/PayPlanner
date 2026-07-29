@@ -180,7 +180,7 @@ public sealed class LegalFeatureFlagCiGateTests
             workflow,
             [
                 "Backup current release",
-                "echo \"[6/13] Restore persistent file storage\"",
+                "echo \"[6/14] Restore persistent file storage\"",
                 "sudo rsync -a --delete \"$STAGE/be/\" \"$BE_DIR/\"",
                 "sudo systemctl restart payplanner.service",
             ]);

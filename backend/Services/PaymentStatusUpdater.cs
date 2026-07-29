@@ -69,6 +69,7 @@ namespace PayPlanner.Api.Services
                 .Where(payment =>
                     !payment.IsPaid
                     && payment.Status == PaymentStatus.Pending
+                    && payment.Amount > 0m
                     && payment.Date.Date <= nowUtc.Date)
                 .ToListAsync(ct);
 

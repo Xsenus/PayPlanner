@@ -182,6 +182,49 @@ public class PaymentStatusUpdaterTests
         Assert.Single(interceptor.ReaderCommands, IsPaymentVisibilityQuery);
     }
 
+    [Fact]
+    public async Task RunOnceAsync_DoesNotMarkZeroAmountInvoiceAsOverdue()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var services = new ServiceCollection();
+        services.AddDbContext<PaymentContext>(options => options.UseSqlite(connection));
+        await using var provider = services.BuildServiceProvider();
+
+        await using (var scope = provider.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<PaymentContext>();
+            await db.Database.EnsureCreatedAsync();
+            db.Payments.Add(new Payment
+            {
+                Description = "Счёт без суммы",
+                Date = DateTime.UtcNow.Date.AddDays(-30),
+                PlannedDate = DateTime.UtcNow.Date.AddDays(-30),
+                Amount = 0m,
+                PaidAmount = 0m,
+                Type = PaymentType.Income,
+                Status = PaymentStatus.Pending,
+                DocumentKind = DocumentKind.Invoice,
+                InvoiceWorkflowStatus = InvoiceWorkflowStatus.OnSigning
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var updater = new PaymentStatusUpdater(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            NullLogger<PaymentStatusUpdater>.Instance);
+
+        var affected = await updater.RunOnceAsync(CancellationToken.None);
+
+        Assert.Equal(0, affected);
+        await using var assertScope = provider.CreateAsyncScope();
+        var stored = await assertScope.ServiceProvider
+            .GetRequiredService<PaymentContext>()
+            .Payments
+            .SingleAsync();
+        Assert.Equal(PaymentStatus.Pending, stored.Status);
+    }
+
     private static bool IsPaymentVisibilityQuery(string command)
         => command.Contains("SELECT EXISTS", StringComparison.Ordinal)
             && command.Contains("FROM \"Payments\"", StringComparison.Ordinal);
