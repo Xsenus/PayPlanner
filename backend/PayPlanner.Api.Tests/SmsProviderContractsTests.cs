@@ -84,6 +84,36 @@ public sealed class SmsProviderContractsTests
     }
 
     [Fact]
+    public void IdempotencyKey_IsStableDistinctAndDoesNotExposeSourceData()
+    {
+        var first = SmsProviderIdempotencyKey.Create("task:42:reminder", "+79990000000", 7);
+        var repeated = SmsProviderIdempotencyKey.Create(" task:42:reminder ", " +79990000000 ", 7);
+        var anotherEvent = SmsProviderIdempotencyKey.Create("task:42:overdue", "+79990000000", 7);
+        var anotherRecipient = SmsProviderIdempotencyKey.Create("task:42:reminder", "+79991111111", 7);
+        var anotherSender = SmsProviderIdempotencyKey.Create("task:42:reminder", "+79990000000", 8);
+
+        Assert.Equal(first, repeated);
+        Assert.StartsWith(SmsProviderIdempotencyKey.Prefix, first, StringComparison.Ordinal);
+        Assert.True(first.Length <= SmsProviderIdempotencyKey.MaxLength);
+        Assert.DoesNotContain("task", first, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("7999", first, StringComparison.Ordinal);
+        Assert.NotEqual(first, anotherEvent);
+        Assert.NotEqual(first, anotherRecipient);
+        Assert.NotEqual(first, anotherSender);
+    }
+
+    [Theory]
+    [InlineData(null, "+79990000000")]
+    [InlineData(" ", "+79990000000")]
+    [InlineData("task:42", null)]
+    [InlineData("task:42", " ")]
+    public void IdempotencyKey_RejectsMissingIdentityParts(string? eventKey, string? recipientAddress)
+    {
+        Assert.Throws<ArgumentException>(() =>
+            SmsProviderIdempotencyKey.Create(eventKey!, recipientAddress!, null));
+    }
+
+    [Fact]
     public void NormalizedStatuses_ExposeCompleteAndTerminalSets()
     {
         Assert.Equal(

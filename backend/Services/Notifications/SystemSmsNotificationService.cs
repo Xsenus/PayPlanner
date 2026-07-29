@@ -72,7 +72,11 @@ public sealed class SystemSmsNotificationService : ISmsNotificationService
         return BuildSettings(updated);
     }
 
-    public async Task<SmsSendResult> SendMessageAsync(string phoneNumber, string text, CancellationToken cancellationToken = default)
+    public async Task<SmsSendResult> SendMessageAsync(
+        string phoneNumber,
+        string text,
+        string idempotencyKey,
+        CancellationToken cancellationToken = default)
     {
         var settings = await GetSettingsAsync(cancellationToken);
         var status = string.IsNullOrWhiteSpace(settings.StatusText)

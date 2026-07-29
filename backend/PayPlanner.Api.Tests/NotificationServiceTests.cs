@@ -331,6 +331,9 @@ public class NotificationServiceTests
         var message = Assert.Single(smsService.Messages);
         Assert.Equal("+79994445566", message.PhoneNumber);
         Assert.Equal("Сообщение для успешной SMS-доставки", message.Text);
+        Assert.Equal(
+            SmsProviderIdempotencyKey.Create("sms:test:sent", "+79994445566", null),
+            message.IdempotencyKey);
 
         var savedDelivery = await db.NotificationDeliveries.SingleAsync();
         Assert.Equal(delivery.Id, savedDelivery.Id);
@@ -375,6 +378,43 @@ public class NotificationServiceTests
         Assert.Equal(NotificationDeliveryStatus.Failed, savedDelivery.Status);
         Assert.Equal("Provider rejected phone", savedDelivery.Error);
         Assert.Null(savedDelivery.SentAt);
+    }
+
+    [Fact]
+    public async Task SmsDelivery_ReusesIdempotencyKeyWhenFailedEventIsRetried()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "sms-retry@example.com", phoneNumber: "+7 (999) 666-77-88");
+        var smsService = new RecordingSmsNotificationService
+        {
+            NextResult = new SmsSendResult(false, NotificationDeliveryStatus.Failed, "Temporary provider error")
+        };
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            smsNotificationService: smsService);
+        var message = new NotificationMessage("SMS retry", "Повторяемое сообщение");
+
+        var firstDeliveries = await service.SendToUserAsync(
+            user.Id,
+            message,
+            [NotificationChannels.Sms],
+            "sms:test:retry");
+        var retryDeliveries = await service.SendToUserAsync(
+            user.Id,
+            message,
+            [NotificationChannels.Sms],
+            "sms:test:retry");
+
+        Assert.Single(firstDeliveries);
+        Assert.Single(retryDeliveries);
+        Assert.NotEqual(firstDeliveries[0].Id, retryDeliveries[0].Id);
+        Assert.Equal(2, smsService.Messages.Count);
+        Assert.Equal(smsService.Messages[0].IdempotencyKey, smsService.Messages[1].IdempotencyKey);
+        Assert.Equal(
+            SmsProviderIdempotencyKey.Create("sms:test:retry", "+79996667788", null),
+            smsService.Messages[0].IdempotencyKey);
     }
 
     [Fact]
@@ -9797,7 +9837,7 @@ public class NotificationServiceTests
 
     private sealed class RecordingSmsNotificationService : ISmsNotificationService
     {
-        public List<(string PhoneNumber, string Text)> Messages { get; } = [];
+        public List<(string PhoneNumber, string Text, string IdempotencyKey)> Messages { get; } = [];
 
         public SmsNotificationSettingsDto Settings { get; set; } = new()
         {
@@ -9823,9 +9863,13 @@ public class NotificationServiceTests
             CancellationToken cancellationToken = default)
             => Task.FromResult(Settings);
 
-        public Task<SmsSendResult> SendMessageAsync(string phoneNumber, string text, CancellationToken cancellationToken = default)
+        public Task<SmsSendResult> SendMessageAsync(
+            string phoneNumber,
+            string text,
+            string idempotencyKey,
+            CancellationToken cancellationToken = default)
         {
-            Messages.Add((phoneNumber, text));
+            Messages.Add((phoneNumber, text, idempotencyKey));
             return Task.FromResult(NextResult);
         }
     }

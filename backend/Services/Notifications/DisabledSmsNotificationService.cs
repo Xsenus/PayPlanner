@@ -23,7 +23,11 @@ public sealed class DisabledSmsNotificationService : ISmsNotificationService
         CancellationToken cancellationToken = default)
         => GetSettingsAsync(cancellationToken);
 
-    public Task<SmsSendResult> SendMessageAsync(string phoneNumber, string text, CancellationToken cancellationToken = default)
+    public Task<SmsSendResult> SendMessageAsync(
+        string phoneNumber,
+        string text,
+        string idempotencyKey,
+        CancellationToken cancellationToken = default)
         => Task.FromResult(new SmsSendResult(
             false,
             NotificationDeliveryStatus.Skipped,

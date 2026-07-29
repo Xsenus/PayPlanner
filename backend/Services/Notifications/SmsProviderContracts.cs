@@ -1,3 +1,7 @@
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
+
 namespace PayPlanner.Api.Services.Notifications;
 
 /// <summary>
@@ -58,6 +62,53 @@ public sealed record SmsProviderHealthResult(
     TimeSpan? Latency = null,
     string? ErrorCode = null,
     string? ErrorMessage = null);
+
+public static class SmsProviderIdempotencyKey
+{
+    public const string Prefix = "pp-sms-v1-";
+    public const int MaxLength = 64;
+
+    public static string Create(string eventKey, string recipientAddress, int? senderId)
+    {
+        var normalizedEventKey = NormalizeRequired(eventKey, nameof(eventKey));
+        var normalizedRecipientAddress = NormalizeRequired(recipientAddress, nameof(recipientAddress));
+        var normalizedSenderId = senderId?.ToString(CultureInfo.InvariantCulture) ?? "-";
+        var payload = string.Concat(
+            normalizedEventKey.Length.ToString(CultureInfo.InvariantCulture),
+            ":",
+            normalizedEventKey,
+            "|",
+            normalizedRecipientAddress.Length.ToString(CultureInfo.InvariantCulture),
+            ":",
+            normalizedRecipientAddress,
+            "|",
+            normalizedSenderId);
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(payload));
+        var encodedHash = Convert.ToBase64String(hash)
+            .TrimEnd('=')
+            .Replace('+', '-')
+            .Replace('/', '_');
+        var key = Prefix + encodedHash;
+
+        if (key.Length > MaxLength)
+        {
+            throw new InvalidOperationException("Generated SMS idempotency key exceeds the supported length.");
+        }
+
+        return key;
+    }
+
+    private static string NormalizeRequired(string? value, string parameterName)
+    {
+        var normalized = value?.Trim();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            throw new ArgumentException("Value is required.", parameterName);
+        }
+
+        return normalized;
+    }
+}
 
 public static class SmsProviderMessageStatuses
 {

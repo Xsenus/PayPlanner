@@ -3779,7 +3779,14 @@ public sealed class NotificationService : INotificationService
 
             var result = _smsService is null
                 ? new SmsSendResult(false, NotificationDeliveryStatus.Skipped, "SMS-уведомления отключены: SMS-сервис не подключен.")
-                : await _smsService.SendMessageAsync(recipient.PhoneNumber, message.Body, cancellationToken);
+                : await _smsService.SendMessageAsync(
+                    recipient.PhoneNumber,
+                    message.Body,
+                    SmsProviderIdempotencyKey.Create(
+                        delivery.EventKey,
+                        delivery.RecipientAddress,
+                        delivery.NotificationSenderId),
+                    cancellationToken);
             delivery.Status = result.Status;
             delivery.Error = result.Error;
             delivery.SentAt = result.Success ? DateTime.UtcNow : null;

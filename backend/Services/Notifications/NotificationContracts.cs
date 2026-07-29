@@ -998,7 +998,11 @@ public interface ISmsNotificationService
     Task<SmsNotificationSettingsDto> UpdateSettingsAsync(
         PayPlanner.Api.Models.Requests.UpdateSmsNotificationSettingsRequest request,
         CancellationToken cancellationToken = default);
-    Task<SmsSendResult> SendMessageAsync(string phoneNumber, string text, CancellationToken cancellationToken = default);
+    Task<SmsSendResult> SendMessageAsync(
+        string phoneNumber,
+        string text,
+        string idempotencyKey,
+        CancellationToken cancellationToken = default);
 }
 
 public sealed record TelegramBotConnectionSettings(
