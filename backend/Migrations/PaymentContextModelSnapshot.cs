@@ -1856,9 +1856,22 @@ namespace PayPlanner.Api.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTime?>("SourceCheckedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceConfidence")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("SourceType")
                         .IsRequired()
                         .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceUrl")
+                        .IsRequired()
+                        .HasMaxLength(1000)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Title")
@@ -2127,6 +2140,24 @@ namespace PayPlanner.Api.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTime?>("SourceCheckedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceConfidence")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceType")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceUrl")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("TEXT");
 
@@ -2195,6 +2226,24 @@ namespace PayPlanner.Api.Migrations
 
                     b.Property<long>("SizeBytes")
                         .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("SourceCheckedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceConfidence")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceType")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceUrl")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -2320,12 +2369,25 @@ namespace PayPlanner.Api.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTime?>("SourceCheckedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceConfidence")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
                     b.Property<int?>("SourceId")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("SourceType")
                         .IsRequired()
                         .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceUrl")
+                        .IsRequired()
+                        .HasMaxLength(1000)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Status")

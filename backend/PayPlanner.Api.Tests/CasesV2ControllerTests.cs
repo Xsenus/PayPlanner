@@ -5794,6 +5794,9 @@ public class CasesV2ControllerTests
         Assert.Equal("зал 12", courtEvent.Courtroom);
         Assert.Equal("Иванова И.И.", courtEvent.SecretaryName);
         Assert.StartsWith("sudrf-event-", courtEvent.ExternalKey, StringComparison.Ordinal);
+        Assert.Equal(clientCase.CourtUrl, courtEvent.SourceUrl);
+        Assert.NotNull(courtEvent.SourceCheckedAt);
+        Assert.Equal("official-source", courtEvent.SourceConfidence);
 
         var history = await db.ClientCaseCourtEventHistory.SingleAsync(item => item.ClientCaseCourtEventId == courtEvent.Id);
         Assert.Contains("ГАС «Правосудие»", history.Summary, StringComparison.Ordinal);
@@ -5803,6 +5806,13 @@ public class CasesV2ControllerTests
             .OrderBy(item => item.DisplayName)
             .ToListAsync();
         Assert.Equal(3, courtParties.Count);
+        Assert.All(courtParties, item =>
+        {
+            Assert.Equal("sudrf", item.SourceType);
+            Assert.Equal(clientCase.CourtUrl, item.SourceUrl);
+            Assert.NotNull(item.SourceCheckedAt);
+            Assert.Equal("official-source", item.SourceConfidence);
+        });
         Assert.Contains(courtParties, item =>
             item.DisplayName == "Шафорост Антон Евгеньевич"
             && item.Side == "claimant"
@@ -5819,11 +5829,18 @@ public class CasesV2ControllerTests
         var document = await db.ClientCaseDocuments.SingleAsync(item => item.ClientCaseId == clientCase.Id && item.DocumentType == "Судебный акт");
         Assert.Equal("received", document.Status);
         Assert.StartsWith("sudrf-act-", document.DocumentKey, StringComparison.Ordinal);
+        Assert.Equal("sudrf", document.SourceType);
+        Assert.Equal(clientCase.CourtUrl, document.SourceUrl);
+        Assert.NotNull(document.SourceCheckedAt);
+        Assert.Equal("official-source", document.SourceConfidence);
 
         var deadline = await db.ClientCaseProceduralDeadlines.SingleAsync(item => item.ClientCaseId == clientCase.Id);
         Assert.Equal("cassation", deadline.DeadlineType);
         Assert.Equal(new DateTime(2026, 9, 1), deadline.DueAt);
         Assert.Equal(document.Id, deadline.ClientCaseDocumentId);
+        Assert.Equal(clientCase.CourtUrl, deadline.SourceUrl);
+        Assert.NotNull(deadline.SourceCheckedAt);
+        Assert.Equal("official-source", deadline.SourceConfidence);
 
         var notification = await db.UserNotifications.SingleAsync(item => item.Type == UserNotificationTypes.CourtHearing);
         Assert.Equal(responsible.Id, notification.RecipientUserId);

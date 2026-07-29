@@ -18,6 +18,10 @@ public class ClientCaseDocumentDto
     public string OriginalFileName { get; set; } = string.Empty;
     public string ContentType { get; set; } = "application/octet-stream";
     public long SizeBytes { get; set; }
+    public string SourceType { get; set; } = string.Empty;
+    public string SourceUrl { get; set; } = string.Empty;
+    public DateTime? SourceCheckedAt { get; set; }
+    public string SourceConfidence { get; set; } = string.Empty;
     public int? UploadedByUserId { get; set; }
     public string UploadedByName { get; set; } = string.Empty;
     public DateTime UploadedAt { get; set; }

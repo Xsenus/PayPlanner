@@ -34,6 +34,17 @@ public class ClientCaseDocument
 
     public long SizeBytes { get; set; }
 
+    [Required, MaxLength(64)]
+    public string SourceType { get; set; } = "manual";
+
+    [MaxLength(1000)]
+    public string SourceUrl { get; set; } = string.Empty;
+
+    public DateTime? SourceCheckedAt { get; set; }
+
+    [Required, MaxLength(32)]
+    public string SourceConfidence { get; set; } = "manual";
+
     public int? UploadedByUserId { get; set; }
     public User? UploadedByUser { get; set; }
 

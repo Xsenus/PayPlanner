@@ -7289,6 +7289,9 @@ public class CasesV2Controller : ControllerBase
                         MovementStatus = CourtSyncNormalization.ResolveMovementStatusFromResult(hearing.Result),
                         ResultSummary = Truncate(hearing.Result, 1000),
                         SourceType = "sudrf",
+                        SourceUrl = Truncate(courtData.SourceUrl, 1000),
+                        SourceCheckedAt = checkedAt,
+                        SourceConfidence = "official-source",
                         ExternalKey = externalKey,
                         CreatedAt = checkedAt,
                         CreatedByUserId = actorUserId,
@@ -7311,6 +7314,9 @@ public class CasesV2Controller : ControllerBase
                     existingEventsByExternalKey[externalKey] = existing;
                 }
                 updated |= UpdateCourtEventString(existing.SourceType, "sudrf", value => existing.SourceType = value, 64);
+                existing.SourceUrl = Truncate(courtData.SourceUrl, 1000);
+                existing.SourceCheckedAt = checkedAt;
+                existing.SourceConfidence = "official-source";
                 updated |= UpdateCourtEventString(existing.CourtName, courtData.CourtName, value => existing.CourtName = value, 200);
                 updated |= UpdateCourtEventString(existing.CourtCaseNumber, courtData.CaseNumber, value => existing.CourtCaseNumber = value, 100);
                 updated |= UpdateCourtEventString(existing.Courtroom, hearing.Place, value => existing.Courtroom = value, 120);
@@ -7370,6 +7376,10 @@ public class CasesV2Controller : ControllerBase
                     && string.Equals(NormalizeCourtPartyName(item.ProcessRole), NormalizeCourtPartyName(candidate.ProcessRole), StringComparison.OrdinalIgnoreCase));
                 if (existing is not null)
                 {
+                    existing.SourceType = "sudrf";
+                    existing.SourceUrl = Truncate(courtData.SourceUrl, 1000);
+                    existing.SourceCheckedAt = checkedAt;
+                    existing.SourceConfidence = "official-source";
                     if (existing.IsArchived)
                     {
                         existing.IsArchived = false;
@@ -7389,6 +7399,10 @@ public class CasesV2Controller : ControllerBase
                     ProcessRole = candidate.ProcessRole,
                     RepresentativeName = candidate.RepresentativeName,
                     Notes = candidate.Notes,
+                    SourceType = "sudrf",
+                    SourceUrl = Truncate(courtData.SourceUrl, 1000),
+                    SourceCheckedAt = checkedAt,
+                    SourceConfidence = "official-source",
                     CreatedAt = checkedAt,
                     CreatedByUserId = actorUserId,
                     CreatedByUserName = Truncate(actorName, 256),
@@ -7436,6 +7450,11 @@ public class CasesV2Controller : ControllerBase
             .Where(static item => item.DocumentType == CourtSyncNormalization.DocumentTypes.CourtAct)
             .GroupBy(static item => item.OriginalFileName, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(static group => group.Key, static group => group.First(), StringComparer.OrdinalIgnoreCase);
+        var existingCourtActDeadlines = courtActsWithKeys.Count == 0
+            ? []
+            : await _db.ClientCaseProceduralDeadlines
+                .Where(item => item.ClientCaseId == clientCase.Id && item.SourceType == "sudrf")
+                .ToListAsync(ct);
 
         foreach (var courtActWithKey in courtActsWithKeys)
         {
@@ -7464,6 +7483,10 @@ public class CasesV2Controller : ControllerBase
                 document.DocumentKey = documentKey;
             }
 
+            document.SourceType = "sudrf";
+            document.SourceUrl = Truncate(FirstNonEmpty(courtAct.SourceUrl, courtData.SourceUrl), 1000);
+            document.SourceCheckedAt = checkedAt;
+            document.SourceConfidence = "official-source";
             existingCourtActDocumentsByKey[documentKey] = document;
             existingCourtActDocumentsByFileName[courtActWithKey.FileName] = document;
 
@@ -7475,6 +7498,7 @@ public class CasesV2Controller : ControllerBase
                 actorUserId,
                 actorName,
                 checkedAt,
+                existingCourtActDeadlines,
                 ct);
         }
 
@@ -7573,6 +7597,7 @@ public class CasesV2Controller : ControllerBase
         int? actorUserId,
         string actorName,
         DateTime checkedAt,
+        IList<ClientCaseProceduralDeadline> existingDeadlines,
         CancellationToken ct)
     {
         if (!courtAct.ActDate.HasValue)
@@ -7590,13 +7615,14 @@ public class CasesV2Controller : ControllerBase
         var createdDeadlines = new List<ClientCaseProceduralDeadline>();
         foreach (var spec in deadlineSpecs)
         {
-            var exists = await _db.ClientCaseProceduralDeadlines.AnyAsync(item =>
-                item.ClientCaseId == clientCase.Id
-                && item.SourceType == "sudrf"
-                && item.ClientCaseDocumentId == document.Id
-                && item.DeadlineType == spec.DeadlineType, ct);
-            if (exists)
+            var existing = existingDeadlines.FirstOrDefault(item =>
+                item.ClientCaseDocumentId == document.Id
+                && item.DeadlineType == spec.DeadlineType);
+            if (existing is not null)
             {
+                existing.SourceUrl = Truncate(FirstNonEmpty(courtAct.SourceUrl, courtData.SourceUrl), 1000);
+                existing.SourceCheckedAt = checkedAt;
+                existing.SourceConfidence = "official-source";
                 continue;
             }
 
@@ -7612,6 +7638,9 @@ public class CasesV2Controller : ControllerBase
                 WarningDaysBefore = 7,
                 ClientCaseDocumentId = document.Id,
                 SourceType = "sudrf",
+                SourceUrl = Truncate(FirstNonEmpty(courtAct.SourceUrl, courtData.SourceUrl), 1000),
+                SourceCheckedAt = checkedAt,
+                SourceConfidence = "official-source",
                 Notes = $"Создано автоматически из ГАС «Правосудие». Документ: {courtAct.Title}.",
                 CreatedAt = checkedAt,
                 CreatedByUserId = actorUserId,
@@ -7621,6 +7650,7 @@ public class CasesV2Controller : ControllerBase
                 UpdatedByUserName = Truncate(actorName, 256),
             };
             _db.ClientCaseProceduralDeadlines.Add(deadline);
+            existingDeadlines.Add(deadline);
             createdDeadlines.Add(deadline);
             created++;
 
@@ -9437,6 +9467,12 @@ public class CasesV2Controller : ControllerBase
             OriginalFileName = document.OriginalFileName,
             ContentType = document.ContentType,
             SizeBytes = document.SizeBytes,
+            SourceType = document.SourceType,
+            SourceUrl = document.SourceUrl,
+            SourceCheckedAt = document.SourceCheckedAt.HasValue
+                ? CalendarTimeZoneHelper.NormalizeUtcInstant(document.SourceCheckedAt.Value)
+                : null,
+            SourceConfidence = document.SourceConfidence,
             UploadedByUserId = document.UploadedByUserId,
             UploadedByName = document.UploadedByName,
             UploadedAt = CalendarTimeZoneHelper.NormalizeUtcInstant(document.UploadedAt),
@@ -10482,6 +10518,11 @@ public class CasesV2Controller : ControllerBase
             ClientCaseDocumentId = item.ClientCaseDocumentId,
             SourceType = item.SourceType,
             SourceId = item.SourceId,
+            SourceUrl = item.SourceUrl,
+            SourceCheckedAt = item.SourceCheckedAt.HasValue
+                ? CalendarTimeZoneHelper.NormalizeUtcInstant(item.SourceCheckedAt.Value)
+                : null,
+            SourceConfidence = item.SourceConfidence,
             Notes = item.Notes,
             CreatedAt = item.CreatedAt,
             CreatedByUserId = item.CreatedByUserId,
@@ -10520,6 +10561,11 @@ public class CasesV2Controller : ControllerBase
             MovementStatusLabel = ResolveCourtMovementStatusLabel(item.MovementStatus),
             ResultSummary = item.ResultSummary,
             SourceType = item.SourceType,
+            SourceUrl = item.SourceUrl,
+            SourceCheckedAt = item.SourceCheckedAt.HasValue
+                ? CalendarTimeZoneHelper.NormalizeUtcInstant(item.SourceCheckedAt.Value)
+                : null,
+            SourceConfidence = item.SourceConfidence,
             ClientCaseDocumentId = item.ClientCaseDocumentId,
             ProceduralDeadlineId = item.ProceduralDeadlineId,
             CreatedAt = item.CreatedAt,
@@ -10720,6 +10766,12 @@ public class CasesV2Controller : ControllerBase
             ProcessRole = item.ProcessRole,
             RepresentativeName = item.RepresentativeName,
             Notes = item.Notes,
+            SourceType = item.SourceType,
+            SourceUrl = item.SourceUrl,
+            SourceCheckedAt = item.SourceCheckedAt.HasValue
+                ? CalendarTimeZoneHelper.NormalizeUtcInstant(item.SourceCheckedAt.Value)
+                : null,
+            SourceConfidence = item.SourceConfidence,
             IsArchived = item.IsArchived,
             CreatedAt = item.CreatedAt,
             CreatedByUserId = item.CreatedByUserId,
@@ -12260,6 +12312,9 @@ public class CasesV2Controller : ControllerBase
         public int? ClientCaseDocumentId { get; set; }
         public string SourceType { get; set; } = string.Empty;
         public int? SourceId { get; set; }
+        public string SourceUrl { get; set; } = string.Empty;
+        public DateTime? SourceCheckedAt { get; set; }
+        public string SourceConfidence { get; set; } = string.Empty;
         public string Notes { get; set; } = string.Empty;
         public DateTime CreatedAt { get; set; }
         public int? CreatedByUserId { get; set; }
@@ -12421,6 +12476,9 @@ public class CasesV2Controller : ControllerBase
         public string MovementStatusLabel { get; set; } = string.Empty;
         public string ResultSummary { get; set; } = string.Empty;
         public string SourceType { get; set; } = string.Empty;
+        public string SourceUrl { get; set; } = string.Empty;
+        public DateTime? SourceCheckedAt { get; set; }
+        public string SourceConfidence { get; set; } = string.Empty;
         public int? ClientCaseDocumentId { get; set; }
         public int? ProceduralDeadlineId { get; set; }
         public DateTime CreatedAt { get; set; }
@@ -12476,6 +12534,10 @@ public class CasesV2Controller : ControllerBase
         public string ProcessRole { get; set; } = string.Empty;
         public string RepresentativeName { get; set; } = string.Empty;
         public string Notes { get; set; } = string.Empty;
+        public string SourceType { get; set; } = string.Empty;
+        public string SourceUrl { get; set; } = string.Empty;
+        public DateTime? SourceCheckedAt { get; set; }
+        public string SourceConfidence { get; set; } = string.Empty;
         public bool IsArchived { get; set; }
         public DateTime CreatedAt { get; set; }
         public int? CreatedByUserId { get; set; }

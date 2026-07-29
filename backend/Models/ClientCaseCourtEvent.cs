@@ -52,6 +52,14 @@ public class ClientCaseCourtEvent
     [Required, MaxLength(64)]
     public string SourceType { get; set; } = "manual";
 
+    [MaxLength(1000)]
+    public string SourceUrl { get; set; } = string.Empty;
+
+    public DateTime? SourceCheckedAt { get; set; }
+
+    [Required, MaxLength(32)]
+    public string SourceConfidence { get; set; } = "manual";
+
     [MaxLength(128)]
     public string? ExternalKey { get; set; }
 

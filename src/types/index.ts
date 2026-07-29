@@ -631,6 +631,9 @@ export interface ClientCaseProceduralDeadline {
   clientCaseDocumentId?: number | null;
   sourceType: string;
   sourceId?: number | null;
+  sourceUrl?: string | null;
+  sourceCheckedAt?: string | null;
+  sourceConfidence?: string | null;
   notes?: string | null;
   createdAt: string;
   createdByUserId?: number | null;
@@ -716,6 +719,9 @@ export interface ClientCaseCourtEvent {
   movementStatusLabel: string;
   resultSummary?: string | null;
   sourceType: string;
+  sourceUrl?: string | null;
+  sourceCheckedAt?: string | null;
+  sourceConfidence?: string | null;
   clientCaseDocumentId?: number | null;
   proceduralDeadlineId?: number | null;
   createdAt: string;
@@ -864,6 +870,10 @@ export interface ClientCaseCourtParty {
   processRole: string;
   representativeName?: string | null;
   notes?: string | null;
+  sourceType?: string | null;
+  sourceUrl?: string | null;
+  sourceCheckedAt?: string | null;
+  sourceConfidence?: string | null;
   isArchived: boolean;
   createdAt: string;
   createdByUserId?: number | null;
@@ -1309,6 +1319,10 @@ export interface ClientCaseDocument {
   originalFileName: string;
   contentType: string;
   sizeBytes: number;
+  sourceType?: string | null;
+  sourceUrl?: string | null;
+  sourceCheckedAt?: string | null;
+  sourceConfidence?: string | null;
   uploadedByUserId?: number | null;
   uploadedByName: string;
   uploadedAt: string;

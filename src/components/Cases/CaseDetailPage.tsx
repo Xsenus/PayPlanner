@@ -5722,6 +5722,53 @@ function CourtTimeline({ entries }: { entries: CourtTimelineEntry[] }) {
   );
 }
 
+export function CourtSourceProvenance({
+  item,
+}: {
+  item: {
+    sourceType?: string | null;
+    sourceUrl?: string | null;
+    sourceCheckedAt?: string | null;
+    sourceConfidence?: string | null;
+  };
+}) {
+  const sourceType = item.sourceType?.trim().toLowerCase();
+  if ((!sourceType || sourceType === 'manual') && !item.sourceUrl && !item.sourceCheckedAt) {
+    return null;
+  }
+
+  const sourceLabel = sourceType === 'sudrf' ? 'ГАС «Правосудие»' : item.sourceType || 'Внешний источник';
+  const confidenceLabel = item.sourceConfidence === 'official-source'
+    ? 'официальный источник'
+    : item.sourceConfidence === 'manual'
+      ? 'внесено вручную'
+      : item.sourceConfidence || 'достоверность не указана';
+  let sourceHref: string | null = null;
+  if (item.sourceUrl) {
+    try {
+      const parsed = new URL(item.sourceUrl);
+      sourceHref = parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.toString() : null;
+    } catch {
+      sourceHref = null;
+    }
+  }
+
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
+      <span className="rounded-full border border-cyan-200 bg-cyan-50 px-2 py-0.5 font-medium text-cyan-800">
+        {sourceLabel}
+      </span>
+      <span>{confidenceLabel}</span>
+      {item.sourceCheckedAt ? <span>· проверено {formatRuDateTime(item.sourceCheckedAt)}</span> : null}
+      {sourceHref ? (
+        <a href={sourceHref} target="_blank" rel="noreferrer" className="font-medium text-blue-600 hover:underline">
+          Открыть источник
+        </a>
+      ) : null}
+    </div>
+  );
+}
+
 function CourtPanel({
   caseItem,
   courtDirectory,
@@ -6292,6 +6339,7 @@ function CourtPanel({
                   <div className="mt-1 text-sm text-slate-600">{party.processRole || 'Участник процесса'}</div>
                   {party.representativeName ? <div className="mt-1 text-sm text-slate-500">Представитель: {party.representativeName}</div> : null}
                   {party.notes ? <div className="mt-2 text-sm text-slate-500">{party.notes}</div> : null}
+                  <CourtSourceProvenance item={party} />
                 </div>
               ))}
             </div>
@@ -6373,6 +6421,7 @@ function CourtPanel({
                 {event.courtName ? <div className="mt-2 text-sm text-slate-500">{event.courtName}{event.courtCaseNumber ? ` · ${event.courtCaseNumber}` : ''}</div> : null}
                 {event.clientCaseDocumentId ? <div className="mt-2 text-sm text-slate-500">Документ #{event.clientCaseDocumentId}</div> : null}
                 {event.resultSummary ? <div className="mt-2 text-sm text-slate-500">{event.resultSummary}</div> : null}
+                <CourtSourceProvenance item={event} />
               </div>
             ))}
           </div>
@@ -6477,6 +6526,7 @@ function CourtPanel({
                 <div className="mt-2 font-semibold text-slate-900">{deadline.title}</div>
                 <div className="mt-1 text-sm text-slate-600">{toRuDate(deadline.dueAt) || '—'} · {deadline.statusLabel}</div>
                 {deadline.notes ? <div className="mt-2 text-sm text-slate-500">{deadline.notes}</div> : null}
+                <CourtSourceProvenance item={deadline} />
               </div>
             ))}
           </div>
@@ -6808,6 +6858,7 @@ function DocumentCard({
           {document.templateLabel ? (
             <div className="mt-1 text-xs text-blue-600">Шаблон: {document.templateLabel}</div>
           ) : null}
+          <CourtSourceProvenance item={document} />
           <div className="mt-2 text-xs text-slate-400">
             {document.uploadedByName || '—'} · {formatRuDateTime(document.uploadedAt) || '—'}
           </div>

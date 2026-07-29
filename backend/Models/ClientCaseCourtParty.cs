@@ -27,6 +27,17 @@ public class ClientCaseCourtParty
     [MaxLength(1000)]
     public string Notes { get; set; } = string.Empty;
 
+    [Required, MaxLength(64)]
+    public string SourceType { get; set; } = "manual";
+
+    [MaxLength(1000)]
+    public string SourceUrl { get; set; } = string.Empty;
+
+    public DateTime? SourceCheckedAt { get; set; }
+
+    [Required, MaxLength(32)]
+    public string SourceConfidence { get; set; } = "manual";
+
     public bool IsArchived { get; set; }
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

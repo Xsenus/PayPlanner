@@ -39,6 +39,14 @@ public class ClientCaseProceduralDeadline
     public int? SourceId { get; set; }
 
     [MaxLength(1000)]
+    public string SourceUrl { get; set; } = string.Empty;
+
+    public DateTime? SourceCheckedAt { get; set; }
+
+    [Required, MaxLength(32)]
+    public string SourceConfidence { get; set; } = "manual";
+
+    [MaxLength(1000)]
     public string Notes { get; set; } = string.Empty;
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

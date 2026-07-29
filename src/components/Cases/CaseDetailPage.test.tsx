@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiService } from '../../services/api';
 import type { ClientCase, ClientCaseWorkOrder } from '../../types';
 import type { TaskJournalItem } from '../../utils/taskJournalStore';
-import { CaseDetailPage } from './CaseDetailPage';
+import { CaseDetailPage, CourtSourceProvenance } from './CaseDetailPage';
 
 const dialogMock = vi.hoisted(() => ({
   confirm: vi.fn(),
@@ -169,6 +169,32 @@ function createTask(overrides: Partial<TaskJournalItem> = {}): TaskJournalItem {
     ...overrides,
   };
 }
+
+describe('CourtSourceProvenance', () => {
+  it('shows the official source, check time and a safe source link', () => {
+    render(
+      <CourtSourceProvenance
+        item={{
+          sourceType: 'sudrf',
+          sourceUrl: 'https://example.sudrf.ru/modules.php?name=sud_delo',
+          sourceCheckedAt: '2026-07-29T12:30:00Z',
+          sourceConfidence: 'official-source',
+        }}
+      />,
+    );
+
+    expect(screen.getByText('ГАС «Правосудие»')).toBeTruthy();
+    expect(screen.getByText('официальный источник')).toBeTruthy();
+    expect(screen.getByText(/проверено/u)).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Открыть источник' }).getAttribute('href'))
+      .toBe('https://example.sudrf.ru/modules.php?name=sud_delo');
+  });
+
+  it('does not render provenance for a regular manual object', () => {
+    const { container } = render(<CourtSourceProvenance item={{ sourceType: 'manual' }} />);
+    expect(container.innerHTML).toBe('');
+  });
+});
 
 describe('CaseDetailPage', () => {
   beforeEach(() => {
