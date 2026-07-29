@@ -334,6 +334,7 @@ public class NotificationServiceTests
         Assert.Equal(
             SmsProviderIdempotencyKey.Create("sms:test:sent", "+79994445566", null),
             message.IdempotencyKey);
+        Assert.Equal(1, smsService.GetSettingsCallCount);
 
         var savedDelivery = await db.NotificationDeliveries.SingleAsync();
         Assert.Equal(delivery.Id, savedDelivery.Id);
@@ -415,6 +416,75 @@ public class NotificationServiceTests
         Assert.Equal(
             SmsProviderIdempotencyKey.Create("sms:test:retry", "+79996667788", null),
             smsService.Messages[0].IdempotencyKey);
+    }
+
+    [Fact]
+    public async Task SmsDelivery_DoesNotCreateDeliveryWhenRenderedBodyExceedsConfiguredLimit()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "sms-too-long@example.com", phoneNumber: "+7 (999) 777-88-99");
+        var smsService = new RecordingSmsNotificationService
+        {
+            Settings = new SmsNotificationSettingsDto
+            {
+                Enabled = true,
+                Ready = true,
+                ProviderConfigured = true,
+                AdapterConfigured = true,
+                ApiTokenSet = true,
+                ProviderKey = "test-provider",
+                SenderName = "Тестовый SMS",
+                DailyLimit = 100,
+                MaxMessageLength = 70,
+                StatusText = "SMS-канал готов к отправке."
+            }
+        };
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            smsNotificationService: smsService);
+
+        var deliveries = await service.SendToUserAsync(
+            user.Id,
+            new NotificationMessage("SMS тест", new string('Я', 71)),
+            [NotificationChannels.Sms],
+            "sms:test:too-long");
+
+        Assert.Empty(deliveries);
+        Assert.Empty(smsService.Messages);
+        Assert.Equal(1, smsService.GetSettingsCallCount);
+        Assert.False(await db.NotificationDeliveries.AnyAsync());
+    }
+
+    [Fact]
+    public async Task SmsDelivery_SkipsOnlySmsWhenTemplateIsNotFullyRendered()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(
+            db,
+            "sms-template@example.com",
+            phoneNumber: "+7 (999) 888-99-00");
+        var smsService = new RecordingSmsNotificationService();
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            smsNotificationService: smsService);
+
+        var deliveries = await service.SendToUserAsync(
+            user.Id,
+            new NotificationMessage("Шаблон", "Задача {{task.title}} требует внимания"),
+            [NotificationChannels.Sms, NotificationChannels.Email],
+            "sms:test:template");
+
+        var delivery = Assert.Single(deliveries);
+        Assert.Equal(NotificationChannels.Email, delivery.Channel);
+        Assert.Empty(smsService.Messages);
+        Assert.Equal(1, smsService.GetSettingsCallCount);
+
+        var savedDelivery = await db.NotificationDeliveries.SingleAsync();
+        Assert.Equal(NotificationChannels.Email, savedDelivery.Channel);
     }
 
     [Fact]
@@ -9838,6 +9908,7 @@ public class NotificationServiceTests
     private sealed class RecordingSmsNotificationService : ISmsNotificationService
     {
         public List<(string PhoneNumber, string Text, string IdempotencyKey)> Messages { get; } = [];
+        public int GetSettingsCallCount { get; private set; }
 
         public SmsNotificationSettingsDto Settings { get; set; } = new()
         {
@@ -9856,7 +9927,10 @@ public class NotificationServiceTests
         public SmsSendResult NextResult { get; set; } = new(true, NotificationDeliveryStatus.Sent);
 
         public Task<SmsNotificationSettingsDto> GetSettingsAsync(CancellationToken cancellationToken = default)
-            => Task.FromResult(Settings);
+        {
+            GetSettingsCallCount++;
+            return Task.FromResult(Settings);
+        }
 
         public Task<SmsNotificationSettingsDto> UpdateSettingsAsync(
             UpdateSmsNotificationSettingsRequest request,

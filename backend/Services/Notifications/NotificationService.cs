@@ -3596,10 +3596,48 @@ public sealed class NotificationService : INotificationService
         CancellationToken cancellationToken,
         int? senderId = null)
     {
-        var deliveries = new List<NotificationDelivery>();
-        foreach (var channel in NormalizeChannels(channels))
+        var normalizedChannels = NormalizeChannels(channels);
+        SmsNotificationSettingsDto? smsSettings = null;
+        SmsMessageValidationResult? smsValidation = null;
+        var smsMaxUnitCount = SmsMessageValidator.DefaultMaxUnitCount;
+
+        if (normalizedChannels.Contains(NotificationChannels.Sms, StringComparer.OrdinalIgnoreCase))
         {
-            var targets = await ResolveSenderTargetsAsync(channel, message.Purpose, senderId, cancellationToken);
+            smsSettings = _smsService is null
+                ? null
+                : await _smsService.GetSettingsAsync(cancellationToken);
+            smsMaxUnitCount = smsSettings is { MaxMessageLength: > 0 }
+                ? smsSettings.MaxMessageLength
+                : SmsMessageValidator.DefaultMaxUnitCount;
+            smsValidation = SmsMessageValidator.Validate(message.Body, smsMaxUnitCount);
+
+            if (!smsValidation.IsValid)
+            {
+                _logger.LogWarning(
+                    "SMS delivery was not created for event {EventKey}: {ValidationErrorCode}. Encoding {Encoding}, units {UnitCount}, segments {SegmentCount}, limit {MaxUnitCount}.",
+                    eventKey ?? "manual",
+                    smsValidation.ErrorCode,
+                    smsValidation.Calculation.Encoding,
+                    smsValidation.Calculation.UnitCount,
+                    smsValidation.Calculation.SegmentCount,
+                    smsMaxUnitCount);
+            }
+        }
+
+        var deliveries = new List<NotificationDelivery>();
+        foreach (var channel in normalizedChannels)
+        {
+            if (channel == NotificationChannels.Sms && smsValidation is { IsValid: false })
+            {
+                continue;
+            }
+
+            var targets = await ResolveSenderTargetsAsync(
+                channel,
+                message.Purpose,
+                senderId,
+                cancellationToken,
+                smsSettings);
             foreach (var target in targets)
             {
                 if (!string.IsNullOrWhiteSpace(eventKey)
@@ -4414,7 +4452,8 @@ public sealed class NotificationService : INotificationService
         string channel,
         string purpose,
         int? senderId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        SmsNotificationSettingsDto? smsSettings = null)
     {
         var normalizedPurpose = NormalizePurpose(purpose) ?? NotificationPurposes.ManualTest;
         if (senderId.HasValue)
@@ -4444,13 +4483,14 @@ public sealed class NotificationService : INotificationService
             return matchedSenders;
         }
 
-        var legacyTarget = await BuildLegacySenderTargetAsync(channel, cancellationToken);
+        var legacyTarget = await BuildLegacySenderTargetAsync(channel, cancellationToken, smsSettings);
         return legacyTarget is null ? [] : [legacyTarget];
     }
 
     private async Task<NotificationSenderTarget?> BuildLegacySenderTargetAsync(
         string channel,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        SmsNotificationSettingsDto? smsSettings = null)
     {
         if (channel == NotificationChannels.Email)
         {
@@ -4491,7 +4531,7 @@ public sealed class NotificationService : INotificationService
 
         if (channel == NotificationChannels.Sms)
         {
-            var sms = _smsService is null
+            var sms = smsSettings ?? (_smsService is null
                 ? new SmsNotificationSettingsDto
                 {
                     Enabled = false,
@@ -4501,7 +4541,7 @@ public sealed class NotificationService : INotificationService
                     ApiTokenSet = false,
                     StatusText = "SMS-уведомления отключены: SMS-сервис не подключен."
                 }
-                : await _smsService.GetSettingsAsync(cancellationToken);
+                : await _smsService.GetSettingsAsync(cancellationToken));
             var reason = string.IsNullOrWhiteSpace(sms.StatusText)
                 ? sms.Enabled
                     ? "SMS-провайдер не настроен."
