@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using PayPlanner.Api.Models;
@@ -239,6 +240,32 @@ public class SudrfCourtSyncServiceTests
             service.FetchCaseAsync("https://kraevoy--hbr.sudrf.ru/modules.php?name=sud_delo&name_op=case&delo_id=42", CancellationToken.None));
 
         Assert.Contains("не ответил", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task FetchCaseAsync_DoesNotWriteCaseIdentifiersOrExceptionContentToLogs()
+    {
+        const string sensitiveCaseNumber = "33а-3390/2026";
+        const string sensitiveDocumentText = "Паспорт 1234 567890";
+        const string sourceUrl =
+            "https://kraevoy--hbr.sudrf.ru/modules.php?name=sud_delo&name_op=case&case_id=43326936&judicial_uid=27RS0005-01-2025-002659-56";
+        var logger = new RecordingLogger<SudrfCourtSyncService>();
+        using var httpClient = new HttpClient(new ThrowingResponseHandler(_ =>
+            new InvalidOperationException($"{sensitiveCaseNumber}; {sensitiveDocumentText}; {sourceUrl}")));
+        var service = new SudrfCourtSyncService(httpClient, logger);
+
+        await Assert.ThrowsAsync<SudrfCourtSyncException>(() =>
+            service.FetchCaseAsync(sourceUrl, CancellationToken.None, sensitiveCaseNumber));
+
+        var record = Assert.Single(logger.Records);
+        Assert.Equal(LogLevel.Warning, record.Level);
+        Assert.Null(record.Exception);
+        Assert.Equal("kraevoy--hbr.sudrf.ru", record.Properties["CourtHost"]);
+        Assert.Equal(nameof(InvalidOperationException), record.Properties["ErrorType"]);
+        Assert.DoesNotContain(sensitiveCaseNumber, record.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(sensitiveDocumentText, record.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("case_id", record.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("judicial_uid", record.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -539,6 +566,28 @@ public class SudrfCourtSyncServiceTests
         }
     }
 
+    private sealed class RecordingLogger<T> : ILogger<T>
+    {
+        public List<LogRecord> Records { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            var properties = state is IEnumerable<KeyValuePair<string, object?>> values
+                ? values.ToDictionary(item => item.Key, item => item.Value, StringComparer.Ordinal)
+                : new Dictionary<string, object?>(StringComparer.Ordinal);
+            Records.Add(new LogRecord(logLevel, formatter(state, exception), exception, properties));
+        }
+    }
+
     private sealed class FixedOptionsSnapshot<T>(T value) : IOptionsSnapshot<T>
         where T : class
     {
@@ -548,4 +597,10 @@ public class SudrfCourtSyncServiceTests
     }
 
     private sealed record RecordedRequest(HttpMethod Method, Uri? RequestUri, string Body);
+
+    private sealed record LogRecord(
+        LogLevel Level,
+        string Message,
+        Exception? Exception,
+        IReadOnlyDictionary<string, object?> Properties);
 }

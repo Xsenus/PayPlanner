@@ -110,12 +110,12 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
         }
         catch (OperationCanceledException ex)
         {
-            _logger.LogWarning(ex, "SUDRF court case request timed out for {SourceUrl}", uri);
+            LogSafeRequestFailure("timeout", uri, ex);
             throw new SudrfCourtSyncException("Сайт суда не ответил вовремя. Повторите синхронизацию позже.", ex);
         }
         catch (TimeoutException ex)
         {
-            _logger.LogWarning(ex, "SUDRF court case request timed out for {SourceUrl}", uri);
+            LogSafeRequestFailure("timeout", uri, ex);
             throw new SudrfCourtSyncException("Сайт суда не ответил вовремя. Повторите синхронизацию позже.", ex);
         }
         catch (CourtSyncCircuitOpenException ex)
@@ -125,9 +125,18 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to fetch SUDRF court case from {SourceUrl}", uri);
+            LogSafeRequestFailure("failed", uri, ex);
             throw new SudrfCourtSyncException("Не удалось прочитать карточку дела на сайте суда.", ex);
         }
+    }
+
+    private void LogSafeRequestFailure(string outcome, Uri sourceUri, Exception exception)
+    {
+        _logger.LogWarning(
+            "SUDRF court request {Outcome}. Host: {CourtHost}; error type: {ErrorType}.",
+            outcome,
+            sourceUri.IdnHost,
+            exception.GetType().Name);
     }
 
     private async Task<string> ReadHtmlAsync(Uri uri, CancellationToken ct)

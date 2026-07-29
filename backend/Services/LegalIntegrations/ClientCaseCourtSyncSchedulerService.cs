@@ -97,7 +97,9 @@ public sealed class ClientCaseCourtSyncSchedulerService : BackgroundService
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Automatic court source sync failed.");
+                _logger.LogError(
+                    "Automatic court source sync failed. Error type: {ErrorType}.",
+                    ex.GetType().Name);
                 if (_jobRunState is not null)
                 {
                     await _jobRunState.RecordFailureAsync(
