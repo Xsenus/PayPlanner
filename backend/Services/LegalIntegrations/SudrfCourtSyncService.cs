@@ -15,6 +15,7 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
     private readonly HttpClient _httpClient;
     private readonly ILogger<SudrfCourtSyncService> _logger;
     private readonly SudrfCourtRequestPolicy _requestPolicy;
+    private readonly CourtSyncMetrics? _metrics;
     private readonly ConcurrentDictionary<string, Lazy<Task<SudrfCourtCaseData>>> _caseReads =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, Lazy<Task<Uri?>>> _caseCardEndpoints =
@@ -28,11 +29,13 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
     public SudrfCourtSyncService(
         HttpClient httpClient,
         ILogger<SudrfCourtSyncService> logger,
-        SudrfCourtRequestPolicy? requestPolicy = null)
+        SudrfCourtRequestPolicy? requestPolicy = null,
+        CourtSyncMetrics? metrics = null)
     {
         _httpClient = httpClient;
         _logger = logger;
         _requestPolicy = requestPolicy ?? new SudrfCourtRequestPolicy();
+        _metrics = metrics;
         _httpClient.Timeout = Timeout.InfiniteTimeSpan;
         _httpClient.DefaultRequestHeaders.UserAgent.Clear();
         _httpClient.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("PayPlanner", "1.0"));
@@ -46,11 +49,16 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
     public Task<SudrfCourtCaseData> FetchCaseAsync(string sourceUrl, CancellationToken ct, string? courtCaseNumber = null)
     {
         var cacheKey = $"{sourceUrl.Trim()}|{courtCaseNumber?.Trim()}";
-        return _caseReads.GetOrAdd(
-            cacheKey,
-            _ => new Lazy<Task<SudrfCourtCaseData>>(
-                () => FetchCaseCoreAsync(sourceUrl, ct, courtCaseNumber),
-                LazyThreadSafetyMode.ExecutionAndPublication)).Value;
+        var candidate = new Lazy<Task<SudrfCourtCaseData>>(
+            () => FetchCaseCoreAsync(sourceUrl, ct, courtCaseNumber),
+            LazyThreadSafetyMode.ExecutionAndPublication);
+        var cached = _caseReads.GetOrAdd(cacheKey, candidate);
+        if (!ReferenceEquals(candidate, cached))
+        {
+            _metrics?.RecordDuplicateSkipped();
+        }
+
+        return cached.Value;
     }
 
     private async Task<SudrfCourtCaseData> FetchCaseCoreAsync(string sourceUrl, CancellationToken ct, string? courtCaseNumber)
@@ -157,11 +165,16 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
     private async Task<Uri?> FindCaseCardUriAsync(Uri sourceUri, string courtCaseNumber, CancellationToken ct)
     {
         var cacheKey = BuildCaseCardEndpointCacheKey(sourceUri, courtCaseNumber);
-        return await _caseCardEndpoints.GetOrAdd(
-            cacheKey,
-            _ => new Lazy<Task<Uri?>>(
-                () => FindCaseCardUriCoreAsync(sourceUri, courtCaseNumber, ct),
-                LazyThreadSafetyMode.ExecutionAndPublication)).Value;
+        var candidate = new Lazy<Task<Uri?>>(
+            () => FindCaseCardUriCoreAsync(sourceUri, courtCaseNumber, ct),
+            LazyThreadSafetyMode.ExecutionAndPublication);
+        var cached = _caseCardEndpoints.GetOrAdd(cacheKey, candidate);
+        if (!ReferenceEquals(candidate, cached))
+        {
+            _metrics?.RecordDuplicateSkipped();
+        }
+
+        return await cached.Value;
     }
 
     private async Task<Uri?> FindCaseCardUriCoreAsync(Uri sourceUri, string courtCaseNumber, CancellationToken ct)

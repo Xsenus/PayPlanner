@@ -14,7 +14,8 @@ public sealed class SudrfCourtRequestPolicyTests
             HttpStatusCode.TooManyRequests,
             HttpStatusCode.OK);
         using var client = new HttpClient(handler);
-        var policy = CreatePolicy(maxRetries: 2);
+        var metrics = new CourtSyncMetrics();
+        var policy = CreatePolicy(maxRetries: 2, metrics: metrics);
 
         using var response = await policy.SendAsync(
             client,
@@ -23,6 +24,11 @@ public sealed class SudrfCourtRequestPolicyTests
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal(3, handler.RequestCount);
+        var snapshot = metrics.GetSnapshot();
+        Assert.Equal(3, snapshot.RequestCount);
+        Assert.Equal(2, snapshot.FailedRequestCount);
+        Assert.True(snapshot.AverageLatencyMs >= 0);
+        Assert.True(snapshot.MaxLatencyMs >= snapshot.AverageLatencyMs);
     }
 
     [Fact]
@@ -92,7 +98,10 @@ public sealed class SudrfCourtRequestPolicyTests
         Assert.Equal(0, handler.RequestCount);
     }
 
-    private static SudrfCourtRequestPolicy CreatePolicy(int maxRetries, int failureThreshold = 5)
+    private static SudrfCourtRequestPolicy CreatePolicy(
+        int maxRetries,
+        int failureThreshold = 5,
+        CourtSyncMetrics? metrics = null)
         => new(new SudrfCourtRequestPolicyOptions
         {
             TimeoutSeconds = 2,
@@ -102,7 +111,7 @@ public sealed class SudrfCourtRequestPolicyTests
             MaxConcurrency = 2,
             CircuitFailureThreshold = failureThreshold,
             CircuitBreakSeconds = 30,
-        });
+        }, metrics);
 
     private sealed class SequenceHandler(params HttpStatusCode[] statuses) : HttpMessageHandler
     {

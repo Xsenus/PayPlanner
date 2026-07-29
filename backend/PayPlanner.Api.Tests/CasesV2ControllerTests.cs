@@ -5760,11 +5760,13 @@ public class CasesV2ControllerTests
                 },
             ],
         };
+        var metrics = new CourtSyncMetrics();
         var controller = CreateController(
             db,
             owner,
             sudrfCourtSyncService: new FixedSudrfCourtSyncService(courtData),
-            notificationService: CreateNotificationService(db));
+            notificationService: CreateNotificationService(db),
+            courtSyncMetrics: metrics);
 
         var result = await controller.RunCourtSync(clientCase.Id, null, CancellationToken.None);
 
@@ -5775,6 +5777,9 @@ public class CasesV2ControllerTests
         Assert.Equal(1, dto.CreatedCourtEvents);
         Assert.Equal(3, dto.CreatedCourtParties);
         Assert.Equal(1, dto.CreatedCourtActDocuments);
+        var metricsSnapshot = metrics.GetSnapshot();
+        Assert.Equal(1, metricsSnapshot.DocumentCount);
+        Assert.True(metricsSnapshot.DocumentBytes > 0);
         Assert.Equal(1, dto.CreatedProceduralDeadlines);
         Assert.Contains(dto.NewItems, item => item == "суд");
         Assert.Contains(dto.NewItems, item => item.Contains("судебное событие", StringComparison.Ordinal));
@@ -8694,11 +8699,12 @@ public class CasesV2ControllerTests
         IConfiguration? configuration = null,
         IOptionsMonitor<AppFeatureFlagsOptions>? featureFlags = null,
         INotificationService? notificationService = null,
-        bool includeAdminRoleClaim = false)
+        bool includeAdminRoleClaim = false,
+        CourtSyncMetrics? courtSyncMetrics = null)
         => new(db, new TestWebHostEnvironment
         {
             ContentRootPath = contentRootPath ?? Path.Combine(Path.GetTempPath(), "payplanner-case-documents", Guid.NewGuid().ToString("N")),
-        }, sudrfCourtSyncService: sudrfCourtSyncService, pdfService: pdfService, courtSyncProviderRegistry: courtSyncProviderRegistry, configuration: configuration, featureFlags: featureFlags, notificationService: notificationService)
+        }, sudrfCourtSyncService: sudrfCourtSyncService, pdfService: pdfService, courtSyncProviderRegistry: courtSyncProviderRegistry, configuration: configuration, featureFlags: featureFlags, notificationService: notificationService, courtSyncMetrics: courtSyncMetrics)
         {
             ControllerContext = new ControllerContext
             {

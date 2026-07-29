@@ -93,7 +93,11 @@ public class SudrfCourtSyncServiceTests
         var bytes = Encoding.GetEncoding("windows-1251").GetBytes(BuildCourtHtml());
         using var handler = new FixedResponseHandler(_ => bytes);
         using var httpClient = new HttpClient(handler);
-        var service = new SudrfCourtSyncService(httpClient, NullLogger<SudrfCourtSyncService>.Instance);
+        var metrics = new CourtSyncMetrics();
+        var service = new SudrfCourtSyncService(
+            httpClient,
+            NullLogger<SudrfCourtSyncService>.Instance,
+            metrics: metrics);
         const string sourceUrl = "https://kraevoy--hbr.sudrf.ru/modules.php?name=sud_delo&name_op=case&delo_id=42";
 
         var first = service.FetchCaseAsync(sourceUrl, CancellationToken.None, "33а-3390/2026");
@@ -103,6 +107,7 @@ public class SudrfCourtSyncServiceTests
         Assert.Equal("33а-3390/2026", results[0].CaseNumber);
         Assert.Same(results[0], results[1]);
         Assert.Equal(1, handler.RequestCount);
+        Assert.Equal(1, metrics.GetSnapshot().DuplicateSkipCount);
     }
 
     [Fact]

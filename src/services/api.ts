@@ -1419,6 +1419,18 @@ export interface SystemJobDiagnosticsItemDto {
   lastRunError?: string | null;
   manualRunEnabled?: boolean;
   manualRunHint?: string | null;
+  courtSyncMetrics?: CourtSyncMetricsDto | null;
+}
+
+export interface CourtSyncMetricsDto {
+  startedAt: string;
+  requestCount: number;
+  failedRequestCount: number;
+  averageLatencyMs: number;
+  maxLatencyMs: number;
+  duplicateSkipCount: number;
+  documentCount: number;
+  documentBytes: number;
 }
 
 export interface SystemJobDiagnosticsDto {

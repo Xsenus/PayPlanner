@@ -274,6 +274,11 @@ public class SystemJobsControllerTests
             serviceProvider.GetRequiredService<IServiceScopeFactory>(),
             configuration,
             NullLogger<NotificationRetrySchedulerService>.Instance);
+        var courtSyncMetrics = new CourtSyncMetrics();
+        courtSyncMetrics.RecordRequest(TimeSpan.FromMilliseconds(120), failed: false);
+        courtSyncMetrics.RecordRequest(TimeSpan.FromMilliseconds(280), failed: true);
+        courtSyncMetrics.RecordDuplicateSkipped();
+        courtSyncMetrics.RecordDocument(4_096);
         var controller = new SystemJobsController(
             scope.Db,
             configuration,
@@ -298,7 +303,8 @@ public class SystemJobsControllerTests
                     Summary = "Проверено дел: 3.",
                 },
             }),
-            notificationRetryRunner: notificationRetryRunner);
+            notificationRetryRunner: notificationRetryRunner,
+            courtSyncMetrics: courtSyncMetrics);
 
         interceptor.Commands.Clear();
         var result = await controller.GetDiagnostics(CancellationToken.None);
@@ -319,6 +325,15 @@ public class SystemJobsControllerTests
         Assert.Contains(dto.Items, item => item.Key == "court-sync" && item.Status == "active" && item.PendingCount == 1 && item.LastProcessedCount == 12);
         Assert.Contains(dto.Items, item => item.Key == "court-sync" && item.LastRunStatus == "success" && item.LastRunStatusText == "Успешно");
         Assert.Contains(dto.Items, item => item.Key == "court-sync" && item.LastSuccessAt == now.AddMinutes(-4) && item.LastRunDurationMs == 60000);
+        var courtSyncMetricsDto = Assert.Single(dto.Items, item => item.Key == "court-sync").CourtSyncMetrics;
+        Assert.NotNull(courtSyncMetricsDto);
+        Assert.Equal(2, courtSyncMetricsDto.RequestCount);
+        Assert.Equal(1, courtSyncMetricsDto.FailedRequestCount);
+        Assert.Equal(200, courtSyncMetricsDto.AverageLatencyMs);
+        Assert.Equal(280, courtSyncMetricsDto.MaxLatencyMs);
+        Assert.Equal(1, courtSyncMetricsDto.DuplicateSkipCount);
+        Assert.Equal(1, courtSyncMetricsDto.DocumentCount);
+        Assert.Equal(4_096, courtSyncMetricsDto.DocumentBytes);
         Assert.Contains(dto.Items, item => item.Key == "database-backup" && item.ManualRunEnabled);
         Assert.Contains(dto.Items, item => item.Key == "court-sync" && item.ManualRunEnabled);
         Assert.Contains(dto.Items, item => item.Key == "money-balance-reconciliation" && item.LastProcessedCount == 2);

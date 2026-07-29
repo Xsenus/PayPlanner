@@ -38,6 +38,13 @@ function formatDuration(durationMs?: number | null) {
   return `${seconds} сек.`;
 }
 
+function formatBytes(bytes?: number | null) {
+  const safeBytes = Math.max(0, bytes ?? 0);
+  if (safeBytes < 1024) return `${safeBytes} Б`;
+  if (safeBytes < 1024 * 1024) return `${(safeBytes / 1024).toFixed(1)} КБ`;
+  return `${(safeBytes / (1024 * 1024)).toFixed(1)} МБ`;
+}
+
 function getStatusClasses(status: string) {
   if (status === 'active') {
     return 'border-emerald-200 bg-emerald-50 text-emerald-700';
@@ -151,6 +158,28 @@ function JobDiagnosticsCard({
         ) : null}
       </div>
 
+      {item.courtSyncMetrics ? (
+        <section className="mt-4 rounded-xl border border-blue-100 bg-blue-50/60 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h5 className="text-sm font-semibold text-slate-900">Метрики судебных источников</h5>
+            <span className="text-xs text-slate-500">
+              С {formatDateTime(item.courtSyncMetrics.startedAt, timeZoneId)}
+            </span>
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-2 text-sm sm:grid-cols-3 xl:grid-cols-6">
+            <MetricValue label="Запросы" value={item.courtSyncMetrics.requestCount} />
+            <MetricValue label="Ошибки" value={item.courtSyncMetrics.failedRequestCount} />
+            <MetricValue
+              label="Средняя / максимум"
+              value={`${formatDuration(item.courtSyncMetrics.averageLatencyMs)} / ${formatDuration(item.courtSyncMetrics.maxLatencyMs)}`}
+            />
+            <MetricValue label="Повторы исключены" value={item.courtSyncMetrics.duplicateSkipCount} />
+            <MetricValue label="Документы" value={item.courtSyncMetrics.documentCount} />
+            <MetricValue label="Объём документов" value={formatBytes(item.courtSyncMetrics.documentBytes)} />
+          </div>
+        </section>
+      ) : null}
+
       {item.lastActivityAt || item.lastActivityDescription || item.nextRunHint ? (
         <div className="mt-4 space-y-2 text-sm leading-6 text-slate-600">
           {item.lastActivityAt ? <p>Последняя видимая активность: {formatDateTime(item.lastActivityAt, timeZoneId)}</p> : null}
@@ -159,6 +188,15 @@ function JobDiagnosticsCard({
         </div>
       ) : null}
     </article>
+  );
+}
+
+function MetricValue({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="rounded-lg bg-white px-3 py-2">
+      <div className="text-xs text-slate-500">{label}</div>
+      <div className="mt-1 font-semibold text-slate-900">{value}</div>
+    </div>
   );
 }
 

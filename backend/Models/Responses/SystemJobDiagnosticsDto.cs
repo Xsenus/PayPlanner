@@ -29,6 +29,19 @@ public sealed class SystemJobDiagnosticsItemDto
     public string? LastRunError { get; init; }
     public bool ManualRunEnabled { get; init; }
     public string? ManualRunHint { get; init; }
+    public CourtSyncMetricsDto? CourtSyncMetrics { get; init; }
+}
+
+public sealed class CourtSyncMetricsDto
+{
+    public DateTime StartedAt { get; init; }
+    public long RequestCount { get; init; }
+    public long FailedRequestCount { get; init; }
+    public double AverageLatencyMs { get; init; }
+    public double MaxLatencyMs { get; init; }
+    public long DuplicateSkipCount { get; init; }
+    public long DocumentCount { get; init; }
+    public long DocumentBytes { get; init; }
 }
 
 public sealed class SystemJobManualRunResultDto

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Microsoft.Extensions.Options;
 
 namespace PayPlanner.Api.Services.LegalIntegrations;
@@ -24,19 +25,25 @@ public sealed class SudrfCourtRequestPolicy
     private readonly int _circuitFailureThreshold;
     private readonly TimeSpan _circuitBreakDuration;
     private readonly SemaphoreSlim _concurrency;
+    private readonly CourtSyncMetrics? _metrics;
     private readonly object _stateLock = new();
     private DateTime _nextRequestAtUtc;
     private DateTime _circuitOpenUntilUtc;
     private int _consecutiveFailures;
 
-    public SudrfCourtRequestPolicy(IOptions<SudrfCourtRequestPolicyOptions> options)
-        : this(options.Value)
+    public SudrfCourtRequestPolicy(
+        IOptions<SudrfCourtRequestPolicyOptions> options,
+        CourtSyncMetrics metrics)
+        : this(options.Value, metrics)
     {
     }
 
-    public SudrfCourtRequestPolicy(SudrfCourtRequestPolicyOptions? options = null)
+    public SudrfCourtRequestPolicy(
+        SudrfCourtRequestPolicyOptions? options = null,
+        CourtSyncMetrics? metrics = null)
     {
         options ??= new SudrfCourtRequestPolicyOptions();
+        _metrics = metrics;
         _timeout = TimeSpan.FromSeconds(Math.Clamp(options.TimeoutSeconds, 1, 120));
         _maxRetries = Math.Clamp(options.MaxRetries, 0, 5);
         _retryBaseDelay = TimeSpan.FromMilliseconds(Math.Clamp(options.RetryBaseDelayMilliseconds, 0, 10_000));
@@ -62,6 +69,7 @@ public sealed class SudrfCourtRequestPolicy
                 using var request = requestFactory();
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 timeout.CancelAfter(_timeout);
+                var requestStartedAt = Stopwatch.GetTimestamp();
 
                 try
                 {
@@ -69,6 +77,9 @@ public sealed class SudrfCourtRequestPolicy
                         request,
                         HttpCompletionOption.ResponseHeadersRead,
                         timeout.Token);
+                    _metrics?.RecordRequest(
+                        Stopwatch.GetElapsedTime(requestStartedAt),
+                        !response.IsSuccessStatusCode);
                     if (!IsTransient(response.StatusCode))
                     {
                         RegisterSuccess();
@@ -87,10 +98,12 @@ public sealed class SudrfCourtRequestPolicy
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
+                    _metrics?.RecordRequest(Stopwatch.GetElapsedTime(requestStartedAt), failed: false);
                     throw;
                 }
                 catch (OperationCanceledException ex)
                 {
+                    _metrics?.RecordRequest(Stopwatch.GetElapsedTime(requestStartedAt), failed: true);
                     if (attempt >= _maxRetries)
                     {
                         RegisterFailure();
@@ -101,6 +114,7 @@ public sealed class SudrfCourtRequestPolicy
                 }
                 catch (HttpRequestException)
                 {
+                    _metrics?.RecordRequest(Stopwatch.GetElapsedTime(requestStartedAt), failed: true);
                     if (attempt >= _maxRetries)
                     {
                         RegisterFailure();
@@ -108,6 +122,11 @@ public sealed class SudrfCourtRequestPolicy
                     }
 
                     await Task.Delay(GetBackoff(attempt), cancellationToken);
+                }
+                catch
+                {
+                    _metrics?.RecordRequest(Stopwatch.GetElapsedTime(requestStartedAt), failed: true);
+                    throw;
                 }
             }
         }

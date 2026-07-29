@@ -142,6 +142,7 @@ public sealed class ClientCaseCourtSyncSchedulerService : BackgroundService
         }
 
         var registry = scope.ServiceProvider.GetService<ICourtSyncProviderRegistry>();
+        var metrics = scope.ServiceProvider.GetService<CourtSyncMetrics>();
         var normalizedBatchSize = NormalizeBatchSize(batchSize);
         var candidateLimit = normalizedBatchSize * 5;
         var candidates = await db.ClientCases
@@ -167,7 +168,13 @@ public sealed class ClientCaseCourtSyncSchedulerService : BackgroundService
         var environment = scope.ServiceProvider.GetService<IWebHostEnvironment>();
         var storage = scope.ServiceProvider.GetRequiredService<ICaseDocumentStorage>();
         var sudrf = scope.ServiceProvider.GetRequiredService<ISudrfCourtSyncService>();
-        var controller = new CasesV2Controller(db, environment, storage, sudrf, courtSyncProviderRegistry: registry)
+        var controller = new CasesV2Controller(
+            db,
+            environment,
+            storage,
+            sudrf,
+            courtSyncProviderRegistry: registry,
+            courtSyncMetrics: metrics)
         {
             ControllerContext = new ControllerContext
             {

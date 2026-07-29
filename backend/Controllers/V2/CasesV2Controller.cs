@@ -116,6 +116,7 @@ public class CasesV2Controller : ControllerBase
     private readonly IConfiguration _configuration;
     private readonly IOptionsMonitor<AppFeatureFlagsOptions>? _featureFlags;
     private readonly INotificationService? _notificationService;
+    private readonly CourtSyncMetrics? _courtSyncMetrics;
     private CaseStatusClock? _caseStatusClock;
 
     public CasesV2Controller(
@@ -127,7 +128,8 @@ public class CasesV2Controller : ControllerBase
         ICourtSyncProviderRegistry? courtSyncProviderRegistry = null,
         IConfiguration? configuration = null,
         IOptionsMonitor<AppFeatureFlagsOptions>? featureFlags = null,
-        INotificationService? notificationService = null)
+        INotificationService? notificationService = null,
+        CourtSyncMetrics? courtSyncMetrics = null)
     {
         _db = db;
         _caseDocumentStorage = caseDocumentStorage ?? new LocalCaseDocumentStorage(environment, configuration);
@@ -137,6 +139,7 @@ public class CasesV2Controller : ControllerBase
         _configuration = configuration ?? new ConfigurationBuilder().Build();
         _featureFlags = featureFlags;
         _notificationService = notificationService;
+        _courtSyncMetrics = courtSyncMetrics;
     }
 
     private Task<DataVisibilityAccess?> ResolveCasesVisibilityAsync(CancellationToken ct)
@@ -7635,6 +7638,7 @@ public class CasesV2Controller : ControllerBase
                     $"Судебный акт «{courtAct.Title}» добавлен из ГАС «Правосудие».",
                     ct);
                 createdCourtActDocuments++;
+                _courtSyncMetrics?.RecordDocument(document.SizeBytes);
                 newItems.Add($"судебный акт «{courtAct.Title}»");
             }
             else if (!string.Equals(document.DocumentKey, documentKey, StringComparison.Ordinal))

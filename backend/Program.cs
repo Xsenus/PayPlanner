@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Filters;
@@ -161,12 +162,15 @@ builder.Services.AddSingleton<ICaseDocumentStorage, LocalCaseDocumentStorage>();
 builder.Services.AddSingleton<IInvoiceDocumentPdfService, InvoiceDocumentPdfService>();
 builder.Services.AddSingleton<DatabaseBackupService>();
 builder.Services.AddSingleton<ISystemJobRunStateService, SystemJobRunStateService>();
+builder.Services.AddSingleton<CourtSyncMetrics>();
 builder.Services.Configure<AppFeatureFlagsOptions>(
     builder.Configuration.GetSection(AppFeatureFlagsOptions.SectionName));
 builder.Services.Configure<DadataOptions>(builder.Configuration.GetSection("DaData"));
 builder.Services.Configure<SudrfCourtRequestPolicyOptions>(
     builder.Configuration.GetSection(SudrfCourtRequestPolicyOptions.SectionName));
-builder.Services.AddSingleton<SudrfCourtRequestPolicy>();
+builder.Services.AddSingleton(sp => new SudrfCourtRequestPolicy(
+    sp.GetRequiredService<IOptions<SudrfCourtRequestPolicyOptions>>(),
+    sp.GetRequiredService<CourtSyncMetrics>()));
 builder.Services.AddHttpClient<ILegalEntityEnrichmentService, DadataLegalEntityEnrichmentService>();
 builder.Services.AddHttpClient<ISudrfCourtSyncService, SudrfCourtSyncService>();
 builder.Services.AddHttpClient<IYandexDiskService, YandexDiskService>();

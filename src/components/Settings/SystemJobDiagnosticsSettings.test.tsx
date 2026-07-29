@@ -65,6 +65,16 @@ describe('SystemJobDiagnosticsSettings', () => {
           lastRunError: 'feature flag disabled',
           manualRunEnabled: false,
           manualRunHint: 'Ручной запуск доступен только после включения feature flag.',
+          courtSyncMetrics: {
+            startedAt: '2026-05-26T08:00:00Z',
+            requestCount: 2,
+            failedRequestCount: 1,
+            averageLatencyMs: 200,
+            maxLatencyMs: 280,
+            duplicateSkipCount: 1,
+            documentCount: 1,
+            documentBytes: 4096,
+          },
         },
       ],
     });
@@ -98,6 +108,11 @@ describe('SystemJobDiagnosticsSettings', () => {
     expect(screen.getByText('10 сек.')).toBeTruthy();
     expect(screen.getByText('Всего сервисов')).toBeTruthy();
     expect(screen.getByText('Ожидает условий')).toBeTruthy();
+    expect(screen.getByText('Метрики судебных источников')).toBeTruthy();
+    expect(screen.getByText('Запросы')).toBeTruthy();
+    expect(screen.getByText('Повторы исключены')).toBeTruthy();
+    expect(screen.getByText('200 мс / 280 мс')).toBeTruthy();
+    expect(screen.getByText('4.0 КБ')).toBeTruthy();
   });
 
   it('formats diagnostic timestamps in profile time zone', async () => {

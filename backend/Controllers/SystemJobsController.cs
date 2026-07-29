@@ -55,6 +55,7 @@ public sealed class SystemJobsController : ControllerBase, IAsyncActionFilter
     private readonly MoneyBalanceReconciliationSchedulerService? _moneyBalanceRunner;
     private readonly UserActivityRetentionService? _userActivityRetentionRunner;
     private readonly YandexDiskCrmSyncSchedulerService? _yandexDiskCrmSyncRunner;
+    private readonly CourtSyncMetrics? _courtSyncMetrics;
 
     public SystemJobsController(
         PaymentContext db,
@@ -72,7 +73,8 @@ public sealed class SystemJobsController : ControllerBase, IAsyncActionFilter
         MoneyBalanceReconciliationSchedulerService? moneyBalanceRunner = null,
         UserActivityRetentionService? userActivityRetentionRunner = null,
         YandexDiskCrmSyncSchedulerService? yandexDiskCrmSyncRunner = null,
-        CalendarSyncLogRetentionService? calendarSyncLogRetentionRunner = null)
+        CalendarSyncLogRetentionService? calendarSyncLogRetentionRunner = null,
+        CourtSyncMetrics? courtSyncMetrics = null)
     {
         _db = db;
         _configuration = configuration;
@@ -90,6 +92,7 @@ public sealed class SystemJobsController : ControllerBase, IAsyncActionFilter
         _userActivityRetentionRunner = userActivityRetentionRunner;
         _yandexDiskCrmSyncRunner = yandexDiskCrmSyncRunner;
         _calendarSyncLogRetentionRunner = calendarSyncLogRetentionRunner;
+        _courtSyncMetrics = courtSyncMetrics;
     }
 
     [NonAction]
@@ -1024,6 +1027,7 @@ public sealed class SystemJobsController : ControllerBase, IAsyncActionFilter
             settings.GetValueOrDefault(ClientCaseCourtSyncSchedulerService.BatchSizeSettingKey),
             _configuration.GetValue<int?>("LegalIntegrations:CourtSyncScheduler:BatchSize") ?? ClientCaseCourtSyncSchedulerService.DefaultBatchSize));
         var enabled = featureEnabled && settingEnabled;
+        var metrics = _courtSyncMetrics?.GetSnapshot();
         var eligibleCounts = _db.UseObjectAuditModel
             ? _db.Database.SqlQuery<int>($$"""
                 SELECT CAST(COUNT(*) AS INTEGER) AS "Value"
@@ -1072,6 +1076,19 @@ public sealed class SystemJobsController : ControllerBase, IAsyncActionFilter
             NextRunHint = enabled ? $"За один запуск обрабатывается до {batchSize} дел." : "Фоновая судебная синхронизация не запускается автоматически.",
             ManualRunEnabled = enabled,
             ManualRunHint = enabled ? "Можно вручную запустить синхронизацию судебных источников." : "Ручной запуск доступен только после включения настройки и feature flag судебной синхронизации.",
+            CourtSyncMetrics = metrics is null
+                ? null
+                : new CourtSyncMetricsDto
+                {
+                    StartedAt = metrics.StartedAt,
+                    RequestCount = metrics.RequestCount,
+                    FailedRequestCount = metrics.FailedRequestCount,
+                    AverageLatencyMs = metrics.AverageLatencyMs,
+                    MaxLatencyMs = metrics.MaxLatencyMs,
+                    DuplicateSkipCount = metrics.DuplicateSkipCount,
+                    DocumentCount = metrics.DocumentCount,
+                    DocumentBytes = metrics.DocumentBytes,
+                },
         };
     }
 
@@ -1374,6 +1391,7 @@ public sealed class SystemJobsController : ControllerBase, IAsyncActionFilter
             LastRunError = state.ErrorMessage,
             ManualRunEnabled = item.ManualRunEnabled,
             ManualRunHint = item.ManualRunHint,
+            CourtSyncMetrics = item.CourtSyncMetrics,
         };
     }
 
