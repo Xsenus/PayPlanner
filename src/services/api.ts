@@ -5492,11 +5492,23 @@ export class ApiService {
     return this.request<ClientCaseCourtSyncLog[]>(`/v2/cases/${caseId}/court-sync/logs`);
   }
 
-  async getCourtSyncJournal(params: { take?: number; status?: string; search?: string } = {}) {
+  async getCourtSyncJournal(params: {
+    take?: number;
+    status?: string;
+    search?: string;
+    provider?: string;
+    hasError?: boolean;
+    maxAgeDays?: number;
+    minAgeDays?: number;
+  } = {}) {
     const query = new URLSearchParams();
     if (params.take) query.set('take', String(params.take));
     if (params.status) query.set('status', params.status);
     if (params.search) query.set('search', params.search);
+    if (params.provider) query.set('provider', params.provider);
+    if (params.hasError !== undefined) query.set('hasError', String(params.hasError));
+    if (params.maxAgeDays !== undefined) query.set('maxAgeDays', String(params.maxAgeDays));
+    if (params.minAgeDays !== undefined) query.set('minAgeDays', String(params.minAgeDays));
     const suffix = query.toString() ? `?${query.toString()}` : '';
     return this.request<ClientCaseCourtSyncJournalEntry[]>(`/v2/cases/court-sync/logs${suffix}`);
   }

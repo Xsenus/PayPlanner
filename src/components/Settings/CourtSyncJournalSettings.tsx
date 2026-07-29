@@ -2,7 +2,7 @@ import { SystemSelect } from '../ui/SystemSelect';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ExternalLink, RefreshCw, Search } from 'lucide-react';
 import { apiService } from '../../services/api';
-import type { ClientCaseCourtSyncJournalEntry } from '../../types';
+import type { ClientCaseCourtSyncJournalEntry, ClientCaseCourtSyncProvider } from '../../types';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 
 const STATUS_OPTIONS = [
@@ -29,6 +29,20 @@ const STATUS_CLASSES: Record<string, string> = {
   history: 'border-slate-200 bg-slate-50 text-slate-700',
 };
 
+const ERROR_OPTIONS = [
+  { value: 'all', label: 'Все результаты' },
+  { value: 'with', label: 'Только с ошибкой' },
+  { value: 'without', label: 'Без ошибок' },
+] as const;
+
+const AGE_OPTIONS = [
+  { value: 'all', label: 'За всё время' },
+  { value: 'day', label: 'За 24 часа' },
+  { value: 'week', label: 'За 7 дней' },
+  { value: 'month', label: 'За 30 дней' },
+  { value: 'older', label: 'Старше 30 дней' },
+] as const;
+
 function formatDateTime(value?: string | null) {
   if (!value) return '—';
   const date = new Date(value);
@@ -50,13 +64,39 @@ function getStatusClass(status: string) {
   return STATUS_CLASSES[status] ?? STATUS_CLASSES.history;
 }
 
+function formatAge(ageDays?: number | null) {
+  if (ageDays === null || ageDays === undefined) return 'Давность не определена';
+  if (ageDays === 0) return 'Сегодня';
+  if (ageDays === 1) return '1 день назад';
+  if (ageDays < 5) return `${ageDays} дня назад`;
+  return `${ageDays} дней назад`;
+}
+
 export function CourtSyncJournalSettings() {
   const [items, setItems] = useState<ClientCaseCourtSyncJournalEntry[]>([]);
+  const [providers, setProviders] = useState<ClientCaseCourtSyncProvider[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState('all');
+  const [providerFilter, setProviderFilter] = useState('all');
+  const [errorFilter, setErrorFilter] = useState('all');
+  const [ageFilter, setAgeFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [appliedSearch, setAppliedSearch] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    apiService.getCourtSyncProviders()
+      .then((result) => {
+        if (!cancelled) setProviders(result ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setProviders([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const loadJournal = useCallback(async () => {
     setLoading(true);
@@ -66,6 +106,10 @@ export function CourtSyncJournalSettings() {
         take: 50,
         status: statusFilter === 'all' ? undefined : statusFilter,
         search: appliedSearch.trim() || undefined,
+        provider: providerFilter === 'all' ? undefined : providerFilter,
+        hasError: errorFilter === 'all' ? undefined : errorFilter === 'with',
+        maxAgeDays: ageFilter === 'day' ? 1 : ageFilter === 'week' ? 7 : ageFilter === 'month' ? 30 : undefined,
+        minAgeDays: ageFilter === 'older' ? 30 : undefined,
       });
       setItems(result ?? []);
     } catch (loadError) {
@@ -74,7 +118,7 @@ export function CourtSyncJournalSettings() {
     } finally {
       setLoading(false);
     }
-  }, [appliedSearch, statusFilter]);
+  }, [ageFilter, appliedSearch, errorFilter, providerFilter, statusFilter]);
 
   useEffect(() => {
     void loadJournal();
@@ -92,7 +136,7 @@ export function CourtSyncJournalSettings() {
   };
 
   return (
-    <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
+    <div className="rounded-2xl border border-gray-200 bg-white p-3 shadow-sm lg:p-4">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <h4 className="text-xl font-semibold text-gray-900">Журнал судебной синхронизации</h4>
@@ -111,14 +155,14 @@ export function CourtSyncJournalSettings() {
         </button>
       </div>
 
-      <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <Metric label="Записей" value={counters.total} />
         <Metric label="Обновлено" value={counters.completed} />
         <Metric label="Ошибок" value={counters.errors} />
         <Metric label="Без привязки" value={counters.bindingRequired} />
       </div>
 
-      <div className="mt-5 flex flex-col gap-3 lg:flex-row lg:items-center">
+      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(150px,0.8fr)_minmax(180px,1fr)_minmax(150px,0.8fr)_minmax(150px,0.8fr)_minmax(280px,2fr)]">
         <SystemSelect
           value={statusFilter}
           onChange={(event) => setStatusFilter(event.target.value)}
@@ -126,6 +170,39 @@ export function CourtSyncJournalSettings() {
           className="h-10 rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
         >
           {STATUS_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>{option.label}</option>
+          ))}
+        </SystemSelect>
+        <SystemSelect
+          value={providerFilter}
+          onChange={(event) => setProviderFilter(event.target.value)}
+          aria-label="Судебный источник"
+          className="h-10 rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+        >
+          <option value="all">Все источники</option>
+          {providers.map((provider) => (
+            <option key={provider.key} value={provider.key}>{provider.label}</option>
+          ))}
+          <option value="unbound">Без привязки</option>
+          <option value="other">Другой источник</option>
+        </SystemSelect>
+        <SystemSelect
+          value={errorFilter}
+          onChange={(event) => setErrorFilter(event.target.value)}
+          aria-label="Наличие ошибки"
+          className="h-10 rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+        >
+          {ERROR_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>{option.label}</option>
+          ))}
+        </SystemSelect>
+        <SystemSelect
+          value={ageFilter}
+          onChange={(event) => setAgeFilter(event.target.value)}
+          aria-label="Давность судебной синхронизации"
+          className="h-10 rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+        >
+          {AGE_OPTIONS.map((option) => (
             <option key={option.value} value={option.value}>{option.label}</option>
           ))}
         </SystemSelect>
@@ -156,13 +233,14 @@ export function CourtSyncJournalSettings() {
         <div className="mt-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>
       ) : null}
 
-      <div className="mt-5 overflow-hidden rounded-2xl border border-gray-200">
+      <div className="mt-4 overflow-hidden rounded-2xl border border-gray-200">
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200 text-sm">
             <thead className="bg-gray-50 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
               <tr>
                 <th className="px-4 py-3">Дата</th>
                 <th className="px-4 py-3">Статус</th>
+                <th className="px-4 py-3">Источник</th>
                 <th className="px-4 py-3">Дело</th>
                 <th className="px-4 py-3">Суд</th>
                 <th className="px-4 py-3">Сообщение</th>
@@ -172,19 +250,26 @@ export function CourtSyncJournalSettings() {
             <tbody className="divide-y divide-gray-100 bg-white">
               {loading && items.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-sm text-gray-500">Загрузка журнала...</td>
+                  <td colSpan={7} className="px-4 py-8 text-center text-sm text-gray-500">Загрузка журнала...</td>
                 </tr>
               ) : items.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-sm text-gray-500">Записей судебной синхронизации не найдено.</td>
+                  <td colSpan={7} className="px-4 py-8 text-center text-sm text-gray-500">Записей судебной синхронизации не найдено.</td>
                 </tr>
               ) : items.map((item) => (
                 <tr key={item.id} className="align-top">
-                  <td className="whitespace-nowrap px-4 py-3 text-gray-600">{formatDateTime(item.occurredAt)}</td>
+                  <td className="whitespace-nowrap px-4 py-3 text-gray-600">
+                    <div>{formatDateTime(item.occurredAt)}</div>
+                    <div className="mt-1 text-xs text-gray-400">{formatAge(item.ageDays)}</div>
+                  </td>
                   <td className="px-4 py-3">
                     <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${getStatusClass(item.status)}`}>
                       {getStatusLabel(item.status)}
                     </span>
+                  </td>
+                  <td className="px-4 py-3 text-gray-600">
+                    <div className="font-medium text-gray-800">{item.providerLabel || 'Не определён'}</div>
+                    <div className="mt-1 text-xs text-gray-400">{item.providerKey || 'other'}</div>
                   </td>
                   <td className="px-4 py-3">
                     <div className="font-semibold text-gray-900">{item.clientCaseTitle || `Дело #${item.clientCaseId}`}</div>

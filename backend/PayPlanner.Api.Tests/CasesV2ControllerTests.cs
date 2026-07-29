@@ -6374,6 +6374,34 @@ public class CasesV2ControllerTests
         Assert.Contains(logs, item => item.Status == "external-sync-error");
         Assert.All(logs, item => Assert.Equal("Земцов - суд", item.ClientCaseTitle));
         Assert.All(logs, item => Assert.Equal("Земцов Виктор Александрович", item.OwnerName));
+        Assert.All(logs, item => Assert.Equal("sudrf", item.ProviderKey));
+        Assert.All(logs, item => Assert.Equal("ГАС Правосудие / sudrf.ru", item.ProviderLabel));
+        Assert.Single(logs, item => item.HasError);
+        Assert.All(logs, item => Assert.NotNull(item.AgeDays));
+
+        var filteredResult = await controller.GetCourtSyncJournal(
+            take: 50,
+            status: null,
+            search: "ВРЕМЕННО НЕДОСТУПЕН",
+            ct: CancellationToken.None,
+            provider: "sudrf",
+            hasError: true,
+            minAgeDays: 30);
+        var filteredOk = Assert.IsType<OkObjectResult>(filteredResult.Result);
+        var filteredLogs = Assert.IsAssignableFrom<IReadOnlyList<CasesV2Controller.ClientCaseCourtSyncJournalEntryDto>>(filteredOk.Value);
+        var filteredLog = Assert.Single(filteredLogs);
+        Assert.Equal("external-sync-error", filteredLog.Status);
+        Assert.True(filteredLog.HasError);
+
+        var recentResult = await controller.GetCourtSyncJournal(
+            take: 50,
+            status: null,
+            search: null,
+            ct: CancellationToken.None,
+            provider: "sudrf",
+            maxAgeDays: 30);
+        var recentOk = Assert.IsType<OkObjectResult>(recentResult.Result);
+        Assert.Empty(Assert.IsAssignableFrom<IReadOnlyList<CasesV2Controller.ClientCaseCourtSyncJournalEntryDto>>(recentOk.Value));
     }
 
     [Fact]

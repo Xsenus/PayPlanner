@@ -6677,7 +6677,11 @@ public class CasesV2Controller : ControllerBase
         [FromQuery] int take = 50,
         [FromQuery] string? status = null,
         [FromQuery] string? search = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        [FromQuery] string? provider = null,
+        [FromQuery] bool? hasError = null,
+        [FromQuery] int? maxAgeDays = null,
+        [FromQuery] int? minAgeDays = null)
     {
         if (await RequireCasesPermissionAsync(static permission => permission.CanView, ct) is { } forbidden)
         {
@@ -6693,11 +6697,45 @@ public class CasesV2Controller : ControllerBase
         var limit = Math.Clamp(take, 1, 200);
         var statusFilter = NormalizeOptional(status);
         var searchFilter = NormalizeOptional(search);
+        var providerFilter = NormalizeOptional(provider);
+        var normalizedMaxAgeDays = maxAgeDays.HasValue ? Math.Clamp(maxAgeDays.Value, 0, 3650) : (int?)null;
+        var normalizedMinAgeDays = minAgeDays.HasValue ? Math.Clamp(minAgeDays.Value, 0, 3650) : (int?)null;
+        var utcNow = DateTime.UtcNow;
 
-        var caseRows = await _db.ClientCases
+        var caseQuery = _db.ClientCases
             .ApplyClientCaseVisibility(visibility)
             .AsNoTracking()
-            .Where(item => item.EventHistory != null && item.EventHistory != string.Empty)
+            .Where(item => item.EventHistory != null && item.EventHistory != string.Empty);
+
+        if (!string.IsNullOrWhiteSpace(searchFilter))
+        {
+            var normalizedSearch = searchFilter.ToLower();
+            caseQuery = caseQuery.Where(item =>
+                item.Title.ToLower().Contains(normalizedSearch)
+                || item.CaseNumber.ToLower().Contains(normalizedSearch)
+                || item.CourtName.ToLower().Contains(normalizedSearch)
+                || item.CourtCaseNumber.ToLower().Contains(normalizedSearch)
+                || item.CourtUrl.ToLower().Contains(normalizedSearch)
+                || item.EventHistory.ToLower().Contains(normalizedSearch)
+                || (item.Client != null && item.Client.Name.ToLower().Contains(normalizedSearch))
+                || (item.LegalEntity != null
+                    && ((item.LegalEntity.ShortName != null && item.LegalEntity.ShortName.ToLower().Contains(normalizedSearch))
+                        || (item.LegalEntity.FullName != null && item.LegalEntity.FullName.ToLower().Contains(normalizedSearch)))));
+        }
+
+        if (string.Equals(statusFilter, "external-sync-error", StringComparison.OrdinalIgnoreCase)
+            || hasError == true)
+        {
+            caseQuery = caseQuery.Where(item => item.EventHistory.Contains("не выполнена"));
+        }
+        else if (string.Equals(statusFilter, "manual-check-recorded", StringComparison.OrdinalIgnoreCase))
+        {
+            caseQuery = caseQuery.Where(item => item.EventHistory.Contains("зафиксирована"));
+        }
+
+        var caseRows = await caseQuery
+            .OrderByDescending(item => item.Id)
+            .Take(5000)
             .Select(item => new CourtSyncJournalCaseRow(
                 item.Id,
                 item.Title,
@@ -6717,12 +6755,22 @@ public class CasesV2Controller : ControllerBase
 
         var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
         var entries = caseRows
-            .SelectMany(row => SplitCaseHistory(row.EventHistory)
-                .Select((line, index) => new { row, line, index })
-                .Where(item => IsCourtSyncHistoryLine(item.line))
-                .Select(item => MapCourtSyncJournalEntry(item.row, item.line, item.index, timeZone)))
+            .SelectMany(row =>
+            {
+                var providerInfo = ResolveCourtSyncJournalProvider(row.CourtUrl);
+                return SplitCaseHistory(row.EventHistory)
+                    .Select((line, index) => new { row, line, index })
+                    .Where(item => IsCourtSyncHistoryLine(item.line))
+                    .Select(item => MapCourtSyncJournalEntry(item.row, item.line, item.index, timeZone, providerInfo, utcNow));
+            })
             .Where(item => string.IsNullOrWhiteSpace(statusFilter) || string.Equals(item.Status, statusFilter, StringComparison.OrdinalIgnoreCase))
             .Where(item => string.IsNullOrWhiteSpace(searchFilter) || CourtSyncJournalEntryMatches(item, searchFilter))
+            .Where(item => string.IsNullOrWhiteSpace(providerFilter) || string.Equals(item.ProviderKey, providerFilter, StringComparison.OrdinalIgnoreCase))
+            .Where(item => !hasError.HasValue || item.HasError == hasError.Value)
+            .Where(item => !normalizedMaxAgeDays.HasValue
+                || (item.OccurredAt.HasValue && item.OccurredAt.Value >= utcNow.AddDays(-normalizedMaxAgeDays.Value)))
+            .Where(item => !normalizedMinAgeDays.HasValue
+                || (item.OccurredAt.HasValue && item.OccurredAt.Value < utcNow.AddDays(-normalizedMinAgeDays.Value)))
             .OrderByDescending(item => item.OccurredAt ?? DateTime.MinValue)
             .ThenByDescending(item => item.ClientCaseId)
             .ThenByDescending(item => item.LogId)
@@ -12171,9 +12219,49 @@ public class CasesV2Controller : ControllerBase
         });
     }
 
-    private static ClientCaseCourtSyncJournalEntryDto MapCourtSyncJournalEntry(CourtSyncJournalCaseRow row, string line, int index, TimeZoneInfo timeZone)
+    private CourtSyncJournalProviderInfo ResolveCourtSyncJournalProvider(string? sourceUrl)
+    {
+        if (string.IsNullOrWhiteSpace(sourceUrl))
+        {
+            return new CourtSyncJournalProviderInfo("unbound", "Без привязки");
+        }
+
+        var activeProvider = ResolveCourtSyncProvider(sourceUrl);
+        if (activeProvider is not null)
+        {
+            return new CourtSyncJournalProviderInfo(activeProvider.Key, activeProvider.Label);
+        }
+
+        if (Uri.TryCreate(sourceUrl, UriKind.Absolute, out var uri))
+        {
+            var externalCourtSyncEnabled = _featureFlags?.CurrentValue.Legal.ExternalCourtSync ?? false;
+            var descriptors = _courtSyncProviderRegistry?.GetProviders()
+                ?? CourtSyncProviderRegistry.GetDefaultDescriptors(externalCourtSyncEnabled);
+            var descriptor = descriptors.FirstOrDefault(item =>
+                item.SupportedHosts.Any(host =>
+                    uri.Host.Equals(host, StringComparison.OrdinalIgnoreCase)
+                    || uri.Host.EndsWith($".{host}", StringComparison.OrdinalIgnoreCase)));
+            if (descriptor is not null)
+            {
+                return new CourtSyncJournalProviderInfo(descriptor.Key, descriptor.Label);
+            }
+        }
+
+        return new CourtSyncJournalProviderInfo("other", "Другой источник");
+    }
+
+    private static ClientCaseCourtSyncJournalEntryDto MapCourtSyncJournalEntry(
+        CourtSyncJournalCaseRow row,
+        string line,
+        int index,
+        TimeZoneInfo timeZone,
+        CourtSyncJournalProviderInfo provider,
+        DateTime utcNow)
     {
         var log = MapCourtSyncLog(row.ClientCaseId, line, index, timeZone);
+        var ageDays = log.OccurredAt.HasValue
+            ? Math.Max(0, (int)Math.Floor((utcNow - log.OccurredAt.Value).TotalDays))
+            : (int?)null;
         return new ClientCaseCourtSyncJournalEntryDto
         {
             Id = $"{row.ClientCaseId}-{log.Id}",
@@ -12185,9 +12273,13 @@ public class CasesV2Controller : ControllerBase
             CourtName = row.CourtName,
             CourtCaseNumber = row.CourtCaseNumber,
             CourtUrl = row.CourtUrl,
+            ProviderKey = provider.Key,
+            ProviderLabel = provider.Label,
             Status = log.Status,
+            HasError = string.Equals(log.Status, "external-sync-error", StringComparison.OrdinalIgnoreCase),
             Message = log.Message,
             OccurredAt = log.OccurredAt,
+            AgeDays = ageDays,
             ActorName = log.ActorName,
         };
     }
@@ -13232,9 +13324,13 @@ public class CasesV2Controller : ControllerBase
         public string CourtName { get; set; } = string.Empty;
         public string CourtCaseNumber { get; set; } = string.Empty;
         public string CourtUrl { get; set; } = string.Empty;
+        public string ProviderKey { get; set; } = string.Empty;
+        public string ProviderLabel { get; set; } = string.Empty;
         public string Status { get; set; } = string.Empty;
+        public bool HasError { get; set; }
         public string Message { get; set; } = string.Empty;
         public DateTime? OccurredAt { get; set; }
+        public int? AgeDays { get; set; }
         public string? ActorName { get; set; }
     }
 
@@ -13454,6 +13550,10 @@ public class CasesV2Controller : ControllerBase
         string CourtCaseNumber,
         string CourtUrl,
         string EventHistory);
+
+    private readonly record struct CourtSyncJournalProviderInfo(
+        string Key,
+        string Label);
 
     private readonly record struct SudrfCourtActDeadlineSpec(
         string DeadlineType,

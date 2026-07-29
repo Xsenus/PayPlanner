@@ -1257,9 +1257,13 @@ export interface ClientCaseCourtSyncJournalEntry {
   courtName?: string | null;
   courtCaseNumber?: string | null;
   courtUrl?: string | null;
+  providerKey: string;
+  providerLabel: string;
   status: ClientCaseCourtSyncLog['status'];
+  hasError: boolean;
   message: string;
   occurredAt?: string | null;
+  ageDays?: number | null;
   actorName?: string | null;
 }
 
