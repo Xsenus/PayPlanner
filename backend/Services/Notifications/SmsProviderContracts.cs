@@ -37,7 +37,8 @@ public sealed record SmsProviderSendResult(
     string? RawProviderStatus = null,
     string? ErrorCode = null,
     string? ErrorMessage = null,
-    TimeSpan? RetryAfter = null);
+    TimeSpan? RetryAfter = null,
+    bool IsTransient = false);
 
 public sealed record SmsProviderMessageStatusResult(
     string ProviderMessageId,
