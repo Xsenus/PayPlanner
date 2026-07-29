@@ -5793,6 +5793,7 @@ public class CasesV2ControllerTests
         Assert.Equal(new DateTime(2026, 5, 27, 15, 0, 0), courtEvent.ScheduledAt);
         Assert.Equal("зал 12", courtEvent.Courtroom);
         Assert.Equal("Иванова И.И.", courtEvent.SecretaryName);
+        Assert.StartsWith("sudrf-event-", courtEvent.ExternalKey, StringComparison.Ordinal);
 
         var history = await db.ClientCaseCourtEventHistory.SingleAsync(item => item.ClientCaseCourtEventId == courtEvent.Id);
         Assert.Contains("ГАС «Правосудие»", history.Summary, StringComparison.Ordinal);
@@ -5837,6 +5838,39 @@ public class CasesV2ControllerTests
         Assert.Equal(clientCase.Id, deadlineNotification.ObjectId);
         Assert.Contains("Срок кассационного обжалования", deadlineNotification.BodyPreview, StringComparison.Ordinal);
         Assert.Contains($"\"proceduralDeadlineId\":{deadline.Id}", deadlineNotification.MetadataJson, StringComparison.Ordinal);
+
+        var changedResultController = CreateController(
+            db,
+            owner,
+            sudrfCourtSyncService: new FixedSudrfCourtSyncService(new SudrfCourtCaseData
+            {
+                SourceUrl = clientCase.CourtUrl,
+                CourtName = courtData.CourtName,
+                CaseNumber = courtData.CaseNumber,
+                JudgeName = courtData.JudgeName,
+                Instance = courtData.Instance,
+                CourtActs =
+                [
+                    new()
+                    {
+                        Title = "Апелляционное определение",
+                        ActDate = new DateTime(2026, 6, 1),
+                        PostedAt = new DateTime(2026, 6, 3),
+                        Result = "Результат дополнен после публикации",
+                        Summary = "Апелляционное определение; обновлённый результат",
+                        SourceUrl = clientCase.CourtUrl,
+                    },
+                ],
+            }),
+            notificationService: CreateNotificationService(db));
+
+        var repeatedResult = await changedResultController.RunCourtSync(clientCase.Id, null, CancellationToken.None);
+        var repeatedOk = Assert.IsType<OkObjectResult>(repeatedResult.Result);
+        var repeatedDto = Assert.IsType<CasesV2Controller.ClientCaseCourtSyncRunDto>(repeatedOk.Value);
+        Assert.Equal(0, repeatedDto.CreatedCourtActDocuments);
+        Assert.Equal(1, await db.ClientCaseDocuments.CountAsync(item =>
+            item.ClientCaseId == clientCase.Id
+            && item.DocumentType == "Судебный акт"));
     }
 
     [Fact]
@@ -6131,6 +6165,7 @@ public class CasesV2ControllerTests
         Assert.Contains("новых изменений не найдено", dto.Message, StringComparison.Ordinal);
 
         Assert.Equal(1, await db.ClientCaseCourtEvents.CountAsync(item => item.ClientCaseId == clientCase.Id));
+        Assert.StartsWith("sudrf-event-", courtEvent.ExternalKey, StringComparison.Ordinal);
         Assert.Empty(await db.ClientCaseCourtEventHistory.Where(item => item.ClientCaseCourtEventId == courtEvent.Id).ToListAsync());
         Assert.Empty(await db.UserNotifications.ToListAsync());
     }

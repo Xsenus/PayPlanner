@@ -7253,6 +7253,10 @@ public class CasesV2Controller : ControllerBase
             var existingEvents = await _db.ClientCaseCourtEvents
                 .Where(item => item.ClientCaseId == clientCase.Id)
                 .ToListAsync(ct);
+            var existingEventsByExternalKey = existingEvents
+                .Where(static item => !string.IsNullOrWhiteSpace(item.ExternalKey))
+                .GroupBy(static item => item.ExternalKey!, StringComparer.Ordinal)
+                .ToDictionary(static group => group.Key, static group => group.First(), StringComparer.Ordinal);
 
             foreach (var hearing in hearings)
             {
@@ -7260,8 +7264,10 @@ public class CasesV2Controller : ControllerBase
                 var allDay = sourceScheduledAt.TimeOfDay == TimeSpan.Zero;
                 var scheduledAt = NormalizeCourtSyncSourceDateTime(sourceScheduledAt, sourceTimeZone, allDay);
                 var title = Truncate(NormalizeOptional(hearing.Title) ?? "Судебное заседание", 200);
-                var existing = existingEvents.FirstOrDefault(item =>
-                    CourtEventMatchesSudrfHearing(item, scheduledAt, title, courtData, hearing));
+                var externalKey = BuildSudrfCourtEventExternalKey(courtData, sourceScheduledAt, title);
+                var existing = existingEventsByExternalKey.GetValueOrDefault(externalKey)
+                    ?? existingEvents.FirstOrDefault(item =>
+                        CourtEventMatchesSudrfHearing(item, scheduledAt, title, courtData, hearing));
                 var summary = Truncate(hearing.SourceSummary, 1000);
 
                 if (existing is null)
@@ -7283,6 +7289,7 @@ public class CasesV2Controller : ControllerBase
                         MovementStatus = ResolveSudrfMovementStatus(hearing.Result),
                         ResultSummary = Truncate(hearing.Result, 1000),
                         SourceType = "sudrf",
+                        ExternalKey = externalKey,
                         CreatedAt = checkedAt,
                         CreatedByUserId = actorUserId,
                         CreatedByUserName = Truncate(actorName, 256),
@@ -7292,11 +7299,17 @@ public class CasesV2Controller : ControllerBase
                     };
                     _db.ClientCaseCourtEvents.Add(courtEvent);
                     existingEvents.Add(courtEvent);
+                    existingEventsByExternalKey[externalKey] = courtEvent;
                     createdEvents.Add(courtEvent);
                     continue;
                 }
 
                 var updated = false;
+                if (string.IsNullOrWhiteSpace(existing.ExternalKey))
+                {
+                    existing.ExternalKey = externalKey;
+                    existingEventsByExternalKey[externalKey] = existing;
+                }
                 updated |= UpdateCourtEventString(existing.SourceType, "sudrf", value => existing.SourceType = value, 64);
                 updated |= UpdateCourtEventString(existing.CourtName, courtData.CourtName, value => existing.CourtName = value, 200);
                 updated |= UpdateCourtEventString(existing.CourtCaseNumber, courtData.CaseNumber, value => existing.CourtCaseNumber = value, 100);
@@ -7394,14 +7407,43 @@ public class CasesV2Controller : ControllerBase
             }
         }
 
-        foreach (var courtAct in courtData.CourtActs)
-        {
-            var documentKey = BuildSudrfCourtActDocumentKey(courtAct);
-            var existingDocument = await _db.ClientCaseDocuments
-                .Where(item => item.ClientCaseId == clientCase.Id && item.DocumentKey == documentKey)
+        var courtActsWithKeys = courtData.CourtActs
+            .Select(courtAct => new
+            {
+                CourtAct = courtAct,
+                DocumentKey = BuildSudrfCourtActDocumentKey(courtAct),
+                LegacyDocumentKey = BuildLegacySudrfCourtActDocumentKey(courtAct),
+                FileName = BuildSudrfCourtActFileName(courtAct),
+            })
+            .ToList();
+        var courtActDocumentKeys = courtActsWithKeys
+            .SelectMany(static item => new[] { item.DocumentKey, item.LegacyDocumentKey })
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        var existingCourtActDocuments = courtActDocumentKeys.Count == 0
+            ? []
+            : (await _db.ClientCaseDocuments
+                .Where(item =>
+                    item.ClientCaseId == clientCase.Id
+                    && (courtActDocumentKeys.Contains(item.DocumentKey)
+                        || item.DocumentType == "Судебный акт"))
                 .OrderByDescending(item => item.Version)
-                .FirstOrDefaultAsync(ct);
-            var document = existingDocument;
+                .ToListAsync(ct));
+        var existingCourtActDocumentsByKey = existingCourtActDocuments
+            .GroupBy(static item => item.DocumentKey, StringComparer.Ordinal)
+            .ToDictionary(static group => group.Key, static group => group.First(), StringComparer.Ordinal);
+        var existingCourtActDocumentsByFileName = existingCourtActDocuments
+            .Where(static item => item.DocumentType == "Судебный акт")
+            .GroupBy(static item => item.OriginalFileName, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(static group => group.Key, static group => group.First(), StringComparer.OrdinalIgnoreCase);
+
+        foreach (var courtActWithKey in courtActsWithKeys)
+        {
+            var courtAct = courtActWithKey.CourtAct;
+            var documentKey = courtActWithKey.DocumentKey;
+            var document = existingCourtActDocumentsByKey.GetValueOrDefault(documentKey)
+                ?? existingCourtActDocumentsByKey.GetValueOrDefault(courtActWithKey.LegacyDocumentKey)
+                ?? existingCourtActDocumentsByFileName.GetValueOrDefault(courtActWithKey.FileName);
             if (document is null)
             {
                 document = await SaveGeneratedCaseDocumentAsync(
@@ -7409,7 +7451,7 @@ public class CasesV2Controller : ControllerBase
                     documentKey,
                     "Судебный акт",
                     "received",
-                    BuildSudrfCourtActFileName(courtAct),
+                    courtActWithKey.FileName,
                     BuildSudrfCourtActHtml(clientCase, courtData, courtAct),
                     "Created",
                     $"Судебный акт «{courtAct.Title}» добавлен из ГАС «Правосудие».",
@@ -7417,6 +7459,13 @@ public class CasesV2Controller : ControllerBase
                     ct);
                 createdCourtActDocuments++;
             }
+            else if (!string.Equals(document.DocumentKey, documentKey, StringComparison.Ordinal))
+            {
+                document.DocumentKey = documentKey;
+            }
+
+            existingCourtActDocumentsByKey[documentKey] = document;
+            existingCourtActDocumentsByFileName[courtActWithKey.FileName] = document;
 
             createdProceduralDeadlines += await SyncSudrfCourtActDeadlinesAsync(
                 clientCase,
@@ -7636,9 +7685,39 @@ public class CasesV2Controller : ControllerBase
 
     private static string BuildSudrfCourtActDocumentKey(SudrfCourtAct courtAct)
     {
+        var hash = BuildStableCourtSyncHash(
+            courtAct.SourceUrl,
+            NormalizeCourtSyncText(courtAct.Title),
+            courtAct.ActDate?.ToString("O", CultureInfo.InvariantCulture));
+        return $"sudrf-act-{hash}";
+    }
+
+    private static string BuildLegacySudrfCourtActDocumentKey(SudrfCourtAct courtAct)
+    {
         var raw = $"{courtAct.Title}|{courtAct.ActDate:yyyy-MM-dd}|{courtAct.Result}|{courtAct.SourceUrl}";
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(raw))).ToLowerInvariant();
         return $"sudrf-act-{hash[..24]}";
+    }
+
+    private static string BuildSudrfCourtEventExternalKey(
+        SudrfCourtCaseData courtData,
+        DateTime sourceScheduledAt,
+        string title)
+        => $"sudrf-event-{BuildStableCourtSyncHash(
+            courtData.SourceUrl,
+            NormalizeCourtSyncText(courtData.CaseNumber),
+            NormalizeCourtSyncText(courtData.Instance),
+            sourceScheduledAt.ToString("O", CultureInfo.InvariantCulture),
+            NormalizeCourtSyncText(title))}";
+
+    private static string BuildStableCourtSyncHash(params string?[] parts)
+    {
+        var raw = string.Join(
+            '\u001f',
+            parts.Select(static part => NormalizeOptional(part)?.Trim() ?? string.Empty));
+        return Convert
+            .ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(raw)))
+            .ToLowerInvariant()[..32];
     }
 
     private static string BuildSudrfCourtActFileName(SudrfCourtAct courtAct)

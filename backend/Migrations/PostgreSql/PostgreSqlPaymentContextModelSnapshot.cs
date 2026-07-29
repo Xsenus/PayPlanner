@@ -1862,6 +1862,10 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
 
+                    b.Property<string>("ExternalKey")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
                     b.Property<bool>("IsDeleted")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")
@@ -1948,6 +1952,10 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.HasIndex("ClientCaseId", "MovementStatus", "ScheduledAt")
                         .HasDatabaseName("IX_ClientCaseCourtEvents_Case_Status_ScheduledAt");
+
+                    b.HasIndex("ClientCaseId", "SourceType", "ExternalKey")
+                        .IsUnique()
+                        .HasDatabaseName("UX_ClientCaseCourtEvents_Case_Source_ExternalKey");
 
                     b.ToTable("ClientCaseCourtEvents");
                 });

@@ -1485,6 +1485,7 @@ public class PaymentContext : DbContext
             entity.Property(e => e.MovementStatus).HasMaxLength(64).IsRequired();
             entity.Property(e => e.ResultSummary).HasMaxLength(1000);
             entity.Property(e => e.SourceType).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.ExternalKey).HasMaxLength(128);
             entity.Property(e => e.CreatedByUserName).HasMaxLength(256);
             entity.Property(e => e.UpdatedByUserName).HasMaxLength(256);
 
@@ -1512,6 +1513,9 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.ScheduledAt).HasDatabaseName("IX_ClientCaseCourtEvents_ScheduledAt");
             entity.HasIndex(e => e.EventType).HasDatabaseName("IX_ClientCaseCourtEvents_EventType");
             entity.HasIndex(e => e.MovementStatus).HasDatabaseName("IX_ClientCaseCourtEvents_MovementStatus");
+            entity.HasIndex(e => new { e.ClientCaseId, e.SourceType, e.ExternalKey })
+                .IsUnique()
+                .HasDatabaseName("UX_ClientCaseCourtEvents_Case_Source_ExternalKey");
             entity.HasIndex(e => e.CourtId).HasDatabaseName("IX_ClientCaseCourtEvents_CourtId");
             entity.HasIndex(e => e.ClientCaseDocumentId).HasDatabaseName("IX_ClientCaseCourtEvents_DocumentId");
             entity.HasIndex(e => e.ProceduralDeadlineId).HasDatabaseName("IX_ClientCaseCourtEvents_DeadlineId");

@@ -1821,6 +1821,10 @@ namespace PayPlanner.Api.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("ExternalKey")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
                     b.Property<bool>("IsDeleted")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER")
@@ -1907,6 +1911,10 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasIndex("ClientCaseId", "MovementStatus", "ScheduledAt")
                         .HasDatabaseName("IX_ClientCaseCourtEvents_Case_Status_ScheduledAt");
+
+                    b.HasIndex("ClientCaseId", "SourceType", "ExternalKey")
+                        .IsUnique()
+                        .HasDatabaseName("UX_ClientCaseCourtEvents_Case_Source_ExternalKey");
 
                     b.ToTable("ClientCaseCourtEvents");
                 });

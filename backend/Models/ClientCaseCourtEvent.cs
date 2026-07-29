@@ -52,6 +52,9 @@ public class ClientCaseCourtEvent
     [Required, MaxLength(64)]
     public string SourceType { get; set; } = "manual";
 
+    [MaxLength(128)]
+    public string? ExternalKey { get; set; }
+
     public int? ClientCaseDocumentId { get; set; }
     public ClientCaseDocument? ClientCaseDocument { get; set; }
 
