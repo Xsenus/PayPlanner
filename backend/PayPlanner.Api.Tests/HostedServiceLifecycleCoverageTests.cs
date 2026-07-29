@@ -22,6 +22,7 @@ public class HostedServiceLifecycleCoverageTests
         "TelegramBotPollingService",
         "MoneyBalanceReconciliationSchedulerService",
         "ClientCaseCourtSyncSchedulerService",
+        "CourtSyncMetricsRollupService",
         "UserActivityRetentionService",
         "YandexDiskCrmSyncSchedulerService",
     ];

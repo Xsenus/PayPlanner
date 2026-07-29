@@ -74,6 +74,18 @@ describe('SystemJobDiagnosticsSettings', () => {
             duplicateSkipCount: 1,
             documentCount: 1,
             documentBytes: 4096,
+            retained: {
+              retentionDays: 90,
+              periodStartedOn: '2026-05-01',
+              periodEndedOn: '2026-05-26',
+              requestCount: 120,
+              failedRequestCount: 3,
+              averageLatencyMs: 180,
+              maxLatencyMs: 450,
+              duplicateSkipCount: 8,
+              documentCount: 12,
+              documentBytes: 16384,
+            },
           },
         },
       ],
@@ -109,10 +121,13 @@ describe('SystemJobDiagnosticsSettings', () => {
     expect(screen.getByText('Всего сервисов')).toBeTruthy();
     expect(screen.getByText('Ожидает условий')).toBeTruthy();
     expect(screen.getByText('Метрики судебных источников')).toBeTruthy();
-    expect(screen.getByText('Запросы')).toBeTruthy();
-    expect(screen.getByText('Повторы исключены')).toBeTruthy();
+    expect(screen.getAllByText('Запросы')).toHaveLength(2);
+    expect(screen.getAllByText('Повторы исключены')).toHaveLength(2);
     expect(screen.getByText('200 мс / 280 мс')).toBeTruthy();
     expect(screen.getByText('4.0 КБ')).toBeTruthy();
+    expect(screen.getByText('Сводка за 90 дней')).toBeTruthy();
+    expect(screen.getByText('01.05.2026 — 26.05.2026')).toBeTruthy();
+    expect(screen.getByText('16.0 КБ')).toBeTruthy();
   });
 
   it('formats diagnostic timestamps in profile time zone', async () => {

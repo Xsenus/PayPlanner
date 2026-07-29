@@ -45,6 +45,11 @@ function formatBytes(bytes?: number | null) {
   return `${(safeBytes / (1024 * 1024)).toFixed(1)} МБ`;
 }
 
+function formatMetricDate(value?: string | null) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value ?? '');
+  return match ? `${match[3]}.${match[2]}.${match[1]}` : value || '—';
+}
+
 function getStatusClasses(status: string) {
   if (status === 'active') {
     return 'border-emerald-200 bg-emerald-50 text-emerald-700';
@@ -177,6 +182,31 @@ function JobDiagnosticsCard({
             <MetricValue label="Документы" value={item.courtSyncMetrics.documentCount} />
             <MetricValue label="Объём документов" value={formatBytes(item.courtSyncMetrics.documentBytes)} />
           </div>
+          {item.courtSyncMetrics.retained ? (
+            <div className="mt-3 border-t border-blue-100 pt-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h6 className="text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Сводка за {item.courtSyncMetrics.retained.retentionDays} дней
+                </h6>
+                <span className="text-xs text-slate-500">
+                  {item.courtSyncMetrics.retained.periodStartedOn && item.courtSyncMetrics.retained.periodEndedOn
+                    ? `${formatMetricDate(item.courtSyncMetrics.retained.periodStartedOn)} — ${formatMetricDate(item.courtSyncMetrics.retained.periodEndedOn)}`
+                    : 'Данные накопятся после синхронизации'}
+                </span>
+              </div>
+              <div className="mt-2 grid grid-cols-2 gap-2 text-sm sm:grid-cols-3 xl:grid-cols-6">
+                <MetricValue label="Запросы" value={item.courtSyncMetrics.retained.requestCount} />
+                <MetricValue label="Ошибки" value={item.courtSyncMetrics.retained.failedRequestCount} />
+                <MetricValue
+                  label="Средняя / максимум"
+                  value={`${formatDuration(item.courtSyncMetrics.retained.averageLatencyMs)} / ${formatDuration(item.courtSyncMetrics.retained.maxLatencyMs)}`}
+                />
+                <MetricValue label="Повторы исключены" value={item.courtSyncMetrics.retained.duplicateSkipCount} />
+                <MetricValue label="Документы" value={item.courtSyncMetrics.retained.documentCount} />
+                <MetricValue label="Объём документов" value={formatBytes(item.courtSyncMetrics.retained.documentBytes)} />
+              </div>
+            </div>
+          ) : null}
         </section>
       ) : null}
 

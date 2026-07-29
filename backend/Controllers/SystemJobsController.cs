@@ -156,6 +156,7 @@ public sealed class SystemJobsController : ControllerBase, IAsyncActionFilter
                 item.Key == ClientCaseCourtSyncSchedulerService.EnabledSettingKey ||
                 item.Key == ClientCaseCourtSyncSchedulerService.IntervalMinutesSettingKey ||
                 item.Key == ClientCaseCourtSyncSchedulerService.BatchSizeSettingKey ||
+                item.Key == CourtSyncMetricsRollupService.ArchiveSettingKey ||
                 item.Key == UserActivityRetentionDaysKey)
             .ToDictionaryAsync(item => item.Key, item => item.Value, ct);
 
@@ -1028,6 +1029,11 @@ public sealed class SystemJobsController : ControllerBase, IAsyncActionFilter
             _configuration.GetValue<int?>("LegalIntegrations:CourtSyncScheduler:BatchSize") ?? ClientCaseCourtSyncSchedulerService.DefaultBatchSize));
         var enabled = featureEnabled && settingEnabled;
         var metrics = _courtSyncMetrics?.GetSnapshot();
+        var retainedMetrics = CourtSyncMetricsRollupService.ReadSnapshot(
+            settings.GetValueOrDefault(CourtSyncMetricsRollupService.ArchiveSettingKey),
+            _configuration.GetValue(
+                "LegalIntegrations:CourtSyncMetrics:RetentionDays",
+                CourtSyncMetricsRollupService.DefaultRetentionDays));
         var eligibleCounts = _db.UseObjectAuditModel
             ? _db.Database.SqlQuery<int>($$"""
                 SELECT CAST(COUNT(*) AS INTEGER) AS "Value"
@@ -1088,6 +1094,19 @@ public sealed class SystemJobsController : ControllerBase, IAsyncActionFilter
                     DuplicateSkipCount = metrics.DuplicateSkipCount,
                     DocumentCount = metrics.DocumentCount,
                     DocumentBytes = metrics.DocumentBytes,
+                    Retained = new CourtSyncRetainedMetricsDto
+                    {
+                        RetentionDays = retainedMetrics.RetentionDays,
+                        PeriodStartedOn = retainedMetrics.PeriodStartedOn,
+                        PeriodEndedOn = retainedMetrics.PeriodEndedOn,
+                        RequestCount = retainedMetrics.RequestCount,
+                        FailedRequestCount = retainedMetrics.FailedRequestCount,
+                        AverageLatencyMs = retainedMetrics.AverageLatencyMs,
+                        MaxLatencyMs = retainedMetrics.MaxLatencyMs,
+                        DuplicateSkipCount = retainedMetrics.DuplicateSkipCount,
+                        DocumentCount = retainedMetrics.DocumentCount,
+                        DocumentBytes = retainedMetrics.DocumentBytes,
+                    },
                 },
         };
     }

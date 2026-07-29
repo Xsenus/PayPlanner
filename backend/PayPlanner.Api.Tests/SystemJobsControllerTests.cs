@@ -83,6 +83,31 @@ public class SystemJobsControllerTests
             new SystemSetting { Key = ClientCaseCourtSyncSchedulerService.EnabledSettingKey, Value = "true", CreatedAt = now, UpdatedAt = now },
             new SystemSetting { Key = ClientCaseCourtSyncSchedulerService.IntervalMinutesSettingKey, Value = "90", CreatedAt = now, UpdatedAt = now },
             new SystemSetting { Key = ClientCaseCourtSyncSchedulerService.BatchSizeSettingKey, Value = "12", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting
+            {
+                Key = CourtSyncMetricsRollupService.ArchiveSettingKey,
+                Value = JsonSerializer.Serialize(
+                    new CourtSyncMetricsArchive
+                    {
+                        Days =
+                        [
+                            new CourtSyncMetricsDailyBucket
+                            {
+                                Day = now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                                RequestCount = 20,
+                                FailedRequestCount = 2,
+                                TotalLatencyTicks = TimeSpan.FromSeconds(4).Ticks,
+                                MaxLatencyTicks = TimeSpan.FromMilliseconds(500).Ticks,
+                                DuplicateSkipCount = 3,
+                                DocumentCount = 4,
+                                DocumentBytes = 8_192,
+                            },
+                        ],
+                    },
+                    new JsonSerializerOptions(JsonSerializerDefaults.Web)),
+                CreatedAt = now,
+                UpdatedAt = now,
+            },
             new SystemSetting { Key = NotificationDeliveryRetentionService.EnabledSettingKey, Value = "true", CreatedAt = now, UpdatedAt = now },
             new SystemSetting { Key = NotificationDeliveryRetentionService.RetentionDaysSettingKey, Value = "30", CreatedAt = now, UpdatedAt = now },
             new SystemSetting { Key = NotificationDeliveryRetentionService.IntervalHoursSettingKey, Value = "12", CreatedAt = now, UpdatedAt = now },
@@ -334,6 +359,12 @@ public class SystemJobsControllerTests
         Assert.Equal(1, courtSyncMetricsDto.DuplicateSkipCount);
         Assert.Equal(1, courtSyncMetricsDto.DocumentCount);
         Assert.Equal(4_096, courtSyncMetricsDto.DocumentBytes);
+        Assert.NotNull(courtSyncMetricsDto.Retained);
+        Assert.Equal(20, courtSyncMetricsDto.Retained.RequestCount);
+        Assert.Equal(2, courtSyncMetricsDto.Retained.FailedRequestCount);
+        Assert.Equal(200, courtSyncMetricsDto.Retained.AverageLatencyMs);
+        Assert.Equal(500, courtSyncMetricsDto.Retained.MaxLatencyMs);
+        Assert.Equal(8_192, courtSyncMetricsDto.Retained.DocumentBytes);
         Assert.Contains(dto.Items, item => item.Key == "database-backup" && item.ManualRunEnabled);
         Assert.Contains(dto.Items, item => item.Key == "court-sync" && item.ManualRunEnabled);
         Assert.Contains(dto.Items, item => item.Key == "money-balance-reconciliation" && item.LastProcessedCount == 2);

@@ -1431,6 +1431,20 @@ export interface CourtSyncMetricsDto {
   duplicateSkipCount: number;
   documentCount: number;
   documentBytes: number;
+  retained?: CourtSyncRetainedMetricsDto | null;
+}
+
+export interface CourtSyncRetainedMetricsDto {
+  retentionDays: number;
+  periodStartedOn?: string | null;
+  periodEndedOn?: string | null;
+  requestCount: number;
+  failedRequestCount: number;
+  averageLatencyMs: number;
+  maxLatencyMs: number;
+  duplicateSkipCount: number;
+  documentCount: number;
+  documentBytes: number;
 }
 
 export interface SystemJobDiagnosticsDto {

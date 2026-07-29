@@ -42,6 +42,21 @@ public sealed class CourtSyncMetricsDto
     public long DuplicateSkipCount { get; init; }
     public long DocumentCount { get; init; }
     public long DocumentBytes { get; init; }
+    public CourtSyncRetainedMetricsDto? Retained { get; init; }
+}
+
+public sealed class CourtSyncRetainedMetricsDto
+{
+    public int RetentionDays { get; init; }
+    public string? PeriodStartedOn { get; init; }
+    public string? PeriodEndedOn { get; init; }
+    public long RequestCount { get; init; }
+    public long FailedRequestCount { get; init; }
+    public double AverageLatencyMs { get; init; }
+    public double MaxLatencyMs { get; init; }
+    public long DuplicateSkipCount { get; init; }
+    public long DocumentCount { get; init; }
+    public long DocumentBytes { get; init; }
 }
 
 public sealed class SystemJobManualRunResultDto

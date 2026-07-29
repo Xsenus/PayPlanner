@@ -163,6 +163,7 @@ builder.Services.AddSingleton<IInvoiceDocumentPdfService, InvoiceDocumentPdfServ
 builder.Services.AddSingleton<DatabaseBackupService>();
 builder.Services.AddSingleton<ISystemJobRunStateService, SystemJobRunStateService>();
 builder.Services.AddSingleton<CourtSyncMetrics>();
+builder.Services.AddSingleton<CourtSyncMetricsRollupService>();
 builder.Services.Configure<AppFeatureFlagsOptions>(
     builder.Configuration.GetSection(AppFeatureFlagsOptions.SectionName));
 builder.Services.Configure<DadataOptions>(builder.Configuration.GetSection("DaData"));
@@ -224,6 +225,7 @@ builder.Services.AddSingleton<MoneyBalanceReconciliationSchedulerService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<MoneyBalanceReconciliationSchedulerService>());
 builder.Services.AddSingleton<ClientCaseCourtSyncSchedulerService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<ClientCaseCourtSyncSchedulerService>());
+builder.Services.AddHostedService(sp => sp.GetRequiredService<CourtSyncMetricsRollupService>());
 builder.Services.AddSingleton<UserActivityRetentionService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<UserActivityRetentionService>());
 builder.Services.AddSingleton<YandexDiskCrmSyncSchedulerService>();

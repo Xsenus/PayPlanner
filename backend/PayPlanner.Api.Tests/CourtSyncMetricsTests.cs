@@ -46,4 +46,27 @@ public sealed class CourtSyncMetricsTests
         Assert.Equal(499_500, snapshot.DocumentBytes);
         Assert.Equal(9, snapshot.MaxLatencyMs);
     }
+
+    [Fact]
+    public void PendingDelta_CanBeDrainedAndRestoredWithoutChangingRuntimeSnapshot()
+    {
+        var metrics = new CourtSyncMetrics();
+        metrics.RecordRequest(TimeSpan.FromMilliseconds(125), failed: true);
+        metrics.RecordDuplicateSkipped();
+        metrics.RecordDocument(512);
+
+        var delta = metrics.DrainPending();
+        Assert.Equal(1, delta.RequestCount);
+        Assert.Equal(1, delta.FailedRequestCount);
+        Assert.Equal(TimeSpan.FromMilliseconds(125).Ticks, delta.TotalLatencyTicks);
+        Assert.Equal(TimeSpan.FromMilliseconds(125).Ticks, delta.MaxLatencyTicks);
+        Assert.Equal(1, delta.DuplicateSkipCount);
+        Assert.Equal(1, delta.DocumentCount);
+        Assert.Equal(512, delta.DocumentBytes);
+        Assert.False(metrics.DrainPending().HasValues);
+
+        metrics.RestorePending(delta);
+        Assert.Equal(delta, metrics.DrainPending());
+        Assert.Equal(1, metrics.GetSnapshot().RequestCount);
+    }
 }
