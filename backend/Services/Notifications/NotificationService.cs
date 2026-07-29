@@ -15,6 +15,7 @@ namespace PayPlanner.Api.Services.Notifications;
 
 public sealed class NotificationService : INotificationService
 {
+    private static readonly SemaphoreSlim SmsRateLimitGate = new(1, 1);
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly CultureInfo RuCulture = CultureInfo.GetCultureInfo("ru-RU");
     private static readonly IReadOnlyList<NotificationPurposeDefinition> PurposeDefinitions =
@@ -3598,6 +3599,7 @@ public sealed class NotificationService : INotificationService
     {
         var normalizedChannels = NormalizeChannels(channels);
         SmsNotificationSettingsDto? smsSettings = null;
+        SmsRateLimitPolicy? smsRateLimitPolicy = null;
         NotificationMessage? protectedSmsMessage = null;
         SmsMessageValidationResult? smsValidation = null;
         var smsMaxUnitCount = SmsMessageValidator.DefaultMaxUnitCount;
@@ -3607,6 +3609,7 @@ public sealed class NotificationService : INotificationService
             smsSettings = _smsService is null
                 ? null
                 : await _smsService.GetSettingsAsync(cancellationToken);
+            smsRateLimitPolicy = SmsRateLimitPolicy.FromSettings(smsSettings);
             smsMaxUnitCount = smsSettings is { MaxMessageLength: > 0 }
                 ? smsSettings.MaxMessageLength
                 : SmsMessageValidator.DefaultMaxUnitCount;
@@ -3671,8 +3674,46 @@ public sealed class NotificationService : INotificationService
                     Status = NotificationDeliveryStatus.Pending,
                     CreatedAt = DateTime.UtcNow,
                 };
-                _context.NotificationDeliveries.Add(delivery);
-                await _context.SaveChangesAsync(cancellationToken);
+
+                if (channel == NotificationChannels.Sms)
+                {
+                    await SmsRateLimitGate.WaitAsync(cancellationToken);
+                    try
+                    {
+                        var policy = smsRateLimitPolicy ?? SmsRateLimitPolicy.FromSettings(smsSettings);
+                        var snapshot = await LoadSmsRateLimitSnapshotAsync(
+                            delivery.RecipientAddress,
+                            delivery.CreatedAt,
+                            cancellationToken);
+                        var decision = SmsRateLimitEvaluator.Evaluate(policy, snapshot);
+                        if (!decision.IsAllowed)
+                        {
+                            _logger.LogWarning(
+                                "SMS delivery was not created for event {EventKey}: {RateLimitReasonCode}. Daily {DailyCount}/{DailyLimit}, recipient {RecipientCount}/{RecipientLimit}, burst {BurstCount}/{BurstLimit}.",
+                                delivery.EventKey,
+                                decision.ReasonCode,
+                                snapshot.DailyCount,
+                                policy.DailyLimit,
+                                snapshot.RecipientDailyCount,
+                                policy.RecipientDailyLimit,
+                                snapshot.BurstCount,
+                                policy.BurstLimitPerMinute);
+                            continue;
+                        }
+
+                        _context.NotificationDeliveries.Add(delivery);
+                        await _context.SaveChangesAsync(cancellationToken);
+                    }
+                    finally
+                    {
+                        SmsRateLimitGate.Release();
+                    }
+                }
+                else
+                {
+                    _context.NotificationDeliveries.Add(delivery);
+                    await _context.SaveChangesAsync(cancellationToken);
+                }
 
                 try
                 {
@@ -3884,6 +3925,36 @@ public sealed class NotificationService : INotificationService
         }
 
         return recipient.TelegramChatId;
+    }
+
+    private async Task<SmsRateLimitSnapshot> LoadSmsRateLimitSnapshotAsync(
+        string recipientAddress,
+        DateTime nowUtc,
+        CancellationToken cancellationToken)
+    {
+        var dayStartUtc = nowUtc.AddDays(-1);
+        var burstStartUtc = nowUtc.AddMinutes(-1);
+        var counts = await _context.NotificationDeliveries
+            .AsNoTracking()
+            .Where(delivery =>
+                delivery.Channel == NotificationChannels.Sms
+                && delivery.Status != NotificationDeliveryStatus.Skipped
+                && delivery.CreatedAt >= dayStartUtc)
+            .GroupBy(_ => 1)
+            .Select(group => new
+            {
+                DailyCount = group.Count(),
+                RecipientDailyCount = group.Count(delivery => delivery.RecipientAddress == recipientAddress),
+                BurstCount = group.Count(delivery => delivery.CreatedAt >= burstStartUtc),
+            })
+            .SingleOrDefaultAsync(cancellationToken);
+
+        return counts is null
+            ? new SmsRateLimitSnapshot(0, 0, 0)
+            : new SmsRateLimitSnapshot(
+                counts.DailyCount,
+                counts.RecipientDailyCount,
+                counts.BurstCount);
     }
 
     private async Task<bool> HasCompletedDeliveryAsync(

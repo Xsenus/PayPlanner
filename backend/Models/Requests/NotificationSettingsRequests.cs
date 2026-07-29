@@ -29,6 +29,8 @@ public class UpdateSmsNotificationSettingsRequest
     public string? ApiToken { get; set; }
     public bool KeepExistingApiToken { get; set; } = true;
     public int? DailyLimit { get; set; }
+    public int? RecipientDailyLimit { get; set; }
+    public int? BurstLimitPerMinute { get; set; }
     public int? MaxMessageLength { get; set; }
     public string? Notes { get; set; }
 }

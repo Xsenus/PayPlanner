@@ -70,6 +70,8 @@ type SmsSettingsForm = {
   apiToken: string;
   keepExistingApiToken: boolean;
   dailyLimit: number;
+  recipientDailyLimit: number;
+  burstLimitPerMinute: number;
   maxMessageLength: number;
   notes: string;
 };
@@ -240,6 +242,8 @@ function smsFormFromSettings(settings?: NotificationSettingsDto | null): SmsSett
     apiToken: '',
     keepExistingApiToken: true,
     dailyLimit: settings?.sms.dailyLimit ?? 100,
+    recipientDailyLimit: settings?.sms.recipientDailyLimit ?? 5,
+    burstLimitPerMinute: settings?.sms.burstLimitPerMinute ?? 20,
     maxMessageLength: settings?.sms.maxMessageLength ?? 480,
     notes: settings?.sms.notes ?? '',
   };
@@ -584,6 +588,8 @@ export function NotificationSettings({ canEdit = true }: NotificationSettingsPro
         apiToken: smsForm.apiToken,
         keepExistingApiToken: smsForm.keepExistingApiToken,
         dailyLimit: smsForm.dailyLimit,
+        recipientDailyLimit: smsForm.recipientDailyLimit,
+        burstLimitPerMinute: smsForm.burstLimitPerMinute,
         maxMessageLength: smsForm.maxMessageLength,
         notes: smsForm.notes.trim(),
       });
@@ -1715,8 +1721,16 @@ function SmsSettingsPanel({
         </div>
         <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
           <div className="text-xs font-semibold uppercase text-gray-500">Лимиты</div>
-          <div className="mt-2 text-sm text-gray-700">{sms?.dailyLimit ?? form.dailyLimit} в день</div>
-          <div className="mt-1 text-xs text-gray-500">до {sms?.maxMessageLength ?? form.maxMessageLength} символов</div>
+          <div className="mt-2 text-sm text-gray-700">{sms?.dailyLimit ?? form.dailyLimit} за 24 часа</div>
+          <div className="mt-1 text-xs text-gray-500">
+            до {sms?.recipientDailyLimit ?? form.recipientDailyLimit} одному получателю за 24 часа
+          </div>
+          <div className="mt-1 text-xs text-gray-500">
+            до {sms?.burstLimitPerMinute ?? form.burstLimitPerMinute} в минуту
+          </div>
+          <div className="mt-1 text-xs text-gray-500">
+            до {sms?.maxMessageLength ?? form.maxMessageLength} единиц текста
+          </div>
         </div>
         <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
           <div className="text-xs font-semibold uppercase text-gray-500">Адаптер</div>
@@ -1776,7 +1790,7 @@ function SmsSettingsPanel({
           />
         </label>
         <label className="text-sm font-medium text-gray-700">
-          Дневной лимит
+          Общий лимит за 24 часа
           <input
             type="number"
             min={1}
@@ -1784,6 +1798,36 @@ function SmsSettingsPanel({
             value={form.dailyLimit}
             disabled={!canEdit || saving}
             onChange={(event) => setForm((prev) => ({ ...prev, dailyLimit: Number(event.target.value) || 100 }))}
+            className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+          />
+        </label>
+        <label className="text-sm font-medium text-gray-700">
+          Одному получателю за 24 часа
+          <input
+            type="number"
+            min={1}
+            max={1000}
+            value={form.recipientDailyLimit}
+            disabled={!canEdit || saving}
+            onChange={(event) => setForm((prev) => ({
+              ...prev,
+              recipientDailyLimit: Number(event.target.value) || 5,
+            }))}
+            className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+          />
+        </label>
+        <label className="text-sm font-medium text-gray-700">
+          Максимум SMS в минуту
+          <input
+            type="number"
+            min={1}
+            max={10000}
+            value={form.burstLimitPerMinute}
+            disabled={!canEdit || saving}
+            onChange={(event) => setForm((prev) => ({
+              ...prev,
+              burstLimitPerMinute: Number(event.target.value) || 20,
+            }))}
             className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
           />
         </label>

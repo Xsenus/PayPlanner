@@ -57,8 +57,10 @@ public class SmsNotificationSettingsDto
     public bool ApiTokenSet { get; set; }
     public string ProviderKey { get; set; } = string.Empty;
     public string SenderName { get; set; } = string.Empty;
-    public int DailyLimit { get; set; }
-    public int MaxMessageLength { get; set; }
+    public int DailyLimit { get; set; } = 100;
+    public int RecipientDailyLimit { get; set; } = 5;
+    public int BurstLimitPerMinute { get; set; } = 20;
+    public int MaxMessageLength { get; set; } = 480;
     public string Notes { get; set; } = string.Empty;
     public string StatusText { get; set; } = string.Empty;
 }

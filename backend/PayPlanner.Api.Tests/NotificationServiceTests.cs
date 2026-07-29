@@ -206,6 +206,8 @@ public class NotificationServiceTests
             ApiToken = "sms-secret-token",
             KeepExistingApiToken = false,
             DailyLimit = 250,
+            RecipientDailyLimit = 8,
+            BurstLimitPerMinute = 30,
             MaxMessageLength = 320,
             Notes = "Тестовые настройки SMS"
         });
@@ -218,6 +220,8 @@ public class NotificationServiceTests
         Assert.Equal("sms-ru", settings.Sms.ProviderKey);
         Assert.Equal("PayPlanner", settings.Sms.SenderName);
         Assert.Equal(250, settings.Sms.DailyLimit);
+        Assert.Equal(8, settings.Sms.RecipientDailyLimit);
+        Assert.Equal(30, settings.Sms.BurstLimitPerMinute);
         Assert.Equal(320, settings.Sms.MaxMessageLength);
         Assert.Contains("адаптер", settings.Sms.StatusText, StringComparison.OrdinalIgnoreCase);
 
@@ -229,12 +233,16 @@ public class NotificationServiceTests
             ApiToken = string.Empty,
             KeepExistingApiToken = true,
             DailyLimit = 10,
+            RecipientDailyLimit = 3,
+            BurstLimitPerMinute = 12,
             MaxMessageLength = 120
         });
 
         Assert.True(updated.Sms.ApiTokenSet);
         Assert.Equal("custom", updated.Sms.ProviderKey);
         Assert.Equal("PayPlanner CRM", updated.Sms.SenderName);
+        Assert.Equal(3, updated.Sms.RecipientDailyLimit);
+        Assert.Equal(12, updated.Sms.BurstLimitPerMinute);
 
         var deliveries = await service.SendToUserAsync(
             user.Id,
@@ -269,6 +277,8 @@ public class NotificationServiceTests
             ApiToken = "   ",
             KeepExistingApiToken = false,
             DailyLimit = -15,
+            RecipientDailyLimit = -10,
+            BurstLimitPerMinute = 0,
             MaxMessageLength = 10,
             Notes = new string('x', 600)
         });
@@ -278,6 +288,8 @@ public class NotificationServiceTests
         Assert.False(settings.Sms.ProviderConfigured);
         Assert.False(settings.Sms.ApiTokenSet);
         Assert.Equal(1, settings.Sms.DailyLimit);
+        Assert.Equal(1, settings.Sms.RecipientDailyLimit);
+        Assert.Equal(1, settings.Sms.BurstLimitPerMinute);
         Assert.Equal(70, settings.Sms.MaxMessageLength);
         Assert.Equal(500, settings.Sms.Notes.Length);
         Assert.Contains("провайдер", settings.Sms.StatusText, StringComparison.OrdinalIgnoreCase);
@@ -559,6 +571,80 @@ public class NotificationServiceTests
         Assert.DoesNotContain("123456", delivery.BodyPreview, StringComparison.Ordinal);
         Assert.DoesNotContain("123456", sentSms.Text, StringComparison.Ordinal);
         Assert.Contains("Подробности", sentSms.Text, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("daily")]
+    [InlineData("recipient")]
+    [InlineData("burst")]
+    public async Task SmsDelivery_DoesNotCreateDeliveryWhenRateLimitIsReached(string limitKind)
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(
+            db,
+            $"sms-limit-{limitKind}@example.com",
+            phoneNumber: "+7 (999) 333-00-44");
+        var smsService = new RecordingSmsNotificationService();
+        smsService.Settings.DailyLimit = limitKind == "daily" ? 1 : 100;
+        smsService.Settings.RecipientDailyLimit = limitKind == "recipient" ? 1 : 100;
+        smsService.Settings.BurstLimitPerMinute = limitKind == "burst" ? 1 : 100;
+        var existingRecipient = limitKind == "recipient"
+            ? "+79993330044"
+            : "+79990000000";
+        await CreateSmsDeliveryAsync(
+            db,
+            existingRecipient,
+            NotificationDeliveryStatus.Sent,
+            DateTime.UtcNow.AddSeconds(-10));
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            smsNotificationService: smsService);
+
+        var deliveries = await service.SendToUserAsync(
+            user.Id,
+            new NotificationMessage("Лимит", "Проверка ограничения SMS"),
+            [NotificationChannels.Sms],
+            $"sms:test:limit:{limitKind}");
+
+        Assert.Empty(deliveries);
+        Assert.Empty(smsService.Messages);
+        Assert.Equal(1, await db.NotificationDeliveries.CountAsync());
+    }
+
+    [Fact]
+    public async Task SmsDelivery_DoesNotCountSkippedDeliveryAgainstLimits()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(
+            db,
+            "sms-limit-skipped@example.com",
+            phoneNumber: "+7 (999) 444-00-55");
+        await CreateSmsDeliveryAsync(
+            db,
+            "+79994440055",
+            NotificationDeliveryStatus.Skipped,
+            DateTime.UtcNow.AddSeconds(-10));
+        var smsService = new RecordingSmsNotificationService();
+        smsService.Settings.DailyLimit = 1;
+        smsService.Settings.RecipientDailyLimit = 1;
+        smsService.Settings.BurstLimitPerMinute = 1;
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            smsNotificationService: smsService);
+
+        var deliveries = await service.SendToUserAsync(
+            user.Id,
+            new NotificationMessage("Лимит", "Разрешенное SMS"),
+            [NotificationChannels.Sms],
+            "sms:test:limit:skipped");
+
+        Assert.Single(deliveries);
+        Assert.Single(smsService.Messages);
+        Assert.Equal(2, await db.NotificationDeliveries.CountAsync());
     }
 
     [Fact]
@@ -9910,6 +9996,28 @@ public class NotificationServiceTests
         return note;
     }
 
+    private static async Task<NotificationDelivery> CreateSmsDeliveryAsync(
+        PaymentContext db,
+        string recipientAddress,
+        string status,
+        DateTime createdAt)
+    {
+        var delivery = new NotificationDelivery
+        {
+            EventKey = $"sms:test:existing:{Guid.NewGuid():N}",
+            Channel = NotificationChannels.Sms,
+            SenderName = "Тестовый SMS",
+            RecipientAddress = recipientAddress,
+            Subject = "Существующая доставка",
+            BodyPreview = "Существующая доставка",
+            Status = status,
+            CreatedAt = createdAt,
+        };
+        db.NotificationDeliveries.Add(delivery);
+        await db.SaveChangesAsync();
+        return delivery;
+    }
+
     private sealed class RecordingCommandInterceptor : DbCommandInterceptor
     {
         public List<string> ReaderCommands { get; } = [];
@@ -9994,6 +10102,8 @@ public class NotificationServiceTests
             ProviderKey = "test-provider",
             SenderName = "Тестовый SMS",
             DailyLimit = 100,
+            RecipientDailyLimit = 5,
+            BurstLimitPerMinute = 20,
             MaxMessageLength = 480,
             StatusText = "SMS-канал готов к отправке."
         };

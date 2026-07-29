@@ -13,10 +13,14 @@ public sealed class SystemSmsNotificationService : ISmsNotificationService
     public const string SenderNameSettingKey = "notifications.sms.senderName";
     public const string ApiTokenSettingKey = "notifications.sms.apiToken";
     public const string DailyLimitSettingKey = "notifications.sms.dailyLimit";
+    public const string RecipientDailyLimitSettingKey = "notifications.sms.recipientDailyLimit";
+    public const string BurstLimitPerMinuteSettingKey = "notifications.sms.burstLimitPerMinute";
     public const string MaxMessageLengthSettingKey = "notifications.sms.maxMessageLength";
     public const string NotesSettingKey = "notifications.sms.notes";
 
     private const int DefaultDailyLimit = 100;
+    private const int DefaultRecipientDailyLimit = 5;
+    private const int DefaultBurstLimitPerMinute = 20;
     private const int DefaultMaxMessageLength = 480;
 
     private static readonly string[] SettingKeys =
@@ -26,6 +30,8 @@ public sealed class SystemSmsNotificationService : ISmsNotificationService
         SenderNameSettingKey,
         ApiTokenSettingKey,
         DailyLimitSettingKey,
+        RecipientDailyLimitSettingKey,
+        BurstLimitPerMinuteSettingKey,
         MaxMessageLengthSettingKey,
         NotesSettingKey
     ];
@@ -54,6 +60,16 @@ public sealed class SystemSmsNotificationService : ISmsNotificationService
         await UpsertSettingAsync(ProviderKeySettingKey, NormalizeOptional(request.ProviderKey) ?? string.Empty, now, cancellationToken);
         await UpsertSettingAsync(SenderNameSettingKey, NormalizeOptional(request.SenderName) ?? string.Empty, now, cancellationToken);
         await UpsertSettingAsync(DailyLimitSettingKey, NormalizeLimit(request.DailyLimit, DefaultDailyLimit, 1, 100000).ToString(), now, cancellationToken);
+        await UpsertSettingAsync(
+            RecipientDailyLimitSettingKey,
+            NormalizeLimit(request.RecipientDailyLimit, DefaultRecipientDailyLimit, 1, 1000).ToString(),
+            now,
+            cancellationToken);
+        await UpsertSettingAsync(
+            BurstLimitPerMinuteSettingKey,
+            NormalizeLimit(request.BurstLimitPerMinute, DefaultBurstLimitPerMinute, 1, 10000).ToString(),
+            now,
+            cancellationToken);
         await UpsertSettingAsync(MaxMessageLengthSettingKey, NormalizeLimit(request.MaxMessageLength, DefaultMaxMessageLength, 70, 1000).ToString(), now, cancellationToken);
         await UpsertSettingAsync(NotesSettingKey, NormalizeNotes(request.Notes), now, cancellationToken);
 
@@ -93,6 +109,16 @@ public sealed class SystemSmsNotificationService : ISmsNotificationService
         var senderName = NormalizeOptional(settings.GetValueOrDefault(SenderNameSettingKey)) ?? string.Empty;
         var apiToken = NormalizeOptional(settings.GetValueOrDefault(ApiTokenSettingKey)) ?? string.Empty;
         var dailyLimit = NormalizeLimit(ParseNullableInt(settings.GetValueOrDefault(DailyLimitSettingKey)), DefaultDailyLimit, 1, 100000);
+        var recipientDailyLimit = NormalizeLimit(
+            ParseNullableInt(settings.GetValueOrDefault(RecipientDailyLimitSettingKey)),
+            DefaultRecipientDailyLimit,
+            1,
+            1000);
+        var burstLimitPerMinute = NormalizeLimit(
+            ParseNullableInt(settings.GetValueOrDefault(BurstLimitPerMinuteSettingKey)),
+            DefaultBurstLimitPerMinute,
+            1,
+            10000);
         var maxMessageLength = NormalizeLimit(ParseNullableInt(settings.GetValueOrDefault(MaxMessageLengthSettingKey)), DefaultMaxMessageLength, 70, 1000);
         var notes = NormalizeNotes(settings.GetValueOrDefault(NotesSettingKey));
         var apiTokenSet = !string.IsNullOrWhiteSpace(apiToken);
@@ -113,6 +139,8 @@ public sealed class SystemSmsNotificationService : ISmsNotificationService
             ProviderKey = providerKey,
             SenderName = senderName,
             DailyLimit = dailyLimit,
+            RecipientDailyLimit = recipientDailyLimit,
+            BurstLimitPerMinute = burstLimitPerMinute,
             MaxMessageLength = maxMessageLength,
             Notes = notes,
             StatusText = BuildStatusText(enabled, providerKey, senderName, apiTokenSet, adapterConfigured)

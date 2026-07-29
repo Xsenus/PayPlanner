@@ -2868,6 +2868,8 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => new { e.EventKey, e.Channel, e.RecipientUserId, e.NotificationSenderId })
                 .HasDatabaseName("IX_NotificationDeliveries_Event_Channel_User_Sender");
             entity.HasIndex(e => e.CreatedAt).HasDatabaseName("IX_NotificationDeliveries_CreatedAt");
+            entity.HasIndex(e => new { e.Channel, e.CreatedAt })
+                .HasDatabaseName("IX_NotificationDeliveries_Channel_CreatedAt");
             entity.HasIndex(e => e.Status).HasDatabaseName("IX_NotificationDeliveries_Status");
         });
 

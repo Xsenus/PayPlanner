@@ -992,6 +992,8 @@ export interface SmsNotificationSettingsDto {
   providerKey: string;
   senderName: string;
   dailyLimit: number;
+  recipientDailyLimit: number;
+  burstLimitPerMinute: number;
   maxMessageLength: number;
   notes: string;
   statusText: string;
@@ -1143,6 +1145,8 @@ export interface UpdateSmsNotificationSettingsRequest {
   apiToken?: string | null;
   keepExistingApiToken?: boolean;
   dailyLimit?: number | null;
+  recipientDailyLimit?: number | null;
+  burstLimitPerMinute?: number | null;
   maxMessageLength?: number | null;
   notes?: string | null;
 }
