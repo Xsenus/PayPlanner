@@ -4687,7 +4687,8 @@ public sealed class NotificationService : INotificationService
             : recipient.Email ?? string.Empty;
 
     private static string? NormalizePhoneNumber(string? value)
-        => SmsPhoneNumberNormalizer.Normalize(value).E164;
+        => SmsPhoneNumberSelector.Select(
+            [new SmsPhoneNumberCandidate(value, SmsPhoneNumberKinds.Mobile, true)]).E164;
 
     private static NotificationSenderDto MapSender(NotificationSender sender, int subscriptionsCount = 0)
     {
