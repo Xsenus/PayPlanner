@@ -248,6 +248,67 @@ public class SudrfCourtSyncServiceTests
     }
 
     [Fact]
+    public async Task FetchCaseAsync_ExplainsEmptySudrfResult()
+    {
+        using var httpClient = new HttpClient(new RecordingResponseHandler(_ => "<html><body>Дело не найдено</body></html>"));
+        var service = new SudrfCourtSyncService(httpClient, NullLogger<SudrfCourtSyncService>.Instance);
+
+        var error = await Assert.ThrowsAsync<SudrfCourtSyncException>(() =>
+            service.FetchCaseAsync(
+                "https://kraevoy--hbr.sudrf.ru/modules.php?name=sud_delo&name_op=case&delo_id=42",
+                CancellationToken.None));
+
+        Assert.Contains("не удалось найти номер дела или движение дела", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task FetchCaseAsync_ExplainsCaptchaChallengeWithoutParsingItAsCase()
+    {
+        const string captchaHtml =
+            """<html><body><div class="g-recaptcha"></div><p>Подтвердите, что вы не робот</p></body></html>""";
+        using var httpClient = new HttpClient(new RecordingResponseHandler(_ => captchaHtml));
+        var service = new SudrfCourtSyncService(httpClient, NullLogger<SudrfCourtSyncService>.Instance);
+
+        var error = await Assert.ThrowsAsync<SudrfCourtSyncException>(() =>
+            service.FetchCaseAsync(
+                "https://kraevoy--hbr.sudrf.ru/modules.php?name=sud_delo&name_op=case&delo_id=42",
+                CancellationToken.None));
+
+        Assert.Contains("captcha", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("вручную", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task FetchCaseAsync_ExplainsRateLimitAfterBoundedRetry()
+    {
+        using var handler = new StatusCodeResponseHandler(HttpStatusCode.TooManyRequests);
+        using var httpClient = new HttpClient(handler);
+        var policy = new SudrfCourtRequestPolicy(new SudrfCourtRequestPolicyOptions
+        {
+            TimeoutSeconds = 2,
+            MaxRetries = 1,
+            RetryBaseDelayMilliseconds = 1,
+            MinimumRequestIntervalMilliseconds = 0,
+            MaxConcurrency = 1,
+            CircuitFailureThreshold = 5,
+            CircuitBreakSeconds = 30,
+        });
+        var service = new SudrfCourtSyncService(
+            httpClient,
+            NullLogger<SudrfCourtSyncService>.Instance,
+            policy);
+
+        var error = await Assert.ThrowsAsync<SudrfCourtSyncException>(() =>
+            service.FetchCaseAsync(
+                "https://kraevoy--hbr.sudrf.ru/modules.php?name=sud_delo&name_op=case&delo_id=42",
+                CancellationToken.None));
+
+        Assert.Equal(2, handler.RequestCount);
+        Assert.Contains("ограничил частоту запросов", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("429", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task FetchCaseAsync_DoesNotWriteCaseIdentifiersOrExceptionContentToLogs()
     {
         const string sensitiveCaseNumber = "33а-3390/2026";
@@ -534,11 +595,16 @@ public class SudrfCourtSyncServiceTests
 
     private sealed class StatusCodeResponseHandler(HttpStatusCode statusCode) : HttpMessageHandler
     {
+        public int RequestCount { get; private set; }
+
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-            => Task.FromResult(new HttpResponseMessage(statusCode)
+        {
+            RequestCount++;
+            return Task.FromResult(new HttpResponseMessage(statusCode)
             {
                 Content = new StringContent(string.Empty, Encoding.UTF8, "text/html"),
             });
+        }
     }
 
     private sealed class ThrowingResponseHandler(Func<HttpRequestMessage, Exception> resolveException) : HttpMessageHandler

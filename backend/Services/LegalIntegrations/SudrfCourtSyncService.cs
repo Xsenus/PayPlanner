@@ -155,11 +155,42 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
             ct);
         if (!response.IsSuccessStatusCode)
         {
+            if (response.StatusCode == HttpStatusCode.TooManyRequests)
+            {
+                throw new SudrfCourtSyncException(
+                    "Сайт суда временно ограничил частоту запросов (429). Повторите синхронизацию позже.");
+            }
+
             throw new SudrfCourtSyncException($"Сайт суда вернул статус {(int)response.StatusCode}.");
         }
 
         var bytes = await response.Content.ReadAsByteArrayAsync(ct);
-        return ResolveEncoding(response.Content.Headers.ContentType?.CharSet, bytes).GetString(bytes);
+        var html = ResolveEncoding(response.Content.Headers.ContentType?.CharSet, bytes).GetString(bytes);
+        if (IsCaptchaChallenge(html))
+        {
+            throw new SudrfCourtSyncException(
+                "Сайт суда запросил проверку captcha. Автоматическая синхронизация временно недоступна; откройте карточку суда вручную и повторите попытку позже.");
+        }
+
+        return html;
+    }
+
+    private static bool IsCaptchaChallenge(string html)
+    {
+        if (string.IsNullOrWhiteSpace(html))
+        {
+            return false;
+        }
+
+        if (CaptchaFieldRegex().IsMatch(html))
+        {
+            return true;
+        }
+
+        var text = NormalizeText(html);
+        return text.Contains("подтвердите, что вы не робот", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("введите код с картинки", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("введите символы с картинки", StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task<Uri?> FindCaseCardUriAsync(Uri sourceUri, string courtCaseNumber, CancellationToken ct)
@@ -970,4 +1001,7 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
 
     [GeneratedRegex(@"\s+", RegexOptions.CultureInvariant)]
     private static partial Regex WhitespaceRegex();
+
+    [GeneratedRegex(@"(?:name|id|class|src)\s*=\s*[""'][^""']*(?:captcha|recaptcha|hcaptcha)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex CaptchaFieldRegex();
 }
