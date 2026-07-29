@@ -23,9 +23,9 @@ public sealed class SmsProviderContractsTests
         Assert.Equal("recording", provider.Key);
         Assert.True(sent.Accepted);
         Assert.Equal("provider-message-42", sent.ProviderMessageId);
-        Assert.Equal("accepted", sent.ProviderStatus);
+        Assert.Equal(SmsProviderMessageStatuses.Accepted, sent.Status);
         Assert.Equal(sent.ProviderMessageId, status.ProviderMessageId);
-        Assert.Equal("delivered", status.ProviderStatus);
+        Assert.Equal(SmsProviderMessageStatuses.Delivered, status.Status);
         Assert.True(balance.IsAvailable);
         Assert.Equal(125.50m, balance.Amount);
         Assert.Equal("RUB", balance.Currency);
@@ -57,6 +57,54 @@ public sealed class SmsProviderContractsTests
         Assert.Equal("health-check-failed", health.ErrorCode);
     }
 
+    [Theory]
+    [InlineData("accepted", SmsProviderMessageStatuses.Accepted)]
+    [InlineData(" QUEUED ", SmsProviderMessageStatuses.Accepted)]
+    [InlineData("sent", SmsProviderMessageStatuses.Accepted)]
+    [InlineData("delivrd", SmsProviderMessageStatuses.Delivered)]
+    [InlineData("delivered-to-handset", SmsProviderMessageStatuses.Delivered)]
+    [InlineData("undelivered", SmsProviderMessageStatuses.Failed)]
+    [InlineData("ttl expired", SmsProviderMessageStatuses.Expired)]
+    [InlineData("blocked", SmsProviderMessageStatuses.Rejected)]
+    [InlineData("provider-specific-new-status", SmsProviderMessageStatuses.Unknown)]
+    [InlineData(null, SmsProviderMessageStatuses.Unknown)]
+    public void NormalizeStatus_MapsProviderValuesToStableStatuses(string? value, string expected)
+    {
+        Assert.Equal(expected, SmsProviderStatusNormalizer.NormalizeStatus(value));
+    }
+
+    [Fact]
+    public void NormalizeMessageId_TrimsAndValidatesProviderIdentifiers()
+    {
+        Assert.Equal("provider-message-42", SmsProviderStatusNormalizer.NormalizeMessageId("  provider-message-42  "));
+        Assert.Null(SmsProviderStatusNormalizer.NormalizeMessageId(" "));
+        Assert.Throws<ArgumentException>(() => SmsProviderStatusNormalizer.NormalizeMessageId("message\r\nid"));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            SmsProviderStatusNormalizer.NormalizeMessageId(new string('x', SmsProviderStatusNormalizer.MaxProviderMessageIdLength + 1)));
+    }
+
+    [Fact]
+    public void NormalizedStatuses_ExposeCompleteAndTerminalSets()
+    {
+        Assert.Equal(
+            new[]
+            {
+                SmsProviderMessageStatuses.Accepted,
+                SmsProviderMessageStatuses.Delivered,
+                SmsProviderMessageStatuses.Expired,
+                SmsProviderMessageStatuses.Failed,
+                SmsProviderMessageStatuses.Rejected,
+                SmsProviderMessageStatuses.Unknown,
+            },
+            SmsProviderMessageStatuses.All.OrderBy(value => value, StringComparer.Ordinal));
+        Assert.DoesNotContain(SmsProviderMessageStatuses.Accepted, SmsProviderMessageStatuses.Terminal);
+        Assert.DoesNotContain(SmsProviderMessageStatuses.Unknown, SmsProviderMessageStatuses.Terminal);
+        Assert.Contains(SmsProviderMessageStatuses.Delivered, SmsProviderMessageStatuses.Terminal);
+        Assert.Contains(SmsProviderMessageStatuses.Failed, SmsProviderMessageStatuses.Terminal);
+        Assert.Contains(SmsProviderMessageStatuses.Expired, SmsProviderMessageStatuses.Terminal);
+        Assert.Contains(SmsProviderMessageStatuses.Rejected, SmsProviderMessageStatuses.Terminal);
+    }
+
     private sealed class RecordingSmsProvider : ISmsProvider
     {
         public string Key => "recording";
@@ -70,17 +118,19 @@ public sealed class SmsProviderContractsTests
             Requests.Add(request);
             return Task.FromResult(new SmsProviderSendResult(
                 true,
-                "provider-message-42",
-                "accepted"));
+                SmsProviderStatusNormalizer.NormalizeMessageId(" provider-message-42 "),
+                SmsProviderStatusNormalizer.NormalizeStatus("queued"),
+                "queued"));
         }
 
         public Task<SmsProviderMessageStatusResult> GetMessageStatusAsync(
             string providerMessageId,
             CancellationToken cancellationToken = default)
             => Task.FromResult(new SmsProviderMessageStatusResult(
-                providerMessageId,
-                "delivered",
+                SmsProviderStatusNormalizer.NormalizeMessageId(providerMessageId)!,
+                SmsProviderStatusNormalizer.NormalizeStatus("delivrd"),
                 new DateTime(2026, 7, 30, 10, 0, 0, DateTimeKind.Utc),
+                "delivrd",
                 new DateTime(2026, 7, 30, 9, 59, 0, DateTimeKind.Utc)));
 
         public Task<SmsProviderBalanceResult> GetBalanceAsync(CancellationToken cancellationToken = default)
@@ -107,6 +157,7 @@ public sealed class SmsProviderContractsTests
             => Task.FromResult(new SmsProviderSendResult(
                 false,
                 null,
+                SmsProviderMessageStatuses.Failed,
                 ErrorCode: "gateway-unavailable",
                 ErrorMessage: "Gateway is temporarily unavailable.",
                 RetryAfter: TimeSpan.FromSeconds(30)));
@@ -116,7 +167,7 @@ public sealed class SmsProviderContractsTests
             CancellationToken cancellationToken = default)
             => Task.FromResult(new SmsProviderMessageStatusResult(
                 providerMessageId,
-                "unknown",
+                SmsProviderMessageStatuses.Unknown,
                 new DateTime(2026, 7, 30, 10, 0, 0, DateTimeKind.Utc),
                 ErrorCode: "status-unavailable",
                 ErrorMessage: "Status is temporarily unavailable."));
