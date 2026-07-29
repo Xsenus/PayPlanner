@@ -488,6 +488,80 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task SmsDelivery_ReplacesSensitiveContentWithoutChangingOtherChannels()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(
+            db,
+            "sms-sensitive@example.com",
+            phoneNumber: "+7 (999) 111-00-22");
+        var smsService = new RecordingSmsNotificationService();
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            smsNotificationService: smsService);
+        const string secret = "TemporaryPassword-123";
+
+        var deliveries = await service.SendToUserAsync(
+            user.Id,
+            new NotificationMessage(
+                "Временный пароль",
+                $"Ваш временный пароль: {secret}",
+                IsSensitive: true,
+                Purpose: NotificationPurposes.PasswordIssue),
+            [NotificationChannels.Sms, NotificationChannels.Email],
+            "sms:test:sensitive");
+
+        Assert.Equal(2, deliveries.Count);
+        var smsDelivery = Assert.Single(deliveries, item => item.Channel == NotificationChannels.Sms);
+        var emailDelivery = Assert.Single(deliveries, item => item.Channel == NotificationChannels.Email);
+        Assert.Equal("CRM: защищённое уведомление", smsDelivery.Subject);
+        Assert.Equal("Содержимое скрыто: служебное уведомление.", smsDelivery.BodyPreview);
+        Assert.Equal("Временный пароль", emailDelivery.Subject);
+
+        var sentSms = Assert.Single(smsService.Messages);
+        Assert.DoesNotContain(secret, sentSms.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("пароль", sentSms.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("защищённом канале", sentSms.Text, StringComparison.Ordinal);
+
+        var savedSmsDelivery = await db.NotificationDeliveries
+            .SingleAsync(item => item.Channel == NotificationChannels.Sms);
+        Assert.DoesNotContain(secret, savedSmsDelivery.Subject, StringComparison.Ordinal);
+        Assert.DoesNotContain(secret, savedSmsDelivery.BodyPreview, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SmsDelivery_ReplacesPassportDetailsWithSafeNotification()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(
+            db,
+            "sms-passport@example.com",
+            phoneNumber: "+7 (999) 222-00-33");
+        var smsService = new RecordingSmsNotificationService();
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            smsNotificationService: smsService);
+        const string passportDetails = "Паспорт: 45 01 123456, выдан 01.01.2020";
+
+        var deliveries = await service.SendToUserAsync(
+            user.Id,
+            new NotificationMessage("Документы клиента", passportDetails),
+            [NotificationChannels.Sms],
+            "sms:test:passport");
+
+        var delivery = Assert.Single(deliveries);
+        var sentSms = Assert.Single(smsService.Messages);
+        Assert.Equal("CRM: защищённое уведомление", delivery.Subject);
+        Assert.DoesNotContain("123456", delivery.BodyPreview, StringComparison.Ordinal);
+        Assert.DoesNotContain("123456", sentSms.Text, StringComparison.Ordinal);
+        Assert.Contains("Подробности", sentSms.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void NotificationEventEnvelope_UsesCatalogDefaultsAndExplicitOverrides()
     {
         var envelope = new NotificationEventEnvelope(

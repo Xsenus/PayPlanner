@@ -3598,6 +3598,7 @@ public sealed class NotificationService : INotificationService
     {
         var normalizedChannels = NormalizeChannels(channels);
         SmsNotificationSettingsDto? smsSettings = null;
+        NotificationMessage? protectedSmsMessage = null;
         SmsMessageValidationResult? smsValidation = null;
         var smsMaxUnitCount = SmsMessageValidator.DefaultMaxUnitCount;
 
@@ -3609,7 +3610,15 @@ public sealed class NotificationService : INotificationService
             smsMaxUnitCount = smsSettings is { MaxMessageLength: > 0 }
                 ? smsSettings.MaxMessageLength
                 : SmsMessageValidator.DefaultMaxUnitCount;
-            smsValidation = SmsMessageValidator.Validate(message.Body, smsMaxUnitCount);
+
+            var protection = SmsMessageProtector.Protect(message);
+            protectedSmsMessage = message with
+            {
+                Subject = protection.Subject,
+                Body = protection.Body,
+                HtmlBody = null,
+            };
+            smsValidation = SmsMessageValidator.Validate(protectedSmsMessage.Body, smsMaxUnitCount);
 
             if (!smsValidation.IsValid)
             {
@@ -3632,9 +3641,12 @@ public sealed class NotificationService : INotificationService
                 continue;
             }
 
+            var channelMessage = channel == NotificationChannels.Sms
+                ? protectedSmsMessage ?? message
+                : message;
             var targets = await ResolveSenderTargetsAsync(
                 channel,
-                message.Purpose,
+                channelMessage.Purpose,
                 senderId,
                 cancellationToken,
                 smsSettings);
@@ -3654,8 +3666,8 @@ public sealed class NotificationService : INotificationService
                     SenderName = target.Name,
                     RecipientUserId = recipient.UserId,
                     RecipientAddress = ResolveRecipientAddress(recipient, channel),
-                    Subject = message.Subject,
-                    BodyPreview = message.IsSensitive ? "Содержимое скрыто: служебное уведомление." : Truncate(message.Body, 1000),
+                    Subject = channelMessage.Subject,
+                    BodyPreview = channelMessage.IsSensitive ? "Содержимое скрыто: служебное уведомление." : Truncate(channelMessage.Body, 1000),
                     Status = NotificationDeliveryStatus.Pending,
                     CreatedAt = DateTime.UtcNow,
                 };
@@ -3664,7 +3676,7 @@ public sealed class NotificationService : INotificationService
 
                 try
                 {
-                    await SendDeliveryAsync(delivery, target, recipient, message, cancellationToken);
+                    await SendDeliveryAsync(delivery, target, recipient, channelMessage, cancellationToken);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
