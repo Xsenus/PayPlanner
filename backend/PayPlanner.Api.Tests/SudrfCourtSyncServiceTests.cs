@@ -84,6 +84,25 @@ public class SudrfCourtSyncServiceTests
     }
 
     [Fact]
+    public async Task FetchCaseAsync_ReusesSameCardReadWithinProviderScope()
+    {
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        var bytes = Encoding.GetEncoding("windows-1251").GetBytes(BuildCourtHtml());
+        using var handler = new FixedResponseHandler(_ => bytes);
+        using var httpClient = new HttpClient(handler);
+        var service = new SudrfCourtSyncService(httpClient, NullLogger<SudrfCourtSyncService>.Instance);
+        const string sourceUrl = "https://kraevoy--hbr.sudrf.ru/modules.php?name=sud_delo&name_op=case&delo_id=42";
+
+        var first = service.FetchCaseAsync(sourceUrl, CancellationToken.None, "33а-3390/2026");
+        var second = service.FetchCaseAsync(sourceUrl, CancellationToken.None, "33а-3390/2026");
+        var results = await Task.WhenAll(first, second);
+
+        Assert.Equal("33а-3390/2026", results[0].CaseNumber);
+        Assert.Same(results[0], results[1]);
+        Assert.Equal(1, handler.RequestCount);
+    }
+
+    [Fact]
     public async Task SudrfProvider_SearchCasesAsync_MapsFetchedCaseToNeutralResult()
     {
         Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
@@ -421,8 +440,11 @@ public class SudrfCourtSyncServiceTests
 
     private sealed class FixedResponseHandler(Func<HttpRequestMessage, byte[]> resolveBytes) : HttpMessageHandler
     {
+        public int RequestCount { get; private set; }
+
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
+            RequestCount++;
             var response = new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new ByteArrayContent(resolveBytes(request)),

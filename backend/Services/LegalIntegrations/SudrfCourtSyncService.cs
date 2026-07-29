@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
@@ -14,6 +15,8 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
     private readonly HttpClient _httpClient;
     private readonly ILogger<SudrfCourtSyncService> _logger;
     private readonly SudrfCourtRequestPolicy _requestPolicy;
+    private readonly ConcurrentDictionary<string, Lazy<Task<SudrfCourtCaseData>>> _caseReads =
+        new(StringComparer.OrdinalIgnoreCase);
 
     static SudrfCourtSyncService()
     {
@@ -38,7 +41,17 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
     public bool CanHandle(string? sourceUrl)
         => TryCreateSudrfUri(sourceUrl, out _);
 
-    public async Task<SudrfCourtCaseData> FetchCaseAsync(string sourceUrl, CancellationToken ct, string? courtCaseNumber = null)
+    public Task<SudrfCourtCaseData> FetchCaseAsync(string sourceUrl, CancellationToken ct, string? courtCaseNumber = null)
+    {
+        var cacheKey = $"{sourceUrl.Trim()}|{courtCaseNumber?.Trim()}";
+        return _caseReads.GetOrAdd(
+            cacheKey,
+            _ => new Lazy<Task<SudrfCourtCaseData>>(
+                () => FetchCaseCoreAsync(sourceUrl, ct, courtCaseNumber),
+                LazyThreadSafetyMode.ExecutionAndPublication)).Value;
+    }
+
+    private async Task<SudrfCourtCaseData> FetchCaseCoreAsync(string sourceUrl, CancellationToken ct, string? courtCaseNumber)
     {
         if (!TryCreateSudrfUri(sourceUrl, out var uri))
         {

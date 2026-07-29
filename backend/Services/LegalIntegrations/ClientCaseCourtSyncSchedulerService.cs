@@ -140,7 +140,8 @@ public sealed class ClientCaseCourtSyncSchedulerService : BackgroundService
         }
 
         var registry = scope.ServiceProvider.GetService<ICourtSyncProviderRegistry>();
-        var candidateLimit = Math.Max(NormalizeBatchSize(batchSize) * 5, NormalizeBatchSize(batchSize));
+        var normalizedBatchSize = NormalizeBatchSize(batchSize);
+        var candidateLimit = normalizedBatchSize * 5;
         var candidates = await db.ClientCases
             .AsNoTracking()
             .Where(item => item.Status == ClientCaseStatus.Open)
@@ -153,7 +154,7 @@ public sealed class ClientCaseCourtSyncSchedulerService : BackgroundService
             .Where(item => !ClientCaseStageClassifier.IsPretrial(item.Stage, item.CaseType))
             .Where(item => registry?.Resolve(item.CourtUrl) is not null || item.CourtUrl.Contains(".sudrf.ru", StringComparison.OrdinalIgnoreCase))
             .Select(item => item.Id)
-            .Take(NormalizeBatchSize(batchSize))
+            .Take(normalizedBatchSize)
             .ToList();
 
         if (caseIds.Count == 0)
