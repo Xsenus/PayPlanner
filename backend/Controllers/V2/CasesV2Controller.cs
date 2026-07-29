@@ -7275,7 +7275,7 @@ public class CasesV2Controller : ControllerBase
                     var courtEvent = new ClientCaseCourtEvent
                     {
                         ClientCaseId = clientCase.Id,
-                        EventType = "hearing",
+                        EventType = CourtSyncNormalization.EventTypes.Hearing,
                         Title = title,
                         Description = Truncate(hearing.SourceSummary, 1000),
                         ScheduledAt = scheduledAt,
@@ -7286,7 +7286,7 @@ public class CasesV2Controller : ControllerBase
                         Courtroom = Truncate(hearing.Place, 120),
                         JudgeName = Truncate(NormalizeOptional(courtData.JudgeName) ?? clientCase.JudgeName, 200),
                         SecretaryName = Truncate(NormalizeOptional(hearing.SecretaryName) ?? courtData.SecretaryName, 200),
-                        MovementStatus = ResolveSudrfMovementStatus(hearing.Result),
+                        MovementStatus = CourtSyncNormalization.ResolveMovementStatusFromResult(hearing.Result),
                         ResultSummary = Truncate(hearing.Result, 1000),
                         SourceType = "sudrf",
                         ExternalKey = externalKey,
@@ -7318,7 +7318,7 @@ public class CasesV2Controller : ControllerBase
                 updated |= UpdateCourtEventString(existing.SecretaryName, FirstNonEmpty(hearing.SecretaryName, courtData.SecretaryName), value => existing.SecretaryName = value, 200);
                 updated |= UpdateCourtEventString(existing.Description, hearing.SourceSummary, value => existing.Description = value, 1000);
                 updated |= UpdateCourtEventString(existing.ResultSummary, hearing.Result, value => existing.ResultSummary = value, 1000);
-                var movementStatus = ResolveSudrfMovementStatus(hearing.Result);
+                var movementStatus = CourtSyncNormalization.ResolveMovementStatusFromResult(hearing.Result);
                 if (!existing.MovementStatus.Equals(movementStatus, StringComparison.OrdinalIgnoreCase))
                 {
                     existing.MovementStatus = movementStatus;
@@ -7426,14 +7426,14 @@ public class CasesV2Controller : ControllerBase
                 .Where(item =>
                     item.ClientCaseId == clientCase.Id
                     && (courtActDocumentKeys.Contains(item.DocumentKey)
-                        || item.DocumentType == "Судебный акт"))
+                        || item.DocumentType == CourtSyncNormalization.DocumentTypes.CourtAct))
                 .OrderByDescending(item => item.Version)
                 .ToListAsync(ct));
         var existingCourtActDocumentsByKey = existingCourtActDocuments
             .GroupBy(static item => item.DocumentKey, StringComparer.Ordinal)
             .ToDictionary(static group => group.Key, static group => group.First(), StringComparer.Ordinal);
         var existingCourtActDocumentsByFileName = existingCourtActDocuments
-            .Where(static item => item.DocumentType == "Судебный акт")
+            .Where(static item => item.DocumentType == CourtSyncNormalization.DocumentTypes.CourtAct)
             .GroupBy(static item => item.OriginalFileName, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(static group => group.Key, static group => group.First(), StringComparer.OrdinalIgnoreCase);
 
@@ -7449,7 +7449,7 @@ public class CasesV2Controller : ControllerBase
                 document = await SaveGeneratedCaseDocumentAsync(
                     clientCase,
                     documentKey,
-                    "Судебный акт",
+                    CourtSyncNormalization.DocumentTypes.CourtAct,
                     "received",
                     courtActWithKey.FileName,
                     BuildSudrfCourtActHtml(clientCase, courtData, courtAct),
@@ -7797,7 +7797,7 @@ public class CasesV2Controller : ControllerBase
                 continue;
             }
 
-            var side = ResolveSudrfCourtPartySide(participant.Role);
+            var side = CourtSyncNormalization.ResolvePartySideFromRole(participant.Role);
             var processRole = Truncate(NormalizeOptional(participant.Role) ?? "Участник процесса", 120);
             var notesParts = new List<string> { "Добавлено из ГАС «Правосудие»." };
             if (!string.IsNullOrWhiteSpace(participant.Role))
@@ -7829,33 +7829,6 @@ public class CasesV2Controller : ControllerBase
             .ToList();
     }
 
-    private static string ResolveSudrfCourtPartySide(string role)
-    {
-        if (role.Contains("ОТВЕТЧИК", StringComparison.OrdinalIgnoreCase)
-            || role.Contains("ДОЛЖНИК", StringComparison.OrdinalIgnoreCase))
-        {
-            return "respondent";
-        }
-
-        if (role.Contains("ТРЕТ", StringComparison.OrdinalIgnoreCase)
-            || role.Contains("ЗАИНТЕРЕС", StringComparison.OrdinalIgnoreCase))
-        {
-            return "thirdParty";
-        }
-
-        if (role.Contains("ЗАЯВИТЕЛ", StringComparison.OrdinalIgnoreCase))
-        {
-            return "applicant";
-        }
-
-        if (role.Contains("ИСТЕЦ", StringComparison.OrdinalIgnoreCase))
-        {
-            return "claimant";
-        }
-
-        return "other";
-    }
-
     private static string NormalizeCourtPartyName(string value)
         => NormalizeHistoryText(value).ToUpperInvariant();
 
@@ -7871,29 +7844,6 @@ public class CasesV2Controller : ControllerBase
             .ToList();
 
         return string.Join("; ", names);
-    }
-
-    private static string ResolveSudrfMovementStatus(string result)
-    {
-        if (result.Contains("отлож", StringComparison.OrdinalIgnoreCase))
-        {
-            return "postponed";
-        }
-
-        if (result.Contains("отмен", StringComparison.OrdinalIgnoreCase)
-            || result.Contains("снят", StringComparison.OrdinalIgnoreCase))
-        {
-            return "cancelled";
-        }
-
-        if (result.Contains("рассмотр", StringComparison.OrdinalIgnoreCase)
-            || result.Contains("решен", StringComparison.OrdinalIgnoreCase)
-            || result.Contains("вынес", StringComparison.OrdinalIgnoreCase))
-        {
-            return "completed";
-        }
-
-        return string.IsNullOrWhiteSpace(result) ? "scheduled" : "held";
     }
 
     [HttpPost]
@@ -10832,14 +10782,7 @@ public class CasesV2Controller : ControllerBase
     }
 
     private static string ResolveCourtPartySideLabel(string value)
-        => value switch
-        {
-            "claimant" => "Истец",
-            "respondent" => "Ответчик",
-            "thirdParty" => "Третье лицо",
-            "applicant" => "Заявитель",
-            _ => "Иная сторона",
-        };
+        => CourtSyncNormalization.GetPartySideLabel(value);
 
     private async Task<ClientCaseCourt?> ResolveCourtDirectoryItemForRequestAsync(int? courtId, CancellationToken ct)
     {
@@ -10970,45 +10913,16 @@ public class CasesV2Controller : ControllerBase
     }
 
     private static string NormalizeCourtEventType(string? value)
-    {
-        var normalized = NormalizeOptional(value)?.ToLowerInvariant();
-        return normalized switch
-        {
-            "claim" or "hearing" or "decision" or "postponement" or "suspension" or "movement" => normalized,
-            _ => "hearing",
-        };
-    }
+        => CourtSyncNormalization.NormalizeEventType(value);
 
     private static string ResolveCourtEventTypeLabel(string value)
-        => value switch
-        {
-            "claim" => "Подача иска",
-            "decision" => "Судебное решение",
-            "postponement" => "Перенос заседания",
-            "suspension" => "Приостановление",
-            "movement" => "Движение дела",
-            _ => "Судебное заседание",
-        };
+        => CourtSyncNormalization.GetEventTypeLabel(value);
 
     private static string NormalizeCourtInstance(string? value)
-    {
-        var normalized = NormalizeOptional(value)?.ToLowerInvariant();
-        return normalized switch
-        {
-            "first" or "appeal" or "cassation" or "supreme" => normalized,
-            "supervision" => "supreme",
-            _ => "first",
-        };
-    }
+        => CourtSyncNormalization.NormalizeInstance(value);
 
     private static string ResolveCourtInstanceLabel(string value)
-        => value switch
-        {
-            "appeal" => "Апелляция",
-            "cassation" => "Кассация",
-            "supreme" or "supervision" => "Верховный суд",
-            _ => "Первая инстанция",
-        };
+        => CourtSyncNormalization.GetInstanceLabel(value);
 
     private static string ResolveNextCourtInstance(string value)
         => NormalizeCourtInstance(value) switch
@@ -11064,25 +10978,10 @@ public class CasesV2Controller : ControllerBase
         };
 
     private static string NormalizeCourtMovementStatus(string? value)
-    {
-        var normalized = NormalizeOptional(value)?.ToLowerInvariant();
-        return normalized switch
-        {
-            "scheduled" or "held" or "postponed" or "cancelled" or "completed" or "suspended" => normalized,
-            _ => "scheduled",
-        };
-    }
+        => CourtSyncNormalization.NormalizeMovementStatus(value);
 
     private static string ResolveCourtMovementStatusLabel(string value)
-        => value switch
-        {
-            "held" => "Проведено",
-            "postponed" => "Отложено",
-            "cancelled" => "Отменено",
-            "completed" => "Завершено",
-            "suspended" => "Приостановлено",
-            _ => "Назначено",
-        };
+        => CourtSyncNormalization.GetMovementStatusLabel(value);
 
     private async Task<string?> ValidateCourtEventLinksAsync(int clientCaseId, UpsertClientCaseCourtEventRequest? request, CancellationToken ct)
     {
