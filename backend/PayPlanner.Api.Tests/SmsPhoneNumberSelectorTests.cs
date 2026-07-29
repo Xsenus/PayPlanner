@@ -109,6 +109,62 @@ public sealed class SmsPhoneNumberSelectorTests
         Assert.Null(result.Kind);
         Assert.Equal(0, result.ValidCandidates);
         Assert.Equal(3, result.RejectedCandidates);
+        Assert.Equal(1, result.Rejections[SmsPhoneNumberErrorCodes.Empty]);
+        Assert.Equal(1, result.Rejections[SmsPhoneNumberErrorCodes.InvalidFormat]);
+        Assert.Equal(1, result.Rejections[SmsPhoneNumberErrorCodes.CountryNotAllowed]);
+    }
+
+    [Fact]
+    public void Select_SkipsUnverifiedServiceAndOptedOutCandidates()
+    {
+        var result = SmsPhoneNumberSelector.Select(
+        [
+            new(
+                "+79991000000",
+                SmsPhoneNumberKinds.Mobile,
+                IsVerified: true,
+                IsOptedOut: true),
+            new(
+                "+79992000000",
+                SmsPhoneNumberKinds.Work,
+                IsVerified: false),
+            new(
+                "+79993000000",
+                SmsPhoneNumberKinds.Backup,
+                IsVerified: true,
+                IsServiceNumber: true),
+            new(
+                "+79994000000",
+                SmsPhoneNumberKinds.Unspecified,
+                IsVerified: true)
+        ]);
+
+        Assert.Equal("+79994000000", result.E164);
+        Assert.Equal(SmsPhoneNumberKinds.Unspecified, result.Kind);
+        Assert.Equal(1, result.ValidCandidates);
+        Assert.Equal(3, result.RejectedCandidates);
+        Assert.Equal(1, result.Rejections[SmsPhoneCandidateRejectionCodes.OptedOut]);
+        Assert.Equal(1, result.Rejections[SmsPhoneCandidateRejectionCodes.Unverified]);
+        Assert.Equal(1, result.Rejections[SmsPhoneCandidateRejectionCodes.ServiceNumber]);
+    }
+
+    [Fact]
+    public void Select_DoesNotNormalizeOrExposeOptedOutNumber()
+    {
+        var result = SmsPhoneNumberSelector.Select(
+        [
+            new(
+                "sensitive opted-out value",
+                SmsPhoneNumberKinds.Mobile,
+                IsVerified: true,
+                IsOptedOut: true)
+        ]);
+
+        Assert.False(result.HasValue);
+        Assert.Equal(1, result.Rejections[SmsPhoneCandidateRejectionCodes.OptedOut]);
+        Assert.DoesNotContain(
+            result.Rejections.Keys,
+            code => code == SmsPhoneNumberErrorCodes.InvalidFormat);
     }
 
     [Fact]

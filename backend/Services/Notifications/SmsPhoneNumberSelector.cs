@@ -8,16 +8,27 @@ public static class SmsPhoneNumberKinds
     public const string Unspecified = "unspecified";
 }
 
+public static class SmsPhoneCandidateRejectionCodes
+{
+    public const string Unverified = "phone-unverified";
+    public const string ServiceNumber = "phone-service-number";
+    public const string OptedOut = "phone-opted-out";
+}
+
 public sealed record SmsPhoneNumberCandidate(
     string? Value,
     string Kind,
-    bool IsPrimary = false);
+    bool IsPrimary = false,
+    bool IsVerified = true,
+    bool IsServiceNumber = false,
+    bool IsOptedOut = false);
 
 public sealed record SmsPhoneNumberSelectionResult(
     string? E164,
     string? Kind,
     int ValidCandidates,
-    int RejectedCandidates)
+    int RejectedCandidates,
+    IReadOnlyDictionary<string, int> Rejections)
 {
     public bool HasValue => !string.IsNullOrWhiteSpace(E164);
 }
@@ -32,14 +43,35 @@ public static class SmsPhoneNumberSelector
 
         SelectedCandidate? selected = null;
         var validNumbers = new HashSet<string>(StringComparer.Ordinal);
-        var rejectedCandidates = 0;
+        var rejections = new Dictionary<string, int>(StringComparer.Ordinal);
         var sourceOrder = 0;
 
         foreach (var candidate in candidates)
         {
             if (candidate is null)
             {
-                rejectedCandidates++;
+                AddRejection(rejections, SmsPhoneNumberErrorCodes.InvalidFormat);
+                sourceOrder++;
+                continue;
+            }
+
+            if (candidate.IsOptedOut)
+            {
+                AddRejection(rejections, SmsPhoneCandidateRejectionCodes.OptedOut);
+                sourceOrder++;
+                continue;
+            }
+
+            if (!candidate.IsVerified)
+            {
+                AddRejection(rejections, SmsPhoneCandidateRejectionCodes.Unverified);
+                sourceOrder++;
+                continue;
+            }
+
+            if (candidate.IsServiceNumber)
+            {
+                AddRejection(rejections, SmsPhoneCandidateRejectionCodes.ServiceNumber);
                 sourceOrder++;
                 continue;
             }
@@ -47,7 +79,9 @@ public static class SmsPhoneNumberSelector
             var normalized = SmsPhoneNumberNormalizer.Normalize(candidate.Value, policy);
             if (!normalized.IsValid || normalized.E164 is null)
             {
-                rejectedCandidates++;
+                AddRejection(
+                    rejections,
+                    normalized.ErrorCode ?? SmsPhoneNumberErrorCodes.InvalidFormat);
                 sourceOrder++;
                 continue;
             }
@@ -72,8 +106,12 @@ public static class SmsPhoneNumberSelector
             selected?.E164,
             selected?.Kind,
             validNumbers.Count,
-            rejectedCandidates);
+            rejections.Values.Sum(),
+            rejections);
     }
+
+    private static void AddRejection(IDictionary<string, int> rejections, string code)
+        => rejections[code] = rejections.TryGetValue(code, out var count) ? count + 1 : 1;
 
     private static string NormalizeKind(string? kind)
     {

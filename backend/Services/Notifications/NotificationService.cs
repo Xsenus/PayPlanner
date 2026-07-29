@@ -4688,7 +4688,11 @@ public sealed class NotificationService : INotificationService
 
     private static string? NormalizePhoneNumber(string? value)
         => SmsPhoneNumberSelector.Select(
-            [new SmsPhoneNumberCandidate(value, SmsPhoneNumberKinds.Mobile, true)]).E164;
+            [new SmsPhoneNumberCandidate(
+                value,
+                SmsPhoneNumberKinds.Mobile,
+                IsPrimary: true,
+                IsVerified: true)]).E164;
 
     private static NotificationSenderDto MapSender(NotificationSender sender, int subscriptionsCount = 0)
     {
