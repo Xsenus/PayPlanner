@@ -27,6 +27,7 @@
     <Compile Remove=".codex-build\\**\\*.cs" />
     <EmbeddedResource Remove=".codex-build\\**\\*" />
     <None Remove=".codex-build\\**\\*" />
+    <None Update="Fixtures\\**\\*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>
