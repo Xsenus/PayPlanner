@@ -13,17 +13,22 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
     private static readonly CultureInfo RussianCulture = CultureInfo.GetCultureInfo("ru-RU");
     private readonly HttpClient _httpClient;
     private readonly ILogger<SudrfCourtSyncService> _logger;
+    private readonly SudrfCourtRequestPolicy _requestPolicy;
 
     static SudrfCourtSyncService()
     {
         Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
     }
 
-    public SudrfCourtSyncService(HttpClient httpClient, ILogger<SudrfCourtSyncService> logger)
+    public SudrfCourtSyncService(
+        HttpClient httpClient,
+        ILogger<SudrfCourtSyncService> logger,
+        SudrfCourtRequestPolicy? requestPolicy = null)
     {
         _httpClient = httpClient;
         _logger = logger;
-        _httpClient.Timeout = TimeSpan.FromSeconds(25);
+        _requestPolicy = requestPolicy ?? new SudrfCourtRequestPolicy();
+        _httpClient.Timeout = Timeout.InfiniteTimeSpan;
         _httpClient.DefaultRequestHeaders.UserAgent.Clear();
         _httpClient.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("PayPlanner", "1.0"));
         _httpClient.DefaultRequestHeaders.Accept.Clear();
@@ -93,6 +98,16 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
             _logger.LogWarning(ex, "SUDRF court case request timed out for {SourceUrl}", uri);
             throw new SudrfCourtSyncException("Сайт суда не ответил вовремя. Повторите синхронизацию позже.", ex);
         }
+        catch (TimeoutException ex)
+        {
+            _logger.LogWarning(ex, "SUDRF court case request timed out for {SourceUrl}", uri);
+            throw new SudrfCourtSyncException("Сайт суда не ответил вовремя. Повторите синхронизацию позже.", ex);
+        }
+        catch (CourtSyncCircuitOpenException ex)
+        {
+            _logger.LogWarning("SUDRF circuit is open until {RetryAtUtc}", ex.RetryAtUtc);
+            throw new SudrfCourtSyncException("Сайт суда временно не проверяется после серии ошибок. Повторите синхронизацию позже.", ex);
+        }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to fetch SUDRF court case from {SourceUrl}", uri);
@@ -102,7 +117,10 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
 
     private async Task<string> ReadHtmlAsync(Uri uri, CancellationToken ct)
     {
-        using var response = await _httpClient.GetAsync(uri, ct);
+        using var response = await _requestPolicy.SendAsync(
+            _httpClient,
+            () => new HttpRequestMessage(HttpMethod.Get, uri),
+            ct);
         if (!response.IsSuccessStatusCode)
         {
             throw new SudrfCourtSyncException($"Сайт суда вернул статус {(int)response.StatusCode}.");
@@ -171,7 +189,7 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
         var srvNum = FirstNotEmpty(ExtractQueryValue(sourceUri, "srv_num"), "1");
         var modulesUri = new Uri(sourceUri, "/modules.php");
         var searchField = searchByJudicialUid ? "p2_case__JUDICIAL_UIDSS" : "p2_case__CASE_NUMBERSS";
-        using var content = new FormUrlEncodedContent(new Dictionary<string, string>
+        var formValues = new Dictionary<string, string>
         {
             ["name"] = "sud_delo",
             ["srv_num"] = srvNum,
@@ -182,9 +200,15 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
             ["delo_table"] = "p2_case",
             [searchField] = searchValue,
             ["list"] = "ON",
-        });
+        };
 
-        using var response = await _httpClient.PostAsync(modulesUri, content, ct);
+        using var response = await _requestPolicy.SendAsync(
+            _httpClient,
+            () => new HttpRequestMessage(HttpMethod.Post, modulesUri)
+            {
+                Content = new FormUrlEncodedContent(formValues),
+            },
+            ct);
         if (!response.IsSuccessStatusCode)
         {
             throw new SudrfCourtSyncException($"Поиск на сайте суда вернул статус {(int)response.StatusCode}.");

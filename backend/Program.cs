@@ -164,6 +164,9 @@ builder.Services.AddSingleton<ISystemJobRunStateService, SystemJobRunStateServic
 builder.Services.Configure<AppFeatureFlagsOptions>(
     builder.Configuration.GetSection(AppFeatureFlagsOptions.SectionName));
 builder.Services.Configure<DadataOptions>(builder.Configuration.GetSection("DaData"));
+builder.Services.Configure<SudrfCourtRequestPolicyOptions>(
+    builder.Configuration.GetSection(SudrfCourtRequestPolicyOptions.SectionName));
+builder.Services.AddSingleton<SudrfCourtRequestPolicy>();
 builder.Services.AddHttpClient<ILegalEntityEnrichmentService, DadataLegalEntityEnrichmentService>();
 builder.Services.AddHttpClient<ISudrfCourtSyncService, SudrfCourtSyncService>();
 builder.Services.AddHttpClient<IYandexDiskService, YandexDiskService>();
