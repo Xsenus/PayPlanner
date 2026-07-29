@@ -4687,25 +4687,7 @@ public sealed class NotificationService : INotificationService
             : recipient.Email ?? string.Empty;
 
     private static string? NormalizePhoneNumber(string? value)
-    {
-        var normalized = NormalizeOptional(value);
-        if (normalized is null)
-        {
-            return null;
-        }
-
-        var builder = new StringBuilder(normalized.Length);
-        foreach (var ch in normalized)
-        {
-            if (char.IsDigit(ch) || ch == '+')
-            {
-                builder.Append(ch);
-            }
-        }
-
-        var phone = builder.ToString();
-        return string.IsNullOrWhiteSpace(phone) ? null : phone;
-    }
+        => SmsPhoneNumberNormalizer.Normalize(value).E164;
 
     private static NotificationSenderDto MapSender(NotificationSender sender, int subscriptionsCount = 0)
     {
