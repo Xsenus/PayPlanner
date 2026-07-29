@@ -1,6 +1,8 @@
 using System.Net;
 using System.Text;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+using PayPlanner.Api.Models;
 using PayPlanner.Api.Services.LegalIntegrations;
 using Xunit;
 
@@ -103,6 +105,33 @@ public class SudrfCourtSyncServiceTests
     }
 
     [Fact]
+    public async Task FetchCaseAsync_ReusesDiscoveredCardEndpointWithinProviderScope()
+    {
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        using var handler = new RecordingResponseHandler(request =>
+            request.Method == HttpMethod.Post
+                ? BuildSearchResultHtml()
+                : request.RequestUri?.Query.Contains("name_op=case", StringComparison.OrdinalIgnoreCase) == true
+                    ? BuildCourtHtml()
+                    : BuildSearchPageHtml());
+        using var httpClient = new HttpClient(handler);
+        var service = new SudrfCourtSyncService(httpClient, NullLogger<SudrfCourtSyncService>.Instance);
+
+        var first = await service.FetchCaseAsync(
+            "https://kraevoy--hbr.sudrf.ru/modules.php?name=sud_delo&srv_num=1&name_op=sf&delo_id=42&view=first",
+            CancellationToken.None,
+            "33а-3390/2026");
+        var second = await service.FetchCaseAsync(
+            "https://kraevoy--hbr.sudrf.ru/modules.php?name=sud_delo&srv_num=1&name_op=sf&delo_id=42&view=second",
+            CancellationToken.None,
+            "33а-3390/2026");
+
+        Assert.Equal("33а-3390/2026", first.CaseNumber);
+        Assert.Equal("33а-3390/2026", second.CaseNumber);
+        Assert.Single(handler.Requests, item => item.Method == HttpMethod.Post);
+    }
+
+    [Fact]
     public async Task SudrfProvider_SearchCasesAsync_MapsFetchedCaseToNeutralResult()
     {
         Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
@@ -150,6 +179,20 @@ public class SudrfCourtSyncServiceTests
             CancellationToken.None);
 
         Assert.Equal("33а-3390/2026", data.CaseNumber);
+    }
+
+    [Fact]
+    public void CourtSyncProviderRegistry_ReusesProviderDirectoryWithinScope()
+    {
+        var registry = new CourtSyncProviderRegistry(
+            [],
+            new FixedOptionsSnapshot<AppFeatureFlagsOptions>(new AppFeatureFlagsOptions()));
+
+        var first = registry.GetProviders();
+        var second = registry.GetProviders();
+
+        Assert.Same(first, second);
+        Assert.Equal(3, first.Count);
     }
 
     [Fact]
@@ -494,6 +537,14 @@ public class SudrfCourtSyncServiceTests
             };
             return response;
         }
+    }
+
+    private sealed class FixedOptionsSnapshot<T>(T value) : IOptionsSnapshot<T>
+        where T : class
+    {
+        public T Value { get; } = value;
+
+        public T Get(string? name) => Value;
     }
 
     private sealed record RecordedRequest(HttpMethod Method, Uri? RequestUri, string Body);

@@ -202,6 +202,7 @@ public sealed class CourtSyncProviderRegistry : ICourtSyncProviderRegistry
 
     private readonly IReadOnlyList<ICourtSyncProvider> _providers;
     private readonly IOptionsSnapshot<AppFeatureFlagsOptions> _featureFlags;
+    private readonly Lazy<IReadOnlyList<CourtSyncProviderDescriptor>> _providerDescriptors;
 
     public CourtSyncProviderRegistry(
         IEnumerable<ICourtSyncProvider> providers,
@@ -209,9 +210,15 @@ public sealed class CourtSyncProviderRegistry : ICourtSyncProviderRegistry
     {
         _providers = providers.ToList();
         _featureFlags = featureFlags;
+        _providerDescriptors = new Lazy<IReadOnlyList<CourtSyncProviderDescriptor>>(
+            BuildProviderDescriptors,
+            LazyThreadSafetyMode.ExecutionAndPublication);
     }
 
     public IReadOnlyList<CourtSyncProviderDescriptor> GetProviders()
+        => _providerDescriptors.Value;
+
+    private IReadOnlyList<CourtSyncProviderDescriptor> BuildProviderDescriptors()
     {
         var legal = _featureFlags.Value.Legal;
         var activeProviders = _providers
@@ -219,7 +226,7 @@ public sealed class CourtSyncProviderRegistry : ICourtSyncProviderRegistry
             .ToList();
 
         activeProviders.AddRange(GetPlannedDescriptors(legal.ExternalCourtSync));
-        return activeProviders;
+        return activeProviders.AsReadOnly();
     }
 
     public ICourtSyncProvider? Resolve(string? sourceUrl)

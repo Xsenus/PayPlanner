@@ -17,6 +17,8 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
     private readonly SudrfCourtRequestPolicy _requestPolicy;
     private readonly ConcurrentDictionary<string, Lazy<Task<SudrfCourtCaseData>>> _caseReads =
         new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, Lazy<Task<Uri?>>> _caseCardEndpoints =
+        new(StringComparer.OrdinalIgnoreCase);
 
     static SudrfCourtSyncService()
     {
@@ -145,6 +147,16 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
 
     private async Task<Uri?> FindCaseCardUriAsync(Uri sourceUri, string courtCaseNumber, CancellationToken ct)
     {
+        var cacheKey = BuildCaseCardEndpointCacheKey(sourceUri, courtCaseNumber);
+        return await _caseCardEndpoints.GetOrAdd(
+            cacheKey,
+            _ => new Lazy<Task<Uri?>>(
+                () => FindCaseCardUriCoreAsync(sourceUri, courtCaseNumber, ct),
+                LazyThreadSafetyMode.ExecutionAndPublication)).Value;
+    }
+
+    private async Task<Uri?> FindCaseCardUriCoreAsync(Uri sourceUri, string courtCaseNumber, CancellationToken ct)
+    {
         if (IsJudicialUid(courtCaseNumber))
         {
             foreach (var deloId in BuildDeloIdCandidates(sourceUri, courtCaseNumber))
@@ -182,6 +194,14 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
         }
 
         return null;
+    }
+
+    private static string BuildCaseCardEndpointCacheKey(Uri sourceUri, string courtCaseNumber)
+    {
+        var srvNum = FirstNotEmpty(ExtractQueryValue(sourceUri, "srv_num"), "1");
+        var deloId = ExtractQueryValue(sourceUri, "delo_id");
+        var normalizedCaseNumber = NormalizeText(courtCaseNumber);
+        return $"{sourceUri.Scheme}://{sourceUri.IdnHost}:{sourceUri.Port}|{srvNum}|{deloId}|{normalizedCaseNumber}";
     }
 
     private async Task<string> GetJudicialUidSearchAsync(Uri sourceUri, string deloId, string judicialUid, CancellationToken ct)
