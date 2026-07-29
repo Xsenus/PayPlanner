@@ -906,6 +906,75 @@ describe('CaseDetailPage', () => {
     expect(await screen.findByText('Массовое изменение')).toBeTruthy();
   });
 
+  it('shows imported court data that moved to the archive as inactive', async () => {
+    vi.mocked(apiService.getCaseCourtEvents).mockResolvedValue([
+      {
+        id: 41,
+        clientCaseId: 15,
+        eventType: 'hearing',
+        eventTypeLabel: 'Заседание',
+        title: 'Заседание из судебного источника',
+        scheduledAt: '2026-06-12T09:30:00Z',
+        allDay: false,
+        courtInstance: 'first',
+        courtInstanceLabel: 'Первая инстанция',
+        movementStatus: 'archived',
+        movementStatusLabel: 'В архиве',
+        sourceType: 'sudrf',
+        createdAt: '2026-05-21T00:00:00Z',
+        isOverdue: false,
+      },
+    ]);
+    vi.mocked(apiService.getCaseProceduralDeadlines).mockResolvedValue([
+      {
+        id: 31,
+        clientCaseId: 15,
+        deadlineType: 'cassation',
+        deadlineTypeLabel: 'Кассация',
+        title: 'Архивный срок',
+        dueAt: '2026-07-01',
+        allDay: true,
+        status: 'archived',
+        statusLabel: 'В архиве',
+        warningDaysBefore: 7,
+        sourceType: 'sudrf',
+        notes: '',
+        createdAt: '2026-05-21T00:00:00Z',
+        isOverdue: false,
+        isWarning: false,
+      },
+    ]);
+    vi.mocked(apiService.getCaseDocuments).mockResolvedValue([
+      {
+        id: 7,
+        clientCaseId: 15,
+        documentKey: 'sudrf-act',
+        version: 1,
+        documentType: 'Судебный акт',
+        status: 'archived',
+        originalFileName: 'Архивное определение.pdf',
+        contentType: 'application/pdf',
+        sizeBytes: 1024,
+        uploadedByName: 'Судебный источник',
+        uploadedAt: '2026-05-02T10:00:00Z',
+        sourceType: 'sudrf',
+        isLatestVersion: true,
+      },
+    ]);
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Суд' }));
+    expect(await screen.findByText('Заседание из судебного источника')).toBeTruthy();
+    expect(screen.getByText('Закрыто и в архиве: 1')).toBeTruthy();
+    expect(screen.queryByText('Архивный срок')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Документы' }));
+    expect(await screen.findByText('Архивное определение.pdf')).toBeTruthy();
+    expect(screen.getByText(/Судебный акт · v1 · В архиве/u)).toBeTruthy();
+  });
+
   it('hides case tasks and does not load task data when task access is closed', async () => {
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} canViewTasks={false} canCreateTasks={false} />);
 

@@ -4798,6 +4798,7 @@ public class CasesV2Controller : ControllerBase
             _db.ClientCaseCourtEvents.Any(courtEvent =>
                 courtEvent.ClientCaseId == item.Id &&
                 courtEvent.MovementStatus != "cancelled" &&
+                courtEvent.MovementStatus != "archived" &&
                 (courtEvent.AllDay
                     ? courtEvent.ScheduledAt >= range.FromDate && courtEvent.ScheduledAt < range.ToDateExclusive
                     : courtEvent.ScheduledAt >= range.FromInstantUtc && courtEvent.ScheduledAt < range.ToInstantExclusiveUtc)) ||
@@ -4805,6 +4806,7 @@ public class CasesV2Controller : ControllerBase
                 deadline.ClientCaseId == item.Id &&
                 deadline.Status != "closed" &&
                 deadline.Status != "cancelled" &&
+                deadline.Status != "archived" &&
                 (deadline.AllDay
                     ? deadline.DueAt >= range.FromDate && deadline.DueAt < range.ToDateExclusive
                     : deadline.DueAt >= range.FromInstantUtc && deadline.DueAt < range.ToInstantExclusiveUtc)) ||
@@ -4825,9 +4827,13 @@ public class CasesV2Controller : ControllerBase
         foreach (var clientCase in cases)
         {
             var separateDeadlineTypes = clientCase.ProceduralDeadlines
-                .Where(item => item.Status != "closed" && item.Status != "cancelled")
                 .Select(item => item.DeadlineType)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            if (clientCase.CourtEvents.Any(item => item.EventType == "hearing"))
+            {
+                separateDeadlineTypes.Add("hearing");
+            }
+
             AddCaseCalendarDateEvents(events, clientCase, separateDeadlineTypes, range);
             AddCaseCalendarCourtEvents(events, clientCase, range);
             AddCaseCalendarProceduralDeadlineEvents(events, clientCase, range);
@@ -4990,7 +4996,11 @@ public class CasesV2Controller : ControllerBase
         CaseCalendarDateRange range)
     {
         AddCaseCalendarEvent(events, clientCase, "case-deadline", "due", "Крайний срок по делу", clientCase.DueDate, true, range);
-        AddCaseCalendarEvent(events, clientCase, "court", "hearing", "Судебное заседание", clientCase.NextHearingAt, false, range);
+        if (!separateDeadlineTypes.Contains("hearing"))
+        {
+            AddCaseCalendarEvent(events, clientCase, "court", "hearing", "Судебное заседание", clientCase.NextHearingAt, false, range);
+        }
+
         AddCaseCalendarEvent(events, clientCase, "court", "claim", "Подача иска", clientCase.ClaimFiledAt, true, range);
         AddCaseCalendarEvent(events, clientCase, "court", "decision", "Судебное решение", clientCase.CourtDecisionAt, true, range);
         AddLegacyProceduralCalendarEvent(events, clientCase, separateDeadlineTypes, "appeal", "Срок апелляции", clientCase.AppealDeadlineAt, range);
@@ -5022,7 +5032,7 @@ public class CasesV2Controller : ControllerBase
         CaseCalendarDateRange range)
     {
         foreach (var deadline in clientCase.ProceduralDeadlines
-            .Where(item => item.Status != "closed" && item.Status != "cancelled")
+            .Where(item => item.Status != "closed" && item.Status != "cancelled" && item.Status != "archived")
             .Where(item => item.AllDay
                 ? item.DueAt >= range.FromDate && item.DueAt < range.ToDateExclusive
                 : item.DueAt >= range.FromInstantUtc && item.DueAt < range.ToInstantExclusiveUtc)
@@ -5063,7 +5073,7 @@ public class CasesV2Controller : ControllerBase
         CaseCalendarDateRange range)
     {
         foreach (var courtEvent in clientCase.CourtEvents
-            .Where(item => item.MovementStatus != "cancelled")
+            .Where(item => item.MovementStatus != "cancelled" && item.MovementStatus != "archived")
             .Where(item => item.AllDay
                 ? item.ScheduledAt >= range.FromDate && item.ScheduledAt < range.ToDateExclusive
                 : item.ScheduledAt >= range.FromInstantUtc && item.ScheduledAt < range.ToInstantExclusiveUtc)
@@ -6974,6 +6984,10 @@ public class CasesV2Controller : ControllerBase
         AppendCaseEvent(clientCase, $"Привязана судебная карточка «{ResolveCourtInstanceLabel(normalizedInstance)}» через {provider.Label}. Суд: {FormatCaseTextValue(courtName)}; № в суде: {FormatCaseTextValue(courtCaseNumber)}.{externalIdSuffix} {syncMessage} Автор: {actorName}.");
         _db.SetAuditReason($"Привязана судебная карточка дела через {provider.Label}.");
         await _db.SaveChangesAsync(ct);
+        if (syncResult is { RequiresDeadlineTaskSync: true })
+        {
+            await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, clientCase.Id, actorUserId, actorName, ct);
+        }
 
         return Ok(new ClientCaseCourtSyncBindingDto
         {
@@ -7101,6 +7115,10 @@ public class CasesV2Controller : ControllerBase
                 AppendCaseEvent(clientCase, $"{syncMessage} Инициатор: {actorName}.");
                 _db.SetAuditReason($"Обновление дела #{clientCase.Id} из судебного источника {courtSyncProvider.Label}.");
                 await _db.SaveChangesAsync(ct);
+                if (syncResult.RequiresDeadlineTaskSync)
+                {
+                    await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, clientCase.Id, User.GetUserId(), actorName, ct);
+                }
 
                 return Ok(new ClientCaseCourtSyncRunDto
                 {
@@ -7259,6 +7277,8 @@ public class CasesV2Controller : ControllerBase
         var changedItems = new List<string>();
         var removedItems = new List<string>();
         var conflictItems = new List<string>();
+        var requiresDeadlineTaskSync = false;
+        var restoredDeadlineIds = new HashSet<int>();
 
         UpdateString("суд", clientCase.CourtName, courtData.CourtName, value => clientCase.CourtName = value, 200);
         UpdateString("номер дела в суде", clientCase.CourtCaseNumber, courtData.CaseNumber, value => clientCase.CourtCaseNumber = value, 100);
@@ -7389,9 +7409,20 @@ public class CasesV2Controller : ControllerBase
                      string.Equals(item.SourceType, "sudrf", StringComparison.OrdinalIgnoreCase)
                      && IsCurrentCourtSyncSource(item.SourceUrl)
                      && !string.IsNullOrWhiteSpace(item.ExternalKey)
+                     && !string.Equals(item.MovementStatus, "archived", StringComparison.OrdinalIgnoreCase)
                      && !currentEventExternalKeys.Contains(item.ExternalKey)))
         {
             removedItems.Add($"судебное событие «{missingEvent.Title}»");
+            missingEvent.MovementStatus = "archived";
+            missingEvent.UpdatedAt = checkedAt;
+            missingEvent.UpdatedByUserId = actorUserId;
+            missingEvent.UpdatedByUserName = Truncate(actorName, 256);
+            AddCourtEventHistory(
+                missingEvent,
+                "archived",
+                "Событие перемещено в архив: оно исчезло из судебного источника.",
+                actorUserId,
+                actorName);
         }
 
         if (createdEvents.Count > 0)
@@ -7481,6 +7512,10 @@ public class CasesV2Controller : ControllerBase
                      && !currentPartyIdentities.Contains(BuildCourtPartyIdentity(item.DisplayName, item.Side, item.ProcessRole))))
         {
             removedItems.Add($"участник процесса «{missingParty.DisplayName}»");
+            missingParty.IsArchived = true;
+            missingParty.UpdatedAt = checkedAt;
+            missingParty.UpdatedByUserId = actorUserId;
+            missingParty.UpdatedByUserName = Truncate(actorName, 256);
         }
 
         if (createdCourtParties > 0)
@@ -7560,6 +7595,12 @@ public class CasesV2Controller : ControllerBase
                 changedItems.Add($"судебный акт «{courtAct.Title}»");
             }
 
+            if (string.Equals(document.Status, "archived", StringComparison.OrdinalIgnoreCase))
+            {
+                document.Status = "received";
+                changedItems.Add($"судебный акт «{courtAct.Title}» восстановлен из архива");
+            }
+
             document.SourceType = "sudrf";
             document.SourceUrl = Truncate(FirstNonEmpty(courtAct.SourceUrl, courtData.SourceUrl), 1000);
             document.SourceCheckedAt = checkedAt;
@@ -7577,10 +7618,13 @@ public class CasesV2Controller : ControllerBase
                 checkedAt,
                 existingCourtActDeadlines,
                 currentDeadlineIdentities,
+                changedItems,
+                restoredDeadlineIds,
                 ct);
             createdProceduralDeadlines += createdDeadlinesForAct;
             if (createdDeadlinesForAct > 0)
             {
+                requiresDeadlineTaskSync = true;
                 newItems.Add($"процессуальные сроки по акту «{courtAct.Title}» ({createdDeadlinesForAct})");
             }
         }
@@ -7589,23 +7633,32 @@ public class CasesV2Controller : ControllerBase
             .Where(item =>
                 string.Equals(item.SourceType, "sudrf", StringComparison.OrdinalIgnoreCase)
                 && IsCurrentCourtSyncSource(item.SourceUrl)
+                && !string.Equals(item.Status, "archived", StringComparison.OrdinalIgnoreCase)
                 && !currentCourtActDocumentKeys.Contains(item.DocumentKey))
             .Select(static item => item.Id)
             .ToHashSet();
         foreach (var missingDocument in existingCourtActDocuments.Where(item => removedCourtActDocumentIds.Contains(item.Id)))
         {
             removedItems.Add($"судебный акт «{missingDocument.OriginalFileName}»");
+            missingDocument.Status = "archived";
         }
 
         foreach (var missingDeadline in existingCourtActDeadlines.Where(item =>
                      IsCurrentCourtSyncSource(item.SourceUrl)
+                     && !string.Equals(item.Status, "archived", StringComparison.OrdinalIgnoreCase)
                      && item.ClientCaseDocumentId.HasValue
                      && !currentDeadlineIdentities.Contains(BuildCourtDeadlineIdentity(
                          item.ClientCaseDocumentId.Value,
                          item.DeadlineType))))
         {
             removedItems.Add($"процессуальный срок «{missingDeadline.Title}»");
+            missingDeadline.Status = "archived";
+            missingDeadline.UpdatedAt = checkedAt;
+            missingDeadline.UpdatedByUserId = actorUserId;
+            missingDeadline.UpdatedByUserName = Truncate(actorName, 256);
+            requiresDeadlineTaskSync = true;
         }
+        requiresDeadlineTaskSync |= restoredDeadlineIds.Count > 0;
 
         if (createdCourtActDocuments > 0)
         {
@@ -7627,7 +7680,8 @@ public class CasesV2Controller : ControllerBase
             newItems.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
             changedItems.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
             removedItems.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
-            conflictItems.Distinct(StringComparer.OrdinalIgnoreCase).ToList());
+            conflictItems.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+            requiresDeadlineTaskSync);
 
         void UpdateString(string label, string currentValue, string sourceValue, Action<string> setValue, int maxLength)
         {
@@ -7728,6 +7782,8 @@ public class CasesV2Controller : ControllerBase
         DateTime checkedAt,
         IList<ClientCaseProceduralDeadline> existingDeadlines,
         ISet<string> currentDeadlineIdentities,
+        ICollection<string> changedItems,
+        ISet<int> restoredDeadlineIds,
         CancellationToken ct)
     {
         if (!courtAct.ActDate.HasValue)
@@ -7758,6 +7814,16 @@ public class CasesV2Controller : ControllerBase
                 existing.SourceUrl = Truncate(FirstNonEmpty(courtAct.SourceUrl, courtData.SourceUrl), 1000);
                 existing.SourceCheckedAt = checkedAt;
                 existing.SourceConfidence = "official-source";
+                if (string.Equals(existing.Status, "archived", StringComparison.OrdinalIgnoreCase))
+                {
+                    existing.Status = "active";
+                    existing.UpdatedAt = checkedAt;
+                    existing.UpdatedByUserId = actorUserId;
+                    existing.UpdatedByUserName = Truncate(actorName, 256);
+                    changedItems.Add($"процессуальный срок «{existing.Title}» восстановлен из архива");
+                    restoredDeadlineIds.Add(existing.Id);
+                }
+
                 continue;
             }
 
@@ -10692,8 +10758,8 @@ public class CasesV2Controller : ControllerBase
             ClosedByUserId = item.ClosedByUserId,
             ClosedByUserName = item.ClosedByUserName,
             CloseReason = item.CloseReason,
-            IsOverdue = item.Status != "closed" && IsCaseStatusOverdue(item.DueAt, item.AllDay, clock),
-            IsWarning = item.Status != "closed" && IsCaseStatusInWarningPeriod(item.DueAt, item.AllDay, Math.Max(0, item.WarningDaysBefore), clock),
+            IsOverdue = item.Status is not "closed" and not "cancelled" and not "archived" && IsCaseStatusOverdue(item.DueAt, item.AllDay, clock),
+            IsWarning = item.Status is not "closed" and not "cancelled" and not "archived" && IsCaseStatusInWarningPeriod(item.DueAt, item.AllDay, Math.Max(0, item.WarningDaysBefore), clock),
         };
 
     private static ClientCaseCourtEventDto MapCourtEvent(ClientCaseCourtEvent item, CaseStatusClock clock)
@@ -10732,7 +10798,7 @@ public class CasesV2Controller : ControllerBase
             UpdatedAt = item.UpdatedAt,
             UpdatedByUserId = item.UpdatedByUserId,
             UpdatedByUserName = item.UpdatedByUserName,
-            IsOverdue = item.MovementStatus is not "held" and not "completed" and not "cancelled" && IsCaseStatusOverdue(item.ScheduledAt, item.AllDay, clock),
+            IsOverdue = item.MovementStatus is not "held" and not "completed" and not "cancelled" and not "archived" && IsCaseStatusOverdue(item.ScheduledAt, item.AllDay, clock),
         };
 
     private static bool IsCaseStatusOverdue(DateTime value, bool allDay, CaseStatusClock clock)
@@ -11428,6 +11494,7 @@ public class CasesV2Controller : ControllerBase
             "moved" => "Перенесен",
             "closed" => "Закрыт",
             "cancelled" => "Отменен",
+            "archived" => "В архиве",
             _ => value,
         };
 
@@ -13368,7 +13435,8 @@ public class CasesV2Controller : ControllerBase
         IReadOnlyList<string> NewItems,
         IReadOnlyList<string> ChangedItems,
         IReadOnlyList<string> RemovedItems,
-        IReadOnlyList<string> ConflictItems)
+        IReadOnlyList<string> ConflictItems,
+        bool RequiresDeadlineTaskSync)
     {
         public bool HasChanges =>
             NewItems.Count > 0

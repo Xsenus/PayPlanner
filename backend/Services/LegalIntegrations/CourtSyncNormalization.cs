@@ -28,6 +28,7 @@ public static class CourtSyncNormalization
         public const string Cancelled = "cancelled";
         public const string Completed = "completed";
         public const string Suspended = "suspended";
+        public const string Archived = "archived";
     }
 
     public static class PartySides
@@ -92,6 +93,7 @@ public static class CourtSyncNormalization
             MovementStatuses.Cancelled => MovementStatuses.Cancelled,
             MovementStatuses.Completed => MovementStatuses.Completed,
             MovementStatuses.Suspended => MovementStatuses.Suspended,
+            MovementStatuses.Archived => MovementStatuses.Archived,
             _ => MovementStatuses.Scheduled,
         };
 
@@ -103,6 +105,7 @@ public static class CourtSyncNormalization
             MovementStatuses.Cancelled => "Отменено",
             MovementStatuses.Completed => "Завершено",
             MovementStatuses.Suspended => "Приостановлено",
+            MovementStatuses.Archived => "В архиве",
             _ => "Назначено",
         };
 

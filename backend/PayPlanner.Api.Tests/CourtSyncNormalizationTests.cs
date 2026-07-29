@@ -40,6 +40,7 @@ public sealed class CourtSyncNormalizationTests
         Assert.Equal("Апелляция", CourtSyncNormalization.GetInstanceLabel("appeal"));
         Assert.Equal("Судебное решение", CourtSyncNormalization.GetEventTypeLabel("decision"));
         Assert.Equal("Отменено", CourtSyncNormalization.GetMovementStatusLabel("cancelled"));
+        Assert.Equal("В архиве", CourtSyncNormalization.GetMovementStatusLabel("archived"));
         Assert.Equal("Третье лицо", CourtSyncNormalization.GetPartySideLabel("thirdParty"));
     }
 }

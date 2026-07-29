@@ -56,8 +56,12 @@ public static class ClientCaseDeadlineTaskSyncService
         var assigneeUserId = assignee?.Id ?? actorUserId;
         var assigneeName = assignee is null ? normalizedActorName : DisplayName(assignee);
         var assigneeEmail = assignee?.Email ?? string.Empty;
+        var hasSeparateHearing = clientCase.NextHearingAt.HasValue
+            && await db.ClientCaseCourtEvents
+                .AsNoTracking()
+                .AnyAsync(item => item.ClientCaseId == clientCase.Id && item.EventType == "hearing", ct);
 
-        foreach (var deadline in BuildDeadlines(clientCase))
+        foreach (var deadline in BuildDeadlines(clientCase, hasSeparateHearing))
         {
             var tag = BuildDeadlineTag(deadline.Key);
             var activeTask = existingTasks
@@ -183,7 +187,7 @@ public static class ClientCaseDeadlineTaskSyncService
         return task;
     }
 
-    private static IReadOnlyList<CaseDeadline> BuildDeadlines(ClientCase clientCase)
+    private static IReadOnlyList<CaseDeadline> BuildDeadlines(ClientCase clientCase, bool hasSeparateHearing)
     {
         if (ClientCaseStageClassifier.IsPretrial(clientCase))
         {
@@ -199,13 +203,18 @@ public static class ClientCaseDeadlineTaskSyncService
         {
             separateDeadlineTypes.Add(deadline.DeadlineType);
             var isClosed = string.Equals(deadline.Status, "closed", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(deadline.Status, "cancelled", StringComparison.OrdinalIgnoreCase);
+                || string.Equals(deadline.Status, "cancelled", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(deadline.Status, "archived", StringComparison.OrdinalIgnoreCase);
             result.Add(new CaseDeadline(
                 $"entity-{deadline.Id}",
                 string.IsNullOrWhiteSpace(deadline.Title) ? ResolveDeadlineTitle(deadline.DeadlineType) : deadline.Title,
                 isClosed ? null : deadline.DueAt,
                 deadline.AllDay,
                 deadline.AllDay ? 60 : 90));
+        }
+        if (hasSeparateHearing)
+        {
+            separateDeadlineTypes.Add("hearing");
         }
 
         var legacyDeadlines = new CaseDeadline[]

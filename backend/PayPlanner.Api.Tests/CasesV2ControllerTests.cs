@@ -5712,6 +5712,7 @@ public class CasesV2ControllerTests
         {
             Client = client,
             Title = "Шафорост - апелляция",
+            Stage = "Апелляция",
             CourtUrl = "https://kraevoy--hbr.sudrf.ru/modules.php?name=sud_delo&name_op=case&delo_id=42",
             Status = ClientCaseStatus.Open,
             ResponsibleUserId = responsible.Id,
@@ -5846,6 +5847,10 @@ public class CasesV2ControllerTests
         Assert.Equal(clientCase.CourtUrl, deadline.SourceUrl);
         Assert.NotNull(deadline.SourceCheckedAt);
         Assert.Equal("official-source", deadline.SourceConfidence);
+        var deadlineControlTask = await db.TaskJournalItems.SingleAsync(item =>
+            item.ClientCaseId == clientCase.Id
+            && item.TagsJson.Contains($"case-deadline:entity-{deadline.Id}"));
+        Assert.Equal("new", deadlineControlTask.Status);
 
         var notification = await db.UserNotifications.SingleAsync(item => item.Type == UserNotificationTypes.CourtHearing);
         Assert.Equal(responsible.Id, notification.RecipientUserId);
@@ -5908,10 +5913,63 @@ public class CasesV2ControllerTests
         Assert.Contains(repeatedDto.RemovedItems, item => item.Contains("участник процесса", StringComparison.Ordinal));
         Assert.DoesNotContain(repeatedDto.RemovedItems, item => item.Contains("другой инстанции", StringComparison.Ordinal));
         Assert.Equal(2, await db.ClientCaseCourtEvents.CountAsync(item => item.ClientCaseId == clientCase.Id));
-        Assert.Equal(3, await db.ClientCaseCourtParties.CountAsync(item => item.ClientCaseId == clientCase.Id && !item.IsArchived));
+        Assert.Equal("archived", (await db.ClientCaseCourtEvents.SingleAsync(item => item.Id == courtEvent.Id)).MovementStatus);
+        Assert.Equal(3, await db.ClientCaseCourtParties.CountAsync(item => item.ClientCaseId == clientCase.Id && item.IsArchived));
         Assert.Equal(1, await db.ClientCaseDocuments.CountAsync(item =>
             item.ClientCaseId == clientCase.Id
             && item.DocumentType == "Судебный акт"));
+
+        var emptySourceController = CreateController(
+            db,
+            owner,
+            sudrfCourtSyncService: new FixedSudrfCourtSyncService(new SudrfCourtCaseData
+            {
+                SourceUrl = clientCase.CourtUrl,
+                CourtName = courtData.CourtName,
+                CaseNumber = courtData.CaseNumber,
+                JudgeName = courtData.JudgeName,
+                Instance = courtData.Instance,
+            }),
+            notificationService: CreateNotificationService(db));
+        var emptySourceResult = await emptySourceController.RunCourtSync(clientCase.Id, null, CancellationToken.None);
+        var emptySourceOk = Assert.IsType<OkObjectResult>(emptySourceResult.Result);
+        var emptySourceDto = Assert.IsType<CasesV2Controller.ClientCaseCourtSyncRunDto>(emptySourceOk.Value);
+        Assert.Contains(emptySourceDto.RemovedItems, item => item.Contains("судебный акт", StringComparison.Ordinal));
+        Assert.Contains(emptySourceDto.RemovedItems, item => item.Contains("процессуальный срок", StringComparison.Ordinal));
+        Assert.Equal("archived", (await db.ClientCaseDocuments.SingleAsync(item => item.Id == document.Id)).Status);
+        Assert.Equal("archived", (await db.ClientCaseProceduralDeadlines.SingleAsync(item => item.Id == deadline.Id)).Status);
+        Assert.Equal("cancelled", (await db.TaskJournalItems.SingleAsync(item => item.Id == deadlineControlTask.Id)).Status);
+        var archivedCalendarResult = await emptySourceController.GetCaseCalendarEvents(
+            new DateTime(2026, 5, 1),
+            new DateTime(2026, 9, 30),
+            clientCaseId: clientCase.Id,
+            responsibleUserId: null,
+            includeTasks: true,
+            ct: CancellationToken.None);
+        var archivedCalendarOk = Assert.IsType<OkObjectResult>(archivedCalendarResult.Result);
+        var archivedCalendarEvents = Assert.IsAssignableFrom<IReadOnlyList<CasesV2Controller.CaseCalendarEventDto>>(archivedCalendarOk.Value);
+        Assert.DoesNotContain(archivedCalendarEvents, item =>
+            (item.Kind == "court" && item.Title == "Судебное заседание")
+            || (item.Kind == "procedural-deadline" && item.DeadlineType == "cassation")
+            || (item.Kind == "task" && item.SourceId == deadlineControlTask.Id));
+
+        var restoreController = CreateController(
+            db,
+            owner,
+            sudrfCourtSyncService: new FixedSudrfCourtSyncService(courtData),
+            notificationService: CreateNotificationService(db));
+        var restoreResult = await restoreController.RunCourtSync(clientCase.Id, null, CancellationToken.None);
+        var restoreOk = Assert.IsType<OkObjectResult>(restoreResult.Result);
+        var restoreDto = Assert.IsType<CasesV2Controller.ClientCaseCourtSyncRunDto>(restoreOk.Value);
+        Assert.Contains(restoreDto.ChangedItems, item => item.Contains("восстановлен из архива", StringComparison.Ordinal));
+        Assert.NotEqual("archived", (await db.ClientCaseCourtEvents.SingleAsync(item => item.Id == courtEvent.Id)).MovementStatus);
+        Assert.Equal(3, await db.ClientCaseCourtParties.CountAsync(item => item.ClientCaseId == clientCase.Id && !item.IsArchived));
+        Assert.Equal("received", (await db.ClientCaseDocuments.SingleAsync(item => item.Id == document.Id)).Status);
+        Assert.Equal("active", (await db.ClientCaseProceduralDeadlines.SingleAsync(item => item.Id == deadline.Id)).Status);
+        Assert.Equal(1, await db.TaskJournalItems.CountAsync(item =>
+            item.ClientCaseId == clientCase.Id
+            && item.Status != "cancelled"
+            && item.TagsJson.Contains($"case-deadline:entity-{deadline.Id}")));
     }
 
     [Fact]

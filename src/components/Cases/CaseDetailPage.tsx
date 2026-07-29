@@ -600,6 +600,13 @@ function buildDocumentStatusOptions(statuses: DocumentStatusEntity[], documents:
   );
 }
 
+function formatCaseDocumentStatus(status: string) {
+  const normalized = status.trim().toLowerCase();
+  if (normalized === 'archived') return 'В архиве';
+  if (normalized === 'received') return 'Получен';
+  return status;
+}
+
 function buildDocumentTypeOptions(
   directoryTypes: string[],
   templates: ClientCaseDocumentTemplate[],
@@ -5985,8 +5992,8 @@ function CourtPanel({
     ['Ходатайства', caseItem.motionDeadlineAt],
     ['Возражения', caseItem.objectionDeadlineAt],
   ].filter(([, value]) => Boolean(value)) as Array<[string, string]>;
-  const activeProceduralDeadlines = proceduralDeadlines.filter((item) => item.status !== 'closed' && item.status !== 'cancelled');
-  const closedProceduralDeadlines = proceduralDeadlines.filter((item) => item.status === 'closed' || item.status === 'cancelled');
+  const activeProceduralDeadlines = proceduralDeadlines.filter((item) => item.status !== 'closed' && item.status !== 'cancelled' && item.status !== 'archived');
+  const inactiveProceduralDeadlines = proceduralDeadlines.filter((item) => item.status === 'closed' || item.status === 'cancelled' || item.status === 'archived');
   const courtTimeline = buildCourtTimeline(caseItem, logs);
   const selectedCourtInstance = courtInstances.find((item) => item.instance === activeCourtInstance);
   const selectedCourtInstanceMeta = COURT_INSTANCE_TABS.find((item) => item.value === activeCourtInstance) ?? COURT_INSTANCE_TABS[0];
@@ -6470,6 +6477,7 @@ function CourtPanel({
               <option value="suspended">Приостановлено</option>
               <option value="completed">Завершено</option>
               <option value="cancelled">Отменено</option>
+              <option value="archived">В архиве</option>
             </SystemSelect>
           </label>
           <label className="text-sm font-medium text-slate-700">
@@ -6628,8 +6636,10 @@ function CourtPanel({
             ))}
           </div>
         )}
-        {closedProceduralDeadlines.length > 0 ? (
-          <div className="mt-4 text-sm text-slate-500">Закрыто: {closedProceduralDeadlines.length}</div>
+        {inactiveProceduralDeadlines.length > 0 ? (
+          <div className="mt-4 text-sm text-slate-500">
+            Закрыто и в архиве: {inactiveProceduralDeadlines.length}
+          </div>
         ) : null}
       </section>
 
@@ -6937,7 +6947,7 @@ function DocumentCard({
         <div className="min-w-0 flex-1">
           <div className="font-semibold text-slate-900">{document.originalFileName}</div>
           <div className="mt-1 text-sm text-slate-500">
-            {document.documentType} · v{document.version} · {document.status}
+            {document.documentType} · v{document.version} · {formatCaseDocumentStatus(document.status)}
           </div>
           <div className="mt-2 flex flex-wrap gap-2 text-xs">
             <span className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-600">

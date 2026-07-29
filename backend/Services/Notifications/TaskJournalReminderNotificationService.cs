@@ -214,6 +214,7 @@ public sealed class TaskJournalReminderNotificationService : BackgroundService
                  clientCase.ProceduralDeadlines.Any(deadline =>
                      deadline.Status != "closed" &&
                      deadline.Status != "cancelled" &&
+                     deadline.Status != "archived" &&
                      deadline.DueAt >= fromUtc &&
                      deadline.DueAt <= toUtc)))
             .OrderBy(clientCase => clientCase.Id)
