@@ -1,3 +1,5 @@
+using PayPlanner.Api.Models;
+
 namespace PayPlanner.Api.Services;
 
 public readonly record struct CaseInactivityNextCycleDecision(
@@ -9,6 +11,13 @@ public readonly record struct CaseInactivityNextCycleDecision(
 
 public static class CaseInactivityControlCyclePolicy
 {
+    public static readonly ClientCaseStatus[] ExcludedCaseStatuses =
+    [
+        ClientCaseStatus.OnHold,
+        ClientCaseStatus.Closed,
+        ClientCaseStatus.Lost,
+    ];
+
     public static CaseInactivityNextCycleDecision EvaluateNextCycle(
         DateTime now,
         DateTime lastMeaningfulActivityAt,

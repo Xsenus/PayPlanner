@@ -65,12 +65,6 @@ public class TasksController : ControllerBase
     [
         "new", "inProgress", "waiting", "onApproval", "approved", "revision", "overdueApproval"
     ];
-    private static readonly ClientCaseStatus[] FinishedCaseStatuses =
-    [
-        ClientCaseStatus.OnHold,
-        ClientCaseStatus.Closed,
-        ClientCaseStatus.Lost,
-    ];
     private const string RestrictExecutorEditingSettingKey = "tasks.restrictExecutorEditing";
     private const string AllowExecutorDeadlineChangeRequestsSettingKey = "tasks.allowExecutorDeadlineChangeRequests";
     private const string ExecutorCompletionAllowedUserIdsSettingKey = "tasks.executorCompletionAllowedUserIds";
@@ -480,7 +474,7 @@ public class TasksController : ControllerBase
             .Where(clientCase =>
                 ((clientCase.ClientId.HasValue && clientCase.Client != null) ||
                  (clientCase.LegalEntityId.HasValue && clientCase.LegalEntity != null)) &&
-                !FinishedCaseStatuses.Contains(clientCase.Status))
+                !CaseInactivityControlCyclePolicy.ExcludedCaseStatuses.Contains(clientCase.Status))
             .Select(clientCase => new
             {
                 clientCase.Id,
@@ -805,7 +799,7 @@ public class TasksController : ControllerBase
             .Where(clientCase =>
                 ((clientCase.ClientId.HasValue && clientCase.Client != null) ||
                  (clientCase.LegalEntityId.HasValue && clientCase.LegalEntity != null)) &&
-                !FinishedCaseStatuses.Contains(clientCase.Status))
+                !CaseInactivityControlCyclePolicy.ExcludedCaseStatuses.Contains(clientCase.Status))
             .Select(clientCase => new
             {
                 clientCase.Id,
@@ -957,7 +951,7 @@ public class TasksController : ControllerBase
                 item.Id == clientCaseId &&
                 ((item.ClientId.HasValue && item.Client != null) ||
                  (item.LegalEntityId.HasValue && item.LegalEntity != null)) &&
-                !FinishedCaseStatuses.Contains(item.Status),
+                !CaseInactivityControlCyclePolicy.ExcludedCaseStatuses.Contains(item.Status),
                 ct);
         if (clientCase is null)
         {
@@ -1131,7 +1125,7 @@ public class TasksController : ControllerBase
             .Where(clientCase =>
                 ((clientCase.ClientId.HasValue && clientCase.Client != null) ||
                  (clientCase.LegalEntityId.HasValue && clientCase.LegalEntity != null)) &&
-                !FinishedCaseStatuses.Contains(clientCase.Status))
+                !CaseInactivityControlCyclePolicy.ExcludedCaseStatuses.Contains(clientCase.Status))
             .Select(clientCase => new
             {
                 Case = clientCase,

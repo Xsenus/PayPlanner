@@ -13,12 +13,6 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
     {
         "new", "inProgress", "waiting", "onApproval", "approved", "revision", "overdueApproval"
     };
-    private static readonly ClientCaseStatus[] FinishedCaseStatuses =
-    [
-        ClientCaseStatus.OnHold,
-        ClientCaseStatus.Closed,
-        ClientCaseStatus.Lost,
-    ];
     private const string EnabledSettingKey = "tasks.automation.caseControl.enabled";
     private const string InactiveDaysSettingKey = "tasks.automation.caseControl.inactiveDays";
     private const string LimitSettingKey = "tasks.automation.caseControl.limit";
@@ -132,7 +126,7 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
                 .Where(clientCase =>
                     ((clientCase.ClientId.HasValue && clientCase.Client != null) ||
                      (clientCase.LegalEntityId.HasValue && clientCase.LegalEntity != null)) &&
-                    !FinishedCaseStatuses.Contains(clientCase.Status))
+                    !CaseInactivityControlCyclePolicy.ExcludedCaseStatuses.Contains(clientCase.Status))
                 .Select(clientCase => new
                 {
                     Case = clientCase,
@@ -605,7 +599,7 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
                 task.ClientCase != null &&
                 task.TagsJson.Contains(AutomationTag) &&
                 ActiveTaskStatuses.Contains(task.Status) &&
-                !FinishedCaseStatuses.Contains(task.ClientCase.Status) &&
+                !CaseInactivityControlCyclePolicy.ExcludedCaseStatuses.Contains(task.ClientCase.Status) &&
                 task.ClientCase.InactivityRemindersEnabled &&
                 (task.InactivityControlCycleNumber == null ||
                  (task.InactivityControlNextCheckAt.HasValue &&
