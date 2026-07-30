@@ -726,6 +726,68 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task PreviewCaseControlAutomation_CountsCandidatesForUnsavedThresholdsInSingleCaseQuery()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+        var admin = await CreateAdminUserAsync(db, "preview-settings@example.com", "Администратор");
+        var client = await CreateClientAsync(db, "Клиент предварительного расчёта");
+        var oldCase = await CreateCaseAsync(db, client.Id, "ДАВНО БЕЗ ДВИЖЕНИЯ");
+        var recentCase = await CreateCaseAsync(db, client.Id, "НЕДАВНЕЕ ДЕЛО");
+        var activeCase = await CreateCaseAsync(db, client.Id, "ДЕЛО С АКТИВНОЙ ЗАДАЧЕЙ");
+        var now = DateTime.UtcNow;
+        oldCase.CreatedAt = now.AddDays(-45);
+        recentCase.CreatedAt = now.AddDays(-5);
+        activeCase.CreatedAt = now.AddDays(-45);
+        await CreateTaskAsync(
+            db,
+            admin.Id,
+            client.Id,
+            assigneeUserId: admin.Id,
+            clientCaseId: activeCase.Id,
+            status: "new",
+            createdAt: now.AddDays(-1));
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), admin);
+        interceptor.Commands.Clear();
+
+        var result = await controller.PreviewCaseControlAutomation(
+            inactivityDays: 14,
+            escalationDays: 30,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<TaskJournalAutomationPreviewDto>(ok.Value);
+        Assert.Equal(14, dto.InactivityDays);
+        Assert.Equal(30, dto.EscalationDays);
+        Assert.Equal(1, dto.CandidateCount);
+        Assert.Equal(1, dto.EscalationCandidateCount);
+        Assert.Single(interceptor.Commands, command =>
+            command.Contains("FROM \"ClientCases\"", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task PreviewCaseControlAutomation_RejectsNonAdminWithTaskViewAccess()
+    {
+        await using var db = await CreateContextAsync();
+        var employee = await CreateTaskUserAsync(
+            db,
+            "preview-restricted@example.com",
+            "Обычный сотрудник",
+            canEdit: true,
+            canCreate: true,
+            viewScope: DataVisibilityScope.All);
+        var controller = CreateController(db, new RecordingNotificationService(), employee);
+
+        var result = await controller.PreviewCaseControlAutomation(
+            inactivityDays: 14,
+            escalationDays: 30,
+            ct: CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(result.Result);
+    }
+
+    [Fact]
     public async Task GetCaseControlAutomationDiagnostics_AppliesCaseOwnerVisibility()
     {
         await using var db = await CreateContextAsync();

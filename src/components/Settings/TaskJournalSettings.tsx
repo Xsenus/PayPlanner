@@ -2,7 +2,12 @@ import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemSelect } from '../ui/SystemSelect';
 import { useCallback, useEffect, useState } from 'react';
 import { RefreshCcw, RotateCcw, Save } from 'lucide-react';
-import { apiService, type TaskJournalAutomationDiagnosticsDto, type TaskJournalSettingsDto } from '../../services/api';
+import {
+  apiService,
+  type TaskJournalAutomationDiagnosticsDto,
+  type TaskJournalAutomationPreviewDto,
+  type TaskJournalSettingsDto,
+} from '../../services/api';
 import { useToast } from '../../hooks/useToast';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { USER_TIME_ZONE_OPTIONS } from '../../utils/timeZoneOptions';
@@ -158,9 +163,11 @@ export function TaskJournalSettings() {
   const [settings, setSettings] = useState<TaskJournalSettingsDto>(DEFAULT_SETTINGS);
   const [assignees, setAssignees] = useState<TaskJournalAssignee[]>([]);
   const [diagnostics, setDiagnostics] = useState<TaskJournalAutomationDiagnosticsDto | null>(null);
+  const [preview, setPreview] = useState<TaskJournalAutomationPreviewDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
+  const [previewLoading, setPreviewLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
   const refreshDiagnostics = useCallback(async () => {
@@ -219,6 +226,21 @@ export function TaskJournalSettings() {
       toast.error(extractDisplayErrorMessage(error, 'Не удалось сохранить настройки журнала задач.'), 'Журнал задач');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const previewAutomationImpact = async () => {
+    setPreviewLoading(true);
+    try {
+      const response = await apiService.previewTaskJournalCaseAutomation(
+        settings.caseInactivityDays,
+        settings.caseInactivityEscalationDays,
+      );
+      setPreview(response);
+    } catch (error) {
+      toast.error(extractDisplayErrorMessage(error, 'Не удалось рассчитать влияние новых правил.'), 'Автоконтроль дел');
+    } finally {
+      setPreviewLoading(false);
     }
   };
 
@@ -547,6 +569,29 @@ export function TaskJournalSettings() {
               Через {settings.caseInactivityCriticalRepeatAfterDays} дн. или при {settings.caseInactivityEscalationDays} дн. тишины
             </div>
           </div>
+        </div>
+
+        <div className="mt-3 flex flex-col gap-3 rounded-xl border border-indigo-100 bg-indigo-50/60 p-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0 text-sm text-slate-700">
+            <div className="font-semibold text-slate-900">Предварительный расчёт</div>
+            {preview ? (
+              <div className="mt-1" data-testid="case-inactivity-preview-result">
+                При пороге {preview.inactivityDays} дн. под правило попадёт <strong>{preview.candidateCount}</strong> дел,
+                из них <strong>{preview.escalationCandidateCount}</strong> достигли критического порога {preview.escalationDays} дн.
+              </div>
+            ) : (
+              <div className="mt-1 text-slate-500">Покажет ожидаемое число дел до сохранения новых сроков.</div>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => void previewAutomationImpact()}
+            disabled={loading || previewLoading}
+            className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-indigo-200 bg-white px-3 py-2 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-50 disabled:cursor-wait disabled:opacity-60"
+          >
+            <RefreshCcw className={`h-4 w-4 ${previewLoading ? 'animate-spin' : ''}`} />
+            {previewLoading ? 'Расчёт...' : 'Рассчитать влияние'}
+          </button>
         </div>
 
         <div className="mt-4 grid gap-4 md:grid-cols-3">

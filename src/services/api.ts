@@ -1796,6 +1796,13 @@ export interface TaskJournalAutomationDiagnosticsDto {
   lastCreatedDescription?: string | null;
 }
 
+export interface TaskJournalAutomationPreviewDto {
+  inactivityDays: number;
+  escalationDays: number;
+  candidateCount: number;
+  escalationCandidateCount: number;
+}
+
 export interface UpdateTaskJournalSettingsRequest {
   restrictExecutorEditing: boolean;
   allowExecutorDeadlineChangeRequests: boolean;
@@ -4100,6 +4107,11 @@ export class ApiService {
 
   async getTaskJournalAutomationDiagnostics() {
     return this.request<TaskJournalAutomationDiagnosticsDto>('/tasks/automation/case-control/diagnostics');
+  }
+
+  async previewTaskJournalCaseAutomation(inactivityDays: number, escalationDays: number) {
+    const q = buildQuery({ inactivityDays, escalationDays });
+    return this.request<TaskJournalAutomationPreviewDto>(`/tasks/automation/case-control/preview${q}`);
   }
 
   async getTaskJournalCaseAutomationCandidates(

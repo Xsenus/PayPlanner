@@ -228,6 +228,14 @@ public class TaskJournalAutomationDiagnosticsDto
     public string? LastCreatedDescription { get; set; }
 }
 
+public class TaskJournalAutomationPreviewDto
+{
+    public int InactivityDays { get; set; }
+    public int EscalationDays { get; set; }
+    public int CandidateCount { get; set; }
+    public int EscalationCandidateCount { get; set; }
+}
+
 public class TaskJournalSettingsDto
 {
     public bool RestrictExecutorEditing { get; set; } = true;

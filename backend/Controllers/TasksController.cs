@@ -604,6 +604,114 @@ public class TasksController : ControllerBase
         });
     }
 
+    [HttpGet("automation/case-control/preview")]
+    public async Task<ActionResult<TaskJournalAutomationPreviewDto>> PreviewCaseControlAutomation(
+        [FromQuery] int inactivityDays,
+        [FromQuery] int escalationDays,
+        CancellationToken ct)
+    {
+        var access = await GetTaskAccessAsync(ct);
+        if (access is null)
+        {
+            return Unauthorized();
+        }
+
+        if (!access.IsAdmin)
+        {
+            return Forbid();
+        }
+
+        var normalizedInactivityDays = Math.Clamp(inactivityDays, 1, 365);
+        var normalizedEscalationDays = Math.Clamp(escalationDays, normalizedInactivityDays, 365);
+        var now = DateTime.UtcNow;
+        var inactivityCutoff = now.AddDays(-normalizedInactivityDays);
+        var escalationCutoff = now.AddDays(-normalizedEscalationDays);
+        var vacationUserIds = await CaseInactivityResponsibleAvailabilityService
+            .GetUsersOnVacationAsync(_db, now, ct);
+
+        var statistics = await _db.ClientCases
+            .AsNoTracking()
+            .Where(clientCase =>
+                ((clientCase.ClientId.HasValue && clientCase.Client != null) ||
+                 (clientCase.LegalEntityId.HasValue && clientCase.LegalEntity != null)) &&
+                !CaseInactivityControlCyclePolicy.ExcludedCaseStatuses.Contains(clientCase.Status) &&
+                !vacationUserIds.Contains(
+                    (clientCase.ResponsibleUserId ??
+                     (clientCase.Client != null ? clientCase.Client.ResponsibleUserId : null) ??
+                     (clientCase.LegalEntity != null ? clientCase.LegalEntity.ResponsibleUserId : null)) ?? 0))
+            .Select(clientCase => new
+            {
+                clientCase.CreatedAt,
+                clientCase.LastViewedAt,
+                clientCase.ActivityConfirmedAt,
+                clientCase.InactivityRemindersEnabled,
+                ActiveTaskCount = _db.TaskJournalItems.Count(task =>
+                    task.ClientCaseId == clientCase.Id &&
+                    ActiveTaskStatuses.Contains(task.Status)),
+                LastTaskAt = _db.TaskJournalItems
+                    .IgnoreQueryFilters()
+                    .Where(task =>
+                        task.ClientCaseId == clientCase.Id &&
+                        !task.TagsJson.Contains(CaseInactivityAutomationTag))
+                    .Max(task => (DateTime?)(task.UpdatedAt ?? task.CreatedAt)),
+                LastTaskCommentAt = _db.TaskJournalComments
+                    .Where(comment =>
+                        comment.TaskJournalItem.ClientCaseId == clientCase.Id &&
+                        !comment.TaskJournalItem.TagsJson.Contains(CaseInactivityAutomationTag))
+                    .Max(comment => (DateTime?)(comment.UpdatedAt ?? comment.CreatedAt)),
+                LastControlCycleEndedAt = _db.TaskJournalItems
+                    .IgnoreQueryFilters()
+                    .Where(task =>
+                        task.ClientCaseId == clientCase.Id &&
+                        task.TagsJson.Contains(CaseInactivityAutomationTag) &&
+                        ((task.Status == "done" || task.Status == "cancelled") ||
+                         EF.Property<bool>(task, "IsDeleted")))
+                    .Max(task =>
+                        EF.Property<DateTime?>(task, "DeletedAt") ??
+                        task.UpdatedAt ??
+                        (DateTime?)task.CreatedAt),
+                LastDocumentAt = _db.ClientCaseDocuments
+                    .Where(document => document.ClientCaseId == clientCase.Id)
+                    .Max(document => (DateTime?)document.UploadedAt),
+                LastCourtEventAt = _db.ClientCaseCourtEvents
+                    .Where(courtEvent => courtEvent.ClientCaseId == clientCase.Id)
+                    .Max(courtEvent => (DateTime?)(courtEvent.UpdatedAt ?? courtEvent.CreatedAt)),
+            })
+            .GroupBy(_ => 1)
+            .Select(group => new
+            {
+                CandidateCount = group.Count(item =>
+                    item.ActiveTaskCount == 0 &&
+                    (item.LastTaskAt ?? item.CreatedAt) <= inactivityCutoff &&
+                    (item.LastTaskCommentAt ?? item.CreatedAt) <= inactivityCutoff &&
+                    (item.LastControlCycleEndedAt ?? item.CreatedAt) <= inactivityCutoff &&
+                    (item.LastDocumentAt ?? item.CreatedAt) <= inactivityCutoff &&
+                    (item.LastCourtEventAt ?? item.CreatedAt) <= inactivityCutoff &&
+                    (item.LastViewedAt ?? item.CreatedAt) <= inactivityCutoff &&
+                    (item.ActivityConfirmedAt ?? item.CreatedAt) <= inactivityCutoff &&
+                    item.InactivityRemindersEnabled),
+                EscalationCandidateCount = group.Count(item =>
+                    item.ActiveTaskCount == 0 &&
+                    (item.LastTaskAt ?? item.CreatedAt) <= escalationCutoff &&
+                    (item.LastTaskCommentAt ?? item.CreatedAt) <= escalationCutoff &&
+                    (item.LastControlCycleEndedAt ?? item.CreatedAt) <= inactivityCutoff &&
+                    (item.LastDocumentAt ?? item.CreatedAt) <= escalationCutoff &&
+                    (item.LastCourtEventAt ?? item.CreatedAt) <= escalationCutoff &&
+                    (item.LastViewedAt ?? item.CreatedAt) <= escalationCutoff &&
+                    (item.ActivityConfirmedAt ?? item.CreatedAt) <= escalationCutoff &&
+                    item.InactivityRemindersEnabled),
+            })
+            .SingleOrDefaultAsync(ct);
+
+        return Ok(new TaskJournalAutomationPreviewDto
+        {
+            InactivityDays = normalizedInactivityDays,
+            EscalationDays = normalizedEscalationDays,
+            CandidateCount = statistics?.CandidateCount ?? 0,
+            EscalationCandidateCount = statistics?.EscalationCandidateCount ?? 0,
+        });
+    }
+
     [HttpGet("calendar.ics")]
     public async Task<IActionResult> ExportCalendar(
         [FromQuery] DateTime? from,

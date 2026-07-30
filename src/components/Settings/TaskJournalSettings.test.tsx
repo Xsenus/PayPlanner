@@ -9,6 +9,7 @@ const apiMock = vi.hoisted(() => ({
   getTaskJournalSettings: vi.fn(),
   getTaskJournalAssignees: vi.fn(),
   getTaskJournalAutomationDiagnostics: vi.fn(),
+  previewTaskJournalCaseAutomation: vi.fn(),
   updateTaskJournalSettings: vi.fn(),
 }));
 const toastMock = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
@@ -50,6 +51,12 @@ describe('TaskJournalSettings', () => {
       { id: 8, name: 'Иван Петров', email: 'ivan@example.com' },
     ]);
     apiMock.getTaskJournalAutomationDiagnostics.mockResolvedValue(null);
+    apiMock.previewTaskJournalCaseAutomation.mockResolvedValue({
+      inactivityDays: 14,
+      escalationDays: 30,
+      candidateCount: 12,
+      escalationCandidateCount: 3,
+    });
     apiMock.updateTaskJournalSettings.mockImplementation(async (payload: TaskJournalSettingsDto) => payload);
   });
 
@@ -136,5 +143,22 @@ describe('TaskJournalSettings', () => {
     expect(within(stages).getByText('Через 14 дн. без активности')).toBeTruthy();
     expect(within(stages).getByText('Через 2 дн. после контроля')).toBeTruthy();
     expect(within(stages).getByText('Через 4 дн. или при 30 дн. тишины')).toBeTruthy();
+  });
+
+  it('previews how many cases will match unsaved inactivity thresholds', async () => {
+    apiMock.getTaskJournalSettings.mockResolvedValue({
+      ...settings,
+      caseInactivityAutomationEnabled: true,
+    });
+    render(<TaskJournalSettings />);
+
+    const inactivityDays = await screen.findByRole('spinbutton', { name: /Период без движения/i });
+    fireEvent.change(inactivityDays, { target: { value: '10' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Рассчитать влияние' }));
+
+    await waitFor(() => expect(apiMock.previewTaskJournalCaseAutomation).toHaveBeenCalledWith(10, 30));
+    const result = await screen.findByTestId('case-inactivity-preview-result');
+    expect(result.textContent).toContain('12');
+    expect(result.textContent).toContain('3');
   });
 });
