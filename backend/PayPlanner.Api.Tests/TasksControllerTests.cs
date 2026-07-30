@@ -523,6 +523,49 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task UpdateSettings_RejectsNonAdminWithFullTaskPermissionsAndPreservesGlobalRules()
+    {
+        await using var db = await CreateContextAsync();
+        var employee = await CreateTaskUserAsync(
+            db,
+            "task-editor-settings@example.com",
+            "Редактор задач",
+            canEdit: true,
+            canCreate: true,
+            viewScope: DataVisibilityScope.All,
+            canEditOthers: true,
+            canCompleteOthers: true,
+            canDeleteOthers: true);
+        var now = DateTime.UtcNow;
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = "tasks.automation.caseControl.inactiveDays",
+            Value = "14",
+            CreatedAt = now,
+            UpdatedAt = now,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), employee);
+
+        var result = await controller.UpdateSettings(new TaskJournalSettingsRequest
+        {
+            CaseInactivityAutomationEnabled = false,
+            CaseInactivityDays = 2,
+            CaseInactivityLimit = 100,
+            CaseInactivityEscalationDays = 4,
+            CaseInactivityRunLocalTime = "00:00",
+            CaseInactivityScheduleTimeZone = "UTC",
+        }, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(result.Result);
+        var stored = await db.SystemSettings
+            .AsNoTracking()
+            .SingleAsync(item => item.Key == "tasks.automation.caseControl.inactiveDays");
+        Assert.Equal("14", stored.Value);
+        Assert.Single(await db.SystemSettings.AsNoTracking().ToListAsync());
+    }
+
+    [Fact]
     public async Task UpdateSettings_PersistsAndReturnsNormalizedTaskStickerStyles()
     {
         await using var db = await CreateContextAsync();

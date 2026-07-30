@@ -174,6 +174,7 @@ describe('AppSettings', () => {
 
     expect(await screen.findByText('Настройки уведомлений mock')).toBeTruthy();
     expect(screen.getByRole('button', { name: /Уведомления/i })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Журнал задач/i })).toBeNull();
     expect(screen.queryByRole('button', { name: /Ключи интеграций/i })).toBeNull();
     expect(screen.queryByRole('button', { name: /Я\.Диск/i })).toBeNull();
     expect(screen.queryByRole('button', { name: /S3-хранилища/i })).toBeNull();
