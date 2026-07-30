@@ -6,7 +6,7 @@ const docsDirectory = join(repositoryRoot, 'docs');
 const packagePath = join(docsDirectory, 'tz-gap-decision-package-2026-07-30.md');
 const decisionPackage = readFileSync(packagePath, 'utf8');
 const roadmapNames = readdirSync(docsDirectory)
-  .filter((name) => /^tz-gap-.+-roadmap-2026-07-29\.md$/.test(name))
+  .filter((name) => /^tz-(?:gap|crm)-.+-roadmap-\d{4}-\d{2}-\d{2}\.md$/.test(name))
   .filter((name) => name !== 'tz-gap-roadmaps-index-2026-07-29.md')
   .sort();
 
