@@ -3208,7 +3208,12 @@ public class TasksControllerTests
         var pausedCase = await CreateCaseAsync(db, client.Id, "ПРИОСТАНОВЛЕННОЕ ДЕЛО", ClientCaseStatus.OnHold);
         var closedCase = await CreateCaseAsync(db, client.Id, "ЗАКРЫТОЕ ДЕЛО", ClientCaseStatus.Closed);
         var lostCase = await CreateCaseAsync(db, client.Id, "ПРОИГРАННОЕ ДЕЛО", ClientCaseStatus.Lost);
-        await CreateTaskAsync(db, author.Id, client.Id, clientCaseId: activeCase.Id);
+        await CreateTaskAsync(
+            db,
+            author.Id,
+            client.Id,
+            clientCaseId: activeCase.Id,
+            dueAt: DateTime.UtcNow.AddDays(30));
         var controller = CreateController(db, new RecordingNotificationService(), author);
 
         var result = await controller.GetAutomationCaseCandidates(inactiveDays: 14, limit: 10, ct: CancellationToken.None);
@@ -3220,6 +3225,53 @@ public class TasksControllerTests
         Assert.DoesNotContain(candidates, item => item.ClientCaseId == pausedCase.Id);
         Assert.DoesNotContain(candidates, item => item.ClientCaseId == closedCase.Id);
         Assert.DoesNotContain(candidates, item => item.ClientCaseId == lostCase.Id);
+    }
+
+    [Fact]
+    public async Task GetAutomationCaseCandidates_UsesActiveStatusInsteadOfDueDateForFutureTasks()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "future-task-statuses@example.com", "Автор");
+        var client = await CreateClientAsync(db, "Клиент с будущими задачами");
+        var now = DateTime.UtcNow;
+        var statuses = new[]
+        {
+            "new", "inProgress", "waiting", "onApproval", "approved", "revision", "overdueApproval", "done", "cancelled",
+        };
+        var casesByStatus = new Dictionary<string, ClientCase>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var status in statuses)
+        {
+            var clientCase = await CreateCaseAsync(db, client.Id, $"ДЕЛО {status}");
+            clientCase.CreatedAt = now.AddDays(-30);
+            casesByStatus[status] = clientCase;
+            await CreateTaskAsync(
+                db,
+                author.Id,
+                client.Id,
+                clientCaseId: clientCase.Id,
+                status: status,
+                createdAt: now.AddDays(-20),
+                updatedAt: now.AddDays(-20),
+                dueAt: now.AddDays(30));
+        }
+
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.GetAutomationCaseCandidates(
+            inactiveDays: 14,
+            limit: 20,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var candidates = Assert.IsAssignableFrom<IReadOnlyList<TaskJournalCaseAutomationCandidateDto>>(ok.Value);
+        foreach (var activeStatus in statuses.Take(7))
+        {
+            Assert.DoesNotContain(candidates, item => item.ClientCaseId == casesByStatus[activeStatus].Id);
+        }
+
+        Assert.Contains(candidates, item => item.ClientCaseId == casesByStatus["done"].Id);
+        Assert.Contains(candidates, item => item.ClientCaseId == casesByStatus["cancelled"].Id);
     }
 
     [Theory]
@@ -3400,7 +3452,12 @@ public class TasksControllerTests
         var author = await CreateAdminUserAsync(db, "author@example.com", "Автор");
         var client = await CreateClientAsync(db, "Иванов Иван Иванович");
         var clientCase = await CreateCaseAsync(db, client.Id, "БАНКРОТСТВО");
-        await CreateTaskAsync(db, author.Id, client.Id, clientCaseId: clientCase.Id);
+        await CreateTaskAsync(
+            db,
+            author.Id,
+            client.Id,
+            clientCaseId: clientCase.Id,
+            dueAt: DateTime.UtcNow.AddDays(30));
         var controller = CreateController(db, new RecordingNotificationService(), author);
 
         var result = await controller.CreateAutomationTaskForCase(clientCase.Id, CancellationToken.None);
@@ -3515,7 +3572,12 @@ public class TasksControllerTests
         var activeCase = await CreateCaseAsync(db, client.Id, "АКТИВНОЕ ДЕЛО");
         firstCase.CreatedAt = DateTime.UtcNow.AddDays(-20);
         secondCase.CreatedAt = DateTime.UtcNow.AddDays(-20);
-        await CreateTaskAsync(db, author.Id, client.Id, clientCaseId: activeCase.Id);
+        await CreateTaskAsync(
+            db,
+            author.Id,
+            client.Id,
+            clientCaseId: activeCase.Id,
+            dueAt: DateTime.UtcNow.AddDays(30));
         await db.SaveChangesAsync();
         var controller = CreateController(db, new RecordingNotificationService(), author);
 
@@ -4019,7 +4081,14 @@ public class TasksControllerTests
         var approvedTaskCase = await CreateCaseAsync(db, client.Id, "ДЕЛО С СОГЛАСОВАННОЙ ЗАДАЧЕЙ");
         pausedCase.CreatedAt = DateTime.UtcNow.AddDays(-30);
         approvedTaskCase.CreatedAt = DateTime.UtcNow.AddDays(-30);
-        await CreateTaskAsync(db, author.Id, client.Id, clientCaseId: approvedTaskCase.Id, status: "approved", createdAt: DateTime.UtcNow.AddDays(-5));
+        await CreateTaskAsync(
+            db,
+            author.Id,
+            client.Id,
+            clientCaseId: approvedTaskCase.Id,
+            status: "approved",
+            createdAt: DateTime.UtcNow.AddDays(-5),
+            dueAt: DateTime.UtcNow.AddDays(30));
         await db.SaveChangesAsync();
         var (scheduler, provider) = CreateAutomationScheduler(db, new Dictionary<string, string?>
         {
@@ -6873,7 +6942,8 @@ public class TasksControllerTests
         int? legalEntityId = null,
         DateTime? approvalDueAt = null,
         string tagsJson = "[]",
-        DateTime? updatedAt = null)
+        DateTime? updatedAt = null,
+        DateTime? dueAt = null)
     {
         var task = new TaskJournalItem
         {
@@ -6886,7 +6956,7 @@ public class TasksControllerTests
             AuthorName = "Автор",
             AssigneeUserId = assigneeUserId,
             AssigneeName = "Исполнитель",
-            DueAt = DateTime.UtcNow.AddHours(1),
+            DueAt = dueAt ?? DateTime.UtcNow.AddHours(1),
             ApprovalDueAt = approvalDueAt,
             PlannedDurationMinutes = 60,
             Status = status,
