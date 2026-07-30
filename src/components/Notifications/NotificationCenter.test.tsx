@@ -20,6 +20,8 @@ const apiMock = vi.hoisted(() => ({
   archiveUserNotifications: vi.fn(),
   deleteUserNotification: vi.fn(),
   deleteUserNotifications: vi.fn(),
+  snoozeUserNotification: vi.fn(),
+  markCaseActivity: vi.fn(),
 }));
 
 const toastMock = vi.hoisted(() => ({
@@ -98,6 +100,9 @@ describe('NotificationCenter', () => {
     apiMock.markAllUserNotificationsRead.mockResolvedValue({ updatedCount: 0 });
     apiMock.archiveUserNotifications.mockResolvedValue({ updatedCount: 0 });
     apiMock.deleteUserNotifications.mockResolvedValue({ updatedCount: 0 });
+    apiMock.snoozeUserNotification.mockImplementation(async (id: number) =>
+      createNotification({ id, snoozedUntil: '2026-06-07T10:30:00Z' }));
+    apiMock.markCaseActivity.mockResolvedValue({});
   });
 
   it('selects notifications on the page and archives selected items', async () => {
@@ -115,6 +120,45 @@ describe('NotificationCenter', () => {
 
     await waitFor(() => expect(apiMock.archiveUserNotifications).toHaveBeenCalledWith([10, 11]));
     expect(toastMock.success).toHaveBeenCalledWith('Отправлено в архив: 2.');
+  });
+
+  it('confirms case activity and snoozes inactivity notifications', async () => {
+    const confirmNotification = createNotification({
+      id: 12,
+      type: 'caseInactivityControl',
+      typeLabel: 'Автоконтроль дела',
+      title: 'Проверьте движение по делу',
+      objectType: 'case',
+      objectId: 55,
+      taskId: 88,
+    });
+    const snoozeNotification = createNotification({
+      id: 13,
+      type: 'caseInactivityReminder',
+      typeLabel: 'Напоминание о неактивности',
+      title: 'Нет активности по делу',
+      objectType: 'case',
+      objectId: 56,
+      taskId: null,
+    });
+    apiMock.getUserNotifications.mockResolvedValue(
+      createPage([confirmNotification, snoozeNotification]),
+    );
+
+    render(<NotificationCenter onOpenCase={vi.fn()} />);
+
+    await screen.findByText('Проверьте движение по делу');
+    fireEvent.click(screen.getAllByRole('button', { name: 'Подтвердить активность' })[0]);
+    await waitFor(() => {
+      expect(apiMock.markCaseActivity).toHaveBeenCalledWith(55, { confirmed: true });
+      expect(apiMock.markUserNotificationRead).toHaveBeenCalledWith(12);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Отложить 30 мин' }));
+    await waitFor(() => {
+      expect(apiMock.snoozeUserNotification).toHaveBeenCalledWith(13, 30);
+    });
+    expect(toastMock.success).toHaveBeenCalledWith('Напоминание отложено на 30 минут.');
   });
 
   it('deletes only manually selected notifications', async () => {

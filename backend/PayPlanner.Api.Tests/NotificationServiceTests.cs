@@ -5529,6 +5529,17 @@ public class NotificationServiceTests
         var assignee = await CreateUserAsync(db, "inactive-assignee@example.com");
         var task = new TaskJournalItem
         {
+            ClientCase = new ClientCase
+            {
+                Client = new Client
+                {
+                    Name = "Земцов Виктор Александрович",
+                    IsActive = true,
+                    ResponsibleUserId = assignee.Id,
+                },
+                Title = "ЗЕМЦОВ - банкротство",
+                Status = ClientCaseStatus.Open,
+            },
             ObjectName = "ЗЕМЦОВ - банкротство",
             Title = "Проверить движение по делу",
             AssigneeUserId = assignee.Id,
@@ -5551,6 +5562,8 @@ public class NotificationServiceTests
         Assert.Equal(UserNotificationTypes.CaseInactivityControl, notification.Type);
         Assert.Equal(assignee.Id, notification.RecipientUserId);
         Assert.Equal(task.Id, notification.TaskJournalItemId);
+        Assert.Equal("case", notification.ObjectType);
+        Assert.Equal(task.ClientCaseId, notification.ObjectId);
         Assert.Contains("20 дн", notification.BodyPreview);
     }
 

@@ -61,7 +61,10 @@ import {
   type UserNotificationDoNotDisturbSettings,
 } from '../../utils/userNotificationDoNotDisturb';
 import { WebPushDevicePanel } from './WebPushDevicePanel';
-import { getClientCaseDocumentIdFromNotification } from '../../utils/userNotificationMetadata';
+import {
+  getClientCaseDocumentIdFromNotification,
+  getClientCaseIdFromNotification,
+} from '../../utils/userNotificationMetadata';
 
 type NotificationStatusFilter = NonNullable<UserNotificationsQuery['status']>;
 type NotificationTaskRoleFilter = 'all' | 'assignee' | 'author' | 'observer' | 'approver';
@@ -162,6 +165,7 @@ const EMPTY_PAGE: PagedResult<UserNotificationDto> = {
   page: 1,
   pageSize: 25,
 };
+const CASE_INACTIVITY_NOTIFICATION_TYPES = new Set(['caseInactivityControl', 'caseInactivityReminder']);
 
 function toneClasses(tone: string, isRead: boolean) {
   if (isRead) {
@@ -528,7 +532,8 @@ export function NotificationCenter({
   };
 
   const handleOpenCase = async (item: UserNotificationDto) => {
-    if (item.objectType !== 'case' || !item.objectId || (!onOpenCase && !onOpenCaseDocument)) {
+    const caseId = getClientCaseIdFromNotification(item);
+    if (!caseId || (!onOpenCase && !onOpenCaseDocument)) {
       return;
     }
 
@@ -537,12 +542,54 @@ export function NotificationCenter({
       await markRead(item);
       const documentId = getClientCaseDocumentIdFromNotification(item);
       if (documentId && onOpenCaseDocument) {
-        onOpenCaseDocument(item.objectId, documentId);
+        onOpenCaseDocument(caseId, documentId);
       } else {
-        onOpenCase?.(item.objectId);
+        onOpenCase?.(caseId);
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Не удалось открыть дело.');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleSnoozeCaseInactivity = async (item: UserNotificationDto) => {
+    try {
+      setBusyId(item.id);
+      await apiService.snoozeUserNotification(item.id, 30);
+      removeItem(item.id);
+      emitUserNotificationsChanged({
+        source: 'inbox',
+        reason: 'case-inactivity-snoozed',
+        unreadDelta: item.isRead ? 0 : -1,
+        notificationId: item.id,
+      });
+      toast.success('Напоминание отложено на 30 минут.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Не удалось отложить напоминание.');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleConfirmCaseActivity = async (item: UserNotificationDto) => {
+    const caseId = getClientCaseIdFromNotification(item);
+    if (!caseId) return;
+
+    try {
+      setBusyId(item.id);
+      await apiService.markCaseActivity(caseId, { confirmed: true });
+      const updated = await apiService.markUserNotificationRead(item.id);
+      updateItem(updated);
+      emitUserNotificationsChanged({
+        source: 'inbox',
+        reason: 'case-activity-confirmed',
+        unreadDelta: item.isRead ? 0 : -1,
+        notificationId: item.id,
+      });
+      toast.success('Активность по делу подтверждена.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Не удалось подтвердить активность.');
     } finally {
       setBusyId(null);
     }
@@ -1268,6 +1315,8 @@ export function NotificationCenter({
               const linkedObjectLabel = item.objectId ? openLinkedObjectLabels[item.objectType] : undefined;
               const canOpenLinkedObject = Boolean(linkedObjectLabel && openLinkedObjectHandlers[item.objectType]);
               const caseDocumentId = getClientCaseDocumentIdFromNotification(item);
+              const caseId = getClientCaseIdFromNotification(item);
+              const isCaseInactivity = CASE_INACTIVITY_NOTIFICATION_TYPES.has(item.type) && Boolean(caseId);
               const caseButtonLabel = caseDocumentId && onOpenCaseDocument ? 'К документам' : 'К делу';
               return (
                 <article
@@ -1346,7 +1395,7 @@ export function NotificationCenter({
                         К задаче
                       </button>
                     ) : null}
-                    {item.objectType === 'case' && item.objectId ? (
+                    {caseId ? (
                       <button
                         type="button"
                         disabled={itemBusy}
@@ -1359,6 +1408,34 @@ export function NotificationCenter({
                         <ExternalLink className="h-4 w-4" />
                         {caseButtonLabel}
                       </button>
+                    ) : null}
+                    {isCaseInactivity ? (
+                      <>
+                        <button
+                          type="button"
+                          disabled={itemBusy}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void handleConfirmCaseActivity(item);
+                          }}
+                          className="inline-flex h-9 items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 text-sm font-medium text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-wait disabled:opacity-60"
+                        >
+                          <CheckCheck className="h-4 w-4" />
+                          Подтвердить активность
+                        </button>
+                        <button
+                          type="button"
+                          disabled={itemBusy}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void handleSnoozeCaseInactivity(item);
+                          }}
+                          className="inline-flex h-9 items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 text-sm font-medium text-amber-700 transition hover:bg-amber-100 disabled:cursor-wait disabled:opacity-60"
+                        >
+                          <Clock className="h-4 w-4" />
+                          Отложить 30 мин
+                        </button>
+                      </>
                     ) : null}
                     {canOpenLinkedObject ? (
                       <button

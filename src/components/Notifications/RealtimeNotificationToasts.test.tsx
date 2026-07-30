@@ -10,11 +10,15 @@ import {
 
 const toastMock = vi.hoisted(() => ({
   showToast: vi.fn(),
+  success: vi.fn(),
+  error: vi.fn(),
 }));
 
 const apiMock = vi.hoisted(() => ({
   getUserNotifications: vi.fn(),
   markUserNotificationRead: vi.fn(),
+  markCaseActivity: vi.fn(),
+  snoozeUserNotification: vi.fn(),
 }));
 
 const connectionState = vi.hoisted(() => ({
@@ -68,6 +72,8 @@ async function flushRealtimeStart() {
 describe('RealtimeNotificationToasts', () => {
   beforeEach(() => {
     toastMock.showToast.mockReset();
+    toastMock.success.mockReset();
+    toastMock.error.mockReset();
     apiMock.getUserNotifications.mockReset();
     apiMock.getUserNotifications.mockResolvedValue({
       items: [],
@@ -77,6 +83,10 @@ describe('RealtimeNotificationToasts', () => {
     });
     apiMock.markUserNotificationRead.mockReset();
     apiMock.markUserNotificationRead.mockResolvedValue({});
+    apiMock.markCaseActivity.mockReset();
+    apiMock.markCaseActivity.mockResolvedValue({});
+    apiMock.snoozeUserNotification.mockReset();
+    apiMock.snoozeUserNotification.mockResolvedValue({});
     window.localStorage.clear();
     connectionState.handlers.clear();
     connectionState.canStart = true;
@@ -443,6 +453,45 @@ describe('RealtimeNotificationToasts', () => {
     });
 
     expect(toastMock.showToast).toHaveBeenCalledTimes(1);
+  });
+
+  it('offers persistent snooze and activity confirmation for case inactivity', async () => {
+    render(<RealtimeNotificationToasts userId={5} onOpenCase={vi.fn()} />);
+
+    await waitFor(() => expect(connectionState.start).toHaveBeenCalledTimes(1));
+    const handler = connectionState.handlers.get(REALTIME_USER_NOTIFICATION_CREATED_EVENT);
+    act(() => {
+      handler?.({
+        id: 80,
+        recipientUserId: 5,
+        type: 'caseInactivityControl',
+        eventKey: 'case:56:inactivity-control:88',
+        title: 'Автоконтроль дела',
+        bodyPreview: 'Проверьте движение.',
+        tone: 'amber',
+        objectType: 'case',
+        objectId: 56,
+        taskJournalItemId: 88,
+        metadataJson: '{"clientCaseId":56}',
+        createdAt: '2026-06-18T10:00:00Z',
+      });
+    });
+
+    const toastOptions = toastMock.showToast.mock.calls[0][0] as {
+      actions: Array<{ label: string; onClick: () => void | Promise<void> }>;
+    };
+    const confirmAction = toastOptions.actions.find((item) => item.label === 'Подтвердить активность');
+    await act(async () => {
+      await confirmAction?.onClick();
+    });
+    expect(apiMock.markCaseActivity).toHaveBeenCalledWith(56, { confirmed: true });
+    expect(apiMock.markUserNotificationRead).toHaveBeenCalledWith(80);
+
+    const snoozeAction = toastOptions.actions.find((item) => item.label === 'Отложить');
+    await act(async () => {
+      await snoozeAction?.onClick();
+    });
+    expect(apiMock.snoozeUserNotification).toHaveBeenCalledWith(80, 30);
   });
 
   it('shows task change toast and opens the task from action', async () => {

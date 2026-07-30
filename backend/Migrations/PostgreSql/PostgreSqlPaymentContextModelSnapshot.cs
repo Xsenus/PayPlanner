@@ -8260,6 +8260,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<int>("RecipientUserId")
                         .HasColumnType("integer");
 
+                    b.Property<DateTime?>("SnoozedUntil")
+                        .HasColumnType("timestamp without time zone");
+
                     b.Property<int?>("TaskJournalItemId")
                         .HasColumnType("integer");
 

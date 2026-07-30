@@ -19,6 +19,7 @@ public class UserNotification
     public DateTime? ReadAt { get; set; }
     public bool IsArchived { get; set; }
     public DateTime? ArchivedAt { get; set; }
+    public DateTime? SnoozedUntil { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? DeletedAt { get; set; }
 }

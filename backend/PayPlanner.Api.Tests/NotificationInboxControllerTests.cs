@@ -151,6 +151,60 @@ public class NotificationInboxControllerTests
     }
 
     [Fact]
+    public async Task Snooze_HidesUnreadNotificationUntilLaterAndReadClearsSnooze()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "snooze@example.com");
+        var notification = CreateNotification(
+            user.Id,
+            "case:1:inactivity-control:10",
+            UserNotificationTypes.CaseInactivityControl);
+        db.UserNotifications.Add(notification);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, user.Id);
+
+        var snoozeResult = await controller.Snooze(
+            notification.Id,
+            new SnoozeUserNotificationRequest { Minutes = 30 },
+            CancellationToken.None);
+        var snoozed = Assert.IsType<UserNotificationDto>(
+            Assert.IsType<OkObjectResult>(snoozeResult.Result).Value);
+        Assert.False(snoozed.IsRead);
+        Assert.True(snoozed.SnoozedUntil > DateTime.UtcNow.AddMinutes(29));
+
+        var activeResult = await controller.GetNotifications("active", null, null);
+        var activePage = Assert.IsType<PagedResponse<UserNotificationDto>>(
+            Assert.IsType<OkObjectResult>(activeResult.Result).Value);
+        Assert.Empty(activePage.Items);
+        var unreadResult = await controller.GetUnreadCount(CancellationToken.None);
+        Assert.Equal(0, Assert.IsType<int>(Assert.IsType<OkObjectResult>(unreadResult.Result).Value));
+
+        var allResult = await controller.GetNotifications("all", null, null);
+        var allPage = Assert.IsType<PagedResponse<UserNotificationDto>>(
+            Assert.IsType<OkObjectResult>(allResult.Result).Value);
+        Assert.Single(allPage.Items);
+
+        var readResult = await controller.MarkRead(notification.Id, CancellationToken.None);
+        var read = Assert.IsType<UserNotificationDto>(
+            Assert.IsType<OkObjectResult>(readResult.Result).Value);
+        Assert.True(read.IsRead);
+        Assert.Null(read.SnoozedUntil);
+
+        await controller.Snooze(
+            notification.Id,
+            new SnoozeUserNotificationRequest { Minutes = 30 },
+            CancellationToken.None);
+        var markUnreadResult = await controller.MarkUnread(notification.Id, CancellationToken.None);
+        var markedUnread = Assert.IsType<UserNotificationDto>(
+            Assert.IsType<OkObjectResult>(markUnreadResult.Result).Value);
+        Assert.False(markedUnread.IsRead);
+        Assert.Null(markedUnread.SnoozedUntil);
+
+        unreadResult = await controller.GetUnreadCount(CancellationToken.None);
+        Assert.Equal(1, Assert.IsType<int>(Assert.IsType<OkObjectResult>(unreadResult.Result).Value));
+    }
+
+    [Fact]
     public async Task GetUnreadCount_IgnoresArchivedReadAndDeletedNotifications()
     {
         await using var db = await CreateContextAsync();

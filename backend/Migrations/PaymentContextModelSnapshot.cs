@@ -8074,6 +8074,9 @@ namespace PayPlanner.Api.Migrations
                     b.Property<int>("RecipientUserId")
                         .HasColumnType("INTEGER");
 
+                    b.Property<DateTime?>("SnoozedUntil")
+                        .HasColumnType("TEXT");
+
                     b.Property<int?>("TaskJournalItemId")
                         .HasColumnType("INTEGER");
 

@@ -54,6 +54,7 @@ public class NotificationInboxController : ControllerBase
                 item.RecipientUserId == userId.Value
                 && !item.IsRead
                 && !item.IsArchived
+                && (!item.SnoozedUntil.HasValue || item.SnoozedUntil <= DateTime.UtcNow)
                 && item.DeletedAt == null);
         unreadQuery = ApplyDisabledTypeFilter(unreadQuery, preferences.DisabledTypes);
         var count = await WhereNotificationTargetVisible(unreadQuery, _context, visibility)
@@ -251,6 +252,7 @@ public class NotificationInboxController : ControllerBase
 
         item.IsRead = false;
         item.ReadAt = null;
+        item.SnoozedUntil = null;
         await _context.SaveChangesAsync(ct);
         return Ok(Map(item));
     }
@@ -271,6 +273,26 @@ public class NotificationInboxController : ControllerBase
             item.ArchivedAt = DateTime.UtcNow;
         }
 
+        await _context.SaveChangesAsync(ct);
+        return Ok(Map(item));
+    }
+
+    [HttpPatch("{id:int}/snooze")]
+    public async Task<ActionResult<UserNotificationDto>> Snooze(
+        int id,
+        [FromBody] SnoozeUserNotificationRequest? request,
+        CancellationToken ct)
+    {
+        var item = await FindOwnedNotificationAsync(id, ct);
+        if (item is null)
+        {
+            return NotFound();
+        }
+
+        var minutes = Math.Clamp(request?.Minutes ?? 30, 5, 1440);
+        item.SnoozedUntil = DateTime.UtcNow.AddMinutes(minutes);
+        item.IsRead = false;
+        item.ReadAt = null;
         await _context.SaveChangesAsync(ct);
         return Ok(Map(item));
     }
@@ -414,13 +436,19 @@ public class NotificationInboxController : ControllerBase
         IQueryable<UserNotification> query,
         string? status)
     {
+        var now = DateTime.UtcNow;
         return status?.Trim().ToLowerInvariant() switch
         {
             "all" => query,
-            "unread" => query.Where(item => !item.IsArchived && !item.IsRead),
+            "unread" => query.Where(item =>
+                !item.IsArchived &&
+                !item.IsRead &&
+                (!item.SnoozedUntil.HasValue || item.SnoozedUntil <= now)),
             "read" => query.Where(item => !item.IsArchived && item.IsRead),
             "archived" => query.Where(item => item.IsArchived),
-            _ => query.Where(item => !item.IsArchived)
+            _ => query.Where(item =>
+                !item.IsArchived &&
+                (!item.SnoozedUntil.HasValue || item.SnoozedUntil <= now))
         };
     }
 
@@ -770,6 +798,7 @@ public class NotificationInboxController : ControllerBase
 
     private static void MarkAsRead(UserNotification item)
     {
+        item.SnoozedUntil = null;
         if (item.IsRead)
         {
             return;
@@ -822,6 +851,7 @@ public class NotificationInboxController : ControllerBase
             ReadAt = item.ReadAt,
             IsArchived = item.IsArchived,
             ArchivedAt = item.ArchivedAt,
+            SnoozedUntil = item.SnoozedUntil,
             CreatedAt = item.CreatedAt
         };
     }

@@ -1,5 +1,7 @@
 type NotificationMetadataSource = {
   metadataJson?: string | null;
+  objectType?: string | null;
+  objectId?: number | null;
 };
 
 function readPositiveInteger(value: unknown): number | null {
@@ -33,4 +35,15 @@ export function parseUserNotificationMetadata(metadataJson?: string | null): Rec
 export function getClientCaseDocumentIdFromNotification(notification: NotificationMetadataSource): number | null {
   const metadata = parseUserNotificationMetadata(notification.metadataJson);
   return readPositiveInteger(metadata.clientCaseDocumentId);
+}
+
+export function getClientCaseIdFromNotification(notification: NotificationMetadataSource): number | null {
+  if ((notification.objectType === 'case' || notification.objectType === 'client-case') &&
+      notification.objectId &&
+      notification.objectId > 0) {
+    return notification.objectId;
+  }
+
+  const metadata = parseUserNotificationMetadata(notification.metadataJson);
+  return readPositiveInteger(metadata.clientCaseId ?? metadata.ClientCaseId);
 }

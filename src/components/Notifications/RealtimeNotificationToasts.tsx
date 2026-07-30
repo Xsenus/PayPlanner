@@ -13,7 +13,11 @@ import {
 import type { ToastDomain } from '../../contexts/toastContextCore';
 import { emitUserNotificationsChanged } from '../../utils/userNotifications';
 import { updateRealtimeNotificationDiagnostics } from '../../utils/realtimeNotificationDiagnostics';
-import { getClientCaseDocumentIdFromNotification, parseUserNotificationMetadata } from '../../utils/userNotificationMetadata';
+import {
+  getClientCaseDocumentIdFromNotification,
+  getClientCaseIdFromNotification,
+  parseUserNotificationMetadata,
+} from '../../utils/userNotificationMetadata';
 
 const FALLBACK_POLL_INTERVAL_MS = 30_000;
 const FALLBACK_PAGE_SIZE = 15;
@@ -481,6 +485,10 @@ export function RealtimeNotificationToasts({
       }
 
       const action = resolveToastAction(notification, handlersRef.current);
+      const caseId = getClientCaseIdFromNotification(notification);
+      const isCaseInactivity =
+        (notification.type === 'caseInactivityControl' || notification.type === 'caseInactivityReminder') &&
+        Boolean(caseId);
       const markRead = async () => {
         try {
           await apiService.markUserNotificationRead(notification.id);
@@ -499,11 +507,50 @@ export function RealtimeNotificationToasts({
         void markRead();
         return action.run();
       };
+      const confirmCaseActivity = async () => {
+        if (!caseId) return;
+        try {
+          await apiService.markCaseActivity(caseId, { confirmed: true });
+          await markRead();
+          toast.success('Активность по делу подтверждена.', 'Автоконтроль');
+        } catch (error) {
+          toast.error(
+            error instanceof Error ? error.message : 'Не удалось подтвердить активность.',
+            'Автоконтроль',
+          );
+        }
+      };
+      const snoozeAction = async () => {
+        try {
+          if (isCaseInactivity) {
+            await apiService.snoozeUserNotification(notification.id, 30);
+            emitUserNotificationsChanged({
+              source: 'realtime',
+              reason: 'case-inactivity-snoozed',
+              unreadDelta: -1,
+              notificationId: notification.id,
+            });
+          }
+          snoozeToast(dedupeKey);
+        } catch (error) {
+          toast.error(
+            error instanceof Error ? error.message : 'Не удалось отложить напоминание.',
+            'Автоконтроль',
+          );
+        }
+      };
       const actions: RealtimeToastAction[] = [
         {
           label: action.label,
           run: openAction,
         },
+        ...(isCaseInactivity
+          ? [{
+              label: 'Подтвердить активность',
+              run: confirmCaseActivity,
+              variant: 'primary' as const,
+            }]
+          : []),
         {
           label: 'Прочитано',
           run: markRead,
@@ -511,7 +558,7 @@ export function RealtimeNotificationToasts({
         },
         {
           label: 'Отложить',
-          run: () => snoozeToast(dedupeKey),
+          run: snoozeAction,
           variant: 'secondary',
         },
       ];

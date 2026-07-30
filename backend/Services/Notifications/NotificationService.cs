@@ -2887,23 +2887,44 @@ public sealed class NotificationService : INotificationService
 
             if (HasTaskChannel(task, NotificationChannels.InApp))
             {
-                await CreateUserNotificationAsync(
-                    recipientUserId,
-                    UserNotificationTypes.CaseInactivityControl,
-                    eventKey,
-                    message.Subject,
-                    message.Body,
-                    "amber",
-                    task,
-                    new
-                    {
+                var metadata = new
+                {
+                    task.ClientCaseId,
+                    daysWithoutActiveTask,
+                    task.AssigneeUserId,
+                    isEscalationObserver = recipientUserId != task.AssigneeUserId.Value
+                };
+                if (task.ClientCaseId.HasValue)
+                {
+                    await CreateUserNotificationAsync(
+                        recipientUserId,
+                        UserNotificationTypes.CaseInactivityControl,
+                        eventKey,
+                        message.Subject,
+                        message.Body,
+                        "amber",
+                        "case",
                         task.ClientCaseId,
-                        daysWithoutActiveTask,
-                        task.AssigneeUserId,
-                        isEscalationObserver = recipientUserId != task.AssigneeUserId.Value
-                    },
-                    cancellationToken,
-                    recipientNotificationChannels[recipientUserId]);
+                        task.Id,
+                        task,
+                        metadata,
+                        cancellationToken,
+                        resolvedNotificationChannels: recipientNotificationChannels[recipientUserId]);
+                }
+                else
+                {
+                    await CreateUserNotificationAsync(
+                        recipientUserId,
+                        UserNotificationTypes.CaseInactivityControl,
+                        eventKey,
+                        message.Subject,
+                        message.Body,
+                        "amber",
+                        task,
+                        metadata,
+                        cancellationToken,
+                        recipientNotificationChannels[recipientUserId]);
+                }
             }
 
             var enabledChannels = channels

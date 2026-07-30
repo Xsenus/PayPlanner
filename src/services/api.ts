@@ -1215,6 +1215,7 @@ export interface UserNotificationDto {
   readAt?: string | null;
   isArchived: boolean;
   archivedAt?: string | null;
+  snoozedUntil?: string | null;
   createdAt: string;
 }
 
@@ -4271,6 +4272,13 @@ export class ApiService {
   async archiveUserNotification(id: number) {
     return this.request<UserNotificationDto>(`/notifications/inbox/${id}/archive`, {
       method: 'PATCH',
+    });
+  }
+
+  async snoozeUserNotification(id: number, minutes = 30) {
+    return this.request<UserNotificationDto>(`/notifications/inbox/${id}/snooze`, {
+      method: 'PATCH',
+      body: JSON.stringify({ minutes }),
     });
   }
 

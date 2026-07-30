@@ -188,7 +188,13 @@ public class UserNotificationDto
     public DateTime? ReadAt { get; set; }
     public bool IsArchived { get; set; }
     public DateTime? ArchivedAt { get; set; }
+    public DateTime? SnoozedUntil { get; set; }
     public DateTime CreatedAt { get; set; }
+}
+
+public sealed class SnoozeUserNotificationRequest
+{
+    public int Minutes { get; set; } = 30;
 }
 
 public class UserNotificationTypeDto
