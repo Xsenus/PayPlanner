@@ -73,6 +73,8 @@ describe('objectAudit utilities', () => {
     expect(getObjectAuditFieldLabel('calendar-sync', 'Yandex Calendar Sync Enabled')).toBe('Синхронизация Яндекс.Календаря');
     expect(getObjectAuditFieldLabel('calendar-sync', 'SyncMode')).toBe('Главный источник событий');
     expect(getObjectAuditFieldLabel('calendar-sync', 'DryRunConfirmed')).toBe('Dry-run на копии базы');
+    expect(getObjectAuditFieldLabel('notification-settings', 'SmsProvider')).toBe('SMS-провайдер');
+    expect(getObjectAuditFieldLabel('notification-settings', 'SmsTemplateBody')).toBe('Текст SMS-шаблона');
     expect(getObjectAuditFieldLabel('user', 'Last Activity Action')).toBe('Последнее действие');
     expect(getObjectAuditFieldLabel('user', 'Last Activity At')).toBe('Время последней активности');
     expect(getObjectAuditFieldLabel('user', 'Last Activity Section')).toBe('Последний раздел');
@@ -162,6 +164,7 @@ describe('objectAudit utilities', () => {
     expect(getObjectAuditTypeLabel('yandex-disk')).toBe('Я.Диск');
     expect(getObjectAuditTypeLabel('task-journal-item')).toBe('Задача');
     expect(getObjectAuditTypeLabel('calendar-sync')).toBe('Синхронизация календаря');
+    expect(getObjectAuditTypeLabel('notification-settings')).toBe('Настройки уведомлений');
     expect(getObjectAuditTypeLabel('invoice-line-item')).toBe('Позиция счета');
     expect(getObjectAuditTypeLabel('client-case-document')).toBe('Документ дела');
     expect(getObjectAuditTypeLabel('client-case-work-order')).toBe('Заказ-наряд');

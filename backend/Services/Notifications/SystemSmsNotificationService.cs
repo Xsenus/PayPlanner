@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
@@ -58,10 +59,14 @@ public sealed class SystemSmsNotificationService : ISmsNotificationService
     ];
 
     private readonly PaymentContext _context;
+    private readonly IHttpContextAccessor? _httpContextAccessor;
 
-    public SystemSmsNotificationService(PaymentContext context)
+    public SystemSmsNotificationService(
+        PaymentContext context,
+        IHttpContextAccessor? httpContextAccessor = null)
     {
         _context = context;
+        _httpContextAccessor = httpContextAccessor;
     }
 
     public async Task<SmsNotificationSettingsDto> GetSettingsAsync(CancellationToken cancellationToken = default)
@@ -80,6 +85,12 @@ public sealed class SystemSmsNotificationService : ISmsNotificationService
         var existing = await _context.SystemSettings
             .Where(setting => SettingKeys.Contains(setting.Key))
             .ToDictionaryAsync(setting => setting.Key, cancellationToken);
+        var previousValues = existing.ToDictionary(
+            item => item.Key,
+            item => item.Value.Value,
+            StringComparer.Ordinal);
+        var previousSettings = BuildSettings(previousValues);
+        var previousApiToken = previousValues.GetValueOrDefault(ApiTokenSettingKey) ?? string.Empty;
 
         UpsertSetting(existing, EnabledSettingKey, request.Enabled ? "true" : "false", now);
         UpsertSetting(existing, ProviderKeySettingKey, NormalizeOptional(request.ProviderKey) ?? string.Empty, now);
@@ -136,6 +147,22 @@ public sealed class SystemSmsNotificationService : ISmsNotificationService
         else if (!existing.ContainsKey(ApiTokenSettingKey))
         {
             UpsertSetting(existing, ApiTokenSettingKey, string.Empty, now);
+        }
+
+        var nextValues = existing.ToDictionary(
+            item => item.Key,
+            item => item.Value.Value,
+            StringComparer.Ordinal);
+        var nextSettings = BuildSettings(nextValues);
+        var nextApiToken = nextValues.GetValueOrDefault(ApiTokenSettingKey) ?? string.Empty;
+        var auditEvent = NotificationSettingsAudit.CreateSmsSettingsUpdatedEvent(
+            _httpContextAccessor?.HttpContext?.User,
+            previousSettings,
+            nextSettings,
+            !string.Equals(previousApiToken, nextApiToken, StringComparison.Ordinal));
+        if (auditEvent is not null)
+        {
+            _context.ObjectAuditEvents.Add(auditEvent);
         }
 
         await _context.SaveChangesAsync(cancellationToken);

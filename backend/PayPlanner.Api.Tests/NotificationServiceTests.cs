@@ -1,5 +1,6 @@
 using System.Data.Common;
 using System.Net;
+using System.Security.Claims;
 using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -417,6 +418,73 @@ public class NotificationServiceTests
         Assert.Equal(delivery.Id, savedDelivery.Id);
         Assert.Equal(NotificationDeliveryStatus.Skipped, savedDelivery.Status);
         Assert.Equal(settings.Sms.StatusText, savedDelivery.Error);
+    }
+
+    [Fact]
+    public async Task SmsSettings_AuditStoresActorAndSafeChangesWithoutToken()
+    {
+        await using var db = await CreateContextAsync();
+        var httpContext = new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal(new ClaimsIdentity(
+            [
+                new Claim(ClaimTypes.NameIdentifier, "42"),
+                new Claim(ClaimTypes.Name, "Администратор SMS")
+            ], "test"))
+        };
+        var accessor = new HttpContextAccessor { HttpContext = httpContext };
+        var smsService = new SystemSmsNotificationService(db, accessor);
+        var request = new UpdateSmsNotificationSettingsRequest
+        {
+            Enabled = true,
+            ProviderKey = "sms-ru",
+            SenderName = "PayPlanner",
+            ApiToken = "server-only-secret-token",
+            DailyLimit = 250,
+            RecipientDailyLimit = 7,
+            BurstLimitPerMinute = 25,
+            MaxMessageLength = 320,
+            LowBalanceThreshold = 700m,
+            EmergencyStop = false,
+            DisabledEventTypes = [UserNotificationTypes.TaskReminder],
+            QuietHoursEnabled = true,
+            QuietHoursStart = "23:00",
+            QuietHoursEnd = "07:00",
+            QuietHoursTimeZone = "Asia/Novosibirsk"
+        };
+
+        await smsService.UpdateSettingsAsync(request);
+
+        var audit = await db.ObjectAuditEvents.SingleAsync();
+        Assert.Equal(NotificationSettingsAudit.ObjectType, audit.ObjectType);
+        Assert.Equal(NotificationSettingsAudit.UpdatedAction, audit.Action);
+        Assert.Equal(42, audit.ActorUserId);
+        Assert.Equal("Администратор SMS", audit.ActorUserName);
+        Assert.Contains("провайдер", audit.Description, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("\"field\":\"SmsProvider\"", audit.MetadataJson, StringComparison.Ordinal);
+        Assert.Contains("\"field\":\"SmsApiToken\"", audit.MetadataJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("server-only-secret-token", audit.MetadataJson, StringComparison.Ordinal);
+
+        await smsService.UpdateSettingsAsync(new UpdateSmsNotificationSettingsRequest
+        {
+            Enabled = request.Enabled,
+            ProviderKey = request.ProviderKey,
+            SenderName = request.SenderName,
+            KeepExistingApiToken = true,
+            DailyLimit = request.DailyLimit,
+            RecipientDailyLimit = request.RecipientDailyLimit,
+            BurstLimitPerMinute = request.BurstLimitPerMinute,
+            MaxMessageLength = request.MaxMessageLength,
+            LowBalanceThreshold = request.LowBalanceThreshold,
+            EmergencyStop = request.EmergencyStop,
+            DisabledEventTypes = request.DisabledEventTypes,
+            QuietHoursEnabled = request.QuietHoursEnabled,
+            QuietHoursStart = request.QuietHoursStart,
+            QuietHoursEnd = request.QuietHoursEnd,
+            QuietHoursTimeZone = request.QuietHoursTimeZone
+        });
+
+        Assert.Equal(1, await db.ObjectAuditEvents.CountAsync());
     }
 
     [Fact]
@@ -1204,6 +1272,51 @@ public class NotificationServiceTests
         var reset = await service.ResetTemplateAsync(NotificationTemplateKeys.SmsCaseProceduralDeadline);
         Assert.Equal(reset.DefaultSubject, reset.Subject);
         Assert.Equal(reset.DefaultBody, reset.Body);
+    }
+
+    [Fact]
+    public async Task SmsTemplateChanges_AreAuditedWithoutTemplateContent()
+    {
+        await using var db = await CreateContextAsync();
+        var httpContext = new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal(new ClaimsIdentity(
+            [
+                new Claim(ClaimTypes.NameIdentifier, "77"),
+                new Claim(ClaimTypes.Name, "Редактор шаблонов")
+            ], "test"))
+        };
+        var accessor = new HttpContextAccessor { HttpContext = httpContext };
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            httpContextAccessor: accessor);
+        const string secretTemplateText = "Секретный текст шаблона для проверки аудита";
+
+        await service.UpdateTemplateAsync(
+            NotificationTemplateKeys.SmsTaskReminder,
+            new UpdateNotificationTemplateRequest
+            {
+                IsEnabled = true,
+                Subject = "Изменённая тема",
+                Body = secretTemplateText
+            });
+        await service.ResetTemplateAsync(NotificationTemplateKeys.SmsTaskReminder);
+
+        var audits = await db.ObjectAuditEvents
+            .OrderBy(item => item.Id)
+            .ToListAsync();
+        Assert.Equal(2, audits.Count);
+        Assert.All(audits, audit =>
+        {
+            Assert.Equal(NotificationSettingsAudit.ObjectType, audit.ObjectType);
+            Assert.Equal(77, audit.ActorUserId);
+            Assert.DoesNotContain(secretTemplateText, audit.MetadataJson, StringComparison.Ordinal);
+            Assert.Contains(NotificationTemplateKeys.SmsTaskReminder, audit.MetadataJson, StringComparison.Ordinal);
+        });
+        Assert.Contains("Изменён SMS-шаблон", audits[0].Description, StringComparison.Ordinal);
+        Assert.Contains("Восстановлен стандартный", audits[1].Description, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -10054,7 +10167,8 @@ public class NotificationServiceTests
         IRealtimeNotificationPublisher? realtimePublisher = null,
         IWebPushNotificationService? webPushNotificationService = null,
         ISmsNotificationService? smsNotificationService = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IHttpContextAccessor? httpContextAccessor = null)
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>())
@@ -10069,7 +10183,8 @@ public class NotificationServiceTests
             realtimePublisher,
             webPushNotificationService,
             smsNotificationService,
-            timeProvider);
+            timeProvider,
+            httpContextAccessor);
     }
 
     private static ExternalAuthService CreateExternalAuthService(

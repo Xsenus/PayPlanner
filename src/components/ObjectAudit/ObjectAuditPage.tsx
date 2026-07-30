@@ -31,6 +31,7 @@ const OBJECT_TYPE_OPTIONS = [
   'client-case',
   'client-case-document',
   'calendar-sync',
+  'notification-settings',
   'payment',
   'invoice',
   'invoice-line-item',

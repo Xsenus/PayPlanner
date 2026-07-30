@@ -53,6 +53,7 @@ public sealed class NotificationService : INotificationService
     private readonly IWebPushNotificationService? _webPushNotificationService;
     private readonly ILogger<NotificationService> _logger;
     private readonly TimeProvider _timeProvider;
+    private readonly IHttpContextAccessor? _httpContextAccessor;
     private SmsDeliveryPolicy? _smsDeliveryPolicyCache;
 
     private sealed record NotificationSenderTarget(
@@ -98,7 +99,8 @@ public sealed class NotificationService : INotificationService
         IRealtimeNotificationPublisher? realtimePublisher = null,
         IWebPushNotificationService? webPushNotificationService = null,
         ISmsNotificationService? smsService = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IHttpContextAccessor? httpContextAccessor = null)
     {
         _context = context;
         _configuration = configuration;
@@ -109,6 +111,7 @@ public sealed class NotificationService : INotificationService
         _webPushNotificationService = webPushNotificationService;
         _logger = logger;
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _httpContextAccessor = httpContextAccessor;
     }
 
     public async Task<NotificationSettingsDto> GetSettingsAsync(CancellationToken cancellationToken = default)
@@ -274,6 +277,7 @@ public sealed class NotificationService : INotificationService
             ?? throw new InvalidOperationException("NotificationTemplateNotFound");
         var storage = await LoadTemplateStorageAsync(cancellationToken);
         var item = storage.Templates.FirstOrDefault(template => string.Equals(template.Key, definition.Key, StringComparison.OrdinalIgnoreCase));
+        var previous = MapTemplate(definition, storage);
         if (item is null)
         {
             item = new NotificationTemplateStorageItem { Key = definition.Key };
@@ -284,8 +288,19 @@ public sealed class NotificationService : INotificationService
         item.Subject = NormalizeTemplateText(request.Subject, definition.DefaultSubject);
         item.Body = NormalizeTemplateText(request.Body, definition.DefaultBody);
 
+        var next = MapTemplate(definition, storage);
+        var auditEvent = NotificationSettingsAudit.CreateSmsTemplateUpdatedEvent(
+            _httpContextAccessor?.HttpContext?.User,
+            previous,
+            next,
+            reset: false);
+        if (auditEvent is not null)
+        {
+            _context.ObjectAuditEvents.Add(auditEvent);
+        }
+
         await SaveTemplateStorageAsync(storage, cancellationToken);
-        return MapTemplate(definition, storage);
+        return next;
     }
 
     public async Task<NotificationTemplateDto> ResetTemplateAsync(string key, CancellationToken cancellationToken = default)
@@ -293,9 +308,21 @@ public sealed class NotificationService : INotificationService
         var definition = NotificationTemplateCatalog.Find(key)
             ?? throw new InvalidOperationException("NotificationTemplateNotFound");
         var storage = await LoadTemplateStorageAsync(cancellationToken);
+        var previous = MapTemplate(definition, storage);
         storage.Templates.RemoveAll(template => string.Equals(template.Key, definition.Key, StringComparison.OrdinalIgnoreCase));
+        var next = MapTemplate(definition, storage);
+        var auditEvent = NotificationSettingsAudit.CreateSmsTemplateUpdatedEvent(
+            _httpContextAccessor?.HttpContext?.User,
+            previous,
+            next,
+            reset: true);
+        if (auditEvent is not null)
+        {
+            _context.ObjectAuditEvents.Add(auditEvent);
+        }
+
         await SaveTemplateStorageAsync(storage, cancellationToken);
-        return MapTemplate(definition, storage);
+        return next;
     }
 
     public async Task<NotificationMessage> RenderTemplateAsync(
