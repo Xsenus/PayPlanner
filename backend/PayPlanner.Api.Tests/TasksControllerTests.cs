@@ -1,4 +1,5 @@
 using System.Data.Common;
+using System.Diagnostics;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
@@ -785,6 +786,48 @@ public class TasksControllerTests
             ct: CancellationToken.None);
 
         Assert.IsType<ForbidResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task PreviewCaseControlAutomation_HandlesTenThousandCasesWithOneAggregateQuery()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+        var admin = await CreateAdminUserAsync(db, "preview-load@example.com", "Администратор");
+        var client = await CreateClientAsync(db, "Клиент нагрузочной проверки");
+        var createdAt = DateTime.UtcNow.AddDays(-45);
+        var cases = Enumerable.Range(1, 10_000)
+            .Select(index => new ClientCase
+            {
+                ClientId = client.Id,
+                Title = $"НАГРУЗОЧНОЕ ДЕЛО {index}",
+                Status = ClientCaseStatus.Open,
+                CreatedAt = createdAt,
+                InactivityRemindersEnabled = true,
+            })
+            .ToArray();
+        db.ClientCases.AddRange(cases);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        var controller = CreateController(db, new RecordingNotificationService(), admin);
+        interceptor.Commands.Clear();
+        var stopwatch = Stopwatch.StartNew();
+
+        var result = await controller.PreviewCaseControlAutomation(
+            inactivityDays: 14,
+            escalationDays: 30,
+            ct: CancellationToken.None);
+
+        stopwatch.Stop();
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<TaskJournalAutomationPreviewDto>(ok.Value);
+        Assert.Equal(10_000, dto.CandidateCount);
+        Assert.Equal(10_000, dto.EscalationCandidateCount);
+        Assert.Single(interceptor.Commands, command =>
+            command.Contains("FROM \"ClientCases\"", StringComparison.Ordinal));
+        Assert.True(
+            stopwatch.Elapsed < TimeSpan.FromSeconds(30),
+            $"Preview 10 000 дел занял {stopwatch.Elapsed}.");
     }
 
     [Fact]
