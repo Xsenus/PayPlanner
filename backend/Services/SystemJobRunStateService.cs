@@ -19,6 +19,7 @@ public static class SystemJobKeys
     public const string UserActivityRetention = "user-activity-retention";
     public const string YandexDiskCrmSync = "yandex-disk-crm-sync";
     public const string PaymentAdvanceReviewMonitoring = "payment-advance-review-monitoring";
+    public const string SmsChannelMonitoring = "sms-channel-monitoring";
 }
 
 public sealed class SystemJobRunState

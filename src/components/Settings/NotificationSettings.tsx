@@ -74,6 +74,7 @@ type SmsSettingsForm = {
   recipientDailyLimit: number;
   burstLimitPerMinute: number;
   maxMessageLength: number;
+  lowBalanceThreshold: number;
   quietHoursEnabled: boolean;
   quietHoursStart: string;
   quietHoursEnd: string;
@@ -250,6 +251,7 @@ function smsFormFromSettings(settings?: NotificationSettingsDto | null): SmsSett
     recipientDailyLimit: settings?.sms.recipientDailyLimit ?? 5,
     burstLimitPerMinute: settings?.sms.burstLimitPerMinute ?? 20,
     maxMessageLength: settings?.sms.maxMessageLength ?? 480,
+    lowBalanceThreshold: settings?.sms.lowBalanceThreshold ?? 500,
     quietHoursEnabled: settings?.sms.quietHoursEnabled ?? true,
     quietHoursStart: settings?.sms.quietHoursStart ?? '22:00',
     quietHoursEnd: settings?.sms.quietHoursEnd ?? '08:00',
@@ -600,6 +602,7 @@ export function NotificationSettings({ canEdit = true }: NotificationSettingsPro
         recipientDailyLimit: smsForm.recipientDailyLimit,
         burstLimitPerMinute: smsForm.burstLimitPerMinute,
         maxMessageLength: smsForm.maxMessageLength,
+        lowBalanceThreshold: smsForm.lowBalanceThreshold,
         quietHoursEnabled: smsForm.quietHoursEnabled,
         quietHoursStart: smsForm.quietHoursStart,
         quietHoursEnd: smsForm.quietHoursEnd,
@@ -1744,6 +1747,9 @@ function SmsSettingsPanel({
           <div className="mt-1 text-xs text-gray-500">
             до {sms?.maxMessageLength ?? form.maxMessageLength} единиц текста
           </div>
+          <div className="mt-1 text-xs text-gray-500">
+            баланс ниже {sms?.lowBalanceThreshold ?? form.lowBalanceThreshold} — предупреждение
+          </div>
         </div>
         <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
           <div className="text-xs font-semibold uppercase text-gray-500">Тихие часы</div>
@@ -1866,6 +1872,25 @@ function SmsSettingsPanel({
             onChange={(event) => setForm((prev) => ({ ...prev, maxMessageLength: Number(event.target.value) || 480 }))}
             className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
           />
+        </label>
+        <label className="text-sm font-medium text-gray-700">
+          Предупреждать при балансе ниже
+          <input
+            type="number"
+            min={0}
+            max={10000000}
+            step={1}
+            value={form.lowBalanceThreshold}
+            disabled={!canEdit || saving}
+            onChange={(event) => setForm((prev) => ({
+              ...prev,
+              lowBalanceThreshold: Math.max(0, Number(event.target.value) || 0),
+            }))}
+            className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+          />
+          <span className="mt-1 block text-xs font-normal text-gray-500">
+            В валюте провайдера. Значение 0 отключает только предупреждение о низком балансе.
+          </span>
         </label>
         <label className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700">
           <SystemCheckbox

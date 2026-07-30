@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
@@ -16,6 +17,7 @@ public sealed class SystemSmsNotificationService : ISmsNotificationService
     public const string RecipientDailyLimitSettingKey = "notifications.sms.recipientDailyLimit";
     public const string BurstLimitPerMinuteSettingKey = "notifications.sms.burstLimitPerMinute";
     public const string MaxMessageLengthSettingKey = "notifications.sms.maxMessageLength";
+    public const string LowBalanceThresholdSettingKey = "notifications.sms.lowBalanceThreshold";
     public const string QuietHoursEnabledSettingKey = "notifications.sms.quietHours.enabled";
     public const string QuietHoursStartSettingKey = "notifications.sms.quietHours.start";
     public const string QuietHoursEndSettingKey = "notifications.sms.quietHours.end";
@@ -28,6 +30,7 @@ public sealed class SystemSmsNotificationService : ISmsNotificationService
     private const int DefaultRecipientDailyLimit = 5;
     private const int DefaultBurstLimitPerMinute = 20;
     private const int DefaultMaxMessageLength = 480;
+    private const decimal DefaultLowBalanceThreshold = 500m;
 
     private static readonly string[] SettingKeys =
     [
@@ -39,6 +42,7 @@ public sealed class SystemSmsNotificationService : ISmsNotificationService
         RecipientDailyLimitSettingKey,
         BurstLimitPerMinuteSettingKey,
         MaxMessageLengthSettingKey,
+        LowBalanceThresholdSettingKey,
         QuietHoursEnabledSettingKey,
         QuietHoursStartSettingKey,
         QuietHoursEndSettingKey,
@@ -83,6 +87,12 @@ public sealed class SystemSmsNotificationService : ISmsNotificationService
             NormalizeLimit(request.BurstLimitPerMinute, DefaultBurstLimitPerMinute, 1, 10000).ToString(),
             now);
         UpsertSetting(existing, MaxMessageLengthSettingKey, NormalizeLimit(request.MaxMessageLength, DefaultMaxMessageLength, 70, 1000).ToString(), now);
+        UpsertSetting(
+            existing,
+            LowBalanceThresholdSettingKey,
+            NormalizeMoneyThreshold(request.LowBalanceThreshold, DefaultLowBalanceThreshold)
+                .ToString(CultureInfo.InvariantCulture),
+            now);
         UpsertSetting(existing, QuietHoursEnabledSettingKey, request.QuietHoursEnabled ? "true" : "false", now);
         UpsertSetting(existing, QuietHoursStartSettingKey, NormalizeTime(request.QuietHoursStart, DefaultQuietHoursStart), now);
         UpsertSetting(existing, QuietHoursEndSettingKey, NormalizeTime(request.QuietHoursEnd, DefaultQuietHoursEnd), now);
@@ -136,6 +146,9 @@ public sealed class SystemSmsNotificationService : ISmsNotificationService
             1,
             10000);
         var maxMessageLength = NormalizeLimit(ParseNullableInt(settings.GetValueOrDefault(MaxMessageLengthSettingKey)), DefaultMaxMessageLength, 70, 1000);
+        var lowBalanceThreshold = NormalizeMoneyThreshold(
+            ParseNullableDecimal(settings.GetValueOrDefault(LowBalanceThresholdSettingKey)),
+            DefaultLowBalanceThreshold);
         var quietHoursEnabled = ParseBool(settings.GetValueOrDefault(QuietHoursEnabledSettingKey), true);
         var quietHoursStart = NormalizeTime(settings.GetValueOrDefault(QuietHoursStartSettingKey), DefaultQuietHoursStart);
         var quietHoursEnd = NormalizeTime(settings.GetValueOrDefault(QuietHoursEndSettingKey), DefaultQuietHoursEnd);
@@ -162,6 +175,7 @@ public sealed class SystemSmsNotificationService : ISmsNotificationService
             RecipientDailyLimit = recipientDailyLimit,
             BurstLimitPerMinute = burstLimitPerMinute,
             MaxMessageLength = maxMessageLength,
+            LowBalanceThreshold = lowBalanceThreshold,
             QuietHoursEnabled = quietHoursEnabled,
             QuietHoursStart = quietHoursStart,
             QuietHoursEnd = quietHoursEnd,
@@ -251,6 +265,9 @@ public sealed class SystemSmsNotificationService : ISmsNotificationService
     private static int NormalizeLimit(int? value, int fallback, int min, int max)
         => Math.Clamp(value.GetValueOrDefault(fallback), min, max);
 
+    private static decimal NormalizeMoneyThreshold(decimal? value, decimal fallback)
+        => Math.Clamp(value.GetValueOrDefault(fallback), 0m, 10_000_000m);
+
     private static string NormalizeTime(string? value, string fallback)
         => TimeSpan.TryParseExact(
             value?.Trim(),
@@ -269,4 +286,13 @@ public sealed class SystemSmsNotificationService : ISmsNotificationService
 
     private static int? ParseNullableInt(string? value)
         => int.TryParse(value, out var parsed) ? parsed : null;
+
+    private static decimal? ParseNullableDecimal(string? value)
+        => decimal.TryParse(
+            value,
+            NumberStyles.Number,
+            CultureInfo.InvariantCulture,
+            out var parsed)
+            ? parsed
+            : null;
 }

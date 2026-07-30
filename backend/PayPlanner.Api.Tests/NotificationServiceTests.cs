@@ -209,6 +209,7 @@ public class NotificationServiceTests
             RecipientDailyLimit = 8,
             BurstLimitPerMinute = 30,
             MaxMessageLength = 320,
+            LowBalanceThreshold = 750m,
             QuietHoursEnabled = true,
             QuietHoursStart = "23:15",
             QuietHoursEnd = "07:45",
@@ -227,6 +228,7 @@ public class NotificationServiceTests
         Assert.Equal(8, settings.Sms.RecipientDailyLimit);
         Assert.Equal(30, settings.Sms.BurstLimitPerMinute);
         Assert.Equal(320, settings.Sms.MaxMessageLength);
+        Assert.Equal(750m, settings.Sms.LowBalanceThreshold);
         Assert.True(settings.Sms.QuietHoursEnabled);
         Assert.Equal("23:15", settings.Sms.QuietHoursStart);
         Assert.Equal("07:45", settings.Sms.QuietHoursEnd);
@@ -289,6 +291,7 @@ public class NotificationServiceTests
             RecipientDailyLimit = -10,
             BurstLimitPerMinute = 0,
             MaxMessageLength = 10,
+            LowBalanceThreshold = -10m,
             QuietHoursEnabled = false,
             QuietHoursStart = "invalid",
             QuietHoursEnd = "invalid",
@@ -304,6 +307,7 @@ public class NotificationServiceTests
         Assert.Equal(1, settings.Sms.RecipientDailyLimit);
         Assert.Equal(1, settings.Sms.BurstLimitPerMinute);
         Assert.Equal(70, settings.Sms.MaxMessageLength);
+        Assert.Equal(0m, settings.Sms.LowBalanceThreshold);
         Assert.False(settings.Sms.QuietHoursEnabled);
         Assert.Equal("22:00", settings.Sms.QuietHoursStart);
         Assert.Equal("08:00", settings.Sms.QuietHoursEnd);
@@ -6068,6 +6072,71 @@ public class NotificationServiceTests
         Assert.Single(interceptor.ReaderCommands, command =>
             command.Contains("FROM \"SystemSettings\"", StringComparison.Ordinal)
             && command.Contains(RoleNotificationPreferenceSettings.SettingKey, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task NotifySmsChannelWarningAsync_NotifiesAdminsAndDeduplicatesDailyWarning()
+    {
+        await using var db = await CreateContextAsync();
+        var adminRole = new Role { Name = "admin", Description = "Admin" };
+        var userRole = new Role { Name = "user", Description = "User" };
+        db.Roles.AddRange(adminRole, userRole);
+        await db.SaveChangesAsync();
+        var admin = new User
+        {
+            Email = "sms-monitor-admin@example.com",
+            FullName = "Администратор SMS",
+            PasswordHash = "hash",
+            RoleId = adminRole.Id,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        var employee = new User
+        {
+            Email = "sms-monitor-user@example.com",
+            FullName = "Сотрудник",
+            PasswordHash = "hash",
+            RoleId = userRole.Id,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        db.Users.AddRange(admin, employee);
+        await db.SaveChangesAsync();
+        var realtime = new RecordingRealtimeNotificationPublisher();
+        var webPush = new RecordingWebPushNotificationService();
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            realtime,
+            webPush);
+
+        var firstCount = await service.NotifySmsChannelWarningAsync(
+            "20260730",
+            SmsChannelMonitoringIssueCodes.LowBalance,
+            "SMS-канал требует внимания",
+            "Баланс SMS ниже установленного порога.");
+        var secondCount = await service.NotifySmsChannelWarningAsync(
+            "20260730",
+            SmsChannelMonitoringIssueCodes.ProviderUnhealthy,
+            "SMS-канал требует внимания",
+            "Повторная проверка провайдера не пройдена.");
+
+        Assert.Equal(1, firstCount);
+        Assert.Equal(0, secondCount);
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal(admin.Id, notification.RecipientUserId);
+        Assert.Equal(UserNotificationTypes.SystemAdminWarning, notification.Type);
+        Assert.Equal("sms-channel-monitor:20260730", notification.EventKey);
+        Assert.Equal("system", notification.ObjectType);
+        Assert.Contains("Баланс SMS", notification.BodyPreview, StringComparison.Ordinal);
+        Assert.DoesNotContain(await db.UserNotifications.ToListAsync(), item => item.RecipientUserId == employee.Id);
+        Assert.Single(realtime.Notifications);
+        Assert.Single(webPush.Notifications);
     }
 
     [Fact]

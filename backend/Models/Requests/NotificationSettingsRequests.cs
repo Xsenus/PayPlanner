@@ -32,6 +32,7 @@ public class UpdateSmsNotificationSettingsRequest
     public int? RecipientDailyLimit { get; set; }
     public int? BurstLimitPerMinute { get; set; }
     public int? MaxMessageLength { get; set; }
+    public decimal? LowBalanceThreshold { get; set; }
     public bool QuietHoursEnabled { get; set; } = true;
     public string? QuietHoursStart { get; set; }
     public string? QuietHoursEnd { get; set; }

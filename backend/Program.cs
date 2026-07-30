@@ -148,6 +148,7 @@ builder.Services.AddScoped<ITelegramBotUpdateService, TelegramBotUpdateService>(
 builder.Services.AddScoped<IRealtimeNotificationPublisher, SignalRRealtimeNotificationPublisher>();
 builder.Services.AddScoped<IWebPushNotificationService, WebPushNotificationService>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
+builder.Services.AddScoped<ISmsChannelWarningPublisher, SmsChannelWarningPublisher>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<ExternalAuthService>();
 builder.Services.AddScoped<RoleManagementAccessService>();
@@ -204,6 +205,8 @@ builder.Services.AddSingleton<NotificationRetrySchedulerService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<NotificationRetrySchedulerService>());
 builder.Services.AddSingleton<NotificationDeliveryRetentionService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<NotificationDeliveryRetentionService>());
+builder.Services.AddSingleton<SmsChannelMonitoringService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<SmsChannelMonitoringService>());
 builder.Services.AddSingleton<CalendarSyncLogRetentionService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<CalendarSyncLogRetentionService>());
 builder.Services.AddSingleton<PaymentAdvanceReviewMonitoringService>();

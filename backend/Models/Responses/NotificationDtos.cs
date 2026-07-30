@@ -61,6 +61,7 @@ public class SmsNotificationSettingsDto
     public int RecipientDailyLimit { get; set; } = 5;
     public int BurstLimitPerMinute { get; set; } = 20;
     public int MaxMessageLength { get; set; } = 480;
+    public decimal LowBalanceThreshold { get; set; } = 500m;
     public bool QuietHoursEnabled { get; set; } = true;
     public string QuietHoursStart { get; set; } = "22:00";
     public string QuietHoursEnd { get; set; } = "08:00";

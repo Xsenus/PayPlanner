@@ -1263,6 +1263,95 @@ public sealed class NotificationService : INotificationService
         }
     }
 
+    public async Task<int> NotifySmsChannelWarningAsync(
+        string eventKey,
+        string issueCode,
+        string title,
+        string body,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedEventKey = $"sms-channel-monitor:{NormalizeEventKeySegment(eventKey)}";
+        var normalizedIssueCode = NormalizeEventKeySegment(issueCode);
+        var normalizedTitle = NormalizeNotificationText(title, "SMS-канал требует внимания");
+        var normalizedBody = NormalizeNotificationText(body, "Проверьте настройки SMS-канала.");
+        var admins = await _context.Users
+            .AsNoTracking()
+            .Where(item =>
+                item.IsActive
+                && item.IsApproved
+                && item.Role != null
+                && item.Role.Name == "admin")
+            .Select(item => item.Id)
+            .ToListAsync(cancellationToken);
+        if (admins.Count == 0)
+        {
+            return 0;
+        }
+
+        var adminNotificationChannels = await ResolveUserNotificationChannelsAsync(
+            admins,
+            UserNotificationTypes.SystemAdminWarning,
+            [
+                NotificationChannels.InApp,
+                NotificationChannels.Toast,
+                NotificationChannels.WebPush,
+            ],
+            cancellationToken);
+        var existingRecipientIds = await _context.UserNotifications
+            .AsNoTracking()
+            .Where(item =>
+                item.EventKey == normalizedEventKey
+                && admins.Contains(item.RecipientUserId))
+            .Select(item => item.RecipientUserId)
+            .ToHashSetAsync(cancellationToken);
+        var metadataJson = JsonSerializer.Serialize(
+            new
+            {
+                source = "sms-channel-monitoring",
+                issueCode = normalizedIssueCode,
+            },
+            JsonOptions);
+        var createdAt = DateTime.UtcNow;
+        var notifications = admins
+            .Where(adminId => !existingRecipientIds.Contains(adminId))
+            .Where(adminId => adminNotificationChannels[adminId].Contains(NotificationChannels.InApp))
+            .Select(adminId => new UserNotification
+            {
+                RecipientUserId = adminId,
+                Type = UserNotificationTypes.SystemAdminWarning,
+                EventKey = normalizedEventKey,
+                Title = Truncate(normalizedTitle, 300),
+                BodyPreview = Truncate(normalizedBody, 1000),
+                Tone = "rose",
+                ObjectType = "system",
+                MetadataJson = metadataJson,
+                CreatedAt = createdAt,
+            })
+            .ToList();
+        if (notifications.Count == 0)
+        {
+            return 0;
+        }
+
+        _context.UserNotifications.AddRange(notifications);
+        await _context.SaveChangesAsync(cancellationToken);
+        foreach (var notification in notifications)
+        {
+            var channels = adminNotificationChannels[notification.RecipientUserId];
+            await _realtimePublisher.PublishUserNotificationAsync(
+                notification,
+                channels.Contains(NotificationChannels.Toast),
+                cancellationToken);
+            if (_webPushNotificationService is not null
+                && channels.Contains(NotificationChannels.WebPush))
+            {
+                await _webPushNotificationService.SendUserNotificationAsync(notification, cancellationToken);
+            }
+        }
+
+        return notifications.Count;
+    }
+
     public async Task NotifyStickyNoteMentionAsync(
         int noteId,
         int boardId,
