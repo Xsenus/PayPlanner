@@ -34,6 +34,8 @@ const settings: TaskJournalSettingsDto = {
   caseInactivityDefaultAssigneeUserId: null,
   caseInactivityEscalationDays: 30,
   caseInactivityEscalationUserId: null,
+  caseInactivityFirstRepeatAfterDays: 2,
+  caseInactivityCriticalRepeatAfterDays: 4,
   caseInactivityRunLocalTime: '09:00',
   caseInactivityScheduleTimeZone: 'Europe/Moscow',
   stickerStyles: cloneDefaultTaskStickerStyles(),
@@ -125,5 +127,14 @@ describe('TaskJournalSettings', () => {
         caseInactivityScheduleTimeZone: 'Asia/Novosibirsk',
       }),
     ));
+  });
+
+  it('shows the actual first, repeat and critical escalation rules', async () => {
+    render(<TaskJournalSettings />);
+
+    const stages = await screen.findByLabelText('Этапы автоконтроля');
+    expect(within(stages).getByText('Через 14 дн. без активности')).toBeTruthy();
+    expect(within(stages).getByText('Через 2 дн. после контроля')).toBeTruthy();
+    expect(within(stages).getByText('Через 4 дн. или при 30 дн. тишины')).toBeTruthy();
   });
 });

@@ -1772,6 +1772,8 @@ export interface TaskJournalSettingsDto {
   caseInactivityDefaultAssigneeUserId?: number | null;
   caseInactivityEscalationDays: number;
   caseInactivityEscalationUserId?: number | null;
+  caseInactivityFirstRepeatAfterDays: number;
+  caseInactivityCriticalRepeatAfterDays: number;
   caseInactivityRunLocalTime?: string;
   caseInactivityScheduleTimeZone?: string;
   stickerStyles: TaskStickerStyles;

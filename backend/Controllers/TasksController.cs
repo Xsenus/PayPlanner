@@ -4233,6 +4233,8 @@ public class TasksController : ControllerBase
             CaseInactivityDefaultAssigneeUserId = defaultAssigneeUserId > 0 ? defaultAssigneeUserId : null,
             CaseInactivityEscalationDays = Math.Clamp(ParseIntSetting(settings.GetValueOrDefault(CaseInactivityAutomationEscalationDaysSettingKey), 30), inactivityDays, 365),
             CaseInactivityEscalationUserId = escalationUserId > 0 ? escalationUserId : null,
+            CaseInactivityFirstRepeatAfterDays = CaseInactivityControlStateMachine.FirstRepeatOffsetDays,
+            CaseInactivityCriticalRepeatAfterDays = CaseInactivityControlStateMachine.SecondRepeatOffsetDays,
             CaseInactivityRunLocalTime = TimeOnly.TryParseExact(
                 settings.GetValueOrDefault(CaseInactivityAutomationRunLocalTimeSettingKey),
                 "HH:mm",

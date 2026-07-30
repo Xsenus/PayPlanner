@@ -245,6 +245,8 @@ public class TaskJournalSettingsDto
     public int? CaseInactivityDefaultAssigneeUserId { get; set; }
     public int CaseInactivityEscalationDays { get; set; } = 30;
     public int? CaseInactivityEscalationUserId { get; set; }
+    public int CaseInactivityFirstRepeatAfterDays { get; set; } = 2;
+    public int CaseInactivityCriticalRepeatAfterDays { get; set; } = 4;
     public string CaseInactivityRunLocalTime { get; set; } = "09:00";
     public string CaseInactivityScheduleTimeZone { get; set; } = "Europe/Moscow";
     public Dictionary<string, TaskStickerStyle> StickerStyles { get; set; } = [];

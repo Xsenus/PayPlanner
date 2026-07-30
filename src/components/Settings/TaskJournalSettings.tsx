@@ -31,6 +31,8 @@ const DEFAULT_SETTINGS: TaskJournalSettingsDto = {
   caseInactivityDefaultAssigneeUserId: null,
   caseInactivityEscalationDays: 30,
   caseInactivityEscalationUserId: null,
+  caseInactivityFirstRepeatAfterDays: 2,
+  caseInactivityCriticalRepeatAfterDays: 4,
   caseInactivityRunLocalTime: '09:00',
   caseInactivityScheduleTimeZone: 'Europe/Moscow',
   stickerStyles: cloneDefaultTaskStickerStyles(),
@@ -524,6 +526,27 @@ export function TaskJournalSettings() {
             />
             Включено
           </label>
+        </div>
+
+        <div className="mt-3 grid gap-2 sm:grid-cols-3" aria-label="Этапы автоконтроля">
+          <div className="rounded-xl border border-blue-100 bg-blue-50/60 p-3 text-center">
+            <div className="text-xs font-semibold uppercase tracking-wide text-blue-700">Первый контроль</div>
+            <div className="mt-1 text-lg font-semibold text-slate-900">
+              Через {settings.caseInactivityDays} дн. без активности
+            </div>
+          </div>
+          <div className="rounded-xl border border-amber-100 bg-amber-50/60 p-3 text-center">
+            <div className="text-xs font-semibold uppercase tracking-wide text-amber-700">Повтор</div>
+            <div className="mt-1 text-lg font-semibold text-slate-900">
+              Через {settings.caseInactivityFirstRepeatAfterDays} дн. после контроля
+            </div>
+          </div>
+          <div className="rounded-xl border border-rose-100 bg-rose-50/60 p-3 text-center">
+            <div className="text-xs font-semibold uppercase tracking-wide text-rose-700">Критическая эскалация</div>
+            <div className="mt-1 text-lg font-semibold text-slate-900">
+              Через {settings.caseInactivityCriticalRepeatAfterDays} дн. или при {settings.caseInactivityEscalationDays} дн. тишины
+            </div>
+          </div>
         </div>
 
         <div className="mt-4 grid gap-4 md:grid-cols-3">

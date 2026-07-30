@@ -481,6 +481,8 @@ public class TasksControllerTests
         Assert.Equal(fallbackAssignee.Id, dto.CaseInactivityDefaultAssigneeUserId);
         Assert.Equal(365, dto.CaseInactivityEscalationDays);
         Assert.Equal(fallbackAssignee.Id, dto.CaseInactivityEscalationUserId);
+        Assert.Equal(2, dto.CaseInactivityFirstRepeatAfterDays);
+        Assert.Equal(4, dto.CaseInactivityCriticalRepeatAfterDays);
         Assert.Equal("16:45", dto.CaseInactivityRunLocalTime);
         Assert.Equal("Asia/Novosibirsk", dto.CaseInactivityScheduleTimeZone);
 
