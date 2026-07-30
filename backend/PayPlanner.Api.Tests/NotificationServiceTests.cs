@@ -11,6 +11,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Controllers;
@@ -752,7 +753,7 @@ public class NotificationServiceTests
     }
 
     [Fact]
-    public async Task SmsDelivery_PersistsProviderErrorInDeliveryLog()
+    public async Task SmsDelivery_DoesNotPersistUntrustedProviderError()
     {
         await using var db = await CreateContextAsync();
         var user = await CreateUserAsync(db, "sms-failed@example.com", phoneNumber: "+7 (999) 555-66-77");
@@ -774,7 +775,8 @@ public class NotificationServiceTests
 
         var delivery = Assert.Single(deliveries);
         Assert.Equal(NotificationDeliveryStatus.Failed, delivery.Status);
-        Assert.Equal("Provider rejected phone", delivery.Error);
+        Assert.Equal("SMS не отправлено: провайдер не подтвердил отправку.", delivery.Error);
+        Assert.DoesNotContain("Provider rejected phone", delivery.Error, StringComparison.Ordinal);
         Assert.Null(delivery.SentAt);
         Assert.Equal("+79995556677", delivery.RecipientAddress);
 
@@ -785,8 +787,69 @@ public class NotificationServiceTests
         var savedDelivery = await db.NotificationDeliveries.SingleAsync();
         Assert.Equal(delivery.Id, savedDelivery.Id);
         Assert.Equal(NotificationDeliveryStatus.Failed, savedDelivery.Status);
-        Assert.Equal("Provider rejected phone", savedDelivery.Error);
+        Assert.Equal("SMS не отправлено: провайдер не подтвердил отправку.", savedDelivery.Error);
         Assert.Null(savedDelivery.SentAt);
+    }
+
+    [Fact]
+    public async Task SmsDelivery_DoesNotWriteSensitiveProviderExceptionToLogsOrJournal()
+    {
+        const string apiToken = "sms-api-token-super-secret";
+        const string sensitiveText = "Конфиденциальный текст заявления";
+        const string normalizedPhone = "+79995556688";
+
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(
+            db,
+            "sms-exception@example.com",
+            phoneNumber: "+7 (999) 555-66-88");
+        var smsService = new RecordingSmsNotificationService
+        {
+            SendException = new InvalidOperationException(
+                $"Provider failed for {normalizedPhone}; token={apiToken}; text={sensitiveText}")
+        };
+        var logger = new RecordingLogger<NotificationService>();
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            smsNotificationService: smsService,
+            logger: logger);
+
+        var deliveries = await service.SendToUserAsync(
+            user.Id,
+            new NotificationMessage(
+                "SMS тест",
+                sensitiveText,
+                IsSensitive: true),
+            [NotificationChannels.Sms],
+            "sms:test:safe-logging");
+
+        var delivery = Assert.Single(deliveries);
+        Assert.Equal(NotificationDeliveryStatus.Failed, delivery.Status);
+        Assert.Equal("SMS не отправлено: внутренняя ошибка канала.", delivery.Error);
+        Assert.Equal("Содержимое скрыто: служебное уведомление.", delivery.BodyPreview);
+
+        var log = Assert.Single(logger.Records, record => record.Level == LogLevel.Error);
+        Assert.Null(log.Exception);
+        Assert.Equal(nameof(InvalidOperationException), log.Properties["ExceptionType"]);
+
+        var serializedLog = string.Join(
+            " ",
+            [
+                log.Message,
+                log.Exception?.ToString() ?? string.Empty,
+                .. log.Properties.Values.Select(value => value?.ToString() ?? string.Empty)
+            ]);
+        Assert.DoesNotContain(apiToken, serializedLog, StringComparison.Ordinal);
+        Assert.DoesNotContain(normalizedPhone, serializedLog, StringComparison.Ordinal);
+        Assert.DoesNotContain(sensitiveText, serializedLog, StringComparison.Ordinal);
+
+        var savedDelivery = await db.NotificationDeliveries.SingleAsync();
+        Assert.DoesNotContain(apiToken, savedDelivery.Error, StringComparison.Ordinal);
+        Assert.DoesNotContain(normalizedPhone, savedDelivery.Error, StringComparison.Ordinal);
+        Assert.DoesNotContain(sensitiveText, savedDelivery.Error, StringComparison.Ordinal);
+        Assert.DoesNotContain(sensitiveText, savedDelivery.BodyPreview, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -868,23 +931,26 @@ public class NotificationServiceTests
     [Fact]
     public async Task SmsDelivery_SkipsOnlySmsWhenTemplateIsNotFullyRendered()
     {
+        const string sensitiveEventKey = "sms:test:token=event-secret-value";
         await using var db = await CreateContextAsync();
         var user = await CreateUserAsync(
             db,
             "sms-template@example.com",
             phoneNumber: "+7 (999) 888-99-00");
         var smsService = new RecordingSmsNotificationService();
+        var logger = new RecordingLogger<NotificationService>();
         var service = CreateService(
             db,
             new RecordingEmailService(),
             new RecordingTelegramService(),
-            smsNotificationService: smsService);
+            smsNotificationService: smsService,
+            logger: logger);
 
         var deliveries = await service.SendToUserAsync(
             user.Id,
             new NotificationMessage("Шаблон", "Задача {{task.title}} требует внимания"),
             [NotificationChannels.Sms, NotificationChannels.Email],
-            "sms:test:template");
+            sensitiveEventKey);
 
         var delivery = Assert.Single(deliveries);
         Assert.Equal(NotificationChannels.Email, delivery.Channel);
@@ -893,6 +959,15 @@ public class NotificationServiceTests
 
         var savedDelivery = await db.NotificationDeliveries.SingleAsync();
         Assert.Equal(NotificationChannels.Email, savedDelivery.Channel);
+
+        var log = Assert.Single(logger.Records, record => record.Level == LogLevel.Warning);
+        Assert.DoesNotContain(sensitiveEventKey, log.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            sensitiveEventKey,
+            string.Join(" ", log.Properties.Values),
+            StringComparison.Ordinal);
+        var eventKeyHash = Assert.IsType<string>(log.Properties["EventKeyHash"]);
+        Assert.Equal(16, eventKeyHash.Length);
     }
 
     [Fact]
@@ -10168,7 +10243,8 @@ public class NotificationServiceTests
         IWebPushNotificationService? webPushNotificationService = null,
         ISmsNotificationService? smsNotificationService = null,
         TimeProvider? timeProvider = null,
-        IHttpContextAccessor? httpContextAccessor = null)
+        IHttpContextAccessor? httpContextAccessor = null,
+        ILogger<NotificationService>? logger = null)
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>())
@@ -10179,7 +10255,7 @@ public class NotificationServiceTests
             configuration,
             emailService,
             telegramService,
-            NullLogger<NotificationService>.Instance,
+            logger ?? NullLogger<NotificationService>.Instance,
             realtimePublisher,
             webPushNotificationService,
             smsNotificationService,
@@ -10691,6 +10767,7 @@ public class NotificationServiceTests
         };
 
         public SmsSendResult NextResult { get; set; } = new(true, NotificationDeliveryStatus.Sent);
+        public Exception? SendException { get; set; }
 
         public Task<SmsNotificationSettingsDto> GetSettingsAsync(CancellationToken cancellationToken = default)
         {
@@ -10716,9 +10793,46 @@ public class NotificationServiceTests
             CancellationToken cancellationToken = default)
         {
             Messages.Add((phoneNumber, text, idempotencyKey));
+            if (SendException is not null)
+            {
+                return Task.FromException<SmsSendResult>(SendException);
+            }
+
             return Task.FromResult(NextResult);
         }
     }
+
+    private sealed class RecordingLogger<T> : ILogger<T>
+    {
+        public List<LogRecord> Records { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            var properties = state is IEnumerable<KeyValuePair<string, object?>> values
+                ? values.ToDictionary(item => item.Key, item => item.Value, StringComparer.Ordinal)
+                : new Dictionary<string, object?>(StringComparer.Ordinal);
+            Records.Add(new LogRecord(
+                logLevel,
+                formatter(state, exception),
+                exception,
+                properties));
+        }
+    }
+
+    private sealed record LogRecord(
+        LogLevel Level,
+        string Message,
+        Exception? Exception,
+        IReadOnlyDictionary<string, object?> Properties);
 
     private sealed class FixedTimeProvider(DateTimeOffset utcNow) : TimeProvider
     {

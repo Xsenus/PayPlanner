@@ -223,14 +223,19 @@ public sealed class SystemSmsNotificationService : ISmsNotificationService
             return new SmsSendResult(
                 false,
                 NotificationDeliveryStatus.Skipped,
-                "SMS не отправлено: включена аварийная остановка канала.");
+                "SMS не отправлено: включена аварийная остановка канала.",
+                ErrorIsSafe: true);
         }
 
         var status = string.IsNullOrWhiteSpace(settings.StatusText)
             ? "SMS-уведомления не отправляются: адаптер провайдера еще не подключен."
             : settings.StatusText;
 
-        return new SmsSendResult(false, NotificationDeliveryStatus.Skipped, status);
+        return new SmsSendResult(
+            false,
+            NotificationDeliveryStatus.Skipped,
+            status,
+            ErrorIsSafe: true);
     }
 
     private SmsNotificationSettingsDto BuildSettings(IReadOnlyDictionary<string, string> settings)

@@ -31,5 +31,6 @@ public sealed class DisabledSmsNotificationService : ISmsNotificationService
         => Task.FromResult(new SmsSendResult(
             false,
             NotificationDeliveryStatus.Skipped,
-            "SMS-уведомления отключены: провайдер и настройки отправителя еще не выбраны."));
+            "SMS-уведомления отключены: провайдер и настройки отправителя еще не выбраны.",
+            ErrorIsSafe: true));
 }

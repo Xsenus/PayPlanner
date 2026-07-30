@@ -994,7 +994,8 @@ public sealed record TelegramSendResult(
 public sealed record SmsSendResult(
     bool Success,
     string Status,
-    string? Error = null);
+    string? Error = null,
+    bool ErrorIsSafe = false);
 
 public sealed record SmsProviderDiagnosticsSnapshot(
     DateTime CheckedAtUtc,

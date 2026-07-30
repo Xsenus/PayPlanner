@@ -3732,8 +3732,8 @@ public sealed class NotificationService : INotificationService
             if (smsPolicy.EmergencyStop || !smsPolicy.IsEventEnabled(eventKey))
             {
                 _logger.LogWarning(
-                    "SMS delivery was not created for event {EventKey}: {ReasonCode}.",
-                    eventKey ?? "manual",
+                    "SMS delivery was not created for event hash {EventKeyHash}: {ReasonCode}.",
+                    BuildStableTextHash(eventKey ?? "manual"),
                     smsPolicy.EmergencyStop ? "emergency_stop" : "event_disabled");
                 normalizedChannels = normalizedChannels
                     .Where(channel => channel != NotificationChannels.Sms)
@@ -3753,8 +3753,8 @@ public sealed class NotificationService : INotificationService
                 if (!smsQuietHoursDecision.IsAllowed)
                 {
                     _logger.LogInformation(
-                        "SMS delivery was not created for event {EventKey}: {QuietHoursReasonCode}.",
-                        eventKey ?? "manual",
+                        "SMS delivery was not created for event hash {EventKeyHash}: {QuietHoursReasonCode}.",
+                        BuildStableTextHash(eventKey ?? "manual"),
                         smsQuietHoursDecision.ReasonCode);
                 }
                 smsMaxUnitCount = smsSettings is { MaxMessageLength: > 0 }
@@ -3775,8 +3775,8 @@ public sealed class NotificationService : INotificationService
                     if (!smsValidation.IsValid)
                     {
                         _logger.LogWarning(
-                            "SMS delivery was not created for event {EventKey}: {ValidationErrorCode}. Encoding {Encoding}, units {UnitCount}, segments {SegmentCount}, limit {MaxUnitCount}.",
-                            eventKey ?? "manual",
+                            "SMS delivery was not created for event hash {EventKeyHash}: {ValidationErrorCode}. Encoding {Encoding}, units {UnitCount}, segments {SegmentCount}, limit {MaxUnitCount}.",
+                            BuildStableTextHash(eventKey ?? "manual"),
                             smsValidation.ErrorCode,
                             smsValidation.Calculation.Encoding,
                             smsValidation.Calculation.UnitCount,
@@ -3842,8 +3842,8 @@ public sealed class NotificationService : INotificationService
                         if (!decision.IsAllowed)
                         {
                             _logger.LogWarning(
-                                "SMS delivery was not created for event {EventKey}: {RateLimitReasonCode}. Daily {DailyCount}/{DailyLimit}, recipient {RecipientCount}/{RecipientLimit}, burst {BurstCount}/{BurstLimit}.",
-                                delivery.EventKey,
+                                "SMS delivery was not created for event hash {EventKeyHash}: {RateLimitReasonCode}. Daily {DailyCount}/{DailyLimit}, recipient {RecipientCount}/{RecipientLimit}, burst {BurstCount}/{BurstLimit}.",
+                                BuildStableTextHash(delivery.EventKey),
                                 decision.ReasonCode,
                                 snapshot.DailyCount,
                                 policy.DailyLimit,
@@ -3874,9 +3874,22 @@ public sealed class NotificationService : INotificationService
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-                    _logger.LogError(ex, "Notification delivery {DeliveryId} failed.", delivery.Id);
+                    if (delivery.Channel == NotificationChannels.Sms)
+                    {
+                        _logger.LogError(
+                            "SMS notification delivery {DeliveryId} failed with {ExceptionType}.",
+                            delivery.Id,
+                            ex.GetType().Name);
+                    }
+                    else
+                    {
+                        _logger.LogError(ex, "Notification delivery {DeliveryId} failed.", delivery.Id);
+                    }
+
                     delivery.Status = NotificationDeliveryStatus.Failed;
-                    delivery.Error = ex.Message;
+                    delivery.Error = delivery.Channel == NotificationChannels.Sms
+                        ? "SMS не отправлено: внутренняя ошибка канала."
+                        : ex.Message;
                 }
 
                 await _context.SaveChangesAsync(cancellationToken);
@@ -4022,7 +4035,11 @@ public sealed class NotificationService : INotificationService
             }
 
             var result = _smsService is null
-                ? new SmsSendResult(false, NotificationDeliveryStatus.Skipped, "SMS-уведомления отключены: SMS-сервис не подключен.")
+                ? new SmsSendResult(
+                    false,
+                    NotificationDeliveryStatus.Skipped,
+                    "SMS-уведомления отключены: SMS-сервис не подключен.",
+                    ErrorIsSafe: true)
                 : await _smsService.SendMessageAsync(
                     recipient.PhoneNumber,
                     message.Body,
@@ -4032,7 +4049,7 @@ public sealed class NotificationService : INotificationService
                         delivery.NotificationSenderId),
                     cancellationToken);
             delivery.Status = result.Status;
-            delivery.Error = result.Error;
+            delivery.Error = ResolveSmsDeliveryError(result);
             delivery.SentAt = result.Success ? DateTime.UtcNow : null;
             return;
         }
@@ -7371,6 +7388,18 @@ public sealed class NotificationService : INotificationService
 
     private static string Truncate(string value, int maxLength)
         => value.Length <= maxLength ? value : value[..maxLength];
+
+    private static string? ResolveSmsDeliveryError(SmsSendResult result)
+    {
+        if (string.IsNullOrWhiteSpace(result.Error))
+        {
+            return null;
+        }
+
+        return result.ErrorIsSafe
+            ? Truncate(result.Error.Trim(), 500)
+            : "SMS не отправлено: провайдер не подтвердил отправку.";
+    }
 
     private static string? NormalizeOptional(string? value)
     {
