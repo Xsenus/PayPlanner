@@ -139,6 +139,31 @@ public sealed class CaseInactivityControlStateMachineTests
         Assert.Equal(CaseInactivityControlTransition.Waiting, decision.Transition);
     }
 
+    [Fact]
+    public void ResolveRecoveryNextCheckAt_KeepsRecentlyDueEscalation()
+    {
+        var nextCheckAt = Now.Subtract(
+            CaseInactivityControlStateMachine.MaximumTimelyEscalationDelay);
+
+        var recoveryNextCheckAt =
+            CaseInactivityControlStateMachine.ResolveRecoveryNextCheckAt(Now, nextCheckAt);
+
+        Assert.Null(recoveryNextCheckAt);
+    }
+
+    [Fact]
+    public void ResolveRecoveryNextCheckAt_RebasesEscalationMissedDuringLongDowntime()
+    {
+        var nextCheckAt = Now
+            .Subtract(CaseInactivityControlStateMachine.MaximumTimelyEscalationDelay)
+            .AddMinutes(-1);
+
+        var recoveryNextCheckAt =
+            CaseInactivityControlStateMachine.ResolveRecoveryNextCheckAt(Now, nextCheckAt);
+
+        Assert.Equal(Now.AddDays(2), recoveryNextCheckAt);
+    }
+
     private static CaseInactivityControlStateDecision Evaluate(
         DateTime lastActivityAt,
         DateTime? controlTaskCreatedAt = null,

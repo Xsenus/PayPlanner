@@ -4003,6 +4003,66 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task TaskJournalAutomationScheduler_RebasesLongMissedEscalationWithoutNotification()
+    {
+        await using var db = await CreateContextAsync();
+        var assignee = await CreateAdminUserAsync(db, "downtime-recovery@example.com", "Ответственный дела");
+        var client = await CreateClientAsync(db, "Клиент после простоя");
+        client.ResponsibleUserId = assignee.Id;
+        var clientCase = await CreateCaseAsync(db, client.Id, "ВОССТАНОВЛЕНИЕ ПОСЛЕ ПРОСТОЯ");
+        var now = DateTime.UtcNow;
+        clientCase.CreatedAt = now.AddDays(-40);
+        var task = await CreateTaskAsync(
+            db,
+            assignee.Id,
+            client.Id,
+            assigneeUserId: assignee.Id,
+            clientCaseId: clientCase.Id,
+            status: "new",
+            createdAt: now.AddDays(-10));
+        task.Type = "control";
+        task.Title = "Проверить движение по делу";
+        task.Priority = "normal";
+        task.TagsJson = "[\"автоконтроль\"]";
+        task.InactivityControlCycleNumber = 1;
+        task.InactivityControlNextCheckAt = now.AddDays(-8);
+        await db.SaveChangesAsync();
+        var notifications = new RecordingNotificationService();
+        var (scheduler, provider) = CreateAutomationScheduler(db, new Dictionary<string, string?>
+        {
+            ["TaskJournal:Automation:Enabled"] = "true",
+            ["TaskJournal:Automation:InactiveDays"] = "14",
+            ["TaskJournal:Automation:EscalationDays"] = "30",
+            ["TaskJournal:Automation:Limit"] = "10",
+        }, notifications);
+        var beforeRun = DateTime.UtcNow;
+
+        using (provider)
+        {
+            var firstRun = await scheduler.RunOnceAsync(CancellationToken.None);
+            var secondRun = await scheduler.RunOnceAsync(CancellationToken.None);
+
+            Assert.Null(firstRun.Error);
+            Assert.Null(secondRun.Error);
+            Assert.Equal(0, firstRun.EscalatedCount);
+            Assert.Equal(0, secondRun.EscalatedCount);
+        }
+
+        var afterRun = DateTime.UtcNow;
+        var updatedTask = await db.TaskJournalItems
+            .Include(item => item.Comments)
+            .SingleAsync(item => item.Id == task.Id);
+        Assert.Equal(1, updatedTask.InactivityControlCycleNumber);
+        Assert.InRange(
+            updatedTask.InactivityControlNextCheckAt!.Value,
+            beforeRun.AddDays(2),
+            afterRun.AddDays(2));
+        Assert.DoesNotContain(updatedTask.Comments, item =>
+            item.MetadataJson.Contains("caseInactivityControlEscalation"));
+        Assert.Empty(notifications.ChangedTasks);
+    }
+
+    [Fact]
     public async Task TaskJournalAutomationScheduler_PausesRepeatEscalationWhileResponsibleIsOnVacation()
     {
         await using var db = await CreateContextAsync();

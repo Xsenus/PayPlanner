@@ -814,6 +814,17 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
                 continue;
             }
 
+            var recoveryNextCheckAt = CaseInactivityControlStateMachine.ResolveRecoveryNextCheckAt(
+                now,
+                task.InactivityControlNextCheckAt);
+            if (recoveryNextCheckAt.HasValue)
+            {
+                task.InactivityControlNextCheckAt = recoveryNextCheckAt.Value;
+                task.UpdatedAt = now;
+                stateChangedCount += 1;
+                continue;
+            }
+
             var daysWithoutActiveTask = transition.DaysWithoutActivity;
             var level = transition.RepeatLevel;
             var dueOffset = transition.RepeatOffsetDays.Value;

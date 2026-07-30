@@ -31,6 +31,7 @@ public static class CaseInactivityControlStateMachine
 {
     public const int FirstRepeatOffsetDays = 2;
     public const int SecondRepeatOffsetDays = 4;
+    public static readonly TimeSpan MaximumTimelyEscalationDelay = TimeSpan.FromHours(36);
 
     public static CaseInactivityControlStateDecision Evaluate(CaseInactivityControlStateInput input)
     {
@@ -91,6 +92,18 @@ public static class CaseInactivityControlStateMachine
         }
 
         return Decision(CaseInactivityControlTransition.Waiting, daysWithoutActivity);
+    }
+
+    public static DateTime? ResolveRecoveryNextCheckAt(DateTime now, DateTime? nextCheckAt)
+    {
+        if (!nextCheckAt.HasValue ||
+            now <= nextCheckAt.Value ||
+            now - nextCheckAt.Value <= MaximumTimelyEscalationDelay)
+        {
+            return null;
+        }
+
+        return now.AddDays(FirstRepeatOffsetDays);
     }
 
     private static int ElapsedWholeDays(DateTime later, DateTime earlier)
