@@ -25,6 +25,8 @@ public sealed class SystemSmsNotificationService : ISmsNotificationService
     public const string QuietHoursTimeZoneSettingKey = "notifications.sms.quietHours.timeZone";
     public const string NotesSettingKey = "notifications.sms.notes";
     public const string DiagnosticsSettingKey = "notifications.sms.diagnostics";
+    public const string EmergencyStopSettingKey = "notifications.sms.emergencyStop";
+    public const string DisabledEventTypesSettingKey = "notifications.sms.disabledEventTypes";
     public const string DefaultQuietHoursStart = "22:00";
     public const string DefaultQuietHoursEnd = "08:00";
 
@@ -50,7 +52,9 @@ public sealed class SystemSmsNotificationService : ISmsNotificationService
         QuietHoursEndSettingKey,
         QuietHoursTimeZoneSettingKey,
         NotesSettingKey,
-        DiagnosticsSettingKey
+        DiagnosticsSettingKey,
+        EmergencyStopSettingKey,
+        DisabledEventTypesSettingKey
     ];
 
     private readonly PaymentContext _context;
@@ -98,6 +102,27 @@ public sealed class SystemSmsNotificationService : ISmsNotificationService
             NormalizeMoneyThreshold(request.LowBalanceThreshold, DefaultLowBalanceThreshold)
                 .ToString(CultureInfo.InvariantCulture),
             now);
+        if (request.EmergencyStop.HasValue)
+        {
+            UpsertSetting(existing, EmergencyStopSettingKey, request.EmergencyStop.Value ? "true" : "false", now);
+        }
+        else if (!existing.ContainsKey(EmergencyStopSettingKey))
+        {
+            UpsertSetting(existing, EmergencyStopSettingKey, "false", now);
+        }
+
+        if (request.DisabledEventTypes is not null)
+        {
+            UpsertSetting(
+                existing,
+                DisabledEventTypesSettingKey,
+                JsonSerializer.Serialize(NormalizeDisabledEventTypes(request.DisabledEventTypes)),
+                now);
+        }
+        else if (!existing.ContainsKey(DisabledEventTypesSettingKey))
+        {
+            UpsertSetting(existing, DisabledEventTypesSettingKey, "[]", now);
+        }
         UpsertSetting(existing, QuietHoursEnabledSettingKey, request.QuietHoursEnabled ? "true" : "false", now);
         UpsertSetting(existing, QuietHoursStartSettingKey, NormalizeTime(request.QuietHoursStart, DefaultQuietHoursStart), now);
         UpsertSetting(existing, QuietHoursEndSettingKey, NormalizeTime(request.QuietHoursEnd, DefaultQuietHoursEnd), now);
@@ -148,6 +173,17 @@ public sealed class SystemSmsNotificationService : ISmsNotificationService
         await _context.SaveChangesAsync(cancellationToken);
     }
 
+    public async Task<SmsDeliveryPolicy> GetDeliveryPolicyAsync(CancellationToken cancellationToken = default)
+    {
+        var values = await _context.SystemSettings
+            .AsNoTracking()
+            .Where(item =>
+                item.Key == EmergencyStopSettingKey
+                || item.Key == DisabledEventTypesSettingKey)
+            .ToDictionaryAsync(item => item.Key, item => item.Value, cancellationToken);
+        return BuildDeliveryPolicy(values);
+    }
+
     public async Task<SmsSendResult> SendMessageAsync(
         string phoneNumber,
         string text,
@@ -155,6 +191,14 @@ public sealed class SystemSmsNotificationService : ISmsNotificationService
         CancellationToken cancellationToken = default)
     {
         var settings = await GetSettingsAsync(cancellationToken);
+        if (settings.EmergencyStop)
+        {
+            return new SmsSendResult(
+                false,
+                NotificationDeliveryStatus.Skipped,
+                "SMS не отправлено: включена аварийная остановка канала.");
+        }
+
         var status = string.IsNullOrWhiteSpace(settings.StatusText)
             ? "SMS-уведомления не отправляются: адаптер провайдера еще не подключен."
             : settings.StatusText;
@@ -183,6 +227,7 @@ public sealed class SystemSmsNotificationService : ISmsNotificationService
         var lowBalanceThreshold = NormalizeMoneyThreshold(
             ParseNullableDecimal(settings.GetValueOrDefault(LowBalanceThresholdSettingKey)),
             DefaultLowBalanceThreshold);
+        var deliveryPolicy = BuildDeliveryPolicy(settings);
         var quietHoursEnabled = ParseBool(settings.GetValueOrDefault(QuietHoursEnabledSettingKey), true);
         var quietHoursStart = NormalizeTime(settings.GetValueOrDefault(QuietHoursStartSettingKey), DefaultQuietHoursStart);
         var quietHoursEnd = NormalizeTime(settings.GetValueOrDefault(QuietHoursEndSettingKey), DefaultQuietHoursEnd);
@@ -192,6 +237,7 @@ public sealed class SystemSmsNotificationService : ISmsNotificationService
         var providerConfigured = !string.IsNullOrWhiteSpace(providerKey) && apiTokenSet;
         const bool adapterConfigured = false;
         var ready = enabled
+            && !deliveryPolicy.EmergencyStop
             && providerConfigured
             && adapterConfigured
             && !string.IsNullOrWhiteSpace(senderName);
@@ -210,22 +256,44 @@ public sealed class SystemSmsNotificationService : ISmsNotificationService
             BurstLimitPerMinute = burstLimitPerMinute,
             MaxMessageLength = maxMessageLength,
             LowBalanceThreshold = lowBalanceThreshold,
+            EmergencyStop = deliveryPolicy.EmergencyStop,
+            EventTypes = UserNotificationTypes.SmsEventTypes
+                .Select(item => new SmsEventTypeSettingDto
+                {
+                    Key = item.Key,
+                    Label = item.Label,
+                    Description = item.Description,
+                    Enabled = deliveryPolicy.IsEventEnabled(item.Key)
+                })
+                .ToList(),
             QuietHoursEnabled = quietHoursEnabled,
             QuietHoursStart = quietHoursStart,
             QuietHoursEnd = quietHoursEnd,
             QuietHoursTimeZone = quietHoursTimeZone,
             Notes = notes,
-            StatusText = BuildStatusText(enabled, providerKey, senderName, apiTokenSet, adapterConfigured)
+            StatusText = BuildStatusText(
+                enabled,
+                deliveryPolicy.EmergencyStop,
+                providerKey,
+                senderName,
+                apiTokenSet,
+                adapterConfigured)
         };
     }
 
     private static string BuildStatusText(
         bool enabled,
+        bool emergencyStop,
         string providerKey,
         string senderName,
         bool apiTokenSet,
         bool adapterConfigured)
     {
+        if (emergencyStop)
+        {
+            return "Включена аварийная остановка: новые SMS не создаются, остальные каналы продолжают работать.";
+        }
+
         if (!enabled)
         {
             return "SMS-уведомления отключены. Настройки можно заполнить заранее, но сообщения не будут отправляться.";
@@ -368,6 +436,40 @@ public sealed class SystemSmsNotificationService : ISmsNotificationService
     {
         var normalized = NormalizeOptional(value)?.ToUpperInvariant();
         return normalized is { Length: <= 12 } ? normalized : string.Empty;
+    }
+
+    private static SmsDeliveryPolicy BuildDeliveryPolicy(IReadOnlyDictionary<string, string> settings)
+        => new(
+            ParseBool(settings.GetValueOrDefault(EmergencyStopSettingKey), false),
+            NormalizeDisabledEventTypes(ParseStringList(settings.GetValueOrDefault(DisabledEventTypesSettingKey))));
+
+    private static IReadOnlySet<string> NormalizeDisabledEventTypes(IEnumerable<string>? values)
+    {
+        var knownTypes = UserNotificationTypes.SmsEventTypes
+            .Select(item => item.Key)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return (values ?? [])
+            .Select(value => value?.Trim())
+            .Where(value => !string.IsNullOrWhiteSpace(value) && knownTypes.Contains(value))
+            .Cast<string>()
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static IReadOnlyList<string> ParseStringList(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return [];
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<List<string>>(value) ?? [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
     }
 
     private static string? NormalizeDiagnosticError(string? value)

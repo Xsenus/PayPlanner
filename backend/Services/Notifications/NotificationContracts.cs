@@ -354,6 +354,9 @@ public static class UserNotificationTypes
     public static bool SupportsSmsPreference(string? value)
         => SmsPreferenceTypes.Contains(value ?? string.Empty);
 
+    public static IReadOnlyList<UserNotificationTypeDefinition> SmsEventTypes
+        => All.Where(item => SupportsSmsPreference(item.Key)).ToList();
+
     public static bool SupportsForcedModalPreference(string? value)
         => ForcedModalPreferenceTypes.Contains(value ?? string.Empty);
 
@@ -1001,6 +1004,19 @@ public sealed record SmsProviderDiagnosticsSnapshot(
     string? IssueCode,
     string Summary);
 
+public sealed record SmsDeliveryPolicy(
+    bool EmergencyStop,
+    IReadOnlySet<string> DisabledEventTypes)
+{
+    public static SmsDeliveryPolicy AllowAll { get; } = new(
+        false,
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+
+    public bool IsEventEnabled(string? eventType)
+        => string.IsNullOrWhiteSpace(eventType)
+           || !DisabledEventTypes.Contains(eventType);
+}
+
 public interface ISmsNotificationService
 {
     Task<SmsNotificationSettingsDto> GetSettingsAsync(CancellationToken cancellationToken = default);
@@ -1016,6 +1032,8 @@ public interface ISmsNotificationService
         SmsProviderDiagnosticsSnapshot snapshot,
         CancellationToken cancellationToken = default)
         => Task.CompletedTask;
+    Task<SmsDeliveryPolicy> GetDeliveryPolicyAsync(CancellationToken cancellationToken = default)
+        => Task.FromResult(SmsDeliveryPolicy.AllowAll);
 }
 
 public sealed record TelegramBotConnectionSettings(

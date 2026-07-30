@@ -996,6 +996,8 @@ export interface SmsNotificationSettingsDto {
   burstLimitPerMinute: number;
   maxMessageLength: number;
   lowBalanceThreshold: number;
+  emergencyStop: boolean;
+  eventTypes: SmsEventTypeSettingDto[];
   quietHoursEnabled: boolean;
   quietHoursStart: string;
   quietHoursEnd: string;
@@ -1003,6 +1005,13 @@ export interface SmsNotificationSettingsDto {
   notes: string;
   statusText: string;
   diagnostics: SmsNotificationDiagnosticsDto;
+}
+
+export interface SmsEventTypeSettingDto {
+  key: string;
+  label: string;
+  description: string;
+  enabled: boolean;
 }
 
 export interface SmsNotificationDiagnosticsDto {
@@ -1172,6 +1181,8 @@ export interface UpdateSmsNotificationSettingsRequest {
   burstLimitPerMinute?: number | null;
   maxMessageLength?: number | null;
   lowBalanceThreshold?: number | null;
+  emergencyStop?: boolean | null;
+  disabledEventTypes?: string[] | null;
   quietHoursEnabled: boolean;
   quietHoursStart?: string | null;
   quietHoursEnd?: string | null;

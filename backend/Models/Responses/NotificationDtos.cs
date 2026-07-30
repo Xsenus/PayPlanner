@@ -62,6 +62,8 @@ public class SmsNotificationSettingsDto
     public int BurstLimitPerMinute { get; set; } = 20;
     public int MaxMessageLength { get; set; } = 480;
     public decimal LowBalanceThreshold { get; set; } = 500m;
+    public bool EmergencyStop { get; set; }
+    public IReadOnlyList<SmsEventTypeSettingDto> EventTypes { get; set; } = Array.Empty<SmsEventTypeSettingDto>();
     public bool QuietHoursEnabled { get; set; } = true;
     public string QuietHoursStart { get; set; } = "22:00";
     public string QuietHoursEnd { get; set; } = "08:00";
@@ -69,6 +71,14 @@ public class SmsNotificationSettingsDto
     public string Notes { get; set; } = string.Empty;
     public string StatusText { get; set; } = string.Empty;
     public SmsNotificationDiagnosticsDto Diagnostics { get; set; } = new();
+}
+
+public class SmsEventTypeSettingDto
+{
+    public string Key { get; set; } = string.Empty;
+    public string Label { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public bool Enabled { get; set; }
 }
 
 public class SmsNotificationDiagnosticsDto

@@ -75,6 +75,8 @@ type SmsSettingsForm = {
   burstLimitPerMinute: number;
   maxMessageLength: number;
   lowBalanceThreshold: number;
+  emergencyStop: boolean;
+  disabledEventTypes: string[];
   quietHoursEnabled: boolean;
   quietHoursStart: string;
   quietHoursEnd: string;
@@ -252,6 +254,8 @@ function smsFormFromSettings(settings?: NotificationSettingsDto | null): SmsSett
     burstLimitPerMinute: settings?.sms.burstLimitPerMinute ?? 20,
     maxMessageLength: settings?.sms.maxMessageLength ?? 480,
     lowBalanceThreshold: settings?.sms.lowBalanceThreshold ?? 500,
+    emergencyStop: settings?.sms.emergencyStop ?? false,
+    disabledEventTypes: settings?.sms.eventTypes.filter((item) => !item.enabled).map((item) => item.key) ?? [],
     quietHoursEnabled: settings?.sms.quietHoursEnabled ?? true,
     quietHoursStart: settings?.sms.quietHoursStart ?? '22:00',
     quietHoursEnd: settings?.sms.quietHoursEnd ?? '08:00',
@@ -603,6 +607,8 @@ export function NotificationSettings({ canEdit = true }: NotificationSettingsPro
         burstLimitPerMinute: smsForm.burstLimitPerMinute,
         maxMessageLength: smsForm.maxMessageLength,
         lowBalanceThreshold: smsForm.lowBalanceThreshold,
+        emergencyStop: smsForm.emergencyStop,
+        disabledEventTypes: smsForm.disabledEventTypes,
         quietHoursEnabled: smsForm.quietHoursEnabled,
         quietHoursStart: smsForm.quietHoursStart,
         quietHoursEnd: smsForm.quietHoursEnd,
@@ -1755,12 +1761,16 @@ function SmsSettingsPanel({
           </p>
         </div>
         <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${statusClass(Boolean(sms?.ready), Boolean(sms?.enabled))}`}>
-          {sms?.ready ? 'Готово' : sms?.enabled ? 'Требуется настройка' : 'Отключено'}
+          {sms?.emergencyStop ? 'Аварийно остановлено' : sms?.ready ? 'Готово' : sms?.enabled ? 'Требуется настройка' : 'Отключено'}
         </span>
       </div>
 
       {sms?.statusText ? (
-        <div className="mt-4 rounded-xl border border-amber-100 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+        <div className={`mt-4 rounded-xl border px-3 py-2 text-sm ${
+          sms.emergencyStop
+            ? 'border-red-200 bg-red-50 text-red-800'
+            : 'border-amber-100 bg-amber-50 text-amber-800'
+        }`}>
           {sms.statusText}
         </div>
       ) : null}
@@ -1881,6 +1891,25 @@ function SmsSettingsPanel({
       </div>
 
       <div className="mt-5 grid gap-4 md:grid-cols-2">
+        <label className={`flex items-start gap-3 rounded-xl border px-3 py-3 md:col-span-2 ${
+          form.emergencyStop
+            ? 'border-red-300 bg-red-50 text-red-900'
+            : 'border-gray-200 bg-gray-50 text-gray-700'
+        }`}>
+          <SystemCheckbox
+            type="checkbox"
+            checked={form.emergencyStop}
+            disabled={!canEdit || saving}
+            onChange={(event) => setForm((prev) => ({ ...prev, emergencyStop: event.target.checked }))}
+            className="mt-0.5 h-4 w-4 rounded border-gray-300 text-red-600"
+          />
+          <span>
+            <span className="block text-sm font-semibold">Аварийная остановка SMS</span>
+            <span className="mt-1 block text-xs font-normal">
+              Немедленно запрещает создание любых новых SMS, включая тестовые. Email, Telegram, Push и уведомления внутри CRM продолжат работать.
+            </span>
+          </span>
+        </label>
         <label className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700">
           <SystemCheckbox
             type="checkbox"
@@ -2050,6 +2079,40 @@ function SmsSettingsPanel({
           В тихие часы SMS не создаётся и не расходует лимиты. Исключение возможно только для события,
           которое отдельно утверждено как критическое; до такого решения исключения не включены.
         </div>
+        <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 md:col-span-2">
+          <div className="text-sm font-semibold text-gray-900">События с разрешённой SMS-доставкой</div>
+          <p className="mt-1 text-xs text-gray-500">
+            Выключение события блокирует только SMS. Остальные выбранные каналы и внутренние уведомления сохраняются.
+          </p>
+          <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+            {(sms?.eventTypes ?? []).map((eventType) => {
+              const enabled = !form.disabledEventTypes.includes(eventType.key);
+              return (
+                <label
+                  key={eventType.key}
+                  className="flex items-start gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2"
+                >
+                  <SystemCheckbox
+                    type="checkbox"
+                    checked={enabled}
+                    disabled={!canEdit || saving}
+                    onChange={(event) => setForm((prev) => ({
+                      ...prev,
+                      disabledEventTypes: event.target.checked
+                        ? prev.disabledEventTypes.filter((key) => key !== eventType.key)
+                        : [...new Set([...prev.disabledEventTypes, eventType.key])],
+                    }))}
+                    className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600"
+                  />
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium text-gray-800">{eventType.label}</span>
+                    <span className="mt-0.5 block text-xs text-gray-500">{eventType.description}</span>
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        </div>
         <label className="text-sm font-medium text-gray-700 md:col-span-2">
           Заметка администратора
           <textarea
@@ -2115,11 +2178,11 @@ function SmsSettingsPanel({
           <button
             type="button"
             onClick={() => void sendSmsTest()}
-            disabled={!canEdit || testSending || !testPhoneNumber.trim() || !testMessage.trim()}
+            disabled={!canEdit || testSending || form.emergencyStop || !testPhoneNumber.trim() || !testMessage.trim()}
             className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
           >
             {testSending ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-            {testSending ? 'Отправляем…' : 'Отправить тест'}
+            {testSending ? 'Отправляем…' : form.emergencyStop ? 'SMS остановлены' : 'Отправить тест'}
           </button>
         </div>
 

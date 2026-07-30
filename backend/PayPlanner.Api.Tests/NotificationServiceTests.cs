@@ -507,6 +507,140 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task SmsSettings_SaveEmergencyStopAndKnownEventSwitches()
+    {
+        await using var db = await CreateContextAsync();
+        var smsService = new SystemSmsNotificationService(db);
+
+        var settings = await smsService.UpdateSettingsAsync(new UpdateSmsNotificationSettingsRequest
+        {
+            Enabled = true,
+            ProviderKey = "sms-ru",
+            SenderName = "PayPlanner",
+            ApiToken = "server-only-token",
+            EmergencyStop = true,
+            DisabledEventTypes =
+            [
+                UserNotificationTypes.TaskAssigned,
+                UserNotificationTypes.CourtHearing,
+                "unknown-event"
+            ]
+        });
+        var policy = await smsService.GetDeliveryPolicyAsync();
+
+        Assert.True(settings.EmergencyStop);
+        Assert.False(settings.Ready);
+        Assert.Contains("аварийная остановка", settings.StatusText, StringComparison.OrdinalIgnoreCase);
+        Assert.False(settings.EventTypes.Single(item => item.Key == UserNotificationTypes.TaskAssigned).Enabled);
+        Assert.False(settings.EventTypes.Single(item => item.Key == UserNotificationTypes.CourtHearing).Enabled);
+        Assert.DoesNotContain(settings.EventTypes, item => item.Key == "unknown-event");
+        Assert.True(policy.EmergencyStop);
+        Assert.Equal(2, policy.DisabledEventTypes.Count);
+        Assert.False(policy.IsEventEnabled(UserNotificationTypes.TaskAssigned));
+        Assert.True(policy.IsEventEnabled(UserNotificationTypes.TaskReminder));
+
+        await smsService.UpdateSettingsAsync(new UpdateSmsNotificationSettingsRequest
+        {
+            Enabled = true,
+            KeepExistingApiToken = true
+        });
+        var preservedPolicy = await smsService.GetDeliveryPolicyAsync();
+
+        Assert.True(preservedPolicy.EmergencyStop);
+        Assert.False(preservedPolicy.IsEventEnabled(UserNotificationTypes.TaskAssigned));
+        Assert.False(preservedPolicy.IsEventEnabled(UserNotificationTypes.CourtHearing));
+    }
+
+    [Fact]
+    public async Task NotifyTaskAssignedAsync_GlobalEventSwitchBlocksOnlySms()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateUserAsync(db, "sms-event-author@example.com");
+        var assignee = new User
+        {
+            Email = "sms-event-assignee@example.com",
+            FullName = "SMS Event Assignee",
+            PasswordHash = "hash",
+            RoleId = author.RoleId,
+            PhoneNumber = "+7 (999) 700-10-20",
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        db.Users.Add(assignee);
+        await db.SaveChangesAsync();
+        var task = new TaskJournalItem
+        {
+            ObjectName = "SMS policy case",
+            Title = "SMS policy task",
+            AuthorUserId = author.Id,
+            AuthorName = author.FullName,
+            AssigneeUserId = assignee.Id,
+            AssigneeName = assignee.FullName,
+            RemindersJson = "[]",
+            ChannelsJson = "[\"inApp\",\"sms\"]",
+            Status = "new"
+        };
+        db.TaskJournalItems.Add(task);
+        await db.SaveChangesAsync();
+        var smsService = new RecordingSmsNotificationService
+        {
+            DeliveryPolicy = new SmsDeliveryPolicy(
+                false,
+                new HashSet<string>(
+                    [UserNotificationTypes.TaskAssigned],
+                    StringComparer.OrdinalIgnoreCase))
+        };
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            smsNotificationService: smsService);
+
+        var deliveries = await service.NotifyTaskAssignedAsync(task, author.FullName, author.Id);
+
+        Assert.Empty(deliveries);
+        Assert.Empty(smsService.Messages);
+        Assert.Equal(1, smsService.GetDeliveryPolicyCallCount);
+        Assert.Equal(UserNotificationTypes.TaskAssigned, (await db.UserNotifications.SingleAsync()).Type);
+    }
+
+    [Fact]
+    public async Task SmsEmergencyStopBlocksManualDeliveryBeforeJournalAndProvider()
+    {
+        await using var db = await CreateContextAsync();
+        var smsService = new RecordingSmsNotificationService
+        {
+            Settings =
+            {
+                EmergencyStop = true,
+                Ready = false,
+                StatusText = "Включена аварийная остановка."
+            },
+            DeliveryPolicy = new SmsDeliveryPolicy(
+                true,
+                new HashSet<string>(StringComparer.OrdinalIgnoreCase))
+        };
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            smsNotificationService: smsService);
+
+        var deliveries = await service.SendAsync(
+            new NotificationRecipient(null, "Тест", null, null, "+79997001020"),
+            new NotificationMessage("SMS", "Тест аварийной остановки"),
+            [NotificationChannels.Sms],
+            "sms:emergency-stop",
+            CancellationToken.None);
+
+        Assert.Empty(deliveries);
+        Assert.Empty(smsService.Messages);
+        Assert.False(await db.NotificationDeliveries.AnyAsync());
+    }
+
+    [Fact]
     public async Task SmsDelivery_UsesReadyProviderAndPersistsSentLog()
     {
         await using var db = await CreateContextAsync();
@@ -10421,6 +10555,8 @@ public class NotificationServiceTests
     {
         public List<(string PhoneNumber, string Text, string IdempotencyKey)> Messages { get; } = [];
         public int GetSettingsCallCount { get; private set; }
+        public int GetDeliveryPolicyCallCount { get; private set; }
+        public SmsDeliveryPolicy DeliveryPolicy { get; set; } = SmsDeliveryPolicy.AllowAll;
 
         public SmsNotificationSettingsDto Settings { get; set; } = new()
         {
@@ -10451,6 +10587,12 @@ public class NotificationServiceTests
             UpdateSmsNotificationSettingsRequest request,
             CancellationToken cancellationToken = default)
             => Task.FromResult(Settings);
+
+        public Task<SmsDeliveryPolicy> GetDeliveryPolicyAsync(CancellationToken cancellationToken = default)
+        {
+            GetDeliveryPolicyCallCount++;
+            return Task.FromResult(DeliveryPolicy);
+        }
 
         public Task<SmsSendResult> SendMessageAsync(
             string phoneNumber,

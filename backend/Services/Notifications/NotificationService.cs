@@ -53,6 +53,7 @@ public sealed class NotificationService : INotificationService
     private readonly IWebPushNotificationService? _webPushNotificationService;
     private readonly ILogger<NotificationService> _logger;
     private readonly TimeProvider _timeProvider;
+    private SmsDeliveryPolicy? _smsDeliveryPolicyCache;
 
     private sealed record NotificationSenderTarget(
         int? Id,
@@ -254,6 +255,7 @@ public sealed class NotificationService : INotificationService
         }
 
         await _smsService.UpdateSettingsAsync(request, cancellationToken);
+        _smsDeliveryPolicyCache = null;
         return await GetSettingsAsync(cancellationToken);
     }
 
@@ -3699,46 +3701,61 @@ public sealed class NotificationService : INotificationService
 
         if (normalizedChannels.Contains(NotificationChannels.Sms, StringComparer.OrdinalIgnoreCase))
         {
-            smsSettings = _smsService is null
-                ? null
-                : await _smsService.GetSettingsAsync(cancellationToken);
-            smsRateLimitPolicy = SmsRateLimitPolicy.FromSettings(smsSettings);
-            smsQuietHoursDecision = SmsQuietHoursPolicy.Evaluate(
-                smsSettings,
-                _timeProvider.GetUtcNow(),
-                message.IsApprovedSmsCriticalEvent);
-            if (!smsQuietHoursDecision.IsAllowed)
+            var smsPolicy = await GetSmsDeliveryPolicyAsync(cancellationToken);
+            if (smsPolicy.EmergencyStop || !smsPolicy.IsEventEnabled(eventKey))
             {
-                _logger.LogInformation(
-                    "SMS delivery was not created for event {EventKey}: {QuietHoursReasonCode}.",
+                _logger.LogWarning(
+                    "SMS delivery was not created for event {EventKey}: {ReasonCode}.",
                     eventKey ?? "manual",
-                    smsQuietHoursDecision.ReasonCode);
+                    smsPolicy.EmergencyStop ? "emergency_stop" : "event_disabled");
+                normalizedChannels = normalizedChannels
+                    .Where(channel => channel != NotificationChannels.Sms)
+                    .ToList();
             }
-            smsMaxUnitCount = smsSettings is { MaxMessageLength: > 0 }
-                ? smsSettings.MaxMessageLength
-                : SmsMessageValidator.DefaultMaxUnitCount;
-
-            if (smsQuietHoursDecision.IsAllowed)
+            else
             {
-                var protection = SmsMessageProtector.Protect(message);
-                protectedSmsMessage = message with
-                {
-                    Subject = protection.Subject,
-                    Body = protection.Body,
-                    HtmlBody = null,
-                };
-                smsValidation = SmsMessageValidator.Validate(protectedSmsMessage.Body, smsMaxUnitCount);
+                smsSettings = _smsService is null
+                    ? null
+                    : await _smsService.GetSettingsAsync(cancellationToken);
 
-                if (!smsValidation.IsValid)
+                smsRateLimitPolicy = SmsRateLimitPolicy.FromSettings(smsSettings);
+                smsQuietHoursDecision = SmsQuietHoursPolicy.Evaluate(
+                    smsSettings,
+                    _timeProvider.GetUtcNow(),
+                    message.IsApprovedSmsCriticalEvent);
+                if (!smsQuietHoursDecision.IsAllowed)
                 {
-                    _logger.LogWarning(
-                        "SMS delivery was not created for event {EventKey}: {ValidationErrorCode}. Encoding {Encoding}, units {UnitCount}, segments {SegmentCount}, limit {MaxUnitCount}.",
+                    _logger.LogInformation(
+                        "SMS delivery was not created for event {EventKey}: {QuietHoursReasonCode}.",
                         eventKey ?? "manual",
-                        smsValidation.ErrorCode,
-                        smsValidation.Calculation.Encoding,
-                        smsValidation.Calculation.UnitCount,
-                        smsValidation.Calculation.SegmentCount,
-                        smsMaxUnitCount);
+                        smsQuietHoursDecision.ReasonCode);
+                }
+                smsMaxUnitCount = smsSettings is { MaxMessageLength: > 0 }
+                    ? smsSettings.MaxMessageLength
+                    : SmsMessageValidator.DefaultMaxUnitCount;
+
+                if (smsQuietHoursDecision.IsAllowed)
+                {
+                    var protection = SmsMessageProtector.Protect(message);
+                    protectedSmsMessage = message with
+                    {
+                        Subject = protection.Subject,
+                        Body = protection.Body,
+                        HtmlBody = null,
+                    };
+                    smsValidation = SmsMessageValidator.Validate(protectedSmsMessage.Body, smsMaxUnitCount);
+
+                    if (!smsValidation.IsValid)
+                    {
+                        _logger.LogWarning(
+                            "SMS delivery was not created for event {EventKey}: {ValidationErrorCode}. Encoding {Encoding}, units {UnitCount}, segments {SegmentCount}, limit {MaxUnitCount}.",
+                            eventKey ?? "manual",
+                            smsValidation.ErrorCode,
+                            smsValidation.Calculation.Encoding,
+                            smsValidation.Calculation.UnitCount,
+                            smsValidation.Calculation.SegmentCount,
+                            smsMaxUnitCount);
+                    }
                 }
             }
         }
@@ -4399,6 +4416,12 @@ public sealed class NotificationService : INotificationService
             return false;
         }
 
+        if (channel == NotificationChannels.Sms
+            && !await IsSmsEventEnabledAsync(type, cancellationToken))
+        {
+            return false;
+        }
+
         var preferences = await GetUserNotificationPreferencesAsync(recipientUserId, cancellationToken);
         return UserNotificationPreferenceSettings.IsChannelEnabled(preferences, type, channel)
                && !await IsUserNotificationChannelMutedAsync(recipientUserId, type, channel, cancellationToken);
@@ -4423,9 +4446,14 @@ public sealed class NotificationService : INotificationService
             : TimeZoneInfo.Utc;
         var typeDefinition = UserNotificationTypes.Find(type);
         var nowUtc = DateTime.UtcNow;
+        var smsPolicy = normalizedChannels.Contains(NotificationChannels.Sms, StringComparer.OrdinalIgnoreCase)
+            ? await GetSmsDeliveryPolicyAsync(cancellationToken)
+            : SmsDeliveryPolicy.AllowAll;
 
         return normalizedChannels
             .Where(channel => IsChannelAvailableForNotificationType(type, channel))
+            .Where(channel => channel != NotificationChannels.Sms
+                              || (!smsPolicy.EmergencyStop && smsPolicy.IsEventEnabled(type)))
             .Where(channel => UserNotificationPreferenceSettings.IsChannelEnabled(preferences, type, channel))
             .Where(channel => !UserNotificationDoNotDisturbSettings.IsChannelMuted(
                 quietHours,
@@ -4542,11 +4570,16 @@ public sealed class NotificationService : INotificationService
             cancellationToken);
         var typeDefinition = UserNotificationTypes.Find(type);
         var nowUtc = DateTime.UtcNow;
+        var smsPolicy = normalizedChannels.Contains(NotificationChannels.Sms, StringComparer.OrdinalIgnoreCase)
+            ? await GetSmsDeliveryPolicyAsync(cancellationToken)
+            : SmsDeliveryPolicy.AllowAll;
 
         return userIds.ToDictionary(
             userId => userId,
             userId => (IReadOnlySet<string>)normalizedChannels
                 .Where(channel => IsChannelAvailableForNotificationType(type, channel))
+                .Where(channel => channel != NotificationChannels.Sms
+                                  || (!smsPolicy.EmergencyStop && smsPolicy.IsEventEnabled(type)))
                 .Where(channel => UserNotificationPreferenceSettings.IsChannelEnabled(preferencesByUser[userId], type, channel))
                 .Where(channel => !UserNotificationDoNotDisturbSettings.IsChannelMuted(
                     doNotDisturbByUser[userId],
@@ -4557,11 +4590,32 @@ public sealed class NotificationService : INotificationService
                 .ToHashSet(StringComparer.OrdinalIgnoreCase));
     }
 
+    private async Task<bool> IsSmsEventEnabledAsync(
+        string eventType,
+        CancellationToken cancellationToken)
+    {
+        var policy = await GetSmsDeliveryPolicyAsync(cancellationToken);
+        return !policy.EmergencyStop && policy.IsEventEnabled(eventType);
+    }
+
+    private async Task<SmsDeliveryPolicy> GetSmsDeliveryPolicyAsync(CancellationToken cancellationToken)
+    {
+        if (_smsDeliveryPolicyCache is not null)
+        {
+            return _smsDeliveryPolicyCache;
+        }
+
+        _smsDeliveryPolicyCache = _smsService is null
+            ? SmsDeliveryPolicy.AllowAll
+            : await _smsService.GetDeliveryPolicyAsync(cancellationToken);
+        return _smsDeliveryPolicyCache;
+    }
+
     private static bool IsChannelAvailableForNotificationType(string type, string channel)
     {
         var typeDefinition = UserNotificationTypes.Find(type);
         return typeDefinition is null
-               || typeDefinition.EffectiveChannels.Contains(channel, StringComparer.OrdinalIgnoreCase);
+               || typeDefinition.PreferenceChannels.Contains(channel, StringComparer.OrdinalIgnoreCase);
     }
 
     private async Task<bool> IsUserNotificationChannelMutedAsync(
@@ -7064,7 +7118,9 @@ public sealed class NotificationService : INotificationService
 
     private static IReadOnlyList<string> ResolveTaskMessageChannels(TaskJournalItem task)
         => DeserializeList(task.ChannelsJson)
-            .Where(channel => channel is NotificationChannels.Email or NotificationChannels.Telegram)
+            .Where(channel => channel is NotificationChannels.Email
+                or NotificationChannels.Telegram
+                or NotificationChannels.Sms)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
