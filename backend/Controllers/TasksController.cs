@@ -86,6 +86,8 @@ public class TasksController : ControllerBase
     private const string CaseInactivityAutomationDefaultAssigneeSettingKey = "tasks.automation.caseControl.defaultAssigneeUserId";
     private const string CaseInactivityAutomationEscalationDaysSettingKey = "tasks.automation.caseControl.escalationDays";
     private const string CaseInactivityAutomationEscalationUserSettingKey = "tasks.automation.caseControl.escalationUserId";
+    private const string CaseInactivityAutomationRunLocalTimeSettingKey = "tasks.automation.caseControl.runLocalTime";
+    private const string CaseInactivityAutomationScheduleTimeZoneSettingKey = "tasks.automation.caseControl.scheduleTimeZone";
     private const string CaseInactivityAutomationTag = "автоконтроль";
     private const string ContractorPaymentMarker = "[PayPlanner:TaskContractorPayment]";
     private const string CalendarSyncSettingsKey = "calendarSync.settings";
@@ -385,6 +387,16 @@ public class TasksController : ControllerBase
         var inactivityDays = Math.Clamp(request.CaseInactivityDays, 1, 365);
         var inactivityLimit = Math.Clamp(request.CaseInactivityLimit, 1, 100);
         var escalationDays = Math.Clamp(request.CaseInactivityEscalationDays, inactivityDays, 365);
+        var runLocalTime = TimeOnly.TryParseExact(
+            request.CaseInactivityRunLocalTime,
+            "HH:mm",
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.None,
+            out var parsedRunLocalTime)
+            ? parsedRunLocalTime.ToString("HH:mm", CultureInfo.InvariantCulture)
+            : "09:00";
+        var scheduleTimeZone = CalendarTimeZoneHelper.ResolveIanaTimeZoneId(
+            CalendarTimeZoneHelper.ResolveTimeZone(request.CaseInactivityScheduleTimeZone));
         var requestedDefaultAssigneeUserId = request.CaseInactivityDefaultAssigneeUserId.GetValueOrDefault();
         var defaultAssigneeUserId = requestedDefaultAssigneeUserId > 0
             ? requestedDefaultAssigneeUserId.ToString()
@@ -438,6 +450,8 @@ public class TasksController : ControllerBase
         await UpsertSystemSettingAsync(CaseInactivityAutomationDefaultAssigneeSettingKey, defaultAssigneeUserId, now, ct);
         await UpsertSystemSettingAsync(CaseInactivityAutomationEscalationDaysSettingKey, escalationDays.ToString(), now, ct);
         await UpsertSystemSettingAsync(CaseInactivityAutomationEscalationUserSettingKey, escalationUserId, now, ct);
+        await UpsertSystemSettingAsync(CaseInactivityAutomationRunLocalTimeSettingKey, runLocalTime, now, ct);
+        await UpsertSystemSettingAsync(CaseInactivityAutomationScheduleTimeZoneSettingKey, scheduleTimeZone, now, ct);
         if (normalizedStickerStyles is not null)
         {
             await UpsertSystemSettingAsync(TaskStickerStylesSettingKey, JsonSerializer.Serialize(normalizedStickerStyles, JsonOptions), now, ct);
@@ -4193,7 +4207,9 @@ public class TasksController : ControllerBase
                 item.Key == CaseInactivityAutomationLimitSettingKey ||
                 item.Key == CaseInactivityAutomationDefaultAssigneeSettingKey ||
                 item.Key == CaseInactivityAutomationEscalationDaysSettingKey ||
-                item.Key == CaseInactivityAutomationEscalationUserSettingKey)
+                item.Key == CaseInactivityAutomationEscalationUserSettingKey ||
+                item.Key == CaseInactivityAutomationRunLocalTimeSettingKey ||
+                item.Key == CaseInactivityAutomationScheduleTimeZoneSettingKey)
             .ToDictionaryAsync(item => item.Key, item => item.Value, ct);
 
         var defaultAssigneeUserId = ParseIntSetting(settings.GetValueOrDefault(CaseInactivityAutomationDefaultAssigneeSettingKey), 0);
@@ -4217,6 +4233,17 @@ public class TasksController : ControllerBase
             CaseInactivityDefaultAssigneeUserId = defaultAssigneeUserId > 0 ? defaultAssigneeUserId : null,
             CaseInactivityEscalationDays = Math.Clamp(ParseIntSetting(settings.GetValueOrDefault(CaseInactivityAutomationEscalationDaysSettingKey), 30), inactivityDays, 365),
             CaseInactivityEscalationUserId = escalationUserId > 0 ? escalationUserId : null,
+            CaseInactivityRunLocalTime = TimeOnly.TryParseExact(
+                settings.GetValueOrDefault(CaseInactivityAutomationRunLocalTimeSettingKey),
+                "HH:mm",
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
+                out var runLocalTime)
+                ? runLocalTime.ToString("HH:mm", CultureInfo.InvariantCulture)
+                : "09:00",
+            CaseInactivityScheduleTimeZone = CalendarTimeZoneHelper.ResolveIanaTimeZoneId(
+                CalendarTimeZoneHelper.ResolveTimeZone(
+                    settings.GetValueOrDefault(CaseInactivityAutomationScheduleTimeZoneSettingKey))),
             StickerStyles = stickerStyles,
         };
     }

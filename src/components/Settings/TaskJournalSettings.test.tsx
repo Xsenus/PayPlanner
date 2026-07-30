@@ -34,6 +34,8 @@ const settings: TaskJournalSettingsDto = {
   caseInactivityDefaultAssigneeUserId: null,
   caseInactivityEscalationDays: 30,
   caseInactivityEscalationUserId: null,
+  caseInactivityRunLocalTime: '09:00',
+  caseInactivityScheduleTimeZone: 'Europe/Moscow',
   stickerStyles: cloneDefaultTaskStickerStyles(),
 };
 
@@ -99,6 +101,28 @@ describe('TaskJournalSettings', () => {
             backgroundColor: '#fef3c7',
           }),
         }),
+      }),
+    ));
+  });
+
+  it('lets an administrator configure the daily automation schedule', async () => {
+    apiMock.getTaskJournalSettings.mockResolvedValue({
+      ...settings,
+      caseInactivityAutomationEnabled: true,
+    });
+    render(<TaskJournalSettings />);
+
+    const runTime = await screen.findByLabelText('Время автоматического запуска');
+    fireEvent.change(runTime, { target: { value: '16:45' } });
+    fireEvent.change(screen.getByLabelText('Часовой пояс запуска'), {
+      target: { value: 'Asia/Novosibirsk' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    await waitFor(() => expect(apiMock.updateTaskJournalSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        caseInactivityRunLocalTime: '16:45',
+        caseInactivityScheduleTimeZone: 'Asia/Novosibirsk',
       }),
     ));
   });

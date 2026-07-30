@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
@@ -19,6 +20,8 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
     private const string DefaultAssigneeSettingKey = "tasks.automation.caseControl.defaultAssigneeUserId";
     private const string EscalationDaysSettingKey = "tasks.automation.caseControl.escalationDays";
     private const string EscalationUserSettingKey = "tasks.automation.caseControl.escalationUserId";
+    private const string RunLocalTimeSettingKey = "tasks.automation.caseControl.runLocalTime";
+    private const string ScheduleTimeZoneSettingKey = "tasks.automation.caseControl.scheduleTimeZone";
     private const string AutomationTag = "автоконтроль";
     private const string AutomationActorName = "Автоконтроль дел";
     private const string InactivityEscalationEventType = "caseInactivityControlEscalation";
@@ -43,7 +46,10 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        var pollSeconds = Math.Clamp(_configuration.GetValue("TaskJournal:Automation:PollSeconds", 3600), 60, 86_400);
+        var scheduleCheckSeconds = Math.Clamp(
+            _configuration.GetValue("TaskJournal:Automation:ScheduleCheckSeconds", 300),
+            60,
+            3600);
         var initialDelaySeconds = Math.Clamp(_configuration.GetValue("TaskJournal:Automation:InitialDelaySeconds", 30), 0, 3600);
 
         if (initialDelaySeconds > 0)
@@ -58,11 +64,45 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
             }
         }
 
-        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(pollSeconds));
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(scheduleCheckSeconds));
+        DateOnly? lastRunLocalDate = null;
+        string? lastScheduleSignature = null;
 
         while (!stoppingToken.IsCancellationRequested)
         {
-            await RunOnceAsync(stoppingToken);
+            try
+            {
+                using var scope = _scopeFactory.CreateScope();
+                var context = scope.ServiceProvider.GetRequiredService<PaymentContext>();
+                var settings = await LoadSettingsAsync(context, stoppingToken);
+                var timeZone = CalendarTimeZoneHelper.ResolveTimeZone(settings.ScheduleTimeZoneId);
+                var scheduleSignature =
+                    $"{settings.RunLocalTime.ToString("HH:mm", CultureInfo.InvariantCulture)}|{timeZone.Id}";
+                if (!string.Equals(lastScheduleSignature, scheduleSignature, StringComparison.Ordinal))
+                {
+                    lastRunLocalDate = await LoadLastRunLocalDateAsync(timeZone, stoppingToken);
+                    lastScheduleSignature = scheduleSignature;
+                }
+
+                var schedule = CaseInactivityAutomationSchedulePolicy.Evaluate(
+                    DateTime.UtcNow,
+                    settings.RunLocalTime,
+                    timeZone,
+                    lastRunLocalDate);
+                if (settings.Enabled && schedule.ShouldRun)
+                {
+                    await RunOnceAsync(stoppingToken);
+                    lastRunLocalDate = schedule.LocalDate;
+                }
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Не удалось проверить расписание автоконтроля дел.");
+            }
 
             try
             {
@@ -73,6 +113,23 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
                 break;
             }
         }
+    }
+
+    private async Task<DateOnly?> LoadLastRunLocalDateAsync(
+        TimeZoneInfo timeZone,
+        CancellationToken cancellationToken)
+    {
+        if (_jobRunState is null)
+        {
+            return null;
+        }
+
+        var states = await _jobRunState.GetLastRunsAsync(
+            [SystemJobKeys.CaseInactivityControl],
+            cancellationToken);
+        return states.TryGetValue(SystemJobKeys.CaseInactivityControl, out var state)
+            ? CaseInactivityAutomationSchedulePolicy.ResolveLastRunLocalDate(state.LastSuccessAt, timeZone)
+            : null;
     }
 
     public async Task<TaskJournalAutomationSchedulerResult> RunOnceAsync(CancellationToken cancellationToken = default)
@@ -362,7 +419,9 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
                 item.Key == LimitSettingKey ||
                 item.Key == DefaultAssigneeSettingKey ||
                 item.Key == EscalationDaysSettingKey ||
-                item.Key == EscalationUserSettingKey)
+                item.Key == EscalationUserSettingKey ||
+                item.Key == RunLocalTimeSettingKey ||
+                item.Key == ScheduleTimeZoneSettingKey)
             .ToDictionaryAsync(item => item.Key, item => item.Value, StringComparer.OrdinalIgnoreCase, cancellationToken);
 
         var inactiveDays = Math.Clamp(GetInteger(values, InactiveDaysSettingKey, "TaskJournal:Automation:InactiveDays", 14), 1, 365);
@@ -372,7 +431,13 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
             Math.Clamp(GetInteger(values, LimitSettingKey, "TaskJournal:Automation:Limit", 25), 1, 100),
             GetNullableInteger(values, DefaultAssigneeSettingKey, "TaskJournal:Automation:DefaultAssigneeUserId"),
             Math.Clamp(GetInteger(values, EscalationDaysSettingKey, "TaskJournal:Automation:EscalationDays", 30), inactiveDays, 365),
-            GetNullableInteger(values, EscalationUserSettingKey, "TaskJournal:Automation:EscalationUserId"));
+            GetNullableInteger(values, EscalationUserSettingKey, "TaskJournal:Automation:EscalationUserId"),
+            GetRunLocalTime(values),
+            GetString(
+                values,
+                ScheduleTimeZoneSettingKey,
+                "TaskJournal:Automation:ScheduleTimeZone",
+                CalendarTimeZoneHelper.DefaultTimeZoneId));
     }
 
     private async Task<User?> ResolveConfiguredAutomationUserAsync(
@@ -992,13 +1057,41 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
         return _configuration.GetValue<int?>(configPath);
     }
 
+    private TimeOnly GetRunLocalTime(IReadOnlyDictionary<string, string> settings)
+    {
+        var value = GetString(
+            settings,
+            RunLocalTimeSettingKey,
+            "TaskJournal:Automation:RunLocalTime",
+            "09:00");
+        return TimeOnly.TryParseExact(
+            value,
+            "HH:mm",
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.None,
+            out var parsed)
+            ? parsed
+            : CaseInactivityAutomationSchedulePolicy.DefaultRunLocalTime;
+    }
+
+    private string GetString(
+        IReadOnlyDictionary<string, string> settings,
+        string key,
+        string configPath,
+        string fallback)
+        => settings.TryGetValue(key, out var settingValue) && !string.IsNullOrWhiteSpace(settingValue)
+            ? settingValue.Trim()
+            : _configuration.GetValue(configPath, fallback) ?? fallback;
+
     private sealed record TaskJournalAutomationSettings(
         bool Enabled,
         int InactiveDays,
         int Limit,
         int? DefaultAssigneeUserId,
         int EscalationDays,
-        int? EscalationUserId);
+        int? EscalationUserId,
+        TimeOnly RunLocalTime,
+        string ScheduleTimeZoneId);
 
     private sealed record CreatedAutomationTask(TaskJournalItem Task, int DaysWithoutActiveTask, bool IsEscalated);
 

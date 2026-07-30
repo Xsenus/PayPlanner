@@ -459,6 +459,8 @@ public class TasksControllerTests
             CaseInactivityDefaultAssigneeUserId = fallbackAssignee.Id,
             CaseInactivityEscalationDays = 7,
             CaseInactivityEscalationUserId = fallbackAssignee.Id,
+            CaseInactivityRunLocalTime = "16:45",
+            CaseInactivityScheduleTimeZone = "Asia/Novosibirsk",
         }, CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(result.Result);
@@ -479,6 +481,8 @@ public class TasksControllerTests
         Assert.Equal(fallbackAssignee.Id, dto.CaseInactivityDefaultAssigneeUserId);
         Assert.Equal(365, dto.CaseInactivityEscalationDays);
         Assert.Equal(fallbackAssignee.Id, dto.CaseInactivityEscalationUserId);
+        Assert.Equal("16:45", dto.CaseInactivityRunLocalTime);
+        Assert.Equal("Asia/Novosibirsk", dto.CaseInactivityScheduleTimeZone);
 
         var stored = await db.SystemSettings
             .AsNoTracking()
@@ -497,6 +501,8 @@ public class TasksControllerTests
         Assert.Equal(fallbackAssignee.Id.ToString(), stored["tasks.automation.caseControl.defaultAssigneeUserId"]);
         Assert.Equal("365", stored["tasks.automation.caseControl.escalationDays"]);
         Assert.Equal(fallbackAssignee.Id.ToString(), stored["tasks.automation.caseControl.escalationUserId"]);
+        Assert.Equal("16:45", stored["tasks.automation.caseControl.runLocalTime"]);
+        Assert.Equal("Asia/Novosibirsk", stored["tasks.automation.caseControl.scheduleTimeZone"]);
 
         var requireCompletionResult = await db.SystemSettings
             .AsNoTracking()

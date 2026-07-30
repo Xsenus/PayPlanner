@@ -5,6 +5,7 @@ import { RefreshCcw, RotateCcw, Save } from 'lucide-react';
 import { apiService, type TaskJournalAutomationDiagnosticsDto, type TaskJournalSettingsDto } from '../../services/api';
 import { useToast } from '../../hooks/useToast';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import { USER_TIME_ZONE_OPTIONS } from '../../utils/timeZoneOptions';
 import type { TaskJournalAssignee } from '../../utils/taskJournalStore';
 import {
   cloneDefaultTaskStickerStyles,
@@ -30,6 +31,8 @@ const DEFAULT_SETTINGS: TaskJournalSettingsDto = {
   caseInactivityDefaultAssigneeUserId: null,
   caseInactivityEscalationDays: 30,
   caseInactivityEscalationUserId: null,
+  caseInactivityRunLocalTime: '09:00',
+  caseInactivityScheduleTimeZone: 'Europe/Moscow',
   stickerStyles: cloneDefaultTaskStickerStyles(),
 };
 
@@ -558,6 +561,41 @@ export function TaskJournalSettings() {
               disabled={loading || saving || !settings.caseInactivityAutomationEnabled}
               className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm disabled:cursor-not-allowed disabled:bg-gray-100"
             />
+          </label>
+
+          <label className="block">
+            <span className="text-sm font-medium text-gray-700">Время автоматического запуска</span>
+            <input
+              type="time"
+              aria-label="Время автоматического запуска"
+              value={settings.caseInactivityRunLocalTime || '09:00'}
+              onChange={(event) => setSettings((prev) => ({
+                ...prev,
+                caseInactivityRunLocalTime: event.target.value || '09:00',
+              }))}
+              disabled={loading || saving || !settings.caseInactivityAutomationEnabled}
+              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm disabled:cursor-not-allowed disabled:bg-gray-100"
+            />
+            <span className="mt-1 block text-xs text-gray-500">Автоматический проход выполняется один раз в сутки.</span>
+          </label>
+
+          <label className="block">
+            <span className="text-sm font-medium text-gray-700">Часовой пояс запуска</span>
+            <SystemSelect
+              aria-label="Часовой пояс запуска"
+              value={settings.caseInactivityScheduleTimeZone || 'Europe/Moscow'}
+              onChange={(event) => setSettings((prev) => ({
+                ...prev,
+                caseInactivityScheduleTimeZone: event.target.value,
+              }))}
+              disabled={loading || saving || !settings.caseInactivityAutomationEnabled}
+              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm disabled:cursor-not-allowed disabled:bg-gray-100"
+            >
+              {USER_TIME_ZONE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </SystemSelect>
+            <span className="mt-1 block text-xs text-gray-500">Время выше интерпретируется в выбранном часовом поясе.</span>
           </label>
 
           <label className="block">

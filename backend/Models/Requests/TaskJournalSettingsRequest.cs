@@ -19,5 +19,7 @@ public class TaskJournalSettingsRequest
     public int? CaseInactivityDefaultAssigneeUserId { get; set; }
     public int CaseInactivityEscalationDays { get; set; } = 30;
     public int? CaseInactivityEscalationUserId { get; set; }
+    public string CaseInactivityRunLocalTime { get; set; } = "09:00";
+    public string CaseInactivityScheduleTimeZone { get; set; } = "Europe/Moscow";
     public Dictionary<string, TaskStickerStyle>? StickerStyles { get; set; }
 }
