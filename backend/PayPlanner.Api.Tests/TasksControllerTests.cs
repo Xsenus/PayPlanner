@@ -3674,6 +3674,60 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task TaskJournalAutomationScheduler_LoadsRepeatEscalationSignalsPerBatch()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+        var assignee = await CreateAdminUserAsync(db, "batch-repeat-assignee@example.com", "Ответственный дела");
+        var client = await CreateClientAsync(db, "Клиент пакетной эскалации");
+        client.ResponsibleUserId = assignee.Id;
+        var now = DateTime.UtcNow;
+        const int caseCount = 8;
+        for (var index = 1; index <= caseCount; index++)
+        {
+            var clientCase = await CreateCaseAsync(db, client.Id, $"ПАКЕТНАЯ ЭСКАЛАЦИЯ {index}");
+            clientCase.CreatedAt = now.AddDays(-20);
+            var task = await CreateTaskAsync(
+                db,
+                assignee.Id,
+                client.Id,
+                assigneeUserId: assignee.Id,
+                clientCaseId: clientCase.Id,
+                status: "new",
+                createdAt: now.AddDays(-3));
+            task.Type = "control";
+            task.Title = "Проверить движение по делу";
+            task.TagsJson = "[\"автоконтроль\"]";
+        }
+
+        await db.SaveChangesAsync();
+        interceptor.Commands.Clear();
+        var (scheduler, provider) = CreateAutomationScheduler(db, new Dictionary<string, string?>
+        {
+            ["TaskJournal:Automation:Enabled"] = "true",
+            ["TaskJournal:Automation:InactiveDays"] = "14",
+            ["TaskJournal:Automation:EscalationDays"] = "30",
+            ["TaskJournal:Automation:Limit"] = "20",
+        });
+
+        using (provider)
+        {
+            var result = await scheduler.RunOnceAsync(CancellationToken.None);
+
+            Assert.Null(result.Error);
+            Assert.Equal(caseCount, result.EscalatedCount);
+        }
+
+        var aggregateSignalCommands = interceptor.Commands
+            .Where(command =>
+                command.Contains("TaskJournalComments", StringComparison.Ordinal) &&
+                command.Contains("ClientCaseDocuments", StringComparison.Ordinal) &&
+                command.Contains("ClientCaseCourtEvents", StringComparison.Ordinal))
+            .ToArray();
+        Assert.Equal(2, aggregateSignalCommands.Length);
+    }
+
+    [Fact]
     public async Task TaskJournalAutomationScheduler_SkipsPausedAndApprovedTaskCases()
     {
         await using var db = await CreateContextAsync();

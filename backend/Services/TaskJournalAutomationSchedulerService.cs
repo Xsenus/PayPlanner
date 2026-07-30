@@ -19,8 +19,6 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
         ClientCaseStatus.Closed,
         ClientCaseStatus.Lost,
     ];
-    private static readonly int[] RepeatEscalationOffsets = [2, 4];
-
     private const string EnabledSettingKey = "tasks.automation.caseControl.enabled";
     private const string InactiveDaysSettingKey = "tasks.automation.caseControl.inactiveDays";
     private const string LimitSettingKey = "tasks.automation.caseControl.limit";
@@ -245,13 +243,25 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
                 var assigneeTimeZone = assigneeTimeZoneIds.TryGetValue(assignee.Id, out var assigneeTimeZoneId)
                     ? CalendarTimeZoneHelper.ResolveTimeZone(assigneeTimeZoneId)
                     : defaultTimeZone;
-                var daysWithoutActiveTask = ResolveDaysWithoutActiveTask(
+                var lastActivity = ResolveLastCaseActivity(
                     candidate.Case,
-                    now,
                     candidate.LastTaskAt,
                     candidate.LastTaskCommentAt,
                     candidate.LastDocumentAt,
                     candidate.LastCourtEventAt);
+                var transition = CaseInactivityControlStateMachine.Evaluate(
+                    new CaseInactivityControlStateInput(
+                        now,
+                        lastActivity,
+                        null,
+                        settings.InactiveDays,
+                        settings.EscalationDays));
+                if (transition.Transition != CaseInactivityControlTransition.FirstControlDue)
+                {
+                    continue;
+                }
+
+                var daysWithoutActiveTask = transition.DaysWithoutActivity;
                 var task = BuildAutomationTask(
                     candidate.Case,
                     owner,
@@ -511,7 +521,7 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
         int daysWithoutActiveTask,
         TaskJournalAutomationSettings settings)
     {
-        if (level >= RepeatEscalationOffsets.Length || daysWithoutActiveTask >= settings.EscalationDays)
+        if (level >= 2 || daysWithoutActiveTask >= settings.EscalationDays)
         {
             return "urgent";
         }
@@ -582,74 +592,81 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
             .Take(settings.Limit)
             .ToListAsync(cancellationToken);
 
+        var caseIds = automationTasks
+            .Select(task => task.ClientCaseId!.Value)
+            .Distinct()
+            .ToArray();
+        var signalsByCase = caseIds.Length == 0
+            ? new Dictionary<int, ExistingAutomationCaseSignals>()
+            : await context.ClientCases
+                .AsNoTracking()
+                .Where(clientCase => caseIds.Contains(clientCase.Id))
+                .Select(clientCase => new ExistingAutomationCaseSignals(
+                    clientCase.Id,
+                    context.TaskJournalItems.Count(other =>
+                        other.ClientCaseId == clientCase.Id &&
+                        ActiveTaskStatuses.Contains(other.Status)),
+                    context.TaskJournalItems
+                        .IgnoreQueryFilters()
+                        .Where(other =>
+                            other.ClientCaseId == clientCase.Id &&
+                            !other.TagsJson.Contains(AutomationTag))
+                        .Max(other => (DateTime?)(other.UpdatedAt ?? other.CreatedAt)),
+                    context.TaskJournalComments
+                        .Where(comment =>
+                            comment.TaskJournalItem.ClientCaseId == clientCase.Id &&
+                            !comment.TaskJournalItem.TagsJson.Contains(AutomationTag))
+                        .Max(comment => (DateTime?)(comment.UpdatedAt ?? comment.CreatedAt)),
+                    context.ClientCaseDocuments
+                        .Where(document => document.ClientCaseId == clientCase.Id)
+                        .Max(document => (DateTime?)document.UploadedAt),
+                    context.ClientCaseCourtEvents
+                        .Where(courtEvent => courtEvent.ClientCaseId == clientCase.Id)
+                        .Max(courtEvent => (DateTime?)(courtEvent.UpdatedAt ?? courtEvent.CreatedAt))))
+                .ToDictionaryAsync(item => item.ClientCaseId, cancellationToken);
+
         var escalatedTasks = new List<EscalatedAutomationTask>();
         foreach (var task in automationTasks)
         {
-            if (task.ClientCase is null || !task.AssigneeUserId.HasValue)
+            if (task.ClientCase is null ||
+                !task.AssigneeUserId.HasValue ||
+                !signalsByCase.TryGetValue(task.ClientCase.Id, out var signals))
             {
                 continue;
             }
 
-            var hasOtherActiveTask = await context.TaskJournalItems
-                .AsNoTracking()
-                .AnyAsync(other =>
-                    other.ClientCaseId == task.ClientCaseId &&
-                    other.Id != task.Id &&
-                    ActiveTaskStatuses.Contains(other.Status),
-                    cancellationToken);
-            if (hasOtherActiveTask)
-            {
-                continue;
-            }
-
-            var lastNonAutomationTaskAt = await context.TaskJournalItems
-                .IgnoreQueryFilters()
-                .AsNoTracking()
-                .Where(other =>
-                    other.ClientCaseId == task.ClientCaseId &&
-                    other.Id != task.Id &&
-                    !other.TagsJson.Contains(AutomationTag))
-                .MaxAsync(other => (DateTime?)(other.UpdatedAt ?? other.CreatedAt), cancellationToken);
-
-            var lastTaskCommentAt = await context.TaskJournalComments
-                .AsNoTracking()
-                .Where(comment =>
-                    comment.TaskJournalItem.ClientCaseId == task.ClientCaseId &&
-                    comment.TaskJournalItemId != task.Id)
-                .MaxAsync(comment => (DateTime?)(comment.UpdatedAt ?? comment.CreatedAt), cancellationToken);
-            var lastDocumentAt = await context.ClientCaseDocuments
-                .AsNoTracking()
-                .Where(document => document.ClientCaseId == task.ClientCaseId)
-                .MaxAsync(document => (DateTime?)document.UploadedAt, cancellationToken);
-            var lastCourtEventAt = await context.ClientCaseCourtEvents
-                .AsNoTracking()
-                .Where(courtEvent => courtEvent.ClientCaseId == task.ClientCaseId)
-                .MaxAsync(courtEvent => (DateTime?)(courtEvent.UpdatedAt ?? courtEvent.CreatedAt), cancellationToken);
-
-            var lastActivity = ResolveLastCaseActivity(task.ClientCase, lastNonAutomationTaskAt, lastTaskCommentAt, lastDocumentAt, lastCourtEventAt);
-            if (lastActivity > task.CreatedAt)
-            {
-                continue;
-            }
-
-            var daysSinceTaskCreated = Math.Max(0, (int)Math.Floor((now - task.CreatedAt).TotalDays));
-            var dueOffset = RepeatEscalationOffsets.FirstOrDefault(offset =>
-                daysSinceTaskCreated >= offset &&
-                !HasEscalationComment(task, offset));
-            if (dueOffset <= 0)
-            {
-                continue;
-            }
-
-            var daysWithoutActiveTask = ResolveDaysWithoutActiveTask(
+            var lastActivity = ResolveLastCaseActivity(
                 task.ClientCase,
-                now,
-                lastNonAutomationTaskAt,
-                lastTaskCommentAt,
-                lastDocumentAt,
-                lastCourtEventAt);
-            var level = Array.IndexOf(RepeatEscalationOffsets, dueOffset) + 1;
-            var shouldEscalateToObserver = level >= RepeatEscalationOffsets.Length || daysWithoutActiveTask >= settings.EscalationDays;
+                signals.LastNonAutomationTaskAt,
+                signals.LastTaskCommentAt,
+                signals.LastDocumentAt,
+                signals.LastCourtEventAt);
+            var transition = CaseInactivityControlStateMachine.Evaluate(
+                new CaseInactivityControlStateInput(
+                    now,
+                    lastActivity,
+                    task.CreatedAt,
+                    settings.InactiveDays,
+                    settings.EscalationDays,
+                    HasOtherActiveTask: signals.ActiveTaskCount > 1,
+                    FirstRepeatCompleted: HasEscalationComment(
+                        task,
+                        CaseInactivityControlStateMachine.FirstRepeatOffsetDays),
+                    SecondRepeatCompleted: HasEscalationComment(
+                        task,
+                        CaseInactivityControlStateMachine.SecondRepeatOffsetDays)));
+            if (transition.Transition is not (
+                    CaseInactivityControlTransition.RepeatDue or
+                    CaseInactivityControlTransition.CriticalEscalationDue) ||
+                !transition.RepeatOffsetDays.HasValue)
+            {
+                continue;
+            }
+
+            var daysWithoutActiveTask = transition.DaysWithoutActivity;
+            var level = transition.RepeatLevel;
+            var dueOffset = transition.RepeatOffsetDays.Value;
+            var shouldEscalateToObserver = transition.IsCritical;
             if (shouldEscalateToObserver)
             {
                 AddEscalationObserver(task, escalationUser, task.AssigneeUserId.Value, now);
@@ -796,24 +813,6 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
                 LastActivityConfirmationAt: clientCase.ActivityConfirmedAt))
             .At;
 
-    private static int ResolveDaysWithoutActiveTask(
-        ClientCase clientCase,
-        DateTime now,
-        DateTime? lastTaskAt,
-        DateTime? lastTaskCommentAt,
-        DateTime? lastDocumentAt,
-        DateTime? lastCourtEventAt)
-        => Math.Max(
-            0,
-            (int)Math.Floor(
-                (now - ResolveLastCaseActivity(
-                    clientCase,
-                    lastTaskAt,
-                    lastTaskCommentAt,
-                    lastDocumentAt,
-                    lastCourtEventAt))
-                .TotalDays));
-
     private async Task NotifyCreatedAutomationTasksAsync(
         INotificationService? notificationService,
         IReadOnlyList<CreatedAutomationTask> createdTasks,
@@ -918,6 +917,14 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
         int OffsetDays,
         int DaysWithoutActiveTask,
         bool EscalatedToObserver);
+
+    private sealed record ExistingAutomationCaseSignals(
+        int ClientCaseId,
+        int ActiveTaskCount,
+        DateTime? LastNonAutomationTaskAt,
+        DateTime? LastTaskCommentAt,
+        DateTime? LastDocumentAt,
+        DateTime? LastCourtEventAt);
 
     private sealed record CaseOwnerBinding(int? ClientId, int? LegalEntityId, string Name);
 }
