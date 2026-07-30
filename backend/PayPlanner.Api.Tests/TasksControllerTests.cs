@@ -3220,6 +3220,52 @@ public class TasksControllerTests
         Assert.DoesNotContain(candidates, item => item.ClientCaseId == lostCase.Id);
     }
 
+    [Theory]
+    [InlineData("done")]
+    [InlineData("cancelled")]
+    public async Task GetAutomationCaseCandidates_WaitsAfterFinishedControlCycle(string finalStatus)
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, $"preview-{finalStatus}@example.com", "Автор");
+        var client = await CreateClientAsync(db, $"Клиент preview {finalStatus}");
+        var recentCase = await CreateCaseAsync(db, client.Id, "НЕДАВНО ЗАВЕРШЁННЫЙ ЦИКЛ");
+        var readyCase = await CreateCaseAsync(db, client.Id, "ЦИКЛ ГОТОВ К ПОВТОРУ");
+        var now = DateTime.UtcNow;
+        recentCase.CreatedAt = now.AddDays(-40);
+        readyCase.CreatedAt = now.AddDays(-40);
+        await CreateTaskAsync(
+            db,
+            author.Id,
+            client.Id,
+            clientCaseId: recentCase.Id,
+            status: finalStatus,
+            createdAt: now.AddDays(-13),
+            tagsJson: "[\"автоконтроль\"]",
+            updatedAt: now.AddDays(-13));
+        await CreateTaskAsync(
+            db,
+            author.Id,
+            client.Id,
+            clientCaseId: readyCase.Id,
+            status: finalStatus,
+            createdAt: now.AddDays(-14),
+            tagsJson: "[\"автоконтроль\"]",
+            updatedAt: now.AddDays(-14));
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.GetAutomationCaseCandidates(
+            inactiveDays: 14,
+            limit: 10,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var candidates = Assert.IsAssignableFrom<IReadOnlyList<TaskJournalCaseAutomationCandidateDto>>(ok.Value);
+        Assert.DoesNotContain(candidates, item => item.ClientCaseId == recentCase.Id);
+        var ready = Assert.Single(candidates, item => item.ClientCaseId == readyCase.Id);
+        Assert.Contains("Предыдущий цикл завершён", ready.Reason, StringComparison.Ordinal);
+        Assert.True(ready.DaysWithoutActiveTask >= 39);
+    }
+
     [Fact]
     public async Task CreateAutomationTaskForCase_CreatesControlTaskWithCaseBinding()
     {
@@ -3338,6 +3384,35 @@ public class TasksControllerTests
         var result = await controller.CreateAutomationTaskForCase(clientCase.Id, CancellationToken.None);
 
         Assert.IsType<ConflictObjectResult>(result.Result);
+        Assert.Equal(1, await db.TaskJournalItems.CountAsync(item => item.ClientCaseId == clientCase.Id));
+    }
+
+    [Theory]
+    [InlineData("done")]
+    [InlineData("cancelled")]
+    public async Task CreateAutomationTaskForCase_WaitsAfterFinishedControlCycle(string finalStatus)
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, $"manual-{finalStatus}@example.com", "Автор");
+        var client = await CreateClientAsync(db, $"Клиент manual {finalStatus}");
+        var clientCase = await CreateCaseAsync(db, client.Id, "НЕДАВНО ЗАВЕРШЁННЫЙ КОНТРОЛЬ");
+        var now = DateTime.UtcNow;
+        clientCase.CreatedAt = now.AddDays(-40);
+        await CreateTaskAsync(
+            db,
+            author.Id,
+            client.Id,
+            clientCaseId: clientCase.Id,
+            status: finalStatus,
+            createdAt: now.AddDays(-13),
+            tagsJson: "[\"автоконтроль\"]",
+            updatedAt: now.AddDays(-13));
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.CreateAutomationTaskForCase(clientCase.Id, CancellationToken.None);
+
+        var conflict = Assert.IsType<ConflictObjectResult>(result.Result);
+        Assert.Contains("Предыдущий цикл автоконтроля недавно завершён", conflict.Value?.ToString(), StringComparison.Ordinal);
         Assert.Equal(1, await db.TaskJournalItems.CountAsync(item => item.ClientCaseId == clientCase.Id));
     }
 
@@ -4145,6 +4220,65 @@ public class TasksControllerTests
 
         Assert.Equal(0, await db.TaskJournalItems.CountAsync(item => item.ClientCaseId == clientCase.Id));
         Assert.Equal(1, await db.TaskJournalItems.IgnoreQueryFilters().CountAsync(item => item.ClientCaseId == clientCase.Id));
+    }
+
+    [Theory]
+    [InlineData("done")]
+    [InlineData("cancelled")]
+    public async Task TaskJournalAutomationScheduler_StartsNewCycleOnlyAfterFinishedControlCooldown(string finalStatus)
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, $"scheduler-{finalStatus}@example.com", "Автор");
+        var client = await CreateClientAsync(db, $"Клиент scheduler {finalStatus}");
+        client.ResponsibleUserId = author.Id;
+        var recentCase = await CreateCaseAsync(db, client.Id, "НЕДАВНО ЗАВЕРШЁННЫЙ ЦИКЛ");
+        var readyCase = await CreateCaseAsync(db, client.Id, "ПОВТОРНЫЙ ЦИКЛ");
+        var now = DateTime.UtcNow;
+        recentCase.CreatedAt = now.AddDays(-40);
+        readyCase.CreatedAt = now.AddDays(-40);
+        await CreateTaskAsync(
+            db,
+            author.Id,
+            client.Id,
+            clientCaseId: recentCase.Id,
+            status: finalStatus,
+            createdAt: now.AddDays(-13),
+            tagsJson: "[\"автоконтроль\"]",
+            updatedAt: now.AddDays(-13));
+        await CreateTaskAsync(
+            db,
+            author.Id,
+            client.Id,
+            clientCaseId: readyCase.Id,
+            status: finalStatus,
+            createdAt: now.AddDays(-14),
+            tagsJson: "[\"автоконтроль\"]",
+            updatedAt: now.AddDays(-14));
+        var (scheduler, provider) = CreateAutomationScheduler(db, new Dictionary<string, string?>
+        {
+            ["TaskJournal:Automation:Enabled"] = "true",
+            ["TaskJournal:Automation:InactiveDays"] = "14",
+            ["TaskJournal:Automation:Limit"] = "10",
+        });
+
+        using (provider)
+        {
+            var result = await scheduler.RunOnceAsync(CancellationToken.None);
+
+            Assert.Null(result.Error);
+            Assert.Equal(1, result.CreatedCount);
+        }
+
+        Assert.Equal(1, await db.TaskJournalItems.CountAsync(item =>
+            item.ClientCaseId == recentCase.Id));
+        Assert.Equal(0, await db.TaskJournalItems.CountAsync(item =>
+            item.ClientCaseId == recentCase.Id &&
+            item.Status == "new"));
+        Assert.Equal(2, await db.TaskJournalItems.CountAsync(item =>
+            item.ClientCaseId == readyCase.Id));
+        Assert.Equal(1, await db.TaskJournalItems.CountAsync(item =>
+            item.ClientCaseId == readyCase.Id &&
+            item.Status == "new"));
     }
 
     [Fact]
@@ -6661,7 +6795,9 @@ public class TasksControllerTests
         string status = "new",
         DateTime? createdAt = null,
         int? legalEntityId = null,
-        DateTime? approvalDueAt = null)
+        DateTime? approvalDueAt = null,
+        string tagsJson = "[]",
+        DateTime? updatedAt = null)
     {
         var task = new TaskJournalItem
         {
@@ -6681,11 +6817,20 @@ public class TasksControllerTests
             Result = result,
             RemindersJson = "[\"atDue\"]",
             ChannelsJson = "[\"inApp\"]",
-            TagsJson = "[]",
+            TagsJson = tagsJson,
             CreatedAt = createdAt ?? DateTime.UtcNow,
+            UpdatedAt = updatedAt,
         };
         db.TaskJournalItems.Add(task);
         await db.SaveChangesAsync();
+        if (updatedAt.HasValue)
+        {
+            await db.TaskJournalItems
+                .Where(item => item.Id == task.Id)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(item => item.UpdatedAt, updatedAt.Value));
+        }
+
         return task;
     }
 

@@ -92,6 +92,7 @@ public class TasksController : ControllerBase
     private const string CaseInactivityAutomationDefaultAssigneeSettingKey = "tasks.automation.caseControl.defaultAssigneeUserId";
     private const string CaseInactivityAutomationEscalationDaysSettingKey = "tasks.automation.caseControl.escalationDays";
     private const string CaseInactivityAutomationEscalationUserSettingKey = "tasks.automation.caseControl.escalationUserId";
+    private const string CaseInactivityAutomationTag = "автоконтроль";
     private const string ContractorPaymentMarker = "[PayPlanner:TaskContractorPayment]";
     private const string CalendarSyncSettingsKey = "calendarSync.settings";
     private const string ProfileTimeZoneSettingKey = "profile.timeZoneId";
@@ -492,11 +493,26 @@ public class TasksController : ControllerBase
                     ActiveTaskStatuses.Contains(task.Status)),
                 LastTaskAt = _db.TaskJournalItems
                     .IgnoreQueryFilters()
-                    .Where(task => task.ClientCaseId == clientCase.Id)
+                    .Where(task =>
+                        task.ClientCaseId == clientCase.Id &&
+                        !task.TagsJson.Contains(CaseInactivityAutomationTag))
                     .Max(task => (DateTime?)(task.UpdatedAt ?? task.CreatedAt)),
                 LastTaskCommentAt = _db.TaskJournalComments
-                    .Where(comment => comment.TaskJournalItem.ClientCaseId == clientCase.Id)
+                    .Where(comment =>
+                        comment.TaskJournalItem.ClientCaseId == clientCase.Id &&
+                        !comment.TaskJournalItem.TagsJson.Contains(CaseInactivityAutomationTag))
                     .Max(comment => (DateTime?)(comment.UpdatedAt ?? comment.CreatedAt)),
+                LastControlCycleEndedAt = _db.TaskJournalItems
+                    .IgnoreQueryFilters()
+                    .Where(task =>
+                        task.ClientCaseId == clientCase.Id &&
+                        task.TagsJson.Contains(CaseInactivityAutomationTag) &&
+                        ((task.Status == "done" || task.Status == "cancelled") ||
+                         EF.Property<bool>(task, "IsDeleted")))
+                    .Max(task =>
+                        EF.Property<DateTime?>(task, "DeletedAt") ??
+                        task.UpdatedAt ??
+                        (DateTime?)task.CreatedAt),
                 LastDocumentAt = _db.ClientCaseDocuments
                     .Where(document => document.ClientCaseId == clientCase.Id)
                     .Max(document => (DateTime?)document.UploadedAt),
@@ -514,6 +530,7 @@ public class TasksController : ControllerBase
                         item.ActiveTaskCount == 0 &&
                         (item.LastTaskAt ?? item.CreatedAt) <= inactivityCutoff &&
                         (item.LastTaskCommentAt ?? item.CreatedAt) <= inactivityCutoff &&
+                        (item.LastControlCycleEndedAt ?? item.CreatedAt) <= inactivityCutoff &&
                         (item.LastDocumentAt ?? item.CreatedAt) <= inactivityCutoff &&
                         (item.LastCourtEventAt ?? item.CreatedAt) <= inactivityCutoff &&
                         (item.LastViewedAt ?? item.CreatedAt) <= inactivityCutoff &&
@@ -523,6 +540,7 @@ public class TasksController : ControllerBase
                         item.ActiveTaskCount == 0 &&
                         (item.LastTaskAt ?? item.CreatedAt) <= escalationCutoff &&
                         (item.LastTaskCommentAt ?? item.CreatedAt) <= escalationCutoff &&
+                        (item.LastControlCycleEndedAt ?? item.CreatedAt) <= inactivityCutoff &&
                         (item.LastDocumentAt ?? item.CreatedAt) <= escalationCutoff &&
                         (item.LastCourtEventAt ?? item.CreatedAt) <= escalationCutoff &&
                         (item.LastViewedAt ?? item.CreatedAt) <= escalationCutoff &&
@@ -812,11 +830,26 @@ public class TasksController : ControllerBase
                     (task.Status == "done" || task.Status == "cancelled")),
                 LastTaskAt = _db.TaskJournalItems
                     .IgnoreQueryFilters()
-                    .Where(task => task.ClientCaseId == clientCase.Id)
+                    .Where(task =>
+                        task.ClientCaseId == clientCase.Id &&
+                        !task.TagsJson.Contains(CaseInactivityAutomationTag))
                     .Max(task => (DateTime?)(task.UpdatedAt ?? task.CreatedAt)),
                 LastTaskCommentAt = _db.TaskJournalComments
-                    .Where(comment => comment.TaskJournalItem.ClientCaseId == clientCase.Id)
+                    .Where(comment =>
+                        comment.TaskJournalItem.ClientCaseId == clientCase.Id &&
+                        !comment.TaskJournalItem.TagsJson.Contains(CaseInactivityAutomationTag))
                     .Max(comment => (DateTime?)(comment.UpdatedAt ?? comment.CreatedAt)),
+                LastControlCycleEndedAt = _db.TaskJournalItems
+                    .IgnoreQueryFilters()
+                    .Where(task =>
+                        task.ClientCaseId == clientCase.Id &&
+                        task.TagsJson.Contains(CaseInactivityAutomationTag) &&
+                        ((task.Status == "done" || task.Status == "cancelled") ||
+                         EF.Property<bool>(task, "IsDeleted")))
+                    .Max(task =>
+                        EF.Property<DateTime?>(task, "DeletedAt") ??
+                        task.UpdatedAt ??
+                        (DateTime?)task.CreatedAt),
                 LastDocumentAt = _db.ClientCaseDocuments
                     .Where(document => document.ClientCaseId == clientCase.Id)
                     .Max(document => (DateTime?)document.UploadedAt),
@@ -842,12 +875,13 @@ public class TasksController : ControllerBase
             .Where(item => item.ActiveTaskCount == 0
                 && (item.LastTaskAt ?? item.CreatedAt) <= cutoff
                 && (item.LastTaskCommentAt ?? item.CreatedAt) <= cutoff
+                && (item.LastControlCycleEndedAt ?? item.CreatedAt) <= cutoff
                 && (item.LastDocumentAt ?? item.CreatedAt) <= cutoff
                 && (item.LastCourtEventAt ?? item.CreatedAt) <= cutoff
                 && (item.LastViewedAt ?? item.CreatedAt) <= cutoff
                 && (item.ActivityConfirmedAt ?? item.CreatedAt) <= cutoff
                 && item.InactivityRemindersEnabled)
-            .OrderBy(item => item.LastTaskAt ?? item.LastTaskCommentAt ?? item.LastDocumentAt ?? item.LastCourtEventAt ?? item.CreatedAt)
+            .OrderBy(item => item.LastControlCycleEndedAt ?? item.LastTaskAt ?? item.LastTaskCommentAt ?? item.LastDocumentAt ?? item.LastCourtEventAt ?? item.CreatedAt)
             .ThenBy(item => item.ClientName != string.Empty ? item.ClientName : item.LegalEntityName)
             .ThenBy(item => item.Title)
             .Take(effectiveLimit)
@@ -865,8 +899,15 @@ public class TasksController : ControllerBase
                 item.LastCourtEventAt);
 
             var daysWithoutActiveTask = Math.Max(0, (int)Math.Floor((now - lastActivity).TotalDays));
+            var nextCycle = CaseInactivityControlCyclePolicy.EvaluateNextCycle(
+                now,
+                lastActivity,
+                item.LastControlCycleEndedAt,
+                effectiveInactiveDays);
             var isEscalated = daysWithoutActiveTask >= effectiveEscalationDays;
-            var reason = item.LastTaskAt is null
+            var reason = nextCycle.WaitsAfterPreviousCycle
+                ? $"Предыдущий цикл завершён {Math.Max(0, (int)Math.Floor((now - nextCycle.CooldownAnchorAt).TotalDays))} дн. назад, нового движения нет"
+                : item.LastTaskAt is null
                 ? "По делу еще не было задач"
                 : daysWithoutActiveTask >= effectiveInactiveDays
                     ? $"Нет активной задачи уже {daysWithoutActiveTask} дн."
@@ -939,33 +980,69 @@ public class TasksController : ControllerBase
             });
         }
 
-        var lastTaskAt = await _db.TaskJournalItems
-            .IgnoreQueryFilters()
-            .Where(task => task.ClientCaseId == clientCase.Id)
-            .MaxAsync(task => (DateTime?)(task.UpdatedAt ?? task.CreatedAt), ct);
-        var lastTaskCommentAt = await _db.TaskJournalComments
-            .Where(comment => comment.TaskJournalItem.ClientCaseId == clientCase.Id)
-            .MaxAsync(comment => (DateTime?)(comment.UpdatedAt ?? comment.CreatedAt), ct);
-        var lastDocumentAt = await _db.ClientCaseDocuments
-            .Where(document => document.ClientCaseId == clientCase.Id)
-            .MaxAsync(document => (DateTime?)document.UploadedAt, ct);
-        var lastCourtEventAt = await _db.ClientCaseCourtEvents
-            .Where(courtEvent => courtEvent.ClientCaseId == clientCase.Id)
-            .MaxAsync(courtEvent => (DateTime?)(courtEvent.UpdatedAt ?? courtEvent.CreatedAt), ct);
+        var signals = await _db.ClientCases
+            .AsNoTracking()
+            .Where(item => item.Id == clientCase.Id)
+            .Select(item => new
+            {
+                LastTaskAt = _db.TaskJournalItems
+                    .IgnoreQueryFilters()
+                    .Where(task =>
+                        task.ClientCaseId == item.Id &&
+                        !task.TagsJson.Contains(CaseInactivityAutomationTag))
+                    .Max(task => (DateTime?)(task.UpdatedAt ?? task.CreatedAt)),
+                LastTaskCommentAt = _db.TaskJournalComments
+                    .Where(comment =>
+                        comment.TaskJournalItem.ClientCaseId == item.Id &&
+                        !comment.TaskJournalItem.TagsJson.Contains(CaseInactivityAutomationTag))
+                    .Max(comment => (DateTime?)(comment.UpdatedAt ?? comment.CreatedAt)),
+                LastControlCycleEndedAt = _db.TaskJournalItems
+                    .IgnoreQueryFilters()
+                    .Where(task =>
+                        task.ClientCaseId == item.Id &&
+                        task.TagsJson.Contains(CaseInactivityAutomationTag) &&
+                        ((task.Status == "done" || task.Status == "cancelled") ||
+                         EF.Property<bool>(task, "IsDeleted")))
+                    .Max(task =>
+                        EF.Property<DateTime?>(task, "DeletedAt") ??
+                        task.UpdatedAt ??
+                        (DateTime?)task.CreatedAt),
+                LastDocumentAt = _db.ClientCaseDocuments
+                    .Where(document => document.ClientCaseId == item.Id)
+                    .Max(document => (DateTime?)document.UploadedAt),
+                LastCourtEventAt = _db.ClientCaseCourtEvents
+                    .Where(courtEvent => courtEvent.ClientCaseId == item.Id)
+                    .Max(courtEvent => (DateTime?)(courtEvent.UpdatedAt ?? courtEvent.CreatedAt)),
+            })
+            .SingleAsync(ct);
         var settings = await GetTaskJournalSettingsAsync(ct);
         if (!settings.CaseInactivityAutomationEnabled || !clientCase.InactivityRemindersEnabled)
         {
             return BadRequest(new { message = "Автоконтроль для этого дела отключен." });
         }
 
-        var lastActivity = ResolveLastCaseActivity(clientCase, lastTaskAt, lastTaskCommentAt, lastDocumentAt, lastCourtEventAt);
-        var daysWithoutActiveTask = Math.Max(0, (int)Math.Floor((DateTime.UtcNow - lastActivity).TotalDays));
-        if (daysWithoutActiveTask < settings.CaseInactivityDays)
+        var now = DateTime.UtcNow;
+        var lastActivity = ResolveLastCaseActivity(
+            clientCase,
+            signals.LastTaskAt,
+            signals.LastTaskCommentAt,
+            signals.LastDocumentAt,
+            signals.LastCourtEventAt);
+        var nextCycle = CaseInactivityControlCyclePolicy.EvaluateNextCycle(
+            now,
+            lastActivity,
+            signals.LastControlCycleEndedAt,
+            settings.CaseInactivityDays);
+        var daysWithoutActiveTask = nextCycle.DaysWithoutMeaningfulActivity;
+        if (!nextCycle.IsEligible)
         {
             return Conflict(new
             {
-                message = "По делу недавно было движение. Контрольная задача пока не требуется.",
+                message = nextCycle.WaitsAfterPreviousCycle
+                    ? "Предыдущий цикл автоконтроля недавно завершён. Новый цикл пока не требуется."
+                    : "По делу недавно было движение. Контрольная задача пока не требуется.",
                 daysWithoutActiveTask,
+                nextControlAt = nextCycle.EligibleAt,
             });
         }
 
@@ -981,7 +1058,6 @@ public class TasksController : ControllerBase
         }
 
         var dueAt = await BuildDefaultTaskDueAtUtcAsync(assignee.UserId, ct);
-        var now = DateTime.UtcNow;
         var entity = new TaskJournalItem
         {
             ClientId = binding.ClientId,
@@ -1002,7 +1078,7 @@ public class TasksController : ControllerBase
             Result = null,
             RemindersJson = SerializeList(["before1d", "atDue"], AllowedReminders, ["atDue"]),
             ChannelsJson = SerializeList(["inApp"], AllowedChannels, ["inApp"]),
-            TagsJson = SerializeFreeList(["автоконтроль"]),
+            TagsJson = SerializeFreeList([CaseInactivityAutomationTag]),
             InactivityControlCycleNumber = 1,
             InactivityControlNextCheckAt = now.AddDays(CaseInactivityControlStateMachine.FirstRepeatOffsetDays),
             CreatedAt = now,
@@ -1064,11 +1140,26 @@ public class TasksController : ControllerBase
                     ActiveTaskStatuses.Contains(task.Status)),
                 LastTaskAt = _db.TaskJournalItems
                     .IgnoreQueryFilters()
-                    .Where(task => task.ClientCaseId == clientCase.Id)
+                    .Where(task =>
+                        task.ClientCaseId == clientCase.Id &&
+                        !task.TagsJson.Contains(CaseInactivityAutomationTag))
                     .Max(task => (DateTime?)(task.UpdatedAt ?? task.CreatedAt)),
                 LastTaskCommentAt = _db.TaskJournalComments
-                    .Where(comment => comment.TaskJournalItem.ClientCaseId == clientCase.Id)
+                    .Where(comment =>
+                        comment.TaskJournalItem.ClientCaseId == clientCase.Id &&
+                        !comment.TaskJournalItem.TagsJson.Contains(CaseInactivityAutomationTag))
                     .Max(comment => (DateTime?)(comment.UpdatedAt ?? comment.CreatedAt)),
+                LastControlCycleEndedAt = _db.TaskJournalItems
+                    .IgnoreQueryFilters()
+                    .Where(task =>
+                        task.ClientCaseId == clientCase.Id &&
+                        task.TagsJson.Contains(CaseInactivityAutomationTag) &&
+                        ((task.Status == "done" || task.Status == "cancelled") ||
+                         EF.Property<bool>(task, "IsDeleted")))
+                    .Max(task =>
+                        EF.Property<DateTime?>(task, "DeletedAt") ??
+                        task.UpdatedAt ??
+                        (DateTime?)task.CreatedAt),
                 LastDocumentAt = _db.ClientCaseDocuments
                     .Where(document => document.ClientCaseId == clientCase.Id)
                     .Max(document => (DateTime?)document.UploadedAt),
@@ -1079,12 +1170,13 @@ public class TasksController : ControllerBase
             .Where(item => item.ActiveTaskCount == 0
                 && (item.LastTaskAt ?? item.Case.CreatedAt) <= cutoff
                 && (item.LastTaskCommentAt ?? item.Case.CreatedAt) <= cutoff
+                && (item.LastControlCycleEndedAt ?? item.Case.CreatedAt) <= cutoff
                 && (item.LastDocumentAt ?? item.Case.CreatedAt) <= cutoff
                 && (item.LastCourtEventAt ?? item.Case.CreatedAt) <= cutoff
                 && (item.Case.LastViewedAt ?? item.Case.CreatedAt) <= cutoff
                 && (item.Case.ActivityConfirmedAt ?? item.Case.CreatedAt) <= cutoff
                 && item.Case.InactivityRemindersEnabled)
-            .OrderBy(item => item.LastTaskAt ?? item.LastTaskCommentAt ?? item.LastDocumentAt ?? item.LastCourtEventAt ?? item.Case.CreatedAt)
+            .OrderBy(item => item.LastControlCycleEndedAt ?? item.LastTaskAt ?? item.LastTaskCommentAt ?? item.LastDocumentAt ?? item.LastCourtEventAt ?? item.Case.CreatedAt)
             .ThenBy(item => item.Case.Client != null
                 ? item.Case.Client.Name
                 : item.Case.LegalEntity != null
@@ -5637,7 +5729,7 @@ public class TasksController : ControllerBase
             Result = null,
             RemindersJson = SerializeList(["before1d", "atDue"], AllowedReminders, ["atDue"]),
             ChannelsJson = SerializeList(["inApp"], AllowedChannels, ["inApp"]),
-            TagsJson = SerializeFreeList(["автоконтроль"]),
+            TagsJson = SerializeFreeList([CaseInactivityAutomationTag]),
             InactivityControlCycleNumber = 1,
             InactivityControlNextCheckAt = now.AddDays(CaseInactivityControlStateMachine.FirstRepeatOffsetDays),
             CreatedAt = now,

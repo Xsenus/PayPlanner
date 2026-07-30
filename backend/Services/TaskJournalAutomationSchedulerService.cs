@@ -141,11 +141,26 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
                         ActiveTaskStatuses.Contains(task.Status)),
                     LastTaskAt = context.TaskJournalItems
                         .IgnoreQueryFilters()
-                        .Where(task => task.ClientCaseId == clientCase.Id)
+                        .Where(task =>
+                            task.ClientCaseId == clientCase.Id &&
+                            !task.TagsJson.Contains(AutomationTag))
                         .Max(task => (DateTime?)(task.UpdatedAt ?? task.CreatedAt)),
                     LastTaskCommentAt = context.TaskJournalComments
-                        .Where(comment => comment.TaskJournalItem.ClientCaseId == clientCase.Id)
+                        .Where(comment =>
+                            comment.TaskJournalItem.ClientCaseId == clientCase.Id &&
+                            !comment.TaskJournalItem.TagsJson.Contains(AutomationTag))
                         .Max(comment => (DateTime?)(comment.UpdatedAt ?? comment.CreatedAt)),
+                    LastControlCycleEndedAt = context.TaskJournalItems
+                        .IgnoreQueryFilters()
+                        .Where(task =>
+                            task.ClientCaseId == clientCase.Id &&
+                            task.TagsJson.Contains(AutomationTag) &&
+                            ((task.Status == "done" || task.Status == "cancelled") ||
+                             EF.Property<bool>(task, "IsDeleted")))
+                        .Max(task =>
+                            EF.Property<DateTime?>(task, "DeletedAt") ??
+                            task.UpdatedAt ??
+                            (DateTime?)task.CreatedAt),
                     LastDocumentAt = context.ClientCaseDocuments
                         .Where(document => document.ClientCaseId == clientCase.Id)
                         .Max(document => (DateTime?)document.UploadedAt),
@@ -156,12 +171,13 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
                 .Where(item => item.ActiveTaskCount == 0
                     && (item.LastTaskAt ?? item.Case.CreatedAt) <= cutoff
                     && (item.LastTaskCommentAt ?? item.Case.CreatedAt) <= cutoff
+                    && (item.LastControlCycleEndedAt ?? item.Case.CreatedAt) <= cutoff
                     && (item.LastDocumentAt ?? item.Case.CreatedAt) <= cutoff
                     && (item.LastCourtEventAt ?? item.Case.CreatedAt) <= cutoff
                     && (item.Case.LastViewedAt ?? item.Case.CreatedAt) <= cutoff
                     && (item.Case.ActivityConfirmedAt ?? item.Case.CreatedAt) <= cutoff
                     && item.Case.InactivityRemindersEnabled)
-                .OrderBy(item => item.LastTaskAt ?? item.LastTaskCommentAt ?? item.LastDocumentAt ?? item.LastCourtEventAt ?? item.Case.CreatedAt)
+                .OrderBy(item => item.LastControlCycleEndedAt ?? item.LastTaskAt ?? item.LastTaskCommentAt ?? item.LastDocumentAt ?? item.LastCourtEventAt ?? item.Case.CreatedAt)
                 .ThenBy(item => item.Case.Client != null
                     ? item.Case.Client.Name
                     : item.Case.LegalEntity != null
