@@ -995,6 +995,10 @@ export interface SmsNotificationSettingsDto {
   recipientDailyLimit: number;
   burstLimitPerMinute: number;
   maxMessageLength: number;
+  quietHoursEnabled: boolean;
+  quietHoursStart: string;
+  quietHoursEnd: string;
+  quietHoursTimeZone: string;
   notes: string;
   statusText: string;
 }
@@ -1148,6 +1152,10 @@ export interface UpdateSmsNotificationSettingsRequest {
   recipientDailyLimit?: number | null;
   burstLimitPerMinute?: number | null;
   maxMessageLength?: number | null;
+  quietHoursEnabled: boolean;
+  quietHoursStart?: string | null;
+  quietHoursEnd?: string | null;
+  quietHoursTimeZone?: string | null;
   notes?: string | null;
 }
 

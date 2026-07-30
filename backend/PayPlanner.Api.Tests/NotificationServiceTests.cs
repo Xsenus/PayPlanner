@@ -209,6 +209,10 @@ public class NotificationServiceTests
             RecipientDailyLimit = 8,
             BurstLimitPerMinute = 30,
             MaxMessageLength = 320,
+            QuietHoursEnabled = true,
+            QuietHoursStart = "23:15",
+            QuietHoursEnd = "07:45",
+            QuietHoursTimeZone = "Asia/Novosibirsk",
             Notes = "Тестовые настройки SMS"
         });
 
@@ -223,6 +227,10 @@ public class NotificationServiceTests
         Assert.Equal(8, settings.Sms.RecipientDailyLimit);
         Assert.Equal(30, settings.Sms.BurstLimitPerMinute);
         Assert.Equal(320, settings.Sms.MaxMessageLength);
+        Assert.True(settings.Sms.QuietHoursEnabled);
+        Assert.Equal("23:15", settings.Sms.QuietHoursStart);
+        Assert.Equal("07:45", settings.Sms.QuietHoursEnd);
+        Assert.Equal("Asia/Novosibirsk", settings.Sms.QuietHoursTimeZone);
         Assert.Contains("адаптер", settings.Sms.StatusText, StringComparison.OrdinalIgnoreCase);
 
         var updated = await service.UpdateSmsSettingsAsync(new UpdateSmsNotificationSettingsRequest
@@ -235,7 +243,8 @@ public class NotificationServiceTests
             DailyLimit = 10,
             RecipientDailyLimit = 3,
             BurstLimitPerMinute = 12,
-            MaxMessageLength = 120
+            MaxMessageLength = 120,
+            QuietHoursEnabled = false
         });
 
         Assert.True(updated.Sms.ApiTokenSet);
@@ -280,6 +289,10 @@ public class NotificationServiceTests
             RecipientDailyLimit = -10,
             BurstLimitPerMinute = 0,
             MaxMessageLength = 10,
+            QuietHoursEnabled = false,
+            QuietHoursStart = "invalid",
+            QuietHoursEnd = "invalid",
+            QuietHoursTimeZone = "invalid",
             Notes = new string('x', 600)
         });
 
@@ -291,6 +304,10 @@ public class NotificationServiceTests
         Assert.Equal(1, settings.Sms.RecipientDailyLimit);
         Assert.Equal(1, settings.Sms.BurstLimitPerMinute);
         Assert.Equal(70, settings.Sms.MaxMessageLength);
+        Assert.False(settings.Sms.QuietHoursEnabled);
+        Assert.Equal("22:00", settings.Sms.QuietHoursStart);
+        Assert.Equal("08:00", settings.Sms.QuietHoursEnd);
+        Assert.Equal("Europe/Moscow", settings.Sms.QuietHoursTimeZone);
         Assert.Equal(500, settings.Sms.Notes.Length);
         Assert.Contains("провайдер", settings.Sms.StatusText, StringComparison.OrdinalIgnoreCase);
 
@@ -645,6 +662,75 @@ public class NotificationServiceTests
         Assert.Single(deliveries);
         Assert.Single(smsService.Messages);
         Assert.Equal(2, await db.NotificationDeliveries.CountAsync());
+    }
+
+    [Fact]
+    public async Task SmsDelivery_SkipsOnlySmsDuringQuietHours()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(
+            db,
+            "sms-quiet-hours@example.com",
+            phoneNumber: "+7 (999) 555-00-66");
+        var emailService = new RecordingEmailService();
+        var smsService = new RecordingSmsNotificationService();
+        smsService.Settings.QuietHoursEnabled = true;
+        smsService.Settings.QuietHoursStart = "22:00";
+        smsService.Settings.QuietHoursEnd = "08:00";
+        smsService.Settings.QuietHoursTimeZone = "Europe/Moscow";
+        var service = CreateService(
+            db,
+            emailService,
+            new RecordingTelegramService(),
+            smsNotificationService: smsService,
+            timeProvider: new FixedTimeProvider(
+                new DateTimeOffset(2026, 7, 30, 20, 0, 0, TimeSpan.Zero)));
+
+        var deliveries = await service.SendToUserAsync(
+            user.Id,
+            new NotificationMessage("Тихие часы", "Обычное сообщение"),
+            [NotificationChannels.Sms, NotificationChannels.Email],
+            "sms:test:quiet-hours");
+
+        var emailDelivery = Assert.Single(deliveries);
+        Assert.Equal(NotificationChannels.Email, emailDelivery.Channel);
+        Assert.Empty(smsService.Messages);
+        Assert.False(await db.NotificationDeliveries.AnyAsync(item => item.Channel == NotificationChannels.Sms));
+    }
+
+    [Fact]
+    public async Task SmsDelivery_AllowsExplicitlyApprovedCriticalEventDuringQuietHours()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(
+            db,
+            "sms-critical-quiet-hours@example.com",
+            phoneNumber: "+7 (999) 777-00-88");
+        var smsService = new RecordingSmsNotificationService();
+        smsService.Settings.QuietHoursEnabled = true;
+        smsService.Settings.QuietHoursStart = "22:00";
+        smsService.Settings.QuietHoursEnd = "08:00";
+        smsService.Settings.QuietHoursTimeZone = "Europe/Moscow";
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            smsNotificationService: smsService,
+            timeProvider: new FixedTimeProvider(
+                new DateTimeOffset(2026, 7, 30, 20, 0, 0, TimeSpan.Zero)));
+
+        var deliveries = await service.SendToUserAsync(
+            user.Id,
+            new NotificationMessage(
+                "Критическое событие",
+                "Требуется срочное действие",
+                IsApprovedSmsCriticalEvent: true),
+            [NotificationChannels.Sms],
+            "sms:test:critical-quiet-hours");
+
+        var delivery = Assert.Single(deliveries);
+        Assert.Equal(NotificationDeliveryStatus.Sent, delivery.Status);
+        Assert.Single(smsService.Messages);
     }
 
     [Fact]
@@ -9591,7 +9677,8 @@ public class NotificationServiceTests
         ITelegramNotificationService telegramService,
         IRealtimeNotificationPublisher? realtimePublisher = null,
         IWebPushNotificationService? webPushNotificationService = null,
-        ISmsNotificationService? smsNotificationService = null)
+        ISmsNotificationService? smsNotificationService = null,
+        TimeProvider? timeProvider = null)
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>())
@@ -9605,7 +9692,8 @@ public class NotificationServiceTests
             NullLogger<NotificationService>.Instance,
             realtimePublisher,
             webPushNotificationService,
-            smsNotificationService);
+            smsNotificationService,
+            timeProvider);
     }
 
     private static ExternalAuthService CreateExternalAuthService(
@@ -10105,6 +10193,7 @@ public class NotificationServiceTests
             RecipientDailyLimit = 5,
             BurstLimitPerMinute = 20,
             MaxMessageLength = 480,
+            QuietHoursEnabled = false,
             StatusText = "SMS-канал готов к отправке."
         };
 
@@ -10130,6 +10219,11 @@ public class NotificationServiceTests
             Messages.Add((phoneNumber, text, idempotencyKey));
             return Task.FromResult(NextResult);
         }
+    }
+
+    private sealed class FixedTimeProvider(DateTimeOffset utcNow) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => utcNow;
     }
 
     private sealed class RecordingRealtimeNotificationPublisher : IRealtimeNotificationPublisher

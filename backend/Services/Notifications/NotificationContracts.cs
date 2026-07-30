@@ -973,7 +973,8 @@ public sealed record NotificationMessage(
     string Body,
     string? HtmlBody = null,
     bool IsSensitive = false,
-    string Purpose = NotificationPurposes.ManualTest);
+    string Purpose = NotificationPurposes.ManualTest,
+    bool IsApprovedSmsCriticalEvent = false);
 
 public sealed record NotificationRecipient(
     int? UserId,

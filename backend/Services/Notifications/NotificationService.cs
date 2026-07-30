@@ -52,6 +52,7 @@ public sealed class NotificationService : INotificationService
     private readonly IRealtimeNotificationPublisher _realtimePublisher;
     private readonly IWebPushNotificationService? _webPushNotificationService;
     private readonly ILogger<NotificationService> _logger;
+    private readonly TimeProvider _timeProvider;
 
     private sealed record NotificationSenderTarget(
         int? Id,
@@ -95,7 +96,8 @@ public sealed class NotificationService : INotificationService
         ILogger<NotificationService> logger,
         IRealtimeNotificationPublisher? realtimePublisher = null,
         IWebPushNotificationService? webPushNotificationService = null,
-        ISmsNotificationService? smsService = null)
+        ISmsNotificationService? smsService = null,
+        TimeProvider? timeProvider = null)
     {
         _context = context;
         _configuration = configuration;
@@ -105,6 +107,7 @@ public sealed class NotificationService : INotificationService
         _realtimePublisher = realtimePublisher ?? NoOpRealtimeNotificationPublisher.Instance;
         _webPushNotificationService = webPushNotificationService;
         _logger = logger;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     public async Task<NotificationSettingsDto> GetSettingsAsync(CancellationToken cancellationToken = default)
@@ -3602,6 +3605,7 @@ public sealed class NotificationService : INotificationService
         SmsRateLimitPolicy? smsRateLimitPolicy = null;
         NotificationMessage? protectedSmsMessage = null;
         SmsMessageValidationResult? smsValidation = null;
+        SmsQuietHoursDecision? smsQuietHoursDecision = null;
         var smsMaxUnitCount = SmsMessageValidator.DefaultMaxUnitCount;
 
         if (normalizedChannels.Contains(NotificationChannels.Sms, StringComparer.OrdinalIgnoreCase))
@@ -3610,36 +3614,52 @@ public sealed class NotificationService : INotificationService
                 ? null
                 : await _smsService.GetSettingsAsync(cancellationToken);
             smsRateLimitPolicy = SmsRateLimitPolicy.FromSettings(smsSettings);
+            smsQuietHoursDecision = SmsQuietHoursPolicy.Evaluate(
+                smsSettings,
+                _timeProvider.GetUtcNow(),
+                message.IsApprovedSmsCriticalEvent);
+            if (!smsQuietHoursDecision.IsAllowed)
+            {
+                _logger.LogInformation(
+                    "SMS delivery was not created for event {EventKey}: {QuietHoursReasonCode}.",
+                    eventKey ?? "manual",
+                    smsQuietHoursDecision.ReasonCode);
+            }
             smsMaxUnitCount = smsSettings is { MaxMessageLength: > 0 }
                 ? smsSettings.MaxMessageLength
                 : SmsMessageValidator.DefaultMaxUnitCount;
 
-            var protection = SmsMessageProtector.Protect(message);
-            protectedSmsMessage = message with
+            if (smsQuietHoursDecision.IsAllowed)
             {
-                Subject = protection.Subject,
-                Body = protection.Body,
-                HtmlBody = null,
-            };
-            smsValidation = SmsMessageValidator.Validate(protectedSmsMessage.Body, smsMaxUnitCount);
+                var protection = SmsMessageProtector.Protect(message);
+                protectedSmsMessage = message with
+                {
+                    Subject = protection.Subject,
+                    Body = protection.Body,
+                    HtmlBody = null,
+                };
+                smsValidation = SmsMessageValidator.Validate(protectedSmsMessage.Body, smsMaxUnitCount);
 
-            if (!smsValidation.IsValid)
-            {
-                _logger.LogWarning(
-                    "SMS delivery was not created for event {EventKey}: {ValidationErrorCode}. Encoding {Encoding}, units {UnitCount}, segments {SegmentCount}, limit {MaxUnitCount}.",
-                    eventKey ?? "manual",
-                    smsValidation.ErrorCode,
-                    smsValidation.Calculation.Encoding,
-                    smsValidation.Calculation.UnitCount,
-                    smsValidation.Calculation.SegmentCount,
-                    smsMaxUnitCount);
+                if (!smsValidation.IsValid)
+                {
+                    _logger.LogWarning(
+                        "SMS delivery was not created for event {EventKey}: {ValidationErrorCode}. Encoding {Encoding}, units {UnitCount}, segments {SegmentCount}, limit {MaxUnitCount}.",
+                        eventKey ?? "manual",
+                        smsValidation.ErrorCode,
+                        smsValidation.Calculation.Encoding,
+                        smsValidation.Calculation.UnitCount,
+                        smsValidation.Calculation.SegmentCount,
+                        smsMaxUnitCount);
+                }
             }
         }
 
         var deliveries = new List<NotificationDelivery>();
         foreach (var channel in normalizedChannels)
         {
-            if (channel == NotificationChannels.Sms && smsValidation is { IsValid: false })
+            if (channel == NotificationChannels.Sms
+                && (smsQuietHoursDecision is { IsAllowed: false }
+                    || smsValidation is { IsValid: false }))
             {
                 continue;
             }

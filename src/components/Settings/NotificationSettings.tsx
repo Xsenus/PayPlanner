@@ -31,6 +31,7 @@ import {
   type UserNotificationTypePreferences,
 } from '../../utils/userNotificationPreferences';
 import { AdminWebPushGuide } from '../Notifications/NotificationHelp';
+import { DEFAULT_TIME_ZONE_ID, USER_TIME_ZONE_OPTIONS } from '../../utils/timeZoneOptions';
 
 type SenderForm = {
   id?: number;
@@ -73,6 +74,10 @@ type SmsSettingsForm = {
   recipientDailyLimit: number;
   burstLimitPerMinute: number;
   maxMessageLength: number;
+  quietHoursEnabled: boolean;
+  quietHoursStart: string;
+  quietHoursEnd: string;
+  quietHoursTimeZone: string;
   notes: string;
 };
 
@@ -245,6 +250,10 @@ function smsFormFromSettings(settings?: NotificationSettingsDto | null): SmsSett
     recipientDailyLimit: settings?.sms.recipientDailyLimit ?? 5,
     burstLimitPerMinute: settings?.sms.burstLimitPerMinute ?? 20,
     maxMessageLength: settings?.sms.maxMessageLength ?? 480,
+    quietHoursEnabled: settings?.sms.quietHoursEnabled ?? true,
+    quietHoursStart: settings?.sms.quietHoursStart ?? '22:00',
+    quietHoursEnd: settings?.sms.quietHoursEnd ?? '08:00',
+    quietHoursTimeZone: settings?.sms.quietHoursTimeZone ?? DEFAULT_TIME_ZONE_ID,
     notes: settings?.sms.notes ?? '',
   };
 }
@@ -591,6 +600,10 @@ export function NotificationSettings({ canEdit = true }: NotificationSettingsPro
         recipientDailyLimit: smsForm.recipientDailyLimit,
         burstLimitPerMinute: smsForm.burstLimitPerMinute,
         maxMessageLength: smsForm.maxMessageLength,
+        quietHoursEnabled: smsForm.quietHoursEnabled,
+        quietHoursStart: smsForm.quietHoursStart,
+        quietHoursEnd: smsForm.quietHoursEnd,
+        quietHoursTimeZone: smsForm.quietHoursTimeZone,
         notes: smsForm.notes.trim(),
       });
       setSettings(next);
@@ -1706,7 +1719,7 @@ function SmsSettingsPanel({
         </div>
       ) : null}
 
-      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
         <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
           <div className="text-xs font-semibold uppercase text-gray-500">Провайдер</div>
           <div className="mt-2 text-sm text-gray-700">{sms?.providerKey || 'не выбран'}</div>
@@ -1730,6 +1743,17 @@ function SmsSettingsPanel({
           </div>
           <div className="mt-1 text-xs text-gray-500">
             до {sms?.maxMessageLength ?? form.maxMessageLength} единиц текста
+          </div>
+        </div>
+        <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+          <div className="text-xs font-semibold uppercase text-gray-500">Тихие часы</div>
+          <div className="mt-2 text-sm text-gray-700">
+            {sms?.quietHoursEnabled
+              ? `${sms.quietHoursStart}–${sms.quietHoursEnd}`
+              : 'отключены'}
+          </div>
+          <div className="mt-1 text-xs text-gray-500">
+            {sms?.quietHoursEnabled ? sms.quietHoursTimeZone : 'SMS доступны круглосуточно'}
           </div>
         </div>
         <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
@@ -1843,6 +1867,53 @@ function SmsSettingsPanel({
             className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
           />
         </label>
+        <label className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700">
+          <SystemCheckbox
+            type="checkbox"
+            checked={form.quietHoursEnabled}
+            disabled={!canEdit || saving}
+            onChange={(event) => setForm((prev) => ({ ...prev, quietHoursEnabled: event.target.checked }))}
+            className="h-4 w-4 rounded border-gray-300 text-blue-600"
+          />
+          Не отправлять обычные SMS в тихие часы
+        </label>
+        <label className="text-sm font-medium text-gray-700">
+          Начало тихих часов
+          <input
+            type="time"
+            value={form.quietHoursStart}
+            disabled={!canEdit || saving || !form.quietHoursEnabled}
+            onChange={(event) => setForm((prev) => ({ ...prev, quietHoursStart: event.target.value }))}
+            className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+          />
+        </label>
+        <label className="text-sm font-medium text-gray-700">
+          Окончание тихих часов
+          <input
+            type="time"
+            value={form.quietHoursEnd}
+            disabled={!canEdit || saving || !form.quietHoursEnabled}
+            onChange={(event) => setForm((prev) => ({ ...prev, quietHoursEnd: event.target.value }))}
+            className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+          />
+        </label>
+        <label className="text-sm font-medium text-gray-700">
+          Часовой пояс тихих часов
+          <SystemSelect
+            value={form.quietHoursTimeZone}
+            disabled={!canEdit || saving || !form.quietHoursEnabled}
+            onChange={(event) => setForm((prev) => ({ ...prev, quietHoursTimeZone: event.target.value }))}
+            className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+          >
+            {USER_TIME_ZONE_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </SystemSelect>
+        </label>
+        <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-800 md:col-span-2">
+          В тихие часы SMS не создаётся и не расходует лимиты. Исключение возможно только для события,
+          которое отдельно утверждено как критическое; до такого решения исключения не включены.
+        </div>
         <label className="text-sm font-medium text-gray-700 md:col-span-2">
           Заметка администратора
           <textarea

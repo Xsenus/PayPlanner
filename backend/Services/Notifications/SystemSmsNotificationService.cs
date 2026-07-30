@@ -16,7 +16,13 @@ public sealed class SystemSmsNotificationService : ISmsNotificationService
     public const string RecipientDailyLimitSettingKey = "notifications.sms.recipientDailyLimit";
     public const string BurstLimitPerMinuteSettingKey = "notifications.sms.burstLimitPerMinute";
     public const string MaxMessageLengthSettingKey = "notifications.sms.maxMessageLength";
+    public const string QuietHoursEnabledSettingKey = "notifications.sms.quietHours.enabled";
+    public const string QuietHoursStartSettingKey = "notifications.sms.quietHours.start";
+    public const string QuietHoursEndSettingKey = "notifications.sms.quietHours.end";
+    public const string QuietHoursTimeZoneSettingKey = "notifications.sms.quietHours.timeZone";
     public const string NotesSettingKey = "notifications.sms.notes";
+    public const string DefaultQuietHoursStart = "22:00";
+    public const string DefaultQuietHoursEnd = "08:00";
 
     private const int DefaultDailyLimit = 100;
     private const int DefaultRecipientDailyLimit = 5;
@@ -33,6 +39,10 @@ public sealed class SystemSmsNotificationService : ISmsNotificationService
         RecipientDailyLimitSettingKey,
         BurstLimitPerMinuteSettingKey,
         MaxMessageLengthSettingKey,
+        QuietHoursEnabledSettingKey,
+        QuietHoursStartSettingKey,
+        QuietHoursEndSettingKey,
+        QuietHoursTimeZoneSettingKey,
         NotesSettingKey
     ];
 
@@ -54,32 +64,38 @@ public sealed class SystemSmsNotificationService : ISmsNotificationService
         CancellationToken cancellationToken = default)
     {
         var now = DateTime.UtcNow;
-        var existing = await LoadSettingsAsync(cancellationToken);
+        var existing = await _context.SystemSettings
+            .Where(setting => SettingKeys.Contains(setting.Key))
+            .ToDictionaryAsync(setting => setting.Key, cancellationToken);
 
-        await UpsertSettingAsync(EnabledSettingKey, request.Enabled ? "true" : "false", now, cancellationToken);
-        await UpsertSettingAsync(ProviderKeySettingKey, NormalizeOptional(request.ProviderKey) ?? string.Empty, now, cancellationToken);
-        await UpsertSettingAsync(SenderNameSettingKey, NormalizeOptional(request.SenderName) ?? string.Empty, now, cancellationToken);
-        await UpsertSettingAsync(DailyLimitSettingKey, NormalizeLimit(request.DailyLimit, DefaultDailyLimit, 1, 100000).ToString(), now, cancellationToken);
-        await UpsertSettingAsync(
+        UpsertSetting(existing, EnabledSettingKey, request.Enabled ? "true" : "false", now);
+        UpsertSetting(existing, ProviderKeySettingKey, NormalizeOptional(request.ProviderKey) ?? string.Empty, now);
+        UpsertSetting(existing, SenderNameSettingKey, NormalizeOptional(request.SenderName) ?? string.Empty, now);
+        UpsertSetting(existing, DailyLimitSettingKey, NormalizeLimit(request.DailyLimit, DefaultDailyLimit, 1, 100000).ToString(), now);
+        UpsertSetting(
+            existing,
             RecipientDailyLimitSettingKey,
             NormalizeLimit(request.RecipientDailyLimit, DefaultRecipientDailyLimit, 1, 1000).ToString(),
-            now,
-            cancellationToken);
-        await UpsertSettingAsync(
+            now);
+        UpsertSetting(
+            existing,
             BurstLimitPerMinuteSettingKey,
             NormalizeLimit(request.BurstLimitPerMinute, DefaultBurstLimitPerMinute, 1, 10000).ToString(),
-            now,
-            cancellationToken);
-        await UpsertSettingAsync(MaxMessageLengthSettingKey, NormalizeLimit(request.MaxMessageLength, DefaultMaxMessageLength, 70, 1000).ToString(), now, cancellationToken);
-        await UpsertSettingAsync(NotesSettingKey, NormalizeNotes(request.Notes), now, cancellationToken);
+            now);
+        UpsertSetting(existing, MaxMessageLengthSettingKey, NormalizeLimit(request.MaxMessageLength, DefaultMaxMessageLength, 70, 1000).ToString(), now);
+        UpsertSetting(existing, QuietHoursEnabledSettingKey, request.QuietHoursEnabled ? "true" : "false", now);
+        UpsertSetting(existing, QuietHoursStartSettingKey, NormalizeTime(request.QuietHoursStart, DefaultQuietHoursStart), now);
+        UpsertSetting(existing, QuietHoursEndSettingKey, NormalizeTime(request.QuietHoursEnd, DefaultQuietHoursEnd), now);
+        UpsertSetting(existing, QuietHoursTimeZoneSettingKey, NormalizeTimeZone(request.QuietHoursTimeZone), now);
+        UpsertSetting(existing, NotesSettingKey, NormalizeNotes(request.Notes), now);
 
         if (!request.KeepExistingApiToken || !string.IsNullOrWhiteSpace(request.ApiToken))
         {
-            await UpsertSettingAsync(ApiTokenSettingKey, NormalizeOptional(request.ApiToken) ?? string.Empty, now, cancellationToken);
+            UpsertSetting(existing, ApiTokenSettingKey, NormalizeOptional(request.ApiToken) ?? string.Empty, now);
         }
         else if (!existing.ContainsKey(ApiTokenSettingKey))
         {
-            await UpsertSettingAsync(ApiTokenSettingKey, string.Empty, now, cancellationToken);
+            UpsertSetting(existing, ApiTokenSettingKey, string.Empty, now);
         }
 
         await _context.SaveChangesAsync(cancellationToken);
@@ -120,6 +136,10 @@ public sealed class SystemSmsNotificationService : ISmsNotificationService
             1,
             10000);
         var maxMessageLength = NormalizeLimit(ParseNullableInt(settings.GetValueOrDefault(MaxMessageLengthSettingKey)), DefaultMaxMessageLength, 70, 1000);
+        var quietHoursEnabled = ParseBool(settings.GetValueOrDefault(QuietHoursEnabledSettingKey), true);
+        var quietHoursStart = NormalizeTime(settings.GetValueOrDefault(QuietHoursStartSettingKey), DefaultQuietHoursStart);
+        var quietHoursEnd = NormalizeTime(settings.GetValueOrDefault(QuietHoursEndSettingKey), DefaultQuietHoursEnd);
+        var quietHoursTimeZone = NormalizeTimeZone(settings.GetValueOrDefault(QuietHoursTimeZoneSettingKey));
         var notes = NormalizeNotes(settings.GetValueOrDefault(NotesSettingKey));
         var apiTokenSet = !string.IsNullOrWhiteSpace(apiToken);
         var providerConfigured = !string.IsNullOrWhiteSpace(providerKey) && apiTokenSet;
@@ -142,6 +162,10 @@ public sealed class SystemSmsNotificationService : ISmsNotificationService
             RecipientDailyLimit = recipientDailyLimit,
             BurstLimitPerMinute = burstLimitPerMinute,
             MaxMessageLength = maxMessageLength,
+            QuietHoursEnabled = quietHoursEnabled,
+            QuietHoursStart = quietHoursStart,
+            QuietHoursEnd = quietHoursEnd,
+            QuietHoursTimeZone = quietHoursTimeZone,
             Notes = notes,
             StatusText = BuildStatusText(enabled, providerKey, senderName, apiTokenSet, adapterConfigured)
         };
@@ -188,18 +212,23 @@ public sealed class SystemSmsNotificationService : ISmsNotificationService
             .Where(setting => SettingKeys.Contains(setting.Key))
             .ToDictionaryAsync(setting => setting.Key, setting => setting.Value, cancellationToken);
 
-    private async Task UpsertSettingAsync(string key, string value, DateTime nowUtc, CancellationToken cancellationToken)
+    private void UpsertSetting(
+        IDictionary<string, SystemSetting> settings,
+        string key,
+        string value,
+        DateTime nowUtc)
     {
-        var setting = await _context.SystemSettings.FirstOrDefaultAsync(item => item.Key == key, cancellationToken);
-        if (setting is null)
+        if (!settings.TryGetValue(key, out var setting))
         {
-            _context.SystemSettings.Add(new SystemSetting
+            setting = new SystemSetting
             {
                 Key = key,
                 Value = value,
                 CreatedAt = nowUtc,
                 UpdatedAt = nowUtc
-            });
+            };
+            settings[key] = setting;
+            _context.SystemSettings.Add(setting);
             return;
         }
 
@@ -221,6 +250,19 @@ public sealed class SystemSmsNotificationService : ISmsNotificationService
 
     private static int NormalizeLimit(int? value, int fallback, int min, int max)
         => Math.Clamp(value.GetValueOrDefault(fallback), min, max);
+
+    private static string NormalizeTime(string? value, string fallback)
+        => TimeSpan.TryParseExact(
+            value?.Trim(),
+            @"hh\:mm",
+            System.Globalization.CultureInfo.InvariantCulture,
+            out var parsed)
+            ? parsed.ToString(@"hh\:mm", System.Globalization.CultureInfo.InvariantCulture)
+            : fallback;
+
+    private static string NormalizeTimeZone(string? value)
+        => CalendarTimeZoneHelper.ResolveIanaTimeZoneId(
+            CalendarTimeZoneHelper.ResolveTimeZone(value));
 
     private static bool ParseBool(string? value, bool fallback)
         => bool.TryParse(value, out var parsed) ? parsed : fallback;
