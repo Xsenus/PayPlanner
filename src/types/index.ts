@@ -550,6 +550,7 @@ export interface ClientCase {
   activityConfirmedByUserId?: number | null;
   activityConfirmedByUserName?: string | null;
   inactivityRemindersEnabled?: boolean;
+  inactivityRemindersDisabledReason?: string | null;
   isUnderControl?: boolean;
   controlMarkedAt?: string | null;
   controlMarkedByUserId?: number | null;
@@ -903,6 +904,7 @@ export interface ClientCaseActivity {
   activityConfirmedByUserId?: number | null;
   activityConfirmedByUserName?: string | null;
   inactivityRemindersEnabled: boolean;
+  inactivityRemindersDisabledReason?: string | null;
   eventHistory?: string | null;
 }
 

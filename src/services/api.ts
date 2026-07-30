@@ -5324,6 +5324,7 @@ export class ApiService {
     priority?: string;
     isHiddenFromExecutor?: boolean;
     inactivityRemindersEnabled?: boolean;
+    inactivityRemindersDisabledReason?: string;
     isUnderControl?: boolean;
   }) {
     return this.request<{ updated: number; requested: number }>('/v2/cases/bulk-update', {

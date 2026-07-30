@@ -148,6 +148,7 @@ interface CaseEditDraft {
   strategy: string;
   isHiddenFromExecutor: boolean;
   inactivityRemindersEnabled: boolean;
+  inactivityRemindersDisabledReason: string;
 }
 
 interface CaseStageDeadlineSuggestion {
@@ -937,6 +938,7 @@ function buildCaseEditDraft(caseItem: ClientCase): CaseEditDraft {
     strategy: caseItem.strategy ?? '',
     isHiddenFromExecutor: Boolean(caseItem.isHiddenFromExecutor),
     inactivityRemindersEnabled: caseItem.inactivityRemindersEnabled !== false,
+    inactivityRemindersDisabledReason: caseItem.inactivityRemindersDisabledReason ?? '',
   };
 }
 
@@ -975,6 +977,9 @@ function buildCasePatchFromEditDraft(draft: CaseEditDraft): Partial<ClientCase> 
     strategy: draft.strategy.trim(),
     isHiddenFromExecutor: draft.isHiddenFromExecutor,
     inactivityRemindersEnabled: draft.inactivityRemindersEnabled,
+    inactivityRemindersDisabledReason: draft.inactivityRemindersEnabled
+      ? ''
+      : draft.inactivityRemindersDisabledReason.trim(),
   };
 }
 
@@ -1016,6 +1021,10 @@ function buildCaseUpdatePayload(base: ClientCase, patch: Partial<ClientCase>): O
     eventHistory: patch.eventHistory ?? base.eventHistory ?? '',
     strategy: patch.strategy ?? base.strategy ?? '',
     inactivityRemindersEnabled: patch.inactivityRemindersEnabled ?? base.inactivityRemindersEnabled ?? true,
+    inactivityRemindersDisabledReason:
+      patch.inactivityRemindersDisabledReason ??
+      base.inactivityRemindersDisabledReason ??
+      '',
     isHiddenFromExecutor: patch.isHiddenFromExecutor ?? base.isHiddenFromExecutor ?? false,
   } as Omit<ClientCase, 'id' | 'createdAt' | 'payments'>;
 }
@@ -1210,6 +1219,7 @@ export function CaseDetailPage({
   const [responsibleDraft, setResponsibleDraft] = useState('');
   const [hiddenFromExecutorDraft, setHiddenFromExecutorDraft] = useState(false);
   const [inactivityRemindersDraft, setInactivityRemindersDraft] = useState(true);
+  const [inactivityRemindersDisabledReasonDraft, setInactivityRemindersDisabledReasonDraft] = useState('');
   const [taskFilter, setTaskFilter] = useState<CaseTaskFilter>(initialViewState.taskFilter ?? 'active');
   const [participantSourceType, setParticipantSourceType] = useState<ParticipantSourceType>(initialViewState.participantSourceType ?? 'client');
   const [participantSourceId, setParticipantSourceId] = useState('');
@@ -1916,6 +1926,7 @@ export function CaseDetailPage({
     setResponsibleDraft(caseItem.responsibleUserId ? String(caseItem.responsibleUserId) : '');
     setHiddenFromExecutorDraft(Boolean(caseItem.isHiddenFromExecutor));
     setInactivityRemindersDraft(caseItem.inactivityRemindersEnabled !== false);
+    setInactivityRemindersDisabledReasonDraft(caseItem.inactivityRemindersDisabledReason ?? '');
   }, [caseItem]);
 
   const filteredTasks = useMemo(() => {
@@ -1961,6 +1972,9 @@ export function CaseDetailPage({
         responsibleUserId: responsibleDraft ? Number(responsibleDraft) : undefined,
         isHiddenFromExecutor: hiddenFromExecutorDraft,
         inactivityRemindersEnabled: inactivityRemindersDraft,
+        inactivityRemindersDisabledReason: inactivityRemindersDraft
+          ? ''
+          : inactivityRemindersDisabledReasonDraft,
       });
       rememberStageTransition(previousStage, { ...caseItem, stage: nextStage });
       setReloadToken((value) => value + 1);
@@ -1969,6 +1983,32 @@ export function CaseDetailPage({
     } finally {
       setSavingHeader(false);
     }
+  };
+
+  const changeHeaderInactivityReminders = async (enabled: boolean) => {
+    if (enabled) {
+      setInactivityRemindersDraft(true);
+      setInactivityRemindersDisabledReasonDraft('');
+      return;
+    }
+
+    const reason = await prompt({
+      title: 'Выключить автоконтроль дела',
+      label: 'Причина выключения',
+      defaultValue: inactivityRemindersDisabledReasonDraft,
+      multiline: true,
+      confirmLabel: 'Выключить',
+      cancelLabel: 'Отмена',
+    });
+    if (reason === null) return;
+    if (!reason.trim()) {
+      setError('Укажите причину выключения автоконтроля.');
+      return;
+    }
+
+    setError(null);
+    setInactivityRemindersDisabledReasonDraft(reason.trim());
+    setInactivityRemindersDraft(false);
   };
 
   const archiveCase = async () => {
@@ -2004,6 +2044,11 @@ export function CaseDetailPage({
     if (!caseItem || !caseEditDraft) return;
     if (!caseEditDraft.title.trim()) {
       setError('Введите название дела.');
+      return;
+    }
+    if (!caseEditDraft.inactivityRemindersEnabled &&
+        !caseEditDraft.inactivityRemindersDisabledReason.trim()) {
+      setError('Укажите причину выключения автоконтроля.');
       return;
     }
 
@@ -3342,11 +3387,16 @@ export function CaseDetailPage({
                   type="checkbox"
                   aria-label="Учитывать дело в автоконтроле"
                   checked={inactivityRemindersDraft}
-                  onChange={(event) => setInactivityRemindersDraft(event.target.checked)}
+                  onChange={(event) => void changeHeaderInactivityReminders(event.target.checked)}
                   className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                 />
                 Включен
               </span>
+              {!inactivityRemindersDraft && inactivityRemindersDisabledReasonDraft ? (
+                <span className="mt-1 text-xs font-normal text-amber-700">
+                  {inactivityRemindersDisabledReasonDraft}
+                </span>
+              ) : null}
             </label>
             <button
               type="button"
@@ -4117,9 +4167,29 @@ function CaseEditPage({
                 Скрыть от исполнителя
               </label>
               <label className="flex min-h-[58px] items-center gap-3 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700">
-                <SystemCheckbox type="checkbox" checked={draft.inactivityRemindersEnabled} onChange={(event) => setField('inactivityRemindersEnabled', event.target.checked)} className="h-4 w-4 rounded border-slate-300 text-blue-600" />
+                <SystemCheckbox
+                  type="checkbox"
+                  checked={draft.inactivityRemindersEnabled}
+                  onChange={(event) => {
+                    setField('inactivityRemindersEnabled', event.target.checked);
+                    if (event.target.checked) setField('inactivityRemindersDisabledReason', '');
+                  }}
+                  className="h-4 w-4 rounded border-slate-300 text-blue-600"
+                />
                 Автоконтроль включен
               </label>
+              {!draft.inactivityRemindersEnabled ? (
+                <label className="text-sm font-medium text-slate-700">
+                  Причина выключения автоконтроля
+                  <textarea
+                    required
+                    aria-label="Причина выключения автоконтроля"
+                    value={draft.inactivityRemindersDisabledReason}
+                    onChange={(event) => setField('inactivityRemindersDisabledReason', event.target.value)}
+                    className="mt-1 min-h-20 w-full rounded-lg border border-amber-200 px-3 py-2 text-sm"
+                  />
+                </label>
+              ) : null}
             </div>
           </section>
         </div>

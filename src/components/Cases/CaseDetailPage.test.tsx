@@ -1849,8 +1849,28 @@ describe('CaseDetailPage', () => {
         responsibleUserId: 8,
         isHiddenFromExecutor: true,
         inactivityRemindersEnabled: true,
+        inactivityRemindersDisabledReason: '',
       });
       expect(apiService.getCaseV2).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it('saves the inactivity control exclusion reason from the new case card', async () => {
+    dialogMock.prompt.mockResolvedValueOnce('Ожидаем решение клиента');
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByLabelText('Учитывать дело в автоконтроле'));
+
+    expect(await screen.findByText('Ожидаем решение клиента')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /Сохранить/u }));
+
+    await waitFor(() => {
+      expect(apiService.bulkUpdateCases).toHaveBeenCalledWith(expect.objectContaining({
+        ids: [15],
+        inactivityRemindersEnabled: false,
+        inactivityRemindersDisabledReason: 'Ожидаем решение клиента',
+      }));
     });
   });
 

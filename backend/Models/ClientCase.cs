@@ -290,6 +290,12 @@ namespace PayPlanner.Api.Models
         /// </summary>
         public bool InactivityRemindersEnabled { get; set; } = true;
 
+        /// <summary>
+        /// Причина индивидуального исключения дела из автоконтроля.
+        /// </summary>
+        [MaxLength(1000)]
+        public string InactivityRemindersDisabledReason { get; set; } = string.Empty;
+
         public bool IsUnderControl { get; set; }
 
         public DateTime? ControlMarkedAt { get; set; }

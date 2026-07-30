@@ -3419,6 +3419,106 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task Update_RequiresReasonWhenDisablingInactivityRemindersAndAuditsIt()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "inactivity-reason@example.com", "Ответственный");
+        var client = new Client
+        {
+            Name = "Клиент с исключением",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Дело с исключением",
+            Status = ClientCaseStatus.Open,
+            InactivityRemindersEnabled = true,
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, owner);
+
+        var rejected = await controller.Update(clientCase.Id, new ClientCase
+        {
+            ClientId = client.Id,
+            Title = clientCase.Title,
+            Status = ClientCaseStatus.Open,
+            InactivityRemindersEnabled = false,
+        }, CancellationToken.None);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(rejected);
+        Assert.Contains("причину", badRequest.Value?.ToString(), StringComparison.OrdinalIgnoreCase);
+        await db.Entry(clientCase).ReloadAsync();
+        Assert.True(clientCase.InactivityRemindersEnabled);
+
+        var accepted = await controller.Update(clientCase.Id, new ClientCase
+        {
+            ClientId = client.Id,
+            Title = clientCase.Title,
+            Status = ClientCaseStatus.Open,
+            InactivityRemindersEnabled = false,
+            InactivityRemindersDisabledReason = "Ожидаем решение клиента",
+        }, CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(accepted);
+        await db.Entry(clientCase).ReloadAsync();
+        Assert.False(clientCase.InactivityRemindersEnabled);
+        Assert.Equal("Ожидаем решение клиента", clientCase.InactivityRemindersDisabledReason);
+        Assert.Contains("Ожидаем решение клиента", clientCase.EventHistory, StringComparison.Ordinal);
+
+        var auditEvent = await db.ObjectAuditEvents
+            .AsNoTracking()
+            .Where(item =>
+                item.ObjectType == "client-case" &&
+                item.ObjectId == clientCase.Id &&
+                item.Action == "Updated")
+            .OrderByDescending(item => item.Id)
+            .FirstAsync();
+        using var auditMetadata = JsonDocument.Parse(auditEvent.MetadataJson!);
+        var reasonChange = auditMetadata.RootElement
+            .GetProperty("changes")
+            .EnumerateArray()
+            .Single(item => item.GetProperty("field").GetString() == "InactivityRemindersDisabledReason");
+        Assert.Equal("Ожидаем решение клиента", reasonChange.GetProperty("newValue").GetString());
+    }
+
+    [Fact]
+    public async Task BulkUpdate_RejectsDisablingInactivityRemindersWithoutReason()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "bulk-inactivity-reason@example.com", "Ответственный");
+        var client = new Client
+        {
+            Name = "Клиент массового исключения",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Дело массового исключения",
+            Status = ClientCaseStatus.Open,
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, owner);
+
+        var result = await controller.BulkUpdate(new CasesV2Controller.BulkUpdateCasesRequest
+        {
+            Ids = [clientCase.Id],
+            InactivityRemindersEnabled = false,
+        }, CancellationToken.None);
+
+        Assert.IsType<BadRequestObjectResult>(result);
+        await db.Entry(clientCase).ReloadAsync();
+        Assert.True(clientCase.InactivityRemindersEnabled);
+    }
+
+    [Fact]
     public async Task BulkUpdate_ChangesOnlyVisibleCases()
     {
         await using var db = await CreateContextAsync();
@@ -3475,6 +3575,7 @@ public class CasesV2ControllerTests
             Priority = "urgent",
             IsHiddenFromExecutor = true,
             InactivityRemindersEnabled = false,
+            InactivityRemindersDisabledReason = "Работа временно ведётся вне CRM",
             IsUnderControl = true,
         }, CancellationToken.None);
 
@@ -3492,6 +3593,7 @@ public class CasesV2ControllerTests
         Assert.Equal("urgent", visibleByClient.Priority);
         Assert.True(visibleByClient.IsHiddenFromExecutor);
         Assert.False(visibleByClient.InactivityRemindersEnabled);
+        Assert.Equal("Работа временно ведётся вне CRM", visibleByClient.InactivityRemindersDisabledReason);
         Assert.True(visibleByClient.IsUnderControl);
         Assert.Equal(owner.Id, visibleByClient.HiddenFromExecutorByUserId);
         Assert.Equal("Владелец", visibleByClient.HiddenFromExecutorByUserName);
@@ -3501,6 +3603,7 @@ public class CasesV2ControllerTests
         Assert.Equal("urgent", visibleByCaseResponsible.Priority);
         Assert.True(visibleByCaseResponsible.IsHiddenFromExecutor);
         Assert.False(visibleByCaseResponsible.InactivityRemindersEnabled);
+        Assert.Equal("Работа временно ведётся вне CRM", visibleByCaseResponsible.InactivityRemindersDisabledReason);
         Assert.True(visibleByCaseResponsible.IsUnderControl);
         Assert.Equal(ClientCaseStatus.Open, hiddenCase.Status);
         Assert.Equal(otherResponsible.Id, hiddenCase.ResponsibleUserId);
@@ -3514,6 +3617,7 @@ public class CasesV2ControllerTests
         Assert.Contains("приоритет «Обычный» → «Критический»", visibleByClient.EventHistory, StringComparison.Ordinal);
         Assert.Contains("доступ: скрыто от исполнителя", visibleByClient.EventHistory, StringComparison.Ordinal);
         Assert.Contains("автоконтроль: выключен", visibleByClient.EventHistory, StringComparison.Ordinal);
+        Assert.Contains("Работа временно ведётся вне CRM", visibleByClient.EventHistory, StringComparison.Ordinal);
         Assert.Contains("контроль: включен", visibleByClient.EventHistory, StringComparison.Ordinal);
         Assert.Contains("ответственный «Владелец» → «Новый ответственный»", visibleByCaseResponsible.EventHistory, StringComparison.Ordinal);
         Assert.DoesNotContain("Массовое изменение", hiddenCase.EventHistory, StringComparison.Ordinal);
@@ -3543,6 +3647,12 @@ public class CasesV2ControllerTests
             Assert.Contains("ResponsibleUserId", auditEvent.MetadataJson, StringComparison.Ordinal);
             Assert.Contains("IsHiddenFromExecutor", auditEvent.MetadataJson, StringComparison.Ordinal);
             Assert.Contains("InactivityRemindersEnabled", auditEvent.MetadataJson, StringComparison.Ordinal);
+            using var metadataChanges = JsonDocument.Parse(auditEvent.MetadataJson!);
+            var reasonChange = metadataChanges.RootElement
+                .GetProperty("changes")
+                .EnumerateArray()
+                .Single(item => item.GetProperty("field").GetString() == "InactivityRemindersDisabledReason");
+            Assert.Equal("Работа временно ведётся вне CRM", reasonChange.GetProperty("newValue").GetString());
             Assert.Contains("IsUnderControl", auditEvent.MetadataJson, StringComparison.Ordinal);
         }
     }

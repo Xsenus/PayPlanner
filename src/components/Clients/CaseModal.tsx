@@ -260,7 +260,7 @@ export function CaseModal({
   canUseContactRelatedParties = true,
   canUseLegalEntityRelatedParties = true,
 }: CaseModalProps) {
-  const { confirm } = useDialog();
+  const { confirm, prompt } = useDialog();
   const [timeZoneId, setTimeZoneId] = useState(() => normalizeUserTimeZoneId());
   const [title, setTitle] = useState(caseData.title ?? '');
   const [description, setDescription] = useState(caseData.description ?? '');
@@ -321,6 +321,7 @@ export function CaseModal({
     activityConfirmedByUserId: caseData.activityConfirmedByUserId ?? null,
     activityConfirmedByUserName: caseData.activityConfirmedByUserName ?? null,
     inactivityRemindersEnabled: caseData.inactivityRemindersEnabled ?? true,
+    inactivityRemindersDisabledReason: caseData.inactivityRemindersDisabledReason ?? '',
     eventHistory: caseData.eventHistory ?? '',
   });
   const [activitySaving, setActivitySaving] = useState(false);
@@ -422,6 +423,7 @@ export function CaseModal({
       activityConfirmedByUserId: caseData.activityConfirmedByUserId ?? null,
       activityConfirmedByUserName: caseData.activityConfirmedByUserName ?? null,
       inactivityRemindersEnabled: caseData.inactivityRemindersEnabled ?? true,
+      inactivityRemindersDisabledReason: caseData.inactivityRemindersDisabledReason ?? '',
       eventHistory: caseData.eventHistory ?? '',
     });
     setActivitySaving(false);
@@ -709,6 +711,9 @@ export function CaseModal({
         eventHistory: eventHistory.trim(),
         strategy: strategy.trim(),
         inactivityRemindersEnabled: activity.inactivityRemindersEnabled,
+        inactivityRemindersDisabledReason: activity.inactivityRemindersEnabled
+          ? ''
+          : activity.inactivityRemindersDisabledReason?.trim(),
       };
       await onSave(patch);
       onClose();
@@ -875,6 +880,38 @@ export function CaseModal({
     }
   };
 
+  const handleInactivityRemindersChange = async (enabled: boolean) => {
+    if (enabled) {
+      setActivity((current) => ({
+        ...current,
+        inactivityRemindersEnabled: true,
+        inactivityRemindersDisabledReason: '',
+      }));
+      return;
+    }
+
+    const reason = await prompt({
+      title: 'Выключить автоконтроль дела',
+      label: 'Причина выключения',
+      defaultValue: activity.inactivityRemindersDisabledReason ?? '',
+      multiline: true,
+      confirmLabel: 'Выключить',
+      cancelLabel: 'Отмена',
+    });
+    if (reason === null) return;
+    if (!reason.trim()) {
+      setError('Укажите причину выключения автоконтроля.');
+      return;
+    }
+
+    setError(null);
+    setActivity((current) => ({
+      ...current,
+      inactivityRemindersEnabled: false,
+      inactivityRemindersDisabledReason: reason.trim(),
+    }));
+  };
+
   const handleAddRelatedParty = async () => {
     if (!allowEdit) {
       setRelatedPartiesError('Недостаточно прав для изменения связей дела.');
@@ -1016,11 +1053,16 @@ export function CaseModal({
                     type="checkbox"
                     className="h-4 w-4 rounded border-slate-300"
                     checked={activity.inactivityRemindersEnabled}
-                    onChange={(e) => setActivity((current) => ({ ...current, inactivityRemindersEnabled: e.target.checked }))}
+                    onChange={(e) => void handleInactivityRemindersChange(e.target.checked)}
                     disabled={saving || activitySaving || !allowEdit}
                   />
                   Автоконтроль дела
                 </label>
+                {!activity.inactivityRemindersEnabled && activity.inactivityRemindersDisabledReason ? (
+                  <div className="max-w-xs text-right text-xs text-amber-700">
+                    Причина: {activity.inactivityRemindersDisabledReason}
+                  </div>
+                ) : null}
                 <button
                   type="button"
                   onClick={() => void handleConfirmActivity()}

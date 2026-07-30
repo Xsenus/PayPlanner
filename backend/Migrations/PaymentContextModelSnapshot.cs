@@ -1374,6 +1374,11 @@ namespace PayPlanner.Api.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("InactivityRemindersDisabledReason")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
                     b.Property<bool>("InactivityRemindersEnabled")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER")

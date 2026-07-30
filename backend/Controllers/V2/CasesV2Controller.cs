@@ -5276,6 +5276,7 @@ public class CasesV2Controller : ControllerBase
             ActivityConfirmedByUserId = clientCase.ActivityConfirmedByUserId,
             ActivityConfirmedByUserName = clientCase.ActivityConfirmedByUserName,
             InactivityRemindersEnabled = clientCase.InactivityRemindersEnabled,
+            InactivityRemindersDisabledReason = clientCase.InactivityRemindersDisabledReason,
             EventHistory = clientCase.EventHistory,
         });
     }
@@ -5335,6 +5336,7 @@ public class CasesV2Controller : ControllerBase
             ActivityConfirmedByUserId = clientCase.ActivityConfirmedByUserId,
             ActivityConfirmedByUserName = clientCase.ActivityConfirmedByUserName,
             InactivityRemindersEnabled = clientCase.InactivityRemindersEnabled,
+            InactivityRemindersDisabledReason = clientCase.InactivityRemindersDisabledReason,
             EventHistory = clientCase.EventHistory,
         });
     }
@@ -8168,6 +8170,17 @@ public class CasesV2Controller : ControllerBase
 
         var validation = await ValidateCaseOwnerAsync(model.ClientId, model.LegalEntityId, visibility, ct);
         if (validation is not null) return validation;
+        if (!TryNormalizeInactivityReminderState(
+                model.InactivityRemindersEnabled,
+                model.InactivityRemindersDisabledReason,
+                existingReason: null,
+                requireNewReason: !model.InactivityRemindersEnabled,
+                out var inactivityDisabledReason,
+                out var inactivityValidationError))
+        {
+            return BadRequest(inactivityValidationError);
+        }
+        model.InactivityRemindersDisabledReason = inactivityDisabledReason;
         ApplyCaseDetails(model, model);
         if (!await CanViewCaseFinanceAsync(ct))
         {
@@ -8201,6 +8214,18 @@ public class CasesV2Controller : ControllerBase
         if (e is null) return NotFound();
         var validation = await ValidateCaseOwnerAsync(model.ClientId, model.LegalEntityId, visibility, ct);
         if (validation is not null) return validation;
+        var inactivityStateChanged = e.InactivityRemindersEnabled != model.InactivityRemindersEnabled;
+        if (!TryNormalizeInactivityReminderState(
+                model.InactivityRemindersEnabled,
+                model.InactivityRemindersDisabledReason,
+                e.InactivityRemindersDisabledReason,
+                requireNewReason: inactivityStateChanged && !model.InactivityRemindersEnabled,
+                out var inactivityDisabledReason,
+                out var inactivityValidationError))
+        {
+            return BadRequest(inactivityValidationError);
+        }
+        model.InactivityRemindersDisabledReason = inactivityDisabledReason;
 
         var shouldCloseLinkedTasks = !IsFinishedCaseStatus(e.Status) && IsFinishedCaseStatus(model.Status);
         var previousFeeAmount = e.FeeAmount;
@@ -8220,6 +8245,14 @@ public class CasesV2Controller : ControllerBase
         if (previousHiddenFromExecutor != e.IsHiddenFromExecutor)
         {
             ApplyHiddenFromExecutorMetadata(e, e.IsHiddenFromExecutor, User.GetUserId(), User.GetDisplayName());
+        }
+        if (inactivityStateChanged)
+        {
+            var inactivityAuditReason = e.InactivityRemindersEnabled
+                ? "Автоконтроль дела включен."
+                : $"Автоконтроль дела выключен. Причина: {e.InactivityRemindersDisabledReason}";
+            AppendCaseEvent(e, $"{inactivityAuditReason} Изменил: {User.GetDisplayName()}.");
+            _db.SetAuditReason(inactivityAuditReason);
         }
 
         if (shouldCloseLinkedTasks)
@@ -8369,6 +8402,18 @@ public class CasesV2Controller : ControllerBase
             return NotFound();
         }
 
+        var requiresInactivityDisableReason =
+            request.InactivityRemindersEnabled == false &&
+            cases.Any(item => item.InactivityRemindersEnabled);
+        if (requiresInactivityDisableReason &&
+            string.IsNullOrWhiteSpace(request.InactivityRemindersDisabledReason))
+        {
+            return BadRequest("Укажите причину выключения автоконтроля.");
+        }
+        var inactivityDisabledReason = request.InactivityRemindersEnabled == false
+            ? Truncate(request.InactivityRemindersDisabledReason?.Trim() ?? string.Empty, 1000)
+            : string.Empty;
+
         var casesClosedByUpdate = new List<int>();
         var changedCasesCount = 0;
         var actorUserId = User.GetUserId();
@@ -8429,8 +8474,11 @@ public class CasesV2Controller : ControllerBase
             if (request.InactivityRemindersEnabled.HasValue && item.InactivityRemindersEnabled != request.InactivityRemindersEnabled.Value)
             {
                 var nextEnabled = request.InactivityRemindersEnabled.Value;
-                changes.Add(nextEnabled ? "автоконтроль: включен" : "автоконтроль: выключен");
+                changes.Add(nextEnabled
+                    ? "автоконтроль: включен"
+                    : $"автоконтроль: выключен, причина «{inactivityDisabledReason}»");
                 item.InactivityRemindersEnabled = nextEnabled;
+                item.InactivityRemindersDisabledReason = nextEnabled ? string.Empty : inactivityDisabledReason;
             }
 
             if (request.IsUnderControl.HasValue && ApplyCaseControlState(item, request.IsUnderControl.Value, actorUserId, actorName))
@@ -8536,7 +8584,41 @@ public class CasesV2Controller : ControllerBase
         target.EventHistory = source.EventHistory?.Trim() ?? string.Empty;
         target.Strategy = source.Strategy?.Trim() ?? string.Empty;
         target.InactivityRemindersEnabled = source.InactivityRemindersEnabled;
+        target.InactivityRemindersDisabledReason = source.InactivityRemindersEnabled
+            ? string.Empty
+            : Truncate(source.InactivityRemindersDisabledReason?.Trim() ?? string.Empty, 1000);
         target.IsHiddenFromExecutor = source.IsHiddenFromExecutor;
+    }
+
+    private static bool TryNormalizeInactivityReminderState(
+        bool enabled,
+        string? requestedReason,
+        string? existingReason,
+        bool requireNewReason,
+        out string normalizedReason,
+        out string error)
+    {
+        normalizedReason = string.Empty;
+        error = string.Empty;
+        if (enabled)
+        {
+            return true;
+        }
+
+        var reason = requestedReason?.Trim();
+        if (string.IsNullOrWhiteSpace(reason) && !requireNewReason)
+        {
+            reason = existingReason?.Trim();
+        }
+
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            error = "Укажите причину выключения автоконтроля.";
+            return false;
+        }
+
+        normalizedReason = Truncate(reason, 1000);
+        return true;
     }
 
     private static bool ApplyCaseControlState(
@@ -12405,6 +12487,13 @@ public class CasesV2Controller : ControllerBase
     {
         var targets = new List<string>();
 
+        if (request.InactivityRemindersEnabled.HasValue)
+        {
+            targets.Add(request.InactivityRemindersEnabled.Value
+                ? "автоконтроль: включен"
+                : "автоконтроль: выключен");
+        }
+
         if (request.Status is not null)
         {
             targets.Add($"статус: {FormatCaseStatus(request.Status.Value)}");
@@ -12420,13 +12509,6 @@ public class CasesV2Controller : ControllerBase
             targets.Add(request.IsHiddenFromExecutor.Value
                 ? "доступ: скрыто от исполнителя"
                 : "доступ: открыто исполнителю");
-        }
-
-        if (request.InactivityRemindersEnabled.HasValue)
-        {
-            targets.Add(request.InactivityRemindersEnabled.Value
-                ? "автоконтроль: включен"
-                : "автоконтроль: выключен");
         }
 
         if (request.IsUnderControl.HasValue)
@@ -12457,6 +12539,7 @@ public class CasesV2Controller : ControllerBase
         public string? Priority { get; set; }
         public bool? IsHiddenFromExecutor { get; set; }
         public bool? InactivityRemindersEnabled { get; set; }
+        public string? InactivityRemindersDisabledReason { get; set; }
         public bool? IsUnderControl { get; set; }
     }
 
@@ -13049,6 +13132,7 @@ public class CasesV2Controller : ControllerBase
         public int? ActivityConfirmedByUserId { get; set; }
         public string ActivityConfirmedByUserName { get; set; } = string.Empty;
         public bool InactivityRemindersEnabled { get; set; }
+        public string InactivityRemindersDisabledReason { get; set; } = string.Empty;
         public string EventHistory { get; set; } = string.Empty;
     }
 

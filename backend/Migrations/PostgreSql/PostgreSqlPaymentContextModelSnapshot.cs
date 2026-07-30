@@ -1409,6 +1409,11 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasMaxLength(256)
                         .HasColumnType("character varying(256)");
 
+                    b.Property<string>("InactivityRemindersDisabledReason")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
                     b.Property<bool>("InactivityRemindersEnabled")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")

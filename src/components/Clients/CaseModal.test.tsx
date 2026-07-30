@@ -5,10 +5,13 @@ import { CaseModal } from './CaseModal';
 import { apiService } from '../../services/api';
 import type { ClientCase, ClientCaseDocument } from '../../types';
 
+const dialogMock = vi.hoisted(() => ({
+  confirm: vi.fn(),
+  prompt: vi.fn(),
+}));
+
 vi.mock('../../hooks/useDialog', () => ({
-  useDialog: () => ({
-    confirm: vi.fn().mockResolvedValue(true),
-  }),
+  useDialog: () => dialogMock,
 }));
 
 vi.mock('../../services/api', () => ({
@@ -47,6 +50,10 @@ function createCase(overrides: Partial<ClientCase> = {}): ClientCase {
 
 describe('CaseModal', () => {
   beforeEach(() => {
+    dialogMock.confirm.mockReset();
+    dialogMock.confirm.mockResolvedValue(true);
+    dialogMock.prompt.mockReset();
+    dialogMock.prompt.mockResolvedValue(null);
     vi.mocked(apiService.getCaseDocuments).mockReset();
     vi.mocked(apiService.getCaseDocuments).mockResolvedValue([]);
     vi.mocked(apiService.getTaskJournalItems).mockReset();
@@ -356,6 +363,31 @@ describe('CaseModal', () => {
       documentsSummary: 'Паспорт, договор',
       eventHistory: 'Заявление принято',
       strategy: 'Подать ходатайство',
+    }));
+  });
+
+  it('requires and saves a reason when inactivity control is disabled', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    dialogMock.prompt.mockResolvedValueOnce('Работа временно ведётся вне CRM');
+
+    render(
+      <CaseModal
+        isOpen
+        onClose={vi.fn()}
+        caseData={createCase({ inactivityRemindersEnabled: true })}
+        onSave={onSave}
+      />,
+    );
+
+    fireEvent.click(screen.getByLabelText('Автоконтроль дела'));
+
+    expect(await screen.findByText('Причина: Работа временно ведётся вне CRM')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+      inactivityRemindersEnabled: false,
+      inactivityRemindersDisabledReason: 'Работа временно ведётся вне CRM',
     }));
   });
 

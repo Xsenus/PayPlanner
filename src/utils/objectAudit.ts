@@ -153,6 +153,7 @@ const COMMON_FIELD_LABELS: Record<string, string> = {
   ActivityConfirmedByUserId: 'Кто подтвердил активность',
   ActivityConfirmedByUserName: 'Кто подтвердил активность',
   InactivityRemindersEnabled: 'Автоконтроль',
+  InactivityRemindersDisabledReason: 'Причина выключения автоконтроля',
   IsUnderControl: 'На контроле',
   ControlMarkedAt: 'Дата постановки на контроль',
   ControlMarkedByUserId: 'Кто поставил на контроль',

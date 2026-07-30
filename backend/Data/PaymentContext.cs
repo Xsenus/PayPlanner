@@ -1243,6 +1243,7 @@ public class PaymentContext : DbContext
             entity.Property(e => e.LastViewedByUserName).HasMaxLength(256);
             entity.Property(e => e.ActivityConfirmedByUserName).HasMaxLength(256);
             entity.Property(e => e.InactivityRemindersEnabled).HasDefaultValue(true);
+            entity.Property(e => e.InactivityRemindersDisabledReason).HasMaxLength(1000);
             entity.Property(e => e.IsUnderControl).HasDefaultValue(false);
             entity.Property(e => e.ControlMarkedByUserName).HasMaxLength(256);
             entity.Property(e => e.IsHiddenFromExecutor).HasDefaultValue(false);
