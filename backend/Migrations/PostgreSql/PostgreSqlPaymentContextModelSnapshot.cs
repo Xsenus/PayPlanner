@@ -5085,6 +5085,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.HasIndex("Status")
                         .HasDatabaseName("IX_NotificationDeliveries_Status");
 
+                    b.HasIndex("Channel", "CreatedAt")
+                        .HasDatabaseName("IX_NotificationDeliveries_Channel_CreatedAt");
+
                     b.HasIndex("EventKey", "Channel", "RecipientUserId", "NotificationSenderId")
                         .HasDatabaseName("IX_NotificationDeliveries_Event_Channel_User_Sender");
 
