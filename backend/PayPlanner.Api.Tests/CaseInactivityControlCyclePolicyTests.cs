@@ -38,6 +38,22 @@ public sealed class CaseInactivityControlCyclePolicyTests
     }
 
     [Fact]
+    public void EvaluateNextCycle_CountsWeekendInCooldown()
+    {
+        var friday = new DateTime(2026, 7, 24, 8, 0, 0, DateTimeKind.Utc);
+        var sunday = friday.AddDays(2);
+
+        var decision = CaseInactivityControlCyclePolicy.EvaluateNextCycle(
+            sunday,
+            friday.AddDays(-20),
+            friday,
+            inactiveDays: 2);
+
+        Assert.True(decision.IsEligible);
+        Assert.Equal(sunday, decision.EligibleAt);
+    }
+
+    [Fact]
     public void EvaluateNextCycle_UsesLaterMeaningfulActivityInsteadOfOldCycleEnd()
     {
         var decision = CaseInactivityControlCyclePolicy.EvaluateNextCycle(

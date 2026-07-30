@@ -27,6 +27,26 @@ public sealed class CaseInactivityControlStateMachineTests
     }
 
     [Fact]
+    public void Evaluate_CountsWeekendAsCalendarDays()
+    {
+        var friday = new DateTime(2026, 7, 24, 8, 0, 0, DateTimeKind.Utc);
+        var sunday = friday.AddDays(2);
+        Assert.Equal(DayOfWeek.Friday, friday.DayOfWeek);
+        Assert.Equal(DayOfWeek.Sunday, sunday.DayOfWeek);
+
+        var decision = CaseInactivityControlStateMachine.Evaluate(
+            new CaseInactivityControlStateInput(
+                sunday,
+                friday,
+                ControlTaskCreatedAt: null,
+                InactiveDays: 2,
+                EscalationDays: 30));
+
+        Assert.Equal(CaseInactivityControlTransition.FirstControlDue, decision.Transition);
+        Assert.Equal(2, decision.DaysWithoutActivity);
+    }
+
+    [Fact]
     public void Evaluate_MarksFirstControlCriticalAtEscalationThreshold()
     {
         var decision = Evaluate(lastActivityAt: Now.AddDays(-30));
