@@ -892,6 +892,10 @@ describe('CaseDetailPage', () => {
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
 
     expect(await screen.findByText('ЗЕМЦОВ - банкротство')).toBeTruthy();
+    await waitFor(() => {
+      expect(apiService.markCaseActivity).toHaveBeenCalledWith(15, { confirmed: false });
+      expect(apiService.markCaseActivity).toHaveBeenCalledTimes(1);
+    });
     expect(screen.getByText('2026-015')).toBeTruthy();
     expect(screen.getAllByText('Земцов Виктор Александрович').length).toBeGreaterThan(0);
     expect(screen.getByText(/35\s*000\s*₽ \/ 15\s*000\s*₽/u)).toBeTruthy();

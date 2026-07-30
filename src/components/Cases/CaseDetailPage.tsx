@@ -1,7 +1,7 @@
 import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Archive,
   ArrowLeft,
@@ -1111,6 +1111,7 @@ export function CaseDetailPage({
   const initialViewState = readCaseDetailViewState(caseId);
   const canCreateCaseTask = canViewTasks && canCreateTasks;
   const [caseItem, setCaseItem] = useState<ClientCase | null>(null);
+  const markedViewedCaseIdRef = useRef<number | null>(null);
   const [caseTimeZoneId, setCaseTimeZoneId] = useState(() => normalizeUserTimeZoneId());
   const [responsibles, setResponsibles] = useState<ActResponsible[]>([]);
   const [tasks, setTasks] = useState<TaskJournalItem[]>([]);
@@ -1434,6 +1435,39 @@ export function CaseDetailPage({
       cancelled = true;
     };
   }, [caseId, reloadToken]);
+
+  useEffect(() => {
+    if (caseItem?.id !== caseId || markedViewedCaseIdRef.current === caseId) return;
+    markedViewedCaseIdRef.current = caseId;
+
+    let cancelled = false;
+    apiService.markCaseActivity(caseId, { confirmed: false })
+      .then((activity) => {
+        if (cancelled) return;
+        setCaseItem((current) => current?.id === caseId
+          ? {
+            ...current,
+            lastViewedAt: activity.lastViewedAt,
+            lastViewedByUserId: activity.lastViewedByUserId,
+            lastViewedByUserName: activity.lastViewedByUserName,
+            lastViewedByResponsibleAt: activity.lastViewedByResponsibleAt,
+            lastViewedByResponsibleUserId: activity.lastViewedByResponsibleUserId,
+            lastViewedByResponsibleUserName: activity.lastViewedByResponsibleUserName,
+            activityConfirmedAt: activity.activityConfirmedAt,
+            activityConfirmedByUserId: activity.activityConfirmedByUserId,
+            activityConfirmedByUserName: activity.activityConfirmedByUserName,
+            inactivityRemindersEnabled: activity.inactivityRemindersEnabled,
+          }
+          : current);
+      })
+      .catch(() => {
+        // Фиксация просмотра не должна блокировать работу с карточкой.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [caseId, caseItem?.id]);
 
   useEffect(() => {
     let cancelled = false;

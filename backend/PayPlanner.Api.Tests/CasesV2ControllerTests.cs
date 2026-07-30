@@ -5410,6 +5410,45 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task MarkActivity_DoesNotResetLastViewWhenResponsibleIsNotAssigned()
+    {
+        await using var db = await CreateContextAsync();
+        var viewer = await CreateUserAsync(db, "viewer-without-responsible@example.com", "Наблюдатель", DataVisibilityScope.All);
+        var viewedAt = new DateTime(2026, 5, 1, 8, 30, 0, DateTimeKind.Utc);
+        var client = new Client
+        {
+            Name = "Клиент без ответственного",
+            IsActive = true,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Дело без ответственного",
+            Status = ClientCaseStatus.Open,
+            LastViewedAt = viewedAt,
+            LastViewedByUserName = "Прежний ответственный",
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, viewer);
+
+        var result = await controller.MarkActivity(clientCase.Id, new CasesV2Controller.MarkClientCaseActivityRequest
+        {
+            Confirmed = false,
+        }, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<CasesV2Controller.ClientCaseActivityDto>(ok.Value);
+        Assert.Equal(viewedAt, dto.LastViewedByResponsibleAt);
+        Assert.Equal("Прежний ответственный", dto.LastViewedByResponsibleUserName);
+
+        await db.Entry(clientCase).ReloadAsync();
+        Assert.Equal(viewedAt, clientCase.LastViewedAt);
+        Assert.Equal("Прежний ответственный", clientCase.LastViewedByUserName);
+    }
+
+    [Fact]
     public async Task RunCourtSync_RecordsManualCourtCheckInHistory()
     {
         await using var db = await CreateContextAsync();

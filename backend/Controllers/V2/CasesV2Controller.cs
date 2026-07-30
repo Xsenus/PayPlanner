@@ -5245,7 +5245,7 @@ public class CasesV2Controller : ControllerBase
         var userId = User.GetUserId();
         var displayName = User.GetDisplayName();
         var responsibleUserId = clientCase.ResponsibleUserId ?? clientCase.Client?.ResponsibleUserId ?? clientCase.LegalEntity?.ResponsibleUserId;
-        var resetsInactivityTimer = !responsibleUserId.HasValue || responsibleUserId == userId;
+        var resetsInactivityTimer = responsibleUserId.HasValue && responsibleUserId == userId;
         if (resetsInactivityTimer)
         {
             clientCase.LastViewedAt = now;
