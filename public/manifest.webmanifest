@@ -1,0 +1,26 @@
+{
+  "id": "/",
+  "name": "ЭлитПраво CRM",
+  "short_name": "ЭлитПраво",
+  "description": "Рабочая CRM для дел, задач, календаря и финансов.",
+  "lang": "ru",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#0f172a",
+  "icons": [
+    {
+      "src": "/logo.png",
+      "sizes": "640x640",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/logo.png",
+      "sizes": "640x640",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

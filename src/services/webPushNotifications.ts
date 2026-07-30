@@ -1,8 +1,12 @@
 import { apiService, type UpsertPushSubscriptionRequest, type UserPushSubscriptionDto } from './api';
+import {
+  PAYPLANNER_APPLICATION_WORKER_PATH,
+  PAYPLANNER_APPLICATION_WORKER_SCOPE,
+  registerPayPlannerApplicationWorker,
+} from './applicationWorker';
 
-export const PAYPLANNER_PUSH_WORKER_PATH = '/payplanner-push-worker.js';
-export const PAYPLANNER_PUSH_WORKER_SCOPE = '/';
-const PAYPLANNER_PUSH_WORKER_READY_TIMEOUT_MS = 4_000;
+export const PAYPLANNER_PUSH_WORKER_PATH = PAYPLANNER_APPLICATION_WORKER_PATH;
+export const PAYPLANNER_PUSH_WORKER_SCOPE = PAYPLANNER_APPLICATION_WORKER_SCOPE;
 
 export type WebPushDeviceStatus =
   | 'unsupported'
@@ -198,13 +202,12 @@ export async function registerPayPlannerPushWorker() {
     throw new Error('Push-уведомления работают только на защищённом HTTPS-адресе CRM.');
   }
 
-  const registration = await navigator.serviceWorker.register(PAYPLANNER_PUSH_WORKER_PATH, { scope: PAYPLANNER_PUSH_WORKER_SCOPE });
-  if (registration.active) {
-    return registration;
+  const registration = await registerPayPlannerApplicationWorker();
+  if (!registration) {
+    throw new Error('Этот браузер не поддерживает service worker.');
   }
 
-  const readyRegistration = await waitForReadyPayPlannerPushWorker(registration);
-  return readyRegistration ?? registration;
+  return registration;
 }
 
 export function urlBase64ToUint8Array(value: string) {
@@ -289,26 +292,6 @@ async function createBrowserPushSubscription(registration: ServiceWorkerRegistra
     }
 
     throw error;
-  }
-}
-
-async function waitForReadyPayPlannerPushWorker(registration: ServiceWorkerRegistration) {
-  const ready = navigator.serviceWorker.ready;
-  if (!ready || typeof ready.then !== 'function') {
-    return null;
-  }
-
-  try {
-    return await Promise.race([
-      ready.then((readyRegistration) => (
-        readyRegistration.scope === registration.scope ? readyRegistration : registration
-      )),
-      new Promise<ServiceWorkerRegistration | null>((resolve) => {
-        window.setTimeout(() => resolve(null), PAYPLANNER_PUSH_WORKER_READY_TIMEOUT_MS);
-      }),
-    ]);
-  } catch {
-    return null;
   }
 }
 
