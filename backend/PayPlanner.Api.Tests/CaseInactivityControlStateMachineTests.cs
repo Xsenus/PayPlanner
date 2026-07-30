@@ -26,6 +26,30 @@ public sealed class CaseInactivityControlStateMachineTests
         Assert.False(decision.IsCritical);
     }
 
+    [Theory]
+    [InlineData(13, 23, 59, CaseInactivityControlTransition.Waiting)]
+    [InlineData(14, 0, 0, CaseInactivityControlTransition.FirstControlDue)]
+    public void Evaluate_UsesCompletedTwentyFourHourPeriodsAtInitialBoundary(
+        int days,
+        int hours,
+        int minutes,
+        CaseInactivityControlTransition expected)
+    {
+        var decision = Evaluate(lastActivityAt: Now.AddDays(-days).AddHours(-hours).AddMinutes(-minutes));
+
+        Assert.Equal(expected, decision.Transition);
+        Assert.Equal(days, decision.DaysWithoutActivity);
+    }
+
+    [Fact]
+    public void Evaluate_ClampsFutureActivityToZeroDays()
+    {
+        var decision = Evaluate(lastActivityAt: Now.AddHours(1));
+
+        Assert.Equal(CaseInactivityControlTransition.Waiting, decision.Transition);
+        Assert.Equal(0, decision.DaysWithoutActivity);
+    }
+
     [Fact]
     public void Evaluate_CountsWeekendAsCalendarDays()
     {
@@ -66,6 +90,19 @@ public sealed class CaseInactivityControlStateMachineTests
         Assert.Equal(CaseInactivityControlTransition.RepeatDue, decision.Transition);
         Assert.Equal(1, decision.RepeatLevel);
         Assert.Equal(2, decision.RepeatOffsetDays);
+    }
+
+    [Fact]
+    public void Evaluate_DoesNotResetWhenActivityEqualsControlCreationTime()
+    {
+        var createdAt = Now.AddDays(-2);
+        var decision = Evaluate(
+            lastActivityAt: createdAt,
+            controlTaskCreatedAt: createdAt,
+            nextCheckAt: Now);
+
+        Assert.Equal(CaseInactivityControlTransition.RepeatDue, decision.Transition);
+        Assert.Equal(1, decision.RepeatLevel);
     }
 
     [Fact]
@@ -117,6 +154,19 @@ public sealed class CaseInactivityControlStateMachineTests
     }
 
     [Fact]
+    public void Evaluate_SuppressesDueRepeatWhenAnotherActiveTaskExists()
+    {
+        var decision = Evaluate(
+            lastActivityAt: Now.AddDays(-30),
+            controlTaskCreatedAt: Now.AddDays(-4),
+            hasOtherActiveTask: true,
+            completedRepeatLevel: 1,
+            nextCheckAt: Now);
+
+        Assert.Equal(CaseInactivityControlTransition.SuppressedByActiveTask, decision.Transition);
+    }
+
+    [Fact]
     public void Evaluate_WaitsAfterAllRepeatLevelsAreCompleted()
     {
         var decision = Evaluate(
@@ -137,6 +187,19 @@ public sealed class CaseInactivityControlStateMachineTests
             nextCheckAt: Now.AddMinutes(1));
 
         Assert.Equal(CaseInactivityControlTransition.Waiting, decision.Transition);
+    }
+
+    [Fact]
+    public void Evaluate_WaitsAfterCompletedRepeatsEvenWithStaleStoredDate()
+    {
+        var decision = Evaluate(
+            lastActivityAt: Now.AddDays(-40),
+            controlTaskCreatedAt: Now.AddDays(-10),
+            completedRepeatLevel: 2,
+            nextCheckAt: Now.AddDays(-1));
+
+        Assert.Equal(CaseInactivityControlTransition.Waiting, decision.Transition);
+        Assert.Equal(0, decision.RepeatLevel);
     }
 
     [Fact]
@@ -162,6 +225,19 @@ public sealed class CaseInactivityControlStateMachineTests
             CaseInactivityControlStateMachine.ResolveRecoveryNextCheckAt(Now, nextCheckAt);
 
         Assert.Equal(Now.AddDays(2), recoveryNextCheckAt);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(1)]
+    public void ResolveRecoveryNextCheckAt_DoesNotRebaseMissingOrFutureDate(int? futureDays)
+    {
+        var nextCheckAt = futureDays.HasValue ? Now.AddDays(futureDays.Value) : (DateTime?)null;
+
+        var recoveryNextCheckAt =
+            CaseInactivityControlStateMachine.ResolveRecoveryNextCheckAt(Now, nextCheckAt);
+
+        Assert.Null(recoveryNextCheckAt);
     }
 
     private static CaseInactivityControlStateDecision Evaluate(
