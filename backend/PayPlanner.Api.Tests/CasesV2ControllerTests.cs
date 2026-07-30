@@ -871,6 +871,7 @@ public class CasesV2ControllerTests
                 FeeAmount = 25_000m,
                 NextHearingAt = hearingAtUtc,
                 LastViewedAt = hearingAtUtc,
+                CreatedAt = new DateTime(2026, 6, 1, 8, 0, 0, DateTimeKind.Utc),
             },
             new ClientCase
             {
@@ -880,6 +881,7 @@ public class CasesV2ControllerTests
                 ResponsibleUserId = otherResponsible.Id,
                 Status = ClientCaseStatus.Open,
                 FeeAmount = 50_000m,
+                CreatedAt = new DateTime(2026, 6, 1, 8, 0, 0, DateTimeKind.Utc),
             });
         db.UserSettings.Add(new UserSetting
         {
@@ -1236,6 +1238,9 @@ public class CasesV2ControllerTests
         Assert.Equal(33, item.TaskProgressPercent);
         Assert.NotNull(item.LastTaskAt);
         Assert.True(item.LastTaskAt >= new DateTime(2026, 5, 4, 10, 0, 0, DateTimeKind.Utc));
+        Assert.NotNull(item.LastMeaningfulActivityAt);
+        Assert.Null(item.NextInactivityControlAt);
+        Assert.Equal("Есть активная задача", item.InactivityControlExclusionReason);
 
         var paymentCommand = Assert.Single(interceptor.Commands, command =>
             command.Contains("FROM \"Payments\"", StringComparison.Ordinal)
@@ -1248,6 +1253,73 @@ public class CasesV2ControllerTests
             command.Contains("FROM \"InvoiceClientCases\"", StringComparison.Ordinal)
             && command.Contains("PaymentId", StringComparison.Ordinal)
             && command.Contains("ClientCaseId", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Get_ReturnsInactivityControlDatesAndStoredExclusionReason()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "owner@example.com", "Владелец");
+        var client = new Client
+        {
+            Name = "Клиент",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var lastActivityAt = new DateTime(2026, 5, 10, 10, 0, 0, DateTimeKind.Utc);
+        db.ClientCases.AddRange(
+            new ClientCase
+            {
+                Client = client,
+                Title = "Дело с контролем",
+                Status = ClientCaseStatus.Open,
+                CreatedAt = new DateTime(2026, 5, 1, 10, 0, 0, DateTimeKind.Utc),
+                ActivityConfirmedAt = lastActivityAt,
+                InactivityRemindersEnabled = true,
+            },
+            new ClientCase
+            {
+                Client = client,
+                Title = "Исключённое дело",
+                Status = ClientCaseStatus.Open,
+                CreatedAt = new DateTime(2026, 5, 2, 10, 0, 0, DateTimeKind.Utc),
+                InactivityRemindersEnabled = false,
+                InactivityRemindersDisabledReason = "Ожидаем решение клиента",
+            });
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = "tasks.automation.caseControl.inactiveDays",
+            Value = "7",
+        });
+        await db.SaveChangesAsync();
+
+        var result = await CreateController(db, owner).Get(
+            clientId: null,
+            legalEntityId: null,
+            status: null,
+            search: null,
+            responsibleUserId: null,
+            caseType: null,
+            priority: null,
+            from: null,
+            to: null,
+            minFee: null,
+            maxFee: null,
+            sortBy: "title",
+            sortDir: "asc",
+            page: 1,
+            pageSize: 50,
+            ct: CancellationToken.None);
+
+        var items = GetAnonymousItems(Assert.IsType<OkObjectResult>(result).Value);
+        var controlled = Assert.Single(items, item => item.Title == "Дело с контролем");
+        Assert.Equal(lastActivityAt, controlled.LastMeaningfulActivityAt);
+        Assert.Equal(lastActivityAt.AddDays(7), controlled.NextInactivityControlAt);
+        Assert.Empty(controlled.InactivityControlExclusionReason);
+
+        var excluded = Assert.Single(items, item => item.Title == "Исключённое дело");
+        Assert.Equal("Ожидаем решение клиента", excluded.InactivityControlExclusionReason);
+        Assert.Null(excluded.NextInactivityControlAt);
     }
 
     [Fact]

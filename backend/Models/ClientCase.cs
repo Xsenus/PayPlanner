@@ -253,6 +253,15 @@ namespace PayPlanner.Api.Models
         [NotMapped]
         public DateTime? LastTaskAt { get; set; }
 
+        [NotMapped]
+        public DateTime? LastMeaningfulActivityAt { get; set; }
+
+        [NotMapped]
+        public DateTime? NextInactivityControlAt { get; set; }
+
+        [NotMapped]
+        public string InactivityControlExclusionReason { get; set; } = string.Empty;
+
         /// <summary>
         /// Дата последнего открытия карточки дела пользователем.
         /// </summary>

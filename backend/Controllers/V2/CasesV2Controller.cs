@@ -42,6 +42,13 @@ public class CasesV2Controller : ControllerBase
     private const string CaseHistoryAuthorMarker = "Автор:";
     private const string CaseDocumentTemplatesSettingKey = "cases.documentTemplates";
     private const string CaseProductionCalendarSettingKey = "cases.productionCalendar";
+    private const string CaseInactivityAutomationEnabledSettingKey = "tasks.automation.caseControl.enabled";
+    private const string CaseInactivityAutomationDaysSettingKey = "tasks.automation.caseControl.inactiveDays";
+    private const string CaseInactivityAutomationTag = "автоконтроль";
+    private static readonly string[] ActiveTaskStatuses =
+    [
+        "new", "inProgress", "waiting", "onApproval", "approved", "revision", "overdueApproval"
+    ];
     private static readonly JsonSerializerOptions CaseDocumentTemplateJsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly HashSet<string> AllowedCasePriorities = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -313,7 +320,7 @@ public class CasesV2Controller : ControllerBase
         {
             HideCaseFinanceData(items);
         }
-        await ApplyTaskSummaryAsync(items, ct);
+        await ApplyTaskSummaryAsync(items, ct, includeInactivityControlSummary: true);
         PopulateResponsibleViewAliases(items);
 
         return Ok(new { items, total, page, pageSize });
@@ -579,7 +586,7 @@ public class CasesV2Controller : ControllerBase
         {
             HideCaseFinanceData(items);
         }
-        await ApplyTaskSummaryAsync(items, ct);
+        await ApplyTaskSummaryAsync(items, ct, includeInactivityControlSummary: true);
         PopulateResponsibleViewAliases(items);
 
         return (items, canViewFinance, null);
@@ -621,6 +628,7 @@ public class CasesV2Controller : ControllerBase
                 {
                     Id = item.Client.Id,
                     Name = item.Client.Name,
+                    ResponsibleUserId = item.Client.ResponsibleUserId,
                 },
             LegalEntityId = item.LegalEntityId,
             LegalEntity = item.LegalEntity == null
@@ -630,6 +638,7 @@ public class CasesV2Controller : ControllerBase
                     Id = item.LegalEntity.Id,
                     ShortName = item.LegalEntity.ShortName,
                     FullName = item.LegalEntity.FullName,
+                    ResponsibleUserId = item.LegalEntity.ResponsibleUserId,
                 },
             CreatedAt = item.CreatedAt,
             CaseNumber = item.CaseNumber,
@@ -675,6 +684,7 @@ public class CasesV2Controller : ControllerBase
             ActivityConfirmedByUserId = item.ActivityConfirmedByUserId,
             ActivityConfirmedByUserName = item.ActivityConfirmedByUserName,
             InactivityRemindersEnabled = item.InactivityRemindersEnabled,
+            InactivityRemindersDisabledReason = item.InactivityRemindersDisabledReason,
             IsUnderControl = item.IsUnderControl,
             ControlMarkedAt = item.ControlMarkedAt,
             ControlMarkedByUserId = item.ControlMarkedByUserId,
@@ -1453,6 +1463,8 @@ public class CasesV2Controller : ControllerBase
             "Выполненные задачи",
             "Прогресс",
             "Последняя активность",
+            "Следующий автоконтроль",
+            "Причина исключения",
             "Просмотр ответственным",
             "Активность подтвердил",
             "Приоритет",
@@ -1489,6 +1501,8 @@ public class CasesV2Controller : ControllerBase
                 item.CompletedTaskCount.ToString(CultureInfo.InvariantCulture),
                 $"{item.TaskProgressPercent}%",
                 FormatRuDateTime(GetLatestCaseActivityAt(item), timeZone),
+                FormatRuDateTime(item.NextInactivityControlAt, timeZone),
+                item.InactivityControlExclusionReason,
                 FormatRuDateTime(item.LastViewedByResponsibleAt ?? item.LastViewedAt, timeZone),
                 item.ActivityConfirmedByUserName,
                 GetPriorityLabel(item.Priority),
@@ -1562,6 +1576,8 @@ public class CasesV2Controller : ControllerBase
             "Выполненные задачи",
             "Прогресс",
             "Последняя активность",
+            "Следующий автоконтроль",
+            "Причина исключения",
             "Просмотр ответственным",
             "Активность подтвердил",
             "Приоритет",
@@ -1594,6 +1610,8 @@ public class CasesV2Controller : ControllerBase
                 item.CompletedTaskCount.ToString(CultureInfo.InvariantCulture),
                 $"{item.TaskProgressPercent}%",
                 FormatRuDateTime(GetLatestCaseActivityAt(item), timeZone),
+                FormatRuDateTime(item.NextInactivityControlAt, timeZone),
+                item.InactivityControlExclusionReason,
                 FormatRuDateTime(item.LastViewedByResponsibleAt ?? item.LastViewedAt, timeZone),
                 item.ActivityConfirmedByUserName,
                 GetPriorityLabel(item.Priority),
@@ -1670,6 +1688,8 @@ public class CasesV2Controller : ControllerBase
               """ : string.Empty)}
               <td>{item.OpenTaskCount} / {item.OverdueTaskCount}</td>
               <td>{Html(FormatRuDateTime(GetLatestCaseActivityAt(item), timeZone))}</td>
+              <td>{Html(FormatRuDateTime(item.NextInactivityControlAt, timeZone))}</td>
+              <td>{Html(item.InactivityControlExclusionReason)}</td>
             </tr>
             """));
 
@@ -1717,7 +1737,9 @@ public class CasesV2Controller : ControllerBase
                     <th>Срок</th>
                     {{financeHeaders}}
                     <th>Задачи</th>
-                    <th>Активность</th>
+                    <th>Последняя активность</th>
+                    <th>Следующий автоконтроль</th>
+                    <th>Причина исключения</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1778,6 +1800,11 @@ public class CasesV2Controller : ControllerBase
 
     private static DateTime? GetLatestCaseActivityAt(ClientCase clientCase)
     {
+        if (clientCase.LastMeaningfulActivityAt.HasValue)
+        {
+            return clientCase.LastMeaningfulActivityAt;
+        }
+
         var values = new[]
         {
             clientCase.LastTaskAt,
@@ -8829,7 +8856,10 @@ public class CasesV2Controller : ControllerBase
         }
     }
 
-    private async Task ApplyTaskSummaryAsync(IReadOnlyCollection<ClientCase> cases, CancellationToken ct)
+    private async Task ApplyTaskSummaryAsync(
+        IReadOnlyCollection<ClientCase> cases,
+        CancellationToken ct,
+        bool includeInactivityControlSummary = false)
     {
         var caseIds = cases
             .Select(item => item.Id)
@@ -8843,17 +8873,54 @@ public class CasesV2Controller : ControllerBase
 
         var now = DateTime.UtcNow;
         var summaryByCaseId = await _db.TaskJournalItems
+            .IgnoreQueryFilters()
             .AsNoTracking()
             .Where(task => task.ClientCaseId.HasValue && caseIds.Contains(task.ClientCaseId.Value))
             .GroupBy(task => task.ClientCaseId!.Value)
             .Select(group => new
             {
                 CaseId = group.Key,
-                Total = group.Count(),
-                Open = group.Count(task => task.Status != "done" && task.Status != "cancelled"),
-                Completed = group.Count(task => task.Status == "done" || task.Status == "cancelled"),
-                Overdue = group.Count(task => task.Status != "done" && task.Status != "cancelled" && task.DueAt < now),
-                LastTaskAt = group.Max(task => task.UpdatedAt ?? task.CreatedAt),
+                Total = group.Count(task => !EF.Property<bool>(task, "IsDeleted")),
+                Open = group.Count(task =>
+                    !EF.Property<bool>(task, "IsDeleted") &&
+                    task.Status != "done" &&
+                    task.Status != "cancelled"),
+                Completed = group.Count(task =>
+                    !EF.Property<bool>(task, "IsDeleted") &&
+                    (task.Status == "done" || task.Status == "cancelled")),
+                Overdue = group.Count(task =>
+                    !EF.Property<bool>(task, "IsDeleted") &&
+                    task.Status != "done" &&
+                    task.Status != "cancelled" &&
+                    task.DueAt < now),
+                LastTaskAt = group.Max(task =>
+                    !EF.Property<bool>(task, "IsDeleted")
+                        ? (DateTime?)(task.UpdatedAt ?? task.CreatedAt)
+                        : null),
+                LastMeaningfulTaskAt = group.Max(task =>
+                    !EF.Property<bool>(task, "IsDeleted") &&
+                    !task.TagsJson.Contains(CaseInactivityAutomationTag)
+                        ? (DateTime?)(task.UpdatedAt ?? task.CreatedAt)
+                        : null),
+                LastControlCycleEndedAt = group.Max(task =>
+                        task.TagsJson.Contains(CaseInactivityAutomationTag) &&
+                    (EF.Property<bool>(task, "IsDeleted") ||
+                     task.Status == "done" ||
+                     task.Status == "cancelled")
+                        ? EF.Property<DateTime?>(task, "DeletedAt") ??
+                          task.UpdatedAt ??
+                          (DateTime?)task.CreatedAt
+                        : null),
+                ActiveOtherTaskCount = group.Count(task =>
+                    !EF.Property<bool>(task, "IsDeleted") &&
+                    ActiveTaskStatuses.Contains(task.Status) &&
+                    !task.TagsJson.Contains(CaseInactivityAutomationTag)),
+                ActiveControlNextCheckAt = group.Min(task =>
+                    !EF.Property<bool>(task, "IsDeleted") &&
+                    ActiveTaskStatuses.Contains(task.Status) &&
+                    task.TagsJson.Contains(CaseInactivityAutomationTag)
+                        ? task.InactivityControlNextCheckAt
+                        : null),
             })
             .ToDictionaryAsync(item => item.CaseId, ct);
 
@@ -8872,7 +8939,146 @@ public class CasesV2Controller : ControllerBase
                 ? 0
                 : (int)Math.Round(summary.Completed * 100m / summary.Total, MidpointRounding.AwayFromZero);
         }
+
+        if (!includeInactivityControlSummary)
+        {
+            return;
+        }
+
+        var lastCommentByCaseId = await _db.TaskJournalComments
+            .AsNoTracking()
+            .Where(comment =>
+                comment.TaskJournalItem.ClientCaseId.HasValue &&
+                caseIds.Contains(comment.TaskJournalItem.ClientCaseId.Value) &&
+                !comment.TaskJournalItem.TagsJson.Contains(CaseInactivityAutomationTag))
+            .GroupBy(comment => comment.TaskJournalItem.ClientCaseId!.Value)
+            .Select(group => new
+            {
+                CaseId = group.Key,
+                LastAt = group.Max(comment => comment.UpdatedAt ?? comment.CreatedAt),
+            })
+            .ToDictionaryAsync(item => item.CaseId, item => (DateTime?)item.LastAt, ct);
+
+        var lastDocumentByCaseId = await _db.ClientCaseDocuments
+            .AsNoTracking()
+            .Where(document => caseIds.Contains(document.ClientCaseId))
+            .GroupBy(document => document.ClientCaseId)
+            .Select(group => new
+            {
+                CaseId = group.Key,
+                LastAt = group.Max(document => document.UploadedAt),
+            })
+            .ToDictionaryAsync(item => item.CaseId, item => (DateTime?)item.LastAt, ct);
+
+        var lastCourtEventByCaseId = await _db.ClientCaseCourtEvents
+            .AsNoTracking()
+            .Where(courtEvent => caseIds.Contains(courtEvent.ClientCaseId))
+            .GroupBy(courtEvent => courtEvent.ClientCaseId)
+            .Select(group => new
+            {
+                CaseId = group.Key,
+                LastAt = group.Max(courtEvent => courtEvent.UpdatedAt ?? courtEvent.CreatedAt),
+            })
+            .ToDictionaryAsync(item => item.CaseId, item => (DateTime?)item.LastAt, ct);
+
+        var automationSettings = await _db.SystemSettings
+            .AsNoTracking()
+            .Where(setting =>
+                setting.Key == CaseInactivityAutomationEnabledSettingKey ||
+                setting.Key == CaseInactivityAutomationDaysSettingKey)
+            .ToDictionaryAsync(setting => setting.Key, setting => setting.Value, ct);
+        var automationEnabled = !automationSettings.TryGetValue(
+                CaseInactivityAutomationEnabledSettingKey,
+                out var automationEnabledRaw) ||
+            !bool.TryParse(automationEnabledRaw, out var parsedAutomationEnabled) ||
+            parsedAutomationEnabled;
+        var inactivityDays = automationSettings.TryGetValue(
+                CaseInactivityAutomationDaysSettingKey,
+                out var inactivityDaysRaw) &&
+            int.TryParse(inactivityDaysRaw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedInactivityDays)
+                ? Math.Clamp(parsedInactivityDays, 1, 365)
+                : 14;
+        var effectiveResponsibleUserIds = cases
+            .Select(ResolveEffectiveCaseResponsibleUserId)
+            .Where(userId => userId.HasValue)
+            .Select(userId => userId!.Value)
+            .Distinct()
+            .ToArray();
+        var vacationUserIds = await CaseInactivityResponsibleAvailabilityService.GetUsersOnVacationAsync(
+            _db,
+            now,
+            effectiveResponsibleUserIds,
+            ct);
+
+        foreach (var clientCase in cases)
+        {
+            summaryByCaseId.TryGetValue(clientCase.Id, out var taskSummary);
+            var meaningfulActivity = CaseMeaningfulActivityResolver.Resolve(
+                new CaseMeaningfulActivitySignals(
+                    clientCase.CreatedAt,
+                    taskSummary?.LastMeaningfulTaskAt,
+                    lastCommentByCaseId.GetValueOrDefault(clientCase.Id),
+                    lastDocumentByCaseId.GetValueOrDefault(clientCase.Id),
+                    lastCourtEventByCaseId.GetValueOrDefault(clientCase.Id),
+                    clientCase.LastViewedAt,
+                    clientCase.ActivityConfirmedAt));
+            clientCase.LastMeaningfulActivityAt = meaningfulActivity.At;
+            clientCase.NextInactivityControlAt = null;
+            clientCase.InactivityControlExclusionReason = string.Empty;
+
+            if (!automationEnabled)
+            {
+                clientCase.InactivityControlExclusionReason = "Автоконтроль отключён администратором";
+                continue;
+            }
+
+            if (!clientCase.InactivityRemindersEnabled)
+            {
+                clientCase.InactivityControlExclusionReason =
+                    clientCase.InactivityRemindersDisabledReason.Trim();
+                continue;
+            }
+
+            if (CaseInactivityControlCyclePolicy.ExcludedCaseStatuses.Contains(clientCase.Status))
+            {
+                clientCase.InactivityControlExclusionReason =
+                    clientCase.Status == ClientCaseStatus.OnHold
+                        ? "Дело приостановлено"
+                        : "Дело завершено";
+                continue;
+            }
+
+            var responsibleUserId = ResolveEffectiveCaseResponsibleUserId(clientCase);
+            if (responsibleUserId.HasValue && vacationUserIds.Contains(responsibleUserId.Value))
+            {
+                clientCase.InactivityControlExclusionReason = "Ответственный в отпуске";
+                continue;
+            }
+
+            if (taskSummary is { ActiveOtherTaskCount: > 0 })
+            {
+                clientCase.InactivityControlExclusionReason = "Есть активная задача";
+                continue;
+            }
+
+            if (taskSummary?.ActiveControlNextCheckAt is { } storedNextCheckAt)
+            {
+                clientCase.NextInactivityControlAt = storedNextCheckAt;
+                continue;
+            }
+
+            var nextCycleBase = taskSummary?.LastControlCycleEndedAt is { } cycleEndedAt &&
+                cycleEndedAt > meaningfulActivity.At
+                    ? cycleEndedAt
+                    : meaningfulActivity.At;
+            clientCase.NextInactivityControlAt = nextCycleBase.AddDays(inactivityDays);
+        }
     }
+
+    private static int? ResolveEffectiveCaseResponsibleUserId(ClientCase clientCase)
+        => clientCase.ResponsibleUserId
+           ?? clientCase.Client?.ResponsibleUserId
+           ?? clientCase.LegalEntity?.ResponsibleUserId;
 
     private async Task<(CaseDocumentTemplateDefinition Template, string? Error, bool NotFound)> ResolveCaseDocumentTemplateDefinitionAsync(
         GenerateCaseDocumentTemplateRequest? request,

@@ -16,16 +16,38 @@ public static class CaseInactivityResponsibleAvailabilityService
         CancellationToken cancellationToken)
         => (await GetAvailabilityAsync(context, nowUtc, cancellationToken)).UsersOnVacation;
 
+    public static async Task<HashSet<int>> GetUsersOnVacationAsync(
+        PaymentContext context,
+        DateTime nowUtc,
+        IReadOnlyCollection<int> userIds,
+        CancellationToken cancellationToken)
+        => userIds.Count == 0
+            ? []
+            : (await GetAvailabilityAsync(context, nowUtc, userIds, cancellationToken)).UsersOnVacation;
+
     public static async Task<CaseInactivityResponsibleAvailabilitySnapshot> GetAvailabilityAsync(
         PaymentContext context,
         DateTime nowUtc,
         CancellationToken cancellationToken)
+        => await GetAvailabilityAsync(context, nowUtc, userIds: null, cancellationToken);
+
+    private static async Task<CaseInactivityResponsibleAvailabilitySnapshot> GetAvailabilityAsync(
+        PaymentContext context,
+        DateTime nowUtc,
+        IReadOnlyCollection<int>? userIds,
+        CancellationToken cancellationToken)
     {
-        var settings = await context.UserSettings
+        var settingsQuery = context.UserSettings
             .AsNoTracking()
             .Where(item =>
                 item.Key == UserNotificationDoNotDisturbSettings.SettingKey ||
-                item.Key == CalendarTimeZoneHelper.UserTimeZoneSettingKey)
+                item.Key == CalendarTimeZoneHelper.UserTimeZoneSettingKey);
+        if (userIds is { Count: > 0 })
+        {
+            settingsQuery = settingsQuery.Where(item => userIds.Contains(item.UserId));
+        }
+
+        var settings = await settingsQuery
             .Select(item => new { item.UserId, item.Key, item.Value })
             .ToListAsync(cancellationToken);
 

@@ -308,6 +308,35 @@ describe('CasesRegistry', () => {
     );
   });
 
+  it('shows the last activity, next control and exclusion reason in the registry', async () => {
+    vi.mocked(apiService.getCasesV2).mockResolvedValue({
+      items: [
+        createCase({
+          id: 1,
+          lastMeaningfulActivityAt: '2026-05-12T10:20:00Z',
+          nextInactivityControlAt: '2026-05-26T10:20:00Z',
+        }),
+        createCase({
+          id: 2,
+          caseNumber: '2026-002',
+          title: 'Дело без автоконтроля',
+          inactivityRemindersEnabled: false,
+          inactivityControlExclusionReason: 'Ожидаем решение клиента',
+          nextInactivityControlAt: null,
+        }),
+      ],
+      total: 2,
+      page: 1,
+      pageSize: 25,
+    });
+
+    render(<CasesRegistry />);
+
+    expect((await screen.findAllByText(/Последняя:/u)).length).toBe(2);
+    expect(screen.getByText(/Следующая:/u)).toBeTruthy();
+    expect(screen.getByText('Исключено: Ожидаем решение клиента')).toBeTruthy();
+  });
+
   it('keeps case owners closed when clients and legal entities are hidden', async () => {
     authState.isAdmin = false;
     permissionsState.clientsCanView = false;

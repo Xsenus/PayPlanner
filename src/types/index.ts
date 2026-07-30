@@ -540,6 +540,9 @@ export interface ClientCase {
   overdueTaskCount?: number;
   taskProgressPercent?: number;
   lastTaskAt?: string | null;
+  lastMeaningfulActivityAt?: string | null;
+  nextInactivityControlAt?: string | null;
+  inactivityControlExclusionReason?: string | null;
   lastViewedAt?: string | null;
   lastViewedByUserId?: number | null;
   lastViewedByUserName?: string | null;
