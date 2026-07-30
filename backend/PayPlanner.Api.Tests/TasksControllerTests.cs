@@ -4499,6 +4499,68 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task TaskJournalAutomationScheduler_RestoresLegacyCycleOnFullyMigratedDatabase()
+    {
+        await using var db = await CreateMigratedContextAsync();
+        var assignee = await CreateAdminUserAsync(db, "migrated-cycle@example.com", "Ответственный дела");
+        var client = await CreateClientAsync(db, "Клиент миграционной проверки");
+        client.ResponsibleUserId = assignee.Id;
+        var clientCase = await CreateCaseAsync(db, client.Id, "МИГРИРОВАННЫЙ СТАРЫЙ ЦИКЛ");
+        var now = DateTime.UtcNow;
+        clientCase.CreatedAt = now.AddDays(-30);
+        var task = await CreateTaskAsync(
+            db,
+            assignee.Id,
+            client.Id,
+            assigneeUserId: assignee.Id,
+            clientCaseId: clientCase.Id,
+            status: "new",
+            createdAt: now);
+        task.Type = "control";
+        task.Title = "Старый автоконтроль после миграции";
+        task.TagsJson = "[\"автоконтроль\"]";
+        task.InactivityControlCycleNumber = null;
+        task.InactivityControlNextCheckAt = null;
+        db.TaskJournalComments.Add(new TaskJournalComment
+        {
+            TaskJournalItemId = task.Id,
+            AuthorName = "Автоконтроль",
+            Kind = "system",
+            Text = "Первый повтор до обновления.",
+            MetadataJson = "{\"eventType\":\"caseInactivityControlEscalation\",\"level\":1,\"offsetDays\":2}",
+            CreatedAt = now,
+            UpdatedAt = now,
+        });
+        await db.SaveChangesAsync();
+        var appliedMigrations = await db.Database.GetAppliedMigrationsAsync();
+        Assert.Contains(appliedMigrations, migration =>
+            migration.EndsWith("AddTaskInactivityControlCycleState", StringComparison.Ordinal));
+        var (scheduler, provider) = CreateAutomationScheduler(db, new Dictionary<string, string?>
+        {
+            ["TaskJournal:Automation:Enabled"] = "true",
+            ["TaskJournal:Automation:InactiveDays"] = "14",
+            ["TaskJournal:Automation:Limit"] = "10",
+        });
+
+        using (provider)
+        {
+            var firstRun = await scheduler.RunOnceAsync(CancellationToken.None);
+            var secondRun = await scheduler.RunOnceAsync(CancellationToken.None);
+
+            Assert.Null(firstRun.Error);
+            Assert.Null(secondRun.Error);
+            Assert.Equal(0, firstRun.CreatedCount);
+            Assert.Equal(0, secondRun.CreatedCount);
+        }
+
+        await db.Entry(task).ReloadAsync();
+        Assert.Equal(2, task.InactivityControlCycleNumber);
+        Assert.Equal(task.CreatedAt.AddDays(4), task.InactivityControlNextCheckAt);
+        Assert.Equal(1, await db.TaskJournalComments.CountAsync(item =>
+            item.TaskJournalItemId == task.Id));
+    }
+
+    [Fact]
     public async Task TaskJournalAutomationScheduler_StopsStoredCycleAfterMeaningfulActivity()
     {
         await using var db = await CreateContextAsync();
@@ -7327,6 +7389,19 @@ public class TasksControllerTests
         var options = optionsBuilder.Options;
         var db = new PaymentContext(options);
         await db.Database.EnsureCreatedAsync();
+        return db;
+    }
+
+    private static async Task<PaymentContext> CreateMigratedContextAsync()
+    {
+        var connection = new SqliteConnection("DataSource=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<PaymentContext>()
+            .UseSqlite(connection)
+            .UsePayPlannerSqliteMigrations()
+            .Options;
+        var db = new PaymentContext(options);
+        await db.Database.MigrateAsync();
         return db;
     }
 
