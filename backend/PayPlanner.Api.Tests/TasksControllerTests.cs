@@ -3243,6 +3243,14 @@ public class TasksControllerTests
         Assert.Equal(author.Id, dto.AssigneeUserId);
         Assert.Contains("автоконтроль", dto.Tags);
 
+        var task = await db.TaskJournalItems.SingleAsync(item => item.Id == dto.Id);
+        Assert.Equal(1, task.InactivityControlCycleNumber);
+        Assert.Equal(task.CreatedAt.AddDays(2), task.InactivityControlNextCheckAt);
+
+        var duplicateResult = await controller.CreateAutomationTaskForCase(clientCase.Id, CancellationToken.None);
+        Assert.IsType<ConflictObjectResult>(duplicateResult.Result);
+        Assert.Equal(1, await db.TaskJournalItems.CountAsync(item => item.ClientCaseId == clientCase.Id));
+
         var comments = await db.TaskJournalComments
             .AsNoTracking()
             .Where(item => item.TaskJournalItemId == dto.Id)
@@ -3424,6 +3432,21 @@ public class TasksControllerTests
         Assert.Contains(dto.CreatedTasks, item => item.ClientCaseId == secondCase.Id);
         Assert.DoesNotContain(dto.CreatedTasks, item => item.ClientCaseId == activeCase.Id);
         Assert.Equal(3, await db.TaskJournalItems.CountAsync());
+
+        var secondResult = await controller.CreateAutomationTasksForCandidates(limit: 10, ct: CancellationToken.None);
+        var secondOk = Assert.IsType<OkObjectResult>(secondResult.Result);
+        var secondDto = Assert.IsType<TaskJournalAutomationCreateResultDto>(secondOk.Value);
+        Assert.Empty(secondDto.CreatedTasks);
+        Assert.Equal(3, await db.TaskJournalItems.CountAsync());
+
+        var automaticTasks = await db.TaskJournalItems
+            .Where(item => item.ClientCaseId == firstCase.Id || item.ClientCaseId == secondCase.Id)
+            .ToListAsync();
+        Assert.All(automaticTasks, task =>
+        {
+            Assert.Equal(1, task.InactivityControlCycleNumber);
+            Assert.Equal(task.CreatedAt.AddDays(2), task.InactivityControlNextCheckAt);
+        });
     }
 
     [Fact]
@@ -3498,6 +3521,38 @@ public class TasksControllerTests
             item.Action == "Automation");
         Assert.Contains("Автоконтроль создал задачу", auditEvent.Description ?? string.Empty);
         Assert.Contains(task.Id.ToString(), auditEvent.MetadataJson ?? string.Empty);
+    }
+
+    [Fact]
+    public async Task TaskJournalAutomationScheduler_ConcurrentRunsCreateSingleControlCycle()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "concurrent-cycle-author@example.com", "Автор");
+        var client = await CreateClientAsync(db, "Клиент параллельного автоконтроля");
+        client.ResponsibleUserId = author.Id;
+        var clientCase = await CreateCaseAsync(db, client.Id, "ПАРАЛЛЕЛЬНЫЙ КОНТРОЛЬ");
+        clientCase.CreatedAt = DateTime.UtcNow.AddDays(-20);
+        await db.SaveChangesAsync();
+        var (scheduler, provider) = CreateAutomationScheduler(db, new Dictionary<string, string?>
+        {
+            ["TaskJournal:Automation:Enabled"] = "true",
+            ["TaskJournal:Automation:InactiveDays"] = "14",
+            ["TaskJournal:Automation:Limit"] = "10",
+        });
+
+        using (provider)
+        {
+            var results = await Task.WhenAll(
+                scheduler.RunOnceAsync(CancellationToken.None),
+                scheduler.RunOnceAsync(CancellationToken.None));
+
+            Assert.All(results, result => Assert.Null(result.Error));
+            Assert.Equal(1, results.Sum(result => result.CreatedCount));
+        }
+
+        var task = await db.TaskJournalItems.SingleAsync(item => item.ClientCaseId == clientCase.Id);
+        Assert.Equal(1, task.InactivityControlCycleNumber);
+        Assert.Equal(task.CreatedAt.AddDays(2), task.InactivityControlNextCheckAt);
     }
 
     [Fact]

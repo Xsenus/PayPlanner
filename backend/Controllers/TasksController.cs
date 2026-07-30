@@ -981,6 +981,7 @@ public class TasksController : ControllerBase
         }
 
         var dueAt = await BuildDefaultTaskDueAtUtcAsync(assignee.UserId, ct);
+        var now = DateTime.UtcNow;
         var entity = new TaskJournalItem
         {
             ClientId = binding.ClientId,
@@ -1002,11 +1003,13 @@ public class TasksController : ControllerBase
             RemindersJson = SerializeList(["before1d", "atDue"], AllowedReminders, ["atDue"]),
             ChannelsJson = SerializeList(["inApp"], AllowedChannels, ["inApp"]),
             TagsJson = SerializeFreeList(["автоконтроль"]),
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow,
+            InactivityControlCycleNumber = 1,
+            InactivityControlNextCheckAt = now.AddDays(CaseInactivityControlStateMachine.FirstRepeatOffsetDays),
+            CreatedAt = now,
+            UpdatedAt = now,
             Participants = [ToParticipantEntity(assignee)],
         };
-        AddEscalationObserver(entity, escalationUser, assignee.UserId, DateTime.UtcNow);
+        AddEscalationObserver(entity, escalationUser, assignee.UserId, now);
 
         AddTaskHistory(entity, access, "Задача создана автоматически из автоконтроля дела.");
         _db.TaskJournalItems.Add(entity);
@@ -1042,7 +1045,8 @@ public class TasksController : ControllerBase
         }
 
         var effectiveLimit = Math.Min(limit, settings.CaseInactivityLimit);
-        var cutoff = DateTime.UtcNow.AddDays(-settings.CaseInactivityDays);
+        var now = DateTime.UtcNow;
+        var cutoff = now.AddDays(-settings.CaseInactivityDays);
         var escalationUser = await ResolveConfiguredAutomationUserAsync(settings.CaseInactivityEscalationUserId, ct);
         var candidates = await _db.ClientCases
             .Include(item => item.Client)
@@ -1109,6 +1113,7 @@ public class TasksController : ControllerBase
                 settings,
                 escalationUser,
                 dueAt,
+                now,
                 item.LastTaskAt,
                 item.LastTaskCommentAt,
                 item.LastDocumentAt,
@@ -5597,6 +5602,7 @@ public class TasksController : ControllerBase
         TaskJournalSettingsDto settings,
         User? escalationUser,
         DateTime dueAt,
+        DateTime now,
         DateTime? lastTaskAt,
         DateTime? lastTaskCommentAt,
         DateTime? lastDocumentAt,
@@ -5608,7 +5614,7 @@ public class TasksController : ControllerBase
             lastTaskCommentAt,
             lastDocumentAt,
             lastCourtEventAt);
-        var daysWithoutActiveTask = Math.Max(0, (int)Math.Floor((DateTime.UtcNow - lastActivity).TotalDays));
+        var daysWithoutActiveTask = Math.Max(0, (int)Math.Floor((now - lastActivity).TotalDays));
         var isEscalated = daysWithoutActiveTask >= settings.CaseInactivityEscalationDays;
 
         var task = new TaskJournalItem
@@ -5632,12 +5638,14 @@ public class TasksController : ControllerBase
             RemindersJson = SerializeList(["before1d", "atDue"], AllowedReminders, ["atDue"]),
             ChannelsJson = SerializeList(["inApp"], AllowedChannels, ["inApp"]),
             TagsJson = SerializeFreeList(["автоконтроль"]),
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow,
+            InactivityControlCycleNumber = 1,
+            InactivityControlNextCheckAt = now.AddDays(CaseInactivityControlStateMachine.FirstRepeatOffsetDays),
+            CreatedAt = now,
+            UpdatedAt = now,
             Participants = [ToParticipantEntity(assignee)],
         };
 
-        AddEscalationObserver(task, isEscalated ? escalationUser : null, assignee.UserId, DateTime.UtcNow);
+        AddEscalationObserver(task, isEscalated ? escalationUser : null, assignee.UserId, now);
         return task;
     }
 
