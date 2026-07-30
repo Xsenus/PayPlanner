@@ -499,9 +499,9 @@ public class NotificationsController : ControllerBase
     {
         if (!await CanEditNotificationSettingsAsync(ct)) return Forbid();
         var channel = NormalizeChannel(request.Channel);
-        if (channel is not (NotificationChannels.Email or NotificationChannels.Telegram))
+        if (channel is not (NotificationChannels.Email or NotificationChannels.Telegram or NotificationChannels.Sms))
         {
-            return BadRequest(new { message = "Укажите канал email или telegram." });
+            return BadRequest(new { message = "Укажите канал email, telegram или sms." });
         }
 
         var message = new NotificationMessage(
@@ -524,7 +524,12 @@ public class NotificationsController : ControllerBase
             var recipient = BuildManualRecipient(request, channel);
             if (recipient is null)
             {
-                return BadRequest(new { message = "Укажите пользователя, email или Telegram chat id." });
+                return BadRequest(new
+                {
+                    message = channel == NotificationChannels.Sms
+                        ? "Укажите корректный мобильный номер для тестового SMS."
+                        : "Укажите пользователя, email или Telegram chat id."
+                });
             }
 
             deliveries = await _notificationService.SendAsync(
@@ -543,7 +548,9 @@ public class NotificationsController : ControllerBase
             Channel = channel,
             Recipient = delivery?.RecipientAddress ?? string.Empty,
             Status = delivery?.Status ?? NotificationDeliveryStatus.Skipped,
-            Error = delivery?.Error
+            Error = delivery?.Error ?? (channel == NotificationChannels.Sms && delivery is null
+                ? "Тестовое SMS не создано: проверьте тихие часы, ограничения длины и лимиты отправки."
+                : null)
         });
     }
 
@@ -605,6 +612,14 @@ public class NotificationsController : ControllerBase
             return string.IsNullOrWhiteSpace(email)
                 ? null
                 : new NotificationRecipient(null, email, email, null);
+        }
+
+        if (channel == NotificationChannels.Sms)
+        {
+            var phoneNumber = SmsPhoneNumberNormalizer.Normalize(request.PhoneNumber).E164;
+            return string.IsNullOrWhiteSpace(phoneNumber)
+                ? null
+                : new NotificationRecipient(null, phoneNumber, null, null, phoneNumber);
         }
 
         return request.TelegramChatId.HasValue

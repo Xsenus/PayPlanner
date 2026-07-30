@@ -3212,6 +3212,7 @@ export class ApiService {
     userId?: number | null;
     email?: string | null;
     telegramChatId?: number | null;
+    phoneNumber?: string | null;
     subject?: string | null;
     message?: string | null;
   }) {

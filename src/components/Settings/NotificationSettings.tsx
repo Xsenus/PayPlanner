@@ -1697,7 +1697,48 @@ function SmsSettingsPanel({
   setForm: Dispatch<SetStateAction<SmsSettingsForm>>;
   onSave: () => void | Promise<void>;
 }) {
+  const toast = useToast();
   const sms = settings?.sms;
+  const [testPhoneNumber, setTestPhoneNumber] = useState('');
+  const [testMessage, setTestMessage] = useState('Тестовое SMS из PayPlanner. Канал работает.');
+  const [testSending, setTestSending] = useState(false);
+  const [testResult, setTestResult] = useState<{ success: boolean; text: string } | null>(null);
+
+  const sendSmsTest = async () => {
+    const phoneNumber = testPhoneNumber.trim();
+    if (!canEdit || !phoneNumber) {
+      const text = 'Укажите мобильный номер для тестового SMS.';
+      setTestResult({ success: false, text });
+      toast.error(text, 'SMS');
+      return;
+    }
+
+    setTestSending(true);
+    setTestResult(null);
+    try {
+      const result = await apiService.sendNotificationTest({
+        channel: 'sms',
+        phoneNumber,
+        subject: 'Тестовое SMS PayPlanner',
+        message: testMessage.trim(),
+      });
+      const text = result.success
+        ? `Тестовое SMS отправлено на ${result.recipient}.`
+        : result.error || 'Тестовое SMS не отправлено.';
+      setTestResult({ success: result.success, text });
+      if (result.success) {
+        toast.success(text, 'SMS');
+      } else {
+        toast.error(text, 'SMS');
+      }
+    } catch (error) {
+      const text = extractDisplayErrorMessage(error, 'Не удалось выполнить тестовую отправку SMS.');
+      setTestResult({ success: false, text });
+      toast.error(text, 'SMS');
+    } finally {
+      setTestSending(false);
+    }
+  };
 
   return (
     <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
@@ -1962,6 +2003,65 @@ function SmsSettingsPanel({
           <Save className={`h-4 w-4 ${saving ? 'animate-pulse' : ''}`} />
           Сохранить SMS
         </button>
+      </div>
+
+      <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50/60 p-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="text-sm font-semibold text-gray-900">Тестовая отправка</div>
+            <p className="mt-1 max-w-3xl text-xs text-gray-600">
+              Используются сохранённые настройки и серверный API-токен. Токен не загружается в браузер и не показывается в результате.
+            </p>
+          </div>
+          <span className="rounded-full border border-blue-200 bg-white px-2.5 py-1 text-xs font-medium text-blue-700">
+            Запись появится в журнале доставок
+          </span>
+        </div>
+
+        <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(220px,0.8fr)_minmax(320px,1.4fr)_auto] lg:items-end">
+          <label className="text-sm font-medium text-gray-700">
+            Мобильный номер
+            <input
+              type="tel"
+              inputMode="tel"
+              autoComplete="tel"
+              value={testPhoneNumber}
+              disabled={!canEdit || testSending}
+              onChange={(event) => setTestPhoneNumber(event.target.value)}
+              placeholder="+7 999 123-45-67"
+              className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+            />
+          </label>
+          <label className="text-sm font-medium text-gray-700">
+            Текст
+            <input
+              value={testMessage}
+              disabled={!canEdit || testSending}
+              maxLength={240}
+              onChange={(event) => setTestMessage(event.target.value)}
+              className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+            />
+          </label>
+          <button
+            type="button"
+            onClick={() => void sendSmsTest()}
+            disabled={!canEdit || testSending || !testPhoneNumber.trim() || !testMessage.trim()}
+            className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+          >
+            {testSending ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            {testSending ? 'Отправляем…' : 'Отправить тест'}
+          </button>
+        </div>
+
+        {testResult ? (
+          <div className={`mt-3 rounded-lg border px-3 py-2 text-sm ${
+            testResult.success
+              ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+              : 'border-amber-200 bg-amber-50 text-amber-800'
+          }`}>
+            {testResult.text}
+          </div>
+        ) : null}
       </div>
     </div>
   );

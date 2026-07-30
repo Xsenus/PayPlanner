@@ -4,6 +4,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -11,6 +12,7 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
@@ -186,6 +188,90 @@ public class NotificationServiceTests
         var savedDelivery = await db.NotificationDeliveries.SingleAsync();
         Assert.Equal(delivery.Id, savedDelivery.Id);
         Assert.Equal(NotificationDeliveryStatus.Skipped, savedDelivery.Status);
+    }
+
+    [Fact]
+    public async Task SendTest_AllowsSmsAndKeepsProviderCredentialsOnServer()
+    {
+        await using var db = await CreateContextAsync();
+        var smsService = new RecordingSmsNotificationService();
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            smsNotificationService: smsService);
+        var controller = new NotificationsController(db, service, null!, null!)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext()
+            }
+        };
+
+        var action = await controller.SendTest(
+            new SendNotificationTestRequest
+            {
+                Channel = NotificationChannels.Sms,
+                PhoneNumber = "+7 (999) 123-45-67",
+                Subject = "Тестовое SMS",
+                Message = "Проверка SMS из настроек."
+            },
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var response = Assert.IsType<SendNotificationTestResponseDto>(ok.Value);
+        Assert.True(response.Success);
+        Assert.Equal(NotificationChannels.Sms, response.Channel);
+        Assert.Equal("+79991234567", response.Recipient);
+        Assert.Equal(NotificationDeliveryStatus.Sent, response.Status);
+        Assert.Null(response.Error);
+        var sent = Assert.Single(smsService.Messages);
+        Assert.Equal("+79991234567", sent.PhoneNumber);
+        Assert.Equal("Проверка SMS из настроек.", sent.Text);
+        Assert.StartsWith(SmsProviderIdempotencyKey.Prefix, sent.IdempotencyKey, StringComparison.Ordinal);
+
+        var delivery = await db.NotificationDeliveries.SingleAsync();
+        Assert.Equal("+79991234567", delivery.RecipientAddress);
+        Assert.Equal(NotificationDeliveryStatus.Sent, delivery.Status);
+    }
+
+    [Fact]
+    public async Task SendTest_RejectsInvalidSmsNumberBeforeCreatingDelivery()
+    {
+        await using var db = await CreateContextAsync();
+        var smsService = new RecordingSmsNotificationService();
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            smsNotificationService: smsService);
+        var controller = new NotificationsController(db, service, null!, null!)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext()
+            }
+        };
+
+        var action = await controller.SendTest(
+            new SendNotificationTestRequest
+            {
+                Channel = NotificationChannels.Sms,
+                PhoneNumber = "123",
+                Message = "Проверка SMS из настроек."
+            },
+            CancellationToken.None);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(action.Result);
+        var error = JsonSerializer.SerializeToElement(badRequest.Value)
+            .GetProperty("message")
+            .GetString();
+        Assert.Contains(
+            "корректный мобильный номер",
+            error,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(smsService.Messages);
+        Assert.False(await db.NotificationDeliveries.AnyAsync());
     }
 
     [Fact]
