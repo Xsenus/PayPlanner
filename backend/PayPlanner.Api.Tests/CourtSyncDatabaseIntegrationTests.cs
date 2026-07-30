@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 using Npgsql;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Services.Notifications;
 using Xunit;
 
 namespace PayPlanner.Api.Tests;
@@ -39,6 +40,7 @@ public sealed class CourtSyncDatabaseIntegrationTests
             Assert.Contains("20260729133312_AddCourtSyncProvenance", appliedMigrations);
 
             await AssertCourtSyncRoundTripAndUniqueConstraintAsync(context);
+            await AssertSmsDiagnosticsQueryAsync(context);
         }
         finally
         {
@@ -99,6 +101,7 @@ public sealed class CourtSyncDatabaseIntegrationTests
             Assert.Contains("20260729133331_AddCourtSyncProvenance", appliedMigrations);
 
             await AssertCourtSyncRoundTripAndUniqueConstraintAsync(context);
+            await AssertSmsDiagnosticsQueryAsync(context);
         }
         finally
         {
@@ -228,6 +231,54 @@ public sealed class CourtSyncDatabaseIntegrationTests
         });
 
         await Assert.ThrowsAsync<DbUpdateException>(() => context.SaveChangesAsync());
+        context.ChangeTracker.Clear();
+    }
+
+    private static async Task AssertSmsDiagnosticsQueryAsync(PaymentContext context)
+    {
+        var now = DateTime.UtcNow;
+        context.NotificationDeliveries.AddRange(
+            new NotificationDelivery
+            {
+                EventKey = "sms:database:sent",
+                Channel = NotificationChannels.Sms,
+                SenderName = "SMS",
+                RecipientAddress = "+79990000101",
+                Subject = "SMS",
+                BodyPreview = "Доставлено",
+                Status = NotificationDeliveryStatus.Sent,
+                CreatedAt = now.AddHours(-2),
+                SentAt = now.AddHours(-2).AddMinutes(1),
+            },
+            new NotificationDelivery
+            {
+                EventKey = "sms:database:failed",
+                Channel = NotificationChannels.Sms,
+                SenderName = "SMS",
+                RecipientAddress = "+79990000102",
+                Subject = "SMS",
+                BodyPreview = "Ошибка",
+                Status = NotificationDeliveryStatus.Failed,
+                Error = "Безопасная тестовая ошибка.",
+                CreatedAt = now.AddHours(-1),
+            });
+        await context.SaveChangesAsync();
+        var service = new SystemSmsNotificationService(context);
+        await service.SaveDiagnosticsAsync(new SmsProviderDiagnosticsSnapshot(
+            now,
+            true,
+            900m,
+            "RUB",
+            null,
+            "SMS-канал доступен."));
+
+        var settings = await service.GetSettingsAsync();
+
+        Assert.True(settings.Diagnostics.ProviderHealthy);
+        Assert.Equal(900m, settings.Diagnostics.Balance);
+        Assert.Equal(1, settings.Diagnostics.DeliveredCount);
+        Assert.Equal(1, settings.Diagnostics.FailedCount);
+        Assert.Equal(50m, settings.Diagnostics.DeliveredRatePercent);
     }
 
     private static void AssertSafeTemporaryDatabaseName(string databaseName)

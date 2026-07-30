@@ -128,6 +128,10 @@ public sealed class SmsChannelMonitoringServiceTests
         Assert.Contains("100,00 RUB", warning.Body, StringComparison.Ordinal);
         Assert.Equal(2, provider.HealthChecks);
         Assert.Equal(2, provider.BalanceChecks);
+        Assert.NotNull(smsService.LastDiagnostics);
+        Assert.True(smsService.LastDiagnostics.ProviderHealthy);
+        Assert.Equal(100m, smsService.LastDiagnostics.Balance);
+        Assert.Equal(SmsChannelMonitoringIssueCodes.LowBalance, smsService.LastDiagnostics.IssueCode);
     }
 
     [Fact]
@@ -191,6 +195,9 @@ public sealed class SmsChannelMonitoringServiceTests
         Assert.Empty(publisher.Warnings);
         Assert.Equal(0, provider.HealthChecks);
         Assert.Equal(0, provider.BalanceChecks);
+        Assert.NotNull(smsService.LastDiagnostics);
+        Assert.Null(smsService.LastDiagnostics.ProviderHealthy);
+        Assert.Null(smsService.LastDiagnostics.IssueCode);
     }
 
     private static ServiceProvider BuildServices(
@@ -223,6 +230,8 @@ public sealed class SmsChannelMonitoringServiceTests
 
     private sealed class FakeSmsNotificationService(SmsNotificationSettingsDto settings) : ISmsNotificationService
     {
+        public SmsProviderDiagnosticsSnapshot? LastDiagnostics { get; private set; }
+
         public Task<SmsNotificationSettingsDto> GetSettingsAsync(CancellationToken cancellationToken = default)
             => Task.FromResult(settings);
 
@@ -237,6 +246,14 @@ public sealed class SmsChannelMonitoringServiceTests
             string idempotencyKey,
             CancellationToken cancellationToken = default)
             => Task.FromResult(new SmsSendResult(false, NotificationDeliveryStatus.Skipped));
+
+        public Task SaveDiagnosticsAsync(
+            SmsProviderDiagnosticsSnapshot snapshot,
+            CancellationToken cancellationToken = default)
+        {
+            LastDiagnostics = snapshot;
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class DeduplicatingWarningPublisher : ISmsChannelWarningPublisher

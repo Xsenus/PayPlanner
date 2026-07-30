@@ -1002,6 +1002,24 @@ export interface SmsNotificationSettingsDto {
   quietHoursTimeZone: string;
   notes: string;
   statusText: string;
+  diagnostics: SmsNotificationDiagnosticsDto;
+}
+
+export interface SmsNotificationDiagnosticsDto {
+  lastCheckedAt?: string | null;
+  providerHealthy?: boolean | null;
+  balance?: number | null;
+  balanceCurrency: string;
+  issueCode?: string | null;
+  summary?: string | null;
+  lastSuccessfulDeliveryAt?: string | null;
+  lastFailedDeliveryAt?: string | null;
+  lastDeliveryError?: string | null;
+  pendingCount: number;
+  failedCount: number;
+  deliveredCount: number;
+  deliverySampleSize: number;
+  deliveredRatePercent?: number | null;
 }
 
 export interface MaxNotificationDiagnosticsDto {

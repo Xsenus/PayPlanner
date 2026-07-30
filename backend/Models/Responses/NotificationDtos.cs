@@ -68,6 +68,25 @@ public class SmsNotificationSettingsDto
     public string QuietHoursTimeZone { get; set; } = "Europe/Moscow";
     public string Notes { get; set; } = string.Empty;
     public string StatusText { get; set; } = string.Empty;
+    public SmsNotificationDiagnosticsDto Diagnostics { get; set; } = new();
+}
+
+public class SmsNotificationDiagnosticsDto
+{
+    public DateTime? LastCheckedAt { get; set; }
+    public bool? ProviderHealthy { get; set; }
+    public decimal? Balance { get; set; }
+    public string BalanceCurrency { get; set; } = string.Empty;
+    public string? IssueCode { get; set; }
+    public string? Summary { get; set; }
+    public DateTime? LastSuccessfulDeliveryAt { get; set; }
+    public DateTime? LastFailedDeliveryAt { get; set; }
+    public string? LastDeliveryError { get; set; }
+    public int PendingCount { get; set; }
+    public int FailedCount { get; set; }
+    public int DeliveredCount { get; set; }
+    public int DeliverySampleSize { get; set; }
+    public decimal? DeliveredRatePercent { get; set; }
 }
 
 public class MaxNotificationDiagnosticsDto

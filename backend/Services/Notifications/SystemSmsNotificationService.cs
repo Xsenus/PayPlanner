@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
@@ -23,6 +24,7 @@ public sealed class SystemSmsNotificationService : ISmsNotificationService
     public const string QuietHoursEndSettingKey = "notifications.sms.quietHours.end";
     public const string QuietHoursTimeZoneSettingKey = "notifications.sms.quietHours.timeZone";
     public const string NotesSettingKey = "notifications.sms.notes";
+    public const string DiagnosticsSettingKey = "notifications.sms.diagnostics";
     public const string DefaultQuietHoursStart = "22:00";
     public const string DefaultQuietHoursEnd = "08:00";
 
@@ -47,7 +49,8 @@ public sealed class SystemSmsNotificationService : ISmsNotificationService
         QuietHoursStartSettingKey,
         QuietHoursEndSettingKey,
         QuietHoursTimeZoneSettingKey,
-        NotesSettingKey
+        NotesSettingKey,
+        DiagnosticsSettingKey
     ];
 
     private readonly PaymentContext _context;
@@ -60,7 +63,9 @@ public sealed class SystemSmsNotificationService : ISmsNotificationService
     public async Task<SmsNotificationSettingsDto> GetSettingsAsync(CancellationToken cancellationToken = default)
     {
         var settings = await LoadSettingsAsync(cancellationToken);
-        return BuildSettings(settings);
+        var result = BuildSettings(settings);
+        result.Diagnostics = await BuildDiagnosticsAsync(settings, cancellationToken);
+        return result;
     }
 
     public async Task<SmsNotificationSettingsDto> UpdateSettingsAsync(
@@ -111,7 +116,36 @@ public sealed class SystemSmsNotificationService : ISmsNotificationService
         await _context.SaveChangesAsync(cancellationToken);
 
         var updated = await LoadSettingsAsync(cancellationToken);
-        return BuildSettings(updated);
+        var result = BuildSettings(updated);
+        result.Diagnostics = await BuildDiagnosticsAsync(updated, cancellationToken);
+        return result;
+    }
+
+    public async Task SaveDiagnosticsAsync(
+        SmsProviderDiagnosticsSnapshot snapshot,
+        CancellationToken cancellationToken = default)
+    {
+        var setting = await _context.SystemSettings
+            .FirstOrDefaultAsync(item => item.Key == DiagnosticsSettingKey, cancellationToken);
+        var now = DateTime.UtcNow;
+        var value = JsonSerializer.Serialize(snapshot);
+        if (setting is null)
+        {
+            _context.SystemSettings.Add(new SystemSetting
+            {
+                Key = DiagnosticsSettingKey,
+                Value = value,
+                CreatedAt = now,
+                UpdatedAt = now
+            });
+        }
+        else
+        {
+            setting.Value = value;
+            setting.UpdatedAt = now;
+        }
+
+        await _context.SaveChangesAsync(cancellationToken);
     }
 
     public async Task<SmsSendResult> SendMessageAsync(
@@ -226,6 +260,74 @@ public sealed class SystemSmsNotificationService : ISmsNotificationService
             .Where(setting => SettingKeys.Contains(setting.Key))
             .ToDictionaryAsync(setting => setting.Key, setting => setting.Value, cancellationToken);
 
+    private async Task<SmsNotificationDiagnosticsDto> BuildDiagnosticsAsync(
+        IReadOnlyDictionary<string, string> settings,
+        CancellationToken cancellationToken)
+    {
+        SmsProviderDiagnosticsSnapshot? providerSnapshot = null;
+        var rawSnapshot = settings.GetValueOrDefault(DiagnosticsSettingKey);
+        if (!string.IsNullOrWhiteSpace(rawSnapshot))
+        {
+            try
+            {
+                providerSnapshot = JsonSerializer.Deserialize<SmsProviderDiagnosticsSnapshot>(rawSnapshot);
+            }
+            catch (JsonException)
+            {
+                providerSnapshot = null;
+            }
+        }
+
+        var deliveredRateFrom = DateTime.UtcNow.AddDays(-30);
+        var deliveryStats = await _context.NotificationDeliveries
+            .AsNoTracking()
+            .Where(item => item.Channel == NotificationChannels.Sms)
+            .GroupBy(_ => 1)
+            .Select(group => new
+            {
+                PendingCount = group.Count(item => item.Status == NotificationDeliveryStatus.Pending),
+                FailedCount = group.Count(item =>
+                    item.CreatedAt >= deliveredRateFrom
+                    && item.Status == NotificationDeliveryStatus.Failed),
+                DeliveredCount = group.Count(item =>
+                    item.CreatedAt >= deliveredRateFrom
+                    && item.Status == NotificationDeliveryStatus.Sent),
+                LastSuccessfulDeliveryAt = group
+                    .Where(item => item.Status == NotificationDeliveryStatus.Sent)
+                    .Max(item => (DateTime?)item.SentAt ?? item.CreatedAt),
+                LastFailedDeliveryAt = group
+                    .Where(item => item.Status == NotificationDeliveryStatus.Failed)
+                    .Max(item => (DateTime?)item.CreatedAt),
+                LastDeliveryError = group
+                    .Where(item => item.Status == NotificationDeliveryStatus.Failed)
+                    .OrderByDescending(item => item.CreatedAt)
+                    .Select(item => item.Error)
+                    .FirstOrDefault()
+            })
+            .SingleOrDefaultAsync(cancellationToken);
+        var sampleSize = (deliveryStats?.DeliveredCount ?? 0) + (deliveryStats?.FailedCount ?? 0);
+
+        return new SmsNotificationDiagnosticsDto
+        {
+            LastCheckedAt = providerSnapshot?.CheckedAtUtc,
+            ProviderHealthy = providerSnapshot?.ProviderHealthy,
+            Balance = providerSnapshot?.Balance,
+            BalanceCurrency = NormalizeCurrency(providerSnapshot?.BalanceCurrency),
+            IssueCode = NormalizeOptional(providerSnapshot?.IssueCode),
+            Summary = NormalizeOptional(providerSnapshot?.Summary),
+            LastSuccessfulDeliveryAt = deliveryStats?.LastSuccessfulDeliveryAt,
+            LastFailedDeliveryAt = deliveryStats?.LastFailedDeliveryAt,
+            LastDeliveryError = NormalizeDiagnosticError(deliveryStats?.LastDeliveryError),
+            PendingCount = deliveryStats?.PendingCount ?? 0,
+            FailedCount = deliveryStats?.FailedCount ?? 0,
+            DeliveredCount = deliveryStats?.DeliveredCount ?? 0,
+            DeliverySampleSize = sampleSize,
+            DeliveredRatePercent = sampleSize == 0
+                ? null
+                : Math.Round((deliveryStats!.DeliveredCount * 100m) / sampleSize, 1)
+        };
+    }
+
     private void UpsertSetting(
         IDictionary<string, SystemSetting> settings,
         string key,
@@ -260,6 +362,28 @@ public sealed class SystemSmsNotificationService : ISmsNotificationService
     {
         var normalized = NormalizeOptional(value) ?? string.Empty;
         return normalized.Length <= 500 ? normalized : normalized[..500];
+    }
+
+    private static string NormalizeCurrency(string? value)
+    {
+        var normalized = NormalizeOptional(value)?.ToUpperInvariant();
+        return normalized is { Length: <= 12 } ? normalized : string.Empty;
+    }
+
+    private static string? NormalizeDiagnosticError(string? value)
+    {
+        var normalized = NormalizeOptional(value);
+        if (normalized is null)
+        {
+            return null;
+        }
+
+        var protection = SmsMessageProtector.Protect(new NotificationMessage(
+            "Ошибка SMS-доставки",
+            normalized));
+        return protection.WasReplaced
+            ? "Подробности ошибки скрыты. Проверьте настройки и журнал SMS-доставок."
+            : protection.Body;
     }
 
     private static int NormalizeLimit(int? value, int fallback, int min, int max)

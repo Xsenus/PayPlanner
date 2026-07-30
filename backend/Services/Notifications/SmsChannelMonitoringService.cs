@@ -205,6 +205,15 @@ public sealed class SmsChannelMonitoringService : BackgroundService
                     false,
                     null,
                     "SMS-канал отключён, проверка провайдера не требуется.");
+                await smsService.SaveDiagnosticsAsync(
+                    new SmsProviderDiagnosticsSnapshot(
+                        _timeProvider.GetUtcNow().UtcDateTime,
+                        null,
+                        null,
+                        string.Empty,
+                        null,
+                        disabledResult.Summary),
+                    cancellationToken);
                 await RecordSuccessAsync(startedAt, disabledResult, cancellationToken);
                 return disabledResult;
             }
@@ -249,6 +258,15 @@ public sealed class SmsChannelMonitoringService : BackgroundService
                 provider is not null,
                 health,
                 balance);
+            await smsService.SaveDiagnosticsAsync(
+                new SmsProviderDiagnosticsSnapshot(
+                    _timeProvider.GetUtcNow().UtcDateTime,
+                    provider is null ? null : health?.IsHealthy ?? false,
+                    balance is { IsAvailable: true } ? balance.Amount : null,
+                    balance?.Currency ?? string.Empty,
+                    decision.IssueCode,
+                    decision.Summary),
+                cancellationToken);
             var notificationRequested = false;
             if (decision.ShouldNotify && decision.IssueCode is not null)
             {

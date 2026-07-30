@@ -420,6 +420,93 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task SmsSettings_ReturnProviderAndDeliveryDiagnosticsInOneAggregate()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+        var now = DateTime.UtcNow;
+        db.NotificationDeliveries.AddRange(
+            new NotificationDelivery
+            {
+                EventKey = "sms:diagnostics:sent",
+                Channel = NotificationChannels.Sms,
+                SenderName = "SMS",
+                RecipientAddress = "+79990000001",
+                Subject = "SMS",
+                BodyPreview = "Доставлено",
+                Status = NotificationDeliveryStatus.Sent,
+                CreatedAt = now.AddDays(-2),
+                SentAt = now.AddDays(-2).AddMinutes(1)
+            },
+            new NotificationDelivery
+            {
+                EventKey = "sms:diagnostics:failed",
+                Channel = NotificationChannels.Sms,
+                SenderName = "SMS",
+                RecipientAddress = "+79990000002",
+                Subject = "SMS",
+                BodyPreview = "Ошибка",
+                Status = NotificationDeliveryStatus.Failed,
+                Error = "Provider response token=provider-secret",
+                CreatedAt = now.AddDays(-1)
+            },
+            new NotificationDelivery
+            {
+                EventKey = "sms:diagnostics:pending",
+                Channel = NotificationChannels.Sms,
+                SenderName = "SMS",
+                RecipientAddress = "+79990000003",
+                Subject = "SMS",
+                BodyPreview = "В очереди",
+                Status = NotificationDeliveryStatus.Pending,
+                CreatedAt = now.AddMinutes(-10)
+            },
+            new NotificationDelivery
+            {
+                EventKey = "sms:diagnostics:old-sent",
+                Channel = NotificationChannels.Sms,
+                SenderName = "SMS",
+                RecipientAddress = "+79990000004",
+                Subject = "SMS",
+                BodyPreview = "Старая доставка",
+                Status = NotificationDeliveryStatus.Sent,
+                CreatedAt = now.AddDays(-45),
+                SentAt = now.AddDays(-45).AddMinutes(1)
+            });
+        await db.SaveChangesAsync();
+        var smsService = new SystemSmsNotificationService(db);
+        await smsService.SaveDiagnosticsAsync(new SmsProviderDiagnosticsSnapshot(
+            now.AddMinutes(-5),
+            true,
+            1_250.50m,
+            "rub",
+            null,
+            "SMS-канал доступен."));
+        interceptor.ReaderCommands.Clear();
+
+        var settings = await smsService.GetSettingsAsync();
+        var diagnostics = settings.Diagnostics;
+
+        Assert.True(diagnostics.ProviderHealthy);
+        Assert.Equal(1_250.50m, diagnostics.Balance);
+        Assert.Equal("RUB", diagnostics.BalanceCurrency);
+        Assert.Equal(now.AddMinutes(-5), diagnostics.LastCheckedAt);
+        Assert.Equal(1, diagnostics.PendingCount);
+        Assert.Equal(1, diagnostics.DeliveredCount);
+        Assert.Equal(1, diagnostics.FailedCount);
+        Assert.Equal(2, diagnostics.DeliverySampleSize);
+        Assert.Equal(50m, diagnostics.DeliveredRatePercent);
+        Assert.Equal(
+            "Подробности ошибки скрыты. Проверьте настройки и журнал SMS-доставок.",
+            diagnostics.LastDeliveryError);
+        Assert.DoesNotContain("provider-secret", diagnostics.LastDeliveryError, StringComparison.Ordinal);
+        Assert.Equal(now.AddDays(-1), diagnostics.LastFailedDeliveryAt);
+        Assert.Equal(now.AddDays(-2).AddMinutes(1), diagnostics.LastSuccessfulDeliveryAt);
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("FROM \"NotificationDeliveries\"", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task SmsDelivery_UsesReadyProviderAndPersistsSentLog()
     {
         await using var db = await CreateContextAsync();

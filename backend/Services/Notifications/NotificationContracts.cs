@@ -993,6 +993,14 @@ public sealed record SmsSendResult(
     string Status,
     string? Error = null);
 
+public sealed record SmsProviderDiagnosticsSnapshot(
+    DateTime CheckedAtUtc,
+    bool? ProviderHealthy,
+    decimal? Balance,
+    string BalanceCurrency,
+    string? IssueCode,
+    string Summary);
+
 public interface ISmsNotificationService
 {
     Task<SmsNotificationSettingsDto> GetSettingsAsync(CancellationToken cancellationToken = default);
@@ -1004,6 +1012,10 @@ public interface ISmsNotificationService
         string text,
         string idempotencyKey,
         CancellationToken cancellationToken = default);
+    Task SaveDiagnosticsAsync(
+        SmsProviderDiagnosticsSnapshot snapshot,
+        CancellationToken cancellationToken = default)
+        => Task.CompletedTask;
 }
 
 public sealed record TelegramBotConnectionSettings(

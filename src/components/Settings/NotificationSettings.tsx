@@ -1699,6 +1699,8 @@ function SmsSettingsPanel({
 }) {
   const toast = useToast();
   const sms = settings?.sms;
+  const diagnostics = sms?.diagnostics;
+  const diagnosticsProblem = diagnostics?.issueCode ? diagnostics.summary : null;
   const [testPhoneNumber, setTestPhoneNumber] = useState('');
   const [testMessage, setTestMessage] = useState('Тестовое SMS из PayPlanner. Канал работает.');
   const [testSending, setTestSending] = useState(false);
@@ -1807,6 +1809,74 @@ function SmsSettingsPanel({
           <div className="text-xs font-semibold uppercase text-gray-500">Адаптер</div>
           <div className="mt-2 text-sm text-gray-700">{sms?.adapterConfigured ? 'подключен' : 'не подключен'}</div>
           <div className="mt-1 text-xs text-gray-500">токен: {sms?.apiTokenSet ? 'сохранен' : 'не указан'}</div>
+        </div>
+      </div>
+
+      <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+        <div className="rounded-xl border border-gray-200 bg-white p-3">
+          <div className="text-xs font-semibold uppercase text-gray-500">Состояние</div>
+          <div className={`mt-2 text-sm font-semibold ${
+            diagnostics?.providerHealthy === true
+              ? 'text-emerald-700'
+              : diagnostics?.providerHealthy === false
+                ? 'text-red-700'
+                : 'text-gray-600'
+          }`}>
+            {diagnostics?.providerHealthy === true
+              ? 'Провайдер доступен'
+              : diagnostics?.providerHealthy === false
+                ? 'Есть проблема'
+                : 'Ещё не проверялся'}
+          </div>
+          <div className="mt-1 text-xs text-gray-500">
+            {diagnostics?.lastCheckedAt ? formatDateTime(diagnostics.lastCheckedAt) : 'ожидается ежедневная проверка'}
+          </div>
+        </div>
+        <div className="rounded-xl border border-gray-200 bg-white p-3">
+          <div className="text-xs font-semibold uppercase text-gray-500">Баланс</div>
+          <div className="mt-2 text-sm font-semibold text-gray-900">
+            {diagnostics?.balance != null
+              ? `${diagnostics.balance.toLocaleString('ru-RU')} ${diagnostics.balanceCurrency || ''}`.trim()
+              : 'Нет данных'}
+          </div>
+          <div className="mt-1 text-xs text-gray-500">
+            порог: {sms?.lowBalanceThreshold ?? form.lowBalanceThreshold}
+          </div>
+        </div>
+        <div className="rounded-xl border border-gray-200 bg-white p-3">
+          <div className="text-xs font-semibold uppercase text-gray-500">Доставка за 30 дней</div>
+          <div className="mt-2 text-sm font-semibold text-gray-900">
+            {diagnostics?.deliveredRatePercent != null ? `${diagnostics.deliveredRatePercent}%` : 'Нет выборки'}
+          </div>
+          <div className="mt-1 text-xs text-gray-500">
+            {diagnostics?.deliveredCount ?? 0} из {diagnostics?.deliverySampleSize ?? 0} доставлено
+          </div>
+        </div>
+        <div className="rounded-xl border border-gray-200 bg-white p-3">
+          <div className="text-xs font-semibold uppercase text-gray-500">Очередь</div>
+          <div className="mt-2 text-sm font-semibold text-gray-900">{diagnostics?.pendingCount ?? 0}</div>
+          <div className="mt-1 text-xs text-gray-500">
+            ошибок за 30 дней: {diagnostics?.failedCount ?? 0}
+          </div>
+        </div>
+        <div className="rounded-xl border border-gray-200 bg-white p-3">
+          <div className="text-xs font-semibold uppercase text-gray-500">Последняя доставка</div>
+          <div className="mt-2 text-sm text-gray-700">
+            {formatDateTime(diagnostics?.lastSuccessfulDeliveryAt)}
+          </div>
+          <div className="mt-1 text-xs text-gray-500">успешное SMS</div>
+        </div>
+        <div className="min-w-0 rounded-xl border border-gray-200 bg-white p-3">
+          <div className="text-xs font-semibold uppercase text-gray-500">Последняя ошибка</div>
+          <div className="mt-2 text-sm text-gray-700">
+            {formatDateTime(diagnostics?.lastFailedDeliveryAt)}
+          </div>
+          <div
+            className="mt-1 truncate text-xs text-red-600"
+            title={diagnostics?.lastDeliveryError || diagnosticsProblem || ''}
+          >
+            {diagnostics?.lastDeliveryError || diagnosticsProblem || 'ошибок нет'}
+          </div>
         </div>
       </div>
 
