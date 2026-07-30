@@ -4199,6 +4199,101 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task TaskJournalAutomationScheduler_RestoresAllLegacyCycleLevelsIdempotently()
+    {
+        await using var db = await CreateContextAsync();
+        var assignee = await CreateAdminUserAsync(db, "legacy-levels-assignee@example.com", "Ответственный дела");
+        var client = await CreateClientAsync(db, "Клиент уровней автоконтроля");
+        client.ResponsibleUserId = assignee.Id;
+        var clientCase = await CreateCaseAsync(db, client.Id, "УРОВНИ СТАРОГО ЦИКЛА");
+        var now = DateTime.UtcNow;
+        clientCase.CreatedAt = now.AddDays(-20);
+
+        var tasks = new List<TaskJournalItem>();
+        for (var index = 0; index < 3; index++)
+        {
+            var task = await CreateTaskAsync(
+                db,
+                assignee.Id,
+                client.Id,
+                assigneeUserId: assignee.Id,
+                clientCaseId: clientCase.Id,
+                status: "new",
+                createdAt: now);
+            task.Type = "control";
+            task.Title = $"Старый автоконтроль {index + 1}";
+            task.TagsJson = "[\"автоконтроль\"]";
+            tasks.Add(task);
+        }
+
+        db.TaskJournalComments.AddRange(
+            new TaskJournalComment
+            {
+                TaskJournalItemId = tasks[1].Id,
+                AuthorName = "Автоконтроль",
+                Kind = "system",
+                Text = "Первый повтор.",
+                MetadataJson = "{\"eventType\":\"caseInactivityControlEscalation\",\"level\":1,\"offsetDays\":2}",
+                CreatedAt = now,
+                UpdatedAt = now,
+            },
+            new TaskJournalComment
+            {
+                TaskJournalItemId = tasks[2].Id,
+                AuthorName = "Автоконтроль",
+                Kind = "system",
+                Text = "Первый повтор.",
+                MetadataJson = "{\"eventType\":\"caseInactivityControlEscalation\",\"level\":1,\"offsetDays\":2}",
+                CreatedAt = now,
+                UpdatedAt = now,
+            },
+            new TaskJournalComment
+            {
+                TaskJournalItemId = tasks[2].Id,
+                AuthorName = "Автоконтроль",
+                Kind = "system",
+                Text = "Критический повтор.",
+                MetadataJson = "{\"eventType\":\"caseInactivityControlEscalation\",\"level\":2,\"offsetDays\":4}",
+                CreatedAt = now,
+                UpdatedAt = now,
+            });
+        await db.SaveChangesAsync();
+
+        var (scheduler, provider) = CreateAutomationScheduler(db, new Dictionary<string, string?>
+        {
+            ["TaskJournal:Automation:Enabled"] = "true",
+            ["TaskJournal:Automation:InactiveDays"] = "14",
+            ["TaskJournal:Automation:Limit"] = "10",
+        });
+
+        using (provider)
+        {
+            var firstRun = await scheduler.RunOnceAsync(CancellationToken.None);
+            var secondRun = await scheduler.RunOnceAsync(CancellationToken.None);
+
+            Assert.Null(firstRun.Error);
+            Assert.Null(secondRun.Error);
+            Assert.Equal(0, firstRun.CreatedCount);
+            Assert.Equal(0, secondRun.CreatedCount);
+            Assert.Equal(0, firstRun.EscalatedCount);
+            Assert.Equal(0, secondRun.EscalatedCount);
+        }
+
+        foreach (var task in tasks)
+        {
+            await db.Entry(task).ReloadAsync();
+        }
+
+        Assert.Equal(1, tasks[0].InactivityControlCycleNumber);
+        Assert.Equal(tasks[0].CreatedAt.AddDays(2), tasks[0].InactivityControlNextCheckAt);
+        Assert.Equal(2, tasks[1].InactivityControlCycleNumber);
+        Assert.Equal(tasks[1].CreatedAt.AddDays(4), tasks[1].InactivityControlNextCheckAt);
+        Assert.Equal(3, tasks[2].InactivityControlCycleNumber);
+        Assert.Null(tasks[2].InactivityControlNextCheckAt);
+        Assert.Equal(3, await db.TaskJournalComments.CountAsync());
+    }
+
+    [Fact]
     public async Task TaskJournalAutomationScheduler_StopsStoredCycleAfterMeaningfulActivity()
     {
         await using var db = await CreateContextAsync();
