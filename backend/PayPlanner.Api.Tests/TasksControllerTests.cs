@@ -3871,6 +3871,74 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task TaskJournalAutomationScheduler_DoesNotDuplicateControlAfterGlobalDefaultsChange()
+    {
+        await using var db = await CreateContextAsync();
+        var initialAssignee = await CreateAdminUserAsync(db, "defaults-initial@example.com", "Первый ответственный");
+        var newDefaultAssignee = await CreateAdminUserAsync(db, "defaults-new@example.com", "Новый резервный ответственный");
+        var client = await CreateClientAsync(db, "Клиент изменения правил");
+        client.ResponsibleUserId = initialAssignee.Id;
+        var clientCase = await CreateCaseAsync(db, client.Id, "ИЗМЕНЕНИЕ ПРАВИЛ АВТОКОНТРОЛЯ");
+        clientCase.CreatedAt = DateTime.UtcNow.AddDays(-40);
+        await db.SaveChangesAsync();
+        var (scheduler, provider) = CreateAutomationScheduler(db, new Dictionary<string, string?>
+        {
+            ["TaskJournal:Automation:Enabled"] = "true",
+            ["TaskJournal:Automation:InactiveDays"] = "14",
+            ["TaskJournal:Automation:EscalationDays"] = "30",
+            ["TaskJournal:Automation:Limit"] = "10",
+        });
+
+        using (provider)
+        {
+            var firstRun = await scheduler.RunOnceAsync(CancellationToken.None);
+            Assert.Null(firstRun.Error);
+            Assert.Equal(1, firstRun.CreatedCount);
+
+            var now = DateTime.UtcNow;
+            db.SystemSettings.AddRange(
+                new SystemSetting
+                {
+                    Key = "tasks.automation.caseControl.inactiveDays",
+                    Value = "2",
+                    CreatedAt = now,
+                    UpdatedAt = now,
+                },
+                new SystemSetting
+                {
+                    Key = "tasks.automation.caseControl.escalationDays",
+                    Value = "4",
+                    CreatedAt = now,
+                    UpdatedAt = now,
+                },
+                new SystemSetting
+                {
+                    Key = "tasks.automation.caseControl.defaultAssigneeUserId",
+                    Value = newDefaultAssignee.Id.ToString(),
+                    CreatedAt = now,
+                    UpdatedAt = now,
+                },
+                new SystemSetting
+                {
+                    Key = "tasks.automation.caseControl.limit",
+                    Value = "100",
+                    CreatedAt = now,
+                    UpdatedAt = now,
+                });
+            await db.SaveChangesAsync();
+
+            var secondRun = await scheduler.RunOnceAsync(CancellationToken.None);
+            Assert.Null(secondRun.Error);
+            Assert.Equal(0, secondRun.CreatedCount);
+        }
+
+        var task = await db.TaskJournalItems.SingleAsync(item => item.ClientCaseId == clientCase.Id);
+        Assert.Equal(initialAssignee.Id, task.AssigneeUserId);
+        Assert.Equal(1, task.InactivityControlCycleNumber);
+        Assert.Equal(task.CreatedAt.AddDays(2), task.InactivityControlNextCheckAt);
+    }
+
+    [Fact]
     public async Task TaskJournalAutomationScheduler_RechecksCandidateCasesInSingleQuery()
     {
         var interceptor = new RecordingCommandInterceptor();
