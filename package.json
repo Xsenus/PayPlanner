@@ -15,6 +15,7 @@
     "roadmap:advance-status": "node scripts/check-advance-roadmap-status.mjs docs/archive/roadmaps/unallocated-advance-monitoring-roadmap-2026-06-12.md",
     "roadmap:advance-status:test": "node scripts/check-advance-roadmap-status.mjs --self-test",
     "roadmap:acceptance-package": "node scripts/check-roadmap-acceptance-package.mjs",
+    "roadmap:active-progress": "node scripts/check-active-roadmap-progress.mjs",
     "roadmap:decision-package": "node scripts/check-roadmap-decision-package.mjs",
     "test": "npm run test:unit",
     "test:all": "vitest run",
