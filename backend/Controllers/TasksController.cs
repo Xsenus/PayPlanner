@@ -4667,40 +4667,39 @@ public class TasksController : ControllerBase
         return entity.BillingModeSnapshot == ContractBillingMode.Fixed ? "fixed" : "unbilled";
     }
 
-    private static DateTime ResolveLastCaseActivity(ClientCase clientCase, params DateTime?[] activitySignals)
+    private static DateTime ResolveLastCaseActivity(
+        ClientCase clientCase,
+        DateTime? lastTaskAt,
+        DateTime? lastTaskCommentAt,
+        DateTime? lastDocumentAt,
+        DateTime? lastCourtEventAt)
         => ResolveLastCaseActivity(
             clientCase.CreatedAt,
             clientCase.LastViewedAt,
             clientCase.ActivityConfirmedAt,
-            activitySignals);
+            lastTaskAt,
+            lastTaskCommentAt,
+            lastDocumentAt,
+            lastCourtEventAt);
 
     private static DateTime ResolveLastCaseActivity(
         DateTime createdAt,
         DateTime? lastViewedAt,
         DateTime? activityConfirmedAt,
-        params DateTime?[] activitySignals)
-    {
-        var lastActivity = createdAt;
-        foreach (var signal in activitySignals)
-        {
-            if (signal.HasValue && signal.Value > lastActivity)
-            {
-                lastActivity = signal.Value;
-            }
-        }
-
-        if (lastViewedAt.HasValue && lastViewedAt.Value > lastActivity)
-        {
-            lastActivity = lastViewedAt.Value;
-        }
-
-        if (activityConfirmedAt.HasValue && activityConfirmedAt.Value > lastActivity)
-        {
-            lastActivity = activityConfirmedAt.Value;
-        }
-
-        return lastActivity;
-    }
+        DateTime? lastTaskAt,
+        DateTime? lastTaskCommentAt,
+        DateTime? lastDocumentAt,
+        DateTime? lastCourtEventAt)
+        => CaseMeaningfulActivityResolver.Resolve(
+            new CaseMeaningfulActivitySignals(
+                createdAt,
+                LastTaskAt: lastTaskAt,
+                LastTaskCommentAt: lastTaskCommentAt,
+                LastDocumentAt: lastDocumentAt,
+                LastCourtEventAt: lastCourtEventAt,
+                LastResponsibleViewAt: lastViewedAt,
+                LastActivityConfirmationAt: activityConfirmedAt))
+            .At;
 
     private static TaskClientBinding BuildCaseBinding(ClientCase clientCase)
     {
@@ -5598,9 +5597,17 @@ public class TasksController : ControllerBase
         TaskJournalSettingsDto settings,
         User? escalationUser,
         DateTime dueAt,
-        params DateTime?[] activitySignals)
+        DateTime? lastTaskAt,
+        DateTime? lastTaskCommentAt,
+        DateTime? lastDocumentAt,
+        DateTime? lastCourtEventAt)
     {
-        var lastActivity = ResolveLastCaseActivity(clientCase, activitySignals);
+        var lastActivity = ResolveLastCaseActivity(
+            clientCase,
+            lastTaskAt,
+            lastTaskCommentAt,
+            lastDocumentAt,
+            lastCourtEventAt);
         var daysWithoutActiveTask = Math.Max(0, (int)Math.Floor((DateTime.UtcNow - lastActivity).TotalDays));
         var isEscalated = daysWithoutActiveTask >= settings.CaseInactivityEscalationDays;
 

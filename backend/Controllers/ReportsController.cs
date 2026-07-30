@@ -5565,77 +5565,45 @@ public class ReportsController : ControllerBase
     private static int ParseIntSetting(string? value, int fallback)
         => int.TryParse(value, out var parsed) ? parsed : fallback;
 
-    private static DateTime ResolveCaseLastActivityAt(ClientCase clientCase, params DateTime?[] activitySignals)
-    {
-        var lastActivity = clientCase.CreatedAt;
-        foreach (var signal in activitySignals)
-        {
-            if (signal.HasValue && signal.Value > lastActivity)
-            {
-                lastActivity = signal.Value;
-            }
-        }
+    private static DateTime ResolveCaseLastActivityAt(CurrentCaseQueryRow clientCase)
+        => ResolveCaseLastActivityAt(
+            clientCase.CreatedAt,
+            clientCase.LastViewedAt,
+            clientCase.ActivityConfirmedAt);
 
-        if (clientCase.LastViewedAt.HasValue && clientCase.LastViewedAt.Value > lastActivity)
-        {
-            lastActivity = clientCase.LastViewedAt.Value;
-        }
+    private static DateTime ResolveCaseLastActivityAt(
+        CaseActivityCaseRow clientCase,
+        DateTime? lastTaskAt,
+        DateTime? lastTaskCommentAt,
+        DateTime? lastDocumentAt,
+        DateTime? lastCourtEventAt)
+        => ResolveCaseLastActivityAt(
+            clientCase.CreatedAt,
+            clientCase.LastViewedAt,
+            clientCase.ActivityConfirmedAt,
+            lastTaskAt,
+            lastTaskCommentAt,
+            lastDocumentAt,
+            lastCourtEventAt);
 
-        if (clientCase.ActivityConfirmedAt.HasValue && clientCase.ActivityConfirmedAt.Value > lastActivity)
-        {
-            lastActivity = clientCase.ActivityConfirmedAt.Value;
-        }
-
-        return lastActivity;
-    }
-
-    private static DateTime ResolveCaseLastActivityAt(CurrentCaseQueryRow clientCase, params DateTime?[] activitySignals)
-    {
-        var lastActivity = clientCase.CreatedAt;
-        foreach (var signal in activitySignals)
-        {
-            if (signal.HasValue && signal.Value > lastActivity)
-            {
-                lastActivity = signal.Value;
-            }
-        }
-
-        if (clientCase.LastViewedAt.HasValue && clientCase.LastViewedAt.Value > lastActivity)
-        {
-            lastActivity = clientCase.LastViewedAt.Value;
-        }
-
-        if (clientCase.ActivityConfirmedAt.HasValue && clientCase.ActivityConfirmedAt.Value > lastActivity)
-        {
-            lastActivity = clientCase.ActivityConfirmedAt.Value;
-        }
-
-        return lastActivity;
-    }
-
-    private static DateTime ResolveCaseLastActivityAt(CaseActivityCaseRow clientCase, params DateTime?[] activitySignals)
-    {
-        var lastActivity = clientCase.CreatedAt;
-        foreach (var signal in activitySignals)
-        {
-            if (signal.HasValue && signal.Value > lastActivity)
-            {
-                lastActivity = signal.Value;
-            }
-        }
-
-        if (clientCase.LastViewedAt.HasValue && clientCase.LastViewedAt.Value > lastActivity)
-        {
-            lastActivity = clientCase.LastViewedAt.Value;
-        }
-
-        if (clientCase.ActivityConfirmedAt.HasValue && clientCase.ActivityConfirmedAt.Value > lastActivity)
-        {
-            lastActivity = clientCase.ActivityConfirmedAt.Value;
-        }
-
-        return lastActivity;
-    }
+    private static DateTime ResolveCaseLastActivityAt(
+        DateTime createdAt,
+        DateTime? lastResponsibleViewAt,
+        DateTime? activityConfirmedAt,
+        DateTime? lastTaskAt = null,
+        DateTime? lastTaskCommentAt = null,
+        DateTime? lastDocumentAt = null,
+        DateTime? lastCourtEventAt = null)
+        => CaseMeaningfulActivityResolver.Resolve(
+            new CaseMeaningfulActivitySignals(
+                createdAt,
+                LastTaskAt: lastTaskAt,
+                LastTaskCommentAt: lastTaskCommentAt,
+                LastDocumentAt: lastDocumentAt,
+                LastCourtEventAt: lastCourtEventAt,
+                LastResponsibleViewAt: lastResponsibleViewAt,
+                LastActivityConfirmationAt: activityConfirmedAt))
+            .At;
 
     private static string BuildCaseActivityReason(
         ClientCase clientCase,
