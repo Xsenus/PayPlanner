@@ -616,7 +616,7 @@ export function TaskJournalSettings() {
           </label>
 
           <label className="block">
-            <span className="text-sm font-medium text-gray-700">Лимит задач за запуск</span>
+            <span className="text-sm font-medium text-gray-700">Дневной лимит новых задач</span>
             <input
               type="number"
               min={1}
@@ -629,6 +629,7 @@ export function TaskJournalSettings() {
               disabled={loading || saving || !settings.caseInactivityAutomationEnabled}
               className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm disabled:cursor-not-allowed disabled:bg-gray-100"
             />
+            <span className="mt-1 block text-xs text-gray-500">Автоматический проход выполняется раз в сутки и создаёт не больше указанного числа задач.</span>
           </label>
 
           <label className="block">

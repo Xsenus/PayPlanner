@@ -4061,6 +4061,38 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task TaskJournalAutomationScheduler_RespectsDailyCreationLimit()
+    {
+        await using var db = await CreateContextAsync();
+        var assignee = await CreateAdminUserAsync(db, "daily-limit@example.com", "Ответственный автоконтроля");
+        var client = await CreateClientAsync(db, "Клиент дневного лимита");
+        client.ResponsibleUserId = assignee.Id;
+        for (var index = 1; index <= 3; index++)
+        {
+            var clientCase = await CreateCaseAsync(db, client.Id, $"ДЕЛО ДНЕВНОГО ЛИМИТА {index}");
+            clientCase.CreatedAt = DateTime.UtcNow.AddDays(-30);
+        }
+
+        await db.SaveChangesAsync();
+        var (scheduler, provider) = CreateAutomationScheduler(db, new Dictionary<string, string?>
+        {
+            ["TaskJournal:Automation:Enabled"] = "true",
+            ["TaskJournal:Automation:InactiveDays"] = "14",
+            ["TaskJournal:Automation:Limit"] = "1",
+        });
+
+        using (provider)
+        {
+            var result = await scheduler.RunOnceAsync(CancellationToken.None);
+
+            Assert.Null(result.Error);
+            Assert.Equal(1, result.CreatedCount);
+        }
+
+        Assert.Equal(1, await db.TaskJournalItems.CountAsync());
+    }
+
+    [Fact]
     public async Task TaskJournalAutomationScheduler_EscalatesLongInactiveCase()
     {
         await using var db = await CreateContextAsync();

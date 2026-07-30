@@ -122,6 +122,7 @@ describe('TaskJournalSettings', () => {
     render(<TaskJournalSettings />);
 
     const runTime = await screen.findByLabelText('Время автоматического запуска');
+    expect(screen.getByRole('spinbutton', { name: /Дневной лимит новых задач/i })).toBeTruthy();
     fireEvent.change(runTime, { target: { value: '16:45' } });
     fireEvent.change(screen.getByLabelText('Часовой пояс запуска'), {
       target: { value: 'Asia/Novosibirsk' },
