@@ -14,6 +14,7 @@
     "deploy:verify-production": "node scripts/run-production-deploy-readiness.mjs",
     "roadmap:advance-status": "node scripts/check-advance-roadmap-status.mjs docs/archive/roadmaps/unallocated-advance-monitoring-roadmap-2026-06-12.md",
     "roadmap:advance-status:test": "node scripts/check-advance-roadmap-status.mjs --self-test",
+    "roadmap:decision-package": "node scripts/check-roadmap-decision-package.mjs",
     "test": "npm run test:unit",
     "test:all": "vitest run",
     "test:unit": "vitest run --exclude \"**/*.integration.test.*\" --maxWorkers=3",
