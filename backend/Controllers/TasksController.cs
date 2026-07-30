@@ -467,6 +467,8 @@ public class TasksController : ControllerBase
         var now = DateTime.UtcNow;
         var inactivityCutoff = now.AddDays(-settings.CaseInactivityDays);
         var escalationCutoff = now.AddDays(-settings.CaseInactivityEscalationDays);
+        var vacationUserIds = await CaseInactivityResponsibleAvailabilityService
+            .GetUsersOnVacationAsync(_db, now, ct);
 
         var visibleCases = _db.ClientCases
             .AsNoTracking()
@@ -474,7 +476,11 @@ public class TasksController : ControllerBase
             .Where(clientCase =>
                 ((clientCase.ClientId.HasValue && clientCase.Client != null) ||
                  (clientCase.LegalEntityId.HasValue && clientCase.LegalEntity != null)) &&
-                !CaseInactivityControlCyclePolicy.ExcludedCaseStatuses.Contains(clientCase.Status))
+                !CaseInactivityControlCyclePolicy.ExcludedCaseStatuses.Contains(clientCase.Status) &&
+                !vacationUserIds.Contains(
+                    (clientCase.ResponsibleUserId ??
+                     (clientCase.Client != null ? clientCase.Client.ResponsibleUserId : null) ??
+                     (clientCase.LegalEntity != null ? clientCase.LegalEntity.ResponsibleUserId : null)) ?? 0))
             .Select(clientCase => new
             {
                 clientCase.Id,
@@ -792,6 +798,8 @@ public class TasksController : ControllerBase
         var effectiveEscalationDays = Math.Clamp(escalationDays ?? settings.CaseInactivityEscalationDays, effectiveInactiveDays, 365);
         var now = DateTime.UtcNow;
         var cutoff = now.AddDays(-effectiveInactiveDays);
+        var vacationUserIds = await CaseInactivityResponsibleAvailabilityService
+            .GetUsersOnVacationAsync(_db, now, ct);
 
         var candidates = _db.ClientCases
             .AsNoTracking()
@@ -799,7 +807,11 @@ public class TasksController : ControllerBase
             .Where(clientCase =>
                 ((clientCase.ClientId.HasValue && clientCase.Client != null) ||
                  (clientCase.LegalEntityId.HasValue && clientCase.LegalEntity != null)) &&
-                !CaseInactivityControlCyclePolicy.ExcludedCaseStatuses.Contains(clientCase.Status))
+                !CaseInactivityControlCyclePolicy.ExcludedCaseStatuses.Contains(clientCase.Status) &&
+                !vacationUserIds.Contains(
+                    (clientCase.ResponsibleUserId ??
+                     (clientCase.Client != null ? clientCase.Client.ResponsibleUserId : null) ??
+                     (clientCase.LegalEntity != null ? clientCase.LegalEntity.ResponsibleUserId : null)) ?? 0))
             .Select(clientCase => new
             {
                 clientCase.Id,
@@ -958,6 +970,20 @@ public class TasksController : ControllerBase
             return NotFound(new { message = "Дело для автоконтроля не найдено или уже закрыто." });
         }
 
+        var now = DateTime.UtcNow;
+        var responsibleUserId = clientCase.ResponsibleUserId
+            ?? clientCase.Client?.ResponsibleUserId
+            ?? clientCase.LegalEntity?.ResponsibleUserId;
+        var vacationUserIds = await CaseInactivityResponsibleAvailabilityService
+            .GetUsersOnVacationAsync(_db, now, ct);
+        if (responsibleUserId.HasValue && vacationUserIds.Contains(responsibleUserId.Value))
+        {
+            return Conflict(new
+            {
+                message = "Ответственный по делу находится в отпуске. Автоконтроль будет продолжен после его возвращения.",
+            });
+        }
+
         var existingActiveTask = await _db.TaskJournalItems
             .AsNoTracking()
             .Where(task =>
@@ -1015,7 +1041,6 @@ public class TasksController : ControllerBase
             return BadRequest(new { message = "Автоконтроль для этого дела отключен." });
         }
 
-        var now = DateTime.UtcNow;
         var lastActivity = ResolveLastCaseActivity(
             clientCase,
             signals.LastTaskAt,
@@ -1118,6 +1143,8 @@ public class TasksController : ControllerBase
         var now = DateTime.UtcNow;
         var cutoff = now.AddDays(-settings.CaseInactivityDays);
         var escalationUser = await ResolveConfiguredAutomationUserAsync(settings.CaseInactivityEscalationUserId, ct);
+        var vacationUserIds = await CaseInactivityResponsibleAvailabilityService
+            .GetUsersOnVacationAsync(_db, now, ct);
         var candidates = await _db.ClientCases
             .Include(item => item.Client)
             .Include(item => item.LegalEntity)
@@ -1125,7 +1152,11 @@ public class TasksController : ControllerBase
             .Where(clientCase =>
                 ((clientCase.ClientId.HasValue && clientCase.Client != null) ||
                  (clientCase.LegalEntityId.HasValue && clientCase.LegalEntity != null)) &&
-                !CaseInactivityControlCyclePolicy.ExcludedCaseStatuses.Contains(clientCase.Status))
+                !CaseInactivityControlCyclePolicy.ExcludedCaseStatuses.Contains(clientCase.Status) &&
+                !vacationUserIds.Contains(
+                    (clientCase.ResponsibleUserId ??
+                     (clientCase.Client != null ? clientCase.Client.ResponsibleUserId : null) ??
+                     (clientCase.LegalEntity != null ? clientCase.LegalEntity.ResponsibleUserId : null)) ?? 0))
             .Select(clientCase => new
             {
                 Case = clientCase,

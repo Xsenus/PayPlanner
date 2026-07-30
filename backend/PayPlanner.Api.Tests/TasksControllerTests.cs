@@ -3274,6 +3274,50 @@ public class TasksControllerTests
         Assert.Contains(candidates, item => item.ClientCaseId == casesByStatus["cancelled"].Id);
     }
 
+    [Fact]
+    public async Task GetAutomationCaseCandidates_SkipsCaseWhileResponsibleIsOnVacation()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "vacation-preview@example.com", "Ответственный в отпуске");
+        var client = await CreateClientAsync(db, "Клиент отпуска");
+        client.ResponsibleUserId = author.Id;
+        var clientCase = await CreateCaseAsync(db, client.Id, "ДЕЛО НА ВРЕМЯ ОТПУСКА");
+        clientCase.CreatedAt = DateTime.UtcNow.AddDays(-30);
+        await SetVacationAsync(db, author.Id, DateTime.UtcNow.AddDays(5));
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.GetAutomationCaseCandidates(
+            inactiveDays: 14,
+            limit: 10,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var candidates = Assert.IsAssignableFrom<IReadOnlyList<TaskJournalCaseAutomationCandidateDto>>(ok.Value);
+        Assert.DoesNotContain(candidates, item => item.ClientCaseId == clientCase.Id);
+    }
+
+    [Fact]
+    public async Task GetAutomationCaseCandidates_ResumesCaseAfterResponsibleVacationEnds()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "vacation-ended@example.com", "Вернувшийся ответственный");
+        var client = await CreateClientAsync(db, "Клиент после отпуска");
+        client.ResponsibleUserId = author.Id;
+        var clientCase = await CreateCaseAsync(db, client.Id, "ДЕЛО ПОСЛЕ ОТПУСКА");
+        clientCase.CreatedAt = DateTime.UtcNow.AddDays(-30);
+        await SetVacationAsync(db, author.Id, DateTime.UtcNow.AddDays(-1));
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.GetAutomationCaseCandidates(
+            inactiveDays: 14,
+            limit: 10,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var candidates = Assert.IsAssignableFrom<IReadOnlyList<TaskJournalCaseAutomationCandidateDto>>(ok.Value);
+        Assert.Contains(candidates, item => item.ClientCaseId == clientCase.Id);
+    }
+
     [Theory]
     [InlineData("done")]
     [InlineData("cancelled")]
@@ -3442,6 +3486,25 @@ public class TasksControllerTests
         var result = await controller.CreateAutomationTaskForCase(clientCase.Id, CancellationToken.None);
 
         Assert.IsType<NotFoundObjectResult>(result.Result);
+        Assert.False(await db.TaskJournalItems.AnyAsync(item => item.ClientCaseId == clientCase.Id));
+    }
+
+    [Fact]
+    public async Task CreateAutomationTaskForCase_SkipsCaseWhileResponsibleIsOnVacation()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "vacation-manual@example.com", "Ответственный в отпуске");
+        var client = await CreateClientAsync(db, "Клиент отпуска");
+        client.ResponsibleUserId = author.Id;
+        var clientCase = await CreateCaseAsync(db, client.Id, "ДЕЛО НА ВРЕМЯ ОТПУСКА");
+        clientCase.CreatedAt = DateTime.UtcNow.AddDays(-30);
+        await SetVacationAsync(db, author.Id, DateTime.UtcNow.AddDays(5));
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.CreateAutomationTaskForCase(clientCase.Id, CancellationToken.None);
+
+        var conflict = Assert.IsType<ConflictObjectResult>(result.Result);
+        Assert.Contains("находится в отпуске", conflict.Value?.ToString(), StringComparison.Ordinal);
         Assert.False(await db.TaskJournalItems.AnyAsync(item => item.ClientCaseId == clientCase.Id));
     }
 
@@ -3620,6 +3683,26 @@ public class TasksControllerTests
         var clientCase = await CreateCaseAsync(db, client.Id, $"ДЕЛО {status}", status);
         clientCase.CreatedAt = DateTime.UtcNow.AddDays(-30);
         await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.CreateAutomationTasksForCandidates(limit: 10, ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<TaskJournalAutomationCreateResultDto>(ok.Value);
+        Assert.Empty(dto.CreatedTasks);
+        Assert.False(await db.TaskJournalItems.AnyAsync(item => item.ClientCaseId == clientCase.Id));
+    }
+
+    [Fact]
+    public async Task CreateAutomationTasksForCandidates_SkipsCaseWhileResponsibleIsOnVacation()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "vacation-bulk@example.com", "Ответственный в отпуске");
+        var client = await CreateClientAsync(db, "Клиент отпуска");
+        client.ResponsibleUserId = author.Id;
+        var clientCase = await CreateCaseAsync(db, client.Id, "ДЕЛО НА ВРЕМЯ ОТПУСКА");
+        clientCase.CreatedAt = DateTime.UtcNow.AddDays(-30);
+        await SetVacationAsync(db, author.Id, DateTime.UtcNow.AddDays(5));
         var controller = CreateController(db, new RecordingNotificationService(), author);
 
         var result = await controller.CreateAutomationTasksForCandidates(limit: 10, ct: CancellationToken.None);
@@ -3914,6 +3997,54 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task TaskJournalAutomationScheduler_PausesRepeatEscalationWhileResponsibleIsOnVacation()
+    {
+        await using var db = await CreateContextAsync();
+        var assignee = await CreateAdminUserAsync(db, "vacation-repeat@example.com", "Ответственный в отпуске");
+        var client = await CreateClientAsync(db, "Клиент отпуска");
+        client.ResponsibleUserId = assignee.Id;
+        var clientCase = await CreateCaseAsync(db, client.Id, "КОНТРОЛЬ НА ВРЕМЯ ОТПУСКА");
+        var now = DateTime.UtcNow;
+        clientCase.CreatedAt = now.AddDays(-40);
+        var task = await CreateTaskAsync(
+            db,
+            assignee.Id,
+            client.Id,
+            assigneeUserId: assignee.Id,
+            clientCaseId: clientCase.Id,
+            status: "new",
+            createdAt: now.AddDays(-3));
+        task.Type = "control";
+        task.Title = "Проверить движение по делу";
+        task.TagsJson = "[\"автоконтроль\"]";
+        task.InactivityControlCycleNumber = 1;
+        task.InactivityControlNextCheckAt = now.AddDays(-1);
+        await SetVacationAsync(db, assignee.Id, now.AddDays(5));
+        var nextCheckAt = task.InactivityControlNextCheckAt;
+        var (scheduler, provider) = CreateAutomationScheduler(db, new Dictionary<string, string?>
+        {
+            ["TaskJournal:Automation:Enabled"] = "true",
+            ["TaskJournal:Automation:InactiveDays"] = "14",
+            ["TaskJournal:Automation:Limit"] = "10",
+        });
+
+        using (provider)
+        {
+            var result = await scheduler.RunOnceAsync(CancellationToken.None);
+            Assert.Null(result.Error);
+            Assert.Equal(0, result.CreatedCount);
+            Assert.Equal(0, result.EscalatedCount);
+        }
+
+        await db.Entry(task).ReloadAsync();
+        Assert.Equal(1, task.InactivityControlCycleNumber);
+        Assert.Equal(nextCheckAt, task.InactivityControlNextCheckAt);
+        Assert.Empty(await db.TaskJournalComments
+            .Where(item => item.TaskJournalItemId == task.Id)
+            .ToListAsync());
+    }
+
+    [Fact]
     public async Task TaskJournalAutomationScheduler_InitializesLegacyControlCycleOnce()
     {
         await using var db = await CreateContextAsync();
@@ -4134,6 +4265,34 @@ public class TasksControllerTests
         {
             var result = await scheduler.RunOnceAsync(CancellationToken.None);
 
+            Assert.True(result.Enabled);
+            Assert.Null(result.Error);
+            Assert.Equal(0, result.CreatedCount);
+        }
+
+        Assert.False(await db.TaskJournalItems.AnyAsync(item => item.ClientCaseId == clientCase.Id));
+    }
+
+    [Fact]
+    public async Task TaskJournalAutomationScheduler_SkipsCaseWhileResponsibleIsOnVacation()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "vacation-scheduler@example.com", "Ответственный в отпуске");
+        var client = await CreateClientAsync(db, "Клиент отпуска");
+        client.ResponsibleUserId = author.Id;
+        var clientCase = await CreateCaseAsync(db, client.Id, "ДЕЛО НА ВРЕМЯ ОТПУСКА");
+        clientCase.CreatedAt = DateTime.UtcNow.AddDays(-30);
+        await SetVacationAsync(db, author.Id, DateTime.UtcNow.AddDays(5));
+        var (scheduler, provider) = CreateAutomationScheduler(db, new Dictionary<string, string?>
+        {
+            ["TaskJournal:Automation:Enabled"] = "true",
+            ["TaskJournal:Automation:InactiveDays"] = "14",
+            ["TaskJournal:Automation:Limit"] = "10",
+        });
+
+        using (provider)
+        {
+            var result = await scheduler.RunOnceAsync(CancellationToken.None);
             Assert.True(result.Enabled);
             Assert.Null(result.Error);
             Assert.Equal(0, result.CreatedCount);
@@ -6978,6 +7137,40 @@ public class TasksControllerTests
         }
 
         return task;
+    }
+
+    private static async Task SetVacationAsync(
+        PaymentContext db,
+        int userId,
+        DateTime vacationUntil)
+    {
+        var now = DateTime.UtcNow;
+        db.UserSettings.AddRange(
+            new UserSetting
+            {
+                UserId = userId,
+                Key = UserNotificationDoNotDisturbSettings.SettingKey,
+                Value = UserNotificationDoNotDisturbSettings.Serialize(
+                    new UserNotificationDoNotDisturbSnapshot(
+                        Enabled: true,
+                        WorkStart: "09:00",
+                        WorkEnd: "18:00",
+                        MuteWeekends: true,
+                        VacationUntil: vacationUntil.ToString("yyyy-MM-dd"),
+                        AllowCritical: true,
+                        WorkDays: [1, 2, 3, 4, 5])),
+                CreatedAt = now,
+                UpdatedAt = now,
+            },
+            new UserSetting
+            {
+                UserId = userId,
+                Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+                Value = "Asia/Novosibirsk",
+                CreatedAt = now,
+                UpdatedAt = now,
+            });
+        await db.SaveChangesAsync();
     }
 
     private static IFormFile CreateFormFile(string content, string fileName, string contentType = "text/plain")

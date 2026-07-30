@@ -117,7 +117,16 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
             var escalationUser = await ResolveConfiguredAutomationUserAsync(context, settings.EscalationUserId, cancellationToken);
 
             var now = DateTime.UtcNow;
-            var escalationResult = await EscalateExistingAutomationTasksAsync(context, settings, escalationUser, now, cancellationToken);
+            var responsibleAvailability = await CaseInactivityResponsibleAvailabilityService
+                .GetAvailabilityAsync(context, now, cancellationToken);
+            var vacationUserIds = responsibleAvailability.UsersOnVacation;
+            var escalationResult = await EscalateExistingAutomationTasksAsync(
+                context,
+                settings,
+                escalationUser,
+                vacationUserIds,
+                now,
+                cancellationToken);
             var escalatedTasks = escalationResult.EscalatedTasks;
             var cutoff = now.AddDays(-settings.InactiveDays);
             var candidates = await context.ClientCases
@@ -126,7 +135,11 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
                 .Where(clientCase =>
                     ((clientCase.ClientId.HasValue && clientCase.Client != null) ||
                      (clientCase.LegalEntityId.HasValue && clientCase.LegalEntity != null)) &&
-                    !CaseInactivityControlCyclePolicy.ExcludedCaseStatuses.Contains(clientCase.Status))
+                    !CaseInactivityControlCyclePolicy.ExcludedCaseStatuses.Contains(clientCase.Status) &&
+                    !vacationUserIds.Contains(
+                        (clientCase.ResponsibleUserId ??
+                         (clientCase.Client != null ? clientCase.Client.ResponsibleUserId : null) ??
+                         (clientCase.LegalEntity != null ? clientCase.LegalEntity.ResponsibleUserId : null)) ?? 0))
                 .Select(clientCase => new
                 {
                     Case = clientCase,
@@ -220,14 +233,11 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
                 .Where(userId => userId > 0)
                 .Distinct()
                 .ToArray();
-            var assigneeTimeZoneIds = assigneeUserIds.Length == 0
-                ? new Dictionary<int, string>()
-                : await context.UserSettings
-                    .AsNoTracking()
-                    .Where(setting =>
-                        assigneeUserIds.Contains(setting.UserId) &&
-                        setting.Key == CalendarTimeZoneHelper.UserTimeZoneSettingKey)
-                    .ToDictionaryAsync(setting => setting.UserId, setting => setting.Value, cancellationToken);
+            var assigneeTimeZoneIds = assigneeUserIds
+                .Where(responsibleAvailability.TimeZoneIds.ContainsKey)
+                .ToDictionary(
+                    userId => userId,
+                    userId => responsibleAvailability.TimeZoneIds[userId]);
             var defaultTimeZone = CalendarTimeZoneHelper.ResolveTimeZone(null);
 
             var created = 0;
@@ -587,6 +597,7 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
         PaymentContext context,
         TaskJournalAutomationSettings settings,
         User? escalationUser,
+        IReadOnlySet<int> vacationUserIds,
         DateTime now,
         CancellationToken cancellationToken)
     {
@@ -600,6 +611,10 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
                 task.TagsJson.Contains(AutomationTag) &&
                 ActiveTaskStatuses.Contains(task.Status) &&
                 !CaseInactivityControlCyclePolicy.ExcludedCaseStatuses.Contains(task.ClientCase.Status) &&
+                !vacationUserIds.Contains(
+                    (task.ClientCase.ResponsibleUserId ??
+                     (task.ClientCase.Client != null ? task.ClientCase.Client.ResponsibleUserId : null) ??
+                     (task.ClientCase.LegalEntity != null ? task.ClientCase.LegalEntity.ResponsibleUserId : null)) ?? 0) &&
                 task.ClientCase.InactivityRemindersEnabled &&
                 (task.InactivityControlCycleNumber == null ||
                  (task.InactivityControlNextCheckAt.HasValue &&

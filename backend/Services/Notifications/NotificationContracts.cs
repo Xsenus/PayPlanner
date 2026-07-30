@@ -692,6 +692,13 @@ public static class UserNotificationDoNotDisturbSettings
     public static bool IsCritical(UserNotificationTypeDefinition? type)
         => NotificationPriorities.IsCritical(type?.Priority);
 
+    public static bool IsVacationActive(
+        UserNotificationDoNotDisturbSnapshot settings,
+        DateTime nowUtc,
+        TimeZoneInfo timeZone)
+        => settings.Enabled
+           && IsVacationDay(settings, CalendarTimeZoneHelper.ToUserLocal(nowUtc, timeZone).Date);
+
     private static UserNotificationDoNotDisturbSnapshot Normalize(UserNotificationDoNotDisturbStorage? storage)
         => new(
             Enabled: storage?.Enabled ?? Disabled.Enabled,
