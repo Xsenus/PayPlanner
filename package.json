@@ -9,6 +9,8 @@
     "lint": "eslint .",
     "audit:dates": "node scripts/audit-date-time.mjs",
     "audit:dates:test": "node scripts/audit-date-time.mjs --self-test",
+    "audit:encryption-inventory": "node scripts/audit-field-encryption-inventory.mjs",
+    "audit:encryption-inventory:update": "node scripts/audit-field-encryption-inventory.mjs --write",
     "deploy:verify-production": "node scripts/run-production-deploy-readiness.mjs",
     "roadmap:advance-status": "node scripts/check-advance-roadmap-status.mjs docs/archive/roadmaps/unallocated-advance-monitoring-roadmap-2026-06-12.md",
     "roadmap:advance-status:test": "node scripts/check-advance-roadmap-status.mjs --self-test",

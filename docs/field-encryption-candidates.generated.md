@@ -1,0 +1,91 @@
+# Автоматически найденные кандидаты для классификации
+
+Файл сформирован командой `npm run audit:encryption-inventory:update`.
+Он дополняет ручную карту и не является утверждённой бизнес-классификацией.
+
+Всего кандидатов вне ручной карты: 247.
+
+- `Act`: `Act.Comment`, `Act.CounterpartyInn`
+- `ActLineItem`: `ActLineItem.Name`
+- `AppRelease`: `AppRelease.CreatedByUserName`, `AppRelease.UpdatedByUserName`
+- `AppReleaseItem`: `AppReleaseItem.Text`
+- `Bank`: `Bank.CorrespondentAccount`, `Bank.Name`
+- `BankStatementImportBatch`: `BankStatementImportBatch.FileName`
+- `BaseCurrencyDictionaryItem`: `BaseCurrencyDictionaryItem.Description`, `BaseCurrencyDictionaryItem.Name`
+- `CashInventory`: `CashInventory.AccountName`, `CashInventory.AccountingBalance`, `CashInventory.Comment`
+- `CashOrder`: `CashOrder.Account`, `CashOrder.Comment`, `CashOrder.CreatedByUserName`, `CashOrder.PayerName`, `CashOrder.ReceiverName`, `CashOrder.UpdatedByUserName`
+- `Client`: `Client.Addresses`, `Client.AuditCreatedByUserName`, `Client.AuditDeletedByUserName`, `Client.AuditUpdatedByUserName`, `Client.Passports`, `Client.ResponsibleUserName`
+- `ClientBalanceTransaction`: `ClientBalanceTransaction.CreatedByUserName`, `ClientBalanceTransaction.Description`
+- `ClientCase`: `ClientCase.AccessRequestedByUserName`, `ClientCase.ActivityConfirmedByUserName`, `ClientCase.AuditCreatedByUserName`, `ClientCase.AuditDeletedByUserName`, `ClientCase.AuditUpdatedByUserName`, `ClientCase.ControlMarkedByUserName`, `ClientCase.CourtName`, `ClientCase.Description`, `ClientCase.HiddenFromExecutorByUserName`, `ClientCase.JudgeName`, `ClientCase.LastViewedByResponsibleUserName`, `ClientCase.LastViewedByUserName`
+- `ClientCaseCourt`: `ClientCaseCourt.Address`, `ClientCaseCourt.Contacts`, `ClientCaseCourt.CreatedByUserName`, `ClientCaseCourt.Name`, `ClientCaseCourt.UpdatedByUserName`
+- `ClientCaseCourtComplaint`: `ClientCaseCourtComplaint.CreatedByUserName`, `ClientCaseCourtComplaint.Notes`, `ClientCaseCourtComplaint.UpdatedByUserName`
+- `ClientCaseCourtEvent`: `ClientCaseCourtEvent.CourtName`, `ClientCaseCourtEvent.CreatedByUserName`, `ClientCaseCourtEvent.Description`, `ClientCaseCourtEvent.JudgeName`, `ClientCaseCourtEvent.SecretaryName`, `ClientCaseCourtEvent.UpdatedByUserName`
+- `ClientCaseCourtEventHistory`: `ClientCaseCourtEventHistory.ActorUserName`
+- `ClientCaseCourtInstance`: `ClientCaseCourtInstance.CourtName`, `ClientCaseCourtInstance.CreatedByUserName`, `ClientCaseCourtInstance.JudgeName`, `ClientCaseCourtInstance.Notes`, `ClientCaseCourtInstance.SecretaryName`, `ClientCaseCourtInstance.UpdatedByUserName`
+- `ClientCaseCourtParty`: `ClientCaseCourtParty.CreatedByUserName`, `ClientCaseCourtParty.DisplayName`, `ClientCaseCourtParty.Notes`, `ClientCaseCourtParty.RelatedParty`, `ClientCaseCourtParty.RelatedPartyId`, `ClientCaseCourtParty.RepresentativeName`, `ClientCaseCourtParty.UpdatedByUserName`
+- `ClientCaseDocument`: `ClientCaseDocument.StoredFileName`, `ClientCaseDocument.UploadedByName`
+- `ClientCaseProceduralDeadline`: `ClientCaseProceduralDeadline.ClosedByUserName`, `ClientCaseProceduralDeadline.CreatedByUserName`, `ClientCaseProceduralDeadline.Description`, `ClientCaseProceduralDeadline.Notes`, `ClientCaseProceduralDeadline.UpdatedByUserName`
+- `ClientCaseRelatedParty`: `ClientCaseRelatedParty.ArchivedByUserName`, `ClientCaseRelatedParty.CreatedByUserName`, `ClientCaseRelatedParty.DisplayName`, `ClientCaseRelatedParty.Email`, `ClientCaseRelatedParty.ExternalContact`, `ClientCaseRelatedParty.ExternalContactId`, `ClientCaseRelatedParty.Notes`, `ClientCaseRelatedParty.OrganizationName`, `ClientCaseRelatedParty.Phone`
+- `ClientCaseWorkOrder`: `ClientCaseWorkOrder.ApprovalComment`, `ClientCaseWorkOrder.ApprovalDecisionByUserName`, `ClientCaseWorkOrder.ApprovalRequestedByUserName`, `ClientCaseWorkOrder.CreatedByUserName`, `ClientCaseWorkOrder.Notes`, `ClientCaseWorkOrder.UpdatedByUserName`
+- `ClientCaseWorkOrderItem`: `ClientCaseWorkOrderItem.Description`, `ClientCaseWorkOrderItem.ExecutorName`, `ClientCaseWorkOrderItem.ServiceName`
+- `ClientContract`: `ClientContract.Comment`
+- `ClientStats`: `ClientStats.ClientName`
+- `ClientStatusEntity`: `ClientStatusEntity.Description`, `ClientStatusEntity.Name`
+- `Contract`: `Contract.Description`
+- `CountryDictionaryItem`: `CountryDictionaryItem.Description`, `CountryDictionaryItem.Name`
+- `DealType`: `DealType.Description`, `DealType.Name`
+- `DepartmentDictionaryItem`: `DepartmentDictionaryItem.Description`, `DepartmentDictionaryItem.Name`
+- `DocumentStatusEntity`: `DocumentStatusEntity.Description`, `DocumentStatusEntity.Name`
+- `ExternalContact`: `ExternalContact.SyncToPhonebook`
+- `GoogleCalendarConnection`: `GoogleCalendarConnection.AccessTokenExpiresAt`, `GoogleCalendarConnection.DefaultCalendarName`, `GoogleCalendarConnection.DisplayName`
+- `GoogleCalendarSyncCalendar`: `GoogleCalendarSyncCalendar.Name`, `GoogleCalendarSyncCalendar.SyncToken`, `GoogleCalendarSyncCalendar.WatchToken`
+- `IncomeType`: `IncomeType.Description`, `IncomeType.Name`
+- `InvoiceItemNameDictionaryItem`: `InvoiceItemNameDictionaryItem.Description`, `InvoiceItemNameDictionaryItem.Name`
+- `InvoiceLineItem`: `InvoiceLineItem.Name`
+- `InvoiceUnitDictionaryItem`: `InvoiceUnitDictionaryItem.Description`, `InvoiceUnitDictionaryItem.Name`
+- `LegalEntity`: `LegalEntity.Addresses`, `LegalEntity.ContactEmailsJson`, `LegalEntity.ContactPhonesJson`, `LegalEntity.FullName`, `LegalEntity.IfnsName`, `LegalEntity.Notes`, `LegalEntity.ShortName`, `LegalEntity.TaxOfficePhone`, `LegalEntity.TreasuryBankName`, `LegalEntity.TreasuryInn`, `LegalEntity.TreasuryKpp`, `LegalEntity.TreasuryRecipientName`
+- `LegalEntityContract`: `LegalEntityContract.Comment`
+- `MoneyAccount`: `MoneyAccount.BankName`, `MoneyAccount.Name`
+- `MoneyBalanceReconciliationResult`: `MoneyBalanceReconciliationResult.AccountName`
+- `MoneyOperation`: `MoneyOperation.AccountName`, `MoneyOperation.AccountingType`, `MoneyOperation.CategoryName`, `MoneyOperation.CounterpartyName`, `MoneyOperation.DirectionName`, `MoneyOperation.MatchComment`, `MoneyOperation.MoneyAccount`, `MoneyOperation.MoneyAccountId`, `MoneyOperation.PaidAccountName`, `MoneyOperation.ProjectName`, `MoneyOperation.Purpose`, `MoneyOperation.SalesPointName`
+- `NotificationBotSubscription`: `NotificationBotSubscription.DisplayName`, `NotificationBotSubscription.Username`
+- `NotificationDelivery`: `NotificationDelivery.SenderName`
+- `NotificationSender`: `NotificationSender.Name`, `NotificationSender.PurposesJson`
+- `ObjectAuditEvent`: `ObjectAuditEvent.ActorUserName`
+- `OkinDictionaryItem`: `OkinDictionaryItem.Name`
+- `OkpdtrDictionaryItem`: `OkpdtrDictionaryItem.Name`
+- `OksoDictionaryItem`: `OksoDictionaryItem.Name`
+- `OrganizationFormDictionaryItem`: `OrganizationFormDictionaryItem.Description`, `OrganizationFormDictionaryItem.Name`
+- `Payment`: `Payment.Account`, `Payment.AccountDate`, `Payment.AdvanceReviewedByUserName`, `Payment.AuditCreatedByUserName`, `Payment.AuditDeletedByUserName`, `Payment.AuditUpdatedByUserName`, `Payment.ContractorUserName`, `Payment.CounterpartyName`, `Payment.IsNotForAccounting`, `Payment.LegacyAccountDate`, `Payment.LegacyAccountNumber`, `Payment.OverpaymentComment`
+- `PaymentSource`: `PaymentSource.Description`, `PaymentSource.Name`
+- `PaymentStatusEntity`: `PaymentStatusEntity.Description`, `PaymentStatusEntity.Name`
+- `PowerOfAttorney`: `PowerOfAttorney.Notes`
+- `Role`: `Role.Description`, `Role.Name`, `Role.PermissionsUpdatedByUserName`
+- `RoleCalendarVisibleUser`: `RoleCalendarVisibleUser.CreatedByUserName`
+- `RolePermissionsDto`: `RolePermissionsDto.Accounts`, `RolePermissionsDto.Notes`
+- `ServiceCategoryDictionaryItem`: `ServiceCategoryDictionaryItem.Description`, `ServiceCategoryDictionaryItem.Name`
+- `ServiceDictionaryItem`: `ServiceDictionaryItem.Description`, `ServiceDictionaryItem.Name`
+- `ServiceLanguageDictionaryItem`: `ServiceLanguageDictionaryItem.Description`, `ServiceLanguageDictionaryItem.Name`
+- `SpreadsheetImportBatch`: `SpreadsheetImportBatch.CreatedByUserName`
+- `SpreadsheetImportBatchFile`: `SpreadsheetImportBatchFile.FileName`, `SpreadsheetImportBatchFile.SheetName`
+- `SpreadsheetImportBatchOperation`: `SpreadsheetImportBatchOperation.SourceFileName`
+- `StickyNote`: `StickyNote.AssignedUserName`, `StickyNote.AuthorUserName`, `StickyNote.IsPinned`
+- `StickyNoteBoard`: `StickyNoteBoard.Description`, `StickyNoteBoard.Notes`, `StickyNoteBoard.OwnerUserName`
+- `TaskJournalComment`: `TaskJournalComment.AuthorName`
+- `TaskJournalDeadlineChangeRequest`: `TaskJournalDeadlineChangeRequest.CreatedComment`, `TaskJournalDeadlineChangeRequest.CreatedCommentId`, `TaskJournalDeadlineChangeRequest.DecidedByName`, `TaskJournalDeadlineChangeRequest.DecisionComment`, `TaskJournalDeadlineChangeRequest.DecisionCommentEntry`, `TaskJournalDeadlineChangeRequest.DecisionCommentId`, `TaskJournalDeadlineChangeRequest.RequestedByName`, `TaskJournalDeadlineChangeRequest.ReviewerName`
+- `TaskJournalFile`: `TaskJournalFile.StoredFileName`, `TaskJournalFile.UploadedByName`
+- `TaskJournalItem`: `TaskJournalItem.AssigneeName`, `TaskJournalItem.AuthorName`, `TaskJournalItem.Comments`, `TaskJournalItem.ControlMarkedByUserName`, `TaskJournalItem.Description`, `TaskJournalItem.ObjectName`
+- `TaskJournalParticipant`: `TaskJournalParticipant.DisplayName`, `TaskJournalParticipant.Email`
+- `TaskJournalTemplate`: `TaskJournalTemplate.AssigneeName`, `TaskJournalTemplate.CreatedByName`, `TaskJournalTemplate.Description`, `TaskJournalTemplate.Name`, `TaskJournalTemplate.TaskDescription`
+- `TaskJournalTemplateParticipant`: `TaskJournalTemplateParticipant.DisplayName`, `TaskJournalTemplateParticipant.Email`
+- `TaskStickerStyle`: `TaskStickerStyle.TextColor`
+- `TaxSystemDictionaryItem`: `TaxSystemDictionaryItem.Description`, `TaxSystemDictionaryItem.Name`
+- `TaxSystemModeDictionaryItem`: `TaxSystemModeDictionaryItem.Description`, `TaxSystemModeDictionaryItem.Name`
+- `TimezoneDictionaryItem`: `TimezoneDictionaryItem.Description`, `TimezoneDictionaryItem.Name`
+- `User`: `User.FirstName`, `User.LastName`, `User.MiddleName`
+- `UserActivityLog`: `UserActivityLog.Description`, `UserActivityLog.UserFullName`
+- `UserExternalIdentity`: `UserExternalIdentity.DisplayName`, `UserExternalIdentity.ProviderEmail`, `UserExternalIdentity.ProviderUsername`
+- `UserPushSubscription`: `UserPushSubscription.DeviceName`, `UserPushSubscription.UserAgent`
+- `YandexCalendarConnection`: `YandexCalendarConnection.AccessTokenExpiresAt`, `YandexCalendarConnection.DefaultCalendarName`, `YandexCalendarConnection.DisplayName`
+- `YandexCalendarSyncCalendar`: `YandexCalendarSyncCalendar.Name`, `YandexCalendarSyncCalendar.SyncToken`
+- `YandexDiskCrmSyncState`: `YandexDiskCrmSyncState.FileName`
