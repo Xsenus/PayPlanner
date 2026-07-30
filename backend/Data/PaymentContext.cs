@@ -2639,6 +2639,7 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.Type).HasDatabaseName("IX_TaskJournalItems_Type");
             entity.HasIndex(e => e.Priority).HasDatabaseName("IX_TaskJournalItems_Priority");
             entity.HasIndex(e => e.IsUnderControl).HasDatabaseName("IX_TaskJournalItems_IsUnderControl");
+            entity.HasIndex(e => e.InactivityControlNextCheckAt).HasDatabaseName("IX_TaskJournalItems_InactivityControlNextCheckAt");
             entity.HasIndex(e => e.ControlMarkedByUserId).HasDatabaseName("IX_TaskJournalItems_ControlMarkedByUserId");
             entity.HasIndex(e => e.ClientId).HasDatabaseName("IX_TaskJournalItems_ClientId");
             entity.HasIndex(e => e.LegalEntityId).HasDatabaseName("IX_TaskJournalItems_LegalEntityId");

@@ -7133,6 +7133,12 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<DateTime>("DueAt")
                         .HasColumnType("timestamp without time zone");
 
+                    b.Property<int?>("InactivityControlCycleNumber")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("InactivityControlNextCheckAt")
+                        .HasColumnType("timestamp without time zone");
+
                     b.Property<bool>("IsDeleted")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")
@@ -7248,6 +7254,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.HasIndex("DueAt")
                         .HasDatabaseName("IX_TaskJournalItems_DueAt");
+
+                    b.HasIndex("InactivityControlNextCheckAt")
+                        .HasDatabaseName("IX_TaskJournalItems_InactivityControlNextCheckAt");
 
                     b.HasIndex("IsDeleted")
                         .HasDatabaseName("IX_TaskJournalItem_IsDeleted");

@@ -40,7 +40,8 @@ public sealed class CaseInactivityControlStateMachineTests
     {
         var decision = Evaluate(
             lastActivityAt: Now.AddDays(-20),
-            controlTaskCreatedAt: Now.AddDays(-2));
+            controlTaskCreatedAt: Now.AddDays(-2),
+            nextCheckAt: Now);
 
         Assert.Equal(CaseInactivityControlTransition.RepeatDue, decision.Transition);
         Assert.Equal(1, decision.RepeatLevel);
@@ -52,7 +53,8 @@ public sealed class CaseInactivityControlStateMachineTests
     {
         var decision = Evaluate(
             lastActivityAt: Now.AddDays(-30),
-            controlTaskCreatedAt: Now.AddDays(-2));
+            controlTaskCreatedAt: Now.AddDays(-2),
+            nextCheckAt: Now);
 
         Assert.Equal(CaseInactivityControlTransition.CriticalEscalationDue, decision.Transition);
         Assert.Equal(1, decision.RepeatLevel);
@@ -65,7 +67,8 @@ public sealed class CaseInactivityControlStateMachineTests
         var decision = Evaluate(
             lastActivityAt: Now.AddDays(-20),
             controlTaskCreatedAt: Now.AddDays(-4),
-            firstRepeatCompleted: true);
+            completedRepeatLevel: 1,
+            nextCheckAt: Now);
 
         Assert.Equal(CaseInactivityControlTransition.CriticalEscalationDue, decision.Transition);
         Assert.Equal(2, decision.RepeatLevel);
@@ -99,8 +102,19 @@ public sealed class CaseInactivityControlStateMachineTests
         var decision = Evaluate(
             lastActivityAt: Now.AddDays(-20),
             controlTaskCreatedAt: Now.AddDays(-10),
-            firstRepeatCompleted: true,
-            secondRepeatCompleted: true);
+            completedRepeatLevel: 2,
+            nextCheckAt: null);
+
+        Assert.Equal(CaseInactivityControlTransition.Waiting, decision.Transition);
+    }
+
+    [Fact]
+    public void Evaluate_WaitsUntilStoredNextCheckAt()
+    {
+        var decision = Evaluate(
+            lastActivityAt: Now.AddDays(-20),
+            controlTaskCreatedAt: Now.AddDays(-10),
+            nextCheckAt: Now.AddMinutes(1));
 
         Assert.Equal(CaseInactivityControlTransition.Waiting, decision.Transition);
     }
@@ -109,8 +123,8 @@ public sealed class CaseInactivityControlStateMachineTests
         DateTime lastActivityAt,
         DateTime? controlTaskCreatedAt = null,
         bool hasOtherActiveTask = false,
-        bool firstRepeatCompleted = false,
-        bool secondRepeatCompleted = false)
+        int completedRepeatLevel = 0,
+        DateTime? nextCheckAt = null)
         => CaseInactivityControlStateMachine.Evaluate(
             new CaseInactivityControlStateInput(
                 Now,
@@ -119,6 +133,6 @@ public sealed class CaseInactivityControlStateMachineTests
                 InactiveDays: 14,
                 EscalationDays: 30,
                 HasOtherActiveTask: hasOtherActiveTask,
-                FirstRepeatCompleted: firstRepeatCompleted,
-                SecondRepeatCompleted: secondRepeatCompleted));
+                CompletedRepeatLevel: completedRepeatLevel,
+                NextCheckAt: nextCheckAt));
 }

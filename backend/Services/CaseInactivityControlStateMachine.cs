@@ -17,8 +17,8 @@ public readonly record struct CaseInactivityControlStateInput(
     int InactiveDays,
     int EscalationDays,
     bool HasOtherActiveTask = false,
-    bool FirstRepeatCompleted = false,
-    bool SecondRepeatCompleted = false);
+    int CompletedRepeatLevel = 0,
+    DateTime? NextCheckAt = null);
 
 public readonly record struct CaseInactivityControlStateDecision(
     CaseInactivityControlTransition Transition,
@@ -61,8 +61,13 @@ public static class CaseInactivityControlStateMachine
             return Decision(CaseInactivityControlTransition.SuppressedByActiveTask, daysWithoutActivity);
         }
 
-        var daysSinceControlCreated = ElapsedWholeDays(input.Now, controlTaskCreatedAt);
-        if (!input.FirstRepeatCompleted && daysSinceControlCreated >= FirstRepeatOffsetDays)
+        if (!input.NextCheckAt.HasValue || input.Now < input.NextCheckAt.Value)
+        {
+            return Decision(CaseInactivityControlTransition.Waiting, daysWithoutActivity);
+        }
+
+        var nextRepeatLevel = Math.Clamp(input.CompletedRepeatLevel + 1, 1, 3);
+        if (nextRepeatLevel == 1)
         {
             var isCritical = daysWithoutActivity >= input.EscalationDays;
             return Decision(
@@ -75,7 +80,7 @@ public static class CaseInactivityControlStateMachine
                 isCritical: isCritical);
         }
 
-        if (!input.SecondRepeatCompleted && daysSinceControlCreated >= SecondRepeatOffsetDays)
+        if (nextRepeatLevel == 2)
         {
             return Decision(
                 CaseInactivityControlTransition.CriticalEscalationDue,

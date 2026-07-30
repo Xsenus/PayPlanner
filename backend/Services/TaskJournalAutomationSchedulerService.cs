@@ -123,7 +123,8 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
             var escalationUser = await ResolveConfiguredAutomationUserAsync(context, settings.EscalationUserId, cancellationToken);
 
             var now = DateTime.UtcNow;
-            var escalatedTasks = await EscalateExistingAutomationTasksAsync(context, settings, escalationUser, now, cancellationToken);
+            var escalationResult = await EscalateExistingAutomationTasksAsync(context, settings, escalationUser, now, cancellationToken);
+            var escalatedTasks = escalationResult.EscalatedTasks;
             var cutoff = now.AddDays(-settings.InactiveDays);
             var candidates = await context.ClientCases
                 .Include(item => item.Client)
@@ -287,9 +288,13 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
                 await NotifyCreatedAutomationTasksAsync(notificationService, createdTasks, cancellationToken);
             }
 
-            if (escalatedTasks.Count > 0)
+            if (escalationResult.StateChangedCount > 0)
             {
                 await context.SaveChangesAsync(cancellationToken);
+            }
+
+            if (escalatedTasks.Count > 0)
+            {
                 await NotifyEscalatedAutomationTasksAsync(notificationService, escalatedTasks, cancellationToken);
             }
 
@@ -477,6 +482,8 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
             RemindersJson = SerializeList(["before1d", "atDue", "dailyOverdue"]),
             ChannelsJson = SerializeList(["inApp"]),
             TagsJson = SerializeList([AutomationTag]),
+            InactivityControlCycleNumber = 1,
+            InactivityControlNextCheckAt = now.AddDays(CaseInactivityControlStateMachine.FirstRepeatOffsetDays),
             CreatedAt = now,
             UpdatedAt = now,
         };
@@ -543,9 +550,6 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
         return $"Автоконтроль: повторная эскалация уровня {level} через {offsetDays} дн. после создания контрольной задачи. По делу нет нового движения {daysWithoutActiveTask} дн.{observerText}";
     }
 
-    private static bool HasEscalationComment(TaskJournalItem task, int offsetDays)
-        => task.Comments.Any(comment => IsEscalationComment(comment.MetadataJson, offsetDays));
-
     private static bool IsEscalationComment(string? metadataJson, int offsetDays)
     {
         if (string.IsNullOrWhiteSpace(metadataJson))
@@ -569,7 +573,7 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
         }
     }
 
-    private static async Task<IReadOnlyList<EscalatedAutomationTask>> EscalateExistingAutomationTasksAsync(
+    private static async Task<ExistingAutomationEscalationResult> EscalateExistingAutomationTasksAsync(
         PaymentContext context,
         TaskJournalAutomationSettings settings,
         User? escalationUser,
@@ -579,7 +583,6 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
         var automationTasks = await context.TaskJournalItems
             .Include(task => task.ClientCase)
             .Include(task => task.Participants)
-            .Include(task => task.Comments)
             .AsSplitQuery()
             .Where(task =>
                 task.ClientCaseId.HasValue &&
@@ -587,10 +590,46 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
                 task.TagsJson.Contains(AutomationTag) &&
                 ActiveTaskStatuses.Contains(task.Status) &&
                 !FinishedCaseStatuses.Contains(task.ClientCase.Status) &&
-                task.ClientCase.InactivityRemindersEnabled)
+                task.ClientCase.InactivityRemindersEnabled &&
+                (task.InactivityControlCycleNumber == null ||
+                 (task.InactivityControlNextCheckAt.HasValue &&
+                  task.InactivityControlNextCheckAt <= now)))
             .OrderBy(task => task.CreatedAt)
             .Take(settings.Limit)
             .ToListAsync(cancellationToken);
+
+        var legacyTaskIds = automationTasks
+            .Where(task => !task.InactivityControlCycleNumber.HasValue)
+            .Select(task => task.Id)
+            .ToArray();
+        var legacyCompletedLevels = new Dictionary<int, int>();
+        if (legacyTaskIds.Length > 0)
+        {
+            var legacyEscalationMetadata = await context.TaskJournalComments
+                .AsNoTracking()
+                .Where(comment =>
+                    legacyTaskIds.Contains(comment.TaskJournalItemId) &&
+                    comment.MetadataJson.Contains(InactivityEscalationEventType))
+                .Select(comment => new
+                {
+                    comment.TaskJournalItemId,
+                    comment.MetadataJson,
+                })
+                .ToListAsync(cancellationToken);
+            legacyCompletedLevels = legacyEscalationMetadata
+                .GroupBy(comment => comment.TaskJournalItemId)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group.Any(comment => IsEscalationComment(
+                        comment.MetadataJson,
+                        CaseInactivityControlStateMachine.SecondRepeatOffsetDays))
+                        ? 2
+                        : group.Any(comment => IsEscalationComment(
+                            comment.MetadataJson,
+                            CaseInactivityControlStateMachine.FirstRepeatOffsetDays))
+                            ? 1
+                            : 0);
+        }
 
         var caseIds = automationTasks
             .Select(task => task.ClientCaseId!.Value)
@@ -626,8 +665,22 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
                 .ToDictionaryAsync(item => item.ClientCaseId, cancellationToken);
 
         var escalatedTasks = new List<EscalatedAutomationTask>();
+        var stateChangedCount = 0;
         foreach (var task in automationTasks)
         {
+            if (!task.InactivityControlCycleNumber.HasValue)
+            {
+                var completedRepeatLevel = legacyCompletedLevels.GetValueOrDefault(task.Id);
+                task.InactivityControlCycleNumber = completedRepeatLevel + 1;
+                task.InactivityControlNextCheckAt = completedRepeatLevel switch
+                {
+                    0 => task.CreatedAt.AddDays(CaseInactivityControlStateMachine.FirstRepeatOffsetDays),
+                    1 => task.CreatedAt.AddDays(CaseInactivityControlStateMachine.SecondRepeatOffsetDays),
+                    _ => null,
+                };
+                stateChangedCount += 1;
+            }
+
             if (task.ClientCase is null ||
                 !task.AssigneeUserId.HasValue ||
                 !signalsByCase.TryGetValue(task.ClientCase.Id, out var signals))
@@ -649,12 +702,20 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
                     settings.InactiveDays,
                     settings.EscalationDays,
                     HasOtherActiveTask: signals.ActiveTaskCount > 1,
-                    FirstRepeatCompleted: HasEscalationComment(
-                        task,
-                        CaseInactivityControlStateMachine.FirstRepeatOffsetDays),
-                    SecondRepeatCompleted: HasEscalationComment(
-                        task,
-                        CaseInactivityControlStateMachine.SecondRepeatOffsetDays)));
+                    CompletedRepeatLevel: Math.Max(0, task.InactivityControlCycleNumber.Value - 1),
+                    NextCheckAt: task.InactivityControlNextCheckAt));
+            if (transition.Transition == CaseInactivityControlTransition.Reset)
+            {
+                if (task.InactivityControlNextCheckAt.HasValue)
+                {
+                    task.InactivityControlNextCheckAt = null;
+                    task.UpdatedAt = now;
+                    stateChangedCount += 1;
+                }
+
+                continue;
+            }
+
             if (transition.Transition is not (
                     CaseInactivityControlTransition.RepeatDue or
                     CaseInactivityControlTransition.CriticalEscalationDue) ||
@@ -673,6 +734,10 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
             }
 
             task.Priority = ResolveRepeatEscalationPriority(task.Priority, level, daysWithoutActiveTask, settings);
+            task.InactivityControlCycleNumber = level + 1;
+            task.InactivityControlNextCheckAt = level < 2
+                ? task.CreatedAt.AddDays(CaseInactivityControlStateMachine.SecondRepeatOffsetDays)
+                : null;
             task.UpdatedAt = now;
             task.Comments.Add(new TaskJournalComment
             {
@@ -694,9 +759,10 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
 
             AddRepeatEscalationAuditEvent(context, task, level, dueOffset, daysWithoutActiveTask, now);
             escalatedTasks.Add(new EscalatedAutomationTask(task, level, dueOffset, daysWithoutActiveTask, shouldEscalateToObserver));
+            stateChangedCount += 1;
         }
 
-        return escalatedTasks;
+        return new ExistingAutomationEscalationResult(escalatedTasks, stateChangedCount);
     }
 
     private static void AddRepeatEscalationAuditEvent(
@@ -917,6 +983,10 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
         int OffsetDays,
         int DaysWithoutActiveTask,
         bool EscalatedToObserver);
+
+    private sealed record ExistingAutomationEscalationResult(
+        IReadOnlyList<EscalatedAutomationTask> EscalatedTasks,
+        int StateChangedCount);
 
     private sealed record ExistingAutomationCaseSignals(
         int ClientCaseId,

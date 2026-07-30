@@ -3487,6 +3487,8 @@ public class TasksControllerTests
         Assert.Equal("control", task.Type);
         Assert.Equal("Проверить движение по делу", task.Title);
         Assert.Equal(author.Id, task.AssigneeUserId);
+        Assert.Equal(1, task.InactivityControlCycleNumber);
+        Assert.Equal(task.CreatedAt.AddDays(2), task.InactivityControlNextCheckAt);
         Assert.Contains(task.Participants, item => item.Role == "assignee" && item.UserId == author.Id);
         Assert.Contains(task.Comments, item => item.Kind == "system" && item.Text.Contains("фоновым автоконтролем", StringComparison.OrdinalIgnoreCase));
 
@@ -3663,6 +3665,8 @@ public class TasksControllerTests
             .Include(item => item.Comments)
             .SingleAsync(item => item.Id == task.Id);
         Assert.Equal("urgent", updatedTask.Priority);
+        Assert.Equal(2, updatedTask.InactivityControlCycleNumber);
+        Assert.Equal(updatedTask.CreatedAt.AddDays(4), updatedTask.InactivityControlNextCheckAt);
         Assert.Contains(updatedTask.Participants, item => item.Role == "observer" && item.UserId == escalationUser.Id);
         Assert.Single(updatedTask.Comments, item =>
             item.Kind == "system" &&
@@ -3671,6 +3675,109 @@ public class TasksControllerTests
         var changedTask = Assert.Single(notifications.ChangedTasks);
         Assert.Equal(task.Id, changedTask.TaskId);
         Assert.Contains("Повторная эскалация автоконтроля", changedTask.ChangeLabels.Single());
+    }
+
+    [Fact]
+    public async Task TaskJournalAutomationScheduler_InitializesLegacyControlCycleOnce()
+    {
+        await using var db = await CreateContextAsync();
+        var assignee = await CreateAdminUserAsync(db, "legacy-cycle-assignee@example.com", "Ответственный дела");
+        var client = await CreateClientAsync(db, "Клиент старого автоконтроля");
+        client.ResponsibleUserId = assignee.Id;
+        var clientCase = await CreateCaseAsync(db, client.Id, "СТАРЫЙ ЦИКЛ");
+        var now = DateTime.UtcNow;
+        clientCase.CreatedAt = now.AddDays(-20);
+        var task = await CreateTaskAsync(
+            db,
+            assignee.Id,
+            client.Id,
+            assigneeUserId: assignee.Id,
+            clientCaseId: clientCase.Id,
+            status: "new",
+            createdAt: now.AddDays(-1));
+        task.Type = "control";
+        task.Title = "Проверить движение по делу";
+        task.TagsJson = "[\"автоконтроль\"]";
+        await db.SaveChangesAsync();
+        var (scheduler, provider) = CreateAutomationScheduler(db, new Dictionary<string, string?>
+        {
+            ["TaskJournal:Automation:Enabled"] = "true",
+            ["TaskJournal:Automation:InactiveDays"] = "14",
+            ["TaskJournal:Automation:Limit"] = "10",
+        });
+
+        using (provider)
+        {
+            var result = await scheduler.RunOnceAsync(CancellationToken.None);
+
+            Assert.Null(result.Error);
+            Assert.Equal(0, result.CreatedCount);
+            Assert.Equal(0, result.EscalatedCount);
+        }
+
+        await db.Entry(task).ReloadAsync();
+        Assert.Equal(1, task.InactivityControlCycleNumber);
+        Assert.Equal(task.CreatedAt.AddDays(2), task.InactivityControlNextCheckAt);
+    }
+
+    [Fact]
+    public async Task TaskJournalAutomationScheduler_StopsStoredCycleAfterMeaningfulActivity()
+    {
+        await using var db = await CreateContextAsync();
+        var assignee = await CreateAdminUserAsync(db, "reset-cycle-assignee@example.com", "Ответственный дела");
+        var client = await CreateClientAsync(db, "Клиент со сброшенным автоконтролем");
+        client.ResponsibleUserId = assignee.Id;
+        var clientCase = await CreateCaseAsync(db, client.Id, "СБРОС ЦИКЛА");
+        var now = DateTime.UtcNow;
+        clientCase.CreatedAt = now.AddDays(-20);
+        var task = await CreateTaskAsync(
+            db,
+            assignee.Id,
+            client.Id,
+            assigneeUserId: assignee.Id,
+            clientCaseId: clientCase.Id,
+            status: "new",
+            createdAt: now.AddDays(-3));
+        task.Type = "control";
+        task.Title = "Проверить движение по делу";
+        task.TagsJson = "[\"автоконтроль\"]";
+        task.InactivityControlCycleNumber = 1;
+        task.InactivityControlNextCheckAt = now.AddDays(-1);
+        db.ClientCaseDocuments.Add(new ClientCaseDocument
+        {
+            ClientCaseId = clientCase.Id,
+            DocumentKey = "reset-cycle-activity",
+            DocumentType = "other",
+            Status = "draft",
+            OriginalFileName = "новое движение.pdf",
+            StoredFileName = "new-activity.pdf",
+            StoragePath = "tests/new-activity.pdf",
+            ContentType = "application/pdf",
+            SizeBytes = 12,
+            UploadedByUserId = assignee.Id,
+            UploadedByName = assignee.FullName,
+            UploadedAt = now.AddHours(-1),
+        });
+        await db.SaveChangesAsync();
+        var (scheduler, provider) = CreateAutomationScheduler(db, new Dictionary<string, string?>
+        {
+            ["TaskJournal:Automation:Enabled"] = "true",
+            ["TaskJournal:Automation:InactiveDays"] = "14",
+            ["TaskJournal:Automation:Limit"] = "10",
+        });
+
+        using (provider)
+        {
+            var result = await scheduler.RunOnceAsync(CancellationToken.None);
+
+            Assert.Null(result.Error);
+            Assert.Equal(0, result.CreatedCount);
+            Assert.Equal(0, result.EscalatedCount);
+        }
+
+        await db.Entry(task).ReloadAsync();
+        Assert.Equal(1, task.InactivityControlCycleNumber);
+        Assert.Null(task.InactivityControlNextCheckAt);
     }
 
     [Fact]

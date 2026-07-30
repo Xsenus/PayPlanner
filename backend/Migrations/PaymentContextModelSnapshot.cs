@@ -6968,6 +6968,12 @@ namespace PayPlanner.Api.Migrations
                     b.Property<DateTime>("DueAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<int?>("InactivityControlCycleNumber")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("InactivityControlNextCheckAt")
+                        .HasColumnType("TEXT");
+
                     b.Property<bool>("IsDeleted")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER")
@@ -7083,6 +7089,9 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasIndex("DueAt")
                         .HasDatabaseName("IX_TaskJournalItems_DueAt");
+
+                    b.HasIndex("InactivityControlNextCheckAt")
+                        .HasDatabaseName("IX_TaskJournalItems_InactivityControlNextCheckAt");
 
                     b.HasIndex("IsDeleted")
                         .HasDatabaseName("IX_TaskJournalItem_IsDeleted");

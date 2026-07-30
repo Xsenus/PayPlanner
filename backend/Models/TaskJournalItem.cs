@@ -84,6 +84,10 @@ public class TaskJournalItem
 
     public DateTime? ControlMarkedAt { get; set; }
 
+    public int? InactivityControlCycleNumber { get; set; }
+
+    public DateTime? InactivityControlNextCheckAt { get; set; }
+
     public int? ControlMarkedByUserId { get; set; }
     public User? ControlMarkedByUser { get; set; }
 
