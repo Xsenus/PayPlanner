@@ -5692,11 +5692,41 @@ export class ApiService {
     recipientName: string;
     recipientEmail: string;
     recipientType: 'client' | 'representative';
+    documentIds?: number[];
   }) {
     return this.request<ExternalWorkOrderApprovalStatus>(
       `/v2/cases/${caseId}/work-order/external-approval`,
       { method: 'POST', body: JSON.stringify(payload) },
     );
+  }
+
+  async createPublicWorkOrderAttachmentGrant(publicId: string, attachmentPublicId: string, token: string) {
+    return this.request<{ grantToken: string; expiresAt: string }>(
+      `/public/work-order-approvals/${encodeURIComponent(publicId)}/attachments/${encodeURIComponent(attachmentPublicId)}/grant`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ token }),
+        suppressAuthSessionExpired: true,
+      },
+    );
+  }
+
+  async downloadPublicWorkOrderAttachment(publicId: string, attachmentPublicId: string, grantToken: string) {
+    const response = await fetch(
+      `${API_BASE_URL}/public/work-order-approvals/${encodeURIComponent(publicId)}/attachments/${encodeURIComponent(attachmentPublicId)}/download`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ grantToken }),
+        cache: 'no-store',
+        referrerPolicy: 'no-referrer',
+      },
+    );
+    if (!response.ok) {
+      const text = await extractResponseErrorMessage(response);
+      throw new Error(text || `HTTP ${response.status} ${response.statusText}`);
+    }
+    return response.blob();
   }
 
   async revokeExternalWorkOrderApproval(caseId: number) {

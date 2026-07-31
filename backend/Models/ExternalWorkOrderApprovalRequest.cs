@@ -71,4 +71,6 @@ public sealed class ExternalWorkOrderApprovalRequest
 
     [MaxLength(500)]
     public string RevocationReason { get; set; } = string.Empty;
+
+    public ICollection<ExternalWorkOrderApprovalAttachment> Attachments { get; set; } = new List<ExternalWorkOrderApprovalAttachment>();
 }

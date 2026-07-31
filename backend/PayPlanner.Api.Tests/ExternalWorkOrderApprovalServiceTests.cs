@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using Microsoft.Data.Sqlite;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -41,6 +42,7 @@ public sealed class ExternalWorkOrderApprovalServiceTests
         Assert.Equal("opened", opened.Status);
         Assert.Equal("Подготовка заявления", opened.Snapshot.Items.Single().ServiceName);
         Assert.Equal(15_000m, opened.Snapshot.TotalAmount);
+        Assert.Empty(opened.Snapshot.Attachments);
 
         var result = await fixture.Service.DecideAsync(
             status.PublicId,
@@ -177,6 +179,85 @@ public sealed class ExternalWorkOrderApprovalServiceTests
         Assert.Equal(1, fixture.Notifier.ExpiredCount);
     }
 
+    [Fact]
+    public async Task Explicit_attachment_uses_short_lived_grant_and_integrity_check()
+    {
+        await using var fixture = await Fixture.CreateAsync(enabled: true);
+        var document = await fixture.AddDocumentAsync("Расчёт.pdf", "application/pdf", "public-document"u8.ToArray());
+        var status = await fixture.Service.CreateAsync(
+            fixture.CaseId,
+            new CreateExternalWorkOrderApprovalRequest
+            {
+                RecipientName = "Иван Иванов",
+                RecipientEmail = "client@example.test",
+                RecipientType = "client",
+                DocumentIds = [document.Id],
+            },
+            7,
+            "Менеджер",
+            CancellationToken.None);
+
+        var opened = await fixture.Service.OpenAsync(status.PublicId, fixture.Email.Token, CancellationToken.None);
+        var attachment = Assert.Single(opened.Snapshot.Attachments);
+        Assert.Equal("Расчёт.pdf", attachment.FileName);
+        var grant = await fixture.Service.CreateAttachmentGrantAsync(
+            status.PublicId,
+            attachment.PublicId,
+            fixture.Email.Token,
+            CancellationToken.None);
+        Assert.True(grant.ExpiresAt > DateTime.UtcNow);
+        var download = await fixture.Service.DownloadAttachmentAsync(
+            status.PublicId,
+            attachment.PublicId,
+            grant.GrantToken,
+            CancellationToken.None);
+        Assert.Equal("public-document", await File.ReadAllTextAsync(download.Path));
+
+        await File.WriteAllTextAsync(download.Path, "tampered");
+        var error = await Assert.ThrowsAsync<ExternalWorkOrderApprovalException>(() =>
+            fixture.Service.DownloadAttachmentAsync(
+                status.PublicId,
+                attachment.PublicId,
+                grant.GrantToken,
+                CancellationToken.None));
+        Assert.Equal("attachment_integrity_error", error.Code);
+    }
+
+    [Fact]
+    public async Task Attachment_from_another_case_is_rejected()
+    {
+        await using var fixture = await Fixture.CreateAsync(enabled: true);
+        var anotherCase = new ClientCase
+        {
+            ClientId = await fixture.Db.Clients.Select(client => client.Id).SingleAsync(),
+            Title = "Чужое дело",
+            CaseNumber = "X-2",
+        };
+        fixture.Db.ClientCases.Add(anotherCase);
+        await fixture.Db.SaveChangesAsync();
+        var document = await fixture.AddDocumentAsync(
+            "Чужой.pdf",
+            "application/pdf",
+            "private"u8.ToArray(),
+            anotherCase.Id);
+
+        var error = await Assert.ThrowsAsync<ExternalWorkOrderApprovalException>(() =>
+            fixture.Service.CreateAsync(
+                fixture.CaseId,
+                new CreateExternalWorkOrderApprovalRequest
+                {
+                    RecipientName = "Иван Иванов",
+                    RecipientEmail = "client@example.test",
+                    RecipientType = "client",
+                    DocumentIds = [document.Id],
+                },
+                7,
+                "Менеджер",
+                CancellationToken.None));
+        Assert.Equal("validation_error", error.Code);
+        Assert.Empty(await fixture.Db.ExternalWorkOrderApprovalRequests.ToListAsync());
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly SqliteConnection _connection;
@@ -187,6 +268,8 @@ public sealed class ExternalWorkOrderApprovalServiceTests
             RecordingEmailService email,
             ExternalWorkOrderApprovalService service,
             RecordingNotifier notifier,
+            string storageRoot,
+            ICaseDocumentStorage storage,
             int caseId)
         {
             _connection = connection;
@@ -194,6 +277,8 @@ public sealed class ExternalWorkOrderApprovalServiceTests
             Email = email;
             Service = service;
             Notifier = notifier;
+            StorageRoot = storageRoot;
+            Storage = storage;
             CaseId = caseId;
         }
 
@@ -201,6 +286,8 @@ public sealed class ExternalWorkOrderApprovalServiceTests
         public RecordingEmailService Email { get; }
         public ExternalWorkOrderApprovalService Service { get; }
         public RecordingNotifier Notifier { get; }
+        public string StorageRoot { get; }
+        public ICaseDocumentStorage Storage { get; }
         public int CaseId { get; }
 
         public static async Task<Fixture> CreateAsync(bool enabled)
@@ -243,20 +330,60 @@ public sealed class ExternalWorkOrderApprovalServiceTests
             await db.SaveChangesAsync();
 
             var email = new RecordingEmailService();
+            var storageRoot = Path.Combine(Path.GetTempPath(), $"payplanner-work-order-{Guid.NewGuid():N}");
             var configuration = new ConfigurationBuilder()
                 .AddInMemoryCollection(new Dictionary<string, string?>
                 {
                     ["App:FrontendUrl"] = "https://crm.example.test",
                     ["App:OrganizationName"] = "Тестовая компания",
+                    [ApplicationFileStoragePaths.RootPathConfigurationKey] = storageRoot,
                 })
                 .Build();
+            var storage = new LocalCaseDocumentStorage(configuration: configuration);
+            var dataProtection = DataProtectionProvider.Create(
+                new DirectoryInfo(Path.Combine(storageRoot, "keys")));
             var flags = new FixedOptionsMonitor(new AppFeatureFlagsOptions
             {
                 Legal = new LegalFeatureFlagsOptions { ExternalWorkOrderApproval = enabled },
             });
             var notifier = new RecordingNotifier();
-            var service = new ExternalWorkOrderApprovalService(db, email, configuration, flags, notifier);
-            return new Fixture(connection, db, email, service, notifier, clientCase.Id);
+            var service = new ExternalWorkOrderApprovalService(
+                db,
+                email,
+                configuration,
+                flags,
+                notifier,
+                documentStorage: storage,
+                dataProtectionProvider: dataProtection);
+            return new Fixture(connection, db, email, service, notifier, storageRoot, storage, clientCase.Id);
+        }
+
+        public async Task<ClientCaseDocument> AddDocumentAsync(
+            string fileName,
+            string contentType,
+            byte[] content,
+            int? clientCaseId = null)
+        {
+            var ownerCaseId = clientCaseId ?? CaseId;
+            var storedName = $"{Guid.NewGuid():N}{Path.GetExtension(fileName)}";
+            var storagePath = Storage.BuildRelativePath(ownerCaseId, storedName);
+            await Storage.SaveAsync(storagePath, content, CancellationToken.None);
+            var document = new ClientCaseDocument
+            {
+                ClientCaseId = ownerCaseId,
+                DocumentKey = Guid.NewGuid().ToString("N"),
+                OriginalFileName = fileName,
+                StoredFileName = storedName,
+                StoragePath = storagePath,
+                ContentType = contentType,
+                SizeBytes = content.LongLength,
+                DocumentType = "Приложение",
+                Status = "Готов",
+                UploadedByName = "Тест",
+            };
+            Db.ClientCaseDocuments.Add(document);
+            await Db.SaveChangesAsync();
+            return document;
         }
 
         public Task<ExternalWorkOrderApprovalStatusDto> SendAsync()
@@ -276,6 +403,10 @@ public sealed class ExternalWorkOrderApprovalServiceTests
         {
             await Db.DisposeAsync();
             await _connection.DisposeAsync();
+            if (Directory.Exists(StorageRoot))
+            {
+                Directory.Delete(StorageRoot, recursive: true);
+            }
         }
     }
 

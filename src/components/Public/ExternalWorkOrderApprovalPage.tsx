@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { CheckCircle2, Clock3, FileCheck2, Loader2, RotateCcw } from 'lucide-react';
+import { CheckCircle2, Clock3, Download, FileCheck2, Loader2, Paperclip, RotateCcw } from 'lucide-react';
 
 import { apiService } from '../../services/api';
 import type { PublicWorkOrderApproval } from '../../types';
@@ -44,6 +44,7 @@ export function ExternalWorkOrderApprovalPage() {
   const [comment, setComment] = useState('');
   const [confirmed, setConfirmed] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [downloadingAttachmentId, setDownloadingAttachmentId] = useState<string | null>(null);
 
   useEffect(() => {
     document.title = 'Согласование заказ-наряда';
@@ -97,6 +98,26 @@ export function ExternalWorkOrderApprovalPage() {
     }
   };
 
+  const downloadAttachment = async (attachment: NonNullable<PublicWorkOrderApproval['snapshot']['attachments']>[number]) => {
+    setError(null);
+    setDownloadingAttachmentId(attachment.publicId);
+    try {
+      const grant = await apiService.createPublicWorkOrderAttachmentGrant(publicId, attachment.publicId, token);
+      const blob = await apiService.downloadPublicWorkOrderAttachment(publicId, attachment.publicId, grant.grantToken);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = attachment.fileName;
+      link.rel = 'noreferrer';
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(extractDisplayErrorMessage(err, 'Не удалось скачать вложение.'));
+    } finally {
+      setDownloadingAttachmentId(null);
+    }
+  };
+
   if (loading) {
     return (
       <main className="grid min-h-screen place-items-center bg-slate-50 p-4">
@@ -113,6 +134,7 @@ export function ExternalWorkOrderApprovalPage() {
           <h1 className="mt-3 text-xl font-semibold text-slate-900">Заказ-наряд недоступен</h1>
           <p className="mt-2 text-sm text-slate-600">{error}</p>
         </section>
+
       </main>
     );
   }
@@ -160,6 +182,32 @@ export function ExternalWorkOrderApprovalPage() {
             ))}
           </div>
         </section>
+
+        {snapshot.attachments?.length ? (
+          <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+            <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+              <Paperclip className="h-4 w-4 text-blue-600" /> Документы к согласованию
+            </div>
+            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+              {snapshot.attachments.map((attachment) => (
+                <button
+                  key={attachment.publicId}
+                  type="button"
+                  onClick={() => void downloadAttachment(attachment)}
+                  disabled={downloadingAttachmentId === attachment.publicId}
+                  className="flex min-w-0 items-center gap-3 rounded-xl border border-slate-200 px-3 py-3 text-left hover:border-blue-300 hover:bg-blue-50/40 disabled:opacity-60">
+                  {downloadingAttachmentId === attachment.publicId
+                    ? <Loader2 className="h-5 w-5 shrink-0 animate-spin text-blue-600" />
+                    : <Download className="h-5 w-5 shrink-0 text-blue-600" />}
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm font-semibold text-slate-800">{attachment.fileName}</span>
+                    <span className="block text-xs text-slate-500">{Math.max(1, Math.ceil(attachment.sizeBytes / 1024))} КБ · доступ на 5 минут</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </section>
+        ) : null}
 
         {decided ? (
           <section className={`rounded-2xl border p-5 shadow-sm ${

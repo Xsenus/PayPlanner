@@ -4223,6 +4223,56 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.ToTable("ExternalContacts");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.ExternalWorkOrderApprovalAttachment", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("ClientCaseDocumentId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<int>("ExternalWorkOrderApprovalRequestId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(260)
+                        .HasColumnType("character varying(260)");
+
+                    b.Property<Guid>("PublicId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Sha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<long>("SizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClientCaseDocumentId");
+
+                    b.HasIndex("PublicId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_ExternalWorkOrderApprovalAttachments_PublicId");
+
+                    b.HasIndex("ExternalWorkOrderApprovalRequestId", "ClientCaseDocumentId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_ExternalWorkOrderApprovalAttachments_RequestId_DocumentId");
+
+                    b.ToTable("ExternalWorkOrderApprovalAttachments");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.ExternalWorkOrderApprovalRequest", b =>
                 {
                     b.Property<int>("Id")
@@ -10960,6 +11010,25 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("ResponsibleUser");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.ExternalWorkOrderApprovalAttachment", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.ClientCaseDocument", "Document")
+                        .WithMany()
+                        .HasForeignKey("ClientCaseDocumentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.ExternalWorkOrderApprovalRequest", "Request")
+                        .WithMany("Attachments")
+                        .HasForeignKey("ExternalWorkOrderApprovalRequestId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Document");
+
+                    b.Navigation("Request");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.ExternalWorkOrderApprovalRequest", b =>
                 {
                     b.HasOne("PayPlanner.Api.Models.ClientCaseWorkOrder", "WorkOrder")
@@ -12082,6 +12151,11 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("Events");
 
                     b.Navigation("Signers");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ExternalWorkOrderApprovalRequest", b =>
+                {
+                    b.Navigation("Attachments");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.GoogleCalendarConnection", b =>

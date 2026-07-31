@@ -1502,6 +1502,26 @@ public class PaymentContext : DbContext
                 .HasDatabaseName("IX_ExternalWorkOrderApprovalRequests_ExpiresAt");
         });
 
+        modelBuilder.Entity<ExternalWorkOrderApprovalAttachment>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.FileName).HasMaxLength(260).IsRequired();
+            entity.Property(e => e.ContentType).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.Sha256).HasMaxLength(64).IsRequired();
+            entity.HasOne(e => e.Request)
+                .WithMany(e => e.Attachments)
+                .HasForeignKey(e => e.ExternalWorkOrderApprovalRequestId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Document)
+                .WithMany()
+                .HasForeignKey(e => e.ClientCaseDocumentId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(e => e.PublicId).IsUnique()
+                .HasDatabaseName("IX_ExternalWorkOrderApprovalAttachments_PublicId");
+            entity.HasIndex(e => new { e.ExternalWorkOrderApprovalRequestId, e.ClientCaseDocumentId }).IsUnique()
+                .HasDatabaseName("IX_ExternalWorkOrderApprovalAttachments_RequestId_DocumentId");
+        });
+
         modelBuilder.Entity<ClientPortalAccount>(entity =>
         {
             entity.HasKey(e => e.Id);
@@ -3438,6 +3458,9 @@ public class PaymentContext : DbContext
             .HasQueryFilter(item => ClientCaseWorkOrders.Any(parent => parent.Id == item.ClientCaseWorkOrderId));
         modelBuilder.Entity<ExternalWorkOrderApprovalRequest>()
             .HasQueryFilter(item => ClientCaseWorkOrders.Any(parent => parent.Id == item.ClientCaseWorkOrderId));
+        modelBuilder.Entity<ExternalWorkOrderApprovalAttachment>()
+            .HasQueryFilter(item => ExternalWorkOrderApprovalRequests.Any(parent => parent.Id == item.ExternalWorkOrderApprovalRequestId)
+                && ClientCaseDocuments.Any(parent => parent.Id == item.ClientCaseDocumentId));
         modelBuilder.Entity<ClientPortalCaseGrant>()
             .HasQueryFilter(item => ClientCases.Any(parent => parent.Id == item.ClientCaseId));
         modelBuilder.Entity<ClientPortalDocumentGrant>()
@@ -4006,6 +4029,7 @@ public class PaymentContext : DbContext
     public DbSet<ClientCaseWorkOrderItem> ClientCaseWorkOrderItems { get; set; }
 
     public DbSet<ExternalWorkOrderApprovalRequest> ExternalWorkOrderApprovalRequests { get; set; }
+    public DbSet<ExternalWorkOrderApprovalAttachment> ExternalWorkOrderApprovalAttachments { get; set; }
 
     public DbSet<ClientPortalAccount> ClientPortalAccounts { get; set; }
     public DbSet<ClientPortalCaseGrant> ClientPortalCaseGrants { get; set; }

@@ -1219,6 +1219,7 @@ export function CaseDetailPage({
   const [externalApprovalRecipientEmail, setExternalApprovalRecipientEmail] = useState('');
   const [externalApprovalRecipientType, setExternalApprovalRecipientType] = useState<'client' | 'representative'>('client');
   const [externalApprovalSaving, setExternalApprovalSaving] = useState(false);
+  const [externalApprovalDocumentIds, setExternalApprovalDocumentIds] = useState<number[]>([]);
   const [copiedLink, setCopiedLink] = useState(false);
   const [editPageOpen, setEditPageOpen] = useState(false);
   const [caseEditDraft, setCaseEditDraft] = useState<CaseEditDraft | null>(null);
@@ -1667,7 +1668,9 @@ export function CaseDetailPage({
   }, [activeTab]);
 
   useEffect(() => {
-    if (activeTab !== 'documents' && activeTab !== 'court') return;
+    if (activeTab !== 'documents'
+      && activeTab !== 'court'
+      && !(activeTab === 'workOrder' && externalApprovalAvailable)) return;
 
     let cancelled = false;
     setDocumentsLoading(true);
@@ -1685,7 +1688,7 @@ export function CaseDetailPage({
     return () => {
       cancelled = true;
     };
-  }, [activeTab, caseId, reloadToken]);
+  }, [activeTab, caseId, externalApprovalAvailable, reloadToken]);
 
   useEffect(() => {
     if (activeTab !== 'court' && activeTab !== 'documents') return;
@@ -1908,6 +1911,11 @@ export function CaseDetailPage({
       setExternalApprovalRecipientEmail(caseItem.client?.email || caseItem.legalEntity?.email || '');
     }
   }, [caseItem, externalApprovalRecipientEmail, externalApprovalRecipientName]);
+
+  useEffect(() => {
+    const availableIds = new Set(documents.map((document) => document.id));
+    setExternalApprovalDocumentIds((current) => current.filter((id) => availableIds.has(id)).slice(0, 10));
+  }, [documents]);
 
   useEffect(() => {
     if (activeTab !== 'history') return;
@@ -3160,8 +3168,8 @@ export function CaseDetailPage({
     const confirmed = await confirm({
       title: externalApprovalStatus ? 'Отправить новую версию?' : 'Отправить клиенту?',
       description: externalApprovalStatus
-        ? 'Предыдущая активная ссылка будет отозвана. Получатель получит новую ссылку и код.'
-        : 'Получатель получит одноразовую ссылку и код подтверждения по email.',
+        ? `Предыдущая активная ссылка будет отозвана. Получатель получит новую ссылку, код и ${externalApprovalDocumentIds.length} вложений.`
+        : `Получатель получит одноразовую ссылку, код подтверждения и ${externalApprovalDocumentIds.length} вложений по email.`,
       confirmLabel: 'Отправить',
     });
     if (!confirmed) return;
@@ -3173,6 +3181,7 @@ export function CaseDetailPage({
         recipientName: externalApprovalRecipientName.trim(),
         recipientEmail: externalApprovalRecipientEmail.trim(),
         recipientType: externalApprovalRecipientType,
+        documentIds: externalApprovalDocumentIds,
       });
       setExternalApprovalStatus(status);
       setNotice(`Версия ${status.version} отправлена на ${status.recipientEmail}.`);
@@ -3822,6 +3831,8 @@ export function CaseDetailPage({
               externalApprovalRecipientEmail={externalApprovalRecipientEmail}
               externalApprovalRecipientType={externalApprovalRecipientType}
               externalApprovalSaving={externalApprovalSaving}
+              documents={documents}
+              externalApprovalDocumentIds={externalApprovalDocumentIds}
               onDraftChange={setWorkOrderDraft}
               onItemDraftChange={(itemId, draft) => setWorkOrderItemDrafts((current) => ({ ...current, [itemId]: draft }))}
               onNewItemDraftChange={setNewWorkOrderItemDraft}
@@ -3829,6 +3840,7 @@ export function CaseDetailPage({
               onExternalApprovalRecipientNameChange={setExternalApprovalRecipientName}
               onExternalApprovalRecipientEmailChange={setExternalApprovalRecipientEmail}
               onExternalApprovalRecipientTypeChange={setExternalApprovalRecipientType}
+              onExternalApprovalDocumentIdsChange={setExternalApprovalDocumentIds}
               onSendExternalApproval={() => void sendExternalWorkOrderApproval()}
               onRevokeExternalApproval={() => void revokeExternalWorkOrderApproval()}
               onSaveHeader={() => void saveWorkOrderHeader()}
@@ -4643,6 +4655,22 @@ function InfoPill({ label, value }: { label: string; value: string }) {
   );
 }
 
+function canAttachToExternalWorkOrder(document: ClientCaseDocument) {
+  const extension = document.originalFileName.toLocaleLowerCase('ru').match(/\.[^.]+$/)?.[0] ?? '';
+  const contentType = document.contentType.toLocaleLowerCase('en-US');
+  return [
+    ['application/pdf', '.pdf'],
+    ['image/jpeg', '.jpg'],
+    ['image/jpeg', '.jpeg'],
+    ['image/png', '.png'],
+    ['text/plain', '.txt'],
+    ['application/msword', '.doc'],
+    ['application/vnd.openxmlformats-officedocument.wordprocessingml.document', '.docx'],
+    ['application/vnd.ms-excel', '.xls'],
+    ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', '.xlsx'],
+  ].some(([type, suffix]) => contentType === type && extension === suffix);
+}
+
 function WorkOrderPanel({
   workOrder,
   draft,
@@ -4667,11 +4695,14 @@ function WorkOrderPanel({
   externalApprovalRecipientEmail,
   externalApprovalRecipientType,
   externalApprovalSaving,
+  documents,
+  externalApprovalDocumentIds,
   onDraftChange,
   onItemDraftChange,
   onNewItemDraftChange,
   onApprovalCommentChange,
   onExternalApprovalRecipientNameChange,
+  onExternalApprovalDocumentIdsChange,
   onExternalApprovalRecipientEmailChange,
   onExternalApprovalRecipientTypeChange,
   onSendExternalApproval,
@@ -4713,11 +4744,14 @@ function WorkOrderPanel({
   externalApprovalRecipientEmail: string;
   externalApprovalRecipientType: 'client' | 'representative';
   externalApprovalSaving: boolean;
+  documents: ClientCaseDocument[];
+  externalApprovalDocumentIds: number[];
   onDraftChange: (draft: WorkOrderHeaderDraft) => void;
   onItemDraftChange: (itemId: number, draft: WorkOrderItemDraft) => void;
   onNewItemDraftChange: (draft: WorkOrderItemDraft) => void;
   onApprovalCommentChange: (value: string) => void;
   onExternalApprovalRecipientNameChange: (value: string) => void;
+  onExternalApprovalDocumentIdsChange: (value: number[]) => void;
   onExternalApprovalRecipientEmailChange: (value: string) => void;
   onExternalApprovalRecipientTypeChange: (value: 'client' | 'representative') => void;
   onSendExternalApproval: () => void;
@@ -4748,6 +4782,12 @@ function WorkOrderPanel({
   const canCreateAct = hasWorkOrder && (status === 'approved' || status === 'invoice_created') && items.length > 0 && (workOrder?.totalAmount ?? 0) > 0;
   const canCreateContract = hasWorkOrder && (status === 'approved' || status === 'invoice_created') && items.length > 0 && (workOrder?.totalAmount ?? 0) > 0;
   const addDisabled = savingItem || !hasWorkOrder || isWorkOrderLocked || !newItemDraft.serviceName.trim();
+  const availableExternalDocuments = documents
+    .filter((document) => document.isLatestVersion
+      && document.sizeBytes > 0
+      && document.sizeBytes <= 25 * 1024 * 1024
+      && canAttachToExternalWorkOrder(document))
+    .sort((left, right) => left.originalFileName.localeCompare(right.originalFileName, 'ru'));
   const lockMessage = status === 'pending_approval'
     ? 'Заказ-наряд на согласовании: редактирование доступно после возврата на доработку.'
     : status === 'approved'
@@ -4952,6 +4992,42 @@ function WorkOrderPanel({
               {externalApprovalStatus ? 'Новая версия' : 'Отправить'}
             </button>
           </div>
+
+          {availableExternalDocuments.length ? (
+            <fieldset className="mt-3 rounded-lg border border-blue-100 bg-white/80 p-3">
+              <legend className="px-1 text-xs font-semibold uppercase tracking-[0.1em] text-slate-500">
+                Документы клиенту · до 10
+              </legend>
+              <div className="mt-1 grid gap-2 md:grid-cols-2">
+                {availableExternalDocuments.map((document) => {
+                  const checked = externalApprovalDocumentIds.includes(document.id);
+                  const limitReached = !checked && externalApprovalDocumentIds.length >= 10;
+                  return (
+                    <label key={document.id} className="flex min-w-0 items-start gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        disabled={externalApprovalSaving || limitReached}
+                        onChange={(event) => onExternalApprovalDocumentIdsChange(
+                          event.target.checked
+                            ? [...externalApprovalDocumentIds, document.id]
+                            : externalApprovalDocumentIds.filter((id) => id !== document.id),
+                        )}
+                        className="mt-0.5 h-4 w-4 rounded border-slate-300"
+                      />
+                      <span className="min-w-0">
+                        <span className="block truncate font-medium">{document.originalFileName}</span>
+                        <span className="block text-xs text-slate-400">версия {document.version} · {Math.max(1, Math.ceil(document.sizeBytes / 1024))} КБ</span>
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+              <p className="mt-2 text-xs text-slate-500">
+                Наружу попадут только отмеченные файлы. Внутренние документы по умолчанию не передаются.
+              </p>
+            </fieldset>
+          ) : null}
 
           {externalApprovalStatus ? (
             <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-blue-100 pt-3 text-xs text-slate-500">

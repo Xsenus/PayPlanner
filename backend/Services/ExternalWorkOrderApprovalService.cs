@@ -4,6 +4,7 @@ using System.Net.Mail;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using PayPlanner.Api.Data;
@@ -28,12 +29,25 @@ public interface IExternalWorkOrderApprovalService
         string? remoteIp,
         string? userAgent,
         CancellationToken ct);
+    Task<PublicWorkOrderAttachmentGrantDto> CreateAttachmentGrantAsync(
+        Guid publicId,
+        Guid attachmentPublicId,
+        string token,
+        CancellationToken ct);
+    Task<PublicWorkOrderAttachmentDownload> DownloadAttachmentAsync(
+        Guid publicId,
+        Guid attachmentPublicId,
+        string grantToken,
+        CancellationToken ct);
 }
 
 public sealed class ExternalWorkOrderApprovalService : IExternalWorkOrderApprovalService
 {
     private const int LifetimeHours = 72;
     private const int MaxAttempts = 5;
+    private const int MaxAttachmentCount = 10;
+    private const long MaxAttachmentSizeBytes = 25L * 1024 * 1024;
+    private static readonly TimeSpan AttachmentGrantLifetime = TimeSpan.FromMinutes(5);
     private static readonly JsonSerializerOptions SnapshotJsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly HashSet<string> FinalStatuses = new(StringComparer.Ordinal)
     {
@@ -46,6 +60,8 @@ public sealed class ExternalWorkOrderApprovalService : IExternalWorkOrderApprova
     private readonly IOptionsMonitor<AppFeatureFlagsOptions> _featureFlags;
     private readonly IExternalWorkOrderApprovalNotifier? _notifier;
     private readonly ILogger<ExternalWorkOrderApprovalService>? _logger;
+    private readonly ICaseDocumentStorage? _documentStorage;
+    private readonly ITimeLimitedDataProtector? _attachmentGrantProtector;
 
     public ExternalWorkOrderApprovalService(
         PaymentContext db,
@@ -53,7 +69,9 @@ public sealed class ExternalWorkOrderApprovalService : IExternalWorkOrderApprova
         IConfiguration configuration,
         IOptionsMonitor<AppFeatureFlagsOptions> featureFlags,
         IExternalWorkOrderApprovalNotifier? notifier = null,
-        ILogger<ExternalWorkOrderApprovalService>? logger = null)
+        ILogger<ExternalWorkOrderApprovalService>? logger = null,
+        ICaseDocumentStorage? documentStorage = null,
+        IDataProtectionProvider? dataProtectionProvider = null)
     {
         _db = db;
         _email = email;
@@ -61,6 +79,10 @@ public sealed class ExternalWorkOrderApprovalService : IExternalWorkOrderApprova
         _featureFlags = featureFlags;
         _notifier = notifier;
         _logger = logger;
+        _documentStorage = documentStorage;
+        _attachmentGrantProtector = dataProtectionProvider?
+            .CreateProtector("PayPlanner.ExternalWorkOrderApproval.AttachmentGrant.v1")
+            .ToTimeLimitedDataProtector();
     }
 
     public async Task<ExternalWorkOrderApprovalStatusDto?> GetLatestStatusAsync(int caseId, CancellationToken ct)
@@ -141,6 +163,7 @@ public sealed class ExternalWorkOrderApprovalService : IExternalWorkOrderApprova
         }
 
         var now = DateTime.UtcNow;
+        var attachments = await BuildAttachmentsAsync(caseId, request.DocumentIds, ct);
         var previousWorkOrderStatus = aggregate.WorkOrder.Status;
         var previousApprovalRequestedAt = aggregate.WorkOrder.ApprovalRequestedAt;
         var previousApprovalRequestedByUserId = aggregate.WorkOrder.ApprovalRequestedByUserId;
@@ -170,6 +193,13 @@ public sealed class ExternalWorkOrderApprovalService : IExternalWorkOrderApprova
             Currency = aggregate.WorkOrder.Currency,
             TotalAmount = aggregate.WorkOrder.TotalAmount,
             Items = aggregate.Items,
+            Attachments = attachments.Select(item => new ExternalWorkOrderSnapshotAttachmentDto
+            {
+                PublicId = item.PublicId,
+                FileName = item.FileName,
+                ContentType = item.ContentType,
+                SizeBytes = item.SizeBytes,
+            }).ToArray(),
         };
         var snapshotJson = JsonSerializer.Serialize(snapshot, SnapshotJsonOptions);
         var accessToken = GenerateToken(32);
@@ -194,6 +224,7 @@ public sealed class ExternalWorkOrderApprovalService : IExternalWorkOrderApprova
             ExpiresAt = now.AddHours(LifetimeHours),
             LastSentAt = now,
             MaxAttempts = MaxAttempts,
+            Attachments = attachments,
         };
         _db.ExternalWorkOrderApprovalRequests.Add(entity);
         aggregate.WorkOrder.ApprovalRequestedAt = now;
@@ -357,6 +388,181 @@ public sealed class ExternalWorkOrderApprovalService : IExternalWorkOrderApprova
             }
         }
         return MapDecision(entity);
+    }
+
+    public async Task<PublicWorkOrderAttachmentGrantDto> CreateAttachmentGrantAsync(
+        Guid publicId,
+        Guid attachmentPublicId,
+        string token,
+        CancellationToken ct)
+    {
+        EnsureEnabled(publicSurface: true);
+        EnsureAttachmentSupport();
+        var request = await LoadPublicRequestAsync(publicId, token.Trim(), ct);
+        EnsureAttachmentWindow(request);
+        VerifySnapshot(request);
+        var exists = await _db.ExternalWorkOrderApprovalAttachments
+            .AsNoTracking()
+            .AnyAsync(item => item.ExternalWorkOrderApprovalRequestId == request.Id
+                && item.PublicId == attachmentPublicId, ct);
+        if (!exists)
+        {
+            throw new ExternalWorkOrderApprovalException("attachment_unavailable", "Вложение недоступно.");
+        }
+
+        var expiresAt = DateTimeOffset.UtcNow.Add(AttachmentGrantLifetime);
+        var payload = JsonSerializer.Serialize(new AttachmentGrantPayload(
+            publicId,
+            attachmentPublicId,
+            request.SnapshotHash));
+        return new PublicWorkOrderAttachmentGrantDto
+        {
+            GrantToken = _attachmentGrantProtector!.Protect(payload, AttachmentGrantLifetime),
+            ExpiresAt = expiresAt.UtcDateTime,
+        };
+    }
+
+    public async Task<PublicWorkOrderAttachmentDownload> DownloadAttachmentAsync(
+        Guid publicId,
+        Guid attachmentPublicId,
+        string grantToken,
+        CancellationToken ct)
+    {
+        EnsureEnabled(publicSurface: true);
+        EnsureAttachmentSupport();
+        AttachmentGrantPayload payload;
+        try
+        {
+            var json = _attachmentGrantProtector!.Unprotect(grantToken.Trim(), out _);
+            payload = JsonSerializer.Deserialize<AttachmentGrantPayload>(json)
+                ?? throw new CryptographicException("Attachment grant payload is empty.");
+        }
+        catch (Exception exception) when (exception is CryptographicException or JsonException or FormatException)
+        {
+            throw new ExternalWorkOrderApprovalException("attachment_unavailable", "Ссылка на вложение недействительна или истекла.");
+        }
+
+        if (payload.PublicId != publicId || payload.AttachmentPublicId != attachmentPublicId)
+        {
+            throw new ExternalWorkOrderApprovalException("attachment_unavailable", "Вложение недоступно.");
+        }
+
+        var attachment = await _db.ExternalWorkOrderApprovalAttachments
+            .AsNoTracking()
+            .Include(item => item.Request)
+            .Include(item => item.Document)
+            .FirstOrDefaultAsync(item => item.PublicId == attachmentPublicId
+                && item.Request.PublicId == publicId, ct)
+            ?? throw new ExternalWorkOrderApprovalException("attachment_unavailable", "Вложение недоступно.");
+        EnsureAttachmentWindow(attachment.Request);
+        VerifySnapshot(attachment.Request);
+        if (!FixedTimeEquals(payload.SnapshotHash, attachment.Request.SnapshotHash)
+            || !_documentStorage!.Exists(attachment.Document.StoragePath))
+        {
+            throw new ExternalWorkOrderApprovalException("attachment_unavailable", "Вложение недоступно.");
+        }
+
+        var path = _documentStorage.ResolvePath(attachment.Document.StoragePath);
+        var currentHash = await HashFileAsync(path, ct);
+        if (!FixedTimeEquals(currentHash, attachment.Sha256))
+        {
+            throw new ExternalWorkOrderApprovalException("attachment_integrity_error", "Не удалось проверить неизменность вложения.");
+        }
+
+        return new PublicWorkOrderAttachmentDownload(path, attachment.FileName, attachment.ContentType);
+    }
+
+    private async Task<List<ExternalWorkOrderApprovalAttachment>> BuildAttachmentsAsync(
+        int caseId,
+        IReadOnlyCollection<int>? requestedIds,
+        CancellationToken ct)
+    {
+        var ids = (requestedIds ?? Array.Empty<int>())
+            .Where(static id => id > 0)
+            .Distinct()
+            .ToArray();
+        if (ids.Length == 0)
+        {
+            return [];
+        }
+        if (ids.Length > MaxAttachmentCount)
+        {
+            throw new ExternalWorkOrderApprovalException("validation_error", $"Можно приложить не более {MaxAttachmentCount} документов.");
+        }
+        EnsureAttachmentSupport();
+
+        var documents = await _db.ClientCaseDocuments
+            .AsNoTracking()
+            .Where(item => item.ClientCaseId == caseId && ids.Contains(item.Id))
+            .ToListAsync(ct);
+        if (documents.Count != ids.Length)
+        {
+            throw new ExternalWorkOrderApprovalException("validation_error", "Один или несколько документов не относятся к выбранному делу.");
+        }
+
+        var result = new List<ExternalWorkOrderApprovalAttachment>(documents.Count);
+        foreach (var document in documents.OrderBy(item => item.OriginalFileName, StringComparer.OrdinalIgnoreCase))
+        {
+            if (document.SizeBytes <= 0 || document.SizeBytes > MaxAttachmentSizeBytes
+                || !IsAllowedAttachment(document.ContentType, document.OriginalFileName)
+                || !_documentStorage!.Exists(document.StoragePath))
+            {
+                throw new ExternalWorkOrderApprovalException("validation_error", $"Документ «{document.OriginalFileName}» нельзя передать клиенту.");
+            }
+
+            var path = _documentStorage.ResolvePath(document.StoragePath);
+            result.Add(new ExternalWorkOrderApprovalAttachment
+            {
+                PublicId = Guid.NewGuid(),
+                ClientCaseDocumentId = document.Id,
+                FileName = Truncate(document.OriginalFileName, 260),
+                ContentType = Truncate(document.ContentType, 200),
+                SizeBytes = document.SizeBytes,
+                Sha256 = await HashFileAsync(path, ct),
+            });
+        }
+        return result;
+    }
+
+    private static bool IsAllowedAttachment(string? contentType, string fileName)
+    {
+        var normalizedType = contentType?.Trim().ToLowerInvariant() ?? string.Empty;
+        var extension = Path.GetExtension(fileName).ToLowerInvariant();
+        return (normalizedType, extension) switch
+        {
+            ("application/pdf", ".pdf") => true,
+            ("image/jpeg", ".jpg" or ".jpeg") => true,
+            ("image/png", ".png") => true,
+            ("text/plain", ".txt") => true,
+            ("application/msword", ".doc") => true,
+            ("application/vnd.openxmlformats-officedocument.wordprocessingml.document", ".docx") => true,
+            ("application/vnd.ms-excel", ".xls") => true,
+            ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ".xlsx") => true,
+            _ => false,
+        };
+    }
+
+    private static async Task<string> HashFileAsync(string path, CancellationToken ct)
+    {
+        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        var hash = await SHA256.HashDataAsync(stream, ct);
+        return Convert.ToHexString(hash).ToLowerInvariant();
+    }
+
+    private void EnsureAttachmentSupport()
+    {
+        if (_documentStorage is null || _attachmentGrantProtector is null)
+        {
+            throw new ExternalWorkOrderApprovalException("attachment_unavailable", "Вложения временно недоступны.");
+        }
+    }
+
+    private static void EnsureAttachmentWindow(ExternalWorkOrderApprovalRequest request)
+    {
+        if (request.ExpiresAt <= DateTime.UtcNow || request.Status is "revoked" or "locked" or "expired" or "delivery_failed")
+        {
+            throw new ExternalWorkOrderApprovalException("attachment_unavailable", "Срок доступа к вложению истёк.");
+        }
     }
 
     private async Task<ExternalWorkOrderApprovalRequest> LoadPublicRequestAsync(Guid publicId, string token, CancellationToken ct)
@@ -612,6 +818,7 @@ public sealed class CreateExternalWorkOrderApprovalRequest
     public string? RecipientName { get; set; }
     public string? RecipientEmail { get; set; }
     public string? RecipientType { get; set; }
+    public IReadOnlyCollection<int>? DocumentIds { get; set; }
 }
 
 public sealed class PublicWorkOrderApprovalDecisionRequest
@@ -670,7 +877,26 @@ public sealed class ExternalWorkOrderSnapshotDto
     public string Currency { get; set; } = "RUB";
     public decimal TotalAmount { get; set; }
     public IReadOnlyList<ExternalWorkOrderSnapshotItemDto> Items { get; set; } = [];
+    public IReadOnlyList<ExternalWorkOrderSnapshotAttachmentDto> Attachments { get; set; } = [];
 }
+
+public sealed class ExternalWorkOrderSnapshotAttachmentDto
+{
+    public Guid PublicId { get; set; }
+    public string FileName { get; set; } = string.Empty;
+    public string ContentType { get; set; } = string.Empty;
+    public long SizeBytes { get; set; }
+}
+
+public sealed class PublicWorkOrderAttachmentGrantDto
+{
+    public string GrantToken { get; set; } = string.Empty;
+    public DateTime ExpiresAt { get; set; }
+}
+
+public sealed record PublicWorkOrderAttachmentDownload(string Path, string FileName, string ContentType);
+
+internal sealed record AttachmentGrantPayload(Guid PublicId, Guid AttachmentPublicId, string SnapshotHash);
 
 public sealed class ExternalWorkOrderSnapshotItemDto
 {

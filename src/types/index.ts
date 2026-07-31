@@ -1178,6 +1178,14 @@ export interface ExternalWorkOrderSnapshot {
   currency: string;
   totalAmount: number;
   items: ExternalWorkOrderSnapshotItem[];
+  attachments?: ExternalWorkOrderSnapshotAttachment[];
+}
+
+export interface ExternalWorkOrderSnapshotAttachment {
+  publicId: string;
+  fileName: string;
+  contentType: string;
+  sizeBytes: number;
 }
 
 export interface PublicWorkOrderApproval {

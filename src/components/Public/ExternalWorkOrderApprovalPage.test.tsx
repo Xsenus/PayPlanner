@@ -12,7 +12,12 @@ const PUBLIC_ID = '11111111-1111-4111-8111-111111111111';
 
 describe('ExternalWorkOrderApprovalPage', () => {
   beforeEach(() => {
-    resetApiServiceMock('openPublicWorkOrderApproval', 'decidePublicWorkOrderApproval');
+    resetApiServiceMock(
+      'openPublicWorkOrderApproval',
+      'decidePublicWorkOrderApproval',
+      'createPublicWorkOrderAttachmentGrant',
+      'downloadPublicWorkOrderAttachment',
+    );
     sessionStorage.clear();
     window.history.replaceState(null, '', `/external/work-order-approval/${PUBLIC_ID}#token=safe-token`);
     apiServiceMock.openPublicWorkOrderApproval.mockResolvedValue({
@@ -37,6 +42,12 @@ describe('ExternalWorkOrderApprovalPage', () => {
           unitPrice: 15000,
           totalAmount: 15000,
         }],
+        attachments: [{
+          publicId: '22222222-2222-4222-8222-222222222222',
+          fileName: 'Расчёт.pdf',
+          contentType: 'application/pdf',
+          sizeBytes: 1024,
+        }],
       },
     });
     apiServiceMock.decidePublicWorkOrderApproval.mockResolvedValue({
@@ -45,6 +56,11 @@ describe('ExternalWorkOrderApprovalPage', () => {
       comment: '',
       decisionAt: '2026-07-31T05:00:00Z',
     });
+    apiServiceMock.createPublicWorkOrderAttachmentGrant.mockResolvedValue({
+      grantToken: 'short-lived-grant',
+      expiresAt: '2026-07-31T05:05:00Z',
+    });
+    apiServiceMock.downloadPublicWorkOrderAttachment.mockResolvedValue(new Blob(['pdf']));
   });
 
   it('removes token from URL and records explicit OTP confirmation', async () => {
@@ -67,5 +83,36 @@ describe('ExternalWorkOrderApprovalPage', () => {
       });
     });
     expect(await screen.findByText('Заказ-наряд согласован')).toBeTruthy();
+  });
+
+  it('downloads only an explicitly listed attachment through a short-lived grant', async () => {
+    const createObjectUrl = vi.fn(() => 'blob:work-order-attachment');
+    const revokeObjectUrl = vi.fn();
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    vi.stubGlobal('URL', Object.assign(URL, {
+      createObjectURL: createObjectUrl,
+      revokeObjectURL: revokeObjectUrl,
+    }));
+
+    render(<ExternalWorkOrderApprovalPage />);
+    fireEvent.click(await screen.findByRole('button', { name: /Расчёт\.pdf/ }));
+
+    await waitFor(() => {
+      expect(apiServiceMock.createPublicWorkOrderAttachmentGrant).toHaveBeenCalledWith(
+        PUBLIC_ID,
+        '22222222-2222-4222-8222-222222222222',
+        'safe-token',
+      );
+      expect(apiServiceMock.downloadPublicWorkOrderAttachment).toHaveBeenCalledWith(
+        PUBLIC_ID,
+        '22222222-2222-4222-8222-222222222222',
+        'short-lived-grant',
+      );
+    });
+    expect(createObjectUrl).toHaveBeenCalledTimes(1);
+    expect(click).toHaveBeenCalledTimes(1);
+    expect(revokeObjectUrl).toHaveBeenCalledWith('blob:work-order-attachment');
+    click.mockRestore();
+    vi.unstubAllGlobals();
   });
 });
