@@ -5,6 +5,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 
@@ -320,22 +321,33 @@ public sealed class SystemMaxNotificationService(
         CancellationToken cancellationToken = default)
     {
         var result = Build(await LoadAsync(cancellationToken));
-        var deliveryMetrics = await context.NotificationDeliveries
+        var deliveryMetrics = await context.MaxOutboxMessages
             .AsNoTracking()
-            .Where(item => item.Channel == NotificationChannels.Max)
             .GroupBy(_ => 1)
             .Select(group => new
             {
+                PendingCount = group.Count(item => item.Status == MaxOutboxStatuses.Queued || item.Status == MaxOutboxStatuses.Processing),
+                FailedCount = group.Count(item => item.Status == MaxOutboxStatuses.Failed),
+                SentCount = group.Count(item => item.Status == MaxOutboxStatuses.Sent),
                 LastSuccessfulAt = group
-                    .Where(item => item.Status == NotificationDeliveryStatus.Sent)
-                    .Max(item => (DateTime?)(item.SentAt ?? item.CreatedAt)),
+                    .Where(item => item.Status == MaxOutboxStatuses.Sent)
+                    .Max(item => (DateTime?)item.SentAt),
                 LastFailedAt = group
-                    .Where(item => item.Status == NotificationDeliveryStatus.Failed)
-                    .Max(item => (DateTime?)item.CreatedAt),
+                    .Where(item => item.Status == MaxOutboxStatuses.Failed)
+                    .Max(item => (DateTime?)item.UpdatedAt),
             })
             .SingleOrDefaultAsync(cancellationToken);
         result.LastSuccessfulDeliveryAt = deliveryMetrics?.LastSuccessfulAt;
         result.LastFailedDeliveryAt = deliveryMetrics?.LastFailedAt;
+        result.PendingCount = deliveryMetrics?.PendingCount ?? 0;
+        result.FailedCount = deliveryMetrics?.FailedCount ?? 0;
+        result.SentCount = deliveryMetrics?.SentCount ?? 0;
+        result.DeliverySampleSize = result.FailedCount + result.SentCount;
+        result.SentRatePercent = result.DeliverySampleSize == 0
+            ? null
+            : Math.Round(result.SentCount * 100m / result.DeliverySampleSize, 1);
+        result.BlockedRecipientsCount = await context.MaxRecipientLinks.AsNoTracking()
+            .CountAsync(item => item.Status == MaxRecipientLinkStatuses.Blocked || item.Status == MaxRecipientLinkStatuses.OptedOut, cancellationToken);
         result.LastDeliveryError = deliveryMetrics?.LastFailedAt is null
             ? null
             : "Последняя доставка завершилась ошибкой. Подробности доступны в журнале доставок.";

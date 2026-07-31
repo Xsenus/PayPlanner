@@ -128,6 +128,12 @@ public class MaxNotificationDiagnosticsDto
     public DateTime? LastSuccessfulDeliveryAt { get; set; }
     public DateTime? LastFailedDeliveryAt { get; set; }
     public string? LastDeliveryError { get; set; }
+    public int PendingCount { get; set; }
+    public int FailedCount { get; set; }
+    public int SentCount { get; set; }
+    public int DeliverySampleSize { get; set; }
+    public decimal? SentRatePercent { get; set; }
+    public int BlockedRecipientsCount { get; set; }
     public string StatusText { get; set; } = string.Empty;
 }
 

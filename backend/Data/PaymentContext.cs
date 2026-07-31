@@ -3062,6 +3062,28 @@ public class PaymentContext : DbContext
             entity.HasIndex(item => item.ExpiresAt);
         });
 
+        modelBuilder.Entity<MaxOutboxMessage>(entity =>
+        {
+            entity.HasKey(item => item.Id);
+            entity.Property(item => item.EventKey).HasMaxLength(64).IsRequired();
+            entity.Property(item => item.Scenario).HasMaxLength(32).IsRequired();
+            entity.Property(item => item.ProtectedText).HasMaxLength(12000).IsRequired();
+            entity.Property(item => item.ProtectedActionUrl).HasMaxLength(512);
+            entity.Property(item => item.ActionText).HasMaxLength(128);
+            entity.Property(item => item.BodyPreview).HasMaxLength(256).IsRequired();
+            entity.Property(item => item.IdempotencyKey).HasMaxLength(64).IsRequired();
+            entity.Property(item => item.Status).HasMaxLength(32).IsRequired();
+            entity.Property(item => item.ProviderMessageId).HasMaxLength(256);
+            entity.Property(item => item.LastErrorCode).HasMaxLength(128);
+            entity.Property(item => item.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.HasOne(item => item.RecipientLink).WithMany().HasForeignKey(item => item.RecipientLinkId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.RecipientUser).WithMany().HasForeignKey(item => item.RecipientUserId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasIndex(item => item.PublicId).IsUnique();
+            entity.HasIndex(item => item.IdempotencyKey).IsUnique();
+            entity.HasIndex(item => new { item.Status, item.NextAttemptAt });
+            entity.HasIndex(item => new { item.RecipientLinkId, item.CreatedAt });
+        });
+
         modelBuilder.Entity<TaskJournalDeadlineChangeRequest>(entity =>
         {
             entity.HasKey(e => e.Id);
@@ -4126,6 +4148,7 @@ public class PaymentContext : DbContext
     public DbSet<ElectronicSignatureEvent> ElectronicSignatureEvents { get; set; }
     public DbSet<MaxRecipientLink> MaxRecipientLinks { get; set; }
     public DbSet<MaxInboundEvent> MaxInboundEvents { get; set; }
+    public DbSet<MaxOutboxMessage> MaxOutboxMessages { get; set; }
     public DbSet<TaskJournalDeadlineChangeRequest> TaskJournalDeadlineChangeRequests { get; set; }
     public DbSet<TaskJournalFile> TaskJournalFiles { get; set; }
     public DbSet<TaskJournalTemplate> TaskJournalTemplates { get; set; }

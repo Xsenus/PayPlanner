@@ -45,3 +45,38 @@ public sealed class MaxInboundEvent
     public DateTime ReceivedAt { get; set; } = DateTime.UtcNow;
     public DateTime ExpiresAt { get; set; }
 }
+
+public static class MaxOutboxStatuses
+{
+    public const string Queued = "queued";
+    public const string Processing = "processing";
+    public const string Sent = "sent";
+    public const string Failed = "failed";
+    public const string Cancelled = "cancelled";
+}
+
+public sealed class MaxOutboxMessage
+{
+    public int Id { get; set; }
+    public Guid PublicId { get; set; } = Guid.NewGuid();
+    [MaxLength(64)] public string EventKey { get; set; } = string.Empty;
+    [MaxLength(32)] public string Scenario { get; set; } = string.Empty;
+    public int RecipientLinkId { get; set; }
+    public MaxRecipientLink RecipientLink { get; set; } = null!;
+    public int? RecipientUserId { get; set; }
+    public User? RecipientUser { get; set; }
+    [MaxLength(12000)] public string ProtectedText { get; set; } = string.Empty;
+    [MaxLength(512)] public string? ProtectedActionUrl { get; set; }
+    [MaxLength(128)] public string? ActionText { get; set; }
+    [MaxLength(256)] public string BodyPreview { get; set; } = "Содержимое скрыто: сообщение MAX.";
+    [MaxLength(64)] public string IdempotencyKey { get; set; } = string.Empty;
+    [MaxLength(32)] public string Status { get; set; } = MaxOutboxStatuses.Queued;
+    public int AttemptCount { get; set; }
+    public int MaxAttempts { get; set; } = 5;
+    public DateTime NextAttemptAt { get; set; } = DateTime.UtcNow;
+    [MaxLength(256)] public string? ProviderMessageId { get; set; }
+    [MaxLength(128)] public string? LastErrorCode { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? SentAt { get; set; }
+}

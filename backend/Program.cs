@@ -149,6 +149,8 @@ builder.Services.AddScoped<ITelegramNotificationService, TelegramNotificationSer
 builder.Services.AddScoped<ISmsNotificationService, SystemSmsNotificationService>();
 builder.Services.AddScoped<IMaxNotificationService, SystemMaxNotificationService>();
 builder.Services.AddScoped<IMaxWebhookService, MaxWebhookService>();
+builder.Services.AddScoped<IMaxOutboxService, MaxOutboxService>();
+builder.Services.AddScoped<IMaxOutboxProcessor, MaxOutboxProcessor>();
 builder.Services.AddScoped<IExternalWorkOrderApprovalService, ExternalWorkOrderApprovalService>();
 builder.Services.AddScoped<IClientPortalService, ClientPortalService>();
 builder.Services.AddScoped<ITelegramBotUpdateService, TelegramBotUpdateService>();
@@ -240,6 +242,7 @@ else
 
 builder.Services.AddHostedService<DatabaseBackupSchedulerService>();
 builder.Services.AddHostedService<MessengerDocumentOutboxWorker>();
+builder.Services.AddHostedService<MaxOutboxWorker>();
 builder.Services.AddHostedService<PaymentStatusUpdater>();
 builder.Services.AddHostedService<InvoicePaymentStateReconciliationService>();
 builder.Services.AddSingleton<TaskJournalReminderNotificationService>();
