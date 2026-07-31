@@ -84,6 +84,11 @@ public sealed class MaxMessengerServiceTests
                 DocumentsEnabled = true,
                 CorrespondenceEnabled = true,
                 ConfirmationsEnabled = true,
+                QuietHoursEnabled = true,
+                QuietHoursStart = "21:30",
+                QuietHoursEnd = "08:15",
+                QuietHoursTimeZone = "Asia/Novosibirsk",
+                DailyLimitPerRecipient = 999,
                 TechnicalPayloadRetentionDays = 120,
             });
 
@@ -93,6 +98,11 @@ public sealed class MaxMessengerServiceTests
             Assert.True(settings.BotTokenSet);
             Assert.True(settings.WebhookSecretSet);
             Assert.Equal(90, settings.TechnicalPayloadRetentionDays);
+            Assert.True(settings.QuietHoursEnabled);
+            Assert.Equal("21:30", settings.QuietHoursStart);
+            Assert.Equal("08:15", settings.QuietHoursEnd);
+            Assert.Equal("Asia/Novosibirsk", settings.QuietHoursTimeZone);
+            Assert.Equal(100, settings.DailyLimitPerRecipient);
             Assert.Equal(4, settings.Scenarios.Count);
             var storedSecrets = await context.SystemSettings
                 .Where(item => item.Key == SystemMaxNotificationService.BotTokenKey

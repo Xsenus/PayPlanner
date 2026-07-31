@@ -281,6 +281,11 @@ public sealed record MaxRuntimeSettings(
     bool DocumentsEnabled,
     bool CorrespondenceEnabled,
     bool ConfirmationsEnabled,
+    bool QuietHoursEnabled,
+    TimeOnly QuietHoursStart,
+    TimeOnly QuietHoursEnd,
+    string QuietHoursTimeZone,
+    int DailyLimitPerRecipient,
     int TechnicalPayloadRetentionDays)
 {
     public bool Ready => Enabled && !EmergencyStop
@@ -302,6 +307,11 @@ public sealed class SystemMaxNotificationService(
     public const string CorrespondenceEnabledKey = "notifications.max.scenarios.correspondence";
     public const string ConfirmationsEnabledKey = "notifications.max.scenarios.confirmations";
     public const string EmergencyStopKey = "notifications.max.emergencyStop";
+    public const string QuietHoursEnabledKey = "notifications.max.quietHours.enabled";
+    public const string QuietHoursStartKey = "notifications.max.quietHours.start";
+    public const string QuietHoursEndKey = "notifications.max.quietHours.end";
+    public const string QuietHoursTimeZoneKey = "notifications.max.quietHours.timeZone";
+    public const string DailyLimitPerRecipientKey = "notifications.max.limits.dailyPerRecipient";
     public const string TechnicalPayloadRetentionDaysKey = "notifications.max.technicalPayloadRetentionDays";
     private static readonly string[] Keys =
     [
@@ -313,6 +323,11 @@ public sealed class SystemMaxNotificationService(
         CorrespondenceEnabledKey,
         ConfirmationsEnabledKey,
         EmergencyStopKey,
+        QuietHoursEnabledKey,
+        QuietHoursStartKey,
+        QuietHoursEndKey,
+        QuietHoursTimeZoneKey,
+        DailyLimitPerRecipientKey,
         TechnicalPayloadRetentionDaysKey,
     ];
     private readonly IDataProtector _protector = dataProtectionProvider.CreateProtector(ProtectorPurpose);
@@ -376,6 +391,14 @@ public sealed class SystemMaxNotificationService(
         Upsert(existing, CorrespondenceEnabledKey, request.CorrespondenceEnabled ? "true" : "false", now);
         Upsert(existing, ConfirmationsEnabledKey, request.ConfirmationsEnabled ? "true" : "false", now);
         Upsert(existing, EmergencyStopKey, request.EmergencyStop ? "true" : "false", now);
+        var quietStart = ParseTime(request.QuietHoursStart, new TimeOnly(20, 0));
+        var quietEnd = ParseTime(request.QuietHoursEnd, new TimeOnly(9, 0));
+        var quietTimeZone = NormalizeTimeZone(request.QuietHoursTimeZone, rejectInvalid: true);
+        Upsert(existing, QuietHoursEnabledKey, request.QuietHoursEnabled ? "true" : "false", now);
+        Upsert(existing, QuietHoursStartKey, quietStart.ToString("HH:mm"), now);
+        Upsert(existing, QuietHoursEndKey, quietEnd.ToString("HH:mm"), now);
+        Upsert(existing, QuietHoursTimeZoneKey, quietTimeZone, now);
+        Upsert(existing, DailyLimitPerRecipientKey, Math.Clamp(request.DailyLimitPerRecipient ?? 20, 1, 100).ToString(), now);
         Upsert(
             existing,
             TechnicalPayloadRetentionDaysKey,
@@ -399,6 +422,11 @@ public sealed class SystemMaxNotificationService(
             ParseBool(settings.GetValueOrDefault(DocumentsEnabledKey)),
             ParseBool(settings.GetValueOrDefault(CorrespondenceEnabledKey)),
             ParseBool(settings.GetValueOrDefault(ConfirmationsEnabledKey)),
+            ParseBool(settings.GetValueOrDefault(QuietHoursEnabledKey), fallback: true),
+            ParseTime(settings.GetValueOrDefault(QuietHoursStartKey), new TimeOnly(20, 0)),
+            ParseTime(settings.GetValueOrDefault(QuietHoursEndKey), new TimeOnly(9, 0)),
+            NormalizeTimeZone(settings.GetValueOrDefault(QuietHoursTimeZoneKey)),
+            ParseLimit(settings.GetValueOrDefault(DailyLimitPerRecipientKey)),
             ParseRetention(settings.GetValueOrDefault(TechnicalPayloadRetentionDaysKey)));
     }
 
@@ -445,6 +473,11 @@ public sealed class SystemMaxNotificationService(
             DocumentsEnabled = documents,
             CorrespondenceEnabled = correspondence,
             ConfirmationsEnabled = confirmations,
+            QuietHoursEnabled = ParseBool(settings.GetValueOrDefault(QuietHoursEnabledKey), fallback: true),
+            QuietHoursStart = ParseTime(settings.GetValueOrDefault(QuietHoursStartKey), new TimeOnly(20, 0)).ToString("HH:mm"),
+            QuietHoursEnd = ParseTime(settings.GetValueOrDefault(QuietHoursEndKey), new TimeOnly(9, 0)).ToString("HH:mm"),
+            QuietHoursTimeZone = NormalizeTimeZone(settings.GetValueOrDefault(QuietHoursTimeZoneKey)),
+            DailyLimitPerRecipient = ParseLimit(settings.GetValueOrDefault(DailyLimitPerRecipientKey)),
             TechnicalPayloadRetentionDays = ParseRetention(settings.GetValueOrDefault(TechnicalPayloadRetentionDaysKey)),
             Scenarios = scenarios,
             AllowedEventTypes = notifications ? ["employee-critical"] : [],
@@ -522,8 +555,34 @@ public sealed class SystemMaxNotificationService(
         context.SystemSettings.Add(setting);
     }
 
-    private static bool ParseBool(string? value)
-        => bool.TryParse(value, out var parsed) && parsed;
+    private static bool ParseBool(string? value, bool fallback = false)
+        => bool.TryParse(value, out var parsed) ? parsed : fallback;
+
+    private static TimeOnly ParseTime(string? value, TimeOnly fallback)
+        => TimeOnly.TryParseExact(value?.Trim(), "HH:mm", out var parsed) ? parsed : fallback;
+
+    private static int ParseLimit(string? value)
+        => int.TryParse(value, out var parsed) ? Math.Clamp(parsed, 1, 100) : 20;
+
+    private static string NormalizeTimeZone(string? value, bool rejectInvalid = false)
+    {
+        var normalized = string.IsNullOrWhiteSpace(value) ? "Asia/Novosibirsk" : value.Trim();
+        try
+        {
+            _ = TimeZoneInfo.FindSystemTimeZoneById(normalized);
+            return normalized;
+        }
+        catch (TimeZoneNotFoundException)
+        {
+            if (rejectInvalid) throw new ArgumentException("Неизвестный часовой пояс тихих часов MAX.");
+            return "Asia/Novosibirsk";
+        }
+        catch (InvalidTimeZoneException)
+        {
+            if (rejectInvalid) throw new ArgumentException("Некорректный часовой пояс тихих часов MAX.");
+            return "Asia/Novosibirsk";
+        }
+    }
 
     private static int ParseRetention(string? value)
         => int.TryParse(value, out var parsed) ? Math.Clamp(parsed, 1, 90) : 30;

@@ -122,6 +122,11 @@ public class MaxNotificationDiagnosticsDto
     public bool DocumentsEnabled { get; set; }
     public bool CorrespondenceEnabled { get; set; }
     public bool ConfirmationsEnabled { get; set; }
+    public bool QuietHoursEnabled { get; set; } = true;
+    public string QuietHoursStart { get; set; } = "20:00";
+    public string QuietHoursEnd { get; set; } = "09:00";
+    public string QuietHoursTimeZone { get; set; } = "Asia/Novosibirsk";
+    public int DailyLimitPerRecipient { get; set; } = 20;
     public int TechnicalPayloadRetentionDays { get; set; } = 30;
     public IReadOnlyList<MaxScenarioDto> Scenarios { get; set; } = Array.Empty<MaxScenarioDto>();
     public IReadOnlyList<string> AllowedEventTypes { get; set; } = Array.Empty<string>();

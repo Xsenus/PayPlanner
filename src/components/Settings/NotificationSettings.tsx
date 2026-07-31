@@ -96,6 +96,11 @@ type MaxSettingsForm = {
   correspondenceEnabled: boolean;
   confirmationsEnabled: boolean;
   emergencyStop: boolean;
+  quietHoursEnabled: boolean;
+  quietHoursStart: string;
+  quietHoursEnd: string;
+  quietHoursTimeZone: string;
+  dailyLimitPerRecipient: number;
   technicalPayloadRetentionDays: number;
 };
 
@@ -292,6 +297,11 @@ function maxFormFromSettings(settings?: NotificationSettingsDto | null): MaxSett
     correspondenceEnabled: settings?.max.correspondenceEnabled ?? false,
     confirmationsEnabled: settings?.max.confirmationsEnabled ?? false,
     emergencyStop: settings?.max.emergencyStop ?? false,
+    quietHoursEnabled: settings?.max.quietHoursEnabled ?? true,
+    quietHoursStart: settings?.max.quietHoursStart ?? '20:00',
+    quietHoursEnd: settings?.max.quietHoursEnd ?? '09:00',
+    quietHoursTimeZone: settings?.max.quietHoursTimeZone ?? DEFAULT_TIME_ZONE_ID,
+    dailyLimitPerRecipient: settings?.max.dailyLimitPerRecipient ?? 20,
     technicalPayloadRetentionDays: settings?.max.technicalPayloadRetentionDays ?? 30,
   };
 }
@@ -676,6 +686,11 @@ export function NotificationSettings({ canEdit = true }: NotificationSettingsPro
         correspondenceEnabled: maxForm.correspondenceEnabled,
         confirmationsEnabled: maxForm.confirmationsEnabled,
         emergencyStop: maxForm.emergencyStop,
+        quietHoursEnabled: maxForm.quietHoursEnabled,
+        quietHoursStart: maxForm.quietHoursStart,
+        quietHoursEnd: maxForm.quietHoursEnd,
+        quietHoursTimeZone: maxForm.quietHoursTimeZone,
+        dailyLimitPerRecipient: maxForm.dailyLimitPerRecipient,
         technicalPayloadRetentionDays: maxForm.technicalPayloadRetentionDays,
       });
       setSettings(next);
@@ -2406,6 +2421,30 @@ function MaxDiagnosticsPanel({
       </div>
 
       <div className="mt-3 flex flex-wrap items-end gap-3">
+        <label className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700">
+          <SystemCheckbox
+            checked={form.quietHoursEnabled}
+            disabled={!canEdit || saving}
+            onChange={(event) => setForm((prev) => ({ ...prev, quietHoursEnabled: event.target.checked }))}
+          />
+          Тихие часы
+        </label>
+        <label className="text-sm font-medium text-gray-700">
+          Начало
+          <input type="time" value={form.quietHoursStart} disabled={!canEdit || saving || !form.quietHoursEnabled} onChange={(event) => setForm((prev) => ({ ...prev, quietHoursStart: event.target.value }))} className="mt-1 block rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+        </label>
+        <label className="text-sm font-medium text-gray-700">
+          Окончание
+          <input type="time" value={form.quietHoursEnd} disabled={!canEdit || saving || !form.quietHoursEnabled} onChange={(event) => setForm((prev) => ({ ...prev, quietHoursEnd: event.target.value }))} className="mt-1 block rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+        </label>
+        <label className="text-sm font-medium text-gray-700">
+          Часовой пояс
+          <input value={form.quietHoursTimeZone} disabled={!canEdit || saving || !form.quietHoursEnabled} onChange={(event) => setForm((prev) => ({ ...prev, quietHoursTimeZone: event.target.value }))} className="mt-1 block w-48 rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+        </label>
+        <label className="text-sm font-medium text-gray-700">
+          Лимит на получателя в день
+          <input type="number" min={1} max={100} value={form.dailyLimitPerRecipient} disabled={!canEdit || saving} onChange={(event) => setForm((prev) => ({ ...prev, dailyLimitPerRecipient: Number(event.target.value) || 20 }))} className="mt-1 block w-44 rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+        </label>
         <label className="text-sm font-medium text-gray-700">
           Хранить технические payload, дней
           <input

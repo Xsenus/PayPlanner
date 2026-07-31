@@ -61,6 +61,20 @@ public sealed class MaxOutboxService(
         if (existing is not null) return existing;
 
         var now = timeProvider.GetUtcNow().UtcDateTime;
+        var timeZone = TimeZoneInfo.FindSystemTimeZoneById(runtime.QuietHoursTimeZone);
+        var localNow = TimeZoneInfo.ConvertTimeFromUtc(now, timeZone);
+        if (runtime.QuietHoursEnabled && IsWithinQuietHours(TimeOnly.FromDateTime(localNow), runtime.QuietHoursStart, runtime.QuietHoursEnd))
+            throw new InvalidOperationException("Сообщение MAX не создано: действуют тихие часы.");
+        var localDayStart = DateTime.SpecifyKind(localNow.Date, DateTimeKind.Unspecified);
+        var dayStartUtc = TimeZoneInfo.ConvertTimeToUtc(localDayStart, timeZone);
+        var dayEndUtc = TimeZoneInfo.ConvertTimeToUtc(localDayStart.AddDays(1), timeZone);
+        var sentToday = await db.MaxOutboxMessages.AsNoTracking()
+            .CountAsync(item => item.RecipientLinkId == link.Id
+                && item.CreatedAt >= dayStartUtc && item.CreatedAt < dayEndUtc
+                && item.Status != MaxOutboxStatuses.Cancelled, ct);
+        if (sentToday >= runtime.DailyLimitPerRecipient)
+            throw new InvalidOperationException("Достигнут дневной лимит MAX для получателя.");
+
         var message = new MaxOutboxMessage
         {
             EventKey = normalizedEventKey,
@@ -109,6 +123,9 @@ public sealed class MaxOutboxService(
 
     private static string Sha256(string value) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
+
+    private static bool IsWithinQuietHours(TimeOnly now, TimeOnly start, TimeOnly end)
+        => start == end ? false : start < end ? now >= start && now < end : now >= start || now < end;
 }
 
 public interface IMaxOutboxProcessor

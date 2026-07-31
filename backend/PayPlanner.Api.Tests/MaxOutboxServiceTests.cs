@@ -46,6 +46,22 @@ public sealed class MaxOutboxServiceTests
     }
 
     [Fact]
+    public async Task QuietHoursAndDailyRecipientLimitRejectBeforeCreatingMessage()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        await fixture.ConfigureLimitsAsync(quietHoursEnabled: true, dailyLimit: 20);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Outbox.QueueAsync(fixture.Request(), CancellationToken.None));
+        Assert.Empty(await fixture.Db.MaxOutboxMessages.ToListAsync());
+
+        await fixture.ConfigureLimitsAsync(quietHoursEnabled: false, dailyLimit: 1);
+        var first = await fixture.Outbox.QueueAsync(fixture.Request(), CancellationToken.None);
+        Assert.Equal(first.Id, (await fixture.Outbox.QueueAsync(fixture.Request(), CancellationToken.None)).Id);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Outbox.QueueAsync(
+            fixture.Request() with { EventKey = "critical:event:2" }, CancellationToken.None));
+        Assert.Single(await fixture.Db.MaxOutboxMessages.ToListAsync());
+    }
+
+    [Fact]
     public async Task ProcessorSendsQueuedMessageAndStoresOnlyProviderId()
     {
         await using var fixture = await Fixture.CreateAsync();
@@ -122,6 +138,20 @@ public sealed class MaxOutboxServiceTests
         public MaxOutboxProcessor Processor(IMaxApiClient api) => new(
             Db, _settings, api, _protection, _time, NullLogger<MaxOutboxProcessor>.Instance);
 
+        public async Task ConfigureLimitsAsync(bool quietHoursEnabled, int dailyLimit) => await _settings.UpdateSettingsAsync(new UpdateMaxNotificationSettingsRequest
+        {
+            Enabled = true,
+            KeepExistingBotToken = true,
+            KeepExistingWebhookSecret = true,
+            NotificationsEnabled = true,
+            DocumentsEnabled = true,
+            QuietHoursEnabled = quietHoursEnabled,
+            QuietHoursStart = "20:00",
+            QuietHoursEnd = "09:00",
+            QuietHoursTimeZone = "Asia/Novosibirsk",
+            DailyLimitPerRecipient = dailyLimit,
+        });
+
         public static async Task<Fixture> CreateAsync(bool linked = true)
         {
             var connection = new SqliteConnection("Data Source=:memory:");
@@ -149,7 +179,8 @@ public sealed class MaxOutboxServiceTests
             {
                 Enabled = true, BotToken = "bot-token", KeepExistingBotToken = false,
                 WebhookSecret = "webhook-secret", KeepExistingWebhookSecret = false,
-                NotificationsEnabled = true, DocumentsEnabled = true
+                NotificationsEnabled = true, DocumentsEnabled = true,
+                QuietHoursEnabled = false
             });
             var time = new FixedTimeProvider(new DateTimeOffset(2026, 7, 31, 16, 0, 0, TimeSpan.Zero));
             var outbox = new MaxOutboxService(db, settings, protection, time);

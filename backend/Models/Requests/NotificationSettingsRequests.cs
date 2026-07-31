@@ -62,6 +62,11 @@ public class UpdateMaxNotificationSettingsRequest
     public bool CorrespondenceEnabled { get; set; }
     public bool ConfirmationsEnabled { get; set; }
     public bool EmergencyStop { get; set; }
+    public bool QuietHoursEnabled { get; set; } = true;
+    public string? QuietHoursStart { get; set; } = "20:00";
+    public string? QuietHoursEnd { get; set; } = "09:00";
+    public string? QuietHoursTimeZone { get; set; } = "Asia/Novosibirsk";
+    public int? DailyLimitPerRecipient { get; set; }
     public int? TechnicalPayloadRetentionDays { get; set; }
 }
 

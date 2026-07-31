@@ -1084,6 +1084,11 @@ export interface MaxNotificationDiagnosticsDto {
   documentsEnabled: boolean;
   correspondenceEnabled: boolean;
   confirmationsEnabled: boolean;
+  quietHoursEnabled: boolean;
+  quietHoursStart: string;
+  quietHoursEnd: string;
+  quietHoursTimeZone: string;
+  dailyLimitPerRecipient: number;
   technicalPayloadRetentionDays: number;
   scenarios: MaxScenarioDto[];
   allowedEventTypes: string[];
@@ -1259,6 +1264,11 @@ export interface UpdateMaxNotificationSettingsRequest {
   correspondenceEnabled: boolean;
   confirmationsEnabled: boolean;
   emergencyStop: boolean;
+  quietHoursEnabled: boolean;
+  quietHoursStart?: string | null;
+  quietHoursEnd?: string | null;
+  quietHoursTimeZone?: string | null;
+  dailyLimitPerRecipient?: number | null;
   technicalPayloadRetentionDays?: number | null;
 }
 
