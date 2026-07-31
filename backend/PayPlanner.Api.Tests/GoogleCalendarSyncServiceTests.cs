@@ -208,6 +208,51 @@ public class GoogleCalendarSyncServiceTests
     }
 
     [Fact]
+    public async Task SyncNowAsync_ExportsOnlyExplicitlyVisibleTaskComments()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "comments-google@example.com", "user");
+        await EnableGoogleSettingsAsync(db);
+        await CreateConnectionAsync(db, user.Id);
+        var task = await CreateTaskAsync(db, user.Id, "Комментарии Google");
+        db.TaskJournalComments.AddRange(
+            new TaskJournalComment
+            {
+                TaskJournalItemId = task.Id,
+                AuthorUserId = user.Id,
+                AuthorName = user.FullName,
+                Kind = "comment",
+                Text = "Разрешённый комментарий Google",
+                IsExternalCalendarVisible = true,
+                CreatedAt = DateTime.UtcNow,
+            },
+            new TaskJournalComment
+            {
+                TaskJournalItemId = task.Id,
+                AuthorUserId = user.Id,
+                AuthorName = user.FullName,
+                Kind = "comment",
+                Text = "Внутренний комментарий Google",
+                IsExternalCalendarVisible = false,
+                CreatedAt = DateTime.UtcNow.AddSeconds(1),
+            });
+        await db.SaveChangesAsync();
+        var handler = new RecordingGoogleHandler();
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+
+        await service.SyncNowAsync(user.Id, CreateHttpRequest(user.Id), CancellationToken.None);
+
+        var request = handler.Requests.Single(item =>
+            item.Method == HttpMethod.Post && item.RequestUri!.AbsolutePath.Contains("/events", StringComparison.Ordinal));
+        var body = await request.Content!.ReadAsStringAsync();
+        using var payload = JsonDocument.Parse(body);
+        var description = payload.RootElement.GetProperty("description").GetString();
+        Assert.Contains("Разрешённый комментарий Google", description);
+        Assert.DoesNotContain("Внутренний комментарий Google", description);
+        Assert.Contains("PAYPLANNER-COMMENTS-V1", description);
+    }
+
+    [Fact]
     public async Task SyncNowAsync_UsesSyncFromDateToSkipOlderTasks()
     {
         await using var db = await CreateContextAsync();

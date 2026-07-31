@@ -544,6 +544,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         errors += await DeleteLinksOutsideSyncWindowAsync(connection, cancellationToken);
 
         var tasks = await LoadTasksForConnectionAsync(connection, cancellationToken);
+        var externalCommentsByTask = await LoadExternalCalendarCommentsAsync(tasks.Select(item => item.Id), cancellationToken);
         var processedTasks = 0;
         foreach (var task in tasks)
         {
@@ -555,7 +556,11 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
                 }
                 else
                 {
-                    await UpsertYandexEventForTaskAsync(connection, task, cancellationToken);
+                    await UpsertYandexEventForTaskAsync(
+                        connection,
+                        task,
+                        externalCommentsByTask.GetValueOrDefault(task.Id) ?? [],
+                        cancellationToken);
                 }
 
                 processedTasks++;
@@ -626,7 +631,12 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         }
         else
         {
-            await UpsertYandexEventForTaskAsync(connection, task, cancellationToken);
+            var externalComments = await LoadExternalCalendarCommentsAsync([task.Id], cancellationToken);
+            await UpsertYandexEventForTaskAsync(
+                connection,
+                task,
+                externalComments.GetValueOrDefault(task.Id) ?? [],
+                cancellationToken);
         }
 
         connection.LastIncrementalSyncAt = DateTime.UtcNow;
@@ -882,12 +892,16 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         return true;
     }
 
-    private async Task UpsertYandexEventForTaskAsync(YandexCalendarConnection connection, TaskJournalItem task, CancellationToken cancellationToken)
+    private async Task UpsertYandexEventForTaskAsync(
+        YandexCalendarConnection connection,
+        TaskJournalItem task,
+        IReadOnlyCollection<TaskJournalComment> externalComments,
+        CancellationToken cancellationToken)
     {
         var accessToken = await ResolveAccessTokenAsync(connection, cancellationToken);
         var calendar = await EnsureCalendarForTaskAsync(connection, task, accessToken, cancellationToken);
         var timeZone = await ResolveTaskTimeZoneAsync(connection, null, task, cancellationToken);
-        var crmHash = BuildCrmHash(task, timeZone);
+        var crmHash = BuildCrmHash(task, timeZone, externalComments);
         var link = connection.TaskLinks
             .FirstOrDefault(item => item.TaskJournalItemId == task.Id);
 
@@ -905,7 +919,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         }
 
         var eventUrl = BuildEventUrl(calendar.CalendarUrl, eventId);
-        var ics = BuildIcsEvent(connection, task, eventId, crmHash, timeZone);
+        var ics = BuildIcsEvent(connection, task, externalComments, eventId, crmHash, timeZone);
         var result = await PutYandexEventAsync(accessToken, eventUrl, ics, cancellationToken);
         var created = link is null || link.SyncStatus == "detached" || string.IsNullOrWhiteSpace(link.YandexEventUrl);
         if (link is null)
@@ -939,7 +953,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         link.YandexEventUrl = eventUrl;
         link.YandexEtag = result.Etag;
         link.LastCrmHash = crmHash;
-        link.LastYandexHash = BuildYandexHashFromTask(task, eventId, timeZone);
+        link.LastYandexHash = BuildYandexHashFromTask(task, externalComments, eventId, timeZone);
         link.LastDirection = "crm-to-yandex";
         link.SyncStatus = "active";
         link.LastError = null;
@@ -1104,6 +1118,44 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         calendar.YandexCalendarId = discovered.Id;
         calendar.CalendarUrl = discovered.Url;
         calendar.UpdatedAt = DateTime.UtcNow;
+    }
+
+    private async Task<IReadOnlyDictionary<int, IReadOnlyCollection<TaskJournalComment>>> LoadExternalCalendarCommentsAsync(
+        IEnumerable<int> taskIds,
+        CancellationToken cancellationToken)
+    {
+        var ids = taskIds.Distinct().ToArray();
+        if (ids.Length == 0)
+        {
+            return new Dictionary<int, IReadOnlyCollection<TaskJournalComment>>();
+        }
+
+        var comments = await _db.TaskJournalComments
+            .AsNoTracking()
+            .Where(item =>
+                ids.Contains(item.TaskJournalItemId)
+                && item.IsExternalCalendarVisible
+                && item.ExternalDeletedAt == null
+                && item.Kind == "comment")
+            .Select(item => new TaskJournalComment
+            {
+                Id = item.Id,
+                TaskJournalItemId = item.TaskJournalItemId,
+                AuthorName = item.AuthorName,
+                Kind = item.Kind,
+                Text = item.Text,
+                IsExternalCalendarVisible = true,
+                CreatedAt = item.CreatedAt,
+            })
+            .OrderBy(item => item.CreatedAt)
+            .ThenBy(item => item.Id)
+            .ToListAsync(cancellationToken);
+
+        return comments
+            .GroupBy(item => item.TaskJournalItemId)
+            .ToDictionary(
+                group => group.Key,
+                group => (IReadOnlyCollection<TaskJournalComment>)group.ToArray());
     }
 
     private async Task<IReadOnlyList<TaskJournalItem>> LoadTasksForConnectionAsync(YandexCalendarConnection connection, CancellationToken cancellationToken)
@@ -1921,7 +1973,13 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         return result;
     }
 
-    private static string BuildIcsEvent(YandexCalendarConnection connection, TaskJournalItem task, string eventId, string crmHash, TimeZoneInfo timeZone)
+    private static string BuildIcsEvent(
+        YandexCalendarConnection connection,
+        TaskJournalItem task,
+        IReadOnlyCollection<TaskJournalComment> externalComments,
+        string eventId,
+        string crmHash,
+        TimeZoneInfo timeZone)
     {
         var start = CalendarTimeZoneHelper.ToExternalUtc(task.DueAt, timeZone);
         var end = start.AddMinutes(Math.Max(15, task.PlannedDurationMinutes));
@@ -1936,7 +1994,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
             $"DTSTART:{start:yyyyMMdd'T'HHmmss'Z'}",
             $"DTEND:{end:yyyyMMdd'T'HHmmss'Z'}",
             $"SUMMARY:{EscapeIcs($"[{StatusLabel(task.Status)}] {task.Title}")}",
-            $"DESCRIPTION:{EscapeIcs(BuildEventDescription(task))}",
+            $"DESCRIPTION:{EscapeIcs(BuildEventDescription(task, externalComments))}",
             $"X-PAYPLANNER-TASK-ID:{task.Id.ToString(CultureInfo.InvariantCulture)}",
             $"X-PAYPLANNER-CONNECTION-ID:{connection.Id.ToString(CultureInfo.InvariantCulture)}",
             $"X-PAYPLANNER-TIMEZONE:{EscapeIcs(CalendarTimeZoneHelper.ResolveIanaTimeZoneId(timeZone))}",
@@ -2056,7 +2114,9 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         return match?.Success == true && int.TryParse(match.Groups["id"].Value, out id) ? id : null;
     }
 
-    private static string BuildEventDescription(TaskJournalItem task)
+    private static string BuildEventDescription(
+        TaskJournalItem task,
+        IReadOnlyCollection<TaskJournalComment> externalComments)
     {
         var lines = new List<string>
         {
@@ -2079,17 +2139,29 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
             lines.Add(string.Empty);
             lines.Add($"Результат: {task.Result.Trim()}");
         }
-        return string.Join('\n', lines);
+        return ExternalCalendarCommentBlockService
+            .AppendToDescription(string.Join('\n', lines), externalComments)
+            .Description;
     }
 
-    private static string BuildCrmHash(TaskJournalItem task, TimeZoneInfo timeZone)
-        => Sha256($"{task.Id}|{task.Title}|{task.Description}|{task.Result}|{task.Status}|{task.Priority}|{CalendarTimeZoneHelper.ToExternalUtc(task.DueAt, timeZone):O}|{task.PlannedDurationMinutes}|{task.AssigneeUserId}|{task.AssigneeName}|{timeZone.Id}");
+    private static string BuildCrmHash(
+        TaskJournalItem task,
+        TimeZoneInfo timeZone,
+        IReadOnlyCollection<TaskJournalComment>? externalComments = null)
+    {
+        var commentsHash = Sha256(BuildEventDescription(task, externalComments ?? []));
+        return Sha256($"{task.Id}|{task.Title}|{task.Description}|{task.Result}|{task.Status}|{task.Priority}|{CalendarTimeZoneHelper.ToExternalUtc(task.DueAt, timeZone):O}|{task.PlannedDurationMinutes}|{task.AssigneeUserId}|{task.AssigneeName}|{timeZone.Id}|{commentsHash}");
+    }
 
     private static string BuildYandexHash(YandexEventItem item)
         => Sha256($"{item.Id}|{item.Summary}|{item.Deleted}|{item.StartAt:O}|{item.EndAt:O}|{item.PayPlannerHash}");
 
-    private static string BuildYandexHashFromTask(TaskJournalItem task, string eventId, TimeZoneInfo timeZone)
-        => Sha256($"{eventId}|[{StatusLabel(task.Status)}] {task.Title}|False|{CalendarTimeZoneHelper.ToExternalUtc(task.DueAt, timeZone):O}|{CalendarTimeZoneHelper.ToExternalUtc(task.DueAt, timeZone).AddMinutes(Math.Max(15, task.PlannedDurationMinutes)):O}|{BuildCrmHash(task, timeZone)}");
+    private static string BuildYandexHashFromTask(
+        TaskJournalItem task,
+        IReadOnlyCollection<TaskJournalComment> externalComments,
+        string eventId,
+        TimeZoneInfo timeZone)
+        => Sha256($"{eventId}|[{StatusLabel(task.Status)}] {task.Title}|False|{CalendarTimeZoneHelper.ToExternalUtc(task.DueAt, timeZone):O}|{CalendarTimeZoneHelper.ToExternalUtc(task.DueAt, timeZone).AddMinutes(Math.Max(15, task.PlannedDurationMinutes)):O}|{BuildCrmHash(task, timeZone, externalComments)}");
 
     private static string Sha256(string value)
         => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));

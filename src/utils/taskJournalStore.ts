@@ -152,6 +152,9 @@ export interface TaskJournalComment {
   authorName: string;
   kind: TaskJournalCommentKind;
   text: string;
+  isExternalCalendarVisible: boolean;
+  externalSource?: string | null;
+  externalAuthorTrust?: string | null;
   metadataJson?: string | null;
   createdAt: string;
   updatedAt?: string | null;

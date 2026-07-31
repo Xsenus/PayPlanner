@@ -130,6 +130,9 @@ public class TaskJournalCommentDto
     public string AuthorName { get; set; } = string.Empty;
     public string Kind { get; set; } = "comment";
     public string Text { get; set; } = string.Empty;
+    public bool IsExternalCalendarVisible { get; set; }
+    public string? ExternalSource { get; set; }
+    public string? ExternalAuthorTrust { get; set; }
     public string MetadataJson { get; set; } = "{}";
     public string CreatedAt { get; set; } = string.Empty;
     public string? UpdatedAt { get; set; }

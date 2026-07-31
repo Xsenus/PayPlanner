@@ -4532,10 +4532,10 @@ export class ApiService {
     return this.request<TaskJournalComment[]>(`/tasks/${id}/comments`);
   }
 
-  async createTaskJournalComment(id: number, text: string) {
+  async createTaskJournalComment(id: number, text: string, isExternalCalendarVisible = false) {
     return this.request<TaskJournalComment>(`/tasks/${id}/comments`, {
       method: 'POST',
-      body: JSON.stringify({ text }),
+      body: JSON.stringify({ text, isExternalCalendarVisible }),
     });
   }
 

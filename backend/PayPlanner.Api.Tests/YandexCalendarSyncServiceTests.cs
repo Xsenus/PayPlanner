@@ -289,6 +289,47 @@ public class YandexCalendarSyncServiceTests
     }
 
     [Fact]
+    public async Task SyncTaskForConnectedUsersAsync_ExportsOnlyExplicitlyVisibleTaskComments()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "comments-yandex@example.com", "user");
+        var connection = await CreateConnectionAsync(db, user.Id);
+        await CreateCalendarAsync(db, connection.Id, "calendar-yandex-comments", "PayPlanner задачи");
+        var task = await CreateTaskAsync(db, user.Id, "Комментарии Яндекс", DateTime.UtcNow.AddDays(1));
+        db.TaskJournalComments.AddRange(
+            new TaskJournalComment
+            {
+                TaskJournalItemId = task.Id,
+                AuthorUserId = user.Id,
+                AuthorName = user.FullName,
+                Kind = "comment",
+                Text = "Разрешённый комментарий Яндекс",
+                IsExternalCalendarVisible = true,
+                CreatedAt = DateTime.UtcNow,
+            },
+            new TaskJournalComment
+            {
+                TaskJournalItemId = task.Id,
+                AuthorUserId = user.Id,
+                AuthorName = user.FullName,
+                Kind = "comment",
+                Text = "Внутренний комментарий Яндекс",
+                CreatedAt = DateTime.UtcNow.AddSeconds(1),
+            });
+        await db.SaveChangesAsync();
+        var handler = new RecordingYandexHandler();
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+
+        await service.SyncTaskForConnectedUsersAsync(task.Id, CancellationToken.None);
+
+        var request = handler.Requests.Single(item => item.Method == HttpMethod.Put);
+        var body = await request.Content!.ReadAsStringAsync();
+        Assert.Contains("Разрешённый комментарий Яндекс", body);
+        Assert.DoesNotContain("Внутренний комментарий Яндекс", body);
+        Assert.Contains("PAYPLANNER-COMMENTS-V1", body);
+    }
+
+    [Fact]
     public async Task SyncNowAsync_UsesAssigneeTimeZoneForAdminCalendarNearMidnight()
     {
         await using var db = await CreateContextAsync();

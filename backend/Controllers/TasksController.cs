@@ -1762,10 +1762,17 @@ public class TasksController : ControllerBase
         }
 
         var comment = CreateTaskComment(entity.Id, access, "comment", text);
+        comment.IsExternalCalendarVisible = request.IsExternalCalendarVisible;
+        comment.ExternalSource = request.IsExternalCalendarVisible ? "crm" : null;
+        comment.ExternalAuthorTrust = request.IsExternalCalendarVisible ? "verified-crm-user" : null;
         _db.TaskJournalComments.Add(comment);
         entity.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
         await _notificationService.NotifyTaskCommentAsync(entity, comment, ct);
+        if (comment.IsExternalCalendarVisible)
+        {
+            await SafeSyncExternalCalendarTaskAsync(entity.Id, ct);
+        }
 
         return Created($"/api/tasks/{entity.Id}/comments/{comment.Id}", MapComment(comment));
     }
@@ -6196,6 +6203,9 @@ public class TasksController : ControllerBase
             AuthorName = comment.AuthorName,
             Kind = comment.Kind,
             Text = comment.Text,
+            IsExternalCalendarVisible = comment.IsExternalCalendarVisible,
+            ExternalSource = comment.ExternalSource,
+            ExternalAuthorTrust = comment.ExternalAuthorTrust,
             MetadataJson = string.IsNullOrWhiteSpace(comment.MetadataJson) ? "{}" : comment.MetadataJson,
             CreatedAt = ToIso(comment.CreatedAt),
             UpdatedAt = comment.UpdatedAt.HasValue ? ToIso(comment.UpdatedAt.Value) : null,

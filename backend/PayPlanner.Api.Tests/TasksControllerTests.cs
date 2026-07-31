@@ -6050,6 +6050,7 @@ public class TasksControllerTests
         var result = await controller.CreateComment(task.Id, new CreateTaskJournalCommentRequest
         {
             Text = "Клиент прислал документы.",
+            IsExternalCalendarVisible = true,
         }, CancellationToken.None);
 
         var created = Assert.IsType<CreatedResult>(result.Result);
@@ -6058,6 +6059,9 @@ public class TasksControllerTests
         Assert.Equal("comment", comment.Kind);
         Assert.Equal("Клиент прислал документы.", comment.Text);
         Assert.Equal(author.Id, comment.AuthorUserId);
+        Assert.True(comment.IsExternalCalendarVisible);
+        Assert.Equal("crm", comment.ExternalSource);
+        Assert.Equal("verified-crm-user", comment.ExternalAuthorTrust);
         Assert.Single(notificationService.CommentTaskIds, task.Id);
     }
 

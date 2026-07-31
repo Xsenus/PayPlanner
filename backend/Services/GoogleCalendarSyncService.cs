@@ -589,6 +589,7 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         errors += await DeleteLinksOutsideSyncWindowAsync(connection, cancellationToken);
 
         var tasks = await LoadTasksForConnectionAsync(connection, cancellationToken);
+        var externalCommentsByTask = await LoadExternalCalendarCommentsAsync(tasks.Select(item => item.Id), cancellationToken);
         var processedTasks = 0;
         foreach (var task in tasks)
         {
@@ -600,7 +601,12 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
                 }
                 else
                 {
-                    await UpsertGoogleEventForTaskAsync(connection, task, settings, cancellationToken);
+                    await UpsertGoogleEventForTaskAsync(
+                        connection,
+                        task,
+                        settings,
+                        externalCommentsByTask.GetValueOrDefault(task.Id) ?? [],
+                        cancellationToken);
                 }
 
                 processedTasks++;
@@ -685,7 +691,13 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         }
         else
         {
-            await UpsertGoogleEventForTaskAsync(connection, task, settings, cancellationToken);
+            var externalComments = await LoadExternalCalendarCommentsAsync([task.Id], cancellationToken);
+            await UpsertGoogleEventForTaskAsync(
+                connection,
+                task,
+                settings,
+                externalComments.GetValueOrDefault(task.Id) ?? [],
+                cancellationToken);
         }
 
         connection.LastIncrementalSyncAt = DateTime.UtcNow;
@@ -1049,12 +1061,13 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         GoogleCalendarConnection connection,
         TaskJournalItem task,
         CalendarSyncSettingsDto settings,
+        IReadOnlyCollection<TaskJournalComment> externalComments,
         CancellationToken cancellationToken)
     {
         var accessToken = await ResolveAccessTokenAsync(connection, cancellationToken);
         var calendar = await EnsureCalendarForTaskAsync(connection, task, accessToken, cancellationToken);
         var timeZone = await ResolveTaskTimeZoneAsync(connection, null, task, cancellationToken);
-        var crmHash = BuildCrmHash(task, timeZone);
+        var crmHash = BuildCrmHash(task, timeZone, externalComments);
         var link = await _db.GoogleCalendarTaskLinks
             .FirstOrDefaultAsync(item => item.ConnectionId == connection.Id && item.TaskJournalItemId == task.Id, cancellationToken);
 
@@ -1065,7 +1078,7 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
             return;
         }
 
-        var payload = BuildGoogleEventPayload(connection, task, settings, crmHash, timeZone);
+        var payload = BuildGoogleEventPayload(connection, task, settings, externalComments, crmHash, timeZone);
         var previousGoogleCalendarId = link?.GoogleCalendarId;
         var previousGoogleEventId = link?.GoogleEventId;
         var createNewEvent = link is null ||
@@ -1285,6 +1298,44 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
 
         await AddLogAsync(connection.Id, calendar.Id, null, "system", "create-calendar", "success", $"В Google Calendar создан календарь «{name}».", null, cancellationToken);
         return calendar;
+    }
+
+    private async Task<IReadOnlyDictionary<int, IReadOnlyCollection<TaskJournalComment>>> LoadExternalCalendarCommentsAsync(
+        IEnumerable<int> taskIds,
+        CancellationToken cancellationToken)
+    {
+        var ids = taskIds.Distinct().ToArray();
+        if (ids.Length == 0)
+        {
+            return new Dictionary<int, IReadOnlyCollection<TaskJournalComment>>();
+        }
+
+        var comments = await _db.TaskJournalComments
+            .AsNoTracking()
+            .Where(item =>
+                ids.Contains(item.TaskJournalItemId)
+                && item.IsExternalCalendarVisible
+                && item.ExternalDeletedAt == null
+                && item.Kind == "comment")
+            .Select(item => new TaskJournalComment
+            {
+                Id = item.Id,
+                TaskJournalItemId = item.TaskJournalItemId,
+                AuthorName = item.AuthorName,
+                Kind = item.Kind,
+                Text = item.Text,
+                IsExternalCalendarVisible = true,
+                CreatedAt = item.CreatedAt,
+            })
+            .OrderBy(item => item.CreatedAt)
+            .ThenBy(item => item.Id)
+            .ToListAsync(cancellationToken);
+
+        return comments
+            .GroupBy(item => item.TaskJournalItemId)
+            .ToDictionary(
+                group => group.Key,
+                group => (IReadOnlyCollection<TaskJournalComment>)group.ToArray());
     }
 
     private async Task<IReadOnlyList<TaskJournalItem>> LoadTasksForConnectionAsync(GoogleCalendarConnection connection, CancellationToken cancellationToken)
@@ -1999,6 +2050,7 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         GoogleCalendarConnection connection,
         TaskJournalItem task,
         CalendarSyncSettingsDto settings,
+        IReadOnlyCollection<TaskJournalComment> externalComments,
         string crmHash,
         TimeZoneInfo timeZone)
     {
@@ -2008,7 +2060,7 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         return new GoogleEventPayload
         {
             Summary = $"[{StatusLabel(task.Status)}] {task.Title}",
-            Description = BuildEventDescription(task),
+            Description = BuildEventDescription(task, externalComments),
             Start = new GoogleEventDateTime { DateTime = CalendarTimeZoneHelper.FormatOffsetDateTime(start, timeZone), TimeZone = timeZoneId },
             End = new GoogleEventDateTime { DateTime = CalendarTimeZoneHelper.FormatOffsetDateTime(end, timeZone), TimeZone = timeZoneId },
             ColorId = ResolveCompletedTaskGoogleColorId(task, settings),
@@ -2025,7 +2077,9 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         };
     }
 
-    private static string BuildEventDescription(TaskJournalItem task)
+    private static string BuildEventDescription(
+        TaskJournalItem task,
+        IReadOnlyCollection<TaskJournalComment> externalComments)
     {
         var lines = new List<string>
         {
@@ -2048,11 +2102,19 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
             lines.Add(string.Empty);
             lines.Add($"Результат: {task.Result.Trim()}");
         }
-        return string.Join('\n', lines);
+        return ExternalCalendarCommentBlockService
+            .AppendToDescription(string.Join('\n', lines), externalComments)
+            .Description;
     }
 
-    private static string BuildCrmHash(TaskJournalItem task, TimeZoneInfo timeZone)
-        => Sha256($"{task.Id}|{task.Title}|{task.Description}|{task.Result}|{task.Status}|{task.Priority}|{CalendarTimeZoneHelper.ToExternalUtc(task.DueAt, timeZone):O}|{task.PlannedDurationMinutes}|{task.AssigneeUserId}|{task.AssigneeName}|{timeZone.Id}");
+    private static string BuildCrmHash(
+        TaskJournalItem task,
+        TimeZoneInfo timeZone,
+        IReadOnlyCollection<TaskJournalComment>? externalComments = null)
+    {
+        var commentsHash = Sha256(BuildEventDescription(task, externalComments ?? []));
+        return Sha256($"{task.Id}|{task.Title}|{task.Description}|{task.Result}|{task.Status}|{task.Priority}|{CalendarTimeZoneHelper.ToExternalUtc(task.DueAt, timeZone):O}|{task.PlannedDurationMinutes}|{task.AssigneeUserId}|{task.AssigneeName}|{timeZone.Id}|{commentsHash}");
+    }
 
     private static string BuildGoogleHash(GoogleEventItem item)
         => Sha256($"{item.Id}|{item.Summary}|{item.Status}|{item.StartAt:O}|{item.EndAt:O}");

@@ -8339,6 +8339,7 @@ function TaskModal({
   const [commentsLoading, setCommentsLoading] = useState(false);
   const [commentSaving, setCommentSaving] = useState(false);
   const [commentText, setCommentText] = useState('');
+  const [commentExternalCalendarVisible, setCommentExternalCalendarVisible] = useState(false);
   const [deadlineChangeRequests, setDeadlineChangeRequests] = useState<TaskJournalDeadlineChangeRequest[]>([]);
   const [deadlineChangeRequestsLoading, setDeadlineChangeRequestsLoading] = useState(false);
   const [changeComment, setChangeComment] = useState('');
@@ -9010,10 +9011,16 @@ function TaskModal({
 
     setCommentSaving(true);
     try {
-      const created = await apiService.createTaskJournalComment(taskId, text);
+      const created = await apiService.createTaskJournalComment(taskId, text, commentExternalCalendarVisible);
       setComments((previous) => [created, ...previous]);
       setCommentText('');
-      toast.success('Комментарий добавлен.', 'Журнал задач');
+      setCommentExternalCalendarVisible(false);
+      toast.success(
+        commentExternalCalendarVisible
+          ? 'Комментарий добавлен и будет доступен во внешнем календаре.'
+          : 'Комментарий добавлен.',
+        'Журнал задач',
+      );
     } catch (error) {
       toast.error(extractDisplayErrorMessage(error, 'Не удалось добавить комментарий.'), 'Журнал задач');
     } finally {
@@ -9868,32 +9875,43 @@ function TaskModal({
                     </div>
                   )}
                   {taskId && canPostComment ? (
-                    <div className="flex items-end gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2">
-                      <button type="button" className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-white" title="Упомянуть" aria-label="Упомянуть">
-                        @
-                      </button>
-                      <textarea
-                        value={commentText}
-                        onChange={(event) => setCommentText(event.target.value)}
-                        className="min-h-[40px] flex-1 resize-none border-0 bg-transparent px-2 py-2 text-sm outline-none placeholder:text-slate-400 focus:ring-0"
-                        rows={1}
-                        maxLength={4000}
-                        placeholder="Напишите комментарий..."
-                      />
-                      {canManageFiles ? (
-                        <button type="button" onClick={() => newFileInputRef.current?.click()} className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-white" title="Прикрепить файл" aria-label="Прикрепить файл">
-                          <UploadCloud className="h-4 w-4" />
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-2">
+                      <div className="flex items-end gap-2">
+                        <button type="button" className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-white" title="Упомянуть" aria-label="Упомянуть">
+                          @
                         </button>
-                      ) : null}
-                      <button
-                        type="button"
-                        onClick={handleAddComment}
-                        disabled={commentSaving || !commentText.trim()}
-                        className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-500 text-white transition hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-60"
-                        aria-label="Отправить комментарий"
-                      >
-                        {commentSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                      </button>
+                        <textarea
+                          value={commentText}
+                          onChange={(event) => setCommentText(event.target.value)}
+                          className="min-h-[40px] flex-1 resize-none border-0 bg-transparent px-2 py-2 text-sm outline-none placeholder:text-slate-400 focus:ring-0"
+                          rows={1}
+                          maxLength={4000}
+                          placeholder="Напишите комментарий..."
+                        />
+                        {canManageFiles ? (
+                          <button type="button" onClick={() => newFileInputRef.current?.click()} className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-white" title="Прикрепить файл" aria-label="Прикрепить файл">
+                            <UploadCloud className="h-4 w-4" />
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          onClick={handleAddComment}
+                          disabled={commentSaving || !commentText.trim()}
+                          className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-500 text-white transition hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-60"
+                          aria-label="Отправить комментарий"
+                        >
+                          {commentSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                        </button>
+                      </div>
+                      <label className="mt-2 inline-flex cursor-pointer items-center gap-2 px-2 text-xs font-medium text-slate-600">
+                        <input
+                          type="checkbox"
+                          checked={commentExternalCalendarVisible}
+                          onChange={(event) => setCommentExternalCalendarVisible(event.target.checked)}
+                          className="form-checkbox"
+                        />
+                        Доступен во внешнем календаре
+                      </label>
                     </div>
                   ) : null}
                 </div>
@@ -11281,6 +11299,15 @@ function TaskModal({
                       placeholder="Введите комментарий"
                       maxLength={4000}
                     />
+                    <label className="mt-3 inline-flex cursor-pointer items-center gap-2 text-xs font-medium text-slate-600">
+                      <input
+                        type="checkbox"
+                        checked={commentExternalCalendarVisible}
+                        onChange={(event) => setCommentExternalCalendarVisible(event.target.checked)}
+                        className="form-checkbox"
+                      />
+                      Доступен во внешнем календаре
+                    </label>
                     <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                       <span className="text-xs text-slate-400">{commentText.trim().length}/4000</span>
                       <button
@@ -11327,6 +11354,11 @@ function TaskModal({
                               }`}>
                                 {isSystem ? 'История' : 'Комментарий'}
                               </span>
+                              {comment.isExternalCalendarVisible ? (
+                                <span className="rounded-full bg-cyan-50 px-2 py-0.5 text-[11px] font-semibold text-cyan-700 ring-1 ring-cyan-200">
+                                  Внешний календарь
+                                </span>
+                              ) : null}
                             </div>
                             <div className="text-xs text-slate-400">{formatDateTime(comment.createdAt)}</div>
                           </div>

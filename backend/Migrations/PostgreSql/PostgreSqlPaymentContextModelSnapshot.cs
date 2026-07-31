@@ -7275,6 +7275,35 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasColumnType("timestamp without time zone")
                         .HasDefaultValueSql("CURRENT_TIMESTAMP");
 
+                    b.Property<string>("ExternalAuthorTrust")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("ExternalCommentId")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<DateTime?>("ExternalDeletedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("ExternalRevision")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("ExternalSource")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("ExternalSyncHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime?>("ExternalSyncedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<bool>("IsExternalCalendarVisible")
+                        .HasColumnType("boolean");
+
                     b.Property<string>("Kind")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
@@ -7310,8 +7339,16 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.HasIndex("TaskJournalItemId")
                         .HasDatabaseName("IX_TaskJournalComments_TaskJournalItemId");
 
+                    b.HasIndex("ExternalSource", "ExternalCommentId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_TaskJournalComments_ExternalSource_CommentId")
+                        .HasFilter("\"ExternalCommentId\" IS NOT NULL");
+
                     b.HasIndex("TaskJournalItemId", "CreatedAt")
                         .HasDatabaseName("IX_TaskJournalComments_Task_CreatedAt");
+
+                    b.HasIndex("TaskJournalItemId", "IsExternalCalendarVisible", "CreatedAt")
+                        .HasDatabaseName("IX_TaskJournalComments_Task_ExternalVisible_CreatedAt");
 
                     b.ToTable("TaskJournalComments");
                 });

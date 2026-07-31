@@ -4462,9 +4462,10 @@ describe('TaskJournal', () => {
     expect(await screen.findByRole('heading', { name: 'Просмотр задачи' })).toBeTruthy();
 
     fireEvent.change(screen.getByPlaceholderText('Введите комментарий'), { target: { value: 'Комментарий исполнителя' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Доступен во внешнем календаре' }));
     fireEvent.click(screen.getByRole('button', { name: /Добавить комментарий/i }));
 
-    await waitFor(() => expect(apiMock.createTaskJournalComment).toHaveBeenCalledWith(101, 'Комментарий исполнителя'));
+    await waitFor(() => expect(apiMock.createTaskJournalComment).toHaveBeenCalledWith(101, 'Комментарий исполнителя', true));
   });
 
   it.each(['legacy', 'modern'] as const)('allows executor to complete a read-only task from the %s task card', async (taskCardWindowMode) => {
@@ -5371,7 +5372,7 @@ describe('TaskJournal', () => {
     fireEvent.change(screen.getByPlaceholderText('Введите комментарий'), { target: { value: 'Комментарий по задаче' } });
     fireEvent.click(screen.getByRole('button', { name: /Добавить комментарий/i }));
 
-    await waitFor(() => expect(apiMock.createTaskJournalComment).toHaveBeenCalledWith(101, 'Комментарий по задаче'));
+    await waitFor(() => expect(apiMock.createTaskJournalComment).toHaveBeenCalledWith(101, 'Комментарий по задаче', false));
     expect(await screen.findAllByText('Комментарий по задаче')).toHaveLength(1);
   });
 

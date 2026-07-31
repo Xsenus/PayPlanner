@@ -2858,6 +2858,11 @@ public class PaymentContext : DbContext
             entity.Property(e => e.AuthorName).HasMaxLength(256).IsRequired();
             entity.Property(e => e.Kind).HasMaxLength(32).HasDefaultValue("comment").IsRequired();
             entity.Property(e => e.Text).HasMaxLength(4000).IsRequired();
+            entity.Property(e => e.ExternalSource).HasMaxLength(32);
+            entity.Property(e => e.ExternalCommentId).HasMaxLength(256);
+            entity.Property(e => e.ExternalRevision).HasMaxLength(256);
+            entity.Property(e => e.ExternalSyncHash).HasMaxLength(64);
+            entity.Property(e => e.ExternalAuthorTrust).HasMaxLength(32);
             entity.Property(e => e.MetadataJson).HasColumnType("text").HasDefaultValue("{}").IsRequired();
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
 
@@ -2875,6 +2880,12 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.AuthorUserId).HasDatabaseName("IX_TaskJournalComments_AuthorUserId");
             entity.HasIndex(e => new { e.TaskJournalItemId, e.CreatedAt }).HasDatabaseName("IX_TaskJournalComments_Task_CreatedAt");
             entity.HasIndex(e => e.Kind).HasDatabaseName("IX_TaskJournalComments_Kind");
+            entity.HasIndex(e => new { e.TaskJournalItemId, e.IsExternalCalendarVisible, e.CreatedAt })
+                .HasDatabaseName("IX_TaskJournalComments_Task_ExternalVisible_CreatedAt");
+            entity.HasIndex(e => new { e.ExternalSource, e.ExternalCommentId })
+                .IsUnique()
+                .HasFilter("\"ExternalCommentId\" IS NOT NULL")
+                .HasDatabaseName("IX_TaskJournalComments_ExternalSource_CommentId");
         });
 
         modelBuilder.Entity<TaskJournalDeadlineChangeRequest>(entity =>
