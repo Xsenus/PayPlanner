@@ -55,6 +55,8 @@ public sealed class ExternalWorkOrderApprovalRequest
 
     public DateTime? DecisionAt { get; set; }
 
+    public DateTime? ExpirationNotificationProcessedAt { get; set; }
+
     [MaxLength(64)]
     public string DecisionIpHash { get; set; } = string.Empty;
 

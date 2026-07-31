@@ -152,6 +152,7 @@ builder.Services.AddScoped<IMaxWebhookService, MaxWebhookService>();
 builder.Services.AddScoped<IMaxOutboxService, MaxOutboxService>();
 builder.Services.AddScoped<IMaxOutboxProcessor, MaxOutboxProcessor>();
 builder.Services.AddScoped<IExternalWorkOrderApprovalService, ExternalWorkOrderApprovalService>();
+builder.Services.AddScoped<IExternalWorkOrderApprovalNotifier, ExternalWorkOrderApprovalNotifier>();
 builder.Services.AddScoped<IClientPortalService, ClientPortalService>();
 builder.Services.AddScoped<ITelegramBotUpdateService, TelegramBotUpdateService>();
 builder.Services.AddScoped<IRealtimeNotificationPublisher, SignalRRealtimeNotificationPublisher>();
@@ -243,6 +244,7 @@ else
 builder.Services.AddHostedService<DatabaseBackupSchedulerService>();
 builder.Services.AddHostedService<MessengerDocumentOutboxWorker>();
 builder.Services.AddHostedService<MaxOutboxWorker>();
+builder.Services.AddHostedService<ExternalWorkOrderApprovalExpirationService>();
 builder.Services.AddHostedService<PaymentStatusUpdater>();
 builder.Services.AddHostedService<InvoicePaymentStateReconciliationService>();
 builder.Services.AddSingleton<TaskJournalReminderNotificationService>();

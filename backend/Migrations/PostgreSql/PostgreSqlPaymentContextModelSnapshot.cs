@@ -4273,6 +4273,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasMaxLength(512)
                         .HasColumnType("character varying(512)");
 
+                    b.Property<DateTime?>("ExpirationNotificationProcessedAt")
+                        .HasColumnType("timestamp without time zone");
+
                     b.Property<DateTime>("ExpiresAt")
                         .HasColumnType("timestamp without time zone");
 

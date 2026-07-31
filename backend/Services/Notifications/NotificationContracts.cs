@@ -113,6 +113,8 @@ public static class UserNotificationDomains
             UserNotificationTypes.CaseInactivityControl
                 or UserNotificationTypes.CaseAccessRequested
                 or UserNotificationTypes.CaseAccessResolved
+                or UserNotificationTypes.ExternalWorkOrderDecision
+                or UserNotificationTypes.ExternalWorkOrderExpired
                 or UserNotificationTypes.CaseProceduralDeadline
                 or UserNotificationTypes.CaseConversation
                 or UserNotificationTypes.CaseDocument
@@ -214,6 +216,8 @@ public static class UserNotificationTypes
     public const string CaseConversation = "caseConversation";
     public const string CaseDocument = "caseDocument";
     public const string CaseInactivityReminder = "caseInactivityReminder";
+    public const string ExternalWorkOrderDecision = "externalWorkOrderDecision";
+    public const string ExternalWorkOrderExpired = "externalWorkOrderExpired";
     public const string PaymentAssigned = "paymentAssigned";
     public const string PaymentChanged = "paymentChanged";
     public const string InvoiceCreated = "invoiceCreated";
@@ -288,6 +292,8 @@ public static class UserNotificationTypes
         new(CaseConversation, "Переписка дела", "По делу добавлено сообщение или вложение во внутренней переписке.", "emerald", "normal", NotificationChannels.All, true, true),
         new(CaseDocument, "Документы дела", "По делу загружен, сформирован, обновлен или удален документ.", "emerald", NotificationPriorities.Silent, NotificationChannels.All, false, false),
         new(CaseInactivityReminder, "Напоминание о неактивности", "По делу давно не было значимой активности, требуется проверка ответственного.", "amber", "high", NotificationChannels.All, true, false),
+        new(ExternalWorkOrderDecision, "Решение по заказ-наряду", "Клиент согласовал заказ-наряд или вернул его с замечаниями.", "emerald", NotificationPriorities.High, NotificationChannels.All, true, false),
+        new(ExternalWorkOrderExpired, "Истекло согласование заказ-наряда", "Клиент не принял решение по внешней ссылке в установленный срок.", "amber", NotificationPriorities.High, NotificationChannels.All, true, false),
         new(PaymentAssigned, "Назначен платеж", "Ответственного добавили к платежу, который требует контроля.", "blue", "high", NotificationChannels.All, true, false),
         new(PaymentChanged, "Изменение платежа", "Изменились важные параметры платежа: статус, дата, сумма или источник.", "amber", "high", NotificationChannels.All, true, false),
         new(InvoiceCreated, "Создан счет", "Ответственному сотруднику доступен новый счет для контроля.", "blue", "high", NotificationChannels.All, true, false),
@@ -327,6 +333,8 @@ public static class UserNotificationTypes
         CourtSyncFailed,
         CaseProceduralDeadline,
         CaseInactivityReminder,
+        ExternalWorkOrderDecision,
+        ExternalWorkOrderExpired,
         NoteMention,
         NoteAssigned,
         NoteReminder,

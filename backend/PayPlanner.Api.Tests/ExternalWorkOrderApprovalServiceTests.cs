@@ -2,6 +2,8 @@ using System.Text.RegularExpressions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
@@ -57,6 +59,7 @@ public sealed class ExternalWorkOrderApprovalServiceTests
         var workOrder = await fixture.Db.ClientCaseWorkOrders.SingleAsync();
         Assert.Equal("approved", workOrder.Status);
         Assert.Equal("Иван Иванов", workOrder.ApprovalDecisionByUserName);
+        Assert.Equal(1, fixture.Notifier.DecisionCount);
 
         var repeated = await fixture.Service.DecideAsync(
             status.PublicId,
@@ -70,6 +73,7 @@ public sealed class ExternalWorkOrderApprovalServiceTests
             "test-browser",
             CancellationToken.None);
         Assert.Equal(result.DecisionAt, repeated.DecisionAt);
+        Assert.Equal(1, fixture.Notifier.DecisionCount);
     }
 
     [Fact]
@@ -141,6 +145,38 @@ public sealed class ExternalWorkOrderApprovalServiceTests
         Assert.Equal("expired", (await fixture.Db.ExternalWorkOrderApprovalRequests.SingleAsync()).Status);
     }
 
+    [Fact]
+    public async Task Expiration_worker_processes_due_requests_once()
+    {
+        await using var fixture = await Fixture.CreateAsync(enabled: true);
+        await fixture.SendAsync();
+        var entity = await fixture.Db.ExternalWorkOrderApprovalRequests.SingleAsync();
+        entity.ExpiresAt = DateTime.UtcNow.AddMinutes(-1);
+        await fixture.Db.SaveChangesAsync();
+
+        var services = new ServiceCollection();
+        services.AddSingleton(fixture.Db);
+        services.AddSingleton<IExternalWorkOrderApprovalNotifier>(fixture.Notifier);
+        using var provider = services.BuildServiceProvider();
+        var worker = new ExternalWorkOrderApprovalExpirationService(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            new FixedOptionsMonitor(new AppFeatureFlagsOptions
+            {
+                Legal = new LegalFeatureFlagsOptions { ExternalWorkOrderApproval = true },
+            }),
+            NullLogger<ExternalWorkOrderApprovalExpirationService>.Instance);
+
+        Assert.Equal(1, await worker.RunOnceAsync());
+        Assert.Equal(1, fixture.Notifier.ExpiredCount);
+        fixture.Db.ChangeTracker.Clear();
+        var processed = await fixture.Db.ExternalWorkOrderApprovalRequests.SingleAsync();
+        Assert.Equal("expired", processed.Status);
+        Assert.NotNull(processed.ExpirationNotificationProcessedAt);
+
+        Assert.Equal(0, await worker.RunOnceAsync());
+        Assert.Equal(1, fixture.Notifier.ExpiredCount);
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly SqliteConnection _connection;
@@ -150,18 +186,21 @@ public sealed class ExternalWorkOrderApprovalServiceTests
             PaymentContext db,
             RecordingEmailService email,
             ExternalWorkOrderApprovalService service,
+            RecordingNotifier notifier,
             int caseId)
         {
             _connection = connection;
             Db = db;
             Email = email;
             Service = service;
+            Notifier = notifier;
             CaseId = caseId;
         }
 
         public PaymentContext Db { get; }
         public RecordingEmailService Email { get; }
         public ExternalWorkOrderApprovalService Service { get; }
+        public RecordingNotifier Notifier { get; }
         public int CaseId { get; }
 
         public static async Task<Fixture> CreateAsync(bool enabled)
@@ -215,8 +254,9 @@ public sealed class ExternalWorkOrderApprovalServiceTests
             {
                 Legal = new LegalFeatureFlagsOptions { ExternalWorkOrderApproval = enabled },
             });
-            var service = new ExternalWorkOrderApprovalService(db, email, configuration, flags);
-            return new Fixture(connection, db, email, service, clientCase.Id);
+            var notifier = new RecordingNotifier();
+            var service = new ExternalWorkOrderApprovalService(db, email, configuration, flags, notifier);
+            return new Fixture(connection, db, email, service, notifier, clientCase.Id);
         }
 
         public Task<ExternalWorkOrderApprovalStatusDto> SendAsync()
@@ -236,6 +276,30 @@ public sealed class ExternalWorkOrderApprovalServiceTests
         {
             await Db.DisposeAsync();
             await _connection.DisposeAsync();
+        }
+    }
+
+    private sealed class RecordingNotifier : IExternalWorkOrderApprovalNotifier
+    {
+        public int DecisionCount { get; private set; }
+        public int ExpiredCount { get; private set; }
+
+        public Task NotifyDecisionAsync(
+            ExternalWorkOrderApprovalRequest request,
+            ClientCaseWorkOrder workOrder,
+            CancellationToken ct = default)
+        {
+            DecisionCount++;
+            return Task.CompletedTask;
+        }
+
+        public Task NotifyExpiredAsync(
+            ExternalWorkOrderApprovalRequest request,
+            ClientCaseWorkOrder workOrder,
+            CancellationToken ct = default)
+        {
+            ExpiredCount++;
+            return Task.CompletedTask;
         }
     }
 

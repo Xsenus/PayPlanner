@@ -4176,6 +4176,9 @@ namespace PayPlanner.Api.Migrations
                         .HasMaxLength(512)
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTime?>("ExpirationNotificationProcessedAt")
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime>("ExpiresAt")
                         .HasColumnType("TEXT");
 

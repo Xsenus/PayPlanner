@@ -199,6 +199,8 @@ public class CaseNotificationInventoryTests
             [UserNotificationTypes.CaseConversation] = new(UserNotificationDomains.Case, NotificationPriorities.Normal, RequiresAction: false, ShowToast: true, PushEligible: true),
             [UserNotificationTypes.CaseDocument] = new(UserNotificationDomains.Case, NotificationPriorities.Silent, RequiresAction: false, ShowToast: false, PushEligible: false),
             [UserNotificationTypes.CaseInactivityReminder] = new(UserNotificationDomains.Case, NotificationPriorities.High, RequiresAction: true, ShowToast: true, PushEligible: true),
+            [UserNotificationTypes.ExternalWorkOrderDecision] = new(UserNotificationDomains.Case, NotificationPriorities.High, RequiresAction: true, ShowToast: true, PushEligible: true),
+            [UserNotificationTypes.ExternalWorkOrderExpired] = new(UserNotificationDomains.Case, NotificationPriorities.High, RequiresAction: true, ShowToast: true, PushEligible: true),
             [UserNotificationTypes.CaseCourtEvent] = new(UserNotificationDomains.Court, NotificationPriorities.High, RequiresAction: true, ShowToast: true, PushEligible: true),
             [UserNotificationTypes.CourtHearing] = new(UserNotificationDomains.Court, NotificationPriorities.High, RequiresAction: true, ShowToast: true, PushEligible: true),
             [UserNotificationTypes.CourtStatusChanged] = new(UserNotificationDomains.Court, NotificationPriorities.High, RequiresAction: true, ShowToast: true, PushEligible: true),

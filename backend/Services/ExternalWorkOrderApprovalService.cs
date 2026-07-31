@@ -44,17 +44,23 @@ public sealed class ExternalWorkOrderApprovalService : IExternalWorkOrderApprova
     private readonly IEmailService _email;
     private readonly IConfiguration _configuration;
     private readonly IOptionsMonitor<AppFeatureFlagsOptions> _featureFlags;
+    private readonly IExternalWorkOrderApprovalNotifier? _notifier;
+    private readonly ILogger<ExternalWorkOrderApprovalService>? _logger;
 
     public ExternalWorkOrderApprovalService(
         PaymentContext db,
         IEmailService email,
         IConfiguration configuration,
-        IOptionsMonitor<AppFeatureFlagsOptions> featureFlags)
+        IOptionsMonitor<AppFeatureFlagsOptions> featureFlags,
+        IExternalWorkOrderApprovalNotifier? notifier = null,
+        ILogger<ExternalWorkOrderApprovalService>? logger = null)
     {
         _db = db;
         _email = email;
         _configuration = configuration;
         _featureFlags = featureFlags;
+        _notifier = notifier;
+        _logger = logger;
     }
 
     public async Task<ExternalWorkOrderApprovalStatusDto?> GetLatestStatusAsync(int caseId, CancellationToken ct)
@@ -339,6 +345,17 @@ public sealed class ExternalWorkOrderApprovalService : IExternalWorkOrderApprova
                 : $"Клиент вернул заказ-наряд «{workOrder.Title}» версии {entity.Version} с замечаниями.");
         _db.SetAuditReason($"Получено внешнее решение по заказ-наряду дела #{workOrder.ClientCaseId}.");
         await _db.SaveChangesAsync(ct);
+        if (_notifier is not null)
+        {
+            try
+            {
+                await _notifier.NotifyDecisionAsync(entity, workOrder, ct);
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                _logger?.LogWarning(ex, "External work order decision notification failed for request {RequestId}.", entity.Id);
+            }
+        }
         return MapDecision(entity);
     }
 
