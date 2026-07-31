@@ -6512,6 +6512,21 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<int?>("NotificationSenderId")
                         .HasColumnType("integer");
 
+                    b.Property<string>("ProviderKey")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("ProviderMessageId")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("ProviderStatus")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime?>("ProviderStatusCheckedAt")
+                        .HasColumnType("timestamp without time zone");
+
                     b.Property<string>("RecipientAddress")
                         .IsRequired()
                         .HasMaxLength(2048)
@@ -6555,6 +6570,12 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.HasIndex("Channel", "CreatedAt")
                         .HasDatabaseName("IX_NotificationDeliveries_Channel_CreatedAt");
+
+                    b.HasIndex("ProviderKey", "ProviderMessageId")
+                        .HasDatabaseName("IX_NotificationDeliveries_Provider_Message");
+
+                    b.HasIndex("Channel", "Status", "ProviderStatusCheckedAt")
+                        .HasDatabaseName("IX_NotificationDeliveries_Channel_Status_ProviderChecked");
 
                     b.HasIndex("EventKey", "Channel", "RecipientUserId", "NotificationSenderId")
                         .HasDatabaseName("IX_NotificationDeliveries_Event_Channel_User_Sender");

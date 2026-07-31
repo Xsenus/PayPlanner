@@ -6367,6 +6367,21 @@ namespace PayPlanner.Api.Migrations
                     b.Property<int?>("NotificationSenderId")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("ProviderKey")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProviderMessageId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProviderStatus")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("ProviderStatusCheckedAt")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("RecipientAddress")
                         .IsRequired()
                         .HasMaxLength(2048)
@@ -6410,6 +6425,12 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasIndex("Channel", "CreatedAt")
                         .HasDatabaseName("IX_NotificationDeliveries_Channel_CreatedAt");
+
+                    b.HasIndex("ProviderKey", "ProviderMessageId")
+                        .HasDatabaseName("IX_NotificationDeliveries_Provider_Message");
+
+                    b.HasIndex("Channel", "Status", "ProviderStatusCheckedAt")
+                        .HasDatabaseName("IX_NotificationDeliveries_Channel_Status_ProviderChecked");
 
                     b.HasIndex("EventKey", "Channel", "RecipientUserId", "NotificationSenderId")
                         .HasDatabaseName("IX_NotificationDeliveries_Event_Channel_User_Sender");

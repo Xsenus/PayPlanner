@@ -722,7 +722,12 @@ public class NotificationServiceTests
         var user = await CreateUserAsync(db, "sms-sent@example.com", phoneNumber: "+7 (999) 444-55-66");
         var smsService = new RecordingSmsNotificationService
         {
-            NextResult = new SmsSendResult(true, NotificationDeliveryStatus.Sent)
+            NextResult = new SmsSendResult(
+                true,
+                NotificationDeliveryStatus.Sent,
+                ProviderKey: "test-provider",
+                ProviderMessageId: "provider-message-42",
+                ProviderStatus: SmsProviderMessageStatuses.Accepted)
         };
         var service = CreateService(
             db,
@@ -754,6 +759,10 @@ public class NotificationServiceTests
         var savedDelivery = await db.NotificationDeliveries.SingleAsync();
         Assert.Equal(delivery.Id, savedDelivery.Id);
         Assert.Equal(NotificationDeliveryStatus.Sent, savedDelivery.Status);
+        Assert.Equal("test-provider", savedDelivery.ProviderKey);
+        Assert.Equal("provider-message-42", savedDelivery.ProviderMessageId);
+        Assert.Equal(SmsProviderMessageStatuses.Accepted, savedDelivery.ProviderStatus);
+        Assert.NotNull(savedDelivery.ProviderStatusCheckedAt);
         Assert.Equal("Сообщение для успешной SMS-доставки", savedDelivery.BodyPreview);
         Assert.NotNull(savedDelivery.SentAt);
     }

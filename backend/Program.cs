@@ -258,6 +258,8 @@ builder.Services.AddSingleton<NotificationDeliveryRetentionService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<NotificationDeliveryRetentionService>());
 builder.Services.AddSingleton<SmsChannelMonitoringService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<SmsChannelMonitoringService>());
+builder.Services.AddSingleton<SmsDeliveryStatusReconciliationService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<SmsDeliveryStatusReconciliationService>());
 builder.Services.AddSingleton<CalendarSyncLogRetentionService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<CalendarSyncLogRetentionService>());
 builder.Services.AddSingleton<PaymentAdvanceReviewMonitoringService>();

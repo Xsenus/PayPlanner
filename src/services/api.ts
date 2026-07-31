@@ -1428,6 +1428,9 @@ export interface NotificationDeliveryDto {
   subject: string;
   status: string;
   error?: string | null;
+  providerKey?: string | null;
+  providerStatus?: string | null;
+  providerStatusCheckedAt?: string | null;
   createdAt: string;
   sentAt?: string | null;
 }

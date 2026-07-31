@@ -203,6 +203,9 @@ public class NotificationDeliveryDto
     public string Subject { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;
     public string? Error { get; set; }
+    public string? ProviderKey { get; set; }
+    public string? ProviderStatus { get; set; }
+    public DateTime? ProviderStatusCheckedAt { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime? SentAt { get; set; }
 }

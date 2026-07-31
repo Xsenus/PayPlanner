@@ -15,6 +15,10 @@ public class NotificationDelivery
     public string BodyPreview { get; set; } = string.Empty;
     public string Status { get; set; } = "pending";
     public string? Error { get; set; }
+    public string? ProviderKey { get; set; }
+    public string? ProviderMessageId { get; set; }
+    public string? ProviderStatus { get; set; }
+    public DateTime? ProviderStatusCheckedAt { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? SentAt { get; set; }
 }

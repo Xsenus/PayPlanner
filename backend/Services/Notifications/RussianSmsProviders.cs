@@ -36,6 +36,7 @@ public sealed class SmsProviderCredentialStore(
 {
     private readonly IDataProtector _protector =
         dataProtectionProvider.CreateProtector(SystemSmsNotificationService.ApiTokenProtectorPurpose);
+    private IReadOnlyDictionary<string, string>? _cachedSettings;
 
     public async Task<SmsProviderCredentials> LoadAsync(
         string providerKey,
@@ -48,7 +49,7 @@ public sealed class SmsProviderCredentialStore(
             SystemSmsNotificationService.SenderNameSettingKey,
             SystemSmsNotificationService.ApiTokenSettingKey,
         };
-        var settings = await context.SystemSettings
+        var settings = _cachedSettings ??= await context.SystemSettings
             .AsNoTracking()
             .Where(setting => keys.Contains(setting.Key))
             .ToDictionaryAsync(setting => setting.Key, setting => setting.Value, cancellationToken);
@@ -130,6 +131,11 @@ public abstract class RussianSmsProviderBase(
     public abstract Task<SmsProviderMessageStatusResult> GetMessageStatusAsync(
         string providerMessageId,
         CancellationToken cancellationToken = default);
+
+    public virtual Task<SmsProviderMessageStatusResult> GetMessageStatusAsync(
+        SmsProviderMessageStatusRequest request,
+        CancellationToken cancellationToken = default)
+        => GetMessageStatusAsync(request.ProviderMessageId, cancellationToken);
 
     public abstract Task<SmsProviderBalanceResult> GetBalanceAsync(
         CancellationToken cancellationToken = default);
@@ -329,12 +335,12 @@ public sealed class SmsRuProvider(
             && sms.ValueKind == JsonValueKind.Object
             && sms.TryGetProperty(normalizedId, out var item)
             && item.ValueKind == JsonValueKind.Object
-            && item.TryGetProperty("status", out var status)
-                ? status.GetString()
+            && item.TryGetProperty("status_code", out var statusCode)
+                ? statusCode.ToString()
                 : null;
         return new SmsProviderMessageStatusResult(
             normalizedId,
-            SmsProviderStatusNormalizer.NormalizeStatus(rawStatus),
+            NormalizeSmsRuStatus(rawStatus),
             DateTime.UtcNow,
             rawStatus);
     }
@@ -367,6 +373,17 @@ public sealed class SmsRuProvider(
 
         return new SmsProviderBalanceResult(true, amount, "RUB", DateTime.UtcNow);
     }
+
+    private static string NormalizeSmsRuStatus(string? status)
+        => status switch
+        {
+            "100" or "101" or "102" => SmsProviderMessageStatuses.Accepted,
+            "103" => SmsProviderMessageStatuses.Delivered,
+            "104" => SmsProviderMessageStatuses.Expired,
+            "105" or "106" or "107" or "150" => SmsProviderMessageStatuses.Failed,
+            "108" => SmsProviderMessageStatuses.Rejected,
+            _ => SmsProviderMessageStatuses.Unknown,
+        };
 }
 
 public sealed class SmscRuProvider(
@@ -435,6 +452,47 @@ public sealed class SmscRuProvider(
             DateTime.UtcNow,
             ErrorCode: "smsc-status-requires-recipient"));
 
+    public override async Task<SmsProviderMessageStatusResult> GetMessageStatusAsync(
+        SmsProviderMessageStatusRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var credentials = await LoadCredentialsAsync(cancellationToken);
+        var normalizedId = SmsProviderStatusNormalizer.NormalizeMessageId(request.ProviderMessageId)
+            ?? throw new ArgumentException("Provider message id is required.", nameof(request));
+        if (!credentials.HasToken || string.IsNullOrWhiteSpace(request.RecipientAddress))
+        {
+            return new SmsProviderMessageStatusResult(
+                normalizedId,
+                SmsProviderMessageStatuses.Unknown,
+                DateTime.UtcNow,
+                ErrorCode: !credentials.HasToken ? "credentials-missing" : "smsc-status-requires-recipient");
+        }
+
+        using var response = await HttpClient.PostAsync(
+            "sys/status.php",
+            new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["apikey"] = credentials.ApiToken,
+                ["phone"] = NormalizePhone(request.RecipientAddress),
+                ["id"] = normalizedId,
+                ["fmt"] = "3",
+                ["charset"] = "utf-8",
+            }),
+            cancellationToken);
+        using var json = await ReadJsonAsync(response, cancellationToken);
+        var rawStatus = response.IsSuccessStatusCode
+            && json is not null
+            && json.RootElement.TryGetProperty("status", out var status)
+                ? status.ToString()
+                : null;
+        return new SmsProviderMessageStatusResult(
+            normalizedId,
+            NormalizeSmscStatus(rawStatus),
+            DateTime.UtcNow,
+            rawStatus,
+            ErrorCode: rawStatus is null ? "smsc-status-unavailable" : null);
+    }
+
     public override async Task<SmsProviderBalanceResult> GetBalanceAsync(
         CancellationToken cancellationToken = default)
     {
@@ -463,6 +521,17 @@ public sealed class SmscRuProvider(
 
         return new SmsProviderBalanceResult(true, amount, "RUB", DateTime.UtcNow);
     }
+
+    private static string NormalizeSmscStatus(string? status)
+        => status switch
+        {
+            "-1" or "0" => SmsProviderMessageStatuses.Accepted,
+            "1" or "2" or "4" => SmsProviderMessageStatuses.Delivered,
+            "3" => SmsProviderMessageStatuses.Expired,
+            "-2" or "-3" or "20" => SmsProviderMessageStatuses.Failed,
+            "22" or "23" or "24" or "25" => SmsProviderMessageStatuses.Rejected,
+            _ => SmsProviderMessageStatuses.Unknown,
+        };
 }
 
 public sealed class SmsAeroProvider(

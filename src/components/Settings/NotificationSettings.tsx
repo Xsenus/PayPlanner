@@ -2634,6 +2634,25 @@ function deliveryStatusClass(status: string) {
   }
 }
 
+function smsProviderStatusLabel(status?: string | null) {
+  switch (status) {
+    case 'accepted':
+      return 'Принято шлюзом';
+    case 'delivered':
+      return 'Доставлено';
+    case 'failed':
+      return 'Не доставлено';
+    case 'expired':
+      return 'Срок доставки истёк';
+    case 'rejected':
+      return 'Отклонено шлюзом';
+    case 'unknown':
+      return 'Статус уточняется';
+    default:
+      return status || '';
+  }
+}
+
 function DeliveryLogPanel({
   items,
   total,
@@ -2660,7 +2679,7 @@ function DeliveryLogPanel({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h4 className="text-base font-semibold text-gray-900">Журнал доставки</h4>
-          <p className="text-sm text-gray-500">Последние попытки отправки email и Telegram. Ошибочные и пропущенные можно повторить вручную.</p>
+          <p className="text-sm text-gray-500">Последние попытки отправки email, Telegram и SMS. Ошибочные и пропущенные можно повторить вручную.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <SystemSelect
@@ -2725,6 +2744,14 @@ function DeliveryLogPanel({
                       <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${deliveryStatusClass(item.status)}`}>
                         {deliveryStatusLabel(item.status)}
                       </span>
+                      {item.channel === 'sms' && item.providerStatus ? (
+                        <div
+                          className="mt-1 text-xs text-gray-500"
+                          title={item.providerStatusCheckedAt ? `Проверено: ${formatDeliveryDate(item.providerStatusCheckedAt)}` : undefined}
+                        >
+                          {smsProviderStatusLabel(item.providerStatus)}
+                        </div>
+                      ) : null}
                     </td>
                     <td className="px-4 py-3 text-right">
                       {canRetry ? (

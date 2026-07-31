@@ -1010,7 +1010,10 @@ public sealed record SmsSendResult(
     bool Success,
     string Status,
     string? Error = null,
-    bool ErrorIsSafe = false);
+    bool ErrorIsSafe = false,
+    string? ProviderKey = null,
+    string? ProviderMessageId = null,
+    string? ProviderStatus = null);
 
 public sealed record SmsProviderDiagnosticsSnapshot(
     DateTime CheckedAtUtc,

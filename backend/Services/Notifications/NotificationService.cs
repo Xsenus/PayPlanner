@@ -4101,6 +4101,10 @@ public sealed class NotificationService : INotificationService
                     cancellationToken);
             delivery.Status = result.Status;
             delivery.Error = ResolveSmsDeliveryError(result);
+            delivery.ProviderKey = result.ProviderKey;
+            delivery.ProviderMessageId = result.ProviderMessageId;
+            delivery.ProviderStatus = result.ProviderStatus;
+            delivery.ProviderStatusCheckedAt = result.ProviderStatus is null ? null : DateTime.UtcNow;
             delivery.SentAt = result.Success ? DateTime.UtcNow : null;
             return;
         }

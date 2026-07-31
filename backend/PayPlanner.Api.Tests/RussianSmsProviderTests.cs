@@ -119,6 +119,42 @@ public sealed class RussianSmsProviderTests
             handler.Authorization?.Parameter);
     }
 
+    [Fact]
+    public async Task SmsRu_StatusUsesOfficialNumericCode()
+    {
+        var handler = new RecordingHandler(_ => Json(
+            """{"status":"OK","sms":{"sms-42":{"status":"OK","status_code":103}}}"""));
+        ISmsProvider provider = new SmsRuProvider(
+            CreateClient(handler, "https://sms.ru/"),
+            new FixedCredentialStore());
+
+        var result = await provider.GetMessageStatusAsync(
+            new SmsProviderMessageStatusRequest("sms-42", "+79991112233"));
+
+        Assert.Equal(SmsProviderMessageStatuses.Delivered, result.Status);
+        Assert.Equal("103", result.RawProviderStatus);
+    }
+
+    [Theory]
+    [InlineData(1, SmsProviderMessageStatuses.Delivered)]
+    [InlineData(3, SmsProviderMessageStatuses.Expired)]
+    [InlineData(20, SmsProviderMessageStatuses.Failed)]
+    public async Task SmscRu_StatusUsesRecipientAndMapsOfficialCode(int rawStatus, string expectedStatus)
+    {
+        var handler = new RecordingHandler(_ => Json($$"""{"status":{{rawStatus}},"id":715}"""));
+        ISmsProvider provider = new SmscRuProvider(
+            CreateClient(handler, "https://smsc.ru/"),
+            new FixedCredentialStore());
+
+        var result = await provider.GetMessageStatusAsync(
+            new SmsProviderMessageStatusRequest("715", "+79991112233"));
+
+        Assert.Equal(expectedStatus, result.Status);
+        Assert.Equal("/sys/status.php", handler.RequestUri?.AbsolutePath);
+        Assert.Contains("phone=79991112233", handler.RequestBody, StringComparison.Ordinal);
+        Assert.Contains("id=715", handler.RequestBody, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("123")]
     [InlineData("+1 555 000-00-00")]

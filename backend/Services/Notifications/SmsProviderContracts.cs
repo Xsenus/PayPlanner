@@ -19,6 +19,11 @@ public interface ISmsProvider
         string providerMessageId,
         CancellationToken cancellationToken = default);
 
+    Task<SmsProviderMessageStatusResult> GetMessageStatusAsync(
+        SmsProviderMessageStatusRequest request,
+        CancellationToken cancellationToken = default)
+        => GetMessageStatusAsync(request.ProviderMessageId, cancellationToken);
+
     Task<SmsProviderBalanceResult> GetBalanceAsync(CancellationToken cancellationToken = default);
 
     Task<SmsProviderHealthResult> CheckHealthAsync(CancellationToken cancellationToken = default);
@@ -50,6 +55,10 @@ public sealed record SmsProviderMessageStatusResult(
     DateTime? DeliveredAtUtc = null,
     string? ErrorCode = null,
     string? ErrorMessage = null);
+
+public sealed record SmsProviderMessageStatusRequest(
+    string ProviderMessageId,
+    string? RecipientAddress = null);
 
 public sealed record SmsProviderBalanceResult(
     bool IsAvailable,

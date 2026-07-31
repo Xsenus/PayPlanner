@@ -3215,6 +3215,9 @@ public class PaymentContext : DbContext
             entity.Property(e => e.BodyPreview).HasMaxLength(1000).IsRequired();
             entity.Property(e => e.Status).HasMaxLength(32).IsRequired();
             entity.Property(e => e.Error).HasMaxLength(2000);
+            entity.Property(e => e.ProviderKey).HasMaxLength(64);
+            entity.Property(e => e.ProviderMessageId).HasMaxLength(256);
+            entity.Property(e => e.ProviderStatus).HasMaxLength(64);
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
 
             entity.HasOne(e => e.RecipientUser)
@@ -3234,6 +3237,10 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => new { e.Channel, e.CreatedAt })
                 .HasDatabaseName("IX_NotificationDeliveries_Channel_CreatedAt");
             entity.HasIndex(e => e.Status).HasDatabaseName("IX_NotificationDeliveries_Status");
+            entity.HasIndex(e => new { e.Channel, e.Status, e.ProviderStatusCheckedAt })
+                .HasDatabaseName("IX_NotificationDeliveries_Channel_Status_ProviderChecked");
+            entity.HasIndex(e => new { e.ProviderKey, e.ProviderMessageId })
+                .HasDatabaseName("IX_NotificationDeliveries_Provider_Message");
         });
 
         modelBuilder.Entity<UserNotification>(entity =>

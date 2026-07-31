@@ -681,6 +681,9 @@ public class NotificationsController : ControllerBase
             Subject = item.Subject,
             Status = item.Status,
             Error = item.Error,
+            ProviderKey = item.ProviderKey,
+            ProviderStatus = item.ProviderStatus,
+            ProviderStatusCheckedAt = item.ProviderStatusCheckedAt,
             CreatedAt = item.CreatedAt,
             SentAt = item.SentAt
         };

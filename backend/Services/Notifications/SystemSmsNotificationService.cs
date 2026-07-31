@@ -286,12 +286,18 @@ public sealed class SystemSmsNotificationService : ISmsNotificationService
             return result.Accepted
                 ? new SmsSendResult(
                     true,
-                    NotificationDeliveryStatus.Sent)
+                    NotificationDeliveryStatus.Sent,
+                    ProviderKey: settings.ProviderKey,
+                    ProviderMessageId: result.ProviderMessageId,
+                    ProviderStatus: result.Status)
                 : new SmsSendResult(
                     false,
                     NotificationDeliveryStatus.Failed,
                     BuildSafeProviderError(result.ErrorCode),
-                    ErrorIsSafe: true);
+                    ErrorIsSafe: true,
+                    ProviderKey: settings.ProviderKey,
+                    ProviderMessageId: result.ProviderMessageId,
+                    ProviderStatus: result.Status);
         }
         catch (ArgumentException ex)
         {
@@ -525,16 +531,25 @@ public sealed class SystemSmsNotificationService : ISmsNotificationService
             .GroupBy(_ => 1)
             .Select(group => new
             {
-                PendingCount = group.Count(item => item.Status == NotificationDeliveryStatus.Pending),
+                PendingCount = group.Count(item =>
+                    item.Status == NotificationDeliveryStatus.Pending
+                    || (item.Status == NotificationDeliveryStatus.Sent
+                        && item.ProviderKey != null
+                        && item.ProviderStatus != SmsProviderMessageStatuses.Delivered)),
                 FailedCount = group.Count(item =>
                     item.CreatedAt >= deliveredRateFrom
                     && item.Status == NotificationDeliveryStatus.Failed),
                 DeliveredCount = group.Count(item =>
                     item.CreatedAt >= deliveredRateFrom
-                    && item.Status == NotificationDeliveryStatus.Sent),
+                    && item.Status == NotificationDeliveryStatus.Sent
+                    && (item.ProviderKey == null
+                        || item.ProviderStatus == SmsProviderMessageStatuses.Delivered)),
                 LastSuccessfulDeliveryAt = group
-                    .Where(item => item.Status == NotificationDeliveryStatus.Sent)
-                    .Max(item => (DateTime?)item.SentAt ?? item.CreatedAt),
+                    .Where(item =>
+                        item.Status == NotificationDeliveryStatus.Sent
+                        && (item.ProviderKey == null
+                            || item.ProviderStatus == SmsProviderMessageStatuses.Delivered))
+                    .Max(item => item.ProviderStatusCheckedAt ?? item.SentAt ?? item.CreatedAt),
                 LastFailedDeliveryAt = group
                     .Where(item => item.Status == NotificationDeliveryStatus.Failed)
                     .Max(item => (DateTime?)item.CreatedAt),
