@@ -138,21 +138,100 @@ public sealed class MaxWebhookServiceTests
         Assert.Equal(MaxRecipientLinkStatuses.OptedOut, stored.Status);
     }
 
+    [Fact]
+    public async Task InboundPortalMessageIsRoutedOnlyToGrantedCaseAndStoresExternalId()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var client = new Client { Name = "Клиент MAX" };
+        var clientCase = new ClientCase { Client = client, CaseNumber = "MAX-1", Title = "Разрешённое дело" };
+        var account = new ClientPortalAccount
+        {
+            Client = client,
+            Email = "portal-max@example.test",
+            DisplayName = "Клиент MAX",
+            IsActive = true
+        };
+        fixture.Db.ClientPortalCaseGrants.Add(new ClientPortalCaseGrant
+        {
+            Account = account,
+            ClientCase = clientCase,
+            CanViewMessages = true
+        });
+        await fixture.Db.SaveChangesAsync();
+        var link = await fixture.Service.CreatePortalLinkAsync(account.Id, CancellationToken.None);
+        await fixture.Service.ProcessAsync(fixture.Update("bot_started", link.Payload), "webhook-secret", CancellationToken.None);
+
+        var result = await fixture.Service.ProcessAsync(
+            fixture.Message("message-42", "Сообщение клиента"), "webhook-secret", CancellationToken.None);
+        var stored = await fixture.Db.MaxInboundCorrespondenceMessages.SingleAsync();
+
+        Assert.Equal("correspondence-routed", result.Status);
+        Assert.Equal(clientCase.Id, stored.ClientCaseId);
+        Assert.Equal("message-42", stored.ExternalMessageId);
+        Assert.Equal(MaxCorrespondenceStatuses.Routed, stored.Status);
+        Assert.DoesNotContain("Сообщение клиента", stored.ProtectedText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AmbiguousInboundMessageWaitsForAuthorizedManualRoute()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var client = new Client { Name = "Клиент с двумя делами" };
+        var firstCase = new ClientCase { Client = client, CaseNumber = "MAX-A", Title = "Первое дело" };
+        var secondCase = new ClientCase { Client = client, CaseNumber = "MAX-B", Title = "Второе дело" };
+        var account = new ClientPortalAccount
+        {
+            Client = client,
+            Email = "multi-max@example.test",
+            DisplayName = "Клиент MAX",
+            IsActive = true
+        };
+        fixture.Db.ClientPortalCaseGrants.AddRange(
+            new ClientPortalCaseGrant { Account = account, ClientCase = firstCase, CanViewMessages = true },
+            new ClientPortalCaseGrant { Account = account, ClientCase = secondCase, CanViewMessages = true });
+        await fixture.Db.SaveChangesAsync();
+        var link = await fixture.Service.CreatePortalLinkAsync(account.Id, CancellationToken.None);
+        await fixture.Service.ProcessAsync(fixture.Update("bot_started", link.Payload), "webhook-secret", CancellationToken.None);
+
+        var result = await fixture.Service.ProcessAsync(
+            fixture.Message("message-ambiguous", "Выберите дело вручную"), "webhook-secret", CancellationToken.None);
+        var pending = await fixture.Db.MaxInboundCorrespondenceMessages.SingleAsync();
+        var routed = await fixture.Correspondence.RouteAsync(pending.PublicId, secondCase.Id, fixture.UserId, CancellationToken.None);
+
+        Assert.Equal("correspondence-pending-manual-routing", result.Status);
+        Assert.True(routed);
+        Assert.Equal(secondCase.Id, pending.ClientCaseId);
+        Assert.Equal(MaxCorrespondenceStatuses.Routed, pending.Status);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Correspondence.RouteAsync(
+            pending.PublicId,
+            999999,
+            fixture.UserId,
+            CancellationToken.None));
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly SqliteConnection _connection;
         private readonly DirectoryInfo _keys;
         public PaymentContext Db { get; }
         public MaxWebhookService Service { get; }
+        public MaxCorrespondenceService Correspondence { get; }
         public int UserId { get; }
         public DateTime Now { get; } = new(2026, 7, 31, 15, 0, 0, DateTimeKind.Utc);
 
-        private Fixture(SqliteConnection connection, DirectoryInfo keys, PaymentContext db, MaxWebhookService service, int userId)
+        private Fixture(
+            SqliteConnection connection,
+            DirectoryInfo keys,
+            PaymentContext db,
+            MaxWebhookService service,
+            MaxCorrespondenceService correspondence,
+            int userId)
         {
             _connection = connection;
             _keys = keys;
             Db = db;
             Service = service;
+            Correspondence = correspondence;
             UserId = userId;
         }
 
@@ -163,6 +242,18 @@ public sealed class MaxWebhookServiceTests
             chat_id = 8001,
             user = new { user_id = 9001, name = "Тест" },
             payload
+        });
+
+        public string Message(string externalId, string text) => JsonSerializer.Serialize(new
+        {
+            update_type = "message_created",
+            timestamp = new DateTimeOffset(Now).ToUnixTimeMilliseconds(),
+            message = new
+            {
+                sender = new { user_id = 9001 },
+                recipient = new { chat_id = 8001 },
+                body = new { mid = externalId, text }
+            }
         });
 
         public static async Task<Fixture> CreateAsync(bool enabled = true)
@@ -180,7 +271,8 @@ public sealed class MaxWebhookServiceTests
             db.Users.Add(user);
             await db.SaveChangesAsync();
             var keys = Directory.CreateTempSubdirectory("pp-max-webhook-");
-            var settings = new SystemMaxNotificationService(db, DataProtectionProvider.Create(keys));
+            var dataProtection = DataProtectionProvider.Create(keys);
+            var settings = new SystemMaxNotificationService(db, dataProtection);
             await settings.UpdateSettingsAsync(new UpdateMaxNotificationSettingsRequest
             {
                 Enabled = enabled,
@@ -196,7 +288,14 @@ public sealed class MaxWebhookServiceTests
                 ["MaxMessenger:BotUsername"] = "TestBot"
             }).Build();
             var time = new FixedTimeProvider(new DateTimeOffset(2026, 7, 31, 15, 0, 0, TimeSpan.Zero));
-            return new Fixture(connection, keys, db, new MaxWebhookService(db, settings, configuration, time), user.Id);
+            var correspondence = new MaxCorrespondenceService(db, dataProtection, time);
+            return new Fixture(
+                connection,
+                keys,
+                db,
+                new MaxWebhookService(db, settings, correspondence, configuration, time),
+                correspondence,
+                user.Id);
         }
 
         public async ValueTask DisposeAsync()

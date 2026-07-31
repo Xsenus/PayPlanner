@@ -14,6 +14,7 @@ namespace PayPlanner.Api.Controllers;
 public sealed class MaxMessengerController(
     IMaxWebhookService service,
     IMaxOutboxService outbox,
+    IMaxCorrespondenceService correspondence,
     PaymentContext db) : ControllerBase
 {
     [HttpPost("link")]
@@ -70,6 +71,39 @@ public sealed class MaxMessengerController(
             .ToListAsync(ct);
         return Ok(items);
     }
+
+    [HttpGet("correspondence")]
+    [Authorize(Roles = "admin")]
+    public async Task<IActionResult> GetCorrespondence(
+        [FromQuery] string? status = null,
+        [FromQuery] int take = 50,
+        CancellationToken ct = default)
+        => Ok(await correspondence.GetAsync(status, take, ct));
+
+    [HttpPost("correspondence/{publicId:guid}/route")]
+    [Authorize(Roles = "admin")]
+    public async Task<IActionResult> RouteCorrespondence(
+        Guid publicId,
+        [FromBody] RouteMaxCorrespondenceRequest request,
+        CancellationToken ct)
+    {
+        if (!int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId)) return Unauthorized();
+        try
+        {
+            return await correspondence.RouteAsync(publicId, request.ClientCaseId, userId, ct)
+                ? NoContent()
+                : NotFound();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(new { message = ex.Message });
+        }
+    }
+}
+
+public sealed class RouteMaxCorrespondenceRequest
+{
+    public int ClientCaseId { get; set; }
 }
 
 public sealed class QueueMaxMessageRequest

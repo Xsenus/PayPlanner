@@ -46,6 +46,36 @@ public sealed class MaxInboundEvent
     public DateTime ExpiresAt { get; set; }
 }
 
+public static class MaxCorrespondenceStatuses
+{
+    public const string Routed = "routed";
+    public const string PendingRouting = "pending-routing";
+}
+
+public sealed class MaxInboundCorrespondenceMessage
+{
+    public int Id { get; set; }
+    public Guid PublicId { get; set; } = Guid.NewGuid();
+    public int InboundEventId { get; set; }
+    public MaxInboundEvent InboundEvent { get; set; } = null!;
+    public int RecipientLinkId { get; set; }
+    public MaxRecipientLink RecipientLink { get; set; } = null!;
+    public int ClientPortalAccountId { get; set; }
+    public ClientPortalAccount ClientPortalAccount { get; set; } = null!;
+    public int? ClientCaseId { get; set; }
+    public ClientCase? ClientCase { get; set; }
+    [MaxLength(256)] public string ExternalMessageId { get; set; } = string.Empty;
+    [MaxLength(12000)] public string ProtectedText { get; set; } = string.Empty;
+    [MaxLength(256)] public string BodyPreview { get; set; } = "Содержимое скрыто: входящее сообщение MAX.";
+    [MaxLength(32)] public string Status { get; set; } = MaxCorrespondenceStatuses.PendingRouting;
+    public DateTime OccurredAt { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime ExpiresAt { get; set; }
+    public DateTime? RoutedAt { get; set; }
+    public int? RoutedByUserId { get; set; }
+    public User? RoutedByUser { get; set; }
+}
+
 public static class MaxOutboxStatuses
 {
     public const string Queued = "queued";

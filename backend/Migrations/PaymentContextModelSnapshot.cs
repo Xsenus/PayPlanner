@@ -5373,6 +5373,88 @@ namespace PayPlanner.Api.Migrations
                     b.ToTable("LegalEntityContracts", (string)null);
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.MaxInboundCorrespondenceMessage", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("BodyPreview")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("ClientCaseId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ClientPortalAccountId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ExternalMessageId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("InboundEventId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("OccurredAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProtectedText")
+                        .IsRequired()
+                        .HasMaxLength(12000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("PublicId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("RecipientLinkId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("RoutedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("RoutedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClientPortalAccountId");
+
+                    b.HasIndex("ExpiresAt");
+
+                    b.HasIndex("InboundEventId")
+                        .IsUnique();
+
+                    b.HasIndex("PublicId")
+                        .IsUnique();
+
+                    b.HasIndex("RoutedByUserId");
+
+                    b.HasIndex("ClientCaseId", "CreatedAt");
+
+                    b.HasIndex("RecipientLinkId", "ExternalMessageId")
+                        .IsUnique();
+
+                    b.HasIndex("Status", "CreatedAt");
+
+                    b.ToTable("MaxInboundCorrespondenceMessages");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.MaxInboundEvent", b =>
                 {
                     b.Property<int>("Id")
@@ -10966,6 +11048,47 @@ namespace PayPlanner.Api.Migrations
                     b.Navigation("Contract");
 
                     b.Navigation("LegalEntity");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.MaxInboundCorrespondenceMessage", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.ClientCase", "ClientCase")
+                        .WithMany()
+                        .HasForeignKey("ClientCaseId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("PayPlanner.Api.Models.ClientPortalAccount", "ClientPortalAccount")
+                        .WithMany()
+                        .HasForeignKey("ClientPortalAccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.MaxInboundEvent", "InboundEvent")
+                        .WithMany()
+                        .HasForeignKey("InboundEventId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.MaxRecipientLink", "RecipientLink")
+                        .WithMany()
+                        .HasForeignKey("RecipientLinkId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.User", "RoutedByUser")
+                        .WithMany()
+                        .HasForeignKey("RoutedByUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("ClientCase");
+
+                    b.Navigation("ClientPortalAccount");
+
+                    b.Navigation("InboundEvent");
+
+                    b.Navigation("RecipientLink");
+
+                    b.Navigation("RoutedByUser");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.MaxOutboxMessage", b =>

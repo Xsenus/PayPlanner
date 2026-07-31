@@ -149,6 +149,7 @@ builder.Services.AddScoped<ITelegramNotificationService, TelegramNotificationSer
 builder.Services.AddScoped<ISmsNotificationService, SystemSmsNotificationService>();
 builder.Services.AddScoped<IMaxNotificationService, SystemMaxNotificationService>();
 builder.Services.AddScoped<IMaxWebhookService, MaxWebhookService>();
+builder.Services.AddScoped<IMaxCorrespondenceService, MaxCorrespondenceService>();
 builder.Services.AddScoped<IMaxOutboxService, MaxOutboxService>();
 builder.Services.AddScoped<IMaxOutboxProcessor, MaxOutboxProcessor>();
 builder.Services.AddScoped<IExternalWorkOrderApprovalService, ExternalWorkOrderApprovalService>();

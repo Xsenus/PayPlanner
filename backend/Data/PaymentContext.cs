@@ -3082,6 +3082,27 @@ public class PaymentContext : DbContext
             entity.HasIndex(item => item.ExpiresAt);
         });
 
+        modelBuilder.Entity<MaxInboundCorrespondenceMessage>(entity =>
+        {
+            entity.HasKey(item => item.Id);
+            entity.Property(item => item.ExternalMessageId).HasMaxLength(256).IsRequired();
+            entity.Property(item => item.ProtectedText).HasMaxLength(12000).IsRequired();
+            entity.Property(item => item.BodyPreview).HasMaxLength(256).IsRequired();
+            entity.Property(item => item.Status).HasMaxLength(32).IsRequired();
+            entity.Property(item => item.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.HasOne(item => item.InboundEvent).WithMany().HasForeignKey(item => item.InboundEventId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(item => item.RecipientLink).WithMany().HasForeignKey(item => item.RecipientLinkId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.ClientPortalAccount).WithMany().HasForeignKey(item => item.ClientPortalAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.ClientCase).WithMany().HasForeignKey(item => item.ClientCaseId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.RoutedByUser).WithMany().HasForeignKey(item => item.RoutedByUserId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasIndex(item => item.PublicId).IsUnique();
+            entity.HasIndex(item => item.InboundEventId).IsUnique();
+            entity.HasIndex(item => new { item.RecipientLinkId, item.ExternalMessageId }).IsUnique();
+            entity.HasIndex(item => new { item.Status, item.CreatedAt });
+            entity.HasIndex(item => new { item.ClientCaseId, item.CreatedAt });
+            entity.HasIndex(item => item.ExpiresAt);
+        });
+
         modelBuilder.Entity<MaxOutboxMessage>(entity =>
         {
             entity.HasKey(item => item.Id);
@@ -4172,6 +4193,7 @@ public class PaymentContext : DbContext
     public DbSet<ElectronicSignatureEvent> ElectronicSignatureEvents { get; set; }
     public DbSet<MaxRecipientLink> MaxRecipientLinks { get; set; }
     public DbSet<MaxInboundEvent> MaxInboundEvents { get; set; }
+    public DbSet<MaxInboundCorrespondenceMessage> MaxInboundCorrespondenceMessages { get; set; }
     public DbSet<MaxOutboxMessage> MaxOutboxMessages { get; set; }
     public DbSet<TaskJournalDeadlineChangeRequest> TaskJournalDeadlineChangeRequests { get; set; }
     public DbSet<TaskJournalFile> TaskJournalFiles { get; set; }

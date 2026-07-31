@@ -22,6 +22,7 @@ public interface IMaxWebhookService
 public sealed class MaxWebhookService(
     PaymentContext db,
     IMaxNotificationService settingsService,
+    IMaxCorrespondenceService correspondenceService,
     IConfiguration configuration,
     TimeProvider timeProvider) : IMaxWebhookService
 {
@@ -182,7 +183,14 @@ public sealed class MaxWebhookService(
             else if (updateType == "message_created")
             {
                 inbound.ProcessingStatus = settings.CorrespondenceEnabled
-                    ? "correspondence-pending-manual-routing"
+                    ? await correspondenceService.CaptureAsync(
+                        inbound,
+                        maxUserId,
+                        messageId,
+                        ReadString(root, "message", "body", "text"),
+                        occurredAt,
+                        settings.TechnicalPayloadRetentionDays,
+                        ct)
                     : "correspondence-disabled";
             }
 
