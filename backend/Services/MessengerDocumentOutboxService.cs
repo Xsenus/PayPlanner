@@ -11,7 +11,8 @@ public sealed record MessengerDocumentProviderRequest(
     string RecipientAddress,
     string Text,
     string Link,
-    string IdempotencyKey);
+    string IdempotencyKey,
+    int? ClientPortalAccountId = null);
 
 public sealed record MessengerDocumentProviderResult(
     bool Accepted,
@@ -63,6 +64,40 @@ public sealed class TelegramMessengerDocumentProvider : IMessengerDocumentProvid
         return result.Success
             ? new(true, MessengerDocumentDeliveryStatuses.Sent, $"telegram:{request.DeliveryId}")
             : new(false, MessengerDocumentDeliveryStatuses.Failed, Error: result.Error, IsTransient: result.Status == NotificationDeliveryStatus.Failed);
+    }
+}
+
+public sealed class MaxMessengerDocumentProvider(
+    IMaxOutboxService maxOutbox,
+    IConfiguration configuration) : IMessengerDocumentProvider
+{
+    public string Channel => MessengerDocumentChannels.Max;
+
+    public async Task<MessengerDocumentProviderResult> SendAsync(
+        MessengerDocumentProviderRequest request,
+        CancellationToken ct)
+    {
+        if (!configuration.GetValue("MessengerDocumentDelivery:Providers:Max:Enabled", false))
+            return new(false, MessengerDocumentDeliveryStatuses.Failed, Error: "MAX document delivery is disabled.");
+        if (!request.ClientPortalAccountId.HasValue)
+            return new(false, MessengerDocumentDeliveryStatuses.Failed, Error: "MAX recipient is not linked to a portal account.");
+
+        try
+        {
+            var queued = await maxOutbox.QueueAsync(new MaxQueueRequest(
+                null,
+                MaxMessengerScenarios.Documents,
+                $"document-delivery:{request.IdempotencyKey}",
+                "В CRM подготовлен документ. Откройте защищённую ссылку, чтобы скачать его.",
+                "Открыть документ",
+                request.Link,
+                RecipientPortalAccountId: request.ClientPortalAccountId), ct);
+            return new(true, MessengerDocumentDeliveryStatuses.Queued, $"max-outbox:{queued.PublicId:D}");
+        }
+        catch (InvalidOperationException ex)
+        {
+            return new(false, MessengerDocumentDeliveryStatuses.Failed, Error: ex.Message);
+        }
     }
 }
 
@@ -180,7 +215,8 @@ public sealed class MessengerDocumentOutboxProcessor : IMessengerDocumentOutboxP
                 address,
                 item.MessagePreview ?? string.Empty,
                 link,
-                item.IdempotencyKey), ct);
+                item.IdempotencyKey,
+                item.RecipientBinding.ClientPortalAccountId), ct);
             if (!result.Accepted)
             {
                 if (!result.IsTransient)

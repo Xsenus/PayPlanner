@@ -20,6 +20,7 @@ describe('ClientPortalPage', () => {
       'getClientPortalProfile',
       'createClientPortalDocumentGrant',
       'downloadClientPortalDocument',
+      'createClientPortalMaxLink',
       'logoutClientPortal',
     );
     sessionStorage.clear();
@@ -53,6 +54,7 @@ describe('ClientPortalPage', () => {
     });
     apiServiceMock.createClientPortalDocumentGrant.mockResolvedValue({ grantToken: 'grant', expiresAt: '2026-08-01T10:05:00Z' });
     apiServiceMock.downloadClientPortalDocument.mockResolvedValue(new Blob(['pdf']));
+    apiServiceMock.createClientPortalMaxLink.mockResolvedValue({ linkId: 'max-link', payload: 'opaque', deepLinkUrl: 'https://max.ru/test_bot?start=opaque', expiresAt: '2026-08-01T10:15:00Z' });
   });
 
   it('removes token from URL, verifies OTP and opens only returned cases', async () => {
@@ -75,6 +77,7 @@ describe('ClientPortalPage', () => {
     const createObjectUrl = vi.fn(() => 'blob:portal-document');
     const revokeObjectUrl = vi.fn();
     const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null);
     Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectUrl });
     Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectUrl });
 
@@ -91,6 +94,8 @@ describe('ClientPortalPage', () => {
     expect(await screen.findByText('ivan@example.test · клиент')).toBeTruthy();
     expect(screen.getByText('Уведомления безопасности о новых входах включены.')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Выйти на всех устройствах' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Подключить MAX' }));
+    await waitFor(() => expect(open).toHaveBeenCalledWith('https://max.ru/test_bot?start=opaque', '_blank', 'noopener,noreferrer'));
 
     fireEvent.click(screen.getAllByRole('button', { name: /Дело клиента/ }).at(-1)!);
     fireEvent.click(await screen.findByRole('button', { name: /Документ\.pdf/ }));
@@ -101,5 +106,6 @@ describe('ClientPortalPage', () => {
     expect(createObjectUrl).toHaveBeenCalledTimes(1);
     expect(revokeObjectUrl).toHaveBeenCalledWith('blob:portal-document');
     click.mockRestore();
+    open.mockRestore();
   });
 });

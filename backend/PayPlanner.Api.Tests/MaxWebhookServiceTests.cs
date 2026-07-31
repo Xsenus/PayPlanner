@@ -108,6 +108,36 @@ public sealed class MaxWebhookServiceTests
             (await fixture.Db.MaxRecipientLinks.SingleAsync(item => item.PublicId == second.LinkId)).Status);
     }
 
+    [Fact]
+    public async Task PortalAccountCanLinkAndOptOutWithoutEmployeeIdentity()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var client = new Client { Name = "Клиент для портала" };
+        var account = new ClientPortalAccount
+        {
+            Client = client,
+            Email = "client@example.test",
+            DisplayName = "Клиент",
+            AccountType = "client",
+            IsActive = true
+        };
+        fixture.Db.ClientPortalAccounts.Add(account);
+        await fixture.Db.SaveChangesAsync();
+
+        var link = await fixture.Service.CreatePortalLinkAsync(account.Id, CancellationToken.None);
+        var result = await fixture.Service.ProcessAsync(
+            fixture.Update("bot_started", link.Payload), "webhook-secret", CancellationToken.None);
+        var optedOut = await fixture.Service.OptOutPortalAsync(account.Id, CancellationToken.None);
+        var stored = await fixture.Db.MaxRecipientLinks.SingleAsync(item => item.PublicId == link.LinkId);
+
+        Assert.True(result.Accepted);
+        Assert.Equal("link-verified", result.Status);
+        Assert.Null(stored.UserId);
+        Assert.Equal(account.Id, stored.ClientPortalAccountId);
+        Assert.True(optedOut);
+        Assert.Equal(MaxRecipientLinkStatuses.OptedOut, stored.Status);
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly SqliteConnection _connection;

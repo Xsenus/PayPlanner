@@ -12,12 +12,41 @@ using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Notifications;
 using Xunit;
 
 namespace PayPlanner.Api.Tests;
 
 public sealed class MessengerDocumentDeliveryServiceTests
 {
+    [Fact]
+    public async Task MaxProviderQueuesOnlyProtectedLinkForVerifiedPortalRecipient()
+    {
+        var outbox = new RecordingMaxOutbox();
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["MessengerDocumentDelivery:Providers:Max:Enabled"] = "true"
+        }).Build();
+        var provider = new MaxMessengerDocumentProvider(outbox, configuration);
+
+        var result = await provider.SendAsync(new MessengerDocumentProviderRequest(
+            17,
+            "protected-address-is-not-used",
+            "Произвольный текст не должен попасть в MAX",
+            "https://crm.example.test/api/public/messenger-document-deliveries/id/download?token=secret",
+            "delivery-key",
+            42), CancellationToken.None);
+
+        Assert.True(result.Accepted);
+        var request = Assert.Single(outbox.Requests);
+        Assert.Null(request.RecipientUserId);
+        Assert.Equal(42, request.RecipientPortalAccountId);
+        Assert.Equal(MaxMessengerScenarios.Documents, request.Scenario);
+        Assert.Equal("Открыть документ", request.ActionText);
+        Assert.StartsWith("https://", request.ActionUrl, StringComparison.Ordinal);
+        Assert.DoesNotContain("Произвольный", request.Text, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task DisabledFeatureRejectsRecipientBinding()
     {
@@ -402,6 +431,17 @@ public sealed class MessengerDocumentDeliveryServiceTests
         public string Channel => MessengerDocumentChannels.Telegram;
         public Task<MessengerDocumentProviderResult> SendAsync(MessengerDocumentProviderRequest request, CancellationToken ct)
             => Task.FromException<MessengerDocumentProviderResult>(new TaskCanceledException("provider timeout"));
+    }
+
+    private sealed class RecordingMaxOutbox : IMaxOutboxService
+    {
+        public List<MaxQueueRequest> Requests { get; } = [];
+
+        public Task<MaxOutboxMessage> QueueAsync(MaxQueueRequest request, CancellationToken ct)
+        {
+            Requests.Add(request);
+            return Task.FromResult(new MaxOutboxMessage());
+        }
     }
 
     private sealed class TestEnvironment(string root) : IWebHostEnvironment

@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Notifications;
 
 namespace PayPlanner.Api.Controllers;
 
@@ -9,7 +10,10 @@ namespace PayPlanner.Api.Controllers;
 [AllowAnonymous]
 [EnableRateLimiting("client-portal")]
 [Route("api/portal")]
-public sealed class ClientPortalController(IClientPortalService service, IWebHostEnvironment environment) : ControllerBase
+public sealed class ClientPortalController(
+    IClientPortalService service,
+    IMaxWebhookService maxWebhookService,
+    IWebHostEnvironment environment) : ControllerBase
 {
     private const string CookieName = "pp_client_portal";
 
@@ -170,6 +174,33 @@ public sealed class ClientPortalController(IClientPortalService service, IWebHos
             Path = "/",
         });
         return NoContent();
+    }
+
+    [HttpPost("max/link")]
+    public async Task<ActionResult<MaxLinkTokenResult>> CreateMaxLink(CancellationToken ct)
+    {
+        ApplySecurityHeaders();
+        if (!IsTrustedPortalPost()) return BadRequest(new { code = "csrf_rejected", message = "Обновите страницу и повторите действие." });
+        var session = await ResolveSession(ct);
+        if (session is null) return Unauthorized(new { code = "session_unavailable", message = "Войдите в кабинет ещё раз." });
+        try
+        {
+            return Ok(await maxWebhookService.CreatePortalLinkAsync(session.AccountId, ct));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(new { code = "max_unavailable", message = ex.Message });
+        }
+    }
+
+    [HttpDelete("max/link")]
+    public async Task<IActionResult> DeleteMaxLink(CancellationToken ct)
+    {
+        ApplySecurityHeaders();
+        if (!IsTrustedPortalPost()) return BadRequest(new { code = "csrf_rejected", message = "Обновите страницу и повторите действие." });
+        var session = await ResolveSession(ct);
+        if (session is null) return Unauthorized(new { code = "session_unavailable", message = "Войдите в кабинет ещё раз." });
+        return await maxWebhookService.OptOutPortalAsync(session.AccountId, ct) ? NoContent() : NotFound();
     }
 
     private Task<ClientPortalSessionContext?> ResolveSession(CancellationToken ct)

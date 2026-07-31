@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Briefcase, CalendarDays, Download, FileText, Loader2, LogOut, ReceiptText, Search, ShieldCheck, UserRound } from 'lucide-react';
+import { Briefcase, CalendarDays, Download, FileText, Loader2, LogOut, MessageSquare, ReceiptText, Search, ShieldCheck, UserRound } from 'lucide-react';
 
 import {
   apiService,
@@ -40,6 +40,7 @@ export function ClientPortalPage() {
   const [status, setStatus] = useState('');
   const [profile, setProfile] = useState<ClientPortalProfile | null>(null);
   const [downloadingDocumentId, setDownloadingDocumentId] = useState<string | null>(null);
+  const [maxLinking, setMaxLinking] = useState(false);
 
   const loadHome = useCallback(async (nextSearch = '', nextStatus = '') => {
     setLoading(true);
@@ -126,6 +127,20 @@ export function ClientPortalPage() {
     }
   };
 
+  const connectMax = async () => {
+    setMaxLinking(true);
+    setError(null);
+    try {
+      const link = await apiService.createClientPortalMaxLink();
+      if (!link.deepLinkUrl) throw new Error('Ссылка MAX временно недоступна.');
+      window.open(link.deepLinkUrl, '_blank', 'noopener,noreferrer');
+    } catch (err) {
+      setError(extractDisplayErrorMessage(err, 'Не удалось начать подключение MAX.'));
+    } finally {
+      setMaxLinking(false);
+    }
+  };
+
   if (loading) {
     return <main className="grid min-h-screen place-items-center bg-slate-50"><Loader2 className="h-7 w-7 animate-spin text-blue-600" /></main>;
   }
@@ -182,7 +197,10 @@ export function ClientPortalPage() {
             <div className="mt-1">{profile.email} · {profile.accountType === 'representative' ? 'представитель' : 'клиент'}</div>
           <div className="mt-1 text-xs text-slate-500">Доступно дел: {profile.activeCaseCount} · активных входов: {profile.activeSessionCount}</div>
           {profile.securityNotificationsEnabled ? <div className="mt-1 text-xs text-emerald-700">Уведомления безопасности о новых входах включены.</div> : null}
-            <button type="button" onClick={() => void apiService.logoutClientPortal(true).finally(() => window.location.reload())} className="mt-3 rounded-lg border border-rose-200 bg-white px-3 py-2 text-xs font-semibold text-rose-700">Выйти на всех устройствах</button>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button type="button" disabled={maxLinking} onClick={() => void connectMax()} className="inline-flex items-center gap-1.5 rounded-lg border border-violet-200 bg-white px-3 py-2 text-xs font-semibold text-violet-700 disabled:opacity-60"><MessageSquare className="h-3.5 w-3.5" />{maxLinking ? 'Открываем…' : 'Подключить MAX'}</button>
+              <button type="button" onClick={() => void apiService.logoutClientPortal(true).finally(() => window.location.reload())} className="rounded-lg border border-rose-200 bg-white px-3 py-2 text-xs font-semibold text-rose-700">Выйти на всех устройствах</button>
+            </div>
           </section>
         ) : null}
         {home.upcomingActions?.length ? (

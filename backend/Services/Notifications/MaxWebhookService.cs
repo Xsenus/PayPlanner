@@ -13,7 +13,9 @@ public sealed record MaxWebhookResult(bool Accepted, bool Duplicate, string Stat
 public interface IMaxWebhookService
 {
     Task<MaxLinkTokenResult> CreateEmployeeLinkAsync(int userId, CancellationToken ct);
+    Task<MaxLinkTokenResult> CreatePortalLinkAsync(int portalAccountId, CancellationToken ct);
     Task<bool> OptOutEmployeeAsync(int userId, CancellationToken ct);
+    Task<bool> OptOutPortalAsync(int portalAccountId, CancellationToken ct);
     Task<MaxWebhookResult> ProcessAsync(string rawJson, string? suppliedSecret, CancellationToken ct);
 }
 
@@ -32,10 +34,28 @@ public sealed class MaxWebhookService(
     {
         if (userId <= 0 || !await db.Users.AsNoTracking().AnyAsync(item => item.Id == userId && item.IsActive, ct))
             throw new InvalidOperationException("Активный сотрудник не найден.");
+        return await CreateLinkAsync(userId, null, ct);
+    }
+
+    public async Task<MaxLinkTokenResult> CreatePortalLinkAsync(int portalAccountId, CancellationToken ct)
+    {
+        if (portalAccountId <= 0 || !await db.ClientPortalAccounts.AsNoTracking()
+            .AnyAsync(item => item.Id == portalAccountId && item.IsActive && item.RevokedAt == null, ct))
+            throw new InvalidOperationException("Активный аккаунт клиентского кабинета не найден.");
+        return await CreateLinkAsync(null, portalAccountId, ct);
+    }
+
+    private async Task<MaxLinkTokenResult> CreateLinkAsync(int? userId, int? portalAccountId, CancellationToken ct)
+    {
+        var settings = await settingsService.GetRuntimeSettingsAsync(ct);
+        if (!settings.Ready) throw new InvalidOperationException("Канал MAX выключен или настроен не полностью.");
+        var botName = configuration["MaxMessenger:BotUsername"]?.Trim().TrimStart('@');
+        if (string.IsNullOrWhiteSpace(botName)) throw new InvalidOperationException("Имя бота MAX не настроено.");
 
         var now = timeProvider.GetUtcNow().UtcDateTime;
         var oldPending = await db.MaxRecipientLinks
-            .Where(item => item.UserId == userId && item.Status == MaxRecipientLinkStatuses.Pending)
+            .Where(item => item.UserId == userId && item.ClientPortalAccountId == portalAccountId
+                && item.Status == MaxRecipientLinkStatuses.Pending)
             .ToListAsync(ct);
         foreach (var item in oldPending)
         {
@@ -47,6 +67,7 @@ public sealed class MaxWebhookService(
         var link = new MaxRecipientLink
         {
             UserId = userId,
+            ClientPortalAccountId = portalAccountId,
             Status = MaxRecipientLinkStatuses.Pending,
             LinkTokenHash = Sha256(token),
             LinkTokenExpiresAt = now.AddMinutes(15),
@@ -56,18 +77,21 @@ public sealed class MaxWebhookService(
         db.MaxRecipientLinks.Add(link);
         await db.SaveChangesAsync(ct);
 
-        var botName = configuration["MaxMessenger:BotUsername"]?.Trim().TrimStart('@');
-        var url = string.IsNullOrWhiteSpace(botName)
-            ? null
-            : $"https://max.ru/{Uri.EscapeDataString(botName)}?start={Uri.EscapeDataString(token)}";
+        var url = $"https://max.ru/{Uri.EscapeDataString(botName)}?start={Uri.EscapeDataString(token)}";
         return new MaxLinkTokenResult(link.PublicId, token, url, link.LinkTokenExpiresAt);
     }
 
     public async Task<bool> OptOutEmployeeAsync(int userId, CancellationToken ct)
+        => await OptOutAsync(userId, null, ct);
+
+    public async Task<bool> OptOutPortalAsync(int portalAccountId, CancellationToken ct)
+        => await OptOutAsync(null, portalAccountId, ct);
+
+    private async Task<bool> OptOutAsync(int? userId, int? portalAccountId, CancellationToken ct)
     {
         var now = timeProvider.GetUtcNow().UtcDateTime;
         var links = await db.MaxRecipientLinks
-            .Where(item => item.UserId == userId
+            .Where(item => item.UserId == userId && item.ClientPortalAccountId == portalAccountId
                            && (item.Status == MaxRecipientLinkStatuses.Verified
                                || item.Status == MaxRecipientLinkStatuses.Pending))
             .ToListAsync(ct);
@@ -197,7 +221,7 @@ public sealed class MaxWebhookService(
             item => item.Id != link.Id
                     && item.MaxUserId == maxUserId
                     && item.Status == MaxRecipientLinkStatuses.Verified
-                    && item.UserId != link.UserId,
+                    && (item.UserId != link.UserId || item.ClientPortalAccountId != link.ClientPortalAccountId),
             ct);
         if (conflict)
             return "link-conflict";
@@ -205,7 +229,9 @@ public sealed class MaxWebhookService(
         var oldLinks = await db.MaxRecipientLinks.Where(item =>
                 item.Id != link.Id
                 && item.Status == MaxRecipientLinkStatuses.Verified
-                && (item.UserId == link.UserId || item.MaxUserId == maxUserId))
+                && ((link.UserId != null && item.UserId == link.UserId)
+                    || (link.ClientPortalAccountId != null && item.ClientPortalAccountId == link.ClientPortalAccountId)
+                    || item.MaxUserId == maxUserId))
             .ToListAsync(ct);
         foreach (var old in oldLinks)
         {

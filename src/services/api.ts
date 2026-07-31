@@ -5805,6 +5805,19 @@ export class ApiService {
     return this.request<ClientPortalProfile>('/portal/profile', { suppressAuthSessionExpired: true });
   }
 
+  async createClientPortalMaxLink() {
+    return this.request<{ linkId: string; payload: string; deepLinkUrl?: string | null; expiresAt: string }>(
+      '/portal/max/link',
+      { method: 'POST', headers: { 'X-Portal-Request': '1' }, suppressAuthSessionExpired: true },
+    );
+  }
+
+  async deleteClientPortalMaxLink() {
+    return this.request<void>('/portal/max/link', {
+      method: 'DELETE', headers: { 'X-Portal-Request': '1' }, suppressAuthSessionExpired: true,
+    });
+  }
+
   async getClientPortalCase(publicId: string) {
     return this.request<ClientPortalCase>(
       `/portal/cases/${encodeURIComponent(publicId)}`,

@@ -196,7 +196,7 @@ builder.Services.AddScoped<IFormRequirementsService, FormRequirementsService>();
 builder.Services.AddSingleton<ICaseDocumentStorage, LocalCaseDocumentStorage>();
 builder.Services.AddScoped<IMessengerDocumentDeliveryService, MessengerDocumentDeliveryService>();
 builder.Services.AddScoped<IMessengerDocumentProvider, TelegramMessengerDocumentProvider>();
-builder.Services.AddScoped<IMessengerDocumentProvider>(_ => new DisabledMessengerDocumentProvider(MessengerDocumentChannels.Max));
+builder.Services.AddScoped<IMessengerDocumentProvider, MaxMessengerDocumentProvider>();
 builder.Services.AddScoped<IMessengerDocumentProvider>(_ => new DisabledMessengerDocumentProvider(MessengerDocumentChannels.WhatsAppBusiness));
 builder.Services.AddScoped<IMessengerDocumentOutboxProcessor, MessengerDocumentOutboxProcessor>();
 builder.Services.AddScoped<IElectronicSignatureService, ElectronicSignatureService>();

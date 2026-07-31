@@ -8,13 +8,14 @@ using PayPlanner.Api.Models;
 namespace PayPlanner.Api.Services.Notifications;
 
 public sealed record MaxQueueRequest(
-    int RecipientUserId,
+    int? RecipientUserId,
     string Scenario,
     string EventKey,
     string Text,
     string? ActionText = null,
     string? ActionUrl = null,
-    string? NotificationType = null);
+    string? NotificationType = null,
+    int? RecipientPortalAccountId = null);
 
 public interface IMaxOutboxService
 {
@@ -41,6 +42,8 @@ public sealed class MaxOutboxService(
 
     public async Task<MaxOutboxMessage> QueueAsync(MaxQueueRequest request, CancellationToken ct)
     {
+        if (request.RecipientUserId.HasValue == request.RecipientPortalAccountId.HasValue)
+            throw new InvalidOperationException("Укажите ровно одного получателя MAX: сотрудника или аккаунт клиентского портала.");
         var runtime = await settingsService.GetRuntimeSettingsAsync(ct);
         if (!runtime.Ready) throw new InvalidOperationException("Канал MAX выключен или настроен не полностью.");
         var scenario = request.Scenario?.Trim().ToLowerInvariant() ?? string.Empty;
@@ -48,10 +51,12 @@ public sealed class MaxOutboxService(
         string? notificationType = null;
         if (scenario == MaxMessengerScenarios.Notifications)
         {
+            if (!request.RecipientUserId.HasValue)
+                throw new InvalidOperationException("Системные уведомления MAX доступны только сотрудникам.");
             notificationType = UserNotificationTypes.Find(request.NotificationType)?.Key;
             if (!string.Equals(notificationType, UserNotificationTypes.SystemAdminWarning, StringComparison.Ordinal))
                 throw new InvalidOperationException("Событие пока не разрешено для MAX.");
-            if (!await IsNotificationAllowedForRecipientAsync(request.RecipientUserId, notificationType!, ct))
+            if (!await IsNotificationAllowedForRecipientAsync(request.RecipientUserId.Value, notificationType!, ct))
                 throw new InvalidOperationException("Получатель отключил это уведомление MAX.");
         }
         var text = notificationType is null
@@ -70,6 +75,7 @@ public sealed class MaxOutboxService(
 
         var link = await db.MaxRecipientLinks.AsNoTracking()
             .Where(item => item.UserId == request.RecipientUserId
+                           && item.ClientPortalAccountId == request.RecipientPortalAccountId
                            && item.Status == MaxRecipientLinkStatuses.Verified
                            && item.MaxUserId != null)
             .OrderByDescending(item => item.VerifiedAt)
