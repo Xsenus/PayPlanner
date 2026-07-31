@@ -322,6 +322,12 @@ public class NotificationServiceTests
         Assert.Equal("07:45", settings.Sms.QuietHoursEnd);
         Assert.Equal("Asia/Novosibirsk", settings.Sms.QuietHoursTimeZone);
         Assert.Contains("адаптер", settings.Sms.StatusText, StringComparison.OrdinalIgnoreCase);
+        var storedToken = await db.SystemSettings
+            .Where(item => item.Key == SystemSmsNotificationService.ApiTokenSettingKey)
+            .Select(item => item.Value)
+            .SingleAsync();
+        Assert.StartsWith("dp:v1:", storedToken, StringComparison.Ordinal);
+        Assert.DoesNotContain("sms-secret-token", storedToken, StringComparison.Ordinal);
 
         var updated = await service.UpdateSmsSettingsAsync(new UpdateSmsNotificationSettingsRequest
         {
@@ -397,8 +403,8 @@ public class NotificationServiceTests
         Assert.Equal(70, settings.Sms.MaxMessageLength);
         Assert.Equal(0m, settings.Sms.LowBalanceThreshold);
         Assert.False(settings.Sms.QuietHoursEnabled);
-        Assert.Equal("22:00", settings.Sms.QuietHoursStart);
-        Assert.Equal("08:00", settings.Sms.QuietHoursEnd);
+        Assert.Equal("20:00", settings.Sms.QuietHoursStart);
+        Assert.Equal("09:00", settings.Sms.QuietHoursEnd);
         Assert.Equal("Europe/Moscow", settings.Sms.QuietHoursTimeZone);
         Assert.Equal(500, settings.Sms.Notes.Length);
         Assert.Contains("провайдер", settings.Sms.StatusText, StringComparison.OrdinalIgnoreCase);

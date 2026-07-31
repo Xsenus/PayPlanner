@@ -149,6 +149,25 @@ builder.Services.AddScoped<IRealtimeNotificationPublisher, SignalRRealtimeNotifi
 builder.Services.AddScoped<IWebPushNotificationService, WebPushNotificationService>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddScoped<ISmsChannelWarningPublisher, SmsChannelWarningPublisher>();
+builder.Services.AddScoped<ISmsProviderCredentialStore, SmsProviderCredentialStore>();
+builder.Services.AddHttpClient<SmsRuProvider>(client =>
+{
+    client.BaseAddress = new Uri("https://sms.ru/");
+    client.Timeout = TimeSpan.FromSeconds(20);
+});
+builder.Services.AddHttpClient<SmscRuProvider>(client =>
+{
+    client.BaseAddress = new Uri("https://smsc.ru/");
+    client.Timeout = TimeSpan.FromSeconds(20);
+});
+builder.Services.AddHttpClient<SmsAeroProvider>(client =>
+{
+    client.BaseAddress = new Uri("https://gate.smsaero.ru/");
+    client.Timeout = TimeSpan.FromSeconds(20);
+});
+builder.Services.AddScoped<ISmsProvider>(sp => sp.GetRequiredService<SmsRuProvider>());
+builder.Services.AddScoped<ISmsProvider>(sp => sp.GetRequiredService<SmscRuProvider>());
+builder.Services.AddScoped<ISmsProvider>(sp => sp.GetRequiredService<SmsAeroProvider>());
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<ExternalAuthService>();
 builder.Services.AddScoped<RoleManagementAccessService>();
@@ -334,6 +353,7 @@ using (var scope = app.Services.CreateScope())
 {
     var cfg = scope.ServiceProvider.GetRequiredService<IConfiguration>();
     var startupLogger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("StartupDataMaintenance");
+    var dataProtectionProvider = scope.ServiceProvider.GetRequiredService<IDataProtectionProvider>();
     var seedClients = cfg.GetValue<bool>("Seed:ClientsAndPayments");
 
     if (databaseProvider.IsSqlite)
@@ -342,6 +362,7 @@ using (var scope = app.Services.CreateScope())
         await RunStartupStepAsync(startupLogger, "SQLite database migrations", async () => await ctx.Database.MigrateAsync());
         await RunStartupStepAsync(startupLogger, "SQLite seed data", async () => await SeedDataService.SeedAsync(ctx, seedClients));
         await RunStartupStepAsync(startupLogger, "SQLite app release sync", async () => await AppReleaseSeedService.SyncAsync(ctx, app.Environment.ContentRootPath));
+        await RunStartupStepAsync(startupLogger, "SQLite SMS credential protection", async () => await SmsCredentialProtectionBackfillService.EnsureProtectedAsync(ctx, dataProtectionProvider));
         await RunStartupStepAsync(startupLogger, "SQLite payment remainder transfer backfill", async () => await PaymentRemainderTransferBackfillService.EnsureLegacyLinksAsync(ctx));
         await RunStartupStepAsync(startupLogger, "SQLite task contractor payment backfill", async () => await TaskContractorPaymentBackfillService.EnsureGeneratedPaymentDetailsAsync(ctx));
         await RunStartupStepAsync(startupLogger, "SQLite legacy expense recipient backfill", async () => await LegacyExpensePaymentRecipientBackfillService.EnsureRecognizedRecipientsAsync(ctx));
@@ -353,6 +374,7 @@ using (var scope = app.Services.CreateScope())
         await RunStartupStepAsync(startupLogger, "PostgreSQL database migrations", async () => await pgContext.Database.MigrateAsync());
         await RunStartupStepAsync(startupLogger, "PostgreSQL seed data", async () => await SeedDataService.SeedAsync(pgContext, seedClients));
         await RunStartupStepAsync(startupLogger, "PostgreSQL app release sync", async () => await AppReleaseSeedService.SyncAsync(pgContext, app.Environment.ContentRootPath));
+        await RunStartupStepAsync(startupLogger, "PostgreSQL SMS credential protection", async () => await SmsCredentialProtectionBackfillService.EnsureProtectedAsync(pgContext, dataProtectionProvider));
         await RunStartupStepAsync(startupLogger, "PostgreSQL payment remainder transfer backfill", async () => await PaymentRemainderTransferBackfillService.EnsureLegacyLinksAsync(pgContext));
         await RunStartupStepAsync(startupLogger, "PostgreSQL task contractor payment backfill", async () => await TaskContractorPaymentBackfillService.EnsureGeneratedPaymentDetailsAsync(pgContext));
         await RunStartupStepAsync(startupLogger, "PostgreSQL legacy expense recipient backfill", async () => await LegacyExpensePaymentRecipientBackfillService.EnsureRecognizedRecipientsAsync(pgContext));

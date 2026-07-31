@@ -1,5 +1,7 @@
 using System.Globalization;
+using System.Security.Cryptography;
 using System.Text.Json;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
@@ -13,6 +15,7 @@ public sealed class SystemSmsNotificationService : ISmsNotificationService
 {
     public const string EnabledSettingKey = "notifications.sms.enabled";
     public const string ProviderKeySettingKey = "notifications.sms.providerKey";
+    public const string ProviderAccountSettingKey = "notifications.sms.providerAccount";
     public const string SenderNameSettingKey = "notifications.sms.senderName";
     public const string ApiTokenSettingKey = "notifications.sms.apiToken";
     public const string DailyLimitSettingKey = "notifications.sms.dailyLimit";
@@ -28,19 +31,24 @@ public sealed class SystemSmsNotificationService : ISmsNotificationService
     public const string DiagnosticsSettingKey = "notifications.sms.diagnostics";
     public const string EmergencyStopSettingKey = "notifications.sms.emergencyStop";
     public const string DisabledEventTypesSettingKey = "notifications.sms.disabledEventTypes";
-    public const string DefaultQuietHoursStart = "22:00";
-    public const string DefaultQuietHoursEnd = "08:00";
+    public const string DefaultQuietHoursStart = "20:00";
+    public const string DefaultQuietHoursEnd = "09:00";
 
     private const int DefaultDailyLimit = 100;
     private const int DefaultRecipientDailyLimit = 5;
     private const int DefaultBurstLimitPerMinute = 20;
     private const int DefaultMaxMessageLength = 480;
     private const decimal DefaultLowBalanceThreshold = 500m;
+    internal const string ProtectedTokenPrefix = "dp:v1:";
+    internal const string ApiTokenProtectorPurpose = "PayPlanner.Notifications.Sms.ApiToken.v1";
 
+    private static readonly IDataProtectionProvider FallbackDataProtectionProvider =
+        new EphemeralDataProtectionProvider();
     private static readonly string[] SettingKeys =
     [
         EnabledSettingKey,
         ProviderKeySettingKey,
+        ProviderAccountSettingKey,
         SenderNameSettingKey,
         ApiTokenSettingKey,
         DailyLimitSettingKey,
@@ -60,13 +68,30 @@ public sealed class SystemSmsNotificationService : ISmsNotificationService
 
     private readonly PaymentContext _context;
     private readonly IHttpContextAccessor? _httpContextAccessor;
+    private readonly IDataProtector _apiTokenProtector;
+    private readonly IReadOnlyDictionary<string, ISmsProvider> _providers;
+    private readonly IReadOnlyDictionary<string, SmsProviderResilienceExecutor> _providerExecutors;
 
     public SystemSmsNotificationService(
         PaymentContext context,
-        IHttpContextAccessor? httpContextAccessor = null)
+        IHttpContextAccessor? httpContextAccessor = null,
+        IDataProtectionProvider? dataProtectionProvider = null,
+        IEnumerable<ISmsProvider>? providers = null)
     {
         _context = context;
         _httpContextAccessor = httpContextAccessor;
+        _apiTokenProtector = (dataProtectionProvider ?? FallbackDataProtectionProvider)
+            .CreateProtector(ApiTokenProtectorPurpose);
+        _providers = (providers ?? [])
+            .GroupBy(provider => provider.Key, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                group => group.Key,
+                group => group.First(),
+                StringComparer.OrdinalIgnoreCase);
+        _providerExecutors = _providers.ToDictionary(
+            item => item.Key,
+            item => new SmsProviderResilienceExecutor(item.Value),
+            StringComparer.OrdinalIgnoreCase);
     }
 
     public async Task<SmsNotificationSettingsDto> GetSettingsAsync(CancellationToken cancellationToken = default)
@@ -90,10 +115,11 @@ public sealed class SystemSmsNotificationService : ISmsNotificationService
             item => item.Value.Value,
             StringComparer.Ordinal);
         var previousSettings = BuildSettings(previousValues);
-        var previousApiToken = previousValues.GetValueOrDefault(ApiTokenSettingKey) ?? string.Empty;
+        var previousApiToken = UnprotectApiToken(previousValues.GetValueOrDefault(ApiTokenSettingKey));
 
         UpsertSetting(existing, EnabledSettingKey, request.Enabled ? "true" : "false", now);
         UpsertSetting(existing, ProviderKeySettingKey, NormalizeOptional(request.ProviderKey) ?? string.Empty, now);
+        UpsertSetting(existing, ProviderAccountSettingKey, NormalizeOptional(request.ProviderAccount) ?? string.Empty, now);
         UpsertSetting(existing, SenderNameSettingKey, NormalizeOptional(request.SenderName) ?? string.Empty, now);
         UpsertSetting(existing, DailyLimitSettingKey, NormalizeLimit(request.DailyLimit, DefaultDailyLimit, 1, 100000).ToString(), now);
         UpsertSetting(
@@ -142,7 +168,11 @@ public sealed class SystemSmsNotificationService : ISmsNotificationService
 
         if (!request.KeepExistingApiToken || !string.IsNullOrWhiteSpace(request.ApiToken))
         {
-            UpsertSetting(existing, ApiTokenSettingKey, NormalizeOptional(request.ApiToken) ?? string.Empty, now);
+            UpsertSetting(
+                existing,
+                ApiTokenSettingKey,
+                ProtectApiToken(NormalizeOptional(request.ApiToken)),
+                now);
         }
         else if (!existing.ContainsKey(ApiTokenSettingKey))
         {
@@ -154,7 +184,7 @@ public sealed class SystemSmsNotificationService : ISmsNotificationService
             item => item.Value.Value,
             StringComparer.Ordinal);
         var nextSettings = BuildSettings(nextValues);
-        var nextApiToken = nextValues.GetValueOrDefault(ApiTokenSettingKey) ?? string.Empty;
+        var nextApiToken = UnprotectApiToken(nextValues.GetValueOrDefault(ApiTokenSettingKey));
         var auditEvent = NotificationSettingsAudit.CreateSmsSettingsUpdatedEvent(
             _httpContextAccessor?.HttpContext?.User,
             previousSettings,
@@ -217,7 +247,8 @@ public sealed class SystemSmsNotificationService : ISmsNotificationService
         string idempotencyKey,
         CancellationToken cancellationToken = default)
     {
-        var settings = await GetSettingsAsync(cancellationToken);
+        var rawSettings = await LoadSettingsAsync(cancellationToken);
+        var settings = BuildSettings(rawSettings);
         if (settings.EmergencyStop)
         {
             return new SmsSendResult(
@@ -227,23 +258,74 @@ public sealed class SystemSmsNotificationService : ISmsNotificationService
                 ErrorIsSafe: true);
         }
 
-        var status = string.IsNullOrWhiteSpace(settings.StatusText)
-            ? "SMS-уведомления не отправляются: адаптер провайдера еще не подключен."
-            : settings.StatusText;
+        if (!settings.Ready
+            || !_providerExecutors.TryGetValue(settings.ProviderKey, out var executor))
+        {
+            var status = string.IsNullOrWhiteSpace(settings.StatusText)
+                ? "SMS-уведомления не отправляются: провайдер не готов."
+                : settings.StatusText;
 
-        return new SmsSendResult(
-            false,
-            NotificationDeliveryStatus.Skipped,
-            status,
-            ErrorIsSafe: true);
+            return new SmsSendResult(
+                false,
+                NotificationDeliveryStatus.Skipped,
+                status,
+                ErrorIsSafe: true);
+        }
+
+        try
+        {
+            var result = await executor.SendAsync(
+                new SmsProviderSendRequest(
+                    phoneNumber,
+                    text,
+                    settings.SenderName,
+                    idempotencyKey,
+                    settings.ProviderAccount,
+                    UnprotectApiToken(rawSettings.GetValueOrDefault(ApiTokenSettingKey))),
+                cancellationToken);
+            return result.Accepted
+                ? new SmsSendResult(
+                    true,
+                    NotificationDeliveryStatus.Sent)
+                : new SmsSendResult(
+                    false,
+                    NotificationDeliveryStatus.Failed,
+                    BuildSafeProviderError(result.ErrorCode),
+                    ErrorIsSafe: true);
+        }
+        catch (ArgumentException ex)
+        {
+            return new SmsSendResult(
+                false,
+                NotificationDeliveryStatus.Failed,
+                ex.Message,
+                ErrorIsSafe: true);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return new SmsSendResult(
+                false,
+                NotificationDeliveryStatus.Failed,
+                "SMS-провайдер не ответил за отведенное время.",
+                ErrorIsSafe: true);
+        }
+        catch (HttpRequestException)
+        {
+            return new SmsSendResult(
+                false,
+                NotificationDeliveryStatus.Failed,
+                "Не удалось связаться с SMS-провайдером.",
+                ErrorIsSafe: true);
+        }
     }
 
     private SmsNotificationSettingsDto BuildSettings(IReadOnlyDictionary<string, string> settings)
     {
         var enabled = ParseBool(settings.GetValueOrDefault(EnabledSettingKey), false);
         var providerKey = NormalizeOptional(settings.GetValueOrDefault(ProviderKeySettingKey)) ?? string.Empty;
+        var providerAccount = NormalizeOptional(settings.GetValueOrDefault(ProviderAccountSettingKey)) ?? string.Empty;
         var senderName = NormalizeOptional(settings.GetValueOrDefault(SenderNameSettingKey)) ?? string.Empty;
-        var apiToken = NormalizeOptional(settings.GetValueOrDefault(ApiTokenSettingKey)) ?? string.Empty;
+        var apiToken = UnprotectApiToken(settings.GetValueOrDefault(ApiTokenSettingKey));
         var dailyLimit = NormalizeLimit(ParseNullableInt(settings.GetValueOrDefault(DailyLimitSettingKey)), DefaultDailyLimit, 1, 100000);
         var recipientDailyLimit = NormalizeLimit(
             ParseNullableInt(settings.GetValueOrDefault(RecipientDailyLimitSettingKey)),
@@ -266,8 +348,11 @@ public sealed class SystemSmsNotificationService : ISmsNotificationService
         var quietHoursTimeZone = NormalizeTimeZone(settings.GetValueOrDefault(QuietHoursTimeZoneSettingKey));
         var notes = NormalizeNotes(settings.GetValueOrDefault(NotesSettingKey));
         var apiTokenSet = !string.IsNullOrWhiteSpace(apiToken);
-        var providerConfigured = !string.IsNullOrWhiteSpace(providerKey) && apiTokenSet;
-        const bool adapterConfigured = false;
+        var adapterConfigured = _providers.TryGetValue(providerKey, out var provider);
+        var providerMetadata = provider as ISmsProviderMetadata;
+        var providerConfigured = !string.IsNullOrWhiteSpace(providerKey)
+            && apiTokenSet
+            && (providerMetadata?.RequiresAccount != true || !string.IsNullOrWhiteSpace(providerAccount));
         var ready = enabled
             && !deliveryPolicy.EmergencyStop
             && providerConfigured
@@ -282,7 +367,20 @@ public sealed class SystemSmsNotificationService : ISmsNotificationService
             AdapterConfigured = adapterConfigured,
             ApiTokenSet = apiTokenSet,
             ProviderKey = providerKey,
+            ProviderAccount = providerAccount,
             SenderName = senderName,
+            Providers = _providers.Values
+                .Select(provider => (
+                    Provider: provider,
+                    Metadata: provider as ISmsProviderMetadata))
+                .OrderBy(item => item.Metadata?.Label ?? item.Provider.Key, StringComparer.CurrentCultureIgnoreCase)
+                .Select(item => new SmsProviderOptionDto
+                {
+                    Key = item.Provider.Key,
+                    Label = item.Metadata?.Label ?? item.Provider.Key,
+                    RequiresAccount = item.Metadata?.RequiresAccount == true,
+                })
+                .ToArray(),
             DailyLimit = dailyLimit,
             RecipientDailyLimit = recipientDailyLimit,
             BurstLimitPerMinute = burstLimitPerMinute,
@@ -307,19 +405,33 @@ public sealed class SystemSmsNotificationService : ISmsNotificationService
                 enabled,
                 deliveryPolicy.EmergencyStop,
                 providerKey,
+                providerAccount,
                 senderName,
                 apiTokenSet,
-                adapterConfigured)
+                adapterConfigured,
+                providerMetadata?.RequiresAccount == true)
         };
     }
+
+    private static string BuildSafeProviderError(string? errorCode)
+        => errorCode switch
+        {
+            "circuit-open" => "SMS-провайдер временно недоступен. Повторите отправку позже.",
+            "provider-timeout" => "SMS-провайдер не ответил за отведенное время.",
+            "provider-http-error" => "Не удалось связаться с SMS-провайдером.",
+            "credentials-missing" => "Не заполнены учетные данные SMS-провайдера.",
+            _ => "SMS-провайдер отклонил сообщение или вернул некорректный ответ.",
+        };
 
     private static string BuildStatusText(
         bool enabled,
         bool emergencyStop,
         string providerKey,
+        string providerAccount,
         string senderName,
         bool apiTokenSet,
-        bool adapterConfigured)
+        bool adapterConfigured,
+        bool providerAccountRequired)
     {
         if (emergencyStop)
         {
@@ -351,7 +463,35 @@ public sealed class SystemSmsNotificationService : ISmsNotificationService
             return "Настройки SMS сохранены, но отправка еще недоступна: адаптер выбранного провайдера не подключен.";
         }
 
+        if (providerAccountRequired && string.IsNullOrWhiteSpace(providerAccount))
+        {
+            return "Укажите email или логин учетной записи SMS-провайдера.";
+        }
+
         return "SMS-канал готов к отправке.";
+    }
+
+    private string ProtectApiToken(string? token)
+        => string.IsNullOrWhiteSpace(token)
+            ? string.Empty
+            : $"{ProtectedTokenPrefix}{_apiTokenProtector.Protect(token)}";
+
+    private string UnprotectApiToken(string? storedValue)
+    {
+        var normalized = NormalizeOptional(storedValue) ?? string.Empty;
+        if (!normalized.StartsWith(ProtectedTokenPrefix, StringComparison.Ordinal))
+        {
+            return normalized;
+        }
+
+        try
+        {
+            return _apiTokenProtector.Unprotect(normalized[ProtectedTokenPrefix.Length..]);
+        }
+        catch (CryptographicException)
+        {
+            return string.Empty;
+        }
     }
 
     private async Task<Dictionary<string, string>> LoadSettingsAsync(CancellationToken cancellationToken)

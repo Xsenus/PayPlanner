@@ -56,7 +56,9 @@ public class SmsNotificationSettingsDto
     public bool AdapterConfigured { get; set; }
     public bool ApiTokenSet { get; set; }
     public string ProviderKey { get; set; } = string.Empty;
+    public string ProviderAccount { get; set; } = string.Empty;
     public string SenderName { get; set; } = string.Empty;
+    public IReadOnlyList<SmsProviderOptionDto> Providers { get; set; } = Array.Empty<SmsProviderOptionDto>();
     public int DailyLimit { get; set; } = 100;
     public int RecipientDailyLimit { get; set; } = 5;
     public int BurstLimitPerMinute { get; set; } = 20;
@@ -65,12 +67,19 @@ public class SmsNotificationSettingsDto
     public bool EmergencyStop { get; set; }
     public IReadOnlyList<SmsEventTypeSettingDto> EventTypes { get; set; } = Array.Empty<SmsEventTypeSettingDto>();
     public bool QuietHoursEnabled { get; set; } = true;
-    public string QuietHoursStart { get; set; } = "22:00";
-    public string QuietHoursEnd { get; set; } = "08:00";
+    public string QuietHoursStart { get; set; } = "20:00";
+    public string QuietHoursEnd { get; set; } = "09:00";
     public string QuietHoursTimeZone { get; set; } = "Europe/Moscow";
     public string Notes { get; set; } = string.Empty;
     public string StatusText { get; set; } = string.Empty;
     public SmsNotificationDiagnosticsDto Diagnostics { get; set; } = new();
+}
+
+public sealed class SmsProviderOptionDto
+{
+    public string Key { get; set; } = string.Empty;
+    public string Label { get; set; } = string.Empty;
+    public bool RequiresAccount { get; set; }
 }
 
 public class SmsEventTypeSettingDto

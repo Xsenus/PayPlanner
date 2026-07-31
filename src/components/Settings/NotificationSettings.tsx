@@ -67,6 +67,7 @@ type SenderForm = {
 type SmsSettingsForm = {
   enabled: boolean;
   providerKey: string;
+  providerAccount: string;
   senderName: string;
   apiToken: string;
   keepExistingApiToken: boolean;
@@ -246,6 +247,7 @@ function smsFormFromSettings(settings?: NotificationSettingsDto | null): SmsSett
   return {
     enabled: settings?.sms.enabled ?? false,
     providerKey: settings?.sms.providerKey ?? '',
+    providerAccount: settings?.sms.providerAccount ?? '',
     senderName: settings?.sms.senderName ?? '',
     apiToken: '',
     keepExistingApiToken: true,
@@ -257,8 +259,8 @@ function smsFormFromSettings(settings?: NotificationSettingsDto | null): SmsSett
     emergencyStop: settings?.sms.emergencyStop ?? false,
     disabledEventTypes: settings?.sms.eventTypes.filter((item) => !item.enabled).map((item) => item.key) ?? [],
     quietHoursEnabled: settings?.sms.quietHoursEnabled ?? true,
-    quietHoursStart: settings?.sms.quietHoursStart ?? '22:00',
-    quietHoursEnd: settings?.sms.quietHoursEnd ?? '08:00',
+    quietHoursStart: settings?.sms.quietHoursStart ?? '20:00',
+    quietHoursEnd: settings?.sms.quietHoursEnd ?? '09:00',
     quietHoursTimeZone: settings?.sms.quietHoursTimeZone ?? DEFAULT_TIME_ZONE_ID,
     notes: settings?.sms.notes ?? '',
   };
@@ -599,6 +601,7 @@ export function NotificationSettings({ canEdit = true }: NotificationSettingsPro
       const next = await apiService.updateSmsNotificationSettings({
         enabled: smsForm.enabled,
         providerKey: smsForm.providerKey.trim(),
+        providerAccount: smsForm.providerAccount.trim(),
         senderName: smsForm.senderName.trim(),
         apiToken: smsForm.apiToken,
         keepExistingApiToken: smsForm.keepExistingApiToken,
@@ -1757,7 +1760,8 @@ function SmsSettingsPanel({
             <h4 className="text-base font-semibold text-gray-900">SMS-уведомления</h4>
           </div>
           <p className="mt-1 max-w-3xl text-sm text-gray-500">
-            Настройки будущего SMS-канала и диагностика готовности. Пока адаптер провайдера не подключен, сообщения не отправляются.
+            Поддерживаются SMS.RU, SMSC.RU и SMS Aero. Канал остаётся безопасно выключенным,
+            пока администратор не выберет провайдера, не заполнит credentials и явно не включит отправку.
           </p>
         </div>
         <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${statusClass(Boolean(sms?.ready), Boolean(sms?.enabled))}`}>
@@ -1918,7 +1922,7 @@ function SmsSettingsPanel({
             onChange={(event) => setForm((prev) => ({ ...prev, enabled: event.target.checked }))}
             className="h-4 w-4 rounded border-gray-300 text-blue-600"
           />
-          Включить SMS-канал после готовности провайдера
+          Включить SMS-канал
         </label>
         <label className="text-sm font-medium text-gray-700">
           Провайдер
@@ -1929,11 +1933,24 @@ function SmsSettingsPanel({
             className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
           >
             <option value="">Не выбран</option>
-            <option value="sms-ru">SMS.RU</option>
-            <option value="sms-aero">SMS Aero</option>
-            <option value="custom">Другой провайдер</option>
+            {(sms?.providers ?? []).map((provider) => (
+              <option key={provider.key} value={provider.key}>{provider.label}</option>
+            ))}
           </SystemSelect>
         </label>
+        {(sms?.providers ?? []).find((provider) => provider.key === form.providerKey)?.requiresAccount ? (
+          <label className="text-sm font-medium text-gray-700">
+            Email или логин провайдера
+            <input
+              value={form.providerAccount}
+              disabled={!canEdit || saving}
+              onChange={(event) => setForm((prev) => ({ ...prev, providerAccount: event.target.value }))}
+              autoComplete="off"
+              placeholder="account@example.com"
+              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+            />
+          </label>
+        ) : null}
         <label className="text-sm font-medium text-gray-700">
           Имя отправителя
           <input

@@ -28,7 +28,9 @@ public sealed record SmsProviderSendRequest(
     string PhoneNumber,
     string Text,
     string SenderName,
-    string IdempotencyKey);
+    string IdempotencyKey,
+    string Account = "",
+    string ApiToken = "");
 
 public sealed record SmsProviderSendResult(
     bool Accepted,

@@ -990,7 +990,9 @@ export interface SmsNotificationSettingsDto {
   adapterConfigured: boolean;
   apiTokenSet: boolean;
   providerKey: string;
+  providerAccount: string;
   senderName: string;
+  providers: SmsProviderOptionDto[];
   dailyLimit: number;
   recipientDailyLimit: number;
   burstLimitPerMinute: number;
@@ -1005,6 +1007,12 @@ export interface SmsNotificationSettingsDto {
   notes: string;
   statusText: string;
   diagnostics: SmsNotificationDiagnosticsDto;
+}
+
+export interface SmsProviderOptionDto {
+  key: string;
+  label: string;
+  requiresAccount: boolean;
 }
 
 export interface SmsEventTypeSettingDto {
@@ -1173,6 +1181,7 @@ export interface UpdateEmailNotificationSettingsRequest {
 export interface UpdateSmsNotificationSettingsRequest {
   enabled: boolean;
   providerKey?: string | null;
+  providerAccount?: string | null;
   senderName?: string | null;
   apiToken?: string | null;
   keepExistingApiToken?: boolean;

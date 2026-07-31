@@ -25,6 +25,7 @@ public class UpdateSmsNotificationSettingsRequest
 {
     public bool Enabled { get; set; }
     public string? ProviderKey { get; set; }
+    public string? ProviderAccount { get; set; }
     public string? SenderName { get; set; }
     public string? ApiToken { get; set; }
     public bool KeepExistingApiToken { get; set; } = true;
