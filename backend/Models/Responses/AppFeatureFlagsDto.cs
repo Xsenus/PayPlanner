@@ -14,6 +14,7 @@ public sealed class AppFeatureFlagsDto
                 CourtEvents = options.Legal.CourtEvents,
                 DocumentTemplateLibrary = options.Legal.DocumentTemplateLibrary,
                 ExternalWorkOrderApproval = options.Legal.ExternalWorkOrderApproval,
+                ClientPortal = options.Legal.ClientPortal,
             },
         };
 }
@@ -25,6 +26,7 @@ public sealed class LegalFeatureFlagsDto
     public bool CourtEvents { get; set; }
     public bool DocumentTemplateLibrary { get; set; }
     public bool ExternalWorkOrderApproval { get; set; }
+    public bool ClientPortal { get; set; }
 }
 
 public sealed class LegalIntegrationDiagnosticsDto

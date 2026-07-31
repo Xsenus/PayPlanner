@@ -25,6 +25,8 @@ import { apiService, type ContactScope } from './services/api';
 import { extractDisplayErrorMessage } from './utils/errorUtils';
 import { ExternalWorkOrderApprovalPage } from './components/Public/ExternalWorkOrderApprovalPage';
 import { isExternalWorkOrderApprovalPath } from './utils/externalWorkOrderApprovalRoute';
+import { ClientPortalPage } from './components/Public/ClientPortalPage';
+import { isClientPortalPath } from './utils/clientPortalRoute';
 import type { InvoiceEditorDraftState } from './utils/invoiceEditorBridge';
 import {
   canAccessTab,
@@ -1914,6 +1916,9 @@ function AppContent() {
 function App() {
   if (isExternalWorkOrderApprovalPath()) {
     return <ExternalWorkOrderApprovalPage />;
+  }
+  if (isClientPortalPath()) {
+    return <ClientPortalPage />;
   }
 
   return (

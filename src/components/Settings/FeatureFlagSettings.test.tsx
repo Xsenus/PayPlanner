@@ -21,6 +21,7 @@ describe('FeatureFlagSettings', () => {
         courtEvents: false,
         documentTemplateLibrary: true,
         externalWorkOrderApproval: false,
+        clientPortal: false,
       },
     });
 
@@ -32,7 +33,7 @@ describe('FeatureFlagSettings', () => {
     expect(screen.getByText('Внешнее согласование заказ-нарядов')).toBeTruthy();
 
     await waitFor(() => {
-      expect(screen.getByText('Активно: 2 из 5. Источник: backend `FeatureFlags:Legal`.')).toBeTruthy();
+      expect(screen.getByText('Активно: 2 из 6. Источник: backend `FeatureFlags:Legal`.')).toBeTruthy();
     });
   });
 
@@ -42,6 +43,6 @@ describe('FeatureFlagSettings', () => {
     render(<FeatureFlagSettings />);
 
     expect(await screen.findByText(/network down/i)).toBeTruthy();
-    expect(screen.getByText('Активно: 0 из 5. Источник: backend `FeatureFlags:Legal`.')).toBeTruthy();
+    expect(screen.getByText('Активно: 0 из 6. Источник: backend `FeatureFlags:Legal`.')).toBeTruthy();
   });
 });

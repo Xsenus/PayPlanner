@@ -1,0 +1,709 @@
+using System.Globalization;
+using System.Net;
+using System.Net.Mail;
+using System.Security.Cryptography;
+using System.Text;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
+using PayPlanner.Api.Data;
+using PayPlanner.Api.Models;
+
+namespace PayPlanner.Api.Services;
+
+public interface IClientPortalService
+{
+    Task<ClientPortalAdminAccountDto> CreateOrUpdateAccessAsync(ClientPortalAccessRequest request, int actorId, string actorName, CancellationToken ct);
+    Task<ClientPortalAdminAccountDto?> GetAccountAsync(int accountId, CancellationToken ct);
+    Task<List<ClientPortalCaseAccessDto>> GetCaseAccountsAsync(int caseId, CancellationToken ct);
+    Task<List<ClientPortalAuditDto>> GetCaseAuditAsync(int caseId, CancellationToken ct);
+    Task<ClientPortalChallengeCreatedDto> SendLoginAsync(int accountId, CancellationToken ct);
+    Task RevokeAccountAsync(int accountId, int actorId, string actorName, string? reason, CancellationToken ct);
+    Task RevokeCaseAccessAsync(int accountId, int caseId, int actorId, string? reason, CancellationToken ct);
+    Task<ClientPortalLoginPreviewDto> PreviewLoginAsync(Guid challengeId, string token, CancellationToken ct);
+    Task<ClientPortalSessionCreatedDto> VerifyLoginAsync(Guid challengeId, string token, string otp, string? ip, string? userAgent, CancellationToken ct);
+    Task<ClientPortalSessionContext?> ResolveSessionAsync(string? token, string? ip, string? userAgent, CancellationToken ct);
+    Task RevokeSessionAsync(string? token, bool all, CancellationToken ct);
+    Task<ClientPortalHomeDto> GetHomeAsync(ClientPortalSessionContext session, int page, int pageSize, CancellationToken ct);
+    Task<ClientPortalCaseDto?> GetCaseAsync(ClientPortalSessionContext session, Guid casePublicId, CancellationToken ct);
+    Task<ClientPortalDocumentDownloadDto?> GetDocumentAsync(ClientPortalSessionContext session, Guid documentPublicId, CancellationToken ct);
+}
+
+public sealed class ClientPortalService : IClientPortalService
+{
+    private const int ChallengeHours = 2;
+    private const int SessionHours = 12;
+    private const int MaxAttempts = 5;
+    private readonly PaymentContext _db;
+    private readonly IEmailService _email;
+    private readonly IConfiguration _configuration;
+    private readonly IOptionsMonitor<AppFeatureFlagsOptions> _flags;
+    private readonly ICaseDocumentStorage _documentStorage;
+
+    public ClientPortalService(
+        PaymentContext db,
+        IEmailService email,
+        IConfiguration configuration,
+        IOptionsMonitor<AppFeatureFlagsOptions> flags,
+        ICaseDocumentStorage documentStorage)
+    {
+        _db = db;
+        _email = email;
+        _configuration = configuration;
+        _flags = flags;
+        _documentStorage = documentStorage;
+    }
+
+    public async Task<ClientPortalAdminAccountDto> CreateOrUpdateAccessAsync(
+        ClientPortalAccessRequest request,
+        int actorId,
+        string actorName,
+        CancellationToken ct)
+    {
+        EnsureEnabled();
+        var email = NormalizeEmail(request.Email);
+        var name = Require(request.DisplayName, 256, "Укажите имя внешнего пользователя.");
+        var requestedDocumentIds = (request.CanViewDocuments ? request.DocumentIds ?? [] : [])
+            .Where(id => id > 0)
+            .Distinct()
+            .Take(201)
+            .ToList();
+        if (requestedDocumentIds.Count > 200)
+        {
+            throw Error("validation_error", "За один раз можно открыть не более 200 документов.");
+        }
+        var type = request.AccountType?.Trim().ToLowerInvariant() switch
+        {
+            "client" or null or "" => "client",
+            "representative" => "representative",
+            _ => throw Error("validation_error", "Тип доступа должен быть «клиент» или «представитель»."),
+        };
+
+        var clientCase = await _db.ClientCases.AsNoTracking()
+            .Where(item => item.Id == request.ClientCaseId)
+            .Select(item => new { item.Id, item.ClientId, item.LegalEntityId })
+            .FirstOrDefaultAsync(ct)
+            ?? throw Error("case_not_found", "Дело не найдено.");
+        var matchesOwner = (clientCase.ClientId.HasValue && request.ClientId == clientCase.ClientId)
+            || (clientCase.LegalEntityId.HasValue && request.LegalEntityId == clientCase.LegalEntityId);
+        if (type == "client" && !matchesOwner)
+        {
+            throw Error("access_mismatch", "Клиентский аккаунт можно связать только с владельцем выбранного дела.");
+        }
+
+        var account = await _db.ClientPortalAccounts
+            .Include(item => item.CaseGrants)
+            .FirstOrDefaultAsync(item => item.Email == email
+                && item.ClientId == request.ClientId
+                && item.LegalEntityId == request.LegalEntityId
+                && item.AccountType == type, ct);
+        if (account is null)
+        {
+            account = new ClientPortalAccount
+            {
+                Email = email,
+                DisplayName = name,
+                AccountType = type,
+                ClientId = request.ClientId,
+                LegalEntityId = request.LegalEntityId,
+                CreatedByUserId = actorId,
+                CreatedByUserName = Truncate(actorName, 256),
+            };
+            _db.ClientPortalAccounts.Add(account);
+        }
+        else
+        {
+            account.DisplayName = name;
+            account.IsActive = true;
+            account.RevokedAt = null;
+            account.RevocationReason = string.Empty;
+        }
+
+        var grant = account.CaseGrants.FirstOrDefault(item => item.ClientCaseId == clientCase.Id);
+        if (grant is null)
+        {
+            grant = new ClientPortalCaseGrant
+            {
+                ClientCaseId = clientCase.Id,
+                CreatedByUserId = actorId,
+            };
+            account.CaseGrants.Add(grant);
+        }
+        grant.CanViewCaseSummary = request.CanViewCaseSummary;
+        grant.CanViewDeadlines = request.CanViewDeadlines;
+        grant.CanViewDocuments = request.CanViewDocuments;
+        grant.CanViewFinance = request.CanViewFinance;
+        grant.CanViewApprovals = request.CanViewApprovals;
+        grant.CanViewMessages = request.CanViewMessages;
+        grant.RevokedAt = null;
+        grant.RevocationReason = string.Empty;
+
+        await _db.SaveChangesAsync(ct);
+
+        {
+            var allowedIds = await _db.ClientCaseDocuments.AsNoTracking()
+                .Where(item => item.ClientCaseId == clientCase.Id && requestedDocumentIds.Contains(item.Id))
+                .Select(item => item.Id)
+                .ToListAsync(ct);
+            var existing = await _db.ClientPortalDocumentGrants
+                .Where(item => item.ClientPortalCaseGrantId == grant.Id)
+                .ToListAsync(ct);
+            foreach (var item in existing)
+            {
+                item.RevokedAt = allowedIds.Contains(item.ClientCaseDocumentId) ? null : DateTime.UtcNow;
+            }
+            foreach (var id in allowedIds.Where(id => existing.All(item => item.ClientCaseDocumentId != id)))
+            {
+                _db.ClientPortalDocumentGrants.Add(new ClientPortalDocumentGrant
+                {
+                    ClientPortalCaseGrantId = grant.Id,
+                    ClientCaseDocumentId = id,
+                    CreatedByUserId = actorId,
+                });
+            }
+            await _db.SaveChangesAsync(ct);
+        }
+
+        Audit(account.Id, grant.Id, "grant_saved", "case", clientCase.Id.ToString(CultureInfo.InvariantCulture), null, null);
+        await _db.SaveChangesAsync(ct);
+        return (await GetAccountAsync(account.Id, ct))!;
+    }
+
+    public async Task<ClientPortalAdminAccountDto?> GetAccountAsync(int accountId, CancellationToken ct)
+    {
+        EnsureEnabled();
+        return await _db.ClientPortalAccounts.AsNoTracking()
+            .Where(item => item.Id == accountId)
+            .Select(item => new ClientPortalAdminAccountDto
+            {
+                Id = item.Id,
+                PublicId = item.PublicId,
+                Email = item.Email,
+                DisplayName = item.DisplayName,
+                AccountType = item.AccountType,
+                ClientId = item.ClientId,
+                LegalEntityId = item.LegalEntityId,
+                IsActive = item.IsActive,
+                CreatedAt = item.CreatedAt,
+                RevokedAt = item.RevokedAt,
+                Grants = item.CaseGrants.OrderBy(grant => grant.Id).Select(grant => new ClientPortalGrantDto
+                {
+                    Id = grant.Id,
+                    CasePublicId = grant.PublicId,
+                    CaseTitle = grant.ClientCase.Title,
+                    RevokedAt = grant.RevokedAt,
+                    CanViewCaseSummary = grant.CanViewCaseSummary,
+                    CanViewDeadlines = grant.CanViewDeadlines,
+                    CanViewDocuments = grant.CanViewDocuments,
+                    CanViewFinance = grant.CanViewFinance,
+                    CanViewApprovals = grant.CanViewApprovals,
+                    CanViewMessages = grant.CanViewMessages,
+                }).ToList(),
+            })
+            .FirstOrDefaultAsync(ct);
+    }
+
+    public async Task<List<ClientPortalCaseAccessDto>> GetCaseAccountsAsync(int caseId, CancellationToken ct)
+    {
+        EnsureEnabled();
+        return await _db.ClientPortalCaseGrants.AsNoTracking()
+            .Where(grant => grant.ClientCaseId == caseId)
+            .OrderBy(grant => grant.Account.DisplayName)
+            .ThenBy(grant => grant.Id)
+            .Select(grant => new ClientPortalCaseAccessDto
+            {
+                AccountId = grant.ClientPortalAccountId,
+                DisplayName = grant.Account.DisplayName,
+                Email = grant.Account.Email,
+                AccountType = grant.Account.AccountType,
+                IsActive = grant.Account.IsActive && grant.Account.RevokedAt == null && grant.RevokedAt == null,
+                CanViewCaseSummary = grant.CanViewCaseSummary,
+                CanViewDeadlines = grant.CanViewDeadlines,
+                CanViewDocuments = grant.CanViewDocuments,
+                CanViewFinance = grant.CanViewFinance,
+                CanViewApprovals = grant.CanViewApprovals,
+                CanViewMessages = grant.CanViewMessages,
+                DocumentIds = _db.ClientPortalDocumentGrants
+                    .Where(document => document.ClientPortalCaseGrantId == grant.Id && document.RevokedAt == null)
+                    .Select(document => document.ClientCaseDocumentId)
+                    .ToList(),
+            })
+            .ToListAsync(ct);
+    }
+
+    public async Task<List<ClientPortalAuditDto>> GetCaseAuditAsync(int caseId, CancellationToken ct)
+    {
+        EnsureEnabled();
+        return await _db.ClientPortalAuditEvents.AsNoTracking()
+            .Where(item => item.ClientPortalCaseGrantId.HasValue
+                && _db.ClientPortalCaseGrants.Any(grant =>
+                    grant.Id == item.ClientPortalCaseGrantId.Value && grant.ClientCaseId == caseId))
+            .OrderByDescending(item => item.OccurredAt)
+            .Take(50)
+            .Select(item => new ClientPortalAuditDto
+            {
+                EventType = item.EventType,
+                TargetType = item.TargetType,
+                TargetKey = item.TargetKey,
+                OccurredAt = item.OccurredAt,
+                DisplayName = item.Account != null ? item.Account.DisplayName : string.Empty,
+                Email = item.Account != null ? item.Account.Email : string.Empty,
+            })
+            .ToListAsync(ct);
+    }
+
+    public async Task<ClientPortalChallengeCreatedDto> SendLoginAsync(int accountId, CancellationToken ct)
+    {
+        EnsureEnabled();
+        var account = await _db.ClientPortalAccounts
+            .FirstOrDefaultAsync(item => item.Id == accountId && item.IsActive && item.RevokedAt == null, ct)
+            ?? throw Error("account_unavailable", "Аккаунт не найден или отключён.");
+        var active = await _db.ClientPortalLoginChallenges
+            .Where(item => item.ClientPortalAccountId == accountId && item.ConsumedAt == null && item.RevokedAt == null)
+            .ToListAsync(ct);
+        foreach (var item in active) item.RevokedAt = DateTime.UtcNow;
+
+        var token = GenerateToken(32);
+        var otp = RandomNumberGenerator.GetInt32(0, 1_000_000).ToString("D6", CultureInfo.InvariantCulture);
+        var challenge = new ClientPortalLoginChallenge
+        {
+            ClientPortalAccountId = accountId,
+            TokenHash = Hash(token),
+            OtpHash = Hash($"{token}:{otp}"),
+            ExpiresAt = DateTime.UtcNow.AddHours(ChallengeHours),
+            MaxAttempts = MaxAttempts,
+        };
+        _db.ClientPortalLoginChallenges.Add(challenge);
+        await _db.SaveChangesAsync(ct);
+
+        var baseUrl = (_configuration["App:FrontendUrl"]
+            ?? _configuration["Frontend:BaseUrl"]
+            ?? _configuration["Frontend:PublicUrl"]
+            ?? "http://localhost:5173").TrimEnd('/');
+        var link = $"{baseUrl}/portal/login/{challenge.PublicId:D}#token={Uri.EscapeDataString(token)}";
+        try
+        {
+            await _email.SendEmailAsync(
+                account.Email,
+                "Вход в клиентский кабинет",
+                $"<h2>Клиентский кабинет</h2><p>{WebUtility.HtmlEncode(account.DisplayName)}, откройте защищённую ссылку:</p><p><a href=\"{WebUtility.HtmlEncode(link)}\">Войти в кабинет</a></p><p>Код: <strong>{otp}</strong></p><p>Ссылка действует {ChallengeHours} часа.</p>",
+                true,
+                ct);
+        }
+        catch (Exception) when (!ct.IsCancellationRequested)
+        {
+            challenge.RevokedAt = DateTime.UtcNow;
+            await _db.SaveChangesAsync(CancellationToken.None);
+            throw Error("delivery_failed", "Не удалось отправить письмо; ссылка отключена.");
+        }
+
+        Audit(account.Id, null, "login_sent", "account", account.PublicId.ToString("D"), null, null);
+        await _db.SaveChangesAsync(ct);
+        return new ClientPortalChallengeCreatedDto { ChallengeId = challenge.PublicId, ExpiresAt = challenge.ExpiresAt, EmailHint = MaskEmail(account.Email) };
+    }
+
+    public async Task RevokeAccountAsync(int accountId, int actorId, string actorName, string? reason, CancellationToken ct)
+    {
+        EnsureEnabled();
+        var account = await _db.ClientPortalAccounts
+            .Include(item => item.Sessions)
+            .Include(item => item.CaseGrants)
+            .FirstOrDefaultAsync(item => item.Id == accountId, ct)
+            ?? throw Error("account_not_found", "Аккаунт не найден.");
+        var now = DateTime.UtcNow;
+        account.IsActive = false;
+        account.RevokedAt = now;
+        account.RevokedByUserId = actorId;
+        account.RevokedByUserName = Truncate(actorName, 256);
+        account.RevocationReason = Truncate(reason?.Trim() ?? "Доступ отозван администратором.", 500);
+        foreach (var grant in account.CaseGrants.Where(item => item.RevokedAt == null)) grant.RevokedAt = now;
+        foreach (var session in account.Sessions.Where(item => item.RevokedAt == null)) session.RevokedAt = now;
+        Audit(account.Id, null, "account_revoked", "account", account.PublicId.ToString("D"), null, null);
+        await _db.SaveChangesAsync(ct);
+    }
+
+    public async Task RevokeCaseAccessAsync(
+        int accountId,
+        int caseId,
+        int actorId,
+        string? reason,
+        CancellationToken ct)
+    {
+        EnsureEnabled();
+        var grant = await _db.ClientPortalCaseGrants
+            .FirstOrDefaultAsync(item => item.ClientPortalAccountId == accountId
+                && item.ClientCaseId == caseId
+                && item.RevokedAt == null, ct)
+            ?? throw Error("grant_not_found", "Доступ к делу уже отозван или не найден.");
+        grant.RevokedAt = DateTime.UtcNow;
+        grant.RevokedByUserId = actorId;
+        grant.RevocationReason = Truncate(reason?.Trim() ?? "Доступ к делу отозван администратором.", 500);
+        Audit(accountId, grant.Id, "grant_revoked", "case", caseId.ToString(CultureInfo.InvariantCulture), null, null);
+
+        var hasOtherGrant = await _db.ClientPortalCaseGrants.AsNoTracking()
+            .AnyAsync(item => item.ClientPortalAccountId == accountId
+                && item.Id != grant.Id
+                && item.RevokedAt == null
+                && item.CanViewCaseSummary, ct);
+        if (!hasOtherGrant)
+        {
+            var account = await _db.ClientPortalAccounts
+                .Include(item => item.Sessions)
+                .FirstAsync(item => item.Id == accountId, ct);
+            account.IsActive = false;
+            account.RevokedAt = DateTime.UtcNow;
+            account.RevokedByUserId = actorId;
+            account.RevocationReason = "Отозван последний доступ к делу.";
+            foreach (var session in account.Sessions.Where(item => item.RevokedAt == null))
+            {
+                session.RevokedAt = DateTime.UtcNow;
+            }
+        }
+
+        await _db.SaveChangesAsync(ct);
+    }
+
+    public async Task<ClientPortalLoginPreviewDto> PreviewLoginAsync(Guid challengeId, string token, CancellationToken ct)
+    {
+        EnsureEnabled(publicSurface: true);
+        var challenge = await LoadChallengeAsync(challengeId, token, ct);
+        EnsureChallengeUsable(challenge);
+        return new ClientPortalLoginPreviewDto
+        {
+            DisplayName = challenge.Account.DisplayName,
+            EmailHint = MaskEmail(challenge.Account.Email),
+            ExpiresAt = challenge.ExpiresAt,
+        };
+    }
+
+    public async Task<ClientPortalSessionCreatedDto> VerifyLoginAsync(
+        Guid challengeId,
+        string token,
+        string otp,
+        string? ip,
+        string? userAgent,
+        CancellationToken ct)
+    {
+        EnsureEnabled(publicSurface: true);
+        var challenge = await LoadChallengeAsync(challengeId, token, ct);
+        EnsureChallengeUsable(challenge);
+        if (!FixedTimeEquals(challenge.OtpHash, Hash($"{token}:{otp?.Trim()}")))
+        {
+            challenge.FailedAttempts++;
+            if (challenge.FailedAttempts >= challenge.MaxAttempts) challenge.RevokedAt = DateTime.UtcNow;
+            await _db.SaveChangesAsync(ct);
+            throw Error("invalid_confirmation", challenge.RevokedAt.HasValue ? "Ссылка заблокирована." : "Неверный код.");
+        }
+
+        challenge.ConsumedAt = DateTime.UtcNow;
+        var sessionToken = GenerateToken(48);
+        var session = new ClientPortalSession
+        {
+            ClientPortalAccountId = challenge.ClientPortalAccountId,
+            TokenHash = Hash(sessionToken),
+            ExpiresAt = DateTime.UtcNow.AddHours(SessionHours),
+            IpHash = Hash($"{challenge.Account.PublicId:N}:{ip}"),
+            UserAgent = Truncate(userAgent?.Trim() ?? string.Empty, 512),
+        };
+        _db.ClientPortalSessions.Add(session);
+        Audit(challenge.Account.Id, null, "login_succeeded", "session", session.PublicId.ToString("D"), ip, userAgent);
+        await _db.SaveChangesAsync(ct);
+        return new ClientPortalSessionCreatedDto { SessionToken = sessionToken, ExpiresAt = session.ExpiresAt };
+    }
+
+    public async Task<ClientPortalSessionContext?> ResolveSessionAsync(string? token, string? ip, string? userAgent, CancellationToken ct)
+    {
+        EnsureEnabled(publicSurface: true);
+        if (string.IsNullOrWhiteSpace(token)) return null;
+        var hash = Hash(token.Trim());
+        var session = await _db.ClientPortalSessions
+            .Include(item => item.Account)
+            .FirstOrDefaultAsync(item => item.TokenHash == hash, ct);
+        if (session is null || session.RevokedAt.HasValue || session.ExpiresAt <= DateTime.UtcNow
+            || !session.Account.IsActive || session.Account.RevokedAt.HasValue)
+        {
+            return null;
+        }
+        if (DateTime.UtcNow - session.LastSeenAt > TimeSpan.FromMinutes(5))
+        {
+            session.LastSeenAt = DateTime.UtcNow;
+            await _db.SaveChangesAsync(ct);
+        }
+        return new ClientPortalSessionContext(session.Account.Id, session.Account.PublicId, session.Account.DisplayName, session.Account.Email);
+    }
+
+    public async Task RevokeSessionAsync(string? token, bool all, CancellationToken ct)
+    {
+        var session = await ResolveSessionAsync(token, null, null, ct);
+        if (session is null) return;
+        var sessions = await _db.ClientPortalSessions
+            .Where(item => item.ClientPortalAccountId == session.AccountId && item.RevokedAt == null
+                && (all || item.TokenHash == Hash(token!.Trim())))
+            .ToListAsync(ct);
+        foreach (var item in sessions) item.RevokedAt = DateTime.UtcNow;
+        Audit(session.AccountId, null, all ? "logout_all" : "logout", "account", session.AccountPublicId.ToString("D"), null, null);
+        await _db.SaveChangesAsync(ct);
+    }
+
+    public async Task<ClientPortalHomeDto> GetHomeAsync(ClientPortalSessionContext session, int page, int pageSize, CancellationToken ct)
+    {
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 1, 50);
+        var query = _db.ClientPortalCaseGrants.AsNoTracking()
+            .Where(grant => grant.ClientPortalAccountId == session.AccountId
+                && grant.RevokedAt == null
+                && grant.CanViewCaseSummary);
+        var total = await query.CountAsync(ct);
+        var items = await query.OrderByDescending(grant => grant.ClientCase.CreatedAt).ThenByDescending(grant => grant.Id)
+            .Skip((page - 1) * pageSize).Take(pageSize)
+            .Select(grant => new ClientPortalCaseListItemDto
+            {
+                PublicId = grant.PublicId,
+                Title = grant.ClientCase.Title,
+                CaseNumber = grant.ClientCase.CaseNumber,
+                CaseType = grant.ClientCase.CaseType,
+                Status = grant.ClientCase.Status.ToString(),
+                Stage = grant.ClientCase.Stage,
+                DueDate = grant.ClientCase.DueDate,
+                CanViewDeadlines = grant.CanViewDeadlines,
+                CanViewDocuments = grant.CanViewDocuments,
+                CanViewFinance = grant.CanViewFinance,
+                CanViewApprovals = grant.CanViewApprovals,
+                CanViewMessages = grant.CanViewMessages,
+            }).ToListAsync(ct);
+        Audit(session.AccountId, null, "home_viewed", "case_list", page.ToString(CultureInfo.InvariantCulture), null, null);
+        await _db.SaveChangesAsync(ct);
+        return new ClientPortalHomeDto { DisplayName = session.DisplayName, Items = items, Total = total, Page = page, PageSize = pageSize };
+    }
+
+    public async Task<ClientPortalCaseDto?> GetCaseAsync(ClientPortalSessionContext session, Guid casePublicId, CancellationToken ct)
+    {
+        var grant = await _db.ClientPortalCaseGrants.AsNoTracking()
+            .Where(item => item.ClientPortalAccountId == session.AccountId
+                && item.RevokedAt == null && item.CanViewCaseSummary
+                && item.PublicId == casePublicId)
+            .Select(item => new
+            {
+                item.Id, item.ClientCaseId,
+                Case = new ClientPortalCaseDto
+                {
+                    PublicId = item.PublicId,
+                    Title = item.ClientCase.Title,
+                    CaseNumber = item.ClientCase.CaseNumber,
+                    CaseType = item.ClientCase.CaseType,
+                    Status = item.ClientCase.Status.ToString(),
+                    Stage = item.ClientCase.Stage,
+                    StartDate = item.ClientCase.StartDate,
+                    DueDate = item.ClientCase.DueDate,
+                },
+                item.CanViewDeadlines, item.CanViewDocuments, item.CanViewFinance, item.CanViewApprovals,
+            }).FirstOrDefaultAsync(ct);
+        if (grant is null) return null;
+
+        if (grant.CanViewDeadlines)
+        {
+            grant.Case.Deadlines = await _db.ClientCaseProceduralDeadlines.AsNoTracking()
+                .Where(item => item.ClientCaseId == grant.ClientCaseId && item.Status != "cancelled")
+                .OrderBy(item => item.DueAt).Take(100)
+                .Select(item => new ClientPortalDeadlineDto { Title = item.Title, DueAt = item.DueAt, Status = item.Status })
+                .ToListAsync(ct);
+        }
+        if (grant.CanViewDocuments)
+        {
+            grant.Case.Documents = await _db.ClientPortalDocumentGrants.AsNoTracking()
+                .Where(item => item.ClientPortalCaseGrantId == grant.Id && item.RevokedAt == null)
+                .OrderByDescending(item => item.Document.UploadedAt).Take(100)
+                .Select(item => new ClientPortalDocumentDto
+                {
+                    PublicId = item.PublicId,
+                    Name = item.Document.OriginalFileName,
+                    DocumentType = item.Document.DocumentType,
+                    Status = item.Document.Status,
+                    Version = item.Document.Version,
+                    SizeBytes = item.Document.SizeBytes,
+                    UploadedAt = item.Document.UploadedAt,
+                }).ToListAsync(ct);
+        }
+        if (grant.CanViewFinance)
+        {
+            grant.Case.Invoices = await _db.Payments.AsNoTracking()
+                .Where(item => (item.ClientCaseId == grant.ClientCaseId
+                    || item.InvoiceClientCases.Any(link => link.ClientCaseId == grant.ClientCaseId))
+                    && item.Type == PaymentType.Income)
+                .OrderByDescending(item => item.Date).Take(100)
+                .Select(item => new ClientPortalInvoiceDto
+                {
+                    Number = item.Account ?? item.LegacyAccountNumber ?? string.Empty,
+                    Date = item.AccountDate ?? item.Date,
+                    Amount = item.Amount,
+                    Status = item.Status.ToString(),
+                    WorkflowStatus = item.InvoiceWorkflowStatus,
+                }).ToListAsync(ct);
+        }
+        if (grant.CanViewApprovals)
+        {
+            grant.Case.Approvals = await _db.ExternalWorkOrderApprovalRequests.AsNoTracking()
+                .Where(item => item.WorkOrder.ClientCaseId == grant.ClientCaseId
+                    && item.RecipientEmail == session.Email)
+                .OrderByDescending(item => item.Version).Take(20)
+                .Select(item => new ClientPortalApprovalDto
+                {
+                    Version = item.Version,
+                    Status = item.Status,
+                    CreatedAt = item.CreatedAt,
+                    ExpiresAt = item.ExpiresAt,
+                    DecisionAt = item.DecisionAt,
+                }).ToListAsync(ct);
+        }
+        Audit(session.AccountId, grant.Id, "case_viewed", "case", casePublicId.ToString("D"), null, null);
+        await _db.SaveChangesAsync(ct);
+        return grant.Case;
+    }
+
+    public async Task<ClientPortalDocumentDownloadDto?> GetDocumentAsync(
+        ClientPortalSessionContext session,
+        Guid documentPublicId,
+        CancellationToken ct)
+    {
+        var document = await _db.ClientPortalDocumentGrants.AsNoTracking()
+            .Where(item => item.PublicId == documentPublicId
+                && item.RevokedAt == null
+                && item.CaseGrant.ClientPortalAccountId == session.AccountId
+                && item.CaseGrant.RevokedAt == null
+                && item.CaseGrant.CanViewCaseSummary
+                && item.CaseGrant.CanViewDocuments)
+            .Select(item => new
+            {
+                item.ClientPortalCaseGrantId,
+                item.Document.StoragePath,
+                item.Document.ContentType,
+                item.Document.OriginalFileName,
+            })
+            .FirstOrDefaultAsync(ct);
+        if (document is null || !_documentStorage.Exists(document.StoragePath))
+        {
+            return null;
+        }
+
+        Audit(session.AccountId, document.ClientPortalCaseGrantId, "document_downloaded", "document", documentPublicId.ToString("D"), null, null);
+        await _db.SaveChangesAsync(ct);
+        return new ClientPortalDocumentDownloadDto(
+            _documentStorage.ResolvePath(document.StoragePath),
+            document.ContentType,
+            document.OriginalFileName);
+    }
+
+    private async Task<ClientPortalLoginChallenge> LoadChallengeAsync(Guid publicId, string token, CancellationToken ct)
+    {
+        var challenge = await _db.ClientPortalLoginChallenges.Include(item => item.Account)
+            .FirstOrDefaultAsync(item => item.PublicId == publicId, ct);
+        if (challenge is null || string.IsNullOrWhiteSpace(token)
+            || !FixedTimeEquals(challenge.TokenHash, Hash(token.Trim())))
+            throw Error("link_unavailable", "Ссылка недействительна или больше недоступна.");
+        return challenge;
+    }
+
+    private static void EnsureChallengeUsable(ClientPortalLoginChallenge challenge)
+    {
+        if (!challenge.Account.IsActive || challenge.Account.RevokedAt.HasValue
+            || challenge.RevokedAt.HasValue || challenge.ConsumedAt.HasValue
+            || challenge.ExpiresAt <= DateTime.UtcNow)
+            throw Error("link_unavailable", "Ссылка недействительна или больше недоступна.");
+    }
+
+    private void EnsureEnabled(bool publicSurface = false)
+    {
+        if (!_flags.CurrentValue.Legal.ClientPortal)
+            throw Error("feature_disabled", publicSurface ? "Клиентский кабинет недоступен." : "Клиентский кабинет выключен.");
+    }
+
+    private void Audit(int? accountId, int? grantId, string eventType, string targetType, string targetKey, string? ip, string? userAgent)
+        => _db.ClientPortalAuditEvents.Add(new ClientPortalAuditEvent
+        {
+            ClientPortalAccountId = accountId, ClientPortalCaseGrantId = grantId,
+            EventType = eventType, TargetType = targetType, TargetKey = Truncate(targetKey, 128),
+            IpHash = Hash($"{accountId}:{ip}"), UserAgent = Truncate(userAgent?.Trim() ?? string.Empty, 512),
+        });
+
+    private static ClientPortalException Error(string code, string message) => new(code, message);
+    private static string GenerateToken(int bytes) => Convert.ToBase64String(RandomNumberGenerator.GetBytes(bytes)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+    private static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
+    private static bool FixedTimeEquals(string a, string b)
+    {
+        try { return CryptographicOperations.FixedTimeEquals(Convert.FromHexString(a), Convert.FromHexString(b)); }
+        catch (FormatException) { return false; }
+    }
+    private static string Require(string? value, int max, string error)
+        => string.IsNullOrWhiteSpace(value) ? throw Error("validation_error", error) : Truncate(value.Trim(), max);
+    private static string NormalizeEmail(string? value)
+    {
+        var email = value?.Trim().ToLowerInvariant() ?? string.Empty;
+        try { return new MailAddress(email).Address == email ? Truncate(email, 320) : throw new FormatException(); }
+        catch (FormatException) { throw Error("validation_error", "Укажите корректный email."); }
+    }
+    private static string MaskEmail(string email) => email.IndexOf('@') is var at && at > 1 ? $"{email[0]}***{email[(at - 1)..]}" : "***";
+    private static string Truncate(string value, int max) => value.Length <= max ? value : value[..max];
+}
+
+public sealed class ClientPortalException(string code, string message) : Exception(message) { public string Code { get; } = code; }
+public sealed record ClientPortalSessionContext(int AccountId, Guid AccountPublicId, string DisplayName, string Email);
+public sealed record ClientPortalDocumentDownloadDto(string FullPath, string ContentType, string FileName);
+public sealed class ClientPortalAccessRequest
+{
+    public string? Email { get; set; }
+    public string? DisplayName { get; set; }
+    public string? AccountType { get; set; }
+    public int? ClientId { get; set; }
+    public int? LegalEntityId { get; set; }
+    public int ClientCaseId { get; set; }
+    public bool CanViewCaseSummary { get; set; }
+    public bool CanViewDeadlines { get; set; }
+    public bool CanViewDocuments { get; set; }
+    public bool CanViewFinance { get; set; }
+    public bool CanViewApprovals { get; set; }
+    public bool CanViewMessages { get; set; }
+    public List<int> DocumentIds { get; set; } = [];
+}
+public sealed class ClientPortalAdminAccountDto
+{
+    public int Id { get; set; } public Guid PublicId { get; set; } public string Email { get; set; } = ""; public string DisplayName { get; set; } = "";
+    public string AccountType { get; set; } = ""; public int? ClientId { get; set; } public int? LegalEntityId { get; set; } public bool IsActive { get; set; }
+    public DateTime CreatedAt { get; set; } public DateTime? RevokedAt { get; set; } public List<ClientPortalGrantDto> Grants { get; set; } = [];
+}
+public sealed class ClientPortalGrantDto
+{
+    public int Id { get; set; } public Guid CasePublicId { get; set; } public string CaseTitle { get; set; } = ""; public DateTime? RevokedAt { get; set; }
+    public bool CanViewCaseSummary { get; set; } public bool CanViewDeadlines { get; set; } public bool CanViewDocuments { get; set; }
+    public bool CanViewFinance { get; set; } public bool CanViewApprovals { get; set; } public bool CanViewMessages { get; set; }
+}
+public sealed class ClientPortalChallengeCreatedDto { public Guid ChallengeId { get; set; } public DateTime ExpiresAt { get; set; } public string EmailHint { get; set; } = ""; }
+public sealed class ClientPortalCaseAccessDto
+{
+    public int AccountId { get; set; } public string DisplayName { get; set; } = ""; public string Email { get; set; } = ""; public string AccountType { get; set; } = "";
+    public bool IsActive { get; set; } public bool CanViewCaseSummary { get; set; } public bool CanViewDeadlines { get; set; } public bool CanViewDocuments { get; set; }
+    public bool CanViewFinance { get; set; } public bool CanViewApprovals { get; set; } public bool CanViewMessages { get; set; } public List<int> DocumentIds { get; set; } = [];
+}
+public sealed class ClientPortalAuditDto
+{
+    public string EventType { get; set; } = ""; public string TargetType { get; set; } = ""; public string TargetKey { get; set; } = "";
+    public DateTime OccurredAt { get; set; } public string DisplayName { get; set; } = ""; public string Email { get; set; } = "";
+}
+public sealed class ClientPortalLoginPreviewDto { public string DisplayName { get; set; } = ""; public string EmailHint { get; set; } = ""; public DateTime ExpiresAt { get; set; } }
+public sealed class ClientPortalSessionCreatedDto { public string SessionToken { get; set; } = ""; public DateTime ExpiresAt { get; set; } }
+public sealed class ClientPortalHomeDto { public string DisplayName { get; set; } = ""; public List<ClientPortalCaseListItemDto> Items { get; set; } = []; public int Total { get; set; } public int Page { get; set; } public int PageSize { get; set; } }
+public sealed class ClientPortalCaseListItemDto
+{
+    public Guid PublicId { get; set; } public string Title { get; set; } = ""; public string CaseNumber { get; set; } = ""; public string CaseType { get; set; } = "";
+    public string Status { get; set; } = ""; public string Stage { get; set; } = ""; public DateTime? DueDate { get; set; }
+    public bool CanViewDeadlines { get; set; } public bool CanViewDocuments { get; set; } public bool CanViewFinance { get; set; } public bool CanViewApprovals { get; set; } public bool CanViewMessages { get; set; }
+}
+public sealed class ClientPortalCaseDto
+{
+    public Guid PublicId { get; set; } public string Title { get; set; } = ""; public string CaseNumber { get; set; } = ""; public string CaseType { get; set; } = "";
+    public string Status { get; set; } = ""; public string Stage { get; set; } = ""; public DateTime? StartDate { get; set; } public DateTime? DueDate { get; set; }
+    public List<ClientPortalDeadlineDto> Deadlines { get; set; } = []; public List<ClientPortalDocumentDto> Documents { get; set; } = [];
+    public List<ClientPortalInvoiceDto> Invoices { get; set; } = []; public List<ClientPortalApprovalDto> Approvals { get; set; } = [];
+}
+public sealed class ClientPortalDeadlineDto { public string Title { get; set; } = ""; public DateTime DueAt { get; set; } public string Status { get; set; } = ""; }
+public sealed class ClientPortalDocumentDto { public Guid PublicId { get; set; } public string Name { get; set; } = ""; public string DocumentType { get; set; } = ""; public string Status { get; set; } = ""; public int Version { get; set; } public long SizeBytes { get; set; } public DateTime UploadedAt { get; set; } }
+public sealed class ClientPortalInvoiceDto { public string Number { get; set; } = ""; public DateTime Date { get; set; } public decimal Amount { get; set; } public string Status { get; set; } = ""; public string WorkflowStatus { get; set; } = ""; }
+public sealed class ClientPortalApprovalDto { public int Version { get; set; } public string Status { get; set; } = ""; public DateTime CreatedAt { get; set; } public DateTime ExpiresAt { get; set; } public DateTime? DecisionAt { get; set; } }

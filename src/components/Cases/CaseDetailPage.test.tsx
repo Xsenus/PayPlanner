@@ -217,6 +217,7 @@ describe('CaseDetailPage', () => {
         courtEvents: false,
         documentTemplateLibrary: false,
         externalWorkOrderApproval: false,
+        clientPortal: false,
       },
     });
     vi.mocked(apiService.getExternalWorkOrderApproval).mockReset();

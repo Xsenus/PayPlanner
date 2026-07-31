@@ -2850,6 +2850,331 @@ namespace PayPlanner.Api.Migrations
                     b.ToTable("ClientPassports");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.ClientPortalAccount", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("AccountType")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("ClientId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("CreatedByUserName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DisplayName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Email")
+                        .IsRequired()
+                        .HasMaxLength(320)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("LegalEntityId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("PublicId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RevocationReason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("RevokedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("RevokedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("RevokedByUserName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClientId");
+
+                    b.HasIndex("LegalEntityId");
+
+                    b.HasIndex("PublicId")
+                        .IsUnique();
+
+                    b.HasIndex("Email", "IsActive");
+
+                    b.ToTable("ClientPortalAccounts");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ClientPortalAuditEvent", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("ClientPortalAccountId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("ClientPortalCaseGrantId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("EventType")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("IpHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("OccurredAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TargetKey")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TargetType")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UserAgent")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClientPortalAccountId", "OccurredAt");
+
+                    b.HasIndex("EventType", "OccurredAt");
+
+                    b.ToTable("ClientPortalAuditEvents");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ClientPortalCaseGrant", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("CanViewApprovals")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("CanViewCaseSummary")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("CanViewDeadlines")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("CanViewDocuments")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("CanViewFinance")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("CanViewMessages")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ClientCaseId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ClientPortalAccountId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("PublicId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RevocationReason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("RevokedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("RevokedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PublicId")
+                        .IsUnique();
+
+                    b.HasIndex("ClientCaseId", "RevokedAt");
+
+                    b.HasIndex("ClientPortalAccountId", "ClientCaseId")
+                        .IsUnique();
+
+                    b.ToTable("ClientPortalCaseGrants");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ClientPortalDocumentGrant", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ClientCaseDocumentId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ClientPortalCaseGrantId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("PublicId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("RevokedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClientCaseDocumentId");
+
+                    b.HasIndex("PublicId")
+                        .IsUnique();
+
+                    b.HasIndex("ClientPortalCaseGrantId", "ClientCaseDocumentId")
+                        .IsUnique();
+
+                    b.ToTable("ClientPortalDocumentGrants");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ClientPortalLoginChallenge", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ClientPortalAccountId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("ConsumedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("FailedAttempts")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("MaxAttempts")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("OtpHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("PublicId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("RevokedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PublicId")
+                        .IsUnique();
+
+                    b.HasIndex("ClientPortalAccountId", "ExpiresAt");
+
+                    b.ToTable("ClientPortalLoginChallenges");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ClientPortalSession", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ClientPortalAccountId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("IpHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("LastSeenAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("PublicId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("RevokedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UserAgent")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PublicId")
+                        .IsUnique();
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique();
+
+                    b.HasIndex("ClientPortalAccountId", "RevokedAt", "ExpiresAt");
+
+                    b.ToTable("ClientPortalSessions");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.ClientStatusEntity", b =>
                 {
                     b.Property<int>("Id")
@@ -9294,6 +9619,93 @@ namespace PayPlanner.Api.Migrations
                     b.Navigation("Client");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.ClientPortalAccount", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.Client", "Client")
+                        .WithMany()
+                        .HasForeignKey("ClientId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("PayPlanner.Api.Models.LegalEntity", "LegalEntity")
+                        .WithMany()
+                        .HasForeignKey("LegalEntityId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Client");
+
+                    b.Navigation("LegalEntity");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ClientPortalAuditEvent", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.ClientPortalAccount", "Account")
+                        .WithMany()
+                        .HasForeignKey("ClientPortalAccountId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Account");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ClientPortalCaseGrant", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.ClientCase", "ClientCase")
+                        .WithMany()
+                        .HasForeignKey("ClientCaseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.ClientPortalAccount", "Account")
+                        .WithMany("CaseGrants")
+                        .HasForeignKey("ClientPortalAccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Account");
+
+                    b.Navigation("ClientCase");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ClientPortalDocumentGrant", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.ClientCaseDocument", "Document")
+                        .WithMany()
+                        .HasForeignKey("ClientCaseDocumentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.ClientPortalCaseGrant", "CaseGrant")
+                        .WithMany()
+                        .HasForeignKey("ClientPortalCaseGrantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("CaseGrant");
+
+                    b.Navigation("Document");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ClientPortalLoginChallenge", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.ClientPortalAccount", "Account")
+                        .WithMany()
+                        .HasForeignKey("ClientPortalAccountId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Account");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ClientPortalSession", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.ClientPortalAccount", "Account")
+                        .WithMany("Sessions")
+                        .HasForeignKey("ClientPortalAccountId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Account");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.ContractAct", b =>
                 {
                     b.HasOne("PayPlanner.Api.Models.Act", "Act")
@@ -10362,6 +10774,13 @@ namespace PayPlanner.Api.Migrations
                     b.Navigation("ExternalApprovalRequests");
 
                     b.Navigation("Items");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ClientPortalAccount", b =>
+                {
+                    b.Navigation("CaseGrants");
+
+                    b.Navigation("Sessions");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.ClientStatusEntity", b =>

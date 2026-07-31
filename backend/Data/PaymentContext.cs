@@ -1465,6 +1465,85 @@ public class PaymentContext : DbContext
                 .HasDatabaseName("IX_ExternalWorkOrderApprovalRequests_ExpiresAt");
         });
 
+        modelBuilder.Entity<ClientPortalAccount>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Email).HasMaxLength(320).IsRequired();
+            entity.Property(e => e.DisplayName).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.AccountType).HasMaxLength(32).IsRequired();
+            entity.Property(e => e.CreatedByUserName).HasMaxLength(256);
+            entity.Property(e => e.RevokedByUserName).HasMaxLength(256);
+            entity.Property(e => e.RevocationReason).HasMaxLength(500);
+            entity.HasOne(e => e.Client).WithMany().HasForeignKey(e => e.ClientId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne(e => e.LegalEntity).WithMany().HasForeignKey(e => e.LegalEntityId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasIndex(e => e.PublicId).IsUnique();
+            entity.HasIndex(e => new { e.Email, e.IsActive });
+            entity.HasIndex(e => e.ClientId);
+            entity.HasIndex(e => e.LegalEntityId);
+        });
+
+        modelBuilder.Entity<ClientPortalCaseGrant>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.RevocationReason).HasMaxLength(500);
+            entity.HasOne(e => e.Account).WithMany(e => e.CaseGrants)
+                .HasForeignKey(e => e.ClientPortalAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ClientCase).WithMany()
+                .HasForeignKey(e => e.ClientCaseId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(e => new { e.ClientPortalAccountId, e.ClientCaseId }).IsUnique();
+            entity.HasIndex(e => e.PublicId).IsUnique();
+            entity.HasIndex(e => new { e.ClientCaseId, e.RevokedAt });
+        });
+
+        modelBuilder.Entity<ClientPortalDocumentGrant>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasOne(e => e.CaseGrant).WithMany()
+                .HasForeignKey(e => e.ClientPortalCaseGrantId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Document).WithMany()
+                .HasForeignKey(e => e.ClientCaseDocumentId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(e => new { e.ClientPortalCaseGrantId, e.ClientCaseDocumentId }).IsUnique();
+            entity.HasIndex(e => e.PublicId).IsUnique();
+        });
+
+        modelBuilder.Entity<ClientPortalLoginChallenge>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.TokenHash).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.OtpHash).HasMaxLength(64).IsRequired();
+            entity.HasOne(e => e.Account).WithMany()
+                .HasForeignKey(e => e.ClientPortalAccountId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(e => e.PublicId).IsUnique();
+            entity.HasIndex(e => new { e.ClientPortalAccountId, e.ExpiresAt });
+        });
+
+        modelBuilder.Entity<ClientPortalSession>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.TokenHash).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.IpHash).HasMaxLength(64);
+            entity.Property(e => e.UserAgent).HasMaxLength(512);
+            entity.HasOne(e => e.Account).WithMany(e => e.Sessions)
+                .HasForeignKey(e => e.ClientPortalAccountId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(e => e.PublicId).IsUnique();
+            entity.HasIndex(e => e.TokenHash).IsUnique();
+            entity.HasIndex(e => new { e.ClientPortalAccountId, e.RevokedAt, e.ExpiresAt });
+        });
+
+        modelBuilder.Entity<ClientPortalAuditEvent>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.EventType).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.TargetType).HasMaxLength(64);
+            entity.Property(e => e.TargetKey).HasMaxLength(128);
+            entity.Property(e => e.IpHash).HasMaxLength(64);
+            entity.Property(e => e.UserAgent).HasMaxLength(512);
+            entity.HasOne(e => e.Account).WithMany()
+                .HasForeignKey(e => e.ClientPortalAccountId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasIndex(e => new { e.ClientPortalAccountId, e.OccurredAt });
+            entity.HasIndex(e => new { e.EventType, e.OccurredAt });
+        });
+
         // ------------------ ClientCaseProceduralDeadline ------------------
         modelBuilder.Entity<ClientCaseProceduralDeadline>(entity =>
         {
@@ -3152,6 +3231,11 @@ public class PaymentContext : DbContext
             .HasQueryFilter(item => ClientCaseWorkOrders.Any(parent => parent.Id == item.ClientCaseWorkOrderId));
         modelBuilder.Entity<ExternalWorkOrderApprovalRequest>()
             .HasQueryFilter(item => ClientCaseWorkOrders.Any(parent => parent.Id == item.ClientCaseWorkOrderId));
+        modelBuilder.Entity<ClientPortalCaseGrant>()
+            .HasQueryFilter(item => ClientCases.Any(parent => parent.Id == item.ClientCaseId));
+        modelBuilder.Entity<ClientPortalDocumentGrant>()
+            .HasQueryFilter(item => ClientPortalCaseGrants.Any(parent => parent.Id == item.ClientPortalCaseGrantId)
+                && ClientCaseDocuments.Any(parent => parent.Id == item.ClientCaseDocumentId));
         modelBuilder.Entity<ClientContract>()
             .HasQueryFilter(item => Clients.Any(parent => parent.Id == item.ClientId)
                 && Contracts.Any(parent => parent.Id == item.ContractId));
@@ -3709,6 +3793,13 @@ public class PaymentContext : DbContext
     public DbSet<ClientCaseWorkOrderItem> ClientCaseWorkOrderItems { get; set; }
 
     public DbSet<ExternalWorkOrderApprovalRequest> ExternalWorkOrderApprovalRequests { get; set; }
+
+    public DbSet<ClientPortalAccount> ClientPortalAccounts { get; set; }
+    public DbSet<ClientPortalCaseGrant> ClientPortalCaseGrants { get; set; }
+    public DbSet<ClientPortalDocumentGrant> ClientPortalDocumentGrants { get; set; }
+    public DbSet<ClientPortalLoginChallenge> ClientPortalLoginChallenges { get; set; }
+    public DbSet<ClientPortalSession> ClientPortalSessions { get; set; }
+    public DbSet<ClientPortalAuditEvent> ClientPortalAuditEvents { get; set; }
 
     public DbSet<ClientCaseProceduralDeadline> ClientCaseProceduralDeadlines { get; set; }
 

@@ -1,6 +1,7 @@
 import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
+import { ClientPortalAccessPanel } from './ClientPortalAccessPanel';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Archive,
@@ -3400,6 +3401,7 @@ export function CaseDetailPage({
 
         {error ? <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div> : null}
         {notice ? <div className="rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-3 text-sm text-cyan-800">{notice}</div> : null}
+        {canEdit ? <ClientPortalAccessPanel caseItem={caseItem} documents={documents} /> : null}
         {stageTransitionPrompt ? (
           <StageTransitionActions
             prompt={stageTransitionPrompt}

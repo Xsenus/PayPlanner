@@ -11,6 +11,7 @@ const EMPTY_FLAGS: AppFeatureFlagsDto = {
     courtEvents: false,
     documentTemplateLibrary: false,
     externalWorkOrderApproval: false,
+    clientPortal: false,
   },
 };
 
@@ -45,6 +46,11 @@ const LEGAL_FLAGS: FeatureFlagRow[] = [
     key: 'externalWorkOrderApproval',
     label: 'Внешнее согласование заказ-нарядов',
     area: 'Дела',
+  },
+  {
+    key: 'clientPortal',
+    label: 'Клиентский кабинет',
+    area: 'Клиенты',
   },
 ];
 

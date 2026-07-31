@@ -130,7 +130,30 @@ export interface AppFeatureFlagsDto {
     courtEvents: boolean;
     documentTemplateLibrary: boolean;
     externalWorkOrderApproval: boolean;
+    clientPortal: boolean;
   };
+}
+
+export interface ClientPortalLoginPreview { displayName: string; emailHint: string; expiresAt: string }
+export interface ClientPortalCaseListItem { publicId: string; title: string; caseNumber: string; caseType: string; status: string; stage: string; dueDate?: string | null }
+export interface ClientPortalHome { displayName: string; items: ClientPortalCaseListItem[]; total: number; page: number; pageSize: number }
+export interface ClientPortalCase {
+  publicId: string; title: string; caseNumber: string; caseType: string; status: string; stage: string; startDate?: string | null; dueDate?: string | null;
+  deadlines: Array<{ title: string; dueAt: string; status: string }>;
+  documents: Array<{ publicId: string; name: string; documentType: string; status: string; version: number; sizeBytes: number; uploadedAt: string }>;
+  invoices: Array<{ number: string; date: string; amount: number; status: string; workflowStatus: string }>;
+  approvals: Array<{ version: number; status: string; createdAt: string; expiresAt: string; decisionAt?: string | null }>;
+}
+export interface ClientPortalCaseAccess {
+  accountId: number; displayName: string; email: string; accountType: 'client' | 'representative'; isActive: boolean;
+  canViewCaseSummary: boolean; canViewDeadlines: boolean; canViewDocuments: boolean; canViewFinance: boolean;
+  canViewApprovals: boolean; canViewMessages: boolean; documentIds: number[];
+}
+export interface ClientPortalAudit { eventType: string; targetType: string; targetKey: string; occurredAt: string; displayName: string; email: string }
+export interface ClientPortalAccessRequest {
+  email: string; displayName: string; accountType: 'client' | 'representative'; clientId?: number | null;
+  legalEntityId?: number | null; clientCaseId: number; canViewCaseSummary: boolean; canViewDeadlines: boolean;
+  canViewDocuments: boolean; canViewFinance: boolean; canViewApprovals: boolean; canViewMessages: boolean; documentIds: number[];
 }
 
 export type AppReleaseItemType = 'new' | 'improved' | 'fixed' | 'important';
@@ -5648,6 +5671,74 @@ export class ApiService {
         suppressAuthSessionExpired: true,
       },
     );
+  }
+
+  async previewClientPortalLogin(challengeId: string, token: string) {
+    return this.request<ClientPortalLoginPreview>(
+      `/portal/auth/${encodeURIComponent(challengeId)}/preview`,
+      { method: 'POST', body: JSON.stringify({ token }), suppressAuthSessionExpired: true },
+    );
+  }
+
+  async verifyClientPortalLogin(challengeId: string, token: string, otp: string) {
+    return this.request<{ expiresAt: string }>(
+      `/portal/auth/${encodeURIComponent(challengeId)}/verify`,
+      { method: 'POST', body: JSON.stringify({ token, otp }), suppressAuthSessionExpired: true },
+    );
+  }
+
+  async getClientPortalHome(page = 1, pageSize = 20) {
+    return this.request<ClientPortalHome>(
+      `/portal/home?page=${page}&pageSize=${pageSize}`,
+      { suppressAuthSessionExpired: true },
+    );
+  }
+
+  async getClientPortalCase(publicId: string) {
+    return this.request<ClientPortalCase>(
+      `/portal/cases/${encodeURIComponent(publicId)}`,
+      { suppressAuthSessionExpired: true },
+    );
+  }
+
+  getClientPortalDocumentUrl(publicId: string) {
+    return `${API_BASE_URL}/portal/documents/${encodeURIComponent(publicId)}`;
+  }
+
+  async logoutClientPortal(all = false) {
+    return this.request<void>(
+      `/portal/logout?all=${all}`,
+      { method: 'POST', suppressAuthSessionExpired: true },
+    );
+  }
+
+  async getClientPortalCaseAccess(caseId: number) {
+    return this.request<ClientPortalCaseAccess[]>(`/portal/admin/cases/${caseId}/accounts`);
+  }
+
+  async getClientPortalAudit(caseId: number) {
+    return this.request<ClientPortalAudit[]>(`/portal/admin/cases/${caseId}/audit`);
+  }
+
+  async saveClientPortalAccess(payload: ClientPortalAccessRequest) {
+    return this.request<{ id: number }>('/portal/admin/access', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async sendClientPortalLogin(accountId: number) {
+    return this.request<{ challengeId: string; expiresAt: string; emailHint: string }>(
+      `/portal/admin/accounts/${accountId}/login`,
+      { method: 'POST' },
+    );
+  }
+
+  async revokeClientPortalCaseAccess(accountId: number, caseId: number, reason?: string) {
+    return this.request<void>(`/portal/admin/accounts/${accountId}/cases/${caseId}`, {
+      method: 'DELETE',
+      body: JSON.stringify({ reason }),
+    });
   }
 
   async getCaseWorkOrderPrintHtml(caseId: number) {
