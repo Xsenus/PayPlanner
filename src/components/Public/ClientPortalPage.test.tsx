@@ -49,7 +49,8 @@ describe('ClientPortalPage', () => {
     });
     apiServiceMock.getClientPortalCase.mockResolvedValue({
       publicId: '33333333-3333-4333-8333-333333333333', title: 'Дело клиента', caseNumber: 'A-1', caseType: '', status: 'Open', stage: '',
-      deadlines: [], events: [], invoices: [], acts: [], contracts: [], approvals: [],
+      deadlines: [], events: [], invoices: [], acts: [], contracts: [],
+      approvals: [{ version: 2, status: 'Ожидает решения', requestedAt: '2026-07-31T11:00:00Z' }],
       documents: [{ publicId: '44444444-4444-4444-8444-444444444444', name: 'Документ.pdf', documentType: 'Документ', status: 'Готов', version: 1, sizeBytes: 1024, uploadedAt: '2026-07-31T10:00:00Z' }],
     });
     apiServiceMock.createClientPortalDocumentGrant.mockResolvedValue({ grantToken: 'grant', expiresAt: '2026-08-01T10:05:00Z' });
@@ -98,6 +99,7 @@ describe('ClientPortalPage', () => {
     await waitFor(() => expect(open).toHaveBeenCalledWith('https://max.ru/test_bot?start=opaque', '_blank', 'noopener,noreferrer'));
 
     fireEvent.click(screen.getAllByRole('button', { name: /Дело клиента/ }).at(-1)!);
+    expect(await screen.findByText('Версия 2 · Ожидает решения')).toBeTruthy();
     fireEvent.click(await screen.findByRole('button', { name: /Документ\.pdf/ }));
     await waitFor(() => {
       expect(apiServiceMock.createClientPortalDocumentGrant).toHaveBeenCalledWith('44444444-4444-4444-8444-444444444444');
@@ -107,5 +109,17 @@ describe('ClientPortalPage', () => {
     expect(revokeObjectUrl).toHaveBeenCalledWith('blob:portal-document');
     click.mockRestore();
     open.mockRestore();
+  });
+
+  it('logs out after completing the portal workflow', async () => {
+    apiServiceMock.logoutClientPortal.mockImplementation(() => new Promise(() => undefined));
+
+    render(<ClientPortalPage />);
+    fireEvent.change(await screen.findByRole('textbox'), { target: { value: '123456' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Войти' }));
+    expect(await screen.findByText('Ближайшие сроки')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Выйти' }));
+    expect(apiServiceMock.logoutClientPortal).toHaveBeenCalledWith();
   });
 });

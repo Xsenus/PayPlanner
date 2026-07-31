@@ -203,6 +203,24 @@ public sealed class ClientPortalServiceTests
         Assert.Null(await fixture.Service.GetDocumentAsync(context, publicDocumentId, grant.GrantToken + "x", CancellationToken.None));
     }
 
+    [Fact]
+    public async Task Backup_restore_preserves_revoked_access_and_audit_history()
+    {
+        await using var fixture = await Fixture.CreateAsync(enabled: true);
+        var account = await fixture.CreateAccessAsync(1, fixture.Client1Id, fixture.Case1Id);
+        await fixture.Service.RevokeAccountAsync(account.Id, 7, "Администратор", "Проверка хранения", CancellationToken.None);
+
+        await using var restored = await fixture.BackupAndRestoreAsync();
+
+        var restoredAccount = await restored.ClientPortalAccounts.AsNoTracking().SingleAsync();
+        Assert.False(restoredAccount.IsActive);
+        Assert.NotNull(restoredAccount.RevokedAt);
+        Assert.True(await restored.ClientPortalCaseGrants.AsNoTracking().AnyAsync(item => item.RevokedAt != null));
+        Assert.Contains(
+            await restored.ClientPortalAuditEvents.AsNoTracking().Select(item => item.EventType).ToListAsync(),
+            action => action == "account_revoked");
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly SqliteConnection _connection;
@@ -280,6 +298,30 @@ public sealed class ClientPortalServiceTests
                 CanViewCaseSummary = true,
                 CanViewDeadlines = true,
             }, 7, "Администратор", CancellationToken.None);
+
+        public async Task<PaymentContext> BackupAndRestoreAsync()
+        {
+            Directory.CreateDirectory(StorageRoot);
+            var backupPath = Path.Combine(StorageRoot, "client-portal-backup.sqlite");
+            await using (var backup = new SqliteConnection($"Data Source={backupPath};Pooling=False"))
+            {
+                await backup.OpenAsync();
+                ((SqliteConnection)Db.Database.GetDbConnection()).BackupDatabase(backup);
+            }
+
+            var restoredConnection = new SqliteConnection("Data Source=:memory:");
+            await restoredConnection.OpenAsync();
+            await using (var backup = new SqliteConnection($"Data Source={backupPath};Mode=ReadOnly;Pooling=False"))
+            {
+                await backup.OpenAsync();
+                backup.BackupDatabase(restoredConnection);
+            }
+
+            return new PaymentContext(
+                new DbContextOptionsBuilder<PaymentContext>()
+                    .UseSqlite(restoredConnection, contextOwnsConnection: true)
+                    .Options);
+        }
 
         public async ValueTask DisposeAsync()
         {
