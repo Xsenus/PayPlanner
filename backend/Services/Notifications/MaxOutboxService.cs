@@ -21,6 +21,15 @@ public interface IMaxOutboxService
     Task<MaxOutboxMessage> QueueAsync(MaxQueueRequest request, CancellationToken ct);
 }
 
+public static class MaxMessageTemplateCatalog
+{
+    public static string RenderNotification(string notificationType) => notificationType switch
+    {
+        UserNotificationTypes.SystemAdminWarning => "В CRM есть критическое системное предупреждение. Откройте CRM, чтобы безопасно посмотреть подробности.",
+        _ => throw new InvalidOperationException("Для события не настроен безопасный шаблон MAX."),
+    };
+}
+
 public sealed class MaxOutboxService(
     PaymentContext db,
     IMaxNotificationService settingsService,
@@ -36,15 +45,18 @@ public sealed class MaxOutboxService(
         if (!runtime.Ready) throw new InvalidOperationException("Канал MAX выключен или настроен не полностью.");
         var scenario = request.Scenario?.Trim().ToLowerInvariant() ?? string.Empty;
         if (!IsScenarioEnabled(runtime, scenario)) throw new InvalidOperationException("Сценарий MAX выключен администратором.");
+        string? notificationType = null;
         if (scenario == MaxMessengerScenarios.Notifications)
         {
-            var notificationType = UserNotificationTypes.Find(request.NotificationType)?.Key;
+            notificationType = UserNotificationTypes.Find(request.NotificationType)?.Key;
             if (!string.Equals(notificationType, UserNotificationTypes.SystemAdminWarning, StringComparison.Ordinal))
                 throw new InvalidOperationException("Событие пока не разрешено для MAX.");
             if (!await IsNotificationAllowedForRecipientAsync(request.RecipientUserId, notificationType!, ct))
                 throw new InvalidOperationException("Получатель отключил это уведомление MAX.");
         }
-        var text = request.Text?.Trim() ?? string.Empty;
+        var text = notificationType is null
+            ? request.Text?.Trim() ?? string.Empty
+            : MaxMessageTemplateCatalog.RenderNotification(notificationType);
         if (text.Length is 0 or > MaxApiClient.MaxTextLength) throw new InvalidOperationException("Текст MAX должен содержать от 1 до 4000 символов.");
         Uri? actionUri = null;
         if (!string.IsNullOrWhiteSpace(request.ActionUrl))
@@ -53,8 +65,8 @@ public sealed class MaxOutboxService(
                 || actionUri.Scheme != Uri.UriSchemeHttps)
                 throw new InvalidOperationException("Ссылка MAX должна использовать HTTPS.");
         }
-        if (scenario is MaxMessengerScenarios.Documents or MaxMessengerScenarios.Confirmations && actionUri is null)
-            throw new InvalidOperationException("Для документа или подтверждения обязательна защищённая HTTPS-ссылка.");
+        if (scenario is MaxMessengerScenarios.Notifications or MaxMessengerScenarios.Documents or MaxMessengerScenarios.Confirmations && actionUri is null)
+            throw new InvalidOperationException("Для уведомления, документа или подтверждения обязательна защищённая HTTPS-ссылка.");
 
         var link = await db.MaxRecipientLinks.AsNoTracking()
             .Where(item => item.UserId == request.RecipientUserId

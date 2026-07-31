@@ -95,8 +95,27 @@ public sealed class MaxOutboxServiceTests
         Assert.Equal(MaxOutboxStatuses.Sent, stored.Status);
         Assert.Equal("max-message-1", stored.ProviderMessageId);
         Assert.Single(api.Messages);
-        Assert.Equal("Критическое уведомление", api.Messages[0].Text);
+        Assert.Equal(MaxMessageTemplateCatalog.RenderNotification(UserNotificationTypes.SystemAdminWarning), api.Messages[0].Text);
         Assert.Equal("https://crm.example.test/opaque-link", api.Messages[0].Url?.AbsoluteUri);
+    }
+
+    [Fact]
+    public async Task NotificationUsesSafeServerTemplateAndRequiresHttpsAction()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var unsafeRequest = fixture.Request() with
+        {
+            Text = "Паспорт 1234 567890",
+            ActionUrl = null,
+        };
+        await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Outbox.QueueAsync(unsafeRequest, CancellationToken.None));
+
+        var queued = await fixture.Outbox.QueueAsync(unsafeRequest with { ActionUrl = "https://crm.example.test/open/opaque" }, CancellationToken.None);
+        var api = new RecordingApiClient();
+        await fixture.Processor(api).ProcessBatchAsync(CancellationToken.None);
+        Assert.DoesNotContain("1234", queued.ProtectedText, StringComparison.Ordinal);
+        Assert.DoesNotContain("567890", queued.ProtectedText, StringComparison.Ordinal);
+        Assert.Equal(MaxMessageTemplateCatalog.RenderNotification(UserNotificationTypes.SystemAdminWarning), api.Messages.Single().Text);
     }
 
     [Fact]
