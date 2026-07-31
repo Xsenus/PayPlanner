@@ -32,6 +32,7 @@ public sealed class MessengerDocumentDeliveriesController : ControllerBase
     public IActionResult GetConfiguration()
     {
         var enabled = _configuration.GetValue("MessengerDocumentDelivery:Enabled", false);
+        var directAttachments = MessengerDirectAttachmentPolicy.GetStatus(_configuration);
         return Ok(new
         {
             Enabled = enabled,
@@ -39,6 +40,7 @@ public sealed class MessengerDocumentDeliveriesController : ControllerBase
                 _configuration.GetValue("MessengerDocumentDelivery:LinkLifetimeHours", 24),
                 1,
                 168),
+            DirectAttachments = directAttachments,
             Providers = new[]
             {
                 ProviderState(MessengerDocumentChannels.Telegram),

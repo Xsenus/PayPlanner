@@ -20,6 +20,45 @@ namespace PayPlanner.Api.Tests;
 public sealed class MessengerDocumentDeliveryServiceTests
 {
     [Fact]
+    public void DirectAttachmentsRemainDisabledWithoutAntivirusAndProviderLimit()
+    {
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["MessengerDocumentDelivery:DirectAttachments:Enabled"] = "true",
+            ["MessengerDocumentDelivery:DirectAttachments:AllowedMimeTypes:0"] = "application/pdf",
+            ["MessengerDocumentDelivery:DirectAttachments:MaxBytes"] = "0",
+            ["MessengerDocumentDelivery:DirectAttachments:Antivirus:Enabled"] = "false"
+        }).Build();
+
+        var status = MessengerDirectAttachmentPolicy.GetStatus(configuration);
+
+        Assert.True(status.Requested);
+        Assert.False(status.Enabled);
+        Assert.Equal("protected_link", status.DeliveryMode);
+        Assert.Contains("antivirus", status.DisabledReason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void DirectAttachmentsRequireAllSafetyGates()
+    {
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["MessengerDocumentDelivery:DirectAttachments:Enabled"] = "true",
+            ["MessengerDocumentDelivery:DirectAttachments:AllowedMimeTypes:0"] = "APPLICATION/PDF",
+            ["MessengerDocumentDelivery:DirectAttachments:AllowedMimeTypes:1"] = "application/pdf",
+            ["MessengerDocumentDelivery:DirectAttachments:MaxBytes"] = "1048576",
+            ["MessengerDocumentDelivery:DirectAttachments:Antivirus:Enabled"] = "true"
+        }).Build();
+
+        var status = MessengerDirectAttachmentPolicy.GetStatus(configuration);
+
+        Assert.True(status.Enabled);
+        Assert.Equal("direct_attachment", status.DeliveryMode);
+        Assert.Equal(["application/pdf"], status.AllowedMimeTypes);
+        Assert.Null(status.DisabledReason);
+    }
+
+    [Fact]
     public async Task MaxProviderQueuesOnlyProtectedLinkForVerifiedPortalRecipient()
     {
         var outbox = new RecordingMaxOutbox();
