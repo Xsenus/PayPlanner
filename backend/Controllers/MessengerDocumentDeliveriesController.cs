@@ -161,6 +161,68 @@ public sealed class MessengerDocumentDeliveriesController : ControllerBase
         }
     }
 
+    [HttpPost("financial-documents/{documentType}/{documentId:int}/prepare")]
+    [RequestSizeLimit(26L * 1024 * 1024)]
+    public async Task<IActionResult> PrepareFinancialDocument(
+        string documentType,
+        int documentId,
+        [FromForm] IFormFile? file,
+        [FromForm] int recipientBindingId,
+        [FromForm] string? message,
+        [FromForm] bool confirmRecipientAndDocument,
+        CancellationToken ct)
+    {
+        if (!confirmRecipientAndDocument)
+        {
+            return BadRequest(new { message = "Подтвердите выбранный документ и получателя." });
+        }
+        if (file is null || file.Length <= 0)
+        {
+            return BadRequest(new { message = "Сформированный PDF не передан." });
+        }
+
+        var normalizedType = documentType.Trim().ToLowerInvariant();
+        var binding = await _db.MessengerRecipientBindings
+            .AsNoTracking()
+            .Where(item => item.Id == recipientBindingId && item.IsActive)
+            .Select(item => new { item.ClientId })
+            .FirstOrDefaultAsync(ct);
+        if (binding?.ClientId is null)
+        {
+            return BadRequest(new { message = "Подтверждённый контакт получателя не найден." });
+        }
+
+        var clientId = binding.ClientId.Value;
+        var source = await ResolveFinancialDocumentSourceAsync(normalizedType, documentId, clientId, ct);
+        if (source is null)
+        {
+            return BadRequest(new { message = "Документ не найден или не принадлежит клиенту выбранного получателя." });
+        }
+
+        try
+        {
+            await using var stream = file.OpenReadStream();
+            var prepared = await _deliveryService.PrepareGeneratedDocumentAsync(
+                User.GetUserId() ?? 0,
+                normalizedType,
+                documentId,
+                1,
+                clientId,
+                source.FileName,
+                file.ContentType,
+                stream,
+                file.Length,
+                recipientBindingId,
+                message,
+                ct);
+            return Ok(ToPreparedResponse(prepared));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
     [HttpGet]
     public async Task<IActionResult> GetHistory([FromQuery] int? clientId, CancellationToken ct)
     {
@@ -235,6 +297,71 @@ public sealed class MessengerDocumentDeliveriesController : ControllerBase
         MessengerDocumentChannels.WhatsAppBusiness => "WhatsAppBusiness",
         _ => channel,
     };
+
+    private async Task<FinancialDocumentSource?> ResolveFinancialDocumentSourceAsync(
+        string documentType,
+        int documentId,
+        int clientId,
+        CancellationToken ct)
+    {
+        if (documentType == "invoice")
+        {
+            var number = await _db.Payments
+                .AsNoTracking()
+                .Where(item => item.Id == documentId
+                    && (item.ClientId == clientId || item.ExpenseClientId == clientId))
+                .Select(item => item.Invoice != null ? item.Invoice.Number : item.Account)
+                .FirstOrDefaultAsync(ct);
+            return string.IsNullOrWhiteSpace(number) ? null : new($"invoice-{SanitizeFilePart(number)}.pdf");
+        }
+        if (documentType == "act")
+        {
+            var number = await _db.Acts.AsNoTracking()
+                .Where(item => item.Id == documentId && item.ClientId == clientId)
+                .Select(item => item.Number)
+                .FirstOrDefaultAsync(ct);
+            return string.IsNullOrWhiteSpace(number) ? null : new($"act-{SanitizeFilePart(number)}.pdf");
+        }
+        if (documentType == "contract")
+        {
+            var number = await _db.Contracts.AsNoTracking()
+                .Where(item => item.Id == documentId
+                    && item.ClientContracts.Any(link => link.ClientId == clientId))
+                .Select(item => item.Number)
+                .FirstOrDefaultAsync(ct);
+            return string.IsNullOrWhiteSpace(number) ? null : new($"contract-{SanitizeFilePart(number)}.pdf");
+        }
+        return null;
+    }
+
+    private static object ToPreparedResponse(PreparedMessengerDocumentDelivery prepared)
+    {
+        var delivery = prepared.Delivery;
+        return new
+        {
+            delivery.Id,
+            delivery.PublicId,
+            delivery.DocumentType,
+            delivery.DocumentId,
+            delivery.DocumentVersion,
+            delivery.OriginalFileName,
+            delivery.ChecksumSha256,
+            delivery.SizeBytes,
+            delivery.Channel,
+            delivery.Provider,
+            delivery.Status,
+            delivery.LinkExpiresAt,
+        };
+    }
+
+    private static string SanitizeFilePart(string value)
+    {
+        var invalid = Path.GetInvalidFileNameChars();
+        var safe = new string(value.Trim().Select(ch => invalid.Contains(ch) ? '_' : ch).ToArray());
+        return string.IsNullOrWhiteSpace(safe) ? "document" : safe;
+    }
+
+    private sealed record FinancialDocumentSource(string FileName);
 }
 
 [ApiController]

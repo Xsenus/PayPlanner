@@ -7,7 +7,6 @@ import {
   type MessengerDocumentDeliveryDto,
   type MessengerRecipientBindingDto,
 } from '../../services/api';
-import type { ClientCaseDocument } from '../../types';
 import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemSelect } from '../ui/SystemSelect';
 
@@ -28,13 +27,25 @@ const STATUS_LABELS: Record<string, string> = {
   cancelled: 'Отменено',
 };
 
+export type MessengerDeliveryDocumentDescriptor = {
+  id: number;
+  originalFileName: string;
+  documentType: string;
+  version: number;
+  sizeBytes: number;
+  sourceType?: 'invoice' | 'act' | 'contract';
+};
+
 type Props = {
-  document: ClientCaseDocument;
+  document: MessengerDeliveryDocumentDescriptor;
   clientId: number;
+  clientOptions?: Array<{ id: number; name: string }>;
+  preparePdf?: () => Promise<Blob>;
   onClose: () => void;
 };
 
-export function MessengerDocumentDeliveryModal({ document, clientId, onClose }: Props) {
+export function MessengerDocumentDeliveryModal({ document, clientId, clientOptions, preparePdf, onClose }: Props) {
+  const [selectedClientId, setSelectedClientId] = useState(clientId);
   const [configuration, setConfiguration] = useState<MessengerDocumentDeliveryConfiguration | null>(null);
   const [recipients, setRecipients] = useState<MessengerRecipientBindingDto[]>([]);
   const [history, setHistory] = useState<MessengerDocumentDeliveryDto[]>([]);
@@ -65,11 +76,12 @@ export function MessengerDocumentDeliveryModal({ document, clientId, onClose }: 
         return;
       }
       const [nextRecipients, nextHistory] = await Promise.all([
-        apiService.getMessengerRecipients(clientId),
-        apiService.getMessengerDocumentDeliveryHistory(clientId),
+        apiService.getMessengerRecipients(selectedClientId),
+        apiService.getMessengerDocumentDeliveryHistory(selectedClientId),
       ]);
       setRecipients(nextRecipients);
-      setHistory(nextHistory.filter((item) => item.documentId === document.id));
+      const expectedType = document.sourceType ?? 'case-document';
+      setHistory(nextHistory.filter((item) => item.documentId === document.id && item.documentType === expectedType));
       setRecipientId((current) => current || String(nextRecipients[0]?.id ?? ''));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Не удалось загрузить настройки доставки.');
@@ -82,7 +94,7 @@ export function MessengerDocumentDeliveryModal({ document, clientId, onClose }: 
     void load();
     // Данные мастера зависят только от выбранного документа и клиента.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clientId, document.id]);
+  }, [selectedClientId, document.id, document.sourceType]);
 
   const enabledProviders = useMemo(
     () => configuration?.providers.filter((provider) => provider.enabled) ?? [],
@@ -100,7 +112,7 @@ export function MessengerDocumentDeliveryModal({ document, clientId, onClose }: 
     setError('');
     try {
       const created = await apiService.createMessengerRecipient({
-        clientId,
+        clientId: selectedClientId,
         channel: newRecipient.channel,
         provider: newRecipient.channel,
         displayName: newRecipient.displayName.trim(),
@@ -132,11 +144,19 @@ export function MessengerDocumentDeliveryModal({ document, clientId, onClose }: 
     setError('');
     setSuccess('');
     try {
-      const prepared = await apiService.prepareCaseDocumentMessengerDelivery(document.id, {
+      const deliveryPayload = {
         recipientBindingId: Number(recipientId),
         message: message.trim() || undefined,
         confirmRecipientAndDocument: true,
-      });
+      };
+      const prepared = document.sourceType
+        ? await apiService.prepareFinancialDocumentMessengerDelivery(
+            document.sourceType,
+            document.id,
+            await requirePdf(),
+            deliveryPayload,
+          )
+        : await apiService.prepareCaseDocumentMessengerDelivery(document.id, deliveryPayload);
       await apiService.queueMessengerDocumentDelivery(prepared.id);
       setSuccess('Документ поставлен в безопасную очередь отправки.');
       setConfirmed(false);
@@ -146,6 +166,17 @@ export function MessengerDocumentDeliveryModal({ document, clientId, onClose }: 
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const requirePdf = async () => {
+    if (!preparePdf) {
+      throw new Error('Не настроено формирование PDF выбранного документа.');
+    }
+    const pdf = await preparePdf();
+    if (pdf.size <= 0 || (pdf.type && pdf.type !== 'application/pdf')) {
+      throw new Error('CRM не смогла сформировать корректный PDF для отправки.');
+    }
+    return pdf.type === 'application/pdf' ? pdf : pdf.slice(0, pdf.size, 'application/pdf');
   };
 
   return (
@@ -162,9 +193,28 @@ export function MessengerDocumentDeliveryModal({ document, clientId, onClose }: 
         </header>
 
         <div className="space-y-3 p-4">
+          {clientOptions && clientOptions.length > 1 ? (
+            <label className="block text-sm font-semibold text-slate-900">
+              Получатель по договору
+              <SystemSelect
+                value={String(selectedClientId)}
+                onChange={(event) => {
+                  setSelectedClientId(Number(event.target.value));
+                  setRecipientId('');
+                  setConfirmed(false);
+                }}
+                className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-normal"
+              >
+                {clientOptions.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
+              </SystemSelect>
+            </label>
+          ) : null}
           <section className="rounded-xl border border-slate-200 bg-slate-50 p-3">
             <div className="font-semibold text-slate-900">{document.originalFileName}</div>
-            <div className="mt-1 text-sm text-slate-500">{document.documentType} · версия {document.version} · {(document.sizeBytes / 1024).toFixed(1)} КБ</div>
+            <div className="mt-1 text-sm text-slate-500">
+              {document.documentType} · версия {document.version}
+              {document.sizeBytes > 0 ? ` · ${(document.sizeBytes / 1024).toFixed(1)} КБ` : ' · PDF будет сформирован перед отправкой'}
+            </div>
             <div className="mt-2 flex items-center gap-2 text-xs text-slate-500">
               <ShieldCheck className="h-4 w-4 text-emerald-600" /> Перед отправкой CRM создаст неизменяемый снимок и SHA-256.
             </div>

@@ -27,6 +27,20 @@ public interface IMessengerDocumentDeliveryService
         string? message,
         CancellationToken ct);
 
+    Task<PreparedMessengerDocumentDelivery> PrepareGeneratedDocumentAsync(
+        int userId,
+        string documentType,
+        int documentId,
+        int documentVersion,
+        int clientId,
+        string originalFileName,
+        string contentType,
+        Stream source,
+        long declaredSize,
+        int recipientBindingId,
+        string? message,
+        CancellationToken ct);
+
     Task<MessengerDocumentDelivery> QueueAsync(int deliveryId, CancellationToken ct);
 
     Task<MessengerDocumentDownload?> ConsumeDownloadAsync(Guid publicId, string token, CancellationToken ct);
@@ -293,6 +307,157 @@ public sealed class MessengerDocumentDeliveryService : IMessengerDocumentDeliver
         delivery.UpdatedAt = now;
         await _db.SaveChangesAsync(ct);
         return delivery;
+    }
+
+    public async Task<PreparedMessengerDocumentDelivery> PrepareGeneratedDocumentAsync(
+        int userId,
+        string documentType,
+        int documentId,
+        int documentVersion,
+        int clientId,
+        string originalFileName,
+        string contentType,
+        Stream source,
+        long declaredSize,
+        int recipientBindingId,
+        string? message,
+        CancellationToken ct)
+    {
+        EnsureEnabled();
+        var normalizedType = documentType.Trim().ToLowerInvariant();
+        if (normalizedType is not ("invoice" or "act" or "contract"))
+        {
+            throw new InvalidOperationException("Тип финансового документа не поддерживается.");
+        }
+        if (documentId <= 0 || documentVersion <= 0 || clientId <= 0)
+        {
+            throw new InvalidOperationException("Источник документа указан неверно.");
+        }
+        if (!string.Equals(contentType, "application/pdf", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Для отправки финансовых документов разрешён только PDF.");
+        }
+        if (declaredSize <= 0 || declaredSize > MaximumSnapshotBytes)
+        {
+            throw new InvalidOperationException("Размер документа недопустим для отправки.");
+        }
+
+        var binding = await _db.MessengerRecipientBindings
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == recipientBindingId && item.IsActive, ct)
+            ?? throw new InvalidOperationException("Контакт получателя не найден.");
+        if (binding.ClientId != clientId
+            || binding.VerifiedAt is null
+            || !string.Equals(binding.VerificationStatus, "verified", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Получатель не подтверждён или не принадлежит выбранному клиенту.");
+        }
+
+        var publicId = Guid.NewGuid();
+        var snapshotRelativePath = Path.Combine(
+            DateTime.UtcNow.ToString("yyyy", System.Globalization.CultureInfo.InvariantCulture),
+            DateTime.UtcNow.ToString("MM", System.Globalization.CultureInfo.InvariantCulture),
+            $"{publicId:N}.snapshot");
+        var snapshotFullPath = ResolveSnapshotPath(snapshotRelativePath);
+        Directory.CreateDirectory(Path.GetDirectoryName(snapshotFullPath)!);
+
+        string checksum;
+        long size = 0;
+        try
+        {
+            await using var target = new FileStream(
+                snapshotFullPath,
+                FileMode.CreateNew,
+                FileAccess.Write,
+                FileShare.None,
+                81920,
+                FileOptions.Asynchronous | FileOptions.SequentialScan);
+            using var incrementalHash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+            var buffer = new byte[81920];
+            int read;
+            while ((read = await source.ReadAsync(buffer.AsMemory(0, buffer.Length), ct)) > 0)
+            {
+                if (size == 0
+                    && (read < 5
+                        || buffer[0] != (byte)'%'
+                        || buffer[1] != (byte)'P'
+                        || buffer[2] != (byte)'D'
+                        || buffer[3] != (byte)'F'
+                        || buffer[4] != (byte)'-'))
+                {
+                    throw new InvalidOperationException("Сформированный файл не является PDF.");
+                }
+                size += read;
+                if (size > MaximumSnapshotBytes)
+                {
+                    throw new InvalidOperationException("Документ превышает допустимый размер.");
+                }
+                incrementalHash.AppendData(buffer, 0, read);
+                await target.WriteAsync(buffer.AsMemory(0, read), ct);
+            }
+            checksum = Convert.ToHexString(incrementalHash.GetHashAndReset());
+        }
+        catch
+        {
+            File.Delete(snapshotFullPath);
+            throw;
+        }
+        if (size != declaredSize)
+        {
+            File.Delete(snapshotFullPath);
+            throw new InvalidOperationException("Размер сформированного документа изменился при передаче.");
+        }
+
+        var idempotencyKey = Hash($"{normalizedType}|{documentId}|{documentVersion}|{checksum}|{binding.Id}");
+        var existing = await _db.MessengerDocumentDeliveries.FirstOrDefaultAsync(
+            item => item.IdempotencyKey == idempotencyKey && item.Status != MessengerDocumentDeliveryStatuses.Cancelled,
+            ct);
+        if (existing is not null)
+        {
+            File.Delete(snapshotFullPath);
+            var renewedToken = GenerateToken();
+            var renewedAt = DateTime.UtcNow;
+            existing.LinkTokenHash = Hash(renewedToken);
+            existing.ProtectedLinkToken = _addressProtector.Protect(renewedToken);
+            existing.LinkExpiresAt = renewedAt.Add(_linkLifetime);
+            existing.DownloadCount = 0;
+            existing.Status = MessengerDocumentDeliveryStatuses.Prepared;
+            existing.MessagePreview = NormalizeOptional(message, 1000);
+            existing.LastError = null;
+            existing.UpdatedAt = renewedAt;
+            await _db.SaveChangesAsync(ct);
+            return new(existing, renewedToken);
+        }
+
+        var token = GenerateToken();
+        var now = DateTime.UtcNow;
+        var delivery = new MessengerDocumentDelivery
+        {
+            PublicId = publicId,
+            RecipientBindingId = binding.Id,
+            ClientId = binding.ClientId,
+            DocumentType = normalizedType,
+            DocumentId = documentId,
+            DocumentVersion = documentVersion,
+            OriginalFileName = NormalizeRequired(originalFileName, 260, "Имя документа не указано."),
+            SnapshotPath = snapshotRelativePath,
+            ContentType = "application/pdf",
+            SizeBytes = size,
+            ChecksumSha256 = checksum,
+            Channel = binding.Channel,
+            Provider = binding.Provider,
+            IdempotencyKey = idempotencyKey,
+            LinkTokenHash = Hash(token),
+            ProtectedLinkToken = _addressProtector.Protect(token),
+            LinkExpiresAt = now.Add(_linkLifetime),
+            MessagePreview = NormalizeOptional(message, 1000),
+            CreatedByUserId = userId,
+            CreatedAt = now,
+            UpdatedAt = now,
+        };
+        _db.MessengerDocumentDeliveries.Add(delivery);
+        await _db.SaveChangesAsync(ct);
+        return new(delivery, token);
     }
 
     public async Task<MessengerDocumentDownload?> ConsumeDownloadAsync(

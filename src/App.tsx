@@ -1251,6 +1251,7 @@ function AppContent() {
             canViewFinance={permissions.payments.canView}
             canViewTasks={permissions.tasks.canView}
             canCreateTasks={permissions.tasks.canView && permissions.tasks.canCreate}
+            canSendMessenger={isAdminRole}
             onBack={() => {
               setSelectedCaseId(null);
               setActiveTab(caseReturnTab === 'caseDetail' ? 'cases' : caseReturnTab);

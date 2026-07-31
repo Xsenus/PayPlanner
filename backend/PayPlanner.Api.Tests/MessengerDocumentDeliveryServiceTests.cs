@@ -88,6 +88,29 @@ public sealed class MessengerDocumentDeliveryServiceTests
     }
 
     [Fact]
+    public async Task GeneratedFinancialPdfCreatesImmutableSnapshotAndIsIdempotent()
+    {
+        await using var fixture = await Fixture.CreateAsync(enabled: true);
+        var binding = await fixture.CreateBindingAsync();
+        var pdf = System.Text.Encoding.ASCII.GetBytes("%PDF-1.7 generated invoice");
+
+        var first = await fixture.Service.PrepareGeneratedDocumentAsync(
+            fixture.UserId, "invoice", 55, 1, fixture.ClientId, "invoice-55.pdf",
+            "application/pdf", new MemoryStream(pdf), pdf.Length, binding.Id, "Счёт", CancellationToken.None);
+        var second = await fixture.Service.PrepareGeneratedDocumentAsync(
+            fixture.UserId, "invoice", 55, 1, fixture.ClientId, "invoice-55.pdf",
+            "application/pdf", new MemoryStream(pdf), pdf.Length, binding.Id, "Счёт повторно", CancellationToken.None);
+
+        Assert.Equal(first.Delivery.Id, second.Delivery.Id);
+        Assert.Equal("invoice", first.Delivery.DocumentType);
+        Assert.Equal(Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(pdf)), first.Delivery.ChecksumSha256);
+        Assert.Single(await fixture.Db.MessengerDocumentDeliveries.ToListAsync());
+        var download = await fixture.Service.ConsumeDownloadAsync(second.Delivery.PublicId, second.Token!, CancellationToken.None);
+        Assert.NotNull(download);
+        Assert.Equal(pdf, await File.ReadAllBytesAsync(download.FullPath));
+    }
+
+    [Fact]
     public async Task OutboxSendsQueuedDeliveryOnceAndClearsProtectedToken()
     {
         await using var fixture = await Fixture.CreateAsync(enabled: true);

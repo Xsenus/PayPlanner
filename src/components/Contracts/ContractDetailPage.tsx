@@ -22,6 +22,7 @@ import { TableColumnSettings } from '../ui/TableColumnSettings';
 import { TablePagination } from '../ui/TablePagination';
 import { ObjectAuditLauncher } from '../ui/ObjectAuditModal';
 import { CounterpartyPickerModal, type CounterpartyKind, type CounterpartySelection } from '../ui/CounterpartyPickerModal';
+import { MessengerDocumentDeliveryModal } from '../Cases/MessengerDocumentDeliveryModal';
 
 interface Props {
   contractId: number;
@@ -169,6 +170,7 @@ export function ContractDetailPage({
   onOpenMoneyEditor,
 }: Props) {
   const { user } = useAuth();
+  const isAdmin = (user?.role?.name ?? '').toLowerCase() === 'admin';
   const toast = useToast();
   const { confirm, prompt } = useDialog();
   const rolePermissions = useRolePermissions(user?.role?.id);
@@ -198,6 +200,7 @@ export function ContractDetailPage({
   const [documentSaving, setDocumentSaving] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [messengerDeliveryOpen, setMessengerDeliveryOpen] = useState(false);
 
   const [pickerOpen, setPickerOpen] = useState(false);
   const visibleTabs = useMemo(
@@ -1026,13 +1029,13 @@ export function ContractDetailPage({
 
   return (
     <div className="p-6">
-      <div className="mb-4 flex items-center justify-between">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <button onClick={onBack} className="inline-flex items-center gap-2 rounded border px-3 py-2">
           <ArrowLeft className="h-4 w-4" />
           Назад
         </button>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={() => void openContractDocumentPreview()}
@@ -1080,6 +1083,17 @@ export function ContractDetailPage({
             {documentSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />}
             Email
           </button>
+          {isAdmin && contract.clients.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => setMessengerDeliveryOpen(true)}
+              disabled={documentSaving}
+              className="inline-flex items-center gap-2 rounded border border-violet-200 px-3 py-2 text-sm text-violet-700 disabled:opacity-60"
+            >
+              <Send className="h-4 w-4" />
+              Мессенджер
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={() => void uploadContractToYandexDisk()}
@@ -2213,6 +2227,22 @@ export function ContractDetailPage({
         onApply={handleApplyCounterparties}
         onClose={() => setPickerOpen(false)}
       />
+      {messengerDeliveryOpen && contract.clients.length > 0 ? (
+        <MessengerDocumentDeliveryModal
+          clientId={contract.clients[0].id}
+          clientOptions={contract.clients.map((client) => ({ id: client.id, name: client.name }))}
+          document={{
+            id: contract.id,
+            originalFileName: `contract-${contract.number || contract.id}.pdf`,
+            documentType: 'Договор',
+            version: 1,
+            sizeBytes: 0,
+            sourceType: 'contract',
+          }}
+          preparePdf={() => apiService.downloadContractDocument(contract.id, 'pdf')}
+          onClose={() => setMessengerDeliveryOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }

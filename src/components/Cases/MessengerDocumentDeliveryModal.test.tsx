@@ -12,6 +12,7 @@ vi.mock('../../services/api', () => ({
     getMessengerRecipients: vi.fn(),
     getMessengerDocumentDeliveryHistory: vi.fn(),
     prepareCaseDocumentMessengerDelivery: vi.fn(),
+    prepareFinancialDocumentMessengerDelivery: vi.fn(),
     queueMessengerDocumentDelivery: vi.fn(),
     createMessengerRecipient: vi.fn(),
   },
@@ -103,5 +104,61 @@ describe('MessengerDocumentDeliveryModal', () => {
     })));
     expect(apiService.queueMessengerDocumentDelivery).toHaveBeenCalledWith(101);
     expect(await screen.findByText(/поставлен в безопасную очередь/i)).toBeTruthy();
+  });
+
+  it('формирует канонический PDF финансового документа перед подготовкой', async () => {
+    vi.mocked(apiService.getMessengerDocumentDeliveryConfiguration).mockResolvedValue({
+      enabled: true,
+      linkLifetimeHours: 24,
+      providers: [{ channel: 'telegram', enabled: true }],
+    });
+    vi.mocked(apiService.getMessengerRecipients).mockResolvedValue([{
+      id: 8,
+      clientId: 11,
+      channel: 'telegram',
+      provider: 'telegram',
+      displayName: 'Иван Иванов',
+      maskedAddress: '***4567',
+      verificationStatus: 'verified',
+      verificationMethod: 'admin-confirmed',
+      verifiedAt: '2026-07-31T10:00:00Z',
+    }]);
+    vi.mocked(apiService.getMessengerDocumentDeliveryHistory).mockResolvedValue([]);
+    vi.mocked(apiService.prepareFinancialDocumentMessengerDelivery).mockResolvedValue({
+      id: 102,
+      publicId: '00000000-0000-0000-0000-000000000102',
+      documentType: 'invoice',
+      documentId: 44,
+      documentVersion: 1,
+      originalFileName: 'invoice-44.pdf',
+      checksumSha256: 'DEF',
+      sizeBytes: 12,
+      channel: 'telegram',
+      provider: 'telegram',
+      status: 'prepared',
+      linkExpiresAt: '2026-08-01T10:00:00Z',
+    });
+    vi.mocked(apiService.queueMessengerDocumentDelivery).mockResolvedValue({ id: 102, status: 'queued' });
+    const pdf = new Blob(['%PDF'], { type: 'application/pdf' });
+    const preparePdf = vi.fn().mockResolvedValue(pdf);
+
+    render(<MessengerDocumentDeliveryModal
+      document={{ id: 44, originalFileName: 'invoice-44.pdf', documentType: 'Счёт', version: 1, sizeBytes: 0, sourceType: 'invoice' }}
+      clientId={11}
+      preparePdf={preparePdf}
+      onClose={vi.fn()}
+    />);
+    await screen.findAllByText(/иван иванов/i);
+    await userEvent.click(screen.getByText(/подтверждаю выбранный документ/i));
+    await userEvent.click(screen.getByRole('button', { name: /подготовить и отправить/i }));
+
+    await waitFor(() => expect(preparePdf).toHaveBeenCalledOnce());
+    expect(apiService.prepareFinancialDocumentMessengerDelivery).toHaveBeenCalledWith(
+      'invoice',
+      44,
+      pdf,
+      expect.objectContaining({ recipientBindingId: 8, confirmRecipientAndDocument: true }),
+    );
+    expect(apiService.queueMessengerDocumentDelivery).toHaveBeenCalledWith(102);
   });
 });

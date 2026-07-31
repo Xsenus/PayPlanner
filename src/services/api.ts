@@ -6191,6 +6191,27 @@ export class ApiService {
     );
   }
 
+  async prepareFinancialDocumentMessengerDelivery(
+    documentType: 'invoice' | 'act' | 'contract',
+    documentId: number,
+    pdf: Blob,
+    payload: {
+      recipientBindingId: number;
+      message?: string;
+      confirmRecipientAndDocument: boolean;
+    },
+  ) {
+    const form = new FormData();
+    form.append('file', pdf, `${documentType}-${documentId}.pdf`);
+    form.append('recipientBindingId', String(payload.recipientBindingId));
+    form.append('confirmRecipientAndDocument', String(payload.confirmRecipientAndDocument));
+    if (payload.message) form.append('message', payload.message);
+    return this.request<PreparedMessengerDocumentDeliveryDto>(
+      `/messenger-document-deliveries/financial-documents/${documentType}/${documentId}/prepare`,
+      { method: 'POST', body: form },
+    );
+  }
+
   async queueMessengerDocumentDelivery(deliveryId: number) {
     return this.request<{ id: number; status: string; queuedAt?: string | null; nextAttemptAt?: string | null }>(
       `/messenger-document-deliveries/${deliveryId}/queue`,

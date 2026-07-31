@@ -47,6 +47,7 @@ import { cloneInstallmentPlan, deriveInstallmentPlanFromPayments, parseInstallme
 import { getContractBillingModeLabel, getContractEffectiveAmount } from '../../utils/contracts';
 import { ObjectAuditLauncher } from '../ui/ObjectAuditModal';
 import { CounterpartyPickerModal, type CounterpartyKind, type CounterpartySelection } from '../ui/CounterpartyPickerModal';
+import { MessengerDocumentDeliveryModal } from '../Cases/MessengerDocumentDeliveryModal';
 import { useDocumentStatusSettings } from '../../hooks/useDocumentStatusSettings';
 import { getDocumentStatusLabels } from '../../utils/documentStatusSettings';
 import {
@@ -920,6 +921,7 @@ export function InvoiceModal({
   onCreateActPage,
 }: InvoiceModalProps) {
   const { user: currentUser } = useAuth();
+  const isAdmin = (currentUser?.role?.name ?? '').toLowerCase() === 'admin';
   const { t } = useTranslation();
   const { confirm, prompt } = useDialog();
   const toast = useToast();
@@ -1006,6 +1008,7 @@ export function InvoiceModal({
   const [documentPreviewError, setDocumentPreviewError] = useState<string | null>(null);
   const [yandexDiskUploading, setYandexDiskUploading] = useState(false);
   const [downloadMenuOpen, setDownloadMenuOpen] = useState(false);
+  const [messengerDeliveryOpen, setMessengerDeliveryOpen] = useState(false);
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [cancelScope, setCancelScope] = useState<InvoiceCancellationScope>('All');
@@ -4263,6 +4266,9 @@ export function InvoiceModal({
 
           <div className="grid grid-cols-2 gap-2 rounded-lg border border-slate-300 bg-white p-2 md:grid-cols-4 xl:grid-cols-12">
             <button type="button" onClick={() => void handlePageAction('send')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Send className="h-4 w-4" />Отправить</button>
+            {isAdmin && (invoice.type === 'Expense' ? invoice.expenseClientId : invoice.clientId) ? (
+              <button type="button" onClick={() => setMessengerDeliveryOpen(true)} className="inline-flex items-center justify-center gap-2 rounded border border-violet-200 px-3 py-2 text-sm text-violet-700"><Send className="h-4 w-4" />Мессенджер</button>
+            ) : null}
             <button type="button" onClick={() => void handlePrintDocument()} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Printer className="h-4 w-4" />Печать</button>
             <button type="button" onClick={() => void handlePrintDocument(INVOICE_OFFER_TEMPLATE_KEY)} className="inline-flex items-center justify-center gap-2 rounded border border-emerald-200 px-3 py-2 text-sm text-emerald-700"><FileText className="h-4 w-4" />Оферта</button>
             <button
@@ -5796,6 +5802,22 @@ export function InvoiceModal({
         overlayClassName="z-[2300]"
         responsibles={responsibles}
       />
+
+      {messengerDeliveryOpen && invoice && (invoice.type === 'Expense' ? invoice.expenseClientId : invoice.clientId) ? (
+        <MessengerDocumentDeliveryModal
+          clientId={(invoice.type === 'Expense' ? invoice.expenseClientId : invoice.clientId)!}
+          document={{
+            id: invoice.id,
+            originalFileName: `invoice-${invoice.number || invoice.id}.pdf`,
+            documentType: 'Счёт',
+            version: 1,
+            sizeBytes: 0,
+            sourceType: 'invoice',
+          }}
+          preparePdf={() => apiService.downloadInvoiceDocument(invoice.id, 'pdf', { includeSignatureAndSeal: true })}
+          onClose={() => setMessengerDeliveryOpen(false)}
+        />
+      ) : null}
 
       {createActOpen && !onCreateActPage && (
         <div className="absolute inset-0 z-30 flex items-center justify-center bg-slate-900/40 p-4">

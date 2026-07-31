@@ -88,6 +88,7 @@ interface CaseDetailPageProps {
   canViewFinance?: boolean;
   canViewTasks?: boolean;
   canCreateTasks?: boolean;
+  canSendMessenger?: boolean;
 }
 
 type CaseDetailTab = 'overview' | 'participants' | 'tasks' | 'court' | 'finance' | 'workOrder' | 'documents' | 'conversation' | 'history';
@@ -1118,6 +1119,7 @@ export function CaseDetailPage({
   canViewFinance = true,
   canViewTasks = true,
   canCreateTasks = true,
+  canSendMessenger = false,
 }: CaseDetailPageProps) {
   const { confirm, prompt } = useDialog();
   const initialViewState = readCaseDetailViewState(caseId);
@@ -3992,6 +3994,7 @@ export function CaseDetailPage({
                   documentStatusOptions={documentStatusOptions}
                   canEdit={canManageDocuments}
                   canDelete={canDeleteDocuments}
+                  canSendMessenger={canSendMessenger}
                   onPreview={(caseDocument) => void previewDocument(caseDocument)}
                   onDownload={(caseDocument) => void downloadDocument(caseDocument)}
                   onSendToYandexDisk={(caseDocument) => void sendDocumentToYandexDisk(caseDocument)}
@@ -7016,6 +7019,7 @@ function DocumentList({
   documentStatusOptions,
   canEdit,
   canDelete,
+  canSendMessenger,
   onPreview,
   onDownload,
   onSendToYandexDisk,
@@ -7035,6 +7039,7 @@ function DocumentList({
   documentStatusOptions: string[];
   canEdit: boolean;
   canDelete: boolean;
+  canSendMessenger: boolean;
   onPreview: (caseDocument: ClientCaseDocument) => void;
   onDownload: (caseDocument: ClientCaseDocument) => void;
   onSendToYandexDisk: (caseDocument: ClientCaseDocument) => void;
@@ -7159,7 +7164,7 @@ function DocumentList({
               onPreview={onPreview}
               onDownload={onDownload}
               onSendToYandexDisk={onSendToYandexDisk}
-              onSendMessenger={clientId ? setDeliveryDocument : undefined}
+              onSendMessenger={clientId && canSendMessenger ? setDeliveryDocument : undefined}
               onUploadVersion={onUploadVersion}
               onUpdate={onUpdate}
               onDelete={onDelete}

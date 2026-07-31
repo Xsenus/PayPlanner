@@ -13,6 +13,7 @@ import { toDateInputValue } from '../../utils/dateUtils';
 import { getDocumentStatusCodes, getDocumentStatusLabels } from '../../utils/documentStatusSettings';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
+import { MessengerDocumentDeliveryModal } from '../Cases/MessengerDocumentDeliveryModal';
 import { ObjectAuditLauncher } from '../ui/ObjectAuditModal';
 import { StatusChangeModal, type StatusChangeOption } from '../ui/StatusChangeModal';
 import { ActModal } from './ActModal';
@@ -162,6 +163,7 @@ function resolveCounterpartyLabel(type?: PaymentKind | null): string {
 export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: ActDetailPageProps) {
   const { t } = useTranslation();
   const { user } = useAuth();
+  const isAdmin = (user?.role?.name ?? '').toLowerCase() === 'admin';
   const { confirm, prompt } = useDialog();
   const toast = useToast();
   const permissions = useRolePermissions(user?.role?.id);
@@ -186,6 +188,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
   const [downloadMenuOpen, setDownloadMenuOpen] = useState(false);
   const [pageActionLoading, setPageActionLoading] = useState<PageAction | null>(null);
   const [statusChangeOpen, setStatusChangeOpen] = useState(false);
+  const [messengerDeliveryOpen, setMessengerDeliveryOpen] = useState(false);
   const [statusChangeValue, setStatusChangeValue] = useState<ActWorkflowStatus>('Draft');
   const [statusChangeReason, setStatusChangeReason] = useState('');
   const [statusChangeSubmitting, setStatusChangeSubmitting] = useState(false);
@@ -1025,6 +1028,17 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
               Отправить
             </button>
 
+            {isAdmin && act.clientId ? (
+              <button
+                type="button"
+                onClick={() => setMessengerDeliveryOpen(true)}
+                className="inline-flex items-center justify-center gap-2 rounded border border-violet-200 px-3 py-2 text-sm text-violet-700 transition hover:bg-violet-50"
+              >
+                <Send className="h-4 w-4" />
+                Мессенджер
+              </button>
+            ) : null}
+
             <button
               type="button"
               onClick={() => void handlePrintDocument()}
@@ -1224,6 +1238,21 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
         error={statusChangeError}
         loading={statusChangeSubmitting}
       />
+      {messengerDeliveryOpen && act.clientId ? (
+        <MessengerDocumentDeliveryModal
+          clientId={act.clientId}
+          document={{
+            id: act.id,
+            originalFileName: `act-${act.number || act.id}.pdf`,
+            documentType: 'Акт',
+            version: 1,
+            sizeBytes: 0,
+            sourceType: 'act',
+          }}
+          preparePdf={() => apiService.downloadActDocument(act.id, 'pdf', { includeSignatureAndSeal: true })}
+          onClose={() => setMessengerDeliveryOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }
