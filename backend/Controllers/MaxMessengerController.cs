@@ -72,6 +72,22 @@ public sealed class MaxMessengerController(
         return Ok(items);
     }
 
+    [HttpPost("messages/{publicId:guid}/retry")]
+    [Authorize(Roles = "admin")]
+    public async Task<IActionResult> RetryMessage(Guid publicId, CancellationToken ct)
+    {
+        if (!int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId)) return Unauthorized();
+        var actorName = User.FindFirstValue(ClaimTypes.Name) ?? User.Identity?.Name ?? "Администратор";
+        try
+        {
+            return await outbox.RetryAsync(publicId, userId, actorName, ct) ? Accepted() : NotFound();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(new { message = ex.Message });
+        }
+    }
+
     [HttpGet("correspondence")]
     [Authorize(Roles = "admin")]
     public async Task<IActionResult> GetCorrespondence(

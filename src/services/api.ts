@@ -1272,6 +1272,21 @@ export interface UpdateMaxNotificationSettingsRequest {
   technicalPayloadRetentionDays?: number | null;
 }
 
+export interface MaxOutboxMessageDto {
+  publicId: string;
+  eventKey: string;
+  scenario: string;
+  recipientUserId?: number | null;
+  bodyPreview: string;
+  status: string;
+  attemptCount: number;
+  maxAttempts: number;
+  nextAttemptAt?: string | null;
+  lastErrorCode?: string | null;
+  createdAt: string;
+  sentAt?: string | null;
+}
+
 export interface UpdateNotificationTemplateRequest {
   isEnabled: boolean;
   subject?: string | null;
@@ -3296,6 +3311,14 @@ export class ApiService {
       method: 'PUT',
       body: JSON.stringify(payload),
     });
+  }
+
+  async getMaxOutboxMessages(take = 20) {
+    return this.request<MaxOutboxMessageDto[]>(`/max/messages?take=${Math.max(1, Math.min(100, take))}`);
+  }
+
+  async retryMaxOutboxMessage(publicId: string) {
+    return this.request<void>(`/max/messages/${encodeURIComponent(publicId)}/retry`, { method: 'POST' });
   }
 
   async getNotificationTemplates() {

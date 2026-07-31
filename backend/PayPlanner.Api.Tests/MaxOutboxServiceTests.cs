@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
+using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services.Notifications;
 using Xunit;
 
@@ -147,6 +148,47 @@ public sealed class MaxOutboxServiceTests
         Assert.Equal(MaxOutboxStatuses.Failed, failed.Status);
         Assert.Equal("provider-timeout", failed.LastErrorCode);
         Assert.Equal(fixture.Now.AddMinutes(1), failed.NextAttemptAt);
+    }
+
+    [Fact]
+    public async Task ManualRetryRequeuesFailedMessageAndCreatesAuditEvent()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var queued = await fixture.Outbox.QueueAsync(fixture.Request(), CancellationToken.None);
+        await fixture.Processor(new RecordingApiClient(transientFailure: true)).ProcessBatchAsync(CancellationToken.None);
+
+        var retried = await fixture.Outbox.RetryAsync(queued.PublicId, fixture.UserId, "Администратор", CancellationToken.None);
+        var stored = await fixture.Db.MaxOutboxMessages.AsNoTracking().SingleAsync(item => item.Id == queued.Id);
+        var audit = await fixture.Db.ObjectAuditEvents.AsNoTracking().SingleAsync(item => item.ObjectType == "max-outbox-message");
+
+        Assert.True(retried);
+        Assert.Equal(MaxOutboxStatuses.Queued, stored.Status);
+        Assert.Equal("Retried", audit.Action);
+        Assert.DoesNotContain("Критическое уведомление", audit.MetadataJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MaxSettingsAuditListsChangesWithoutSecrets()
+    {
+        var previous = new MaxNotificationDiagnosticsDto();
+        var next = new MaxNotificationDiagnosticsDto
+        {
+            Enabled = true,
+            BotTokenSet = true,
+            WebhookSecretSet = true,
+            DocumentsEnabled = true,
+            DailyLimitPerRecipient = 15,
+            TechnicalPayloadRetentionDays = 30
+        };
+
+        var audit = NotificationSettingsAudit.CreateMaxSettingsUpdatedEvent(
+            null, previous, next, botTokenChanged: true, webhookSecretChanged: true);
+
+        Assert.NotNull(audit);
+        Assert.Contains("MaxBotToken", audit.MetadataJson, StringComparison.Ordinal);
+        Assert.Contains("MaxWebhookSecret", audit.MetadataJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("bot-token", audit.MetadataJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("webhook-secret", audit.MetadataJson, StringComparison.Ordinal);
     }
 
     private sealed class Fixture : IAsyncDisposable

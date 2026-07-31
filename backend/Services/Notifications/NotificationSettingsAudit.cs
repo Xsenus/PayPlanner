@@ -121,6 +121,40 @@ public static class NotificationSettingsAudit
             });
     }
 
+    public static ObjectAuditEvent? CreateMaxSettingsUpdatedEvent(
+        ClaimsPrincipal? user,
+        MaxNotificationDiagnosticsDto previous,
+        MaxNotificationDiagnosticsDto next,
+        bool botTokenChanged,
+        bool webhookSecretChanged)
+    {
+        var changes = new List<NotificationSettingsChange>();
+        AddIfChanged(changes, "MaxEnabled", FormatBoolean(previous.Enabled), FormatBoolean(next.Enabled));
+        AddIfChanged(changes, "MaxEmergencyStop", FormatBoolean(previous.EmergencyStop), FormatBoolean(next.EmergencyStop));
+        AddIfChanged(changes, "MaxNotifications", FormatBoolean(previous.NotificationsEnabled), FormatBoolean(next.NotificationsEnabled));
+        AddIfChanged(changes, "MaxDocuments", FormatBoolean(previous.DocumentsEnabled), FormatBoolean(next.DocumentsEnabled));
+        AddIfChanged(changes, "MaxCorrespondence", FormatBoolean(previous.CorrespondenceEnabled), FormatBoolean(next.CorrespondenceEnabled));
+        AddIfChanged(changes, "MaxConfirmations", FormatBoolean(previous.ConfirmationsEnabled), FormatBoolean(next.ConfirmationsEnabled));
+        AddIfChanged(changes, "MaxQuietHoursEnabled", FormatBoolean(previous.QuietHoursEnabled), FormatBoolean(next.QuietHoursEnabled));
+        AddIfChanged(changes, "MaxQuietHoursStart", previous.QuietHoursStart, next.QuietHoursStart);
+        AddIfChanged(changes, "MaxQuietHoursEnd", previous.QuietHoursEnd, next.QuietHoursEnd);
+        AddIfChanged(changes, "MaxQuietHoursTimeZone", previous.QuietHoursTimeZone, next.QuietHoursTimeZone);
+        AddIfChanged(changes, "MaxDailyLimit", FormatNumber(previous.DailyLimitPerRecipient), FormatNumber(next.DailyLimitPerRecipient));
+        AddIfChanged(changes, "MaxRetentionDays", FormatNumber(previous.TechnicalPayloadRetentionDays), FormatNumber(next.TechnicalPayloadRetentionDays));
+        if (botTokenChanged)
+            changes.Add(new("MaxBotToken", previous.BotTokenSet ? "настроен" : "не задан", next.BotTokenSet ? "обновлён" : "не задан"));
+        if (webhookSecretChanged)
+            changes.Add(new("MaxWebhookSecret", previous.WebhookSecretSet ? "настроен" : "не задан", next.WebhookSecretSet ? "обновлён" : "не задан"));
+        if (changes.Count == 0) return null;
+
+        return CreateEvent(user, "Изменены настройки канала MAX.", new
+        {
+            category = "max",
+            changedFields = changes.Select(item => item.Field).ToArray(),
+            changes,
+        });
+    }
+
     private static ObjectAuditEvent CreateEvent(ClaimsPrincipal? user, string description, object metadata)
         => new()
         {

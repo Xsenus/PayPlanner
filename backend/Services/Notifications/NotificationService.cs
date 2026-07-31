@@ -276,7 +276,19 @@ public sealed class NotificationService : INotificationService
             throw new InvalidOperationException("MaxNotificationServiceMissing");
         }
 
-        await _maxService.UpdateSettingsAsync(request, cancellationToken);
+        var previous = await _maxService.GetSettingsAsync(cancellationToken);
+        var next = await _maxService.UpdateSettingsAsync(request, cancellationToken);
+        var auditEvent = NotificationSettingsAudit.CreateMaxSettingsUpdatedEvent(
+            _httpContextAccessor?.HttpContext?.User,
+            previous,
+            next,
+            !request.KeepExistingBotToken || !string.IsNullOrWhiteSpace(request.BotToken),
+            !request.KeepExistingWebhookSecret || !string.IsNullOrWhiteSpace(request.WebhookSecret));
+        if (auditEvent is not null)
+        {
+            _context.ObjectAuditEvents.Add(auditEvent);
+            await _context.SaveChangesAsync(cancellationToken);
+        }
         return await GetSettingsAsync(cancellationToken);
     }
 

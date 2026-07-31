@@ -30,6 +30,9 @@ public sealed class MaxWebhookServiceTests
         Assert.Equal(MaxRecipientLinkStatuses.Verified, stored.Status);
         Assert.Equal(9001, stored.MaxUserId);
         Assert.Single(await fixture.Db.MaxInboundEvents.ToListAsync());
+        Assert.Equal(
+            ["Created", "Verified"],
+            await fixture.Db.ObjectAuditEvents.OrderBy(item => item.Id).Select(item => item.Action).ToArrayAsync());
     }
 
     [Fact]

@@ -20,6 +20,7 @@ public sealed record MaxQueueRequest(
 public interface IMaxOutboxService
 {
     Task<MaxOutboxMessage> QueueAsync(MaxQueueRequest request, CancellationToken ct);
+    Task<bool> RetryAsync(Guid publicId, int? actorUserId, string actorName, CancellationToken ct);
 }
 
 public static class MaxMessageTemplateCatalog
@@ -130,6 +131,43 @@ public sealed class MaxOutboxService(
             if (concurrent is not null) return concurrent;
             throw;
         }
+    }
+
+    public async Task<bool> RetryAsync(Guid publicId, int? actorUserId, string actorName, CancellationToken ct)
+    {
+        var message = await db.MaxOutboxMessages
+            .Include(item => item.RecipientLink)
+            .FirstOrDefaultAsync(item => item.PublicId == publicId, ct);
+        if (message is null) return false;
+        if (message.Status != MaxOutboxStatuses.Failed || message.AttemptCount >= message.MaxAttempts)
+            throw new InvalidOperationException("Повтор доступен только для неокончательной ошибки MAX с оставшимися попытками.");
+        if (message.RecipientLink.Status != MaxRecipientLinkStatuses.Verified || !message.RecipientLink.MaxUserId.HasValue)
+            throw new InvalidOperationException("Получатель MAX больше не привязан.");
+
+        var now = timeProvider.GetUtcNow().UtcDateTime;
+        message.Status = MaxOutboxStatuses.Queued;
+        message.NextAttemptAt = now;
+        message.LastErrorCode = null;
+        message.UpdatedAt = now;
+        db.ObjectAuditEvents.Add(new ObjectAuditEvent
+        {
+            ObjectType = "max-outbox-message",
+            ObjectId = message.Id,
+            Action = "Retried",
+            Description = "Администратор повторно поставил доставку MAX в очередь.",
+            ActorUserId = actorUserId,
+            ActorUserName = actorName,
+            MetadataJson = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                message.PublicId,
+                message.EventKey,
+                message.Scenario,
+                previousAttempts = message.AttemptCount
+            }),
+            CreatedAt = now
+        });
+        await db.SaveChangesAsync(ct);
+        return true;
     }
 
     private static bool IsScenarioEnabled(MaxRuntimeSettings settings, string scenario) => scenario switch

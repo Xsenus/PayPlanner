@@ -12,6 +12,7 @@ import {
   type NotificationPurposeDto,
   type NotificationSenderDto,
   type NotificationSettingsDto,
+  type MaxOutboxMessageDto,
   type NotificationTemplateDto,
   type UpsertNotificationSenderRequest,
   type UserNotificationPreferenceDto,
@@ -2314,7 +2315,36 @@ function MaxDiagnosticsPanel({
   canEdit: boolean;
   onSave: () => Promise<void>;
 }) {
+  const toast = useToast();
   const max = settings?.max;
+  const [deliveries, setDeliveries] = useState<MaxOutboxMessageDto[]>([]);
+  const [deliveriesLoading, setDeliveriesLoading] = useState(false);
+  const [retryingId, setRetryingId] = useState<string | null>(null);
+  const loadDeliveries = useCallback(async () => {
+    setDeliveriesLoading(true);
+    try {
+      setDeliveries(await apiService.getMaxOutboxMessages(20));
+    } catch (error) {
+      toast.error(extractDisplayErrorMessage(error, 'Не удалось загрузить журнал MAX.'), 'MAX');
+    } finally {
+      setDeliveriesLoading(false);
+    }
+  }, [toast]);
+  useEffect(() => {
+    void loadDeliveries();
+  }, [loadDeliveries]);
+  const retryDelivery = async (item: MaxOutboxMessageDto) => {
+    setRetryingId(item.publicId);
+    try {
+      await apiService.retryMaxOutboxMessage(item.publicId);
+      toast.success('Доставка MAX возвращена в очередь.', 'MAX');
+      await loadDeliveries();
+    } catch (error) {
+      toast.error(extractDisplayErrorMessage(error, 'Не удалось повторить доставку MAX.'), 'MAX');
+    } finally {
+      setRetryingId(null);
+    }
+  };
   const pendingItems = [
     { label: 'API MAX', ready: Boolean(max?.apiConfirmed) },
     { label: 'Бот', ready: Boolean(max?.botConfigured) },
@@ -2509,6 +2539,35 @@ function MaxDiagnosticsPanel({
           )}
         </div>
       </div>
+
+      <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50 p-3">
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            <div className="text-xs font-semibold uppercase text-gray-500">Последние доставки MAX</div>
+            <div className="mt-1 text-xs text-gray-500">Тексты скрыты; повтор доступен только для временной ошибки с оставшимися попытками.</div>
+          </div>
+          <button type="button" onClick={() => void loadDeliveries()} disabled={deliveriesLoading} className="inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-xs font-semibold text-gray-700 disabled:opacity-60">
+            <RefreshCw className={`h-3.5 w-3.5 ${deliveriesLoading ? 'animate-spin' : ''}`} /> Обновить
+          </button>
+        </div>
+        <div className="mt-2 space-y-1.5">
+          {deliveries.map((item) => (
+            <div key={item.publicId} className="flex flex-wrap items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-600">
+              <span className="font-semibold text-gray-800">{item.scenario}</span>
+              <span>{formatDeliveryDate(item.createdAt)}</span>
+              <span className={`rounded-full border px-2 py-0.5 ${deliveryStatusClass(item.status)}`}>{deliveryStatusLabel(item.status)}</span>
+              <span>попыток {item.attemptCount}/{item.maxAttempts}</span>
+              {item.lastErrorCode ? <span className="text-rose-600">{item.lastErrorCode}</span> : null}
+              {item.status === 'failed' && item.attemptCount < item.maxAttempts && canEdit ? (
+                <button type="button" disabled={retryingId === item.publicId} onClick={() => void retryDelivery(item)} className="ml-auto rounded-lg border border-violet-200 px-2 py-1 font-semibold text-violet-700 disabled:opacity-60">
+                  {retryingId === item.publicId ? 'Повторяем…' : 'Повторить'}
+                </button>
+              ) : null}
+            </div>
+          ))}
+          {!deliveriesLoading && deliveries.length === 0 ? <div className="py-2 text-xs text-gray-500">Доставок пока нет.</div> : null}
+        </div>
+      </div>
     </div>
   );
 }
@@ -2547,6 +2606,12 @@ function deliveryStatusLabel(status: string) {
       return 'Отправлено';
     case 'failed':
       return 'Ошибка';
+    case 'queued':
+      return 'В очереди';
+    case 'processing':
+      return 'Отправляется';
+    case 'cancelled':
+      return 'Отменено';
     case 'skipped':
       return 'Пропущено';
     case 'pending':

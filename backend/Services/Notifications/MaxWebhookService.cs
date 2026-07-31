@@ -33,20 +33,32 @@ public sealed class MaxWebhookService(
 
     public async Task<MaxLinkTokenResult> CreateEmployeeLinkAsync(int userId, CancellationToken ct)
     {
-        if (userId <= 0 || !await db.Users.AsNoTracking().AnyAsync(item => item.Id == userId && item.IsActive, ct))
+        var actorName = userId <= 0 ? null : await db.Users.AsNoTracking()
+            .Where(item => item.Id == userId && item.IsActive)
+            .Select(item => item.FullName)
+            .FirstOrDefaultAsync(ct);
+        if (string.IsNullOrWhiteSpace(actorName))
             throw new InvalidOperationException("Активный сотрудник не найден.");
-        return await CreateLinkAsync(userId, null, ct);
+        return await CreateLinkAsync(userId, null, userId, actorName, ct);
     }
 
     public async Task<MaxLinkTokenResult> CreatePortalLinkAsync(int portalAccountId, CancellationToken ct)
     {
-        if (portalAccountId <= 0 || !await db.ClientPortalAccounts.AsNoTracking()
-            .AnyAsync(item => item.Id == portalAccountId && item.IsActive && item.RevokedAt == null, ct))
+        var actorName = portalAccountId <= 0 ? null : await db.ClientPortalAccounts.AsNoTracking()
+            .Where(item => item.Id == portalAccountId && item.IsActive && item.RevokedAt == null)
+            .Select(item => item.DisplayName)
+            .FirstOrDefaultAsync(ct);
+        if (string.IsNullOrWhiteSpace(actorName))
             throw new InvalidOperationException("Активный аккаунт клиентского кабинета не найден.");
-        return await CreateLinkAsync(null, portalAccountId, ct);
+        return await CreateLinkAsync(null, portalAccountId, null, actorName, ct);
     }
 
-    private async Task<MaxLinkTokenResult> CreateLinkAsync(int? userId, int? portalAccountId, CancellationToken ct)
+    private async Task<MaxLinkTokenResult> CreateLinkAsync(
+        int? userId,
+        int? portalAccountId,
+        int? actorUserId,
+        string actorName,
+        CancellationToken ct)
     {
         var settings = await settingsService.GetRuntimeSettingsAsync(ct);
         if (!settings.Ready) throw new InvalidOperationException("Канал MAX выключен или настроен не полностью.");
@@ -76,6 +88,13 @@ public sealed class MaxWebhookService(
             UpdatedAt = now
         };
         db.MaxRecipientLinks.Add(link);
+        AddAudit(
+            portalAccountId ?? userId ?? 0,
+            "Created",
+            "Создан одноразовый запрос на привязку MAX.",
+            actorUserId,
+            actorName,
+            new { userId, portalAccountId, expiresAt = link.LinkTokenExpiresAt });
         await db.SaveChangesAsync(ct);
 
         var url = $"https://max.ru/{Uri.EscapeDataString(botName)}?start={Uri.EscapeDataString(token)}";
@@ -102,7 +121,17 @@ public sealed class MaxWebhookService(
             link.OptedOutAt = now;
             link.UpdatedAt = now;
         }
-        if (links.Count > 0) await db.SaveChangesAsync(ct);
+        if (links.Count > 0)
+        {
+            AddAudit(
+                portalAccountId ?? userId ?? 0,
+                "Revoked",
+                "Привязка MAX отключена получателем.",
+                userId,
+                userId.HasValue ? "Сотрудник" : "Клиентский кабинет",
+                new { userId, portalAccountId, links = links.Count });
+            await db.SaveChangesAsync(ct);
+        }
         return links.Count > 0;
     }
 
@@ -253,6 +282,13 @@ public sealed class MaxWebhookService(
         link.VerifiedAt = now;
         link.LastSeenAt = now;
         link.UpdatedAt = now;
+        AddAudit(
+            link.Id,
+            "Verified",
+            "Привязка MAX подтверждена официальным webhook.",
+            link.UserId,
+            link.UserId.HasValue ? "Сотрудник" : "Клиентский кабинет",
+            new { link.UserId, link.ClientPortalAccountId, link.MaxUserId, link.VerifiedAt });
         return "link-verified";
     }
 
@@ -268,8 +304,32 @@ public sealed class MaxWebhookService(
             link.OptedOutAt = now;
             link.UpdatedAt = now;
         }
+        if (links.Count > 0)
+        {
+            foreach (var link in links)
+                AddAudit(link.Id, "Blocked", "Привязка MAX заблокирована после отключения диалога.", null, "MAX webhook", new { link.UserId, link.ClientPortalAccountId });
+        }
         return links.Count == 0 ? "recipient-unknown" : "recipient-blocked";
     }
+
+    private void AddAudit(
+        int objectId,
+        string action,
+        string description,
+        int? actorUserId,
+        string actorName,
+        object metadata)
+        => db.ObjectAuditEvents.Add(new ObjectAuditEvent
+        {
+            ObjectType = "max-recipient-link",
+            ObjectId = objectId,
+            Action = action,
+            Description = description,
+            ActorUserId = actorUserId,
+            ActorUserName = actorName,
+            MetadataJson = JsonSerializer.Serialize(metadata),
+            CreatedAt = timeProvider.GetUtcNow().UtcDateTime
+        });
 
     private static bool FixedTimeEquals(string expected, string? actual)
     {

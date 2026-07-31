@@ -491,6 +491,9 @@ public sealed class ExternalWorkOrderApprovalServiceTests
             Requests.Add(request);
             return Task.FromResult(new MaxOutboxMessage());
         }
+
+        public Task<bool> RetryAsync(Guid publicId, int? actorUserId, string actorName, CancellationToken ct)
+            => Task.FromResult(false);
     }
 
     private sealed class FixedOptionsMonitor : IOptionsMonitor<AppFeatureFlagsOptions>
