@@ -180,7 +180,8 @@ export function ClientPortalPage() {
           <section className="rounded-2xl border border-blue-200 bg-blue-50/50 p-4 text-sm text-slate-700">
             <div className="font-semibold text-slate-900">{profile.displayName}</div>
             <div className="mt-1">{profile.email} · {profile.accountType === 'representative' ? 'представитель' : 'клиент'}</div>
-            <div className="mt-1 text-xs text-slate-500">Доступно дел: {profile.activeCaseCount} · активных входов: {profile.activeSessionCount}</div>
+          <div className="mt-1 text-xs text-slate-500">Доступно дел: {profile.activeCaseCount} · активных входов: {profile.activeSessionCount}</div>
+          {profile.securityNotificationsEnabled ? <div className="mt-1 text-xs text-emerald-700">Уведомления безопасности о новых входах включены.</div> : null}
             <button type="button" onClick={() => void apiService.logoutClientPortal(true).finally(() => window.location.reload())} className="mt-3 rounded-lg border border-rose-200 bg-white px-3 py-2 text-xs font-semibold text-rose-700">Выйти на всех устройствах</button>
           </section>
         ) : null}

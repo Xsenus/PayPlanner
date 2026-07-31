@@ -42,6 +42,7 @@ describe('ClientPortalPage', () => {
       displayName: 'Иван Иванов',
       email: 'ivan@example.test',
       accountType: 'client',
+      securityNotificationsEnabled: true,
       activeSessionCount: 2,
       activeCaseCount: 1,
     });
@@ -88,6 +89,7 @@ describe('ClientPortalPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Профиль' }));
     expect(await screen.findByText('ivan@example.test · клиент')).toBeTruthy();
+    expect(screen.getByText('Уведомления безопасности о новых входах включены.')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Выйти на всех устройствах' })).toBeTruthy();
 
     fireEvent.click(screen.getAllByRole('button', { name: /Дело клиента/ }).at(-1)!);

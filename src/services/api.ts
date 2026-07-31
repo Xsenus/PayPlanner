@@ -151,7 +151,7 @@ export interface ClientPortalCase {
   contracts?: Array<{ number: string; date: string; amount?: number | null; status: string; validUntil?: string | null }>;
   approvals: Array<{ version: number; status: string; createdAt: string; expiresAt: string; decisionAt?: string | null }>;
 }
-export interface ClientPortalProfile { displayName: string; email: string; accountType: string; activeSessionCount: number; activeCaseCount: number }
+export interface ClientPortalProfile { displayName: string; email: string; accountType: string; securityNotificationsEnabled: boolean; activeSessionCount: number; activeCaseCount: number }
 export interface ClientPortalCaseAccess {
   accountId: number; displayName: string; email: string; accountType: 'client' | 'representative'; isActive: boolean;
   canViewCaseSummary: boolean; canViewDeadlines: boolean; canViewDocuments: boolean; canViewFinance: boolean;

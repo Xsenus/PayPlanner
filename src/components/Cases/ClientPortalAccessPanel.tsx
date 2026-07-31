@@ -101,7 +101,12 @@ export function ClientPortalAccessPanel({ caseItem, documents }: { caseItem: Cli
       <p className="mt-1 text-xs text-slate-500">По умолчанию закрыто всё. Отметьте только данные, которые можно показать получателю.</p>
       {accesses.length > 0 ? <div className="mt-3 space-y-2">{accesses.map((item) => (
         <div key={item.accountId} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm">
-          <div><span className="font-semibold text-slate-800">{item.displayName}</span><span className="ml-2 text-slate-500">{item.email}</span><span className={`ml-2 text-xs ${item.isActive ? 'text-emerald-600' : 'text-rose-600'}`}>{item.isActive ? 'доступен' : 'отозван'}</span></div>
+          <div className="min-w-0">
+            <div><span className="font-semibold text-slate-800">{item.displayName}</span><span className="ml-2 text-slate-500">{item.email}</span><span className={`ml-2 text-xs ${item.isActive ? 'text-emerald-600' : 'text-rose-600'}`}>{item.isActive ? 'доступен' : 'отозван'}</span></div>
+            <div className="mt-1 flex flex-wrap gap-1" aria-label={`Разрешения: ${item.displayName}`}>
+              {portalRightLabels(item).map((label) => <span key={label} className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[11px] text-blue-700">{label}</span>)}
+            </div>
+          </div>
           {item.isActive ? <button type="button" disabled={busy} onClick={() => void revoke(item.accountId)} className="inline-flex items-center gap-1 text-xs text-rose-600"><Trash2 className="h-3.5 w-3.5" /> Отозвать</button> : null}
         </div>
       ))}</div> : null}
@@ -127,6 +132,16 @@ export function ClientPortalAccessPanel({ caseItem, documents }: { caseItem: Cli
       {audit.length > 0 ? <details className="mt-3 rounded-lg border border-slate-200 px-3 py-2"><summary className="cursor-pointer text-sm font-medium text-slate-700">Последние действия ({audit.length})</summary><div className="mt-2 max-h-48 space-y-1 overflow-auto">{audit.map((item, index) => <div key={`${item.occurredAt}-${index}`} className="text-xs text-slate-500">{new Date(item.occurredAt).toLocaleString('ru-RU')} · {item.displayName || item.email || 'Система'} · {item.eventType}</div>)}</div></details> : null}
     </section>
   );
+}
+
+function portalRightLabels(item: ClientPortalCaseAccess) {
+  const labels = ['Карточка дела'];
+  if (item.canViewDeadlines) labels.push('Сроки и события');
+  if (item.canViewDocuments) labels.push('Документы');
+  if (item.canViewFinance) labels.push('Финансы');
+  if (item.canViewApprovals) labels.push('Согласования');
+  if (item.canViewMessages) labels.push('История сообщений');
+  return labels;
 }
 
 function CheckLabel({ label, checked, onChange }: { label: string; checked: boolean; onChange: (value: boolean) => void }) {

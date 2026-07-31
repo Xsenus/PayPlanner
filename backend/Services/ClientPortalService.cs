@@ -417,6 +417,21 @@ public sealed class ClientPortalService : IClientPortalService
         _db.ClientPortalSessions.Add(session);
         Audit(challenge.Account.Id, null, "login_succeeded", "session", session.PublicId.ToString("D"), ip, userAgent);
         await _db.SaveChangesAsync(ct);
+        try
+        {
+            var loginAt = DateTime.UtcNow.ToString("dd.MM.yyyy HH:mm 'UTC'", CultureInfo.InvariantCulture);
+            var device = string.IsNullOrWhiteSpace(userAgent) ? "не определено" : Truncate(userAgent.Trim(), 160);
+            await _email.SendEmailAsync(
+                challenge.Account.Email,
+                "Новый вход в клиентский кабинет",
+                $"<h2>Новый вход</h2><p>{WebUtility.HtmlEncode(challenge.Account.DisplayName)}, выполнен вход в клиентский кабинет.</p><p>Время: {loginAt}<br>Устройство: {WebUtility.HtmlEncode(device)}</p><p>Если это были не вы, завершите все сессии в разделе «Профиль» и свяжитесь с компанией.</p>",
+                true,
+                ct);
+        }
+        catch (Exception) when (!ct.IsCancellationRequested)
+        {
+            // Сбой дополнительного security-письма не должен отменять уже подтверждённый вход.
+        }
         return new ClientPortalSessionCreatedDto { SessionToken = sessionToken, ExpiresAt = session.ExpiresAt };
     }
 
@@ -549,6 +564,7 @@ public sealed class ClientPortalService : IClientPortalService
                 DisplayName = account.DisplayName,
                 Email = account.Email,
                 AccountType = account.AccountType,
+                SecurityNotificationsEnabled = true,
                 ActiveSessionCount = account.Sessions.Count(item => item.RevokedAt == null && item.ExpiresAt > DateTime.UtcNow),
                 ActiveCaseCount = account.CaseGrants.Count(item => item.RevokedAt == null && item.CanViewCaseSummary),
             })
@@ -860,7 +876,7 @@ public sealed class ClientPortalLoginPreviewDto { public string DisplayName { ge
 public sealed class ClientPortalSessionCreatedDto { public string SessionToken { get; set; } = ""; public DateTime ExpiresAt { get; set; } }
 public sealed class ClientPortalHomeDto { public string DisplayName { get; set; } = ""; public List<ClientPortalCaseListItemDto> Items { get; set; } = []; public List<ClientPortalUpcomingActionDto> UpcomingActions { get; set; } = []; public int Total { get; set; } public int Page { get; set; } public int PageSize { get; set; } }
 public sealed class ClientPortalUpcomingActionDto { public Guid CasePublicId { get; set; } public string CaseTitle { get; set; } = ""; public string Title { get; set; } = ""; public DateTime DueAt { get; set; } public string Status { get; set; } = ""; }
-public sealed class ClientPortalProfileDto { public string DisplayName { get; set; } = ""; public string Email { get; set; } = ""; public string AccountType { get; set; } = ""; public int ActiveSessionCount { get; set; } public int ActiveCaseCount { get; set; } }
+public sealed class ClientPortalProfileDto { public string DisplayName { get; set; } = ""; public string Email { get; set; } = ""; public string AccountType { get; set; } = ""; public bool SecurityNotificationsEnabled { get; set; } public int ActiveSessionCount { get; set; } public int ActiveCaseCount { get; set; } }
 public sealed class ClientPortalDocumentGrantDto { public string GrantToken { get; set; } = ""; public DateTime ExpiresAt { get; set; } }
 public sealed class ClientPortalCaseListItemDto
 {

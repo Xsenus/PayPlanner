@@ -35,6 +35,7 @@ public sealed class ClientPortalServiceTests
         var session = await fixture.Service.VerifyLoginAsync(
             challenge.ChallengeId, fixture.Email.Token, fixture.Email.Otp, "127.0.0.1", "test", CancellationToken.None);
         Assert.NotNull(await fixture.Service.ResolveSessionAsync(session.SessionToken, null, null, CancellationToken.None));
+        Assert.Contains("Новый вход в клиентский кабинет", fixture.Email.Subjects);
 
         var replay = await Assert.ThrowsAsync<ClientPortalException>(() =>
             fixture.Service.VerifyLoginAsync(challenge.ChallengeId, fixture.Email.Token, fixture.Email.Otp, null, null, CancellationToken.None));
@@ -299,10 +300,14 @@ public sealed class ClientPortalServiceTests
     {
         public string Token { get; private set; } = string.Empty;
         public string Otp { get; private set; } = string.Empty;
+        public List<string> Subjects { get; } = [];
         public Task SendEmailAsync(string toEmail, string subject, string body, bool isHtml = false, CancellationToken cancellationToken = default, EmailSendSettings? settings = null)
         {
-            Token = Uri.UnescapeDataString(Regex.Match(body, @"#token=([^""&<]+)").Groups[1].Value);
-            Otp = Regex.Match(body, @">(\d{6})</strong>").Groups[1].Value;
+            Subjects.Add(subject);
+            var tokenMatch = Regex.Match(body, @"#token=([^""&<]+)");
+            var otpMatch = Regex.Match(body, @">(\d{6})</strong>");
+            if (tokenMatch.Success) Token = Uri.UnescapeDataString(tokenMatch.Groups[1].Value);
+            if (otpMatch.Success) Otp = otpMatch.Groups[1].Value;
             return Task.CompletedTask;
         }
         public Task SendRegistrationPendingEmailAsync(string toEmail, string fullName) => Task.CompletedTask;
