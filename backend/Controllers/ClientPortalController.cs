@@ -64,6 +64,8 @@ public sealed class ClientPortalController(IClientPortalService service, IWebHos
     public async Task<ActionResult<ClientPortalHomeDto>> Home(
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20,
+        [FromQuery] string? search = null,
+        [FromQuery] string? status = null,
         CancellationToken ct = default)
     {
         ApplySecurityHeaders();
@@ -72,7 +74,7 @@ public sealed class ClientPortalController(IClientPortalService service, IWebHos
             var session = await ResolveSession(ct);
             return session is null
                 ? Unauthorized(new { code = "session_unavailable", message = "Войдите в кабинет ещё раз." })
-                : Ok(await service.GetHomeAsync(session, page, pageSize, ct));
+                : Ok(await service.GetHomeAsync(session, page, pageSize, ct, search, status));
         }
         catch (ClientPortalException ex)
         {
@@ -100,10 +102,35 @@ public sealed class ClientPortalController(IClientPortalService service, IWebHos
         }
     }
 
-    [HttpGet("documents/{documentPublicId:guid}")]
-    public async Task<IActionResult> DownloadDocument(Guid documentPublicId, CancellationToken ct)
+    [HttpGet("profile")]
+    public async Task<ActionResult<ClientPortalProfileDto>> Profile(CancellationToken ct)
     {
         ApplySecurityHeaders();
+        var session = await ResolveSession(ct);
+        return session is null
+            ? Unauthorized(new { code = "session_unavailable", message = "Войдите в кабинет ещё раз." })
+            : Ok(await service.GetProfileAsync(session, ct));
+    }
+
+    [HttpPost("documents/{documentPublicId:guid}/grant")]
+    public async Task<ActionResult<ClientPortalDocumentGrantDto>> CreateDocumentGrant(Guid documentPublicId, CancellationToken ct)
+    {
+        ApplySecurityHeaders();
+        if (!IsTrustedPortalPost()) return BadRequest(new { code = "csrf_rejected", message = "Обновите страницу и повторите действие." });
+        var session = await ResolveSession(ct);
+        if (session is null) return Unauthorized(new { code = "session_unavailable", message = "Войдите в кабинет ещё раз." });
+        var result = await service.CreateDocumentGrantAsync(session, documentPublicId, ct);
+        return result is null ? NotFound() : Ok(result);
+    }
+
+    [HttpPost("documents/{documentPublicId:guid}/download")]
+    public async Task<IActionResult> DownloadDocument(
+        Guid documentPublicId,
+        [FromBody] ClientPortalDocumentDownloadRequest? request,
+        CancellationToken ct)
+    {
+        ApplySecurityHeaders();
+        if (!IsTrustedPortalPost()) return BadRequest(new { code = "csrf_rejected", message = "Обновите страницу и повторите действие." });
         try
         {
             var session = await ResolveSession(ct);
@@ -111,7 +138,7 @@ public sealed class ClientPortalController(IClientPortalService service, IWebHos
             {
                 return Unauthorized(new { code = "session_unavailable", message = "Войдите в кабинет ещё раз." });
             }
-            var document = await service.GetDocumentAsync(session, documentPublicId, ct);
+            var document = await service.GetDocumentAsync(session, documentPublicId, request?.GrantToken ?? string.Empty, ct);
             return document is null
                 ? NotFound()
                 : PhysicalFile(document.FullPath, document.ContentType, document.FileName);
@@ -126,6 +153,7 @@ public sealed class ClientPortalController(IClientPortalService service, IWebHos
     public async Task<IActionResult> Logout([FromQuery] bool all = false, CancellationToken ct = default)
     {
         ApplySecurityHeaders();
+        if (!IsTrustedPortalPost()) return BadRequest(new { code = "csrf_rejected", message = "Обновите страницу и повторите действие." });
         try
         {
             await service.RevokeSessionAsync(Request.Cookies[CookieName], all, ct);
@@ -171,6 +199,12 @@ public sealed class ClientPortalController(IClientPortalService service, IWebHos
         Response.Headers["Content-Security-Policy"] = "default-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
     }
 
+    private bool IsTrustedPortalPost()
+        => string.Equals(Request.Headers["X-Portal-Request"], "1", StringComparison.Ordinal)
+            && (string.IsNullOrWhiteSpace(Request.Headers["Sec-Fetch-Site"])
+                || string.Equals(Request.Headers["Sec-Fetch-Site"], "same-origin", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(Request.Headers["Sec-Fetch-Site"], "same-site", StringComparison.OrdinalIgnoreCase));
+
     private ActionResult MapPublicError(ClientPortalException ex)
         => ex.Code switch
         {
@@ -195,4 +229,9 @@ public sealed class ClientPortalVerifyRequest
 public sealed class ClientPortalLoginResultDto
 {
     public DateTime ExpiresAt { get; set; }
+}
+
+public sealed class ClientPortalDocumentDownloadRequest
+{
+    public string? GrantToken { get; set; }
 }

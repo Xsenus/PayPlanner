@@ -3,6 +3,8 @@ using System.Net;
 using System.Net.Mail;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using PayPlanner.Api.Data;
@@ -23,9 +25,11 @@ public interface IClientPortalService
     Task<ClientPortalSessionCreatedDto> VerifyLoginAsync(Guid challengeId, string token, string otp, string? ip, string? userAgent, CancellationToken ct);
     Task<ClientPortalSessionContext?> ResolveSessionAsync(string? token, string? ip, string? userAgent, CancellationToken ct);
     Task RevokeSessionAsync(string? token, bool all, CancellationToken ct);
-    Task<ClientPortalHomeDto> GetHomeAsync(ClientPortalSessionContext session, int page, int pageSize, CancellationToken ct);
+    Task<ClientPortalHomeDto> GetHomeAsync(ClientPortalSessionContext session, int page, int pageSize, CancellationToken ct, string? search = null, string? status = null);
+    Task<ClientPortalProfileDto> GetProfileAsync(ClientPortalSessionContext session, CancellationToken ct);
     Task<ClientPortalCaseDto?> GetCaseAsync(ClientPortalSessionContext session, Guid casePublicId, CancellationToken ct);
-    Task<ClientPortalDocumentDownloadDto?> GetDocumentAsync(ClientPortalSessionContext session, Guid documentPublicId, CancellationToken ct);
+    Task<ClientPortalDocumentGrantDto?> CreateDocumentGrantAsync(ClientPortalSessionContext session, Guid documentPublicId, CancellationToken ct);
+    Task<ClientPortalDocumentDownloadDto?> GetDocumentAsync(ClientPortalSessionContext session, Guid documentPublicId, string grantToken, CancellationToken ct);
 }
 
 public sealed class ClientPortalService : IClientPortalService
@@ -33,24 +37,30 @@ public sealed class ClientPortalService : IClientPortalService
     private const int ChallengeHours = 2;
     private const int SessionHours = 12;
     private const int MaxAttempts = 5;
+    private static readonly TimeSpan DocumentGrantLifetime = TimeSpan.FromMinutes(5);
     private readonly PaymentContext _db;
     private readonly IEmailService _email;
     private readonly IConfiguration _configuration;
     private readonly IOptionsMonitor<AppFeatureFlagsOptions> _flags;
     private readonly ICaseDocumentStorage _documentStorage;
+    private readonly ITimeLimitedDataProtector _documentGrantProtector;
 
     public ClientPortalService(
         PaymentContext db,
         IEmailService email,
         IConfiguration configuration,
         IOptionsMonitor<AppFeatureFlagsOptions> flags,
-        ICaseDocumentStorage documentStorage)
+        ICaseDocumentStorage documentStorage,
+        IDataProtectionProvider dataProtectionProvider)
     {
         _db = db;
         _email = email;
         _configuration = configuration;
         _flags = flags;
         _documentStorage = documentStorage;
+        _documentGrantProtector = dataProtectionProvider
+            .CreateProtector("PayPlanner.ClientPortal.DocumentGrant.v1")
+            .ToTimeLimitedDataProtector();
     }
 
     public async Task<ClientPortalAdminAccountDto> CreateOrUpdateAccessAsync(
@@ -444,7 +454,13 @@ public sealed class ClientPortalService : IClientPortalService
         await _db.SaveChangesAsync(ct);
     }
 
-    public async Task<ClientPortalHomeDto> GetHomeAsync(ClientPortalSessionContext session, int page, int pageSize, CancellationToken ct)
+    public async Task<ClientPortalHomeDto> GetHomeAsync(
+        ClientPortalSessionContext session,
+        int page,
+        int pageSize,
+        CancellationToken ct,
+        string? search = null,
+        string? status = null)
     {
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, 50);
@@ -452,6 +468,26 @@ public sealed class ClientPortalService : IClientPortalService
             .Where(grant => grant.ClientPortalAccountId == session.AccountId
                 && grant.RevokedAt == null
                 && grant.CanViewCaseSummary);
+        var normalizedSearch = Truncate(search?.Trim() ?? string.Empty, 100);
+        if (!string.IsNullOrWhiteSpace(normalizedSearch))
+        {
+            var pattern = $"%{normalizedSearch}%";
+            query = query.Where(grant => EF.Functions.Like(grant.ClientCase.Title, pattern)
+                || EF.Functions.Like(grant.ClientCase.CaseNumber, pattern)
+                || EF.Functions.Like(grant.ClientCase.CaseType, pattern));
+        }
+        var normalizedStatus = Truncate(status?.Trim() ?? string.Empty, 64);
+        if (!string.IsNullOrWhiteSpace(normalizedStatus))
+        {
+            if (!Enum.TryParse<ClientCaseStatus>(normalizedStatus, true, out var parsedStatus))
+            {
+                query = query.Where(_ => false);
+            }
+            else
+            {
+                query = query.Where(grant => grant.ClientCase.Status == parsedStatus);
+            }
+        }
         var total = await query.CountAsync(ct);
         var items = await query.OrderByDescending(grant => grant.ClientCase.CreatedAt).ThenByDescending(grant => grant.Id)
             .Skip((page - 1) * pageSize).Take(pageSize)
@@ -472,7 +508,55 @@ public sealed class ClientPortalService : IClientPortalService
             }).ToListAsync(ct);
         Audit(session.AccountId, null, "home_viewed", "case_list", page.ToString(CultureInfo.InvariantCulture), null, null);
         await _db.SaveChangesAsync(ct);
-        return new ClientPortalHomeDto { DisplayName = session.DisplayName, Items = items, Total = total, Page = page, PageSize = pageSize };
+        var upcoming = await (
+            from grant in _db.ClientPortalCaseGrants.AsNoTracking()
+            join deadline in _db.ClientCaseProceduralDeadlines.AsNoTracking()
+                on grant.ClientCaseId equals deadline.ClientCaseId
+            where grant.ClientPortalAccountId == session.AccountId
+                && grant.RevokedAt == null
+                && grant.CanViewCaseSummary
+                && grant.CanViewDeadlines
+                && deadline.Status != "cancelled"
+                && deadline.DueAt >= DateTime.UtcNow
+            orderby deadline.DueAt, deadline.Id
+            select new ClientPortalUpcomingActionDto
+            {
+                CasePublicId = grant.PublicId,
+                CaseTitle = deadline.ClientCase.Title,
+                Title = deadline.Title,
+                DueAt = deadline.DueAt,
+                Status = deadline.Status,
+            })
+            .Take(10)
+            .ToListAsync(ct);
+        return new ClientPortalHomeDto
+        {
+            DisplayName = session.DisplayName,
+            Items = items,
+            UpcomingActions = upcoming,
+            Total = total,
+            Page = page,
+            PageSize = pageSize,
+        };
+    }
+
+    public async Task<ClientPortalProfileDto> GetProfileAsync(ClientPortalSessionContext session, CancellationToken ct)
+    {
+        var profile = await _db.ClientPortalAccounts.AsNoTracking()
+            .Where(account => account.Id == session.AccountId && account.IsActive && account.RevokedAt == null)
+            .Select(account => new ClientPortalProfileDto
+            {
+                DisplayName = account.DisplayName,
+                Email = account.Email,
+                AccountType = account.AccountType,
+                ActiveSessionCount = account.Sessions.Count(item => item.RevokedAt == null && item.ExpiresAt > DateTime.UtcNow),
+                ActiveCaseCount = account.CaseGrants.Count(item => item.RevokedAt == null && item.CanViewCaseSummary),
+            })
+            .FirstOrDefaultAsync(ct)
+            ?? throw Error("account_unavailable", "Аккаунт недоступен.");
+        Audit(session.AccountId, null, "profile_viewed", "account", session.AccountPublicId.ToString("D"), null, null);
+        await _db.SaveChangesAsync(ct);
+        return profile;
     }
 
     public async Task<ClientPortalCaseDto?> GetCaseAsync(ClientPortalSessionContext session, Guid casePublicId, CancellationToken ct)
@@ -506,6 +590,18 @@ public sealed class ClientPortalService : IClientPortalService
                 .OrderBy(item => item.DueAt).Take(100)
                 .Select(item => new ClientPortalDeadlineDto { Title = item.Title, DueAt = item.DueAt, Status = item.Status })
                 .ToListAsync(ct);
+            grant.Case.Events = await _db.ClientCaseCourtEvents.AsNoTracking()
+                .Where(item => item.ClientCaseId == grant.ClientCaseId)
+                .OrderByDescending(item => item.ScheduledAt)
+                .Take(50)
+                .Select(item => new ClientPortalEventDto
+                {
+                    Title = item.Title,
+                    OccurredAt = item.ScheduledAt,
+                    EventType = item.EventType,
+                    Status = item.MovementStatus,
+                })
+                .ToListAsync(ct);
         }
         if (grant.CanViewDocuments)
         {
@@ -538,6 +634,35 @@ public sealed class ClientPortalService : IClientPortalService
                     Status = item.Status.ToString(),
                     WorkflowStatus = item.InvoiceWorkflowStatus,
                 }).ToListAsync(ct);
+            grant.Case.Acts = await _db.Acts.AsNoTracking()
+                .Where(item => item.InvoiceId.HasValue
+                    && (item.Invoice!.ClientCaseId == grant.ClientCaseId
+                        || item.Invoice.InvoiceClientCases.Any(link => link.ClientCaseId == grant.ClientCaseId)))
+                .OrderByDescending(item => item.Date)
+                .Take(100)
+                .Select(item => new ClientPortalActDto
+                {
+                    Number = item.Number,
+                    Date = item.Date,
+                    Amount = item.Amount,
+                    Status = item.Status.ToString(),
+                    WorkflowStatus = item.WorkflowStatus,
+                })
+                .ToListAsync(ct);
+            grant.Case.Contracts = await _db.Contracts.AsNoTracking()
+                .Where(item => item.ContractInvoices.Any(link => link.Invoice.ClientCaseId == grant.ClientCaseId
+                    || link.Invoice.InvoiceClientCases.Any(caseLink => caseLink.ClientCaseId == grant.ClientCaseId)))
+                .OrderByDescending(item => item.Date)
+                .Take(100)
+                .Select(item => new ClientPortalContractDto
+                {
+                    Number = item.Number,
+                    Date = item.Date,
+                    Amount = item.Amount,
+                    Status = item.Status,
+                    ValidUntil = item.ValidUntil,
+                })
+                .ToListAsync(ct);
         }
         if (grant.CanViewApprovals)
         {
@@ -559,11 +684,54 @@ public sealed class ClientPortalService : IClientPortalService
         return grant.Case;
     }
 
-    public async Task<ClientPortalDocumentDownloadDto?> GetDocumentAsync(
+    public async Task<ClientPortalDocumentGrantDto?> CreateDocumentGrantAsync(
         ClientPortalSessionContext session,
         Guid documentPublicId,
         CancellationToken ct)
     {
+        var allowed = await _db.ClientPortalDocumentGrants.AsNoTracking()
+            .AnyAsync(item => item.PublicId == documentPublicId
+                && item.RevokedAt == null
+                && item.CaseGrant.ClientPortalAccountId == session.AccountId
+                && item.CaseGrant.RevokedAt == null
+                && item.CaseGrant.CanViewCaseSummary
+                && item.CaseGrant.CanViewDocuments, ct);
+        if (!allowed)
+        {
+            return null;
+        }
+        var payload = JsonSerializer.Serialize(new ClientPortalDocumentGrantPayload(session.AccountId, documentPublicId));
+        Audit(session.AccountId, null, "document_grant_created", "document", documentPublicId.ToString("D"), null, null);
+        await _db.SaveChangesAsync(ct);
+        return new ClientPortalDocumentGrantDto
+        {
+            GrantToken = _documentGrantProtector.Protect(payload, DocumentGrantLifetime),
+            ExpiresAt = DateTime.UtcNow.Add(DocumentGrantLifetime),
+        };
+    }
+
+    public async Task<ClientPortalDocumentDownloadDto?> GetDocumentAsync(
+        ClientPortalSessionContext session,
+        Guid documentPublicId,
+        string grantToken,
+        CancellationToken ct)
+    {
+        ClientPortalDocumentGrantPayload payload;
+        try
+        {
+            var json = _documentGrantProtector.Unprotect(grantToken.Trim(), out _);
+            payload = JsonSerializer.Deserialize<ClientPortalDocumentGrantPayload>(json)
+                ?? throw new CryptographicException("Empty portal document grant.");
+        }
+        catch (Exception exception) when (exception is CryptographicException or JsonException or FormatException)
+        {
+            return null;
+        }
+        if (payload.AccountId != session.AccountId || payload.DocumentPublicId != documentPublicId)
+        {
+            return null;
+        }
+
         var document = await _db.ClientPortalDocumentGrants.AsNoTracking()
             .Where(item => item.PublicId == documentPublicId
                 && item.RevokedAt == null
@@ -647,6 +815,7 @@ public sealed class ClientPortalService : IClientPortalService
 public sealed class ClientPortalException(string code, string message) : Exception(message) { public string Code { get; } = code; }
 public sealed record ClientPortalSessionContext(int AccountId, Guid AccountPublicId, string DisplayName, string Email);
 public sealed record ClientPortalDocumentDownloadDto(string FullPath, string ContentType, string FileName);
+public sealed record ClientPortalDocumentGrantPayload(int AccountId, Guid DocumentPublicId);
 public sealed class ClientPortalAccessRequest
 {
     public string? Email { get; set; }
@@ -689,7 +858,10 @@ public sealed class ClientPortalAuditDto
 }
 public sealed class ClientPortalLoginPreviewDto { public string DisplayName { get; set; } = ""; public string EmailHint { get; set; } = ""; public DateTime ExpiresAt { get; set; } }
 public sealed class ClientPortalSessionCreatedDto { public string SessionToken { get; set; } = ""; public DateTime ExpiresAt { get; set; } }
-public sealed class ClientPortalHomeDto { public string DisplayName { get; set; } = ""; public List<ClientPortalCaseListItemDto> Items { get; set; } = []; public int Total { get; set; } public int Page { get; set; } public int PageSize { get; set; } }
+public sealed class ClientPortalHomeDto { public string DisplayName { get; set; } = ""; public List<ClientPortalCaseListItemDto> Items { get; set; } = []; public List<ClientPortalUpcomingActionDto> UpcomingActions { get; set; } = []; public int Total { get; set; } public int Page { get; set; } public int PageSize { get; set; } }
+public sealed class ClientPortalUpcomingActionDto { public Guid CasePublicId { get; set; } public string CaseTitle { get; set; } = ""; public string Title { get; set; } = ""; public DateTime DueAt { get; set; } public string Status { get; set; } = ""; }
+public sealed class ClientPortalProfileDto { public string DisplayName { get; set; } = ""; public string Email { get; set; } = ""; public string AccountType { get; set; } = ""; public int ActiveSessionCount { get; set; } public int ActiveCaseCount { get; set; } }
+public sealed class ClientPortalDocumentGrantDto { public string GrantToken { get; set; } = ""; public DateTime ExpiresAt { get; set; } }
 public sealed class ClientPortalCaseListItemDto
 {
     public Guid PublicId { get; set; } public string Title { get; set; } = ""; public string CaseNumber { get; set; } = ""; public string CaseType { get; set; } = "";
@@ -701,9 +873,12 @@ public sealed class ClientPortalCaseDto
     public Guid PublicId { get; set; } public string Title { get; set; } = ""; public string CaseNumber { get; set; } = ""; public string CaseType { get; set; } = "";
     public string Status { get; set; } = ""; public string Stage { get; set; } = ""; public DateTime? StartDate { get; set; } public DateTime? DueDate { get; set; }
     public List<ClientPortalDeadlineDto> Deadlines { get; set; } = []; public List<ClientPortalDocumentDto> Documents { get; set; } = [];
-    public List<ClientPortalInvoiceDto> Invoices { get; set; } = []; public List<ClientPortalApprovalDto> Approvals { get; set; } = [];
+    public List<ClientPortalEventDto> Events { get; set; } = []; public List<ClientPortalInvoiceDto> Invoices { get; set; } = []; public List<ClientPortalActDto> Acts { get; set; } = []; public List<ClientPortalContractDto> Contracts { get; set; } = []; public List<ClientPortalApprovalDto> Approvals { get; set; } = [];
 }
 public sealed class ClientPortalDeadlineDto { public string Title { get; set; } = ""; public DateTime DueAt { get; set; } public string Status { get; set; } = ""; }
+public sealed class ClientPortalEventDto { public string Title { get; set; } = ""; public DateTime OccurredAt { get; set; } public string EventType { get; set; } = ""; public string Status { get; set; } = ""; }
 public sealed class ClientPortalDocumentDto { public Guid PublicId { get; set; } public string Name { get; set; } = ""; public string DocumentType { get; set; } = ""; public string Status { get; set; } = ""; public int Version { get; set; } public long SizeBytes { get; set; } public DateTime UploadedAt { get; set; } }
 public sealed class ClientPortalInvoiceDto { public string Number { get; set; } = ""; public DateTime Date { get; set; } public decimal Amount { get; set; } public string Status { get; set; } = ""; public string WorkflowStatus { get; set; } = ""; }
+public sealed class ClientPortalActDto { public string Number { get; set; } = ""; public DateTime Date { get; set; } public decimal Amount { get; set; } public string Status { get; set; } = ""; public string WorkflowStatus { get; set; } = ""; }
+public sealed class ClientPortalContractDto { public string Number { get; set; } = ""; public DateTime Date { get; set; } public decimal? Amount { get; set; } public string Status { get; set; } = ""; public DateTime? ValidUntil { get; set; } }
 public sealed class ClientPortalApprovalDto { public int Version { get; set; } public string Status { get; set; } = ""; public DateTime CreatedAt { get; set; } public DateTime ExpiresAt { get; set; } public DateTime? DecisionAt { get; set; } }

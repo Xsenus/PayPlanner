@@ -137,14 +137,21 @@ export interface AppFeatureFlagsDto {
 
 export interface ClientPortalLoginPreview { displayName: string; emailHint: string; expiresAt: string }
 export interface ClientPortalCaseListItem { publicId: string; title: string; caseNumber: string; caseType: string; status: string; stage: string; dueDate?: string | null }
-export interface ClientPortalHome { displayName: string; items: ClientPortalCaseListItem[]; total: number; page: number; pageSize: number }
+export interface ClientPortalHome {
+  displayName: string; items: ClientPortalCaseListItem[]; total: number; page: number; pageSize: number;
+  upcomingActions?: Array<{ casePublicId: string; caseTitle: string; title: string; dueAt: string; status: string }>;
+}
 export interface ClientPortalCase {
   publicId: string; title: string; caseNumber: string; caseType: string; status: string; stage: string; startDate?: string | null; dueDate?: string | null;
   deadlines: Array<{ title: string; dueAt: string; status: string }>;
+  events?: Array<{ title: string; occurredAt: string; eventType: string; status: string }>;
   documents: Array<{ publicId: string; name: string; documentType: string; status: string; version: number; sizeBytes: number; uploadedAt: string }>;
   invoices: Array<{ number: string; date: string; amount: number; status: string; workflowStatus: string }>;
+  acts?: Array<{ number: string; date: string; amount: number; status: string; workflowStatus: string }>;
+  contracts?: Array<{ number: string; date: string; amount?: number | null; status: string; validUntil?: string | null }>;
   approvals: Array<{ version: number; status: string; createdAt: string; expiresAt: string; decisionAt?: string | null }>;
 }
+export interface ClientPortalProfile { displayName: string; email: string; accountType: string; activeSessionCount: number; activeCaseCount: number }
 export interface ClientPortalCaseAccess {
   accountId: number; displayName: string; email: string; accountType: 'client' | 'representative'; isActive: boolean;
   canViewCaseSummary: boolean; canViewDeadlines: boolean; canViewDocuments: boolean; canViewFinance: boolean;
@@ -5774,11 +5781,18 @@ export class ApiService {
     );
   }
 
-  async getClientPortalHome(page = 1, pageSize = 20) {
+  async getClientPortalHome(page = 1, pageSize = 20, search = '', status = '') {
+    const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+    if (search.trim()) params.set('search', search.trim());
+    if (status.trim()) params.set('status', status.trim());
     return this.request<ClientPortalHome>(
-      `/portal/home?page=${page}&pageSize=${pageSize}`,
+      `/portal/home?${params.toString()}`,
       { suppressAuthSessionExpired: true },
     );
+  }
+
+  async getClientPortalProfile() {
+    return this.request<ClientPortalProfile>('/portal/profile', { suppressAuthSessionExpired: true });
   }
 
   async getClientPortalCase(publicId: string) {
@@ -5788,14 +5802,37 @@ export class ApiService {
     );
   }
 
-  getClientPortalDocumentUrl(publicId: string) {
-    return `${API_BASE_URL}/portal/documents/${encodeURIComponent(publicId)}`;
+  async createClientPortalDocumentGrant(publicId: string) {
+    return this.request<{ grantToken: string; expiresAt: string }>(
+      `/portal/documents/${encodeURIComponent(publicId)}/grant`,
+      {
+        method: 'POST',
+        headers: { 'X-Portal-Request': '1' },
+        suppressAuthSessionExpired: true,
+      },
+    );
+  }
+
+  async downloadClientPortalDocument(publicId: string, grantToken: string) {
+    const response = await fetch(`${API_BASE_URL}/portal/documents/${encodeURIComponent(publicId)}/download`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json', 'X-Portal-Request': '1' },
+      body: JSON.stringify({ grantToken }),
+      cache: 'no-store',
+      referrerPolicy: 'no-referrer',
+    });
+    if (!response.ok) {
+      const text = await extractResponseErrorMessage(response);
+      throw new Error(text || `HTTP ${response.status} ${response.statusText}`);
+    }
+    return response.blob();
   }
 
   async logoutClientPortal(all = false) {
     return this.request<void>(
       `/portal/logout?all=${all}`,
-      { method: 'POST', suppressAuthSessionExpired: true },
+      { method: 'POST', headers: { 'X-Portal-Request': '1' }, suppressAuthSessionExpired: true },
     );
   }
 

@@ -17,6 +17,9 @@ describe('ClientPortalPage', () => {
       'verifyClientPortalLogin',
       'getClientPortalHome',
       'getClientPortalCase',
+      'getClientPortalProfile',
+      'createClientPortalDocumentGrant',
+      'downloadClientPortalDocument',
       'logoutClientPortal',
     );
     sessionStorage.clear();
@@ -33,7 +36,22 @@ describe('ClientPortalPage', () => {
       total: 1,
       page: 1,
       pageSize: 20,
+      upcomingActions: [{ casePublicId: '33333333-3333-4333-8333-333333333333', caseTitle: 'Дело клиента', title: 'Подать документы', dueAt: '2026-08-03T10:00:00Z', status: 'active' }],
     });
+    apiServiceMock.getClientPortalProfile.mockResolvedValue({
+      displayName: 'Иван Иванов',
+      email: 'ivan@example.test',
+      accountType: 'client',
+      activeSessionCount: 2,
+      activeCaseCount: 1,
+    });
+    apiServiceMock.getClientPortalCase.mockResolvedValue({
+      publicId: '33333333-3333-4333-8333-333333333333', title: 'Дело клиента', caseNumber: 'A-1', caseType: '', status: 'Open', stage: '',
+      deadlines: [], events: [], invoices: [], acts: [], contracts: [], approvals: [],
+      documents: [{ publicId: '44444444-4444-4444-8444-444444444444', name: 'Документ.pdf', documentType: 'Документ', status: 'Готов', version: 1, sizeBytes: 1024, uploadedAt: '2026-07-31T10:00:00Z' }],
+    });
+    apiServiceMock.createClientPortalDocumentGrant.mockResolvedValue({ grantToken: 'grant', expiresAt: '2026-08-01T10:05:00Z' });
+    apiServiceMock.downloadClientPortalDocument.mockResolvedValue(new Blob(['pdf']));
   });
 
   it('removes token from URL, verifies OTP and opens only returned cases', async () => {
@@ -47,8 +65,39 @@ describe('ClientPortalPage', () => {
 
     await waitFor(() => expect(apiServiceMock.verifyClientPortalLogin)
       .toHaveBeenCalledWith(CHALLENGE_ID, 'portal-token', '123456'));
-    expect(await screen.findByText('Дело клиента')).toBeTruthy();
+    expect((await screen.findAllByText('Дело клиента')).length).toBeGreaterThan(0);
     expect(screen.queryByText('Чужое дело')).toBeNull();
     expect(window.location.pathname).toBe('/portal');
+  });
+
+  it('shows upcoming actions, filters cases, opens profile and downloads through a grant', async () => {
+    const createObjectUrl = vi.fn(() => 'blob:portal-document');
+    const revokeObjectUrl = vi.fn();
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectUrl });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectUrl });
+
+    render(<ClientPortalPage />);
+    fireEvent.change(await screen.findByRole('textbox'), { target: { value: '123456' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Войти' }));
+    expect(await screen.findByText('Ближайшие сроки')).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText('Поиск дел'), { target: { value: 'A-1' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Найти' }));
+    await waitFor(() => expect(apiServiceMock.getClientPortalHome).toHaveBeenLastCalledWith(1, 20, 'A-1', ''));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Профиль' }));
+    expect(await screen.findByText('ivan@example.test · клиент')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Выйти на всех устройствах' })).toBeTruthy();
+
+    fireEvent.click(screen.getAllByRole('button', { name: /Дело клиента/ }).at(-1)!);
+    fireEvent.click(await screen.findByRole('button', { name: /Документ\.pdf/ }));
+    await waitFor(() => {
+      expect(apiServiceMock.createClientPortalDocumentGrant).toHaveBeenCalledWith('44444444-4444-4444-8444-444444444444');
+      expect(apiServiceMock.downloadClientPortalDocument).toHaveBeenCalledWith('44444444-4444-4444-8444-444444444444', 'grant');
+    });
+    expect(createObjectUrl).toHaveBeenCalledTimes(1);
+    expect(revokeObjectUrl).toHaveBeenCalledWith('blob:portal-document');
+    click.mockRestore();
   });
 });

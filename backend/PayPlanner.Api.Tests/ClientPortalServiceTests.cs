@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using Microsoft.Data.Sqlite;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
@@ -70,6 +71,10 @@ public sealed class ClientPortalServiceTests
         Assert.NotNull(await fixture.Service.GetCaseAsync(firstSession, ownGrant, CancellationToken.None));
         Assert.Null(await fixture.Service.GetCaseAsync(firstSession, otherGrant, CancellationToken.None));
         Assert.Single((await fixture.Service.GetHomeAsync(firstSession, 1, 20, CancellationToken.None)).Items);
+        Assert.Single((await fixture.Service.GetHomeAsync(firstSession, 1, 20, CancellationToken.None, "Дело 1")).Items);
+        Assert.Empty((await fixture.Service.GetHomeAsync(firstSession, 1, 20, CancellationToken.None, "Дело 2")).Items);
+        Assert.Single((await fixture.Service.GetHomeAsync(firstSession, 1, 20, CancellationToken.None, status: "open")).Items);
+        Assert.Empty((await fixture.Service.GetHomeAsync(firstSession, 1, 20, CancellationToken.None, status: "unknown")).Items);
     }
 
     [Fact]
@@ -116,20 +121,105 @@ public sealed class ClientPortalServiceTests
         Assert.Equal("Дело 2", home.Items[0].Title);
     }
 
+    [Fact]
+    public async Task Legal_entity_client_access_must_match_legal_case_owner()
+    {
+        await using var fixture = await Fixture.CreateAsync(enabled: true);
+        var legalEntity = new LegalEntity { ShortName = "ООО Тест" };
+        var legalCase = new ClientCase { LegalEntity = legalEntity, Title = "Дело организации", CaseNumber = "Ю-1" };
+        fixture.Db.ClientCases.Add(legalCase);
+        await fixture.Db.SaveChangesAsync();
+
+        var account = await fixture.Service.CreateOrUpdateAccessAsync(new ClientPortalAccessRequest
+        {
+            Email = "director@example.test",
+            DisplayName = "Директор",
+            AccountType = "client",
+            LegalEntityId = legalEntity.Id,
+            ClientCaseId = legalCase.Id,
+            CanViewCaseSummary = true,
+        }, 7, "Администратор", CancellationToken.None);
+        Assert.Equal(legalEntity.Id, account.LegalEntityId);
+
+        var mismatch = await Assert.ThrowsAsync<ClientPortalException>(() =>
+            fixture.Service.CreateOrUpdateAccessAsync(new ClientPortalAccessRequest
+            {
+                Email = "other@example.test",
+                DisplayName = "Другой клиент",
+                AccountType = "client",
+                ClientId = fixture.Client1Id,
+                ClientCaseId = legalCase.Id,
+                CanViewCaseSummary = true,
+            }, 7, "Администратор", CancellationToken.None));
+        Assert.Equal("access_mismatch", mismatch.Code);
+    }
+
+    [Fact]
+    public async Task Document_download_requires_account_bound_short_lived_grant()
+    {
+        await using var fixture = await Fixture.CreateAsync(enabled: true);
+        var bytes = "portal-document"u8.ToArray();
+        var storedName = $"{Guid.NewGuid():N}.pdf";
+        var storagePath = fixture.Storage.BuildRelativePath(fixture.Case1Id, storedName);
+        await fixture.Storage.SaveAsync(storagePath, bytes, CancellationToken.None);
+        var document = new ClientCaseDocument
+        {
+            ClientCaseId = fixture.Case1Id,
+            DocumentKey = Guid.NewGuid().ToString("N"),
+            OriginalFileName = "Документ.pdf",
+            StoredFileName = storedName,
+            StoragePath = storagePath,
+            ContentType = "application/pdf",
+            SizeBytes = bytes.LongLength,
+            DocumentType = "Документ",
+            Status = "Готов",
+            UploadedByName = "Тест",
+        };
+        fixture.Db.ClientCaseDocuments.Add(document);
+        await fixture.Db.SaveChangesAsync();
+        var account = await fixture.Service.CreateOrUpdateAccessAsync(new ClientPortalAccessRequest
+        {
+            Email = "documents@example.test",
+            DisplayName = "Клиент с документом",
+            AccountType = "client",
+            ClientId = fixture.Client1Id,
+            ClientCaseId = fixture.Case1Id,
+            CanViewCaseSummary = true,
+            CanViewDocuments = true,
+            DocumentIds = [document.Id],
+        }, 7, "Администратор", CancellationToken.None);
+        var context = new ClientPortalSessionContext(account.Id, account.PublicId, account.DisplayName, account.Email);
+        var publicDocumentId = await fixture.Db.ClientPortalDocumentGrants.Select(item => item.PublicId).SingleAsync();
+
+        var grant = await fixture.Service.CreateDocumentGrantAsync(context, publicDocumentId, CancellationToken.None);
+        Assert.NotNull(grant);
+        var download = await fixture.Service.GetDocumentAsync(context, publicDocumentId, grant!.GrantToken, CancellationToken.None);
+        Assert.NotNull(download);
+        Assert.Equal("portal-document", await File.ReadAllTextAsync(download!.FullPath));
+
+        var otherContext = context with { AccountId = account.Id + 100 };
+        Assert.Null(await fixture.Service.GetDocumentAsync(otherContext, publicDocumentId, grant.GrantToken, CancellationToken.None));
+        Assert.Null(await fixture.Service.GetDocumentAsync(context, publicDocumentId, grant.GrantToken + "x", CancellationToken.None));
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly SqliteConnection _connection;
-        private Fixture(SqliteConnection connection, PaymentContext db, RecordingEmailService email, ClientPortalService service)
+        private Fixture(SqliteConnection connection, PaymentContext db, RecordingEmailService email, ClientPortalService service, string storageRoot, ICaseDocumentStorage storage)
         {
             _connection = connection;
             Db = db;
             Email = email;
             Service = service;
+            StorageRoot = storageRoot;
+            Storage = storage;
         }
 
         public PaymentContext Db { get; }
         public RecordingEmailService Email { get; }
         public ClientPortalService Service { get; }
+        public string StorageRoot { get; }
+        public ICaseDocumentStorage Storage { get; }
         public int Client1Id { get; private set; }
         public int Client2Id { get; private set; }
         public int Case1Id { get; private set; }
@@ -149,15 +239,27 @@ public sealed class ClientPortalServiceTests
             await db.SaveChangesAsync();
 
             var email = new RecordingEmailService();
+            var storageRoot = Path.Combine(Path.GetTempPath(), $"payplanner-client-portal-{Guid.NewGuid():N}");
             var configuration = new ConfigurationBuilder()
-                .AddInMemoryCollection(new Dictionary<string, string?> { ["App:FrontendUrl"] = "https://crm.example.test" })
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["App:FrontendUrl"] = "https://crm.example.test",
+                    [ApplicationFileStoragePaths.RootPathConfigurationKey] = storageRoot,
+                })
                 .Build();
             var flags = new FixedOptionsMonitor(new AppFeatureFlagsOptions
             {
                 Legal = new LegalFeatureFlagsOptions { ClientPortal = enabled },
             });
-            var service = new ClientPortalService(db, email, configuration, flags, new MissingDocumentStorage());
-            return new Fixture(connection, db, email, service)
+            var storage = new LocalCaseDocumentStorage(configuration: configuration);
+            var service = new ClientPortalService(
+                db,
+                email,
+                configuration,
+                flags,
+                storage,
+                DataProtectionProvider.Create(new DirectoryInfo(Path.Combine(storageRoot, "keys"))));
+            return new Fixture(connection, db, email, service, storageRoot, storage)
             {
                 Client1Id = client1.Id,
                 Client2Id = client2.Id,
@@ -182,6 +284,7 @@ public sealed class ClientPortalServiceTests
         {
             await Db.DisposeAsync();
             await _connection.DisposeAsync();
+            if (Directory.Exists(StorageRoot)) Directory.Delete(StorageRoot, recursive: true);
         }
     }
 
@@ -190,16 +293,6 @@ public sealed class ClientPortalServiceTests
         public AppFeatureFlagsOptions CurrentValue { get; } = value;
         public AppFeatureFlagsOptions Get(string? name) => CurrentValue;
         public IDisposable? OnChange(Action<AppFeatureFlagsOptions, string?> listener) => null;
-    }
-
-    private sealed class MissingDocumentStorage : ICaseDocumentStorage
-    {
-        public string BuildRelativePath(int caseId, string storedFileName) => $"{caseId}/{storedFileName}";
-        public string ResolvePath(string storagePath) => storagePath;
-        public Task SaveAsync(string storagePath, Stream content, CancellationToken cancellationToken) => Task.CompletedTask;
-        public Task SaveAsync(string storagePath, byte[] content, CancellationToken cancellationToken) => Task.CompletedTask;
-        public bool Exists(string storagePath) => false;
-        public void DeleteIfExists(string storagePath) { }
     }
 
     private sealed class RecordingEmailService : IEmailService
