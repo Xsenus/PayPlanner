@@ -5075,6 +5075,10 @@ namespace PayPlanner.Api.Migrations
                         .HasMaxLength(260)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("ProtectedLinkToken")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Provider")
                         .IsRequired()
                         .HasMaxLength(64)

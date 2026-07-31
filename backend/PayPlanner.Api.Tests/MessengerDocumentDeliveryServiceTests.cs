@@ -4,6 +4,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.Logging.Abstractions;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services;
@@ -86,6 +87,47 @@ public sealed class MessengerDocumentDeliveryServiceTests
         Assert.Empty(await fixture.Db.MessengerDocumentDeliveries.ToListAsync());
     }
 
+    [Fact]
+    public async Task OutboxSendsQueuedDeliveryOnceAndClearsProtectedToken()
+    {
+        await using var fixture = await Fixture.CreateAsync(enabled: true);
+        var binding = await fixture.CreateBindingAsync();
+        var prepared = await fixture.Service.PrepareCaseDocumentAsync(
+            fixture.UserId, fixture.DocumentId, binding.Id, "Сообщение", CancellationToken.None);
+        await fixture.Service.QueueAsync(prepared.Delivery.Id, CancellationToken.None);
+        var provider = new RecordingProvider();
+        var processor = fixture.CreateProcessor(provider);
+
+        Assert.Equal(1, await processor.ProcessBatchAsync(CancellationToken.None));
+
+        var delivery = await fixture.Db.MessengerDocumentDeliveries.SingleAsync();
+        Assert.Equal(MessengerDocumentDeliveryStatuses.Sent, delivery.Status);
+        Assert.Equal(1, delivery.AttemptCount);
+        Assert.Null(delivery.ProtectedLinkToken);
+        Assert.Single(provider.Requests);
+        Assert.Contains("https://crm.example.test/api/public/messenger-document-deliveries/", provider.Requests[0].Link);
+        Assert.Contains("token=", provider.Requests[0].Link);
+    }
+
+    [Fact]
+    public async Task OutboxSchedulesBackoffForTransientFailure()
+    {
+        await using var fixture = await Fixture.CreateAsync(enabled: true);
+        var binding = await fixture.CreateBindingAsync();
+        var prepared = await fixture.Service.PrepareCaseDocumentAsync(
+            fixture.UserId, fixture.DocumentId, binding.Id, null, CancellationToken.None);
+        await fixture.Service.QueueAsync(prepared.Delivery.Id, CancellationToken.None);
+        var processor = fixture.CreateProcessor(new RecordingProvider(transientFailure: true));
+
+        await processor.ProcessBatchAsync(CancellationToken.None);
+
+        var delivery = await fixture.Db.MessengerDocumentDeliveries.SingleAsync();
+        Assert.Equal(MessengerDocumentDeliveryStatuses.Failed, delivery.Status);
+        Assert.Equal(1, delivery.AttemptCount);
+        Assert.True(delivery.NextAttemptAt > DateTime.UtcNow);
+        Assert.NotNull(delivery.ProtectedLinkToken);
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly SqliteConnection _connection;
@@ -99,6 +141,8 @@ public sealed class MessengerDocumentDeliveryServiceTests
         public string SourceFullPath { get; }
         public string ExpectedContent { get; } = "публичный судебный документ";
         public string ExpectedChecksum { get; }
+        public IConfiguration Configuration { get; }
+        public IDataProtectionProvider DataProtectionProvider { get; }
 
         private Fixture(
             SqliteConnection connection,
@@ -110,7 +154,9 @@ public sealed class MessengerDocumentDeliveryServiceTests
             int documentId,
             string sourcePath,
             string sourceFullPath,
-            string expectedChecksum)
+            string expectedChecksum,
+            IConfiguration configuration,
+            IDataProtectionProvider dataProtectionProvider)
         {
             _connection = connection;
             _root = root;
@@ -122,6 +168,8 @@ public sealed class MessengerDocumentDeliveryServiceTests
             SourcePath = sourcePath;
             SourceFullPath = sourceFullPath;
             ExpectedChecksum = expectedChecksum;
+            Configuration = configuration;
+            DataProtectionProvider = dataProtectionProvider;
         }
 
         public static async Task<Fixture> CreateAsync(bool enabled)
@@ -154,6 +202,7 @@ public sealed class MessengerDocumentDeliveryServiceTests
                     ["FileStorage:RootPath"] = root,
                     ["MessengerDocumentDelivery:Enabled"] = enabled.ToString(),
                     ["MessengerDocumentDelivery:LinkLifetimeHours"] = "24",
+                    ["MessengerDocumentDelivery:PublicBaseUrl"] = "https://crm.example.test",
                 })
                 .Build();
             var environment = new TestEnvironment(root);
@@ -178,18 +227,27 @@ public sealed class MessengerDocumentDeliveryServiceTests
             };
             db.ClientCaseDocuments.Add(document);
             await db.SaveChangesAsync();
-            var provider = DataProtectionProvider.Create(new DirectoryInfo(Path.Combine(root, "keys")));
+            var provider = Microsoft.AspNetCore.DataProtection.DataProtectionProvider.Create(
+                new DirectoryInfo(Path.Combine(root, "keys")));
             var service = new MessengerDocumentDeliveryService(db, storage, provider, environment, configuration);
             var checksum = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(expectedContent)));
             return new Fixture(
                 connection, root, db, service, user.Id, client.Id, document.Id,
-                sourcePath, storage.ResolvePath(sourcePath), checksum);
+                sourcePath, storage.ResolvePath(sourcePath), checksum, configuration, provider);
         }
 
         public Task<MessengerRecipientBinding> CreateBindingAsync()
             => Service.CreateVerifiedBindingAsync(
                 UserId, ClientId, null, "telegram", "telegram-bot",
                 "Клиент", "123456789", "admin-confirmed", CancellationToken.None);
+
+        public MessengerDocumentOutboxProcessor CreateProcessor(IMessengerDocumentProvider provider)
+            => new(
+                Db,
+                Configuration,
+                [provider],
+                DataProtectionProvider,
+                NullLogger<MessengerDocumentOutboxProcessor>.Instance);
 
         public async ValueTask DisposeAsync()
         {
@@ -199,6 +257,19 @@ public sealed class MessengerDocumentDeliveryServiceTests
             {
                 Directory.Delete(_root, recursive: true);
             }
+        }
+    }
+
+    private sealed class RecordingProvider(bool transientFailure = false) : IMessengerDocumentProvider
+    {
+        public string Channel => MessengerDocumentChannels.Telegram;
+        public List<MessengerDocumentProviderRequest> Requests { get; } = [];
+        public Task<MessengerDocumentProviderResult> SendAsync(MessengerDocumentProviderRequest request, CancellationToken ct)
+        {
+            Requests.Add(request);
+            return Task.FromResult(transientFailure
+                ? new MessengerDocumentProviderResult(false, MessengerDocumentDeliveryStatuses.Failed, Error: "temporary", IsTransient: true)
+                : new MessengerDocumentProviderResult(true, MessengerDocumentDeliveryStatuses.Sent, "provider-message-1"));
         }
     }
 

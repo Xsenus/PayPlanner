@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
+using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Services;
 
@@ -15,13 +16,36 @@ public sealed class MessengerDocumentDeliveriesController : ControllerBase
 {
     private readonly PaymentContext _db;
     private readonly IMessengerDocumentDeliveryService _deliveryService;
+    private readonly IConfiguration _configuration;
 
     public MessengerDocumentDeliveriesController(
         PaymentContext db,
-        IMessengerDocumentDeliveryService deliveryService)
+        IMessengerDocumentDeliveryService deliveryService,
+        IConfiguration configuration)
     {
         _db = db;
         _deliveryService = deliveryService;
+        _configuration = configuration;
+    }
+
+    [HttpGet("configuration")]
+    public IActionResult GetConfiguration()
+    {
+        var enabled = _configuration.GetValue("MessengerDocumentDelivery:Enabled", false);
+        return Ok(new
+        {
+            Enabled = enabled,
+            LinkLifetimeHours = Math.Clamp(
+                _configuration.GetValue("MessengerDocumentDelivery:LinkLifetimeHours", 24),
+                1,
+                168),
+            Providers = new[]
+            {
+                ProviderState(MessengerDocumentChannels.Telegram),
+                ProviderState(MessengerDocumentChannels.Max),
+                ProviderState(MessengerDocumentChannels.WhatsAppBusiness),
+            },
+        });
     }
 
     [HttpGet("recipients")]
@@ -175,6 +199,42 @@ public sealed class MessengerDocumentDeliveriesController : ControllerBase
             .ToListAsync(ct);
         return Ok(items);
     }
+
+    [HttpPost("{deliveryId:int}/queue")]
+    public async Task<IActionResult> Queue(int deliveryId, CancellationToken ct)
+    {
+        try
+        {
+            var delivery = await _deliveryService.QueueAsync(deliveryId, ct);
+            return Ok(new
+            {
+                delivery.Id,
+                delivery.Status,
+                delivery.QueuedAt,
+                delivery.NextAttemptAt,
+            });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    private object ProviderState(string channel) => new
+    {
+        Channel = channel,
+        Enabled = _configuration.GetValue(
+            $"MessengerDocumentDelivery:Providers:{ProviderConfigurationName(channel)}:Enabled",
+            false),
+    };
+
+    private static string ProviderConfigurationName(string channel) => channel switch
+    {
+        MessengerDocumentChannels.Telegram => "Telegram",
+        MessengerDocumentChannels.Max => "Max",
+        MessengerDocumentChannels.WhatsAppBusiness => "WhatsAppBusiness",
+        _ => channel,
+    };
 }
 
 [ApiController]
@@ -183,10 +243,17 @@ public sealed class MessengerDocumentDeliveriesController : ControllerBase
 public sealed class PublicMessengerDocumentDeliveriesController : ControllerBase
 {
     private readonly IMessengerDocumentDeliveryService _deliveryService;
+    private readonly PaymentContext _db;
+    private readonly IConfiguration _configuration;
 
-    public PublicMessengerDocumentDeliveriesController(IMessengerDocumentDeliveryService deliveryService)
+    public PublicMessengerDocumentDeliveriesController(
+        IMessengerDocumentDeliveryService deliveryService,
+        PaymentContext db,
+        IConfiguration configuration)
     {
         _deliveryService = deliveryService;
+        _db = db;
+        _configuration = configuration;
     }
 
     [HttpGet("{publicId:guid}/download")]
@@ -202,5 +269,84 @@ public sealed class PublicMessengerDocumentDeliveriesController : ControllerBase
         Response.Headers["Cache-Control"] = "no-store, private";
         Response.Headers["Content-Security-Policy"] = "default-src 'none'";
         return PhysicalFile(download.FullPath, download.ContentType, download.FileName, enableRangeProcessing: false);
+    }
+
+    [HttpPost("callbacks/{provider}")]
+    public async Task<IActionResult> Callback(
+        string provider,
+        [FromBody] MessengerDocumentDeliveryCallbackRequest request,
+        CancellationToken ct)
+    {
+        provider = provider.Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(request.ProviderMessageId))
+        {
+            return BadRequest(new { message = "Идентификатор сообщения провайдера обязателен." });
+        }
+
+        var configurationProvider = provider switch
+        {
+            MessengerDocumentChannels.Telegram => "Telegram",
+            MessengerDocumentChannels.Max => "Max",
+            MessengerDocumentChannels.WhatsAppBusiness => "WhatsAppBusiness",
+            _ => provider,
+        };
+        var expectedSecret = _configuration[$"MessengerDocumentDelivery:Providers:{configurationProvider}:WebhookSecret"];
+        var providedSecret = Request.Headers["X-Document-Delivery-Webhook-Secret"].ToString();
+        if (string.IsNullOrWhiteSpace(expectedSecret)
+            || !FixedTimeEquals(expectedSecret, providedSecret))
+        {
+            return NotFound();
+        }
+
+        var normalizedStatus = request.Status.Trim().ToLowerInvariant();
+        if (normalizedStatus is not (MessengerDocumentDeliveryStatuses.Delivered
+            or MessengerDocumentDeliveryStatuses.Read
+            or MessengerDocumentDeliveryStatuses.Failed))
+        {
+            return BadRequest(new { message = "Неподдерживаемый статус доставки." });
+        }
+
+        var messageId = request.ProviderMessageId.Trim();
+        var delivery = await _db.MessengerDocumentDeliveries.FirstOrDefaultAsync(
+            item => item.Channel == provider && item.ProviderMessageId == messageId,
+            ct);
+        if (delivery is null)
+        {
+            return NotFound();
+        }
+
+        var occurredAt = request.OccurredAt?.ToUniversalTime() ?? DateTime.UtcNow;
+        if (normalizedStatus == MessengerDocumentDeliveryStatuses.Delivered)
+        {
+            if (delivery.ReadAt is null)
+            {
+                delivery.Status = MessengerDocumentDeliveryStatuses.Delivered;
+            }
+            delivery.DeliveredAt ??= occurredAt;
+        }
+        else if (normalizedStatus == MessengerDocumentDeliveryStatuses.Read)
+        {
+            delivery.Status = MessengerDocumentDeliveryStatuses.Read;
+            delivery.DeliveredAt ??= occurredAt;
+            delivery.ReadAt ??= occurredAt;
+        }
+        else if (delivery.ReadAt is null)
+        {
+            delivery.Status = MessengerDocumentDeliveryStatuses.Failed;
+            delivery.FailedAt = occurredAt;
+            delivery.LastError = string.IsNullOrWhiteSpace(request.Error)
+                ? "Provider callback reported failure."
+                : request.Error.Trim()[..Math.Min(request.Error.Trim().Length, 2000)];
+        }
+        delivery.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync(ct);
+        return Ok(new { delivery.Id, delivery.Status });
+    }
+
+    private static bool FixedTimeEquals(string left, string right)
+    {
+        var leftHash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(left));
+        var rightHash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(right));
+        return System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(leftHash, rightHash);
     }
 }

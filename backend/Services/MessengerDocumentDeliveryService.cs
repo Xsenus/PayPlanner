@@ -27,6 +27,8 @@ public interface IMessengerDocumentDeliveryService
         string? message,
         CancellationToken ct);
 
+    Task<MessengerDocumentDelivery> QueueAsync(int deliveryId, CancellationToken ct);
+
     Task<MessengerDocumentDownload?> ConsumeDownloadAsync(Guid publicId, string token, CancellationToken ct);
 }
 
@@ -220,6 +222,7 @@ public sealed class MessengerDocumentDeliveryService : IMessengerDocumentDeliver
             var renewedToken = GenerateToken();
             var renewedAt = DateTime.UtcNow;
             existing.LinkTokenHash = Hash(renewedToken);
+            existing.ProtectedLinkToken = _addressProtector.Protect(renewedToken);
             existing.LinkExpiresAt = renewedAt.Add(_linkLifetime);
             existing.DownloadCount = 0;
             existing.Status = MessengerDocumentDeliveryStatuses.Prepared;
@@ -249,6 +252,7 @@ public sealed class MessengerDocumentDeliveryService : IMessengerDocumentDeliver
             Provider = binding.Provider,
             IdempotencyKey = idempotencyKey,
             LinkTokenHash = Hash(token),
+            ProtectedLinkToken = _addressProtector.Protect(token),
             LinkExpiresAt = now.Add(_linkLifetime),
             MessagePreview = NormalizeOptional(message, 1000),
             CreatedByUserId = userId,
@@ -258,6 +262,37 @@ public sealed class MessengerDocumentDeliveryService : IMessengerDocumentDeliver
         _db.MessengerDocumentDeliveries.Add(delivery);
         await _db.SaveChangesAsync(ct);
         return new PreparedMessengerDocumentDelivery(delivery, token);
+    }
+
+    public async Task<MessengerDocumentDelivery> QueueAsync(int deliveryId, CancellationToken ct)
+    {
+        EnsureEnabled();
+        var delivery = await _db.MessengerDocumentDeliveries
+            .Include(item => item.RecipientBinding)
+            .FirstOrDefaultAsync(item => item.Id == deliveryId, ct)
+            ?? throw new InvalidOperationException("Подготовленная отправка не найдена.");
+        if (!delivery.RecipientBinding.IsActive
+            || !string.Equals(delivery.RecipientBinding.VerificationStatus, "verified", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Контакт получателя отключён или больше не подтверждён.");
+        }
+        if (delivery.DownloadCount > 0 || delivery.LinkExpiresAt <= DateTime.UtcNow)
+        {
+            throw new InvalidOperationException("Одноразовая ссылка уже использована или истекла. Подготовьте отправку повторно.");
+        }
+        if (string.IsNullOrWhiteSpace(delivery.ProtectedLinkToken))
+        {
+            throw new InvalidOperationException("Защищённый токен отправки отсутствует. Подготовьте отправку повторно.");
+        }
+
+        var now = DateTime.UtcNow;
+        delivery.Status = MessengerDocumentDeliveryStatuses.Queued;
+        delivery.QueuedAt = now;
+        delivery.NextAttemptAt = now;
+        delivery.LastError = null;
+        delivery.UpdatedAt = now;
+        await _db.SaveChangesAsync(ct);
+        return delivery;
     }
 
     public async Task<MessengerDocumentDownload?> ConsumeDownloadAsync(

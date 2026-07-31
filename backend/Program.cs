@@ -190,6 +190,10 @@ builder.Services.AddScoped<StatsSummaryService>();
 builder.Services.AddScoped<IFormRequirementsService, FormRequirementsService>();
 builder.Services.AddSingleton<ICaseDocumentStorage, LocalCaseDocumentStorage>();
 builder.Services.AddScoped<IMessengerDocumentDeliveryService, MessengerDocumentDeliveryService>();
+builder.Services.AddScoped<IMessengerDocumentProvider, TelegramMessengerDocumentProvider>();
+builder.Services.AddScoped<IMessengerDocumentProvider>(_ => new DisabledMessengerDocumentProvider(MessengerDocumentChannels.Max));
+builder.Services.AddScoped<IMessengerDocumentProvider>(_ => new DisabledMessengerDocumentProvider(MessengerDocumentChannels.WhatsAppBusiness));
+builder.Services.AddScoped<IMessengerDocumentOutboxProcessor, MessengerDocumentOutboxProcessor>();
 builder.Services.AddSingleton<IInvoiceDocumentPdfService, InvoiceDocumentPdfService>();
 builder.Services.AddSingleton<DatabaseBackupService>();
 builder.Services.AddSingleton<ISystemJobRunStateService, SystemJobRunStateService>();
@@ -227,6 +231,7 @@ else
 }
 
 builder.Services.AddHostedService<DatabaseBackupSchedulerService>();
+builder.Services.AddHostedService<MessengerDocumentOutboxWorker>();
 builder.Services.AddHostedService<PaymentStatusUpdater>();
 builder.Services.AddHostedService<InvoicePaymentStateReconciliationService>();
 builder.Services.AddSingleton<TaskJournalReminderNotificationService>();

@@ -2924,6 +2924,7 @@ public class PaymentContext : DbContext
             entity.Property(item => item.IdempotencyKey).HasMaxLength(128).IsRequired();
             entity.Property(item => item.ProviderMessageId).HasMaxLength(256);
             entity.Property(item => item.LinkTokenHash).HasMaxLength(64);
+            entity.Property(item => item.ProtectedLinkToken).HasMaxLength(512);
             entity.Property(item => item.LastError).HasMaxLength(2000);
             entity.Property(item => item.MessagePreview).HasMaxLength(1000);
             entity.Property(item => item.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");

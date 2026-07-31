@@ -18,3 +18,11 @@ public class PrepareCaseDocumentMessengerDeliveryRequest
     public string? Message { get; set; }
     public bool ConfirmRecipientAndDocument { get; set; }
 }
+
+public class MessengerDocumentDeliveryCallbackRequest
+{
+    public string ProviderMessageId { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public DateTime? OccurredAt { get; set; }
+    public string? Error { get; set; }
+}

@@ -5190,6 +5190,10 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasMaxLength(260)
                         .HasColumnType("character varying(260)");
 
+                    b.Property<string>("ProtectedLinkToken")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
                     b.Property<string>("Provider")
                         .IsRequired()
                         .HasMaxLength(64)

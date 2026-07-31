@@ -13,6 +13,7 @@ public static class MessengerDocumentDeliveryStatuses
 {
     public const string Prepared = "prepared";
     public const string Queued = "queued";
+    public const string Processing = "processing";
     public const string Sent = "sent";
     public const string Delivered = "delivered";
     public const string Read = "read";
@@ -72,6 +73,7 @@ public class MessengerDocumentDelivery
     [Required, MaxLength(128)] public string IdempotencyKey { get; set; } = string.Empty;
     [MaxLength(256)] public string? ProviderMessageId { get; set; }
     [MaxLength(64)] public string? LinkTokenHash { get; set; }
+    [MaxLength(512)] public string? ProtectedLinkToken { get; set; }
     public DateTime? LinkExpiresAt { get; set; }
     public DateTime? FirstOpenedAt { get; set; }
     public DateTime? LastOpenedAt { get; set; }
