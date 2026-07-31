@@ -1,5 +1,6 @@
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services;
+using System.Diagnostics;
 using Xunit;
 
 namespace PayPlanner.Api.Tests;
@@ -91,6 +92,24 @@ public class ExternalCalendarCommentBlockServiceTests
 
         Assert.DoesNotContain("Удалённый", result.Description);
         Assert.Contains("Активный", result.Description);
+    }
+
+    [Fact]
+    public void AppendToDescription_LongFeedBenchmark_RemainsBounded()
+    {
+        var comments = Enumerable.Range(1, 10_000)
+            .Select(id => Comment(id, $"Длинный комментарий {id}: {new string('я', 500)}", visible: true))
+            .ToArray();
+        var stopwatch = Stopwatch.StartNew();
+
+        var result = ExternalCalendarCommentBlockService.AppendToDescription("Описание задачи", comments);
+
+        stopwatch.Stop();
+        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(5), $"Формирование заняло {stopwatch.Elapsed}.");
+        Assert.True(result.Truncated);
+        Assert.InRange(result.Description.Length, 1, ExternalCalendarCommentBlockService.DefaultMaximumDescriptionLength);
+        Assert.True(result.ExportedCount < comments.Length);
+        Assert.True(ExternalCalendarCommentBlockService.TryParse(result.Description)?.HashIsValid);
     }
 
     private static TaskJournalComment Comment(int id, string text, bool visible, string kind = "comment")

@@ -51,32 +51,28 @@ public static partial class ExternalCalendarCommentBlockService
 
         var entries = new List<string>(visibleComments.Count);
         var exportedCount = 0;
+        var entriesLength = 0;
         foreach (var comment in visibleComments)
         {
             var entry = SerializeComment(comment);
-            var candidateEntries = entries.Append(entry).ToList();
-            var candidateHash = ComputeSemanticHash(visibleComments.Take(exportedCount + 1));
-            var candidateBlock = BuildBlock(candidateEntries, candidateHash, truncated: exportedCount + 1 < visibleComments.Count);
-            if (candidateBlock.Length > available)
+            var candidateCount = exportedCount + 1;
+            var candidateEntriesLength = entriesLength + entry.Length;
+            if (GetBlockLength(
+                    candidateEntriesLength,
+                    candidateCount,
+                    truncated: candidateCount < visibleComments.Count) > available)
             {
                 break;
             }
 
             entries.Add(entry);
-            exportedCount++;
+            entriesLength = candidateEntriesLength;
+            exportedCount = candidateCount;
         }
 
         var truncated = exportedCount < visibleComments.Count;
         var semanticHash = ComputeSemanticHash(visibleComments.Take(exportedCount));
         var block = BuildBlock(entries, semanticHash, truncated);
-        while (entries.Count > 0 && block.Length > available)
-        {
-            entries.RemoveAt(entries.Count - 1);
-            exportedCount--;
-            truncated = true;
-            semanticHash = ComputeSemanticHash(visibleComments.Take(exportedCount));
-            block = BuildBlock(entries, semanticHash, truncated);
-        }
 
         if (block.Length > available)
         {
@@ -220,6 +216,27 @@ public static partial class ExternalCalendarCommentBlockService
         }
         builder.Append(EndMarker);
         return builder.ToString();
+    }
+
+    private static int GetBlockLength(int entriesLength, int entryCount, bool truncated)
+    {
+        const int sha256HexLength = 64;
+        const string hashPrefix = " hash=";
+        const string headerSuffix = " ---";
+        const string intro = "Комментарии, разрешённые для внешнего календаря:";
+        const string truncatedNotice = "Показана часть комментариев. Полная история доступна в CRM.";
+        var newlineLength = Environment.NewLine.Length;
+
+        return StartMarker.Length
+            + hashPrefix.Length
+            + sha256HexLength
+            + headerSuffix.Length
+            + newlineLength
+            + intro.Length
+            + newlineLength
+            + (entryCount > 0 ? entriesLength + ((entryCount - 1) * 2) + newlineLength : 0)
+            + (truncated ? truncatedNotice.Length + newlineLength : 0)
+            + EndMarker.Length;
     }
 
     private static string Sanitize(string value)
