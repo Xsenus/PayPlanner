@@ -10,6 +10,8 @@ public sealed class AppFeatureFlagsOptions
 public sealed class LegalFeatureFlagsOptions
 {
     public bool ExternalCourtSync { get; set; }
+    public bool KadArbitrCourtSync { get; set; }
+    public bool MosGorSudCourtSync { get; set; }
     public bool ExternalCalendarSync { get; set; }
     public bool CourtEvents { get; set; }
     public bool DocumentTemplateLibrary { get; set; }

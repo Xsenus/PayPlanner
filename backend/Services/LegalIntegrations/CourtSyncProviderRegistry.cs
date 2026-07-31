@@ -84,6 +84,13 @@ public interface ICourtSyncProvider
     bool CanHandle(string? sourceUrl);
 }
 
+public interface ICourtSyncProviderAvailability
+{
+    bool IsAvailable { get; }
+    string Status { get; }
+    string Message { get; }
+}
+
 public interface ICourtSyncCaseSearchProvider : ICourtSyncProvider
 {
     Task<IReadOnlyList<CourtSyncCaseSearchResult>> SearchCasesAsync(CourtSyncCaseSearchRequest request, CancellationToken ct);
@@ -224,10 +231,15 @@ public sealed class CourtSyncProviderRegistry : ICourtSyncProviderRegistry
     {
         var legal = _featureFlags.Value.Legal;
         var activeProviders = _providers
-            .Select(provider => BuildActiveDescriptor(provider, legal.ExternalCourtSync))
+            .Select(provider => BuildActiveDescriptor(provider, legal))
             .ToList();
 
-        activeProviders.AddRange(GetPlannedDescriptors(legal.ExternalCourtSync));
+        var activeKeys = activeProviders
+            .Select(static provider => provider.Key)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        activeProviders.AddRange(
+            GetPlannedDescriptors(legal.ExternalCourtSync)
+                .Where(provider => !activeKeys.Contains(provider.Key)));
         return activeProviders.AsReadOnly();
     }
 
@@ -244,18 +256,31 @@ public sealed class CourtSyncProviderRegistry : ICourtSyncProviderRegistry
         return descriptors;
     }
 
-    private static CourtSyncProviderDescriptor BuildActiveDescriptor(ICourtSyncProvider provider, bool externalCourtSyncEnabled)
+    private static CourtSyncProviderDescriptor BuildActiveDescriptor(
+        ICourtSyncProvider provider,
+        LegalFeatureFlagsOptions legal)
     {
         if (provider.Key == "sudrf")
         {
-            return BuildSudrfDescriptor(externalCourtSyncEnabled);
+            return BuildSudrfDescriptor(legal.ExternalCourtSync);
         }
 
         var capabilities = GetEffectiveCapabilities(provider);
+        var featureFlagEnabled = IsProviderFeatureEnabled(provider.Key, legal);
         var supportsManualRun = (capabilities & CourtSyncProviderCapability.ManualSync) != 0;
         var supportsBackgroundSync =
-            externalCourtSyncEnabled
+            featureFlagEnabled
             && (capabilities & CourtSyncProviderCapability.BackgroundSync) != 0;
+        var availability = provider as ICourtSyncProviderAvailability;
+        var isAvailable = availability?.IsAvailable ?? true;
+        var status = availability?.Status
+            ?? (featureFlagEnabled ? "active" : "manual-only");
+        var message = availability?.Message
+            ?? (supportsBackgroundSync
+                ? "Источник доступен для ручной и фоновой судебной синхронизации."
+                : supportsManualRun
+                    ? "Источник доступен для ручной проверки; фоновая синхронизация для него недоступна."
+                    : "Источник подключён, но не поддерживает ручное или фоновое чтение карточки.");
 
         return new CourtSyncProviderDescriptor(
             provider.Key,
@@ -263,18 +288,22 @@ public sealed class CourtSyncProviderRegistry : ICourtSyncProviderRegistry
             provider.SourceType,
             provider.SchemaVersion,
             GetCapabilityKeys(capabilities),
-            externalCourtSyncEnabled ? "active" : "manual-only",
-            true,
-            externalCourtSyncEnabled,
+            status,
+            isAvailable,
+            featureFlagEnabled,
             supportsManualRun,
             supportsBackgroundSync,
             provider.SupportedHosts,
-            supportsBackgroundSync
-                ? "Источник доступен для ручной и фоновой судебной синхронизации."
-                : supportsManualRun
-                    ? "Источник доступен для ручной проверки; фоновая синхронизация для него недоступна."
-                    : "Источник подключён, но не поддерживает ручное или фоновое чтение карточки.");
+            message);
     }
+
+    private static bool IsProviderFeatureEnabled(string providerKey, LegalFeatureFlagsOptions legal)
+        => providerKey switch
+        {
+            "kadArbitr" => legal.ExternalCourtSync && legal.KadArbitrCourtSync,
+            "mosGorSud" => legal.ExternalCourtSync && legal.MosGorSudCourtSync,
+            _ => legal.ExternalCourtSync,
+        };
 
     private static CourtSyncProviderDescriptor BuildSudrfDescriptor(bool externalCourtSyncEnabled)
         => new(

@@ -245,6 +245,62 @@ public class SudrfCourtSyncServiceTests
     }
 
     [Fact]
+    public void CourtSyncProviderRegistry_ExposesApprovedProvidersInSafeDisabledState()
+    {
+        var options = new AppFeatureFlagsOptions
+        {
+            Legal = new LegalFeatureFlagsOptions
+            {
+                ExternalCourtSync = true,
+                KadArbitrCourtSync = true,
+                MosGorSudCourtSync = true,
+            },
+        };
+        var registry = new CourtSyncProviderRegistry(
+            [new KadArbitrCourtSyncProvider(), new MosGorSudCourtSyncProvider()],
+            new FixedOptionsSnapshot<AppFeatureFlagsOptions>(options));
+
+        var providers = registry.GetProviders();
+
+        Assert.Equal(3, providers.Count);
+        var kad = Assert.Single(providers, provider => provider.Key == "kadArbitr");
+        Assert.Equal("approved-disabled", kad.Status);
+        Assert.False(kad.IsAvailable);
+        Assert.True(kad.FeatureFlagEnabled);
+        Assert.Empty(kad.Capabilities);
+        Assert.False(kad.SupportsManualRun);
+        Assert.False(kad.SupportsBackgroundSync);
+        Assert.Contains("captcha", kad.Message, StringComparison.OrdinalIgnoreCase);
+
+        var mosGorSud = Assert.Single(providers, provider => provider.Key == "mosGorSud");
+        Assert.Equal("approved-disabled", mosGorSud.Status);
+        Assert.False(mosGorSud.IsAvailable);
+        Assert.True(mosGorSud.FeatureFlagEnabled);
+        Assert.Empty(mosGorSud.Capabilities);
+        Assert.Contains("mos-gorsud.ru", mosGorSud.SupportedHosts);
+    }
+
+    [Theory]
+    [InlineData("https://kad.arbitr.ru/Card/00000000-0000-0000-0000-000000000000")]
+    [InlineData("https://mos-gorsud.ru/rs/example/cases")]
+    public void ApprovedCourtProviders_DoNotResolveBeforeAdapterVerification(string sourceUrl)
+    {
+        var registry = new CourtSyncProviderRegistry(
+            [new KadArbitrCourtSyncProvider(), new MosGorSudCourtSyncProvider()],
+            new FixedOptionsSnapshot<AppFeatureFlagsOptions>(new AppFeatureFlagsOptions
+            {
+                Legal = new LegalFeatureFlagsOptions
+                {
+                    ExternalCourtSync = true,
+                    KadArbitrCourtSync = true,
+                    MosGorSudCourtSync = true,
+                },
+            }));
+
+        Assert.Null(registry.Resolve(sourceUrl));
+    }
+
+    [Fact]
     public async Task SudrfProvider_SearchCasesAsync_ReturnsEmptyForUnsupportedSource()
     {
         using var httpClient = new HttpClient(new FixedResponseHandler(_ => []));

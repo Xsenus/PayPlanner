@@ -183,6 +183,8 @@ builder.Services.AddScoped<IYandexCalendarSyncService, YandexCalendarSyncService
 builder.Services.AddSingleton<IS3StorageClientFactory, S3StorageClientFactory>();
 builder.Services.AddScoped<IS3StorageService, S3StorageService>();
 builder.Services.AddScoped<ICourtSyncProvider, SudrfCourtSyncProvider>();
+builder.Services.AddScoped<ICourtSyncProvider, KadArbitrCourtSyncProvider>();
+builder.Services.AddScoped<ICourtSyncProvider, MosGorSudCourtSyncProvider>();
 builder.Services.AddScoped<ICourtSyncProviderRegistry, CourtSyncProviderRegistry>();
 
 if (databaseProvider.IsSqlite)
