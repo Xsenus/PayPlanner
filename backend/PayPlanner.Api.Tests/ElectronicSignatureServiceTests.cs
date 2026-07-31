@@ -149,6 +149,43 @@ public sealed class ElectronicSignatureServiceTests
         Assert.Contains("не подключён", result.Error);
     }
 
+    [Fact]
+    public async Task PreparedEnvelopeCancellationIsIdempotentAndPreservesSnapshot()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var bytes = "%PDF-1.7 immutable"u8.ToArray();
+        var prepared = await fixture.Service.PrepareAsync(
+            fixture.Request(), new MemoryStream(bytes), "invoice.pdf", CancellationToken.None);
+
+        var first = await fixture.Service.CancelPreparedAsync(prepared.PublicId, fixture.UserId, "Документ заменён", CancellationToken.None);
+        var second = await fixture.Service.CancelPreparedAsync(prepared.PublicId, fixture.UserId, null, CancellationToken.None);
+
+        Assert.NotNull(first);
+        Assert.NotNull(second);
+        Assert.Equal(ElectronicSignatureEnvelopeStatuses.Cancelled, second!.Status);
+        Assert.NotNull(second.CancelledAt);
+        Assert.Equal(bytes, await File.ReadAllBytesAsync(second.SnapshotPath));
+        var events = await fixture.Db.ElectronicSignatureEvents.AsNoTracking().ToListAsync();
+        Assert.Equal(2, events.Count);
+        Assert.Single(events, item => item.EventType == "cancelled-by-user");
+        Assert.Contains("Документ заменён", events.Single(item => item.EventType == "cancelled-by-user").Message);
+    }
+
+    [Fact]
+    public async Task SentEnvelopeCannotBeCancelledLocally()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var prepared = await fixture.Service.PrepareAsync(
+            fixture.Request(), new MemoryStream("%PDF-1.7"u8.ToArray()), "invoice.pdf", CancellationToken.None);
+        prepared.Status = ElectronicSignatureEnvelopeStatuses.Pending;
+        await fixture.Db.SaveChangesAsync();
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            fixture.Service.CancelPreparedAsync(prepared.PublicId, fixture.UserId, null, CancellationToken.None));
+
+        Assert.Contains("ещё не отправленную", error.Message);
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly SqliteConnection _connection;

@@ -15,6 +15,7 @@ describe('ElectronicSignatureModal', () => {
       'getElectronicSignatureRecipients',
       'getElectronicSignatureHistory',
       'prepareElectronicSignatureEnvelope',
+      'cancelElectronicSignatureEnvelope',
     );
     apiServiceMock.getElectronicSignatureConfiguration.mockResolvedValue({
       enabled: false,
@@ -64,5 +65,27 @@ describe('ElectronicSignatureModal', () => {
 
     expect(await screen.findByText(/Сначала выдайте клиенту или представителю явный доступ/)).toBeTruthy();
     expect((screen.getByRole('button', { name: 'Подготовить неизменяемую версию' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('cancels only an unsent prepared version and keeps its history', async () => {
+    const prepared = {
+      id: 3, publicId: '33333333-3333-4333-8333-333333333333', documentType: 'invoice', documentId: 15,
+      documentVersion: 1, signatureType: 'qualified', signingOrder: 'sequential', provider: 'KonturDiadoc',
+      status: 'prepared', originalFileName: 'invoice.pdf', sizeBytes: 100, checksumSha256: 'abc',
+      archiveRetentionYears: 10, requiresMachineReadablePowerOfAttorney: false, createdAt: '2026-08-01T00:00:00Z',
+      signers: [{ id: 7, order: 1, displayName: 'Иван Иванов', maskedContact: 'i***n@example.test', partyType: 'client', status: 'pending', requiresMachineReadablePowerOfAttorney: false }],
+      events: [],
+    };
+    apiServiceMock.getElectronicSignatureHistory.mockResolvedValueOnce([prepared]).mockResolvedValueOnce([{ ...prepared, status: 'cancelled' }]);
+    apiServiceMock.cancelElectronicSignatureEnvelope.mockResolvedValue({ ...prepared, status: 'cancelled' });
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    render(<ElectronicSignatureModal documentType="invoice" documentId={15} documentName="Счёт 15" clientId={3} preparePdf={vi.fn()} onClose={() => undefined} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Отменить' }));
+
+    await waitFor(() => expect(apiServiceMock.cancelElectronicSignatureEnvelope).toHaveBeenCalledWith(prepared.publicId));
+    expect(await screen.findByText(/PDF и история сохранены/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Отменить' })).toBeNull();
+    vi.restoreAllMocks();
   });
 });

@@ -2085,6 +2085,7 @@ export interface ElectronicSignatureEnvelopeDto {
   createdAt: string;
   sentAt?: string | null;
   completedAt?: string | null;
+  cancelledAt?: string | null;
   signers: Array<{
     id: number;
     order: number;
@@ -6430,6 +6431,13 @@ export class ApiService {
       `/electronic-signatures/financial-documents/${documentType}/${documentId}/prepare`,
       { method: 'POST', body: form },
     );
+  }
+
+  async cancelElectronicSignatureEnvelope(publicId: string, reason?: string) {
+    return this.request<ElectronicSignatureEnvelopeDto>(`/electronic-signatures/${publicId}/cancel`, {
+      method: 'POST',
+      body: JSON.stringify({ reason: reason?.trim() || null }),
+    });
   }
 
   async uploadCaseDocument(caseId: number, file: File, payload?: { documentType?: string; status?: string; documentKey?: string }) {

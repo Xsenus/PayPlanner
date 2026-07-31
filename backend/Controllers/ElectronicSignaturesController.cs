@@ -106,8 +106,9 @@ public sealed class ElectronicSignaturesController(
         if (signers.Count != requestedSignerIds.Length)
             return BadRequest(new { message = "Один из подписантов не имеет явного доступа к делам выбранного клиента." });
 
+        var signerLookup = signers.ToDictionary(item => item.Id);
         var orderedSigners = requestedSignerIds
-            .Select(id => signers.Single(item => item.Id == id))
+            .Select(id => signerLookup[id])
             .Select(item => new ElectronicSignatureSignerDraft(
                 item.DisplayName,
                 item.Email,
@@ -157,6 +158,27 @@ public sealed class ElectronicSignaturesController(
         return Ok(envelopes.Select(ToDto));
     }
 
+    [HttpPost("{publicId:guid}/cancel")]
+    public async Task<IActionResult> Cancel(
+        Guid publicId,
+        [FromBody] ElectronicSignatureCancelRequest? request,
+        CancellationToken ct)
+    {
+        try
+        {
+            var envelope = await service.CancelPreparedAsync(
+                publicId,
+                User.GetUserId() ?? 0,
+                request?.Reason,
+                ct);
+            return envelope is null ? NotFound() : Ok(ToDto(envelope));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
     private async Task<string?> ResolveFinancialDocumentFileName(string type, int documentId, int clientId, CancellationToken ct)
     {
         string? number = type switch
@@ -197,6 +219,7 @@ public sealed class ElectronicSignaturesController(
         item.CreatedAt,
         item.SentAt,
         item.CompletedAt,
+        item.CancelledAt,
         Signers = item.Signers.OrderBy(signer => signer.Order).Select(signer => new
         {
             signer.Id,
@@ -223,3 +246,5 @@ public sealed class ElectronicSignaturesController(
         return safe.Length == 0 ? "document" : safe[..Math.Min(80, safe.Length)];
     }
 }
+
+public sealed record ElectronicSignatureCancelRequest(string? Reason);

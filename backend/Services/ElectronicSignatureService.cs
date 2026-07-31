@@ -105,6 +105,12 @@ public interface IElectronicSignatureService
         Stream pdf,
         string fileName,
         CancellationToken ct);
+
+    Task<ElectronicSignatureEnvelope?> CancelPreparedAsync(
+        Guid publicId,
+        int actorUserId,
+        string? reason,
+        CancellationToken ct);
 }
 
 public sealed class ElectronicSignatureService : IElectronicSignatureService
@@ -265,6 +271,67 @@ public sealed class ElectronicSignatureService : IElectronicSignatureService
             if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
             throw;
         }
+    }
+
+    public async Task<ElectronicSignatureEnvelope?> CancelPreparedAsync(
+        Guid publicId,
+        int actorUserId,
+        string? reason,
+        CancellationToken ct)
+    {
+        if (publicId == Guid.Empty || actorUserId <= 0)
+            throw new InvalidOperationException("Не удалось определить версию или пользователя.");
+
+        var normalizedReason = reason?.Trim() ?? string.Empty;
+        if (normalizedReason.Length > 1000)
+            throw new InvalidOperationException("Причина отмены не должна превышать 1000 символов.");
+
+        await using var transaction = await _db.Database.BeginTransactionAsync(ct);
+        var now = DateTime.UtcNow;
+        var updated = await _db.ElectronicSignatureEnvelopes
+            .Where(item => item.PublicId == publicId
+                && item.Status == ElectronicSignatureEnvelopeStatuses.Prepared)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(item => item.Status, ElectronicSignatureEnvelopeStatuses.Cancelled)
+                .SetProperty(item => item.CancelledAt, now)
+                .SetProperty(item => item.UpdatedAt, now), ct);
+
+        var envelope = await _db.ElectronicSignatureEnvelopes
+            .AsNoTracking()
+            .Include(item => item.Signers)
+            .Include(item => item.Events)
+            .FirstOrDefaultAsync(item => item.PublicId == publicId, ct);
+        if (envelope is null)
+        {
+            await transaction.CommitAsync(ct);
+            return null;
+        }
+
+        if (updated == 0)
+        {
+            if (!string.Equals(envelope.Status, ElectronicSignatureEnvelopeStatuses.Cancelled, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Отменить можно только подготовленную и ещё не отправленную версию.");
+
+            await transaction.CommitAsync(ct);
+            return envelope;
+        }
+
+        var auditEvent = new ElectronicSignatureEvent
+        {
+            EnvelopeId = envelope.Id,
+            EventType = "cancelled-by-user",
+            Status = ElectronicSignatureEnvelopeStatuses.Cancelled,
+            Message = string.IsNullOrWhiteSpace(normalizedReason)
+                ? $"Подготовленная версия отменена пользователем #{actorUserId}."
+                : $"Подготовленная версия отменена пользователем #{actorUserId}. Причина: {normalizedReason}",
+            OccurredAt = now,
+            ReceivedAt = now
+        };
+        _db.ElectronicSignatureEvents.Add(auditEvent);
+        await _db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
+        envelope.Events.Add(auditEvent);
+        return envelope;
     }
 
     private void Validate(ElectronicSignaturePreparation request, Stream pdf, string fileName)
