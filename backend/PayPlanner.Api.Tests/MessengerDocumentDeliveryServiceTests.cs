@@ -1,12 +1,16 @@
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Logging.Abstractions;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Services;
 using Xunit;
 
@@ -149,6 +153,103 @@ public sealed class MessengerDocumentDeliveryServiceTests
         Assert.Equal(1, delivery.AttemptCount);
         Assert.True(delivery.NextAttemptAt > DateTime.UtcNow);
         Assert.NotNull(delivery.ProtectedLinkToken);
+    }
+
+    [Fact]
+    public async Task OutboxSchedulesBackoffWhenProviderTimesOut()
+    {
+        await using var fixture = await Fixture.CreateAsync(enabled: true);
+        var binding = await fixture.CreateBindingAsync();
+        var prepared = await fixture.Service.PrepareCaseDocumentAsync(
+            fixture.UserId, fixture.DocumentId, binding.Id, null, CancellationToken.None);
+        await fixture.Service.QueueAsync(prepared.Delivery.Id, CancellationToken.None);
+
+        await fixture.CreateProcessor(new TimeoutProvider()).ProcessBatchAsync(CancellationToken.None);
+
+        var delivery = await fixture.Db.MessengerDocumentDeliveries.SingleAsync();
+        Assert.Equal(MessengerDocumentDeliveryStatuses.Failed, delivery.Status);
+        Assert.True(delivery.NextAttemptAt > DateTime.UtcNow);
+        Assert.Contains("timeout", delivery.LastError!, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task OutboxProcessesOnlyConfiguredBatchSize()
+    {
+        await using var fixture = await Fixture.CreateAsync(enabled: true);
+        var binding = await fixture.CreateBindingAsync();
+        var pdf = System.Text.Encoding.ASCII.GetBytes("%PDF-1.7 batch");
+        for (var index = 1; index <= 21; index++)
+        {
+            var prepared = await fixture.Service.PrepareGeneratedDocumentAsync(
+                fixture.UserId, "invoice", 1000 + index, 1, fixture.ClientId, $"invoice-{index}.pdf",
+                "application/pdf", new MemoryStream(pdf), pdf.Length, binding.Id, null, CancellationToken.None);
+            await fixture.Service.QueueAsync(prepared.Delivery.Id, CancellationToken.None);
+        }
+
+        var provider = new RecordingProvider();
+        var processed = await fixture.CreateProcessor(provider).ProcessBatchAsync(CancellationToken.None);
+
+        Assert.Equal(20, processed);
+        Assert.Equal(20, provider.Requests.Count);
+        Assert.Equal(1, await fixture.Db.MessengerDocumentDeliveries.CountAsync(item => item.Status == MessengerDocumentDeliveryStatuses.Queued));
+    }
+
+    [Fact]
+    public async Task GeneratedFinancialPdfAcceptsMaximumAllowedSize()
+    {
+        await using var fixture = await Fixture.CreateAsync(enabled: true);
+        var binding = await fixture.CreateBindingAsync();
+        var pdf = new byte[25 * 1024 * 1024];
+        "%PDF-"u8.CopyTo(pdf);
+
+        var prepared = await fixture.Service.PrepareGeneratedDocumentAsync(
+            fixture.UserId, "contract", 77, 1, fixture.ClientId, "contract-77.pdf",
+            "application/pdf", new MemoryStream(pdf, writable: false), pdf.LongLength, binding.Id, null, CancellationToken.None);
+
+        Assert.Equal(pdf.LongLength, prepared.Delivery.SizeBytes);
+        Assert.Equal(Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(pdf)), prepared.Delivery.ChecksumSha256);
+    }
+
+    [Fact]
+    public async Task ProviderCallbackUpdatesStatusMonotonically()
+    {
+        await using var fixture = await Fixture.CreateAsync(enabled: true);
+        var binding = await fixture.CreateBindingAsync();
+        var prepared = await fixture.Service.PrepareCaseDocumentAsync(
+            fixture.UserId, fixture.DocumentId, binding.Id, null, CancellationToken.None);
+        prepared.Delivery.Status = MessengerDocumentDeliveryStatuses.Sent;
+        prepared.Delivery.ProviderMessageId = "provider-message-1";
+        await fixture.Db.SaveChangesAsync();
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["MessengerDocumentDelivery:Providers:Telegram:WebhookSecret"] = "callback-secret",
+        }).Build();
+        var controller = new PublicMessengerDocumentDeliveriesController(fixture.Service, fixture.Db, configuration)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
+        };
+        controller.Request.Headers["X-Document-Delivery-Webhook-Secret"] = "callback-secret";
+
+        Assert.IsType<OkObjectResult>(await controller.Callback("TELEGRAM", new MessengerDocumentDeliveryCallbackRequest
+        {
+            ProviderMessageId = "provider-message-1",
+            Status = "read",
+        }, CancellationToken.None));
+        fixture.Db.ChangeTracker.Clear();
+        var delivery = await fixture.Db.MessengerDocumentDeliveries.SingleAsync();
+        Assert.Equal(MessengerDocumentDeliveryStatuses.Read, delivery.Status);
+        Assert.NotNull(delivery.DeliveredAt);
+        Assert.NotNull(delivery.ReadAt);
+
+        controller.Request.Headers["X-Document-Delivery-Webhook-Secret"] = "callback-secret";
+        Assert.IsType<OkObjectResult>(await controller.Callback("telegram", new MessengerDocumentDeliveryCallbackRequest
+        {
+            ProviderMessageId = "provider-message-1",
+            Status = "failed",
+            Error = "late failure",
+        }, CancellationToken.None));
+        fixture.Db.ChangeTracker.Clear();
+        Assert.Equal(MessengerDocumentDeliveryStatuses.Read, (await fixture.Db.MessengerDocumentDeliveries.SingleAsync()).Status);
     }
 
     private sealed class Fixture : IAsyncDisposable
@@ -294,6 +395,13 @@ public sealed class MessengerDocumentDeliveryServiceTests
                 ? new MessengerDocumentProviderResult(false, MessengerDocumentDeliveryStatuses.Failed, Error: "temporary", IsTransient: true)
                 : new MessengerDocumentProviderResult(true, MessengerDocumentDeliveryStatuses.Sent, "provider-message-1"));
         }
+    }
+
+    private sealed class TimeoutProvider : IMessengerDocumentProvider
+    {
+        public string Channel => MessengerDocumentChannels.Telegram;
+        public Task<MessengerDocumentProviderResult> SendAsync(MessengerDocumentProviderRequest request, CancellationToken ct)
+            => Task.FromException<MessengerDocumentProviderResult>(new TaskCanceledException("provider timeout"));
     }
 
     private sealed class TestEnvironment(string root) : IWebHostEnvironment

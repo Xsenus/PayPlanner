@@ -201,6 +201,10 @@ public sealed class MessengerDocumentOutboxProcessor : IMessengerDocumentOutboxP
         {
             MarkFailed(item, ex.Message, now, retry: false);
         }
+        catch (OperationCanceledException ex) when (!ct.IsCancellationRequested)
+        {
+            MarkFailed(item, string.IsNullOrWhiteSpace(ex.Message) ? "Provider request timed out." : ex.Message, now, retry: item.AttemptCount < MaxAttempts);
+        }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             MarkFailed(item, ex.Message, now, retry: item.AttemptCount < MaxAttempts);
