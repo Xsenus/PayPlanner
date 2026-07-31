@@ -14,6 +14,7 @@ import { getDocumentStatusCodes, getDocumentStatusLabels } from '../../utils/doc
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
 import { MessengerDocumentDeliveryModal } from '../Cases/MessengerDocumentDeliveryModal';
+import { ElectronicSignatureModal } from '../Documents/ElectronicSignatureModal';
 import { ObjectAuditLauncher } from '../ui/ObjectAuditModal';
 import { StatusChangeModal, type StatusChangeOption } from '../ui/StatusChangeModal';
 import { ActModal } from './ActModal';
@@ -189,6 +190,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
   const [pageActionLoading, setPageActionLoading] = useState<PageAction | null>(null);
   const [statusChangeOpen, setStatusChangeOpen] = useState(false);
   const [messengerDeliveryOpen, setMessengerDeliveryOpen] = useState(false);
+  const [electronicSignatureOpen, setElectronicSignatureOpen] = useState(false);
   const [statusChangeValue, setStatusChangeValue] = useState<ActWorkflowStatus>('Draft');
   const [statusChangeReason, setStatusChangeReason] = useState('');
   const [statusChangeSubmitting, setStatusChangeSubmitting] = useState(false);
@@ -1038,6 +1040,16 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
                 Мессенджер
               </button>
             ) : null}
+            {isAdmin && act.clientId ? (
+              <button
+                type="button"
+                onClick={() => setElectronicSignatureOpen(true)}
+                className="inline-flex items-center justify-center gap-2 rounded border border-blue-200 px-3 py-2 text-sm text-blue-700 transition hover:bg-blue-50"
+              >
+                <FilePlus2 className="h-4 w-4" />
+                Э-подпись
+              </button>
+            ) : null}
 
             <button
               type="button"
@@ -1251,6 +1263,16 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
           }}
           preparePdf={() => apiService.downloadActDocument(act.id, 'pdf', { includeSignatureAndSeal: true })}
           onClose={() => setMessengerDeliveryOpen(false)}
+        />
+      ) : null}
+      {electronicSignatureOpen && act.clientId ? (
+        <ElectronicSignatureModal
+          clientId={act.clientId}
+          documentId={act.id}
+          documentName={`Акт ${act.number || act.id}`}
+          documentType="act"
+          preparePdf={() => apiService.downloadActDocument(act.id, 'pdf', { includeSignatureAndSeal: true })}
+          onClose={() => setElectronicSignatureOpen(false)}
         />
       ) : null}
     </div>

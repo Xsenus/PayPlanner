@@ -2050,6 +2050,54 @@ export interface PreparedMessengerDocumentDeliveryDto {
   linkExpiresAt: string;
 }
 
+export interface ElectronicSignatureConfigurationDto {
+  enabled: boolean;
+  preparationEnabled: boolean;
+  defaultSignatureType: string;
+  defaultSigningOrder: string;
+  defaultArchiveRetentionYears: number;
+  providers: Array<{ name: string; enabled: boolean }>;
+}
+
+export interface ElectronicSignatureRecipientDto {
+  id: number;
+  displayName: string;
+  accountType: string;
+  email: string;
+  isRepresentative: boolean;
+}
+
+export interface ElectronicSignatureEnvelopeDto {
+  id: number;
+  publicId: string;
+  documentType: string;
+  documentId: number;
+  documentVersion: number;
+  signatureType: string;
+  signingOrder: string;
+  provider: string;
+  status: string;
+  originalFileName: string;
+  sizeBytes: number;
+  checksumSha256: string;
+  archiveRetentionYears: number;
+  requiresMachineReadablePowerOfAttorney: boolean;
+  createdAt: string;
+  sentAt?: string | null;
+  completedAt?: string | null;
+  signers: Array<{
+    id: number;
+    order: number;
+    displayName: string;
+    maskedContact: string;
+    partyType: string;
+    status: string;
+    requiresMachineReadablePowerOfAttorney: boolean;
+    powerOfAttorneyReference?: string | null;
+  }>;
+  events: Array<{ eventType: string; status: string; message: string; occurredAt: string }>;
+}
+
 export interface ContactDirectoryItemDto {
   sourceType: ContactSourceType;
   category: ContactScope;
@@ -6336,6 +6384,52 @@ export class ApiService {
   async getMessengerDocumentDeliveryHistory(clientId: number) {
     const query = buildQuery({ clientId });
     return this.request<MessengerDocumentDeliveryDto[]>(`/messenger-document-deliveries${query}`);
+  }
+
+  async getElectronicSignatureConfiguration() {
+    return this.request<ElectronicSignatureConfigurationDto>('/electronic-signatures/configuration');
+  }
+
+  async getElectronicSignatureRecipients(clientId: number) {
+    const query = buildQuery({ clientId });
+    return this.request<ElectronicSignatureRecipientDto[]>(`/electronic-signatures/recipients${query}`);
+  }
+
+  async getElectronicSignatureHistory(documentType: 'invoice' | 'act' | 'contract', documentId: number) {
+    return this.request<ElectronicSignatureEnvelopeDto[]>(`/electronic-signatures/financial-documents/${documentType}/${documentId}`);
+  }
+
+  async prepareElectronicSignatureEnvelope(
+    documentType: 'invoice' | 'act' | 'contract',
+    documentId: number,
+    pdf: Blob,
+    payload: {
+      clientId: number;
+      signerAccountIds: number[];
+      signatureType: string;
+      signingOrder: string;
+      provider: string;
+      archiveRetentionYears: number;
+      requiresMachineReadablePowerOfAttorney: boolean;
+      powerOfAttorneyReference?: string;
+      confirmSnapshotAndSigners: boolean;
+    },
+  ) {
+    const form = new FormData();
+    form.append('file', pdf, `${documentType}-${documentId}.pdf`);
+    form.append('clientId', String(payload.clientId));
+    payload.signerAccountIds.forEach((id) => form.append('signerAccountIds', String(id)));
+    form.append('signatureType', payload.signatureType);
+    form.append('signingOrder', payload.signingOrder);
+    form.append('provider', payload.provider);
+    form.append('archiveRetentionYears', String(payload.archiveRetentionYears));
+    form.append('requiresMachineReadablePowerOfAttorney', String(payload.requiresMachineReadablePowerOfAttorney));
+    form.append('confirmSnapshotAndSigners', String(payload.confirmSnapshotAndSigners));
+    if (payload.powerOfAttorneyReference) form.append('powerOfAttorneyReference', payload.powerOfAttorneyReference);
+    return this.request<ElectronicSignatureEnvelopeDto>(
+      `/electronic-signatures/financial-documents/${documentType}/${documentId}/prepare`,
+      { method: 'POST', body: form },
+    );
   }
 
   async uploadCaseDocument(caseId: number, file: File, payload?: { documentType?: string; status?: string; documentKey?: string }) {

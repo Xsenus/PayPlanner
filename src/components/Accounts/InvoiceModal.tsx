@@ -48,6 +48,7 @@ import { getContractBillingModeLabel, getContractEffectiveAmount } from '../../u
 import { ObjectAuditLauncher } from '../ui/ObjectAuditModal';
 import { CounterpartyPickerModal, type CounterpartyKind, type CounterpartySelection } from '../ui/CounterpartyPickerModal';
 import { MessengerDocumentDeliveryModal } from '../Cases/MessengerDocumentDeliveryModal';
+import { ElectronicSignatureModal } from '../Documents/ElectronicSignatureModal';
 import { useDocumentStatusSettings } from '../../hooks/useDocumentStatusSettings';
 import { getDocumentStatusLabels } from '../../utils/documentStatusSettings';
 import {
@@ -1009,6 +1010,7 @@ export function InvoiceModal({
   const [yandexDiskUploading, setYandexDiskUploading] = useState(false);
   const [downloadMenuOpen, setDownloadMenuOpen] = useState(false);
   const [messengerDeliveryOpen, setMessengerDeliveryOpen] = useState(false);
+  const [electronicSignatureOpen, setElectronicSignatureOpen] = useState(false);
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [cancelScope, setCancelScope] = useState<InvoiceCancellationScope>('All');
@@ -4269,6 +4271,9 @@ export function InvoiceModal({
             {isAdmin && (invoice.type === 'Expense' ? invoice.expenseClientId : invoice.clientId) ? (
               <button type="button" onClick={() => setMessengerDeliveryOpen(true)} className="inline-flex items-center justify-center gap-2 rounded border border-violet-200 px-3 py-2 text-sm text-violet-700"><Send className="h-4 w-4" />Мессенджер</button>
             ) : null}
+            {isAdmin && (invoice.type === 'Expense' ? invoice.expenseClientId : invoice.clientId) ? (
+              <button type="button" onClick={() => setElectronicSignatureOpen(true)} className="inline-flex items-center justify-center gap-2 rounded border border-blue-200 px-3 py-2 text-sm text-blue-700"><FileText className="h-4 w-4" />Э-подпись</button>
+            ) : null}
             <button type="button" onClick={() => void handlePrintDocument()} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Printer className="h-4 w-4" />Печать</button>
             <button type="button" onClick={() => void handlePrintDocument(INVOICE_OFFER_TEMPLATE_KEY)} className="inline-flex items-center justify-center gap-2 rounded border border-emerald-200 px-3 py-2 text-sm text-emerald-700"><FileText className="h-4 w-4" />Оферта</button>
             <button
@@ -5816,6 +5821,16 @@ export function InvoiceModal({
           }}
           preparePdf={() => apiService.downloadInvoiceDocument(invoice.id, 'pdf', { includeSignatureAndSeal: true })}
           onClose={() => setMessengerDeliveryOpen(false)}
+        />
+      ) : null}
+      {electronicSignatureOpen && invoice && (invoice.type === 'Expense' ? invoice.expenseClientId : invoice.clientId) ? (
+        <ElectronicSignatureModal
+          clientId={(invoice.type === 'Expense' ? invoice.expenseClientId : invoice.clientId)!}
+          documentId={invoice.id}
+          documentName={`Счёт ${invoice.number || invoice.id}`}
+          documentType="invoice"
+          preparePdf={() => apiService.downloadInvoiceDocument(invoice.id, 'pdf', { includeSignatureAndSeal: true })}
+          onClose={() => setElectronicSignatureOpen(false)}
         />
       ) : null}
 

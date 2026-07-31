@@ -23,6 +23,7 @@ import { TablePagination } from '../ui/TablePagination';
 import { ObjectAuditLauncher } from '../ui/ObjectAuditModal';
 import { CounterpartyPickerModal, type CounterpartyKind, type CounterpartySelection } from '../ui/CounterpartyPickerModal';
 import { MessengerDocumentDeliveryModal } from '../Cases/MessengerDocumentDeliveryModal';
+import { ElectronicSignatureModal } from '../Documents/ElectronicSignatureModal';
 
 interface Props {
   contractId: number;
@@ -201,6 +202,7 @@ export function ContractDetailPage({
   const [editMode, setEditMode] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [messengerDeliveryOpen, setMessengerDeliveryOpen] = useState(false);
+  const [electronicSignatureOpen, setElectronicSignatureOpen] = useState(false);
 
   const [pickerOpen, setPickerOpen] = useState(false);
   const visibleTabs = useMemo(
@@ -1092,6 +1094,17 @@ export function ContractDetailPage({
             >
               <Send className="h-4 w-4" />
               Мессенджер
+            </button>
+          ) : null}
+          {isAdmin && contract.clients.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => setElectronicSignatureOpen(true)}
+              disabled={documentSaving}
+              className="inline-flex items-center gap-2 rounded border border-blue-200 px-3 py-2 text-sm text-blue-700 disabled:opacity-60"
+            >
+              <FileText className="h-4 w-4" />
+              Э-подпись
             </button>
           ) : null}
           <button
@@ -2241,6 +2254,16 @@ export function ContractDetailPage({
           }}
           preparePdf={() => apiService.downloadContractDocument(contract.id, 'pdf')}
           onClose={() => setMessengerDeliveryOpen(false)}
+        />
+      ) : null}
+      {electronicSignatureOpen && contract.clients.length > 0 ? (
+        <ElectronicSignatureModal
+          clientId={contract.clients[0].id}
+          documentId={contract.id}
+          documentName={`Договор ${contract.number || contract.id}`}
+          documentType="contract"
+          preparePdf={() => apiService.downloadContractDocument(contract.id, 'pdf')}
+          onClose={() => setElectronicSignatureOpen(false)}
         />
       ) : null}
     </div>

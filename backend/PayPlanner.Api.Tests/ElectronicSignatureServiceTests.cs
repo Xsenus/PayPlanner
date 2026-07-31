@@ -1,10 +1,12 @@
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.FileProviders;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services;
 using Xunit;
@@ -13,6 +15,50 @@ namespace PayPlanner.Api.Tests;
 
 public sealed class ElectronicSignatureServiceTests
 {
+    [Fact]
+    public async Task ControllerListsOnlyClientAndExplicitRepresentativeRecipients()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var clientCase = new ClientCase { ClientId = fixture.ClientId, Title = "Дело клиента" };
+        var direct = new ClientPortalAccount
+        {
+            ClientId = fixture.ClientId,
+            DisplayName = "Прямой клиент",
+            Email = "direct@example.test",
+            AccountType = "client"
+        };
+        var representative = new ClientPortalAccount
+        {
+            DisplayName = "Явный представитель",
+            Email = "representative@example.test",
+            AccountType = "representative",
+            CaseGrants = [new ClientPortalCaseGrant { ClientCase = clientCase, CanViewCaseSummary = true }]
+        };
+        var unrelated = new ClientPortalAccount
+        {
+            DisplayName = "Посторонний аккаунт",
+            Email = "other@example.test",
+            AccountType = "representative"
+        };
+        fixture.Db.AddRange(clientCase, direct, representative, unrelated);
+        await fixture.Db.SaveChangesAsync();
+        var controller = new ElectronicSignaturesController(
+            fixture.Db,
+            fixture.Service,
+            new ConfigurationBuilder().Build());
+
+        var result = await controller.GetRecipients(fixture.ClientId, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var json = System.Text.Json.JsonSerializer.Serialize(ok.Value, new System.Text.Json.JsonSerializerOptions
+        {
+            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+        });
+        Assert.Contains("Прямой клиент", json, StringComparison.Ordinal);
+        Assert.Contains("Явный представитель", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("Посторонний аккаунт", json, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task PrepareCreatesImmutableEncryptedSnapshotAndIsIdempotent()
     {
@@ -53,6 +99,28 @@ public sealed class ElectronicSignatureServiceTests
         await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Service.PrepareAsync(
             fixture.Request(documentType: "passport"), new MemoryStream("%PDF-1.7"u8.ToArray()), "passport.pdf", CancellationToken.None));
 
+        Assert.Empty(await fixture.Db.ElectronicSignatureEnvelopes.ToListAsync());
+    }
+
+    [Fact]
+    public async Task RejectsUnknownProviderAndSignerWithoutRequiredPowerOfAttorney()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var request = fixture.Request();
+        var unknownProvider = request with { Provider = "ManualUpload" };
+        var missingMchd = request with
+        {
+            Signers = [new ElectronicSignatureSignerDraft(
+                "Представитель",
+                "representative@example.test",
+                "representative",
+                RequiresMachineReadablePowerOfAttorney: true)]
+        };
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Service.PrepareAsync(
+            unknownProvider, new MemoryStream("%PDF-1.7"u8.ToArray()), "invoice.pdf", CancellationToken.None));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Service.PrepareAsync(
+            missingMchd, new MemoryStream("%PDF-1.7"u8.ToArray()), "invoice.pdf", CancellationToken.None));
         Assert.Empty(await fixture.Db.ElectronicSignatureEnvelopes.ToListAsync());
     }
 

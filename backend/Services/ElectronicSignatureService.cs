@@ -122,6 +122,11 @@ public sealed class ElectronicSignatureService : IElectronicSignatureService
         ElectronicSignatureSigningOrders.Parallel
     ];
     private static readonly HashSet<string> DocumentTypes = ["invoice", "act", "contract"];
+    private static readonly HashSet<string> ProviderNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "KonturDiadoc", "Sbis", "Taxcom"
+    };
+    private static readonly HashSet<string> PartyTypes = ["client", "representative"];
 
     private readonly PaymentContext _db;
     private readonly IConfiguration _configuration;
@@ -272,6 +277,8 @@ public sealed class ElectronicSignatureService : IElectronicSignatureService
             throw new InvalidOperationException("Неизвестный вид электронной подписи.");
         if (!SigningOrders.Contains(request.SigningOrder.Trim().ToLowerInvariant()))
             throw new InvalidOperationException("Неизвестный порядок подписания.");
+        if (!ProviderNames.Contains(request.Provider.Trim()))
+            throw new InvalidOperationException("Неизвестный провайдер электронной подписи.");
         if (request.DocumentId <= 0 || request.DocumentVersion <= 0 || request.CreatedByUserId <= 0)
             throw new InvalidOperationException("Документ, версия и автор обязательны.");
         if (request.ArchiveRetentionYears is not (5 or 10 or 75))
@@ -280,6 +287,13 @@ public sealed class ElectronicSignatureService : IElectronicSignatureService
             throw new InvalidOperationException("Укажите от одного до двадцати подписантов.");
         if (request.Signers.Any(item => string.IsNullOrWhiteSpace(item.DisplayName) || string.IsNullOrWhiteSpace(item.Contact)))
             throw new InvalidOperationException("Для каждого подписанта обязательны имя и контакт.");
+        if (request.Signers.Any(item => item.DisplayName.Trim().Length > 256 || item.Contact.Trim().Length > 254))
+            throw new InvalidOperationException("Имя или контакт подписанта слишком длинные.");
+        if (request.Signers.Any(item => !PartyTypes.Contains(item.PartyType.Trim().ToLowerInvariant())))
+            throw new InvalidOperationException("Подписантом может быть только клиент или явно назначенный представитель.");
+        if (request.Signers.Any(item => item.RequiresMachineReadablePowerOfAttorney
+            && (string.IsNullOrWhiteSpace(item.PowerOfAttorneyReference) || item.PowerOfAttorneyReference.Trim().Length > 256)))
+            throw new InvalidOperationException("Для подписанта с МЧД укажите номер или ссылку длиной до 256 символов.");
         if (!pdf.CanRead || string.IsNullOrWhiteSpace(fileName))
             throw new InvalidOperationException("PDF-документ обязателен.");
     }
