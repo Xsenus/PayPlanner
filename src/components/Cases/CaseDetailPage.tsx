@@ -2,6 +2,7 @@ import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
 import { ClientPortalAccessPanel } from './ClientPortalAccessPanel';
+import { MessengerDocumentDeliveryModal } from './MessengerDocumentDeliveryModal';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Archive,
@@ -3980,6 +3981,7 @@ export function CaseDetailPage({
               ) : (
                 <DocumentList
                   documents={documents}
+                  clientId={caseItem.clientId ?? null}
                   downloadingDocumentId={downloadingDocumentId}
                   previewingDocumentId={previewingDocumentId}
                   sendingYandexDocumentId={sendingYandexDocumentId}
@@ -7003,6 +7005,7 @@ function CourtPanel({
 
 function DocumentList({
   documents,
+  clientId,
   downloadingDocumentId,
   previewingDocumentId,
   sendingYandexDocumentId,
@@ -7021,6 +7024,7 @@ function DocumentList({
   onDelete,
 }: {
   documents: ClientCaseDocument[];
+  clientId: number | null;
   downloadingDocumentId: number | null;
   previewingDocumentId: number | null;
   sendingYandexDocumentId: number | null;
@@ -7042,6 +7046,7 @@ function DocumentList({
   const [typeFilter, setTypeFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [latestOnly, setLatestOnly] = useState(false);
+  const [deliveryDocument, setDeliveryDocument] = useState<ClientCaseDocument | null>(null);
   const versionSummaries = useMemo(() => buildDocumentVersionSummaries(documents), [documents]);
 
   const documentTypes = useMemo(
@@ -7154,6 +7159,7 @@ function DocumentList({
               onPreview={onPreview}
               onDownload={onDownload}
               onSendToYandexDisk={onSendToYandexDisk}
+              onSendMessenger={clientId ? setDeliveryDocument : undefined}
               onUploadVersion={onUploadVersion}
               onUpdate={onUpdate}
               onDelete={onDelete}
@@ -7161,6 +7167,13 @@ function DocumentList({
           ))}
         </div>
       )}
+      {deliveryDocument && clientId ? (
+        <MessengerDocumentDeliveryModal
+          document={deliveryDocument}
+          clientId={clientId}
+          onClose={() => setDeliveryDocument(null)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -7214,6 +7227,7 @@ function DocumentCard({
   onPreview,
   onDownload,
   onSendToYandexDisk,
+  onSendMessenger,
   onUploadVersion,
   onUpdate,
   onDelete,
@@ -7233,6 +7247,7 @@ function DocumentCard({
   onPreview: (caseDocument: ClientCaseDocument) => void;
   onDownload: (caseDocument: ClientCaseDocument) => void;
   onSendToYandexDisk: (caseDocument: ClientCaseDocument) => void;
+  onSendMessenger?: (caseDocument: ClientCaseDocument) => void;
   onUploadVersion: (caseDocument: ClientCaseDocument, file: File | null | undefined) => void;
   onUpdate: (caseDocument: ClientCaseDocument, payload: { documentType: string; status: string }) => void;
   onDelete: (caseDocument: ClientCaseDocument) => void;
@@ -7349,6 +7364,16 @@ function DocumentCard({
           className="inline-flex items-center justify-center gap-2 rounded-lg border border-sky-200 px-3 py-2 text-sm font-medium text-sky-700 hover:bg-sky-50 disabled:opacity-50">
           {sendingToYandex ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />} Я.Диск
         </button>
+        {onSendMessenger ? (
+          <button
+            type="button"
+            onClick={() => onSendMessenger(document)}
+            disabled={deleting}
+            aria-label={`Отправить документ ${document.originalFileName} в мессенджер`}
+            className="inline-flex items-center justify-center gap-2 rounded-lg border border-violet-200 px-3 py-2 text-sm font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-50">
+            <Send className="h-4 w-4" /> Мессенджер
+          </button>
+        ) : null}
         {canEdit ? (
           <label
             className={`inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-200 px-3 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-50 ${uploadingVersion || updating || deleting ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}

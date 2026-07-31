@@ -1962,6 +1962,62 @@ export interface FormRequirementSectionMetadataDto {
 export type ContactSourceType = 'client' | 'external';
 export type ContactScope = 'all' | 'clients' | 'external';
 
+export interface MessengerDocumentDeliveryConfiguration {
+  enabled: boolean;
+  linkLifetimeHours: number;
+  providers: Array<{ channel: string; enabled: boolean }>;
+}
+
+export interface MessengerRecipientBindingDto {
+  id: number;
+  clientId: number;
+  clientPortalAccountId?: number | null;
+  channel: string;
+  provider: string;
+  displayName: string;
+  maskedAddress: string;
+  verificationStatus: string;
+  verificationMethod: string;
+  verifiedAt?: string | null;
+}
+
+export interface MessengerDocumentDeliveryDto {
+  id: number;
+  publicId: string;
+  clientId: number;
+  clientCaseId?: number | null;
+  documentType: string;
+  documentId: number;
+  documentVersion: number;
+  originalFileName: string;
+  checksumSha256: string;
+  sizeBytes: number;
+  channel: string;
+  provider: string;
+  status: string;
+  attemptCount: number;
+  linkExpiresAt: string;
+  firstOpenedAt?: string | null;
+  downloadCount: number;
+  createdAt: string;
+  recipient: string;
+}
+
+export interface PreparedMessengerDocumentDeliveryDto {
+  id: number;
+  publicId: string;
+  documentType: string;
+  documentId: number;
+  documentVersion: number;
+  originalFileName: string;
+  checksumSha256: string;
+  sizeBytes: number;
+  channel: string;
+  provider: string;
+  status: string;
+  linkExpiresAt: string;
+}
+
 export interface ContactDirectoryItemDto {
   sourceType: ContactSourceType;
   category: ContactScope;
@@ -6097,6 +6153,54 @@ export class ApiService {
 
   async getCaseDocument(documentId: number) {
     return this.request<ClientCaseDocument>(`/case-documents/${documentId}`);
+  }
+
+  async getMessengerDocumentDeliveryConfiguration() {
+    return this.request<MessengerDocumentDeliveryConfiguration>('/messenger-document-deliveries/configuration');
+  }
+
+  async getMessengerRecipients(clientId: number) {
+    const query = buildQuery({ clientId });
+    return this.request<MessengerRecipientBindingDto[]>(`/messenger-document-deliveries/recipients${query}`);
+  }
+
+  async createMessengerRecipient(payload: {
+    clientId: number;
+    clientPortalAccountId?: number | null;
+    channel: string;
+    provider: string;
+    displayName: string;
+    address: string;
+    verificationMethod: string;
+    confirmContactOwnership: boolean;
+  }) {
+    return this.request<MessengerRecipientBindingDto>('/messenger-document-deliveries/recipients', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async prepareCaseDocumentMessengerDelivery(documentId: number, payload: {
+    recipientBindingId: number;
+    message?: string;
+    confirmRecipientAndDocument: boolean;
+  }) {
+    return this.request<PreparedMessengerDocumentDeliveryDto>(
+      `/messenger-document-deliveries/case-documents/${documentId}/prepare`,
+      { method: 'POST', body: JSON.stringify(payload) },
+    );
+  }
+
+  async queueMessengerDocumentDelivery(deliveryId: number) {
+    return this.request<{ id: number; status: string; queuedAt?: string | null; nextAttemptAt?: string | null }>(
+      `/messenger-document-deliveries/${deliveryId}/queue`,
+      { method: 'POST' },
+    );
+  }
+
+  async getMessengerDocumentDeliveryHistory(clientId: number) {
+    const query = buildQuery({ clientId });
+    return this.request<MessengerDocumentDeliveryDto[]>(`/messenger-document-deliveries${query}`);
   }
 
   async uploadCaseDocument(caseId: number, file: File, payload?: { documentType?: string; status?: string; documentKey?: string }) {
