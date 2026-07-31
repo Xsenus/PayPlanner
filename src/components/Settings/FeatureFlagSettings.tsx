@@ -10,6 +10,7 @@ const EMPTY_FLAGS: AppFeatureFlagsDto = {
     externalCalendarSync: false,
     courtEvents: false,
     documentTemplateLibrary: false,
+    externalWorkOrderApproval: false,
   },
 };
 
@@ -39,6 +40,11 @@ const LEGAL_FLAGS: FeatureFlagRow[] = [
     key: 'documentTemplateLibrary',
     label: 'Библиотека шаблонов документов',
     area: 'Документы',
+  },
+  {
+    key: 'externalWorkOrderApproval',
+    label: 'Внешнее согласование заказ-нарядов',
+    area: 'Дела',
   },
 ];
 

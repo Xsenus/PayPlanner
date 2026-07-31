@@ -20,6 +20,7 @@ describe('FeatureFlagSettings', () => {
         externalCalendarSync: true,
         courtEvents: false,
         documentTemplateLibrary: true,
+        externalWorkOrderApproval: false,
       },
     });
 
@@ -28,9 +29,10 @@ describe('FeatureFlagSettings', () => {
     expect(await screen.findByText('Юридический контур')).toBeTruthy();
     expect(screen.getByText('Google/Яндекс календарь')).toBeTruthy();
     expect(screen.getByText('Библиотека шаблонов документов')).toBeTruthy();
+    expect(screen.getByText('Внешнее согласование заказ-нарядов')).toBeTruthy();
 
     await waitFor(() => {
-      expect(screen.getByText('Активно: 2 из 4. Источник: backend `FeatureFlags:Legal`.')).toBeTruthy();
+      expect(screen.getByText('Активно: 2 из 5. Источник: backend `FeatureFlags:Legal`.')).toBeTruthy();
     });
   });
 
@@ -40,6 +42,6 @@ describe('FeatureFlagSettings', () => {
     render(<FeatureFlagSettings />);
 
     expect(await screen.findByText(/network down/i)).toBeTruthy();
-    expect(screen.getByText('Активно: 0 из 4. Источник: backend `FeatureFlags:Legal`.')).toBeTruthy();
+    expect(screen.getByText('Активно: 0 из 5. Источник: backend `FeatureFlags:Legal`.')).toBeTruthy();
   });
 });

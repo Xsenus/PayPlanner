@@ -3536,6 +3536,146 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.ToTable("ExternalContacts");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.ExternalWorkOrderApprovalRequest", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("AccessTokenHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<int>("ClientCaseWorkOrderId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CreatedByUserName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("Decision")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<DateTime?>("DecisionAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("DecisionComment")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<string>("DecisionIpHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("DecisionUserAgent")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int>("FailedAttempts")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("LastSentAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int>("MaxAttempts")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("OpenedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("OtpHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<Guid>("PublicId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("RecipientEmail")
+                        .IsRequired()
+                        .HasMaxLength(320)
+                        .HasColumnType("character varying(320)");
+
+                    b.Property<string>("RecipientName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("RecipientType")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("RevocationReason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTime?>("RevokedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("RevokedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("RevokedByUserName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("SnapshotHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("SnapshotJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ExpiresAt")
+                        .HasDatabaseName("IX_ExternalWorkOrderApprovalRequests_ExpiresAt");
+
+                    b.HasIndex("PublicId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_ExternalWorkOrderApprovalRequests_PublicId");
+
+                    b.HasIndex("ClientCaseWorkOrderId", "Status")
+                        .HasDatabaseName("IX_ExternalWorkOrderApprovalRequests_WorkOrderId_Status");
+
+                    b.HasIndex("ClientCaseWorkOrderId", "Version")
+                        .IsUnique()
+                        .HasDatabaseName("IX_ExternalWorkOrderApprovalRequests_WorkOrderId_Version");
+
+                    b.ToTable("ExternalWorkOrderApprovalRequests");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.FormFieldRequirement", b =>
                 {
                     b.Property<int>("Id")
@@ -9442,6 +9582,17 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("ResponsibleUser");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.ExternalWorkOrderApprovalRequest", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.ClientCaseWorkOrder", "WorkOrder")
+                        .WithMany("ExternalApprovalRequests")
+                        .HasForeignKey("ClientCaseWorkOrderId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("WorkOrder");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.GoogleCalendarAuthRequest", b =>
                 {
                     b.HasOne("PayPlanner.Api.Models.User", "User")
@@ -10412,6 +10563,8 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
             modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseWorkOrder", b =>
                 {
+                    b.Navigation("ExternalApprovalRequests");
+
                     b.Navigation("Items");
                 });
 

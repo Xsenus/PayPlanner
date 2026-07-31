@@ -61,6 +61,7 @@ import type {
   ClientCaseTimelineEntry,
   ClientCaseWorkOrder,
   ClientCaseWorkOrderItem,
+  ExternalWorkOrderApprovalStatus,
   DocumentStatusEntity,
   LegalEntitySummary,
   ProceduralDeadlineCalculationResult,
@@ -1208,6 +1209,12 @@ export function CaseDetailPage({
   const [generatingWorkOrderDocument, setGeneratingWorkOrderDocument] = useState(false);
   const [workOrderApprovalAction, setWorkOrderApprovalAction] = useState<'submit' | 'approve' | 'revision' | null>(null);
   const [workOrderApprovalComment, setWorkOrderApprovalComment] = useState('');
+  const [externalApprovalAvailable, setExternalApprovalAvailable] = useState(false);
+  const [externalApprovalStatus, setExternalApprovalStatus] = useState<ExternalWorkOrderApprovalStatus | null>(null);
+  const [externalApprovalRecipientName, setExternalApprovalRecipientName] = useState('');
+  const [externalApprovalRecipientEmail, setExternalApprovalRecipientEmail] = useState('');
+  const [externalApprovalRecipientType, setExternalApprovalRecipientType] = useState<'client' | 'representative'>('client');
+  const [externalApprovalSaving, setExternalApprovalSaving] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
   const [editPageOpen, setEditPageOpen] = useState(false);
   const [caseEditDraft, setCaseEditDraft] = useState<CaseEditDraft | null>(null);
@@ -1864,10 +1871,39 @@ export function CaseDetailPage({
         if (!cancelled) setWorkOrderLoading(false);
       });
 
+    apiService.getFeatureFlags()
+      .then(async (flags) => {
+        if (cancelled) return;
+        const available = Boolean(flags.legal.externalWorkOrderApproval);
+        setExternalApprovalAvailable(available);
+        if (!available) {
+          setExternalApprovalStatus(null);
+          return;
+        }
+        const status = await apiService.getExternalWorkOrderApproval(caseId);
+        if (!cancelled) setExternalApprovalStatus(status ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setExternalApprovalAvailable(false);
+          setExternalApprovalStatus(null);
+        }
+      });
+
     return () => {
       cancelled = true;
     };
   }, [activeTab, caseId, reloadToken]);
+
+  useEffect(() => {
+    if (!caseItem) return;
+    if (!externalApprovalRecipientName) {
+      setExternalApprovalRecipientName(caseItem.client?.name || caseItem.legalEntity?.shortName || '');
+    }
+    if (!externalApprovalRecipientEmail) {
+      setExternalApprovalRecipientEmail(caseItem.client?.email || caseItem.legalEntity?.email || '');
+    }
+  }, [caseItem, externalApprovalRecipientEmail, externalApprovalRecipientName]);
 
   useEffect(() => {
     if (activeTab !== 'history') return;
@@ -3111,6 +3147,63 @@ export function CaseDetailPage({
     }
   };
 
+  const sendExternalWorkOrderApproval = async () => {
+    if (!caseItem || !externalApprovalRecipientName.trim() || !externalApprovalRecipientEmail.trim()) {
+      setError('Укажите имя и email клиента или представителя.');
+      return;
+    }
+
+    const confirmed = await confirmDialog({
+      title: externalApprovalStatus ? 'Отправить новую версию?' : 'Отправить клиенту?',
+      description: externalApprovalStatus
+        ? 'Предыдущая активная ссылка будет отозвана. Получатель получит новую ссылку и код.'
+        : 'Получатель получит одноразовую ссылку и код подтверждения по email.',
+      confirmLabel: 'Отправить',
+    });
+    if (!confirmed) return;
+
+    setExternalApprovalSaving(true);
+    setError(null);
+    try {
+      const status = await apiService.createExternalWorkOrderApproval(caseItem.id, {
+        recipientName: externalApprovalRecipientName.trim(),
+        recipientEmail: externalApprovalRecipientEmail.trim(),
+        recipientType: externalApprovalRecipientType,
+      });
+      setExternalApprovalStatus(status);
+      setNotice(`Версия ${status.version} отправлена на ${status.recipientEmail}.`);
+      const loadedWorkOrder = await apiService.getCaseWorkOrder(caseItem.id);
+      applyLoadedWorkOrder(loadedWorkOrder);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось отправить заказ-наряд клиенту.');
+    } finally {
+      setExternalApprovalSaving(false);
+    }
+  };
+
+  const revokeExternalWorkOrderApproval = async () => {
+    if (!caseItem) return;
+    const confirmed = await confirmDialog({
+      title: 'Отозвать внешнюю ссылку?',
+      description: 'Клиент больше не сможет открыть ссылку или принять решение по этой версии.',
+      confirmLabel: 'Отозвать',
+      variant: 'danger',
+    });
+    if (!confirmed) return;
+
+    setExternalApprovalSaving(true);
+    setError(null);
+    try {
+      await apiService.revokeExternalWorkOrderApproval(caseItem.id);
+      setExternalApprovalStatus((current) => current ? { ...current, status: 'revoked' } : current);
+      setNotice('Внешняя ссылка отозвана.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось отозвать внешнюю ссылку.');
+    } finally {
+      setExternalApprovalSaving(false);
+    }
+  };
+
   const copyCaseLink = async () => {
     if (!caseItem) return;
 
@@ -3718,10 +3811,21 @@ export function CaseDetailPage({
               generatingDocument={generatingWorkOrderDocument}
               approvalAction={workOrderApprovalAction}
               approvalComment={workOrderApprovalComment}
+              externalApprovalAvailable={externalApprovalAvailable}
+              externalApprovalStatus={externalApprovalStatus}
+              externalApprovalRecipientName={externalApprovalRecipientName}
+              externalApprovalRecipientEmail={externalApprovalRecipientEmail}
+              externalApprovalRecipientType={externalApprovalRecipientType}
+              externalApprovalSaving={externalApprovalSaving}
               onDraftChange={setWorkOrderDraft}
               onItemDraftChange={(itemId, draft) => setWorkOrderItemDrafts((current) => ({ ...current, [itemId]: draft }))}
               onNewItemDraftChange={setNewWorkOrderItemDraft}
               onApprovalCommentChange={setWorkOrderApprovalComment}
+              onExternalApprovalRecipientNameChange={setExternalApprovalRecipientName}
+              onExternalApprovalRecipientEmailChange={setExternalApprovalRecipientEmail}
+              onExternalApprovalRecipientTypeChange={setExternalApprovalRecipientType}
+              onSendExternalApproval={() => void sendExternalWorkOrderApproval()}
+              onRevokeExternalApproval={() => void revokeExternalWorkOrderApproval()}
               onSaveHeader={() => void saveWorkOrderHeader()}
               onDeleteHeader={() => void deleteWorkOrder()}
               onCreateInvoice={canViewFinance ? () => void createInvoiceFromWorkOrder() : undefined}
@@ -4550,10 +4654,21 @@ function WorkOrderPanel({
   generatingDocument,
   approvalAction,
   approvalComment,
+  externalApprovalAvailable,
+  externalApprovalStatus,
+  externalApprovalRecipientName,
+  externalApprovalRecipientEmail,
+  externalApprovalRecipientType,
+  externalApprovalSaving,
   onDraftChange,
   onItemDraftChange,
   onNewItemDraftChange,
   onApprovalCommentChange,
+  onExternalApprovalRecipientNameChange,
+  onExternalApprovalRecipientEmailChange,
+  onExternalApprovalRecipientTypeChange,
+  onSendExternalApproval,
+  onRevokeExternalApproval,
   onSaveHeader,
   onDeleteHeader,
   onCreateInvoice,
@@ -4585,10 +4700,21 @@ function WorkOrderPanel({
   generatingDocument: boolean;
   approvalAction: 'submit' | 'approve' | 'revision' | null;
   approvalComment: string;
+  externalApprovalAvailable: boolean;
+  externalApprovalStatus: ExternalWorkOrderApprovalStatus | null;
+  externalApprovalRecipientName: string;
+  externalApprovalRecipientEmail: string;
+  externalApprovalRecipientType: 'client' | 'representative';
+  externalApprovalSaving: boolean;
   onDraftChange: (draft: WorkOrderHeaderDraft) => void;
   onItemDraftChange: (itemId: number, draft: WorkOrderItemDraft) => void;
   onNewItemDraftChange: (draft: WorkOrderItemDraft) => void;
   onApprovalCommentChange: (value: string) => void;
+  onExternalApprovalRecipientNameChange: (value: string) => void;
+  onExternalApprovalRecipientEmailChange: (value: string) => void;
+  onExternalApprovalRecipientTypeChange: (value: 'client' | 'representative') => void;
+  onSendExternalApproval: () => void;
+  onRevokeExternalApproval: () => void;
   onSaveHeader: () => void;
   onDeleteHeader: () => void;
   onCreateInvoice?: () => void;
@@ -4757,6 +4883,85 @@ function WorkOrderPanel({
               className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
             />
           </label>
+        </section>
+      ) : null}
+
+      {hasWorkOrder && externalApprovalAvailable ? (
+        <section className="rounded-xl border border-blue-200 bg-blue-50/40 p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                <Mail className="h-4 w-4 text-blue-600" /> Внешнее согласование с клиентом
+              </div>
+              <p className="mt-1 text-xs text-slate-500">
+                Клиент получит защищённую ссылку на неизменяемую версию и шестизначный код по email.
+              </p>
+            </div>
+            {externalApprovalStatus ? (
+              <div className="rounded-lg bg-white px-3 py-2 text-xs text-slate-600 shadow-sm">
+                <strong className="text-slate-900">Версия {externalApprovalStatus.version}</strong>
+                <span className="mx-1">·</span>
+                {externalApprovalStatus.status === 'pending' ? 'Отправлено'
+                  : externalApprovalStatus.status === 'opened' ? 'Открыто клиентом'
+                    : externalApprovalStatus.status === 'approved' ? 'Согласовано'
+                      : externalApprovalStatus.status === 'revision_requested' ? 'Есть замечания'
+                        : externalApprovalStatus.status === 'revoked' ? 'Отозвано'
+                          : externalApprovalStatus.status === 'expired' ? 'Истекло'
+                            : externalApprovalStatus.status === 'locked' ? 'Заблокировано'
+                              : externalApprovalStatus.status}
+              </div>
+            ) : null}
+          </div>
+
+          <div className="mt-3 grid gap-2 md:grid-cols-[160px_1fr_1fr_auto]">
+            <select
+              value={externalApprovalRecipientType}
+              onChange={(event) => onExternalApprovalRecipientTypeChange(event.target.value as 'client' | 'representative')}
+              className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100">
+              <option value="client">Клиент</option>
+              <option value="representative">Представитель</option>
+            </select>
+            <input
+              value={externalApprovalRecipientName}
+              onChange={(event) => onExternalApprovalRecipientNameChange(event.target.value)}
+              maxLength={256}
+              placeholder="ФИО получателя"
+              className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+            />
+            <input
+              type="email"
+              value={externalApprovalRecipientEmail}
+              onChange={(event) => onExternalApprovalRecipientEmailChange(event.target.value)}
+              maxLength={320}
+              placeholder="Email получателя"
+              className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+            />
+            <button
+              type="button"
+              onClick={onSendExternalApproval}
+              disabled={externalApprovalSaving || !items.length || (workOrder?.totalAmount ?? 0) <= 0}
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
+              {externalApprovalSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+              {externalApprovalStatus ? 'Новая версия' : 'Отправить'}
+            </button>
+          </div>
+
+          {externalApprovalStatus ? (
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-blue-100 pt-3 text-xs text-slate-500">
+              <span>
+                {externalApprovalStatus.recipientName} · {externalApprovalStatus.recipientEmail} · до {formatRuDateTime(externalApprovalStatus.expiresAt)}
+              </span>
+              {(externalApprovalStatus.status === 'pending' || externalApprovalStatus.status === 'opened') ? (
+                <button
+                  type="button"
+                  onClick={onRevokeExternalApproval}
+                  disabled={externalApprovalSaving}
+                  className="font-semibold text-rose-600 hover:text-rose-700 disabled:opacity-50">
+                  Отозвать ссылку
+                </button>
+              ) : null}
+            </div>
+          ) : null}
         </section>
       ) : null}
 

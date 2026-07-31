@@ -53,4 +53,5 @@ public class ClientCaseWorkOrder
     public string ApprovalComment { get; set; } = string.Empty;
 
     public ICollection<ClientCaseWorkOrderItem> Items { get; set; } = new List<ClientCaseWorkOrderItem>();
+    public ICollection<ExternalWorkOrderApprovalRequest> ExternalApprovalRequests { get; set; } = new List<ExternalWorkOrderApprovalRequest>();
 }

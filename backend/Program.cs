@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.ResponseCompression;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
@@ -22,6 +23,7 @@ using System.Diagnostics;
 using System.IO.Compression;
 using System.Text;
 using System.Text.Json.Serialization;
+using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
 var databaseProvider = DatabaseProviderResolver.Resolve(builder.Configuration);
@@ -145,6 +147,7 @@ builder.Services.AddScoped<IEmailService, EmailService>();
 builder.Services.AddScoped<ITelegramNotificationService, TelegramNotificationService>();
 builder.Services.AddScoped<ISmsNotificationService, SystemSmsNotificationService>();
 builder.Services.AddScoped<IMaxNotificationService, SystemMaxNotificationService>();
+builder.Services.AddScoped<IExternalWorkOrderApprovalService, ExternalWorkOrderApprovalService>();
 builder.Services.AddScoped<ITelegramBotUpdateService, TelegramBotUpdateService>();
 builder.Services.AddScoped<IRealtimeNotificationPublisher, SignalRRealtimeNotificationPublisher>();
 builder.Services.AddScoped<IWebPushNotificationService, WebPushNotificationService>();
@@ -323,6 +326,20 @@ builder.Services.AddAuthorization(opts =>
 {
     opts.AddPolicy("Admin", p => p.RequireRole("admin"));
 });
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddPolicy("public-work-order-approval", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 10,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+                AutoReplenishment = true,
+            }));
+});
 
 var urlsEnv = Environment.GetEnvironmentVariable("ASPNETCORE_URLS");
 var urlsCfg = builder.Configuration["urls"] ?? builder.Configuration["Urls"];
@@ -349,6 +366,7 @@ app.UseRouting();
 app.UseMiddleware<SlowRequestLoggingMiddleware>();
 app.UseCors();
 app.UseResponseCompression();
+app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 

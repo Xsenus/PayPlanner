@@ -124,6 +124,7 @@ public class CasesV2Controller : ControllerBase
     private readonly IOptionsMonitor<AppFeatureFlagsOptions>? _featureFlags;
     private readonly INotificationService? _notificationService;
     private readonly CourtSyncMetrics? _courtSyncMetrics;
+    private readonly IExternalWorkOrderApprovalService? _externalWorkOrderApprovalService;
     private CaseStatusClock? _caseStatusClock;
 
     public CasesV2Controller(
@@ -136,7 +137,8 @@ public class CasesV2Controller : ControllerBase
         IConfiguration? configuration = null,
         IOptionsMonitor<AppFeatureFlagsOptions>? featureFlags = null,
         INotificationService? notificationService = null,
-        CourtSyncMetrics? courtSyncMetrics = null)
+        CourtSyncMetrics? courtSyncMetrics = null,
+        IExternalWorkOrderApprovalService? externalWorkOrderApprovalService = null)
     {
         _db = db;
         _caseDocumentStorage = caseDocumentStorage ?? new LocalCaseDocumentStorage(environment, configuration);
@@ -147,6 +149,7 @@ public class CasesV2Controller : ControllerBase
         _featureFlags = featureFlags;
         _notificationService = notificationService;
         _courtSyncMetrics = courtSyncMetrics;
+        _externalWorkOrderApprovalService = externalWorkOrderApprovalService;
     }
 
     private Task<DataVisibilityAccess?> ResolveCasesVisibilityAsync(CancellationToken ct)
@@ -5812,6 +5815,126 @@ public class CasesV2Controller : ControllerBase
             : MapWorkOrder(workOrder));
     }
 
+    [HttpGet("{id:int}/work-order/external-approval")]
+    public async Task<ActionResult<ExternalWorkOrderApprovalStatusDto?>> GetExternalWorkOrderApproval(
+        int id,
+        CancellationToken ct)
+    {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanView, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        if (!await CanAccessCaseAsync(id, ct))
+        {
+            return NotFound();
+        }
+
+        if (_externalWorkOrderApprovalService is null)
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new { message = "Модуль внешнего согласования недоступен." });
+        }
+
+        try
+        {
+            var status = await _externalWorkOrderApprovalService.GetLatestStatusAsync(id, ct);
+            return status is null ? NoContent() : Ok(status);
+        }
+        catch (ExternalWorkOrderApprovalException ex)
+        {
+            return MapExternalWorkOrderApprovalError(ex);
+        }
+    }
+
+    [HttpPost("{id:int}/work-order/external-approval")]
+    public async Task<ActionResult<ExternalWorkOrderApprovalStatusDto>> CreateExternalWorkOrderApproval(
+        int id,
+        [FromBody] CreateExternalWorkOrderApprovalRequest? request,
+        CancellationToken ct)
+    {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        if (!await CanAccessCaseAsync(id, ct))
+        {
+            return NotFound();
+        }
+
+        if (_externalWorkOrderApprovalService is null)
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new { message = "Модуль внешнего согласования недоступен." });
+        }
+
+        try
+        {
+            var status = await _externalWorkOrderApprovalService.CreateAsync(
+                id,
+                request ?? new CreateExternalWorkOrderApprovalRequest(),
+                User.GetUserId(),
+                User.GetDisplayName(),
+                ct);
+            return Ok(status);
+        }
+        catch (ExternalWorkOrderApprovalException ex)
+        {
+            return MapExternalWorkOrderApprovalError(ex);
+        }
+    }
+
+    [HttpDelete("{id:int}/work-order/external-approval")]
+    public async Task<IActionResult> RevokeExternalWorkOrderApproval(int id, CancellationToken ct)
+    {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        if (!await CanAccessCaseAsync(id, ct))
+        {
+            return NotFound();
+        }
+
+        if (_externalWorkOrderApprovalService is null)
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new { message = "Модуль внешнего согласования недоступен." });
+        }
+
+        try
+        {
+            return await _externalWorkOrderApprovalService.RevokeAsync(
+                id,
+                User.GetUserId(),
+                User.GetDisplayName(),
+                ct)
+                ? NoContent()
+                : NotFound(new { message = "Активный запрос внешнего согласования не найден." });
+        }
+        catch (ExternalWorkOrderApprovalException ex)
+        {
+            return MapExternalWorkOrderApprovalError(ex);
+        }
+    }
+
+    private async Task<bool> CanAccessCaseAsync(int id, CancellationToken ct)
+    {
+        var visibility = await ResolveCasesVisibilityAsync(ct);
+        return visibility is not null && await _db.ClientCases
+            .AsNoTracking()
+            .ApplyClientCaseVisibility(visibility)
+            .AnyAsync(item => item.Id == id, ct);
+    }
+
+    private ActionResult MapExternalWorkOrderApprovalError(ExternalWorkOrderApprovalException ex)
+        => ex.Code switch
+        {
+            "feature_disabled" => StatusCode(StatusCodes.Status503ServiceUnavailable, new { ex.Code, message = ex.Message }),
+            "work_order_not_found" => NotFound(new { ex.Code, message = ex.Message }),
+            "validation_error" or "work_order_empty" => BadRequest(new { ex.Code, message = ex.Message }),
+            _ => Conflict(new { ex.Code, message = ex.Message }),
+        };
+
     [HttpGet("{id:int}/work-order/print")]
     public async Task<IActionResult> PrintWorkOrder(int id, CancellationToken ct)
     {
@@ -6048,6 +6171,11 @@ public class CasesV2Controller : ControllerBase
         if (IsWorkOrderLockedForEditing(workOrder))
         {
             return BadRequest(new { message = BuildWorkOrderLockedMessage(workOrder.Status) });
+        }
+        if (await _db.ExternalWorkOrderApprovalRequests
+            .AnyAsync(item => item.ClientCaseWorkOrderId == workOrder.Id, ct))
+        {
+            return BadRequest(new { message = "Заказ-наряд с историей внешнего согласования нельзя удалить. Создайте новую версию или отзовите активную ссылку." });
         }
 
         _db.ClientCaseWorkOrders.Remove(workOrder);

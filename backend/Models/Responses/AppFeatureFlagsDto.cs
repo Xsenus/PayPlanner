@@ -13,6 +13,7 @@ public sealed class AppFeatureFlagsDto
                 ExternalCalendarSync = options.Legal.ExternalCalendarSync,
                 CourtEvents = options.Legal.CourtEvents,
                 DocumentTemplateLibrary = options.Legal.DocumentTemplateLibrary,
+                ExternalWorkOrderApproval = options.Legal.ExternalWorkOrderApproval,
             },
         };
 }
@@ -23,6 +24,7 @@ public sealed class LegalFeatureFlagsDto
     public bool ExternalCalendarSync { get; set; }
     public bool CourtEvents { get; set; }
     public bool DocumentTemplateLibrary { get; set; }
+    public bool ExternalWorkOrderApproval { get; set; }
 }
 
 public sealed class LegalIntegrationDiagnosticsDto

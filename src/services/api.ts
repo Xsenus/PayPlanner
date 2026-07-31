@@ -129,6 +129,7 @@ export interface AppFeatureFlagsDto {
     externalCalendarSync: boolean;
     courtEvents: boolean;
     documentTemplateLibrary: boolean;
+    externalWorkOrderApproval: boolean;
   };
 }
 
@@ -5601,6 +5602,54 @@ export class ApiService {
     });
   }
 
+  async getExternalWorkOrderApproval(caseId: number) {
+    return this.request<ExternalWorkOrderApprovalStatus | undefined>(
+      `/v2/cases/${caseId}/work-order/external-approval`,
+    );
+  }
+
+  async createExternalWorkOrderApproval(caseId: number, payload: {
+    recipientName: string;
+    recipientEmail: string;
+    recipientType: 'client' | 'representative';
+  }) {
+    return this.request<ExternalWorkOrderApprovalStatus>(
+      `/v2/cases/${caseId}/work-order/external-approval`,
+      { method: 'POST', body: JSON.stringify(payload) },
+    );
+  }
+
+  async revokeExternalWorkOrderApproval(caseId: number) {
+    return this.request<void>(`/v2/cases/${caseId}/work-order/external-approval`, { method: 'DELETE' });
+  }
+
+  async openPublicWorkOrderApproval(publicId: string, token: string) {
+    return this.request<PublicWorkOrderApproval>(
+      `/public/work-order-approvals/${encodeURIComponent(publicId)}/open`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ token }),
+        suppressAuthSessionExpired: true,
+      },
+    );
+  }
+
+  async decidePublicWorkOrderApproval(publicId: string, payload: {
+    token: string;
+    otp: string;
+    decision: 'approved' | 'revision_requested';
+    comment?: string;
+  }) {
+    return this.request<PublicWorkOrderApprovalDecision>(
+      `/public/work-order-approvals/${encodeURIComponent(publicId)}/decision`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+        suppressAuthSessionExpired: true,
+      },
+    );
+  }
+
   async getCaseWorkOrderPrintHtml(caseId: number) {
     return this.request<string>(`/v2/cases/${caseId}/work-order/print`);
   }
@@ -7513,6 +7562,9 @@ import type {
   ClientCaseWorkOrderAct,
   ClientCaseWorkOrderContract,
   ClientCaseWorkOrderInvoice,
+  ExternalWorkOrderApprovalStatus,
+  PublicWorkOrderApproval,
+  PublicWorkOrderApprovalDecision,
   AccountSuggestion,
   SummaryStats,
   PeriodKey,

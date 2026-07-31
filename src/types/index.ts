@@ -1143,6 +1143,61 @@ export interface ClientCaseWorkOrderItem {
   sortOrder: number;
 }
 
+export interface ExternalWorkOrderApprovalStatus {
+  publicId: string;
+  version: number;
+  status: string;
+  recipientName: string;
+  recipientEmail: string;
+  recipientType: 'client' | 'representative' | string;
+  createdAt: string;
+  expiresAt: string;
+  openedAt?: string | null;
+  lastSentAt?: string | null;
+  decision?: string | null;
+  decisionComment?: string | null;
+  decisionAt?: string | null;
+}
+
+export interface ExternalWorkOrderSnapshotItem {
+  serviceName: string;
+  description?: string | null;
+  dueDate?: string | null;
+  quantity: number;
+  unitPrice: number;
+  totalAmount: number;
+}
+
+export interface ExternalWorkOrderSnapshot {
+  organizationName: string;
+  clientName: string;
+  caseTitle: string;
+  caseNumber: string;
+  version: number;
+  title: string;
+  currency: string;
+  totalAmount: number;
+  items: ExternalWorkOrderSnapshotItem[];
+}
+
+export interface PublicWorkOrderApproval {
+  publicId: string;
+  status: string;
+  expiresAt: string;
+  recipientHint: string;
+  snapshot: ExternalWorkOrderSnapshot;
+  decision?: string | null;
+  decisionComment?: string | null;
+  decisionAt?: string | null;
+}
+
+export interface PublicWorkOrderApprovalDecision {
+  status: string;
+  decision: string;
+  comment?: string | null;
+  decisionAt?: string | null;
+}
+
 export interface ClientCaseCourtSyncRun {
   clientCaseId: number;
   status: 'manual-check-recorded' | 'binding-required' | 'external-sync-completed' | 'external-sync-error' | string;

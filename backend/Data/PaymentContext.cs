@@ -1431,6 +1431,40 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.DueDate).HasDatabaseName("IX_ClientCaseWorkOrderItems_DueDate");
         });
 
+        modelBuilder.Entity<ExternalWorkOrderApprovalRequest>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Status).HasMaxLength(32).IsRequired();
+            entity.Property(e => e.SnapshotJson).IsRequired();
+            entity.Property(e => e.SnapshotHash).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.AccessTokenHash).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.OtpHash).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.RecipientName).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.RecipientEmail).HasMaxLength(320).IsRequired();
+            entity.Property(e => e.RecipientType).HasMaxLength(32).IsRequired();
+            entity.Property(e => e.CreatedByUserName).HasMaxLength(256);
+            entity.Property(e => e.Decision).HasMaxLength(32);
+            entity.Property(e => e.DecisionComment).HasMaxLength(2000);
+            entity.Property(e => e.DecisionIpHash).HasMaxLength(64);
+            entity.Property(e => e.DecisionUserAgent).HasMaxLength(512);
+            entity.Property(e => e.RevokedByUserName).HasMaxLength(256);
+            entity.Property(e => e.RevocationReason).HasMaxLength(500);
+
+            entity.HasOne(e => e.WorkOrder)
+                .WithMany(e => e.ExternalApprovalRequests)
+                .HasForeignKey(e => e.ClientCaseWorkOrderId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasIndex(e => e.PublicId).IsUnique()
+                .HasDatabaseName("IX_ExternalWorkOrderApprovalRequests_PublicId");
+            entity.HasIndex(e => new { e.ClientCaseWorkOrderId, e.Version }).IsUnique()
+                .HasDatabaseName("IX_ExternalWorkOrderApprovalRequests_WorkOrderId_Version");
+            entity.HasIndex(e => new { e.ClientCaseWorkOrderId, e.Status })
+                .HasDatabaseName("IX_ExternalWorkOrderApprovalRequests_WorkOrderId_Status");
+            entity.HasIndex(e => e.ExpiresAt)
+                .HasDatabaseName("IX_ExternalWorkOrderApprovalRequests_ExpiresAt");
+        });
+
         // ------------------ ClientCaseProceduralDeadline ------------------
         modelBuilder.Entity<ClientCaseProceduralDeadline>(entity =>
         {
@@ -3116,6 +3150,8 @@ public class PaymentContext : DbContext
             .HasQueryFilter(item => ClientCases.Any(parent => parent.Id == item.ClientCaseId));
         modelBuilder.Entity<ClientCaseWorkOrderItem>()
             .HasQueryFilter(item => ClientCaseWorkOrders.Any(parent => parent.Id == item.ClientCaseWorkOrderId));
+        modelBuilder.Entity<ExternalWorkOrderApprovalRequest>()
+            .HasQueryFilter(item => ClientCaseWorkOrders.Any(parent => parent.Id == item.ClientCaseWorkOrderId));
         modelBuilder.Entity<ClientContract>()
             .HasQueryFilter(item => Clients.Any(parent => parent.Id == item.ClientId)
                 && Contracts.Any(parent => parent.Id == item.ContractId));
@@ -3671,6 +3707,8 @@ public class PaymentContext : DbContext
     public DbSet<ClientCaseWorkOrder> ClientCaseWorkOrders { get; set; }
 
     public DbSet<ClientCaseWorkOrderItem> ClientCaseWorkOrderItems { get; set; }
+
+    public DbSet<ExternalWorkOrderApprovalRequest> ExternalWorkOrderApprovalRequests { get; set; }
 
     public DbSet<ClientCaseProceduralDeadline> ClientCaseProceduralDeadlines { get; set; }
 

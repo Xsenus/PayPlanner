@@ -3461,6 +3461,144 @@ namespace PayPlanner.Api.Migrations
                     b.ToTable("ExternalContacts");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.ExternalWorkOrderApprovalRequest", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("AccessTokenHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ClientCaseWorkOrderId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("CreatedByUserName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Decision")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("DecisionAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DecisionComment")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DecisionIpHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DecisionUserAgent")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("FailedAttempts")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("LastSentAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("MaxAttempts")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("OpenedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OtpHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("PublicId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RecipientEmail")
+                        .IsRequired()
+                        .HasMaxLength(320)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RecipientName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RecipientType")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RevocationReason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("RevokedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("RevokedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("RevokedByUserName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SnapshotHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SnapshotJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ExpiresAt")
+                        .HasDatabaseName("IX_ExternalWorkOrderApprovalRequests_ExpiresAt");
+
+                    b.HasIndex("PublicId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_ExternalWorkOrderApprovalRequests_PublicId");
+
+                    b.HasIndex("ClientCaseWorkOrderId", "Status")
+                        .HasDatabaseName("IX_ExternalWorkOrderApprovalRequests_WorkOrderId_Status");
+
+                    b.HasIndex("ClientCaseWorkOrderId", "Version")
+                        .IsUnique()
+                        .HasDatabaseName("IX_ExternalWorkOrderApprovalRequests_WorkOrderId_Version");
+
+                    b.ToTable("ExternalWorkOrderApprovalRequests");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.FormFieldRequirement", b =>
                 {
                     b.Property<int>("Id")
@@ -9240,6 +9378,17 @@ namespace PayPlanner.Api.Migrations
                     b.Navigation("ResponsibleUser");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.ExternalWorkOrderApprovalRequest", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.ClientCaseWorkOrder", "WorkOrder")
+                        .WithMany("ExternalApprovalRequests")
+                        .HasForeignKey("ClientCaseWorkOrderId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("WorkOrder");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.GoogleCalendarAuthRequest", b =>
                 {
                     b.HasOne("PayPlanner.Api.Models.User", "User")
@@ -10210,6 +10359,8 @@ namespace PayPlanner.Api.Migrations
 
             modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseWorkOrder", b =>
                 {
+                    b.Navigation("ExternalApprovalRequests");
+
                     b.Navigation("Items");
                 });
 

@@ -23,6 +23,8 @@ import { DailyOverdueTaskReminder } from './components/Tasks/DailyOverdueTaskRem
 import type { User as AppUser } from './services/authService';
 import { apiService, type ContactScope } from './services/api';
 import { extractDisplayErrorMessage } from './utils/errorUtils';
+import { ExternalWorkOrderApprovalPage } from './components/Public/ExternalWorkOrderApprovalPage';
+import { isExternalWorkOrderApprovalPath } from './utils/externalWorkOrderApprovalRoute';
 import type { InvoiceEditorDraftState } from './utils/invoiceEditorBridge';
 import {
   canAccessTab,
@@ -1910,6 +1912,10 @@ function AppContent() {
 }
 
 function App() {
+  if (isExternalWorkOrderApprovalPath()) {
+    return <ExternalWorkOrderApprovalPage />;
+  }
+
   return (
     <AuthProvider>
       <ToastProvider>

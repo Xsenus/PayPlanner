@@ -65,6 +65,10 @@ vi.mock('../../services/api', () => ({
     getClientCaseFinanceSummaries: vi.fn(),
     getLegalEntityCaseFinanceSummaries: vi.fn(),
     getCaseWorkOrder: vi.fn(),
+    getFeatureFlags: vi.fn(),
+    getExternalWorkOrderApproval: vi.fn(),
+    createExternalWorkOrderApproval: vi.fn(),
+    revokeExternalWorkOrderApproval: vi.fn(),
     createCaseWorkOrder: vi.fn(),
     updateCaseWorkOrder: vi.fn(),
     deleteCaseWorkOrder: vi.fn(),
@@ -205,6 +209,18 @@ describe('CaseDetailPage', () => {
     window.sessionStorage.clear();
     vi.mocked(apiService.getCaseV2).mockReset();
     vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase());
+    vi.mocked(apiService.getFeatureFlags).mockReset();
+    vi.mocked(apiService.getFeatureFlags).mockResolvedValue({
+      legal: {
+        externalCourtSync: false,
+        externalCalendarSync: false,
+        courtEvents: false,
+        documentTemplateLibrary: false,
+        externalWorkOrderApproval: false,
+      },
+    });
+    vi.mocked(apiService.getExternalWorkOrderApproval).mockReset();
+    vi.mocked(apiService.getExternalWorkOrderApproval).mockResolvedValue(undefined);
     vi.mocked(apiService.getUserSetting).mockReset();
     vi.mocked(apiService.getUserSetting).mockResolvedValue(null);
     vi.mocked(apiService.updateCaseV2).mockReset();

@@ -68,7 +68,7 @@
 
 ## 4. Внешнее согласование заказ-наряда
 
-<!-- decisions: tz-gap-external-workorder-approval-roadmap-2026-07-29.md count=5 -->
+<!-- decisions: tz-gap-external-workorder-approval-roadmap-2026-07-29.md count=0 -->
 
 Рекомендуемый старт:
 

@@ -15,4 +15,5 @@ public sealed class LegalFeatureFlagsOptions
     public bool ExternalCalendarSync { get; set; }
     public bool CourtEvents { get; set; }
     public bool DocumentTemplateLibrary { get; set; }
+    public bool ExternalWorkOrderApproval { get; set; }
 }
