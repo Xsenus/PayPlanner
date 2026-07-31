@@ -22,6 +22,27 @@ public sealed class MaxOutboxServiceTests
     }
 
     [Fact]
+    public async Task NotificationHonorsPersonalMaxPreference()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        fixture.Db.UserSettings.Add(new UserSetting
+        {
+            UserId = fixture.UserId,
+            Key = UserNotificationPreferenceSettings.SettingKey,
+            Value = UserNotificationPreferenceSettings.Serialize(new UserNotificationPreferenceSnapshot(
+                [],
+                new Dictionary<string, IReadOnlyList<string>>
+                {
+                    [UserNotificationTypes.SystemAdminWarning] = [NotificationChannels.Max],
+                })),
+        });
+        await fixture.Db.SaveChangesAsync();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Outbox.QueueAsync(fixture.Request(), CancellationToken.None));
+        Assert.Empty(await fixture.Db.MaxOutboxMessages.ToListAsync());
+    }
+
+    [Fact]
     public async Task QueueIsIdempotentAndProtectsTextAndUrl()
     {
         await using var fixture = await Fixture.CreateAsync();
@@ -133,7 +154,8 @@ public sealed class MaxOutboxServiceTests
             "critical:event:1",
             "Критическое уведомление",
             "Открыть CRM",
-            "https://crm.example.test/opaque-link");
+            "https://crm.example.test/opaque-link",
+            UserNotificationTypes.SystemAdminWarning);
 
         public MaxOutboxProcessor Processor(IMaxApiClient api) => new(
             Db, _settings, api, _protection, _time, NullLogger<MaxOutboxProcessor>.Instance);

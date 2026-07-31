@@ -480,7 +480,7 @@ public sealed class SystemMaxNotificationService(
             DailyLimitPerRecipient = ParseLimit(settings.GetValueOrDefault(DailyLimitPerRecipientKey)),
             TechnicalPayloadRetentionDays = ParseRetention(settings.GetValueOrDefault(TechnicalPayloadRetentionDaysKey)),
             Scenarios = scenarios,
-            AllowedEventTypes = notifications ? ["employee-critical"] : [],
+            AllowedEventTypes = notifications ? [UserNotificationTypes.SystemAdminWarning] : [],
             StatusText = BuildStatus(enabled, emergencyStop, botTokenSet, webhookSecretSet, scenarioConfirmed),
         };
     }

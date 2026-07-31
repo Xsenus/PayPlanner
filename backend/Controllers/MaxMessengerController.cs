@@ -40,7 +40,8 @@ public sealed class MaxMessengerController(
             request.EventKey,
             request.Text,
             request.ActionText,
-            request.ActionUrl), ct);
+            request.ActionUrl,
+            request.NotificationType), ct);
         return Accepted(new { message.PublicId, message.Status, message.CreatedAt });
     }
 
@@ -79,6 +80,7 @@ public sealed class QueueMaxMessageRequest
     public string Text { get; set; } = string.Empty;
     public string? ActionText { get; set; }
     public string? ActionUrl { get; set; }
+    public string? NotificationType { get; set; } = UserNotificationTypes.SystemAdminWarning;
 }
 
 [ApiController]

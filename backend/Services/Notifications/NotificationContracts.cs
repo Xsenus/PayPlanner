@@ -33,7 +33,7 @@ public static class NotificationChannels
     public static readonly IReadOnlyList<string> External = [Email, Telegram, WebPush];
     public static readonly IReadOnlyList<string> Future = [Sms, Max];
     public static readonly IReadOnlyList<string> Known = [InApp, Toast, ForcedModal, WebPush, Email, Telegram, Sms, Max];
-    public static readonly IReadOnlyList<string> UserPreferences = [InApp, Toast, ForcedModal, WebPush, Email, Telegram, Sms];
+    public static readonly IReadOnlyList<string> UserPreferences = [InApp, Toast, ForcedModal, WebPush, Email, Telegram, Sms, Max];
     public static readonly IReadOnlyList<NotificationChannelDefinition> Definitions =
     [
         new(InApp, "Центр уведомлений", "Внутренние уведомления в CRM, счетчик и центр уведомлений.", "active", true, true, true, false, false, false),
@@ -42,7 +42,7 @@ public static class NotificationChannels
         new(Email, "Email", "Письма через настроенных SMTP-отправителей.", "active", true, true, true, true, true, false),
         new(Telegram, "Telegram", "Сообщения через подключенных Telegram-ботов и привязанные чаты пользователей.", "active", true, true, true, true, true, false),
         new(Sms, "SMS", "SMS-уведомления. Адаптер подготовлен в модели каналов, провайдер будет выбран отдельно.", "planned", false, false, false, true, true, true),
-        new(Max, "MAX", "Уведомления в мессенджер MAX. Канал зарезервирован как будущая интеграция без привязки к конкретному API.", "planned", false, false, false, true, true, true)
+        new(Max, "MAX", "Уведомления через официальный Bot API MAX после привязки сотрудника и явного включения администратором.", "configured", false, false, true, true, true, true)
     ];
 }
 

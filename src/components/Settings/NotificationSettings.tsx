@@ -113,6 +113,7 @@ const ROLE_CHANNEL_OPTIONS: Array<{ value: UserNotificationPreferenceChannel; la
   { value: 'email', label: 'Email', Icon: Mail },
   { value: 'telegram', label: 'Telegram', Icon: Send },
   { value: 'sms', label: 'SMS', Icon: Smartphone },
+  { value: 'max', label: 'MAX', Icon: MessageSquare },
 ];
 
 const TYPE_DOMAIN_ORDER = ['task', 'calendar', 'note', 'payment', 'invoice', 'act', 'contract', 'case', 'court', 'system'];

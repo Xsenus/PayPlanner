@@ -13,7 +13,8 @@ public sealed record MaxQueueRequest(
     string EventKey,
     string Text,
     string? ActionText = null,
-    string? ActionUrl = null);
+    string? ActionUrl = null,
+    string? NotificationType = null);
 
 public interface IMaxOutboxService
 {
@@ -35,6 +36,14 @@ public sealed class MaxOutboxService(
         if (!runtime.Ready) throw new InvalidOperationException("Канал MAX выключен или настроен не полностью.");
         var scenario = request.Scenario?.Trim().ToLowerInvariant() ?? string.Empty;
         if (!IsScenarioEnabled(runtime, scenario)) throw new InvalidOperationException("Сценарий MAX выключен администратором.");
+        if (scenario == MaxMessengerScenarios.Notifications)
+        {
+            var notificationType = UserNotificationTypes.Find(request.NotificationType)?.Key;
+            if (!string.Equals(notificationType, UserNotificationTypes.SystemAdminWarning, StringComparison.Ordinal))
+                throw new InvalidOperationException("Событие пока не разрешено для MAX.");
+            if (!await IsNotificationAllowedForRecipientAsync(request.RecipientUserId, notificationType!, ct))
+                throw new InvalidOperationException("Получатель отключил это уведомление MAX.");
+        }
         var text = request.Text?.Trim() ?? string.Empty;
         if (text.Length is 0 or > MaxApiClient.MaxTextLength) throw new InvalidOperationException("Текст MAX должен содержать от 1 до 4000 символов.");
         Uri? actionUri = null;
@@ -126,6 +135,39 @@ public sealed class MaxOutboxService(
 
     private static bool IsWithinQuietHours(TimeOnly now, TimeOnly start, TimeOnly end)
         => start == end ? false : start < end ? now >= start && now < end : now >= start || now < end;
+
+    private async Task<bool> IsNotificationAllowedForRecipientAsync(int userId, string notificationType, CancellationToken ct)
+    {
+        var user = await db.Users.AsNoTracking()
+            .Where(item => item.Id == userId && item.IsActive && item.IsApproved)
+            .Select(item => new
+            {
+                item.RoleId,
+                RoleName = item.Role != null ? item.Role.Name : string.Empty,
+                Preference = db.UserSettings
+                    .Where(setting => setting.UserId == item.Id)
+                    .Where(setting => setting.Key == UserNotificationPreferenceSettings.SettingKey)
+                    .Select(setting => setting.Value)
+                    .FirstOrDefault(),
+            })
+            .FirstOrDefaultAsync(ct);
+        if (user is null) return false;
+        UserNotificationPreferenceSnapshot preferences;
+        if (user.Preference is not null)
+        {
+            preferences = UserNotificationPreferenceSettings.Parse(user.Preference);
+        }
+        else
+        {
+            var roleSetting = await db.SystemSettings.AsNoTracking()
+                .Where(item => item.Key == RoleNotificationPreferenceSettings.SettingKey)
+                .Select(item => item.Value)
+                .FirstOrDefaultAsync(ct);
+            preferences = RoleNotificationPreferenceSettings.ParseForRole(roleSetting, user.RoleId)
+                ?? RoleNotificationPreferenceDefaults.Resolve(user.RoleName).Preferences;
+        }
+        return UserNotificationPreferenceSettings.IsChannelEnabled(preferences, notificationType, NotificationChannels.Max);
+    }
 }
 
 public interface IMaxOutboxProcessor
