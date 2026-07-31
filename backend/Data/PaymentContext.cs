@@ -3033,6 +3033,35 @@ public class PaymentContext : DbContext
                 .HasFilter("\"ProviderEventId\" IS NOT NULL");
         });
 
+        modelBuilder.Entity<MaxRecipientLink>(entity =>
+        {
+            entity.HasKey(item => item.Id);
+            entity.Property(item => item.Status).HasMaxLength(32).IsRequired();
+            entity.Property(item => item.LinkTokenHash).HasMaxLength(64).IsRequired();
+            entity.Property(item => item.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.HasOne(item => item.User).WithMany().HasForeignKey(item => item.UserId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(item => item.ClientPortalAccount).WithMany().HasForeignKey(item => item.ClientPortalAccountId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(item => item.PublicId).IsUnique();
+            entity.HasIndex(item => item.LinkTokenHash).IsUnique();
+            entity.HasIndex(item => new { item.UserId, item.Status });
+            entity.HasIndex(item => new { item.ClientPortalAccountId, item.Status });
+            entity.HasIndex(item => new { item.MaxUserId, item.Status });
+            entity.HasIndex(item => item.LinkTokenExpiresAt);
+        });
+
+        modelBuilder.Entity<MaxInboundEvent>(entity =>
+        {
+            entity.HasKey(item => item.Id);
+            entity.Property(item => item.Fingerprint).HasMaxLength(64).IsRequired();
+            entity.Property(item => item.UpdateType).HasMaxLength(64).IsRequired();
+            entity.Property(item => item.PayloadHash).HasMaxLength(64).IsRequired();
+            entity.Property(item => item.ProcessingStatus).HasMaxLength(32).IsRequired();
+            entity.Property(item => item.ReceivedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.HasIndex(item => item.Fingerprint).IsUnique();
+            entity.HasIndex(item => new { item.MaxUserId, item.ReceivedAt });
+            entity.HasIndex(item => item.ExpiresAt);
+        });
+
         modelBuilder.Entity<TaskJournalDeadlineChangeRequest>(entity =>
         {
             entity.HasKey(e => e.Id);
@@ -4095,6 +4124,8 @@ public class PaymentContext : DbContext
     public DbSet<ElectronicSignatureSigner> ElectronicSignatureSigners { get; set; }
     public DbSet<ElectronicSignatureArtifact> ElectronicSignatureArtifacts { get; set; }
     public DbSet<ElectronicSignatureEvent> ElectronicSignatureEvents { get; set; }
+    public DbSet<MaxRecipientLink> MaxRecipientLinks { get; set; }
+    public DbSet<MaxInboundEvent> MaxInboundEvents { get; set; }
     public DbSet<TaskJournalDeadlineChangeRequest> TaskJournalDeadlineChangeRequests { get; set; }
     public DbSet<TaskJournalFile> TaskJournalFiles { get; set; }
     public DbSet<TaskJournalTemplate> TaskJournalTemplates { get; set; }

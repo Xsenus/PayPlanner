@@ -5443,6 +5443,143 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.ToTable("LegalEntityContracts", (string)null);
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.MaxInboundEvent", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("CallbackId")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("ExternalMessageId")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("Fingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<long?>("MaxChatId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("MaxUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("OccurredAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("PayloadHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("ProcessingStatus")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<DateTime>("ReceivedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("UpdateType")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ExpiresAt");
+
+                    b.HasIndex("Fingerprint")
+                        .IsUnique();
+
+                    b.HasIndex("MaxUserId", "ReceivedAt");
+
+                    b.ToTable("MaxInboundEvents");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.MaxRecipientLink", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int?>("ClientPortalAccountId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<DateTime?>("LastSeenAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<DateTime>("LinkTokenExpiresAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("LinkTokenHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<long?>("MaxChatId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("MaxUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime?>("OptedOutAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<Guid>("PublicId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("UserId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("VerifiedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LinkTokenExpiresAt");
+
+                    b.HasIndex("LinkTokenHash")
+                        .IsUnique();
+
+                    b.HasIndex("PublicId")
+                        .IsUnique();
+
+                    b.HasIndex("ClientPortalAccountId", "Status");
+
+                    b.HasIndex("MaxUserId", "Status");
+
+                    b.HasIndex("UserId", "Status");
+
+                    b.ToTable("MaxRecipientLinks");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.MessengerDocumentDelivery", b =>
                 {
                     b.Property<int>("Id")
@@ -10893,6 +11030,23 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("Contract");
 
                     b.Navigation("LegalEntity");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.MaxRecipientLink", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.ClientPortalAccount", "ClientPortalAccount")
+                        .WithMany()
+                        .HasForeignKey("ClientPortalAccountId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.HasOne("PayPlanner.Api.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.Navigation("ClientPortalAccount");
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.MessengerDocumentDelivery", b =>

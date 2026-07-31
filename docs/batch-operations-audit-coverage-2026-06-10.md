@@ -14,6 +14,7 @@ EF `ExecuteUpdateAsync` and `ExecuteDeleteAsync` bypass the change tracker. That
 | `backend/Services/Notifications/NotificationDeliveryRetentionService.cs:150` | `ExecuteDeleteAsync` | Expired notification delivery technical rows | No per-row object audit; service records system job state and logs deleted count. | Retention cleanup removes delivery diagnostics in bulk. |
 | `backend/Services/CalendarSyncLogRetentionService.cs:198` | `ExecuteDeleteAsync` | Expired Google calendar synchronization technical rows | No per-row object audit; service records the provider-specific and total deleted counts in the system job state. | Retention cleanup removes technical synchronization diagnostics in bounded chunks. |
 | `backend/Services/CalendarSyncLogRetentionService.cs:209` | `ExecuteDeleteAsync` | Expired Yandex calendar synchronization technical rows | No per-row object audit; service records the provider-specific and total deleted counts in the system job state. | Retention cleanup removes technical synchronization diagnostics in bounded chunks. |
+| `backend/Services/Notifications/MaxWebhookService.cs:180` | `ExecuteDeleteAsync` | Expired MAX webhook fingerprints and technical identifiers | No per-row object audit; each retained webhook has its own processing status and no message text or raw payload is stored. | Retention cleanup removes non-business technical events using the configured 1–90 day window. |
 
 ## Guardrails
 

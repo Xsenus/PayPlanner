@@ -5322,6 +5322,139 @@ namespace PayPlanner.Api.Migrations
                     b.ToTable("LegalEntityContracts", (string)null);
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.MaxInboundEvent", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("CallbackId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ExternalMessageId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Fingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("MaxChatId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("MaxUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("OccurredAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PayloadHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProcessingStatus")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("ReceivedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("UpdateType")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ExpiresAt");
+
+                    b.HasIndex("Fingerprint")
+                        .IsUnique();
+
+                    b.HasIndex("MaxUserId", "ReceivedAt");
+
+                    b.ToTable("MaxInboundEvents");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.MaxRecipientLink", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("ClientPortalAccountId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<DateTime?>("LastSeenAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("LinkTokenExpiresAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LinkTokenHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("MaxChatId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("MaxUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("OptedOutAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("PublicId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("UserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("VerifiedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LinkTokenExpiresAt");
+
+                    b.HasIndex("LinkTokenHash")
+                        .IsUnique();
+
+                    b.HasIndex("PublicId")
+                        .IsUnique();
+
+                    b.HasIndex("ClientPortalAccountId", "Status");
+
+                    b.HasIndex("MaxUserId", "Status");
+
+                    b.HasIndex("UserId", "Status");
+
+                    b.ToTable("MaxRecipientLinks");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.MessengerDocumentDelivery", b =>
                 {
                     b.Property<int>("Id")
@@ -10665,6 +10798,23 @@ namespace PayPlanner.Api.Migrations
                     b.Navigation("Contract");
 
                     b.Navigation("LegalEntity");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.MaxRecipientLink", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.ClientPortalAccount", "ClientPortalAccount")
+                        .WithMany()
+                        .HasForeignKey("ClientPortalAccountId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.HasOne("PayPlanner.Api.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.Navigation("ClientPortalAccount");
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.MessengerDocumentDelivery", b =>

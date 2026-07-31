@@ -268,6 +268,23 @@ public interface IMaxNotificationService
     Task<MaxNotificationDiagnosticsDto> UpdateSettingsAsync(
         UpdateMaxNotificationSettingsRequest request,
         CancellationToken cancellationToken = default);
+    Task<MaxRuntimeSettings> GetRuntimeSettingsAsync(CancellationToken cancellationToken = default);
+}
+
+public sealed record MaxRuntimeSettings(
+    bool Enabled,
+    bool EmergencyStop,
+    string BotToken,
+    string WebhookSecret,
+    bool NotificationsEnabled,
+    bool DocumentsEnabled,
+    bool CorrespondenceEnabled,
+    bool ConfirmationsEnabled,
+    int TechnicalPayloadRetentionDays)
+{
+    public bool Ready => Enabled && !EmergencyStop
+                         && !string.IsNullOrWhiteSpace(BotToken)
+                         && !string.IsNullOrWhiteSpace(WebhookSecret);
 }
 
 public sealed class SystemMaxNotificationService(
@@ -356,6 +373,21 @@ public sealed class SystemMaxNotificationService(
         UpdateSecret(existing, WebhookSecretKey, request.WebhookSecret, request.KeepExistingWebhookSecret, now);
         await context.SaveChangesAsync(cancellationToken);
         return Build(existing.ToDictionary(item => item.Key, item => item.Value.Value, StringComparer.Ordinal));
+    }
+
+    public async Task<MaxRuntimeSettings> GetRuntimeSettingsAsync(CancellationToken cancellationToken = default)
+    {
+        var settings = await LoadAsync(cancellationToken);
+        return new MaxRuntimeSettings(
+            ParseBool(settings.GetValueOrDefault(EnabledKey)),
+            ParseBool(settings.GetValueOrDefault(EmergencyStopKey)),
+            Unprotect(settings.GetValueOrDefault(BotTokenKey)),
+            Unprotect(settings.GetValueOrDefault(WebhookSecretKey)),
+            ParseBool(settings.GetValueOrDefault(NotificationsEnabledKey)),
+            ParseBool(settings.GetValueOrDefault(DocumentsEnabledKey)),
+            ParseBool(settings.GetValueOrDefault(CorrespondenceEnabledKey)),
+            ParseBool(settings.GetValueOrDefault(ConfirmationsEnabledKey)),
+            ParseRetention(settings.GetValueOrDefault(TechnicalPayloadRetentionDaysKey)));
     }
 
     private MaxNotificationDiagnosticsDto Build(IReadOnlyDictionary<string, string> settings)

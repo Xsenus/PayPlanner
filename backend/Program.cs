@@ -26,6 +26,7 @@ using System.Text.Json.Serialization;
 using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddSingleton(TimeProvider.System);
 var databaseProvider = DatabaseProviderResolver.Resolve(builder.Configuration);
 
 builder.Services.AddControllers(options =>
@@ -147,6 +148,7 @@ builder.Services.AddScoped<IEmailService, EmailService>();
 builder.Services.AddScoped<ITelegramNotificationService, TelegramNotificationService>();
 builder.Services.AddScoped<ISmsNotificationService, SystemSmsNotificationService>();
 builder.Services.AddScoped<IMaxNotificationService, SystemMaxNotificationService>();
+builder.Services.AddScoped<IMaxWebhookService, MaxWebhookService>();
 builder.Services.AddScoped<IExternalWorkOrderApprovalService, ExternalWorkOrderApprovalService>();
 builder.Services.AddScoped<IClientPortalService, ClientPortalService>();
 builder.Services.AddScoped<ITelegramBotUpdateService, TelegramBotUpdateService>();
