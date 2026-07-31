@@ -3,7 +3,7 @@
 Файл сформирован командой `npm run audit:encryption-inventory:update`.
 Он дополняет ручную карту и не является утверждённой бизнес-классификацией.
 
-Всего кандидатов вне ручной карты: 247.
+Всего кандидатов вне ручной карты: 278.
 
 - `Act`: `Act.Comment`, `Act.CounterpartyInn`
 - `ActLineItem`: `ActLineItem.Name`
@@ -29,6 +29,11 @@
 - `ClientCaseWorkOrder`: `ClientCaseWorkOrder.ApprovalComment`, `ClientCaseWorkOrder.ApprovalDecisionByUserName`, `ClientCaseWorkOrder.ApprovalRequestedByUserName`, `ClientCaseWorkOrder.CreatedByUserName`, `ClientCaseWorkOrder.Notes`, `ClientCaseWorkOrder.UpdatedByUserName`
 - `ClientCaseWorkOrderItem`: `ClientCaseWorkOrderItem.Description`, `ClientCaseWorkOrderItem.ExecutorName`, `ClientCaseWorkOrderItem.ServiceName`
 - `ClientContract`: `ClientContract.Comment`
+- `ClientPortalAccount`: `ClientPortalAccount.AccountType`, `ClientPortalAccount.CreatedByUserName`, `ClientPortalAccount.RevokedByUserName`
+- `ClientPortalAuditEvent`: `ClientPortalAuditEvent.Account`, `ClientPortalAuditEvent.ClientPortalAccountId`
+- `ClientPortalCaseGrant`: `ClientPortalCaseGrant.Account`, `ClientPortalCaseGrant.ClientPortalAccountId`
+- `ClientPortalLoginChallenge`: `ClientPortalLoginChallenge.Account`, `ClientPortalLoginChallenge.ClientPortalAccountId`
+- `ClientPortalSession`: `ClientPortalSession.Account`, `ClientPortalSession.ClientPortalAccountId`
 - `ClientStats`: `ClientStats.ClientName`
 - `ClientStatusEntity`: `ClientStatusEntity.Description`, `ClientStatusEntity.Name`
 - `Contract`: `Contract.Description`
@@ -36,7 +41,12 @@
 - `DealType`: `DealType.Description`, `DealType.Name`
 - `DepartmentDictionaryItem`: `DepartmentDictionaryItem.Description`, `DepartmentDictionaryItem.Name`
 - `DocumentStatusEntity`: `DocumentStatusEntity.Description`, `DocumentStatusEntity.Name`
+- `ElectronicSignatureArtifact`: `ElectronicSignatureArtifact.FileName`
+- `ElectronicSignatureEnvelope`: `ElectronicSignatureEnvelope.OriginalFileName`, `ElectronicSignatureEnvelope.SignatureType`
+- `ElectronicSignatureSigner`: `ElectronicSignatureSigner.ClientPortalAccount`, `ElectronicSignatureSigner.ClientPortalAccountId`, `ElectronicSignatureSigner.PartyType`
 - `ExternalContact`: `ExternalContact.SyncToPhonebook`
+- `ExternalWorkOrderApprovalAttachment`: `ExternalWorkOrderApprovalAttachment.FileName`
+- `ExternalWorkOrderApprovalRequest`: `ExternalWorkOrderApprovalRequest.CreatedByUserName`, `ExternalWorkOrderApprovalRequest.DecisionComment`, `ExternalWorkOrderApprovalRequest.RevokedByUserName`
 - `GoogleCalendarConnection`: `GoogleCalendarConnection.AccessTokenExpiresAt`, `GoogleCalendarConnection.DefaultCalendarName`, `GoogleCalendarConnection.DisplayName`
 - `GoogleCalendarSyncCalendar`: `GoogleCalendarSyncCalendar.Name`, `GoogleCalendarSyncCalendar.SyncToken`, `GoogleCalendarSyncCalendar.WatchToken`
 - `IncomeType`: `IncomeType.Description`, `IncomeType.Name`
@@ -45,6 +55,11 @@
 - `InvoiceUnitDictionaryItem`: `InvoiceUnitDictionaryItem.Description`, `InvoiceUnitDictionaryItem.Name`
 - `LegalEntity`: `LegalEntity.Addresses`, `LegalEntity.ContactEmailsJson`, `LegalEntity.ContactPhonesJson`, `LegalEntity.FullName`, `LegalEntity.IfnsName`, `LegalEntity.Notes`, `LegalEntity.ShortName`, `LegalEntity.TaxOfficePhone`, `LegalEntity.TreasuryBankName`, `LegalEntity.TreasuryInn`, `LegalEntity.TreasuryKpp`, `LegalEntity.TreasuryRecipientName`
 - `LegalEntityContract`: `LegalEntityContract.Comment`
+- `MaxInboundCorrespondenceMessage`: `MaxInboundCorrespondenceMessage.ClientPortalAccount`, `MaxInboundCorrespondenceMessage.ClientPortalAccountId`
+- `MaxOutboxMessage`: `MaxOutboxMessage.ActionText`
+- `MaxRecipientLink`: `MaxRecipientLink.ClientPortalAccount`, `MaxRecipientLink.ClientPortalAccountId`, `MaxRecipientLink.LinkTokenExpiresAt`
+- `MessengerDocumentDelivery`: `MessengerDocumentDelivery.OriginalFileName`
+- `MessengerRecipientBinding`: `MessengerRecipientBinding.ClientPortalAccount`, `MessengerRecipientBinding.ClientPortalAccountId`
 - `MoneyAccount`: `MoneyAccount.BankName`, `MoneyAccount.Name`
 - `MoneyBalanceReconciliationResult`: `MoneyBalanceReconciliationResult.AccountName`
 - `MoneyOperation`: `MoneyOperation.AccountName`, `MoneyOperation.AccountingType`, `MoneyOperation.CategoryName`, `MoneyOperation.CounterpartyName`, `MoneyOperation.DirectionName`, `MoneyOperation.MatchComment`, `MoneyOperation.MoneyAccount`, `MoneyOperation.MoneyAccountId`, `MoneyOperation.PaidAccountName`, `MoneyOperation.ProjectName`, `MoneyOperation.Purpose`, `MoneyOperation.SalesPointName`
@@ -71,7 +86,7 @@
 - `SpreadsheetImportBatchOperation`: `SpreadsheetImportBatchOperation.SourceFileName`
 - `StickyNote`: `StickyNote.AssignedUserName`, `StickyNote.AuthorUserName`, `StickyNote.IsPinned`
 - `StickyNoteBoard`: `StickyNoteBoard.Description`, `StickyNoteBoard.Notes`, `StickyNoteBoard.OwnerUserName`
-- `TaskJournalComment`: `TaskJournalComment.AuthorName`
+- `TaskJournalComment`: `TaskJournalComment.AuthorName`, `TaskJournalComment.ExternalCommentId`
 - `TaskJournalDeadlineChangeRequest`: `TaskJournalDeadlineChangeRequest.CreatedComment`, `TaskJournalDeadlineChangeRequest.CreatedCommentId`, `TaskJournalDeadlineChangeRequest.DecidedByName`, `TaskJournalDeadlineChangeRequest.DecisionComment`, `TaskJournalDeadlineChangeRequest.DecisionCommentEntry`, `TaskJournalDeadlineChangeRequest.DecisionCommentId`, `TaskJournalDeadlineChangeRequest.RequestedByName`, `TaskJournalDeadlineChangeRequest.ReviewerName`
 - `TaskJournalFile`: `TaskJournalFile.StoredFileName`, `TaskJournalFile.UploadedByName`
 - `TaskJournalItem`: `TaskJournalItem.AssigneeName`, `TaskJournalItem.AuthorName`, `TaskJournalItem.Comments`, `TaskJournalItem.ControlMarkedByUserName`, `TaskJournalItem.Description`, `TaskJournalItem.ObjectName`

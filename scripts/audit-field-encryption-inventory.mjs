@@ -54,6 +54,17 @@ const requiredFields = {
   SpreadsheetImportBatchOperation: ['BeforeJson', 'AfterJson', 'MetadataJson'],
   GoogleCalendarConnection: ['GoogleEmail', 'AccessTokenProtected', 'RefreshTokenProtected'],
   YandexCalendarConnection: ['YandexEmail', 'AccessTokenProtected', 'RefreshTokenProtected'],
+  ClientPortalAccount: ['DisplayName', 'Email'],
+  ClientPortalLoginChallenge: ['TokenHash'],
+  ClientPortalSession: ['TokenHash', 'UserAgent'],
+  ClientPortalAuditEvent: ['UserAgent'],
+  ExternalWorkOrderApprovalRequest: ['AccessTokenHash', 'RecipientEmail', 'RecipientName', 'DecisionUserAgent'],
+  ElectronicSignatureSigner: ['DisplayName', 'MaskedContact', 'ProtectedContact'],
+  MaxInboundCorrespondenceMessage: ['ProtectedText'],
+  MaxOutboxMessage: ['ProtectedText'],
+  MaxRecipientLink: ['LinkTokenHash'],
+  MessengerDocumentDelivery: ['LinkTokenHash', 'ProtectedLinkToken'],
+  MessengerRecipientBinding: ['AddressHash', 'DisplayName', 'MaskedAddress', 'ProtectedAddress'],
 };
 const modelSourceFiles = {
   BankStatementImportRow: 'BankStatementImportBatch.cs',
