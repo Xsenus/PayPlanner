@@ -2755,8 +2755,14 @@ namespace PayPlanner.Api.Migrations
                         .HasMaxLength(120)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("BirthPlaceFiasEncrypted")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("BirthPlacePassport")
                         .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("BirthPlacePassportEncrypted")
                         .HasColumnType("TEXT");
 
                     b.Property<int>("ClientId")
@@ -2788,6 +2794,9 @@ namespace PayPlanner.Api.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("DepartmentCodeEncrypted")
+                        .HasColumnType("TEXT");
+
                     b.Property<bool>("IsDeleted")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER")
@@ -2799,16 +2808,36 @@ namespace PayPlanner.Api.Migrations
                     b.Property<DateTime?>("IssuedAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("IssuedAtEncrypted")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("IssuedBy")
                         .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("IssuedByEncrypted")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Number")
                         .HasMaxLength(20)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("NumberBlindIndex")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("NumberEncrypted")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Series")
                         .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SeriesBlindIndex")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SeriesEncrypted")
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime?>("UpdatedAt")
@@ -2846,6 +2875,9 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasIndex("ClientId", "Series", "Number")
                         .HasDatabaseName("IX_ClientPassports_ClientId_Series_Number");
+
+                    b.HasIndex("ClientId", "SeriesBlindIndex", "NumberBlindIndex")
+                        .HasDatabaseName("IX_ClientPassports_ClientId_SeriesBlind_NumberBlind");
 
                     b.ToTable("ClientPassports");
                 });

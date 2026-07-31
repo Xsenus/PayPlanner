@@ -3,7 +3,7 @@
 Файл сформирован командой `npm run audit:encryption-inventory:update`.
 Он дополняет ручную карту и не является утверждённой бизнес-классификацией.
 
-Всего кандидатов вне ручной карты: 278.
+Всего кандидатов вне ручной карты: 280.
 
 - `Act`: `Act.Comment`, `Act.CounterpartyInn`
 - `ActLineItem`: `ActLineItem.Name`
@@ -29,6 +29,7 @@
 - `ClientCaseWorkOrder`: `ClientCaseWorkOrder.ApprovalComment`, `ClientCaseWorkOrder.ApprovalDecisionByUserName`, `ClientCaseWorkOrder.ApprovalRequestedByUserName`, `ClientCaseWorkOrder.CreatedByUserName`, `ClientCaseWorkOrder.Notes`, `ClientCaseWorkOrder.UpdatedByUserName`
 - `ClientCaseWorkOrderItem`: `ClientCaseWorkOrderItem.Description`, `ClientCaseWorkOrderItem.ExecutorName`, `ClientCaseWorkOrderItem.ServiceName`
 - `ClientContract`: `ClientContract.Comment`
+- `ClientPassport`: `ClientPassport.BirthPlaceFiasEncrypted`, `ClientPassport.BirthPlacePassportEncrypted`
 - `ClientPortalAccount`: `ClientPortalAccount.AccountType`, `ClientPortalAccount.CreatedByUserName`, `ClientPortalAccount.RevokedByUserName`
 - `ClientPortalAuditEvent`: `ClientPortalAuditEvent.Account`, `ClientPortalAuditEvent.ClientPortalAccountId`
 - `ClientPortalCaseGrant`: `ClientPortalCaseGrant.Account`, `ClientPortalCaseGrant.ClientPortalAccountId`

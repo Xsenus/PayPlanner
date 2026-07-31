@@ -1124,6 +1124,8 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.ClientId).HasDatabaseName("IX_ClientPassports_ClientId");
             entity.HasIndex(e => new { e.ClientId, e.IsPrimary }).HasDatabaseName("IX_ClientPassports_ClientId_IsPrimary");
             entity.HasIndex(e => new { e.ClientId, e.Series, e.Number }).HasDatabaseName("IX_ClientPassports_ClientId_Series_Number");
+            entity.HasIndex(e => new { e.ClientId, e.SeriesBlindIndex, e.NumberBlindIndex })
+                .HasDatabaseName("IX_ClientPassports_ClientId_SeriesBlind_NumberBlind");
         });
 
         // ------------------ PowerOfAttorney ------------------

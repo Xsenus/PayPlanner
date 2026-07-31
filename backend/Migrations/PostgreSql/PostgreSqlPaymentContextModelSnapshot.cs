@@ -2814,9 +2814,15 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasMaxLength(120)
                         .HasColumnType("character varying(120)");
 
+                    b.Property<string>("BirthPlaceFiasEncrypted")
+                        .HasColumnType("text");
+
                     b.Property<string>("BirthPlacePassport")
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)");
+
+                    b.Property<string>("BirthPlacePassportEncrypted")
+                        .HasColumnType("text");
 
                     b.Property<int>("ClientId")
                         .HasColumnType("integer");
@@ -2847,6 +2853,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)");
 
+                    b.Property<string>("DepartmentCodeEncrypted")
+                        .HasColumnType("text");
+
                     b.Property<bool>("IsDeleted")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")
@@ -2858,17 +2867,37 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<DateTime?>("IssuedAt")
                         .HasColumnType("timestamp without time zone");
 
+                    b.Property<string>("IssuedAtEncrypted")
+                        .HasColumnType("text");
+
                     b.Property<string>("IssuedBy")
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)");
+
+                    b.Property<string>("IssuedByEncrypted")
+                        .HasColumnType("text");
 
                     b.Property<string>("Number")
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)");
 
+                    b.Property<string>("NumberBlindIndex")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("NumberEncrypted")
+                        .HasColumnType("text");
+
                     b.Property<string>("Series")
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)");
+
+                    b.Property<string>("SeriesBlindIndex")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("SeriesEncrypted")
+                        .HasColumnType("text");
 
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("timestamp without time zone");
@@ -2905,6 +2934,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.HasIndex("ClientId", "Series", "Number")
                         .HasDatabaseName("IX_ClientPassports_ClientId_Series_Number");
+
+                    b.HasIndex("ClientId", "SeriesBlindIndex", "NumberBlindIndex")
+                        .HasDatabaseName("IX_ClientPassports_ClientId_SeriesBlind_NumberBlind");
 
                     b.ToTable("ClientPassports");
                 });
