@@ -3154,7 +3154,7 @@ export function CaseDetailPage({
       return;
     }
 
-    const confirmed = await confirmDialog({
+    const confirmed = await confirm({
       title: externalApprovalStatus ? 'Отправить новую версию?' : 'Отправить клиенту?',
       description: externalApprovalStatus
         ? 'Предыдущая активная ссылка будет отозвана. Получатель получит новую ссылку и код.'
@@ -3184,7 +3184,7 @@ export function CaseDetailPage({
 
   const revokeExternalWorkOrderApproval = async () => {
     if (!caseItem) return;
-    const confirmed = await confirmDialog({
+    const confirmed = await confirm({
       title: 'Отозвать внешнюю ссылку?',
       description: 'Клиент больше не сможет открыть ссылку или принять решение по этой версии.',
       confirmLabel: 'Отозвать',
