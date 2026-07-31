@@ -144,6 +144,7 @@ builder.Services.Configure<PasswordHasherOptions>(opt =>
 builder.Services.AddScoped<IEmailService, EmailService>();
 builder.Services.AddScoped<ITelegramNotificationService, TelegramNotificationService>();
 builder.Services.AddScoped<ISmsNotificationService, SystemSmsNotificationService>();
+builder.Services.AddScoped<IMaxNotificationService, SystemMaxNotificationService>();
 builder.Services.AddScoped<ITelegramBotUpdateService, TelegramBotUpdateService>();
 builder.Services.AddScoped<IRealtimeNotificationPublisher, SignalRRealtimeNotificationPublisher>();
 builder.Services.AddScoped<IWebPushNotificationService, WebPushNotificationService>();
@@ -168,6 +169,11 @@ builder.Services.AddHttpClient<SmsAeroProvider>(client =>
 builder.Services.AddScoped<ISmsProvider>(sp => sp.GetRequiredService<SmsRuProvider>());
 builder.Services.AddScoped<ISmsProvider>(sp => sp.GetRequiredService<SmscRuProvider>());
 builder.Services.AddScoped<ISmsProvider>(sp => sp.GetRequiredService<SmsAeroProvider>());
+builder.Services.AddHttpClient<IMaxApiClient, MaxApiClient>(client =>
+{
+    client.BaseAddress = new Uri("https://platform-api2.max.ru/");
+    client.Timeout = TimeSpan.FromSeconds(20);
+});
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<ExternalAuthService>();
 builder.Services.AddScoped<RoleManagementAccessService>();

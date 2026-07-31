@@ -1044,12 +1044,29 @@ export interface MaxNotificationDiagnosticsDto {
   ready: boolean;
   apiConfirmed: boolean;
   botConfigured: boolean;
+  botTokenSet: boolean;
+  webhookSecretSet: boolean;
   scenariosConfirmed: boolean;
+  emergencyStop: boolean;
+  notificationsEnabled: boolean;
+  documentsEnabled: boolean;
+  correspondenceEnabled: boolean;
+  confirmationsEnabled: boolean;
+  technicalPayloadRetentionDays: number;
+  scenarios: MaxScenarioDto[];
   allowedEventTypes: string[];
   lastSuccessfulDeliveryAt?: string | null;
   lastFailedDeliveryAt?: string | null;
   lastDeliveryError?: string | null;
   statusText: string;
+}
+
+export interface MaxScenarioDto {
+  key: string;
+  label: string;
+  description: string;
+  enabled: boolean;
+  requiresVerifiedLink: boolean;
 }
 
 export interface WebPushPublicKeyDto {
@@ -1197,6 +1214,20 @@ export interface UpdateSmsNotificationSettingsRequest {
   quietHoursEnd?: string | null;
   quietHoursTimeZone?: string | null;
   notes?: string | null;
+}
+
+export interface UpdateMaxNotificationSettingsRequest {
+  enabled: boolean;
+  botToken?: string | null;
+  keepExistingBotToken?: boolean;
+  webhookSecret?: string | null;
+  keepExistingWebhookSecret?: boolean;
+  notificationsEnabled: boolean;
+  documentsEnabled: boolean;
+  correspondenceEnabled: boolean;
+  confirmationsEnabled: boolean;
+  emergencyStop: boolean;
+  technicalPayloadRetentionDays?: number | null;
 }
 
 export interface UpdateNotificationTemplateRequest {
@@ -3157,6 +3188,13 @@ export class ApiService {
 
   async updateSmsNotificationSettings(payload: UpdateSmsNotificationSettingsRequest) {
     return this.request<NotificationSettingsDto>('/notifications/settings/sms', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateMaxNotificationSettings(payload: UpdateMaxNotificationSettingsRequest) {
+    return this.request<NotificationSettingsDto>('/notifications/settings/max', {
       method: 'PUT',
       body: JSON.stringify(payload),
     });

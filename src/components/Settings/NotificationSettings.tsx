@@ -85,6 +85,20 @@ type SmsSettingsForm = {
   notes: string;
 };
 
+type MaxSettingsForm = {
+  enabled: boolean;
+  botToken: string;
+  keepExistingBotToken: boolean;
+  webhookSecret: string;
+  keepExistingWebhookSecret: boolean;
+  notificationsEnabled: boolean;
+  documentsEnabled: boolean;
+  correspondenceEnabled: boolean;
+  confirmationsEnabled: boolean;
+  emergencyStop: boolean;
+  technicalPayloadRetentionDays: number;
+};
+
 const DEFAULT_PURPOSES = ['manualTest'];
 const ROLE_CHANNEL_OPTIONS: Array<{ value: UserNotificationPreferenceChannel; label: string; Icon: typeof Monitor }> = [
   { value: 'inApp', label: 'Центр', Icon: Monitor },
@@ -266,6 +280,22 @@ function smsFormFromSettings(settings?: NotificationSettingsDto | null): SmsSett
   };
 }
 
+function maxFormFromSettings(settings?: NotificationSettingsDto | null): MaxSettingsForm {
+  return {
+    enabled: settings?.max.enabled ?? false,
+    botToken: '',
+    keepExistingBotToken: true,
+    webhookSecret: '',
+    keepExistingWebhookSecret: true,
+    notificationsEnabled: settings?.max.notificationsEnabled ?? false,
+    documentsEnabled: settings?.max.documentsEnabled ?? false,
+    correspondenceEnabled: settings?.max.correspondenceEnabled ?? false,
+    confirmationsEnabled: settings?.max.confirmationsEnabled ?? false,
+    emergencyStop: settings?.max.emergencyStop ?? false,
+    technicalPayloadRetentionDays: settings?.max.technicalPayloadRetentionDays ?? 30,
+  };
+}
+
 function formFromSender(sender: NotificationSenderDto): SenderForm {
   return {
     id: sender.id,
@@ -343,11 +373,13 @@ export function NotificationSettings({ canEdit = true }: NotificationSettingsPro
   const [channelCatalog, setChannelCatalog] = useState<NotificationChannelDto[]>([]);
   const [webPushDiagnostics, setWebPushDiagnostics] = useState<WebPushDiagnosticsDto | null>(null);
   const [smsForm, setSmsForm] = useState<SmsSettingsForm>(() => smsFormFromSettings(null));
+  const [maxForm, setMaxForm] = useState<MaxSettingsForm>(() => maxFormFromSettings(null));
   const [form, setForm] = useState<SenderForm>(() => createBlankForm());
   const [route, setRoute] = useState<SenderRoute>(() => readNotificationRoute());
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [smsSaving, setSmsSaving] = useState(false);
+  const [maxSaving, setMaxSaving] = useState(false);
   const [emailPolicySaving, setEmailPolicySaving] = useState(false);
   const [templateSaving, setTemplateSaving] = useState(false);
   const [selectedTemplateKey, setSelectedTemplateKey] = useState('');
@@ -379,6 +411,7 @@ export function NotificationSettings({ canEdit = true }: NotificationSettingsPro
       ]);
       setSettings(next);
       setSmsForm(smsFormFromSettings(next));
+      setMaxForm(maxFormFromSettings(next));
       setChannelCatalog(channels);
       setWebPushDiagnostics(pushDiagnostics);
     } catch (error) {
@@ -626,6 +659,32 @@ export function NotificationSettings({ canEdit = true }: NotificationSettingsPro
       toast.error(text, 'Уведомления');
     } finally {
       setSmsSaving(false);
+    }
+  };
+
+  const saveMaxSettings = async () => {
+    setMaxSaving(true);
+    try {
+      const next = await apiService.updateMaxNotificationSettings({
+        enabled: maxForm.enabled,
+        botToken: maxForm.botToken,
+        keepExistingBotToken: maxForm.keepExistingBotToken,
+        webhookSecret: maxForm.webhookSecret,
+        keepExistingWebhookSecret: maxForm.keepExistingWebhookSecret,
+        notificationsEnabled: maxForm.notificationsEnabled,
+        documentsEnabled: maxForm.documentsEnabled,
+        correspondenceEnabled: maxForm.correspondenceEnabled,
+        confirmationsEnabled: maxForm.confirmationsEnabled,
+        emergencyStop: maxForm.emergencyStop,
+        technicalPayloadRetentionDays: maxForm.technicalPayloadRetentionDays,
+      });
+      setSettings(next);
+      setMaxForm(maxFormFromSettings(next));
+      toast.success('Настройки MAX сохранены.', 'Уведомления');
+    } catch (error) {
+      toast.error(extractDisplayErrorMessage(error, 'Не удалось сохранить настройки MAX.'), 'Уведомления');
+    } finally {
+      setMaxSaving(false);
     }
   };
 
@@ -1145,7 +1204,14 @@ export function NotificationSettings({ canEdit = true }: NotificationSettingsPro
             onSave={saveSmsSettings}
           />
 
-          <MaxDiagnosticsPanel settings={settings} />
+          <MaxDiagnosticsPanel
+            settings={settings}
+            form={maxForm}
+            setForm={setMaxForm}
+            saving={maxSaving}
+            canEdit={canEdit}
+            onSave={saveMaxSettings}
+          />
 
           <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
             <div className="flex flex-wrap items-start justify-between gap-4">
@@ -2217,7 +2283,21 @@ function SmsSettingsPanel({
   );
 }
 
-function MaxDiagnosticsPanel({ settings }: { settings: NotificationSettingsDto | null }) {
+function MaxDiagnosticsPanel({
+  settings,
+  form,
+  setForm,
+  saving,
+  canEdit,
+  onSave,
+}: {
+  settings: NotificationSettingsDto | null;
+  form: MaxSettingsForm;
+  setForm: React.Dispatch<React.SetStateAction<MaxSettingsForm>>;
+  saving: boolean;
+  canEdit: boolean;
+  onSave: () => Promise<void>;
+}) {
   const max = settings?.max;
   const pendingItems = [
     { label: 'API MAX', ready: Boolean(max?.apiConfirmed) },
@@ -2234,7 +2314,8 @@ function MaxDiagnosticsPanel({ settings }: { settings: NotificationSettingsDto |
             <h4 className="text-base font-semibold text-gray-900">MAX messenger</h4>
           </div>
           <p className="mt-1 max-w-3xl text-sm text-gray-500">
-            Диагностика будущего канала MAX. Пока API и сценарии не подтверждены, CRM не отправляет сообщения в MAX.
+            Используется официальный Bot API MAX. Канал не обращается к платформе, пока не заполнены
+            bot token, отдельный Webhook-secret и явное разрешение сценариев.
           </p>
         </div>
         <span className={'rounded-full border px-3 py-1 text-xs font-semibold ' + statusClass(Boolean(max?.ready), Boolean(max?.enabled))}>
@@ -2247,6 +2328,108 @@ function MaxDiagnosticsPanel({ settings }: { settings: NotificationSettingsDto |
           {max.statusText}
         </div>
       ) : null}
+
+      <div className="mt-4 grid gap-3 lg:grid-cols-2">
+        <label className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700">
+          <SystemCheckbox
+            checked={form.enabled}
+            disabled={!canEdit || saving}
+            onChange={(event) => setForm((prev) => ({ ...prev, enabled: event.target.checked }))}
+          />
+          Включить канал MAX после полной настройки
+        </label>
+        <label className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-800">
+          <SystemCheckbox
+            checked={form.emergencyStop}
+            disabled={!canEdit || saving}
+            onChange={(event) => setForm((prev) => ({ ...prev, emergencyStop: event.target.checked }))}
+          />
+          Аварийно остановить MAX
+        </label>
+        <label className="text-sm font-medium text-gray-700">
+          Bot token
+          <input
+            type="password"
+            value={form.botToken}
+            disabled={!canEdit || saving}
+            autoComplete="new-password"
+            placeholder={max?.botTokenSet ? 'Токен сохранён — оставьте пустым' : 'Получите в MAX для бизнеса'}
+            onChange={(event) => setForm((prev) => ({
+              ...prev,
+              botToken: event.target.value,
+              keepExistingBotToken: event.target.value.length === 0,
+            }))}
+            className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+          />
+        </label>
+        <label className="text-sm font-medium text-gray-700">
+          Webhook-secret
+          <input
+            type="password"
+            value={form.webhookSecret}
+            disabled={!canEdit || saving}
+            autoComplete="new-password"
+            placeholder={max?.webhookSecretSet ? 'Секрет сохранён — оставьте пустым' : 'Отдельный секрет 5–256 символов'}
+            onChange={(event) => setForm((prev) => ({
+              ...prev,
+              webhookSecret: event.target.value,
+              keepExistingWebhookSecret: event.target.value.length === 0,
+            }))}
+            className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+          />
+        </label>
+      </div>
+
+      <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+        {(max?.scenarios ?? []).map((scenario) => {
+          const field = scenario.key === 'notifications'
+            ? 'notificationsEnabled'
+            : scenario.key === 'documents'
+              ? 'documentsEnabled'
+              : scenario.key === 'correspondence'
+                ? 'correspondenceEnabled'
+                : 'confirmationsEnabled';
+          return (
+            <label key={scenario.key} className="rounded-lg border border-gray-200 p-3 text-sm text-gray-700">
+              <span className="flex items-center gap-2 font-semibold">
+                <SystemCheckbox
+                  checked={form[field]}
+                  disabled={!canEdit || saving}
+                  onChange={(event) => setForm((prev) => ({ ...prev, [field]: event.target.checked }))}
+                />
+                {scenario.label}
+              </span>
+              <span className="mt-1 block text-xs text-gray-500">{scenario.description}</span>
+            </label>
+          );
+        })}
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-end gap-3">
+        <label className="text-sm font-medium text-gray-700">
+          Хранить технические payload, дней
+          <input
+            type="number"
+            min={1}
+            max={90}
+            value={form.technicalPayloadRetentionDays}
+            disabled={!canEdit || saving}
+            onChange={(event) => setForm((prev) => ({
+              ...prev,
+              technicalPayloadRetentionDays: Number(event.target.value) || 30,
+            }))}
+            className="mt-1 w-44 rounded-lg border border-gray-300 px-3 py-2 text-sm"
+          />
+        </label>
+        <button
+          type="button"
+          disabled={!canEdit || saving}
+          onClick={() => void onSave()}
+          className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+        >
+          {saving ? 'Сохраняем…' : 'Сохранить MAX'}
+        </button>
+      </div>
 
       <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">

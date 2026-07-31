@@ -112,14 +112,32 @@ public class MaxNotificationDiagnosticsDto
 {
     public bool Enabled { get; set; }
     public bool Ready { get; set; }
-    public bool ApiConfirmed { get; set; }
+    public bool ApiConfirmed { get; set; } = true;
     public bool BotConfigured { get; set; }
+    public bool BotTokenSet { get; set; }
+    public bool WebhookSecretSet { get; set; }
     public bool ScenariosConfirmed { get; set; }
+    public bool EmergencyStop { get; set; }
+    public bool NotificationsEnabled { get; set; }
+    public bool DocumentsEnabled { get; set; }
+    public bool CorrespondenceEnabled { get; set; }
+    public bool ConfirmationsEnabled { get; set; }
+    public int TechnicalPayloadRetentionDays { get; set; } = 30;
+    public IReadOnlyList<MaxScenarioDto> Scenarios { get; set; } = Array.Empty<MaxScenarioDto>();
     public IReadOnlyList<string> AllowedEventTypes { get; set; } = Array.Empty<string>();
     public DateTime? LastSuccessfulDeliveryAt { get; set; }
     public DateTime? LastFailedDeliveryAt { get; set; }
     public string? LastDeliveryError { get; set; }
     public string StatusText { get; set; } = string.Empty;
+}
+
+public sealed class MaxScenarioDto
+{
+    public string Key { get; set; } = string.Empty;
+    public string Label { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public bool Enabled { get; set; }
+    public bool RequiresVerifiedLink { get; set; }
 }
 
 public class WebPushPublicKeyDto

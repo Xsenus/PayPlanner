@@ -50,6 +50,21 @@ public class UpdateNotificationTemplateRequest
     public string? Body { get; set; }
 }
 
+public class UpdateMaxNotificationSettingsRequest
+{
+    public bool Enabled { get; set; }
+    public string? BotToken { get; set; }
+    public bool KeepExistingBotToken { get; set; } = true;
+    public string? WebhookSecret { get; set; }
+    public bool KeepExistingWebhookSecret { get; set; } = true;
+    public bool NotificationsEnabled { get; set; }
+    public bool DocumentsEnabled { get; set; }
+    public bool CorrespondenceEnabled { get; set; }
+    public bool ConfirmationsEnabled { get; set; }
+    public bool EmergencyStop { get; set; }
+    public int? TechnicalPayloadRetentionDays { get; set; }
+}
+
 public class SendNotificationTestRequest
 {
     public string Channel { get; set; } = "email";

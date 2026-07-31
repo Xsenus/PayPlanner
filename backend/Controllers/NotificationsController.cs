@@ -79,6 +79,15 @@ public class NotificationsController : ControllerBase
         return Ok(await _notificationService.UpdateSmsSettingsAsync(request, ct));
     }
 
+    [HttpPut("settings/max")]
+    public async Task<ActionResult<NotificationSettingsDto>> UpdateMaxSettings(
+        [FromBody] UpdateMaxNotificationSettingsRequest request,
+        CancellationToken ct)
+    {
+        if (!await CanEditNotificationSettingsAsync(ct)) return Forbid();
+        return Ok(await _notificationService.UpdateMaxSettingsAsync(request, ct));
+    }
+
     [HttpGet("templates")]
     public async Task<ActionResult<IReadOnlyList<NotificationTemplateDto>>> GetTemplates(CancellationToken ct)
     {

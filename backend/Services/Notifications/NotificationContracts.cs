@@ -1112,6 +1112,10 @@ public interface INotificationService
     Task<NotificationSettingsDto> UpdateSmsSettingsAsync(
         PayPlanner.Api.Models.Requests.UpdateSmsNotificationSettingsRequest request,
         CancellationToken cancellationToken = default);
+    Task<NotificationSettingsDto> UpdateMaxSettingsAsync(
+        PayPlanner.Api.Models.Requests.UpdateMaxNotificationSettingsRequest request,
+        CancellationToken cancellationToken = default)
+        => throw new NotSupportedException("MAX settings are not supported by this notification service.");
     Task<IReadOnlyList<NotificationTemplateDto>> GetTemplatesAsync(CancellationToken cancellationToken = default);
     Task<NotificationTemplateDto> UpdateTemplateAsync(
         string key,

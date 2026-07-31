@@ -49,6 +49,7 @@ public sealed class NotificationService : INotificationService
     private readonly IEmailService _emailService;
     private readonly ITelegramNotificationService _telegramService;
     private readonly ISmsNotificationService? _smsService;
+    private readonly IMaxNotificationService? _maxService;
     private readonly IRealtimeNotificationPublisher _realtimePublisher;
     private readonly IWebPushNotificationService? _webPushNotificationService;
     private readonly ILogger<NotificationService> _logger;
@@ -100,13 +101,15 @@ public sealed class NotificationService : INotificationService
         IWebPushNotificationService? webPushNotificationService = null,
         ISmsNotificationService? smsService = null,
         TimeProvider? timeProvider = null,
-        IHttpContextAccessor? httpContextAccessor = null)
+        IHttpContextAccessor? httpContextAccessor = null,
+        IMaxNotificationService? maxService = null)
     {
         _context = context;
         _configuration = configuration;
         _emailService = emailService;
         _telegramService = telegramService;
         _smsService = smsService;
+        _maxService = maxService;
         _realtimePublisher = realtimePublisher ?? NoOpRealtimeNotificationPublisher.Instance;
         _webPushNotificationService = webPushNotificationService;
         _logger = logger;
@@ -146,7 +149,9 @@ public sealed class NotificationService : INotificationService
                     StatusText = "SMS-уведомления отключены: SMS-сервис не подключен."
                 }
                 : await _smsService.GetSettingsAsync(cancellationToken),
-            Max = await BuildMaxDiagnosticsAsync(cancellationToken),
+            Max = _maxService is null
+                ? await BuildMaxDiagnosticsAsync(cancellationToken)
+                : await _maxService.GetSettingsAsync(cancellationToken),
             Senders = senders.Select(sender => MapSender(sender, subscriptionCounts.GetValueOrDefault(sender.Id))).ToList(),
             Purposes = PurposeDefinitions.Select(item => new NotificationPurposeDto
             {
@@ -259,6 +264,19 @@ public sealed class NotificationService : INotificationService
 
         await _smsService.UpdateSettingsAsync(request, cancellationToken);
         _smsDeliveryPolicyCache = null;
+        return await GetSettingsAsync(cancellationToken);
+    }
+
+    public async Task<NotificationSettingsDto> UpdateMaxSettingsAsync(
+        UpdateMaxNotificationSettingsRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (_maxService is null)
+        {
+            throw new InvalidOperationException("MaxNotificationServiceMissing");
+        }
+
+        await _maxService.UpdateSettingsAsync(request, cancellationToken);
         return await GetSettingsAsync(cancellationToken);
     }
 
