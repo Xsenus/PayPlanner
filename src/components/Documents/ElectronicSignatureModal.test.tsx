@@ -79,15 +79,15 @@ describe('ElectronicSignatureModal', () => {
     };
     apiServiceMock.getElectronicSignatureHistory.mockResolvedValueOnce([prepared]).mockResolvedValueOnce([{ ...prepared, status: 'cancelled' }]);
     apiServiceMock.cancelElectronicSignatureEnvelope.mockResolvedValue({ ...prepared, status: 'cancelled' });
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
 
     render(<ElectronicSignatureModal documentType="invoice" documentId={15} documentName="Счёт 15" clientId={3} preparePdf={vi.fn()} onClose={() => undefined} />);
     fireEvent.click(await screen.findByRole('button', { name: 'Отменить' }));
+    expect(screen.getByRole('dialog', { name: 'Отменить подготовленную версию?' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Отменить версию' }));
 
     await waitFor(() => expect(apiServiceMock.cancelElectronicSignatureEnvelope).toHaveBeenCalledWith(prepared.publicId));
     expect(await screen.findByText(/PDF и история сохранены/)).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Отменить' })).toBeNull();
-    vi.restoreAllMocks();
   });
 
   it('downloads an internal evidence package for a prepared version', async () => {
