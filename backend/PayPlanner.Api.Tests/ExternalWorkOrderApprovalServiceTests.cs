@@ -17,6 +17,49 @@ namespace PayPlanner.Api.Tests;
 public sealed class ExternalWorkOrderApprovalServiceTests
 {
     [Fact]
+    public async Task EmailAndMaxDeliveryUsesSecureFormAndAuthorizedPortalAccount()
+    {
+        await using var fixture = await Fixture.CreateAsync(enabled: true, withMax: true);
+        var clientId = await fixture.Db.ClientCases.Where(item => item.Id == fixture.CaseId)
+            .Select(item => item.ClientId!.Value).SingleAsync();
+        var account = new ClientPortalAccount
+        {
+            ClientId = clientId,
+            Email = "client@example.test",
+            DisplayName = "Иван Иванов",
+            IsActive = true
+        };
+        fixture.Db.ClientPortalCaseGrants.Add(new ClientPortalCaseGrant
+        {
+            Account = account,
+            ClientCaseId = fixture.CaseId,
+            CanViewApprovals = true
+        });
+        await fixture.Db.SaveChangesAsync();
+
+        var status = await fixture.Service.CreateAsync(
+            fixture.CaseId,
+            new CreateExternalWorkOrderApprovalRequest
+            {
+                RecipientName = "Иван Иванов",
+                RecipientEmail = "client@example.test",
+                RecipientType = "client",
+                DeliveryChannel = "email_and_max"
+            },
+            7,
+            "Менеджер",
+            CancellationToken.None);
+
+        Assert.Equal(1, status.Version);
+        var maxRequest = Assert.Single(fixture.MaxOutbox.Requests);
+        Assert.Equal(account.Id, maxRequest.RecipientPortalAccountId);
+        Assert.Equal(MaxMessengerScenarios.Confirmations, maxRequest.Scenario);
+        Assert.Contains(":v1", maxRequest.EventKey, StringComparison.Ordinal);
+        Assert.StartsWith("https://", maxRequest.ActionUrl, StringComparison.Ordinal);
+        Assert.DoesNotContain(fixture.Email.Otp, maxRequest.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Create_open_and_approve_uses_immutable_public_snapshot()
     {
         await using var fixture = await Fixture.CreateAsync(enabled: true);
@@ -268,6 +311,7 @@ public sealed class ExternalWorkOrderApprovalServiceTests
             RecordingEmailService email,
             ExternalWorkOrderApprovalService service,
             RecordingNotifier notifier,
+            RecordingMaxOutbox maxOutbox,
             string storageRoot,
             ICaseDocumentStorage storage,
             int caseId)
@@ -277,6 +321,7 @@ public sealed class ExternalWorkOrderApprovalServiceTests
             Email = email;
             Service = service;
             Notifier = notifier;
+            MaxOutbox = maxOutbox;
             StorageRoot = storageRoot;
             Storage = storage;
             CaseId = caseId;
@@ -286,11 +331,12 @@ public sealed class ExternalWorkOrderApprovalServiceTests
         public RecordingEmailService Email { get; }
         public ExternalWorkOrderApprovalService Service { get; }
         public RecordingNotifier Notifier { get; }
+        public RecordingMaxOutbox MaxOutbox { get; }
         public string StorageRoot { get; }
         public ICaseDocumentStorage Storage { get; }
         public int CaseId { get; }
 
-        public static async Task<Fixture> CreateAsync(bool enabled)
+        public static async Task<Fixture> CreateAsync(bool enabled, bool withMax = false)
         {
             var connection = new SqliteConnection("Data Source=:memory:");
             await connection.OpenAsync();
@@ -347,6 +393,7 @@ public sealed class ExternalWorkOrderApprovalServiceTests
                 Legal = new LegalFeatureFlagsOptions { ExternalWorkOrderApproval = enabled },
             });
             var notifier = new RecordingNotifier();
+            var maxOutbox = new RecordingMaxOutbox();
             var service = new ExternalWorkOrderApprovalService(
                 db,
                 email,
@@ -354,8 +401,9 @@ public sealed class ExternalWorkOrderApprovalServiceTests
                 flags,
                 notifier,
                 documentStorage: storage,
-                dataProtectionProvider: dataProtection);
-            return new Fixture(connection, db, email, service, notifier, storageRoot, storage, clientCase.Id);
+                dataProtectionProvider: dataProtection,
+                maxOutbox: withMax ? maxOutbox : null);
+            return new Fixture(connection, db, email, service, notifier, maxOutbox, storageRoot, storage, clientCase.Id);
         }
 
         public async Task<ClientCaseDocument> AddDocumentAsync(
@@ -431,6 +479,17 @@ public sealed class ExternalWorkOrderApprovalServiceTests
         {
             ExpiredCount++;
             return Task.CompletedTask;
+        }
+    }
+
+    private sealed class RecordingMaxOutbox : IMaxOutboxService
+    {
+        public List<MaxQueueRequest> Requests { get; } = [];
+
+        public Task<MaxOutboxMessage> QueueAsync(MaxQueueRequest request, CancellationToken ct)
+        {
+            Requests.Add(request);
+            return Task.FromResult(new MaxOutboxMessage());
         }
     }
 

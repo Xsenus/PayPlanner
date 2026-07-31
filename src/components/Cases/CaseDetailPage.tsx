@@ -1218,6 +1218,7 @@ export function CaseDetailPage({
   const [externalApprovalRecipientName, setExternalApprovalRecipientName] = useState('');
   const [externalApprovalRecipientEmail, setExternalApprovalRecipientEmail] = useState('');
   const [externalApprovalRecipientType, setExternalApprovalRecipientType] = useState<'client' | 'representative'>('client');
+  const [externalApprovalDeliveryChannel, setExternalApprovalDeliveryChannel] = useState<'email' | 'email_and_max'>('email');
   const [externalApprovalSaving, setExternalApprovalSaving] = useState(false);
   const [externalApprovalDocumentIds, setExternalApprovalDocumentIds] = useState<number[]>([]);
   const [copiedLink, setCopiedLink] = useState(false);
@@ -3169,7 +3170,7 @@ export function CaseDetailPage({
       title: externalApprovalStatus ? 'Отправить новую версию?' : 'Отправить клиенту?',
       description: externalApprovalStatus
         ? `Предыдущая активная ссылка будет отозвана. Получатель получит новую ссылку, код и ${externalApprovalDocumentIds.length} вложений.`
-        : `Получатель получит одноразовую ссылку, код подтверждения и ${externalApprovalDocumentIds.length} вложений по email.`,
+        : `Получатель получит одноразовую ссылку, код подтверждения и ${externalApprovalDocumentIds.length} вложений по email${externalApprovalDeliveryChannel === 'email_and_max' ? ', а безопасную кнопку перехода — также в MAX' : ''}.`,
       confirmLabel: 'Отправить',
     });
     if (!confirmed) return;
@@ -3182,6 +3183,7 @@ export function CaseDetailPage({
         recipientEmail: externalApprovalRecipientEmail.trim(),
         recipientType: externalApprovalRecipientType,
         documentIds: externalApprovalDocumentIds,
+        deliveryChannel: externalApprovalDeliveryChannel,
       });
       setExternalApprovalStatus(status);
       setNotice(`Версия ${status.version} отправлена на ${status.recipientEmail}.`);
@@ -3830,6 +3832,7 @@ export function CaseDetailPage({
               externalApprovalRecipientName={externalApprovalRecipientName}
               externalApprovalRecipientEmail={externalApprovalRecipientEmail}
               externalApprovalRecipientType={externalApprovalRecipientType}
+              externalApprovalDeliveryChannel={externalApprovalDeliveryChannel}
               externalApprovalSaving={externalApprovalSaving}
               documents={documents}
               externalApprovalDocumentIds={externalApprovalDocumentIds}
@@ -3840,6 +3843,7 @@ export function CaseDetailPage({
               onExternalApprovalRecipientNameChange={setExternalApprovalRecipientName}
               onExternalApprovalRecipientEmailChange={setExternalApprovalRecipientEmail}
               onExternalApprovalRecipientTypeChange={setExternalApprovalRecipientType}
+              onExternalApprovalDeliveryChannelChange={setExternalApprovalDeliveryChannel}
               onExternalApprovalDocumentIdsChange={setExternalApprovalDocumentIds}
               onSendExternalApproval={() => void sendExternalWorkOrderApproval()}
               onRevokeExternalApproval={() => void revokeExternalWorkOrderApproval()}
@@ -4694,6 +4698,7 @@ function WorkOrderPanel({
   externalApprovalRecipientName,
   externalApprovalRecipientEmail,
   externalApprovalRecipientType,
+  externalApprovalDeliveryChannel,
   externalApprovalSaving,
   documents,
   externalApprovalDocumentIds,
@@ -4705,6 +4710,7 @@ function WorkOrderPanel({
   onExternalApprovalDocumentIdsChange,
   onExternalApprovalRecipientEmailChange,
   onExternalApprovalRecipientTypeChange,
+  onExternalApprovalDeliveryChannelChange,
   onSendExternalApproval,
   onRevokeExternalApproval,
   onSaveHeader,
@@ -4743,6 +4749,7 @@ function WorkOrderPanel({
   externalApprovalRecipientName: string;
   externalApprovalRecipientEmail: string;
   externalApprovalRecipientType: 'client' | 'representative';
+  externalApprovalDeliveryChannel: 'email' | 'email_and_max';
   externalApprovalSaving: boolean;
   documents: ClientCaseDocument[];
   externalApprovalDocumentIds: number[];
@@ -4754,6 +4761,7 @@ function WorkOrderPanel({
   onExternalApprovalDocumentIdsChange: (value: number[]) => void;
   onExternalApprovalRecipientEmailChange: (value: string) => void;
   onExternalApprovalRecipientTypeChange: (value: 'client' | 'representative') => void;
+  onExternalApprovalDeliveryChannelChange: (value: 'email' | 'email_and_max') => void;
   onSendExternalApproval: () => void;
   onRevokeExternalApproval: () => void;
   onSaveHeader: () => void;
@@ -4960,7 +4968,7 @@ function WorkOrderPanel({
             ) : null}
           </div>
 
-          <div className="mt-3 grid gap-2 md:grid-cols-[160px_1fr_1fr_auto]">
+          <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-[140px_1fr_1fr_170px_auto]">
             <select
               value={externalApprovalRecipientType}
               onChange={(event) => onExternalApprovalRecipientTypeChange(event.target.value as 'client' | 'representative')}
@@ -4975,6 +4983,13 @@ function WorkOrderPanel({
               placeholder="ФИО получателя"
               className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
             />
+            <select
+              value={externalApprovalDeliveryChannel}
+              onChange={(event) => onExternalApprovalDeliveryChannelChange(event.target.value as 'email' | 'email_and_max')}
+              className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100">
+              <option value="email">Только email</option>
+              <option value="email_and_max">Email + MAX</option>
+            </select>
             <input
               type="email"
               value={externalApprovalRecipientEmail}

@@ -5710,6 +5710,7 @@ export class ApiService {
     recipientEmail: string;
     recipientType: 'client' | 'representative';
     documentIds?: number[];
+    deliveryChannel?: 'email' | 'email_and_max';
   }) {
     return this.request<ExternalWorkOrderApprovalStatus>(
       `/v2/cases/${caseId}/work-order/external-approval`,

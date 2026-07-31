@@ -9,6 +9,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Services.Notifications;
 
 namespace PayPlanner.Api.Services;
 
@@ -62,6 +63,7 @@ public sealed class ExternalWorkOrderApprovalService : IExternalWorkOrderApprova
     private readonly ILogger<ExternalWorkOrderApprovalService>? _logger;
     private readonly ICaseDocumentStorage? _documentStorage;
     private readonly ITimeLimitedDataProtector? _attachmentGrantProtector;
+    private readonly IMaxOutboxService? _maxOutbox;
 
     public ExternalWorkOrderApprovalService(
         PaymentContext db,
@@ -71,7 +73,8 @@ public sealed class ExternalWorkOrderApprovalService : IExternalWorkOrderApprova
         IExternalWorkOrderApprovalNotifier? notifier = null,
         ILogger<ExternalWorkOrderApprovalService>? logger = null,
         ICaseDocumentStorage? documentStorage = null,
-        IDataProtectionProvider? dataProtectionProvider = null)
+        IDataProtectionProvider? dataProtectionProvider = null,
+        IMaxOutboxService? maxOutbox = null)
     {
         _db = db;
         _email = email;
@@ -83,6 +86,7 @@ public sealed class ExternalWorkOrderApprovalService : IExternalWorkOrderApprova
         _attachmentGrantProtector = dataProtectionProvider?
             .CreateProtector("PayPlanner.ExternalWorkOrderApproval.AttachmentGrant.v1")
             .ToTimeLimitedDataProtector();
+        _maxOutbox = maxOutbox;
     }
 
     public async Task<ExternalWorkOrderApprovalStatusDto?> GetLatestStatusAsync(int caseId, CancellationToken ct)
@@ -122,6 +126,7 @@ public sealed class ExternalWorkOrderApprovalService : IExternalWorkOrderApprova
         var recipientName = NormalizeRequired(request.RecipientName, 256, "Укажите имя получателя.");
         var recipientEmail = NormalizeEmail(request.RecipientEmail);
         var recipientType = NormalizeRecipientType(request.RecipientType);
+        var deliveryChannel = NormalizeDeliveryChannel(request.DeliveryChannel);
 
         var aggregate = await _db.ClientCaseWorkOrders
             .Where(item => item.ClientCaseId == caseId)
@@ -160,6 +165,27 @@ public sealed class ExternalWorkOrderApprovalService : IExternalWorkOrderApprova
             throw new ExternalWorkOrderApprovalException(
                 "work_order_empty",
                 "Добавьте услуги с ненулевой стоимостью перед отправкой клиенту.");
+        }
+
+        int? maxPortalAccountId = null;
+        if (deliveryChannel == "email_and_max")
+        {
+            if (_maxOutbox is null)
+                throw new ExternalWorkOrderApprovalException("delivery_unavailable", "Доставка через MAX не подключена.");
+            var candidates = await _db.ClientPortalAccounts.AsNoTracking()
+                .Where(item => item.Email == recipientEmail && item.IsActive && item.RevokedAt == null)
+                .Where(item => item.CaseGrants.Any(grant => grant.ClientCaseId == caseId
+                    && grant.RevokedAt == null
+                    && grant.CanViewApprovals))
+                .OrderBy(item => item.Id)
+                .Select(item => item.Id)
+                .Take(2)
+                .ToListAsync(ct);
+            if (candidates.Count != 1)
+                throw new ExternalWorkOrderApprovalException(
+                    "max_recipient_unavailable",
+                    "Для MAX нужен ровно один активный аккаунт кабинета с этим email и правом просмотра согласований данного дела.");
+            maxPortalAccountId = candidates[0];
         }
 
         var now = DateTime.UtcNow;
@@ -246,6 +272,17 @@ public sealed class ExternalWorkOrderApprovalService : IExternalWorkOrderApprova
                 BuildEmailBody(recipientName, snapshot, publicUrl, otp, entity.ExpiresAt),
                 isHtml: true,
                 cancellationToken: ct);
+            if (maxPortalAccountId.HasValue)
+            {
+                await _maxOutbox!.QueueAsync(new MaxQueueRequest(
+                    null,
+                    MaxMessengerScenarios.Confirmations,
+                    $"work-order-approval:{entity.Id}:v{entity.Version}",
+                    "В CRM подготовлен запрос на согласование. Решение принимается только на защищённой странице.",
+                    "Открыть согласование",
+                    publicUrl,
+                    RecipientPortalAccountId: maxPortalAccountId), ct);
+            }
         }
         catch (Exception) when (!ct.IsCancellationRequested)
         {
@@ -258,7 +295,9 @@ public sealed class ExternalWorkOrderApprovalService : IExternalWorkOrderApprova
             await _db.SaveChangesAsync(CancellationToken.None);
             throw new ExternalWorkOrderApprovalException(
                 "delivery_failed",
-                "Не удалось отправить письмо. Ссылка автоматически отключена; проверьте настройки email и повторите отправку.");
+                deliveryChannel == "email_and_max"
+                    ? "Не удалось доставить email и уведомление MAX. Ссылка автоматически отключена; проверьте оба канала и повторите отправку."
+                    : "Не удалось отправить письмо. Ссылка автоматически отключена; проверьте настройки email и повторите отправку.");
         }
 
         return MapStatus(entity);
@@ -748,6 +787,16 @@ public sealed class ExternalWorkOrderApprovalService : IExternalWorkOrderApprova
                 "Получателем может быть только клиент или явно назначенный представитель."),
         };
 
+    private static string NormalizeDeliveryChannel(string? value)
+        => value?.Trim().ToLowerInvariant() switch
+        {
+            null or "" or "email" => "email",
+            "email_and_max" => "email_and_max",
+            _ => throw new ExternalWorkOrderApprovalException(
+                "validation_error",
+                "Доступны варианты доставки: email или email вместе с MAX."),
+        };
+
     private static string NormalizeDecision(string? value)
         => value?.Trim().ToLowerInvariant() switch
         {
@@ -819,6 +868,7 @@ public sealed class CreateExternalWorkOrderApprovalRequest
     public string? RecipientEmail { get; set; }
     public string? RecipientType { get; set; }
     public IReadOnlyCollection<int>? DocumentIds { get; set; }
+    public string? DeliveryChannel { get; set; } = "email";
 }
 
 public sealed class PublicWorkOrderApprovalDecisionRequest
