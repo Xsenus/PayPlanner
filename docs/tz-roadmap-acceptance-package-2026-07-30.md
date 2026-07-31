@@ -21,7 +21,6 @@
 ## 1. Базовые роли и выпуск
 
 <!-- acceptance: tz-crm-acceptance-baseline-roadmap-2026-07-08.md count=1 -->
-<!-- acceptance: tz-crm-financial-scenarios-roadmap-2026-07-08.md count=0 -->
 <!-- acceptance: tz-crm-release-stability-roadmap-2026-07-08.md count=1 -->
 
 Участники: администратор, руководитель, юрист, бухгалтер и пользователь без расширенных прав.
@@ -173,4 +172,4 @@
 
 ## Сводка покрытия
 
-Пакет охватывает 31 из 31 пункта `[acceptance]` во всех 18 активных roadmap. Команда `npm run roadmap:acceptance-package` проверяет соответствие пакета исходным документам.
+Пакет охватывает 31 из 31 пункта `[acceptance]` во всех 17 активных roadmap. Команда `npm run roadmap:acceptance-package` проверяет соответствие пакета исходным документам.
