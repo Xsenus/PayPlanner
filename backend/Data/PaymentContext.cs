@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Services;
 using System.Globalization;
 using System.Linq.Expressions;
 using System.Security.Claims;
@@ -57,9 +58,19 @@ public class PaymentContext : DbContext
         (typeof(ClientPassport), nameof(ClientPassport.Series)),
         (typeof(ClientPassport), nameof(ClientPassport.Number)),
         (typeof(ClientPassport), nameof(ClientPassport.IssuedBy)),
+        (typeof(ClientPassport), nameof(ClientPassport.IssuedAt)),
         (typeof(ClientPassport), nameof(ClientPassport.DepartmentCode)),
         (typeof(ClientPassport), nameof(ClientPassport.BirthPlacePassport)),
         (typeof(ClientPassport), nameof(ClientPassport.BirthPlaceFias)),
+        (typeof(ClientPassport), nameof(ClientPassport.SeriesEncrypted)),
+        (typeof(ClientPassport), nameof(ClientPassport.SeriesBlindIndex)),
+        (typeof(ClientPassport), nameof(ClientPassport.NumberEncrypted)),
+        (typeof(ClientPassport), nameof(ClientPassport.NumberBlindIndex)),
+        (typeof(ClientPassport), nameof(ClientPassport.IssuedByEncrypted)),
+        (typeof(ClientPassport), nameof(ClientPassport.IssuedAtEncrypted)),
+        (typeof(ClientPassport), nameof(ClientPassport.DepartmentCodeEncrypted)),
+        (typeof(ClientPassport), nameof(ClientPassport.BirthPlacePassportEncrypted)),
+        (typeof(ClientPassport), nameof(ClientPassport.BirthPlaceFiasEncrypted)),
         (typeof(AddressRecord), nameof(AddressRecord.Value)),
         (typeof(AddressRecord), nameof(AddressRecord.UnrestrictedValue)),
         (typeof(AddressRecord), nameof(AddressRecord.Flat)),
@@ -88,6 +99,17 @@ public class PaymentContext : DbContext
     private static readonly JsonSerializerOptions AuditMetadataJsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    };
+
+    private static readonly HashSet<string> ClientPassportEncryptedSourceProperties = new(StringComparer.Ordinal)
+    {
+        nameof(ClientPassport.Series),
+        nameof(ClientPassport.Number),
+        nameof(ClientPassport.IssuedBy),
+        nameof(ClientPassport.IssuedAt),
+        nameof(ClientPassport.DepartmentCode),
+        nameof(ClientPassport.BirthPlacePassport),
+        nameof(ClientPassport.BirthPlaceFias),
     };
 
     private static readonly HashSet<Type> SoftDeleteAuditedEntityTypes = new()
@@ -150,7 +172,13 @@ public class PaymentContext : DbContext
         IReadOnlyCollection<AuditFieldChange> Changes,
         string? Reason = null);
 
+    private sealed record PassportEncryptionWorkItem(
+        ClientPassport Passport,
+        IReadOnlySet<string>? ModifiedPlaintextFields,
+        bool RequiresGeneratedId);
+
     private readonly IHttpContextAccessor? _httpContextAccessor;
+    private readonly IClientPassportEncryptionDualWriteService? _clientPassportEncryption;
     private string? _auditReason;
 
     internal bool UseObjectAuditModel { get; }
@@ -171,11 +199,13 @@ public class PaymentContext : DbContext
     public PaymentContext(
         DbContextOptions options,
         IHttpContextAccessor? httpContextAccessor = null,
-        bool useObjectAuditModel = true)
+        bool useObjectAuditModel = true,
+        IClientPassportEncryptionDualWriteService? clientPassportEncryption = null)
         : base(options)
     {
         _httpContextAccessor = httpContextAccessor;
         UseObjectAuditModel = useObjectAuditModel;
+        _clientPassportEncryption = clientPassportEncryption;
     }
 
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
@@ -3606,13 +3636,39 @@ public class PaymentContext : DbContext
 
     public override int SaveChanges()
     {
-        var pendingAuditEvents = ApplyAuditMetadata();
-        var result = base.SaveChanges();
-        PersistAuditEvents(pendingAuditEvents);
-        return result;
+        return SaveChanges(acceptAllChangesOnSuccess: true);
     }
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        var encryptionWork = CapturePassportEncryptionWork();
+        if (encryptionWork.Count == 0)
+            return SaveChangesWithoutPassportEncryption(acceptAllChangesOnSuccess);
+        if (!acceptAllChangesOnSuccess && encryptionWork.Any(item => item.RequiresGeneratedId))
+            throw new InvalidOperationException(
+                "Нельзя сохранить новый паспорт с acceptAllChangesOnSuccess=false при включённом dual-write шифровании.");
+
+        using var transaction = Database.CurrentTransaction is null ? Database.BeginTransaction() : null;
+        try
+        {
+            ProtectPassportsBeforeSaveAsync(encryptionWork, CancellationToken.None).GetAwaiter().GetResult();
+            var pendingAuditEvents = ApplyAuditMetadata();
+            var result = base.SaveChanges(acceptAllChangesOnSuccess);
+            ProtectNewPassportsAfterSaveAsync(encryptionWork, CancellationToken.None).GetAwaiter().GetResult();
+            if (encryptionWork.Any(item => item.RequiresGeneratedId))
+                base.SaveChanges(acceptAllChangesOnSuccess);
+            PersistAuditEvents(pendingAuditEvents, acceptAllChangesOnSuccess);
+            transaction?.Commit();
+            return result;
+        }
+        catch
+        {
+            transaction?.Rollback();
+            throw;
+        }
+    }
+
+    private int SaveChangesWithoutPassportEncryption(bool acceptAllChangesOnSuccess)
     {
         var pendingAuditEvents = ApplyAuditMetadata();
         var result = base.SaveChanges(acceptAllChangesOnSuccess);
@@ -3632,10 +3688,85 @@ public class PaymentContext : DbContext
 
     private async Task<int> SaveChangesCoreAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken)
     {
+        var encryptionWork = CapturePassportEncryptionWork();
+        if (encryptionWork.Count == 0)
+            return await SaveChangesWithoutPassportEncryptionAsync(acceptAllChangesOnSuccess, cancellationToken);
+        if (!acceptAllChangesOnSuccess && encryptionWork.Any(item => item.RequiresGeneratedId))
+            throw new InvalidOperationException(
+                "Нельзя сохранить новый паспорт с acceptAllChangesOnSuccess=false при включённом dual-write шифровании.");
+
+        await using var transaction = Database.CurrentTransaction is null
+            ? await Database.BeginTransactionAsync(cancellationToken)
+            : null;
+        try
+        {
+            await ProtectPassportsBeforeSaveAsync(encryptionWork, cancellationToken);
+            var pendingAuditEvents = ApplyAuditMetadata();
+            var result = await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+            await ProtectNewPassportsAfterSaveAsync(encryptionWork, cancellationToken);
+            if (encryptionWork.Any(item => item.RequiresGeneratedId))
+                await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+            await PersistAuditEventsAsync(pendingAuditEvents, acceptAllChangesOnSuccess, cancellationToken);
+            if (transaction is not null)
+                await transaction.CommitAsync(cancellationToken);
+            return result;
+        }
+        catch
+        {
+            if (transaction is not null)
+                await transaction.RollbackAsync(cancellationToken);
+            throw;
+        }
+    }
+
+    private async Task<int> SaveChangesWithoutPassportEncryptionAsync(
+        bool acceptAllChangesOnSuccess,
+        CancellationToken cancellationToken)
+    {
         var pendingAuditEvents = ApplyAuditMetadata();
         var result = await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
         await PersistAuditEventsAsync(pendingAuditEvents, acceptAllChangesOnSuccess, cancellationToken);
         return result;
+    }
+
+    private List<PassportEncryptionWorkItem> CapturePassportEncryptionWork()
+    {
+        if (_clientPassportEncryption?.Enabled != true)
+            return [];
+
+        ChangeTracker.DetectChanges();
+        return ChangeTracker.Entries<ClientPassport>()
+            .Where(entry => entry.State is EntityState.Added or EntityState.Modified)
+            .Select(entry => new PassportEncryptionWorkItem(
+                entry.Entity,
+                entry.State == EntityState.Added
+                    ? null
+                    : entry.Properties
+                        .Where(property => property.IsModified
+                                           && ClientPassportEncryptedSourceProperties.Contains(property.Metadata.Name))
+                        .Select(property => property.Metadata.Name)
+                        .ToHashSet(StringComparer.Ordinal),
+                entry.State == EntityState.Added && entry.Entity.Id <= 0))
+            .ToList();
+    }
+
+    private async Task ProtectPassportsBeforeSaveAsync(
+        IReadOnlyCollection<PassportEncryptionWorkItem> work,
+        CancellationToken cancellationToken)
+    {
+        foreach (var item in work.Where(item => !item.RequiresGeneratedId))
+            await _clientPassportEncryption!.ProtectAsync(
+                item.Passport,
+                item.ModifiedPlaintextFields,
+                cancellationToken);
+    }
+
+    private async Task ProtectNewPassportsAfterSaveAsync(
+        IReadOnlyCollection<PassportEncryptionWorkItem> work,
+        CancellationToken cancellationToken)
+    {
+        foreach (var item in work.Where(item => item.RequiresGeneratedId))
+            await _clientPassportEncryption!.ProtectAsync(item.Passport, null, cancellationToken);
     }
 
     private List<PendingAuditEvent> ApplyAuditMetadata()

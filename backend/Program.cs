@@ -206,6 +206,7 @@ builder.Services.AddScoped<IElectronicSignatureProvider>(_ => new DisabledElectr
 builder.Services.AddScoped<IElectronicSignatureProvider>(_ => new DisabledElectronicSignatureProvider("Taxcom"));
 builder.Services.AddSingleton<IFieldEncryptionKeyStore, EnvironmentFieldEncryptionKeyStore>();
 builder.Services.AddSingleton<IFieldEncryptor, AeadFieldEncryptor>();
+builder.Services.AddSingleton<IClientPassportEncryptionDualWriteService, ClientPassportEncryptionDualWriteService>();
 builder.Services.AddScoped<IClientPassportEncryptionBackfillService, ClientPassportEncryptionBackfillService>();
 builder.Services.AddSingleton<IInvoiceDocumentPdfService, InvoiceDocumentPdfService>();
 builder.Services.AddSingleton<DatabaseBackupService>();
