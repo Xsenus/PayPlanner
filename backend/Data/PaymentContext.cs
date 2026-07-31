@@ -2888,6 +2888,59 @@ public class PaymentContext : DbContext
                 .HasDatabaseName("IX_TaskJournalComments_ExternalSource_CommentId");
         });
 
+        modelBuilder.Entity<MessengerRecipientBinding>(entity =>
+        {
+            entity.HasKey(item => item.Id);
+            entity.Property(item => item.Channel).HasMaxLength(32).IsRequired();
+            entity.Property(item => item.Provider).HasMaxLength(64).IsRequired();
+            entity.Property(item => item.DisplayName).HasMaxLength(256).IsRequired();
+            entity.Property(item => item.ProtectedAddress).HasMaxLength(512).IsRequired();
+            entity.Property(item => item.AddressHash).HasMaxLength(64).IsRequired();
+            entity.Property(item => item.MaskedAddress).HasMaxLength(128).IsRequired();
+            entity.Property(item => item.ProviderRecipientId).HasMaxLength(128);
+            entity.Property(item => item.VerificationStatus).HasMaxLength(32).HasDefaultValue("pending").IsRequired();
+            entity.Property(item => item.VerificationMethod).HasMaxLength(64);
+            entity.Property(item => item.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.HasOne(item => item.Client).WithMany().HasForeignKey(item => item.ClientId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(item => item.ClientPortalAccount).WithMany().HasForeignKey(item => item.ClientPortalAccountId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne(item => item.VerifiedByUser).WithMany().HasForeignKey(item => item.VerifiedByUserId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasIndex(item => new { item.ClientId, item.IsActive, item.Channel })
+                .HasDatabaseName("IX_MessengerRecipientBindings_Client_Active_Channel");
+            entity.HasIndex(item => new { item.Channel, item.AddressHash })
+                .HasDatabaseName("IX_MessengerRecipientBindings_Channel_AddressHash");
+        });
+
+        modelBuilder.Entity<MessengerDocumentDelivery>(entity =>
+        {
+            entity.HasKey(item => item.Id);
+            entity.Property(item => item.DocumentType).HasMaxLength(32).IsRequired();
+            entity.Property(item => item.OriginalFileName).HasMaxLength(260).IsRequired();
+            entity.Property(item => item.SnapshotPath).HasMaxLength(600).IsRequired();
+            entity.Property(item => item.ContentType).HasMaxLength(200).IsRequired();
+            entity.Property(item => item.ChecksumSha256).HasMaxLength(64).IsRequired();
+            entity.Property(item => item.Channel).HasMaxLength(32).IsRequired();
+            entity.Property(item => item.Provider).HasMaxLength(64).IsRequired();
+            entity.Property(item => item.Status).HasMaxLength(32).HasDefaultValue(MessengerDocumentDeliveryStatuses.Prepared).IsRequired();
+            entity.Property(item => item.IdempotencyKey).HasMaxLength(128).IsRequired();
+            entity.Property(item => item.ProviderMessageId).HasMaxLength(256);
+            entity.Property(item => item.LinkTokenHash).HasMaxLength(64);
+            entity.Property(item => item.LastError).HasMaxLength(2000);
+            entity.Property(item => item.MessagePreview).HasMaxLength(1000);
+            entity.Property(item => item.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.HasOne(item => item.RecipientBinding).WithMany().HasForeignKey(item => item.RecipientBindingId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.Client).WithMany().HasForeignKey(item => item.ClientId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne(item => item.ClientCase).WithMany().HasForeignKey(item => item.ClientCaseId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne(item => item.CreatedByUser).WithMany().HasForeignKey(item => item.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(item => item.PublicId).IsUnique().HasDatabaseName("IX_MessengerDocumentDeliveries_PublicId");
+            entity.HasIndex(item => item.IdempotencyKey).IsUnique().HasDatabaseName("IX_MessengerDocumentDeliveries_IdempotencyKey");
+            entity.HasIndex(item => new { item.Status, item.NextAttemptAt })
+                .HasDatabaseName("IX_MessengerDocumentDeliveries_Status_NextAttemptAt");
+            entity.HasIndex(item => new { item.DocumentType, item.DocumentId, item.DocumentVersion })
+                .HasDatabaseName("IX_MessengerDocumentDeliveries_Document_Version");
+            entity.HasIndex(item => new { item.RecipientBindingId, item.CreatedAt })
+                .HasDatabaseName("IX_MessengerDocumentDeliveries_Recipient_CreatedAt");
+        });
+
         modelBuilder.Entity<TaskJournalDeadlineChangeRequest>(entity =>
         {
             entity.HasKey(e => e.Id);
@@ -3938,6 +3991,8 @@ public class PaymentContext : DbContext
     public DbSet<TaskJournalItem> TaskJournalItems { get; set; }
     public DbSet<TaskJournalParticipant> TaskJournalParticipants { get; set; }
     public DbSet<TaskJournalComment> TaskJournalComments { get; set; }
+    public DbSet<MessengerRecipientBinding> MessengerRecipientBindings { get; set; }
+    public DbSet<MessengerDocumentDelivery> MessengerDocumentDeliveries { get; set; }
     public DbSet<TaskJournalDeadlineChangeRequest> TaskJournalDeadlineChangeRequests { get; set; }
     public DbSet<TaskJournalFile> TaskJournalFiles { get; set; }
     public DbSet<TaskJournalTemplate> TaskJournalTemplates { get; set; }

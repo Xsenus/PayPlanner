@@ -189,6 +189,7 @@ builder.Services.AddScoped<InstallmentService>();
 builder.Services.AddScoped<StatsSummaryService>();
 builder.Services.AddScoped<IFormRequirementsService, FormRequirementsService>();
 builder.Services.AddSingleton<ICaseDocumentStorage, LocalCaseDocumentStorage>();
+builder.Services.AddScoped<IMessengerDocumentDeliveryService, MessengerDocumentDeliveryService>();
 builder.Services.AddSingleton<IInvoiceDocumentPdfService, InvoiceDocumentPdfService>();
 builder.Services.AddSingleton<DatabaseBackupService>();
 builder.Services.AddSingleton<ISystemJobRunStateService, SystemJobRunStateService>();

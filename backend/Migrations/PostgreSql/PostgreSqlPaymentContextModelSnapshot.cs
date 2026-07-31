@@ -5093,6 +5093,264 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.ToTable("LegalEntityContracts", (string)null);
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.MessengerDocumentDelivery", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("CancelledAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("Channel")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("ChecksumSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<int?>("ClientCaseId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("ClientId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<int>("CreatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("DeliveredAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int>("DocumentId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("DocumentType")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<int>("DocumentVersion")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("DownloadCount")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("FailedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<DateTime?>("FirstOpenedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("IdempotencyKey")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<DateTime?>("LastOpenedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<DateTime?>("LinkExpiresAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("LinkTokenHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("MessagePreview")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateTime?>("NextAttemptAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("OriginalFileName")
+                        .IsRequired()
+                        .HasMaxLength(260)
+                        .HasColumnType("character varying(260)");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("ProviderMessageId")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<Guid>("PublicId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("QueuedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<DateTime?>("ReadAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int>("RecipientBindingId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("SentAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<long>("SizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("SnapshotPath")
+                        .IsRequired()
+                        .HasMaxLength(600)
+                        .HasColumnType("character varying(600)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasDefaultValue("prepared");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClientCaseId");
+
+                    b.HasIndex("ClientId");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("IdempotencyKey")
+                        .IsUnique()
+                        .HasDatabaseName("IX_MessengerDocumentDeliveries_IdempotencyKey");
+
+                    b.HasIndex("PublicId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_MessengerDocumentDeliveries_PublicId");
+
+                    b.HasIndex("RecipientBindingId", "CreatedAt")
+                        .HasDatabaseName("IX_MessengerDocumentDeliveries_Recipient_CreatedAt");
+
+                    b.HasIndex("Status", "NextAttemptAt")
+                        .HasDatabaseName("IX_MessengerDocumentDeliveries_Status_NextAttemptAt");
+
+                    b.HasIndex("DocumentType", "DocumentId", "DocumentVersion")
+                        .HasDatabaseName("IX_MessengerDocumentDeliveries_Document_Version");
+
+                    b.ToTable("MessengerDocumentDeliveries");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.MessengerRecipientBinding", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("AddressHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Channel")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<int?>("ClientId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("ClientPortalAccountId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("DisplayName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("MaskedAddress")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("ProtectedAddress")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("ProviderRecipientId")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("VerificationMethod")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("VerificationStatus")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasDefaultValue("pending");
+
+                    b.Property<DateTime?>("VerifiedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("VerifiedByUserId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClientPortalAccountId");
+
+                    b.HasIndex("VerifiedByUserId");
+
+                    b.HasIndex("Channel", "AddressHash")
+                        .HasDatabaseName("IX_MessengerRecipientBindings_Channel_AddressHash");
+
+                    b.HasIndex("ClientId", "IsActive", "Channel")
+                        .HasDatabaseName("IX_MessengerRecipientBindings_Client_Active_Channel");
+
+                    b.ToTable("MessengerRecipientBindings");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.MoneyAccount", b =>
                 {
                     b.Property<int>("Id")
@@ -10216,6 +10474,63 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("Contract");
 
                     b.Navigation("LegalEntity");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.MessengerDocumentDelivery", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.ClientCase", "ClientCase")
+                        .WithMany()
+                        .HasForeignKey("ClientCaseId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("PayPlanner.Api.Models.Client", "Client")
+                        .WithMany()
+                        .HasForeignKey("ClientId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("PayPlanner.Api.Models.User", "CreatedByUser")
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.MessengerRecipientBinding", "RecipientBinding")
+                        .WithMany()
+                        .HasForeignKey("RecipientBindingId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Client");
+
+                    b.Navigation("ClientCase");
+
+                    b.Navigation("CreatedByUser");
+
+                    b.Navigation("RecipientBinding");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.MessengerRecipientBinding", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.Client", "Client")
+                        .WithMany()
+                        .HasForeignKey("ClientId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.HasOne("PayPlanner.Api.Models.ClientPortalAccount", "ClientPortalAccount")
+                        .WithMany()
+                        .HasForeignKey("ClientPortalAccountId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("PayPlanner.Api.Models.User", "VerifiedByUser")
+                        .WithMany()
+                        .HasForeignKey("VerifiedByUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Client");
+
+                    b.Navigation("ClientPortalAccount");
+
+                    b.Navigation("VerifiedByUser");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.MoneyOperation", b =>
