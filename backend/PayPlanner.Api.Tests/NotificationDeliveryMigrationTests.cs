@@ -47,28 +47,17 @@ public sealed class NotificationDeliveryMigrationTests
             await using (var legacyContext = new PaymentContext(options))
             {
                 await legacyContext.Database.MigrateAsync(PreviousMigration);
-                legacyContext.NotificationDeliveries.AddRange(
-                    CreateDelivery(
-                        "legacy-email",
-                        NotificationChannels.Email,
-                        NotificationDeliveryStatus.Sent,
-                        "client@example.com",
-                        new DateTime(2026, 7, 28, 7, 0, 0, DateTimeKind.Utc)),
-                    CreateDelivery(
-                        "legacy-web-push",
-                        NotificationChannels.WebPush,
-                        NotificationDeliveryStatus.Failed,
-                        "https://push.example/legacy",
-                        new DateTime(2026, 7, 28, 8, 0, 0, DateTimeKind.Utc),
-                        "legacy-safe-error"),
-                    CreateDelivery(
-                        "legacy-sms",
-                        NotificationChannels.Sms,
-                        NotificationDeliveryStatus.Skipped,
-                        "+79990000000",
-                        new DateTime(2026, 7, 28, 9, 0, 0, DateTimeKind.Utc),
-                        "provider-not-configured"));
-                await legacyContext.SaveChangesAsync();
+                // Старую схему заполняем SQL, потому что актуальная EF-модель уже знает
+                // о колонках будущей миграции и не может корректно имитировать старый клиент.
+                await legacyContext.Database.ExecuteSqlRawAsync(
+                    """
+                    INSERT INTO NotificationDeliveries
+                        (EventKey, Channel, SenderName, RecipientAddress, Subject, BodyPreview, Status, Error, CreatedAt, SentAt)
+                    VALUES
+                        ('legacy-email', 'email', 'Legacy sender', 'client@example.com', 'Legacy subject', 'Legacy preview', 'sent', NULL, '2026-07-28 07:00:00', '2026-07-28 07:01:00'),
+                        ('legacy-web-push', 'webPush', 'Legacy sender', 'https://push.example/legacy', 'Legacy subject', 'Legacy preview', 'failed', 'legacy-safe-error', '2026-07-28 08:00:00', NULL),
+                        ('legacy-sms', 'sms', 'Legacy sender', '+79990000000', 'Legacy subject', 'Legacy preview', 'skipped', 'provider-not-configured', '2026-07-28 09:00:00', NULL);
+                    """);
 
                 var appliedMigrations = await legacyContext.Database.GetAppliedMigrationsAsync();
                 Assert.DoesNotContain(DeliveryIndexMigration, appliedMigrations);
@@ -128,27 +117,6 @@ public sealed class NotificationDeliveryMigrationTests
             DeleteIfExists(databasePath + "-wal");
         }
     }
-
-    private static NotificationDelivery CreateDelivery(
-        string eventKey,
-        string channel,
-        string status,
-        string recipientAddress,
-        DateTime createdAt,
-        string? error = null)
-        => new()
-        {
-            EventKey = eventKey,
-            Channel = channel,
-            SenderName = "Legacy sender",
-            RecipientAddress = recipientAddress,
-            Subject = "Legacy subject",
-            BodyPreview = "Legacy preview",
-            Status = status,
-            Error = error,
-            CreatedAt = createdAt,
-            SentAt = status == NotificationDeliveryStatus.Sent ? createdAt.AddMinutes(1) : null,
-        };
 
     private static void AssertDelivery(
         NotificationDelivery delivery,
