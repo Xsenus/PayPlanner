@@ -152,8 +152,10 @@ public class PaymentContextAuditTests
         var phoneChange = changesElement.EnumerateArray()
             .FirstOrDefault(item => item.TryGetProperty("field", out var field) && field.GetString() == "Phone");
 
-        Assert.Equal("79990000003", phoneChange.GetProperty("oldValue").GetString());
-        Assert.Equal("79990000004", phoneChange.GetProperty("newValue").GetString());
+        Assert.Equal("[СКРЫТО]", phoneChange.GetProperty("oldValue").GetString());
+        Assert.Equal("[СКРЫТО]", phoneChange.GetProperty("newValue").GetString());
+        Assert.DoesNotContain("79990000003", updatedEvent.MetadataJson);
+        Assert.DoesNotContain("79990000004", updatedEvent.MetadataJson);
 
         db.Clients.Remove(client);
         await db.SaveChangesAsync();

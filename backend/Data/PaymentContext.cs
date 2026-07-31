@@ -48,6 +48,43 @@ public class PaymentContext : DbContext
         "DirectorSignatureDataUrl",
     };
 
+    private static readonly HashSet<(Type EntityType, string PropertyName)> SensitiveAuditProperties = new()
+    {
+        (typeof(Client), nameof(Client.Email)),
+        (typeof(Client), nameof(Client.Phone)),
+        (typeof(Client), nameof(Client.Address)),
+        (typeof(Client), nameof(Client.Notes)),
+        (typeof(ClientPassport), nameof(ClientPassport.Series)),
+        (typeof(ClientPassport), nameof(ClientPassport.Number)),
+        (typeof(ClientPassport), nameof(ClientPassport.IssuedBy)),
+        (typeof(ClientPassport), nameof(ClientPassport.DepartmentCode)),
+        (typeof(ClientPassport), nameof(ClientPassport.BirthPlacePassport)),
+        (typeof(ClientPassport), nameof(ClientPassport.BirthPlaceFias)),
+        (typeof(AddressRecord), nameof(AddressRecord.Value)),
+        (typeof(AddressRecord), nameof(AddressRecord.UnrestrictedValue)),
+        (typeof(AddressRecord), nameof(AddressRecord.Flat)),
+        (typeof(AddressRecord), nameof(AddressRecord.GeoLat)),
+        (typeof(AddressRecord), nameof(AddressRecord.GeoLon)),
+        (typeof(ExternalContact), nameof(ExternalContact.Phone)),
+        (typeof(ExternalContact), nameof(ExternalContact.Email)),
+        (typeof(ExternalContact), nameof(ExternalContact.Notes)),
+        (typeof(User), nameof(User.Email)),
+        (typeof(User), nameof(User.PhoneNumber)),
+        (typeof(User), nameof(User.LastActivityIpAddress)),
+        (typeof(User), nameof(User.LastActivityUserAgent)),
+        (typeof(LegalEntity), nameof(LegalEntity.Address)),
+        (typeof(LegalEntity), nameof(LegalEntity.Phone)),
+        (typeof(LegalEntity), nameof(LegalEntity.Email)),
+        (typeof(MoneyAccount), nameof(MoneyAccount.BankAccountNumber)),
+        (typeof(ClientCase), nameof(ClientCase.Strategy)),
+        (typeof(ClientCase), nameof(ClientCase.CourtSecretaryContacts)),
+        (typeof(ClientCase), nameof(ClientCase.DocumentsSummary)),
+        (typeof(ClientCase), nameof(ClientCase.EventHistory)),
+        (typeof(Payment), nameof(Payment.Description)),
+        (typeof(Payment), nameof(Payment.Notes)),
+        (typeof(StickyNote), nameof(StickyNote.Text)),
+    };
+
     private static readonly JsonSerializerOptions AuditMetadataJsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
@@ -3706,20 +3743,26 @@ public class PaymentContext : DbContext
             .Where(property => !AuditDetailedDiffExcludedPropertyNames.Contains(property.Metadata.Name))
             .Select(property => new AuditFieldChange(
                 property.Metadata.Name,
-                FormatAuditValue(property.OriginalValue),
-                FormatAuditValue(property.CurrentValue)))
+                FormatAuditValue(entry.Metadata.ClrType, property.Metadata.Name, property.OriginalValue),
+                FormatAuditValue(entry.Metadata.ClrType, property.Metadata.Name, property.CurrentValue)))
             .Where(change =>
-                !string.Equals(change.OldValue, change.NewValue, StringComparison.Ordinal)
-                && (!string.IsNullOrWhiteSpace(change.OldValue) || !string.IsNullOrWhiteSpace(change.NewValue)))
+                SensitiveAuditProperties.Contains((entry.Metadata.ClrType, change.Field))
+                || (!string.Equals(change.OldValue, change.NewValue, StringComparison.Ordinal)
+                    && (!string.IsNullOrWhiteSpace(change.OldValue) || !string.IsNullOrWhiteSpace(change.NewValue))))
             .OrderBy(change => change.Field, StringComparer.Ordinal)
             .ToList();
     }
 
-    private static string? FormatAuditValue(object? value)
+    private static string? FormatAuditValue(Type entityType, string propertyName, object? value)
     {
         if (value is null)
         {
             return null;
+        }
+
+        if (SensitiveAuditProperties.Contains((entityType, propertyName)))
+        {
+            return "[СКРЫТО]";
         }
 
         return value switch

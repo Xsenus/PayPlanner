@@ -198,6 +198,8 @@ builder.Services.AddScoped<IElectronicSignatureService, ElectronicSignatureServi
 builder.Services.AddScoped<IElectronicSignatureProvider>(_ => new DisabledElectronicSignatureProvider("KonturDiadoc"));
 builder.Services.AddScoped<IElectronicSignatureProvider>(_ => new DisabledElectronicSignatureProvider("Sbis"));
 builder.Services.AddScoped<IElectronicSignatureProvider>(_ => new DisabledElectronicSignatureProvider("Taxcom"));
+builder.Services.AddSingleton<IFieldEncryptionKeyStore, EnvironmentFieldEncryptionKeyStore>();
+builder.Services.AddSingleton<IFieldEncryptor, AeadFieldEncryptor>();
 builder.Services.AddSingleton<IInvoiceDocumentPdfService, InvoiceDocumentPdfService>();
 builder.Services.AddSingleton<DatabaseBackupService>();
 builder.Services.AddSingleton<ISystemJobRunStateService, SystemJobRunStateService>();
