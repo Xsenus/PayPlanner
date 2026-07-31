@@ -15,6 +15,7 @@ public sealed class AppFeatureFlagsDto
                 DocumentTemplateLibrary = options.Legal.DocumentTemplateLibrary,
                 ExternalWorkOrderApproval = options.Legal.ExternalWorkOrderApproval,
                 ClientPortal = options.Legal.ClientPortal,
+                OfflineCalendarReadOnly = options.Legal.OfflineCalendarReadOnly,
             },
         };
 }
@@ -27,6 +28,7 @@ public sealed class LegalFeatureFlagsDto
     public bool DocumentTemplateLibrary { get; set; }
     public bool ExternalWorkOrderApproval { get; set; }
     public bool ClientPortal { get; set; }
+    public bool OfflineCalendarReadOnly { get; set; }
 }
 
 public sealed class LegalIntegrationDiagnosticsDto

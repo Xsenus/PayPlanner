@@ -17,4 +17,5 @@ public sealed class LegalFeatureFlagsOptions
     public bool DocumentTemplateLibrary { get; set; }
     public bool ExternalWorkOrderApproval { get; set; }
     public bool ClientPortal { get; set; }
+    public bool OfflineCalendarReadOnly { get; set; }
 }

@@ -34,6 +34,7 @@ public sealed class LegalFeatureFlagCiGateTests
         Assert.False(legal.GetProperty("ExternalCalendarSync").GetBoolean());
         Assert.False(legal.GetProperty("CourtEvents").GetBoolean());
         Assert.False(legal.GetProperty("DocumentTemplateLibrary").GetBoolean());
+        Assert.False(legal.GetProperty("OfflineCalendarReadOnly").GetBoolean());
     }
 
     [Fact]

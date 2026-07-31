@@ -218,6 +218,7 @@ describe('CaseDetailPage', () => {
         documentTemplateLibrary: false,
         externalWorkOrderApproval: false,
         clientPortal: false,
+        offlineCalendarReadOnly: false,
       },
     });
     vi.mocked(apiService.getExternalWorkOrderApproval).mockReset();

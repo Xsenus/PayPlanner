@@ -131,6 +131,7 @@ export interface AppFeatureFlagsDto {
     documentTemplateLibrary: boolean;
     externalWorkOrderApproval: boolean;
     clientPortal: boolean;
+    offlineCalendarReadOnly: boolean;
   };
 }
 

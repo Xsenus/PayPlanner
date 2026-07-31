@@ -56,6 +56,14 @@ import { useToast } from '../../hooks/useToast';
 import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings';
 import { apiService, type TaskJournalSettingsDto } from '../../services/api';
 import {
+  clearOfflineCalendarSnapshot,
+  getOfflineCalendarTrustedDevice,
+  loadOfflineCalendarSnapshot,
+  saveOfflineCalendarSnapshot,
+  setOfflineCalendarTrustedDevice,
+  type OfflineCalendarSnapshot,
+} from '../../services/offlineCalendarStore';
+import {
   TaskStickerBadge,
   TaskStickerStylesProvider,
 } from './TaskStickerBadge';
@@ -225,6 +233,10 @@ const DEFAULT_TASK_JOURNAL_SETTINGS: TaskJournalSettingsDto = {
   caseInactivityDefaultAssigneeUserId: null,
   caseInactivityEscalationDays: 30,
   caseInactivityEscalationUserId: null,
+  caseInactivityFirstRepeatAfterDays: 2,
+  caseInactivityCriticalRepeatAfterDays: 4,
+  caseInactivityRunLocalTime: '09:00',
+  caseInactivityScheduleTimeZone: 'Europe/Moscow',
   stickerStyles: cloneDefaultTaskStickerStyles(),
 };
 
@@ -930,8 +942,8 @@ function toLocalDateKey(date: Date) {
   return toDateKey(date);
 }
 
-function getTaskDateKey(value: string | Date) {
-  return toTimeZoneDateKey(value, activeTaskJournalTimeZoneId);
+function getTaskDateKey(value: string | Date, timeZoneId = activeTaskJournalTimeZoneId) {
+  return toTimeZoneDateKey(value, timeZoneId);
 }
 
 function getCurrentCalendarDate(now = new Date()) {
@@ -1984,6 +1996,9 @@ export function TaskJournal({
   const { confirm, prompt } = useDialog();
   const currentUserName = user?.fullName || user?.email || 'Текущий пользователь';
   const currentUserId = user?.id ?? null;
+  const [offlineCalendarEnabled, setOfflineCalendarEnabled] = useState(false);
+  const [offlineCalendarSnapshot, setOfflineCalendarSnapshot] = useState<OfflineCalendarSnapshot | null>(null);
+  const [offlineCalendarTrustedDevice, setOfflineCalendarTrustedDeviceState] = useState(false);
   const taskTableLayoutSettings = usePersistedTableSettings<TaskTableColumnKey>({
     storageKey: `pp.task_journal.table_settings.v1.user:${currentUserId ?? 'guest'}`,
     settingsKey: TASK_JOURNAL_TABLE_SETTINGS_KEY,
@@ -2000,9 +2015,10 @@ export function TaskJournal({
   const canViewCases = isAdminUser || permissions.cases.canView;
   const { clients } = useClients({ enabled: canViewClients });
   const { legalEntities } = useLegalEntities({ enabled: canViewLegalEntities });
-  const canCreateTasks = isAdminUser || permissions.tasks.canCreate;
-  const canEditTasks = isAdminUser || permissions.tasks.canEdit;
-  const canDeleteTasks = isAdminUser || permissions.tasks.canDelete || permissions.tasks.canDeleteOthers;
+  const canCreateTasks = !offlineCalendarSnapshot && (isAdminUser || permissions.tasks.canCreate);
+  const canEditTasks = !offlineCalendarSnapshot && (isAdminUser || permissions.tasks.canEdit);
+  const canDeleteTasks = !offlineCalendarSnapshot
+    && (isAdminUser || permissions.tasks.canDelete || permissions.tasks.canDeleteOthers);
   const canExportTasks = isAdminUser || permissions.tasks.canExport;
   const canExportCases = isAdminUser || permissions.cases.canExport;
   const canSendTaskFilesToYandexDisk = isAdminUser || (canExportTasks && permissions.yandexDisk?.canCreate === true);
@@ -2086,6 +2102,11 @@ export function TaskJournal({
   const [dateToFilter, setDateToFilter] = useState(initialPreferences.dateTo);
   const [viewMode, setViewMode] = useState<ViewMode>(initialPreferences.viewMode);
   const shouldUseCalendarVisibility = viewMode === 'calendar' || initialView === 'calendar';
+  const shouldUseOfflineCalendar = shouldUseCalendarVisibility
+    || viewMode === 'timeline'
+    || initialView === 'timeline';
+  const shouldUseOfflineCalendarRef = useRef(shouldUseOfflineCalendar);
+  shouldUseOfflineCalendarRef.current = shouldUseOfflineCalendar;
   const [calendarColorMode, setCalendarColorMode] = useState<TaskCalendarColorMode>(initialPreferences.calendarColorMode);
   const [calendarConflictPolicy, setCalendarConflictPolicy] = useState<TaskCalendarConflictPolicy>(initialPreferences.calendarConflictPolicy);
   const [calendarLoadWarningMode, setCalendarLoadWarningMode] = useState<TaskCalendarLoadWarningMode>(initialPreferences.calendarLoadWarningMode);
@@ -2443,12 +2464,16 @@ export function TaskJournal({
     setLoading(true);
     try {
       const settingsPromise = apiService.getTaskJournalSettings();
+      const featureFlagsPromise = apiService.getFeatureFlags().catch(() => null);
+      const trustedDevicePromise = currentUserId
+        ? getOfflineCalendarTrustedDevice(currentUserId).catch(() => false)
+        : Promise.resolve(false);
       let automationSearchValue = searchRef.current;
       const automationPromise = settingsPromise.then((settingsResponse) => {
         automationSearchValue = searchRef.current;
         return loadAutomationCandidates(settingsResponse, automationSearchValue);
       });
-      const [taskItems, assigneeResponse, settingsResponse, notificationDefaultsResponse, timeZoneResponse, calendarSyncSettingsResponse, automationResponse] = await Promise.all([
+      const [taskItems, assigneeResponse, settingsResponse, notificationDefaultsResponse, timeZoneResponse, calendarSyncSettingsResponse, automationResponse, featureFlagsResponse, trustedDevice] = await Promise.all([
         loadAllTaskJournalItems(contextFilter, underControlOnly, shouldUseCalendarVisibility, sortBy, sortDir, true),
         apiService.getTaskJournalAssignees({ calendarView: shouldUseCalendarVisibility }),
         settingsPromise,
@@ -2456,8 +2481,17 @@ export function TaskJournal({
         apiService.getUserSetting(USER_TIME_ZONE_SETTING_KEY).catch(() => null),
         apiService.getCalendarSyncSettings().catch(() => null),
         automationPromise,
+        featureFlagsPromise,
+        trustedDevicePromise,
       ]);
       setTasks(taskItems);
+      setOfflineCalendarSnapshot(null);
+      setOfflineCalendarTrustedDeviceState(trustedDevice);
+      const offlineEnabled = featureFlagsResponse?.legal.offlineCalendarReadOnly === true;
+      setOfflineCalendarEnabled(offlineEnabled);
+      if (!offlineEnabled && currentUserId) {
+        await clearOfflineCalendarSnapshot(currentUserId).catch(() => undefined);
+      }
       setAssignees(assigneeResponse);
       setAutomationCandidates(automationResponse);
       automationCandidatesRequestKeyRef.current = buildAutomationCandidatesRequestKey(settingsResponse, automationSearchValue);
@@ -2470,11 +2504,24 @@ export function TaskJournal({
       setCurrentTimeZoneId(normalizeUserTimeZoneId(timeZoneResponse?.value));
       setCompletedTaskCalendarAction(calendarSyncSettingsResponse?.completedTaskCalendarAction === 'hide' ? 'hide' : 'color');
     } catch {
-      toast.error('Не удалось загрузить журнал задач.', 'Журнал задач');
+      const snapshot = currentUserId && shouldUseOfflineCalendarRef.current
+        ? await loadOfflineCalendarSnapshot(currentUserId).catch(() => null)
+        : null;
+      if (snapshot) {
+        setTasks(snapshot.items);
+        setAssignees([]);
+        setAutomationCandidates([]);
+        setOfflineCalendarEnabled(true);
+        setOfflineCalendarSnapshot(snapshot);
+        setOfflineCalendarTrustedDeviceState(snapshot.trustedDevice);
+        toast.info('Показан сохранённый календарь. Изменения недоступны до восстановления связи.', 'Офлайн-календарь');
+      } else {
+        toast.error('Не удалось загрузить журнал задач.', 'Журнал задач');
+      }
     } finally {
       setLoading(false);
     }
-  }, [contextFilter, loadAutomationCandidates, shouldUseCalendarVisibility, sortBy, sortDir, toast, underControlOnly]);
+  }, [contextFilter, currentUserId, loadAutomationCandidates, shouldUseCalendarVisibility, sortBy, sortDir, toast, underControlOnly]);
 
   useEffect(() => {
     void refreshTasks();
@@ -2491,6 +2538,25 @@ export function TaskJournal({
     window.addEventListener(TASK_JOURNAL_EVENT, refresh);
     return () => window.removeEventListener(TASK_JOURNAL_EVENT, refresh);
   }, [refreshTasks]);
+
+  useEffect(() => {
+    if (!offlineCalendarEnabled
+      || offlineCalendarSnapshot
+      || !currentUserId
+      || !shouldUseOfflineCalendar
+      || tasks.length === 0) {
+      return;
+    }
+
+    void saveOfflineCalendarSnapshot(currentUserId, tasks, offlineCalendarTrustedDevice).catch(() => null);
+  }, [
+    currentUserId,
+    offlineCalendarEnabled,
+    offlineCalendarSnapshot,
+    offlineCalendarTrustedDevice,
+    shouldUseOfflineCalendar,
+    tasks,
+  ]);
 
   useEffect(() => {
     if (!isApprovalsMode) {
@@ -4257,6 +4323,25 @@ export function TaskJournal({
     }
   };
 
+  const handleOfflineCalendarTrustedDeviceChange = async (trustedDevice: boolean) => {
+    if (!currentUserId || offlineCalendarSnapshot) return;
+
+    setOfflineCalendarTrustedDeviceState(trustedDevice);
+    try {
+      await setOfflineCalendarTrustedDevice(currentUserId, trustedDevice);
+      await saveOfflineCalendarSnapshot(currentUserId, tasks, trustedDevice);
+      toast.success(
+        trustedDevice
+          ? 'В офлайн-снимке будут видны названия задач и исполнителей.'
+          : 'Офлайн-снимок заменён на обезличенный.',
+        'Офлайн-календарь',
+      );
+    } catch {
+      setOfflineCalendarTrustedDeviceState(!trustedDevice);
+      toast.error('Не удалось изменить настройку локального календаря.', 'Офлайн-календарь');
+    }
+  };
+
   const contextTitle = contextFilter?.title?.trim();
   const pageTitle = isApprovalsMode ? 'Согласования' : underControlOnly ? 'На контроле' : contextTitle ? `Задачи: ${contextTitle}` : 'Журнал задач';
   const pageDescription = isApprovalsMode
@@ -4425,6 +4510,43 @@ export function TaskJournal({
             </div>
           </div>
         </section>
+
+        {offlineCalendarEnabled && shouldUseOfflineCalendar ? (
+          <section className={`mb-3 flex flex-col gap-3 rounded-xl border px-3 py-3 sm:flex-row sm:items-center sm:justify-between ${
+            offlineCalendarSnapshot
+              ? 'border-amber-300 bg-amber-50 text-amber-950'
+              : 'border-sky-200 bg-sky-50 text-sky-950'
+          }`}>
+            <div className="flex min-w-0 items-start gap-2">
+              <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+              <div>
+                <div className="text-sm font-semibold">
+                  {offlineCalendarSnapshot ? 'Офлайн-календарь · только просмотр' : 'Офлайн-календарь подготовлен'}
+                </div>
+                <div className="mt-0.5 text-xs leading-5 opacity-80">
+                  {offlineCalendarSnapshot
+                    ? `Данные сохранены ${new Date(offlineCalendarSnapshot.syncedAt).toLocaleString('ru-RU')}. Срок действия — до ${new Date(offlineCalendarSnapshot.expiresAt).toLocaleString('ru-RU')}.`
+                    : 'Хранится не более 1000 событий на 7 дней. Документы, комментарии и результаты задач не сохраняются.'}
+                </div>
+              </div>
+            </div>
+            {!offlineCalendarSnapshot ? (
+              <label className="inline-flex shrink-0 items-center gap-2 text-xs font-semibold">
+                <SystemCheckbox
+                  role="switch"
+                  checked={offlineCalendarTrustedDevice}
+                  onChange={(event) => void handleOfflineCalendarTrustedDeviceChange(event.target.checked)}
+                  aria-label="Сохранять названия задач на доверенном устройстве"
+                />
+                Доверенное устройство: сохранять названия
+              </label>
+            ) : (
+              <span className="shrink-0 rounded-full bg-white/70 px-2.5 py-1 text-xs font-semibold">
+                {offlineCalendarSnapshot.trustedDevice ? 'Названия сохранены' : 'Данные обезличены'}
+              </span>
+            )}
+          </section>
+        ) : null}
 
         {templatesPanelOpen && !isApprovalsMode ? (
           <TaskTemplatesPanel
@@ -4968,6 +5090,7 @@ export function TaskJournal({
             ) : null}
             <TaskCalendar
               tasks={calendarTasks}
+              timeZoneId={effectiveTaskJournalTimeZoneId}
               mode={periodMode}
               colorMode={calendarColorMode}
               completedTaskCalendarAction={completedTaskCalendarAction}
@@ -4992,6 +5115,7 @@ export function TaskJournal({
               taskPermissions={permissions.tasks}
               movingTaskId={calendarMovingTaskId}
               resizingTaskId={calendarResizingTaskId}
+              readOnly={Boolean(offlineCalendarSnapshot)}
             />
           </>
         ) : (
@@ -5031,6 +5155,7 @@ export function TaskJournal({
               taskSettings={taskSettings}
               taskPermissions={permissions.tasks}
               movingTaskId={calendarMovingTaskId}
+              readOnly={Boolean(offlineCalendarSnapshot)}
             />
           </>
         )}
@@ -6694,6 +6819,7 @@ function TaskTimelineCalendar({
   taskSettings,
   taskPermissions,
   movingTaskId,
+  readOnly,
 }: {
   tasks: TaskJournalItem[];
   timeZoneId: string;
@@ -6716,6 +6842,7 @@ function TaskTimelineCalendar({
   taskSettings: TaskJournalSettingsDto;
   taskPermissions: TaskSectionPermissions;
   movingTaskId: number | null;
+  readOnly?: boolean;
 }) {
   const visibleDays = useMemo(() => {
     const start = startOfWeek(anchorDate);
@@ -6728,7 +6855,7 @@ function TaskTimelineCalendar({
   const tasksByDate = useMemo(() => {
     const map = new Map<string, TaskJournalItem[]>();
     tasks.forEach((task) => {
-      const key = getTaskDateKey(task.dueAt);
+      const key = getTaskDateKey(task.dueAt, timeZoneId);
       if (!visibleDayKeys.has(key)) {
         return;
       }
@@ -6743,7 +6870,7 @@ function TaskTimelineCalendar({
     });
 
     return map;
-  }, [tasks, visibleDayKeys]);
+  }, [tasks, timeZoneId, visibleDayKeys]);
 
   const weekTasks = useMemo(
     () => visibleDays.flatMap((day) => tasksByDate.get(toLocalDateKey(day)) ?? []),
@@ -6963,13 +7090,14 @@ function TaskTimelineCalendar({
                       className={`relative border-l border-slate-200 ${isToday ? 'bg-blue-50/30' : 'bg-white'}`}
                       style={{ height: timelineHeight }}
                       onDragOver={(event) => {
-                        if (event.dataTransfer.types.includes('application/x-task-id') || event.dataTransfer.types.includes('text/plain')) {
+                        if (!readOnly && (event.dataTransfer.types.includes('application/x-task-id') || event.dataTransfer.types.includes('text/plain'))) {
                           event.preventDefault();
                           event.dataTransfer.dropEffect = 'move';
                         }
                       }}
                       onDrop={(event) => {
                         event.preventDefault();
+                        if (readOnly) return;
                         const taskId = Number(event.dataTransfer.getData('application/x-task-id') || event.dataTransfer.getData('text/plain'));
                         const task = tasks.find((item) => item.id === taskId);
                         if (!task) {
@@ -6995,7 +7123,7 @@ function TaskTimelineCalendar({
 
                       {placements.map(({ task, top, height, lane, laneCount }) => {
                         const tone = getTimelineTaskTone(task, currentUserId, assigneeFilter, colorMode, completedTaskCalendarAction);
-                        const isReadOnly = isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings, taskPermissions);
+                        const isReadOnly = readOnly || isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings, taskPermissions);
                         const canCompleteTask = canCompleteTaskForCurrentUser(task, currentUserId, isAdminUser, taskSettings, taskPermissions);
                         const isAwaitingApproval = isTaskAwaitingApproval(task);
                         const reviewableApprovalParticipant = getReviewableApprovalParticipant(task, currentUserId);
@@ -7038,7 +7166,7 @@ function TaskTimelineCalendar({
                                   <span className="mt-0.5 block truncate opacity-90">{getTaskAssigneeNames(task).join(', ')}</span>
                                 ) : null}
                               </button>
-                              {useSeparateApprovalAction ? (
+                              {!isReadOnly && useSeparateApprovalAction ? (
                                 <button
                                   type="button"
                                   onClick={(event) => {
@@ -7055,7 +7183,7 @@ function TaskTimelineCalendar({
                                   <Scale className="h-3.5 w-3.5" />
                                 </button>
                               ) : null}
-                              {canCompleteTask || isAwaitingApproval ? (
+                              {!isReadOnly && (canCompleteTask || isAwaitingApproval) ? (
                                 <button
                                   type="button"
                                   onClick={(event) => {
@@ -7103,6 +7231,7 @@ function CalendarTaskTooltip({ task }: { task: TaskJournalItem }) {
 
 function TaskCalendar({
   tasks,
+  timeZoneId,
   mode,
   colorMode,
   completedTaskCalendarAction,
@@ -7127,8 +7256,10 @@ function TaskCalendar({
   taskPermissions,
   movingTaskId,
   resizingTaskId,
+  readOnly,
 }: {
   tasks: TaskJournalItem[];
+  timeZoneId: string;
   mode: PeriodMode;
   colorMode: TaskCalendarColorMode;
   completedTaskCalendarAction: 'color' | 'hide';
@@ -7153,6 +7284,7 @@ function TaskCalendar({
   taskPermissions: TaskSectionPermissions;
   movingTaskId: number | null;
   resizingTaskId: number | null;
+  readOnly?: boolean;
 }) {
   const visibleDays = useMemo(() => {
     if (mode === 'day') {
@@ -7172,7 +7304,7 @@ function TaskCalendar({
   const tasksByDate = useMemo(() => {
     const map = new Map<string, TaskJournalItem[]>();
     tasks.forEach((task) => {
-      const key = getTaskDateKey(task.dueAt);
+      const key = getTaskDateKey(task.dueAt, timeZoneId);
       const items = map.get(key) ?? [];
       items.push(task);
       map.set(key, items);
@@ -7183,7 +7315,7 @@ function TaskCalendar({
     });
 
     return map;
-  }, [tasks]);
+  }, [tasks, timeZoneId]);
 
   const selectedTasks = useMemo(
     () => tasksByDate.get(toLocalDateKey(selectedDate)) ?? [],
@@ -7395,13 +7527,14 @@ function TaskCalendar({
                     key={key}
                     data-testid={`task-calendar-day-${key}`}
                     onDragOver={(event) => {
-                      if (event.dataTransfer.types.includes('application/x-task-id') || event.dataTransfer.types.includes('text/plain')) {
+                      if (!readOnly && (event.dataTransfer.types.includes('application/x-task-id') || event.dataTransfer.types.includes('text/plain'))) {
                         event.preventDefault();
                         event.dataTransfer.dropEffect = 'move';
                       }
                     }}
                     onDrop={(event) => {
                       event.preventDefault();
+                      if (readOnly) return;
                       const taskId = Number(event.dataTransfer.getData('application/x-task-id') || event.dataTransfer.getData('text/plain'));
                       const task = tasks.find((item) => item.id === taskId);
                       if (task) {
@@ -7456,7 +7589,7 @@ function TaskCalendar({
 
                     <div className="mt-2 space-y-1.5">
                       {dayTasks.slice(0, mode === 'day' ? 8 : 3).map((task) => {
-                        const isReadOnly = isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings, taskPermissions);
+                        const isReadOnly = readOnly || isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings, taskPermissions);
                         const hasTimeConflict = conflictTaskIds.has(task.id);
                         const calendarCardTone = getTaskCalendarCardTone(task, colorMode, completedTaskCalendarAction);
                         const tooltipTitle = [
@@ -7584,7 +7717,7 @@ function TaskCalendar({
                 </div>
               ) : selectedTasks.map((task) => {
                 const TypeIcon = getTypeMeta(task.type).icon;
-                const isReadOnly = isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings, taskPermissions);
+                const isReadOnly = readOnly || isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings, taskPermissions);
                 const canCompleteTask = canCompleteTaskForCurrentUser(task, currentUserId, isAdminUser, taskSettings, taskPermissions);
                 const isAwaitingApproval = isTaskAwaitingApproval(task);
                 const reviewableApprovalParticipant = getReviewableApprovalParticipant(task, currentUserId);
@@ -7643,7 +7776,7 @@ function TaskCalendar({
                         +15 мин
                       </button>
                     </div>
-                    {useSeparateApprovalAction ? (
+                    {!isReadOnly && useSeparateApprovalAction ? (
                       <button
                         type="button"
                         onClick={() => reviewableApprovalParticipant && onReviewApproval(task, reviewableApprovalParticipant)}
@@ -7655,7 +7788,7 @@ function TaskCalendar({
                         Рассмотреть согласование
                       </button>
                     ) : null}
-                    {canCompleteTask || isAwaitingApproval ? (
+                    {!isReadOnly && (canCompleteTask || isAwaitingApproval) ? (
                       <button
                         type="button"
                         onClick={() => onDone(task)}

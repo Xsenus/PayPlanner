@@ -2,6 +2,10 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { authService, type User } from '../services/authService';
 import { AUTH_SESSION_EXPIRED_EVENT, apiService } from '../services/api';
+import {
+  activateOfflineCalendarUser,
+  clearOfflineCalendarCache,
+} from '../services/offlineCalendarStore';
 import type { UserActivityStatus } from '../types/userActivity';
 
 interface AuthContextType {
@@ -54,9 +58,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       }
 
       const me = await authService.getCurrentUser();
+      await activateOfflineCalendarUser(me.id);
       setUser(me);
     } catch (error) {
       console.error('Ошибка загрузки профиля:', error);
+      await clearOfflineCalendarCache();
       authService.logout();
       setUser(null);
     }
@@ -72,6 +78,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   useEffect(() => {
     const handleSessionExpired = () => {
+      void clearOfflineCalendarCache();
       authService.logout();
       setUser(null);
       setLoading(false);
@@ -84,6 +91,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const signIn = async (email: string, password: string) => {
     const resp = await authService.login(email, password);
     const resolvedUser = resp.user ?? (await authService.getCurrentUser());
+    await activateOfflineCalendarUser(resolvedUser.id);
     setUser(resolvedUser);
 
     logAuthEvent('login', `Вход пользователя ${resolvedUser.email}`, 'Success');
@@ -91,6 +99,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const signInWithToken = async (token: string, nextUser?: User | null, provider?: string) => {
     const resolvedUser = await authService.completeSignIn(token, nextUser);
+    await activateOfflineCalendarUser(resolvedUser.id);
     setUser(resolvedUser);
 
     logAuthEvent(
@@ -102,6 +111,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const signOut = async () => {
     logAuthEvent('logout', `Выход пользователя ${user?.email ?? 'unknown'}`, 'Info');
+    await clearOfflineCalendarCache();
     authService.logout();
     setUser(null);
   };

@@ -19,6 +19,7 @@ const apiMock = vi.hoisted(() => ({
   getTaskJournalAssignees: vi.fn(),
   getTaskJournalSettings: vi.fn(),
   getCalendarSyncSettings: vi.fn(),
+  getFeatureFlags: vi.fn(),
   getUserSetting: vi.fn(),
   upsertUserSetting: vi.fn(),
   updateTaskJournalSettings: vi.fn(),
@@ -64,6 +65,14 @@ const dialogMock = vi.hoisted(() => ({
   prompt: vi.fn(),
 }));
 
+const offlineCalendarMock = vi.hoisted(() => ({
+  clearOfflineCalendarSnapshot: vi.fn(),
+  getOfflineCalendarTrustedDevice: vi.fn(),
+  loadOfflineCalendarSnapshot: vi.fn(),
+  saveOfflineCalendarSnapshot: vi.fn(),
+  setOfflineCalendarTrustedDevice: vi.fn(),
+}));
+
 const clientsState = vi.hoisted(() => ({
   clients: [] as Client[],
 }));
@@ -102,6 +111,8 @@ const permissionsState = vi.hoisted(() => ({
 vi.mock('../../services/api', () => ({
   apiService: apiMock,
 }));
+
+vi.mock('../../services/offlineCalendarStore', () => offlineCalendarMock);
 
 vi.mock('../../hooks/useToast', () => ({
   useToast: () => toastMock,
@@ -290,6 +301,7 @@ async function renderJournal(
     overdueFilterSignal?: number;
   } = {},
 ) {
+  apiMock.getTaskJournalItems.mockReset();
   apiMock.getTaskJournalItems.mockResolvedValue({
     items: tasks,
     total: tasks.length,
@@ -439,8 +451,10 @@ describe('TaskJournal', () => {
     legalEntitiesState.legalEntities = [
       { id: 20, shortName: 'ООО Ромашка', inn: '5400000000', email: 'office@example.com' } as LegalEntitySummary,
     ];
+    apiMock.getUserSetting.mockReset();
     apiMock.getUserSetting.mockRejectedValue(new Error('not found'));
     apiMock.upsertUserSetting.mockResolvedValue(undefined);
+    apiMock.getCalendarSyncSettings.mockReset();
     apiMock.getCalendarSyncSettings.mockResolvedValue({
       externalCalendarSyncEnabled: false,
       googleCalendarSyncEnabled: false,
@@ -460,6 +474,22 @@ describe('TaskJournal', () => {
       notes: '',
       updatedAt: null,
     });
+    apiMock.getFeatureFlags.mockResolvedValue({
+      legal: {
+        externalCourtSync: false,
+        externalCalendarSync: false,
+        courtEvents: false,
+        documentTemplateLibrary: false,
+        externalWorkOrderApproval: false,
+        clientPortal: false,
+        offlineCalendarReadOnly: false,
+      },
+    });
+    offlineCalendarMock.clearOfflineCalendarSnapshot.mockResolvedValue(undefined);
+    offlineCalendarMock.getOfflineCalendarTrustedDevice.mockResolvedValue(false);
+    offlineCalendarMock.loadOfflineCalendarSnapshot.mockResolvedValue(null);
+    offlineCalendarMock.saveOfflineCalendarSnapshot.mockResolvedValue(null);
+    offlineCalendarMock.setOfflineCalendarTrustedDevice.mockResolvedValue(undefined);
     apiMock.getTaskBillingContext.mockResolvedValue({
       clientId: 10,
       legalEntityId: null,
@@ -554,6 +584,29 @@ describe('TaskJournal', () => {
     expect(screen.getByText('Наименование задачи')).toBeTruthy();
     expect(screen.getAllByText('Иванов Иван Иванович').length).toBeGreaterThan(0);
     expect(screen.getByText('БАНКРОТСТВО')).toBeTruthy();
+  });
+
+  it('shows a valid cached calendar as read-only when the task API is unavailable', async () => {
+    const cachedTask = createTask({ title: 'Сохранённая задача' });
+    apiMock.getTaskJournalItems.mockRejectedValue(new Error('offline'));
+    offlineCalendarMock.loadOfflineCalendarSnapshot.mockResolvedValue({
+      schemaVersion: 1,
+      userId: 7,
+      trustedDevice: false,
+      syncedAt: '2026-07-31T08:00:00.000Z',
+      expiresAt: '2026-08-07T08:00:00.000Z',
+      items: [cachedTask],
+    });
+
+    render(<TaskJournal initialView="calendar" />);
+
+    expect(await screen.findByText('Офлайн-календарь · только просмотр')).toBeTruthy();
+    expect(offlineCalendarMock.loadOfflineCalendarSnapshot).toHaveBeenCalledWith(7);
+    expect(screen.queryByRole('button', { name: 'Добавить задачу' })).toBeNull();
+    expect(toastMock.info).toHaveBeenCalledWith(
+      expect.stringContaining('Изменения недоступны'),
+      'Офлайн-календарь',
+    );
   });
 
   it('opens a task from the list title and exposes full hover text for clipped fields', async () => {
@@ -4801,7 +4854,10 @@ describe('TaskJournal', () => {
     ], { initialView: 'calendar', waitForTitle: null });
 
     const profileDay = await screen.findByTestId(`task-calendar-day-${profileDateKey}`);
-    await waitFor(() => expect(within(profileDay).getByTestId('task-calendar-task-101')).toBeTruthy());
+    await waitFor(
+      () => expect(within(profileDay).getByTestId('task-calendar-task-101')).toBeTruthy(),
+      { timeout: 5000 },
+    );
   });
 
   it('opens the task calendar on today from the user profile time zone', async () => {

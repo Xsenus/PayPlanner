@@ -12,6 +12,7 @@ const EMPTY_FLAGS: AppFeatureFlagsDto = {
     documentTemplateLibrary: false,
     externalWorkOrderApproval: false,
     clientPortal: false,
+    offlineCalendarReadOnly: false,
   },
 };
 
@@ -51,6 +52,11 @@ const LEGAL_FLAGS: FeatureFlagRow[] = [
     key: 'clientPortal',
     label: 'Клиентский кабинет',
     area: 'Клиенты',
+  },
+  {
+    key: 'offlineCalendarReadOnly',
+    label: 'Офлайн-календарь (только чтение)',
+    area: 'Календарь',
   },
 ];
 

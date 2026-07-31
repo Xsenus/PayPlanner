@@ -595,6 +595,7 @@ describe('apiService auth handling', () => {
         documentTemplateLibrary: false,
         externalWorkOrderApproval: false,
         clientPortal: false,
+        offlineCalendarReadOnly: false,
       },
     };
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {

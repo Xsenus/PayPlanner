@@ -30,6 +30,7 @@ public class AppFeatureFlagsTests
                 ExternalCalendarSync = false,
                 CourtEvents = true,
                 DocumentTemplateLibrary = true,
+                OfflineCalendarReadOnly = true,
             },
         });
 
@@ -37,6 +38,7 @@ public class AppFeatureFlagsTests
         Assert.False(dto.Legal.ExternalCalendarSync);
         Assert.True(dto.Legal.CourtEvents);
         Assert.True(dto.Legal.DocumentTemplateLibrary);
+        Assert.True(dto.Legal.OfflineCalendarReadOnly);
     }
 
     [Fact]
