@@ -2942,6 +2942,60 @@ public class PaymentContext : DbContext
                 .HasDatabaseName("IX_MessengerDocumentDeliveries_Recipient_CreatedAt");
         });
 
+        modelBuilder.Entity<ElectronicSignatureEnvelope>(entity =>
+        {
+            entity.HasKey(item => item.Id);
+            entity.Property(item => item.DocumentType).HasMaxLength(32).IsRequired();
+            entity.Property(item => item.SignatureType).HasMaxLength(32).IsRequired();
+            entity.Property(item => item.SigningOrder).HasMaxLength(32).IsRequired();
+            entity.Property(item => item.Provider).HasMaxLength(64).IsRequired();
+            entity.Property(item => item.ProviderEnvelopeId).HasMaxLength(256);
+            entity.Property(item => item.Status).HasMaxLength(32).IsRequired();
+            entity.Property(item => item.OriginalFileName).HasMaxLength(260).IsRequired();
+            entity.Property(item => item.SnapshotPath).HasMaxLength(1024).IsRequired();
+            entity.Property(item => item.ContentType).HasMaxLength(128).IsRequired();
+            entity.Property(item => item.ChecksumSha256).HasMaxLength(64).IsRequired();
+            entity.Property(item => item.IdempotencyKey).HasMaxLength(64).IsRequired();
+            entity.Property(item => item.LastError).HasMaxLength(2000);
+            entity.Property(item => item.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.HasOne(item => item.Client).WithMany().HasForeignKey(item => item.ClientId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne(item => item.CreatedByUser).WithMany().HasForeignKey(item => item.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(item => item.PublicId).IsUnique();
+            entity.HasIndex(item => item.IdempotencyKey).IsUnique();
+            entity.HasIndex(item => new { item.DocumentType, item.DocumentId, item.DocumentVersion });
+            entity.HasIndex(item => new { item.Provider, item.ProviderEnvelopeId })
+                .IsUnique()
+                .HasFilter("\"ProviderEnvelopeId\" IS NOT NULL");
+        });
+
+        modelBuilder.Entity<ElectronicSignatureSigner>(entity =>
+        {
+            entity.HasKey(item => item.Id);
+            entity.HasOne(item => item.Envelope).WithMany(item => item.Signers).HasForeignKey(item => item.EnvelopeId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(item => item.ClientPortalAccount).WithMany().HasForeignKey(item => item.ClientPortalAccountId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasIndex(item => new { item.EnvelopeId, item.Order }).IsUnique();
+            entity.HasIndex(item => new { item.EnvelopeId, item.Status });
+        });
+
+        modelBuilder.Entity<ElectronicSignatureArtifact>(entity =>
+        {
+            entity.HasKey(item => item.Id);
+            entity.HasOne(item => item.Envelope).WithMany(item => item.Artifacts).HasForeignKey(item => item.EnvelopeId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(item => item.Signer).WithMany().HasForeignKey(item => item.SignerId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasIndex(item => new { item.EnvelopeId, item.ArtifactType });
+            entity.HasIndex(item => item.ChecksumSha256);
+        });
+
+        modelBuilder.Entity<ElectronicSignatureEvent>(entity =>
+        {
+            entity.HasKey(item => item.Id);
+            entity.HasOne(item => item.Envelope).WithMany(item => item.Events).HasForeignKey(item => item.EnvelopeId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(item => new { item.EnvelopeId, item.OccurredAt });
+            entity.HasIndex(item => new { item.EnvelopeId, item.ProviderEventId })
+                .IsUnique()
+                .HasFilter("\"ProviderEventId\" IS NOT NULL");
+        });
+
         modelBuilder.Entity<TaskJournalDeadlineChangeRequest>(entity =>
         {
             entity.HasKey(e => e.Id);
@@ -3994,6 +4048,10 @@ public class PaymentContext : DbContext
     public DbSet<TaskJournalComment> TaskJournalComments { get; set; }
     public DbSet<MessengerRecipientBinding> MessengerRecipientBindings { get; set; }
     public DbSet<MessengerDocumentDelivery> MessengerDocumentDeliveries { get; set; }
+    public DbSet<ElectronicSignatureEnvelope> ElectronicSignatureEnvelopes { get; set; }
+    public DbSet<ElectronicSignatureSigner> ElectronicSignatureSigners { get; set; }
+    public DbSet<ElectronicSignatureArtifact> ElectronicSignatureArtifacts { get; set; }
+    public DbSet<ElectronicSignatureEvent> ElectronicSignatureEvents { get; set; }
     public DbSet<TaskJournalDeadlineChangeRequest> TaskJournalDeadlineChangeRequests { get; set; }
     public DbSet<TaskJournalFile> TaskJournalFiles { get; set; }
     public DbSet<TaskJournalTemplate> TaskJournalTemplates { get; set; }

@@ -3684,6 +3684,356 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.ToTable("DocumentStatuses");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.ElectronicSignatureArtifact", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("ArtifactType")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("ChecksumSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int>("EnvelopeId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(260)
+                        .HasColumnType("character varying(260)");
+
+                    b.Property<int?>("SignerId")
+                        .HasColumnType("integer");
+
+                    b.Property<long>("SizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("StoragePath")
+                        .IsRequired()
+                        .HasMaxLength(1024)
+                        .HasColumnType("character varying(1024)");
+
+                    b.Property<string>("VerificationDetails")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<string>("VerificationStatus")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<DateTime?>("VerifiedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ChecksumSha256");
+
+                    b.HasIndex("SignerId");
+
+                    b.HasIndex("EnvelopeId", "ArtifactType");
+
+                    b.ToTable("ElectronicSignatureArtifacts");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ElectronicSignatureEnvelope", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("ArchiveRetentionYears")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("CancelledAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("ChecksumSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<int?>("ClientId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<int>("CreatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("DocumentId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("DocumentType")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<int>("DocumentVersion")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("ExpiresAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("IdempotencyKey")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<string>("OriginalFileName")
+                        .IsRequired()
+                        .HasMaxLength(260)
+                        .HasColumnType("character varying(260)");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("ProviderEnvelopeId")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<Guid>("PublicId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("RequiresMachineReadablePowerOfAttorney")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("SentAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("SignatureType")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("SigningOrder")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<long>("SizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("SnapshotPath")
+                        .IsRequired()
+                        .HasMaxLength(1024)
+                        .HasColumnType("character varying(1024)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClientId");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("IdempotencyKey")
+                        .IsUnique();
+
+                    b.HasIndex("PublicId")
+                        .IsUnique();
+
+                    b.HasIndex("Provider", "ProviderEnvelopeId")
+                        .IsUnique()
+                        .HasFilter("\"ProviderEnvelopeId\" IS NOT NULL");
+
+                    b.HasIndex("DocumentType", "DocumentId", "DocumentVersion");
+
+                    b.ToTable("ElectronicSignatureEnvelopes");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ElectronicSignatureEvent", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("EnvelopeId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("EventType")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Message")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<DateTime>("OccurredAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("PayloadHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("ProviderEventId")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<DateTime>("ReceivedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EnvelopeId", "OccurredAt");
+
+                    b.HasIndex("EnvelopeId", "ProviderEventId")
+                        .IsUnique()
+                        .HasFilter("\"ProviderEventId\" IS NOT NULL");
+
+                    b.ToTable("ElectronicSignatureEvents");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ElectronicSignatureSigner", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("CertificateIssuer")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<string>("CertificateRevocationStatus")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("CertificateSubject")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<string>("CertificateThumbprint")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<DateTime?>("CertificateValidFrom")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<DateTime?>("CertificateValidTo")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("ClientPortalAccountId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("DeclineReason")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<DateTime?>("DeclinedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("DisplayName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<int>("EnvelopeId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("InvitedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("MaskedContact")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<int>("Order")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("PartyType")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("PowerOfAttorneyReference")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("ProtectedContact")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<string>("ProviderSignerId")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<bool>("RequiresMachineReadablePowerOfAttorney")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("SignedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClientPortalAccountId");
+
+                    b.HasIndex("EnvelopeId", "Order")
+                        .IsUnique();
+
+                    b.HasIndex("EnvelopeId", "Status");
+
+                    b.ToTable("ElectronicSignatureSigners");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.ExternalAuthRequest", b =>
                 {
                     b.Property<int>("Id")
@@ -10278,6 +10628,71 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("Payment");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.ElectronicSignatureArtifact", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.ElectronicSignatureEnvelope", "Envelope")
+                        .WithMany("Artifacts")
+                        .HasForeignKey("EnvelopeId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.ElectronicSignatureSigner", "Signer")
+                        .WithMany()
+                        .HasForeignKey("SignerId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Envelope");
+
+                    b.Navigation("Signer");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ElectronicSignatureEnvelope", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.Client", "Client")
+                        .WithMany()
+                        .HasForeignKey("ClientId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("PayPlanner.Api.Models.User", "CreatedByUser")
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Client");
+
+                    b.Navigation("CreatedByUser");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ElectronicSignatureEvent", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.ElectronicSignatureEnvelope", "Envelope")
+                        .WithMany("Events")
+                        .HasForeignKey("EnvelopeId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Envelope");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ElectronicSignatureSigner", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.ClientPortalAccount", "ClientPortalAccount")
+                        .WithMany()
+                        .HasForeignKey("ClientPortalAccountId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("PayPlanner.Api.Models.ElectronicSignatureEnvelope", "Envelope")
+                        .WithMany("Signers")
+                        .HasForeignKey("EnvelopeId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("ClientPortalAccount");
+
+                    b.Navigation("Envelope");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.ExternalAuthRequest", b =>
                 {
                     b.HasOne("PayPlanner.Api.Models.User", "User")
@@ -11383,6 +11798,15 @@ namespace PayPlanner.Api.Migrations.PostgreSql
             modelBuilder.Entity("PayPlanner.Api.Models.DepartmentDictionaryItem", b =>
                 {
                     b.Navigation("Users");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ElectronicSignatureEnvelope", b =>
+                {
+                    b.Navigation("Artifacts");
+
+                    b.Navigation("Events");
+
+                    b.Navigation("Signers");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.GoogleCalendarConnection", b =>

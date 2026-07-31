@@ -194,6 +194,10 @@ builder.Services.AddScoped<IMessengerDocumentProvider, TelegramMessengerDocument
 builder.Services.AddScoped<IMessengerDocumentProvider>(_ => new DisabledMessengerDocumentProvider(MessengerDocumentChannels.Max));
 builder.Services.AddScoped<IMessengerDocumentProvider>(_ => new DisabledMessengerDocumentProvider(MessengerDocumentChannels.WhatsAppBusiness));
 builder.Services.AddScoped<IMessengerDocumentOutboxProcessor, MessengerDocumentOutboxProcessor>();
+builder.Services.AddScoped<IElectronicSignatureService, ElectronicSignatureService>();
+builder.Services.AddScoped<IElectronicSignatureProvider>(_ => new DisabledElectronicSignatureProvider("KonturDiadoc"));
+builder.Services.AddScoped<IElectronicSignatureProvider>(_ => new DisabledElectronicSignatureProvider("Sbis"));
+builder.Services.AddScoped<IElectronicSignatureProvider>(_ => new DisabledElectronicSignatureProvider("Taxcom"));
 builder.Services.AddSingleton<IInvoiceDocumentPdfService, InvoiceDocumentPdfService>();
 builder.Services.AddSingleton<DatabaseBackupService>();
 builder.Services.AddSingleton<ISystemJobRunStateService, SystemJobRunStateService>();
