@@ -6440,6 +6440,22 @@ export class ApiService {
     });
   }
 
+  async downloadElectronicSignatureEvidencePackage(publicId: string) {
+    const token = getAuthToken();
+    const response = await fetch(`${API_BASE_URL}/electronic-signatures/${encodeURIComponent(publicId)}/evidence-package`, {
+      method: 'GET',
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+    if (!response.ok) {
+      const text = await extractResponseErrorMessage(response);
+      throw new Error(text || `HTTP ${response.status} ${response.statusText}`);
+    }
+    return {
+      blob: await response.blob(),
+      fileName: parseContentDispositionFileName(response.headers.get('content-disposition')),
+    };
+  }
+
   async uploadCaseDocument(caseId: number, file: File, payload?: { documentType?: string; status?: string; documentKey?: string }) {
     const form = new FormData();
     form.append('file', file);

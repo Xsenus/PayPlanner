@@ -16,6 +16,7 @@ describe('ElectronicSignatureModal', () => {
       'getElectronicSignatureHistory',
       'prepareElectronicSignatureEnvelope',
       'cancelElectronicSignatureEnvelope',
+      'downloadElectronicSignatureEvidencePackage',
     );
     apiServiceMock.getElectronicSignatureConfiguration.mockResolvedValue({
       enabled: false,
@@ -87,5 +88,30 @@ describe('ElectronicSignatureModal', () => {
     expect(await screen.findByText(/PDF и история сохранены/)).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Отменить' })).toBeNull();
     vi.restoreAllMocks();
+  });
+
+  it('downloads an internal evidence package for a prepared version', async () => {
+    const prepared = {
+      id: 4, publicId: '44444444-4444-4444-8444-444444444444', documentType: 'invoice', documentId: 15,
+      documentVersion: 1, signatureType: 'qualified', signingOrder: 'sequential', provider: 'KonturDiadoc',
+      status: 'prepared', originalFileName: 'invoice.pdf', sizeBytes: 100, checksumSha256: 'abc',
+      archiveRetentionYears: 10, requiresMachineReadablePowerOfAttorney: false, createdAt: '2026-08-01T00:00:00Z',
+      signers: [], events: [],
+    };
+    apiServiceMock.getElectronicSignatureHistory.mockResolvedValue([prepared]);
+    apiServiceMock.downloadElectronicSignatureEvidencePackage.mockResolvedValue({ blob: new Blob(['zip']), fileName: 'evidence.zip' });
+    const createObjectUrl = vi.fn(() => 'blob:evidence');
+    const revokeObjectUrl = vi.fn();
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectUrl });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectUrl });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+
+    render(<ElectronicSignatureModal documentType="invoice" documentId={15} documentName="Счёт 15" clientId={3} preparePdf={vi.fn()} onClose={() => undefined} />);
+    fireEvent.click(await screen.findByRole('button', { name: /Архив/ }));
+
+    await waitFor(() => expect(apiServiceMock.downloadElectronicSignatureEvidencePackage).toHaveBeenCalledWith(prepared.publicId));
+    expect(createObjectUrl).toHaveBeenCalledTimes(1);
+    expect(revokeObjectUrl).toHaveBeenCalledWith('blob:evidence');
+    click.mockRestore();
   });
 });

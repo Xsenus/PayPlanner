@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { FileSignature, Loader2, ShieldCheck, X } from 'lucide-react';
+import { Download, FileSignature, Loader2, ShieldCheck, X } from 'lucide-react';
 
 import {
   apiService,
@@ -38,6 +38,7 @@ export function ElectronicSignatureModal({ documentType, documentId, documentNam
   const [confirmed, setConfirmed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [downloadingId, setDownloadingId] = useState<number | null>(null);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
@@ -124,6 +125,24 @@ export function ElectronicSignatureModal({ documentType, documentId, documentNam
     }
   };
 
+  const downloadEvidence = async (item: ElectronicSignatureEnvelopeDto) => {
+    setDownloadingId(item.id);
+    setError('');
+    try {
+      const result = await apiService.downloadElectronicSignatureEvidencePackage(item.publicId);
+      const url = URL.createObjectURL(result.blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = result.fileName || `electronic-signature-${item.documentId}-v${item.documentVersion}.zip`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Не удалось сформировать доказательный пакет.');
+    } finally {
+      setDownloadingId(null);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-[2600] flex items-center justify-center bg-slate-950/55 p-3" role="dialog" aria-modal="true" aria-label="Электронная подпись">
       <div className="max-h-[94vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white shadow-2xl">
@@ -146,7 +165,7 @@ export function ElectronicSignatureModal({ documentType, documentId, documentNam
           {!configuration?.enabled ? <div className="flex gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600"><ShieldCheck className="h-4 w-4 shrink-0" />Внешняя отправка безопасно выключена. Можно подготовить снимок, но он не покинет CRM до подключения официального провайдера.</div> : null}
           {error ? <div className="rounded-lg bg-rose-50 p-3 text-sm text-rose-700">{error}</div> : null}{success ? <div className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-700">{success}</div> : null}
           <button type="button" disabled={submitting || loading || recipients.length === 0} onClick={() => void prepare()} className="w-full rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">{submitting ? 'Подготовка…' : 'Подготовить неизменяемую версию'}</button>
-          {history.length > 0 ? <section className="rounded-xl border border-slate-200 p-3"><h3 className="text-sm font-semibold text-slate-800">История версий</h3><div className="mt-2 space-y-2">{history.map((item) => <div key={item.id} className="rounded-lg bg-slate-50 p-2 text-xs text-slate-600"><div className="flex items-start justify-between gap-2"><div className="font-semibold text-slate-800">Версия {item.documentVersion} · {statusLabels[item.status] ?? item.status}</div>{item.status === 'prepared' ? <button type="button" disabled={submitting} onClick={() => void cancelPrepared(item)} className="rounded-md border border-rose-200 bg-white px-2 py-1 font-semibold text-rose-700 disabled:opacity-50">Отменить</button> : null}</div><div>{item.provider} · {item.signers.map((signer) => `${signer.displayName} — ${statusLabels[signer.status] ?? signer.status}`).join(', ')}</div><div className="font-mono text-[10px] text-slate-400">SHA-256 {item.checksumSha256}</div></div>)}</div></section> : null}
+          {history.length > 0 ? <section className="rounded-xl border border-slate-200 p-3"><h3 className="text-sm font-semibold text-slate-800">История версий</h3><div className="mt-2 space-y-2">{history.map((item) => <div key={item.id} className="rounded-lg bg-slate-50 p-2 text-xs text-slate-600"><div className="flex items-start justify-between gap-2"><div className="font-semibold text-slate-800">Версия {item.documentVersion} · {statusLabels[item.status] ?? item.status}</div><div className="flex gap-1"><button type="button" disabled={downloadingId === item.id} onClick={() => void downloadEvidence(item)} className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 font-semibold text-slate-700 disabled:opacity-50"><Download className="h-3 w-3" />{downloadingId === item.id ? 'Сборка…' : 'Архив'}</button>{item.status === 'prepared' ? <button type="button" disabled={submitting} onClick={() => void cancelPrepared(item)} className="rounded-md border border-rose-200 bg-white px-2 py-1 font-semibold text-rose-700 disabled:opacity-50">Отменить</button> : null}</div></div><div>{item.provider} · {item.signers.map((signer) => `${signer.displayName} — ${statusLabels[signer.status] ?? signer.status}`).join(', ')}</div><div className="font-mono text-[10px] text-slate-400">SHA-256 {item.checksumSha256}</div></div>)}</div></section> : null}
         </div>
       </div>
     </div>

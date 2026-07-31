@@ -1,5 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.IO.Compression;
+using System.Text.Json;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
@@ -33,6 +35,8 @@ public sealed record ElectronicSignatureProviderResult(
     string? ProviderEnvelopeId = null,
     string? Error = null,
     bool IsTransient = false);
+
+public sealed record ElectronicSignatureEvidencePackage(string FullPath, string FileName);
 
 public interface IElectronicSignatureProvider
 {
@@ -111,11 +115,21 @@ public interface IElectronicSignatureService
         int actorUserId,
         string? reason,
         CancellationToken ct);
+
+    Task<ElectronicSignatureEvidencePackage?> CreateEvidencePackageAsync(
+        Guid publicId,
+        CancellationToken ct);
 }
 
 public sealed class ElectronicSignatureService : IElectronicSignatureService
 {
     private const long MaxPdfSize = 25L * 1024 * 1024;
+    private const long MaxEvidencePackageSourceSize = 100L * 1024 * 1024;
+    private const int MaxEvidenceArtifacts = 100;
+    private static readonly JsonSerializerOptions EvidenceJsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        WriteIndented = true
+    };
     private static readonly HashSet<string> SignatureTypes =
     [
         ElectronicSignatureTypes.Simple,
@@ -334,6 +348,136 @@ public sealed class ElectronicSignatureService : IElectronicSignatureService
         return envelope;
     }
 
+    public async Task<ElectronicSignatureEvidencePackage?> CreateEvidencePackageAsync(
+        Guid publicId,
+        CancellationToken ct)
+    {
+        if (publicId == Guid.Empty)
+            throw new InvalidOperationException("Не удалось определить версию электронной подписи.");
+
+        var envelope = await _db.ElectronicSignatureEnvelopes
+            .AsNoTracking()
+            .AsSplitQuery()
+            .Include(item => item.Signers)
+            .Include(item => item.Events)
+            .Include(item => item.Artifacts)
+            .FirstOrDefaultAsync(item => item.PublicId == publicId, ct);
+        if (envelope is null) return null;
+        if (envelope.Artifacts.Count > MaxEvidenceArtifacts)
+            throw new InvalidOperationException("Доказательный пакет содержит слишком много артефактов.");
+
+        var sources = new List<(string EntryName, string FullPath, string ExpectedChecksum, string ArtifactType)>
+        {
+            ("original/document.pdf", EnsureStoragePath(envelope.SnapshotPath), envelope.ChecksumSha256, "original")
+        };
+        sources.AddRange(envelope.Artifacts
+            .OrderBy(item => item.Id)
+            .Select((item, index) => (
+                $"artifacts/{index + 1:D3}-{SanitizeEntryName(item.FileName)}",
+                EnsureStoragePath(item.StoragePath),
+                item.ChecksumSha256,
+                item.ArtifactType)));
+
+        long totalSourceSize = 0;
+        foreach (var source in sources)
+        {
+            var info = new FileInfo(source.FullPath);
+            if (!info.Exists) throw new InvalidOperationException($"Файл доказательного пакета не найден: {source.EntryName}.");
+            totalSourceSize += info.Length;
+            if (totalSourceSize > MaxEvidencePackageSourceSize)
+                throw new InvalidOperationException("Общий размер файлов доказательного пакета превышает 100 МБ.");
+        }
+
+        var exportsDirectory = Path.Combine(_storageRoot, ".exports");
+        Directory.CreateDirectory(exportsDirectory);
+        CleanupStaleEvidencePackages(exportsDirectory);
+        var packagePath = Path.Combine(exportsDirectory, $"{publicId:N}-{Guid.NewGuid():N}.zip");
+        try
+        {
+            var files = new List<object>(sources.Count);
+            await using (var output = new FileStream(packagePath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, true))
+            using (var archive = new ZipArchive(output, ZipArchiveMode.Create, leaveOpen: false, Encoding.UTF8))
+            {
+                foreach (var source in sources)
+                {
+                    var entry = archive.CreateEntry(source.EntryName, CompressionLevel.Fastest);
+                    await using var target = entry.Open();
+                    await using var input = new FileStream(source.FullPath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, true);
+                    var actualChecksum = await CopyAndHashAsync(input, target, ct);
+                    if (!string.Equals(actualChecksum, source.ExpectedChecksum, StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidOperationException($"Контрольная сумма файла {source.EntryName} не совпадает с зафиксированной версией.");
+                    files.Add(new { path = source.EntryName, type = source.ArtifactType, sizeBytes = input.Length, checksumSha256 = actualChecksum });
+                }
+
+                var manifestEntry = archive.CreateEntry("manifest.json", CompressionLevel.Fastest);
+                await using var manifestStream = manifestEntry.Open();
+                await JsonSerializer.SerializeAsync(manifestStream, new
+                {
+                    format = "payplanner-electronic-signature-evidence",
+                    formatVersion = 1,
+                    generatedAt = DateTime.UtcNow,
+                    envelope = new
+                    {
+                        envelope.PublicId,
+                        envelope.DocumentType,
+                        envelope.DocumentId,
+                        envelope.DocumentVersion,
+                        envelope.SignatureType,
+                        envelope.SigningOrder,
+                        envelope.Provider,
+                        envelope.ProviderEnvelopeId,
+                        envelope.Status,
+                        envelope.ArchiveRetentionYears,
+                        envelope.CreatedAt,
+                        envelope.SentAt,
+                        envelope.CompletedAt,
+                        envelope.CancelledAt
+                    },
+                    signers = envelope.Signers.OrderBy(item => item.Order).Select(item => new
+                    {
+                        item.Order,
+                        item.PartyType,
+                        item.DisplayName,
+                        item.MaskedContact,
+                        item.Status,
+                        item.RequiresMachineReadablePowerOfAttorney,
+                        item.PowerOfAttorneyReference,
+                        item.CertificateThumbprint,
+                        item.CertificateSubject,
+                        item.CertificateIssuer,
+                        item.CertificateValidFrom,
+                        item.CertificateValidTo,
+                        item.CertificateRevocationStatus,
+                        item.InvitedAt,
+                        item.SignedAt,
+                        item.DeclinedAt,
+                        item.DeclineReason
+                    }),
+                    events = envelope.Events.OrderBy(item => item.OccurredAt).ThenBy(item => item.Id).Select(item => new
+                    {
+                        item.ProviderEventId,
+                        item.EventType,
+                        item.Status,
+                        item.Message,
+                        item.PayloadHash,
+                        item.OccurredAt,
+                        item.ReceivedAt
+                    }),
+                    files
+                }, EvidenceJsonOptions, ct);
+            }
+
+            return new ElectronicSignatureEvidencePackage(
+                packagePath,
+                $"electronic-signature-{envelope.DocumentType}-{envelope.DocumentId}-v{envelope.DocumentVersion}.zip");
+        }
+        catch
+        {
+            if (File.Exists(packagePath)) File.Delete(packagePath);
+            throw;
+        }
+    }
+
     private void Validate(ElectronicSignaturePreparation request, Stream pdf, string fileName)
     {
         if (!_configuration.GetValue("ElectronicSignature:PreparationEnabled", true))
@@ -392,5 +536,49 @@ public sealed class ElectronicSignatureService : IElectronicSignatureService
             total += read;
         }
         return total;
+    }
+
+    private string EnsureStoragePath(string path)
+    {
+        var fullPath = Path.GetFullPath(Path.IsPathRooted(path) ? path : Path.Combine(_storageRoot, path));
+        var rootPrefix = _storageRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            + Path.DirectorySeparatorChar;
+        if (!fullPath.StartsWith(rootPrefix, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+            throw new InvalidOperationException("Файл доказательного пакета находится вне защищённого хранилища.");
+        return fullPath;
+    }
+
+    private static string SanitizeEntryName(string? fileName)
+    {
+        var name = Path.GetFileName(fileName ?? string.Empty);
+        var safe = new string(name.Select(ch => char.IsLetterOrDigit(ch) || ch is '.' or '-' or '_' ? ch : '_').ToArray());
+        return string.IsNullOrWhiteSpace(safe) ? "artifact.bin" : safe[..Math.Min(safe.Length, 120)];
+    }
+
+    private static async Task<string> CopyAndHashAsync(Stream input, Stream output, CancellationToken ct)
+    {
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        var buffer = new byte[81920];
+        int read;
+        while ((read = await input.ReadAsync(buffer, ct)) > 0)
+        {
+            hash.AppendData(buffer.AsSpan(0, read));
+            await output.WriteAsync(buffer.AsMemory(0, read), ct);
+        }
+        return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
+    }
+
+    private static void CleanupStaleEvidencePackages(string directory)
+    {
+        var threshold = DateTime.UtcNow.AddHours(-24);
+        foreach (var path in Directory.EnumerateFiles(directory, "*.zip", SearchOption.TopDirectoryOnly).Take(200))
+        {
+            try
+            {
+                if (File.GetLastWriteTimeUtc(path) < threshold) File.Delete(path);
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
     }
 }

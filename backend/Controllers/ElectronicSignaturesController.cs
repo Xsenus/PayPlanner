@@ -179,6 +179,28 @@ public sealed class ElectronicSignaturesController(
         }
     }
 
+    [HttpGet("{publicId:guid}/evidence-package")]
+    public async Task<IActionResult> DownloadEvidencePackage(Guid publicId, CancellationToken ct)
+    {
+        try
+        {
+            var package = await service.CreateEvidencePackageAsync(publicId, ct);
+            if (package is null) return NotFound();
+            Response.OnCompleted(() =>
+            {
+                try { if (System.IO.File.Exists(package.FullPath)) System.IO.File.Delete(package.FullPath); }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+                return Task.CompletedTask;
+            });
+            return PhysicalFile(package.FullPath, "application/zip", package.FileName, enableRangeProcessing: false);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
     private async Task<string?> ResolveFinancialDocumentFileName(string type, int documentId, int clientId, CancellationToken ct)
     {
         string? number = type switch

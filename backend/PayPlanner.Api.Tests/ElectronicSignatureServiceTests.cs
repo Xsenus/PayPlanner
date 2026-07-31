@@ -5,6 +5,8 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.FileProviders;
+using System.IO.Compression;
+using System.Text.Json;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Models;
@@ -186,6 +188,66 @@ public sealed class ElectronicSignatureServiceTests
         Assert.Contains("ещё не отправленную", error.Message);
     }
 
+    [Fact]
+    public async Task EvidencePackageIsSelfContainedAndVerifiesSnapshotChecksum()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var prepared = await fixture.Service.PrepareAsync(
+            fixture.Request(), new MemoryStream("%PDF-1.7 evidence"u8.ToArray()), "invoice.pdf", CancellationToken.None);
+
+        var package = await fixture.Service.CreateEvidencePackageAsync(prepared.PublicId, CancellationToken.None);
+
+        Assert.NotNull(package);
+        var restoredPath = Path.Combine(fixture.Root, "restored-evidence.zip");
+        File.Copy(package!.FullPath, restoredPath);
+        using var archive = ZipFile.OpenRead(restoredPath);
+        Assert.NotNull(archive.GetEntry("original/document.pdf"));
+        var manifestEntry = Assert.Single(archive.Entries, item => item.FullName == "manifest.json");
+        await using var manifestStream = manifestEntry.Open();
+        using var manifest = await JsonDocument.ParseAsync(manifestStream);
+        Assert.Equal(prepared.PublicId, manifest.RootElement.GetProperty("envelope").GetProperty("publicId").GetGuid());
+        Assert.Equal(prepared.ChecksumSha256, manifest.RootElement.GetProperty("files")[0].GetProperty("checksumSha256").GetString());
+    }
+
+    [Fact]
+    public async Task EvidencePackageRejectsTamperedSnapshot()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var prepared = await fixture.Service.PrepareAsync(
+            fixture.Request(), new MemoryStream("%PDF-1.7 evidence"u8.ToArray()), "invoice.pdf", CancellationToken.None);
+        await File.AppendAllTextAsync(prepared.SnapshotPath, "tampered");
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            fixture.Service.CreateEvidencePackageAsync(prepared.PublicId, CancellationToken.None));
+
+        Assert.Contains("Контрольная сумма", error.Message);
+    }
+
+    [Fact]
+    public async Task EvidencePackageRejectsArtifactOutsideProtectedStorage()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var prepared = await fixture.Service.PrepareAsync(
+            fixture.Request(), new MemoryStream("%PDF-1.7 evidence"u8.ToArray()), "invoice.pdf", CancellationToken.None);
+        var outsidePath = Path.Combine(fixture.Root, "outside-signature.bin");
+        await File.WriteAllTextAsync(outsidePath, "signature");
+        fixture.Db.ElectronicSignatureArtifacts.Add(new ElectronicSignatureArtifact
+        {
+            EnvelopeId = prepared.Id,
+            ArtifactType = "detached-signature",
+            StoragePath = outsidePath,
+            FileName = "signature.bin",
+            SizeBytes = new FileInfo(outsidePath).Length,
+            ChecksumSha256 = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData("signature"u8.ToArray())).ToLowerInvariant()
+        });
+        await fixture.Db.SaveChangesAsync();
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            fixture.Service.CreateEvidencePackageAsync(prepared.PublicId, CancellationToken.None));
+
+        Assert.Contains("вне защищённого хранилища", error.Message);
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly SqliteConnection _connection;
@@ -194,6 +256,7 @@ public sealed class ElectronicSignatureServiceTests
         public ElectronicSignatureService Service { get; }
         public int UserId { get; }
         public int ClientId { get; }
+        public string Root => _root;
 
         private Fixture(SqliteConnection connection, string root, PaymentContext db, ElectronicSignatureService service, int userId, int clientId)
         {
