@@ -33,8 +33,16 @@ export type MessengerDeliveryDocumentDescriptor = {
   documentType: string;
   version: number;
   sizeBytes: number;
-  sourceType?: 'invoice' | 'act' | 'contract';
+  sourceType?: string | null;
 };
+
+type MessengerDeliverySourceType = 'invoice' | 'act' | 'contract';
+
+function resolveMessengerDeliverySourceType(sourceType?: string | null): MessengerDeliverySourceType | undefined {
+  return sourceType === 'invoice' || sourceType === 'act' || sourceType === 'contract'
+    ? sourceType
+    : undefined;
+}
 
 type Props = {
   document: MessengerDeliveryDocumentDescriptor;
@@ -45,6 +53,7 @@ type Props = {
 };
 
 export function MessengerDocumentDeliveryModal({ document, clientId, clientOptions, preparePdf, onClose }: Props) {
+  const sourceType = resolveMessengerDeliverySourceType(document.sourceType);
   const [selectedClientId, setSelectedClientId] = useState(clientId);
   const [configuration, setConfiguration] = useState<MessengerDocumentDeliveryConfiguration | null>(null);
   const [recipients, setRecipients] = useState<MessengerRecipientBindingDto[]>([]);
@@ -80,7 +89,7 @@ export function MessengerDocumentDeliveryModal({ document, clientId, clientOptio
         apiService.getMessengerDocumentDeliveryHistory(selectedClientId),
       ]);
       setRecipients(nextRecipients);
-      const expectedType = document.sourceType ?? 'case-document';
+      const expectedType = sourceType ?? 'case-document';
       setHistory(nextHistory.filter((item) => item.documentId === document.id && item.documentType === expectedType));
       setRecipientId((current) => current || String(nextRecipients[0]?.id ?? ''));
     } catch (cause) {
@@ -94,7 +103,7 @@ export function MessengerDocumentDeliveryModal({ document, clientId, clientOptio
     void load();
     // Данные мастера зависят только от выбранного документа и клиента.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedClientId, document.id, document.sourceType]);
+  }, [selectedClientId, document.id, sourceType]);
 
   const enabledProviders = useMemo(
     () => configuration?.providers.filter((provider) => provider.enabled) ?? [],
@@ -149,9 +158,9 @@ export function MessengerDocumentDeliveryModal({ document, clientId, clientOptio
         message: message.trim() || undefined,
         confirmRecipientAndDocument: true,
       };
-      const prepared = document.sourceType
+      const prepared = sourceType
         ? await apiService.prepareFinancialDocumentMessengerDelivery(
-            document.sourceType,
+            sourceType,
             document.id,
             await requirePdf(),
             deliveryPayload,

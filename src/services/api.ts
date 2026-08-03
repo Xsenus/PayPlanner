@@ -956,7 +956,7 @@ export interface UpdateStickyNoteLayoutPayload {
 }
 
 export type NotificationChannel = 'email' | 'telegram' | 'sms';
-export type UserNotificationDeliveryChannel = 'inApp' | 'toast' | 'forcedModal' | 'webPush' | 'email' | 'telegram' | 'sms';
+export type UserNotificationDeliveryChannel = 'inApp' | 'toast' | 'forcedModal' | 'webPush' | 'email' | 'telegram' | 'sms' | 'max';
 
 export interface NotificationChannelDto {
   key: string;
