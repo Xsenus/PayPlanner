@@ -48,13 +48,14 @@ public class NotificationInboxController : ControllerBase
 
         var visibility = await ResolveNotificationTargetVisibilityAsync(ct);
         var preferences = await LoadNotificationPreferencesAsync(userId.Value, ct);
+        var now = DateTime.SpecifyKind(DateTime.UtcNow, DateTimeKind.Unspecified);
         var unreadQuery = _context.UserNotifications
             .AsNoTracking()
             .Where(item =>
                 item.RecipientUserId == userId.Value
                 && !item.IsRead
                 && !item.IsArchived
-                && (!item.SnoozedUntil.HasValue || item.SnoozedUntil <= DateTime.UtcNow)
+                && (!item.SnoozedUntil.HasValue || item.SnoozedUntil <= now)
                 && item.DeletedAt == null);
         unreadQuery = ApplyDisabledTypeFilter(unreadQuery, preferences.DisabledTypes);
         var count = await WhereNotificationTargetVisible(unreadQuery, _context, visibility)
@@ -436,7 +437,7 @@ public class NotificationInboxController : ControllerBase
         IQueryable<UserNotification> query,
         string? status)
     {
-        var now = DateTime.UtcNow;
+        var now = DateTime.SpecifyKind(DateTime.UtcNow, DateTimeKind.Unspecified);
         return status?.Trim().ToLowerInvariant() switch
         {
             "all" => query,

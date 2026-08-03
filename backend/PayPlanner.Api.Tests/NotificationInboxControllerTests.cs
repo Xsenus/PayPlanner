@@ -15,6 +15,22 @@ namespace PayPlanner.Api.Tests;
 public class NotificationInboxControllerTests
 {
     [Fact]
+    public void UnreadSnoozePredicate_IsTranslatableForPostgreSql()
+    {
+        var options = new DbContextOptionsBuilder<PaymentContext>()
+            .UseNpgsql("Host=localhost;Database=payplanner_query_translation;Username=payplanner")
+            .Options;
+        using var db = new PaymentContext(options);
+        var now = DateTime.SpecifyKind(DateTime.UtcNow, DateTimeKind.Unspecified);
+
+        var sql = db.UserNotifications
+            .Where(item => !item.SnoozedUntil.HasValue || item.SnoozedUntil <= now)
+            .ToQueryString();
+
+        Assert.Contains("SnoozedUntil", sql, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task GetTypes_IncludesRoutingMetadata()
     {
         await using var db = await CreateContextAsync();
