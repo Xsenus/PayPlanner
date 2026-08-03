@@ -249,9 +249,13 @@ public sealed class MaxOutboxServiceTests
             {
                 db.MaxRecipientLinks.Add(new MaxRecipientLink
                 {
-                    UserId = user.Id, MaxUserId = 7001, MaxChatId = 7001,
-                    Status = MaxRecipientLinkStatuses.Verified, LinkTokenHash = Guid.NewGuid().ToString("N"),
-                    LinkTokenExpiresAt = DateTime.UtcNow.AddMinutes(-1), VerifiedAt = DateTime.UtcNow
+                    UserId = user.Id,
+                    MaxUserId = 7001,
+                    MaxChatId = 7001,
+                    Status = MaxRecipientLinkStatuses.Verified,
+                    LinkTokenHash = Guid.NewGuid().ToString("N"),
+                    LinkTokenExpiresAt = DateTime.UtcNow.AddMinutes(-1),
+                    VerifiedAt = DateTime.UtcNow
                 });
                 await db.SaveChangesAsync();
             }
@@ -260,9 +264,13 @@ public sealed class MaxOutboxServiceTests
             var settings = new SystemMaxNotificationService(db, protection);
             await settings.UpdateSettingsAsync(new UpdateMaxNotificationSettingsRequest
             {
-                Enabled = true, BotToken = "bot-token", KeepExistingBotToken = false,
-                WebhookSecret = "webhook-secret", KeepExistingWebhookSecret = false,
-                NotificationsEnabled = true, DocumentsEnabled = true,
+                Enabled = true,
+                BotToken = "bot-token",
+                KeepExistingBotToken = false,
+                WebhookSecret = "webhook-secret",
+                KeepExistingWebhookSecret = false,
+                NotificationsEnabled = true,
+                DocumentsEnabled = true,
                 QuietHoursEnabled = false
             });
             var time = new FixedTimeProvider(new DateTimeOffset(2026, 7, 31, 16, 0, 0, TimeSpan.Zero));

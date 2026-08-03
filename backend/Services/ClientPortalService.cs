@@ -583,7 +583,8 @@ public sealed class ClientPortalService : IClientPortalService
                 && item.PublicId == casePublicId)
             .Select(item => new
             {
-                item.Id, item.ClientCaseId,
+                item.Id,
+                item.ClientCaseId,
                 Case = new ClientPortalCaseDto
                 {
                     PublicId = item.PublicId,
@@ -595,7 +596,10 @@ public sealed class ClientPortalService : IClientPortalService
                     StartDate = item.ClientCase.StartDate,
                     DueDate = item.ClientCase.DueDate,
                 },
-                item.CanViewDeadlines, item.CanViewDocuments, item.CanViewFinance, item.CanViewApprovals,
+                item.CanViewDeadlines,
+                item.CanViewDocuments,
+                item.CanViewFinance,
+                item.CanViewApprovals,
             }).FirstOrDefaultAsync(ct);
         if (grant is null) return null;
 
@@ -803,9 +807,13 @@ public sealed class ClientPortalService : IClientPortalService
     private void Audit(int? accountId, int? grantId, string eventType, string targetType, string targetKey, string? ip, string? userAgent)
         => _db.ClientPortalAuditEvents.Add(new ClientPortalAuditEvent
         {
-            ClientPortalAccountId = accountId, ClientPortalCaseGrantId = grantId,
-            EventType = eventType, TargetType = targetType, TargetKey = Truncate(targetKey, 128),
-            IpHash = Hash($"{accountId}:{ip}"), UserAgent = Truncate(userAgent?.Trim() ?? string.Empty, 512),
+            ClientPortalAccountId = accountId,
+            ClientPortalCaseGrantId = grantId,
+            EventType = eventType,
+            TargetType = targetType,
+            TargetKey = Truncate(targetKey, 128),
+            IpHash = Hash($"{accountId}:{ip}"),
+            UserAgent = Truncate(userAgent?.Trim() ?? string.Empty, 512),
         });
 
     private static ClientPortalException Error(string code, string message) => new(code, message);
@@ -850,27 +858,47 @@ public sealed class ClientPortalAccessRequest
 }
 public sealed class ClientPortalAdminAccountDto
 {
-    public int Id { get; set; } public Guid PublicId { get; set; } public string Email { get; set; } = ""; public string DisplayName { get; set; } = "";
-    public string AccountType { get; set; } = ""; public int? ClientId { get; set; } public int? LegalEntityId { get; set; } public bool IsActive { get; set; }
-    public DateTime CreatedAt { get; set; } public DateTime? RevokedAt { get; set; } public List<ClientPortalGrantDto> Grants { get; set; } = [];
+    public int Id { get; set; }
+    public Guid PublicId { get; set; }
+    public string Email { get; set; } = ""; public string DisplayName { get; set; } = "";
+    public string AccountType { get; set; } = ""; public int? ClientId { get; set; }
+    public int? LegalEntityId { get; set; }
+    public bool IsActive { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime? RevokedAt { get; set; }
+    public List<ClientPortalGrantDto> Grants { get; set; } = [];
 }
 public sealed class ClientPortalGrantDto
 {
-    public int Id { get; set; } public Guid CasePublicId { get; set; } public string CaseTitle { get; set; } = ""; public DateTime? RevokedAt { get; set; }
-    public bool CanViewCaseSummary { get; set; } public bool CanViewDeadlines { get; set; } public bool CanViewDocuments { get; set; }
-    public bool CanViewFinance { get; set; } public bool CanViewApprovals { get; set; } public bool CanViewMessages { get; set; }
+    public int Id { get; set; }
+    public Guid CasePublicId { get; set; }
+    public string CaseTitle { get; set; } = ""; public DateTime? RevokedAt { get; set; }
+    public bool CanViewCaseSummary { get; set; }
+    public bool CanViewDeadlines { get; set; }
+    public bool CanViewDocuments { get; set; }
+    public bool CanViewFinance { get; set; }
+    public bool CanViewApprovals { get; set; }
+    public bool CanViewMessages { get; set; }
 }
 public sealed class ClientPortalChallengeCreatedDto { public Guid ChallengeId { get; set; } public DateTime ExpiresAt { get; set; } public string EmailHint { get; set; } = ""; }
 public sealed class ClientPortalCaseAccessDto
 {
-    public int AccountId { get; set; } public string DisplayName { get; set; } = ""; public string Email { get; set; } = ""; public string AccountType { get; set; } = "";
-    public bool IsActive { get; set; } public bool CanViewCaseSummary { get; set; } public bool CanViewDeadlines { get; set; } public bool CanViewDocuments { get; set; }
-    public bool CanViewFinance { get; set; } public bool CanViewApprovals { get; set; } public bool CanViewMessages { get; set; } public List<int> DocumentIds { get; set; } = [];
+    public int AccountId { get; set; }
+    public string DisplayName { get; set; } = ""; public string Email { get; set; } = ""; public string AccountType { get; set; } = "";
+    public bool IsActive { get; set; }
+    public bool CanViewCaseSummary { get; set; }
+    public bool CanViewDeadlines { get; set; }
+    public bool CanViewDocuments { get; set; }
+    public bool CanViewFinance { get; set; }
+    public bool CanViewApprovals { get; set; }
+    public bool CanViewMessages { get; set; }
+    public List<int> DocumentIds { get; set; } = [];
 }
 public sealed class ClientPortalAuditDto
 {
     public string EventType { get; set; } = ""; public string TargetType { get; set; } = ""; public string TargetKey { get; set; } = "";
-    public DateTime OccurredAt { get; set; } public string DisplayName { get; set; } = ""; public string Email { get; set; } = "";
+    public DateTime OccurredAt { get; set; }
+    public string DisplayName { get; set; } = ""; public string Email { get; set; } = "";
 }
 public sealed class ClientPortalLoginPreviewDto { public string DisplayName { get; set; } = ""; public string EmailHint { get; set; } = ""; public DateTime ExpiresAt { get; set; } }
 public sealed class ClientPortalSessionCreatedDto { public string SessionToken { get; set; } = ""; public DateTime ExpiresAt { get; set; } }
@@ -880,14 +908,21 @@ public sealed class ClientPortalProfileDto { public string DisplayName { get; se
 public sealed class ClientPortalDocumentGrantDto { public string GrantToken { get; set; } = ""; public DateTime ExpiresAt { get; set; } }
 public sealed class ClientPortalCaseListItemDto
 {
-    public Guid PublicId { get; set; } public string Title { get; set; } = ""; public string CaseNumber { get; set; } = ""; public string CaseType { get; set; } = "";
+    public Guid PublicId { get; set; }
+    public string Title { get; set; } = ""; public string CaseNumber { get; set; } = ""; public string CaseType { get; set; } = "";
     public string Status { get; set; } = ""; public string Stage { get; set; } = ""; public DateTime? DueDate { get; set; }
-    public bool CanViewDeadlines { get; set; } public bool CanViewDocuments { get; set; } public bool CanViewFinance { get; set; } public bool CanViewApprovals { get; set; } public bool CanViewMessages { get; set; }
+    public bool CanViewDeadlines { get; set; }
+    public bool CanViewDocuments { get; set; }
+    public bool CanViewFinance { get; set; }
+    public bool CanViewApprovals { get; set; }
+    public bool CanViewMessages { get; set; }
 }
 public sealed class ClientPortalCaseDto
 {
-    public Guid PublicId { get; set; } public string Title { get; set; } = ""; public string CaseNumber { get; set; } = ""; public string CaseType { get; set; } = "";
-    public string Status { get; set; } = ""; public string Stage { get; set; } = ""; public DateTime? StartDate { get; set; } public DateTime? DueDate { get; set; }
+    public Guid PublicId { get; set; }
+    public string Title { get; set; } = ""; public string CaseNumber { get; set; } = ""; public string CaseType { get; set; } = "";
+    public string Status { get; set; } = ""; public string Stage { get; set; } = ""; public DateTime? StartDate { get; set; }
+    public DateTime? DueDate { get; set; }
     public List<ClientPortalDeadlineDto> Deadlines { get; set; } = []; public List<ClientPortalDocumentDto> Documents { get; set; } = [];
     public List<ClientPortalEventDto> Events { get; set; } = []; public List<ClientPortalInvoiceDto> Invoices { get; set; } = []; public List<ClientPortalActDto> Acts { get; set; } = []; public List<ClientPortalContractDto> Contracts { get; set; } = []; public List<ClientPortalApprovalDto> Approvals { get; set; } = [];
 }

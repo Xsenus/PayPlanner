@@ -95,9 +95,12 @@ public sealed class MaxWebhookServiceTests
         await fixture.Service.ProcessAsync(fixture.Update("bot_started", first.Payload), "webhook-secret", CancellationToken.None);
         var secondUser = new User
         {
-            Email = "second@example.test", FullName = "Другой сотрудник", PasswordHash = "hash",
+            Email = "second@example.test",
+            FullName = "Другой сотрудник",
+            PasswordHash = "hash",
             RoleId = (await fixture.Db.Users.Where(item => item.Id == fixture.UserId).Select(item => item.RoleId).SingleAsync()),
-            IsActive = true, IsApproved = true
+            IsActive = true,
+            IsApproved = true
         };
         fixture.Db.Users.Add(secondUser);
         await fixture.Db.SaveChangesAsync();
@@ -268,8 +271,12 @@ public sealed class MaxWebhookServiceTests
             var role = new Role { Name = "employee", Description = "Сотрудник" };
             var user = new User
             {
-                Email = "employee@example.test", FullName = "Сотрудник", PasswordHash = "hash",
-                Role = role, IsActive = true, IsApproved = true
+                Email = "employee@example.test",
+                FullName = "Сотрудник",
+                PasswordHash = "hash",
+                Role = role,
+                IsActive = true,
+                IsApproved = true
             };
             db.Users.Add(user);
             await db.SaveChangesAsync();
