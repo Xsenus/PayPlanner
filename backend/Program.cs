@@ -244,50 +244,54 @@ else
     builder.Services.AddSingleton<ISqliteMaintenanceService, NoOpSqliteMaintenanceService>();
 }
 
-builder.Services.AddHostedService<DatabaseBackupSchedulerService>();
-builder.Services.AddHostedService<MessengerDocumentOutboxWorker>();
-builder.Services.AddHostedService<MaxOutboxWorker>();
-builder.Services.AddHostedService<ExternalWorkOrderApprovalExpirationService>();
-builder.Services.AddHostedService<PaymentStatusUpdater>();
-builder.Services.AddHostedService<InvoicePaymentStateReconciliationService>();
 builder.Services.AddSingleton<TaskJournalReminderNotificationService>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<TaskJournalReminderNotificationService>());
 builder.Services.AddSingleton<StickyNoteReminderNotificationService>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<StickyNoteReminderNotificationService>());
 builder.Services.AddSingleton<NotificationRetrySchedulerService>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<NotificationRetrySchedulerService>());
 builder.Services.AddSingleton<NotificationDeliveryRetentionService>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<NotificationDeliveryRetentionService>());
 builder.Services.AddSingleton<SmsChannelMonitoringService>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<SmsChannelMonitoringService>());
 builder.Services.AddSingleton<SmsDeliveryStatusReconciliationService>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<SmsDeliveryStatusReconciliationService>());
 builder.Services.AddSingleton<CalendarSyncLogRetentionService>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<CalendarSyncLogRetentionService>());
 builder.Services.AddSingleton<PaymentAdvanceReviewMonitoringService>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<PaymentAdvanceReviewMonitoringService>());
 builder.Services.AddSingleton<ContractExpirationNotificationService>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<ContractExpirationNotificationService>());
 builder.Services.AddSingleton<CaseProceduralDeadlineReminderNotificationService>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<CaseProceduralDeadlineReminderNotificationService>());
 builder.Services.AddSingleton<CalendarSyncSchedulerService>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<CalendarSyncSchedulerService>());
 builder.Services.AddSingleton<GoogleCalendarBackgroundSyncService>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<GoogleCalendarBackgroundSyncService>());
 builder.Services.AddSingleton<YandexCalendarBackgroundSyncService>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<YandexCalendarBackgroundSyncService>());
 builder.Services.AddSingleton<TaskJournalAutomationSchedulerService>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<TaskJournalAutomationSchedulerService>());
-builder.Services.AddHostedService<TelegramBotPollingService>();
 builder.Services.AddSingleton<MoneyBalanceReconciliationSchedulerService>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<MoneyBalanceReconciliationSchedulerService>());
 builder.Services.AddSingleton<ClientCaseCourtSyncSchedulerService>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<ClientCaseCourtSyncSchedulerService>());
-builder.Services.AddHostedService(sp => sp.GetRequiredService<CourtSyncMetricsRollupService>());
 builder.Services.AddSingleton<UserActivityRetentionService>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<UserActivityRetentionService>());
 builder.Services.AddSingleton<YandexDiskCrmSyncSchedulerService>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<YandexDiskCrmSyncSchedulerService>());
+
+if (builder.Configuration.GetValue("BackgroundServices:Enabled", true))
+{
+    builder.Services.AddHostedService<DatabaseBackupSchedulerService>();
+    builder.Services.AddHostedService<MessengerDocumentOutboxWorker>();
+    builder.Services.AddHostedService<MaxOutboxWorker>();
+    builder.Services.AddHostedService<ExternalWorkOrderApprovalExpirationService>();
+    builder.Services.AddHostedService<PaymentStatusUpdater>();
+    builder.Services.AddHostedService<InvoicePaymentStateReconciliationService>();
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<TaskJournalReminderNotificationService>());
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<StickyNoteReminderNotificationService>());
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<NotificationRetrySchedulerService>());
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<NotificationDeliveryRetentionService>());
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<SmsChannelMonitoringService>());
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<SmsDeliveryStatusReconciliationService>());
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<CalendarSyncLogRetentionService>());
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<PaymentAdvanceReviewMonitoringService>());
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<ContractExpirationNotificationService>());
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<CaseProceduralDeadlineReminderNotificationService>());
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<CalendarSyncSchedulerService>());
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<GoogleCalendarBackgroundSyncService>());
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<YandexCalendarBackgroundSyncService>());
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<TaskJournalAutomationSchedulerService>());
+    builder.Services.AddHostedService<TelegramBotPollingService>();
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<MoneyBalanceReconciliationSchedulerService>());
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<ClientCaseCourtSyncSchedulerService>());
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<CourtSyncMetricsRollupService>());
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<UserActivityRetentionService>());
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<YandexDiskCrmSyncSchedulerService>());
+}
 
 builder.Services.AddCors(options =>
     CorsPolicyConfiguration.ConfigureDefaultPolicy(options, builder.Configuration, builder.Environment));
