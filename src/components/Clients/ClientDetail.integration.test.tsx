@@ -618,8 +618,8 @@ describe('ClientDetail integration', () => {
     vi.mocked(apiService.createClientPowerOfAttorney).mockResolvedValue(createPowerOfAttorney());
     vi.mocked(apiService.updateClientPowerOfAttorney).mockResolvedValue(createPowerOfAttorney());
     vi.mocked(apiService.deleteClientPowerOfAttorney).mockResolvedValue(undefined);
-    vi.mocked(apiService.getOksoDictionary).mockResolvedValue([]);
-    vi.mocked(apiService.getOkpdtrDictionary).mockResolvedValue([]);
+    vi.mocked(apiService.getOksoDictionary).mockReset().mockResolvedValue([]);
+    vi.mocked(apiService.getOkpdtrDictionary).mockReset().mockResolvedValue([]);
     vi.mocked(apiService.getLegalEntitiesPaged).mockResolvedValue({
       items: [],
       total: 0,
@@ -846,6 +846,10 @@ describe('ClientDetail integration', () => {
     await waitFor(() => {
       expect(apiService.getOksoDictionary).toHaveBeenCalledTimes(1);
     });
+    expect(apiService.getOksoDictionary).toHaveBeenLastCalledWith(
+      { search: undefined, limit: 30 },
+      { signal: expect.any(AbortSignal) },
+    );
     expect(apiService.getOkpdtrDictionary).not.toHaveBeenCalled();
     expect(apiService.getClientPowersOfAttorney).not.toHaveBeenCalled();
 
@@ -853,12 +857,59 @@ describe('ClientDetail integration', () => {
     await waitFor(() => {
       expect(apiService.getOkpdtrDictionary).toHaveBeenCalledTimes(1);
     });
+    expect(apiService.getOkpdtrDictionary).toHaveBeenLastCalledWith(
+      { search: undefined, limit: 30 },
+      { signal: expect.any(AbortSignal) },
+    );
     expect(apiService.getClientPowersOfAttorney).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole('button', { name: /Доверенности/ }));
     await waitFor(() => {
       expect(apiService.getClientPowersOfAttorney).toHaveBeenCalledWith(1);
     });
+  });
+
+  it('searches large profile dictionaries after debounce and cancels stale requests', async () => {
+    const user = userEvent.setup();
+    vi.mocked(apiService.getOksoDictionary).mockResolvedValue([
+      { id: 1, code: '40.03.01', name: 'Юриспруденция' },
+    ]);
+    vi.mocked(apiService.getOkpdtrDictionary).mockResolvedValue([
+      { id: 2, code: '20662', name: 'Юрисконсульт' },
+    ]);
+
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
+    await screen.findByRole('heading', { name: 'Карточка клиента' });
+    await user.click(screen.getByRole('button', { name: 'Редактировать' }));
+    await user.click(screen.getByRole('button', { name: /Образование/ }));
+    await waitFor(() => expect(apiService.getOksoDictionary).toHaveBeenCalledTimes(1));
+    const firstOksoSignal = vi.mocked(apiService.getOksoDictionary).mock.calls[0][1]?.signal;
+    const oksoInput = screen.getAllByPlaceholderText('Код ОКСО')[0];
+    await user.clear(oksoInput);
+    await user.type(oksoInput, '40.03');
+    await waitFor(() => {
+      expect(apiService.getOksoDictionary).toHaveBeenLastCalledWith(
+        { search: '40.03', limit: 30 },
+        { signal: expect.any(AbortSignal) },
+      );
+    });
+    expect(firstOksoSignal?.aborted).toBe(true);
+    expect(document.querySelector('option[value="40.03.01"]')).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: /Профессии/ }));
+    await waitFor(() => expect(apiService.getOkpdtrDictionary).toHaveBeenCalledTimes(1));
+    const firstOkpdtrSignal = vi.mocked(apiService.getOkpdtrDictionary).mock.calls[0][1]?.signal;
+    const okpdtrInput = screen.getAllByPlaceholderText('Код ОКПДТР')[0];
+    await user.clear(okpdtrInput);
+    await user.type(okpdtrInput, '20662');
+    await waitFor(() => {
+      expect(apiService.getOkpdtrDictionary).toHaveBeenLastCalledWith(
+        { search: '20662', limit: 30 },
+        { signal: expect.any(AbortSignal) },
+      );
+    });
+    expect(firstOkpdtrSignal?.aborted).toBe(true);
+    expect(document.querySelector('option[value="20662"]')).toBeTruthy();
   });
 
   it('loads legal entity lookup with paged search for legal client profile', async () => {

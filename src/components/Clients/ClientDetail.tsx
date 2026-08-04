@@ -1615,11 +1615,15 @@ export function ClientDetail({
   const addressSuggestionTimersRef = useRef<Record<number, number>>({});
   const [oksoOptions, setOksoOptions] = useState<ClientReferenceItem[]>([]);
   const [okpdtrOptions, setOkpdtrOptions] = useState<ClientReferenceItem[]>([]);
+  const [oksoSearch, setOksoSearch] = useState("");
+  const [okpdtrSearch, setOkpdtrSearch] = useState("");
+  const debouncedOksoSearch = useDebouncedValue(oksoSearch.trim(), 300);
+  const debouncedOkpdtrSearch = useDebouncedValue(okpdtrSearch.trim(), 300);
+  const [oksoLoading, setOksoLoading] = useState(false);
+  const [okpdtrLoading, setOkpdtrLoading] = useState(false);
   const [powersOfAttorney, setPowersOfAttorney] = useState<PowerOfAttorney[]>(
     [],
   );
-  const [oksoLoaded, setOksoLoaded] = useState(false);
-  const [okpdtrLoaded, setOkpdtrLoaded] = useState(false);
   const [powersOfAttorneyLoaded, setPowersOfAttorneyLoaded] = useState(false);
   const [activeProfileGroup, setActiveProfileGroup] = useState<
     | "main"
@@ -1999,56 +2003,66 @@ export function ClientDetail({
   useEffect(() => {
     if (
       activeSection !== "profile" ||
-      activeProfileGroup !== "education" ||
-      oksoLoaded
+      activeProfileGroup !== "education"
     ) {
       return;
     }
 
-    let alive = true;
+    const controller = new AbortController();
+    setOksoLoading(true);
     apiService
-      .getOksoDictionary()
+      .getOksoDictionary(
+        { search: debouncedOksoSearch || undefined, limit: 30 },
+        { signal: controller.signal },
+      )
       .then((items) => {
-        if (!alive) return;
+        if (controller.signal.aborted) return;
         setOksoOptions(items ?? []);
-        setOksoLoaded(true);
       })
       .catch(() => {
-        if (!alive) return;
-        setOksoLoaded(true);
+        if (controller.signal.aborted) return;
+        setOksoOptions([]);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setOksoLoading(false);
       });
 
     return () => {
-      alive = false;
+      controller.abort();
     };
-  }, [activeProfileGroup, activeSection, oksoLoaded]);
+  }, [activeProfileGroup, activeSection, debouncedOksoSearch]);
 
   useEffect(() => {
     if (
       activeSection !== "profile" ||
-      activeProfileGroup !== "professions" ||
-      okpdtrLoaded
+      activeProfileGroup !== "professions"
     ) {
       return;
     }
 
-    let alive = true;
+    const controller = new AbortController();
+    setOkpdtrLoading(true);
     apiService
-      .getOkpdtrDictionary()
+      .getOkpdtrDictionary(
+        { search: debouncedOkpdtrSearch || undefined, limit: 30 },
+        { signal: controller.signal },
+      )
       .then((items) => {
-        if (!alive) return;
+        if (controller.signal.aborted) return;
         setOkpdtrOptions(items ?? []);
-        setOkpdtrLoaded(true);
       })
       .catch(() => {
-        if (!alive) return;
-        setOkpdtrLoaded(true);
+        if (controller.signal.aborted) return;
+        setOkpdtrOptions([]);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setOkpdtrLoading(false);
       });
 
     return () => {
-      alive = false;
+      controller.abort();
     };
-  }, [activeProfileGroup, activeSection, okpdtrLoaded]);
+  }, [activeProfileGroup, activeSection, debouncedOkpdtrSearch]);
 
   useEffect(() => {
     if (
@@ -6828,20 +6842,25 @@ export function ClientDetail({
                               disabled={!canEditClientProfile}
                               className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-2"
                             />
-                            <input
-                              value={item.oksoCode}
-                              onChange={(e) =>
-                                updateEducation(
-                                  index,
-                                  "oksoCode",
-                                  e.target.value,
-                                )
-                              }
-                              placeholder="Код ОКСО"
-                              list="okso-codes"
-                              disabled={!canEditClientProfile}
-                              className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-2"
-                            />
+                            <div className="md:col-span-2">
+                              <input
+                                value={item.oksoCode}
+                                onFocus={() => setOksoSearch(item.oksoCode)}
+                                onChange={(e) => {
+                                  const value = e.target.value;
+                                  updateEducation(index, "oksoCode", value);
+                                  setOksoSearch(value);
+                                }}
+                                placeholder="Код ОКСО"
+                                list="okso-codes"
+                                aria-busy={oksoLoading}
+                                disabled={!canEditClientProfile}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                              />
+                              {oksoLoading && (
+                                <p className="mt-1 text-xs text-gray-500">Ищем по ОКСО…</p>
+                              )}
+                            </div>
                             <div className="flex items-center justify-end md:col-span-1">
                               <button
                                 type="button"
@@ -6920,20 +6939,25 @@ export function ClientDetail({
                               disabled={!canEditClientProfile}
                               className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-7"
                             />
-                            <input
-                              value={item.okpdtrCode}
-                              onChange={(e) =>
-                                updateProfession(
-                                  index,
-                                  "okpdtrCode",
-                                  e.target.value,
-                                )
-                              }
-                              placeholder="Код ОКПДТР"
-                              list="okpdtr-codes"
-                              disabled={!canEditClientProfile}
-                              className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-4"
-                            />
+                            <div className="md:col-span-4">
+                              <input
+                                value={item.okpdtrCode}
+                                onFocus={() => setOkpdtrSearch(item.okpdtrCode)}
+                                onChange={(e) => {
+                                  const value = e.target.value;
+                                  updateProfession(index, "okpdtrCode", value);
+                                  setOkpdtrSearch(value);
+                                }}
+                                placeholder="Код ОКПДТР"
+                                list="okpdtr-codes"
+                                aria-busy={okpdtrLoading}
+                                disabled={!canEditClientProfile}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                              />
+                              {okpdtrLoading && (
+                                <p className="mt-1 text-xs text-gray-500">Ищем по ОКПДТР…</p>
+                              )}
+                            </div>
                             <div className="flex items-center justify-end md:col-span-1">
                               <button
                                 type="button"

@@ -7,7 +7,7 @@
 
 - Разделов frontend: 49.
 - Backend-контроллеров: 64.
-- HTTP endpoints: 777; с найденной тестовой связью: 699.
+- HTTP endpoints: 777; с найденной тестовой связью: 702.
 - Реальных HTML-форм: 17; с найденной тестовой связью: 15.
 - Фоновых сервисов: 26; с найденной тестовой связью: 24.
 
@@ -74,7 +74,7 @@
 | Login | src/components/Auth/Login.tsx | 73 | да |
 | Register | src/components/Auth/Register.tsx | 94 | да |
 | PaymentModal | src/components/Calendar/PaymentModal.tsx | 2896 | да |
-| ClientDetail | src/components/Clients/ClientDetail.tsx | 6338 | да |
+| ClientDetail | src/components/Clients/ClientDetail.tsx | 6352 | да |
 | ClientModal | src/components/Clients/ClientModal.tsx | 240 | да |
 | ContractCreatePage | src/components/Contracts/ContractCreatePage.tsx | 293 | нет |
 | ContractModal | src/components/Contracts/ContractModal.tsx | 366 | да |
@@ -136,7 +136,7 @@
 | ClientPassportController | backend/Controllers/ClientPassportController.cs | 2 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Clients)] | да |
 | ClientPortalAdminController | backend/Controllers/ClientPortalAdminController.cs | 7 | [Authorize(Policy = "Admin")] | нет |
 | ClientPortalController | backend/Controllers/ClientPortalController.cs | 10 | не задано | да |
-| ClientReferenceDataController | backend/Controllers/ClientReferenceDataController.cs | 3 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Clients)] | нет |
+| ClientReferenceDataController | backend/Controllers/ClientReferenceDataController.cs | 3 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Clients)] | да |
 | ClientsController | backend/Controllers/ClientsController.cs | 12 | [Authorize] | да |
 | ContactsController | backend/Controllers/ContactsController.cs | 7 | [Authorize] | да |
 | ContractsController | backend/Controllers/ContractsController.cs | 23 | [Authorize] | да |
@@ -293,9 +293,9 @@
 | POST | api/portal/logout | ClientPortalController | Logout | backend/Controllers/ClientPortalController.cs:156 | не задано | да |
 | POST | api/portal/max/link | ClientPortalController | CreateMaxLink | backend/Controllers/ClientPortalController.cs:179 | не задано | да |
 | DELETE | api/portal/max/link | ClientPortalController | DeleteMaxLink | backend/Controllers/ClientPortalController.cs:196 | не задано | да |
-| GET | api/client-reference-data/okin | ClientReferenceDataController | GetOkin | backend/Controllers/ClientReferenceDataController.cs:23 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Clients)] | нет |
-| GET | api/client-reference-data/okso | ClientReferenceDataController | GetOkso | backend/Controllers/ClientReferenceDataController.cs:32 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Clients)] | нет |
-| GET | api/client-reference-data/okpdtr | ClientReferenceDataController | GetOkpdtr | backend/Controllers/ClientReferenceDataController.cs:41 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Clients)] | нет |
+| GET | api/client-reference-data/okin | ClientReferenceDataController | GetOkin | backend/Controllers/ClientReferenceDataController.cs:26 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Clients)] | да |
+| GET | api/client-reference-data/okso | ClientReferenceDataController | GetOkso | backend/Controllers/ClientReferenceDataController.cs:32 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Clients)] | да |
+| GET | api/client-reference-data/okpdtr | ClientReferenceDataController | GetOkpdtr | backend/Controllers/ClientReferenceDataController.cs:38 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Clients)] | да |
 | GET | api/[controller] | ClientsController | GetAll | backend/Controllers/ClientsController.cs:229 | [Authorize] | да |
 | GET | api/[controller]/{id:int} | ClientsController | GetById | backend/Controllers/ClientsController.cs:279 | [Authorize] | да |
 | GET | api/[controller]/{id:int}/stats | ClientsController | GetStats | backend/Controllers/ClientsController.cs:314 | [Authorize] | да |

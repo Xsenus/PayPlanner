@@ -5165,16 +5165,34 @@ export class ApiService {
     return this.request<void>(`/clients/${clientId}/powers-of-attorney/${id}`, { method: 'DELETE' });
   }
 
-  async getOkinDictionary() {
-    return this.request<ClientReferenceItem[]>('/client-reference-data/okin');
+  async getOkinDictionary(
+    params?: { search?: string; limit?: number },
+    options?: { signal?: AbortSignal },
+  ) {
+    const query = buildQuery({ search: params?.search, limit: params?.limit ?? 30 });
+    return this.request<ClientReferenceItem[]>(`/client-reference-data/okin${query}`, {
+      signal: options?.signal,
+    });
   }
 
-  async getOksoDictionary() {
-    return this.request<ClientReferenceItem[]>('/client-reference-data/okso');
+  async getOksoDictionary(
+    params?: { search?: string; limit?: number },
+    options?: { signal?: AbortSignal },
+  ) {
+    const query = buildQuery({ search: params?.search, limit: params?.limit ?? 30 });
+    return this.request<ClientReferenceItem[]>(`/client-reference-data/okso${query}`, {
+      signal: options?.signal,
+    });
   }
 
-  async getOkpdtrDictionary() {
-    return this.request<ClientReferenceItem[]>('/client-reference-data/okpdtr');
+  async getOkpdtrDictionary(
+    params?: { search?: string; limit?: number },
+    options?: { signal?: AbortSignal },
+  ) {
+    const query = buildQuery({ search: params?.search, limit: params?.limit ?? 30 });
+    return this.request<ClientReferenceItem[]>(`/client-reference-data/okpdtr${query}`, {
+      signal: options?.signal,
+    });
   }
 
   // ===== Legal entities =====

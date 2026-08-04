@@ -53,6 +53,27 @@ describe('apiService contacts directory', () => {
   });
 });
 
+describe('apiService client reference dictionaries', () => {
+  it('sends bounded search parameters and abort signal to every dictionary endpoint', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify([]), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
+
+    await apiService.getOkinDictionary({ search: 'семья', limit: 15 }, { signal: controller.signal });
+    await apiService.getOksoDictionary({ search: '40.03', limit: 20 }, { signal: controller.signal });
+    await apiService.getOkpdtrDictionary({ search: 'юрист', limit: 25 }, { signal: controller.signal });
+
+    expect(String(fetchMock.mock.calls[0][0])).toContain('/client-reference-data/okin?search=');
+    expect(String(fetchMock.mock.calls[0][0])).toContain('limit=15');
+    expect(String(fetchMock.mock.calls[1][0])).toContain('/client-reference-data/okso?search=40.03&limit=20');
+    expect(String(fetchMock.mock.calls[2][0])).toContain('/client-reference-data/okpdtr?search=');
+    expect(String(fetchMock.mock.calls[2][0])).toContain('limit=25');
+    expect(fetchMock.mock.calls.every(([, options]) => options?.signal === controller.signal)).toBe(true);
+  });
+});
+
 describe('apiService task journal settings', () => {
   it('deduplicates only simultaneous settings requests', async () => {
     const responseBody = {
