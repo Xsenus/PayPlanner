@@ -391,6 +391,21 @@ describe('ForcedTaskRevisionModal', () => {
     expect(screen.getAllByText('30.06.2026, 13:00').length).toBeGreaterThan(0);
   });
 
+  it('closes a stale deadline change notification when the request no longer exists', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    apiMock.getTaskJournalDeadlineChangeRequest.mockRejectedValue(new Error('HTTP 404 Not Found'));
+    mockNotificationPages([], [], [createDeadlineChangeNotification()]);
+
+    render(<ForcedTaskRevisionModal />);
+
+    expect(await screen.findByTestId('forced-deadline-change-prompt')).toBeTruthy();
+    await waitFor(() => expect(apiMock.markUserNotificationRead).toHaveBeenCalledWith(51));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(consoleError).not.toHaveBeenCalled();
+
+    consoleError.mockRestore();
+  });
+
   it('requires a comment before rejecting a deadline change request from the forced queue', async () => {
     mockNotificationPages([], [], [createDeadlineChangeNotification({ id: 52 })]);
 

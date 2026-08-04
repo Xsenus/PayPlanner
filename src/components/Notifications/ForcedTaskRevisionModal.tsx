@@ -4,7 +4,7 @@ import { CheckCircle2, Clock3, Download, ExternalLink, FileText, Loader2, TimerR
 import { apiService, type UserNotificationDto } from '../../services/api';
 import { emitUserNotificationsChanged, USER_NOTIFICATIONS_EVENT } from '../../utils/userNotifications';
 import { parseUserNotificationMetadata } from '../../utils/userNotificationMetadata';
-import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import { extractDisplayErrorMessage, isHttpErrorStatus } from '../../utils/errorUtils';
 import { formatDateTimeInTimeZone, fromTimeZoneDateTimeInput, toTimeZoneDateTimeInput } from '../../utils/timeZoneDate';
 import { normalizeUserTimeZoneId, USER_TIME_ZONE_SETTING_KEY } from '../../utils/timeZoneOptions';
 import type {
@@ -421,6 +421,18 @@ export function ForcedTaskRevisionModal({ onOpenTask }: ForcedTaskRevisionModalP
   const currentDeadlineChangeTaskId = current?.taskId ?? null;
   const notificationRequestedDueAt = readString(currentMetadata.requestedDueAt);
 
+  const finishNotificationById = useCallback(async (notificationId: number, reason: string) => {
+    await apiService.markUserNotificationRead(notificationId);
+    acknowledgedIdsRef.current.add(notificationId);
+    setItems((previous) => previous.filter((item) => item.notification.id !== notificationId));
+    emitUserNotificationsChanged({
+      source: 'system',
+      reason,
+      unreadDelta: -1,
+      notificationId,
+    });
+  }, []);
+
   useEffect(() => {
     if (decisionKind !== 'deadlineChangeRequest') {
       setDeadlineChangeRequest(null);
@@ -450,10 +462,21 @@ export function ForcedTaskRevisionModal({ onOpenTask }: ForcedTaskRevisionModalP
           setDeadlineChangeDueAt(toTimeZoneDateTimeInput(persistedRequest.requestedDueAt, timeZoneId));
         }
       })
-      .catch((error) => {
-        if (!cancelled) {
-          console.error('Failed to load the deadline change request.', error);
+      .catch(async (error) => {
+        if (cancelled) return;
+
+        if (isHttpErrorStatus(error, 404) && current?.id) {
+          try {
+            await finishNotificationById(current.id, 'forced-task-deadline-change-unavailable');
+          } catch (acknowledgeError) {
+            if (!cancelled) {
+              console.error('Failed to close an unavailable deadline change request notification.', acknowledgeError);
+            }
+          }
+          return;
         }
+
+        console.error('Failed to load the deadline change request.', error);
       })
       .finally(() => {
         if (!cancelled) {
@@ -469,6 +492,7 @@ export function ForcedTaskRevisionModal({ onOpenTask }: ForcedTaskRevisionModalP
     currentDeadlineChangeRequestId,
     currentDeadlineChangeTaskId,
     decisionKind,
+    finishNotificationById,
     notificationRequestedDueAt,
     timeZoneId,
   ]);
@@ -536,16 +560,7 @@ export function ForcedTaskRevisionModal({ onOpenTask }: ForcedTaskRevisionModalP
 
   const finishCurrentNotification = async (reason: string) => {
     if (!current) return;
-
-    await apiService.markUserNotificationRead(current.id);
-    acknowledgedIdsRef.current.add(current.id);
-    setItems((previous) => previous.filter((item) => item.notification.id !== current.id));
-    emitUserNotificationsChanged({
-      source: 'system',
-      reason,
-      unreadDelta: -1,
-      notificationId: current.id,
-    });
+    await finishNotificationById(current.id, reason);
   };
 
   const acknowledge = async (openTask = false) => {

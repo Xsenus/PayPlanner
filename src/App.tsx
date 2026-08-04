@@ -1893,7 +1893,7 @@ function AppContent() {
             onOpenNotifications={handleOpenNotifications}
             onOpenAppVersion={handleOpenAppVersion}
           />
-          <main className="flex-1">
+          <main className="min-w-0 flex-1">
             <RouteErrorBoundary
               resetKey={activeTab}
               onGoHome={() => handleTabChange('calendar')}

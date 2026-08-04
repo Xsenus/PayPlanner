@@ -371,7 +371,7 @@ export const SystemSelect = forwardRef<HTMLSelectElement, SystemSelectProps>(fun
       <select
         {...nativeProps}
         ref={setNativeElement}
-        className="pointer-events-none absolute h-px w-px overflow-hidden opacity-0"
+        className="pointer-events-none fixed left-0 top-0 h-px w-px overflow-hidden opacity-0"
         disabled={disabled}
         name={nativeProps.name}
         required={nativeProps.required}

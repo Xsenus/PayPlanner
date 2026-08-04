@@ -234,6 +234,53 @@ async function checkPage({ page, frontendUrl, route, viewportName, timeoutMs, ar
     const viewportWidth = window.innerWidth;
     const documentWidth = Math.max(document.documentElement.scrollWidth, document.body.scrollWidth);
     const bodyText = document.body.innerText.trim();
+    const inspectOverflow = documentWidth > viewportWidth + 2;
+    const overflowingElements = inspectOverflow ? Array.from(document.querySelectorAll('body *'))
+      .map((element) => {
+        const node = /** @type {HTMLElement} */ (element);
+        const rect = node.getBoundingClientRect();
+        const ancestors = [];
+        let parent = node.parentElement;
+        for (let depth = 0; parent && depth < 5; depth += 1, parent = parent.parentElement) {
+          const parentRect = parent.getBoundingClientRect();
+          const style = window.getComputedStyle(parent);
+          ancestors.push(`${parent.tagName.toLowerCase()}${parent.dataset?.testid ? `[data-testid=${parent.dataset.testid}]` : ''}{w=${Math.round(parentRect.width)},cw=${parent.clientWidth},sw=${parent.scrollWidth},ox=${style.overflowX}}`);
+        }
+        return {
+          right: Math.round(rect.right),
+          left: Math.round(rect.left),
+          width: Math.round(rect.width),
+          tag: node.tagName.toLowerCase(),
+          testId: node.dataset?.testid ?? '',
+          className: typeof node.className === 'string' ? node.className.slice(0, 140) : '',
+          ancestors: ancestors.join('>'),
+          position: window.getComputedStyle(node).position,
+        };
+      })
+      .filter((item) => item.right > viewportWidth + 2 || item.left < -2)
+      .sort((left, right) => right.right - left.right)
+      .slice(0, 24) : [];
+    const scrollWidthElements = inspectOverflow ? [document.documentElement, document.body, ...Array.from(document.querySelectorAll('body *'))]
+      .map((element) => {
+        const node = /** @type {HTMLElement} */ (element);
+        const style = window.getComputedStyle(node);
+        return {
+          tag: node.tagName.toLowerCase(),
+          testId: node.dataset?.testid ?? '',
+          clientWidth: node.clientWidth,
+          scrollWidth: node.scrollWidth,
+          overflowX: style.overflowX,
+          className: typeof node.className === 'string' ? node.className.slice(0, 100) : '',
+        };
+      })
+      .filter((item) => item.scrollWidth > item.clientWidth + 2 && item.overflowX === 'visible')
+      .sort((left, right) => right.scrollWidth - left.scrollWidth)
+      .slice(0, 8) : [];
+    const topScrollbars = inspectOverflow ? Array.from(document.querySelectorAll('[data-pp-top-scrollbar]')).map((element) => {
+      const node = /** @type {HTMLElement} */ (element);
+      const rect = node.getBoundingClientRect();
+      return `left=${Math.round(rect.left)},right=${Math.round(rect.right)},w=${Math.round(rect.width)},cw=${node.clientWidth},sw=${node.scrollWidth},display=${window.getComputedStyle(node).display}`;
+    }) : [];
 
     return {
       title: document.title,
@@ -241,6 +288,9 @@ async function checkPage({ page, frontendUrl, route, viewportName, timeoutMs, ar
       documentOverflowX: Math.max(0, documentWidth - viewportWidth),
       viewportWidth,
       documentWidth,
+      overflowingElements,
+      scrollWidthElements,
+      topScrollbars,
       url: window.location.href,
     };
   });
@@ -258,7 +308,15 @@ async function checkPage({ page, frontendUrl, route, viewportName, timeoutMs, ar
   }
 
   if (metrics.documentOverflowX > 2) {
-    failures.push(`horizontal document overflow is ${metrics.documentOverflowX}px (document ${metrics.documentWidth}px, viewport ${metrics.viewportWidth}px)`);
+    const offenders = metrics.overflowingElements
+      .filter((item) => item.right <= metrics.documentWidth + 2)
+      .slice(0, 8)
+      .map((item) => `${item.tag}${item.testId ? `[data-testid=${item.testId}]` : ''} right=${item.right}px width=${item.width}px pos=${item.position} class="${item.className}" ancestors=${item.ancestors}`)
+      .join('; ');
+    const scrollOffenders = metrics.scrollWidthElements
+      .map((item) => `${item.tag}${item.testId ? `[data-testid=${item.testId}]` : ''}{cw=${item.clientWidth},sw=${item.scrollWidth},ox=${item.overflowX},class="${item.className}"}`)
+      .join('; ');
+    failures.push(`horizontal document overflow is ${metrics.documentOverflowX}px (document ${metrics.documentWidth}px, viewport ${metrics.viewportWidth}px)${offenders ? `; candidates: ${offenders}` : ''}${scrollOffenders ? `; visible-scroll candidates: ${scrollOffenders}` : ''}${metrics.topScrollbars.length ? `; top-scrollbars: ${metrics.topScrollbars.join('; ')}` : ''}`);
   }
 
   for (const text of consoleErrors) {

@@ -42,6 +42,7 @@ describe('SystemSelect', () => {
 
     const nativeSelect = screen.getByTestId('status-select');
     expect(nativeSelect.getAttribute('data-system-select-native')).toBe('true');
+    expect(nativeSelect.className).toContain('fixed left-0 top-0');
     fireEvent.change(nativeSelect, { target: { value: 'new' } });
 
     expect(onValue).toHaveBeenCalledWith('new');
