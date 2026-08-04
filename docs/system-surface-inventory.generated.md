@@ -103,7 +103,7 @@
 | CourtSyncMetricsRollupService | backend/Services/LegalIntegrations/CourtSyncMetricsRollupService.cs | 8 | да |
 | MessengerDocumentOutboxWorker | backend/Services/MessengerDocumentOutboxService.cs | 274 | нет |
 | MoneyBalanceReconciliationSchedulerService | backend/Services/MoneyBalanceReconciliationSchedulerService.cs | 10 | да |
-| MaxOutboxWorker | backend/Services/Notifications/MaxOutboxService.cs | 350 | нет |
+| MaxOutboxWorker | backend/Services/Notifications/MaxOutboxService.cs | 353 | нет |
 | NotificationDeliveryRetentionService | backend/Services/Notifications/NotificationDeliveryRetentionService.cs | 6 | да |
 | NotificationRetrySchedulerService | backend/Services/Notifications/NotificationRetrySchedulerService.cs | 8 | да |
 | SmsChannelMonitoringService | backend/Services/Notifications/SmsChannelMonitoringService.cs | 122 | да |

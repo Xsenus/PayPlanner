@@ -263,10 +263,11 @@ public sealed class MaxOutboxProcessor(
             .Take(20)
             .ToListAsync(ct);
         var lastSendByRecipient = new Dictionary<long, DateTime>();
-        var processableMessages = new List<MaxOutboxMessage>(messages.Count);
+        var processableMessages = new List<(MaxOutboxMessage Message, long RecipientId)>(messages.Count);
         foreach (var message in messages)
         {
-            if (message.RecipientLink.Status != MaxRecipientLinkStatuses.Verified || !message.RecipientLink.MaxUserId.HasValue)
+            if (message.RecipientLink.Status != MaxRecipientLinkStatuses.Verified
+                || message.RecipientLink.MaxUserId is not long recipientId)
             {
                 message.Status = MaxOutboxStatuses.Cancelled;
                 message.LastErrorCode = "recipient-unlinked";
@@ -277,7 +278,10 @@ public sealed class MaxOutboxProcessor(
             message.Status = MaxOutboxStatuses.Processing;
             message.AttemptCount++;
             message.UpdatedAt = now;
-            processableMessages.Add(message);
+            // Идентификатор фиксируется вместе с решением о допустимости отправки.
+            // Последующий цикл не перечитывает nullable-поле связи и работает
+            // только с уже проверенным значением получателя.
+            processableMessages.Add((message, recipientId));
         }
 
         if (messages.Count > 0)
@@ -288,11 +292,10 @@ public sealed class MaxOutboxProcessor(
             await db.SaveChangesAsync(ct);
         }
 
-        foreach (var message in processableMessages)
+        foreach (var (message, recipientId) in processableMessages)
         {
             try
             {
-                var recipientId = message.RecipientLink.MaxUserId.Value;
                 if (lastSendByRecipient.TryGetValue(recipientId, out var lastSend))
                 {
                     var remaining = TimeSpan.FromMilliseconds(500) - (timeProvider.GetUtcNow().UtcDateTime - lastSend);

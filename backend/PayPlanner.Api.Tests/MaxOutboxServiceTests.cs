@@ -140,6 +140,25 @@ public sealed class MaxOutboxServiceTests
     }
 
     [Fact]
+    public async Task ProcessorCancelsVerifiedLinkWithoutProviderRecipientId()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var queued = await fixture.Outbox.QueueAsync(fixture.Request(), CancellationToken.None);
+        var link = await fixture.Db.MaxRecipientLinks.SingleAsync(item => item.UserId == fixture.UserId);
+        link.MaxUserId = null;
+        await fixture.Db.SaveChangesAsync();
+        var api = new RecordingApiClient();
+
+        Assert.Equal(1, await fixture.Processor(api).ProcessBatchAsync(CancellationToken.None));
+
+        fixture.Db.ChangeTracker.Clear();
+        var cancelled = await fixture.Db.MaxOutboxMessages.AsNoTracking().SingleAsync(item => item.Id == queued.Id);
+        Assert.Equal(MaxOutboxStatuses.Cancelled, cancelled.Status);
+        Assert.Equal("recipient-unlinked", cancelled.LastErrorCode);
+        Assert.Empty(api.Messages);
+    }
+
+    [Fact]
     public async Task ProviderTimeoutGetsRetryWithoutLeakingException()
     {
         await using var fixture = await Fixture.CreateAsync();
