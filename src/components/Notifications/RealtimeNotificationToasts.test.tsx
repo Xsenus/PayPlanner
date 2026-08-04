@@ -578,8 +578,8 @@ describe('RealtimeNotificationToasts', () => {
         recipientUserId: 5,
         type: 'paymentAdvanceReviewRequired',
         eventKey: 'payment:322:advance-review',
-        title: 'РџСЂРѕРІРµСЂСЊС‚Рµ РїР»Р°С‚РµР¶',
-        bodyPreview: 'РџРѕ РїР»Р°С‚РµР¶Сѓ С‚СЂРµР±СѓРµС‚СЃСЏ РїСЂРѕРІРµСЂРєР° Р°РІР°РЅСЃР°.',
+        title: 'Проверьте платеж',
+        bodyPreview: 'По платежу требуется проверка аванса.',
         tone: 'rose',
         objectType: 'payment',
         objectId: 322,
@@ -589,7 +589,7 @@ describe('RealtimeNotificationToasts', () => {
     });
 
     expect(toastMock.showToast).toHaveBeenCalledWith(expect.objectContaining({
-      title: 'РџСЂРѕРІРµСЂСЊС‚Рµ РїР»Р°С‚РµР¶',
+      title: 'Проверьте платеж',
       actionLabel: 'Открыть уведомления',
       dedupeKey: 'payment:322',
       domain: 'payment',

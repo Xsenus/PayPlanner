@@ -392,14 +392,14 @@ describe('NotificationCenter', () => {
   });
 
   it.each([
-    ['payment', 'Рљ РїР»Р°С‚РµР¶Сѓ'],
-    ['invoice', 'Рљ СЃС‡РµС‚Сѓ'],
-    ['act', 'Рљ Р°РєС‚Сѓ'],
-    ['contract', 'Рљ РґРѕРіРѕРІРѕСЂСѓ'],
+    ['payment', 'К платежу'],
+    ['invoice', 'К счету'],
+    ['act', 'К акту'],
+    ['contract', 'К договору'],
   ] as const)('hides linked %s action when the section handler is unavailable', async (objectType, buttonLabel) => {
     const item = createNotification({
       id: 33,
-      title: `Р—Р°РєСЂС‹С‚С‹Р№ СЃРІСЏР·Р°РЅРЅС‹Р№ РѕР±СЉРµРєС‚ ${objectType}`,
+      title: `Закрытый связанный объект ${objectType}`,
       objectType,
       objectId: 778,
       taskId: null,
@@ -408,7 +408,7 @@ describe('NotificationCenter', () => {
 
     render(<NotificationCenter />);
 
-    expect(await screen.findByText(`Р—Р°РєСЂС‹С‚С‹Р№ СЃРІСЏР·Р°РЅРЅС‹Р№ РѕР±СЉРµРєС‚ ${objectType}`)).toBeTruthy();
+    expect(await screen.findByText(`Закрытый связанный объект ${objectType}`)).toBeTruthy();
     expect(screen.queryByRole('button', { name: buttonLabel })).toBeNull();
   });
 

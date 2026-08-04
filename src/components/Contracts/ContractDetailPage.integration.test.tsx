@@ -392,9 +392,9 @@ describe('ContractDetailPage integration', () => {
       expect(apiService.getContract).toHaveBeenCalledWith(77);
     });
 
-    expect(screen.queryByRole('button', { name: 'РЎС‡РµС‚Р°' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'РђРєС‚С‹' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Р”РµРЅСЊРіРё' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Счета' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Акты' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Деньги' })).toBeNull();
     expect(apiService.getInvoices).not.toHaveBeenCalled();
     expect(apiService.getActs).not.toHaveBeenCalled();
     expect(apiService.getPaymentsV2).not.toHaveBeenCalled();

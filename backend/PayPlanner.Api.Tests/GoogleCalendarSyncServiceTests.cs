@@ -397,7 +397,7 @@ public class GoogleCalendarSyncServiceTests
         var user = await CreateUserAsync(db, "executor-completed-color-google@example.com", "user");
         await EnableGoogleSettingsAsync(db);
         await CreateConnectionAsync(db, user.Id);
-        var task = await CreateTaskAsync(db, user.Id, "Р“РѕС‚РѕРІР°СЏ Р·Р°РґР°С‡Р°", dueAt: DateTime.UtcNow.Date.AddDays(7).AddHours(9));
+        var task = await CreateTaskAsync(db, user.Id, "Готовая задача", dueAt: DateTime.UtcNow.Date.AddDays(7).AddHours(9));
         task.Status = "done";
         await db.SaveChangesAsync();
         var handler = new RecordingGoogleHandler();
@@ -422,8 +422,8 @@ public class GoogleCalendarSyncServiceTests
         await EnableGoogleSettingsAsync(db);
         await SetCalendarSyncSettingsAsync(db, manualFullSyncCooldownMinutes: 10, completedTaskCalendarAction: "hide");
         var connection = await CreateConnectionAsync(db, user.Id);
-        var calendar = await CreateCalendarAsync(db, connection.Id, "calendar-completed-hide", "PayPlanner Р·Р°РґР°С‡Рё");
-        var task = await CreateTaskAsync(db, user.Id, "РЎРєСЂС‹С‚СЊ РіРѕС‚РѕРІСѓСЋ Р·Р°РґР°С‡Сѓ", dueAt: new DateTime(2026, 6, 5, 9, 0, 0));
+        var calendar = await CreateCalendarAsync(db, connection.Id, "calendar-completed-hide", "PayPlanner задачи");
+        var task = await CreateTaskAsync(db, user.Id, "Скрыть готовую задачу", dueAt: new DateTime(2026, 6, 5, 9, 0, 0));
         task.Status = "done";
         db.GoogleCalendarTaskLinks.Add(new GoogleCalendarTaskLink
         {
@@ -733,7 +733,7 @@ public class GoogleCalendarSyncServiceTests
         var user = await CreateUserAsync(db, "executor-google-temporary-unavailable@example.com", "user");
         await EnableGoogleSettingsAsync(db);
         var connection = await CreateConnectionAsync(db, user.Id);
-        await CreateCalendarAsync(db, connection.Id, "calendar-temporary-unavailable", "PayPlanner Р·Р°РґР°С‡Рё");
+        await CreateCalendarAsync(db, connection.Id, "calendar-temporary-unavailable", "PayPlanner задачи");
         var handler = new RecordingGoogleHandler(eventListTransientFailureCount: 1);
         var service = CreateService(db, new FakeHttpClientFactory(handler));
 

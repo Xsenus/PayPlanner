@@ -29,18 +29,18 @@ public class TasksControllerTests
     public async Task TaskTemplateCrud_PersistsAndReplacesParticipants()
     {
         await using var db = await CreateContextAsync();
-        var author = await CreateAdminUserAsync(db, "template-author@example.com", "РђРІС‚РѕСЂ С€Р°Р±Р»РѕРЅР°");
-        var assignee = await CreateAdminUserAsync(db, "template-assignee@example.com", "РСЃРїРѕР»РЅРёС‚РµР»СЊ С€Р°Р±Р»РѕРЅР°");
-        var approver = await CreateAdminUserAsync(db, "template-approver@example.com", "РЎРѕРіР»Р°СЃСѓСЋС‰РёР№ С€Р°Р±Р»РѕРЅР°");
-        var observer = await CreateAdminUserAsync(db, "template-observer@example.com", "РќР°Р±Р»СЋРґР°С‚РµР»СЊ С€Р°Р±Р»РѕРЅР°");
+        var author = await CreateAdminUserAsync(db, "template-author@example.com", "Автор шаблона");
+        var assignee = await CreateAdminUserAsync(db, "template-assignee@example.com", "Исполнитель шаблона");
+        var approver = await CreateAdminUserAsync(db, "template-approver@example.com", "Согласующий шаблона");
+        var observer = await CreateAdminUserAsync(db, "template-observer@example.com", "Наблюдатель шаблона");
         var controller = CreateController(db, new RecordingNotificationService(), author);
 
         var create = await controller.CreateTemplate(new UpsertTaskJournalTemplateRequest
         {
-            Name = "РЁР°Р±Р»РѕРЅ РїРѕРґРіРѕС‚РѕРІРєРё РґРµР»Р°",
-            Description = "РќР°Р±РѕСЂ РїРѕР»РµР№ РґР»СЏ СЃС‚Р°СЂС‚Р° РґРµР»Р°.",
-            Title = "РџРѕРґРіРѕС‚РѕРІРёС‚СЊ РјР°С‚РµСЂРёР°Р»С‹",
-            TaskDescription = "РџСЂРѕРІРµСЂРёС‚СЊ РґРѕРєСѓРјРµРЅС‚С‹ Рё Р·Р°РїСѓСЃС‚РёС‚СЊ СЃРѕРіР»Р°СЃРѕРІР°РЅРёРµ.",
+            Name = "Шаблон подготовки дела",
+            Description = "Набор полей для старта дела.",
+            Title = "Подготовить материалы",
+            TaskDescription = "Проверить документы и запустить согласование.",
             Type = "document",
             Priority = "high",
             PlannedDurationMinutes = 125,
@@ -51,7 +51,7 @@ public class TasksControllerTests
             IsActive = true,
             Reminders = ["before1h", "atDue"],
             Channels = ["inApp", "email"],
-            Tags = ["РґРµР»Рѕ", "СЃС‚Р°СЂС‚"],
+            Tags = ["дело", "старт"],
             Participants =
             [
                 new TaskJournalTemplateParticipantRequest
@@ -73,7 +73,7 @@ public class TasksControllerTests
         var createdDto = Assert.IsType<TaskJournalTemplateDto>(created.Value);
         Assert.True(createdDto.Id > 0);
         Assert.Equal(assignee.Id, createdDto.AssigneeUserId);
-        Assert.Equal("РСЃРїРѕР»РЅРёС‚РµР»СЊ С€Р°Р±Р»РѕРЅР°", createdDto.AssigneeName);
+        Assert.Equal("Исполнитель шаблона", createdDto.AssigneeName);
         Assert.Equal(2, createdDto.Participants.Count);
         Assert.Equal("approver", createdDto.Participants[0].Role);
 
@@ -91,24 +91,24 @@ public class TasksControllerTests
 
         var update = await controller.UpdateTemplate(createdDto.Id, new UpsertTaskJournalTemplateRequest
         {
-            Name = "РЁР°Р±Р»РѕРЅ РїСЂРѕРІРµСЂРєРё РґРµР»Р°",
-            Title = "РџСЂРѕРІРµСЂРёС‚СЊ РјР°С‚РµСЂРёР°Р»С‹",
-            TaskDescription = "РћС‚РґРµР»СЊРЅР°СЏ РёРЅСЃС‚СЂСѓРєС†РёСЏ РїРѕ С€Р°Р±Р»РѕРЅСѓ.",
+            Name = "Шаблон проверки дела",
+            Title = "Проверить материалы",
+            TaskDescription = "Отдельная инструкция по шаблону.",
             Type = "task",
             Priority = "normal",
             PlannedDurationMinutes = 40,
             DueOffsetMinutes = 0,
-            AssigneeName = "Р”РµР¶СѓСЂРЅС‹Р№ СЃРѕС‚СЂСѓРґРЅРёРє",
+            AssigneeName = "Дежурный сотрудник",
             BindingType = "none",
             IsActive = false,
             Reminders = [],
             Channels = [],
-            Tags = ["РїСЂРѕРІРµСЂРєР°"],
+            Tags = ["проверка"],
             Participants =
             [
                 new TaskJournalTemplateParticipantRequest
                 {
-                    Name = "Р’РЅРµС€РЅРёР№ РЅР°Р±Р»СЋРґР°С‚РµР»СЊ",
+                    Name = "Внешний наблюдатель",
                     Role = "observer",
                 },
             ],
@@ -118,11 +118,11 @@ public class TasksControllerTests
         var updatedDto = Assert.IsType<TaskJournalTemplateDto>(updateOk.Value);
         Assert.False(updatedDto.IsActive);
         Assert.Null(updatedDto.AssigneeUserId);
-        Assert.Equal("Р”РµР¶СѓСЂРЅС‹Р№ СЃРѕС‚СЂСѓРґРЅРёРє", updatedDto.AssigneeName);
+        Assert.Equal("Дежурный сотрудник", updatedDto.AssigneeName);
         Assert.Equal("none", updatedDto.BindingType);
         Assert.Equal(string.Empty, updatedDto.BindingKey);
         Assert.Single(updatedDto.Participants);
-        Assert.Equal("Р’РЅРµС€РЅРёР№ РЅР°Р±Р»СЋРґР°С‚РµР»СЊ", updatedDto.Participants[0].DisplayName);
+        Assert.Equal("Внешний наблюдатель", updatedDto.Participants[0].DisplayName);
 
         var fetched = await controller.GetTemplate(createdDto.Id, CancellationToken.None);
         var fetchedOk = Assert.IsType<OkObjectResult>(fetched.Result);
@@ -172,14 +172,14 @@ public class TasksControllerTests
     public async Task CreateTemplate_RejectsParticipantWithoutNameOrUser()
     {
         await using var db = await CreateContextAsync();
-        var author = await CreateAdminUserAsync(db, "template-invalid-author@example.com", "РђРІС‚РѕСЂ С€Р°Р±Р»РѕРЅР°");
+        var author = await CreateAdminUserAsync(db, "template-invalid-author@example.com", "Автор шаблона");
         var controller = CreateController(db, new RecordingNotificationService(), author);
 
         var result = await controller.CreateTemplate(new UpsertTaskJournalTemplateRequest
         {
-            Name = "РЁР°Р±Р»РѕРЅ СЃ РѕС€РёР±РєРѕР№",
-            Title = "РџСЂРѕРІРµСЂРёС‚СЊ СѓС‡Р°СЃС‚РЅРёРєРѕРІ",
-            AssigneeName = "РСЃРїРѕР»РЅРёС‚РµР»СЊ",
+            Name = "Шаблон с ошибкой",
+            Title = "Проверить участников",
+            AssigneeName = "Исполнитель",
             Participants =
             [
                 new TaskJournalTemplateParticipantRequest

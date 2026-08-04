@@ -91,6 +91,9 @@ jobs:
       - name: Verify date/time audit
         run: npm run audit:dates:test
 
+      - name: Verify source encoding
+        run: npm run audit:encoding
+
       - name: Audit FE packages
         run: npm audit --audit-level=moderate
 

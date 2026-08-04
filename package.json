@@ -9,6 +9,8 @@
     "lint": "eslint .",
     "audit:dates": "node scripts/audit-date-time.mjs",
     "audit:dates:test": "node scripts/audit-date-time.mjs --self-test",
+    "audit:encoding": "node scripts/check-source-encoding.mjs",
+    "audit:encoding:test": "node scripts/check-source-encoding.mjs --self-test",
     "audit:encryption-inventory": "node scripts/audit-field-encryption-inventory.mjs",
     "audit:encryption-inventory:update": "node scripts/audit-field-encryption-inventory.mjs --write",
     "deploy:verify-production": "node scripts/run-production-deploy-readiness.mjs",

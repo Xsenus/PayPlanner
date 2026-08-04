@@ -544,7 +544,7 @@ public class YandexCalendarSyncServiceTests
         await using var db = await CreateContextAsync();
         var user = await CreateUserAsync(db, "executor-yandex-refresh-url@example.com", "user");
         var connection = await CreateConnectionAsync(db, user.Id);
-        var calendar = await CreateCalendarAsync(db, connection.Id, "payplanner-tasks", "PayPlanner Р·Р°РґР°С‡Рё");
+        var calendar = await CreateCalendarAsync(db, connection.Id, "payplanner-tasks", "PayPlanner задачи");
         var task = await CreateTaskAsync(db, user.Id, "Refresh stored Yandex calendar URL");
         var handler = new RecordingYandexHandler(calendarHomeResponse: BuildYandexCalendarHomeResponse(
             "/calendars/yandex%40example.com/events-777/",
@@ -864,11 +864,11 @@ END:VCALENDAR
         var user = await CreateUserAsync(db, "executor-yandex-completed-hide@example.com", "user");
         var connection = await CreateConnectionAsync(db, user.Id);
         await SetCalendarSyncSettingsAsync(db, manualFullSyncCooldownMinutes: 10, completedTaskCalendarAction: "hide");
-        var calendar = await CreateCalendarAsync(db, connection.Id, "calendar-yandex-completed-hide", "PayPlanner Р·Р°РґР°С‡Рё");
+        var calendar = await CreateCalendarAsync(db, connection.Id, "calendar-yandex-completed-hide", "PayPlanner задачи");
         var task = await CreateTaskAsync(
             db,
             user.Id,
-            "РЎРєСЂС‹С‚СЊ РіРѕС‚РѕРІСѓСЋ Р·Р°РґР°С‡Сѓ",
+            "Скрыть готовую задачу",
             new DateTime(2026, 6, 5, 9, 0, 0));
         task.Status = "done";
         db.YandexCalendarTaskLinks.Add(new YandexCalendarTaskLink
@@ -1378,7 +1378,7 @@ END:VCALENDAR
         {
             if (request.Content is null)
             {
-                return "PayPlanner Р·Р°РґР°С‡Рё";
+                return "PayPlanner задачи";
             }
 
             var body = request.Content.ReadAsStringAsync().GetAwaiter().GetResult();
@@ -1386,11 +1386,11 @@ END:VCALENDAR
             {
                 var document = XDocument.Parse(body);
                 XNamespace dav = "DAV:";
-                return document.Descendants(dav + "displayname").FirstOrDefault()?.Value ?? "PayPlanner Р·Р°РґР°С‡Рё";
+                return document.Descendants(dav + "displayname").FirstOrDefault()?.Value ?? "PayPlanner задачи";
             }
             catch
             {
-                return "PayPlanner Р·Р°РґР°С‡Рё";
+                return "PayPlanner задачи";
             }
         }
 
