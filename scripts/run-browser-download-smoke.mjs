@@ -98,7 +98,15 @@ async function main() {
     const popupPromise = page.waitForEvent('popup');
     await page.locator('#new-tab').click();
     const popup = await popupPromise;
-    await popup.waitForLoadState('domcontentloaded');
+    // The popup event can be emitted for Chromium's temporary "Loading …" page
+    // before navigation to the requested URL has actually started. Waiting only
+    // for domcontentloaded is therefore racy because that temporary document is
+    // already loaded. Anchor the check to the final URL and document instead.
+    await popup.waitForURL(`${origin}/popup`);
+    await popup.waitForFunction(
+      (expectedTitle) => document.readyState !== 'loading' && document.title === expectedTitle,
+      'PayPlanner popup smoke',
+    );
     assert.equal(await popup.title(), 'PayPlanner popup smoke');
     assert.equal(await popup.evaluate(() => window.opener === null), true);
 
