@@ -419,6 +419,16 @@ class AuthApiService {
     return !!readToken();
   }
 
+  /** Просит сервер отозвать JWT на всех устройствах до удаления локального токена. */
+  public async revokeSessions(): Promise<void> {
+    if (!readToken()) {
+      return;
+    }
+
+    await this.request<void>('/auth/logout', { method: 'POST' });
+  }
+
+  /** Удаляет только локальную копию токена; сетевой отзыв выполняется отдельно. */
   public logout(): void {
     clearToken();
   }

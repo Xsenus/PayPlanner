@@ -57,4 +57,31 @@ describe('authService', () => {
     expect(localStorage.getItem('auth_token')).toBe(renewedToken);
     expect(localStorage.getItem('pp.jwt')).toBe(renewedToken);
   });
+
+  it('revokes server sessions with the current token before local logout', async () => {
+    localStorage.setItem('pp_token', 'active-token');
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await authService.revokeSessions();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0][0])).toContain('/auth/logout');
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('POST');
+    expect((fetchMock.mock.calls[0][1]?.headers as Record<string, string>).Authorization)
+      .toBe('Bearer active-token');
+    expect(localStorage.getItem('pp_token')).toBe('active-token');
+
+    authService.logout();
+    expect(localStorage.getItem('pp_token')).toBeNull();
+  });
+
+  it('does not call logout endpoint without a local session', async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await authService.revokeSessions();
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });

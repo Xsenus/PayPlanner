@@ -31,7 +31,7 @@ public class BatchOperationAuditCoverageTests
             .OrderBy(item => item, StringComparer.Ordinal)
             .ToList();
 
-        Assert.Equal(12, operations.Count);
+        Assert.Equal(13, operations.Count);
         foreach (var operation in operations)
         {
             Assert.Contains(operation, document, StringComparison.Ordinal);

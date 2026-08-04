@@ -9363,6 +9363,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<int?>("ApprovedByUserId")
                         .HasColumnType("integer");
 
+                    b.Property<int>("AuthTokenVersion")
+                        .HasColumnType("integer");
+
                     b.Property<DateTime>("CreatedAt")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp without time zone")

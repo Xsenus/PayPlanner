@@ -38,6 +38,11 @@ public class User
     public DateTime? LastActivityAt { get; set; }
     public DateTime? LastLoginAt { get; set; }
     public DateTime? LastLogoutAt { get; set; }
+    /// <summary>
+    /// Версия серверной сессии. Увеличение значения немедленно отзывает все JWT,
+    /// выпущенные пользователю с предыдущей версией.
+    /// </summary>
+    public int AuthTokenVersion { get; set; }
     public string? LastActivityAction { get; set; }
     public string? LastActivitySection { get; set; }
     public string? LastActivityIpAddress { get; set; }

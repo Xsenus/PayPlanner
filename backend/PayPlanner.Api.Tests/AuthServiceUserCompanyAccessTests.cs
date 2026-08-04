@@ -246,7 +246,7 @@ public class AuthServiceUserCompanyAccessTests
         var user = await CreateUserAsync(db, roleId, "session-refresh@example.com");
         var service = CreateService(db);
 
-        var response = await service.RefreshSessionAsync(user.Id);
+        var response = await service.RefreshSessionAsync(user.Id, user.AuthTokenVersion);
 
         Assert.NotNull(response);
         Assert.Equal(user.Id, response!.User.Id);
@@ -254,6 +254,9 @@ public class AuthServiceUserCompanyAccessTests
 
         var jwt = new JwtSecurityTokenHandler().ReadJwtToken(response.Token);
         Assert.Equal(user.Id.ToString(), jwt.Claims.Single(claim => claim.Type == ClaimTypes.NameIdentifier).Value);
+        Assert.Equal(
+            user.AuthTokenVersion.ToString(),
+            jwt.Claims.Single(claim => claim.Type == AuthSessionClaims.TokenVersionClaimType).Value);
         Assert.True(jwt.ValidTo > DateTime.UtcNow.AddDays(6));
     }
 

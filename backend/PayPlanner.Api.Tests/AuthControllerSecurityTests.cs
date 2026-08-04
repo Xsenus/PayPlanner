@@ -1,6 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using System.Data.Common;
 using System.Reflection;
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -38,6 +39,7 @@ public sealed class AuthControllerSecurityTests
         var login = Assert.IsAssignableFrom<MethodInfo>(typeof(AuthController).GetMethod(nameof(AuthController.Login)));
         var register = Assert.IsAssignableFrom<MethodInfo>(typeof(AuthController).GetMethod(nameof(AuthController.Register)));
         var refresh = Assert.IsAssignableFrom<MethodInfo>(typeof(AuthController).GetMethod(nameof(AuthController.RefreshSession)));
+        var logout = Assert.IsAssignableFrom<MethodInfo>(typeof(AuthController).GetMethod(nameof(AuthController.Logout)));
         var me = Assert.IsAssignableFrom<MethodInfo>(typeof(AuthController).GetMethod(nameof(AuthController.Me)));
 
         Assert.NotNull(login.GetCustomAttribute<AllowAnonymousAttribute>());
@@ -45,6 +47,7 @@ public sealed class AuthControllerSecurityTests
         Assert.NotNull(register.GetCustomAttribute<AllowAnonymousAttribute>());
         Assert.Equal(AuthRateLimitPolicies.RegisterPolicy, register.GetCustomAttribute<EnableRateLimitingAttribute>()?.PolicyName);
         Assert.NotNull(refresh.GetCustomAttribute<AuthorizeAttribute>());
+        Assert.NotNull(logout.GetCustomAttribute<AuthorizeAttribute>());
         Assert.NotNull(me.GetCustomAttribute<AuthorizeAttribute>());
 
         AssertInvalid(new LoginRequest { Email = "не-email", Password = string.Empty });
@@ -202,6 +205,58 @@ public sealed class AuthControllerSecurityTests
     }
 
     [Fact]
+    public async Task RefreshRejectsRevokedTokenVersionBeforeIssuingNewJwt()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var user = await fixture.AddUserAsync("refresh@example.com", "Надёжный пароль", true, true);
+        user.AuthTokenVersion = 2;
+        await fixture.Db.SaveChangesAsync();
+        fixture.Recorder.Commands.Clear();
+
+        var response = await fixture.Service.RefreshSessionAsync(
+            user.Id,
+            tokenVersion: 1,
+            CancellationToken.None);
+
+        Assert.Null(response);
+        Assert.Single(fixture.Recorder.Commands);
+        Assert.Contains("AuthTokenVersion", fixture.Recorder.Commands[0], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task LogoutAtomicallyRevokesAllJwtAndIsIdempotent()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var user = await fixture.AddUserAsync("logout@example.com", "Надёжный пароль", true, true);
+        fixture.Recorder.Commands.Clear();
+
+        Assert.True(await fixture.Service.RevokeSessionsAsync(user.Id, 0, CancellationToken.None));
+        Assert.False(await fixture.Service.RevokeSessionsAsync(user.Id, 0, CancellationToken.None));
+
+        Assert.Equal(2, fixture.Recorder.Commands.Count);
+        Assert.All(
+            fixture.Recorder.Commands,
+            sql => Assert.Contains("UPDATE", sql, StringComparison.OrdinalIgnoreCase));
+        fixture.Db.ChangeTracker.Clear();
+        var stored = await fixture.Db.Users.AsNoTracking().SingleAsync(item => item.Id == user.Id);
+        Assert.Equal(1, stored.AuthTokenVersion);
+        Assert.NotNull(stored.LastLogoutAt);
+        Assert.Equal("logout", stored.LastActivityAction);
+        Assert.Equal("auth", stored.LastActivitySection);
+    }
+
+    [Fact]
+    public async Task LogoutControllerReturnsNoContentAndRejectsRepeatedVersion()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var user = await fixture.AddUserAsync("controller-logout@example.com", "Надёжный пароль", true, true);
+        var controller = fixture.CreateController(user.Id, tokenVersion: 0);
+
+        Assert.IsType<NoContentResult>(await controller.Logout(CancellationToken.None));
+        Assert.IsType<UnauthorizedResult>(await controller.Logout(CancellationToken.None));
+    }
+
+    [Fact]
     public async Task DisabledRegistrationIsRejectedBeforeDatabaseQuery()
     {
         await using var fixture = await Fixture.CreateAsync(registrationEnabled: false);
@@ -335,8 +390,20 @@ public sealed class AuthControllerSecurityTests
                 CancellationToken.None);
             Assert.NotNull(login);
             Assert.Equal(user.Id, login!.User.Id);
+            Assert.Equal(
+                "0",
+                new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler()
+                    .ReadJwtToken(login.Token)
+                    .Claims
+                    .Single(claim => claim.Type == AuthSessionClaims.TokenVersionClaimType)
+                    .Value);
+            Assert.True(await service.RevokeSessionsAsync(user.Id, 0, CancellationToken.None));
+            Assert.Null(await service.RefreshSessionAsync(user.Id, 0, CancellationToken.None));
             db.ChangeTracker.Clear();
-            Assert.NotNull((await db.Users.AsNoTracking().SingleAsync(item => item.Id == user.Id)).LastLoginAt);
+            var stored = await db.Users.AsNoTracking().SingleAsync(item => item.Id == user.Id);
+            Assert.NotNull(stored.LastLoginAt);
+            Assert.NotNull(stored.LastLogoutAt);
+            Assert.Equal(1, stored.AuthTokenVersion);
         }
         finally
         {
@@ -465,12 +532,21 @@ public sealed class AuthControllerSecurityTests
             return user;
         }
 
-        public AuthController CreateController()
+        public AuthController CreateController(int? userId = null, int tokenVersion = 0)
         {
             var httpContext = new DefaultHttpContext
             {
                 RequestServices = _mvcServices,
             };
+            if (userId.HasValue)
+            {
+                httpContext.User = new ClaimsPrincipal(new ClaimsIdentity(
+                [
+                    new Claim(ClaimTypes.NameIdentifier, userId.Value.ToString()),
+                    AuthSessionClaims.CreateTokenVersionClaim(tokenVersion),
+                ],
+                authenticationType: "test"));
+            }
             return new AuthController(Service)
             {
                 ControllerContext = new ControllerContext { HttpContext = httpContext },

@@ -75,7 +75,8 @@ public partial class AuthService
             new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
             new Claim(ClaimTypes.Email, user.Email),
             new Claim(ClaimTypes.Name, user.FullName),
-            new Claim(ClaimTypes.Role, user.Role?.Name ?? "user")
+            new Claim(ClaimTypes.Role, user.Role?.Name ?? "user"),
+            AuthSessionClaims.CreateTokenVersionClaim(user.AuthTokenVersion)
         };
 
         var token = new JwtSecurityToken(
@@ -699,14 +700,20 @@ public partial class AuthService
         };
     }
 
-    /// <summary>Перевыпускает JWT после повторной проверки состояния пользователя.</summary>
+    /// <summary>
+    /// Перевыпускает JWT после повторной проверки состояния пользователя и версии
+    /// исходной сессии. Уже отозванный токен не может создать новую сессию.
+    /// </summary>
     public async Task<LoginResponse?> RefreshSessionAsync(
         int userId,
+        int tokenVersion,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var user = await QueryUsersWithRelations()
-            .FirstOrDefaultAsync(item => item.Id == userId, cancellationToken);
+            .FirstOrDefaultAsync(
+                item => item.Id == userId && item.AuthTokenVersion == tokenVersion,
+                cancellationToken);
         if (user is null)
         {
             return null;
@@ -727,6 +734,32 @@ public partial class AuthService
             Token = GenerateJwtToken(user),
             User = MapToDto(user)
         };
+    }
+
+    /// <summary>
+    /// Атомарно отзывает все JWT пользователя, увеличивая версию серверной сессии.
+    /// Условие по исходной версии делает повторный или конкурентный logout идемпотентным.
+    /// </summary>
+    public async Task<bool> RevokeSessionsAsync(
+        int userId,
+        int tokenVersion,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var now = DateTime.UtcNow;
+        var updated = await _context.Users
+            .Where(item => item.Id == userId && item.AuthTokenVersion == tokenVersion)
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(item => item.AuthTokenVersion, item => item.AuthTokenVersion + 1)
+                    .SetProperty(item => item.LastLogoutAt, now)
+                    .SetProperty(item => item.LastActivityAt, now)
+                    .SetProperty(item => item.LastActivityAction, "logout")
+                    .SetProperty(item => item.LastActivitySection, "auth")
+                    .SetProperty(item => item.UpdatedAt, now),
+                cancellationToken);
+
+        return updated == 1;
     }
 
     /// <summary>

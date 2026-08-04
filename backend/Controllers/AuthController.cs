@@ -65,14 +65,14 @@ public class AuthController : ControllerBase
     public async Task<IActionResult> RefreshSession(CancellationToken ct)
     {
         var id = GetUserId(User);
-        if (id is null)
+        if (id is null || !AuthSessionClaims.TryGetTokenVersion(User, out var tokenVersion))
         {
             return Unauthorized();
         }
 
         try
         {
-            var response = await _svc.RefreshSessionAsync(id.Value, ct);
+            var response = await _svc.RefreshSessionAsync(id.Value, tokenVersion, ct);
             return response is null ? Unauthorized() : Ok(response);
         }
         catch (InvalidOperationException ex) when (ex.Message == "PendingApproval")
@@ -91,6 +91,24 @@ public class AuthController : ControllerBase
                 statusCode: 403
             );
         }
+    }
+
+    /// <summary>
+    /// Завершает все текущие сессии пользователя. Сервер атомарно меняет версию
+    /// JWT, поэтому сохранённые на других устройствах токены сразу перестают работать.
+    /// </summary>
+    [HttpPost("logout")]
+    [Authorize]
+    public async Task<IActionResult> Logout(CancellationToken ct)
+    {
+        var id = GetUserId(User);
+        if (id is null || !AuthSessionClaims.TryGetTokenVersion(User, out var tokenVersion))
+        {
+            return Unauthorized();
+        }
+
+        var revoked = await _svc.RevokeSessionsAsync(id.Value, tokenVersion, ct);
+        return revoked ? NoContent() : Unauthorized();
     }
 
     /// <summary>

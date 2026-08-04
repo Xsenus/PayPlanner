@@ -110,10 +110,17 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const signOut = async () => {
-    logAuthEvent('logout', `Выход пользователя ${user?.email ?? 'unknown'}`, 'Info');
-    await clearOfflineCalendarCache();
-    authService.logout();
-    setUser(null);
+    try {
+      await authService.revokeSessions();
+    } catch (error) {
+      if (import.meta.env.DEV) {
+        console.warn('Не удалось отозвать серверные сессии перед выходом', error);
+      }
+    } finally {
+      await clearOfflineCalendarCache();
+      authService.logout();
+      setUser(null);
+    }
   };
 
   const isAdmin = () => (user?.role?.name ?? '').toLowerCase() === 'admin';

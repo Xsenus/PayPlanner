@@ -28,6 +28,11 @@ public sealed class CurrentUserClaimsTransformation : IClaimsTransformation
             return principal;
         }
 
+        if (!AuthSessionClaims.TryGetTokenVersion(principal, out var tokenVersion))
+        {
+            return CreateAnonymousPrincipal();
+        }
+
         await using var db = await _dbContextFactory.CreateDbContextAsync();
         var snapshot = await db.Users
             .AsNoTracking()
@@ -38,17 +43,21 @@ public sealed class CurrentUserClaimsTransformation : IClaimsTransformation
                 user.FullName,
                 user.IsActive,
                 user.IsApproved,
+                user.AuthTokenVersion,
                 RoleName = user.Role != null ? user.Role.Name : "user",
             })
             .FirstOrDefaultAsync();
 
-        if (snapshot is null || !snapshot.IsActive || !snapshot.IsApproved)
+        if (snapshot is null
+            || !snapshot.IsActive
+            || !snapshot.IsApproved
+            || snapshot.AuthTokenVersion != tokenVersion)
         {
             // A signed JWT must stop granting access as soon as the employee is
             // removed, disabled or loses approval. Returning an anonymous
             // principal signals the JWT validation hook to reject the token with
             // 401 instead of trusting the stale claims until it expires.
-            return new ClaimsPrincipal(new ClaimsIdentity());
+            return CreateAnonymousPrincipal();
         }
 
         ReplaceSingleClaim(identity, ClaimTypes.Email, snapshot.Email);
@@ -57,6 +66,10 @@ public sealed class CurrentUserClaimsTransformation : IClaimsTransformation
 
         return principal;
     }
+
+    /// <summary>Создаёт анонимный principal, который JWT middleware преобразует в 401.</summary>
+    private static ClaimsPrincipal CreateAnonymousPrincipal()
+        => new(new ClaimsIdentity());
 
     private static void ReplaceSingleClaim(ClaimsIdentity identity, string claimType, string? value)
     {

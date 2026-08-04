@@ -9146,6 +9146,9 @@ namespace PayPlanner.Api.Migrations
                     b.Property<int?>("ApprovedByUserId")
                         .HasColumnType("INTEGER");
 
+                    b.Property<int>("AuthTokenVersion")
+                        .HasColumnType("INTEGER");
+
                     b.Property<DateTime>("CreatedAt")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT")
