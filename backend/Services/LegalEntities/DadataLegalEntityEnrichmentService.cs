@@ -252,16 +252,17 @@ namespace PayPlanner.Api.Services.LegalEntities
         {
             const int maxAttempts = 3;
             var attempt = 0;
-            HttpResponseMessage? resp = null;
 
             while (true)
             {
                 attempt++;
-                resp = await _http.SendAsync(req.Clone(), ct);
+                using var attemptRequest = await req.CloneAsync(ct);
+                var resp = await _http.SendAsync(attemptRequest, ct);
                 if (IsTransient(resp) && attempt < maxAttempts)
                 {
                     var delayMs = 200 * attempt * attempt; // квадратичная пауза
                     _logger.LogDebug("Retry {Attempt} for {Url}, status {Code}", attempt, req.RequestUri, (int)resp.StatusCode);
+                    resp.Dispose();
                     await Task.Delay(delayMs, ct);
                     continue;
                 }
@@ -806,27 +807,35 @@ namespace PayPlanner.Api.Services.LegalEntities
 
     internal static class HttpRequestMessageExtensions
     {
-        private static string ReadAsString(this StringContent sc) =>
-            sc.ReadAsStringAsync().GetAwaiter().GetResult();
-
-        public static HttpRequestMessage Clone(this HttpRequestMessage req)
+        public static async Task<HttpRequestMessage> CloneAsync(
+            this HttpRequestMessage req,
+            CancellationToken cancellationToken)
         {
-            var clone = new HttpRequestMessage(req.Method, req.RequestUri);
-
-            // Content
-            if (req.Content is StringContent sc)
-                clone.Content = new StringContent(sc.ReadAsString(), Encoding.UTF8, sc.Headers.ContentType?.MediaType);
-            else if (req.Content != null)
+            var clone = new HttpRequestMessage(req.Method, req.RequestUri)
             {
-                // универсальная копия
-                var bytes = req.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult();
+                Version = req.Version,
+                VersionPolicy = req.VersionPolicy,
+            };
+
+            if (req.Content is not null)
+            {
+                var bytes = await req.Content.ReadAsByteArrayAsync(cancellationToken);
                 clone.Content = new ByteArrayContent(bytes);
-                foreach (var h in req.Content.Headers) clone.Content.Headers.TryAddWithoutValidation(h.Key, h.Value);
+                foreach (var header in req.Content.Headers)
+                {
+                    clone.Content.Headers.TryAddWithoutValidation(header.Key, header.Value);
+                }
             }
 
-            // Headers
-            foreach (var h in req.Headers) clone.Headers.TryAddWithoutValidation(h.Key, h.Value);
-            foreach (var prop in req.Options) clone.Options.Set(new(prop.Key), prop.Value);
+            foreach (var header in req.Headers)
+            {
+                clone.Headers.TryAddWithoutValidation(header.Key, header.Value);
+            }
+
+            foreach (var option in req.Options)
+            {
+                clone.Options.Set(new(option.Key), option.Value);
+            }
 
             return clone;
         }

@@ -59,6 +59,38 @@ public sealed class DadataLegalEntityEnrichmentServiceTests
     }
 
     [Fact]
+    public async Task SuggestAsync_DisposesTransientResponsesBeforeRetrying()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var attempts = 0;
+        var disposedContents = 0;
+        var handler = new RecordingDadataHandler(_ =>
+        {
+            attempts++;
+            var statusCode = attempts < 3 ? HttpStatusCode.ServiceUnavailable : HttpStatusCode.OK;
+            var json = statusCode == HttpStatusCode.OK
+                ? """{"suggestions":[]}"""
+                : """{"message":"temporary error"}""";
+            return new HttpResponseMessage(statusCode)
+            {
+                Content = new TrackingStringContent(json, () => disposedContents++),
+            };
+        });
+        var service = CreateService(scope.Db, handler);
+
+        var suggestions = await service.SuggestAsync("ромашка", null, 5, CancellationToken.None);
+
+        Assert.Empty(suggestions);
+        Assert.Equal(3, attempts);
+        Assert.Equal(3, disposedContents);
+        foreach (var body in handler.Bodies)
+        {
+            using var document = JsonDocument.Parse(body);
+            Assert.Equal("ромашка", document.RootElement.GetProperty("query").GetString());
+        }
+    }
+
+    [Fact]
     public async Task CleanAddressAsync_ReturnsNullWhenDadataTimesOut()
     {
         await using var scope = await CreateDbScopeAsync();
@@ -336,6 +368,20 @@ public sealed class DadataLegalEntityEnrichmentServiceTests
             Requests.Add(request);
             Bodies.Add(request.Content?.ReadAsStringAsync(cancellationToken).GetAwaiter().GetResult() ?? string.Empty);
             return Task.FromResult(handler(request));
+        }
+    }
+
+    private sealed class TrackingStringContent(string content, Action onDispose)
+        : StringContent(content, Encoding.UTF8, "application/json")
+    {
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                onDispose();
+            }
+
+            base.Dispose(disposing);
         }
     }
 
