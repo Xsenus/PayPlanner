@@ -6962,7 +6962,7 @@ function TaskTimelineCalendar({
     && currentTimeTop <= timelineHeight;
 
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+    <section className="min-w-0 rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div className="flex flex-col gap-4 border-b border-slate-100 px-5 py-4 xl:flex-row xl:items-start xl:justify-between">
         <div className="min-w-0">
           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
@@ -7446,8 +7446,8 @@ function TaskCalendar({
       {loading ? (
         <div className="px-6 py-12 text-center text-sm text-slate-500">Загружаем календарь задач...</div>
       ) : (
-        <div className="grid gap-4 p-4 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
-          <div className="overflow-x-auto">
+        <div data-testid="task-calendar-layout" className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4 p-3 sm:p-4 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
+          <div data-testid="task-calendar-grid-scroll" className="min-w-0 max-w-full overflow-x-auto">
             <div data-testid="task-calendar-mobile-strip" className="mb-3 md:hidden">
               <div className="flex gap-2 overflow-x-auto pb-1">
                 {visibleDays.map((day) => {
@@ -7652,7 +7652,7 @@ function TaskCalendar({
             </div>
           </div>
 
-          <aside className="rounded-xl border border-slate-200 bg-slate-50/70">
+          <aside className="min-w-0 rounded-xl border border-slate-200 bg-slate-50/70">
             <div className="border-b border-slate-200 px-4 py-4">
               <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Загрузка за день</div>
               <div className="mt-1 flex flex-wrap items-center justify-between gap-2">

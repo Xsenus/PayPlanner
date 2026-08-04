@@ -4741,6 +4741,10 @@ describe('TaskJournal', () => {
     const calendarTask = await screen.findByTestId('task-calendar-task-101');
     expect(screen.getAllByText('Тестовая задача').length).toBeGreaterThan(0);
     expect(screen.getByTestId('task-calendar-mobile-strip')).toBeTruthy();
+    expect(screen.getByTestId('task-calendar-layout').className).toContain('grid-cols-[minmax(0,1fr)]');
+    expect(screen.getByTestId('task-calendar-layout').className).toContain('min-w-0');
+    expect(screen.getByTestId('task-calendar-grid-scroll').className).toContain('max-w-full');
+    expect(screen.getByTestId('task-calendar-grid-scroll').className).toContain('overflow-x-auto');
     expect(calendarTask.getAttribute('title')).toContain('Статус: Новая');
     expect(calendarTask.getAttribute('title')).toContain('Исполнитель: Администратор');
     expect(calendarTask.getAttribute('title')).toContain('Поручил: Постановщик');
