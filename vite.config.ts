@@ -43,7 +43,7 @@ function splitVendorChunk(id: string): string | undefined {
   return undefined;
 }
 
-function isKnownSignalRAnnotationWarning(warning: unknown): boolean {
+export function isKnownSignalRAnnotationWarning(warning: unknown): boolean {
   if (!warning || typeof warning !== 'object') {
     return false;
   }
@@ -54,7 +54,10 @@ function isKnownSignalRAnnotationWarning(warning: unknown): boolean {
   return (
     rollupWarning.code === 'INVALID_ANNOTATION' &&
     normalizedId.includes('/@microsoft/signalr/dist/esm/Utils.js') &&
-    Boolean(rollupWarning.message?.includes('contains an annotation that Rollup cannot interpret'))
+    Boolean(
+      rollupWarning.message?.includes('contains an annotation') &&
+      rollupWarning.message.includes('cannot interpret'),
+    )
   );
 }
 

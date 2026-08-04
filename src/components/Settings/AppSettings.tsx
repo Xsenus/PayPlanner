@@ -1,6 +1,6 @@
 import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemSelect } from '../ui/SystemSelect';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { Bell, CalendarDays, ClipboardList, Cloud, Database, Flag, History, KeyRound, Save, Scale, ShieldCheck, SlidersHorizontal, Users } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { apiService } from '../../services/api';
@@ -12,7 +12,6 @@ import { useUserTimeZone } from '../../hooks/useUserTimeZone';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { formatDateTimeInTimeZone } from '../../utils/timeZoneDate';
 import { TablePagination } from '../ui/TablePagination';
-import { AuthProviderSettings } from './AuthProviderSettings';
 import { BankDirectorySettings } from './BankDirectorySettings';
 import { DatabaseMaintenanceSettings } from './DatabaseMaintenanceSettings';
 import { CaseDocumentTemplateSettings } from './CaseDocumentTemplateSettings';
@@ -22,12 +21,9 @@ import { CourtSyncJournalSettings } from './CourtSyncJournalSettings';
 import { CourtSyncSchedulerSettings } from './CourtSyncSchedulerSettings';
 import { FeatureFlagSettings } from './FeatureFlagSettings';
 import { AppVersionSettings } from './AppVersionSettings';
-import { InvoiceDocumentTemplateSettings } from './InvoiceDocumentTemplateSettings';
 import { MainCompanySettings } from './MainCompanySettings';
 import { MoneyAccountSettings } from './MoneyAccountSettings';
-import { NotificationSettings } from './NotificationSettings';
 import { ProceduralDeadlineCalendarSettings } from './ProceduralDeadlineCalendarSettings';
-import { SpreadsheetImportSettings } from './SpreadsheetImportSettings';
 import { TaskJournalSettings } from './TaskJournalSettings';
 import { UserOnlineSettings } from './UserOnlineSettings';
 import { UserMergeSettings } from './UserMergeSettings';
@@ -45,6 +41,19 @@ import type {
   InvoiceRulesSettingsDto,
   LegacyAddressMigrationResult,
 } from '../../services/api';
+
+const AuthProviderSettings = lazy(() => import('./AuthProviderSettings')
+  .then((module) => ({ default: module.AuthProviderSettings })));
+const InvoiceDocumentTemplateSettings = lazy(() => import('./InvoiceDocumentTemplateSettings')
+  .then((module) => ({ default: module.InvoiceDocumentTemplateSettings })));
+const NotificationSettings = lazy(() => import('./NotificationSettings')
+  .then((module) => ({ default: module.NotificationSettings })));
+const SpreadsheetImportSettings = lazy(() => import('./SpreadsheetImportSettings')
+  .then((module) => ({ default: module.SpreadsheetImportSettings })));
+
+function SettingsPanelLoading() {
+  return <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-500">Загрузка настроек…</div>;
+}
 
 type SettingsSection =
   | 'companies'
@@ -1223,7 +1232,11 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
                   </div>
                 )}
 
-                {activeFinancialRulesSubsection === 'invoices' && <InvoiceDocumentTemplateSettings />}
+                {activeFinancialRulesSubsection === 'invoices' && (
+                  <Suspense fallback={<SettingsPanelLoading />}>
+                    <InvoiceDocumentTemplateSettings />
+                  </Suspense>
+                )}
 
                 {activeFinancialRulesSubsection === 'case-documents' && (
                   <div className="space-y-6">
@@ -1389,14 +1402,20 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
             )}
 
             {activeSection === 'notifications' && canViewNotificationSettings && (
-              <NotificationSettings canEdit={canEditNotificationSettings} />
+              <Suspense fallback={<SettingsPanelLoading />}>
+                <NotificationSettings canEdit={canEditNotificationSettings} />
+              </Suspense>
             )}
 
             {activeSection === 'users-online' && !restrictedSettingsMode && <UserOnlineSettings />}
 
             {activeSection === 'app-releases' && !restrictedSettingsMode && <AppVersionSettings />}
 
-            {activeSection === 'auth-providers' && !restrictedSettingsMode && <AuthProviderSettings />}
+            {activeSection === 'auth-providers' && !restrictedSettingsMode && (
+              <Suspense fallback={<SettingsPanelLoading />}>
+                <AuthProviderSettings />
+              </Suspense>
+            )}
 
             {activeSection === 'yandex-disk' && canViewYandexDiskSettings && <YandexDisk embedded />}
 
@@ -1404,7 +1423,11 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
 
             {activeSection === 'db-maintenance' && canViewMaintenanceSettings && <DatabaseMaintenanceSettings />}
 
-            {activeSection === 'db-import' && !restrictedSettingsMode && <SpreadsheetImportSettings />}
+            {activeSection === 'db-import' && !restrictedSettingsMode && (
+              <Suspense fallback={<SettingsPanelLoading />}>
+                <SpreadsheetImportSettings />
+              </Suspense>
+            )}
 
             {SHOW_LEGACY_SQLITE_IMPORT && activeSection === 'db-import' && (
               <div className="space-y-6">
