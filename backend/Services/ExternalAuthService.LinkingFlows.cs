@@ -17,6 +17,7 @@ public sealed partial class ExternalAuthService
         HttpRequest request,
         CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var normalizedProvider = TechnicalEmailHelper.NormalizeProvider(provider);
         if (normalizedProvider is not ("google" or "vk" or "yandex"))
         {
@@ -65,6 +66,7 @@ public sealed partial class ExternalAuthService
         string state,
         CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var normalizedState = NormalizeRequired(state, "Invalid state");
         var authRequest = await _context.ExternalAuthRequests
             .OrderByDescending(x => x.CreatedAt)
@@ -89,7 +91,7 @@ public sealed partial class ExternalAuthService
                 Status = authRequest.Status,
                 Completed = false,
                 Provider = authRequest.Provider,
-                Detail = authRequest.Error,
+                Detail = BuildPublicAuthErrorDetail(authRequest.Status),
                 ReturnUrl = authRequest.ReturnUrl
             };
         }
@@ -118,9 +120,10 @@ public sealed partial class ExternalAuthService
 
         if (string.Equals(authRequest.Intent, "link", StringComparison.Ordinal))
         {
-            authRequest.ConsumedAt = DateTime.UtcNow;
-            authRequest.Status = "consumed";
-            await _context.SaveChangesAsync(cancellationToken);
+            if (!await TryConsumeExternalAuthRequestAsync(authRequest, cancellationToken))
+            {
+                return BuildConsumedStatus(authRequest.Provider, authRequest.ReturnUrl);
+            }
 
             return new ExternalAuthStatusResponseDto
             {
@@ -132,7 +135,7 @@ public sealed partial class ExternalAuthService
             };
         }
 
-        return await GetExternalStatusAsync(state, cancellationToken);
+        return await CompleteExternalSignInStatusAsync(authRequest, cancellationToken);
     }
 
     public async Task<string> HandleExternalCallbackForClientAsync(
@@ -145,6 +148,7 @@ public sealed partial class ExternalAuthService
         HttpRequest request,
         CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var normalizedProvider = TechnicalEmailHelper.NormalizeProvider(provider);
         if (normalizedProvider is not ("google" or "vk" or "yandex"))
         {
@@ -246,14 +250,14 @@ public sealed partial class ExternalAuthService
 
             return BuildExternalAuthPopupHtml(true, successMessage, redirectPath);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogWarning(ex, "External auth callback failed for {Provider}", normalizedProvider);
             authRequest.Status = "failed";
-            authRequest.Error = ex.Message;
+            authRequest.Error = "Не удалось завершить внешнюю авторизацию.";
             authRequest.CompletedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync(cancellationToken);
-            return BuildExternalAuthPopupHtml(false, ex.Message, redirectPath);
+            return BuildExternalAuthPopupHtml(false, "Не удалось завершить авторизацию. Повторите попытку.", redirectPath);
         }
     }
 
@@ -262,6 +266,7 @@ public sealed partial class ExternalAuthService
         int? currentUserId,
         CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var telegramBot = await ResolveTelegramAuthBotAsync(cancellationToken);
         var botToken = telegramBot?.BotToken
                        ?? await GetSettingOrConfigAsync(TelegramBotTokenKey, "Auth:Telegram:BotToken", cancellationToken);
@@ -314,6 +319,7 @@ public sealed partial class ExternalAuthService
         HttpRequest request,
         CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var telegramBot = await ResolveTelegramAuthBotAsync(cancellationToken);
         if (!IsTelegramReady(telegramBot))
         {
@@ -357,6 +363,7 @@ public sealed partial class ExternalAuthService
         string state,
         CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var normalizedState = NormalizeRequired(state, "Invalid state");
         var authRequest = await _context.TelegramAuthRequests
             .OrderByDescending(x => x.CreatedAt)
@@ -381,7 +388,7 @@ public sealed partial class ExternalAuthService
                 Status = authRequest.Status,
                 Completed = false,
                 Provider = "telegram",
-                Detail = authRequest.Error
+                Detail = BuildPublicAuthErrorDetail(authRequest.Status)
             };
         }
 
@@ -407,9 +414,10 @@ public sealed partial class ExternalAuthService
 
         if (string.Equals(authRequest.Intent, "link", StringComparison.Ordinal))
         {
-            authRequest.ConsumedAt = DateTime.UtcNow;
-            authRequest.Status = "consumed";
-            await _context.SaveChangesAsync(cancellationToken);
+            if (!await TryConsumeTelegramAuthRequestAsync(authRequest, cancellationToken))
+            {
+                return BuildConsumedStatus("telegram", null);
+            }
 
             return new ExternalAuthStatusResponseDto
             {
@@ -421,7 +429,7 @@ public sealed partial class ExternalAuthService
             };
         }
 
-        return await GetTelegramBotStatusAsync(state, cancellationToken);
+        return await CompleteTelegramSignInStatusAsync(authRequest, cancellationToken);
     }
 
     public async Task<bool> TryHandleTelegramBotAuthUpdateAsync(
@@ -537,6 +545,7 @@ public sealed partial class ExternalAuthService
         HttpRequest request,
         CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var secret = await GetSettingOrConfigAsync(TelegramWebhookSecretKey, "Auth:Telegram:WebhookSecret", cancellationToken);
         if (string.IsNullOrWhiteSpace(secret))
         {

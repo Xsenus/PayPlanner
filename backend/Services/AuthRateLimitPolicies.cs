@@ -12,8 +12,13 @@ public static class AuthRateLimitPolicies
 {
     public const string LoginPolicy = "auth-login";
     public const string RegisterPolicy = "auth-register";
+    public const string ExternalSettingsPolicy = "auth-external-settings";
+    public const string ExternalStartPolicy = "auth-external-start";
+    public const string ExternalStatusPolicy = "auth-external-status";
+    public const string ExternalCallbackPolicy = "auth-external-callback";
+    public const string TelegramWebhookPolicy = "auth-telegram-webhook";
 
-    /// <summary>Добавляет политики входа и самостоятельной регистрации.</summary>
+    /// <summary>Добавляет политики внутреннего входа, регистрации и внешней авторизации.</summary>
     public static void AddPolicies(RateLimiterOptions options)
     {
         options.AddPolicy(LoginPolicy, httpContext =>
@@ -33,6 +38,34 @@ public static class AuthRateLimitPolicies
                 {
                     PermitLimit = 5,
                     Window = TimeSpan.FromMinutes(10),
+                    QueueLimit = 0,
+                    AutoReplenishment = true,
+                }));
+        AddFixedWindowPolicy(options, ExternalSettingsPolicy, permitLimit: 60, TimeSpan.FromMinutes(1));
+        AddFixedWindowPolicy(options, ExternalStartPolicy, permitLimit: 10, TimeSpan.FromMinutes(1));
+        AddFixedWindowPolicy(options, ExternalStatusPolicy, permitLimit: 120, TimeSpan.FromMinutes(1));
+        AddFixedWindowPolicy(options, ExternalCallbackPolicy, permitLimit: 30, TimeSpan.FromMinutes(1));
+        AddFixedWindowPolicy(options, TelegramWebhookPolicy, permitLimit: 300, TimeSpan.FromMinutes(1));
+    }
+
+    /// <summary>
+    /// Регистрирует фиксированное окно с общей схемой разделения по внешнему IP.
+    /// Очередь намеренно отключена: при превышении лимита клиент сразу получает 429
+    /// и не удерживает соединение или память приложения.
+    /// </summary>
+    private static void AddFixedWindowPolicy(
+        RateLimiterOptions options,
+        string policyName,
+        int permitLimit,
+        TimeSpan window)
+    {
+        options.AddPolicy(policyName, httpContext =>
+            RateLimitPartition.GetFixedWindowLimiter(
+                httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = permitLimit,
+                    Window = window,
                     QueueLimit = 0,
                     AutoReplenishment = true,
                 }));

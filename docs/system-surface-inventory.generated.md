@@ -7,7 +7,7 @@
 
 - Разделов frontend: 49.
 - Backend-контроллеров: 64.
-- HTTP endpoints: 777; с найденной тестовой связью: 706.
+- HTTP endpoints: 777; с найденной тестовой связью: 714.
 - Реальных HTML-форм: 17; с найденной тестовой связью: 15.
 - Фоновых сервисов: 26; с найденной тестовой связью: 24.
 
@@ -145,7 +145,7 @@
 | DictionariesAdminController | backend/Controllers/DictionariesAdminController.cs | 74 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Dictionaries)] | да |
 | DictionariesReadController | backend/Controllers/DictionariesReadController.cs | 18 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Dictionaries)] | нет |
 | ElectronicSignaturesController | backend/Controllers/ElectronicSignaturesController.cs | 6 | [Authorize(Policy = "Admin")] | да |
-| ExternalAuthController | backend/Controllers/ExternalAuthController.cs | 8 | не задано | нет |
+| ExternalAuthController | backend/Controllers/ExternalAuthController.cs | 8 | не задано | да |
 | FeatureFlagsController | backend/Controllers/FeatureFlagsController.cs | 2 | не задано | да |
 | FormRequirementsController | backend/Controllers/FormRequirementsController.cs | 3 | [Authorize] | да |
 | GoogleCalendarController | backend/Controllers/GoogleCalendarController.cs | 8 | не задано | нет |
@@ -453,14 +453,14 @@
 | GET | api/electronic-signatures/financial-documents/{documentType}/{documentId:int} | ElectronicSignaturesController | GetHistory | backend/Controllers/ElectronicSignaturesController.cs:144 | [Authorize(Policy = "Admin")] | да |
 | POST | api/electronic-signatures/{publicId:guid}/cancel | ElectronicSignaturesController | Cancel | backend/Controllers/ElectronicSignaturesController.cs:161 | [Authorize(Policy = "Admin")] | да |
 | GET | api/electronic-signatures/{publicId:guid}/evidence-package | ElectronicSignaturesController | DownloadEvidencePackage | backend/Controllers/ElectronicSignaturesController.cs:182 | [Authorize(Policy = "Admin")] | да |
-| GET | api/auth/providers | ExternalAuthController | GetProviders | backend/Controllers/ExternalAuthController.cs:22 | публичный ([AllowAnonymous]) | нет |
-| POST | api/auth/external/start | ExternalAuthController | StartExternal | backend/Controllers/ExternalAuthController.cs:27 | публичный ([AllowAnonymous]) | нет |
-| GET | api/auth/external/status/{state} | ExternalAuthController | GetExternalStatus | backend/Controllers/ExternalAuthController.cs:49 | публичный ([AllowAnonymous]) | нет |
-| GET | api/auth/external/callback/{provider} | ExternalAuthController | ExternalCallback | backend/Controllers/ExternalAuthController.cs:67 | публичный ([AllowAnonymous]) | нет |
-| POST | api/auth/telegram/widget | ExternalAuthController | CompleteTelegramWidget | backend/Controllers/ExternalAuthController.cs:91 | публичный ([AllowAnonymous]) | нет |
-| POST | api/auth/telegram/bot/start | ExternalAuthController | StartTelegramBot | backend/Controllers/ExternalAuthController.cs:107 | публичный ([AllowAnonymous]) | нет |
-| GET | api/auth/telegram/bot/status/{state} | ExternalAuthController | GetTelegramBotStatus | backend/Controllers/ExternalAuthController.cs:123 | публичный ([AllowAnonymous]) | нет |
-| POST | api/auth/telegram/webhook | ExternalAuthController | TelegramWebhook | backend/Controllers/ExternalAuthController.cs:141 | публичный ([AllowAnonymous]) | нет |
+| GET | api/auth/providers | ExternalAuthController | GetProviders | backend/Controllers/ExternalAuthController.cs:29 | публичный ([AllowAnonymous]) | да |
+| POST | api/auth/external/start | ExternalAuthController | StartExternal | backend/Controllers/ExternalAuthController.cs:36 | публичный ([AllowAnonymous]) | да |
+| GET | api/auth/external/status/{state} | ExternalAuthController | GetExternalStatus | backend/Controllers/ExternalAuthController.cs:60 | публичный ([AllowAnonymous]) | да |
+| GET | api/auth/external/callback/{provider} | ExternalAuthController | ExternalCallback | backend/Controllers/ExternalAuthController.cs:82 | публичный ([AllowAnonymous]) | да |
+| POST | api/auth/telegram/widget | ExternalAuthController | CompleteTelegramWidget | backend/Controllers/ExternalAuthController.cs:108 | публичный ([AllowAnonymous]) | да |
+| POST | api/auth/telegram/bot/start | ExternalAuthController | StartTelegramBot | backend/Controllers/ExternalAuthController.cs:126 | публичный ([AllowAnonymous]) | да |
+| GET | api/auth/telegram/bot/status/{state} | ExternalAuthController | GetTelegramBotStatus | backend/Controllers/ExternalAuthController.cs:144 | публичный ([AllowAnonymous]) | да |
+| POST | api/auth/telegram/webhook | ExternalAuthController | TelegramWebhook | backend/Controllers/ExternalAuthController.cs:166 | публичный ([AllowAnonymous]) | да |
 | GET | api/features | FeatureFlagsController | Get | backend/Controllers/FeatureFlagsController.cs:25 | публичный ([AllowAnonymous]) | да |
 | GET | api/features/legal-integrations/diagnostics | FeatureFlagsController | GetLegalIntegrationDiagnostics | backend/Controllers/FeatureFlagsController.cs:32 | публичный ([AllowAnonymous]) | да |
 | GET | api/form-requirements | FormRequirementsController | Get | backend/Controllers/FormRequirementsController.cs:242 | [Authorize] | да |

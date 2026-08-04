@@ -21,18 +21,47 @@ public sealed partial class ExternalAuthService
 
     private async Task<ResolvedTelegramAuthBot?> ResolveTelegramAuthBotAsync(CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var notificationSender = await ResolveNotificationTelegramAuthSenderAsync(cancellationToken);
         if (notificationSender is not null)
         {
             return notificationSender;
         }
 
-        var enabled = await GetBooleanSettingOrConfigAsync(TelegramEnabledKey, "Auth:Telegram:Enabled", false, cancellationToken);
-        var botToken = await GetSettingOrConfigAsync(TelegramBotTokenKey, "Auth:Telegram:BotToken", cancellationToken) ?? string.Empty;
-        var botUsername = await GetSettingOrConfigAsync(TelegramBotUsernameKey, "Auth:Telegram:BotUsername", cancellationToken) ?? string.Empty;
-        var webhookSecret = await GetSettingOrConfigAsync(TelegramWebhookSecretKey, "Auth:Telegram:WebhookSecret", cancellationToken) ?? string.Empty;
-        var botInfoSyncedAt = ParseDateTime(await GetSettingOrConfigAsync(TelegramBotInfoSyncedAtKey, null, cancellationToken));
-        var webhookSyncedAt = ParseDateTime(await GetSettingOrConfigAsync(TelegramWebhookSyncedAtKey, null, cancellationToken));
+        var settings = await LoadSettingsSnapshotAsync(
+            [
+                TelegramEnabledKey,
+                TelegramBotTokenKey,
+                TelegramBotUsernameKey,
+                TelegramWebhookSecretKey,
+                TelegramBotInfoSyncedAtKey,
+                TelegramWebhookSyncedAtKey,
+            ],
+            cancellationToken);
+        return ResolveLegacyTelegramAuthBot(settings);
+    }
+
+    /// <summary>
+    /// Разрешает Telegram-бота с уже загруженным снимком legacy-настроек.
+    /// Это не допускает повторного чтения каждой настройки отдельным SQL-запросом.
+    /// </summary>
+    private async Task<ResolvedTelegramAuthBot?> ResolveTelegramAuthBotAsync(
+        IReadOnlyDictionary<string, string> settings,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return await ResolveNotificationTelegramAuthSenderAsync(cancellationToken)
+               ?? ResolveLegacyTelegramAuthBot(settings);
+    }
+
+    private ResolvedTelegramAuthBot ResolveLegacyTelegramAuthBot(IReadOnlyDictionary<string, string> settings)
+    {
+        var enabled = GetBooleanSettingOrConfig(settings, TelegramEnabledKey, "Auth:Telegram:Enabled", fallback: false);
+        var botToken = GetSettingOrConfig(settings, TelegramBotTokenKey, "Auth:Telegram:BotToken") ?? string.Empty;
+        var botUsername = GetSettingOrConfig(settings, TelegramBotUsernameKey, "Auth:Telegram:BotUsername") ?? string.Empty;
+        var webhookSecret = GetSettingOrConfig(settings, TelegramWebhookSecretKey, "Auth:Telegram:WebhookSecret") ?? string.Empty;
+        var botInfoSyncedAt = ParseDateTime(GetSettingOrConfig(settings, TelegramBotInfoSyncedAtKey, null));
+        var webhookSyncedAt = ParseDateTime(GetSettingOrConfig(settings, TelegramWebhookSyncedAtKey, null));
 
         return new ResolvedTelegramAuthBot(
             enabled,

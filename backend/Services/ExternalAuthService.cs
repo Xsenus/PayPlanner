@@ -45,6 +45,25 @@ public sealed partial class ExternalAuthService
     private const string TelegramWebhookSecretKey = "auth.telegram.webhookSecret";
     private const string TelegramBotInfoSyncedAtKey = "auth.telegram.botInfoSyncedAt";
     private const string TelegramWebhookSyncedAtKey = "auth.telegram.webhookSyncedAt";
+    private static readonly string[] PublicAuthSettingKeys =
+    [
+        GoogleEnabledKey,
+        GoogleClientIdKey,
+        GoogleClientSecretKey,
+        VkEnabledKey,
+        VkClientIdKey,
+        VkClientSecretKey,
+        YandexEnabledKey,
+        YandexClientIdKey,
+        YandexClientSecretKey,
+        TelegramEnabledKey,
+        TelegramWidgetEnabledKey,
+        TelegramBotTokenKey,
+        TelegramBotUsernameKey,
+        TelegramWebhookSecretKey,
+        TelegramBotInfoSyncedAtKey,
+        TelegramWebhookSyncedAtKey,
+    ];
 
     private readonly PaymentContext _context;
     private readonly IConfiguration _configuration;
@@ -69,39 +88,53 @@ public sealed partial class ExternalAuthService
         _logger = logger;
     }
 
-    public async Task<AuthProviderPublicSettingsDto> GetPublicSettingsAsync(HttpRequest request, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Возвращает публичную готовность провайдеров без секретов. Все legacy-настройки
+    /// читаются одним компактным SQL-запросом, а Telegram-отправители — вторым запросом.
+    /// </summary>
+    public async Task<AuthProviderPublicSettingsDto> GetPublicSettingsAsync(
+        HttpRequest request,
+        CancellationToken cancellationToken = default)
     {
-        var telegramBot = await ResolveTelegramAuthBotAsync(cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        var settings = await LoadSettingsSnapshotAsync(PublicAuthSettingKeys, cancellationToken);
+        var telegramBot = await ResolveTelegramAuthBotAsync(settings, cancellationToken);
         var telegramUsername = telegramBot?.BotUsername ?? string.Empty;
 
         return new AuthProviderPublicSettingsDto
         {
-            GoogleEnabled = await IsExternalProviderReadyAsync(
+            GoogleEnabled = IsExternalProviderReady(
+                settings,
                 GoogleEnabledKey,
                 "Auth:Google:Enabled",
                 GoogleClientIdKey,
                 "Auth:Google:ClientId",
                 GoogleClientSecretKey,
-                "Auth:Google:ClientSecret",
-                cancellationToken),
-            VkEnabled = await IsExternalProviderReadyAsync(
+                "Auth:Google:ClientSecret"),
+            VkEnabled = IsExternalProviderReady(
+                settings,
                 VkEnabledKey,
                 "Auth:Vk:Enabled",
                 VkClientIdKey,
                 "Auth:Vk:ClientId",
                 VkClientSecretKey,
-                "Auth:Vk:ClientSecret",
-                cancellationToken),
-            YandexEnabled = await IsExternalProviderReadyAsync(
+                "Auth:Vk:ClientSecret"),
+            YandexEnabled = IsExternalProviderReady(
+                settings,
                 YandexEnabledKey,
                 "Auth:Yandex:Enabled",
                 YandexClientIdKey,
                 "Auth:Yandex:ClientId",
                 YandexClientSecretKey,
-                "Auth:Yandex:ClientSecret",
-                cancellationToken),
+                "Auth:Yandex:ClientSecret"),
             TelegramEnabled = IsTelegramReady(telegramBot),
-            TelegramWidgetEnabled = await IsTelegramWidgetReadyAsync(request, cancellationToken),
+            TelegramWidgetEnabled = GetBooleanSettingOrConfig(
+                    settings,
+                    TelegramWidgetEnabledKey,
+                    "Auth:Telegram:WidgetEnabled",
+                    fallback: false)
+                && IsTelegramWidgetHostSupported(request)
+                && IsTelegramReady(telegramBot),
             TelegramBotUsername = string.IsNullOrWhiteSpace(telegramUsername) ? null : telegramUsername.Trim()
         };
     }
@@ -500,7 +533,7 @@ public sealed partial class ExternalAuthService
                 Status = request.Status,
                 Completed = false,
                 Provider = request.Provider,
-                Detail = request.Error,
+                Detail = BuildPublicAuthErrorDetail(request.Status),
                 ReturnUrl = request.ReturnUrl
             };
         }
@@ -527,16 +560,7 @@ public sealed partial class ExternalAuthService
             };
         }
 
-        var user = await _context.Users
-            .Include(x => x.Role)
-            .FirstOrDefaultAsync(x => x.Id == request.UserId.Value, cancellationToken)
-            ?? throw new InvalidOperationException("Пользователь внешней авторизации не найден.");
-
-        var result = await BuildCompletionResponseAsync(user, request.Provider, request.ReturnUrl, cancellationToken);
-        request.ConsumedAt = DateTime.UtcNow;
-        request.Status = "consumed";
-        await _context.SaveChangesAsync(cancellationToken);
-        return result;
+        return await CompleteExternalSignInStatusAsync(request, cancellationToken);
     }
 
     public async Task<string> HandleExternalCallbackAsync(
@@ -636,14 +660,14 @@ public sealed partial class ExternalAuthService
                 $"Вход через {configuration.DisplayName} завершён. Вернитесь на сайт.",
                 redirectPath);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogWarning(ex, "External auth callback failed for {Provider}", normalizedProvider);
             authRequest.Status = "failed";
-            authRequest.Error = ex.Message;
+            authRequest.Error = "Не удалось завершить внешнюю авторизацию.";
             authRequest.CompletedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync(cancellationToken);
-            return BuildExternalAuthPopupHtml(false, ex.Message, redirectPath);
+            return BuildExternalAuthPopupHtml(false, "Не удалось завершить авторизацию. Повторите попытку.", redirectPath);
         }
     }
 
@@ -738,7 +762,7 @@ public sealed partial class ExternalAuthService
                 Status = request.Status,
                 Completed = false,
                 Provider = "telegram",
-                Detail = request.Error
+                Detail = BuildPublicAuthErrorDetail(request.Status)
             };
         }
 
@@ -762,16 +786,7 @@ public sealed partial class ExternalAuthService
             };
         }
 
-        var user = await _context.Users
-            .Include(x => x.Role)
-            .FirstOrDefaultAsync(x => x.Id == request.UserId.Value, cancellationToken)
-            ?? throw new InvalidOperationException("Пользователь Telegram-авторизации не найден.");
-
-        var result = await BuildCompletionResponseAsync(user, "telegram", "/", cancellationToken);
-        request.ConsumedAt = DateTime.UtcNow;
-        request.Status = "consumed";
-        await _context.SaveChangesAsync(cancellationToken);
-        return result;
+        return await CompleteTelegramSignInStatusAsync(request, cancellationToken);
     }
 
     public async Task HandleTelegramWebhookAsync(JsonDocument updateDocument, HttpRequest request, CancellationToken cancellationToken = default)
@@ -872,6 +887,99 @@ public sealed partial class ExternalAuthService
                 : "Вход подтверждён. Вернитесь на сайт, авторизация завершится автоматически.";
         await SendTelegramMessageAsync(chatId, answer, cancellationToken);
     }
+
+    /// <summary>
+    /// Завершает OAuth-вход по уже загруженной записи state. Повторный поиск state не выполняется;
+    /// после выдачи результата запрос атомарно помечается использованным в текущем DbContext.
+    /// </summary>
+    private async Task<ExternalAuthStatusResponseDto> CompleteExternalSignInStatusAsync(
+        ExternalAuthRequest request,
+        CancellationToken cancellationToken)
+    {
+        var user = await _context.Users
+            .Include(x => x.Role)
+            .FirstOrDefaultAsync(x => x.Id == request.UserId!.Value, cancellationToken)
+            ?? throw new InvalidOperationException("Пользователь внешней авторизации не найден.");
+
+        var result = await BuildCompletionResponseAsync(user, request.Provider, request.ReturnUrl, cancellationToken);
+        return await TryConsumeExternalAuthRequestAsync(request, cancellationToken)
+            ? result
+            : BuildConsumedStatus(request.Provider, request.ReturnUrl);
+    }
+
+    /// <summary>Завершает Telegram-вход по уже загруженной записи без второго поиска state.</summary>
+    private async Task<ExternalAuthStatusResponseDto> CompleteTelegramSignInStatusAsync(
+        TelegramAuthRequest request,
+        CancellationToken cancellationToken)
+    {
+        var user = await _context.Users
+            .Include(x => x.Role)
+            .FirstOrDefaultAsync(x => x.Id == request.UserId!.Value, cancellationToken)
+            ?? throw new InvalidOperationException("Пользователь Telegram-авторизации не найден.");
+
+        var result = await BuildCompletionResponseAsync(user, "telegram", "/", cancellationToken);
+        return await TryConsumeTelegramAuthRequestAsync(request, cancellationToken)
+            ? result
+            : BuildConsumedStatus("telegram", null);
+    }
+
+    /// <summary>
+    /// Условным UPDATE захватывает одноразовый OAuth-результат. При параллельном polling
+    /// ровно один запрос меняет completed на consumed и получает право вернуть токен.
+    /// </summary>
+    private async Task<bool> TryConsumeExternalAuthRequestAsync(
+        ExternalAuthRequest request,
+        CancellationToken cancellationToken)
+    {
+        var consumedAt = DateTime.UtcNow;
+        var affected = await _context.ExternalAuthRequests
+            .Where(item => item.Id == request.Id && item.Status == "completed" && item.ConsumedAt == null)
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(item => item.Status, "consumed")
+                    .SetProperty(item => item.ConsumedAt, consumedAt),
+                cancellationToken);
+        if (affected == 1)
+        {
+            request.Status = "consumed";
+            request.ConsumedAt = consumedAt;
+            _context.Entry(request).State = EntityState.Unchanged;
+        }
+
+        return affected == 1;
+    }
+
+    /// <summary>Условным UPDATE защищает одноразовый Telegram-результат от двойной выдачи.</summary>
+    private async Task<bool> TryConsumeTelegramAuthRequestAsync(
+        TelegramAuthRequest request,
+        CancellationToken cancellationToken)
+    {
+        var consumedAt = DateTime.UtcNow;
+        var affected = await _context.TelegramAuthRequests
+            .Where(item => item.Id == request.Id && item.Status == "completed" && item.ConsumedAt == null)
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(item => item.Status, "consumed")
+                    .SetProperty(item => item.ConsumedAt, consumedAt),
+                cancellationToken);
+        if (affected == 1)
+        {
+            request.Status = "consumed";
+            request.ConsumedAt = consumedAt;
+            _context.Entry(request).State = EntityState.Unchanged;
+        }
+
+        return affected == 1;
+    }
+
+    private static ExternalAuthStatusResponseDto BuildConsumedStatus(string provider, string? returnUrl)
+        => new()
+        {
+            Status = "consumed",
+            Completed = false,
+            Provider = provider,
+            ReturnUrl = returnUrl,
+        };
 
     private async Task<ExternalAuthStatusResponseDto> BuildCompletionResponseAsync(
         User user,
@@ -1072,6 +1180,21 @@ public sealed partial class ExternalAuthService
         var clientId = await GetSettingOrConfigAsync(clientIdSettingKey, clientIdConfigPath, cancellationToken);
         var clientSecret = await GetSettingOrConfigAsync(clientSecretSettingKey, clientSecretConfigPath, cancellationToken);
         return !string.IsNullOrWhiteSpace(clientId) && !string.IsNullOrWhiteSpace(clientSecret);
+    }
+
+    /// <summary>Проверяет готовность OAuth-провайдера по уже загруженному снимку настроек.</summary>
+    private bool IsExternalProviderReady(
+        IReadOnlyDictionary<string, string> settings,
+        string enabledSettingKey,
+        string enabledConfigPath,
+        string clientIdSettingKey,
+        string clientIdConfigPath,
+        string clientSecretSettingKey,
+        string clientSecretConfigPath)
+    {
+        return GetBooleanSettingOrConfig(settings, enabledSettingKey, enabledConfigPath, fallback: false)
+               && !string.IsNullOrWhiteSpace(GetSettingOrConfig(settings, clientIdSettingKey, clientIdConfigPath))
+               && !string.IsNullOrWhiteSpace(GetSettingOrConfig(settings, clientSecretSettingKey, clientSecretConfigPath));
     }
 
     private async Task<bool> IsTelegramReadyAsync(CancellationToken cancellationToken)

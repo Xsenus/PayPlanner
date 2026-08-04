@@ -95,6 +95,52 @@ public sealed partial class ExternalAuthService
         return string.IsNullOrWhiteSpace(configValue) ? null : configValue.Trim();
     }
 
+    /// <summary>
+    /// Загружает только запрошенные ключи настроек одной проекцией без tracking.
+    /// Снимок используется в пределах одного HTTP-запроса и не становится глобальным кэшем,
+    /// поэтому изменения администратора видны сразу на следующем обращении.
+    /// </summary>
+    private async Task<IReadOnlyDictionary<string, string>> LoadSettingsSnapshotAsync(
+        IReadOnlyCollection<string> keys,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return await _context.SystemSettings
+            .AsNoTracking()
+            .Where(setting => keys.Contains(setting.Key))
+            .Select(setting => new { setting.Key, setting.Value })
+            .ToDictionaryAsync(setting => setting.Key, setting => setting.Value, StringComparer.Ordinal, cancellationToken);
+    }
+
+    private string? GetSettingOrConfig(
+        IReadOnlyDictionary<string, string> settings,
+        string key,
+        string? configPath)
+    {
+        if (settings.TryGetValue(key, out var settingValue) && !string.IsNullOrWhiteSpace(settingValue))
+        {
+            return settingValue.Trim();
+        }
+
+        var configValue = string.IsNullOrWhiteSpace(configPath) ? null : _configuration[configPath];
+        return string.IsNullOrWhiteSpace(configValue) ? null : configValue.Trim();
+    }
+
+    private bool GetBooleanSettingOrConfig(
+        IReadOnlyDictionary<string, string> settings,
+        string key,
+        string? configPath,
+        bool fallback)
+    {
+        var raw = GetSettingOrConfig(settings, key, configPath);
+        return raw?.Trim().ToLowerInvariant() switch
+        {
+            "1" or "true" or "yes" or "on" => true,
+            "0" or "false" or "no" or "off" => false,
+            _ => fallback,
+        };
+    }
+
     private async Task<bool> GetBooleanSettingOrConfigAsync(string key, string? configPath, bool fallback, CancellationToken cancellationToken)
     {
         var raw = await GetSettingOrConfigAsync(key, configPath, cancellationToken);
@@ -224,6 +270,19 @@ public sealed partial class ExternalAuthService
             ? throw new InvalidOperationException(errorMessage)
             : normalized;
     }
+
+    /// <summary>
+    /// Преобразует внутреннее состояние запроса в безопасное сообщение для анонимного клиента.
+    /// Текст провайдера и исключения намеренно не возвращаются: они могут содержать технические
+    /// адреса, параметры ответа или другие сведения, предназначенные только для журнала сервера.
+    /// </summary>
+    private static string? BuildPublicAuthErrorDetail(string status)
+        => status switch
+        {
+            "expired" => "Срок действия запроса авторизации истёк. Начните вход заново.",
+            "failed" => "Не удалось завершить авторизацию. Повторите попытку.",
+            _ => null,
+        };
 
     private static DateTime? ParseDateTime(string? value)
     {

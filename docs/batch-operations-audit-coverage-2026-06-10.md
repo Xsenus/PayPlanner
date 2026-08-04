@@ -1,10 +1,10 @@
-# Batch operations and audit coverage
+# Пакетные операции и покрытие аудитом
 
-Inventory date: 2026-06-10.
+Дата первоначальной инвентаризации: 10 июня 2026 года. Актуализировано 5 августа 2026 года.
 
-EF `ExecuteUpdateAsync` and `ExecuteDeleteAsync` bypass the change tracker. That means `PaymentContext` object audit hooks do not see per-entity changes from these operations. This document records each current usage and why it is acceptable.
+EF-операции `ExecuteUpdateAsync` и `ExecuteDeleteAsync` обходят ChangeTracker. Поэтому объектный аудит `PaymentContext` не видит изменения каждой сущности, выполненные такими операциями. В документе перечислены все текущие места использования и объяснено, чем обеспечивается аудит или почему его отсутствие допустимо.
 
-| Location | Operation | Data affected | Audit behavior | Rationale |
+| Расположение | Операция | Затрагиваемые данные | Поведение аудита | Обоснование |
 | --- | --- | --- | --- | --- |
 | `backend/Services/AuthService.cs:269` | `ExecuteUpdateAsync` | Current user's login/activity summary fields | No object audit event; login itself is represented by auth/user activity flow. | Avoids stale tracked user state and updates a small set of technical presence fields atomically. |
 | `backend/Controllers/UserActivityController.cs:403` | `ExecuteUpdateAsync` | Current user's last activity metadata | No object audit event; the user activity log row is the audit trail. | Records lightweight activity metadata without loading the full user aggregate on every request. |
@@ -16,8 +16,10 @@ EF `ExecuteUpdateAsync` and `ExecuteDeleteAsync` bypass the change tracker. That
 | `backend/Services/CalendarSyncLogRetentionService.cs:209` | `ExecuteDeleteAsync` | Expired Yandex calendar synchronization technical rows | No per-row object audit; service records the provider-specific and total deleted counts in the system job state. | Retention cleanup removes technical synchronization diagnostics in bounded chunks. |
 | `backend/Services/Notifications/MaxWebhookService.cs:241` | `ExecuteDeleteAsync` | Expired MAX webhook fingerprints and associated encrypted correspondence records | No per-row object audit; each retained webhook has its own processing status, correspondence is encrypted, and raw payload is not stored. | Retention cleanup removes technical events and dependent correspondence in bounded retention using the configured 1–90 day window. |
 | `backend/Services/ElectronicSignatureService.cs:308` | `ExecuteUpdateAsync` | Одна подготовленная версия электронной подписи при отмене | Объектный аудит ChangeTracker не используется; в той же транзакции создаётся отдельное неизменяемое событие отмены с пользователем и причиной. | Условное атомарное обновление статуса обеспечивает идемпотентность и не позволяет отменить уже отправленную версию. |
+| `backend/Services/ExternalAuthService.cs:937` | `ExecuteUpdateAsync` | Один завершённый OAuth-запрос внешнего входа или привязки | Персональный объектный аудит не создаётся: строка является короткоживущим техническим state, а успешный вход фиксируется журналом авторизации и активности пользователя. | Условный переход `completed` → `consumed` гарантирует, что при параллельном polling токен или результат привязки получает только один запрос. |
+| `backend/Services/ExternalAuthService.cs:960` | `ExecuteUpdateAsync` | Один завершённый запрос входа или привязки через Telegram | Персональный объектный аудит не создаётся: строка является короткоживущим техническим state, а вход и привязка отражаются в журнале авторизации и профиле пользователя. | Условный переход `completed` → `consumed` исключает повторную выдачу результата при одновременных запросах браузера. |
 
-## Guardrails
+## Контрольные правила
 
-- `BatchOperationAuditCoverageTests` scans backend application code and fails when a new `ExecuteUpdateAsync` or `ExecuteDeleteAsync` call is added without documenting it here.
-- New batch operations must explicitly state whether object audit is intentionally skipped, replaced by another audit trail, or needs a compensating audit event.
+- `BatchOperationAuditCoverageTests` просматривает прикладной код backend и завершает проверку ошибкой, если новый вызов `ExecuteUpdateAsync` или `ExecuteDeleteAsync` не внесён в этот документ.
+- Для каждой новой пакетной операции нужно явно указать, почему объектный аудит пропущен, каким журналом он заменён или какое компенсирующее событие требуется.
