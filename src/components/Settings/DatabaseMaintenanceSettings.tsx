@@ -1112,7 +1112,9 @@ export function DatabaseMaintenanceSettings() {
                     <span>
                       <span className="block font-medium text-slate-900">Загружать новые резервные копии на Яндекс.Диск</span>
                       <span className="mt-1 block text-slate-600">
-                        {yandexDiskSettings?.isConfigured
+                        {yandexDiskSettings?.requiresReconnect
+                          ? 'Подключение Яндекс.Диска нужно восстановить в разделе «Я.Диск».'
+                          : yandexDiskSettings?.isConfigured
                           ? `Корневая папка Я.Диска: ${yandexDiskSettings.rootPath}.`
                           : 'Сначала сохраните OAuth-токен в разделе «Я.Диск».'}
                       </span>

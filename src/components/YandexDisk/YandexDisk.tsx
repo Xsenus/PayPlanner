@@ -165,6 +165,10 @@ function draftFromConnection(connection: YandexDiskConnectionDto): ConnectionDra
 }
 
 function statusBadge(connection: YandexDiskConnectionDto) {
+  if (connection.requiresReconnect) {
+    return <span className="rounded-full bg-rose-50 px-2 py-0.5 text-xs font-medium text-rose-700">Нужно переподключить</span>;
+  }
+
   if (!connection.isEnabled) {
     return <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">Выключено</span>;
   }
@@ -855,7 +859,9 @@ export function YandexDisk({ embedded = false }: YandexDiskProps = {}) {
               </div>
               <div>
                 <div className="font-semibold uppercase text-slate-400">OAuth-токен</div>
-                <div className="mt-1 font-mono text-slate-800">{connection.tokenPreview ?? 'Не сохранен'}</div>
+                <div className={`mt-1 ${connection.requiresReconnect ? 'text-rose-700' : 'font-mono text-slate-800'}`}>
+                  {connection.requiresReconnect ? 'Токен недоступен — подключите Я.Диск заново' : (connection.tokenPreview ?? 'Не сохранен')}
+                </div>
               </div>
               <div>
                 <div className="font-semibold uppercase text-slate-400">Обновлено</div>
@@ -864,9 +870,9 @@ export function YandexDisk({ embedded = false }: YandexDiskProps = {}) {
             </div>
 
             <div className="mt-auto flex justify-end gap-2 pt-4">
-              {cardActionButton({ label: 'Открыть файлы', icon: <Folder className="h-4 w-4" />, tone: 'success', onClick: () => { setSelectedConnectionId(connection.id); setActiveTab('files'); } })}
+              {cardActionButton({ label: 'Открыть файлы', icon: <Folder className="h-4 w-4" />, tone: 'success', onClick: () => { setSelectedConnectionId(connection.id); setActiveTab('files'); }, disabled: !connection.isConfigured })}
               {cardActionButton({ label: 'Изменить', icon: <Edit3 className="h-4 w-4" />, onClick: () => openEditForm(connection), disabled: !canEdit })}
-              {cardActionButton({ label: 'Проверить', icon: <TestTube2 className="h-4 w-4" />, onClick: () => void testConnection(connection), disabled: !canTestConnection })}
+              {cardActionButton({ label: 'Проверить', icon: <TestTube2 className="h-4 w-4" />, onClick: () => void testConnection(connection), disabled: !canTestConnection || !connection.isConfigured })}
               {cardActionButton({ label: 'Удалить', icon: <Trash2 className="h-4 w-4" />, tone: 'danger', onClick: () => void deleteConnection(connection), disabled: !canDelete || loadingAction })}
             </div>
           </article>

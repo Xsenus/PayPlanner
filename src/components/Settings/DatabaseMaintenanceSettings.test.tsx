@@ -153,6 +153,7 @@ describe('DatabaseMaintenanceSettings', () => {
           rootPrefix: 'prod',
           isEnabled: true,
           isConfigured: true,
+          requiresReconnect: false,
           createdAt: '2026-06-01T10:00:00+07:00',
           updatedAt: '2026-06-01T10:00:00+07:00',
         },
@@ -160,6 +161,7 @@ describe('DatabaseMaintenanceSettings', () => {
     });
     mocks.getYandexDiskSettingsMock.mockResolvedValue({
       isConfigured: true,
+      requiresReconnect: false,
       rootPath: 'disk:/PayPlanner',
       tokenPreview: 'ya***',
       updatedAt: '2026-06-01T10:00:00+07:00',

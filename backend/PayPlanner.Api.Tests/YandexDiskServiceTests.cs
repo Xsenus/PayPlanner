@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using System.Text.Json;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Data.Sqlite;
@@ -240,6 +241,67 @@ public sealed class YandexDiskServiceTests
         var legacyToken = (await scope.Db.SystemSettings.SingleAsync(item => item.Key == "integrations.yandexDisk.oauthToken")).Value;
         Assert.StartsWith("protected:v1:", legacyToken);
         Assert.DoesNotContain("main-token", legacyToken);
+    }
+
+    [Fact]
+    public async Task ProtectedTokenFromAnotherKeyRing_KeepsSettingsReadableAndRequiresReconnectWithoutLosingToken()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var httpClient = new HttpClient(new FakeYandexDiskHandler(_ => JsonResponse("{}")));
+        var writer = new YandexDiskService(
+            scope.Db,
+            httpClient,
+            new ConfigurationBuilder().Build(),
+            new EphemeralDataProtectionProvider());
+        var created = await writer.UpsertConnectionAsync(new UpsertYandexDiskConnectionRequest
+        {
+            Name = "Архивный диск",
+            OAuthToken = "production-only-token",
+            RootPath = "disk:/Archive",
+            IsEnabled = true,
+        }, CancellationToken.None);
+        var storedSetting = await scope.Db.SystemSettings.SingleAsync(item => item.Key == "integrations.yandexDisk.connections");
+        var originalProtectedToken = ReadFirstConnectionToken(storedSetting.Value);
+
+        var reader = new YandexDiskService(
+            scope.Db,
+            httpClient,
+            new ConfigurationBuilder().Build(),
+            new EphemeralDataProtectionProvider());
+
+        var overview = await reader.GetConnectionsOverviewAsync(CancellationToken.None);
+        var connection = Assert.Single(overview.Connections);
+        Assert.Equal(created.Id, connection.Id);
+        Assert.Equal("disk:/Archive", connection.RootPath);
+        Assert.False(connection.IsConfigured);
+        Assert.True(connection.RequiresReconnect);
+        Assert.Null(connection.TokenPreview);
+
+        var settings = await reader.GetSettingsAsync(CancellationToken.None);
+        Assert.False(settings.IsConfigured);
+        Assert.True(settings.RequiresReconnect);
+        Assert.Equal("disk:/Archive", settings.RootPath);
+
+        var preview = await reader.PreviewCrmSyncAsync(CancellationToken.None);
+        Assert.Equal("disk:/Archive", preview.RootPath);
+        Assert.NotEmpty(preview.Items);
+
+        var operationError = await Assert.ThrowsAsync<YandexDiskOperationException>(() =>
+            reader.ListAsync(created.Id, null, 100, 0, CancellationToken.None));
+        Assert.Equal(StatusCodes.Status409Conflict, operationError.StatusCode);
+        Assert.Contains("Переподключите", operationError.Message);
+
+        await reader.UpsertConnectionAsync(new UpsertYandexDiskConnectionRequest
+        {
+            Id = created.Id,
+            Name = "Архивный диск (нужно переподключить)",
+            RootPath = "disk:/Archive",
+            IsEnabled = true,
+        }, CancellationToken.None);
+
+        await scope.Db.Entry(storedSetting).ReloadAsync();
+        Assert.Equal(originalProtectedToken, ReadFirstConnectionToken(storedSetting.Value));
+        Assert.DoesNotContain("production-only-token", storedSetting.Value);
     }
 
     [Fact]
@@ -865,6 +927,12 @@ public sealed class YandexDiskServiceTests
         {
             Content = new StringContent(json, Encoding.UTF8, "application/json"),
         };
+
+    private static string ReadFirstConnectionToken(string json)
+    {
+        using var document = JsonDocument.Parse(json);
+        return document.RootElement[0].GetProperty("oAuthToken").GetString()!;
+    }
 
     private static async Task<TestDbScope> CreateDbScopeAsync()
     {

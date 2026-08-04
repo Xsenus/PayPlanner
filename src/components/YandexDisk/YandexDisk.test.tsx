@@ -92,6 +92,7 @@ function buildConnection(overrides = {}) {
     name: 'Я.Диск основной',
     isEnabled: true,
     isConfigured: true,
+    requiresReconnect: false,
     rootPath: 'disk:/PayPlanner',
     tokenPreview: 'ya-t...1234',
     updatedAt: '2026-06-01T11:00:00+07:00',
@@ -205,6 +206,24 @@ describe('YandexDisk', () => {
     expect(editButton.textContent?.trim()).toBe('');
     expect(await screen.findAllByText(/01\.06\.2026, 08:00/)).toHaveLength(2);
     expect(filesButton.getAttribute('title')).toBe('Открыть файлы');
+  });
+
+  it('shows a recoverable reconnect state when the protected token is unavailable', async () => {
+    mocks.getYandexDiskConnectionsMock.mockResolvedValue({
+      connections: [buildConnection({
+        isConfigured: false,
+        requiresReconnect: true,
+        tokenPreview: null,
+      })],
+    });
+
+    render(<YandexDisk />);
+
+    const card = (await screen.findByText('Я.Диск основной')).closest('article')!;
+    expect(within(card).getByText('Нужно переподключить')).toBeTruthy();
+    expect(within(card).getByText('Токен недоступен — подключите Я.Диск заново')).toBeTruthy();
+    expect((within(card).getByRole('button', { name: /Открыть файлы/i }) as HTMLButtonElement).disabled).toBe(true);
+    expect((within(card).getByRole('button', { name: /Проверить/i }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it('opens connection editing on a separate page and protects OAuth field from autofill', async () => {

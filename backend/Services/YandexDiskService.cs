@@ -197,13 +197,16 @@ public sealed class YandexDiskService : IYandexDiskService
         }
 
         var token = existing?.OAuthToken;
+        var tokenUnavailable = existing?.TokenUnavailable == true;
         if (request.ClearToken)
         {
             token = null;
+            tokenUnavailable = false;
         }
         else if (!string.IsNullOrWhiteSpace(request.OAuthToken))
         {
             token = request.OAuthToken.Trim();
+            tokenUnavailable = false;
         }
 
         if (existing is null && string.IsNullOrWhiteSpace(token))
@@ -217,7 +220,10 @@ public sealed class YandexDiskService : IYandexDiskService
             token,
             NormalizeRootPath(request.RootPath ?? existing?.RootPath),
             request.IsEnabled,
-            now);
+            now)
+        {
+            TokenUnavailable = tokenUnavailable,
+        };
 
         if (existing is null)
         {
@@ -976,6 +982,7 @@ public sealed class YandexDiskService : IYandexDiskService
     private async Task<YandexDiskSettingsState> LoadConfiguredSettingsAsync(CancellationToken cancellationToken)
     {
         var settings = await LoadSettingsAsync(cancellationToken);
+        ThrowIfTokenUnavailable(settings);
         if (string.IsNullOrWhiteSpace(settings.OAuthToken))
         {
             throw new YandexDiskOperationException(400, "Сначала сохраните OAuth-токен Яндекс.Диска в настройках раздела.");
@@ -996,6 +1003,7 @@ public sealed class YandexDiskService : IYandexDiskService
             throw new YandexDiskOperationException(400, "Подключение Я.Диска отключено.");
         }
 
+        ThrowIfTokenUnavailable(settings);
         if (string.IsNullOrWhiteSpace(settings.OAuthToken))
         {
             throw new YandexDiskOperationException(400, "Сначала сохраните OAuth-токен Я.Диска в подключении.");
@@ -1024,16 +1032,11 @@ public sealed class YandexDiskService : IYandexDiskService
                 var stored = JsonSerializer.Deserialize<List<YandexDiskConnectionState>>(connectionSetting.Value, JsonOptions) ?? [];
                 var normalized = stored
                     .Where(item => !string.IsNullOrWhiteSpace(item.Id))
-                    .Select(item => item with
-                    {
-                        Id = NormalizeConnectionId(item.Id),
-                        Name = NormalizeConnectionName(item.Name, null, 0),
-                        OAuthToken = UnprotectToken(item.OAuthToken),
-                        RootPath = NormalizeRootPath(item.RootPath),
-                    })
+                    .Select(NormalizeStoredConnection)
                     .ToList();
-                if (stored.Any(item => !string.IsNullOrWhiteSpace(item.OAuthToken)
-                    && !item.OAuthToken.StartsWith(ProtectedTokenPrefix, StringComparison.Ordinal)))
+                if (!normalized.Any(item => item.TokenUnavailable)
+                    && stored.Any(item => !string.IsNullOrWhiteSpace(item.OAuthToken)
+                        && !item.OAuthToken.StartsWith(ProtectedTokenPrefix, StringComparison.Ordinal)))
                 {
                     await SaveConnectionsAsync(normalized, cancellationToken);
                 }
@@ -1066,13 +1069,17 @@ public sealed class YandexDiskService : IYandexDiskService
 
         var tokenSetting = rows.FirstOrDefault(item => item.Key == OAuthTokenSettingKey);
         var rootSetting = rows.FirstOrDefault(item => item.Key == RootPathSettingKey);
+        var (token, tokenUnavailable) = ReadStoredToken(tokenSetting?.Value?.Trim());
         return new YandexDiskConnectionState(
             DefaultConnectionId,
             DefaultConnectionName,
-            UnprotectToken(tokenSetting?.Value?.Trim()),
+            token,
             NormalizeRootPath(rootSetting?.Value),
             true,
-            new[] { tokenSetting?.UpdatedAt, rootSetting?.UpdatedAt }.Where(value => value.HasValue).Max());
+            new[] { tokenSetting?.UpdatedAt, rootSetting?.UpdatedAt }.Where(value => value.HasValue).Max())
+        {
+            TokenUnavailable = tokenUnavailable,
+        };
     }
 
     private async Task SaveConnectionsAsync(List<YandexDiskConnectionState> connections, CancellationToken cancellationToken)
@@ -1089,7 +1096,11 @@ public sealed class YandexDiskService : IYandexDiskService
             .ToList();
 
         var protectedConnections = normalized
-            .Select(item => item with { OAuthToken = ProtectToken(item.OAuthToken) })
+            .Select(item => item with
+            {
+                OAuthToken = item.TokenUnavailable ? item.OAuthToken : ProtectToken(item.OAuthToken),
+                TokenUnavailable = false,
+            })
             .ToList();
         await UpsertSettingAsync(ConnectionsSettingKey, JsonSerializer.Serialize(protectedConnections, JsonOptions), now, cancellationToken);
         var defaultConnection = ResolveDefaultConnection(normalized);
@@ -1107,7 +1118,10 @@ public sealed class YandexDiskService : IYandexDiskService
             }
             else
             {
-                await UpsertSettingAsync(OAuthTokenSettingKey, ProtectToken(defaultConnection.OAuthToken)!, now, cancellationToken);
+                var storedToken = defaultConnection.TokenUnavailable
+                    ? defaultConnection.OAuthToken
+                    : ProtectToken(defaultConnection.OAuthToken);
+                await UpsertSettingAsync(OAuthTokenSettingKey, storedToken!, now, cancellationToken);
             }
         }
 
@@ -1267,26 +1281,49 @@ public sealed class YandexDiskService : IYandexDiskService
     private string? ProtectToken(string? token)
         => string.IsNullOrWhiteSpace(token) ? null : ProtectedTokenPrefix + _tokenProtector.Protect(token.Trim());
 
-    private string? UnprotectToken(string? storedToken)
+    private YandexDiskConnectionState NormalizeStoredConnection(YandexDiskConnectionState item)
+    {
+        var (token, tokenUnavailable) = ReadStoredToken(item.OAuthToken);
+        return item with
+        {
+            Id = NormalizeConnectionId(item.Id),
+            Name = NormalizeConnectionName(item.Name, null, 0),
+            OAuthToken = token,
+            RootPath = NormalizeRootPath(item.RootPath),
+            TokenUnavailable = tokenUnavailable,
+        };
+    }
+
+    private (string? Token, bool Unavailable) ReadStoredToken(string? storedToken)
     {
         if (string.IsNullOrWhiteSpace(storedToken))
         {
-            return null;
+            return (null, false);
         }
 
         var normalized = storedToken.Trim();
         if (!normalized.StartsWith(ProtectedTokenPrefix, StringComparison.Ordinal))
         {
-            return normalized;
+            return (normalized, false);
         }
 
         try
         {
-            return _tokenProtector.Unprotect(normalized[ProtectedTokenPrefix.Length..]);
+            return (_tokenProtector.Unprotect(normalized[ProtectedTokenPrefix.Length..]), false);
         }
         catch (Exception ex) when (ex is CryptographicException or FormatException)
         {
-            throw new YandexDiskOperationException(500, "Не удалось прочитать защищённый токен Яндекс.Диска. Проверьте ключи защиты данных на сервере.");
+            return (normalized, true);
+        }
+    }
+
+    private static void ThrowIfTokenUnavailable(YandexDiskSettingsState settings)
+    {
+        if (settings.TokenUnavailable)
+        {
+            throw new YandexDiskOperationException(
+                StatusCodes.Status409Conflict,
+                "Защищённый токен Яндекс.Диска недоступен. Переподключите этот Яндекс.Диск, чтобы восстановить доступ.");
         }
     }
 
@@ -1376,7 +1413,7 @@ public sealed class YandexDiskService : IYandexDiskService
     private static YandexDiskConnectionState? ResolveDefaultConnection(IReadOnlyList<YandexDiskConnectionState> connections)
     {
         if (connections.Count == 0) return null;
-        return connections.FirstOrDefault(item => item.IsEnabled && !string.IsNullOrWhiteSpace(item.OAuthToken))
+        return connections.FirstOrDefault(item => item.IsEnabled && !item.TokenUnavailable && !string.IsNullOrWhiteSpace(item.OAuthToken))
             ?? connections.FirstOrDefault(item => item.IsEnabled)
             ?? connections[0];
     }
@@ -1512,9 +1549,10 @@ public sealed class YandexDiskService : IYandexDiskService
     private static YandexDiskSettingsDto BuildSettingsDto(YandexDiskSettingsState settings)
         => new()
         {
-            IsConfigured = !string.IsNullOrWhiteSpace(settings.OAuthToken),
+            IsConfigured = !settings.TokenUnavailable && !string.IsNullOrWhiteSpace(settings.OAuthToken),
+            RequiresReconnect = settings.TokenUnavailable,
             RootPath = settings.RootPath,
-            TokenPreview = BuildTokenPreview(settings.OAuthToken),
+            TokenPreview = settings.TokenUnavailable ? null : BuildTokenPreview(settings.OAuthToken),
             UpdatedAt = settings.UpdatedAt,
         };
 
@@ -1524,9 +1562,10 @@ public sealed class YandexDiskService : IYandexDiskService
             Id = settings.Id,
             Name = settings.Name,
             IsEnabled = settings.IsEnabled,
-            IsConfigured = !string.IsNullOrWhiteSpace(settings.OAuthToken),
+            IsConfigured = !settings.TokenUnavailable && !string.IsNullOrWhiteSpace(settings.OAuthToken),
+            RequiresReconnect = settings.TokenUnavailable,
             RootPath = settings.RootPath,
-            TokenPreview = BuildTokenPreview(settings.OAuthToken),
+            TokenPreview = settings.TokenUnavailable ? null : BuildTokenPreview(settings.OAuthToken),
             UpdatedAt = settings.UpdatedAt,
         };
 
@@ -2054,7 +2093,11 @@ public sealed class YandexDiskService : IYandexDiskService
         string? OAuthToken,
         string RootPath,
         bool IsEnabled,
-        DateTime? UpdatedAt);
+        DateTime? UpdatedAt)
+    {
+        [JsonIgnore]
+        public bool TokenUnavailable { get; init; }
+    }
 
     private sealed record YandexDiskConnectionState(
         string Id,

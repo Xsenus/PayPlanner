@@ -496,6 +496,7 @@ export interface YandexCalendarSyncNowResultDto {
 
 export interface YandexDiskSettingsDto {
   isConfigured: boolean;
+  requiresReconnect: boolean;
   rootPath: string;
   tokenPreview?: string | null;
   updatedAt?: string | null;
@@ -506,6 +507,7 @@ export interface YandexDiskConnectionDto {
   name: string;
   isEnabled: boolean;
   isConfigured: boolean;
+  requiresReconnect: boolean;
   rootPath: string;
   tokenPreview?: string | null;
   updatedAt?: string | null;

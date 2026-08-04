@@ -3,6 +3,7 @@ namespace PayPlanner.Api.Models.Responses;
 public sealed class YandexDiskSettingsDto
 {
     public bool IsConfigured { get; set; }
+    public bool RequiresReconnect { get; set; }
     public string RootPath { get; set; } = string.Empty;
     public string? TokenPreview { get; set; }
     public DateTime? UpdatedAt { get; set; }
@@ -14,6 +15,7 @@ public sealed class YandexDiskConnectionDto
     public string Name { get; set; } = string.Empty;
     public bool IsEnabled { get; set; }
     public bool IsConfigured { get; set; }
+    public bool RequiresReconnect { get; set; }
     public string RootPath { get; set; } = string.Empty;
     public string? TokenPreview { get; set; }
     public DateTime? UpdatedAt { get; set; }
