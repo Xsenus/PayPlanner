@@ -1373,7 +1373,8 @@ public class ClientsController : ControllerBase
             .FirstOrDefaultAsync(c => c.Id == id, ct);
         if (e is null) return NotFound();
 
-        var usage = await GetClientUsageSummary(id);
+        var usageByClientId = await GetClientUsageSummariesAsync(new[] { id }, ct);
+        var usage = usageByClientId.GetValueOrDefault(id) ?? [];
         if (usage.Count > 0)
         {
             return Conflict(new
@@ -1424,10 +1425,11 @@ public class ClientsController : ControllerBase
             });
         }
 
+        var usageByClientId = await GetClientUsageSummariesAsync(foundIds, ct);
         var blockedClients = new List<object>();
         foreach (var client in clients)
         {
-            var usage = await GetClientUsageSummary(client.Id);
+            var usage = usageByClientId.GetValueOrDefault(client.Id) ?? [];
             if (usage.Count > 0)
             {
                 blockedClients.Add(new
@@ -1509,26 +1511,48 @@ public class ClientsController : ControllerBase
         });
     }
 
-    private async Task<List<string>> GetClientUsageSummary(int clientId)
+    /// <summary>
+    /// Пакетно определяет, какие связанные данные мешают удалению клиентов.
+    /// Все признаки вычисляются одним SQL-запросом через EXISTS-подзапросы,
+    /// поэтому массовое удаление не создаёт по пять запросов на каждого клиента.
+    /// </summary>
+    private async Task<IReadOnlyDictionary<int, List<string>>> GetClientUsageSummariesAsync(
+        IEnumerable<int> clientIds,
+        CancellationToken ct)
     {
-        var usage = new List<string>();
+        var ids = NormalizeIds(clientIds);
+        if (ids.Count == 0)
+        {
+            return new Dictionary<int, List<string>>();
+        }
 
-        if (await _db.Payments.AsNoTracking().AnyAsync(p => p.ClientId == clientId || p.ExpenseClientId == clientId))
-            usage.Add("платежи");
+        var rows = await _db.Clients
+            .AsNoTracking()
+            .Where(client => ids.Contains(client.Id))
+            .Select(client => new
+            {
+                client.Id,
+                HasPayments = _db.Payments.Any(payment =>
+                    payment.ClientId == client.Id || payment.ExpenseClientId == client.Id),
+                HasActs = _db.Acts.Any(act => act.ClientId == client.Id),
+                HasCases = _db.ClientCases.Any(clientCase => clientCase.ClientId == client.Id),
+                HasContracts = _db.ClientContracts.Any(contract => contract.ClientId == client.Id),
+                HasPowersOfAttorney = _db.PowersOfAttorney.Any(power => power.ClientId == client.Id),
+            })
+            .ToListAsync(ct);
 
-        if (await _db.Acts.AsNoTracking().AnyAsync(a => a.ClientId == clientId))
-            usage.Add("акты");
-
-        if (await _db.ClientCases.AsNoTracking().AnyAsync(c => c.ClientId == clientId))
-            usage.Add("дела клиента");
-
-        if (await _db.ClientContracts.AsNoTracking().AnyAsync(cc => cc.ClientId == clientId))
-            usage.Add("договоры");
-
-        if (await _db.PowersOfAttorney.AsNoTracking().AnyAsync(p => p.ClientId == clientId))
-            usage.Add("доверенности");
-
-        return usage;
+        return rows.ToDictionary(
+            row => row.Id,
+            row =>
+            {
+                var usage = new List<string>(5);
+                if (row.HasPayments) usage.Add("платежи");
+                if (row.HasActs) usage.Add("акты");
+                if (row.HasCases) usage.Add("дела клиента");
+                if (row.HasContracts) usage.Add("договоры");
+                if (row.HasPowersOfAttorney) usage.Add("доверенности");
+                return usage;
+            });
     }
 
     private async Task RemoveClientProfileArtifactsAsync(IEnumerable<int> clientIds, CancellationToken ct)

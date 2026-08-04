@@ -2327,6 +2327,51 @@ public class ClientsControllerTests
     }
 
     [Fact]
+    public async Task BulkDelete_LoadsUsageForAllClientsWithSingleQuery()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+        var userId = await CreateUserAsync(db, roleName: "admin");
+        var firstClient = new Client { Name = "Клиент с платежом", ResponsibleUserId = userId, IsActive = true };
+        var secondClient = new Client { Name = "Клиент с делом", ResponsibleUserId = userId, IsActive = true };
+        db.Clients.AddRange(firstClient, secondClient);
+        await db.SaveChangesAsync();
+        db.Payments.Add(new Payment
+        {
+            ClientId = firstClient.Id,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Pending,
+            Date = DateTime.UtcNow.Date,
+            PlannedDate = DateTime.UtcNow.Date,
+            Amount = 1000m,
+        });
+        db.ClientCases.Add(new ClientCase
+        {
+            ClientId = secondClient.Id,
+            Title = "Связанное дело",
+            Status = ClientCaseStatus.Open,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, userId);
+        interceptor.Commands.Clear();
+
+        var action = await controller.BulkDelete(new BulkIdsRequest
+        {
+            Ids = [firstClient.Id, secondClient.Id],
+        }, CancellationToken.None);
+
+        Assert.IsType<ConflictObjectResult>(action);
+        var usageQueries = interceptor.Commands.Where(command =>
+            command.Contains("Payments", StringComparison.Ordinal)
+            && command.Contains("Acts", StringComparison.Ordinal)
+            && command.Contains("ClientCases", StringComparison.Ordinal)
+            && command.Contains("ClientContracts", StringComparison.Ordinal)
+            && command.Contains("PowersOfAttorney", StringComparison.Ordinal)).ToList();
+        Assert.Single(usageQueries);
+        Assert.Contains("EXISTS", usageQueries[0], StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task ChangeResponsible_UpdatesSelectedClients()
     {
         await using var db = await CreateContextAsync();
