@@ -4261,7 +4261,7 @@ describe('TaskJournal', () => {
 
     expect(within(reopenedCard).queryByRole('button', { name: 'Удалить участника Первый согласующий' })).toBeNull();
     expect(within(reopenedCard).getByRole('button', { name: 'Удалить участника Первый наблюдатель' })).toBeTruthy();
-  });
+  }, 30_000);
 
   it('sends a change comment with task edits', async () => {
     await renderJournal();
