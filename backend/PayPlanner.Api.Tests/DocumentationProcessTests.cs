@@ -35,11 +35,20 @@ public sealed class DocumentationProcessTests
         Assert.Contains("npm run test:ci", qualityGates, StringComparison.Ordinal);
         Assert.Contains("npm run test:integration", qualityGates, StringComparison.Ordinal);
         Assert.Contains("npm run audit:dates:test", qualityGates, StringComparison.Ordinal);
+        Assert.Contains("npm run audit:encoding", qualityGates, StringComparison.Ordinal);
+        Assert.Contains("npm run audit:surface:test", qualityGates, StringComparison.Ordinal);
+        Assert.Contains("npm run audit:surface", qualityGates, StringComparison.Ordinal);
         Assert.Contains("npm run build", qualityGates, StringComparison.Ordinal);
         Assert.Contains("dotnet test backend\\PayPlanner.Api.sln --no-restore -c Debug", qualityGates, StringComparison.Ordinal);
         Assert.Contains("dotnet format backend\\PayPlanner.Api.sln --verify-no-changes --no-restore --verbosity minimal", qualityGates, StringComparison.Ordinal);
         Assert.Contains("dotnet list backend\\PayPlanner.Api.sln package --vulnerable --include-transitive", qualityGates, StringComparison.Ordinal);
         Assert.Contains("npm audit --audit-level=moderate", qualityGates, StringComparison.Ordinal);
+
+        var surfaceInventory = Path.Combine(root, "docs", "system-surface-inventory.generated.md");
+        Assert.True(File.Exists(surfaceInventory));
+        var inventory = File.ReadAllText(surfaceInventory);
+        Assert.Contains("## Все HTTP endpoints", inventory, StringComparison.Ordinal);
+        Assert.Contains("## Фоновые сервисы", inventory, StringComparison.Ordinal);
     }
 
     [Fact]

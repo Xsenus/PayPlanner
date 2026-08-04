@@ -94,6 +94,9 @@ jobs:
       - name: Verify source encoding
         run: npm run audit:encoding
 
+      - name: Verify system surface inventory
+        run: npm run audit:surface:test && npm run audit:surface
+
       - name: Audit FE packages
         run: npm audit --audit-level=moderate
 

@@ -89,6 +89,8 @@ public sealed class LegalFeatureFlagCiGateTests
                 "npm run lint",
                 "npx tsc -p tsconfig.app.json --noEmit",
                 "npm run audit:dates:test",
+                "npm run audit:encoding",
+                "npm run audit:surface:test && npm run audit:surface",
                 "npm audit --audit-level=moderate",
                 "npm run test:ci",
                 "npm run test:integration",
