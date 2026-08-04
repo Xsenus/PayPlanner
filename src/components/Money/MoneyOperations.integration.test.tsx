@@ -2560,6 +2560,20 @@ describe('MoneyOperations integration', () => {
     await screen.findByText(/Причина: Дубликат/);
   }, 15000);
 
+  it('keeps the cash book summary within the mobile viewport and scrolls only its table', async () => {
+    operations = [];
+
+    render(<MoneyOperations source="Cash" />);
+
+    const summary = await screen.findByTestId('cash-book-summary');
+    expect(summary.className).toContain('min-w-0');
+    expect(summary.className).toContain('grid-cols-[minmax(0,1fr)]');
+
+    const daysScroll = screen.getByTestId('cash-book-days-scroll');
+    expect(daysScroll.className).toContain('max-w-full');
+    expect(daysScroll.className).toContain('overflow-x-auto');
+  });
+
   it('deletes a draft cash order from the cash order card', async () => {
     const user = userEvent.setup();
     operations = [];

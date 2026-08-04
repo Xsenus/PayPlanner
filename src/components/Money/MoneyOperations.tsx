@@ -1327,7 +1327,7 @@ function CashOrdersPanel({
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   return (
-    <div className="mt-6 rounded-xl border border-slate-200 bg-white">
+    <div className="mt-6 min-w-0 rounded-xl border border-slate-200 bg-white">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
         <div>
           <h2 className="text-lg font-semibold text-slate-900">Кассовые ордера</h2>
@@ -1431,35 +1431,39 @@ function CashOrdersPanel({
       )}
 
       {cashBook && (
-        <div className="grid gap-3 border-b border-slate-200 bg-slate-50/60 p-4 md:grid-cols-4">
-          <div className="md:col-span-4">
-            <div className="inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600">
+        <div
+          data-testid="cash-book-summary"
+          className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3 border-b border-slate-200 bg-slate-50/60 p-3 sm:p-4 md:grid-cols-4">
+          <div className="min-w-0 md:col-span-4">
+            <div className="inline-flex max-w-full items-center rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600">
               Касса: {cashBook.accountName || accountName || 'Все кассы'}
             </div>
           </div>
-          <div className="rounded-lg border border-slate-200 bg-white p-3">
+          <div className="min-w-0 rounded-lg border border-slate-200 bg-white p-3">
             <div className="text-xs uppercase text-slate-400">Остаток на начало</div>
             <div className="mt-1 text-lg font-semibold text-amber-600">{formatMoney(cashBook.openingBalance)} ₽</div>
             <div className="mt-1 text-xs text-slate-400">{formatDate(cashBook.from)}</div>
           </div>
-          <div className="rounded-lg border border-slate-200 bg-white p-3">
+          <div className="min-w-0 rounded-lg border border-slate-200 bg-white p-3">
             <div className="text-xs uppercase text-slate-400">Приход</div>
             <div className="mt-1 text-lg font-semibold text-emerald-600">{formatMoney(cashBook.income)} ₽</div>
             <div className="mt-1 text-xs text-slate-400">ПКО: {cashBook.incomingCount}</div>
           </div>
-          <div className="rounded-lg border border-slate-200 bg-white p-3">
+          <div className="min-w-0 rounded-lg border border-slate-200 bg-white p-3">
             <div className="text-xs uppercase text-slate-400">Расход</div>
             <div className="mt-1 text-lg font-semibold text-rose-600">{formatMoney(cashBook.expense)} ₽</div>
             <div className="mt-1 text-xs text-slate-400">РКО: {cashBook.outgoingCount}</div>
           </div>
-          <div className="rounded-lg border border-slate-200 bg-white p-3">
+          <div className="min-w-0 rounded-lg border border-slate-200 bg-white p-3">
             <div className="text-xs uppercase text-slate-400">Остаток на конец</div>
             <div className="mt-1 text-lg font-semibold text-amber-600">{formatMoney(cashBook.closingBalance)} ₽</div>
             <div className="mt-1 text-xs text-slate-400">{formatDate(cashBook.to)}</div>
           </div>
           {cashBook.days.length > 0 && (
-            <div className="md:col-span-4">
-              <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+            <div className="min-w-0 md:col-span-4">
+              <div
+                data-testid="cash-book-days-scroll"
+                className="max-w-full overflow-x-auto rounded-lg border border-slate-200 bg-white">
                 <table className="w-full min-w-[720px] text-sm">
                   <thead className="bg-white text-xs uppercase text-slate-400">
                     <tr>
