@@ -135,7 +135,7 @@ builder.Services.AddScoped<PaymentContext>(sp =>
     sp.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContext());
 
 builder.Services.AddHttpContextAccessor();
-builder.Services.AddTransient<IClaimsTransformation, CurrentUserClaimsTransformation>();
+builder.Services.AddTransient<CurrentUserClaimsTransformation>();
 
 builder.Services.AddScoped<IPasswordHasher<User>, PasswordHasher<User>>();
 builder.Services.Configure<PasswordHasherOptions>(opt =>
@@ -347,7 +347,26 @@ builder.Services
                 }
 
                 return Task.CompletedTask;
-            }
+            },
+            OnTokenValidated = async context =>
+            {
+                if (context.Principal is null)
+                {
+                    context.Fail("Authenticated principal is missing.");
+                    return;
+                }
+
+                var transformer = context.HttpContext.RequestServices
+                    .GetRequiredService<CurrentUserClaimsTransformation>();
+                var refreshedPrincipal = await transformer.TransformAsync(context.Principal);
+                if (refreshedPrincipal.Identity?.IsAuthenticated != true)
+                {
+                    context.Fail("User account is missing, disabled or not approved.");
+                    return;
+                }
+
+                context.Principal = refreshedPrincipal;
+            },
         };
     });
 

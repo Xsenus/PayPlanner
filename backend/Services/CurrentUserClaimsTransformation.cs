@@ -36,13 +36,19 @@ public sealed class CurrentUserClaimsTransformation : IClaimsTransformation
             {
                 user.Email,
                 user.FullName,
+                user.IsActive,
+                user.IsApproved,
                 RoleName = user.Role != null ? user.Role.Name : "user",
             })
             .FirstOrDefaultAsync();
 
-        if (snapshot is null)
+        if (snapshot is null || !snapshot.IsActive || !snapshot.IsApproved)
         {
-            return principal;
+            // A signed JWT must stop granting access as soon as the employee is
+            // removed, disabled or loses approval. Returning an anonymous
+            // principal signals the JWT validation hook to reject the token with
+            // 401 instead of trusting the stale claims until it expires.
+            return new ClaimsPrincipal(new ClaimsIdentity());
         }
 
         ReplaceSingleClaim(identity, ClaimTypes.Email, snapshot.Email);
