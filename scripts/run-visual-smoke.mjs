@@ -256,29 +256,34 @@ async function checkPage({ page, frontendUrl, route, viewportName, timeoutMs, ar
           tag: node.tagName.toLowerCase(),
           testId: node.dataset?.testid ?? '',
           className: typeof node.className === 'string' ? node.className.slice(0, 140) : '',
+          text: (node.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 120),
           ancestors: ancestors.join('>'),
           position: window.getComputedStyle(node).position,
         };
       })
-      .filter((item) => item.right > viewportWidth + 2 || item.left < -2)
+      .filter((item) => (item.right > viewportWidth + 2 && item.right <= documentWidth + 2) || item.left < -2)
       .sort((left, right) => right.right - left.right)
       .slice(0, 24) : [];
     const scrollWidthElements = inspectOverflow ? [document.documentElement, document.body, ...Array.from(document.querySelectorAll('body *'))]
       .map((element) => {
         const node = /** @type {HTMLElement} */ (element);
         const style = window.getComputedStyle(node);
+        const rect = node.getBoundingClientRect();
         return {
           tag: node.tagName.toLowerCase(),
           testId: node.dataset?.testid ?? '',
           clientWidth: node.clientWidth,
           scrollWidth: node.scrollWidth,
           overflowX: style.overflowX,
+          left: Math.round(rect.left),
+          right: Math.round(rect.right),
+          position: style.position,
           className: typeof node.className === 'string' ? node.className.slice(0, 100) : '',
         };
       })
-      .filter((item) => item.scrollWidth > item.clientWidth + 2 && item.overflowX === 'visible')
-      .sort((left, right) => right.scrollWidth - left.scrollWidth)
-      .slice(0, 8) : [];
+      .filter((item) => item.scrollWidth > item.clientWidth + 2)
+      .sort((left, right) => (right.scrollWidth - right.clientWidth) - (left.scrollWidth - left.clientWidth))
+      .slice(0, 16) : [];
     const topScrollbars = inspectOverflow ? Array.from(document.querySelectorAll('[data-pp-top-scrollbar]')).map((element) => {
       const node = /** @type {HTMLElement} */ (element);
       const rect = node.getBoundingClientRect();
@@ -314,10 +319,10 @@ async function checkPage({ page, frontendUrl, route, viewportName, timeoutMs, ar
     const offenders = metrics.overflowingElements
       .filter((item) => item.right <= metrics.documentWidth + 2)
       .slice(0, 8)
-      .map((item) => `${item.tag}${item.testId ? `[data-testid=${item.testId}]` : ''} right=${item.right}px width=${item.width}px pos=${item.position} class="${item.className}" ancestors=${item.ancestors}`)
+      .map((item) => `${item.tag}${item.testId ? `[data-testid=${item.testId}]` : ''} right=${item.right}px width=${item.width}px pos=${item.position} class="${item.className}" text="${item.text}" ancestors=${item.ancestors}`)
       .join('; ');
     const scrollOffenders = metrics.scrollWidthElements
-      .map((item) => `${item.tag}${item.testId ? `[data-testid=${item.testId}]` : ''}{cw=${item.clientWidth},sw=${item.scrollWidth},ox=${item.overflowX},class="${item.className}"}`)
+      .map((item) => `${item.tag}${item.testId ? `[data-testid=${item.testId}]` : ''}{left=${item.left},right=${item.right},cw=${item.clientWidth},sw=${item.scrollWidth},ox=${item.overflowX},pos=${item.position},class="${item.className}"}`)
       .join('; ');
     failures.push(`horizontal document overflow is ${metrics.documentOverflowX}px (document ${metrics.documentWidth}px, viewport ${metrics.viewportWidth}px)${offenders ? `; candidates: ${offenders}` : ''}${scrollOffenders ? `; visible-scroll candidates: ${scrollOffenders}` : ''}${metrics.topScrollbars.length ? `; top-scrollbars: ${metrics.topScrollbars.join('; ')}` : ''}`);
   }
