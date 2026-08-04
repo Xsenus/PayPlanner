@@ -7,7 +7,7 @@
 
 - Разделов frontend: 49.
 - Backend-контроллеров: 64.
-- HTTP endpoints: 777; с найденной тестовой связью: 702.
+- HTTP endpoints: 777; с найденной тестовой связью: 706.
 - Реальных HTML-форм: 17; с найденной тестовой связью: 15.
 - Фоновых сервисов: 26; с найденной тестовой связью: 24.
 
@@ -126,7 +126,7 @@
 | ActsController | backend/Controllers/ActsController.cs | 16 | [Authorize] | да |
 | AdminUsersController | backend/Controllers/AdminUsersController.cs | 8 | [Authorize(Policy = "Admin")] | да |
 | AppVersionController | backend/Controllers/AppVersionController.cs | 7 | [Authorize] | да |
-| AuthController | backend/Controllers/AuthController.cs | 4 | не задано | нет |
+| AuthController | backend/Controllers/AuthController.cs | 4 | не задано | да |
 | AuthProvidersAdminController | backend/Controllers/AuthProvidersAdminController.cs | 8 | [Authorize(Policy = "Admin")] | да |
 | BanksController | backend/Controllers/BanksController.cs | 5 | [Authorize] | да |
 | CalendarSyncController | backend/Controllers/CalendarSyncController.cs | 5 | [Authorize] | да |
@@ -225,10 +225,10 @@
 | POST | api/app-version/admin/releases | AppVersionController | CreateRelease | backend/Controllers/AppVersionController.cs:142 | [Authorize]; [Authorize(Policy = "Admin")] | да |
 | PUT | api/app-version/admin/releases/{id:int} | AppVersionController | UpdateRelease | backend/Controllers/AppVersionController.cs:187 | [Authorize]; [Authorize(Policy = "Admin")] | да |
 | DELETE | api/app-version/admin/releases/{id:int} | AppVersionController | DeleteRelease | backend/Controllers/AppVersionController.cs:229 | [Authorize]; [Authorize(Policy = "Admin")] | да |
-| POST | api/[controller]/login | AuthController | Login | backend/Controllers/AuthController.cs:16 | публичный ([AllowAnonymous]) | нет |
-| POST | api/[controller]/refresh | AuthController | RefreshSession | backend/Controllers/AuthController.cs:56 | [Authorize] | нет |
-| POST | api/[controller]/register | AuthController | Register | backend/Controllers/AuthController.cs:89 | публичный ([AllowAnonymous]) | нет |
-| GET | api/[controller]/me | AuthController | Me | backend/Controllers/AuthController.cs:126 | [Authorize] | нет |
+| POST | api/[controller]/login | AuthController | Login | backend/Controllers/AuthController.cs:22 | публичный ([AllowAnonymous]) | да |
+| POST | api/[controller]/refresh | AuthController | RefreshSession | backend/Controllers/AuthController.cs:63 | [Authorize] | да |
+| POST | api/[controller]/register | AuthController | Register | backend/Controllers/AuthController.cs:100 | публичный ([AllowAnonymous]) | да |
+| GET | api/[controller]/me | AuthController | Me | backend/Controllers/AuthController.cs:146 | [Authorize] | да |
 | GET | api/auth/admin/providers | AuthProvidersAdminController | GetSettings | backend/Controllers/AuthProvidersAdminController.cs:37 | [Authorize(Policy = "Admin")] | да |
 | PUT | api/auth/admin/providers | AuthProvidersAdminController | UpdateSettings | backend/Controllers/AuthProvidersAdminController.cs:41 | [Authorize(Policy = "Admin")] | да |
 | PUT | api/auth/admin/providers/google | AuthProvidersAdminController | UpdateGoogleSettings | backend/Controllers/AuthProvidersAdminController.cs:56 | [Authorize(Policy = "Admin")] | да |

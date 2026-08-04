@@ -6,7 +6,7 @@ EF `ExecuteUpdateAsync` and `ExecuteDeleteAsync` bypass the change tracker. That
 
 | Location | Operation | Data affected | Audit behavior | Rationale |
 | --- | --- | --- | --- | --- |
-| `backend/Services/AuthService.cs:266` | `ExecuteUpdateAsync` | Current user's login/activity summary fields | No object audit event; login itself is represented by auth/user activity flow. | Avoids stale tracked user state and updates a small set of technical presence fields atomically. |
+| `backend/Services/AuthService.cs:269` | `ExecuteUpdateAsync` | Current user's login/activity summary fields | No object audit event; login itself is represented by auth/user activity flow. | Avoids stale tracked user state and updates a small set of technical presence fields atomically. |
 | `backend/Controllers/UserActivityController.cs:403` | `ExecuteUpdateAsync` | Current user's last activity metadata | No object audit event; the user activity log row is the audit trail. | Records lightweight activity metadata without loading the full user aggregate on every request. |
 | `backend/Controllers/UserActivityController.cs:525` | `ExecuteDeleteAsync` | User activity log cleanup requested by admin | No per-row object audit; controller logs cleanup count and returns maintenance result. | The operation intentionally clears technical activity logs in bulk. |
 | `backend/Controllers/LegalEntitiesController.cs:1000` | `ExecuteDeleteAsync` | Legal entity address records before replacing the address collection | No per-address object audit; legal entity save flow records the visible entity change. | Address records are treated as replaceable child rows of the legal entity form. |

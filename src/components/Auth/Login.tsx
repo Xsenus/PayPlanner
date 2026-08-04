@@ -83,6 +83,7 @@ export const Login = ({ onShowRegister, onPendingApproval }: LoginProps) => {
                 className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent transition-all"
                 placeholder="you@example.com"
                 required
+                maxLength={320}
                 autoComplete="email"
               />
             </div>
@@ -100,6 +101,7 @@ export const Login = ({ onShowRegister, onPendingApproval }: LoginProps) => {
                   className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent transition-all pr-12"
                   placeholder="Введите пароль"
                   required
+                  maxLength={512}
                   autoComplete="current-password"
                 />
                 <button

@@ -25,6 +25,9 @@ public partial class AuthService
     private readonly IExternalCalendarSyncCoordinator? _externalCalendarSyncCoordinator;
     private readonly INotificationService? _notificationService;
     private readonly IPasswordHasher<User> _passwordHasher;
+    private static readonly User InvalidPasswordUser = new();
+    private static readonly string InvalidPasswordHash = new PasswordHasher<User>()
+        .HashPassword(InvalidPasswordUser, "payplanner-invalid-password-placeholder");
     private const string LegacyMainCompanySettingKey = "legalEntities.mainCompanyId";
     private const string MainCompanyIdsSettingKey = "legalEntities.mainCompanyIds";
 
@@ -634,19 +637,38 @@ public partial class AuthService
         return users.Select(MapToDto).ToList();
     }
 
-    public async Task<UserDto?> GetUserByIdAsync(int id)
+    /// <summary>Возвращает рабочий профиль пользователя со связанными ролью и организациями.</summary>
+    public async Task<UserDto?> GetUserByIdAsync(int id, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var user = await QueryUsersWithRelations()
-            .FirstOrDefaultAsync(u => u.Id == id);
+            .FirstOrDefaultAsync(u => u.Id == id, cancellationToken);
         return user == null ? null : MapToDto(user);
     }
 
-    public async Task<LoginResponse?> LoginAsync(string email, string password)
+    /// <summary>
+    /// Проверяет пароль до раскрытия состояния аккаунта, обновляет время входа
+    /// и возвращает новую сессию активного одобренного пользователя.
+    /// </summary>
+    public async Task<LoginResponse?> LoginAsync(
+        string email,
+        string password,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var emailNorm = NormalizeEmail(email);
         var user = await QueryUsersWithRelations()
-            .FirstOrDefaultAsync(u => u.Email == emailNorm);
+            .FirstOrDefaultAsync(u => u.Email == emailNorm, cancellationToken);
         if (user == null)
+        {
+            // Выполняем ту же дорогую криптографическую проверку, чтобы время ответа
+            // не позволяло отличить неизвестный email от неверного пароля.
+            _passwordHasher.VerifyHashedPassword(InvalidPasswordUser, InvalidPasswordHash, password);
+            return null;
+        }
+
+        var verify = _passwordHasher.VerifyHashedPassword(user, user.PasswordHash, password);
+        if (verify == PasswordVerificationResult.Failed)
         {
             return null;
         }
@@ -661,20 +683,14 @@ public partial class AuthService
             throw new InvalidOperationException("PendingApproval");
         }
 
-        var verify = _passwordHasher.VerifyHashedPassword(user, user.PasswordHash, password);
-        if (verify == PasswordVerificationResult.Failed)
-        {
-            return null;
-        }
-
         if (verify == PasswordVerificationResult.SuccessRehashNeeded)
         {
             user.PasswordHash = _passwordHasher.HashPassword(user, password);
             user.UpdatedAt = DateTime.UtcNow;
-            await _context.SaveChangesAsync();
+            await _context.SaveChangesAsync(cancellationToken);
         }
 
-        await MarkUserLoginAsync(user, CancellationToken.None);
+        await MarkUserLoginAsync(user, cancellationToken);
 
         return new LoginResponse
         {
@@ -683,10 +699,14 @@ public partial class AuthService
         };
     }
 
-    public async Task<LoginResponse?> RefreshSessionAsync(int userId)
+    /// <summary>Перевыпускает JWT после повторной проверки состояния пользователя.</summary>
+    public async Task<LoginResponse?> RefreshSessionAsync(
+        int userId,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var user = await QueryUsersWithRelations()
-            .FirstOrDefaultAsync(item => item.Id == userId);
+            .FirstOrDefaultAsync(item => item.Id == userId, cancellationToken);
         if (user is null)
         {
             return null;
@@ -709,19 +729,21 @@ public partial class AuthService
         };
     }
 
-    public async Task<UserDto?> RegisterAsync(RegisterRequest request)
+    /// <summary>
+    /// Создаёт ожидающую одобрения учётную запись и уведомляет администратора.
+    /// Запрещённая регистрация и системные адреса отклоняются до обращения к базе.
+    /// </summary>
+    public async Task<UserDto?> RegisterAsync(
+        RegisterRequest request,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var email = NormalizeEmail(request.Email);
-
-        if (await _context.Users.AnyAsync(u => u.Email == email))
-        {
-            return null;
-        }
 
         var registrationEnabled = _configuration.GetValue<bool>("Features:RegistrationEnabled", true);
         if (!registrationEnabled)
         {
-            throw new InvalidOperationException("Registration is currently disabled");
+            throw new InvalidOperationException("RegistrationDisabled");
         }
 
         if (IsProtectedSystemUserEmail(email))
@@ -729,13 +751,18 @@ public partial class AuthService
             throw new InvalidOperationException("ProtectedUserEmailReserved");
         }
 
-        var defaultRoleId = await GetDefaultUserRoleIdAsync();
+        if (await _context.Users.AnyAsync(u => u.Email == email, cancellationToken))
+        {
+            return null;
+        }
+
+        var defaultRoleId = await GetDefaultUserRoleIdAsync(cancellationToken);
         var roleId = defaultRoleId;
 
         var user = new User
         {
             Email = email,
-            FullName = request.FullName,
+            FullName = request.FullName.Trim(),
             RoleId = roleId,
             IsActive = true,
             IsApproved = false,
@@ -747,12 +774,12 @@ public partial class AuthService
         user.PasswordHash = _passwordHasher.HashPassword(user, request.Password);
 
         _context.Users.Add(user);
-        await _context.SaveChangesAsync();
+        await _context.SaveChangesAsync(cancellationToken);
 
         user = await QueryUsersWithRelations()
-            .FirstAsync(u => u.Id == user.Id);
+            .FirstAsync(u => u.Id == user.Id, cancellationToken);
 
-        await NotifyPendingRegistrationAsync(user);
+        await NotifyPendingRegistrationAsync(user, cancellationToken);
         return MapToDto(user);
     }
 }

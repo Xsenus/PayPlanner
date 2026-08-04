@@ -45,8 +45,8 @@ export const Register = ({ onSuccess, onBackToLogin }: RegisterProps) => {
       setError('Укажите email.');
       return;
     }
-    if (password.length < 6) {
-      setError('Пароль должен содержать не менее 6 символов.');
+    if (password.length < 8) {
+      setError('Пароль должен содержать не менее 8 символов.');
       return;
     }
     if (password !== confirm) {
@@ -101,6 +101,8 @@ export const Register = ({ onSuccess, onBackToLogin }: RegisterProps) => {
                 className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent transition-all"
                 placeholder="Иван Иванов"
                 required
+                minLength={2}
+                maxLength={200}
               />
             </div>
 
@@ -113,6 +115,7 @@ export const Register = ({ onSuccess, onBackToLogin }: RegisterProps) => {
                 className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent transition-all"
                 placeholder="you@example.com"
                 required
+                maxLength={320}
                 autoComplete="email"
               />
             </div>
@@ -127,6 +130,8 @@ export const Register = ({ onSuccess, onBackToLogin }: RegisterProps) => {
                   className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent transition-all pr-12"
                   placeholder="Введите пароль"
                   required
+                  minLength={8}
+                  maxLength={128}
                   autoComplete="new-password"
                 />
                 <button
@@ -149,6 +154,8 @@ export const Register = ({ onSuccess, onBackToLogin }: RegisterProps) => {
                 className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent transition-all"
                 placeholder="Повторите пароль"
                 required
+                minLength={8}
+                maxLength={128}
                 autoComplete="new-password"
               />
             </div>

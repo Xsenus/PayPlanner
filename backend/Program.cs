@@ -374,6 +374,7 @@ builder.Services.AddAuthorization(opts =>
 {
     opts.AddPolicy("Admin", p => p.RequireRole("admin"));
 });
+builder.Services.Configure<ForwardedHeadersOptions>(LocalReverseProxyForwarding.Configure);
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
@@ -397,6 +398,7 @@ builder.Services.AddRateLimiter(options =>
                 QueueLimit = 0,
                 AutoReplenishment = true,
             }));
+    AuthRateLimitPolicies.AddPolicies(options);
 });
 
 var urlsEnv = Environment.GetEnvironmentVariable("ASPNETCORE_URLS");
@@ -419,6 +421,7 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
+app.UseForwardedHeaders();
 app.UseApiErrorContract(app.Environment);
 app.UseRouting();
 app.UseMiddleware<SlowRequestLoggingMiddleware>();
