@@ -7,7 +7,7 @@
 
 - Разделов frontend: 49.
 - Backend-контроллеров: 64.
-- HTTP endpoints: 778; с найденной тестовой связью: 715.
+- HTTP endpoints: 779; с найденной тестовой связью: 720.
 - Реальных HTML-форм: 17; с найденной тестовой связью: 15.
 - Фоновых сервисов: 26; с найденной тестовой связью: 24.
 
@@ -101,7 +101,7 @@
 | InvoicePaymentStateReconciliationService | backend/Services/InvoicePaymentStateReconciliationService.cs | 7 | да |
 | ClientCaseCourtSyncSchedulerService | backend/Services/LegalIntegrations/ClientCaseCourtSyncSchedulerService.cs | 14 | да |
 | CourtSyncMetricsRollupService | backend/Services/LegalIntegrations/CourtSyncMetricsRollupService.cs | 8 | да |
-| MessengerDocumentOutboxWorker | backend/Services/MessengerDocumentOutboxService.cs | 274 | нет |
+| MessengerDocumentOutboxWorker | backend/Services/MessengerDocumentOutboxService.cs | 276 | нет |
 | MoneyBalanceReconciliationSchedulerService | backend/Services/MoneyBalanceReconciliationSchedulerService.cs | 10 | да |
 | MaxOutboxWorker | backend/Services/Notifications/MaxOutboxService.cs | 353 | нет |
 | NotificationDeliveryRetentionService | backend/Services/Notifications/NotificationDeliveryRetentionService.cs | 6 | да |
@@ -155,7 +155,7 @@
 | LegalEntitiesController | backend/Controllers/LegalEntitiesController.cs | 17 | [Authorize] | да |
 | LegalEntityBalancesController | backend/Controllers/LegalEntityBalancesController.cs | 3 | [Authorize] | да |
 | MaxMessengerController | backend/Controllers/MaxMessengerController.cs | 8 | [Authorize] | нет |
-| MessengerDocumentDeliveriesController | backend/Controllers/MessengerDocumentDeliveriesController.cs | 9 | [Authorize(Policy = "Admin")] | да |
+| MessengerDocumentDeliveriesController | backend/Controllers/MessengerDocumentDeliveriesController.cs | 10 | [Authorize(Policy = "Admin")] | да |
 | MoneyAccountsController | backend/Controllers/MoneyAccountsController.cs | 5 | [Authorize] | да |
 | MoneyOperationsController | backend/Controllers/MoneyOperationsController.cs | 25 | [Authorize] | да |
 | NotificationInboxController | backend/Controllers/NotificationInboxController.cs | 11 | [Authorize] | да |
@@ -164,7 +164,7 @@
 | PaymentsController | backend/Controllers/PaymentsController.cs | 20 | [Authorize] | да |
 | PowerOfAttorneyController | backend/Controllers/PowerOfAttorneyController.cs | 4 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Clients)] | да |
 | ProfileController | backend/Controllers/ProfileController.cs | 6 | [Authorize] | да |
-| PublicWorkOrderApprovalController | backend/Controllers/PublicWorkOrderApprovalController.cs | 4 | не задано | нет |
+| PublicWorkOrderApprovalController | backend/Controllers/PublicWorkOrderApprovalController.cs | 4 | не задано | да |
 | PushSubscriptionsController | backend/Controllers/PushSubscriptionsController.cs | 6 | [Authorize] | да |
 | ReportsController | backend/Controllers/ReportsController.cs | 39 | [Authorize] | да |
 | RolePermissionsController | backend/Controllers/RolePermissionsController.cs | 6 | [Authorize] | да |
@@ -284,16 +284,16 @@
 | POST | api/portal/admin/accounts/{accountId:int}/login | ClientPortalAdminController | SendLogin | backend/Controllers/ClientPortalAdminController.cs:78 | [Authorize(Policy = "Admin")] | нет |
 | DELETE | api/portal/admin/accounts/{accountId:int} | ClientPortalAdminController | Revoke | backend/Controllers/ClientPortalAdminController.cs:91 | [Authorize(Policy = "Admin")] | нет |
 | DELETE | api/portal/admin/accounts/{accountId:int}/cases/{caseId:int} | ClientPortalAdminController | RevokeCaseAccess | backend/Controllers/ClientPortalAdminController.cs:119 | [Authorize(Policy = "Admin")] | нет |
-| POST | api/portal/auth/{challengeId:guid}/preview | ClientPortalController | Preview | backend/Controllers/ClientPortalController.cs:20 | не задано | да |
-| POST | api/portal/auth/{challengeId:guid}/verify | ClientPortalController | Verify | backend/Controllers/ClientPortalController.cs:37 | не задано | да |
-| GET | api/portal/home | ClientPortalController | Home | backend/Controllers/ClientPortalController.cs:67 | не задано | да |
-| GET | api/portal/cases/{casePublicId:guid} | ClientPortalController | GetCase | backend/Controllers/ClientPortalController.cs:89 | не задано | да |
-| GET | api/portal/profile | ClientPortalController | Profile | backend/Controllers/ClientPortalController.cs:109 | не задано | да |
-| POST | api/portal/documents/{documentPublicId:guid}/grant | ClientPortalController | CreateDocumentGrant | backend/Controllers/ClientPortalController.cs:119 | не задано | да |
-| POST | api/portal/documents/{documentPublicId:guid}/download | ClientPortalController | DownloadDocument | backend/Controllers/ClientPortalController.cs:130 | не задано | да |
-| POST | api/portal/logout | ClientPortalController | Logout | backend/Controllers/ClientPortalController.cs:156 | не задано | да |
-| POST | api/portal/max/link | ClientPortalController | CreateMaxLink | backend/Controllers/ClientPortalController.cs:179 | не задано | да |
-| DELETE | api/portal/max/link | ClientPortalController | DeleteMaxLink | backend/Controllers/ClientPortalController.cs:196 | не задано | да |
+| POST | api/portal/auth/{challengeId:guid}/preview | ClientPortalController | Preview | backend/Controllers/ClientPortalController.cs:22 | не задано | да |
+| POST | api/portal/auth/{challengeId:guid}/verify | ClientPortalController | Verify | backend/Controllers/ClientPortalController.cs:39 | не задано | да |
+| GET | api/portal/home | ClientPortalController | Home | backend/Controllers/ClientPortalController.cs:69 | не задано | да |
+| GET | api/portal/cases/{casePublicId:guid} | ClientPortalController | GetCase | backend/Controllers/ClientPortalController.cs:91 | не задано | да |
+| GET | api/portal/profile | ClientPortalController | Profile | backend/Controllers/ClientPortalController.cs:111 | не задано | да |
+| POST | api/portal/documents/{documentPublicId:guid}/grant | ClientPortalController | CreateDocumentGrant | backend/Controllers/ClientPortalController.cs:121 | не задано | да |
+| POST | api/portal/documents/{documentPublicId:guid}/download | ClientPortalController | DownloadDocument | backend/Controllers/ClientPortalController.cs:132 | не задано | да |
+| POST | api/portal/logout | ClientPortalController | Logout | backend/Controllers/ClientPortalController.cs:158 | не задано | да |
+| POST | api/portal/max/link | ClientPortalController | CreateMaxLink | backend/Controllers/ClientPortalController.cs:181 | не задано | да |
+| DELETE | api/portal/max/link | ClientPortalController | DeleteMaxLink | backend/Controllers/ClientPortalController.cs:198 | не задано | да |
 | GET | api/client-reference-data/okin | ClientReferenceDataController | GetOkin | backend/Controllers/ClientReferenceDataController.cs:26 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Clients)] | да |
 | GET | api/client-reference-data/okso | ClientReferenceDataController | GetOkso | backend/Controllers/ClientReferenceDataController.cs:32 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Clients)] | да |
 | GET | api/client-reference-data/okpdtr | ClientReferenceDataController | GetOkpdtr | backend/Controllers/ClientReferenceDataController.cs:38 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Clients)] | да |
@@ -536,15 +536,16 @@
 | GET | api/max/correspondence | MaxMessengerController | GetCorrespondence | backend/Controllers/MaxMessengerController.cs:91 | [Authorize]; [Authorize(Roles = "admin")] | нет |
 | POST | api/max/correspondence/{publicId:guid}/route | MaxMessengerController | RouteCorrespondence | backend/Controllers/MaxMessengerController.cs:99 | [Authorize]; [Authorize(Roles = "admin")] | нет |
 | POST | api/max | MaxMessengerController | Receive | backend/Controllers/MaxMessengerController.cs:141 | [Authorize] | нет |
-| GET | api/messenger-document-deliveries/configuration | MessengerDocumentDeliveriesController | GetConfiguration | backend/Controllers/MessengerDocumentDeliveriesController.cs:31 | [Authorize(Policy = "Admin")] | да |
-| GET | api/messenger-document-deliveries/recipients | MessengerDocumentDeliveriesController | GetRecipients | backend/Controllers/MessengerDocumentDeliveriesController.cs:53 | [Authorize(Policy = "Admin")] | да |
-| POST | api/messenger-document-deliveries/recipients | MessengerDocumentDeliveriesController | CreateRecipient | backend/Controllers/MessengerDocumentDeliveriesController.cs:78 | [Authorize(Policy = "Admin")] | да |
-| POST | api/messenger-document-deliveries/case-documents/{documentId:int}/prepare | MessengerDocumentDeliveriesController | PrepareCaseDocument | backend/Controllers/MessengerDocumentDeliveriesController.cs:120 | [Authorize(Policy = "Admin")] | да |
-| POST | api/messenger-document-deliveries/financial-documents/{documentType}/{documentId:int}/prepare | MessengerDocumentDeliveriesController | PrepareFinancialDocument | backend/Controllers/MessengerDocumentDeliveriesController.cs:166 | [Authorize(Policy = "Admin")] | да |
-| GET | api/messenger-document-deliveries | MessengerDocumentDeliveriesController | GetHistory | backend/Controllers/MessengerDocumentDeliveriesController.cs:228 | [Authorize(Policy = "Admin")] | да |
-| POST | api/messenger-document-deliveries/{deliveryId:int}/queue | MessengerDocumentDeliveriesController | Queue | backend/Controllers/MessengerDocumentDeliveriesController.cs:267 | [Authorize(Policy = "Admin")] | да |
-| GET | api/messenger-document-deliveries/{publicId:guid}/download | MessengerDocumentDeliveriesController | Download | backend/Controllers/MessengerDocumentDeliveriesController.cs:388 | [Authorize(Policy = "Admin")] | да |
-| POST | api/messenger-document-deliveries/callbacks/{provider} | MessengerDocumentDeliveriesController | Callback | backend/Controllers/MessengerDocumentDeliveriesController.cs:403 | [Authorize(Policy = "Admin")] | да |
+| GET | api/messenger-document-deliveries/configuration | MessengerDocumentDeliveriesController | GetConfiguration | backend/Controllers/MessengerDocumentDeliveriesController.cs:33 | [Authorize(Policy = "Admin")] | да |
+| GET | api/messenger-document-deliveries/recipients | MessengerDocumentDeliveriesController | GetRecipients | backend/Controllers/MessengerDocumentDeliveriesController.cs:55 | [Authorize(Policy = "Admin")] | да |
+| POST | api/messenger-document-deliveries/recipients | MessengerDocumentDeliveriesController | CreateRecipient | backend/Controllers/MessengerDocumentDeliveriesController.cs:80 | [Authorize(Policy = "Admin")] | да |
+| POST | api/messenger-document-deliveries/case-documents/{documentId:int}/prepare | MessengerDocumentDeliveriesController | PrepareCaseDocument | backend/Controllers/MessengerDocumentDeliveriesController.cs:122 | [Authorize(Policy = "Admin")] | да |
+| POST | api/messenger-document-deliveries/financial-documents/{documentType}/{documentId:int}/prepare | MessengerDocumentDeliveriesController | PrepareFinancialDocument | backend/Controllers/MessengerDocumentDeliveriesController.cs:164 | [Authorize(Policy = "Admin")] | да |
+| GET | api/messenger-document-deliveries | MessengerDocumentDeliveriesController | GetHistory | backend/Controllers/MessengerDocumentDeliveriesController.cs:226 | [Authorize(Policy = "Admin")] | да |
+| POST | api/messenger-document-deliveries/{deliveryId:int}/queue | MessengerDocumentDeliveriesController | Queue | backend/Controllers/MessengerDocumentDeliveriesController.cs:265 | [Authorize(Policy = "Admin")] | да |
+| GET | api/messenger-document-deliveries/{publicId:guid}/download | MessengerDocumentDeliveriesController | Download | backend/Controllers/MessengerDocumentDeliveriesController.cs:386 | [Authorize(Policy = "Admin")] | да |
+| POST | api/messenger-document-deliveries/{publicId:guid}/download | MessengerDocumentDeliveriesController | DownloadSecurely | backend/Controllers/MessengerDocumentDeliveriesController.cs:406 | [Authorize(Policy = "Admin")] | да |
+| POST | api/messenger-document-deliveries/callbacks/{provider} | MessengerDocumentDeliveriesController | Callback | backend/Controllers/MessengerDocumentDeliveriesController.cs:418 | [Authorize(Policy = "Admin")] | да |
 | GET | api/money-accounts | MoneyAccountsController | Get | backend/Controllers/MoneyAccountsController.cs:22 | [Authorize] | да |
 | GET | api/money-accounts/{id:int} | MoneyAccountsController | GetById | backend/Controllers/MoneyAccountsController.cs:49 | [Authorize] | да |
 | POST | api/money-accounts | MoneyAccountsController | Create | backend/Controllers/MoneyAccountsController.cs:56 | [Authorize]; [Authorize(Policy = "Admin")] | да |
@@ -644,10 +645,10 @@
 | POST | api/profile/password | ProfileController | ChangePassword | backend/Controllers/ProfileController.cs:125 | [Authorize] | да |
 | POST | api/profile/photo | ProfileController | UploadProfilePhoto | backend/Controllers/ProfileController.cs:162 | [Authorize] | да |
 | DELETE | api/profile/external/{provider} | ProfileController | DetachExternalIdentity | backend/Controllers/ProfileController.cs:246 | [Authorize] | да |
-| POST | api/public/work-order-approvals/{publicId:guid}/open | PublicWorkOrderApprovalController | Open | backend/Controllers/PublicWorkOrderApprovalController.cs:21 | не задано | нет |
-| POST | api/public/work-order-approvals/{publicId:guid}/decision | PublicWorkOrderApprovalController | Decide | backend/Controllers/PublicWorkOrderApprovalController.cs:38 | не задано | нет |
-| POST | api/public/work-order-approvals/{publicId:guid}/attachments/{attachmentPublicId:guid}/grant | PublicWorkOrderApprovalController | CreateAttachmentGrant | backend/Controllers/PublicWorkOrderApprovalController.cs:65 | не задано | нет |
-| POST | api/public/work-order-approvals/{publicId:guid}/attachments/{attachmentPublicId:guid}/download | PublicWorkOrderApprovalController | DownloadAttachment | backend/Controllers/PublicWorkOrderApprovalController.cs:87 | не задано | нет |
+| POST | api/public/work-order-approvals/{publicId:guid}/open | PublicWorkOrderApprovalController | Open | backend/Controllers/PublicWorkOrderApprovalController.cs:23 | не задано | да |
+| POST | api/public/work-order-approvals/{publicId:guid}/decision | PublicWorkOrderApprovalController | Decide | backend/Controllers/PublicWorkOrderApprovalController.cs:40 | не задано | да |
+| POST | api/public/work-order-approvals/{publicId:guid}/attachments/{attachmentPublicId:guid}/grant | PublicWorkOrderApprovalController | CreateAttachmentGrant | backend/Controllers/PublicWorkOrderApprovalController.cs:67 | не задано | да |
+| POST | api/public/work-order-approvals/{publicId:guid}/attachments/{attachmentPublicId:guid}/download | PublicWorkOrderApprovalController | DownloadAttachment | backend/Controllers/PublicWorkOrderApprovalController.cs:89 | не задано | да |
 | GET | api/notifications/inbox/push/public-key | PushSubscriptionsController | GetPublicKey | backend/Controllers/PushSubscriptionsController.cs:29 | [Authorize] | да |
 | GET | api/notifications/inbox/push/subscriptions | PushSubscriptionsController | GetSubscriptions | backend/Controllers/PushSubscriptionsController.cs:41 | [Authorize] | да |
 | GET | api/notifications/inbox/push/diagnostics | PushSubscriptionsController | GetDiagnostics | backend/Controllers/PushSubscriptionsController.cs:64 | [Authorize] | да |

@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.ComponentModel.DataAnnotations;
 using System.Net;
 using System.Net.Mail;
 using System.Security.Cryptography;
@@ -873,9 +874,16 @@ public sealed class CreateExternalWorkOrderApprovalRequest
 
 public sealed class PublicWorkOrderApprovalDecisionRequest
 {
+    [Required, StringLength(512, MinimumLength = 1)]
     public string? Token { get; set; }
+
+    [Required, StringLength(16, MinimumLength = 4)]
     public string? Otp { get; set; }
+
+    [Required, StringLength(32, MinimumLength = 1)]
     public string? Decision { get; set; }
+
+    [StringLength(2000)]
     public string? Comment { get; set; }
 }
 

@@ -6410,6 +6410,32 @@ export class ApiService {
     return this.request<MessengerDocumentDeliveryDto[]>(`/messenger-document-deliveries${query}`);
   }
 
+  /**
+   * Скачивает одноразовый публичный документ. Секрет передаётся только в теле
+   * POST и не попадает в адресную строку, referrer или журналы веб-сервера.
+   */
+  async downloadPublicMessengerDocument(publicId: string, token: string) {
+    const response = await fetch(
+      `${API_BASE_URL}/public/messenger-document-deliveries/${encodeURIComponent(publicId)}/download`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token }),
+        cache: 'no-store',
+        referrerPolicy: 'no-referrer',
+      },
+    );
+    if (!response.ok) {
+      const text = await extractResponseErrorMessage(response);
+      throw new Error(text || `HTTP ${response.status} ${response.statusText}`);
+    }
+
+    return {
+      blob: await response.blob(),
+      fileName: parseContentDispositionFileName(response.headers.get('content-disposition')) || 'document.pdf',
+    };
+  }
+
   async getElectronicSignatureConfiguration() {
     return this.request<ElectronicSignatureConfigurationDto>('/electronic-signatures/configuration');
   }

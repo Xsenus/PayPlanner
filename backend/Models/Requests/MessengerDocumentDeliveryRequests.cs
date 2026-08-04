@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace PayPlanner.Api.Models.Requests;
 
 public class CreateMessengerRecipientBindingRequest
@@ -21,8 +23,20 @@ public class PrepareCaseDocumentMessengerDeliveryRequest
 
 public class MessengerDocumentDeliveryCallbackRequest
 {
+    [Required, StringLength(256, MinimumLength = 1)]
     public string ProviderMessageId { get; set; } = string.Empty;
+
+    [Required, StringLength(32, MinimumLength = 1)]
     public string Status { get; set; } = string.Empty;
     public DateTime? OccurredAt { get; set; }
+
+    [StringLength(2000)]
     public string? Error { get; set; }
+}
+
+/// <summary>Секрет одноразовой ссылки, передаваемый в теле запроса без попадания в URL.</summary>
+public sealed class MessengerDocumentDownloadRequest
+{
+    [Required, StringLength(512, MinimumLength = 1)]
+    public string Token { get; set; } = string.Empty;
 }

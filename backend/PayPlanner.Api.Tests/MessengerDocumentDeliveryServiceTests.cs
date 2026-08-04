@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -13,6 +14,7 @@ using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.Notifications;
+using System.Data.Common;
 using Xunit;
 
 namespace PayPlanner.Api.Tests;
@@ -72,7 +74,7 @@ public sealed class MessengerDocumentDeliveryServiceTests
             17,
             "protected-address-is-not-used",
             "Произвольный текст не должен попасть в MAX",
-            "https://crm.example.test/api/public/messenger-document-deliveries/id/download?token=secret",
+            "https://crm.example.test/public/document/id#token=secret",
             "delivery-key",
             42), CancellationToken.None);
 
@@ -124,6 +126,78 @@ public sealed class MessengerDocumentDeliveryServiceTests
     }
 
     [Fact]
+    public async Task ParallelDownloadConsumesOneTimeLinkExactlyOnce()
+    {
+        await using var fixture = await Fixture.CreateAsync(enabled: true);
+        var binding = await fixture.CreateBindingAsync();
+        var prepared = await fixture.Service.PrepareCaseDocumentAsync(
+            fixture.UserId, fixture.DocumentId, binding.Id, null, CancellationToken.None);
+        fixture.Db.ChangeTracker.Clear();
+        var barrier = new ParallelSelectBarrier();
+        await using var firstDb = fixture.CreateIndependentContext(barrier);
+        await using var secondDb = fixture.CreateIndependentContext(barrier);
+        var firstService = fixture.CreateIndependentService(firstDb);
+        var secondService = fixture.CreateIndependentService(secondDb);
+
+        var results = await Task.WhenAll(
+            firstService.ConsumeDownloadAsync(prepared.Delivery.PublicId, prepared.Token!, CancellationToken.None),
+            secondService.ConsumeDownloadAsync(prepared.Delivery.PublicId, prepared.Token!, CancellationToken.None));
+
+        Assert.Single(results, item => item is not null);
+        await using var verificationDb = fixture.CreateIndependentContext();
+        var stored = await verificationDb.MessengerDocumentDeliveries.AsNoTracking().SingleAsync();
+        Assert.Equal(1, stored.DownloadCount);
+        Assert.Equal(MessengerDocumentDeliveryStatuses.Read, stored.Status);
+    }
+
+    [Fact]
+    public async Task OversizedDownloadTokenIsRejectedBeforeDatabaseQuery()
+    {
+        await using var fixture = await Fixture.CreateAsync(enabled: true);
+        var recorder = new CommandCounter();
+        await using var db = fixture.CreateIndependentContext(recorder);
+        var service = fixture.CreateIndependentService(db);
+
+        var result = await service.ConsumeDownloadAsync(
+            Guid.NewGuid(),
+            new string('x', 513),
+            CancellationToken.None);
+
+        Assert.Null(result);
+        Assert.Equal(0, recorder.CommandCount);
+    }
+
+    [Fact]
+    public async Task SecureDownloadUsesPostBodySecurityHeadersAndRemainsOneTime()
+    {
+        await using var fixture = await Fixture.CreateAsync(enabled: true);
+        var binding = await fixture.CreateBindingAsync();
+        var prepared = await fixture.Service.PrepareCaseDocumentAsync(
+            fixture.UserId, fixture.DocumentId, binding.Id, null, CancellationToken.None);
+        var controller = new PublicMessengerDocumentDeliveriesController(
+            fixture.Service,
+            fixture.Db,
+            fixture.Configuration)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
+        };
+
+        var result = Assert.IsType<PhysicalFileResult>(await controller.DownloadSecurely(
+            prepared.Delivery.PublicId,
+            new MessengerDocumentDownloadRequest { Token = prepared.Token! },
+            CancellationToken.None));
+
+        Assert.False(result.EnableRangeProcessing);
+        Assert.Equal("no-store, private", controller.Response.Headers.CacheControl);
+        Assert.Equal("no-referrer", controller.Response.Headers["Referrer-Policy"]);
+        Assert.Equal("noindex, nofollow, noarchive", controller.Response.Headers["X-Robots-Tag"]);
+        Assert.IsType<NotFoundResult>(await controller.DownloadSecurely(
+            prepared.Delivery.PublicId,
+            new MessengerDocumentDownloadRequest { Token = prepared.Token! },
+            CancellationToken.None));
+    }
+
+    [Fact]
     public async Task PrepareIsIdempotentForSameVersionRecipientAndChecksum()
     {
         await using var fixture = await Fixture.CreateAsync(enabled: true);
@@ -138,6 +212,35 @@ public sealed class MessengerDocumentDeliveryServiceTests
         Assert.NotNull(second.Token);
         Assert.NotEqual(first.Token, second.Token);
         Assert.Single(await fixture.Db.MessengerDocumentDeliveries.ToListAsync());
+    }
+
+    [Fact]
+    public async Task PreparingUsedDocumentAgainStartsCleanDeliveryCycle()
+    {
+        await using var fixture = await Fixture.CreateAsync(enabled: true);
+        var binding = await fixture.CreateBindingAsync();
+        var first = await fixture.Service.PrepareCaseDocumentAsync(
+            fixture.UserId, fixture.DocumentId, binding.Id, "Первый цикл", CancellationToken.None);
+        Assert.NotNull(await fixture.Service.ConsumeDownloadAsync(
+            first.Delivery.PublicId, first.Token!, CancellationToken.None));
+        fixture.Db.ChangeTracker.Clear();
+
+        var renewed = await fixture.Service.PrepareCaseDocumentAsync(
+            fixture.UserId, fixture.DocumentId, binding.Id, "Новый цикл", CancellationToken.None);
+
+        Assert.Equal(first.Delivery.Id, renewed.Delivery.Id);
+        Assert.NotEqual(first.Token, renewed.Token);
+        Assert.Equal(MessengerDocumentDeliveryStatuses.Prepared, renewed.Delivery.Status);
+        Assert.Equal(0, renewed.Delivery.DownloadCount);
+        Assert.Equal(0, renewed.Delivery.AttemptCount);
+        Assert.Null(renewed.Delivery.FirstOpenedAt);
+        Assert.Null(renewed.Delivery.LastOpenedAt);
+        Assert.Null(renewed.Delivery.ReadAt);
+        Assert.Null(renewed.Delivery.DeliveredAt);
+        Assert.Null(renewed.Delivery.FailedAt);
+        Assert.Equal("Новый цикл", renewed.Delivery.MessagePreview);
+        Assert.NotNull(await fixture.Service.ConsumeDownloadAsync(
+            renewed.Delivery.PublicId, renewed.Token!, CancellationToken.None));
     }
 
     [Fact]
@@ -200,8 +303,9 @@ public sealed class MessengerDocumentDeliveryServiceTests
         Assert.Equal(1, delivery.AttemptCount);
         Assert.Null(delivery.ProtectedLinkToken);
         Assert.Single(provider.Requests);
-        Assert.Contains("https://crm.example.test/api/public/messenger-document-deliveries/", provider.Requests[0].Link);
-        Assert.Contains("token=", provider.Requests[0].Link);
+        Assert.Contains("https://crm.example.test/public/document/", provider.Requests[0].Link);
+        Assert.Contains("#token=", provider.Requests[0].Link);
+        Assert.DoesNotContain("?token=", provider.Requests[0].Link);
     }
 
     [Fact]
@@ -320,10 +424,35 @@ public sealed class MessengerDocumentDeliveryServiceTests
         Assert.Equal(MessengerDocumentDeliveryStatuses.Read, (await fixture.Db.MessengerDocumentDeliveries.SingleAsync()).Status);
     }
 
+    [Fact]
+    public async Task ProviderCallbackRejectsUnknownProviderBeforeDatabaseQuery()
+    {
+        await using var fixture = await Fixture.CreateAsync(enabled: true);
+        var counter = new CommandCounter();
+        await using var db = fixture.CreateIndependentContext(counter);
+        var controller = new PublicMessengerDocumentDeliveriesController(
+            fixture.CreateIndependentService(db),
+            db,
+            fixture.Configuration)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
+        };
+
+        var result = await controller.Callback("unknown-provider", new MessengerDocumentDeliveryCallbackRequest
+        {
+            ProviderMessageId = "message-1",
+            Status = "read",
+        }, CancellationToken.None);
+
+        Assert.IsType<NotFoundResult>(result);
+        Assert.Equal(0, counter.CommandCount);
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly SqliteConnection _connection;
         private readonly string _root;
+        private readonly string _databaseConnectionString;
         public PaymentContext Db { get; }
         public MessengerDocumentDeliveryService Service { get; }
         public int UserId { get; }
@@ -348,7 +477,8 @@ public sealed class MessengerDocumentDeliveryServiceTests
             string sourceFullPath,
             string expectedChecksum,
             IConfiguration configuration,
-            IDataProtectionProvider dataProtectionProvider)
+            IDataProtectionProvider dataProtectionProvider,
+            string databaseConnectionString)
         {
             _connection = connection;
             _root = root;
@@ -362,11 +492,15 @@ public sealed class MessengerDocumentDeliveryServiceTests
             ExpectedChecksum = expectedChecksum;
             Configuration = configuration;
             DataProtectionProvider = dataProtectionProvider;
+            _databaseConnectionString = databaseConnectionString;
         }
 
         public static async Task<Fixture> CreateAsync(bool enabled)
         {
-            var connection = new SqliteConnection("Data Source=:memory:");
+            var root = Path.Combine(Path.GetTempPath(), $"payplanner-messenger-delivery-{Guid.NewGuid():N}");
+            Directory.CreateDirectory(root);
+            var databaseConnectionString = $"Data Source={Path.Combine(root, "delivery-tests.db")};Default Timeout=10";
+            var connection = new SqliteConnection(databaseConnectionString);
             await connection.OpenAsync();
             var options = new DbContextOptionsBuilder<PaymentContext>().UseSqlite(connection).Options;
             var db = new PaymentContext(options, useObjectAuditModel: false);
@@ -386,8 +520,6 @@ public sealed class MessengerDocumentDeliveryServiceTests
             db.AddRange(user, clientCase);
             await db.SaveChangesAsync();
 
-            var root = Path.Combine(Path.GetTempPath(), $"payplanner-messenger-delivery-{Guid.NewGuid():N}");
-            Directory.CreateDirectory(root);
             var configuration = new ConfigurationBuilder()
                 .AddInMemoryCollection(new Dictionary<string, string?>
                 {
@@ -425,7 +557,29 @@ public sealed class MessengerDocumentDeliveryServiceTests
             var checksum = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(expectedContent)));
             return new Fixture(
                 connection, root, db, service, user.Id, client.Id, document.Id,
-                sourcePath, storage.ResolvePath(sourcePath), checksum, configuration, provider);
+                sourcePath, storage.ResolvePath(sourcePath), checksum, configuration, provider,
+                databaseConnectionString);
+        }
+
+        public PaymentContext CreateIndependentContext(params IInterceptor[] interceptors)
+        {
+            var options = new DbContextOptionsBuilder<PaymentContext>()
+                .UseSqlite(_databaseConnectionString)
+                .AddInterceptors(interceptors)
+                .Options;
+            return new PaymentContext(options, useObjectAuditModel: false);
+        }
+
+        public MessengerDocumentDeliveryService CreateIndependentService(PaymentContext db)
+        {
+            var environment = new TestEnvironment(_root);
+            var storage = new LocalCaseDocumentStorage(environment, Configuration);
+            return new MessengerDocumentDeliveryService(
+                db,
+                storage,
+                DataProtectionProvider,
+                environment,
+                Configuration);
         }
 
         public Task<MessengerRecipientBinding> CreateBindingAsync()
@@ -445,10 +599,59 @@ public sealed class MessengerDocumentDeliveryServiceTests
         {
             await Db.DisposeAsync();
             await _connection.DisposeAsync();
+            SqliteConnection.ClearAllPools();
             if (Directory.Exists(_root))
             {
                 Directory.Delete(_root, recursive: true);
             }
+        }
+    }
+
+    private sealed class ParallelSelectBarrier : DbCommandInterceptor
+    {
+        private readonly TaskCompletionSource _bothQueriesStarted =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _readerCount;
+
+        public override async ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (command.CommandText.Contains("MessengerDocumentDeliveries", StringComparison.Ordinal)
+                && Interlocked.Increment(ref _readerCount) >= 2)
+            {
+                _bothQueriesStarted.TrySetResult();
+            }
+
+            await _bothQueriesStarted.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
+            return result;
+        }
+    }
+
+    private sealed class CommandCounter : DbCommandInterceptor
+    {
+        public int CommandCount { get; private set; }
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            CommandCount++;
+            return ValueTask.FromResult(result);
+        }
+
+        public override ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            CommandCount++;
+            return ValueTask.FromResult(result);
         }
     }
 

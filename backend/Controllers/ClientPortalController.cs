@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using System.ComponentModel.DataAnnotations;
 using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.Notifications;
 
@@ -8,7 +9,8 @@ namespace PayPlanner.Api.Controllers;
 
 [ApiController]
 [AllowAnonymous]
-[EnableRateLimiting("client-portal")]
+[EnableRateLimiting(PublicAccessRateLimitPolicies.ClientPortal)]
+[RequestSizeLimit(16 * 1024)]
 [Route("api/portal")]
 public sealed class ClientPortalController(
     IClientPortalService service,
@@ -248,12 +250,16 @@ public sealed class ClientPortalController(
 
 public sealed class ClientPortalTokenRequest
 {
+    [Required, StringLength(512, MinimumLength = 1)]
     public string? Token { get; set; }
 }
 
 public sealed class ClientPortalVerifyRequest
 {
+    [Required, StringLength(512, MinimumLength = 1)]
     public string? Token { get; set; }
+
+    [Required, StringLength(16, MinimumLength = 4)]
     public string? Otp { get; set; }
 }
 
@@ -264,5 +270,6 @@ public sealed class ClientPortalLoginResultDto
 
 public sealed class ClientPortalDocumentDownloadRequest
 {
+    [Required, StringLength(512, MinimumLength = 1)]
     public string? GrantToken { get; set; }
 }

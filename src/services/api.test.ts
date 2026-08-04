@@ -9,6 +9,32 @@ afterEach(() => {
   sessionStorage.clear();
 });
 
+describe('apiService public messenger document', () => {
+  it('sends the one-time token only in a no-referrer POST body', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response('pdf', {
+      headers: {
+        'content-type': 'application/pdf',
+        'content-disposition': "attachment; filename*=UTF-8''contract.pdf",
+      },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiService.downloadPublicMessengerDocument(
+      '11111111-1111-4111-8111-111111111111',
+      'secret-token',
+    );
+
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(String(url)).not.toContain('secret-token');
+    expect(String(url)).not.toContain('?token=');
+    expect(options?.method).toBe('POST');
+    expect(options?.body).toBe(JSON.stringify({ token: 'secret-token' }));
+    expect(options?.referrerPolicy).toBe('no-referrer');
+    expect(options?.cache).toBe('no-store');
+    expect(result.fileName).toBe('contract.pdf');
+  });
+});
+
 describe('apiService object audit', () => {
   it('passes the abort signal to the paged object audit request', async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({

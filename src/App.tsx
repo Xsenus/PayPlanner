@@ -27,6 +27,8 @@ import { ExternalWorkOrderApprovalPage } from './components/Public/ExternalWorkO
 import { isExternalWorkOrderApprovalPath } from './utils/externalWorkOrderApprovalRoute';
 import { ClientPortalPage } from './components/Public/ClientPortalPage';
 import { isClientPortalPath } from './utils/clientPortalRoute';
+import { PublicMessengerDocumentPage } from './components/Public/PublicMessengerDocumentPage';
+import { isPublicMessengerDocumentPath } from './utils/publicMessengerDocumentRoute';
 import type { InvoiceEditorDraftState } from './utils/invoiceEditorBridge';
 import {
   canAccessTab,
@@ -1920,6 +1922,9 @@ function App() {
   }
   if (isClientPortalPath()) {
     return <ClientPortalPage />;
+  }
+  if (isPublicMessengerDocumentPath()) {
+    return <PublicMessengerDocumentPage />;
   }
 
   return (

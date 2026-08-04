@@ -209,7 +209,9 @@ public sealed class MessengerDocumentOutboxProcessor : IMessengerDocumentOutboxP
 
             var address = _protector.Unprotect(item.RecipientBinding.ProtectedAddress);
             var token = _protector.Unprotect(item.ProtectedLinkToken);
-            var link = $"{baseUrl}/api/public/messenger-document-deliveries/{item.PublicId:D}/download?token={Uri.EscapeDataString(token)}";
+            // Токен помещается после # и поэтому не отправляется nginx, приложению
+            // или внешнему сайту. Публичная frontend-страница передаст его API в POST.
+            var link = $"{baseUrl}/public/document/{item.PublicId:D}#token={Uri.EscapeDataString(token)}";
             var result = await provider.SendAsync(new(
                 item.Id,
                 address,

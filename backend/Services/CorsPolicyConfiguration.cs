@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Cors.Infrastructure;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.Net.Http.Headers;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 
@@ -14,6 +15,9 @@ public static class CorsPolicyConfiguration
     {
         options.AddDefaultPolicy(policy =>
         {
+            // Имя скачиваемого файла приходит в Content-Disposition. Явное открытие
+            // заголовка позволяет доверенному frontend сохранить исходное имя.
+            policy.WithExposedHeaders(HeaderNames.ContentDisposition);
             if (environment.IsDevelopment())
             {
                 policy.AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader();

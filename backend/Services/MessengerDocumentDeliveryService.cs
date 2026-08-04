@@ -234,14 +234,7 @@ public sealed class MessengerDocumentDeliveryService : IMessengerDocumentDeliver
         {
             File.Delete(snapshotFullPath);
             var renewedToken = GenerateToken();
-            var renewedAt = DateTime.UtcNow;
-            existing.LinkTokenHash = Hash(renewedToken);
-            existing.ProtectedLinkToken = _addressProtector.Protect(renewedToken);
-            existing.LinkExpiresAt = renewedAt.Add(_linkLifetime);
-            existing.DownloadCount = 0;
-            existing.Status = MessengerDocumentDeliveryStatuses.Prepared;
-            existing.LastError = null;
-            existing.UpdatedAt = renewedAt;
+            RenewPreparedDelivery(existing, renewedToken, message);
             await _db.SaveChangesAsync(ct);
             return new PreparedMessengerDocumentDelivery(existing, renewedToken);
         }
@@ -416,15 +409,7 @@ public sealed class MessengerDocumentDeliveryService : IMessengerDocumentDeliver
         {
             File.Delete(snapshotFullPath);
             var renewedToken = GenerateToken();
-            var renewedAt = DateTime.UtcNow;
-            existing.LinkTokenHash = Hash(renewedToken);
-            existing.ProtectedLinkToken = _addressProtector.Protect(renewedToken);
-            existing.LinkExpiresAt = renewedAt.Add(_linkLifetime);
-            existing.DownloadCount = 0;
-            existing.Status = MessengerDocumentDeliveryStatuses.Prepared;
-            existing.MessagePreview = NormalizeOptional(message, 1000);
-            existing.LastError = null;
-            existing.UpdatedAt = renewedAt;
+            RenewPreparedDelivery(existing, renewedToken, message);
             await _db.SaveChangesAsync(ct);
             return new(existing, renewedToken);
         }
@@ -465,20 +450,36 @@ public sealed class MessengerDocumentDeliveryService : IMessengerDocumentDeliver
         string token,
         CancellationToken ct)
     {
-        if (!_enabled || string.IsNullOrWhiteSpace(token))
+        ct.ThrowIfCancellationRequested();
+        var normalizedToken = token.Trim();
+        if (!_enabled || normalizedToken.Length is 0 or > 512)
         {
             return null;
         }
 
         var delivery = await _db.MessengerDocumentDeliveries
-            .FirstOrDefaultAsync(item => item.PublicId == publicId, ct);
+            .AsNoTracking()
+            .Where(item => item.PublicId == publicId)
+            .Select(item => new DownloadSnapshot(
+                item.Id,
+                item.CancelledAt,
+                item.LinkExpiresAt,
+                item.DownloadCount,
+                item.LinkTokenHash,
+                item.SnapshotPath,
+                item.ContentType,
+                item.OriginalFileName,
+                item.ChecksumSha256))
+            .FirstOrDefaultAsync(ct);
+        var now = DateTime.UtcNow;
+        var tokenHash = Hash(normalizedToken);
         if (delivery is null
             || delivery.CancelledAt.HasValue
             || delivery.LinkExpiresAt is null
-            || delivery.LinkExpiresAt <= DateTime.UtcNow
+            || delivery.LinkExpiresAt <= now
             || delivery.DownloadCount > 0
             || string.IsNullOrWhiteSpace(delivery.LinkTokenHash)
-            || !FixedTimeEquals(delivery.LinkTokenHash, Hash(token.Trim())))
+            || !FixedTimeEquals(delivery.LinkTokenHash, tokenHash))
         {
             return null;
         }
@@ -486,24 +487,55 @@ public sealed class MessengerDocumentDeliveryService : IMessengerDocumentDeliver
         var path = ResolveSnapshotPath(delivery.SnapshotPath);
         if (!File.Exists(path))
         {
-            delivery.Status = MessengerDocumentDeliveryStatuses.Failed;
-            delivery.FailedAt = DateTime.UtcNow;
-            delivery.LastError = "SnapshotMissing";
-            delivery.UpdatedAt = DateTime.UtcNow;
-            await _db.SaveChangesAsync(ct);
+            await _db.MessengerDocumentDeliveries
+                .Where(item => item.Id == delivery.Id && item.DownloadCount == 0)
+                .ExecuteUpdateAsync(
+                    setters => setters
+                        .SetProperty(item => item.Status, MessengerDocumentDeliveryStatuses.Failed)
+                        .SetProperty(item => item.FailedAt, now)
+                        .SetProperty(item => item.LastError, "SnapshotMissing")
+                        .SetProperty(item => item.UpdatedAt, now),
+                    ct);
             return null;
         }
 
-        var now = DateTime.UtcNow;
-        delivery.DownloadCount = 1;
-        delivery.FirstOpenedAt ??= now;
-        delivery.LastOpenedAt = now;
-        delivery.ReadAt ??= now;
-        delivery.Status = MessengerDocumentDeliveryStatuses.Read;
-        delivery.UpdatedAt = now;
-        await _db.SaveChangesAsync(ct);
+        // Второй запрос повторяет все условия доступа и атомарно забирает одноразовую
+        // ссылку. Поэтому два параллельных HTTP-запроса не могут скачать один снимок.
+        var consumed = await _db.MessengerDocumentDeliveries
+            .Where(item => item.Id == delivery.Id
+                && item.CancelledAt == null
+                && item.LinkExpiresAt != null
+                && item.LinkExpiresAt > now
+                && item.DownloadCount == 0
+                && item.LinkTokenHash == tokenHash)
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(item => item.DownloadCount, 1)
+                    .SetProperty(item => item.FirstOpenedAt, item => item.FirstOpenedAt ?? now)
+                    .SetProperty(item => item.LastOpenedAt, now)
+                    .SetProperty(item => item.ReadAt, item => item.ReadAt ?? now)
+                    .SetProperty(item => item.Status, MessengerDocumentDeliveryStatuses.Read)
+                    .SetProperty(item => item.UpdatedAt, now),
+                ct);
+        if (consumed != 1)
+        {
+            return null;
+        }
+
         return new MessengerDocumentDownload(path, delivery.ContentType, delivery.OriginalFileName, delivery.ChecksumSha256);
     }
+
+    /// <summary>Минимальный неизменяемый срез одноразовой ссылки без загрузки связей доставки.</summary>
+    private sealed record DownloadSnapshot(
+        int Id,
+        DateTime? CancelledAt,
+        DateTime? LinkExpiresAt,
+        int DownloadCount,
+        string? LinkTokenHash,
+        string SnapshotPath,
+        string ContentType,
+        string OriginalFileName,
+        string ChecksumSha256);
 
     private string ResolveSnapshotPath(string relativePath)
     {
@@ -514,6 +546,33 @@ public sealed class MessengerDocumentDeliveryService : IMessengerDocumentDeliver
             throw new InvalidOperationException("Некорректный путь снимка документа.");
         }
         return fullPath;
+    }
+
+    /// <summary>
+    /// Начинает новый цикл отправки существующего неизменяемого снимка и удаляет
+    /// все отметки предыдущего цикла, чтобы история не считала новую ссылку прочитанной.
+    /// </summary>
+    private void RenewPreparedDelivery(MessengerDocumentDelivery delivery, string token, string? message)
+    {
+        var renewedAt = DateTime.UtcNow;
+        delivery.LinkTokenHash = Hash(token);
+        delivery.ProtectedLinkToken = _addressProtector.Protect(token);
+        delivery.LinkExpiresAt = renewedAt.Add(_linkLifetime);
+        delivery.Status = MessengerDocumentDeliveryStatuses.Prepared;
+        delivery.ProviderMessageId = null;
+        delivery.DownloadCount = 0;
+        delivery.AttemptCount = 0;
+        delivery.NextAttemptAt = null;
+        delivery.FirstOpenedAt = null;
+        delivery.LastOpenedAt = null;
+        delivery.QueuedAt = null;
+        delivery.SentAt = null;
+        delivery.DeliveredAt = null;
+        delivery.ReadAt = null;
+        delivery.FailedAt = null;
+        delivery.MessagePreview = NormalizeOptional(message, 1000);
+        delivery.LastError = null;
+        delivery.UpdatedAt = renewedAt;
     }
 
     private void EnsureEnabled()

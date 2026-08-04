@@ -2,12 +2,14 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using PayPlanner.Api.Services;
+using System.ComponentModel.DataAnnotations;
 
 namespace PayPlanner.Api.Controllers;
 
 [ApiController]
 [AllowAnonymous]
-[EnableRateLimiting("public-work-order-approval")]
+[EnableRateLimiting(PublicAccessRateLimitPolicies.WorkOrderApproval)]
+[RequestSizeLimit(16 * 1024)]
 [Route("api/public/work-order-approvals")]
 public sealed class PublicWorkOrderApprovalController : ControllerBase
 {
@@ -128,10 +130,12 @@ public sealed class PublicWorkOrderApprovalController : ControllerBase
 
 public sealed class PublicWorkOrderAttachmentDownloadRequest
 {
+    [Required, StringLength(512, MinimumLength = 1)]
     public string? GrantToken { get; set; }
 }
 
 public sealed class PublicWorkOrderApprovalOpenRequest
 {
+    [Required, StringLength(512, MinimumLength = 1)]
     public string? Token { get; set; }
 }

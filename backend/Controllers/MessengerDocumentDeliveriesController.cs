@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
+using System.ComponentModel.DataAnnotations;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
@@ -151,10 +153,6 @@ public sealed class MessengerDocumentDeliveriesController : ControllerBase
                 delivery.Provider,
                 delivery.Status,
                 delivery.LinkExpiresAt,
-                Token = prepared.Token,
-                DownloadPath = prepared.Token is null
-                    ? null
-                    : $"/api/public/messenger-document-deliveries/{delivery.PublicId:D}/download?token={Uri.EscapeDataString(prepared.Token)}",
             });
         }
         catch (InvalidOperationException ex)
@@ -386,7 +384,11 @@ public sealed class PublicMessengerDocumentDeliveriesController : ControllerBase
     }
 
     [HttpGet("{publicId:guid}/download")]
-    public async Task<IActionResult> Download(Guid publicId, [FromQuery] string? token, CancellationToken ct)
+    [EnableRateLimiting(PublicAccessRateLimitPolicies.MessengerDocumentDownload)]
+    public async Task<IActionResult> Download(
+        Guid publicId,
+        [FromQuery, StringLength(512, MinimumLength = 1)] string? token,
+        CancellationToken ct)
     {
         var download = await _deliveryService.ConsumeDownloadAsync(publicId, token ?? string.Empty, ct);
         if (download is null)
@@ -394,19 +396,41 @@ public sealed class PublicMessengerDocumentDeliveriesController : ControllerBase
             return NotFound();
         }
 
-        Response.Headers["X-Content-Type-Options"] = "nosniff";
-        Response.Headers["Cache-Control"] = "no-store, private";
-        Response.Headers["Content-Security-Policy"] = "default-src 'none'";
-        return PhysicalFile(download.FullPath, download.ContentType, download.FileName, enableRangeProcessing: false);
+        return CreateDownloadResult(download);
+    }
+
+    /// <summary>
+    /// Выдаёт документ по токену из тела POST. Новые публичные страницы используют
+    /// именно этот маршрут, чтобы секрет не сохранялся в URL и access-журналах.
+    /// </summary>
+    [HttpPost("{publicId:guid}/download")]
+    [EnableRateLimiting(PublicAccessRateLimitPolicies.MessengerDocumentDownload)]
+    [RequestSizeLimit(4 * 1024)]
+    public async Task<IActionResult> DownloadSecurely(
+        Guid publicId,
+        [FromBody] MessengerDocumentDownloadRequest request,
+        CancellationToken ct)
+    {
+        var download = await _deliveryService.ConsumeDownloadAsync(publicId, request.Token, ct);
+        return download is null ? NotFound() : CreateDownloadResult(download);
     }
 
     [HttpPost("callbacks/{provider}")]
+    [EnableRateLimiting(PublicAccessRateLimitPolicies.MessengerDocumentCallback)]
+    [RequestSizeLimit(16 * 1024)]
     public async Task<IActionResult> Callback(
-        string provider,
+        [StringLength(32, MinimumLength = 1)] string provider,
         [FromBody] MessengerDocumentDeliveryCallbackRequest request,
         CancellationToken ct)
     {
         provider = provider.Trim().ToLowerInvariant();
+        if (provider is not (MessengerDocumentChannels.Telegram
+            or MessengerDocumentChannels.Max
+            or MessengerDocumentChannels.WhatsAppBusiness))
+        {
+            return NotFound();
+        }
+
         if (string.IsNullOrWhiteSpace(request.ProviderMessageId))
         {
             return BadRequest(new { message = "Идентификатор сообщения провайдера обязателен." });
@@ -417,7 +441,7 @@ public sealed class PublicMessengerDocumentDeliveriesController : ControllerBase
             MessengerDocumentChannels.Telegram => "Telegram",
             MessengerDocumentChannels.Max => "Max",
             MessengerDocumentChannels.WhatsAppBusiness => "WhatsAppBusiness",
-            _ => provider,
+            _ => "WhatsAppBusiness",
         };
         var expectedSecret = _configuration[$"MessengerDocumentDelivery:Providers:{configurationProvider}:WebhookSecret"];
         var providedSecret = Request.Headers["X-Document-Delivery-Webhook-Secret"].ToString();
@@ -436,40 +460,84 @@ public sealed class PublicMessengerDocumentDeliveriesController : ControllerBase
         }
 
         var messageId = request.ProviderMessageId.Trim();
-        var delivery = await _db.MessengerDocumentDeliveries.FirstOrDefaultAsync(
-            item => item.Channel == provider && item.ProviderMessageId == messageId,
-            ct);
+        var delivery = await _db.MessengerDocumentDeliveries
+            .AsNoTracking()
+            .Where(item => item.Channel == provider && item.ProviderMessageId == messageId)
+            .Select(item => new { item.Id, item.Status, item.ReadAt, item.CreatedAt })
+            .FirstOrDefaultAsync(ct);
         if (delivery is null)
         {
             return NotFound();
         }
 
-        var occurredAt = request.OccurredAt?.ToUniversalTime() ?? DateTime.UtcNow;
+        var receivedAt = DateTime.UtcNow;
+        var occurredAt = request.OccurredAt?.ToUniversalTime() ?? receivedAt;
+        if (occurredAt > receivedAt.AddMinutes(5) || occurredAt < delivery.CreatedAt.AddMinutes(-5))
+        {
+            occurredAt = receivedAt;
+        }
+
+        int updated;
         if (normalizedStatus == MessengerDocumentDeliveryStatuses.Delivered)
         {
-            if (delivery.ReadAt is null)
-            {
-                delivery.Status = MessengerDocumentDeliveryStatuses.Delivered;
-            }
-            delivery.DeliveredAt ??= occurredAt;
+            updated = await _db.MessengerDocumentDeliveries
+                .Where(item => item.Id == delivery.Id && item.ReadAt == null)
+                .ExecuteUpdateAsync(
+                    setters => setters
+                        .SetProperty(item => item.Status, MessengerDocumentDeliveryStatuses.Delivered)
+                        .SetProperty(item => item.DeliveredAt, item => item.DeliveredAt ?? occurredAt)
+                        .SetProperty(item => item.UpdatedAt, receivedAt),
+                    ct);
         }
         else if (normalizedStatus == MessengerDocumentDeliveryStatuses.Read)
         {
-            delivery.Status = MessengerDocumentDeliveryStatuses.Read;
-            delivery.DeliveredAt ??= occurredAt;
-            delivery.ReadAt ??= occurredAt;
+            updated = await _db.MessengerDocumentDeliveries
+                .Where(item => item.Id == delivery.Id)
+                .ExecuteUpdateAsync(
+                    setters => setters
+                        .SetProperty(item => item.Status, MessengerDocumentDeliveryStatuses.Read)
+                        .SetProperty(item => item.DeliveredAt, item => item.DeliveredAt ?? occurredAt)
+                        .SetProperty(item => item.ReadAt, item => item.ReadAt ?? occurredAt)
+                        .SetProperty(item => item.UpdatedAt, receivedAt),
+                    ct);
         }
-        else if (delivery.ReadAt is null)
+        else
         {
-            delivery.Status = MessengerDocumentDeliveryStatuses.Failed;
-            delivery.FailedAt = occurredAt;
-            delivery.LastError = string.IsNullOrWhiteSpace(request.Error)
+            var safeError = string.IsNullOrWhiteSpace(request.Error)
                 ? "Provider callback reported failure."
                 : request.Error.Trim()[..Math.Min(request.Error.Trim().Length, 2000)];
+            // Условие по ReadAt не позволяет запоздалому или параллельному failure
+            // понизить уже подтверждённый провайдером статус чтения.
+            updated = await _db.MessengerDocumentDeliveries
+                .Where(item => item.Id == delivery.Id && item.ReadAt == null)
+                .ExecuteUpdateAsync(
+                    setters => setters
+                        .SetProperty(item => item.Status, MessengerDocumentDeliveryStatuses.Failed)
+                        .SetProperty(item => item.FailedAt, item => item.FailedAt ?? occurredAt)
+                        .SetProperty(item => item.LastError, safeError)
+                        .SetProperty(item => item.UpdatedAt, receivedAt),
+                    ct);
         }
-        delivery.UpdatedAt = DateTime.UtcNow;
-        await _db.SaveChangesAsync(ct);
-        return Ok(new { delivery.Id, delivery.Status });
+
+        var responseStatus = updated == 1
+            ? normalizedStatus
+            : await _db.MessengerDocumentDeliveries
+                .AsNoTracking()
+                .Where(item => item.Id == delivery.Id)
+                .Select(item => item.Status)
+                .SingleAsync(ct);
+        return Ok(new { delivery.Id, Status = responseStatus });
+    }
+
+    /// <summary>Формирует ответ без кэширования, range-повторов и передачи referrer.</summary>
+    private PhysicalFileResult CreateDownloadResult(MessengerDocumentDownload download)
+    {
+        Response.Headers["X-Content-Type-Options"] = "nosniff";
+        Response.Headers["Cache-Control"] = "no-store, private";
+        Response.Headers["Content-Security-Policy"] = "default-src 'none'";
+        Response.Headers["Referrer-Policy"] = "no-referrer";
+        Response.Headers["X-Robots-Tag"] = "noindex, nofollow, noarchive";
+        return PhysicalFile(download.FullPath, download.ContentType, download.FileName, enableRangeProcessing: false);
     }
 
     private static bool FixedTimeEquals(string left, string right)

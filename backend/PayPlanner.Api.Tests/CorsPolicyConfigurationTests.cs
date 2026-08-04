@@ -25,6 +25,7 @@ public class CorsPolicyConfigurationTests
         Assert.True(policy.AllowAnyOrigin);
         Assert.Contains("*", policy.Headers);
         Assert.Contains("*", policy.Methods);
+        Assert.Contains("Content-Disposition", policy.ExposedHeaders);
     }
 
     [Fact]
@@ -51,6 +52,7 @@ public class CorsPolicyConfigurationTests
             policy.Origins);
         Assert.Contains("*", policy.Headers);
         Assert.Contains("*", policy.Methods);
+        Assert.Contains("Content-Disposition", policy.ExposedHeaders);
     }
 
     [Fact]

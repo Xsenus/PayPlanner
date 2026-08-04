@@ -23,7 +23,6 @@ using System.Diagnostics;
 using System.IO.Compression;
 using System.Text;
 using System.Text.Json.Serialization;
-using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddSingleton(TimeProvider.System);
@@ -378,27 +377,8 @@ builder.Services.Configure<ForwardedHeadersOptions>(LocalReverseProxyForwarding.
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-    options.AddPolicy("public-work-order-approval", httpContext =>
-        RateLimitPartition.GetFixedWindowLimiter(
-            httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-            _ => new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = 10,
-                Window = TimeSpan.FromMinutes(1),
-                QueueLimit = 0,
-                AutoReplenishment = true,
-            }));
-    options.AddPolicy("client-portal", httpContext =>
-        RateLimitPartition.GetFixedWindowLimiter(
-            httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-            _ => new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = 30,
-                Window = TimeSpan.FromMinutes(1),
-                QueueLimit = 0,
-                AutoReplenishment = true,
-            }));
     AuthRateLimitPolicies.AddPolicies(options);
+    PublicAccessRateLimitPolicies.AddPolicies(options);
 });
 
 var urlsEnv = Environment.GetEnvironmentVariable("ASPNETCORE_URLS");
