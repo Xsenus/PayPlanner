@@ -4,6 +4,8 @@ using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Filters;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Models.Requests;
+using PayPlanner.Api.Models.Responses;
 
 namespace PayPlanner.Api.Controllers;
 
@@ -20,36 +22,69 @@ public class ClientPassportController : ControllerBase
         _db = db;
     }
 
+    /// <summary>
+    /// Возвращает основной паспорт клиента одним SQL-запросом и проецирует
+    /// только поля, разрешённые интерфейсу. Отсутствующий клиент даёт 404,
+    /// а клиент без паспорта — 204.
+    /// </summary>
     [HttpGet]
     public async Task<IActionResult> Get(int clientId, CancellationToken ct)
     {
-        var exists = await _db.Clients.AsNoTracking().AnyAsync(c => c.Id == clientId, ct);
-        if (!exists) return NotFound();
-
-        var passport = await _db.ClientPassports
+        var lookup = await _db.Clients
             .AsNoTracking()
-            .Where(x => x.ClientId == clientId)
-            .OrderByDescending(x => x.IsPrimary)
-            .ThenByDescending(x => x.UpdatedAt)
-            .ThenByDescending(x => x.CreatedAt)
-            .FirstOrDefaultAsync(ct);
+            .Where(client => client.Id == clientId)
+            .Select(client => new
+            {
+                Passport = client.Passports
+                    .OrderByDescending(passport => passport.IsPrimary)
+                    .ThenByDescending(passport => passport.UpdatedAt)
+                    .ThenByDescending(passport => passport.CreatedAt)
+                    .Select(passport => new ClientPassportResponse(
+                        passport.Id,
+                        passport.ClientId,
+                        passport.Series,
+                        passport.Number,
+                        passport.IssuedBy,
+                        passport.IssuedAt,
+                        passport.DepartmentCode,
+                        passport.BirthPlacePassport,
+                        passport.BirthPlaceFias,
+                        passport.ValidFrom,
+                        passport.ValidTo,
+                        passport.IsPrimary,
+                        passport.CreatedAt,
+                        passport.UpdatedAt))
+                    .FirstOrDefault(),
+            })
+            .SingleOrDefaultAsync(ct);
 
-        return passport is null ? NoContent() : Ok(passport);
+        if (lookup is null) return NotFound();
+        return lookup.Passport is null ? NoContent() : Ok(lookup.Passport);
     }
 
+    /// <summary>
+    /// Создаёт или изменяет основной паспорт. Клиент и его текущий основной
+    /// паспорт загружаются одним запросом; входной контракт не принимает
+    /// идентификаторы, признаки основного документа и поля шифрования.
+    /// </summary>
     [HttpPut]
     [RequireSectionPermission(RolePermissionCatalog.Clients, RequireSectionPermissionOperations.Edit)]
-    public async Task<IActionResult> Upsert(int clientId, [FromBody] ClientPassport model, CancellationToken ct)
+    public async Task<IActionResult> Upsert(int clientId, [FromBody] UpsertClientPassportRequest model, CancellationToken ct)
     {
-        var exists = await _db.Clients.AsNoTracking().AnyAsync(c => c.Id == clientId, ct);
-        if (!exists) return NotFound();
+        var lookup = await _db.Clients
+            .Where(client => client.Id == clientId)
+            .Select(client => new
+            {
+                Passport = client.Passports
+                    .OrderByDescending(passport => passport.IsPrimary)
+                    .ThenByDescending(passport => passport.UpdatedAt)
+                    .ThenByDescending(passport => passport.CreatedAt)
+                    .FirstOrDefault(),
+            })
+            .SingleOrDefaultAsync(ct);
+        if (lookup is null) return NotFound();
 
-        var entity = await _db.ClientPassports
-            .OrderByDescending(x => x.IsPrimary)
-            .ThenByDescending(x => x.UpdatedAt)
-            .ThenByDescending(x => x.CreatedAt)
-            .FirstOrDefaultAsync(x => x.ClientId == clientId, ct);
-
+        var entity = lookup.Passport;
         if (entity is null)
         {
             entity = new ClientPassport { ClientId = clientId, IsPrimary = true };
@@ -69,8 +104,26 @@ public class ClientPassportController : ControllerBase
         entity.UpdatedAt = DateTime.UtcNow;
 
         await _db.SaveChangesAsync(ct);
-        return Ok(entity);
+        return Ok(ToResponse(entity));
     }
 
+    /// <summary>Удаляет внешние пробелы и приводит пустое значение к null.</summary>
     private static string? Normalize(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    /// <summary>Формирует безопасный ответ без криптографических служебных полей.</summary>
+    private static ClientPassportResponse ToResponse(ClientPassport passport) => new(
+        passport.Id,
+        passport.ClientId,
+        passport.Series,
+        passport.Number,
+        passport.IssuedBy,
+        passport.IssuedAt,
+        passport.DepartmentCode,
+        passport.BirthPlacePassport,
+        passport.BirthPlaceFias,
+        passport.ValidFrom,
+        passport.ValidTo,
+        passport.IsPrimary,
+        passport.CreatedAt,
+        passport.UpdatedAt);
 }

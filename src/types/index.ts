@@ -56,6 +56,11 @@ export interface ClientPassport {
   issuedBy?: string | null;
   issuedAt?: string | null;
   departmentCode?: string | null;
+  birthPlacePassport?: string | null;
+  birthPlaceFias?: string | null;
+  validFrom?: string | null;
+  validTo?: string | null;
+  isPrimary: boolean;
   createdAt: string;
   updatedAt?: string | null;
 }
@@ -66,6 +71,10 @@ export interface ClientPassportInput {
   issuedBy?: string | null;
   issuedAt?: string | null;
   departmentCode?: string | null;
+  birthPlacePassport?: string | null;
+  birthPlaceFias?: string | null;
+  validFrom?: string | null;
+  validTo?: string | null;
 }
 
 export interface PowerOfAttorney {

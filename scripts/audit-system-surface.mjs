@@ -40,7 +40,9 @@ export function parseController(source, file) {
     const method = tail.match(/public\s+(?:async\s+)?[\w<>,.?\[\]\s]+?\s+(\w+)\s*\(/)?.[1] ?? 'не распознано';
     const prefix = source.slice(Math.max(0, index - 1_200), index);
     const memberBoundary = Math.max(prefix.lastIndexOf('{'), prefix.lastIndexOf('}'), prefix.lastIndexOf(';'));
-    const methodHeader = prefix.slice(memberBoundary + 1);
+    const nextDeclaration = tail.search(/\bpublic\s/);
+    const attributesAfterHttp = nextDeclaration >= 0 ? tail.slice(0, nextDeclaration) : '';
+    const methodHeader = `${prefix.slice(memberBoundary + 1)}\n${attributesAfterHttp}`;
     const allowAnonymous = /\[AllowAnonymous\]/.test(methodHeader);
     const methodAuthorized = /\[Authorize(?:\([^\]]*\))?\]/.test(methodHeader);
     const access = allowAnonymous
@@ -189,6 +191,8 @@ function selfTest() {
   if (!controller.endpoints[0].authorized || controller.endpoints[0].access !== '[Authorize]') throw new Error('Не удалось разобрать авторизацию endpoint.');
   const publicController = parseController('[Authorize]\n[Route("api/public")]\npublic class PublicController {\n[AllowAnonymous]\n[HttpGet]\npublic IActionResult Get() => null;\n}', 'PublicController.cs');
   if (publicController.endpoints[0].authorized || !publicController.endpoints[0].access.startsWith('публичный')) throw new Error('Не удалось распознать AllowAnonymous.');
+  const permissionController = parseController('[Authorize]\n[Route("api/secure")]\npublic class SecureController {\n[HttpPut]\n[RequireSectionPermission(Permissions.Clients, Operations.Edit)]\npublic IActionResult Put() => null;\n}', 'SecureController.cs');
+  if (!permissionController.endpoints[0].access.includes('Operations.Edit')) throw new Error('Не удалось распознать атрибут доступа после Http-атрибута.');
   if (parseForms('a\n<form onSubmit={save}>', 'Editor.tsx')[0]?.line !== 2) throw new Error('Не удалось разобрать форму.');
   if (parseTabs('export const TAB_ACCESS_RULES = {\n clients: () => true,\n} satisfies Record<string, unknown>;').join() !== 'clients') throw new Error('Не удалось разобрать разделы.');
   const backgroundServices = [

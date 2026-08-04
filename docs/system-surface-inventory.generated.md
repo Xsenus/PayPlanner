@@ -7,7 +7,7 @@
 
 - Разделов frontend: 49.
 - Backend-контроллеров: 64.
-- HTTP endpoints: 777; с найденной тестовой связью: 697.
+- HTTP endpoints: 777; с найденной тестовой связью: 699.
 - Реальных HTML-форм: 17; с найденной тестовой связью: 15.
 - Фоновых сервисов: 26; с найденной тестовой связью: 24.
 
@@ -133,7 +133,7 @@
 | CasesController | backend/Controllers/CasesController.cs | 5 | [Authorize] | да |
 | CashOrdersController | backend/Controllers/CashOrdersController.cs | 19 | [Authorize] | да |
 | ClientBalancesController | backend/Controllers/ClientBalancesController.cs | 3 | [Authorize] | да |
-| ClientPassportController | backend/Controllers/ClientPassportController.cs | 2 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Clients)] | нет |
+| ClientPassportController | backend/Controllers/ClientPassportController.cs | 2 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Clients)] | да |
 | ClientPortalAdminController | backend/Controllers/ClientPortalAdminController.cs | 7 | [Authorize(Policy = "Admin")] | нет |
 | ClientPortalController | backend/Controllers/ClientPortalController.cs | 10 | не задано | да |
 | ClientReferenceDataController | backend/Controllers/ClientReferenceDataController.cs | 3 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Clients)] | нет |
@@ -221,14 +221,14 @@
 | GET | api/app-version/latest | AppVersionController | GetLatest | backend/Controllers/AppVersionController.cs:48 | [Authorize] | да |
 | GET | api/app-version/history | AppVersionController | GetHistory | backend/Controllers/AppVersionController.cs:81 | [Authorize] | да |
 | POST | api/app-version/mark-seen | AppVersionController | MarkSeen | backend/Controllers/AppVersionController.cs:88 | [Authorize] | да |
-| GET | api/app-version/admin/releases | AppVersionController | GetAdminReleases | backend/Controllers/AppVersionController.cs:123 | [Authorize] | да |
-| POST | api/app-version/admin/releases | AppVersionController | CreateRelease | backend/Controllers/AppVersionController.cs:142 | [Authorize] | да |
-| PUT | api/app-version/admin/releases/{id:int} | AppVersionController | UpdateRelease | backend/Controllers/AppVersionController.cs:187 | [Authorize] | да |
-| DELETE | api/app-version/admin/releases/{id:int} | AppVersionController | DeleteRelease | backend/Controllers/AppVersionController.cs:229 | [Authorize] | да |
-| POST | api/[controller]/login | AuthController | Login | backend/Controllers/AuthController.cs:16 | не задано | нет |
-| POST | api/[controller]/refresh | AuthController | RefreshSession | backend/Controllers/AuthController.cs:56 | не задано | нет |
-| POST | api/[controller]/register | AuthController | Register | backend/Controllers/AuthController.cs:89 | не задано | нет |
-| GET | api/[controller]/me | AuthController | Me | backend/Controllers/AuthController.cs:126 | не задано | нет |
+| GET | api/app-version/admin/releases | AppVersionController | GetAdminReleases | backend/Controllers/AppVersionController.cs:123 | [Authorize]; [Authorize(Policy = "Admin")] | да |
+| POST | api/app-version/admin/releases | AppVersionController | CreateRelease | backend/Controllers/AppVersionController.cs:142 | [Authorize]; [Authorize(Policy = "Admin")] | да |
+| PUT | api/app-version/admin/releases/{id:int} | AppVersionController | UpdateRelease | backend/Controllers/AppVersionController.cs:187 | [Authorize]; [Authorize(Policy = "Admin")] | да |
+| DELETE | api/app-version/admin/releases/{id:int} | AppVersionController | DeleteRelease | backend/Controllers/AppVersionController.cs:229 | [Authorize]; [Authorize(Policy = "Admin")] | да |
+| POST | api/[controller]/login | AuthController | Login | backend/Controllers/AuthController.cs:16 | публичный ([AllowAnonymous]) | нет |
+| POST | api/[controller]/refresh | AuthController | RefreshSession | backend/Controllers/AuthController.cs:56 | [Authorize] | нет |
+| POST | api/[controller]/register | AuthController | Register | backend/Controllers/AuthController.cs:89 | публичный ([AllowAnonymous]) | нет |
+| GET | api/[controller]/me | AuthController | Me | backend/Controllers/AuthController.cs:126 | [Authorize] | нет |
 | GET | api/auth/admin/providers | AuthProvidersAdminController | GetSettings | backend/Controllers/AuthProvidersAdminController.cs:37 | [Authorize(Policy = "Admin")] | да |
 | PUT | api/auth/admin/providers | AuthProvidersAdminController | UpdateSettings | backend/Controllers/AuthProvidersAdminController.cs:41 | [Authorize(Policy = "Admin")] | да |
 | PUT | api/auth/admin/providers/google | AuthProvidersAdminController | UpdateGoogleSettings | backend/Controllers/AuthProvidersAdminController.cs:56 | [Authorize(Policy = "Admin")] | да |
@@ -245,8 +245,8 @@
 | GET | api/calendar-sync/providers | CalendarSyncController | GetProviders | backend/Controllers/CalendarSyncController.cs:55 | [Authorize] | да |
 | GET | api/calendar-sync/readiness | CalendarSyncController | GetReadiness | backend/Controllers/CalendarSyncController.cs:64 | [Authorize] | да |
 | GET | api/calendar-sync/settings | CalendarSyncController | GetSettings | backend/Controllers/CalendarSyncController.cs:74 | [Authorize] | да |
-| PUT | api/calendar-sync/settings | CalendarSyncController | UpdateSettings | backend/Controllers/CalendarSyncController.cs:78 | [Authorize] | да |
-| GET | api/calendar-sync/logs | CalendarSyncController | GetLogs | backend/Controllers/CalendarSyncController.cs:137 | [Authorize] | да |
+| PUT | api/calendar-sync/settings | CalendarSyncController | UpdateSettings | backend/Controllers/CalendarSyncController.cs:78 | [Authorize]; [Authorize(Roles = "admin")] | да |
+| GET | api/calendar-sync/logs | CalendarSyncController | GetLogs | backend/Controllers/CalendarSyncController.cs:137 | [Authorize]; [Authorize(Roles = "admin")] | да |
 | GET | api/[controller] | CasesController | Get | backend/Controllers/CasesController.cs:29 | [Authorize] | да |
 | GET | api/[controller]/{id:int} | CasesController | GetById | backend/Controllers/CasesController.cs:58 | [Authorize] | да |
 | POST | api/[controller] | CasesController | Create | backend/Controllers/CasesController.cs:82 | [Authorize] | да |
@@ -274,8 +274,8 @@
 | GET | api/clients/{clientId:int}/balance | ClientBalancesController | GetSummary | backend/Controllers/ClientBalancesController.cs:57 | [Authorize] | да |
 | GET | api/clients/{clientId:int}/balance/transactions | ClientBalancesController | GetTransactions | backend/Controllers/ClientBalancesController.cs:78 | [Authorize] | да |
 | POST | api/clients/{clientId:int}/balance/apply | ClientBalancesController | ApplyCredit | backend/Controllers/ClientBalancesController.cs:116 | [Authorize] | да |
-| GET | api/clients/{clientId:int}/passport | ClientPassportController | Get | backend/Controllers/ClientPassportController.cs:23 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Clients)] | нет |
-| PUT | api/clients/{clientId:int}/passport | ClientPassportController | Upsert | backend/Controllers/ClientPassportController.cs:40 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Clients)] | нет |
+| GET | api/clients/{clientId:int}/passport | ClientPassportController | Get | backend/Controllers/ClientPassportController.cs:30 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Clients)] | да |
+| PUT | api/clients/{clientId:int}/passport | ClientPassportController | Upsert | backend/Controllers/ClientPassportController.cs:70 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Clients)]; [RequireSectionPermission(RolePermissionCatalog.Clients, RequireSectionPermissionOperations.Edit)] | да |
 | POST | api/portal/admin/access | ClientPortalAdminController | SaveAccess | backend/Controllers/ClientPortalAdminController.cs:13 | [Authorize(Policy = "Admin")] | нет |
 | GET | api/portal/admin/accounts/{accountId:int} | ClientPortalAdminController | GetAccount | backend/Controllers/ClientPortalAdminController.cs:38 | [Authorize(Policy = "Admin")] | нет |
 | GET | api/portal/admin/cases/{caseId:int}/accounts | ClientPortalAdminController | GetCaseAccounts | backend/Controllers/ClientPortalAdminController.cs:52 | [Authorize(Policy = "Admin")] | нет |
@@ -453,19 +453,19 @@
 | GET | api/electronic-signatures/financial-documents/{documentType}/{documentId:int} | ElectronicSignaturesController | GetHistory | backend/Controllers/ElectronicSignaturesController.cs:144 | [Authorize(Policy = "Admin")] | да |
 | POST | api/electronic-signatures/{publicId:guid}/cancel | ElectronicSignaturesController | Cancel | backend/Controllers/ElectronicSignaturesController.cs:161 | [Authorize(Policy = "Admin")] | да |
 | GET | api/electronic-signatures/{publicId:guid}/evidence-package | ElectronicSignaturesController | DownloadEvidencePackage | backend/Controllers/ElectronicSignaturesController.cs:182 | [Authorize(Policy = "Admin")] | да |
-| GET | api/auth/providers | ExternalAuthController | GetProviders | backend/Controllers/ExternalAuthController.cs:22 | не задано | нет |
-| POST | api/auth/external/start | ExternalAuthController | StartExternal | backend/Controllers/ExternalAuthController.cs:27 | не задано | нет |
-| GET | api/auth/external/status/{state} | ExternalAuthController | GetExternalStatus | backend/Controllers/ExternalAuthController.cs:49 | не задано | нет |
-| GET | api/auth/external/callback/{provider} | ExternalAuthController | ExternalCallback | backend/Controllers/ExternalAuthController.cs:67 | не задано | нет |
-| POST | api/auth/telegram/widget | ExternalAuthController | CompleteTelegramWidget | backend/Controllers/ExternalAuthController.cs:91 | не задано | нет |
-| POST | api/auth/telegram/bot/start | ExternalAuthController | StartTelegramBot | backend/Controllers/ExternalAuthController.cs:107 | не задано | нет |
-| GET | api/auth/telegram/bot/status/{state} | ExternalAuthController | GetTelegramBotStatus | backend/Controllers/ExternalAuthController.cs:123 | не задано | нет |
-| POST | api/auth/telegram/webhook | ExternalAuthController | TelegramWebhook | backend/Controllers/ExternalAuthController.cs:141 | не задано | нет |
-| GET | api/features | FeatureFlagsController | Get | backend/Controllers/FeatureFlagsController.cs:25 | не задано | да |
-| GET | api/features/legal-integrations/diagnostics | FeatureFlagsController | GetLegalIntegrationDiagnostics | backend/Controllers/FeatureFlagsController.cs:32 | не задано | да |
+| GET | api/auth/providers | ExternalAuthController | GetProviders | backend/Controllers/ExternalAuthController.cs:22 | публичный ([AllowAnonymous]) | нет |
+| POST | api/auth/external/start | ExternalAuthController | StartExternal | backend/Controllers/ExternalAuthController.cs:27 | публичный ([AllowAnonymous]) | нет |
+| GET | api/auth/external/status/{state} | ExternalAuthController | GetExternalStatus | backend/Controllers/ExternalAuthController.cs:49 | публичный ([AllowAnonymous]) | нет |
+| GET | api/auth/external/callback/{provider} | ExternalAuthController | ExternalCallback | backend/Controllers/ExternalAuthController.cs:67 | публичный ([AllowAnonymous]) | нет |
+| POST | api/auth/telegram/widget | ExternalAuthController | CompleteTelegramWidget | backend/Controllers/ExternalAuthController.cs:91 | публичный ([AllowAnonymous]) | нет |
+| POST | api/auth/telegram/bot/start | ExternalAuthController | StartTelegramBot | backend/Controllers/ExternalAuthController.cs:107 | публичный ([AllowAnonymous]) | нет |
+| GET | api/auth/telegram/bot/status/{state} | ExternalAuthController | GetTelegramBotStatus | backend/Controllers/ExternalAuthController.cs:123 | публичный ([AllowAnonymous]) | нет |
+| POST | api/auth/telegram/webhook | ExternalAuthController | TelegramWebhook | backend/Controllers/ExternalAuthController.cs:141 | публичный ([AllowAnonymous]) | нет |
+| GET | api/features | FeatureFlagsController | Get | backend/Controllers/FeatureFlagsController.cs:25 | публичный ([AllowAnonymous]) | да |
+| GET | api/features/legal-integrations/diagnostics | FeatureFlagsController | GetLegalIntegrationDiagnostics | backend/Controllers/FeatureFlagsController.cs:32 | публичный ([AllowAnonymous]) | да |
 | GET | api/form-requirements | FormRequirementsController | Get | backend/Controllers/FormRequirementsController.cs:242 | [Authorize] | да |
 | GET | api/form-requirements/sections | FormRequirementsController | GetSections | backend/Controllers/FormRequirementsController.cs:273 | [Authorize] | да |
-| PUT | api/form-requirements | FormRequirementsController | Upsert | backend/Controllers/FormRequirementsController.cs:305 | [Authorize] | да |
+| PUT | api/form-requirements | FormRequirementsController | Upsert | backend/Controllers/FormRequirementsController.cs:305 | [Authorize]; [Authorize(Policy = "Admin")] | да |
 | GET | api/google-calendar/status | GoogleCalendarController | GetStatus | backend/Controllers/GoogleCalendarController.cs:26 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Calendar)] | нет |
 | POST | api/google-calendar/auth/start | GoogleCalendarController | StartAuth | backend/Controllers/GoogleCalendarController.cs:40 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Calendar, RequireSectionPermissionOperations.Edit)] | нет |
 | GET | api/google-calendar/auth/status/{state} | GoogleCalendarController | GetAuthStatus | backend/Controllers/GoogleCalendarController.cs:63 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Calendar)] | нет |
@@ -474,9 +474,9 @@
 | POST | api/google-calendar/sync-now | GoogleCalendarController | SyncNow | backend/Controllers/GoogleCalendarController.cs:124 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Calendar, RequireSectionPermissionOperations.Edit)] | нет |
 | DELETE | api/google-calendar/connection | GoogleCalendarController | Disconnect | backend/Controllers/GoogleCalendarController.cs:154 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Calendar, RequireSectionPermissionOperations.Edit)] | нет |
 | POST | api/google-calendar/webhook | GoogleCalendarController | Webhook | backend/Controllers/GoogleCalendarController.cs:178 | публичный ([AllowAnonymous]) | нет |
-| GET | api/[controller] | HealthController | Get | backend/Controllers/HealthController.cs:10 | не задано | да |
+| GET | api/[controller] | HealthController | Get | backend/Controllers/HealthController.cs:10 | публичный ([AllowAnonymous]) | да |
 | POST | api/[controller]/calc | InstallmentsController | Calc | backend/Controllers/InstallmentsController.cs:19 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Accounts)] | нет |
-| GET | api/[controller]/reference-dictionaries | InvoicesController | GetReferenceDictionaries | backend/Controllers/InvoicesController.cs:66 | [Authorize] | да |
+| GET | api/[controller]/reference-dictionaries | InvoicesController | GetReferenceDictionaries | backend/Controllers/InvoicesController.cs:66 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Accounts)] | да |
 | GET | api/[controller] | InvoicesController | Get | backend/Controllers/InvoicesController.cs:239 | [Authorize] | да |
 | GET | api/[controller]/summary | InvoicesController | GetSummary | backend/Controllers/InvoicesController.cs:366 | [Authorize] | да |
 | GET | api/[controller]/{id:int} | InvoicesController | GetById | backend/Controllers/InvoicesController.cs:504 | [Authorize] | да |
@@ -512,10 +512,10 @@
 | POST | api/legal-entities/clean/phone | LegalEntitiesController | CleanPhone | backend/Controllers/LegalEntitiesController.cs:904 | [Authorize] | да |
 | POST | api/legal-entities | LegalEntitiesController | Create | backend/Controllers/LegalEntitiesController.cs:1026 | [Authorize] | да |
 | DELETE | api/legal-entities/{id:int} | LegalEntitiesController | Delete | backend/Controllers/LegalEntitiesController.cs:1171 | [Authorize] | да |
-| GET | api/legal-entities/main-companies/settings | LegalEntitiesController | GetMainCompanySettings | backend/Controllers/LegalEntitiesController.cs:1226 | [Authorize] | да |
-| PUT | api/legal-entities/main-companies/settings | LegalEntitiesController | UpdateMainCompanySettings | backend/Controllers/LegalEntitiesController.cs:1250 | [Authorize] | да |
+| GET | api/legal-entities/main-companies/settings | LegalEntitiesController | GetMainCompanySettings | backend/Controllers/LegalEntitiesController.cs:1226 | [Authorize]; [Authorize(Policy = "Admin")] | да |
+| PUT | api/legal-entities/main-companies/settings | LegalEntitiesController | UpdateMainCompanySettings | backend/Controllers/LegalEntitiesController.cs:1250 | [Authorize]; [Authorize(Policy = "Admin")] | да |
 | GET | api/legal-entities/company-profile | LegalEntitiesController | GetCompanyProfile | backend/Controllers/LegalEntitiesController.cs:1293 | [Authorize] | да |
-| PUT | api/legal-entities/company-profile/main/{id:int} | LegalEntitiesController | SetCompanyProfileMain | backend/Controllers/LegalEntitiesController.cs:1318 | [Authorize] | да |
+| PUT | api/legal-entities/company-profile/main/{id:int} | LegalEntitiesController | SetCompanyProfileMain | backend/Controllers/LegalEntitiesController.cs:1318 | [Authorize]; [Authorize(Policy = "Admin")] | да |
 | POST | api/legal-entities/find-by-id | LegalEntitiesController | FindById | backend/Controllers/LegalEntitiesController.cs:1342 | [Authorize] | да |
 | GET | api/legal-entities | LegalEntitiesController | GetAll | backend/Controllers/LegalEntitiesController.cs:1397 | [Authorize] | да |
 | GET | api/legal-entities/paged | LegalEntitiesController | GetPaged | backend/Controllers/LegalEntitiesController.cs:1431 | [Authorize] | да |
@@ -523,17 +523,17 @@
 | GET | api/legal-entities/{id:int}/case-finance-summaries | LegalEntitiesController | GetCaseFinanceSummaries | backend/Controllers/LegalEntitiesController.cs:1836 | [Authorize] | да |
 | POST | api/legal-entities/suggest | LegalEntitiesController | Suggest | backend/Controllers/LegalEntitiesController.cs:1940 | [Authorize] | да |
 | PUT | api/legal-entities/{id:int} | LegalEntitiesController | Update | backend/Controllers/LegalEntitiesController.cs:1966 | [Authorize] | да |
-| POST | api/legal-entities/migrate-legacy-addresses | LegalEntitiesController | MigrateLegacyAddresses | backend/Controllers/LegalEntitiesController.cs:2105 | [Authorize] | да |
+| POST | api/legal-entities/migrate-legacy-addresses | LegalEntitiesController | MigrateLegacyAddresses | backend/Controllers/LegalEntitiesController.cs:2105 | [Authorize]; [Authorize(Policy = "Admin")] | да |
 | GET | api/legal-entities/{legalEntityId:int}/balance | LegalEntityBalancesController | GetSummary | backend/Controllers/LegalEntityBalancesController.cs:57 | [Authorize] | да |
 | GET | api/legal-entities/{legalEntityId:int}/balance/transactions | LegalEntityBalancesController | GetTransactions | backend/Controllers/LegalEntityBalancesController.cs:78 | [Authorize] | да |
 | POST | api/legal-entities/{legalEntityId:int}/balance/apply | LegalEntityBalancesController | ApplyCredit | backend/Controllers/LegalEntityBalancesController.cs:116 | [Authorize] | да |
 | POST | api/max/link | MaxMessengerController | CreateLink | backend/Controllers/MaxMessengerController.cs:20 | [Authorize] | нет |
 | DELETE | api/max/link | MaxMessengerController | OptOut | backend/Controllers/MaxMessengerController.cs:27 | [Authorize] | нет |
-| POST | api/max/messages | MaxMessengerController | QueueMessage | backend/Controllers/MaxMessengerController.cs:34 | [Authorize] | нет |
-| GET | api/max/messages | MaxMessengerController | GetMessages | backend/Controllers/MaxMessengerController.cs:49 | [Authorize] | нет |
-| POST | api/max/messages/{publicId:guid}/retry | MaxMessengerController | RetryMessage | backend/Controllers/MaxMessengerController.cs:75 | [Authorize] | нет |
-| GET | api/max/correspondence | MaxMessengerController | GetCorrespondence | backend/Controllers/MaxMessengerController.cs:91 | [Authorize] | нет |
-| POST | api/max/correspondence/{publicId:guid}/route | MaxMessengerController | RouteCorrespondence | backend/Controllers/MaxMessengerController.cs:99 | [Authorize] | нет |
+| POST | api/max/messages | MaxMessengerController | QueueMessage | backend/Controllers/MaxMessengerController.cs:34 | [Authorize]; [Authorize(Roles = "admin")] | нет |
+| GET | api/max/messages | MaxMessengerController | GetMessages | backend/Controllers/MaxMessengerController.cs:49 | [Authorize]; [Authorize(Roles = "admin")] | нет |
+| POST | api/max/messages/{publicId:guid}/retry | MaxMessengerController | RetryMessage | backend/Controllers/MaxMessengerController.cs:75 | [Authorize]; [Authorize(Roles = "admin")] | нет |
+| GET | api/max/correspondence | MaxMessengerController | GetCorrespondence | backend/Controllers/MaxMessengerController.cs:91 | [Authorize]; [Authorize(Roles = "admin")] | нет |
+| POST | api/max/correspondence/{publicId:guid}/route | MaxMessengerController | RouteCorrespondence | backend/Controllers/MaxMessengerController.cs:99 | [Authorize]; [Authorize(Roles = "admin")] | нет |
 | POST | api/max | MaxMessengerController | Receive | backend/Controllers/MaxMessengerController.cs:141 | [Authorize] | нет |
 | GET | api/messenger-document-deliveries/configuration | MessengerDocumentDeliveriesController | GetConfiguration | backend/Controllers/MessengerDocumentDeliveriesController.cs:31 | [Authorize(Policy = "Admin")] | да |
 | GET | api/messenger-document-deliveries/recipients | MessengerDocumentDeliveriesController | GetRecipients | backend/Controllers/MessengerDocumentDeliveriesController.cs:53 | [Authorize(Policy = "Admin")] | да |
@@ -546,9 +546,9 @@
 | POST | api/messenger-document-deliveries/callbacks/{provider} | MessengerDocumentDeliveriesController | Callback | backend/Controllers/MessengerDocumentDeliveriesController.cs:403 | [Authorize(Policy = "Admin")] | да |
 | GET | api/money-accounts | MoneyAccountsController | Get | backend/Controllers/MoneyAccountsController.cs:22 | [Authorize] | да |
 | GET | api/money-accounts/{id:int} | MoneyAccountsController | GetById | backend/Controllers/MoneyAccountsController.cs:49 | [Authorize] | да |
-| POST | api/money-accounts | MoneyAccountsController | Create | backend/Controllers/MoneyAccountsController.cs:56 | [Authorize] | да |
-| PUT | api/money-accounts/{id:int} | MoneyAccountsController | Update | backend/Controllers/MoneyAccountsController.cs:94 | [Authorize] | да |
-| DELETE | api/money-accounts/{id:int} | MoneyAccountsController | Delete | backend/Controllers/MoneyAccountsController.cs:146 | [Authorize] | да |
+| POST | api/money-accounts | MoneyAccountsController | Create | backend/Controllers/MoneyAccountsController.cs:56 | [Authorize]; [Authorize(Policy = "Admin")] | да |
+| PUT | api/money-accounts/{id:int} | MoneyAccountsController | Update | backend/Controllers/MoneyAccountsController.cs:94 | [Authorize]; [Authorize(Policy = "Admin")] | да |
+| DELETE | api/money-accounts/{id:int} | MoneyAccountsController | Delete | backend/Controllers/MoneyAccountsController.cs:146 | [Authorize]; [Authorize(Policy = "Admin")] | да |
 | GET | api/money-operations | MoneyOperationsController | Get | backend/Controllers/MoneyOperationsController.cs:199 | [Authorize] | да |
 | GET | api/money-operations/paged | MoneyOperationsController | GetPaged | backend/Controllers/MoneyOperationsController.cs:239 | [Authorize] | да |
 | GET | api/money-operations/export.csv | MoneyOperationsController | ExportCsv | backend/Controllers/MoneyOperationsController.cs:412 | [Authorize] | да |
@@ -634,9 +634,9 @@
 | POST | api/[controller]/repair-invoice-links | PaymentsController | RepairInvoiceLinks | backend/Controllers/PaymentsController.cs:3501 | [Authorize] | да |
 | DELETE | api/[controller]/{id:int} | PaymentsController | Delete | backend/Controllers/PaymentsController.cs:4464 | [Authorize] | да |
 | GET | api/clients/{clientId:int}/powers-of-attorney | PowerOfAttorneyController | Get | backend/Controllers/PowerOfAttorneyController.cs:24 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Clients)] | да |
-| POST | api/clients/{clientId:int}/powers-of-attorney | PowerOfAttorneyController | Create | backend/Controllers/PowerOfAttorneyController.cs:32 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Clients)] | да |
-| PUT | api/clients/{clientId:int}/powers-of-attorney/{id:int} | PowerOfAttorneyController | Update | backend/Controllers/PowerOfAttorneyController.cs:55 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Clients)] | да |
-| DELETE | api/clients/{clientId:int}/powers-of-attorney/{id:int} | PowerOfAttorneyController | Delete | backend/Controllers/PowerOfAttorneyController.cs:74 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Clients)] | да |
+| POST | api/clients/{clientId:int}/powers-of-attorney | PowerOfAttorneyController | Create | backend/Controllers/PowerOfAttorneyController.cs:32 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Clients)]; [RequireSectionPermission(RolePermissionCatalog.Clients, RequireSectionPermissionOperations.Create)] | да |
+| PUT | api/clients/{clientId:int}/powers-of-attorney/{id:int} | PowerOfAttorneyController | Update | backend/Controllers/PowerOfAttorneyController.cs:55 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Clients)]; [RequireSectionPermission(RolePermissionCatalog.Clients, RequireSectionPermissionOperations.Edit)] | да |
+| DELETE | api/clients/{clientId:int}/powers-of-attorney/{id:int} | PowerOfAttorneyController | Delete | backend/Controllers/PowerOfAttorneyController.cs:74 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Clients)]; [RequireSectionPermission(RolePermissionCatalog.Clients, RequireSectionPermissionOperations.Delete)] | да |
 | GET | api/profile | ProfileController | GetProfile | backend/Controllers/ProfileController.cs:35 | [Authorize] | да |
 | GET | api/profile/contractor-balance | ProfileController | GetContractorBalance | backend/Controllers/ProfileController.cs:48 | [Authorize] | да |
 | PUT | api/profile | ProfileController | UpdateProfile | backend/Controllers/ProfileController.cs:101 | [Authorize] | да |
@@ -775,16 +775,16 @@
 | POST | api/tasks/bulk/delete | TasksController | BulkDeleteTasks | backend/Controllers/TasksController.cs:3378 | [Authorize] | да |
 | PATCH | api/tasks/{id:int}/approval | TasksController | UpdateApproval | backend/Controllers/TasksController.cs:3454 | [Authorize] | да |
 | DELETE | api/tasks/{id:int} | TasksController | DeleteTask | backend/Controllers/TasksController.cs:3607 | [Authorize] | да |
-| GET | api/user-activity | UserActivityController | GetAsync | backend/Controllers/UserActivityController.cs:62 | [Authorize] | да |
-| GET | api/user-activity/online | UserActivityController | GetOnlineAsync | backend/Controllers/UserActivityController.cs:153 | [Authorize] | да |
-| GET | api/user-activity/filters | UserActivityController | GetFiltersAsync | backend/Controllers/UserActivityController.cs:287 | [Authorize] | да |
+| GET | api/user-activity | UserActivityController | GetAsync | backend/Controllers/UserActivityController.cs:62 | [Authorize]; [Authorize(Policy = "Admin")] | да |
+| GET | api/user-activity/online | UserActivityController | GetOnlineAsync | backend/Controllers/UserActivityController.cs:153 | [Authorize]; [Authorize(Policy = "Admin")] | да |
+| GET | api/user-activity/filters | UserActivityController | GetFiltersAsync | backend/Controllers/UserActivityController.cs:287 | [Authorize]; [Authorize(Policy = "Admin")] | да |
 | POST | api/user-activity | UserActivityController | CreateAsync | backend/Controllers/UserActivityController.cs:346 | [Authorize] | да |
 | POST | api/user-activity/heartbeat | UserActivityController | HeartbeatAsync | backend/Controllers/UserActivityController.cs:379 | [Authorize] | да |
-| GET | api/user-activity/admin/maintenance | UserActivityController | GetMaintenanceAsync | backend/Controllers/UserActivityController.cs:435 | [Authorize] | да |
-| PUT | api/user-activity/admin/settings | UserActivityController | UpdateSettingsAsync | backend/Controllers/UserActivityController.cs:442 | [Authorize] | да |
-| POST | api/user-activity/admin/cleanup | UserActivityController | CleanupAsync | backend/Controllers/UserActivityController.cs:452 | [Authorize] | да |
-| POST | api/user-activity/admin/compact | UserActivityController | CompactAsync | backend/Controllers/UserActivityController.cs:459 | [Authorize] | да |
-| DELETE | api/user-activity/cleanup | UserActivityController | DeleteAllAsync | backend/Controllers/UserActivityController.cs:472 | [Authorize] | да |
+| GET | api/user-activity/admin/maintenance | UserActivityController | GetMaintenanceAsync | backend/Controllers/UserActivityController.cs:435 | [Authorize]; [Authorize(Policy = "Admin")] | да |
+| PUT | api/user-activity/admin/settings | UserActivityController | UpdateSettingsAsync | backend/Controllers/UserActivityController.cs:442 | [Authorize]; [Authorize(Policy = "Admin")] | да |
+| POST | api/user-activity/admin/cleanup | UserActivityController | CleanupAsync | backend/Controllers/UserActivityController.cs:452 | [Authorize]; [Authorize(Policy = "Admin")] | да |
+| POST | api/user-activity/admin/compact | UserActivityController | CompactAsync | backend/Controllers/UserActivityController.cs:459 | [Authorize]; [Authorize(Policy = "Admin")] | да |
+| DELETE | api/user-activity/cleanup | UserActivityController | DeleteAllAsync | backend/Controllers/UserActivityController.cs:472 | [Authorize]; [Authorize(Policy = "Admin")] | да |
 | POST | api/users/{id:int}/approve | UsersController | ApproveUser | backend/Controllers/UsersController.cs:41 | [Authorize(Policy = "Admin")] | да |
 | POST | api/users | UsersController | CreateUser | backend/Controllers/UsersController.cs:54 | [Authorize(Policy = "Admin")] | да |
 | DELETE | api/users/{id:int} | UsersController | DeleteUser | backend/Controllers/UsersController.cs:78 | [Authorize(Policy = "Admin")] | да |
@@ -798,8 +798,8 @@
 | PUT | api/users/{id:int} | UsersController | UpdateUser | backend/Controllers/UsersController.cs:231 | [Authorize(Policy = "Admin")] | да |
 | GET | api/user-settings/{key} | UserSettingsController | Get | backend/Controllers/UserSettingsController.cs:44 | [Authorize] | да |
 | PUT | api/user-settings/{key} | UserSettingsController | Upsert | backend/Controllers/UserSettingsController.cs:59 | [Authorize] | да |
-| GET | api/user-settings/users/{userId:int}/{key} | UserSettingsController | GetForUser | backend/Controllers/UserSettingsController.cs:68 | [Authorize] | да |
-| PUT | api/user-settings/users/{userId:int}/{key} | UserSettingsController | UpsertForUser | backend/Controllers/UserSettingsController.cs:81 | [Authorize] | да |
+| GET | api/user-settings/users/{userId:int}/{key} | UserSettingsController | GetForUser | backend/Controllers/UserSettingsController.cs:68 | [Authorize]; [Authorize(Policy = "Admin")] | да |
+| PUT | api/user-settings/users/{userId:int}/{key} | UserSettingsController | UpsertForUser | backend/Controllers/UserSettingsController.cs:81 | [Authorize]; [Authorize(Policy = "Admin")] | да |
 | GET | api/v1/cases | CasesV1Controller | Get | backend/Controllers/V1/CasesV1Controller.cs:29 | [Authorize] | да |
 | GET | api/v1/cases/{id:int} | CasesV1Controller | GetById | backend/Controllers/V1/CasesV1Controller.cs:59 | [Authorize] | да |
 | POST | api/v1/cases | CasesV1Controller | Create | backend/Controllers/V1/CasesV1Controller.cs:81 | [Authorize] | да |
