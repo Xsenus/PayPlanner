@@ -15,8 +15,8 @@ import {
 
 describe('run-visual-smoke configuration', () => {
   it('parses cli arguments in dashed and equals forms', () => {
-    expect(parseArgs(['--frontend-url=https://crm.example', '--timeout-ms', '30000'])).toEqual({
-      frontendUrl: 'https://crm.example',
+    expect(parseArgs(['--frontend-url=https://crm.example?mode=full', '--timeout-ms', '30000'])).toEqual({
+      frontendUrl: 'https://crm.example?mode=full',
       timeoutMs: '30000',
     });
   });

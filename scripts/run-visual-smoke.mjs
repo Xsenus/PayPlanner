@@ -51,7 +51,10 @@ export function parseArgs(argv) {
       throw new Error(`Unexpected argument: ${arg}`);
     }
 
-    const [rawKey, inlineValue] = arg.slice(2).split('=', 2);
+    const argument = arg.slice(2);
+    const equalsIndex = argument.indexOf('=');
+    const rawKey = equalsIndex >= 0 ? argument.slice(0, equalsIndex) : argument;
+    const inlineValue = equalsIndex >= 0 ? argument.slice(equalsIndex + 1) : undefined;
     const key = rawKey.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
     const value = inlineValue ?? argv[index + 1];
 
