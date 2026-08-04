@@ -133,8 +133,10 @@ public sealed class MaxOutboxServiceTests
         failed.RecipientLink.Status = MaxRecipientLinkStatuses.OptedOut;
         await fixture.Db.SaveChangesAsync();
         await fixture.Processor(new RecordingApiClient()).ProcessBatchAsync(CancellationToken.None);
-        Assert.Equal(MaxOutboxStatuses.Cancelled, failed.Status);
-        Assert.Equal("recipient-unlinked", failed.LastErrorCode);
+        fixture.Db.ChangeTracker.Clear();
+        var cancelled = await fixture.Db.MaxOutboxMessages.AsNoTracking().SingleAsync(item => item.Id == queued.Id);
+        Assert.Equal(MaxOutboxStatuses.Cancelled, cancelled.Status);
+        Assert.Equal("recipient-unlinked", cancelled.LastErrorCode);
     }
 
     [Fact]

@@ -228,6 +228,11 @@ public sealed class MaxOutboxService(
 
 public interface IMaxOutboxProcessor
 {
+    /// <summary>
+    /// Забирает готовую порцию сообщений MAX, фиксирует их начальное состояние одним
+    /// сохранением и затем последовательно отправляет допустимые сообщения провайдеру.
+    /// </summary>
+    /// <returns>Количество записей, рассмотренных в текущем проходе.</returns>
     Task<int> ProcessBatchAsync(CancellationToken ct);
 }
 
@@ -258,6 +263,7 @@ public sealed class MaxOutboxProcessor(
             .Take(20)
             .ToListAsync(ct);
         var lastSendByRecipient = new Dictionary<long, DateTime>();
+        var processableMessages = new List<MaxOutboxMessage>(messages.Count);
         foreach (var message in messages)
         {
             if (message.RecipientLink.Status != MaxRecipientLinkStatuses.Verified || !message.RecipientLink.MaxUserId.HasValue)
@@ -267,11 +273,23 @@ public sealed class MaxOutboxProcessor(
                 message.UpdatedAt = now;
                 continue;
             }
+
             message.Status = MaxOutboxStatuses.Processing;
             message.AttemptCount++;
             message.UpdatedAt = now;
-            await db.SaveChangesAsync(ct);
+            processableMessages.Add(message);
+        }
 
+        if (messages.Count > 0)
+        {
+            // Одним сохранением фиксируем и отменённые сообщения, и всю порцию,
+            // взятую в обработку. Это исключает вечный повтор неподтверждённых
+            // получателей и не создаёт отдельную транзакцию перед каждой отправкой.
+            await db.SaveChangesAsync(ct);
+        }
+
+        foreach (var message in processableMessages)
+        {
             try
             {
                 var recipientId = message.RecipientLink.MaxUserId.Value;
