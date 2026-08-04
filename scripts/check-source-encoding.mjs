@@ -24,7 +24,7 @@ export function findEncodingIssues(fileName, content) {
       issues.push({ fileName, line: index + 1, kind: 'replacement-character', detail: line.trim() });
       continue;
     }
-    if (/[-]/u.test(line)) {
+    if (/[\u0080-\u009F]/u.test(line)) {
       issues.push({ fileName, line: index + 1, kind: 'c1-control-character', detail: line.trim() });
       continue;
     }
@@ -89,12 +89,19 @@ function runSelfTest() {
   const corrupted = windows1251Decoder.decode(new TextEncoder().encode(original));
   const corruptedIssues = findEncodingIssues('corrupted.txt', new TextEncoder().encode(corrupted));
   const validIssues = findEncodingIssues('valid.txt', new TextEncoder().encode('Россия: готовая задача'));
+  const controlIssues = findEncodingIssues(
+    'control.txt',
+    new TextEncoder().encode(`До${String.fromCharCode(0x80)}После`),
+  );
 
   if (!corruptedIssues.some((issue) => issue.kind === 'recoverable-mojibake')) {
     throw new Error('Self-test did not detect recoverable mojibake.');
   }
   if (validIssues.length !== 0) {
     throw new Error(`Self-test rejected valid UTF-8: ${JSON.stringify(validIssues)}`);
+  }
+  if (!controlIssues.some((issue) => issue.kind === 'c1-control-character')) {
+    throw new Error('Self-test did not detect a C1 control character.');
   }
   console.log('Source encoding audit self-test passed.');
 }
