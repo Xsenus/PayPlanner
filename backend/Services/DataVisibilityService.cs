@@ -21,6 +21,131 @@ public sealed record DataVisibilityAccess(
 
 public static class DataVisibilityService
 {
+    /// <summary>
+    /// Пакетно вычисляет видимость одного раздела для нескольких сотрудников.
+    /// Метод загружает пользователей и права их ролей общими запросами, поэтому число
+    /// обращений к базе не растёт вместе с количеством получателей уведомления.
+    /// </summary>
+    /// <param name="db">Контекст базы данных.</param>
+    /// <param name="userIds">Идентификаторы сотрудников, для которых нужно проверить доступ.</param>
+    /// <param name="section">Раздел из <see cref="RolePermissionCatalog"/>.</param>
+    /// <param name="ct">Токен отмены операции.</param>
+    /// <returns>
+    /// Словарь по всем переданным идентификаторам. Значение <see langword="null"/>
+    /// означает, что сотрудник отсутствует, отключён или не имеет права просмотра.
+    /// </returns>
+    public static async Task<IReadOnlyDictionary<int, DataVisibilityAccess?>> ResolveDataVisibilitiesForUsersAsync(
+        this PaymentContext db,
+        IEnumerable<int> userIds,
+        string section,
+        CancellationToken ct = default)
+    {
+        var normalizedUserIds = userIds
+            .Where(userId => userId > 0)
+            .Distinct()
+            .ToArray();
+        var result = normalizedUserIds.ToDictionary(userId => userId, _ => (DataVisibilityAccess?)null);
+        if (normalizedUserIds.Length == 0)
+        {
+            return result;
+        }
+
+        var users = await db.Users
+            .AsNoTracking()
+            .Where(user => normalizedUserIds.Contains(user.Id) && user.IsActive)
+            .Select(user => new
+            {
+                user.Id,
+                user.RoleId,
+                user.DepartmentId,
+                user.Department,
+                RoleName = user.Role != null ? user.Role.Name : string.Empty,
+                HasAnyPermissions = user.Role != null && user.Role.Permissions.Any(),
+                SectionCanView = user.Role == null
+                    ? null
+                    : user.Role.Permissions
+                        .Where(permission => permission.Section == section)
+                        .Select(permission => (bool?)permission.CanView)
+                        .FirstOrDefault(),
+                SectionViewScope = user.Role == null
+                    ? null
+                    : user.Role.Permissions
+                        .Where(permission => permission.Section == section)
+                        .Select(permission => permission.ViewScope)
+                        .FirstOrDefault(),
+            })
+            .ToListAsync(ct);
+        if (users.Count == 0)
+        {
+            return result;
+        }
+
+        var departmentUsers = Array.Empty<(int Id, int? DepartmentId, string? Department)>();
+        var needsDepartmentUsers = users.Any(user =>
+        {
+            var isAdmin = string.Equals(user.RoleName, "admin", StringComparison.OrdinalIgnoreCase);
+            return !isAdmin
+                && user.SectionCanView is true
+                && string.Equals(
+                    NormalizeScope(section, user.SectionViewScope, isAdmin),
+                    DataVisibilityScope.Department,
+                    StringComparison.OrdinalIgnoreCase)
+                && (user.DepartmentId.HasValue || !string.IsNullOrWhiteSpace(user.Department));
+        });
+        if (needsDepartmentUsers)
+        {
+            var departmentIds = users
+                .Where(user => user.DepartmentId.HasValue)
+                .Select(user => user.DepartmentId!.Value)
+                .Distinct()
+                .ToArray();
+            var departmentNames = users
+                .Select(user => user.Department?.Trim())
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .Cast<string>()
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
+            departmentUsers = await db.Users
+                .AsNoTracking()
+                .Where(user => user.IsActive
+                    && ((user.DepartmentId.HasValue && departmentIds.Contains(user.DepartmentId.Value))
+                        || (user.Department != null && departmentNames.Contains(user.Department))))
+                .Select(user => new ValueTuple<int, int?, string?>(user.Id, user.DepartmentId, user.Department))
+                .ToArrayAsync(ct);
+        }
+
+        foreach (var user in users)
+        {
+            var isAdmin = string.Equals(user.RoleName, "admin", StringComparison.OrdinalIgnoreCase);
+            if (!isAdmin
+                && (user.SectionCanView is null && user.HasAnyPermissions || user.SectionCanView is false))
+            {
+                continue;
+            }
+
+            var scope = NormalizeScope(section, user.SectionViewScope, isAdmin);
+            IReadOnlyCollection<int> visibleUserIds = new[] { user.Id };
+            if (!isAdmin
+                && string.Equals(scope, DataVisibilityScope.Department, StringComparison.OrdinalIgnoreCase))
+            {
+                var department = user.Department?.Trim();
+                visibleUserIds = departmentUsers
+                    .Where(item =>
+                        (user.DepartmentId.HasValue && item.DepartmentId == user.DepartmentId)
+                        || (!string.IsNullOrWhiteSpace(department)
+                            && string.Equals(item.Department, department, StringComparison.Ordinal)))
+                    .Select(item => item.Id)
+                    .Append(user.Id)
+                    .Distinct()
+                    .ToArray();
+            }
+
+            result[user.Id] = new DataVisibilityAccess(user.Id, isAdmin, section, scope, visibleUserIds);
+        }
+
+        return result;
+    }
+
     public static async Task<IReadOnlyDictionary<string, DataVisibilityAccess?>> ResolveDataVisibilitiesAsync(
         this PaymentContext db,
         ClaimsPrincipal? principal,

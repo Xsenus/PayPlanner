@@ -14,6 +14,44 @@ namespace PayPlanner.Api.Tests;
 public class DataVisibilityServiceTests
 {
     [Fact]
+    public async Task ResolveDataVisibilitiesForUsersAsync_BatchesRoleAndDepartmentQueries()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+        var adminRole = new Role { Name = "admin", Description = "admin" };
+        var lawyerRole = new Role { Name = "lawyer", Description = "lawyer" };
+        var deniedRole = new Role { Name = "denied", Description = "denied" };
+        var department = new DepartmentDictionaryItem { Name = "Судебный отдел", IsActive = true };
+        db.Roles.AddRange(adminRole, lawyerRole, deniedRole);
+        db.Departments.Add(department);
+        await db.SaveChangesAsync();
+
+        db.RolePermissions.AddRange(
+            CreatePermission(lawyerRole.Id, RolePermissionCatalog.Cases, DataVisibilityScope.Department),
+            CreatePermission(deniedRole.Id, RolePermissionCatalog.Cases, DataVisibilityScope.Own, canView: false));
+        var admin = CreateUser("batch-admin@example.com", "Администратор", adminRole.Id);
+        var lawyer = CreateUser("batch-lawyer@example.com", "Юрист", lawyerRole.Id, department);
+        var teammate = CreateUser("batch-teammate@example.com", "Коллега", lawyerRole.Id, department);
+        var denied = CreateUser("batch-denied@example.com", "Без доступа", deniedRole.Id);
+        var inactive = CreateUser("batch-inactive@example.com", "Отключён", lawyerRole.Id, department);
+        inactive.IsActive = false;
+        db.Users.AddRange(admin, lawyer, teammate, denied, inactive);
+        await db.SaveChangesAsync();
+        interceptor.ReaderCommands.Clear();
+
+        var access = await db.ResolveDataVisibilitiesForUsersAsync(
+            new[] { admin.Id, lawyer.Id, denied.Id, inactive.Id },
+            RolePermissionCatalog.Cases);
+
+        Assert.True(access[admin.Id]!.SeesAll);
+        Assert.Equal(DataVisibilityScope.Department, access[lawyer.Id]!.ViewScope);
+        Assert.True(access[lawyer.Id]!.CanSeeUser(teammate.Id));
+        Assert.Null(access[denied.Id]);
+        Assert.Null(access[inactive.Id]);
+        Assert.Equal(2, interceptor.ReaderCommands.Count);
+    }
+
+    [Fact]
     public async Task ResolveDataVisibilitiesAsync_LoadsSharedAccessDataOnceAndPreservesSectionScopes()
     {
         var interceptor = new RecordingCommandInterceptor();
@@ -495,6 +533,23 @@ public class DataVisibilityServiceTests
             Section = section,
             CanView = canView,
             ViewScope = viewScope,
+        };
+
+    private static User CreateUser(
+        string email,
+        string fullName,
+        int roleId,
+        DepartmentDictionaryItem? department = null)
+        => new()
+        {
+            Email = email,
+            PasswordHash = "hash",
+            FullName = fullName,
+            RoleId = roleId,
+            DepartmentId = department?.Id,
+            Department = department?.Name,
+            IsActive = true,
+            IsApproved = true,
         };
 
     private static async Task<PaymentContext> CreateContextAsync(DbCommandInterceptor? interceptor = null)

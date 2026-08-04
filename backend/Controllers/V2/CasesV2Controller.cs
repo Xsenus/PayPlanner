@@ -908,7 +908,7 @@ public class CasesV2Controller : ControllerBase
 
     private async Task<IReadOnlyCollection<int>> ResolveCaseNotificationRecipientIdsAsync(int clientCaseId, CancellationToken ct)
     {
-        var candidateUserIds = await _db.ClientCases
+        var caseAccess = await _db.ClientCases
             .AsNoTracking()
             .Where(clientCase => clientCase.Id == clientCaseId)
             .Select(clientCase => new
@@ -916,23 +916,32 @@ public class CasesV2Controller : ControllerBase
                 clientCase.ResponsibleUserId,
                 ClientResponsibleUserId = clientCase.Client != null ? clientCase.Client.ResponsibleUserId : null,
                 LegalEntityResponsibleUserId = clientCase.LegalEntity != null ? clientCase.LegalEntity.ResponsibleUserId : null,
+                clientCase.IsHiddenFromExecutor,
             })
-            .ToListAsync(ct);
+            .SingleOrDefaultAsync(ct);
+        if (caseAccess is null)
+        {
+            return Array.Empty<int>();
+        }
 
-        var userIds = candidateUserIds
-            .SelectMany(item => new[] { item.ResponsibleUserId, item.ClientResponsibleUserId, item.LegalEntityResponsibleUserId })
+        var responsibleUserIds = new[]
+            {
+                caseAccess.ResponsibleUserId,
+                caseAccess.ClientResponsibleUserId,
+                caseAccess.LegalEntityResponsibleUserId,
+            }
             .Where(userId => userId.HasValue && userId.Value > 0)
             .Select(userId => userId!.Value)
             .Distinct()
             .ToArray();
-        if (userIds.Length == 0)
+        if (responsibleUserIds.Length == 0)
         {
             return Array.Empty<int>();
         }
 
         var allowedUserIds = await _db.Users
             .AsNoTracking()
-            .Where(user => userIds.Contains(user.Id)
+            .Where(user => responsibleUserIds.Contains(user.Id)
                 && user.IsActive
                 && user.IsApproved
                 && user.Role != null
@@ -943,23 +952,20 @@ public class CasesV2Controller : ControllerBase
             .Select(user => user.Id)
             .ToListAsync(ct);
 
-        var result = new List<int>();
+        var visibilityByUserId = await _db.ResolveDataVisibilitiesForUsersAsync(
+            allowedUserIds,
+            RolePermissionCatalog.Cases,
+            ct);
+        var result = new List<int>(allowedUserIds.Count);
         foreach (var userId in allowedUserIds)
         {
-            var principal = new ClaimsPrincipal(new ClaimsIdentity(
-                [new Claim(ClaimTypes.NameIdentifier, userId.ToString(CultureInfo.InvariantCulture))],
-                authenticationType: "CaseNotificationAccessCheck"));
-            var visibility = await _db.ResolveDataVisibilityAsync(principal, RolePermissionCatalog.Cases, ct);
-            if (visibility is null)
+            if (!visibilityByUserId.TryGetValue(userId, out var visibility) || visibility is null)
             {
                 continue;
             }
 
-            var canOpenCase = await _db.ClientCases
-                .AsNoTracking()
-                .Where(clientCase => clientCase.Id == clientCaseId)
-                .ApplyClientCaseVisibility(visibility)
-                .AnyAsync(ct);
+            var canOpenCase = visibility.SeesAll
+                || (!caseAccess.IsHiddenFromExecutor && responsibleUserIds.Any(visibility.CanSeeUser));
             if (canOpenCase)
             {
                 result.Add(userId);

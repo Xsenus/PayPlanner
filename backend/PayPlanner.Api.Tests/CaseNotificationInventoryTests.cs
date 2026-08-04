@@ -122,8 +122,9 @@ public class CaseNotificationInventoryTests
         AssertMethodContains(
             source,
             "ResolveCaseNotificationRecipientIdsAsync",
-            "ResolveDataVisibilityAsync",
-            "ApplyClientCaseVisibility");
+            "ResolveDataVisibilitiesForUsersAsync",
+            "visibility.SeesAll",
+            "visibility.CanSeeUser");
     }
 
     [Fact]

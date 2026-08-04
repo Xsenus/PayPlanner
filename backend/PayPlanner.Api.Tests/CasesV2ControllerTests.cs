@@ -1,5 +1,6 @@
 using System.Data.Common;
 using System.Globalization;
+using System.Reflection;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
@@ -28,6 +29,61 @@ namespace PayPlanner.Api.Tests;
 
 public class CasesV2ControllerTests
 {
+    [Fact]
+    public async Task ResolveCaseNotificationRecipientIdsAsync_UsesFixedQueryCountForSeveralRecipients()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+        var department = new DepartmentDictionaryItem { Name = "Судебный отдел", IsActive = true };
+        db.Departments.Add(department);
+        await db.SaveChangesAsync();
+        var caseResponsible = await CreateUserAsync(
+            db,
+            "case-notification-responsible@example.com",
+            "Ответственный по делу",
+            DataVisibilityScope.Department);
+        var clientResponsible = await CreateUserAsync(
+            db,
+            "case-notification-client@example.com",
+            "Ответственный по клиенту",
+            DataVisibilityScope.Department);
+        foreach (var user in new[] { caseResponsible, clientResponsible })
+        {
+            user.DepartmentId = department.Id;
+            user.Department = department.Name;
+        }
+
+        var client = new Client
+        {
+            Name = "Клиент пакетной проверки",
+            IsActive = true,
+            ResponsibleUserId = clientResponsible.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Дело пакетной проверки получателей",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = caseResponsible.Id,
+        };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, caseResponsible);
+        interceptor.Commands.Clear();
+
+        var method = typeof(CasesV2Controller).GetMethod(
+            "ResolveCaseNotificationRecipientIdsAsync",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        var invocation = method.Invoke(controller, new object[] { clientCase.Id, CancellationToken.None });
+        var recipientIds = await Assert.IsAssignableFrom<Task<IReadOnlyCollection<int>>>(invocation);
+
+        Assert.Equal(
+            new[] { caseResponsible.Id, clientResponsible.Id }.OrderBy(id => id),
+            recipientIds.OrderBy(id => id));
+        Assert.Equal(4, interceptor.Commands.Count);
+    }
+
     [Fact]
     public async Task Get_AppliesOwnerVisibility()
     {
