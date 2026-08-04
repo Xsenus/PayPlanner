@@ -17,15 +17,18 @@ public class FormRequirementsService : IFormRequirementsService
 
     public FormRequirementsService(PaymentContext db) => _db = db;
 
-    public Task<List<string>> GetRequiredFieldsAsync(string section, CancellationToken ct = default)
-        => _db.FormFieldRequirements.AsNoTracking()
+    public async Task<List<string>> GetRequiredFieldsAsync(string section, CancellationToken ct = default)
+    {
+        var keys = await _db.FormFieldRequirements.AsNoTracking()
             .Where(x => x.Section == section && x.IsRequired)
             .Select(x => x.FieldKey)
-            .ToListAsync(ct)
-            .ContinueWith(task => task.Result
-                .Select(key => NormalizeFieldKey(section, key))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList(), ct);
+            .ToListAsync(ct);
+
+        return keys
+            .Select(key => NormalizeFieldKey(section, key))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
 
     public async Task<List<string>> GetMissingFieldsAsync(string section, object model, CancellationToken ct = default)
     {

@@ -101,7 +101,11 @@ namespace PayPlanner.Api.Services
                     await context.SaveChangesAsync();
                 }
             }
-            catch (Exception) { }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine(
+                    $"[SEED][PaymentsBackfill] skipped due to error: {ex.GetType().Name}: {ex.Message}");
+            }
 
             if (!await context.DealTypes.AnyAsync())
             {
