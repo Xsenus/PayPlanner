@@ -21,6 +21,22 @@ public sealed class ProductionLoggingConfigurationTests
             logLevel.GetProperty("Microsoft.EntityFrameworkCore.Database.Command").GetString());
     }
 
+    [Fact]
+    public void DefaultLogging_SuppressesRoutineEntityFrameworkCommandLogs()
+    {
+        var root = FindRepositoryRoot();
+        using var appsettings = JsonDocument.Parse(
+            File.ReadAllText(Path.Combine(root, "backend", "appsettings.json")));
+
+        var logLevel = appsettings.RootElement
+            .GetProperty("Logging")
+            .GetProperty("LogLevel");
+
+        Assert.Equal(
+            "Warning",
+            logLevel.GetProperty("Microsoft.EntityFrameworkCore.Database.Command").GetString());
+    }
+
     private static string FindRepositoryRoot()
     {
         var current = new DirectoryInfo(AppContext.BaseDirectory);
