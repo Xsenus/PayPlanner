@@ -557,6 +557,26 @@ public sealed class YandexDiskServiceTests
         Assert.Equal(400, error.StatusCode);
     }
 
+    [Fact]
+    public async Task CreateFolder_DisposesSuccessfulResponse()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        scope.Db.SystemSettings.Add(new SystemSetting { Key = "integrations.yandexDisk.oauthToken", Value = "ya-token", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow });
+        scope.Db.SystemSettings.Add(new SystemSetting { Key = "integrations.yandexDisk.rootPath", Value = "disk:/PayPlanner", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow });
+        await scope.Db.SaveChangesAsync();
+
+        var responseContent = new TrackingHttpContent("{}");
+        var service = new YandexDiskService(scope.Db, new HttpClient(new FakeYandexDiskHandler(_ => new HttpResponseMessage(HttpStatusCode.Created)
+        {
+            Content = responseContent,
+        })));
+
+        var result = await service.CreateFolderAsync("/Documents", CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.True(responseContent.IsDisposed);
+    }
+
     [Theory]
     [InlineData("delete", "../Other")]
     [InlineData("download", "../Other.txt")]
@@ -952,6 +972,17 @@ public sealed class YandexDiskServiceTests
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
             => Task.FromResult(handler(request));
+    }
+
+    private sealed class TrackingHttpContent(string content) : StringContent(content, Encoding.UTF8, "application/json")
+    {
+        public bool IsDisposed { get; private set; }
+
+        protected override void Dispose(bool disposing)
+        {
+            IsDisposed = true;
+            base.Dispose(disposing);
+        }
     }
 
     private sealed class TestDbScope(SqliteConnection connection, PaymentContext db) : IAsyncDisposable

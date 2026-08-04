@@ -487,7 +487,7 @@ public sealed class YandexDiskService : IYandexDiskService
 
         try
         {
-            await SendAsync(
+            await SendAndDiscardAsync(
                 HttpMethod.Put,
                 $"{ApiBaseUrl}/resources?path={Uri.EscapeDataString(BuildFullPath(settings.RootPath, testFolderPath))}",
                 token,
@@ -548,7 +548,7 @@ public sealed class YandexDiskService : IYandexDiskService
         {
             try
             {
-                await SendAsync(
+                await SendAndDiscardAsync(
                     HttpMethod.Delete,
                     $"{ApiBaseUrl}/resources?path={Uri.EscapeDataString(testFileFullPath)}&permanently=true",
                     token,
@@ -652,7 +652,7 @@ public sealed class YandexDiskService : IYandexDiskService
         var relativePath = NormalizeRequiredRelativePath(path, "Укажите путь новой папки.");
         var fullPath = BuildFullPath(settings.RootPath, relativePath);
         var token = settings.OAuthToken!;
-        await SendAsync(
+        await SendAndDiscardAsync(
             HttpMethod.Put,
             $"{ApiBaseUrl}/resources?path={Uri.EscapeDataString(fullPath)}",
             token,
@@ -695,7 +695,7 @@ public sealed class YandexDiskService : IYandexDiskService
         var relativePath = NormalizeRequiredRelativePath(path, "Выберите файл или папку для удаления.");
         var fullPath = BuildFullPath(settings.RootPath, relativePath);
         var token = settings.OAuthToken!;
-        await SendAsync(
+        await SendAndDiscardAsync(
             HttpMethod.Delete,
             $"{ApiBaseUrl}/resources?path={Uri.EscapeDataString(fullPath)}&permanently={permanently.ToString().ToLowerInvariant()}",
             token,
@@ -969,7 +969,7 @@ public sealed class YandexDiskService : IYandexDiskService
         var fromFullPath = BuildFullPath(settings.RootPath, fromRelative);
         var toFullPath = BuildFullPath(settings.RootPath, toRelative);
         var token = settings.OAuthToken!;
-        await SendAsync(
+        await SendAndDiscardAsync(
             HttpMethod.Post,
             $"{ApiBaseUrl}/resources/{operation}?from={Uri.EscapeDataString(fromFullPath)}&path={Uri.EscapeDataString(toFullPath)}&overwrite={overwrite.ToString().ToLowerInvariant()}",
             token,
@@ -1477,6 +1477,16 @@ public sealed class YandexDiskService : IYandexDiskService
         return payload ?? throw new YandexDiskOperationException(502, "Яндекс.Диск вернул пустой ответ.");
     }
 
+    private async Task SendAndDiscardAsync(
+        HttpMethod method,
+        string url,
+        string token,
+        HttpContent? content,
+        CancellationToken cancellationToken)
+    {
+        using var response = await SendAsync(method, url, token, content, cancellationToken);
+    }
+
     private static async Task EnsureSuccessAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {
         if (response.IsSuccessStatusCode)
@@ -1841,7 +1851,7 @@ public sealed class YandexDiskService : IYandexDiskService
             var fullPath = BuildFullPath(settings.RootPath, accumulated);
             try
             {
-                await SendAsync(
+                await SendAndDiscardAsync(
                     HttpMethod.Put,
                     $"{ApiBaseUrl}/resources?path={Uri.EscapeDataString(fullPath)}",
                     token,
@@ -1871,7 +1881,7 @@ public sealed class YandexDiskService : IYandexDiskService
             accumulated = string.IsNullOrWhiteSpace(accumulated) ? part : $"{accumulated}/{part}";
             try
             {
-                await SendAsync(
+                await SendAndDiscardAsync(
                     HttpMethod.Put,
                     $"{ApiBaseUrl}/resources?path={Uri.EscapeDataString($"disk:/{accumulated}")}",
                     token,

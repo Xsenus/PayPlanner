@@ -9831,7 +9831,8 @@ public class NotificationServiceTests
             """);
         var context = new DefaultHttpContext();
         context.Request.Headers["X-Telegram-Bot-Api-Secret-Token"] = "secret";
-        var httpFactory = new StaticHttpClientFactory(new HttpClient(new TelegramOkHandler()));
+        var telegramHandler = new TelegramOkHandler();
+        var httpFactory = new StaticHttpClientFactory(new HttpClient(telegramHandler));
         var updateService = new TelegramBotUpdateService(
             db,
             httpFactory,
@@ -9848,6 +9849,7 @@ public class NotificationServiceTests
         var identity = await db.UserExternalIdentities.SingleAsync(item => item.UserId == user.Id && item.Provider == "telegram");
         Assert.Equal(777888, identity.ChatId);
         Assert.Equal("@ivan", (await db.Users.FindAsync(user.Id))?.Telegram);
+        Assert.True(telegramHandler.ResponseContent?.IsDisposed);
     }
 
     [Fact]
@@ -10918,11 +10920,27 @@ public class NotificationServiceTests
 
     private sealed class TelegramOkHandler : HttpMessageHandler
     {
+        public TrackingTelegramContent? ResponseContent { get; private set; }
+
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-            => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            ResponseContent = new TrackingTelegramContent("""{"ok":true,"result":true}""");
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent("""{"ok":true,"result":true}""")
+                Content = ResponseContent
             });
+        }
+    }
+
+    private sealed class TrackingTelegramContent(string content) : StringContent(content)
+    {
+        public bool IsDisposed { get; private set; }
+
+        protected override void Dispose(bool disposing)
+        {
+            IsDisposed = true;
+            base.Dispose(disposing);
+        }
     }
 
     private sealed class TelegramPollingHandler : HttpMessageHandler

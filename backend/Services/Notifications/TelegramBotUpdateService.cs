@@ -657,14 +657,15 @@ public sealed class TelegramBotUpdateService : ITelegramBotUpdateService
         }
 
         using var client = TelegramBotApiHttpClientFactory.Create(_httpClientFactory, config.ToConnectionSettings());
-        await client.PostAsync(
+        using var content = new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["chat_id"] = chatId.ToString(CultureInfo.InvariantCulture),
+            ["text"] = text,
+            ["disable_web_page_preview"] = "true",
+        });
+        using var response = await client.PostAsync(
             $"https://api.telegram.org/bot{config.BotToken.Trim()}/sendMessage",
-            new FormUrlEncodedContent(new Dictionary<string, string>
-            {
-                ["chat_id"] = chatId.ToString(CultureInfo.InvariantCulture),
-                ["text"] = text,
-                ["disable_web_page_preview"] = "true",
-            }),
+            content,
             cancellationToken);
     }
 
