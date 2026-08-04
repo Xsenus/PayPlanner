@@ -143,6 +143,9 @@ describe('AppSettings', () => {
 
     expect(container.firstElementChild?.className).toContain('p-3');
     expect(container.firstElementChild?.className).toContain('lg:p-4');
+    expect(screen.getByTestId('settings-workspace').className).toContain('lg:grid-cols-[280px_minmax(0,1fr)]');
+    expect(screen.getByTestId('settings-workspace').className).toContain('min-w-0');
+    expect(screen.getByTestId('settings-content').className).toContain('min-w-0');
     expect(screen.getByTestId('settings-content').className).toContain('space-y-3');
   });
 

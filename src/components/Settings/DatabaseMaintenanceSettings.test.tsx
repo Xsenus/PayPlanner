@@ -178,6 +178,18 @@ describe('DatabaseMaintenanceSettings', () => {
     mocks.retryDatabaseBackupYandexDiskUploadMock.mockResolvedValue(buildBackupOverview());
   });
 
+  it('wraps long backup directory paths inside the settings workspace', async () => {
+    mocks.getDatabaseBackupOverviewMock.mockResolvedValue({
+      ...buildBackupOverview(),
+      rootDirectory: 'C:\\PayPlanner\\backend\\bin\\Debug\\net9.0\\backups\\database\\production',
+    });
+
+    render(<DatabaseMaintenanceSettings />);
+
+    const directory = await screen.findByText(/Каталог хранения: C:\\PayPlanner/i);
+    expect(directory.className).toContain('break-all');
+  });
+
   it('saves S3 upload settings for database backups', async () => {
     render(<DatabaseMaintenanceSettings />);
 

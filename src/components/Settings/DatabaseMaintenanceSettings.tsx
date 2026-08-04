@@ -674,7 +674,7 @@ export function DatabaseMaintenanceSettings() {
                 <div className="mt-4 space-y-3 text-sm leading-6 text-gray-700">
                   <p>Провайдер: {databaseBackupOverview?.providerDisplayName ?? databaseStatus?.displayName ?? '—'}.</p>
                   <p>Формат: {summary.backupFormat}{summary.backupFormatDescription ? ` — ${summary.backupFormatDescription}` : ''}.</p>
-                  <p>Каталог хранения: {databaseBackupOverview?.rootDirectory ?? '—'}.</p>
+                  <p className="break-all">Каталог хранения: {databaseBackupOverview?.rootDirectory ?? '—'}.</p>
                   {databaseBackupOverview?.provider === 'postgresql' ? (
                     <p>Команда резервного копирования: {databaseBackupOverview.toolCommand || 'pg_dump'}.</p>
                   ) : (
@@ -1161,7 +1161,7 @@ export function DatabaseMaintenanceSettings() {
                   <StatusBadge value={databaseBackupOverview?.items.length ? `Файлов: ${databaseBackupOverview.items.length}` : 'Список пока пуст'} tone={databaseBackupOverview?.items.length ? 'success' : 'warning'} />
                 </div>
                 <div className="mt-4 space-y-3 text-sm leading-6 text-gray-700">
-                  <p>Каталог хранения: {databaseBackupOverview?.rootDirectory ?? '—'}.</p>
+                  <p className="break-all">Каталог хранения: {databaseBackupOverview?.rootDirectory ?? '—'}.</p>
                   <p>Часовой пояс расписания: {databaseBackupOverview?.timeZone ?? '—'}.</p>
                   {databaseBackupOverview?.provider === 'postgresql' ? (
                     <p>Для PostgreSQL используется: {databaseBackupOverview.toolCommand || 'pg_dump'}.</p>

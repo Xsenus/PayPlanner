@@ -231,8 +231,8 @@ export function AppVersionSettings() {
   };
 
   return (
-    <div className="grid gap-6 xl:grid-cols-[320px_1fr]">
-      <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+    <div data-testid="app-release-settings" className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3 xl:grid-cols-[320px_minmax(0,1fr)]">
+      <div data-testid="app-release-list" className="min-w-0 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="flex items-center justify-between gap-3">
           <div>
             <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Релизы</div>
@@ -264,7 +264,7 @@ export function AppVersionSettings() {
               key={release.id}
               type="button"
               onClick={() => setForm(toForm(release))}
-              className={`w-full rounded-xl border px-3 py-3 text-left transition ${
+              className={`min-w-0 w-full rounded-xl border px-3 py-3 text-left transition ${
                 form.id === release.id
                   ? 'border-blue-200 bg-blue-50 text-blue-950'
                   : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
@@ -277,7 +277,7 @@ export function AppVersionSettings() {
                 </span>
               </div>
               <div className="mt-1 truncate text-xs text-slate-500">{release.title}</div>
-              <div className="mt-1 text-[11px] text-slate-400">{release.releaseId}</div>
+              <div className="mt-1 break-all text-[11px] text-slate-400">{release.releaseId}</div>
             </button>
           ))}
           {releases.length === 0 && !loading ? (
@@ -288,7 +288,7 @@ export function AppVersionSettings() {
         </div>
       </div>
 
-      <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+      <div data-testid="app-release-editor" className="min-w-0 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
         <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">

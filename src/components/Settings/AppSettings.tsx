@@ -803,7 +803,7 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
   return (
     <div className="p-3 lg:p-4">
       <div className="w-full">
-        <div className="grid grid-cols-1 gap-3 lg:grid-cols-[280px_1fr]">
+        <div data-testid="settings-workspace" className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-[280px_minmax(0,1fr)]">
           <aside
             data-testid="settings-sidebar"
             className="flex flex-col rounded-3xl border border-gray-200 bg-white p-3 shadow-sm lg:sticky lg:top-4 lg:max-h-[calc(100vh-8rem)] lg:self-start lg:overflow-hidden"
@@ -1058,7 +1058,7 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
             </nav>
           </aside>
 
-          <section data-testid="settings-content" className="space-y-3">
+          <section data-testid="settings-content" className="min-w-0 space-y-3">
             <div className="rounded-3xl border border-gray-200 bg-white p-3 shadow-sm">
               <h3 className="text-2xl font-semibold text-gray-900">{activeSectionTitle}</h3>
             </div>
