@@ -9075,41 +9075,59 @@ public class CasesV2Controller : ControllerBase
             return;
         }
 
-        var lastCommentByCaseId = await _db.TaskJournalComments
+        const int commentActivitySource = 1;
+        const int documentActivitySource = 2;
+        const int courtEventActivitySource = 3;
+        // Последние комментарии, документы и судебные события нужны вместе для
+        // расчёта активности. UNION ALL сохраняет три независимых источника, но
+        // отправляет их в БД одной агрегирующей командой вместо трёх запросов.
+        var lastExternalActivity = await _db.TaskJournalComments
             .AsNoTracking()
             .Where(comment =>
                 comment.TaskJournalItem.ClientCaseId.HasValue &&
                 caseIds.Contains(comment.TaskJournalItem.ClientCaseId.Value) &&
                 !comment.TaskJournalItem.TagsJson.Contains(CaseInactivityAutomationTag))
-            .GroupBy(comment => comment.TaskJournalItem.ClientCaseId!.Value)
+            .Select(comment => new
+            {
+                CaseId = comment.TaskJournalItem.ClientCaseId!.Value,
+                Source = commentActivitySource,
+                At = (DateTime?)(comment.UpdatedAt ?? comment.CreatedAt),
+            })
+            .Concat(_db.ClientCaseDocuments
+                .AsNoTracking()
+                .Where(document => caseIds.Contains(document.ClientCaseId))
+                .Select(document => new
+                {
+                    CaseId = document.ClientCaseId,
+                    Source = documentActivitySource,
+                    At = (DateTime?)document.UploadedAt,
+                }))
+            .Concat(_db.ClientCaseCourtEvents
+                .AsNoTracking()
+                .Where(courtEvent => caseIds.Contains(courtEvent.ClientCaseId))
+                .Select(courtEvent => new
+                {
+                    CaseId = courtEvent.ClientCaseId,
+                    Source = courtEventActivitySource,
+                    At = (DateTime?)(courtEvent.UpdatedAt ?? courtEvent.CreatedAt),
+                }))
+            .GroupBy(item => new { item.CaseId, item.Source })
             .Select(group => new
             {
-                CaseId = group.Key,
-                LastAt = group.Max(comment => comment.UpdatedAt ?? comment.CreatedAt),
+                group.Key.CaseId,
+                group.Key.Source,
+                LastAt = group.Max(item => item.At),
             })
-            .ToDictionaryAsync(item => item.CaseId, item => (DateTime?)item.LastAt, ct);
-
-        var lastDocumentByCaseId = await _db.ClientCaseDocuments
-            .AsNoTracking()
-            .Where(document => caseIds.Contains(document.ClientCaseId))
-            .GroupBy(document => document.ClientCaseId)
-            .Select(group => new
-            {
-                CaseId = group.Key,
-                LastAt = group.Max(document => document.UploadedAt),
-            })
-            .ToDictionaryAsync(item => item.CaseId, item => (DateTime?)item.LastAt, ct);
-
-        var lastCourtEventByCaseId = await _db.ClientCaseCourtEvents
-            .AsNoTracking()
-            .Where(courtEvent => caseIds.Contains(courtEvent.ClientCaseId))
-            .GroupBy(courtEvent => courtEvent.ClientCaseId)
-            .Select(group => new
-            {
-                CaseId = group.Key,
-                LastAt = group.Max(courtEvent => courtEvent.UpdatedAt ?? courtEvent.CreatedAt),
-            })
-            .ToDictionaryAsync(item => item.CaseId, item => (DateTime?)item.LastAt, ct);
+            .ToListAsync(ct);
+        var lastCommentByCaseId = lastExternalActivity
+            .Where(item => item.Source == commentActivitySource)
+            .ToDictionary(item => item.CaseId, item => item.LastAt);
+        var lastDocumentByCaseId = lastExternalActivity
+            .Where(item => item.Source == documentActivitySource)
+            .ToDictionary(item => item.CaseId, item => item.LastAt);
+        var lastCourtEventByCaseId = lastExternalActivity
+            .Where(item => item.Source == courtEventActivitySource)
+            .ToDictionary(item => item.CaseId, item => item.LastAt);
 
         var automationSettings = await _db.SystemSettings
             .AsNoTracking()

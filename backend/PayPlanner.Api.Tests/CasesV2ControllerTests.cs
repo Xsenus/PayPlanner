@@ -1038,6 +1038,31 @@ public class CasesV2ControllerTests
         Assert.Contains("05.06.2026 16:00", pdfService.LastHtml);
         Assert.DoesNotContain("05.06.2026 12:00", pdfService.LastHtml);
         Assert.DoesNotContain("CASE-002", pdfService.LastHtml);
+
+        var printResult = await controller.PrintRegistry(
+            clientId: null,
+            legalEntityId: null,
+            status: ClientCaseStatus.Open,
+            search: "дело",
+            responsibleUserId: null,
+            caseType: null,
+            priority: null,
+            from: null,
+            to: null,
+            minFee: null,
+            maxFee: null,
+            sortBy: "title",
+            sortDir: "asc",
+            scope: null,
+            ct: CancellationToken.None);
+
+        var print = Assert.IsType<ContentResult>(printResult);
+        Assert.Equal("text/html; charset=utf-8", print.ContentType);
+        Assert.Contains("Реестр дел", print.Content);
+        Assert.Contains("CASE-001", print.Content);
+        Assert.Contains("05.06.2026 16:00", print.Content);
+        Assert.DoesNotContain("05.06.2026 12:00", print.Content);
+        Assert.DoesNotContain("CASE-002", print.Content);
     }
 
     [Fact]
@@ -1101,9 +1126,26 @@ public class CasesV2ControllerTests
             sortDir: null,
             scope: null,
             ct: CancellationToken.None);
+        var printResult = await controller.PrintRegistry(
+            clientId: null,
+            legalEntityId: null,
+            status: null,
+            search: null,
+            responsibleUserId: null,
+            caseType: null,
+            priority: null,
+            from: null,
+            to: null,
+            minFee: null,
+            maxFee: null,
+            sortBy: null,
+            sortDir: null,
+            scope: null,
+            ct: CancellationToken.None);
 
         Assert.IsType<ForbidResult>(excelResult);
         Assert.IsType<ForbidResult>(pdfResult);
+        Assert.IsType<ForbidResult>(printResult);
     }
 
     [Fact]
@@ -1309,6 +1351,12 @@ public class CasesV2ControllerTests
             command.Contains("FROM \"InvoiceClientCases\"", StringComparison.Ordinal)
             && command.Contains("PaymentId", StringComparison.Ordinal)
             && command.Contains("ClientCaseId", StringComparison.Ordinal));
+        var activityCommand = Assert.Single(interceptor.Commands, command =>
+            command.Contains("TaskJournalComments", StringComparison.Ordinal)
+            && command.Contains("ClientCaseDocuments", StringComparison.Ordinal)
+            && command.Contains("ClientCaseCourtEvents", StringComparison.Ordinal));
+        Assert.Contains("UNION ALL", activityCommand, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(11, interceptor.Commands.Count);
     }
 
     [Fact]
