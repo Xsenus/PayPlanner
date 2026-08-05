@@ -52,10 +52,12 @@ public sealed class YandexDiskServiceTests
             new SystemSetting { Key = "auth.yandex.clientSecret", Value = "shared-secret", CreatedAt = now, UpdatedAt = now });
         await scope.Db.SaveChangesAsync();
 
+        var externalRequestCount = 0;
         var service = new YandexDiskService(
             scope.Db,
             new HttpClient(new FakeYandexDiskHandler(request =>
             {
+                externalRequestCount++;
                 if (request.RequestUri?.AbsoluteUri.StartsWith("https://oauth.yandex.ru/token", StringComparison.Ordinal) == true)
                 {
                     return JsonResponse("""{"access_token":"oauth-disk-token","token_type":"bearer"}""");
@@ -94,6 +96,11 @@ public sealed class YandexDiskServiceTests
         Assert.True(status.Completed);
         Assert.Equal("completed", status.Status);
         Assert.False(string.IsNullOrWhiteSpace(status.ConnectionId));
+
+        var completedRequestCount = externalRequestCount;
+        var repeatedHtml = await service.HandleOAuthCallbackAsync(started.State, "confirmation-code", null, null, httpContext.Request, CancellationToken.None);
+        Assert.Contains("уже подключён", repeatedHtml);
+        Assert.Equal(completedRequestCount, externalRequestCount);
 
         var overview = await service.GetConnectionsOverviewAsync(CancellationToken.None);
         var connection = Assert.Single(overview.Connections);

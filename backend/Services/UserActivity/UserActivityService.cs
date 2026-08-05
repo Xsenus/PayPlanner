@@ -3,6 +3,8 @@ using System.Text.Json;
 using System.Linq;
 using System.Threading;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Extensions;
+using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Helpers;
@@ -27,6 +29,11 @@ public class UserActivityService : IUserActivityService
     private static int? CachedRetentionDays;
     private static DateTime? CachedUpdatedAtUtc;
     private static DateTimeOffset SettingsCacheExpiresAtUtc = DateTimeOffset.MinValue;
+    private static readonly HashSet<string> SensitiveQueryKeys = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "access_token", "refresh_token", "authorization", "code", "device_id", "hash",
+        "otp", "password", "signature", "state", "token",
+    };
 
     private readonly IDbContextFactory<PaymentContext> _contextFactory;
     private readonly IHttpContextAccessor _httpContextAccessor;
@@ -167,16 +174,14 @@ public class UserActivityService : IUserActivityService
                 userFullName ??= httpContext.User.FindFirstValue(ClaimTypes.Name);
             }
 
-            var ip = entry.IpAddress ?? httpContext?.Request?.Headers?["X-Forwarded-For"].FirstOrDefault()?.Split(',').FirstOrDefault()?.Trim();
-            if (string.IsNullOrWhiteSpace(ip))
-            {
-                ip = httpContext?.Connection?.RemoteIpAddress?.ToString();
-            }
+            // ForwardedHeadersMiddleware уже заменяет RemoteIpAddress только для доверенного proxy.
+            // Прямой X-Forwarded-For здесь читать нельзя: клиент мог бы подменить адрес в аудите.
+            var ip = entry.IpAddress ?? httpContext?.Connection?.RemoteIpAddress?.ToString();
 
             var userAgent = entry.UserAgent ?? httpContext?.Request?.Headers?["User-Agent"].FirstOrDefault();
             var method = entry.HttpMethod ?? httpContext?.Request?.Method;
             var path = entry.Path ?? httpContext?.Request?.Path.ToString();
-            var query = entry.QueryString ?? httpContext?.Request?.QueryString.ToString();
+            var query = SanitizeQueryString(entry.QueryString ?? httpContext?.Request?.QueryString.ToString());
             var statusCode = entry.HttpStatusCode ?? httpContext?.Response?.StatusCode;
 
             string? metadataJson = null;
@@ -240,6 +245,38 @@ public class UserActivityService : IUserActivityService
             _logger.LogError(ex, "Не удалось сохранить журнал активности пользователя");
             return null;
         }
+    }
+
+    /// <summary>
+    /// Сохраняет структуру query string для диагностики, но удаляет OAuth-коды,
+    /// одноразовые состояния, токены и иные значения, пригодные для повторного входа.
+    /// </summary>
+    public static string? SanitizeQueryString(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var query = value[0] == '?' ? value : $"?{value}";
+        var parsed = QueryHelpers.ParseQuery(query);
+        var builder = new QueryBuilder();
+        foreach (var (key, values) in parsed)
+        {
+            var normalizedKey = key.Replace('-', '_');
+            var sensitive = SensitiveQueryKeys.Contains(normalizedKey)
+                || normalizedKey.Contains("token", StringComparison.OrdinalIgnoreCase)
+                || normalizedKey.Contains("secret", StringComparison.OrdinalIgnoreCase)
+                || normalizedKey.Contains("password", StringComparison.OrdinalIgnoreCase)
+                || normalizedKey.Contains("api_key", StringComparison.OrdinalIgnoreCase);
+            foreach (var item in values)
+            {
+                builder.Add(key, sensitive ? "[скрыто]" : item ?? string.Empty);
+            }
+        }
+
+        var sanitized = builder.ToQueryString().Value;
+        return sanitized is { Length: > 512 } ? sanitized[..512] : sanitized;
     }
 
     private static UserActivitySettingsState? TryGetCachedSettings()

@@ -177,6 +177,30 @@ public class GoogleCalendarSyncServiceTests
     }
 
     [Fact]
+    public async Task HandleCallbackAsync_WhenStateCompletedDoesNotRepeatProviderRequests()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "completed-google-callback@example.com", "user");
+        db.GoogleCalendarAuthRequests.Add(new GoogleCalendarAuthRequest
+        {
+            UserId = user.Id,
+            State = "completed-state",
+            Status = "completed",
+            CreatedAt = DateTime.UtcNow.AddMinutes(-1),
+            ExpiresAt = DateTime.UtcNow.AddMinutes(10),
+            CompletedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var service = CreateService(db, new FakeHttpClientFactory());
+
+        var html = await service.HandleCallbackAsync(
+            "completed-state", "replayed-code", null, null, CreateHttpRequest(user.Id), CancellationToken.None);
+
+        Assert.Contains("уже подключён", html);
+        Assert.Equal("completed", (await db.GoogleCalendarAuthRequests.SingleAsync()).Status);
+    }
+
+    [Fact]
     public async Task HandleWebhookAsync_WhenHeadersMissingRejectsRequest()
     {
         await using var db = await CreateContextAsync();

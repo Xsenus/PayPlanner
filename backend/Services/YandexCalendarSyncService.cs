@@ -182,6 +182,23 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
             return BuildPopupHtml(false, "Запрос подключения Яндекс.Календаря не найден.");
         }
 
+        if (!string.Equals(authRequest.Status, "pending", StringComparison.Ordinal))
+        {
+            return BuildExistingCallbackHtml(authRequest);
+        }
+
+        // Условный захват state делает OAuth-callback одноразовым даже при двух
+        // одновременных ответах браузера и не повторяет внешний обмен кода.
+        var claimed = await _db.YandexCalendarAuthRequests
+            .Where(item => item.Id == authRequest.Id && item.Status == "pending")
+            .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.Status, "processing"), cancellationToken);
+        if (claimed == 0)
+        {
+            await _db.Entry(authRequest).ReloadAsync(cancellationToken);
+            return BuildExistingCallbackHtml(authRequest);
+        }
+        authRequest.Status = "processing";
+
         if (authRequest.ExpiresAt <= DateTime.UtcNow)
         {
             authRequest.Status = "expired";
@@ -193,7 +210,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         if (!string.IsNullOrWhiteSpace(error))
         {
             authRequest.Status = "failed";
-            authRequest.Error = NormalizeOptional(errorDescription) ?? error;
+            authRequest.Error = Trim(NormalizeOptional(errorDescription) ?? error, 2000);
             authRequest.CompletedAt = DateTime.UtcNow;
             await _db.SaveChangesAsync(cancellationToken);
             return BuildPopupHtml(false, authRequest.Error, authRequest.ReturnUrl);
@@ -237,6 +254,14 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
             return BuildPopupHtml(false, ex.Message, authRequest.ReturnUrl);
         }
     }
+
+    private static string BuildExistingCallbackHtml(YandexCalendarAuthRequest authRequest)
+        => authRequest.Status switch
+        {
+            "completed" => BuildPopupHtml(true, "Яндекс.Календарь уже подключён. Вернитесь в CRM.", authRequest.ReturnUrl),
+            "failed" or "expired" => BuildPopupHtml(false, authRequest.Error ?? "Подключение Яндекс.Календаря не завершено.", authRequest.ReturnUrl),
+            _ => BuildPopupHtml(false, "Запрос подключения Яндекс.Календаря уже обрабатывается.", authRequest.ReturnUrl),
+        };
 
     public async Task<YandexCalendarStatusDto> UpdateSettingsAsync(
         int userId,

@@ -379,6 +379,7 @@ builder.Services.AddRateLimiter(options =>
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
     AuthRateLimitPolicies.AddPolicies(options);
     PublicAccessRateLimitPolicies.AddPolicies(options);
+    AnonymousIntegrationRateLimitPolicies.AddPolicies(options);
 });
 
 var urlsEnv = Environment.GetEnvironmentVariable("ASPNETCORE_URLS");

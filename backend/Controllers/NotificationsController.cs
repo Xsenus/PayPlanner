@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
@@ -408,6 +409,8 @@ public class NotificationsController : ControllerBase
 
     [AllowAnonymous]
     [HttpPost("telegram/{senderId:int}/webhook")]
+    [EnableRateLimiting(AnonymousIntegrationRateLimitPolicies.Webhook)]
+    [RequestSizeLimit(256 * 1024)]
     public async Task<IActionResult> TelegramWebhook(
         int senderId,
         [FromBody] JsonDocument update,

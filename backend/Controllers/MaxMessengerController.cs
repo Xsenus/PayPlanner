@@ -2,8 +2,10 @@ using System.Security.Claims;
 using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.Notifications;
 
 namespace PayPlanner.Api.Controllers;
@@ -139,6 +141,7 @@ public sealed class QueueMaxMessageRequest
 public sealed class MaxWebhookController(IMaxWebhookService service) : ControllerBase
 {
     [HttpPost]
+    [EnableRateLimiting(AnonymousIntegrationRateLimitPolicies.Webhook)]
     [RequestSizeLimit(64 * 1024)]
     public async Task<IActionResult> Receive(
         [FromBody] JsonElement update,

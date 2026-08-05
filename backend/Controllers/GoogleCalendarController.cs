@@ -1,6 +1,8 @@
 using System.Text;
+using System.ComponentModel.DataAnnotations;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Filters;
 using PayPlanner.Api.Models;
@@ -81,11 +83,12 @@ public sealed class GoogleCalendarController : ControllerBase
 
     [AllowAnonymous]
     [HttpGet("auth/callback")]
+    [EnableRateLimiting(AnonymousIntegrationRateLimitPolicies.OAuthCallback)]
     public async Task<IActionResult> Callback(
-        [FromQuery] string? state,
-        [FromQuery] string? code,
-        [FromQuery] string? error,
-        [FromQuery(Name = "error_description")] string? errorDescription,
+        [FromQuery, StringLength(128)] string? state,
+        [FromQuery, StringLength(4096)] string? code,
+        [FromQuery, StringLength(256)] string? error,
+        [FromQuery(Name = "error_description"), StringLength(1000)] string? errorDescription,
         CancellationToken ct)
     {
         var html = await _googleCalendarSyncService.HandleCallbackAsync(state, code, error, errorDescription, Request, ct);
@@ -176,6 +179,8 @@ public sealed class GoogleCalendarController : ControllerBase
 
     [AllowAnonymous]
     [HttpPost("webhook")]
+    [EnableRateLimiting(AnonymousIntegrationRateLimitPolicies.Webhook)]
+    [RequestSizeLimit(16 * 1024)]
     public async Task<IActionResult> Webhook(CancellationToken ct)
     {
         try

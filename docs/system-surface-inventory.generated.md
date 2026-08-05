@@ -7,7 +7,7 @@
 
 - Разделов frontend: 49.
 - Backend-контроллеров: 64.
-- HTTP endpoints: 779; с найденной тестовой связью: 720.
+- HTTP endpoints: 779; с найденной тестовой связью: 735.
 - Реальных HTML-форм: 17; с найденной тестовой связью: 15.
 - Фоновых сервисов: 26; с найденной тестовой связью: 24.
 
@@ -148,7 +148,7 @@
 | ExternalAuthController | backend/Controllers/ExternalAuthController.cs | 8 | не задано | да |
 | FeatureFlagsController | backend/Controllers/FeatureFlagsController.cs | 2 | не задано | да |
 | FormRequirementsController | backend/Controllers/FormRequirementsController.cs | 3 | [Authorize] | да |
-| GoogleCalendarController | backend/Controllers/GoogleCalendarController.cs | 8 | не задано | нет |
+| GoogleCalendarController | backend/Controllers/GoogleCalendarController.cs | 8 | не задано | да |
 | HealthController | backend/Controllers/HealthController.cs | 1 | не задано | да |
 | InstallmentsController | backend/Controllers/InstallmentsController.cs | 1 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Accounts)] | нет |
 | InvoicesController | backend/Controllers/InvoicesController.cs | 31 | [Authorize] | да |
@@ -184,7 +184,7 @@
 | ClientsV2Controller | backend/Controllers/V2/ClientsV2Controller.cs | 5 | [Authorize] | да |
 | PaymentsV2Controller | backend/Controllers/V2/PaymentsV2Controller.cs | 7 | [Authorize] | да |
 | StatsV2Controller | backend/Controllers/V2/StatsV2Controller.cs | 2 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Payments)] | нет |
-| YandexCalendarController | backend/Controllers/YandexCalendarController.cs | 7 | не задано | нет |
+| YandexCalendarController | backend/Controllers/YandexCalendarController.cs | 7 | не задано | да |
 | YandexDiskController | backend/Controllers/YandexDiskController.cs | 34 | [Authorize] | да |
 
 ## Все HTTP endpoints
@@ -462,20 +462,20 @@
 | POST | api/auth/telegram/bot/start | ExternalAuthController | StartTelegramBot | backend/Controllers/ExternalAuthController.cs:126 | публичный ([AllowAnonymous]) | да |
 | GET | api/auth/telegram/bot/status/{state} | ExternalAuthController | GetTelegramBotStatus | backend/Controllers/ExternalAuthController.cs:144 | публичный ([AllowAnonymous]) | да |
 | POST | api/auth/telegram/webhook | ExternalAuthController | TelegramWebhook | backend/Controllers/ExternalAuthController.cs:166 | публичный ([AllowAnonymous]) | да |
-| GET | api/features | FeatureFlagsController | Get | backend/Controllers/FeatureFlagsController.cs:25 | публичный ([AllowAnonymous]) | да |
-| GET | api/features/legal-integrations/diagnostics | FeatureFlagsController | GetLegalIntegrationDiagnostics | backend/Controllers/FeatureFlagsController.cs:32 | публичный ([AllowAnonymous]) | да |
+| GET | api/features | FeatureFlagsController | Get | backend/Controllers/FeatureFlagsController.cs:27 | публичный ([AllowAnonymous]) | да |
+| GET | api/features/legal-integrations/diagnostics | FeatureFlagsController | GetLegalIntegrationDiagnostics | backend/Controllers/FeatureFlagsController.cs:35 | [Authorize(Roles = "admin")] | да |
 | GET | api/form-requirements | FormRequirementsController | Get | backend/Controllers/FormRequirementsController.cs:242 | [Authorize] | да |
 | GET | api/form-requirements/sections | FormRequirementsController | GetSections | backend/Controllers/FormRequirementsController.cs:273 | [Authorize] | да |
 | PUT | api/form-requirements | FormRequirementsController | Upsert | backend/Controllers/FormRequirementsController.cs:305 | [Authorize]; [Authorize(Policy = "Admin")] | да |
-| GET | api/google-calendar/status | GoogleCalendarController | GetStatus | backend/Controllers/GoogleCalendarController.cs:26 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Calendar)] | нет |
-| POST | api/google-calendar/auth/start | GoogleCalendarController | StartAuth | backend/Controllers/GoogleCalendarController.cs:40 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Calendar, RequireSectionPermissionOperations.Edit)] | нет |
-| GET | api/google-calendar/auth/status/{state} | GoogleCalendarController | GetAuthStatus | backend/Controllers/GoogleCalendarController.cs:63 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Calendar)] | нет |
-| GET | api/google-calendar/auth/callback | GoogleCalendarController | Callback | backend/Controllers/GoogleCalendarController.cs:83 | публичный ([AllowAnonymous]) | нет |
-| PUT | api/google-calendar/settings | GoogleCalendarController | UpdateSettings | backend/Controllers/GoogleCalendarController.cs:97 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Calendar, RequireSectionPermissionOperations.Edit)] | нет |
-| POST | api/google-calendar/sync-now | GoogleCalendarController | SyncNow | backend/Controllers/GoogleCalendarController.cs:124 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Calendar, RequireSectionPermissionOperations.Edit)] | нет |
-| DELETE | api/google-calendar/connection | GoogleCalendarController | Disconnect | backend/Controllers/GoogleCalendarController.cs:154 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Calendar, RequireSectionPermissionOperations.Edit)] | нет |
-| POST | api/google-calendar/webhook | GoogleCalendarController | Webhook | backend/Controllers/GoogleCalendarController.cs:178 | публичный ([AllowAnonymous]) | нет |
-| GET | api/[controller] | HealthController | Get | backend/Controllers/HealthController.cs:10 | публичный ([AllowAnonymous]) | да |
+| GET | api/google-calendar/status | GoogleCalendarController | GetStatus | backend/Controllers/GoogleCalendarController.cs:28 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Calendar)] | да |
+| POST | api/google-calendar/auth/start | GoogleCalendarController | StartAuth | backend/Controllers/GoogleCalendarController.cs:42 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Calendar, RequireSectionPermissionOperations.Edit)] | да |
+| GET | api/google-calendar/auth/status/{state} | GoogleCalendarController | GetAuthStatus | backend/Controllers/GoogleCalendarController.cs:65 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Calendar)] | да |
+| GET | api/google-calendar/auth/callback | GoogleCalendarController | Callback | backend/Controllers/GoogleCalendarController.cs:85 | публичный ([AllowAnonymous]) | да |
+| PUT | api/google-calendar/settings | GoogleCalendarController | UpdateSettings | backend/Controllers/GoogleCalendarController.cs:100 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Calendar, RequireSectionPermissionOperations.Edit)] | да |
+| POST | api/google-calendar/sync-now | GoogleCalendarController | SyncNow | backend/Controllers/GoogleCalendarController.cs:127 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Calendar, RequireSectionPermissionOperations.Edit)] | да |
+| DELETE | api/google-calendar/connection | GoogleCalendarController | Disconnect | backend/Controllers/GoogleCalendarController.cs:157 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Calendar, RequireSectionPermissionOperations.Edit)] | да |
+| POST | api/google-calendar/webhook | GoogleCalendarController | Webhook | backend/Controllers/GoogleCalendarController.cs:181 | публичный ([AllowAnonymous]) | да |
+| GET | api/[controller] | HealthController | Get | backend/Controllers/HealthController.cs:12 | публичный ([AllowAnonymous]) | да |
 | POST | api/[controller]/calc | InstallmentsController | Calc | backend/Controllers/InstallmentsController.cs:19 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Accounts)] | нет |
 | GET | api/[controller]/reference-dictionaries | InvoicesController | GetReferenceDictionaries | backend/Controllers/InvoicesController.cs:66 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Accounts)] | да |
 | GET | api/[controller] | InvoicesController | Get | backend/Controllers/InvoicesController.cs:239 | [Authorize] | да |
@@ -528,14 +528,14 @@
 | GET | api/legal-entities/{legalEntityId:int}/balance | LegalEntityBalancesController | GetSummary | backend/Controllers/LegalEntityBalancesController.cs:57 | [Authorize] | да |
 | GET | api/legal-entities/{legalEntityId:int}/balance/transactions | LegalEntityBalancesController | GetTransactions | backend/Controllers/LegalEntityBalancesController.cs:78 | [Authorize] | да |
 | POST | api/legal-entities/{legalEntityId:int}/balance/apply | LegalEntityBalancesController | ApplyCredit | backend/Controllers/LegalEntityBalancesController.cs:116 | [Authorize] | да |
-| POST | api/max/link | MaxMessengerController | CreateLink | backend/Controllers/MaxMessengerController.cs:20 | [Authorize] | нет |
-| DELETE | api/max/link | MaxMessengerController | OptOut | backend/Controllers/MaxMessengerController.cs:27 | [Authorize] | нет |
-| POST | api/max/messages | MaxMessengerController | QueueMessage | backend/Controllers/MaxMessengerController.cs:34 | [Authorize]; [Authorize(Roles = "admin")] | нет |
-| GET | api/max/messages | MaxMessengerController | GetMessages | backend/Controllers/MaxMessengerController.cs:49 | [Authorize]; [Authorize(Roles = "admin")] | нет |
-| POST | api/max/messages/{publicId:guid}/retry | MaxMessengerController | RetryMessage | backend/Controllers/MaxMessengerController.cs:75 | [Authorize]; [Authorize(Roles = "admin")] | нет |
-| GET | api/max/correspondence | MaxMessengerController | GetCorrespondence | backend/Controllers/MaxMessengerController.cs:91 | [Authorize]; [Authorize(Roles = "admin")] | нет |
-| POST | api/max/correspondence/{publicId:guid}/route | MaxMessengerController | RouteCorrespondence | backend/Controllers/MaxMessengerController.cs:99 | [Authorize]; [Authorize(Roles = "admin")] | нет |
-| POST | api/max | MaxMessengerController | Receive | backend/Controllers/MaxMessengerController.cs:141 | [Authorize] | нет |
+| POST | api/max/link | MaxMessengerController | CreateLink | backend/Controllers/MaxMessengerController.cs:22 | [Authorize] | нет |
+| DELETE | api/max/link | MaxMessengerController | OptOut | backend/Controllers/MaxMessengerController.cs:29 | [Authorize] | нет |
+| POST | api/max/messages | MaxMessengerController | QueueMessage | backend/Controllers/MaxMessengerController.cs:36 | [Authorize]; [Authorize(Roles = "admin")] | нет |
+| GET | api/max/messages | MaxMessengerController | GetMessages | backend/Controllers/MaxMessengerController.cs:51 | [Authorize]; [Authorize(Roles = "admin")] | нет |
+| POST | api/max/messages/{publicId:guid}/retry | MaxMessengerController | RetryMessage | backend/Controllers/MaxMessengerController.cs:77 | [Authorize]; [Authorize(Roles = "admin")] | нет |
+| GET | api/max/correspondence | MaxMessengerController | GetCorrespondence | backend/Controllers/MaxMessengerController.cs:93 | [Authorize]; [Authorize(Roles = "admin")] | нет |
+| POST | api/max/correspondence/{publicId:guid}/route | MaxMessengerController | RouteCorrespondence | backend/Controllers/MaxMessengerController.cs:101 | [Authorize]; [Authorize(Roles = "admin")] | нет |
+| POST | api/max | MaxMessengerController | Receive | backend/Controllers/MaxMessengerController.cs:143 | [Authorize] | нет |
 | GET | api/messenger-document-deliveries/configuration | MessengerDocumentDeliveriesController | GetConfiguration | backend/Controllers/MessengerDocumentDeliveriesController.cs:33 | [Authorize(Policy = "Admin")] | да |
 | GET | api/messenger-document-deliveries/recipients | MessengerDocumentDeliveriesController | GetRecipients | backend/Controllers/MessengerDocumentDeliveriesController.cs:55 | [Authorize(Policy = "Admin")] | да |
 | POST | api/messenger-document-deliveries/recipients | MessengerDocumentDeliveriesController | CreateRecipient | backend/Controllers/MessengerDocumentDeliveriesController.cs:80 | [Authorize(Policy = "Admin")] | да |
@@ -587,30 +587,30 @@
 | PATCH | api/notifications/inbox/{id:int}/archive | NotificationInboxController | Archive | backend/Controllers/NotificationInboxController.cs:261 | [Authorize] | да |
 | PATCH | api/notifications/inbox/{id:int}/snooze | NotificationInboxController | Snooze | backend/Controllers/NotificationInboxController.cs:281 | [Authorize] | да |
 | DELETE | api/notifications/inbox/{id:int} | NotificationInboxController | Delete | backend/Controllers/NotificationInboxController.cs:301 | [Authorize] | да |
-| GET | api/notifications/settings | NotificationsController | GetSettings | backend/Controllers/NotificationsController.cs:41 | [Authorize] | да |
-| GET | api/notifications/channels | NotificationsController | GetChannels | backend/Controllers/NotificationsController.cs:48 | [Authorize] | да |
-| PUT | api/notifications/settings/email | NotificationsController | UpdateEmailSettings | backend/Controllers/NotificationsController.cs:55 | [Authorize] | да |
-| PUT | api/notifications/settings/telegram | NotificationsController | UpdateTelegramSettings | backend/Controllers/NotificationsController.cs:64 | [Authorize] | да |
-| PUT | api/notifications/settings/sms | NotificationsController | UpdateSmsSettings | backend/Controllers/NotificationsController.cs:73 | [Authorize] | да |
-| PUT | api/notifications/settings/max | NotificationsController | UpdateMaxSettings | backend/Controllers/NotificationsController.cs:82 | [Authorize] | да |
-| GET | api/notifications/templates | NotificationsController | GetTemplates | backend/Controllers/NotificationsController.cs:91 | [Authorize] | да |
-| PUT | api/notifications/templates/{key} | NotificationsController | UpdateTemplate | backend/Controllers/NotificationsController.cs:98 | [Authorize] | да |
-| POST | api/notifications/templates/{key}/reset | NotificationsController | ResetTemplate | backend/Controllers/NotificationsController.cs:115 | [Authorize] | да |
-| GET | api/notifications/role-preferences | NotificationsController | GetRolePreferences | backend/Controllers/NotificationsController.cs:129 | [Authorize] | да |
-| PUT | api/notifications/role-preferences/{roleId:int} | NotificationsController | UpdateRolePreferences | backend/Controllers/NotificationsController.cs:175 | [Authorize] | да |
-| POST | api/notifications/senders | NotificationsController | CreateSender | backend/Controllers/NotificationsController.cs:249 | [Authorize] | да |
-| PUT | api/notifications/senders/{id:int} | NotificationsController | UpdateSender | backend/Controllers/NotificationsController.cs:265 | [Authorize] | да |
-| DELETE | api/notifications/senders/{id:int} | NotificationsController | DeleteSender | backend/Controllers/NotificationsController.cs:286 | [Authorize] | да |
-| POST | api/notifications/senders/{id:int}/telegram/webhook/sync | NotificationsController | SyncTelegramWebhook | backend/Controllers/NotificationsController.cs:293 | [Authorize] | да |
-| DELETE | api/notifications/senders/{id:int}/telegram/webhook | NotificationsController | DeleteTelegramWebhook | backend/Controllers/NotificationsController.cs:316 | [Authorize] | да |
-| POST | api/notifications/senders/{id:int}/telegram/profile/sync | NotificationsController | SyncTelegramBotProfile | backend/Controllers/NotificationsController.cs:339 | [Authorize] | да |
-| PUT | api/notifications/senders/{id:int}/telegram/profile | NotificationsController | ApplyTelegramBotProfile | backend/Controllers/NotificationsController.cs:362 | [Authorize] | да |
-| GET | api/notifications/senders/{id:int}/telegram/photo | NotificationsController | GetTelegramBotProfilePhoto | backend/Controllers/NotificationsController.cs:388 | [Authorize] | да |
-| POST | api/notifications/telegram/{senderId:int}/webhook | NotificationsController | TelegramWebhook | backend/Controllers/NotificationsController.cs:410 | публичный ([AllowAnonymous]) | да |
-| GET | api/notifications/deliveries | NotificationsController | GetDeliveries | backend/Controllers/NotificationsController.cs:431 | [Authorize] | да |
-| POST | api/notifications/deliveries/{id:int}/retry | NotificationsController | RetryDelivery | backend/Controllers/NotificationsController.cs:473 | [Authorize] | да |
-| POST | api/notifications/test | NotificationsController | SendTest | backend/Controllers/NotificationsController.cs:504 | [Authorize] | да |
-| POST | api/notifications/users/{id:int}/issue-password | NotificationsController | IssuePassword | backend/Controllers/NotificationsController.cs:566 | [Authorize] | да |
+| GET | api/notifications/settings | NotificationsController | GetSettings | backend/Controllers/NotificationsController.cs:42 | [Authorize] | да |
+| GET | api/notifications/channels | NotificationsController | GetChannels | backend/Controllers/NotificationsController.cs:49 | [Authorize] | да |
+| PUT | api/notifications/settings/email | NotificationsController | UpdateEmailSettings | backend/Controllers/NotificationsController.cs:56 | [Authorize] | да |
+| PUT | api/notifications/settings/telegram | NotificationsController | UpdateTelegramSettings | backend/Controllers/NotificationsController.cs:65 | [Authorize] | да |
+| PUT | api/notifications/settings/sms | NotificationsController | UpdateSmsSettings | backend/Controllers/NotificationsController.cs:74 | [Authorize] | да |
+| PUT | api/notifications/settings/max | NotificationsController | UpdateMaxSettings | backend/Controllers/NotificationsController.cs:83 | [Authorize] | да |
+| GET | api/notifications/templates | NotificationsController | GetTemplates | backend/Controllers/NotificationsController.cs:92 | [Authorize] | да |
+| PUT | api/notifications/templates/{key} | NotificationsController | UpdateTemplate | backend/Controllers/NotificationsController.cs:99 | [Authorize] | да |
+| POST | api/notifications/templates/{key}/reset | NotificationsController | ResetTemplate | backend/Controllers/NotificationsController.cs:116 | [Authorize] | да |
+| GET | api/notifications/role-preferences | NotificationsController | GetRolePreferences | backend/Controllers/NotificationsController.cs:130 | [Authorize] | да |
+| PUT | api/notifications/role-preferences/{roleId:int} | NotificationsController | UpdateRolePreferences | backend/Controllers/NotificationsController.cs:176 | [Authorize] | да |
+| POST | api/notifications/senders | NotificationsController | CreateSender | backend/Controllers/NotificationsController.cs:250 | [Authorize] | да |
+| PUT | api/notifications/senders/{id:int} | NotificationsController | UpdateSender | backend/Controllers/NotificationsController.cs:266 | [Authorize] | да |
+| DELETE | api/notifications/senders/{id:int} | NotificationsController | DeleteSender | backend/Controllers/NotificationsController.cs:287 | [Authorize] | да |
+| POST | api/notifications/senders/{id:int}/telegram/webhook/sync | NotificationsController | SyncTelegramWebhook | backend/Controllers/NotificationsController.cs:294 | [Authorize] | да |
+| DELETE | api/notifications/senders/{id:int}/telegram/webhook | NotificationsController | DeleteTelegramWebhook | backend/Controllers/NotificationsController.cs:317 | [Authorize] | да |
+| POST | api/notifications/senders/{id:int}/telegram/profile/sync | NotificationsController | SyncTelegramBotProfile | backend/Controllers/NotificationsController.cs:340 | [Authorize] | да |
+| PUT | api/notifications/senders/{id:int}/telegram/profile | NotificationsController | ApplyTelegramBotProfile | backend/Controllers/NotificationsController.cs:363 | [Authorize] | да |
+| GET | api/notifications/senders/{id:int}/telegram/photo | NotificationsController | GetTelegramBotProfilePhoto | backend/Controllers/NotificationsController.cs:389 | [Authorize] | да |
+| POST | api/notifications/telegram/{senderId:int}/webhook | NotificationsController | TelegramWebhook | backend/Controllers/NotificationsController.cs:411 | публичный ([AllowAnonymous]) | да |
+| GET | api/notifications/deliveries | NotificationsController | GetDeliveries | backend/Controllers/NotificationsController.cs:434 | [Authorize] | да |
+| POST | api/notifications/deliveries/{id:int}/retry | NotificationsController | RetryDelivery | backend/Controllers/NotificationsController.cs:476 | [Authorize] | да |
+| POST | api/notifications/test | NotificationsController | SendTest | backend/Controllers/NotificationsController.cs:507 | [Authorize] | да |
+| POST | api/notifications/users/{id:int}/issue-password | NotificationsController | IssuePassword | backend/Controllers/NotificationsController.cs:569 | [Authorize] | да |
 | GET | api/object-audit | ObjectAuditController | GetEvents | backend/Controllers/ObjectAuditController.cs:36 | [Authorize] | да |
 | GET | api/object-audit/{objectType}/{objectId:int} | ObjectAuditController | GetHistory | backend/Controllers/ObjectAuditController.cs:141 | [Authorize] | да |
 | GET | api/object-audit/deleted/{objectType} | ObjectAuditController | GetDeletedObjects | backend/Controllers/ObjectAuditController.cs:187 | [Authorize] | да |
@@ -929,44 +929,44 @@
 | DELETE | api/v2/payments/{id:int} | PaymentsV2Controller | Delete | backend/Controllers/V2/PaymentsV2Controller.cs:645 | [Authorize] | да |
 | GET | api/v2/stats/summary | StatsV2Controller | Summary | backend/Controllers/V2/StatsV2Controller.cs:29 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Payments)] | нет |
 | GET | api/v2/stats/months | StatsV2Controller | Months | backend/Controllers/V2/StatsV2Controller.cs:48 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Payments)] | нет |
-| GET | api/yandex-calendar/status | YandexCalendarController | GetStatus | backend/Controllers/YandexCalendarController.cs:26 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Calendar)] | нет |
-| POST | api/yandex-calendar/auth/start | YandexCalendarController | StartAuth | backend/Controllers/YandexCalendarController.cs:40 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Calendar, RequireSectionPermissionOperations.Edit)] | нет |
-| GET | api/yandex-calendar/auth/status/{state} | YandexCalendarController | GetAuthStatus | backend/Controllers/YandexCalendarController.cs:63 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Calendar)] | нет |
-| GET | api/yandex-calendar/auth/callback | YandexCalendarController | Callback | backend/Controllers/YandexCalendarController.cs:83 | публичный ([AllowAnonymous]) | нет |
-| PUT | api/yandex-calendar/settings | YandexCalendarController | UpdateSettings | backend/Controllers/YandexCalendarController.cs:97 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Calendar, RequireSectionPermissionOperations.Edit)] | нет |
-| POST | api/yandex-calendar/sync-now | YandexCalendarController | SyncNow | backend/Controllers/YandexCalendarController.cs:124 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Calendar, RequireSectionPermissionOperations.Edit)] | нет |
-| DELETE | api/yandex-calendar/connection | YandexCalendarController | Disconnect | backend/Controllers/YandexCalendarController.cs:154 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Calendar, RequireSectionPermissionOperations.Edit)] | нет |
-| GET | api/yandex-disk/connections | YandexDiskController | GetConnections | backend/Controllers/YandexDiskController.cs:42 | [Authorize] | да |
-| PUT | api/yandex-disk/connections | YandexDiskController | UpsertConnection | backend/Controllers/YandexDiskController.cs:53 | [Authorize] | да |
-| POST | api/yandex-disk/auth/start | YandexDiskController | StartOAuth | backend/Controllers/YandexDiskController.cs:75 | [Authorize] | да |
-| GET | api/yandex-disk/auth/status/{state} | YandexDiskController | GetOAuthStatus | backend/Controllers/YandexDiskController.cs:103 | [Authorize] | да |
-| GET | api/yandex-disk/auth/callback | YandexDiskController | OAuthCallback | backend/Controllers/YandexDiskController.cs:123 | публичный ([AllowAnonymous]) | да |
-| DELETE | api/yandex-disk/connections/{id} | YandexDiskController | DeleteConnection | backend/Controllers/YandexDiskController.cs:135 | [Authorize] | да |
-| POST | api/yandex-disk/connections/{id}/connection-test | YandexDiskController | TestConnection | backend/Controllers/YandexDiskController.cs:157 | [Authorize] | да |
-| GET | api/yandex-disk/settings | YandexDiskController | GetSettings | backend/Controllers/YandexDiskController.cs:180 | [Authorize] | да |
-| PUT | api/yandex-disk/settings | YandexDiskController | UpdateSettings | backend/Controllers/YandexDiskController.cs:189 | [Authorize] | да |
-| POST | api/yandex-disk/connection-test | YandexDiskController | TestConnection | backend/Controllers/YandexDiskController.cs:206 | [Authorize] | да |
-| GET | api/yandex-disk/crm-sync/settings | YandexDiskController | GetCrmSyncSettings | backend/Controllers/YandexDiskController.cs:228 | [Authorize] | да |
-| GET | api/yandex-disk/crm-sync/preview | YandexDiskController | PreviewCrmSync | backend/Controllers/YandexDiskController.cs:237 | [Authorize] | да |
-| GET | api/yandex-disk/crm-sync/status | YandexDiskController | GetCrmSyncStatus | backend/Controllers/YandexDiskController.cs:246 | [Authorize] | да |
-| PUT | api/yandex-disk/crm-sync/settings | YandexDiskController | UpdateCrmSyncSettings | backend/Controllers/YandexDiskController.cs:299 | [Authorize] | да |
-| GET | api/yandex-disk/resources | YandexDiskController | List | backend/Controllers/YandexDiskController.cs:328 | [Authorize] | да |
-| GET | api/yandex-disk/connections/{id}/resources | YandexDiskController | List | backend/Controllers/YandexDiskController.cs:341 | [Authorize] | да |
-| POST | api/yandex-disk/folders | YandexDiskController | CreateFolder | backend/Controllers/YandexDiskController.cs:355 | [Authorize] | да |
-| POST | api/yandex-disk/connections/{id}/folders | YandexDiskController | CreateFolder | backend/Controllers/YandexDiskController.cs:372 | [Authorize] | да |
-| POST | api/yandex-disk/copy | YandexDiskController | Copy | backend/Controllers/YandexDiskController.cs:390 | [Authorize] | да |
-| POST | api/yandex-disk/connections/{id}/copy | YandexDiskController | Copy | backend/Controllers/YandexDiskController.cs:407 | [Authorize] | да |
-| POST | api/yandex-disk/move | YandexDiskController | Move | backend/Controllers/YandexDiskController.cs:425 | [Authorize] | да |
-| POST | api/yandex-disk/connections/{id}/move | YandexDiskController | Move | backend/Controllers/YandexDiskController.cs:442 | [Authorize] | да |
-| DELETE | api/yandex-disk/resources | YandexDiskController | Delete | backend/Controllers/YandexDiskController.cs:460 | [Authorize] | да |
-| DELETE | api/yandex-disk/connections/{id}/resources | YandexDiskController | Delete | backend/Controllers/YandexDiskController.cs:480 | [Authorize] | да |
-| POST | api/yandex-disk/upload | YandexDiskController | Upload | backend/Controllers/YandexDiskController.cs:501 | [Authorize] | да |
-| POST | api/yandex-disk/connections/{id}/upload | YandexDiskController | Upload | backend/Controllers/YandexDiskController.cs:529 | [Authorize] | да |
-| GET | api/yandex-disk/download | YandexDiskController | Download | backend/Controllers/YandexDiskController.cs:558 | [Authorize] | да |
-| GET | api/yandex-disk/connections/{id}/download | YandexDiskController | Download | backend/Controllers/YandexDiskController.cs:580 | [Authorize] | да |
-| GET | api/yandex-disk/text | YandexDiskController | GetText | backend/Controllers/YandexDiskController.cs:602 | [Authorize] | да |
-| GET | api/yandex-disk/connections/{id}/text | YandexDiskController | GetText | backend/Controllers/YandexDiskController.cs:611 | [Authorize] | да |
-| PUT | api/yandex-disk/text | YandexDiskController | SaveText | backend/Controllers/YandexDiskController.cs:620 | [Authorize] | да |
-| PUT | api/yandex-disk/connections/{id}/text | YandexDiskController | SaveText | backend/Controllers/YandexDiskController.cs:637 | [Authorize] | да |
-| POST | api/yandex-disk/crm/case-documents/{documentId:int}/upload | YandexDiskController | UploadCaseDocument | backend/Controllers/YandexDiskController.cs:655 | [Authorize] | да |
-| POST | api/yandex-disk/crm/tasks/{taskId:int}/files/{fileId:int}/upload | YandexDiskController | UploadTaskFile | backend/Controllers/YandexDiskController.cs:744 | [Authorize] | да |
+| GET | api/yandex-calendar/status | YandexCalendarController | GetStatus | backend/Controllers/YandexCalendarController.cs:28 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Calendar)] | да |
+| POST | api/yandex-calendar/auth/start | YandexCalendarController | StartAuth | backend/Controllers/YandexCalendarController.cs:42 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Calendar, RequireSectionPermissionOperations.Edit)] | да |
+| GET | api/yandex-calendar/auth/status/{state} | YandexCalendarController | GetAuthStatus | backend/Controllers/YandexCalendarController.cs:65 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Calendar)] | да |
+| GET | api/yandex-calendar/auth/callback | YandexCalendarController | Callback | backend/Controllers/YandexCalendarController.cs:85 | публичный ([AllowAnonymous]) | да |
+| PUT | api/yandex-calendar/settings | YandexCalendarController | UpdateSettings | backend/Controllers/YandexCalendarController.cs:100 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Calendar, RequireSectionPermissionOperations.Edit)] | да |
+| POST | api/yandex-calendar/sync-now | YandexCalendarController | SyncNow | backend/Controllers/YandexCalendarController.cs:127 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Calendar, RequireSectionPermissionOperations.Edit)] | да |
+| DELETE | api/yandex-calendar/connection | YandexCalendarController | Disconnect | backend/Controllers/YandexCalendarController.cs:157 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Calendar, RequireSectionPermissionOperations.Edit)] | да |
+| GET | api/yandex-disk/connections | YandexDiskController | GetConnections | backend/Controllers/YandexDiskController.cs:44 | [Authorize] | да |
+| PUT | api/yandex-disk/connections | YandexDiskController | UpsertConnection | backend/Controllers/YandexDiskController.cs:55 | [Authorize] | да |
+| POST | api/yandex-disk/auth/start | YandexDiskController | StartOAuth | backend/Controllers/YandexDiskController.cs:77 | [Authorize] | да |
+| GET | api/yandex-disk/auth/status/{state} | YandexDiskController | GetOAuthStatus | backend/Controllers/YandexDiskController.cs:105 | [Authorize] | да |
+| GET | api/yandex-disk/auth/callback | YandexDiskController | OAuthCallback | backend/Controllers/YandexDiskController.cs:125 | публичный ([AllowAnonymous]) | да |
+| DELETE | api/yandex-disk/connections/{id} | YandexDiskController | DeleteConnection | backend/Controllers/YandexDiskController.cs:138 | [Authorize] | да |
+| POST | api/yandex-disk/connections/{id}/connection-test | YandexDiskController | TestConnection | backend/Controllers/YandexDiskController.cs:160 | [Authorize] | да |
+| GET | api/yandex-disk/settings | YandexDiskController | GetSettings | backend/Controllers/YandexDiskController.cs:183 | [Authorize] | да |
+| PUT | api/yandex-disk/settings | YandexDiskController | UpdateSettings | backend/Controllers/YandexDiskController.cs:192 | [Authorize] | да |
+| POST | api/yandex-disk/connection-test | YandexDiskController | TestConnection | backend/Controllers/YandexDiskController.cs:209 | [Authorize] | да |
+| GET | api/yandex-disk/crm-sync/settings | YandexDiskController | GetCrmSyncSettings | backend/Controllers/YandexDiskController.cs:231 | [Authorize] | да |
+| GET | api/yandex-disk/crm-sync/preview | YandexDiskController | PreviewCrmSync | backend/Controllers/YandexDiskController.cs:240 | [Authorize] | да |
+| GET | api/yandex-disk/crm-sync/status | YandexDiskController | GetCrmSyncStatus | backend/Controllers/YandexDiskController.cs:249 | [Authorize] | да |
+| PUT | api/yandex-disk/crm-sync/settings | YandexDiskController | UpdateCrmSyncSettings | backend/Controllers/YandexDiskController.cs:302 | [Authorize] | да |
+| GET | api/yandex-disk/resources | YandexDiskController | List | backend/Controllers/YandexDiskController.cs:331 | [Authorize] | да |
+| GET | api/yandex-disk/connections/{id}/resources | YandexDiskController | List | backend/Controllers/YandexDiskController.cs:344 | [Authorize] | да |
+| POST | api/yandex-disk/folders | YandexDiskController | CreateFolder | backend/Controllers/YandexDiskController.cs:358 | [Authorize] | да |
+| POST | api/yandex-disk/connections/{id}/folders | YandexDiskController | CreateFolder | backend/Controllers/YandexDiskController.cs:375 | [Authorize] | да |
+| POST | api/yandex-disk/copy | YandexDiskController | Copy | backend/Controllers/YandexDiskController.cs:393 | [Authorize] | да |
+| POST | api/yandex-disk/connections/{id}/copy | YandexDiskController | Copy | backend/Controllers/YandexDiskController.cs:410 | [Authorize] | да |
+| POST | api/yandex-disk/move | YandexDiskController | Move | backend/Controllers/YandexDiskController.cs:428 | [Authorize] | да |
+| POST | api/yandex-disk/connections/{id}/move | YandexDiskController | Move | backend/Controllers/YandexDiskController.cs:445 | [Authorize] | да |
+| DELETE | api/yandex-disk/resources | YandexDiskController | Delete | backend/Controllers/YandexDiskController.cs:463 | [Authorize] | да |
+| DELETE | api/yandex-disk/connections/{id}/resources | YandexDiskController | Delete | backend/Controllers/YandexDiskController.cs:483 | [Authorize] | да |
+| POST | api/yandex-disk/upload | YandexDiskController | Upload | backend/Controllers/YandexDiskController.cs:504 | [Authorize] | да |
+| POST | api/yandex-disk/connections/{id}/upload | YandexDiskController | Upload | backend/Controllers/YandexDiskController.cs:532 | [Authorize] | да |
+| GET | api/yandex-disk/download | YandexDiskController | Download | backend/Controllers/YandexDiskController.cs:561 | [Authorize] | да |
+| GET | api/yandex-disk/connections/{id}/download | YandexDiskController | Download | backend/Controllers/YandexDiskController.cs:583 | [Authorize] | да |
+| GET | api/yandex-disk/text | YandexDiskController | GetText | backend/Controllers/YandexDiskController.cs:605 | [Authorize] | да |
+| GET | api/yandex-disk/connections/{id}/text | YandexDiskController | GetText | backend/Controllers/YandexDiskController.cs:614 | [Authorize] | да |
+| PUT | api/yandex-disk/text | YandexDiskController | SaveText | backend/Controllers/YandexDiskController.cs:623 | [Authorize] | да |
+| PUT | api/yandex-disk/connections/{id}/text | YandexDiskController | SaveText | backend/Controllers/YandexDiskController.cs:640 | [Authorize] | да |
+| POST | api/yandex-disk/crm/case-documents/{documentId:int}/upload | YandexDiskController | UploadCaseDocument | backend/Controllers/YandexDiskController.cs:658 | [Authorize] | да |
+| POST | api/yandex-disk/crm/tasks/{taskId:int}/files/{fileId:int}/upload | YandexDiskController | UploadTaskFile | backend/Controllers/YandexDiskController.cs:747 | [Authorize] | да |

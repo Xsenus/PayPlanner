@@ -91,6 +91,30 @@ public class YandexCalendarSyncServiceTests
     }
 
     [Fact]
+    public async Task HandleCallbackAsync_WhenStateCompletedDoesNotRepeatProviderRequests()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "completed-yandex-callback@example.com", "user");
+        db.YandexCalendarAuthRequests.Add(new YandexCalendarAuthRequest
+        {
+            UserId = user.Id,
+            State = "completed-state",
+            Status = "completed",
+            CreatedAt = DateTime.UtcNow.AddMinutes(-1),
+            ExpiresAt = DateTime.UtcNow.AddMinutes(10),
+            CompletedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var service = CreateService(db, new FakeHttpClientFactory());
+
+        var html = await service.HandleCallbackAsync(
+            "completed-state", "replayed-code", null, null, CreateHttpRequest(user.Id), CancellationToken.None);
+
+        Assert.Contains("уже подключён", html);
+        Assert.Equal("completed", (await db.YandexCalendarAuthRequests.SingleAsync()).Status);
+    }
+
+    [Fact]
     public async Task StartAuthAsync_WhenProviderDisabledRejectsConnection()
     {
         await using var db = await CreateContextAsync();

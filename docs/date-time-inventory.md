@@ -1,6 +1,6 @@
 # Инвентаризация дат и времени
 
-Сгенерировано: 2026-08-04T08:59:46.358Z
+Сгенерировано: 2026-08-05T00:18:51.382Z
 
 Этот отчет собирает места, где проект работает с датами, временем, периодами, экспортами и календарными интеграциями. Его задача - помочь переводить систему на единое правило: хранение в UTC плюс явный timezone ID пользователя или организации.
 
@@ -12,32 +12,32 @@ npm run audit:dates
 
 ## Сводка
 
-- Проверено файлов: 1919
-- Найдено совпадений: 10746
+- Проверено файлов: 1953
+- Найдено совпадений: 10849
 
 | Категория | Совпадений | Что проверить |
 | --- | ---: | --- |
-| Backend: поля и свойства дат | 2075 | Места, где модель или DTO хранит дату/время и может требовать UTC + timezone ID. |
-| Backend: текущее время сервера | 2639 | Вызовы Now/UtcNow, которые надо привести к единому источнику времени. |
-| Backend: преобразования timezone | 1525 | Ручные преобразования и явное назначение Kind, где чаще всего появляются сдвиги. |
-| Ручные смещения времени | 856 | Жестко заданные часовые пояса и смещения, которые нельзя оставлять для пользователей из разных регионов. |
+| Backend: поля и свойства дат | 2085 | Места, где модель или DTO хранит дату/время и может требовать UTC + timezone ID. |
+| Backend: текущее время сервера | 2657 | Вызовы Now/UtcNow, которые надо привести к единому источнику времени. |
+| Backend: преобразования timezone | 1527 | Ручные преобразования и явное назначение Kind, где чаще всего появляются сдвиги. |
+| Ручные смещения времени | 866 | Жестко заданные часовые пояса и смещения, которые нельзя оставлять для пользователей из разных регионов. |
 | Frontend: работа с датами | 808 | JS/TS места, где браузер может применить локальную timezone пользователя автоматически. |
 | Фильтры и периоды | 1102 | Параметры диапазонов дат в API и UI, где важны границы дня в timezone пользователя. |
-| Экспорты, импорты и файлы | 1424 | Выгрузки и импорты, где дату надо отдавать в понятной timezone, а не в случайном серверном времени. |
-| Интеграции календарей | 317 | Google/Yandex/ICS синхронизация, где надо хранить UTC и передавать timezone ID. |
+| Экспорты, импорты и файлы | 1479 | Выгрузки и импорты, где дату надо отдавать в понятной timezone, а не в случайном серверном времени. |
+| Интеграции календарей | 325 | Google/Yandex/ICS синхронизация, где надо хранить UTC и передавать timezone ID. |
 
 ## Файлы с наибольшим количеством совпадений
 
 | Файл | Совпадений |
 | --- | ---: |
-| `backend/AppReleases/releases.json` | 1126 |
+| `backend/AppReleases/releases.json` | 1137 |
 | `backend/Controllers/ReportsController.cs` | 581 |
 | `backend/PayPlanner.Api.Tests/NotificationServiceTests.cs` | 524 |
 | `backend/Controllers/V2/CasesV2Controller.cs` | 409 |
 | `backend/PayPlanner.Api.Tests/TasksControllerTests.cs` | 315 |
 | `backend/PayPlanner.Api.Tests/MoneyOperationsControllerTests.cs` | 301 |
 | `backend/PayPlanner.Api.Tests/CasesV2ControllerTests.cs` | 218 |
-| `backend/Services/GoogleCalendarSyncService.cs` | 187 |
+| `backend/Services/GoogleCalendarSyncService.cs` | 190 |
 | `backend/PayPlanner.Api.Tests/ReportsControllerTests.cs` | 186 |
 | `backend/Controllers/TasksController.cs` | 180 |
 | `backend/Services/Notifications/NotificationService.cs` | 147 |
@@ -47,7 +47,7 @@ npm run audit:dates
 | `backend/Services/YandexCalendarSyncService.cs` | 127 |
 | `src/components/Reports/Reports.tsx` | 109 |
 | `backend/Controllers/InvoicesController.cs` | 107 |
-| `backend/PayPlanner.Api.Tests/GoogleCalendarSyncServiceTests.cs` | 78 |
+| `backend/PayPlanner.Api.Tests/GoogleCalendarSyncServiceTests.cs` | 81 |
 | `src/components/Tasks/TaskJournal.test.tsx` | 77 |
 | `backend/PayPlanner.Api.Tests/SystemJobsControllerTests.cs` | 74 |
 | `src/types/index.ts` | 74 |
@@ -59,7 +59,7 @@ npm run audit:dates
 | `backend/Controllers/PaymentsController.cs` | 59 |
 | `backend/Controllers/SystemJobsController.cs` | 58 |
 | `backend/Controllers/V2/PaymentsV2Controller.cs` | 57 |
-| `backend/Services/CalendarTimeZoneHelper.cs` | 55 |
+| `backend/PayPlanner.Api.Tests/YandexCalendarSyncServiceTests.cs` | 55 |
 
 ## Детализация
 
@@ -131,12 +131,12 @@ npm run audit:dates
 | `backend/Controllers/CashOrdersController.cs` | 1278 | `DateTime date,` | private async Task<string> GenerateInventoryNumberAsync(DateTime date, CancellationToken ct) |
 | `backend/Controllers/CashOrdersController.cs` | 1818 | `DateTime? from,` | private static string BuildRegisterPrintHtml(CashOrderRegisterResponseDto register, DateTime? from, DateTime? to, string? accountName) |
 | `backend/Controllers/CashOrdersController.cs` | 1818 | `DateTime? to,` | private static string BuildRegisterPrintHtml(CashOrderRegisterResponseDto register, DateTime? from, DateTime? to, string? accountName) |
-| `backend/Controllers/ClientPortalController.cs` | 262 | `DateTime ExpiresAt` | public DateTime ExpiresAt { get; set; } |
-| `backend/Controllers/ClientPortalController.cs` | 213 | `DateTime expiresAt)` | private CookieOptions BuildCookieOptions(DateTime expiresAt) |
-| `backend/Controllers/ClientsController.cs` | 1777 | `DateTime? PassportIssueDate` | public DateTime? PassportIssueDate { get; init; } |
-| `backend/Controllers/ClientsController.cs` | 1811 | `DateTime? IssueDate` | public DateTime? IssueDate { get; init; } |
-| `backend/Controllers/ClientsController.cs` | 1815 | `DateTime? ValidFrom` | public DateTime? ValidFrom { get; init; } |
-| `backend/Controllers/ClientsController.cs` | 1816 | `DateTime? ValidTo` | public DateTime? ValidTo { get; init; } |
+| `backend/Controllers/ClientPortalController.cs` | 268 | `DateTime ExpiresAt` | public DateTime ExpiresAt { get; set; } |
+| `backend/Controllers/ClientPortalController.cs` | 215 | `DateTime expiresAt)` | private CookieOptions BuildCookieOptions(DateTime expiresAt) |
+| `backend/Controllers/ClientsController.cs` | 1801 | `DateTime? PassportIssueDate` | public DateTime? PassportIssueDate { get; init; } |
+| `backend/Controllers/ClientsController.cs` | 1835 | `DateTime? IssueDate` | public DateTime? IssueDate { get; init; } |
+| `backend/Controllers/ClientsController.cs` | 1839 | `DateTime? ValidFrom` | public DateTime? ValidFrom { get; init; } |
+| `backend/Controllers/ClientsController.cs` | 1840 | `DateTime? ValidTo` | public DateTime? ValidTo { get; init; } |
 | `backend/Controllers/ClientsController.cs` | 769 | `DateTime today)` | DateTime today) |
 | `backend/Controllers/ClientsController.cs` | 812 | `DateTime today,` | DateTime today, |
 | `backend/Controllers/ContractsController.cs` | 1732 | `DateTime? ValidUntil` | private async Task<(ActionResult? Error, string? Number, string? BillingMode, bool IsOpenEnded, decimal? Amount, DateTime? ValidUntil, List<(int ClientId, string? Comment)> Clients, List<(int LegalEntityId, string? Comme |
@@ -319,7 +319,7 @@ npm run audit:dates
 | `backend/Controllers/ReportsController.cs` | 9590 | `DateTime? StartDate` | DateTime? StartDate, |
 | `backend/Controllers/ReportsController.cs` | 9591 | `DateTime? DueDate` | DateTime? DueDate, |
 | `backend/Controllers/ReportsController.cs` | 9606 | `DateTime CreatedAt` | DateTime CreatedAt, |
-| Еще 1825 совпадений | - | - | Категория ограничена первыми 250 строками, полное количество указано в сводке. |
+| Еще 1835 совпадений | - | - | Категория ограничена первыми 250 строками, полное количество указано в сводке. |
 
 ### Backend: текущее время сервера
 
@@ -362,7 +362,7 @@ npm run audit:dates
 | `backend/Controllers/CashOrdersController.cs` | 848 | `DateTime.UtcNow` | CreatedAt = DateTime.UtcNow, |
 | `backend/Controllers/CashOrdersController.cs` | 991 | `DateTime.UtcNow` | return CalendarTimeZoneHelper.ToUserLocal(DateTime.UtcNow, timeZone).Date; |
 | `backend/Controllers/ClientBalancesController.cs` | 137 | `DateTime.UtcNow` | DateTime.UtcNow, |
-| `backend/Controllers/ClientPassportController.cs` | 69 | `DateTime.UtcNow` | entity.UpdatedAt = DateTime.UtcNow; |
+| `backend/Controllers/ClientPassportController.cs` | 104 | `DateTime.UtcNow` | entity.UpdatedAt = DateTime.UtcNow; |
 | `backend/Controllers/ClientsController.cs` | 69 | `DateTime.UtcNow` | return CalendarTimeZoneHelper.ToUserLocal(DateTime.UtcNow, timeZone).Date; |
 | `backend/Controllers/ClientsController.cs` | 1188 | `DateTime.UtcNow` | CreatedAt = DateTime.UtcNow, |
 | `backend/Controllers/ClientsController.cs` | 1189 | `DateTime.UtcNow` | UpdatedAt = DateTime.UtcNow, |
@@ -403,7 +403,7 @@ npm run audit:dates
 | `backend/Controllers/DictionariesAdminController.cs` | 1304 | `DateTime.UtcNow` | "invoice-units" => new InvoiceUnitDictionaryItem { Name = name, Description = description, ColorHex = colorHex, IsActive = isActive, CreatedAt = DateTime.UtcNow }, |
 | `backend/Controllers/DictionariesAdminController.cs` | 1305 | `DateTime.UtcNow` | "invoice-item-names" => new InvoiceItemNameDictionaryItem { Name = name, Description = description, ColorHex = colorHex, IsActive = isActive, CreatedAt = DateTime.UtcNow }, |
 | `backend/Controllers/FormRequirementsController.cs` | 321 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
-| `backend/Controllers/GoogleCalendarController.cs` | 139 | `DateTime.UtcNow` | Response.Headers.RetryAfter = Math.Max(1, (int)Math.Ceiling((ex.AvailableAt - DateTime.UtcNow).TotalSeconds)).ToString(); |
+| `backend/Controllers/GoogleCalendarController.cs` | 142 | `DateTime.UtcNow` | Response.Headers.RetryAfter = Math.Max(1, (int)Math.Ceiling((ex.AvailableAt - DateTime.UtcNow).TotalSeconds)).ToString(); |
 | `backend/Controllers/InvoicesController.cs` | 101 | `DateTime.UtcNow` | return CalendarTimeZoneHelper.ToUserLocal(DateTime.UtcNow, timeZone).Date; |
 | `backend/Controllers/InvoicesController.cs` | 597 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
 | `backend/Controllers/InvoicesController.cs` | 712 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
@@ -439,8 +439,7 @@ npm run audit:dates
 | `backend/Controllers/LegalEntitiesController.cs` | 2308 | `DateTime.UtcNow` | CreatedAt = DateTime.UtcNow, |
 | `backend/Controllers/LegalEntitiesController.cs` | 2309 | `DateTime.UtcNow` | UpdatedAt = DateTime.UtcNow, |
 | `backend/Controllers/LegalEntityBalancesController.cs` | 137 | `DateTime.UtcNow` | DateTime.UtcNow, |
-| `backend/Controllers/MessengerDocumentDeliveriesController.cs` | 447 | `DateTime.UtcNow` | var occurredAt = request.OccurredAt?.ToUniversalTime() ?? DateTime.UtcNow; |
-| `backend/Controllers/MessengerDocumentDeliveriesController.cs` | 470 | `DateTime.UtcNow` | delivery.UpdatedAt = DateTime.UtcNow; |
+| `backend/Controllers/MessengerDocumentDeliveriesController.cs` | 473 | `DateTime.UtcNow` | var receivedAt = DateTime.UtcNow; |
 | `backend/Controllers/MoneyAccountsController.cs` | 85 | `DateTime.UtcNow` | normalized.CreatedAt = DateTime.UtcNow; |
 | `backend/Controllers/MoneyAccountsController.cs` | 134 | `DateTime.UtcNow` | entity.UpdatedAt = DateTime.UtcNow; |
 | `backend/Controllers/MoneyAccountsController.cs` | 167 | `DateTime.UtcNow` | entity.UpdatedAt = DateTime.UtcNow; |
@@ -490,8 +489,8 @@ npm run audit:dates
 | `backend/Controllers/NotificationInboxController.cs` | 440 | `DateTime.UtcNow` | var now = DateTime.SpecifyKind(DateTime.UtcNow, DateTimeKind.Unspecified); |
 | `backend/Controllers/NotificationInboxController.cs` | 809 | `DateTime.UtcNow` | item.ReadAt = DateTime.UtcNow; |
 | `backend/Controllers/NotificationInboxController.cs` | 840 | `DateTime.UtcNow` | DateTime.UtcNow, |
-| `backend/Controllers/NotificationsController.cs` | 216 | `DateTime.UtcNow` | var nowUtc = DateTime.UtcNow; |
-| `backend/Controllers/NotificationsController.cs` | 583 | `DateTime.UtcNow` | user.UpdatedAt = DateTime.UtcNow; |
+| `backend/Controllers/NotificationsController.cs` | 217 | `DateTime.UtcNow` | var nowUtc = DateTime.UtcNow; |
+| `backend/Controllers/NotificationsController.cs` | 586 | `DateTime.UtcNow` | user.UpdatedAt = DateTime.UtcNow; |
 | `backend/Controllers/PaymentsController.cs` | 435 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
 | `backend/Controllers/PaymentsController.cs` | 512 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
 | `backend/Controllers/PaymentsController.cs` | 709 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
@@ -577,7 +576,8 @@ npm run audit:dates
 | `backend/Controllers/TasksController.cs` | 3542 | `DateTime.UtcNow` | participant.RespondedAt = DateTime.UtcNow; |
 | `backend/Controllers/TasksController.cs` | 3543 | `DateTime.UtcNow` | participant.UpdatedAt = DateTime.UtcNow; |
 | `backend/Controllers/TasksController.cs` | 3567 | `DateTime.UtcNow` | entity.UpdatedAt = DateTime.UtcNow; |
-| Еще 2389 совпадений | - | - | Категория ограничена первыми 250 строками, полное количество указано в сводке. |
+| `backend/Controllers/TasksController.cs` | 4904 | `DateTime.UtcNow` | var today = DateTime.UtcNow.Date; |
+| Еще 2407 совпадений | - | - | Категория ограничена первыми 250 строками, полное количество указано в сводке. |
 
 ### Backend: преобразования timezone
 
@@ -585,60 +585,60 @@ npm run audit:dates
 
 | Файл | Строка | Совпадение | Контекст |
 | --- | ---: | --- | --- |
-| `backend/AppReleases/releases.json` | 11902 | `timezone` | "releaseId": "2026-06-07-external-calendar-profile-timezone", |
-| `backend/AppReleases/releases.json` | 11916 | `timezone` | "text": "Ранее подключенные календари Google Calendar и Яндекс.Календаря при следующей синхронизации также обновляются до часового пояса владельца, чтобы события отображались без ручной правки timezone у провайдера." |
-| `backend/AppReleases/releases.json` | 12054 | `timezone` | "releaseId": "2026-06-05-auto-detect-profile-timezone", |
-| `backend/AppReleases/releases.json` | 12073 | `timezone` | "releaseId": "2026-06-05-server-timezone-fallback", |
-| `backend/AppReleases/releases.json` | 12111 | `timezone` | "releaseId": "2026-06-05-timezone-roadmap-regressions", |
-| `backend/AppReleases/releases.json` | 12134 | `timezone` | "releaseId": "2026-06-05-timezone-core-rules-regression", |
-| `backend/AppReleases/releases.json` | 12153 | `timezone` | "releaseId": "2026-06-05-case-court-deadline-notifications-timezone", |
-| `backend/AppReleases/releases.json` | 12172 | `timezone` | "releaseId": "2026-06-05-report-month-presets-task-planning-timezone", |
-| `backend/AppReleases/releases.json` | 12191 | `timezone` | "releaseId": "2026-06-05-report-exports-generated-at-timezone", |
-| `backend/AppReleases/releases.json` | 12248 | `timezone` | "releaseId": "2026-06-05-client-case-reports-profile-timezone", |
-| `backend/AppReleases/releases.json` | 12271 | `timezone` | "releaseId": "2026-06-05-financial-reports-profile-timezone", |
-| `backend/AppReleases/releases.json` | 12290 | `timezone` | "releaseId": "2026-06-05-payments-export-profile-timezone", |
-| `backend/AppReleases/releases.json` | 12313 | `timezone` | "releaseId": "2026-06-05-case-expenses-profile-timezone", |
-| `backend/AppReleases/releases.json` | 12332 | `timezone` | "releaseId": "2026-06-05-client-debt-profile-timezone", |
-| `backend/AppReleases/releases.json` | 12351 | `timezone` | "releaseId": "2026-06-05-payment-overdue-profile-timezone", |
-| `backend/AppReleases/releases.json` | 12450 | `timezone` | "releaseId": "2026-06-04-client-contact-profile-timezone", |
-| `backend/AppReleases/releases.json` | 12469 | `timezone` | "releaseId": "2026-06-04-money-journal-profile-timezone", |
-| `backend/AppReleases/releases.json` | 12488 | `timezone` | "releaseId": "2026-06-04-legal-work-export-profile-timezone", |
-| `backend/AppReleases/releases.json` | 12507 | `timezone` | "releaseId": "2026-06-04-report-date-timezone-formatting", |
-| `backend/AppReleases/releases.json` | 12725 | `timezone` | "releaseId": "2026-06-04-case-reports-timezone", |
-| `backend/AppReleases/releases.json` | 12748 | `timezone` | "releaseId": "2026-06-04-case-registry-export-timezone", |
-| `backend/AppReleases/releases.json` | 12771 | `timezone` | "releaseId": "2026-06-04-case-document-print-forms-timezone", |
-| `backend/AppReleases/releases.json` | 12794 | `timezone` | "releaseId": "2026-06-04-case-documents-uploaded-at-timezone", |
-| `backend/AppReleases/releases.json` | 12817 | `timezone` | "releaseId": "2026-06-04-case-history-profile-timezone", |
-| `backend/AppReleases/releases.json` | 12840 | `timezone` | "releaseId": "2026-06-04-case-detail-profile-timezone", |
-| `backend/AppReleases/releases.json` | 12863 | `timezone` | "releaseId": "2026-06-04-court-sync-source-timezone", |
-| `backend/AppReleases/releases.json` | 12886 | `timezone` | "releaseId": "2026-06-04-case-calendar-profile-timezone", |
-| `backend/AppReleases/releases.json` | 12909 | `timezone` | "releaseId": "2026-06-04-external-calendar-reverse-sync-timezone-log", |
-| `backend/AppReleases/releases.json` | 12932 | `timezone` | "releaseId": "2026-06-04-external-calendar-assignee-timezone-regression", |
-| `backend/AppReleases/releases.json` | 12955 | `timezone` | "releaseId": "2026-06-04-task-calendar-assignee-timezone-completed", |
-| `backend/AppReleases/releases.json` | 12978 | `timezone` | "releaseId": "2026-06-04-task-calendar-drag-resize-profile-timezone", |
-| `backend/AppReleases/releases.json` | 13001 | `timezone` | "releaseId": "2026-06-04-task-calendar-profile-timezone-today", |
-| `backend/AppReleases/releases.json` | 13024 | `timezone` | "releaseId": "2026-06-04-task-contractor-payment-exact-date-timezone", |
-| `backend/AppReleases/releases.json` | 13043 | `timezone` | "releaseId": "2026-06-04-calendar-sync-log-filter-profile-timezone", |
-| `backend/AppReleases/releases.json` | 13062 | `timezone` | "releaseId": "2026-06-04-settings-integrations-profile-timezone", |
-| `backend/AppReleases/releases.json` | 13085 | `timezone` | "releaseId": "2026-06-04-admin-users-roles-profile-timezone", |
-| `backend/AppReleases/releases.json` | 13112 | `timezone` | "releaseId": "2026-06-04-audit-logs-profile-timezone", |
-| `backend/AppReleases/releases.json` | 13135 | `timezone` | "releaseId": "2026-06-04-system-job-diagnostics-profile-timezone", |
-| `backend/AppReleases/releases.json` | 13173 | `timezone` | "releaseId": "2026-06-04-task-notifications-recipient-timezone", |
-| `backend/AppReleases/releases.json` | 13192 | `timezone` | "releaseId": "2026-06-04-money-reconciliation-profile-timezone", |
-| `backend/AppReleases/releases.json` | 13211 | `timezone` | "releaseId": "2026-06-04-invoice-numbering-profile-timezone", |
-| `backend/AppReleases/releases.json` | 13230 | `timezone` | "releaseId": "2026-06-04-spreadsheet-import-invoice-status-timezone", |
-| `backend/AppReleases/releases.json` | 13245 | `timezone` | "releaseId": "2026-06-04-profile-birth-date-timezone", |
-| `backend/AppReleases/releases.json` | 13260 | `timezone` | "releaseId": "2026-06-04-task-contractor-payment-profile-timezone", |
-| `backend/AppReleases/releases.json` | 13275 | `timezone` | "releaseId": "2026-06-04-money-transfer-profile-timezone", |
-| `backend/AppReleases/releases.json` | 13290 | `timezone` | "releaseId": "2026-06-04-cash-orders-profile-timezone", |
-| `backend/AppReleases/releases.json` | 13305 | `timezone` | "releaseId": "2026-06-04-stats-summary-profile-timezone", |
-| `backend/AppReleases/releases.json` | 13320 | `timezone` | "releaseId": "2026-06-04-reports-default-period-profile-timezone", |
-| `backend/AppReleases/releases.json` | 13339 | `timezone` | "releaseId": "2026-06-04-invoice-summary-profile-timezone", |
-| `backend/AppReleases/releases.json` | 13358 | `timezone` | "releaseId": "2026-06-04-payables-dashboard-profile-timezone", |
-| `backend/AppReleases/releases.json` | 13373 | `timezone` | "releaseId": "2026-06-04-finance-system-notes-profile-timezone", |
-| `backend/AppReleases/releases.json` | 13392 | `timezone` | "releaseId": "2026-06-04-report-generated-time-profile-timezone", |
-| `backend/AppReleases/releases.json` | 13449 | `timezone` | "releaseId": "2026-06-03-calendar-utc-timezone-rule", |
-| `backend/AppReleases/releases.json` | 13934 | `timezone` | "releaseId": "2026-06-02-app-release-seed-timezone-fix", |
+| `backend/AppReleases/releases.json` | 12100 | `timezone` | "releaseId": "2026-06-07-external-calendar-profile-timezone", |
+| `backend/AppReleases/releases.json` | 12114 | `timezone` | "text": "Ранее подключенные календари Google Calendar и Яндекс.Календаря при следующей синхронизации также обновляются до часового пояса владельца, чтобы события отображались без ручной правки timezone у провайдера." |
+| `backend/AppReleases/releases.json` | 12252 | `timezone` | "releaseId": "2026-06-05-auto-detect-profile-timezone", |
+| `backend/AppReleases/releases.json` | 12271 | `timezone` | "releaseId": "2026-06-05-server-timezone-fallback", |
+| `backend/AppReleases/releases.json` | 12309 | `timezone` | "releaseId": "2026-06-05-timezone-roadmap-regressions", |
+| `backend/AppReleases/releases.json` | 12332 | `timezone` | "releaseId": "2026-06-05-timezone-core-rules-regression", |
+| `backend/AppReleases/releases.json` | 12351 | `timezone` | "releaseId": "2026-06-05-case-court-deadline-notifications-timezone", |
+| `backend/AppReleases/releases.json` | 12370 | `timezone` | "releaseId": "2026-06-05-report-month-presets-task-planning-timezone", |
+| `backend/AppReleases/releases.json` | 12389 | `timezone` | "releaseId": "2026-06-05-report-exports-generated-at-timezone", |
+| `backend/AppReleases/releases.json` | 12446 | `timezone` | "releaseId": "2026-06-05-client-case-reports-profile-timezone", |
+| `backend/AppReleases/releases.json` | 12469 | `timezone` | "releaseId": "2026-06-05-financial-reports-profile-timezone", |
+| `backend/AppReleases/releases.json` | 12488 | `timezone` | "releaseId": "2026-06-05-payments-export-profile-timezone", |
+| `backend/AppReleases/releases.json` | 12511 | `timezone` | "releaseId": "2026-06-05-case-expenses-profile-timezone", |
+| `backend/AppReleases/releases.json` | 12530 | `timezone` | "releaseId": "2026-06-05-client-debt-profile-timezone", |
+| `backend/AppReleases/releases.json` | 12549 | `timezone` | "releaseId": "2026-06-05-payment-overdue-profile-timezone", |
+| `backend/AppReleases/releases.json` | 12648 | `timezone` | "releaseId": "2026-06-04-client-contact-profile-timezone", |
+| `backend/AppReleases/releases.json` | 12667 | `timezone` | "releaseId": "2026-06-04-money-journal-profile-timezone", |
+| `backend/AppReleases/releases.json` | 12686 | `timezone` | "releaseId": "2026-06-04-legal-work-export-profile-timezone", |
+| `backend/AppReleases/releases.json` | 12705 | `timezone` | "releaseId": "2026-06-04-report-date-timezone-formatting", |
+| `backend/AppReleases/releases.json` | 12923 | `timezone` | "releaseId": "2026-06-04-case-reports-timezone", |
+| `backend/AppReleases/releases.json` | 12946 | `timezone` | "releaseId": "2026-06-04-case-registry-export-timezone", |
+| `backend/AppReleases/releases.json` | 12969 | `timezone` | "releaseId": "2026-06-04-case-document-print-forms-timezone", |
+| `backend/AppReleases/releases.json` | 12992 | `timezone` | "releaseId": "2026-06-04-case-documents-uploaded-at-timezone", |
+| `backend/AppReleases/releases.json` | 13015 | `timezone` | "releaseId": "2026-06-04-case-history-profile-timezone", |
+| `backend/AppReleases/releases.json` | 13038 | `timezone` | "releaseId": "2026-06-04-case-detail-profile-timezone", |
+| `backend/AppReleases/releases.json` | 13061 | `timezone` | "releaseId": "2026-06-04-court-sync-source-timezone", |
+| `backend/AppReleases/releases.json` | 13084 | `timezone` | "releaseId": "2026-06-04-case-calendar-profile-timezone", |
+| `backend/AppReleases/releases.json` | 13107 | `timezone` | "releaseId": "2026-06-04-external-calendar-reverse-sync-timezone-log", |
+| `backend/AppReleases/releases.json` | 13130 | `timezone` | "releaseId": "2026-06-04-external-calendar-assignee-timezone-regression", |
+| `backend/AppReleases/releases.json` | 13153 | `timezone` | "releaseId": "2026-06-04-task-calendar-assignee-timezone-completed", |
+| `backend/AppReleases/releases.json` | 13176 | `timezone` | "releaseId": "2026-06-04-task-calendar-drag-resize-profile-timezone", |
+| `backend/AppReleases/releases.json` | 13199 | `timezone` | "releaseId": "2026-06-04-task-calendar-profile-timezone-today", |
+| `backend/AppReleases/releases.json` | 13222 | `timezone` | "releaseId": "2026-06-04-task-contractor-payment-exact-date-timezone", |
+| `backend/AppReleases/releases.json` | 13241 | `timezone` | "releaseId": "2026-06-04-calendar-sync-log-filter-profile-timezone", |
+| `backend/AppReleases/releases.json` | 13260 | `timezone` | "releaseId": "2026-06-04-settings-integrations-profile-timezone", |
+| `backend/AppReleases/releases.json` | 13283 | `timezone` | "releaseId": "2026-06-04-admin-users-roles-profile-timezone", |
+| `backend/AppReleases/releases.json` | 13310 | `timezone` | "releaseId": "2026-06-04-audit-logs-profile-timezone", |
+| `backend/AppReleases/releases.json` | 13333 | `timezone` | "releaseId": "2026-06-04-system-job-diagnostics-profile-timezone", |
+| `backend/AppReleases/releases.json` | 13371 | `timezone` | "releaseId": "2026-06-04-task-notifications-recipient-timezone", |
+| `backend/AppReleases/releases.json` | 13390 | `timezone` | "releaseId": "2026-06-04-money-reconciliation-profile-timezone", |
+| `backend/AppReleases/releases.json` | 13409 | `timezone` | "releaseId": "2026-06-04-invoice-numbering-profile-timezone", |
+| `backend/AppReleases/releases.json` | 13428 | `timezone` | "releaseId": "2026-06-04-spreadsheet-import-invoice-status-timezone", |
+| `backend/AppReleases/releases.json` | 13443 | `timezone` | "releaseId": "2026-06-04-profile-birth-date-timezone", |
+| `backend/AppReleases/releases.json` | 13458 | `timezone` | "releaseId": "2026-06-04-task-contractor-payment-profile-timezone", |
+| `backend/AppReleases/releases.json` | 13473 | `timezone` | "releaseId": "2026-06-04-money-transfer-profile-timezone", |
+| `backend/AppReleases/releases.json` | 13488 | `timezone` | "releaseId": "2026-06-04-cash-orders-profile-timezone", |
+| `backend/AppReleases/releases.json` | 13503 | `timezone` | "releaseId": "2026-06-04-stats-summary-profile-timezone", |
+| `backend/AppReleases/releases.json` | 13518 | `timezone` | "releaseId": "2026-06-04-reports-default-period-profile-timezone", |
+| `backend/AppReleases/releases.json` | 13537 | `timezone` | "releaseId": "2026-06-04-invoice-summary-profile-timezone", |
+| `backend/AppReleases/releases.json` | 13556 | `timezone` | "releaseId": "2026-06-04-payables-dashboard-profile-timezone", |
+| `backend/AppReleases/releases.json` | 13571 | `timezone` | "releaseId": "2026-06-04-finance-system-notes-profile-timezone", |
+| `backend/AppReleases/releases.json` | 13590 | `timezone` | "releaseId": "2026-06-04-report-generated-time-profile-timezone", |
+| `backend/AppReleases/releases.json` | 13647 | `timezone` | "releaseId": "2026-06-03-calendar-utc-timezone-rule", |
+| `backend/AppReleases/releases.json` | 14132 | `timezone` | "releaseId": "2026-06-02-app-release-seed-timezone-fix", |
 | `backend/Controllers/AccountsController.cs` | 25 | `CalendarTimeZoneHelper` | var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct); |
 | `backend/Controllers/AccountsController.cs` | 26 | `CalendarTimeZoneHelper` | return CalendarTimeZoneHelper.ToUserLocal(DateTime.UtcNow, timeZone).Date; |
 | `backend/Controllers/AccountsController.cs` | 25 | `timeZone` | var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct); |
@@ -649,7 +649,7 @@ npm run audit:dates
 | `backend/Controllers/CashOrdersController.cs` | 991 | `CalendarTimeZoneHelper` | return CalendarTimeZoneHelper.ToUserLocal(DateTime.UtcNow, timeZone).Date; |
 | `backend/Controllers/CashOrdersController.cs` | 990 | `timeZone` | var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct); |
 | `backend/Controllers/CashOrdersController.cs` | 991 | `timeZone` | return CalendarTimeZoneHelper.ToUserLocal(DateTime.UtcNow, timeZone).Date; |
-| `backend/Controllers/ClientPortalController.cs` | 220 | `DateTime.SpecifyKind` | Expires = new DateTimeOffset(DateTime.SpecifyKind(expiresAt, DateTimeKind.Utc)), |
+| `backend/Controllers/ClientPortalController.cs` | 222 | `DateTime.SpecifyKind` | Expires = new DateTimeOffset(DateTime.SpecifyKind(expiresAt, DateTimeKind.Utc)), |
 | `backend/Controllers/ClientsController.cs` | 68 | `CalendarTimeZoneHelper` | var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct); |
 | `backend/Controllers/ClientsController.cs` | 69 | `CalendarTimeZoneHelper` | return CalendarTimeZoneHelper.ToUserLocal(DateTime.UtcNow, timeZone).Date; |
 | `backend/Controllers/ClientsController.cs` | 68 | `timeZone` | var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct); |
@@ -676,7 +676,7 @@ npm run audit:dates
 | `backend/Controllers/LegalEntitiesController.cs` | 1109 | `Timezone` | Timezone = NormalizeOptional(request.Timezone), |
 | `backend/Controllers/LegalEntitiesController.cs` | 2050 | `Timezone` | entity.Timezone = NormalizeOptional(request.Timezone); |
 | `backend/Controllers/LegalEntitiesController.cs` | 2234 | `Timezone` | Timezone: null); |
-| `backend/Controllers/MessengerDocumentDeliveriesController.cs` | 447 | `.ToUniversalTime()` | var occurredAt = request.OccurredAt?.ToUniversalTime() ?? DateTime.UtcNow; |
+| `backend/Controllers/MessengerDocumentDeliveriesController.cs` | 474 | `.ToUniversalTime()` | var occurredAt = request.OccurredAt?.ToUniversalTime() ?? receivedAt; |
 | `backend/Controllers/MoneyOperationsController.cs` | 2159 | `CalendarTimeZoneHelper` | var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct); |
 | `backend/Controllers/MoneyOperationsController.cs` | 2160 | `CalendarTimeZoneHelper` | return CalendarTimeZoneHelper.ToUserLocal(DateTime.UtcNow, timeZone).Date; |
 | `backend/Controllers/MoneyOperationsController.cs` | 2159 | `timeZone` | var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct); |
@@ -835,7 +835,7 @@ npm run audit:dates
 | `backend/Controllers/SystemJobsController.cs` | 914 | `timeZone` | LastActivityDescription = state.OldestCandidateAt is null ? null : $"Ближайшее событие-кандидат: {FormatSystemJobDateTime(state.OldestCandidateAt.Value, timeZone)}.", |
 | `backend/Controllers/SystemJobsController.cs` | 1144 | `timeZone` | TimeZoneInfo timeZone, |
 | `backend/Controllers/SystemJobsController.cs` | 1165 | `timeZone` | LastActivityDescription = oldestLogAt is null ? null : $"Самая старая запись журнала: {FormatSystemJobDateTime(oldestLogAt.Value, timeZone)}.", |
-| Еще 1275 совпадений | - | - | Категория ограничена первыми 250 строками, полное количество указано в сводке. |
+| Еще 1277 совпадений | - | - | Категория ограничена первыми 250 строками, полное количество указано в сводке. |
 
 ### Ручные смещения времени
 
@@ -843,257 +843,257 @@ npm run audit:dates
 
 | Файл | Строка | Совпадение | Контекст |
 | --- | ---: | --- | --- |
-| `backend/AppReleases/releases.json` | 5 | `+07:00` | "releasedAt": "2026-08-04T15:35:00+07:00", |
-| `backend/AppReleases/releases.json` | 24 | `+07:00` | "releasedAt": "2026-08-04T15:12:00+07:00", |
-| `backend/AppReleases/releases.json` | 39 | `+07:00` | "releasedAt": "2026-08-04T14:55:00+07:00", |
-| `backend/AppReleases/releases.json` | 54 | `+07:00` | "releasedAt": "2026-08-04T13:20:00+07:00", |
-| `backend/AppReleases/releases.json` | 69 | `+07:00` | "releasedAt": "2026-08-04T12:56:00+07:00", |
-| `backend/AppReleases/releases.json` | 84 | `+07:00` | "releasedAt": "2026-08-04T12:30:00+07:00", |
-| `backend/AppReleases/releases.json` | 107 | `+07:00` | "releasedAt": "2026-08-04T11:45:00+07:00", |
-| `backend/AppReleases/releases.json` | 126 | `+07:00` | "releasedAt": "2026-08-04T10:49:00+07:00", |
-| `backend/AppReleases/releases.json` | 145 | `+07:00` | "releasedAt": "2026-08-04T10:10:00+07:00", |
-| `backend/AppReleases/releases.json` | 164 | `+07:00` | "releasedAt": "2026-08-03T19:30:00+07:00", |
-| `backend/AppReleases/releases.json` | 179 | `+07:00` | "releasedAt": "2026-08-01T03:38:46+07:00", |
-| `backend/AppReleases/releases.json` | 202 | `+07:00` | "releasedAt": "2026-08-01T03:25:00+07:00", |
-| `backend/AppReleases/releases.json` | 225 | `+07:00` | "releasedAt": "2026-08-01T02:40:28+07:00", |
-| `backend/AppReleases/releases.json` | 248 | `+07:00` | "releasedAt": "2026-08-01T00:11:00+07:00", |
-| `backend/AppReleases/releases.json` | 271 | `+07:00` | "releasedAt": "2026-08-01T00:10:00+07:00", |
-| `backend/AppReleases/releases.json` | 290 | `+07:00` | "releasedAt": "2026-08-01T00:09:00+07:00", |
-| `backend/AppReleases/releases.json` | 313 | `+07:00` | "releasedAt": "2026-08-01T00:08:00+07:00", |
-| `backend/AppReleases/releases.json` | 336 | `+07:00` | "releasedAt": "2026-08-01T00:07:00+07:00", |
-| `backend/AppReleases/releases.json` | 359 | `+07:00` | "releasedAt": "2026-08-01T00:06:00+07:00", |
-| `backend/AppReleases/releases.json` | 382 | `+07:00` | "releasedAt": "2026-08-01T00:05:00+07:00", |
-| `backend/AppReleases/releases.json` | 405 | `+07:00` | "releasedAt": "2026-08-01T00:04:00+07:00", |
-| `backend/AppReleases/releases.json` | 424 | `+07:00` | "releasedAt": "2026-08-01T00:03:00+07:00", |
-| `backend/AppReleases/releases.json` | 447 | `+07:00` | "releasedAt": "2026-08-01T00:02:00+07:00", |
-| `backend/AppReleases/releases.json` | 470 | `+07:00` | "releasedAt": "2026-08-01T00:01:00+07:00", |
-| `backend/AppReleases/releases.json` | 493 | `+07:00` | "releasedAt": "2026-08-01T00:00:00+07:00", |
-| `backend/AppReleases/releases.json` | 516 | `+07:00` | "releasedAt": "2026-07-31T23:59:30+07:00", |
-| `backend/AppReleases/releases.json` | 539 | `+07:00` | "releasedAt": "2026-07-31T23:59:00+07:00", |
-| `backend/AppReleases/releases.json` | 562 | `+07:00` | "releasedAt": "2026-07-31T23:55:00+07:00", |
-| `backend/AppReleases/releases.json` | 585 | `+07:00` | "releasedAt": "2026-07-31T23:35:00+07:00", |
-| `backend/AppReleases/releases.json` | 608 | `+07:00` | "releasedAt": "2026-07-31T23:05:00+07:00", |
-| `backend/AppReleases/releases.json` | 627 | `+07:00` | "releasedAt": "2026-07-31T22:45:00+07:00", |
-| `backend/AppReleases/releases.json` | 654 | `+07:00` | "releasedAt": "2026-07-31T22:15:00+07:00", |
-| `backend/AppReleases/releases.json` | 677 | `+07:00` | "releasedAt": "2026-07-31T21:05:00+07:00", |
-| `backend/AppReleases/releases.json` | 700 | `+07:00` | "releasedAt": "2026-07-31T20:35:00+07:00", |
-| `backend/AppReleases/releases.json` | 723 | `+07:00` | "releasedAt": "2026-07-31T19:45:00+07:00", |
-| `backend/AppReleases/releases.json` | 746 | `+07:00` | "releasedAt": "2026-07-31T19:10:00+07:00", |
-| `backend/AppReleases/releases.json` | 769 | `+07:00` | "releasedAt": "2026-07-31T18:10:00+07:00", |
-| `backend/AppReleases/releases.json` | 792 | `+07:00` | "releasedAt": "2026-07-31T16:35:00+07:00", |
-| `backend/AppReleases/releases.json` | 815 | `+07:00` | "releasedAt": "2026-07-31T16:00:00+07:00", |
-| `backend/AppReleases/releases.json` | 830 | `+07:00` | "releasedAt": "2026-07-31T15:25:00+07:00", |
-| `backend/AppReleases/releases.json` | 857 | `+07:00` | "releasedAt": "2026-07-31T14:35:00+07:00", |
-| `backend/AppReleases/releases.json` | 884 | `+07:00` | "releasedAt": "2026-07-31T11:15:00+07:00", |
-| `backend/AppReleases/releases.json` | 911 | `+07:00` | "releasedAt": "2026-07-31T10:30:00+07:00", |
-| `backend/AppReleases/releases.json` | 938 | `+07:00` | "releasedAt": "2026-07-31T09:30:00+07:00", |
-| `backend/AppReleases/releases.json` | 965 | `+07:00` | "releasedAt": "2026-07-31T08:04:00+07:00", |
-| `backend/AppReleases/releases.json` | 988 | `+07:00` | "releasedAt": "2026-07-30T19:45:00+07:00", |
-| `backend/AppReleases/releases.json` | 1011 | `+07:00` | "releasedAt": "2026-07-30T19:30:00+07:00", |
-| `backend/AppReleases/releases.json` | 1030 | `+07:00` | "releasedAt": "2026-07-30T19:20:00+07:00", |
-| `backend/AppReleases/releases.json` | 1053 | `+07:00` | "releasedAt": "2026-07-30T19:10:00+07:00", |
-| `backend/AppReleases/releases.json` | 1072 | `+07:00` | "releasedAt": "2026-07-30T18:55:00+07:00", |
-| `backend/AppReleases/releases.json` | 1091 | `+07:00` | "releasedAt": "2026-07-30T18:40:00+07:00", |
-| `backend/AppReleases/releases.json` | 1110 | `+07:00` | "releasedAt": "2026-07-30T18:25:00+07:00", |
-| `backend/AppReleases/releases.json` | 1133 | `+07:00` | "releasedAt": "2026-07-30T17:40:00+07:00", |
-| `backend/AppReleases/releases.json` | 1156 | `+07:00` | "releasedAt": "2026-07-30T17:25:00+07:00", |
-| `backend/AppReleases/releases.json` | 1179 | `+07:00` | "releasedAt": "2026-07-30T16:45:00+07:00", |
-| `backend/AppReleases/releases.json` | 1198 | `+07:00` | "releasedAt": "2026-07-30T16:30:00+07:00", |
-| `backend/AppReleases/releases.json` | 1221 | `+07:00` | "releasedAt": "2026-07-30T16:10:00+07:00", |
-| `backend/AppReleases/releases.json` | 1244 | `+07:00` | "releasedAt": "2026-07-30T15:30:55+07:00", |
-| `backend/AppReleases/releases.json` | 1263 | `+07:00` | "releasedAt": "2026-07-30T15:12:11+07:00", |
-| `backend/AppReleases/releases.json` | 1286 | `+07:00` | "releasedAt": "2026-07-30T14:53:30+07:00", |
-| `backend/AppReleases/releases.json` | 1309 | `+07:00` | "releasedAt": "2026-07-30T14:39:53+07:00", |
-| `backend/AppReleases/releases.json` | 1328 | `+07:00` | "releasedAt": "2026-07-30T14:14:09+07:00", |
-| `backend/AppReleases/releases.json` | 1351 | `+07:00` | "releasedAt": "2026-07-30T13:49:39+07:00", |
-| `backend/AppReleases/releases.json` | 1374 | `+07:00` | "releasedAt": "2026-07-30T13:14:46+07:00", |
-| `backend/AppReleases/releases.json` | 1401 | `+07:00` | "releasedAt": "2026-07-30T12:43:38+07:00", |
-| `backend/AppReleases/releases.json` | 1428 | `+07:00` | "releasedAt": "2026-07-30T12:16:34+07:00", |
-| `backend/AppReleases/releases.json` | 1451 | `+07:00` | "releasedAt": "2026-07-30T11:51:24+07:00", |
-| `backend/AppReleases/releases.json` | 1474 | `+07:00` | "releasedAt": "2026-07-30T11:18:00+07:00", |
-| `backend/AppReleases/releases.json` | 1497 | `+07:00` | "releasedAt": "2026-07-30T09:50:00+07:00", |
-| `backend/AppReleases/releases.json` | 1524 | `+07:00` | "releasedAt": "2026-07-30T09:30:00+07:00", |
-| `backend/AppReleases/releases.json` | 1547 | `+07:00` | "releasedAt": "2026-07-30T08:18:58+07:00", |
-| `backend/AppReleases/releases.json` | 1570 | `+07:00` | "releasedAt": "2026-07-30T07:51:49+07:00", |
-| `backend/AppReleases/releases.json` | 1593 | `+07:00` | "releasedAt": "2026-07-30T07:13:16+07:00", |
-| `backend/AppReleases/releases.json` | 1616 | `+07:00` | "releasedAt": "2026-07-30T06:38:46+07:00", |
-| `backend/AppReleases/releases.json` | 1639 | `+07:00` | "releasedAt": "2026-07-30T06:09:38+07:00", |
-| `backend/AppReleases/releases.json` | 1662 | `+07:00` | "releasedAt": "2026-07-30T05:30:58+07:00", |
-| `backend/AppReleases/releases.json` | 1685 | `+07:00` | "releasedAt": "2026-07-30T05:14:07+07:00", |
-| `backend/AppReleases/releases.json` | 1708 | `+07:00` | "releasedAt": "2026-07-30T01:16:48+07:00", |
-| `backend/AppReleases/releases.json` | 1731 | `+07:00` | "releasedAt": "2026-07-30T00:55:00+07:00", |
-| `backend/AppReleases/releases.json` | 1754 | `+07:00` | "releasedAt": "2026-07-30T00:16:38+07:00", |
-| `backend/AppReleases/releases.json` | 1777 | `+07:00` | "releasedAt": "2026-07-29T23:41:44+07:00", |
-| `backend/AppReleases/releases.json` | 1800 | `+07:00` | "releasedAt": "2026-07-29T23:21:00+07:00", |
-| `backend/AppReleases/releases.json` | 1823 | `+07:00` | "releasedAt": "2026-07-29T22:38:00+07:00", |
-| `backend/AppReleases/releases.json` | 1850 | `+07:00` | "releasedAt": "2026-07-29T22:25:00+07:00", |
-| `backend/AppReleases/releases.json` | 1873 | `+07:00` | "releasedAt": "2026-07-29T22:00:00+07:00", |
-| `backend/AppReleases/releases.json` | 1896 | `+07:00` | "releasedAt": "2026-07-29T21:45:00+07:00", |
-| `backend/AppReleases/releases.json` | 1919 | `+07:00` | "releasedAt": "2026-07-29T21:10:00+07:00", |
-| `backend/AppReleases/releases.json` | 1938 | `+07:00` | "releasedAt": "2026-07-29T20:35:00+07:00", |
-| `backend/AppReleases/releases.json` | 1961 | `+07:00` | "releasedAt": "2026-07-29T20:10:00+07:00", |
-| `backend/AppReleases/releases.json` | 1984 | `+07:00` | "releasedAt": "2026-07-29T19:45:00+07:00", |
-| `backend/AppReleases/releases.json` | 2007 | `+07:00` | "releasedAt": "2026-07-29T19:20:00+07:00", |
-| `backend/AppReleases/releases.json` | 2030 | `+07:00` | "releasedAt": "2026-07-29T18:45:00+07:00", |
-| `backend/AppReleases/releases.json` | 2053 | `+07:00` | "releasedAt": "2026-07-29T18:20:00+07:00", |
-| `backend/AppReleases/releases.json` | 2076 | `+07:00` | "releasedAt": "2026-07-29T16:05:00+07:00", |
-| `backend/AppReleases/releases.json` | 2095 | `+07:00` | "releasedAt": "2026-07-27T21:20:00+07:00", |
-| `backend/AppReleases/releases.json` | 2118 | `+07:00` | "releasedAt": "2026-07-27T21:15:00+07:00", |
-| `backend/AppReleases/releases.json` | 2141 | `+07:00` | "releasedAt": "2026-07-27T20:18:00+07:00", |
-| `backend/AppReleases/releases.json` | 2164 | `+07:00` | "releasedAt": "2026-07-27T19:20:00+07:00", |
-| `backend/AppReleases/releases.json` | 2187 | `+07:00` | "releasedAt": "2026-07-27T18:42:00+07:00", |
-| `backend/AppReleases/releases.json` | 2210 | `+07:00` | "releasedAt": "2026-07-27T18:07:00+07:00", |
-| `backend/AppReleases/releases.json` | 2233 | `+07:00` | "releasedAt": "2026-07-27T17:21:09+07:00", |
-| `backend/AppReleases/releases.json` | 2256 | `+07:00` | "releasedAt": "2026-07-27T13:45:00+07:00", |
-| `backend/AppReleases/releases.json` | 2275 | `+07:00` | "releasedAt": "2026-07-23T15:25:00+07:00", |
-| `backend/AppReleases/releases.json` | 2298 | `+07:00` | "releasedAt": "2026-07-23T14:30:31+07:00", |
-| `backend/AppReleases/releases.json` | 2317 | `+07:00` | "releasedAt": "2026-07-23T14:09:00+07:00", |
-| `backend/AppReleases/releases.json` | 2336 | `+07:00` | "releasedAt": "2026-07-21T15:55:00+07:00", |
-| `backend/AppReleases/releases.json` | 2355 | `+07:00` | "releasedAt": "2026-07-21T14:35:00+07:00", |
-| `backend/AppReleases/releases.json` | 2378 | `+07:00` | "releasedAt": "2026-07-21T13:35:00+07:00", |
-| `backend/AppReleases/releases.json` | 2397 | `+07:00` | "releasedAt": "2026-07-21T12:20:00+07:00", |
-| `backend/AppReleases/releases.json` | 2420 | `+07:00` | "releasedAt": "2026-07-21T11:20:00+07:00", |
-| `backend/AppReleases/releases.json` | 2443 | `+07:00` | "releasedAt": "2026-07-21T09:30:00+07:00", |
-| `backend/AppReleases/releases.json` | 2462 | `+07:00` | "releasedAt": "2026-07-20T21:35:00+07:00", |
-| `backend/AppReleases/releases.json` | 2481 | `+07:00` | "releasedAt": "2026-07-20T00:00:00+07:00", |
-| `backend/AppReleases/releases.json` | 2496 | `+07:00` | "releasedAt": "2026-07-17T00:50:00+07:00", |
-| `backend/AppReleases/releases.json` | 3271 | `+07:00` | "releasedAt": "2026-07-16T21:30:00+07:00", |
-| `backend/AppReleases/releases.json` | 3290 | `+07:00` | "releasedAt": "2026-07-16T17:50:00+07:00", |
-| `backend/AppReleases/releases.json` | 3309 | `+07:00` | "releasedAt": "2026-07-16T15:35:00+07:00", |
-| `backend/AppReleases/releases.json` | 3332 | `+07:00` | "releasedAt": "2026-07-16T15:20:00+07:00", |
-| `backend/AppReleases/releases.json` | 3351 | `+07:00` | "releasedAt": "2026-07-16T15:05:00+07:00", |
-| `backend/AppReleases/releases.json` | 3366 | `+07:00` | "releasedAt": "2026-07-16T14:30:00+07:00", |
-| `backend/AppReleases/releases.json` | 3389 | `+07:00` | "releasedAt": "2026-07-16T13:30:00+07:00", |
-| `backend/AppReleases/releases.json` | 3408 | `+07:00` | "releasedAt": "2026-07-16T00:35:00+07:00", |
-| `backend/AppReleases/releases.json` | 3427 | `+07:00` | "releasedAt": "2026-07-15T23:40:00+07:00", |
-| `backend/AppReleases/releases.json` | 3454 | `+07:00` | "releasedAt": "2026-07-15T22:45:00+07:00", |
-| `backend/AppReleases/releases.json` | 3473 | `+07:00` | "releasedAt": "2026-07-15T22:40:00+07:00", |
-| `backend/AppReleases/releases.json` | 3492 | `+07:00` | "releasedAt": "2026-07-15T22:10:00+07:00", |
-| `backend/AppReleases/releases.json` | 3511 | `+07:00` | "releasedAt": "2026-07-15T22:05:00+07:00", |
-| `backend/AppReleases/releases.json` | 3530 | `+07:00` | "releasedAt": "2026-07-15T21:25:00+07:00", |
-| `backend/AppReleases/releases.json` | 3549 | `+07:00` | "releasedAt": "2026-07-15T14:30:00+07:00", |
-| `backend/AppReleases/releases.json` | 3568 | `+07:00` | "releasedAt": "2026-07-15T13:45:00+07:00", |
-| `backend/AppReleases/releases.json` | 3587 | `+07:00` | "releasedAt": "2026-07-15T12:35:00+07:00", |
-| `backend/AppReleases/releases.json` | 3602 | `+07:00` | "releasedAt": "2026-07-15T10:30:00+07:00", |
-| `backend/AppReleases/releases.json` | 3629 | `+07:00` | "releasedAt": "2026-07-14T14:45:00+07:00", |
-| `backend/AppReleases/releases.json` | 3648 | `+07:00` | "releasedAt": "2026-07-14T14:32:00+07:00", |
-| `backend/AppReleases/releases.json` | 3667 | `+07:00` | "releasedAt": "2026-07-14T14:31:00+07:00", |
-| `backend/AppReleases/releases.json` | 3686 | `+07:00` | "releasedAt": "2026-07-14T14:30:00+07:00", |
-| `backend/AppReleases/releases.json` | 3705 | `+07:00` | "releasedAt": "2026-07-14T11:43:00+07:00", |
-| `backend/AppReleases/releases.json` | 3724 | `+07:00` | "releasedAt": "2026-07-14T11:20:00+07:00", |
-| `backend/AppReleases/releases.json` | 3743 | `+07:00` | "releasedAt": "2026-07-14T10:25:00+07:00", |
-| `backend/AppReleases/releases.json` | 3770 | `+07:00` | "releasedAt": "2026-07-14T09:55:00+07:00", |
-| `backend/AppReleases/releases.json` | 3789 | `+07:00` | "releasedAt": "2026-07-13T23:05:00+07:00", |
-| `backend/AppReleases/releases.json` | 3816 | `+07:00` | "releasedAt": "2026-07-10T23:25:00+07:00", |
-| `backend/AppReleases/releases.json` | 3831 | `+07:00` | "releasedAt": "2026-07-10T20:55:00+07:00", |
-| `backend/AppReleases/releases.json` | 3854 | `+07:00` | "releasedAt": "2026-07-10T15:35:00+07:00", |
-| `backend/AppReleases/releases.json` | 3873 | `+07:00` | "releasedAt": "2026-07-10T14:20:00+07:00", |
-| `backend/AppReleases/releases.json` | 3888 | `+07:00` | "releasedAt": "2026-07-10T11:45:00+07:00", |
-| `backend/AppReleases/releases.json` | 3903 | `+07:00` | "releasedAt": "2026-07-10T11:25:30+07:00", |
-| `backend/AppReleases/releases.json` | 3918 | `+07:00` | "releasedAt": "2026-07-09T23:25:00+07:00", |
-| `backend/AppReleases/releases.json` | 3941 | `+07:00` | "releasedAt": "2026-07-09T22:50:00+07:00", |
-| `backend/AppReleases/releases.json` | 3960 | `+07:00` | "releasedAt": "2026-07-09T22:40:00+07:00", |
-| `backend/AppReleases/releases.json` | 3979 | `+07:00` | "releasedAt": "2026-07-09T22:30:00+07:00", |
-| `backend/AppReleases/releases.json` | 3998 | `+07:00` | "releasedAt": "2026-07-09T22:20:00+07:00", |
-| `backend/AppReleases/releases.json` | 4013 | `+07:00` | "releasedAt": "2026-07-09T22:19:00+07:00", |
-| `backend/AppReleases/releases.json` | 4028 | `+07:00` | "releasedAt": "2026-07-09T22:18:00+07:00", |
-| `backend/AppReleases/releases.json` | 4043 | `+07:00` | "releasedAt": "2026-07-09T22:17:00+07:00", |
-| `backend/AppReleases/releases.json` | 4058 | `+07:00` | "releasedAt": "2026-07-09T22:16:00+07:00", |
-| `backend/AppReleases/releases.json` | 4073 | `+07:00` | "releasedAt": "2026-07-09T22:15:00+07:00", |
-| `backend/AppReleases/releases.json` | 4092 | `+07:00` | "releasedAt": "2026-07-09T22:14:00+07:00", |
-| `backend/AppReleases/releases.json` | 4111 | `+07:00` | "releasedAt": "2026-07-09T22:13:00+07:00", |
-| `backend/AppReleases/releases.json` | 4126 | `+07:00` | "releasedAt": "2026-07-09T22:12:00+07:00", |
-| `backend/AppReleases/releases.json` | 4141 | `+07:00` | "releasedAt": "2026-07-09T22:11:00+07:00", |
-| `backend/AppReleases/releases.json` | 4156 | `+07:00` | "releasedAt": "2026-07-09T22:10:00+07:00", |
-| `backend/AppReleases/releases.json` | 4171 | `+07:00` | "releasedAt": "2026-07-09T22:09:00+07:00", |
-| `backend/AppReleases/releases.json` | 4186 | `+07:00` | "releasedAt": "2026-07-09T21:45:00+07:00", |
-| `backend/AppReleases/releases.json` | 4201 | `+07:00` | "releasedAt": "2026-07-09T21:20:00+07:00", |
-| `backend/AppReleases/releases.json` | 4216 | `+07:00` | "releasedAt": "2026-07-09T20:45:00+07:00", |
-| `backend/AppReleases/releases.json` | 4231 | `+07:00` | "releasedAt": "2026-07-09T20:10:00+07:00", |
-| `backend/AppReleases/releases.json` | 4254 | `+07:00` | "releasedAt": "2026-07-09T19:25:00+07:00", |
-| `backend/AppReleases/releases.json` | 4273 | `+07:00` | "releasedAt": "2026-07-09T18:55:00+07:00", |
-| `backend/AppReleases/releases.json` | 4292 | `+07:00` | "releasedAt": "2026-07-09T18:20:00+07:00", |
-| `backend/AppReleases/releases.json` | 4311 | `+07:00` | "releasedAt": "2026-07-09T17:45:00+07:00", |
-| `backend/AppReleases/releases.json` | 4330 | `+07:00` | "releasedAt": "2026-07-09T17:05:00+07:00", |
-| `backend/AppReleases/releases.json` | 4353 | `+07:00` | "releasedAt": "2026-07-09T16:43:00+07:00", |
-| `backend/AppReleases/releases.json` | 4376 | `+07:00` | "releasedAt": "2026-07-09T16:35:00+07:00", |
-| `backend/AppReleases/releases.json` | 4399 | `+07:00` | "releasedAt": "2026-07-09T16:25:00+07:00", |
-| `backend/AppReleases/releases.json` | 4422 | `+07:00` | "releasedAt": "2026-07-08T20:05:00+07:00", |
-| `backend/AppReleases/releases.json` | 4445 | `+07:00` | "releasedAt": "2026-07-08T19:45:00+07:00", |
-| `backend/AppReleases/releases.json` | 4468 | `+07:00` | "releasedAt": "2026-07-08T19:25:00+07:00", |
-| `backend/AppReleases/releases.json` | 4487 | `+07:00` | "releasedAt": "2026-07-08T19:05:00+07:00", |
-| `backend/AppReleases/releases.json` | 4506 | `+07:00` | "releasedAt": "2026-07-08T18:25:00+07:00", |
-| `backend/AppReleases/releases.json` | 4529 | `+07:00` | "releasedAt": "2026-07-08T18:05:00+07:00", |
-| `backend/AppReleases/releases.json` | 4548 | `+07:00` | "releasedAt": "2026-07-08T17:45:00+07:00", |
-| `backend/AppReleases/releases.json` | 4567 | `+07:00` | "releasedAt": "2026-07-08T17:25:00+07:00", |
-| `backend/AppReleases/releases.json` | 4586 | `+07:00` | "releasedAt": "2026-07-08T17:05:00+07:00", |
-| `backend/AppReleases/releases.json` | 4605 | `+07:00` | "releasedAt": "2026-07-08T16:40:00+07:00", |
-| `backend/AppReleases/releases.json` | 4624 | `+07:00` | "releasedAt": "2026-07-08T16:20:00+07:00", |
-| `backend/AppReleases/releases.json` | 4647 | `+07:00` | "releasedAt": "2026-07-08T16:00:00+07:00", |
-| `backend/AppReleases/releases.json` | 4670 | `+07:00` | "releasedAt": "2026-07-08T15:05:00+07:00", |
-| `backend/AppReleases/releases.json` | 4689 | `+07:00` | "releasedAt": "2026-07-08T14:45:00+07:00", |
-| `backend/AppReleases/releases.json` | 4712 | `+07:00` | "releasedAt": "2026-07-08T14:25:00+07:00", |
-| `backend/AppReleases/releases.json` | 4735 | `+07:00` | "releasedAt": "2026-07-08T14:05:00+07:00", |
-| `backend/AppReleases/releases.json` | 4758 | `+07:00` | "releasedAt": "2026-07-08T13:35:00+07:00", |
-| `backend/AppReleases/releases.json` | 4777 | `+07:00` | "releasedAt": "2026-07-08T13:10:00+07:00", |
-| `backend/AppReleases/releases.json` | 4796 | `+07:00` | "releasedAt": "2026-07-08T12:45:00+07:00", |
-| `backend/AppReleases/releases.json` | 4815 | `+07:00` | "releasedAt": "2026-07-08T12:25:00+07:00", |
-| `backend/AppReleases/releases.json` | 4838 | `+07:00` | "releasedAt": "2026-07-08T12:10:00+07:00", |
-| `backend/AppReleases/releases.json` | 4857 | `+07:00` | "releasedAt": "2026-07-07T18:00:00+07:00", |
-| `backend/AppReleases/releases.json` | 4876 | `+07:00` | "releasedAt": "2026-07-06T16:40:00+07:00", |
-| `backend/AppReleases/releases.json` | 4907 | `+07:00` | "releasedAt": "2026-07-06T13:30:00+07:00", |
-| `backend/AppReleases/releases.json` | 4930 | `+07:00` | "releasedAt": "2026-07-06T12:05:00+07:00", |
-| `backend/AppReleases/releases.json` | 4949 | `+07:00` | "releasedAt": "2026-07-06T11:15:00+07:00", |
-| `backend/AppReleases/releases.json` | 4968 | `+07:00` | "releasedAt": "2026-07-06T10:30:00+07:00", |
-| `backend/AppReleases/releases.json` | 4987 | `+07:00` | "releasedAt": "2026-07-05T09:30:00+07:00", |
-| `backend/AppReleases/releases.json` | 5006 | `+07:00` | "releasedAt": "2026-07-04T21:45:00+07:00", |
-| `backend/AppReleases/releases.json` | 5025 | `+07:00` | "releasedAt": "2026-07-04T20:35:00+07:00", |
-| `backend/AppReleases/releases.json` | 5040 | `+07:00` | "releasedAt": "2026-07-04T20:25:00+07:00", |
-| `backend/AppReleases/releases.json` | 5055 | `+07:00` | "releasedAt": "2026-07-03T21:25:00+07:00", |
-| `backend/AppReleases/releases.json` | 5074 | `+07:00` | "releasedAt": "2026-07-03T10:20:00+07:00", |
-| `backend/AppReleases/releases.json` | 5097 | `+07:00` | "releasedAt": "2026-07-02T23:55:00+07:00", |
-| `backend/AppReleases/releases.json` | 5112 | `+07:00` | "releasedAt": "2026-07-02T23:30:00+07:00", |
-| `backend/AppReleases/releases.json` | 5131 | `+07:00` | "releasedAt": "2026-07-02T23:20:00+07:00", |
-| `backend/AppReleases/releases.json` | 5150 | `+07:00` | "releasedAt": "2026-07-02T23:10:00+07:00", |
-| `backend/AppReleases/releases.json` | 5169 | `+07:00` | "releasedAt": "2026-07-02T23:05:00+07:00", |
-| `backend/AppReleases/releases.json` | 5188 | `+07:00` | "releasedAt": "2026-07-02T20:35:00+07:00", |
-| `backend/AppReleases/releases.json` | 5207 | `+07:00` | "releasedAt": "2026-07-02T20:15:00+07:00", |
-| `backend/AppReleases/releases.json` | 5226 | `+07:00` | "releasedAt": "2026-07-01T20:05:00+07:00", |
-| `backend/AppReleases/releases.json` | 5245 | `+07:00` | "releasedAt": "2026-07-01T17:45:00+07:00", |
-| `backend/AppReleases/releases.json` | 5264 | `+07:00` | "releasedAt": "2026-07-01T17:20:00+07:00", |
-| `backend/AppReleases/releases.json` | 5283 | `+07:00` | "releasedAt": "2026-07-01T16:55:00+07:00", |
-| `backend/AppReleases/releases.json` | 5306 | `+07:00` | "releasedAt": "2026-07-01T16:20:00+07:00", |
-| `backend/AppReleases/releases.json` | 5325 | `+07:00` | "releasedAt": "2026-07-01T15:55:00+07:00", |
-| `backend/AppReleases/releases.json` | 5348 | `+07:00` | "releasedAt": "2026-07-01T14:45:00+07:00", |
-| `backend/AppReleases/releases.json` | 5375 | `+07:00` | "releasedAt": "2026-07-01T14:25:00+07:00", |
-| `backend/AppReleases/releases.json` | 5398 | `+07:00` | "releasedAt": "2026-06-30T02:45:00+07:00", |
-| `backend/AppReleases/releases.json` | 5425 | `+07:00` | "releasedAt": "2026-06-30T00:45:00+07:00", |
-| `backend/AppReleases/releases.json` | 5444 | `+07:00` | "releasedAt": "2026-06-30T00:20:00+07:00", |
-| `backend/AppReleases/releases.json` | 5467 | `+07:00` | "releasedAt": "2026-06-29T23:59:00+07:00", |
-| `backend/AppReleases/releases.json` | 5482 | `+07:00` | "releasedAt": "2026-06-29T23:55:00+07:00", |
-| `backend/AppReleases/releases.json` | 5497 | `+07:00` | "releasedAt": "2026-06-29T23:25:00+07:00", |
-| `backend/AppReleases/releases.json` | 5516 | `+07:00` | "releasedAt": "2026-06-29T23:05:00+07:00", |
-| `backend/AppReleases/releases.json` | 5535 | `+07:00` | "releasedAt": "2026-06-29T22:45:00+07:00", |
-| `backend/AppReleases/releases.json` | 5554 | `+07:00` | "releasedAt": "2026-06-29T22:25:00+07:00", |
-| `backend/AppReleases/releases.json` | 5577 | `+07:00` | "releasedAt": "2026-06-29T21:54:00+07:00", |
-| `backend/AppReleases/releases.json` | 5600 | `+07:00` | "releasedAt": "2026-06-29T21:33:00+07:00", |
-| `backend/AppReleases/releases.json` | 5619 | `+07:00` | "releasedAt": "2026-06-29T21:22:00+07:00", |
-| `backend/AppReleases/releases.json` | 5638 | `+07:00` | "releasedAt": "2026-06-29T15:34:00+07:00", |
-| `backend/AppReleases/releases.json` | 5657 | `+07:00` | "releasedAt": "2026-06-29T09:36:00+07:00", |
-| `backend/AppReleases/releases.json` | 5672 | `+07:00` | "releasedAt": "2026-06-29T09:27:00+07:00", |
-| `backend/AppReleases/releases.json` | 5687 | `+07:00` | "releasedAt": "2026-06-29T09:15:00+07:00", |
-| `backend/AppReleases/releases.json` | 5702 | `+07:00` | "releasedAt": "2026-06-26T21:55:00+07:00", |
-| `backend/AppReleases/releases.json` | 5729 | `+07:00` | "releasedAt": "2026-06-26T05:30:00+07:00", |
-| `backend/AppReleases/releases.json` | 5748 | `+07:00` | "releasedAt": "2026-06-26T04:45:00+07:00", |
-| `backend/AppReleases/releases.json` | 5767 | `+07:00` | "releasedAt": "2026-06-25T01:45:00+07:00", |
-| `backend/AppReleases/releases.json` | 5938 | `+07:00` | "releasedAt": "2026-06-24T18:12:00+07:00", |
-| `backend/AppReleases/releases.json` | 5969 | `+07:00` | "releasedAt": "2026-06-24T16:35:00+07:00", |
-| `backend/AppReleases/releases.json` | 5992 | `+07:00` | "releasedAt": "2026-06-24T15:30:00+07:00", |
-| `backend/AppReleases/releases.json` | 6019 | `+07:00` | "releasedAt": "2026-06-24T13:45:00+07:00", |
-| `backend/AppReleases/releases.json` | 6038 | `+07:00` | "releasedAt": "2026-06-24T13:08:00+07:00", |
-| `backend/AppReleases/releases.json` | 6057 | `+07:00` | "releasedAt": "2026-06-24T12:52:00+07:00", |
-| `backend/AppReleases/releases.json` | 6076 | `+07:00` | "releasedAt": "2026-06-24T12:34:00+07:00", |
-| Еще 606 совпадений | - | - | Категория ограничена первыми 250 строками, полное количество указано в сводке. |
+| `backend/AppReleases/releases.json` | 5 | `+07:00` | "releasedAt": "2026-08-05T07:01:45+07:00", |
+| `backend/AppReleases/releases.json` | 28 | `+07:00` | "releasedAt": "2026-08-05T05:45:00+07:00", |
+| `backend/AppReleases/releases.json` | 51 | `+07:00` | "releasedAt": "2026-08-05T04:45:00+07:00", |
+| `backend/AppReleases/releases.json` | 74 | `+07:00` | "releasedAt": "2026-08-05T03:40:00+07:00", |
+| `backend/AppReleases/releases.json` | 97 | `+07:00` | "releasedAt": "2026-08-05T02:36:00+07:00", |
+| `backend/AppReleases/releases.json` | 120 | `+07:00` | "releasedAt": "2026-08-05T01:54:00+07:00", |
+| `backend/AppReleases/releases.json` | 139 | `+07:00` | "releasedAt": "2026-08-05T01:06:00+07:00", |
+| `backend/AppReleases/releases.json` | 158 | `+07:00` | "releasedAt": "2026-08-05T00:45:00+07:00", |
+| `backend/AppReleases/releases.json` | 173 | `+07:00` | "releasedAt": "2026-08-05T00:20:00+07:00", |
+| `backend/AppReleases/releases.json` | 188 | `+07:00` | "releasedAt": "2026-08-04T17:30:00+07:00", |
+| `backend/AppReleases/releases.json` | 203 | `+07:00` | "releasedAt": "2026-08-04T15:35:00+07:00", |
+| `backend/AppReleases/releases.json` | 222 | `+07:00` | "releasedAt": "2026-08-04T15:12:00+07:00", |
+| `backend/AppReleases/releases.json` | 237 | `+07:00` | "releasedAt": "2026-08-04T14:55:00+07:00", |
+| `backend/AppReleases/releases.json` | 252 | `+07:00` | "releasedAt": "2026-08-04T13:20:00+07:00", |
+| `backend/AppReleases/releases.json` | 267 | `+07:00` | "releasedAt": "2026-08-04T12:56:00+07:00", |
+| `backend/AppReleases/releases.json` | 282 | `+07:00` | "releasedAt": "2026-08-04T12:30:00+07:00", |
+| `backend/AppReleases/releases.json` | 305 | `+07:00` | "releasedAt": "2026-08-04T11:45:00+07:00", |
+| `backend/AppReleases/releases.json` | 324 | `+07:00` | "releasedAt": "2026-08-04T10:49:00+07:00", |
+| `backend/AppReleases/releases.json` | 343 | `+07:00` | "releasedAt": "2026-08-04T10:10:00+07:00", |
+| `backend/AppReleases/releases.json` | 362 | `+07:00` | "releasedAt": "2026-08-03T19:30:00+07:00", |
+| `backend/AppReleases/releases.json` | 377 | `+07:00` | "releasedAt": "2026-08-01T03:38:46+07:00", |
+| `backend/AppReleases/releases.json` | 400 | `+07:00` | "releasedAt": "2026-08-01T03:25:00+07:00", |
+| `backend/AppReleases/releases.json` | 423 | `+07:00` | "releasedAt": "2026-08-01T02:40:28+07:00", |
+| `backend/AppReleases/releases.json` | 446 | `+07:00` | "releasedAt": "2026-08-01T00:11:00+07:00", |
+| `backend/AppReleases/releases.json` | 469 | `+07:00` | "releasedAt": "2026-08-01T00:10:00+07:00", |
+| `backend/AppReleases/releases.json` | 488 | `+07:00` | "releasedAt": "2026-08-01T00:09:00+07:00", |
+| `backend/AppReleases/releases.json` | 511 | `+07:00` | "releasedAt": "2026-08-01T00:08:00+07:00", |
+| `backend/AppReleases/releases.json` | 534 | `+07:00` | "releasedAt": "2026-08-01T00:07:00+07:00", |
+| `backend/AppReleases/releases.json` | 557 | `+07:00` | "releasedAt": "2026-08-01T00:06:00+07:00", |
+| `backend/AppReleases/releases.json` | 580 | `+07:00` | "releasedAt": "2026-08-01T00:05:00+07:00", |
+| `backend/AppReleases/releases.json` | 603 | `+07:00` | "releasedAt": "2026-08-01T00:04:00+07:00", |
+| `backend/AppReleases/releases.json` | 622 | `+07:00` | "releasedAt": "2026-08-01T00:03:00+07:00", |
+| `backend/AppReleases/releases.json` | 645 | `+07:00` | "releasedAt": "2026-08-01T00:02:00+07:00", |
+| `backend/AppReleases/releases.json` | 668 | `+07:00` | "releasedAt": "2026-08-01T00:01:00+07:00", |
+| `backend/AppReleases/releases.json` | 691 | `+07:00` | "releasedAt": "2026-08-01T00:00:00+07:00", |
+| `backend/AppReleases/releases.json` | 714 | `+07:00` | "releasedAt": "2026-07-31T23:59:30+07:00", |
+| `backend/AppReleases/releases.json` | 737 | `+07:00` | "releasedAt": "2026-07-31T23:59:00+07:00", |
+| `backend/AppReleases/releases.json` | 760 | `+07:00` | "releasedAt": "2026-07-31T23:55:00+07:00", |
+| `backend/AppReleases/releases.json` | 783 | `+07:00` | "releasedAt": "2026-07-31T23:35:00+07:00", |
+| `backend/AppReleases/releases.json` | 806 | `+07:00` | "releasedAt": "2026-07-31T23:05:00+07:00", |
+| `backend/AppReleases/releases.json` | 825 | `+07:00` | "releasedAt": "2026-07-31T22:45:00+07:00", |
+| `backend/AppReleases/releases.json` | 852 | `+07:00` | "releasedAt": "2026-07-31T22:15:00+07:00", |
+| `backend/AppReleases/releases.json` | 875 | `+07:00` | "releasedAt": "2026-07-31T21:05:00+07:00", |
+| `backend/AppReleases/releases.json` | 898 | `+07:00` | "releasedAt": "2026-07-31T20:35:00+07:00", |
+| `backend/AppReleases/releases.json` | 921 | `+07:00` | "releasedAt": "2026-07-31T19:45:00+07:00", |
+| `backend/AppReleases/releases.json` | 944 | `+07:00` | "releasedAt": "2026-07-31T19:10:00+07:00", |
+| `backend/AppReleases/releases.json` | 967 | `+07:00` | "releasedAt": "2026-07-31T18:10:00+07:00", |
+| `backend/AppReleases/releases.json` | 990 | `+07:00` | "releasedAt": "2026-07-31T16:35:00+07:00", |
+| `backend/AppReleases/releases.json` | 1013 | `+07:00` | "releasedAt": "2026-07-31T16:00:00+07:00", |
+| `backend/AppReleases/releases.json` | 1028 | `+07:00` | "releasedAt": "2026-07-31T15:25:00+07:00", |
+| `backend/AppReleases/releases.json` | 1055 | `+07:00` | "releasedAt": "2026-07-31T14:35:00+07:00", |
+| `backend/AppReleases/releases.json` | 1082 | `+07:00` | "releasedAt": "2026-07-31T11:15:00+07:00", |
+| `backend/AppReleases/releases.json` | 1109 | `+07:00` | "releasedAt": "2026-07-31T10:30:00+07:00", |
+| `backend/AppReleases/releases.json` | 1136 | `+07:00` | "releasedAt": "2026-07-31T09:30:00+07:00", |
+| `backend/AppReleases/releases.json` | 1163 | `+07:00` | "releasedAt": "2026-07-31T08:04:00+07:00", |
+| `backend/AppReleases/releases.json` | 1186 | `+07:00` | "releasedAt": "2026-07-30T19:45:00+07:00", |
+| `backend/AppReleases/releases.json` | 1209 | `+07:00` | "releasedAt": "2026-07-30T19:30:00+07:00", |
+| `backend/AppReleases/releases.json` | 1228 | `+07:00` | "releasedAt": "2026-07-30T19:20:00+07:00", |
+| `backend/AppReleases/releases.json` | 1251 | `+07:00` | "releasedAt": "2026-07-30T19:10:00+07:00", |
+| `backend/AppReleases/releases.json` | 1270 | `+07:00` | "releasedAt": "2026-07-30T18:55:00+07:00", |
+| `backend/AppReleases/releases.json` | 1289 | `+07:00` | "releasedAt": "2026-07-30T18:40:00+07:00", |
+| `backend/AppReleases/releases.json` | 1308 | `+07:00` | "releasedAt": "2026-07-30T18:25:00+07:00", |
+| `backend/AppReleases/releases.json` | 1331 | `+07:00` | "releasedAt": "2026-07-30T17:40:00+07:00", |
+| `backend/AppReleases/releases.json` | 1354 | `+07:00` | "releasedAt": "2026-07-30T17:25:00+07:00", |
+| `backend/AppReleases/releases.json` | 1377 | `+07:00` | "releasedAt": "2026-07-30T16:45:00+07:00", |
+| `backend/AppReleases/releases.json` | 1396 | `+07:00` | "releasedAt": "2026-07-30T16:30:00+07:00", |
+| `backend/AppReleases/releases.json` | 1419 | `+07:00` | "releasedAt": "2026-07-30T16:10:00+07:00", |
+| `backend/AppReleases/releases.json` | 1442 | `+07:00` | "releasedAt": "2026-07-30T15:30:55+07:00", |
+| `backend/AppReleases/releases.json` | 1461 | `+07:00` | "releasedAt": "2026-07-30T15:12:11+07:00", |
+| `backend/AppReleases/releases.json` | 1484 | `+07:00` | "releasedAt": "2026-07-30T14:53:30+07:00", |
+| `backend/AppReleases/releases.json` | 1507 | `+07:00` | "releasedAt": "2026-07-30T14:39:53+07:00", |
+| `backend/AppReleases/releases.json` | 1526 | `+07:00` | "releasedAt": "2026-07-30T14:14:09+07:00", |
+| `backend/AppReleases/releases.json` | 1549 | `+07:00` | "releasedAt": "2026-07-30T13:49:39+07:00", |
+| `backend/AppReleases/releases.json` | 1572 | `+07:00` | "releasedAt": "2026-07-30T13:14:46+07:00", |
+| `backend/AppReleases/releases.json` | 1599 | `+07:00` | "releasedAt": "2026-07-30T12:43:38+07:00", |
+| `backend/AppReleases/releases.json` | 1626 | `+07:00` | "releasedAt": "2026-07-30T12:16:34+07:00", |
+| `backend/AppReleases/releases.json` | 1649 | `+07:00` | "releasedAt": "2026-07-30T11:51:24+07:00", |
+| `backend/AppReleases/releases.json` | 1672 | `+07:00` | "releasedAt": "2026-07-30T11:18:00+07:00", |
+| `backend/AppReleases/releases.json` | 1695 | `+07:00` | "releasedAt": "2026-07-30T09:50:00+07:00", |
+| `backend/AppReleases/releases.json` | 1722 | `+07:00` | "releasedAt": "2026-07-30T09:30:00+07:00", |
+| `backend/AppReleases/releases.json` | 1745 | `+07:00` | "releasedAt": "2026-07-30T08:18:58+07:00", |
+| `backend/AppReleases/releases.json` | 1768 | `+07:00` | "releasedAt": "2026-07-30T07:51:49+07:00", |
+| `backend/AppReleases/releases.json` | 1791 | `+07:00` | "releasedAt": "2026-07-30T07:13:16+07:00", |
+| `backend/AppReleases/releases.json` | 1814 | `+07:00` | "releasedAt": "2026-07-30T06:38:46+07:00", |
+| `backend/AppReleases/releases.json` | 1837 | `+07:00` | "releasedAt": "2026-07-30T06:09:38+07:00", |
+| `backend/AppReleases/releases.json` | 1860 | `+07:00` | "releasedAt": "2026-07-30T05:30:58+07:00", |
+| `backend/AppReleases/releases.json` | 1883 | `+07:00` | "releasedAt": "2026-07-30T05:14:07+07:00", |
+| `backend/AppReleases/releases.json` | 1906 | `+07:00` | "releasedAt": "2026-07-30T01:16:48+07:00", |
+| `backend/AppReleases/releases.json` | 1929 | `+07:00` | "releasedAt": "2026-07-30T00:55:00+07:00", |
+| `backend/AppReleases/releases.json` | 1952 | `+07:00` | "releasedAt": "2026-07-30T00:16:38+07:00", |
+| `backend/AppReleases/releases.json` | 1975 | `+07:00` | "releasedAt": "2026-07-29T23:41:44+07:00", |
+| `backend/AppReleases/releases.json` | 1998 | `+07:00` | "releasedAt": "2026-07-29T23:21:00+07:00", |
+| `backend/AppReleases/releases.json` | 2021 | `+07:00` | "releasedAt": "2026-07-29T22:38:00+07:00", |
+| `backend/AppReleases/releases.json` | 2048 | `+07:00` | "releasedAt": "2026-07-29T22:25:00+07:00", |
+| `backend/AppReleases/releases.json` | 2071 | `+07:00` | "releasedAt": "2026-07-29T22:00:00+07:00", |
+| `backend/AppReleases/releases.json` | 2094 | `+07:00` | "releasedAt": "2026-07-29T21:45:00+07:00", |
+| `backend/AppReleases/releases.json` | 2117 | `+07:00` | "releasedAt": "2026-07-29T21:10:00+07:00", |
+| `backend/AppReleases/releases.json` | 2136 | `+07:00` | "releasedAt": "2026-07-29T20:35:00+07:00", |
+| `backend/AppReleases/releases.json` | 2159 | `+07:00` | "releasedAt": "2026-07-29T20:10:00+07:00", |
+| `backend/AppReleases/releases.json` | 2182 | `+07:00` | "releasedAt": "2026-07-29T19:45:00+07:00", |
+| `backend/AppReleases/releases.json` | 2205 | `+07:00` | "releasedAt": "2026-07-29T19:20:00+07:00", |
+| `backend/AppReleases/releases.json` | 2228 | `+07:00` | "releasedAt": "2026-07-29T18:45:00+07:00", |
+| `backend/AppReleases/releases.json` | 2251 | `+07:00` | "releasedAt": "2026-07-29T18:20:00+07:00", |
+| `backend/AppReleases/releases.json` | 2274 | `+07:00` | "releasedAt": "2026-07-29T16:05:00+07:00", |
+| `backend/AppReleases/releases.json` | 2293 | `+07:00` | "releasedAt": "2026-07-27T21:20:00+07:00", |
+| `backend/AppReleases/releases.json` | 2316 | `+07:00` | "releasedAt": "2026-07-27T21:15:00+07:00", |
+| `backend/AppReleases/releases.json` | 2339 | `+07:00` | "releasedAt": "2026-07-27T20:18:00+07:00", |
+| `backend/AppReleases/releases.json` | 2362 | `+07:00` | "releasedAt": "2026-07-27T19:20:00+07:00", |
+| `backend/AppReleases/releases.json` | 2385 | `+07:00` | "releasedAt": "2026-07-27T18:42:00+07:00", |
+| `backend/AppReleases/releases.json` | 2408 | `+07:00` | "releasedAt": "2026-07-27T18:07:00+07:00", |
+| `backend/AppReleases/releases.json` | 2431 | `+07:00` | "releasedAt": "2026-07-27T17:21:09+07:00", |
+| `backend/AppReleases/releases.json` | 2454 | `+07:00` | "releasedAt": "2026-07-27T13:45:00+07:00", |
+| `backend/AppReleases/releases.json` | 2473 | `+07:00` | "releasedAt": "2026-07-23T15:25:00+07:00", |
+| `backend/AppReleases/releases.json` | 2496 | `+07:00` | "releasedAt": "2026-07-23T14:30:31+07:00", |
+| `backend/AppReleases/releases.json` | 2515 | `+07:00` | "releasedAt": "2026-07-23T14:09:00+07:00", |
+| `backend/AppReleases/releases.json` | 2534 | `+07:00` | "releasedAt": "2026-07-21T15:55:00+07:00", |
+| `backend/AppReleases/releases.json` | 2553 | `+07:00` | "releasedAt": "2026-07-21T14:35:00+07:00", |
+| `backend/AppReleases/releases.json` | 2576 | `+07:00` | "releasedAt": "2026-07-21T13:35:00+07:00", |
+| `backend/AppReleases/releases.json` | 2595 | `+07:00` | "releasedAt": "2026-07-21T12:20:00+07:00", |
+| `backend/AppReleases/releases.json` | 2618 | `+07:00` | "releasedAt": "2026-07-21T11:20:00+07:00", |
+| `backend/AppReleases/releases.json` | 2641 | `+07:00` | "releasedAt": "2026-07-21T09:30:00+07:00", |
+| `backend/AppReleases/releases.json` | 2660 | `+07:00` | "releasedAt": "2026-07-20T21:35:00+07:00", |
+| `backend/AppReleases/releases.json` | 2679 | `+07:00` | "releasedAt": "2026-07-20T00:00:00+07:00", |
+| `backend/AppReleases/releases.json` | 2694 | `+07:00` | "releasedAt": "2026-07-17T00:50:00+07:00", |
+| `backend/AppReleases/releases.json` | 3469 | `+07:00` | "releasedAt": "2026-07-16T21:30:00+07:00", |
+| `backend/AppReleases/releases.json` | 3488 | `+07:00` | "releasedAt": "2026-07-16T17:50:00+07:00", |
+| `backend/AppReleases/releases.json` | 3507 | `+07:00` | "releasedAt": "2026-07-16T15:35:00+07:00", |
+| `backend/AppReleases/releases.json` | 3530 | `+07:00` | "releasedAt": "2026-07-16T15:20:00+07:00", |
+| `backend/AppReleases/releases.json` | 3549 | `+07:00` | "releasedAt": "2026-07-16T15:05:00+07:00", |
+| `backend/AppReleases/releases.json` | 3564 | `+07:00` | "releasedAt": "2026-07-16T14:30:00+07:00", |
+| `backend/AppReleases/releases.json` | 3587 | `+07:00` | "releasedAt": "2026-07-16T13:30:00+07:00", |
+| `backend/AppReleases/releases.json` | 3606 | `+07:00` | "releasedAt": "2026-07-16T00:35:00+07:00", |
+| `backend/AppReleases/releases.json` | 3625 | `+07:00` | "releasedAt": "2026-07-15T23:40:00+07:00", |
+| `backend/AppReleases/releases.json` | 3652 | `+07:00` | "releasedAt": "2026-07-15T22:45:00+07:00", |
+| `backend/AppReleases/releases.json` | 3671 | `+07:00` | "releasedAt": "2026-07-15T22:40:00+07:00", |
+| `backend/AppReleases/releases.json` | 3690 | `+07:00` | "releasedAt": "2026-07-15T22:10:00+07:00", |
+| `backend/AppReleases/releases.json` | 3709 | `+07:00` | "releasedAt": "2026-07-15T22:05:00+07:00", |
+| `backend/AppReleases/releases.json` | 3728 | `+07:00` | "releasedAt": "2026-07-15T21:25:00+07:00", |
+| `backend/AppReleases/releases.json` | 3747 | `+07:00` | "releasedAt": "2026-07-15T14:30:00+07:00", |
+| `backend/AppReleases/releases.json` | 3766 | `+07:00` | "releasedAt": "2026-07-15T13:45:00+07:00", |
+| `backend/AppReleases/releases.json` | 3785 | `+07:00` | "releasedAt": "2026-07-15T12:35:00+07:00", |
+| `backend/AppReleases/releases.json` | 3800 | `+07:00` | "releasedAt": "2026-07-15T10:30:00+07:00", |
+| `backend/AppReleases/releases.json` | 3827 | `+07:00` | "releasedAt": "2026-07-14T14:45:00+07:00", |
+| `backend/AppReleases/releases.json` | 3846 | `+07:00` | "releasedAt": "2026-07-14T14:32:00+07:00", |
+| `backend/AppReleases/releases.json` | 3865 | `+07:00` | "releasedAt": "2026-07-14T14:31:00+07:00", |
+| `backend/AppReleases/releases.json` | 3884 | `+07:00` | "releasedAt": "2026-07-14T14:30:00+07:00", |
+| `backend/AppReleases/releases.json` | 3903 | `+07:00` | "releasedAt": "2026-07-14T11:43:00+07:00", |
+| `backend/AppReleases/releases.json` | 3922 | `+07:00` | "releasedAt": "2026-07-14T11:20:00+07:00", |
+| `backend/AppReleases/releases.json` | 3941 | `+07:00` | "releasedAt": "2026-07-14T10:25:00+07:00", |
+| `backend/AppReleases/releases.json` | 3968 | `+07:00` | "releasedAt": "2026-07-14T09:55:00+07:00", |
+| `backend/AppReleases/releases.json` | 3987 | `+07:00` | "releasedAt": "2026-07-13T23:05:00+07:00", |
+| `backend/AppReleases/releases.json` | 4014 | `+07:00` | "releasedAt": "2026-07-10T23:25:00+07:00", |
+| `backend/AppReleases/releases.json` | 4029 | `+07:00` | "releasedAt": "2026-07-10T20:55:00+07:00", |
+| `backend/AppReleases/releases.json` | 4052 | `+07:00` | "releasedAt": "2026-07-10T15:35:00+07:00", |
+| `backend/AppReleases/releases.json` | 4071 | `+07:00` | "releasedAt": "2026-07-10T14:20:00+07:00", |
+| `backend/AppReleases/releases.json` | 4086 | `+07:00` | "releasedAt": "2026-07-10T11:45:00+07:00", |
+| `backend/AppReleases/releases.json` | 4101 | `+07:00` | "releasedAt": "2026-07-10T11:25:30+07:00", |
+| `backend/AppReleases/releases.json` | 4116 | `+07:00` | "releasedAt": "2026-07-09T23:25:00+07:00", |
+| `backend/AppReleases/releases.json` | 4139 | `+07:00` | "releasedAt": "2026-07-09T22:50:00+07:00", |
+| `backend/AppReleases/releases.json` | 4158 | `+07:00` | "releasedAt": "2026-07-09T22:40:00+07:00", |
+| `backend/AppReleases/releases.json` | 4177 | `+07:00` | "releasedAt": "2026-07-09T22:30:00+07:00", |
+| `backend/AppReleases/releases.json` | 4196 | `+07:00` | "releasedAt": "2026-07-09T22:20:00+07:00", |
+| `backend/AppReleases/releases.json` | 4211 | `+07:00` | "releasedAt": "2026-07-09T22:19:00+07:00", |
+| `backend/AppReleases/releases.json` | 4226 | `+07:00` | "releasedAt": "2026-07-09T22:18:00+07:00", |
+| `backend/AppReleases/releases.json` | 4241 | `+07:00` | "releasedAt": "2026-07-09T22:17:00+07:00", |
+| `backend/AppReleases/releases.json` | 4256 | `+07:00` | "releasedAt": "2026-07-09T22:16:00+07:00", |
+| `backend/AppReleases/releases.json` | 4271 | `+07:00` | "releasedAt": "2026-07-09T22:15:00+07:00", |
+| `backend/AppReleases/releases.json` | 4290 | `+07:00` | "releasedAt": "2026-07-09T22:14:00+07:00", |
+| `backend/AppReleases/releases.json` | 4309 | `+07:00` | "releasedAt": "2026-07-09T22:13:00+07:00", |
+| `backend/AppReleases/releases.json` | 4324 | `+07:00` | "releasedAt": "2026-07-09T22:12:00+07:00", |
+| `backend/AppReleases/releases.json` | 4339 | `+07:00` | "releasedAt": "2026-07-09T22:11:00+07:00", |
+| `backend/AppReleases/releases.json` | 4354 | `+07:00` | "releasedAt": "2026-07-09T22:10:00+07:00", |
+| `backend/AppReleases/releases.json` | 4369 | `+07:00` | "releasedAt": "2026-07-09T22:09:00+07:00", |
+| `backend/AppReleases/releases.json` | 4384 | `+07:00` | "releasedAt": "2026-07-09T21:45:00+07:00", |
+| `backend/AppReleases/releases.json` | 4399 | `+07:00` | "releasedAt": "2026-07-09T21:20:00+07:00", |
+| `backend/AppReleases/releases.json` | 4414 | `+07:00` | "releasedAt": "2026-07-09T20:45:00+07:00", |
+| `backend/AppReleases/releases.json` | 4429 | `+07:00` | "releasedAt": "2026-07-09T20:10:00+07:00", |
+| `backend/AppReleases/releases.json` | 4452 | `+07:00` | "releasedAt": "2026-07-09T19:25:00+07:00", |
+| `backend/AppReleases/releases.json` | 4471 | `+07:00` | "releasedAt": "2026-07-09T18:55:00+07:00", |
+| `backend/AppReleases/releases.json` | 4490 | `+07:00` | "releasedAt": "2026-07-09T18:20:00+07:00", |
+| `backend/AppReleases/releases.json` | 4509 | `+07:00` | "releasedAt": "2026-07-09T17:45:00+07:00", |
+| `backend/AppReleases/releases.json` | 4528 | `+07:00` | "releasedAt": "2026-07-09T17:05:00+07:00", |
+| `backend/AppReleases/releases.json` | 4551 | `+07:00` | "releasedAt": "2026-07-09T16:43:00+07:00", |
+| `backend/AppReleases/releases.json` | 4574 | `+07:00` | "releasedAt": "2026-07-09T16:35:00+07:00", |
+| `backend/AppReleases/releases.json` | 4597 | `+07:00` | "releasedAt": "2026-07-09T16:25:00+07:00", |
+| `backend/AppReleases/releases.json` | 4620 | `+07:00` | "releasedAt": "2026-07-08T20:05:00+07:00", |
+| `backend/AppReleases/releases.json` | 4643 | `+07:00` | "releasedAt": "2026-07-08T19:45:00+07:00", |
+| `backend/AppReleases/releases.json` | 4666 | `+07:00` | "releasedAt": "2026-07-08T19:25:00+07:00", |
+| `backend/AppReleases/releases.json` | 4685 | `+07:00` | "releasedAt": "2026-07-08T19:05:00+07:00", |
+| `backend/AppReleases/releases.json` | 4704 | `+07:00` | "releasedAt": "2026-07-08T18:25:00+07:00", |
+| `backend/AppReleases/releases.json` | 4727 | `+07:00` | "releasedAt": "2026-07-08T18:05:00+07:00", |
+| `backend/AppReleases/releases.json` | 4746 | `+07:00` | "releasedAt": "2026-07-08T17:45:00+07:00", |
+| `backend/AppReleases/releases.json` | 4765 | `+07:00` | "releasedAt": "2026-07-08T17:25:00+07:00", |
+| `backend/AppReleases/releases.json` | 4784 | `+07:00` | "releasedAt": "2026-07-08T17:05:00+07:00", |
+| `backend/AppReleases/releases.json` | 4803 | `+07:00` | "releasedAt": "2026-07-08T16:40:00+07:00", |
+| `backend/AppReleases/releases.json` | 4822 | `+07:00` | "releasedAt": "2026-07-08T16:20:00+07:00", |
+| `backend/AppReleases/releases.json` | 4845 | `+07:00` | "releasedAt": "2026-07-08T16:00:00+07:00", |
+| `backend/AppReleases/releases.json` | 4868 | `+07:00` | "releasedAt": "2026-07-08T15:05:00+07:00", |
+| `backend/AppReleases/releases.json` | 4887 | `+07:00` | "releasedAt": "2026-07-08T14:45:00+07:00", |
+| `backend/AppReleases/releases.json` | 4910 | `+07:00` | "releasedAt": "2026-07-08T14:25:00+07:00", |
+| `backend/AppReleases/releases.json` | 4933 | `+07:00` | "releasedAt": "2026-07-08T14:05:00+07:00", |
+| `backend/AppReleases/releases.json` | 4956 | `+07:00` | "releasedAt": "2026-07-08T13:35:00+07:00", |
+| `backend/AppReleases/releases.json` | 4975 | `+07:00` | "releasedAt": "2026-07-08T13:10:00+07:00", |
+| `backend/AppReleases/releases.json` | 4994 | `+07:00` | "releasedAt": "2026-07-08T12:45:00+07:00", |
+| `backend/AppReleases/releases.json` | 5013 | `+07:00` | "releasedAt": "2026-07-08T12:25:00+07:00", |
+| `backend/AppReleases/releases.json` | 5036 | `+07:00` | "releasedAt": "2026-07-08T12:10:00+07:00", |
+| `backend/AppReleases/releases.json` | 5055 | `+07:00` | "releasedAt": "2026-07-07T18:00:00+07:00", |
+| `backend/AppReleases/releases.json` | 5074 | `+07:00` | "releasedAt": "2026-07-06T16:40:00+07:00", |
+| `backend/AppReleases/releases.json` | 5105 | `+07:00` | "releasedAt": "2026-07-06T13:30:00+07:00", |
+| `backend/AppReleases/releases.json` | 5128 | `+07:00` | "releasedAt": "2026-07-06T12:05:00+07:00", |
+| `backend/AppReleases/releases.json` | 5147 | `+07:00` | "releasedAt": "2026-07-06T11:15:00+07:00", |
+| `backend/AppReleases/releases.json` | 5166 | `+07:00` | "releasedAt": "2026-07-06T10:30:00+07:00", |
+| `backend/AppReleases/releases.json` | 5185 | `+07:00` | "releasedAt": "2026-07-05T09:30:00+07:00", |
+| `backend/AppReleases/releases.json` | 5204 | `+07:00` | "releasedAt": "2026-07-04T21:45:00+07:00", |
+| `backend/AppReleases/releases.json` | 5223 | `+07:00` | "releasedAt": "2026-07-04T20:35:00+07:00", |
+| `backend/AppReleases/releases.json` | 5238 | `+07:00` | "releasedAt": "2026-07-04T20:25:00+07:00", |
+| `backend/AppReleases/releases.json` | 5253 | `+07:00` | "releasedAt": "2026-07-03T21:25:00+07:00", |
+| `backend/AppReleases/releases.json` | 5272 | `+07:00` | "releasedAt": "2026-07-03T10:20:00+07:00", |
+| `backend/AppReleases/releases.json` | 5295 | `+07:00` | "releasedAt": "2026-07-02T23:55:00+07:00", |
+| `backend/AppReleases/releases.json` | 5310 | `+07:00` | "releasedAt": "2026-07-02T23:30:00+07:00", |
+| `backend/AppReleases/releases.json` | 5329 | `+07:00` | "releasedAt": "2026-07-02T23:20:00+07:00", |
+| `backend/AppReleases/releases.json` | 5348 | `+07:00` | "releasedAt": "2026-07-02T23:10:00+07:00", |
+| `backend/AppReleases/releases.json` | 5367 | `+07:00` | "releasedAt": "2026-07-02T23:05:00+07:00", |
+| `backend/AppReleases/releases.json` | 5386 | `+07:00` | "releasedAt": "2026-07-02T20:35:00+07:00", |
+| `backend/AppReleases/releases.json` | 5405 | `+07:00` | "releasedAt": "2026-07-02T20:15:00+07:00", |
+| `backend/AppReleases/releases.json` | 5424 | `+07:00` | "releasedAt": "2026-07-01T20:05:00+07:00", |
+| `backend/AppReleases/releases.json` | 5443 | `+07:00` | "releasedAt": "2026-07-01T17:45:00+07:00", |
+| `backend/AppReleases/releases.json` | 5462 | `+07:00` | "releasedAt": "2026-07-01T17:20:00+07:00", |
+| `backend/AppReleases/releases.json` | 5481 | `+07:00` | "releasedAt": "2026-07-01T16:55:00+07:00", |
+| `backend/AppReleases/releases.json` | 5504 | `+07:00` | "releasedAt": "2026-07-01T16:20:00+07:00", |
+| `backend/AppReleases/releases.json` | 5523 | `+07:00` | "releasedAt": "2026-07-01T15:55:00+07:00", |
+| `backend/AppReleases/releases.json` | 5546 | `+07:00` | "releasedAt": "2026-07-01T14:45:00+07:00", |
+| `backend/AppReleases/releases.json` | 5573 | `+07:00` | "releasedAt": "2026-07-01T14:25:00+07:00", |
+| `backend/AppReleases/releases.json` | 5596 | `+07:00` | "releasedAt": "2026-06-30T02:45:00+07:00", |
+| `backend/AppReleases/releases.json` | 5623 | `+07:00` | "releasedAt": "2026-06-30T00:45:00+07:00", |
+| `backend/AppReleases/releases.json` | 5642 | `+07:00` | "releasedAt": "2026-06-30T00:20:00+07:00", |
+| `backend/AppReleases/releases.json` | 5665 | `+07:00` | "releasedAt": "2026-06-29T23:59:00+07:00", |
+| `backend/AppReleases/releases.json` | 5680 | `+07:00` | "releasedAt": "2026-06-29T23:55:00+07:00", |
+| `backend/AppReleases/releases.json` | 5695 | `+07:00` | "releasedAt": "2026-06-29T23:25:00+07:00", |
+| `backend/AppReleases/releases.json` | 5714 | `+07:00` | "releasedAt": "2026-06-29T23:05:00+07:00", |
+| `backend/AppReleases/releases.json` | 5733 | `+07:00` | "releasedAt": "2026-06-29T22:45:00+07:00", |
+| `backend/AppReleases/releases.json` | 5752 | `+07:00` | "releasedAt": "2026-06-29T22:25:00+07:00", |
+| `backend/AppReleases/releases.json` | 5775 | `+07:00` | "releasedAt": "2026-06-29T21:54:00+07:00", |
+| `backend/AppReleases/releases.json` | 5798 | `+07:00` | "releasedAt": "2026-06-29T21:33:00+07:00", |
+| `backend/AppReleases/releases.json` | 5817 | `+07:00` | "releasedAt": "2026-06-29T21:22:00+07:00", |
+| `backend/AppReleases/releases.json` | 5836 | `+07:00` | "releasedAt": "2026-06-29T15:34:00+07:00", |
+| `backend/AppReleases/releases.json` | 5855 | `+07:00` | "releasedAt": "2026-06-29T09:36:00+07:00", |
+| `backend/AppReleases/releases.json` | 5870 | `+07:00` | "releasedAt": "2026-06-29T09:27:00+07:00", |
+| `backend/AppReleases/releases.json` | 5885 | `+07:00` | "releasedAt": "2026-06-29T09:15:00+07:00", |
+| `backend/AppReleases/releases.json` | 5900 | `+07:00` | "releasedAt": "2026-06-26T21:55:00+07:00", |
+| Еще 616 совпадений | - | - | Категория ограничена первыми 250 строками, полное количество указано в сводке. |
 
 ### Frontend: работа с датами
 
@@ -1127,7 +1127,7 @@ JS/TS места, где браузер может применить локал
 | `scripts/run-legal-readiness-report.mjs` | 85 | `.toISOString(` | generatedAtUtc: generatedAt.toISOString(), |
 | `scripts/run-role-permission-smoke.mjs` | 20 | `new Date(` | const suffix = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14); |
 | `scripts/run-role-permission-smoke.mjs` | 20 | `.toISOString(` | const suffix = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14); |
-| `src/App.tsx` | 112 | `new Date(` | const now = new Date(); |
+| `src/App.tsx` | 114 | `new Date(` | const now = new Date(); |
 | `src/components/Accounts/Accounts.tsx` | 1163 | `new Date(` | badges.push(`Период: ${formatPeriodLabel(period, new Date())}`); |
 | `src/components/Accounts/Accounts.tsx` | 1874 | `new Date(` | return new Date(payment.plannedDate) > new Date(acc) ? payment.plannedDate : acc; |
 | `src/components/Accounts/Accounts.tsx` | 1880 | `new Date(` | return new Date(payment.paidDate) > new Date(acc) ? payment.paidDate : acc; |
@@ -1301,34 +1301,34 @@ JS/TS места, где браузер может применить локал
 | `src/components/Clients/CaseModal.tsx` | 1524 | `type="datetime-local"` | type="datetime-local" |
 | `src/components/Clients/ClientAddressEntriesForm.tsx` | 176 | `type="date"` | type="date" |
 | `src/components/Clients/ClientAddressEntriesForm.tsx` | 189 | `type="date"` | type="date" |
-| `src/components/Clients/ClientDetail.integration.test.tsx` | 1841 | `new Date(` | const today = new Date(); |
-| `src/components/Clients/ClientDetail.integration.test.tsx` | 2111 | `new Date(` | const today = new Date(); |
+| `src/components/Clients/ClientDetail.integration.test.tsx` | 1892 | `new Date(` | const today = new Date(); |
+| `src/components/Clients/ClientDetail.integration.test.tsx` | 2162 | `new Date(` | const today = new Date(); |
 | `src/components/Clients/ClientDetail.tsx` | 609 | `new Date(` | return formatLocalYMD(new Date(y, (m ?? 1) - 1, 1)); |
 | `src/components/Clients/ClientDetail.tsx` | 613 | `new Date(` | return formatLocalYMD(new Date(y, m ?? 1, 0)); |
 | `src/components/Clients/ClientDetail.tsx` | 648 | `new Date(` | return formatter.format(new Date(yearRaw, monthRaw - 1, 1)); |
 | `src/components/Clients/ClientDetail.tsx` | 665 | `new Date(` | const date = new Date(value); |
 | `src/components/Clients/ClientDetail.tsx` | 946 | `new Date(` | issuedAt: formatLocalYMD(new Date()), |
-| `src/components/Clients/ClientDetail.tsx` | 2205 | `new Date(` | const today = useMemo(() => new Date(), []); |
-| `src/components/Clients/ClientDetail.tsx` | 3517 | `new Date(` | const leftDate = left.caseCreatedAt ? new Date(left.caseCreatedAt).getTime() : 0; |
-| `src/components/Clients/ClientDetail.tsx` | 3518 | `new Date(` | const rightDate = right.caseCreatedAt ? new Date(right.caseCreatedAt).getTime() : 0; |
-| `src/components/Clients/ClientDetail.tsx` | 3584 | `new Date(` | new Date().toISOString(), |
-| `src/components/Clients/ClientDetail.tsx` | 3675 | `new Date(` | new Date(b.date).getTime() - new Date(a.date).getTime() \|\| |
-| `src/components/Clients/ClientDetail.tsx` | 3684 | `new Date(` | new Date(b.date).getTime() - new Date(a.date).getTime() \|\| |
-| `src/components/Clients/ClientDetail.tsx` | 3695 | `new Date(` | new Date(b.date).getTime() - new Date(a.date).getTime() \|\| |
-| `src/components/Clients/ClientDetail.tsx` | 5140 | `new Date(` | createdAt: new Date().toISOString(), |
-| `src/components/Clients/ClientDetail.tsx` | 10781 | `new Date(` | {new Date(item.createdAt).toLocaleString("ru-RU")} |
-| `src/components/Clients/ClientDetail.tsx` | 3584 | `.toISOString(` | new Date().toISOString(), |
-| `src/components/Clients/ClientDetail.tsx` | 5140 | `.toISOString(` | createdAt: new Date().toISOString(), |
+| `src/components/Clients/ClientDetail.tsx` | 2219 | `new Date(` | const today = useMemo(() => new Date(), []); |
+| `src/components/Clients/ClientDetail.tsx` | 3531 | `new Date(` | const leftDate = left.caseCreatedAt ? new Date(left.caseCreatedAt).getTime() : 0; |
+| `src/components/Clients/ClientDetail.tsx` | 3532 | `new Date(` | const rightDate = right.caseCreatedAt ? new Date(right.caseCreatedAt).getTime() : 0; |
+| `src/components/Clients/ClientDetail.tsx` | 3598 | `new Date(` | new Date().toISOString(), |
+| `src/components/Clients/ClientDetail.tsx` | 3689 | `new Date(` | new Date(b.date).getTime() - new Date(a.date).getTime() \|\| |
+| `src/components/Clients/ClientDetail.tsx` | 3698 | `new Date(` | new Date(b.date).getTime() - new Date(a.date).getTime() \|\| |
+| `src/components/Clients/ClientDetail.tsx` | 3709 | `new Date(` | new Date(b.date).getTime() - new Date(a.date).getTime() \|\| |
+| `src/components/Clients/ClientDetail.tsx` | 5154 | `new Date(` | createdAt: new Date().toISOString(), |
+| `src/components/Clients/ClientDetail.tsx` | 10805 | `new Date(` | {new Date(item.createdAt).toLocaleString("ru-RU")} |
+| `src/components/Clients/ClientDetail.tsx` | 3598 | `.toISOString(` | new Date().toISOString(), |
+| `src/components/Clients/ClientDetail.tsx` | 5154 | `.toISOString(` | createdAt: new Date().toISOString(), |
 | `src/components/Clients/ClientDetail.tsx` | 639 | `Intl.DateTimeFormat` | const formatter = new Intl.DateTimeFormat("ru-RU", { |
-| `src/components/Clients/ClientDetail.tsx` | 6468 | `type="date"` | type="date" |
-| `src/components/Clients/ClientDetail.tsx` | 7015 | `type="date"` | type="date" |
-| `src/components/Clients/ClientDetail.tsx` | 7030 | `type="date"` | type="date" |
-| `src/components/Clients/ClientDetail.tsx` | 7244 | `type="date"` | type="date" |
-| `src/components/Clients/ClientDetail.tsx` | 7371 | `type="date"` | type="date" |
-| `src/components/Clients/ClientDetail.tsx` | 9636 | `type="date"` | type="date" |
-| `src/components/Clients/ClientDetail.tsx` | 9645 | `type="date"` | type="date" |
-| `src/components/Clients/ClientDetail.tsx` | 10085 | `type="date"` | type="date" |
-| `src/components/Clients/ClientDetail.tsx` | 10094 | `type="date"` | type="date" |
+| `src/components/Clients/ClientDetail.tsx` | 6482 | `type="date"` | type="date" |
+| `src/components/Clients/ClientDetail.tsx` | 7039 | `type="date"` | type="date" |
+| `src/components/Clients/ClientDetail.tsx` | 7054 | `type="date"` | type="date" |
+| `src/components/Clients/ClientDetail.tsx` | 7268 | `type="date"` | type="date" |
+| `src/components/Clients/ClientDetail.tsx` | 7395 | `type="date"` | type="date" |
+| `src/components/Clients/ClientDetail.tsx` | 9660 | `type="date"` | type="date" |
+| `src/components/Clients/ClientDetail.tsx` | 9669 | `type="date"` | type="date" |
+| `src/components/Clients/ClientDetail.tsx` | 10109 | `type="date"` | type="date" |
+| `src/components/Clients/ClientDetail.tsx` | 10118 | `type="date"` | type="date" |
 | `src/components/Clients/ClientPassportEntriesForm.tsx` | 91 | `type="date"` | type="date" |
 | `src/components/Clients/ClientPassportEntriesForm.tsx` | 114 | `type="date"` | type="date" |
 | `src/components/Clients/ClientPassportEntriesForm.tsx` | 125 | `type="date"` | type="date" |
@@ -1617,210 +1617,210 @@ JS/TS места, где браузер может применить локал
 
 | Файл | Строка | Совпадение | Контекст |
 | --- | ---: | --- | --- |
-| `backend/AppReleases/releases.json` | 227 | `PDF` | "summary": "Администратор может безопасно отменить ещё не отправленный PDF-снимок прямо в истории электронной подписи.", |
-| `backend/AppReleases/releases.json` | 237 | `PDF` | "text": "Отмена не удаляет PDF, контрольную сумму или историю и не применяется к уже отправленной версии без подтверждения внешнего провайдера." |
-| `backend/AppReleases/releases.json` | 241 | `PDF` | "text": "Повторный запрос отмены безопасен и не создаёт дублирующиеся события в истории; для каждой версии можно скачать внутренний ZIP-архив CRM с PDF, событиями и проверенными контрольными суммами." |
-| `backend/AppReleases/releases.json` | 260 | `PDF` | "text": "Для подписания сохраняется отдельный неизменяемый PDF-снимок с SHA-256; история показывает состояние envelope и каждого подписанта." |
-| `backend/AppReleases/releases.json` | 524 | `PDF` | "text": "В блоке внешнего согласования можно отметить до 10 PDF, изображений или офисных документов размером до 25 МБ каждый." |
-| `backend/AppReleases/releases.json` | 666 | `PDF` | "text": "Перед подписанием PDF сохраняется как отдельная неизменяемая версия с контрольной суммой; новая версия документа всегда получает отдельный процесс подписания." |
-| `backend/AppReleases/releases.json` | 679 | `PDF` | "summary": "Очередь безопасной доставки устойчиво обрабатывает временные задержки провайдера, крупные PDF и запоздалые статусы.", |
-| `backend/AppReleases/releases.json` | 689 | `PDF` | "text": "Очередь обрабатывает документы ограниченными пакетами, а PDF до 25 МБ копируются потоково с проверкой формата, размера и контрольной суммы." |
-| `backend/AppReleases/releases.json` | 708 | `PDF` | "text": "В карточках счета, акта и договора появилась кнопка «Мессенджер». Перед отправкой CRM формирует штатную PDF-версию и показывает получателя, канал и текст сообщения." |
-| `backend/AppReleases/releases.json` | 716 | `PDF` | "text": "Финансовые документы передаются только как PDF размером до 25 МБ через одноразовую защищённую ссылку. Внешняя отправка остаётся выключенной, пока администратор не настроит официальный канал." |
-| `backend/AppReleases/releases.json` | 1149 | `CSV` | "text": "Состояние автоконтроля добавлено в CSV, Excel, PDF и печатную форму реестра дел." |
-| `backend/AppReleases/releases.json` | 1149 | `PDF` | "text": "Состояние автоконтроля добавлено в CSV, Excel, PDF и печатную форму реестра дел." |
-| `backend/AppReleases/releases.json` | 5284 | `PDF` | "title": "Печать счета больше не зависит от PDF-генератора", |
-| `backend/AppReleases/releases.json` | 5285 | `PDF` | "summary": "Кнопки печати в карточке счета теперь открывают печатную HTML-форму напрямую. Если на сервере временно недоступно формирование PDF, пользователь все равно может распечатать счет или счет-оферту из браузера.", |
-| `backend/AppReleases/releases.json` | 5291 | `PDF` | "text": "В разделе «Счета» кнопка «Печать» больше не обращается к серверному PDF-генератору. Печатная форма открывается как обычная страница документа и сразу вызывает печать в браузере." |
-| `backend/AppReleases/releases.json` | 5295 | `PDF` | "text": "Печать счета-оферты работает по той же схеме: CRM формирует HTML-документ и печатает его без промежуточного PDF-файла, поэтому операция не должна падать с ошибкой временной недоступности сервиса PDF." |
-| `backend/AppReleases/releases.json` | 5299 | `PDF` | "text": "Скачивание PDF и отправка PDF на Яндекс.Диск по-прежнему используют серверный PDF-генератор. Если он недоступен, эти операции могут показать отдельную ошибку, но обычная печать счета из браузера продолжит работа |
-| `backend/AppReleases/releases.json` | 6420 | `PDF` | "summary": "В печатной форме счета и PDF улучшено отображение длинных названий организации, покупателя и услуги. Такие реквизиты теперь аккуратнее переносятся внутри страницы и не должны ломать внешний вид счета.", |
-| `backend/AppReleases/releases.json` | 6426 | `PDF` | "text": "В разделе «Счета» печатная форма и PDF стали устойчивее к длинным названиям продавца, покупателя и строк услуг." |
-| `backend/AppReleases/releases.json` | 6458 | `CSV` | "summary": "В разделе «Отчеты» у управленческих отчетов появилась кнопка «Печать». Печатная форма открывается в отдельной вкладке и использует те же выбранные фильтры, что и отчет на экране, CSV, Excel и PDF.", |
-| `backend/AppReleases/releases.json` | 6458 | `PDF` | "summary": "В разделе «Отчеты» у управленческих отчетов появилась кнопка «Печать». Печатная форма открывается в отдельной вкладке и использует те же выбранные фильтры, что и отчет на экране, CSV, Excel и PDF.", |
-| `backend/AppReleases/releases.json` | 6464 | `CSV` | "text": "Для управленческих отчетов добавлена печатная форма рядом с CSV, Excel и PDF." |
-| `backend/AppReleases/releases.json` | 6464 | `PDF` | "text": "Для управленческих отчетов добавлена печатная форма рядом с CSV, Excel и PDF." |
-| `backend/AppReleases/releases.json` | 6480 | `CSV` | "title": "CSV-выгрузка управленческих отчетов", |
-| `backend/AppReleases/releases.json` | 6481 | `CSV` | "summary": "В разделе «Отчеты» у управленческих отчетов появилась выгрузка в CSV рядом с Excel и PDF. Файл формируется по тем же выбранным фильтрам, что и отчет на экране, поэтому его можно использовать для дальнейшей об |
-| `backend/AppReleases/releases.json` | 6481 | `PDF` | "summary": "В разделе «Отчеты» у управленческих отчетов появилась выгрузка в CSV рядом с Excel и PDF. Файл формируется по тем же выбранным фильтрам, что и отчет на экране, поэтому его можно использовать для дальнейшей об |
-| `backend/AppReleases/releases.json` | 6487 | `CSV` | "text": "Для управленческих отчетов добавлена кнопка CSV. Выгрузка доступна там же, где уже были Excel и PDF." |
-| `backend/AppReleases/releases.json` | 6487 | `PDF` | "text": "Для управленческих отчетов добавлена кнопка CSV. Выгрузка доступна там же, где уже были Excel и PDF." |
-| `backend/AppReleases/releases.json` | 6491 | `CSV` | "text": "CSV-файл учитывает выбранный период, источник денег, счет, клиента, дело, договор, статью дохода или расхода и другие фильтры конкретного отчета." |
-| `backend/AppReleases/releases.json` | 6495 | `CSV` | "text": "Выгрузка CSV использует те же права доступа, что и остальные экспорты отчетов: скачать файл могут только пользователи с разрешением на экспорт." |
-| `backend/AppReleases/releases.json` | 7016 | `PDF` | "title": "Отчет по задачам можно выгружать в Excel и PDF", |
-| `backend/AppReleases/releases.json` | 7017 | `PDF` | "summary": "В разделе «Отчеты» серверная выгрузка управленческого отчета по задачам теперь доступна в Excel и PDF/печатном виде. В файл попадают список задач, сводка по статусам и распределение по исполнителям.", |
-| `backend/AppReleases/releases.json` | 7347 | `PDF` | "summary": "В разделе «Отчеты» фильтр по статье дохода или расхода стал применяться к сводкам по статусам актов и договоров. Теперь эти отчеты, а также их Excel/PDF/печатная форма, показывают только документы, связанные  |
-| `backend/AppReleases/releases.json` | 7442 | `PDF` | "summary": "В разделе «Отчеты» сводки по статусам счетов, актов и договоров стали лучше совпадать с общей панелью финансовых фильтров. Теперь при выборе источника денег, денежного счета или контрагента эти отчеты и их Ex |
-| `backend/AppReleases/releases.json` | 7452 | `PDF` | "text": "Excel/PDF/печатная форма этих отчетов теперь формируется по тем же финансовым фильтрам, что выбраны на странице отчетов." |
-| `backend/AppReleases/releases.json` | 7461 | `PDF` | "summary": "В разделе «Отчеты» сводка по импортам банковских выписок стала точнее работать с общей панелью фильтров. Теперь отчет и его Excel/PDF/печатная форма учитывают выбранный расчетный счет, контрагента, клиента, д |
-| `backend/AppReleases/releases.json` | 7471 | `PDF` | "text": "Excel/PDF/печатная форма отчета по импортам банка теперь формируется по тем же фильтрам, что пользователь выбрал на странице отчетов." |
-| `backend/AppReleases/releases.json` | 7480 | `PDF` | "summary": "В разделе «Отчеты» кассовая книга стала точнее совпадать с общей панелью фильтров. Теперь отчет по кассе и его Excel/PDF/печатная форма учитывают выбранного контрагента, клиента, дело, договор и статью дохода |
-| `backend/AppReleases/releases.json` | 7490 | `PDF` | "text": "Excel/PDF/печатная форма отчета по кассе теперь формируется по тем же фильтрам, что пользователь выбрал на странице отчетов." |
-| `backend/AppReleases/releases.json` | 7518 | `CSV` | "summary": "Платежные отчеты в разделе «Отчеты» стали точнее соблюдать матрицу прав. Пользователь может просматривать доступные ему финансовые сводки, но CSV, Excel и PDF/печатная форма теперь доступны только при наличии |
-| `backend/AppReleases/releases.json` | 7518 | `PDF` | "summary": "Платежные отчеты в разделе «Отчеты» стали точнее соблюдать матрицу прав. Пользователь может просматривать доступные ему финансовые сводки, но CSV, Excel и PDF/печатная форма теперь доступны только при наличии |
-| `backend/AppReleases/releases.json` | 7528 | `CSV` | "text": "Если у роли есть просмотр платежей, но нет права выгрузки, кнопки CSV, Excel и PDF в этих отчетах становятся недоступны, а прямой запрос на выгрузку отклоняется сервером." |
-| `backend/AppReleases/releases.json` | 7528 | `PDF` | "text": "Если у роли есть просмотр платежей, но нет права выгрузки, кнопки CSV, Excel и PDF в этих отчетах становятся недоступны, а прямой запрос на выгрузку отклоняется сервером." |
-| `backend/AppReleases/releases.json` | 7547 | `PDF` | "text": "Excel, PDF/печатная форма и CSV по этому отчету также закрыты для пользователей без административного доступа." |
-| `backend/AppReleases/releases.json` | 7547 | `CSV` | "text": "Excel, PDF/печатная форма и CSV по этому отчету также закрыты для пользователей без административного доступа." |
-| `backend/AppReleases/releases.json` | 7566 | `PDF` | "text": "Excel, PDF/печатная форма и CSV по этому отчету теперь доступны только при наличии права выгрузки платежей." |
-| `backend/AppReleases/releases.json` | 7566 | `CSV` | "text": "Excel, PDF/печатная форма и CSV по этому отчету теперь доступны только при наличии права выгрузки платежей." |
-| `backend/AppReleases/releases.json` | 7604 | `PDF` | "text": "В разделе «Отчеты» Excel и PDF/печатная форма отчета по банку теперь учитывают выбранный счет, контрагента, клиента, дело, договор и статью дохода или расхода." |
-| `backend/AppReleases/releases.json` | 7623 | `PDF` | "text": "В разделе «Отчеты» Excel и PDF/печатная форма отчета по кассе теперь выгружают данные только по выбранной кассе, если она указана в фильтре." |
-| `backend/AppReleases/releases.json` | 7646 | `PDF` | "text": "Excel и PDF/печатная форма отчета по кассовым ордерам выгружают ту же выборку, которую пользователь видит на экране." |
-| `backend/AppReleases/releases.json` | 7661 | `PDF` | "text": "В разделе «Отчеты» отчеты по статусам счетов, актов и договоров применяют фильтры клиента, дела и договора на экране, в Excel и PDF/печатной форме." |
-| `backend/AppReleases/releases.json` | 7712 | `PDF` | "summary": "В акте сверки клиента уточнено поведение кнопок выгрузки. Excel и PDF становятся доступны после того, как CRM загрузила данные операций и профиль организации, поэтому в документ попадает корректное название к |
-| `backend/AppReleases/releases.json` | 7718 | `PDF` | "text": "В карточке клиента в акте сверки кнопки Excel и PDF больше нельзя нажать во время формирования акта. Это предотвращает выгрузку документа с временным названием организации вместо данных из профиля компании." |
-| `backend/AppReleases/releases.json` | 9824 | `PDF` | "text": "Исправлен экранный отчет по банку: фильтры по счету, контрагенту, клиенту, делу, договору и статье доходов/расходов теперь применяются не только к Excel и PDF, но и к самой банковской сводке на странице." |
-| `backend/AppReleases/releases.json` | 9833 | `PDF` | "summary": "Excel и PDF для отчета по банку теперь формируются по той же выборке, которую пользователь видит на экране.", |
-| `backend/AppReleases/releases.json` | 9839 | `PDF` | "text": "В разделе «Отчеты» исправлена выгрузка отчета по банку: выбранные фильтры по счету, контрагенту, клиенту, делу, договору и статье доходов/расходов теперь учитываются при скачивании Excel и PDF." |
-| `backend/AppReleases/releases.json` | 9881 | `PDF` | "text": "Фильтр по договору применяется к отчетам по денежным операциям, прогнозу денежных потоков, план-факт отчету и к Excel/PDF-выгрузкам этих отчетов." |
-| `backend/AppReleases/releases.json` | 9904 | `PDF` | "text": "Фильтр по статье применяется к отчетам по денежным операциям, прогнозу денежных потоков, план-факт отчету и к Excel/PDF-выгрузкам этих отчетов." |
-| `backend/AppReleases/releases.json` | 9946 | `PDF` | "text": "Фильтр по делу применяется к отчетам по денежным операциям и к Excel/PDF-выгрузкам этих отчетов. Для фактических операций система использует связь со счетом, а для прогноза платежей — связь платежа с делом." |
-| `backend/AppReleases/releases.json` | 9969 | `PDF` | "text": "Фильтр по клиенту применяется к отчетам по денежным операциям и к Excel/PDF-выгрузкам этих отчетов." |
-| `backend/AppReleases/releases.json` | 10038 | `PDF` | "text": "Фильтр применяется к финансовым отчетам по денежным операциям, прогнозу денежных потоков и к Excel/PDF-выгрузкам этих отчетов." |
-| `backend/AppReleases/releases.json` | 10061 | `PDF` | "text": "Фильтр счета применяется к финансовым отчетам по денежным операциям, прогнозу денежных потоков и к Excel/PDF-выгрузкам этих отчетов." |
-| `backend/AppReleases/releases.json` | 10084 | `PDF` | "text": "Фильтр применяется к финансовым отчетам по денежным операциям и к их выгрузкам Excel и PDF, чтобы данные на экране и в файлах совпадали." |
-| `backend/AppReleases/releases.json` | 10103 | `CSV` | "text": "В разделе «Отчеты» у блоков «Отчет по счетам оплаты», «Отчет по оплаченным счетам», «Отчет по статусам счетов», «Отчет по статусам актов» и «Отчет по статусам договоров» теперь доступны выгрузки CSV, Excel и PDF |
-| `backend/AppReleases/releases.json` | 10103 | `PDF` | "text": "В разделе «Отчеты» у блоков «Отчет по счетам оплаты», «Отчет по оплаченным счетам», «Отчет по статусам счетов», «Отчет по статусам актов» и «Отчет по статусам договоров» теперь доступны выгрузки CSV, Excel и PDF |
-| `backend/AppReleases/releases.json` | 10115 | `PDF` | "text": "PDF-выгрузки можно использовать как печатные формы для сверки оплат и контроля статусов счетов, актов и договоров." |
-| `backend/AppReleases/releases.json` | 10130 | `CSV` | "text": "В разделе «Отчеты» у блоков «План-факт отчет», «Отчет по авансам» и «Отчет по приоритетам платежей» теперь доступны выгрузки CSV, Excel и PDF." |
-| `backend/AppReleases/releases.json` | 10130 | `PDF` | "text": "В разделе «Отчеты» у блоков «План-факт отчет», «Отчет по авансам» и «Отчет по приоритетам платежей» теперь доступны выгрузки CSV, Excel и PDF." |
-| `backend/AppReleases/releases.json` | 10142 | `PDF` | "text": "PDF-выгрузки можно использовать как печатные формы для сверки план-факта, авансов и распределения операций по приоритетам." |
-| `backend/AppReleases/releases.json` | 10157 | `CSV` | "text": "В разделе «Отчеты» у блоков «Отчет по кассе» и «Отчет по банку» теперь доступны выгрузки CSV, Excel и PDF." |
-| `backend/AppReleases/releases.json` | 10157 | `PDF` | "text": "В разделе «Отчеты» у блоков «Отчет по кассе» и «Отчет по банку» теперь доступны выгрузки CSV, Excel и PDF." |
-| `backend/AppReleases/releases.json` | 10169 | `PDF` | "text": "PDF-выгрузки можно использовать как печатные формы для сверки кассовых и банковских движений за выбранный период." |
-| `backend/AppReleases/releases.json` | 10184 | `CSV` | "text": "В разделе «Отчеты» у блока «Отчет по импортам из таблиц» теперь доступны выгрузки CSV, Excel и PDF." |
-| `backend/AppReleases/releases.json` | 10184 | `PDF` | "text": "В разделе «Отчеты» у блока «Отчет по импортам из таблиц» теперь доступны выгрузки CSV, Excel и PDF." |
-| `backend/AppReleases/releases.json` | 10192 | `PDF` | "text": "PDF-выгрузку можно использовать как печатную форму для контроля табличных загрузок, ошибок и откатов с конфликтами." |
-| `backend/AppReleases/releases.json` | 10207 | `CSV` | "text": "В разделе «Отчеты» у блока «Отчет по импортам банковских выписок» теперь доступны выгрузки CSV, Excel и PDF." |
-| `backend/AppReleases/releases.json` | 10207 | `PDF` | "text": "В разделе «Отчеты» у блока «Отчет по импортам банковских выписок» теперь доступны выгрузки CSV, Excel и PDF." |
-| `backend/AppReleases/releases.json` | 10215 | `PDF` | "text": "PDF-выгрузку можно использовать как печатную форму для контроля проблемных импортов и заблокированных откатов." |
-| `backend/AppReleases/releases.json` | 10230 | `CSV` | "text": "В разделе «Отчеты» у блока «Отчет по кассовым ордерам» теперь доступны выгрузки CSV, Excel и PDF." |
-| `backend/AppReleases/releases.json` | 10230 | `PDF` | "text": "В разделе «Отчеты» у блока «Отчет по кассовым ордерам» теперь доступны выгрузки CSV, Excel и PDF." |
-| `backend/AppReleases/releases.json` | 10238 | `PDF` | "text": "PDF-выгрузку можно использовать как печатную форму для сверки приходных и расходных кассовых ордеров за выбранный период." |
-| `backend/AppReleases/releases.json` | 10253 | `CSV` | "text": "В разделе «Отчеты» у блока «Отчет по валютам операций» теперь доступны выгрузки CSV, Excel и PDF." |
-| `backend/AppReleases/releases.json` | 10253 | `PDF` | "text": "В разделе «Отчеты» у блока «Отчет по валютам операций» теперь доступны выгрузки CSV, Excel и PDF." |
-| `backend/AppReleases/releases.json` | 10261 | `PDF` | "text": "PDF-выгрузку можно использовать как печатную форму для сверки оборотов по валютам операций." |
-| `backend/AppReleases/releases.json` | 10276 | `CSV` | "text": "В разделе «Отчеты» у блока «Отчет по журнальным статусам» теперь доступны выгрузки CSV, Excel и PDF." |
-| `backend/AppReleases/releases.json` | 10276 | `PDF` | "text": "В разделе «Отчеты» у блока «Отчет по журнальным статусам» теперь доступны выгрузки CSV, Excel и PDF." |
-| `backend/AppReleases/releases.json` | 10284 | `PDF` | "text": "PDF-выгрузку можно использовать как печатную форму для контроля операций, которые еще находятся в обработке или требуют исправления." |
-| `backend/AppReleases/releases.json` | 10299 | `CSV` | "text": "В разделе «Отчеты» у блока «Отчет по статусам сверки» теперь доступны выгрузки CSV, Excel и PDF." |
-| `backend/AppReleases/releases.json` | 10299 | `PDF` | "text": "В разделе «Отчеты» у блока «Отчет по статусам сверки» теперь доступны выгрузки CSV, Excel и PDF." |
-| `backend/AppReleases/releases.json` | 10307 | `PDF` | "text": "PDF-выгрузку можно использовать как печатную форму для контроля несверенных операций и ручной проверки платежей." |
-| `backend/AppReleases/releases.json` | 10322 | `CSV` | "text": "В разделе «Отчеты» у блока «Отчет по назначениям платежей» теперь доступны выгрузки CSV, Excel и PDF." |
-| `backend/AppReleases/releases.json` | 10322 | `PDF` | "text": "В разделе «Отчеты» у блока «Отчет по назначениям платежей» теперь доступны выгрузки CSV, Excel и PDF." |
-| `backend/AppReleases/releases.json` | 10330 | `PDF` | "text": "PDF-выгрузку можно использовать как печатную форму для сверки повторяющихся оснований оплат и списаний." |
-| `backend/AppReleases/releases.json` | 10345 | `CSV` | "text": "В разделе «Отчеты» у блока «Отчет по платежным поручениям» теперь доступны выгрузки CSV, Excel и PDF." |
-| `backend/AppReleases/releases.json` | 10345 | `PDF` | "text": "В разделе «Отчеты» у блока «Отчет по платежным поручениям» теперь доступны выгрузки CSV, Excel и PDF." |
-| `backend/AppReleases/releases.json` | 10353 | `PDF` | "text": "PDF-выгрузку можно использовать как печатную форму для сверки операций по номерам платежных поручений." |
-| `backend/AppReleases/releases.json` | 10368 | `CSV` | "text": "В разделе «Отчеты» у блока «Отчет по НДС» теперь доступны выгрузки CSV, Excel и PDF." |
-| `backend/AppReleases/releases.json` | 10368 | `PDF` | "text": "В разделе «Отчеты» у блока «Отчет по НДС» теперь доступны выгрузки CSV, Excel и PDF." |
-| `backend/AppReleases/releases.json` | 10376 | `PDF` | "text": "PDF-выгрузку можно использовать как печатную форму для сверки начисленного и входящего НДС за выбранный период." |
-| `backend/AppReleases/releases.json` | 10391 | `CSV` | "text": "В разделе «Отчеты» у блока «Отчет по точкам продаж» теперь доступны выгрузки CSV, Excel и PDF." |
-| `backend/AppReleases/releases.json` | 10391 | `PDF` | "text": "В разделе «Отчеты» у блока «Отчет по точкам продаж» теперь доступны выгрузки CSV, Excel и PDF." |
-| `backend/AppReleases/releases.json` | 10399 | `PDF` | "text": "PDF-выгрузку можно использовать как печатную форму для сверки финансового результата по точкам продаж и каналам." |
-| `backend/AppReleases/releases.json` | 10414 | `CSV` | "text": "В разделе «Отчеты» у блока «Отчет по направлениям» теперь доступны выгрузки CSV, Excel и PDF." |
-| `backend/AppReleases/releases.json` | 10414 | `PDF` | "text": "В разделе «Отчеты» у блока «Отчет по направлениям» теперь доступны выгрузки CSV, Excel и PDF." |
-| `backend/AppReleases/releases.json` | 10422 | `PDF` | "text": "PDF-выгрузку можно использовать как печатную форму для обсуждения структуры доходов и расходов по направлениям бизнеса." |
-| `backend/AppReleases/releases.json` | 10437 | `CSV` | "text": "В разделе «Отчеты» у блока «Отчет по проектам» теперь доступны выгрузки CSV, Excel и PDF." |
-| `backend/AppReleases/releases.json` | 10437 | `PDF` | "text": "В разделе «Отчеты» у блока «Отчет по проектам» теперь доступны выгрузки CSV, Excel и PDF." |
-| `backend/AppReleases/releases.json` | 10445 | `PDF` | "text": "PDF-выгрузку можно использовать как печатную форму для обсуждения финансового результата проектов." |
-| `backend/AppReleases/releases.json` | 10460 | `CSV` | "text": "В разделе «Отчеты» у блока «Отчет по контрагентам» теперь доступны выгрузки CSV, Excel и PDF." |
-| `backend/AppReleases/releases.json` | 10460 | `PDF` | "text": "В разделе «Отчеты» у блока «Отчет по контрагентам» теперь доступны выгрузки CSV, Excel и PDF." |
-| `backend/AppReleases/releases.json` | 10468 | `PDF` | "text": "PDF-выгрузку можно использовать как печатную форму для сверки оборотов по контрагентам за выбранный период." |
-| `backend/AppReleases/releases.json` | 10483 | `CSV` | "text": "В разделе «Отчеты» у блока «Отчет по статьям доходов и расходов» теперь доступны выгрузки CSV, Excel и PDF." |
-| `backend/AppReleases/releases.json` | 10483 | `PDF` | "text": "В разделе «Отчеты» у блока «Отчет по статьям доходов и расходов» теперь доступны выгрузки CSV, Excel и PDF." |
-| `backend/AppReleases/releases.json` | 10491 | `PDF` | "text": "PDF-выгрузку можно использовать как печатную форму для обсуждения структуры доходов и расходов за выбранный период." |
-| `backend/AppReleases/releases.json` | 10506 | `CSV` | "text": "В разделе «Отчеты» у блока «Отчет движения денежных средств» теперь доступны выгрузки CSV, Excel и PDF." |
-| `backend/AppReleases/releases.json` | 10506 | `PDF` | "text": "В разделе «Отчеты» у блока «Отчет движения денежных средств» теперь доступны выгрузки CSV, Excel и PDF." |
-| `backend/AppReleases/releases.json` | 10514 | `PDF` | "text": "PDF-выгрузку можно использовать как печатную форму фактического движения денег за выбранный период." |
-| `backend/AppReleases/releases.json` | 10529 | `CSV` | "text": "В разделе «Отчеты» у блока «Прогноз денежных потоков» теперь доступны выгрузки CSV, Excel и PDF." |
-| `backend/AppReleases/releases.json` | 10529 | `PDF` | "text": "В разделе «Отчеты» у блока «Прогноз денежных потоков» теперь доступны выгрузки CSV, Excel и PDF." |
-| `backend/AppReleases/releases.json` | 10537 | `PDF` | "text": "PDF-выгрузку можно использовать как печатную форму прогноза для обсуждения плановых поступлений и списаний." |
-| `backend/AppReleases/releases.json` | 10583 | `CSV` | "text": "CSV, Excel и PDF-выгрузки финансового отчета по делам также включают расходы, маржу и маржинальность." |
-| `backend/AppReleases/releases.json` | 10583 | `PDF` | "text": "CSV, Excel и PDF-выгрузки финансового отчета по делам также включают расходы, маржу и маржинальность." |
-| `backend/AppReleases/releases.json` | 10717 | `PDF` | "text": "На экране акта сверки, в Excel и в PDF авансовые строки подписываются как авансы, чтобы их было проще отличить от закрывающих оплат." |
-| `backend/AppReleases/releases.json` | 11699 | `PDF` | "text": "В меню «Скачать» появились варианты «PDF счет-оферта» и «Word счет-оферта»." |
-| `backend/AppReleases/releases.json` | 12083 | `ICS` | "text": "Для задач, календаря дел, ICS-календарей, заметок платежей, автоматической сверки баланса и проверки просрочки платежей убрана зависимость от часового пояса сервера, если профильный часовой пояс пользователя не  |
-| `backend/AppReleases/releases.json` | 12195 | `CSV` | "summary": "В разделе \"Отчеты\" скачанные CSV, Excel и PDF-файлы теперь единообразно показывают, когда отчет был сформирован, с учетом часового пояса пользователя из профиля. Это помогает сотрудникам из разных регионов  |
-| `backend/AppReleases/releases.json` | 12195 | `PDF` | "summary": "В разделе \"Отчеты\" скачанные CSV, Excel и PDF-файлы теперь единообразно показывают, когда отчет был сформирован, с учетом часового пояса пользователя из профиля. Это помогает сотрудникам из разных регионов  |
-| `backend/AppReleases/releases.json` | 12205 | `CSV` | "text": "CSV и Excel-выгрузки отчета по юридической работе теперь показывают время формирования по часовому поясу профиля так же, как PDF." |
-| `backend/AppReleases/releases.json` | 12205 | `PDF` | "text": "CSV и Excel-выгрузки отчета по юридической работе теперь показывают время формирования по часовому поясу профиля так же, как PDF." |
-| `backend/AppReleases/releases.json` | 12294 | `CSV` | "summary": "В разделе \"Платежи\" появились выгрузки текущего списка в CSV и Excel. В файл попадают те же платежи, которые пользователь отобрал фильтрами на экране, а служебное время формирования и дата создания платежа  |
-| `backend/AppReleases/releases.json` | 12300 | `CSV` | "text": "В журнале платежей добавлены кнопки выгрузки в CSV и Excel для пользователей с правом экспорта платежей." |
-| `backend/AppReleases/releases.json` | 12492 | `CSV` | "summary": "В выгрузках отчета по юридической работе уточнены даты и имена файлов. CSV, Excel и PDF теперь показывают точные даты создания дел и судебных заседаний с учетом часового пояса профиля пользователя, а CSV-файл |
-| `backend/AppReleases/releases.json` | 12492 | `PDF` | "summary": "В выгрузках отчета по юридической работе уточнены даты и имена файлов. CSV, Excel и PDF теперь показывают точные даты создания дел и судебных заседаний с учетом часового пояса профиля пользователя, а CSV-файл |
-| `backend/AppReleases/releases.json` | 12502 | `CSV` | "text": "CSV-файл юридического отчета теперь скачивается с именем, в котором указаны дата и время формирования по часовому поясу профиля пользователя." |
-| `backend/AppReleases/releases.json` | 12521 | `CSV` | "text": "CSV-выгрузки юридических отчетов теперь используют то же правило дат, что и экран отчета: дата без времени остается календарной датой, а точное время отображается по часовому поясу профиля." |
-| `backend/AppReleases/releases.json` | 12574 | `PDF` | "text": "В HTML, Word и PDF-формах счетов дата счета, срок оплаты, дата договора-основания и дата выдачи паспорта больше не должны отображаться со сдвигом." |
-| `backend/AppReleases/releases.json` | 12743 | `PDF` | "text": "Имена файлов PDF и Excel для отчетов теперь используют локальное время профиля, чтобы время формирования совпадало с тем, что пользователь видит внутри отчета." |
-| `backend/AppReleases/releases.json` | 12752 | `CSV` | "summary": "В CSV, Excel, PDF и печатной версии реестра дел время заседаний и активности теперь отображается по часовому поясу пользователя из профиля.", |
-| `backend/AppReleases/releases.json` | 12752 | `PDF` | "summary": "В CSV, Excel, PDF и печатной версии реестра дел время заседаний и активности теперь отображается по часовому поясу пользователя из профиля.", |
-| `backend/AppReleases/releases.json` | 12762 | `CSV` | "text": "Поля последней активности и просмотра ответственным в CSV и Excel используют тот же часовой пояс профиля, что и интерфейс CRM." |
-| `backend/AppReleases/releases.json` | 12766 | `PDF` | "text": "PDF и печатная версия реестра дел также показывают дату и время активности в локальном времени пользователя." |
-| `backend/AppReleases/releases.json` | 12904 | `ICS` | "text": "ICS-выгрузка календаря дел сохраняет точные моменты времени без двойного сдвига, поэтому внешние календари получают корректное время события." |
-| `backend/AppReleases/releases.json` | 13395 | `PDF` | "title": "PDF-отчеты учитывают часовой пояс профиля", |
-| `backend/AppReleases/releases.json` | 13396 | `PDF` | "summary": "Уточнено отображение времени формирования PDF-отчетов и подготовлено единое правило для системных отметок времени.", |
-| `backend/AppReleases/releases.json` | 13402 | `PDF` | "text": "В PDF-отчетах по юридической работе и управленческих отчетах строка «сформировано» теперь показывает время по часовому поясу пользователя из профиля, а не по локальному времени сервера." |
-| `backend/AppReleases/releases.json` | 13487 | `CSV` | "text": "В отчете по загрузке юристов ближайшие задачи теперь показываются и выгружаются в CSV с учетом часового пояса профиля. В карточке дела время последнего просмотра, подтверждения активности и загрузки документов т |
-| `backend/AppReleases/releases.json` | 13511 | `CSV` | "text": "Экспорт реестра дел и печатные формы заказ-наряда теперь показывают время формирования по часовому поясу пользователя. Имена файлов CSV, Excel и PDF также получают дату и время из профиля сотрудника." |
-| `backend/AppReleases/releases.json` | 13511 | `PDF` | "text": "Экспорт реестра дел и печатные формы заказ-наряда теперь показывают время формирования по часовому поясу пользователя. Имена файлов CSV, Excel и PDF также получают дату и время из профиля сотрудника." |
-| `backend/AppReleases/releases.json` | 13530 | `ICS` | "text": "В настройках внешних календарей добавлен блок «Выполненные задачи в календарях». Администратор может оставить выполненные задачи в календарях с отдельной отметкой или скрывать их после выполнения. Правило примен |
-| `backend/AppReleases/releases.json` | 13538 | `ICS` | "text": "Исправлена выгрузка календаря дел и календаря задач в ICS: судебные заседания, задачи и другие события с точным временем больше не получают сдвиг при добавлении во внешний календарь." |
-| `backend/AppReleases/releases.json` | 14513 | `PDF` | "text": "При выгрузке акта в Word или PDF CRM заменяет символы, которые могут мешать сохранению файла на разных устройствах и серверах. Документ по-прежнему содержит исходный номер акта внутри печатной формы." |
-| `backend/AppReleases/releases.json` | 14579 | `PDF` | "summary": "В карточке акта появилась ручная отправка PDF акта на Яндекс.Диск по правилам CRM-синхронизации.", |
-| `backend/AppReleases/releases.json` | 14585 | `PDF` | "text": "В карточке акта рядом с действиями отправки, печати и скачивания появилась кнопка «Я.Диск». Она формирует PDF акта и отправляет его в подключенный Яндекс.Диск по шаблонам папки и имени файла из раздела «Я.Диск». |
-| `backend/AppReleases/releases.json` | 14598 | `PDF` | "summary": "В карточке счета появилась ручная отправка PDF счета на Яндекс.Диск по правилам CRM-синхронизации.", |
-| `backend/AppReleases/releases.json` | 14604 | `PDF` | "text": "В карточке счета рядом с действиями отправки, печати и скачивания появилась кнопка «Я.Диск». Она формирует PDF счета и отправляет его в подключенный Яндекс.Диск по шаблонам папки и имени файла из раздела «Я.Диск |
-| `backend/AppReleases/releases.json` | 14617 | `PDF` | "summary": "В карточке договора появилась ручная отправка PDF договора на Яндекс.Диск по настроенным правилам CRM-синхронизации.", |
-| `backend/AppReleases/releases.json` | 14623 | `PDF` | "text": "В карточке договора рядом с действиями Word, PDF и Email появилась кнопка «Я.Диск». Она формирует PDF договора и отправляет его в подключенный Яндекс.Диск по шаблонам папки и имени файла из раздела «Я.Диск»." |
-| `backend/AppReleases/releases.json` | 14776 | `PDF` | "text": "Акт сверки теперь печатается в фиксированной альбомной форме A4 с размерами колонок, полями, итогами и блоками подписей, приближенными к приложенному бухгалтерскому образцу. Для Excel сохранена структура эталонн |
-| `backend/AppReleases/releases.json` | 14803 | `PDF` | "text": "Кнопка Excel выгружает акт сверки в формате .xls с той же бухгалтерской структурой, а кнопка PDF открывает чистую печатную форму без лишних элементов интерфейса." |
-| `backend/AppReleases/releases.json` | 15539 | `ICS` | "text": "ICS-выгрузка отдельно отмечена как доступный безопасный контур, а Google Calendar и Яндекс Календарь остаются в подготовительном режиме до закрытия обязательных пунктов." |
-| `backend/AppReleases/releases.json` | 15552 | `ICS` | "summary": "В настройках интеграций появился блок состояния календарных провайдеров: видно, что ICS-выгрузка уже доступна, а Google Calendar и Яндекс Календарь ждут отдельной настройки и приемки.", |
-| `backend/AppReleases/releases.json` | 15558 | `ICS` | "text": "В разделе «Ключи и внешние сервисы» добавлен блок «Провайдеры календарной синхронизации». Он показывает доступность ICS, Google Calendar и Яндекс Календаря." |
-| `backend/AppReleases/releases.json` | 15575 | `ICS` | "summary": "Выгрузки календаря задач и календаря дел в ICS теперь фиксируются в общем журнале действий, чтобы администраторы могли видеть, когда и кем был сформирован файл календаря.", |
-| `backend/AppReleases/releases.json` | 15581 | `ICS` | "text": "В журнале всех действий появился тип «Синхронизация календаря». В нем отражаются выгрузки ICS-файлов из журнала задач и календаря дел." |
-| `backend/AppReleases/releases.json` | 15597 | `ICS` | "title": "Настройка напоминаний в ICS-календарях", |
-| `backend/AppReleases/releases.json` | 15598 | `ICS` | "summary": "В журнале задач можно выбрать, за сколько времени напоминать о событиях при выгрузке календаря задач и календаря дел в ICS.", |
-| `backend/AppReleases/releases.json` | 15604 | `ICS` | "text": "Перед выгрузкой ICS в журнале задач теперь можно выбрать набор напоминаний: стандартный вариант за 1 час и 15 минут, только за 1 час, за 2 часа и 30 минут или за 1 день." |
-| `backend/AppReleases/releases.json` | 15612 | `ICS` | "text": "Если напоминания не выбраны явно, ICS-файлы продолжают выгружаться со стандартными уведомлениями за 1 час и за 15 минут до события." |
-| `backend/AppReleases/releases.json` | 15781 | `PDF` | "title": "Excel и PDF выгрузки юридических отчетов", |
-| `backend/AppReleases/releases.json` | 15782 | `CSV` | "summary": "В разделе «Отчеты» расширены выгрузки управленческих юридических отчетов: теперь ключевые отчеты по делам можно сохранять не только в CSV, но и в Excel или PDF.", |
-| `backend/AppReleases/releases.json` | 15782 | `PDF` | "summary": "В разделе «Отчеты» расширены выгрузки управленческих юридических отчетов: теперь ключевые отчеты по делам можно сохранять не только в CSV, но и в Excel или PDF.", |
-| `backend/AppReleases/releases.json` | 15788 | `PDF` | "text": "Для финансового отчета по делам, статистики успешности, текущих дел, загрузки юристов, просроченных процессуальных сроков и диагностики активности добавлены кнопки Excel и PDF." |
-| `backend/AppReleases/releases.json` | 15796 | `PDF` | "text": "PDF и Excel показывают сводные показатели и детальные строки отчета, чтобы руководитель мог передать файл дальше без ручной сборки данных из нескольких блоков CRM." |
-| `backend/AppReleases/releases.json` | 15819 | `CSV` | "text": "Отчет учитывает доступ пользователя к делам, группирует статистику по ответственным, типам и статусам, а строки можно выгрузить в CSV." |
-| `backend/AppReleases/releases.json` | 15838 | `CSV` | "text": "Отчет учитывает доступ пользователя к делам и платежам, группирует суммы по ответственным и статусам дел, а строки отчета можно выгрузить в CSV." |
-| `backend/AppReleases/releases.json` | 16132 | `ICS` | "summary": "ICS-файл журнала задач теперь передает во внешние календари напоминания перед началом задачи.", |
-| `backend/AppReleases/releases.json` | 16138 | `ICS` | "text": "При выгрузке календаря задач в ICS в каждую задачу добавляются напоминания за 1 час и за 15 минут до срока выполнения." |
-| `backend/AppReleases/releases.json` | 16151 | `ICS` | "summary": "ICS-файл календаря дел теперь передает во внешние календари напоминания по событиям с точным временем.", |
-| `backend/AppReleases/releases.json` | 16157 | `ICS` | "text": "При выгрузке календаря дел в ICS для судебных заседаний, задач и других событий с указанным временем добавляются напоминания за 1 час и за 15 минут до начала." |
-| `backend/AppReleases/releases.json` | 16192 | `PDF` | "title": "Выгрузка реестра дел в Excel и PDF", |
-| `backend/AppReleases/releases.json` | 16193 | `CSV` | "summary": "В разделе «Дела» расширены выгрузки реестра: теперь текущую выборку можно скачать не только в CSV, но и в Excel или PDF.", |
-| `backend/AppReleases/releases.json` | 16193 | `PDF` | "summary": "В разделе «Дела» расширены выгрузки реестра: теперь текущую выборку можно скачать не только в CSV, но и в Excel или PDF.", |
-| `backend/AppReleases/releases.json` | 16199 | `CSV` | "text": "В реестре дел рядом с кнопкой CSV появились кнопки Excel и PDF. Они формируют файл по текущим фильтрам, сортировке и выбранному режиму реестра." |
-| `backend/AppReleases/releases.json` | 16199 | `PDF` | "text": "В реестре дел рядом с кнопкой CSV появились кнопки Excel и PDF. Они формируют файл по текущим фильтрам, сортировке и выбранному режиму реестра." |
-| `backend/AppReleases/releases.json` | 16203 | `PDF` | "text": "Excel-файл содержит основные данные по делам, задачам, финансам, суду и активности, а PDF использует печатную форму реестра с итогами по выборке." |
-| `backend/AppReleases/releases.json` | 16215 | `ICS` | "title": "Выгрузка календаря дел в ICS", |
-| `backend/AppReleases/releases.json` | 16216 | `ICS` | "summary": "В календаре дел появилась выгрузка судебных событий и процессуальных сроков в файл ICS для внешних календарей.", |
-| `backend/AppReleases/releases.json` | 16222 | `ICS` | "text": "В блоке «Календарь дел» добавлена кнопка ICS. Она формирует файл с судебными заседаниями, процессуальными сроками и другими событиями дел за текущий период календаря." |
-| `backend/AppReleases/releases.json` | 16238 | `PDF` | "title": "Выгрузка юридического отчета в Excel и PDF", |
-| `backend/AppReleases/releases.json` | 16245 | `CSV` | "text": "В отчете «Юридическая работа» появились серверные выгрузки CSV, Excel и PDF. Кнопки доступны в шапке отчета рядом с обновлением данных." |
-| `backend/AppReleases/releases.json` | 16245 | `PDF` | "text": "В отчете «Юридическая работа» появились серверные выгрузки CSV, Excel и PDF. Кнопки доступны в шапке отчета рядом с обновлением данных." |
-| `backend/AppReleases/releases.json` | 16327 | `PDF` | "summary": "В журнале задач появился отчет «Планинг по клиентам», который можно выгрузить в Word, PDF или HTML для передачи и печати.", |
-| `backend/AppReleases/releases.json` | 16333 | `PDF` | "text": "В «Журнале задач» добавлены кнопки Word, PDF и HTML. Они формируют отчет «Планинг по клиентам» с группировкой задач по клиенту и делу." |
-| `backend/AppReleases/releases.json` | 16337 | `PDF` | "text": "В отчете выводятся номер строки, вид задачи, описание, срок, статус, исполнитель и комментарий. Формат подходит для просмотра в браузере, печати, отправки в PDF и открытия в Word." |
-| `backend/AppReleases/releases.json` | 16777 | `CSV` | "text": "Номер связанного акта также попадает в выгрузки журнала в CSV, Excel и печатную форму PDF." |
-| `backend/AppReleases/releases.json` | 16777 | `PDF` | "text": "Номер связанного акта также попадает в выгрузки журнала в CSV, Excel и печатную форму PDF." |
-| `backend/AppReleases/releases.json` | 16929 | `PDF` | "text": "В карточке расторгнутого договора появилась кнопка «Соглашение PDF». Она формирует соглашение о расторжении с данными сторон, датой расторжения, причиной, условиями и финансовыми условиями из карточки договора." |
-| `backend/AppReleases/releases.json` | 16956 | `PDF` | "text": "Печать договора, скачивание в Word или PDF и отправка договора по email теперь используют активный шаблон из настроек, поэтому оформление можно поддерживать в одном месте." |
-| `backend/AppReleases/releases.json` | 17013 | `PDF` | "text": "В карточке договора появились действия «Печать», «Word», «PDF» и «Email». Теперь договор можно открыть в печатном виде, скачать или отправить клиенту прямо из карточки." |
-| `backend/AppReleases/releases.json` | 17044 | `CSV` | "text": "Информация о постановщике также добавлена в карточки доски, подсказки календаря и выгрузку журнала задач в CSV." |
+| `backend/AppReleases/releases.json` | 425 | `PDF` | "summary": "Администратор может безопасно отменить ещё не отправленный PDF-снимок прямо в истории электронной подписи.", |
+| `backend/AppReleases/releases.json` | 435 | `PDF` | "text": "Отмена не удаляет PDF, контрольную сумму или историю и не применяется к уже отправленной версии без подтверждения внешнего провайдера." |
+| `backend/AppReleases/releases.json` | 439 | `PDF` | "text": "Повторный запрос отмены безопасен и не создаёт дублирующиеся события в истории; для каждой версии можно скачать внутренний ZIP-архив CRM с PDF, событиями и проверенными контрольными суммами." |
+| `backend/AppReleases/releases.json` | 458 | `PDF` | "text": "Для подписания сохраняется отдельный неизменяемый PDF-снимок с SHA-256; история показывает состояние envelope и каждого подписанта." |
+| `backend/AppReleases/releases.json` | 722 | `PDF` | "text": "В блоке внешнего согласования можно отметить до 10 PDF, изображений или офисных документов размером до 25 МБ каждый." |
+| `backend/AppReleases/releases.json` | 864 | `PDF` | "text": "Перед подписанием PDF сохраняется как отдельная неизменяемая версия с контрольной суммой; новая версия документа всегда получает отдельный процесс подписания." |
+| `backend/AppReleases/releases.json` | 877 | `PDF` | "summary": "Очередь безопасной доставки устойчиво обрабатывает временные задержки провайдера, крупные PDF и запоздалые статусы.", |
+| `backend/AppReleases/releases.json` | 887 | `PDF` | "text": "Очередь обрабатывает документы ограниченными пакетами, а PDF до 25 МБ копируются потоково с проверкой формата, размера и контрольной суммы." |
+| `backend/AppReleases/releases.json` | 906 | `PDF` | "text": "В карточках счета, акта и договора появилась кнопка «Мессенджер». Перед отправкой CRM формирует штатную PDF-версию и показывает получателя, канал и текст сообщения." |
+| `backend/AppReleases/releases.json` | 914 | `PDF` | "text": "Финансовые документы передаются только как PDF размером до 25 МБ через одноразовую защищённую ссылку. Внешняя отправка остаётся выключенной, пока администратор не настроит официальный канал." |
+| `backend/AppReleases/releases.json` | 1347 | `CSV` | "text": "Состояние автоконтроля добавлено в CSV, Excel, PDF и печатную форму реестра дел." |
+| `backend/AppReleases/releases.json` | 1347 | `PDF` | "text": "Состояние автоконтроля добавлено в CSV, Excel, PDF и печатную форму реестра дел." |
+| `backend/AppReleases/releases.json` | 5482 | `PDF` | "title": "Печать счета больше не зависит от PDF-генератора", |
+| `backend/AppReleases/releases.json` | 5483 | `PDF` | "summary": "Кнопки печати в карточке счета теперь открывают печатную HTML-форму напрямую. Если на сервере временно недоступно формирование PDF, пользователь все равно может распечатать счет или счет-оферту из браузера.", |
+| `backend/AppReleases/releases.json` | 5489 | `PDF` | "text": "В разделе «Счета» кнопка «Печать» больше не обращается к серверному PDF-генератору. Печатная форма открывается как обычная страница документа и сразу вызывает печать в браузере." |
+| `backend/AppReleases/releases.json` | 5493 | `PDF` | "text": "Печать счета-оферты работает по той же схеме: CRM формирует HTML-документ и печатает его без промежуточного PDF-файла, поэтому операция не должна падать с ошибкой временной недоступности сервиса PDF." |
+| `backend/AppReleases/releases.json` | 5497 | `PDF` | "text": "Скачивание PDF и отправка PDF на Яндекс.Диск по-прежнему используют серверный PDF-генератор. Если он недоступен, эти операции могут показать отдельную ошибку, но обычная печать счета из браузера продолжит работа |
+| `backend/AppReleases/releases.json` | 6618 | `PDF` | "summary": "В печатной форме счета и PDF улучшено отображение длинных названий организации, покупателя и услуги. Такие реквизиты теперь аккуратнее переносятся внутри страницы и не должны ломать внешний вид счета.", |
+| `backend/AppReleases/releases.json` | 6624 | `PDF` | "text": "В разделе «Счета» печатная форма и PDF стали устойчивее к длинным названиям продавца, покупателя и строк услуг." |
+| `backend/AppReleases/releases.json` | 6656 | `CSV` | "summary": "В разделе «Отчеты» у управленческих отчетов появилась кнопка «Печать». Печатная форма открывается в отдельной вкладке и использует те же выбранные фильтры, что и отчет на экране, CSV, Excel и PDF.", |
+| `backend/AppReleases/releases.json` | 6656 | `PDF` | "summary": "В разделе «Отчеты» у управленческих отчетов появилась кнопка «Печать». Печатная форма открывается в отдельной вкладке и использует те же выбранные фильтры, что и отчет на экране, CSV, Excel и PDF.", |
+| `backend/AppReleases/releases.json` | 6662 | `CSV` | "text": "Для управленческих отчетов добавлена печатная форма рядом с CSV, Excel и PDF." |
+| `backend/AppReleases/releases.json` | 6662 | `PDF` | "text": "Для управленческих отчетов добавлена печатная форма рядом с CSV, Excel и PDF." |
+| `backend/AppReleases/releases.json` | 6678 | `CSV` | "title": "CSV-выгрузка управленческих отчетов", |
+| `backend/AppReleases/releases.json` | 6679 | `CSV` | "summary": "В разделе «Отчеты» у управленческих отчетов появилась выгрузка в CSV рядом с Excel и PDF. Файл формируется по тем же выбранным фильтрам, что и отчет на экране, поэтому его можно использовать для дальнейшей об |
+| `backend/AppReleases/releases.json` | 6679 | `PDF` | "summary": "В разделе «Отчеты» у управленческих отчетов появилась выгрузка в CSV рядом с Excel и PDF. Файл формируется по тем же выбранным фильтрам, что и отчет на экране, поэтому его можно использовать для дальнейшей об |
+| `backend/AppReleases/releases.json` | 6685 | `CSV` | "text": "Для управленческих отчетов добавлена кнопка CSV. Выгрузка доступна там же, где уже были Excel и PDF." |
+| `backend/AppReleases/releases.json` | 6685 | `PDF` | "text": "Для управленческих отчетов добавлена кнопка CSV. Выгрузка доступна там же, где уже были Excel и PDF." |
+| `backend/AppReleases/releases.json` | 6689 | `CSV` | "text": "CSV-файл учитывает выбранный период, источник денег, счет, клиента, дело, договор, статью дохода или расхода и другие фильтры конкретного отчета." |
+| `backend/AppReleases/releases.json` | 6693 | `CSV` | "text": "Выгрузка CSV использует те же права доступа, что и остальные экспорты отчетов: скачать файл могут только пользователи с разрешением на экспорт." |
+| `backend/AppReleases/releases.json` | 7214 | `PDF` | "title": "Отчет по задачам можно выгружать в Excel и PDF", |
+| `backend/AppReleases/releases.json` | 7215 | `PDF` | "summary": "В разделе «Отчеты» серверная выгрузка управленческого отчета по задачам теперь доступна в Excel и PDF/печатном виде. В файл попадают список задач, сводка по статусам и распределение по исполнителям.", |
+| `backend/AppReleases/releases.json` | 7545 | `PDF` | "summary": "В разделе «Отчеты» фильтр по статье дохода или расхода стал применяться к сводкам по статусам актов и договоров. Теперь эти отчеты, а также их Excel/PDF/печатная форма, показывают только документы, связанные  |
+| `backend/AppReleases/releases.json` | 7640 | `PDF` | "summary": "В разделе «Отчеты» сводки по статусам счетов, актов и договоров стали лучше совпадать с общей панелью финансовых фильтров. Теперь при выборе источника денег, денежного счета или контрагента эти отчеты и их Ex |
+| `backend/AppReleases/releases.json` | 7650 | `PDF` | "text": "Excel/PDF/печатная форма этих отчетов теперь формируется по тем же финансовым фильтрам, что выбраны на странице отчетов." |
+| `backend/AppReleases/releases.json` | 7659 | `PDF` | "summary": "В разделе «Отчеты» сводка по импортам банковских выписок стала точнее работать с общей панелью фильтров. Теперь отчет и его Excel/PDF/печатная форма учитывают выбранный расчетный счет, контрагента, клиента, д |
+| `backend/AppReleases/releases.json` | 7669 | `PDF` | "text": "Excel/PDF/печатная форма отчета по импортам банка теперь формируется по тем же фильтрам, что пользователь выбрал на странице отчетов." |
+| `backend/AppReleases/releases.json` | 7678 | `PDF` | "summary": "В разделе «Отчеты» кассовая книга стала точнее совпадать с общей панелью фильтров. Теперь отчет по кассе и его Excel/PDF/печатная форма учитывают выбранного контрагента, клиента, дело, договор и статью дохода |
+| `backend/AppReleases/releases.json` | 7688 | `PDF` | "text": "Excel/PDF/печатная форма отчета по кассе теперь формируется по тем же фильтрам, что пользователь выбрал на странице отчетов." |
+| `backend/AppReleases/releases.json` | 7716 | `CSV` | "summary": "Платежные отчеты в разделе «Отчеты» стали точнее соблюдать матрицу прав. Пользователь может просматривать доступные ему финансовые сводки, но CSV, Excel и PDF/печатная форма теперь доступны только при наличии |
+| `backend/AppReleases/releases.json` | 7716 | `PDF` | "summary": "Платежные отчеты в разделе «Отчеты» стали точнее соблюдать матрицу прав. Пользователь может просматривать доступные ему финансовые сводки, но CSV, Excel и PDF/печатная форма теперь доступны только при наличии |
+| `backend/AppReleases/releases.json` | 7726 | `CSV` | "text": "Если у роли есть просмотр платежей, но нет права выгрузки, кнопки CSV, Excel и PDF в этих отчетах становятся недоступны, а прямой запрос на выгрузку отклоняется сервером." |
+| `backend/AppReleases/releases.json` | 7726 | `PDF` | "text": "Если у роли есть просмотр платежей, но нет права выгрузки, кнопки CSV, Excel и PDF в этих отчетах становятся недоступны, а прямой запрос на выгрузку отклоняется сервером." |
+| `backend/AppReleases/releases.json` | 7745 | `PDF` | "text": "Excel, PDF/печатная форма и CSV по этому отчету также закрыты для пользователей без административного доступа." |
+| `backend/AppReleases/releases.json` | 7745 | `CSV` | "text": "Excel, PDF/печатная форма и CSV по этому отчету также закрыты для пользователей без административного доступа." |
+| `backend/AppReleases/releases.json` | 7764 | `PDF` | "text": "Excel, PDF/печатная форма и CSV по этому отчету теперь доступны только при наличии права выгрузки платежей." |
+| `backend/AppReleases/releases.json` | 7764 | `CSV` | "text": "Excel, PDF/печатная форма и CSV по этому отчету теперь доступны только при наличии права выгрузки платежей." |
+| `backend/AppReleases/releases.json` | 7802 | `PDF` | "text": "В разделе «Отчеты» Excel и PDF/печатная форма отчета по банку теперь учитывают выбранный счет, контрагента, клиента, дело, договор и статью дохода или расхода." |
+| `backend/AppReleases/releases.json` | 7821 | `PDF` | "text": "В разделе «Отчеты» Excel и PDF/печатная форма отчета по кассе теперь выгружают данные только по выбранной кассе, если она указана в фильтре." |
+| `backend/AppReleases/releases.json` | 7844 | `PDF` | "text": "Excel и PDF/печатная форма отчета по кассовым ордерам выгружают ту же выборку, которую пользователь видит на экране." |
+| `backend/AppReleases/releases.json` | 7859 | `PDF` | "text": "В разделе «Отчеты» отчеты по статусам счетов, актов и договоров применяют фильтры клиента, дела и договора на экране, в Excel и PDF/печатной форме." |
+| `backend/AppReleases/releases.json` | 7910 | `PDF` | "summary": "В акте сверки клиента уточнено поведение кнопок выгрузки. Excel и PDF становятся доступны после того, как CRM загрузила данные операций и профиль организации, поэтому в документ попадает корректное название к |
+| `backend/AppReleases/releases.json` | 7916 | `PDF` | "text": "В карточке клиента в акте сверки кнопки Excel и PDF больше нельзя нажать во время формирования акта. Это предотвращает выгрузку документа с временным названием организации вместо данных из профиля компании." |
+| `backend/AppReleases/releases.json` | 10022 | `PDF` | "text": "Исправлен экранный отчет по банку: фильтры по счету, контрагенту, клиенту, делу, договору и статье доходов/расходов теперь применяются не только к Excel и PDF, но и к самой банковской сводке на странице." |
+| `backend/AppReleases/releases.json` | 10031 | `PDF` | "summary": "Excel и PDF для отчета по банку теперь формируются по той же выборке, которую пользователь видит на экране.", |
+| `backend/AppReleases/releases.json` | 10037 | `PDF` | "text": "В разделе «Отчеты» исправлена выгрузка отчета по банку: выбранные фильтры по счету, контрагенту, клиенту, делу, договору и статье доходов/расходов теперь учитываются при скачивании Excel и PDF." |
+| `backend/AppReleases/releases.json` | 10079 | `PDF` | "text": "Фильтр по договору применяется к отчетам по денежным операциям, прогнозу денежных потоков, план-факт отчету и к Excel/PDF-выгрузкам этих отчетов." |
+| `backend/AppReleases/releases.json` | 10102 | `PDF` | "text": "Фильтр по статье применяется к отчетам по денежным операциям, прогнозу денежных потоков, план-факт отчету и к Excel/PDF-выгрузкам этих отчетов." |
+| `backend/AppReleases/releases.json` | 10144 | `PDF` | "text": "Фильтр по делу применяется к отчетам по денежным операциям и к Excel/PDF-выгрузкам этих отчетов. Для фактических операций система использует связь со счетом, а для прогноза платежей — связь платежа с делом." |
+| `backend/AppReleases/releases.json` | 10167 | `PDF` | "text": "Фильтр по клиенту применяется к отчетам по денежным операциям и к Excel/PDF-выгрузкам этих отчетов." |
+| `backend/AppReleases/releases.json` | 10236 | `PDF` | "text": "Фильтр применяется к финансовым отчетам по денежным операциям, прогнозу денежных потоков и к Excel/PDF-выгрузкам этих отчетов." |
+| `backend/AppReleases/releases.json` | 10259 | `PDF` | "text": "Фильтр счета применяется к финансовым отчетам по денежным операциям, прогнозу денежных потоков и к Excel/PDF-выгрузкам этих отчетов." |
+| `backend/AppReleases/releases.json` | 10282 | `PDF` | "text": "Фильтр применяется к финансовым отчетам по денежным операциям и к их выгрузкам Excel и PDF, чтобы данные на экране и в файлах совпадали." |
+| `backend/AppReleases/releases.json` | 10301 | `CSV` | "text": "В разделе «Отчеты» у блоков «Отчет по счетам оплаты», «Отчет по оплаченным счетам», «Отчет по статусам счетов», «Отчет по статусам актов» и «Отчет по статусам договоров» теперь доступны выгрузки CSV, Excel и PDF |
+| `backend/AppReleases/releases.json` | 10301 | `PDF` | "text": "В разделе «Отчеты» у блоков «Отчет по счетам оплаты», «Отчет по оплаченным счетам», «Отчет по статусам счетов», «Отчет по статусам актов» и «Отчет по статусам договоров» теперь доступны выгрузки CSV, Excel и PDF |
+| `backend/AppReleases/releases.json` | 10313 | `PDF` | "text": "PDF-выгрузки можно использовать как печатные формы для сверки оплат и контроля статусов счетов, актов и договоров." |
+| `backend/AppReleases/releases.json` | 10328 | `CSV` | "text": "В разделе «Отчеты» у блоков «План-факт отчет», «Отчет по авансам» и «Отчет по приоритетам платежей» теперь доступны выгрузки CSV, Excel и PDF." |
+| `backend/AppReleases/releases.json` | 10328 | `PDF` | "text": "В разделе «Отчеты» у блоков «План-факт отчет», «Отчет по авансам» и «Отчет по приоритетам платежей» теперь доступны выгрузки CSV, Excel и PDF." |
+| `backend/AppReleases/releases.json` | 10340 | `PDF` | "text": "PDF-выгрузки можно использовать как печатные формы для сверки план-факта, авансов и распределения операций по приоритетам." |
+| `backend/AppReleases/releases.json` | 10355 | `CSV` | "text": "В разделе «Отчеты» у блоков «Отчет по кассе» и «Отчет по банку» теперь доступны выгрузки CSV, Excel и PDF." |
+| `backend/AppReleases/releases.json` | 10355 | `PDF` | "text": "В разделе «Отчеты» у блоков «Отчет по кассе» и «Отчет по банку» теперь доступны выгрузки CSV, Excel и PDF." |
+| `backend/AppReleases/releases.json` | 10367 | `PDF` | "text": "PDF-выгрузки можно использовать как печатные формы для сверки кассовых и банковских движений за выбранный период." |
+| `backend/AppReleases/releases.json` | 10382 | `CSV` | "text": "В разделе «Отчеты» у блока «Отчет по импортам из таблиц» теперь доступны выгрузки CSV, Excel и PDF." |
+| `backend/AppReleases/releases.json` | 10382 | `PDF` | "text": "В разделе «Отчеты» у блока «Отчет по импортам из таблиц» теперь доступны выгрузки CSV, Excel и PDF." |
+| `backend/AppReleases/releases.json` | 10390 | `PDF` | "text": "PDF-выгрузку можно использовать как печатную форму для контроля табличных загрузок, ошибок и откатов с конфликтами." |
+| `backend/AppReleases/releases.json` | 10405 | `CSV` | "text": "В разделе «Отчеты» у блока «Отчет по импортам банковских выписок» теперь доступны выгрузки CSV, Excel и PDF." |
+| `backend/AppReleases/releases.json` | 10405 | `PDF` | "text": "В разделе «Отчеты» у блока «Отчет по импортам банковских выписок» теперь доступны выгрузки CSV, Excel и PDF." |
+| `backend/AppReleases/releases.json` | 10413 | `PDF` | "text": "PDF-выгрузку можно использовать как печатную форму для контроля проблемных импортов и заблокированных откатов." |
+| `backend/AppReleases/releases.json` | 10428 | `CSV` | "text": "В разделе «Отчеты» у блока «Отчет по кассовым ордерам» теперь доступны выгрузки CSV, Excel и PDF." |
+| `backend/AppReleases/releases.json` | 10428 | `PDF` | "text": "В разделе «Отчеты» у блока «Отчет по кассовым ордерам» теперь доступны выгрузки CSV, Excel и PDF." |
+| `backend/AppReleases/releases.json` | 10436 | `PDF` | "text": "PDF-выгрузку можно использовать как печатную форму для сверки приходных и расходных кассовых ордеров за выбранный период." |
+| `backend/AppReleases/releases.json` | 10451 | `CSV` | "text": "В разделе «Отчеты» у блока «Отчет по валютам операций» теперь доступны выгрузки CSV, Excel и PDF." |
+| `backend/AppReleases/releases.json` | 10451 | `PDF` | "text": "В разделе «Отчеты» у блока «Отчет по валютам операций» теперь доступны выгрузки CSV, Excel и PDF." |
+| `backend/AppReleases/releases.json` | 10459 | `PDF` | "text": "PDF-выгрузку можно использовать как печатную форму для сверки оборотов по валютам операций." |
+| `backend/AppReleases/releases.json` | 10474 | `CSV` | "text": "В разделе «Отчеты» у блока «Отчет по журнальным статусам» теперь доступны выгрузки CSV, Excel и PDF." |
+| `backend/AppReleases/releases.json` | 10474 | `PDF` | "text": "В разделе «Отчеты» у блока «Отчет по журнальным статусам» теперь доступны выгрузки CSV, Excel и PDF." |
+| `backend/AppReleases/releases.json` | 10482 | `PDF` | "text": "PDF-выгрузку можно использовать как печатную форму для контроля операций, которые еще находятся в обработке или требуют исправления." |
+| `backend/AppReleases/releases.json` | 10497 | `CSV` | "text": "В разделе «Отчеты» у блока «Отчет по статусам сверки» теперь доступны выгрузки CSV, Excel и PDF." |
+| `backend/AppReleases/releases.json` | 10497 | `PDF` | "text": "В разделе «Отчеты» у блока «Отчет по статусам сверки» теперь доступны выгрузки CSV, Excel и PDF." |
+| `backend/AppReleases/releases.json` | 10505 | `PDF` | "text": "PDF-выгрузку можно использовать как печатную форму для контроля несверенных операций и ручной проверки платежей." |
+| `backend/AppReleases/releases.json` | 10520 | `CSV` | "text": "В разделе «Отчеты» у блока «Отчет по назначениям платежей» теперь доступны выгрузки CSV, Excel и PDF." |
+| `backend/AppReleases/releases.json` | 10520 | `PDF` | "text": "В разделе «Отчеты» у блока «Отчет по назначениям платежей» теперь доступны выгрузки CSV, Excel и PDF." |
+| `backend/AppReleases/releases.json` | 10528 | `PDF` | "text": "PDF-выгрузку можно использовать как печатную форму для сверки повторяющихся оснований оплат и списаний." |
+| `backend/AppReleases/releases.json` | 10543 | `CSV` | "text": "В разделе «Отчеты» у блока «Отчет по платежным поручениям» теперь доступны выгрузки CSV, Excel и PDF." |
+| `backend/AppReleases/releases.json` | 10543 | `PDF` | "text": "В разделе «Отчеты» у блока «Отчет по платежным поручениям» теперь доступны выгрузки CSV, Excel и PDF." |
+| `backend/AppReleases/releases.json` | 10551 | `PDF` | "text": "PDF-выгрузку можно использовать как печатную форму для сверки операций по номерам платежных поручений." |
+| `backend/AppReleases/releases.json` | 10566 | `CSV` | "text": "В разделе «Отчеты» у блока «Отчет по НДС» теперь доступны выгрузки CSV, Excel и PDF." |
+| `backend/AppReleases/releases.json` | 10566 | `PDF` | "text": "В разделе «Отчеты» у блока «Отчет по НДС» теперь доступны выгрузки CSV, Excel и PDF." |
+| `backend/AppReleases/releases.json` | 10574 | `PDF` | "text": "PDF-выгрузку можно использовать как печатную форму для сверки начисленного и входящего НДС за выбранный период." |
+| `backend/AppReleases/releases.json` | 10589 | `CSV` | "text": "В разделе «Отчеты» у блока «Отчет по точкам продаж» теперь доступны выгрузки CSV, Excel и PDF." |
+| `backend/AppReleases/releases.json` | 10589 | `PDF` | "text": "В разделе «Отчеты» у блока «Отчет по точкам продаж» теперь доступны выгрузки CSV, Excel и PDF." |
+| `backend/AppReleases/releases.json` | 10597 | `PDF` | "text": "PDF-выгрузку можно использовать как печатную форму для сверки финансового результата по точкам продаж и каналам." |
+| `backend/AppReleases/releases.json` | 10612 | `CSV` | "text": "В разделе «Отчеты» у блока «Отчет по направлениям» теперь доступны выгрузки CSV, Excel и PDF." |
+| `backend/AppReleases/releases.json` | 10612 | `PDF` | "text": "В разделе «Отчеты» у блока «Отчет по направлениям» теперь доступны выгрузки CSV, Excel и PDF." |
+| `backend/AppReleases/releases.json` | 10620 | `PDF` | "text": "PDF-выгрузку можно использовать как печатную форму для обсуждения структуры доходов и расходов по направлениям бизнеса." |
+| `backend/AppReleases/releases.json` | 10635 | `CSV` | "text": "В разделе «Отчеты» у блока «Отчет по проектам» теперь доступны выгрузки CSV, Excel и PDF." |
+| `backend/AppReleases/releases.json` | 10635 | `PDF` | "text": "В разделе «Отчеты» у блока «Отчет по проектам» теперь доступны выгрузки CSV, Excel и PDF." |
+| `backend/AppReleases/releases.json` | 10643 | `PDF` | "text": "PDF-выгрузку можно использовать как печатную форму для обсуждения финансового результата проектов." |
+| `backend/AppReleases/releases.json` | 10658 | `CSV` | "text": "В разделе «Отчеты» у блока «Отчет по контрагентам» теперь доступны выгрузки CSV, Excel и PDF." |
+| `backend/AppReleases/releases.json` | 10658 | `PDF` | "text": "В разделе «Отчеты» у блока «Отчет по контрагентам» теперь доступны выгрузки CSV, Excel и PDF." |
+| `backend/AppReleases/releases.json` | 10666 | `PDF` | "text": "PDF-выгрузку можно использовать как печатную форму для сверки оборотов по контрагентам за выбранный период." |
+| `backend/AppReleases/releases.json` | 10681 | `CSV` | "text": "В разделе «Отчеты» у блока «Отчет по статьям доходов и расходов» теперь доступны выгрузки CSV, Excel и PDF." |
+| `backend/AppReleases/releases.json` | 10681 | `PDF` | "text": "В разделе «Отчеты» у блока «Отчет по статьям доходов и расходов» теперь доступны выгрузки CSV, Excel и PDF." |
+| `backend/AppReleases/releases.json` | 10689 | `PDF` | "text": "PDF-выгрузку можно использовать как печатную форму для обсуждения структуры доходов и расходов за выбранный период." |
+| `backend/AppReleases/releases.json` | 10704 | `CSV` | "text": "В разделе «Отчеты» у блока «Отчет движения денежных средств» теперь доступны выгрузки CSV, Excel и PDF." |
+| `backend/AppReleases/releases.json` | 10704 | `PDF` | "text": "В разделе «Отчеты» у блока «Отчет движения денежных средств» теперь доступны выгрузки CSV, Excel и PDF." |
+| `backend/AppReleases/releases.json` | 10712 | `PDF` | "text": "PDF-выгрузку можно использовать как печатную форму фактического движения денег за выбранный период." |
+| `backend/AppReleases/releases.json` | 10727 | `CSV` | "text": "В разделе «Отчеты» у блока «Прогноз денежных потоков» теперь доступны выгрузки CSV, Excel и PDF." |
+| `backend/AppReleases/releases.json` | 10727 | `PDF` | "text": "В разделе «Отчеты» у блока «Прогноз денежных потоков» теперь доступны выгрузки CSV, Excel и PDF." |
+| `backend/AppReleases/releases.json` | 10735 | `PDF` | "text": "PDF-выгрузку можно использовать как печатную форму прогноза для обсуждения плановых поступлений и списаний." |
+| `backend/AppReleases/releases.json` | 10781 | `CSV` | "text": "CSV, Excel и PDF-выгрузки финансового отчета по делам также включают расходы, маржу и маржинальность." |
+| `backend/AppReleases/releases.json` | 10781 | `PDF` | "text": "CSV, Excel и PDF-выгрузки финансового отчета по делам также включают расходы, маржу и маржинальность." |
+| `backend/AppReleases/releases.json` | 10915 | `PDF` | "text": "На экране акта сверки, в Excel и в PDF авансовые строки подписываются как авансы, чтобы их было проще отличить от закрывающих оплат." |
+| `backend/AppReleases/releases.json` | 11897 | `PDF` | "text": "В меню «Скачать» появились варианты «PDF счет-оферта» и «Word счет-оферта»." |
+| `backend/AppReleases/releases.json` | 12281 | `ICS` | "text": "Для задач, календаря дел, ICS-календарей, заметок платежей, автоматической сверки баланса и проверки просрочки платежей убрана зависимость от часового пояса сервера, если профильный часовой пояс пользователя не  |
+| `backend/AppReleases/releases.json` | 12393 | `CSV` | "summary": "В разделе \"Отчеты\" скачанные CSV, Excel и PDF-файлы теперь единообразно показывают, когда отчет был сформирован, с учетом часового пояса пользователя из профиля. Это помогает сотрудникам из разных регионов  |
+| `backend/AppReleases/releases.json` | 12393 | `PDF` | "summary": "В разделе \"Отчеты\" скачанные CSV, Excel и PDF-файлы теперь единообразно показывают, когда отчет был сформирован, с учетом часового пояса пользователя из профиля. Это помогает сотрудникам из разных регионов  |
+| `backend/AppReleases/releases.json` | 12403 | `CSV` | "text": "CSV и Excel-выгрузки отчета по юридической работе теперь показывают время формирования по часовому поясу профиля так же, как PDF." |
+| `backend/AppReleases/releases.json` | 12403 | `PDF` | "text": "CSV и Excel-выгрузки отчета по юридической работе теперь показывают время формирования по часовому поясу профиля так же, как PDF." |
+| `backend/AppReleases/releases.json` | 12492 | `CSV` | "summary": "В разделе \"Платежи\" появились выгрузки текущего списка в CSV и Excel. В файл попадают те же платежи, которые пользователь отобрал фильтрами на экране, а служебное время формирования и дата создания платежа  |
+| `backend/AppReleases/releases.json` | 12498 | `CSV` | "text": "В журнале платежей добавлены кнопки выгрузки в CSV и Excel для пользователей с правом экспорта платежей." |
+| `backend/AppReleases/releases.json` | 12690 | `CSV` | "summary": "В выгрузках отчета по юридической работе уточнены даты и имена файлов. CSV, Excel и PDF теперь показывают точные даты создания дел и судебных заседаний с учетом часового пояса профиля пользователя, а CSV-файл |
+| `backend/AppReleases/releases.json` | 12690 | `PDF` | "summary": "В выгрузках отчета по юридической работе уточнены даты и имена файлов. CSV, Excel и PDF теперь показывают точные даты создания дел и судебных заседаний с учетом часового пояса профиля пользователя, а CSV-файл |
+| `backend/AppReleases/releases.json` | 12700 | `CSV` | "text": "CSV-файл юридического отчета теперь скачивается с именем, в котором указаны дата и время формирования по часовому поясу профиля пользователя." |
+| `backend/AppReleases/releases.json` | 12719 | `CSV` | "text": "CSV-выгрузки юридических отчетов теперь используют то же правило дат, что и экран отчета: дата без времени остается календарной датой, а точное время отображается по часовому поясу профиля." |
+| `backend/AppReleases/releases.json` | 12772 | `PDF` | "text": "В HTML, Word и PDF-формах счетов дата счета, срок оплаты, дата договора-основания и дата выдачи паспорта больше не должны отображаться со сдвигом." |
+| `backend/AppReleases/releases.json` | 12941 | `PDF` | "text": "Имена файлов PDF и Excel для отчетов теперь используют локальное время профиля, чтобы время формирования совпадало с тем, что пользователь видит внутри отчета." |
+| `backend/AppReleases/releases.json` | 12950 | `CSV` | "summary": "В CSV, Excel, PDF и печатной версии реестра дел время заседаний и активности теперь отображается по часовому поясу пользователя из профиля.", |
+| `backend/AppReleases/releases.json` | 12950 | `PDF` | "summary": "В CSV, Excel, PDF и печатной версии реестра дел время заседаний и активности теперь отображается по часовому поясу пользователя из профиля.", |
+| `backend/AppReleases/releases.json` | 12960 | `CSV` | "text": "Поля последней активности и просмотра ответственным в CSV и Excel используют тот же часовой пояс профиля, что и интерфейс CRM." |
+| `backend/AppReleases/releases.json` | 12964 | `PDF` | "text": "PDF и печатная версия реестра дел также показывают дату и время активности в локальном времени пользователя." |
+| `backend/AppReleases/releases.json` | 13102 | `ICS` | "text": "ICS-выгрузка календаря дел сохраняет точные моменты времени без двойного сдвига, поэтому внешние календари получают корректное время события." |
+| `backend/AppReleases/releases.json` | 13593 | `PDF` | "title": "PDF-отчеты учитывают часовой пояс профиля", |
+| `backend/AppReleases/releases.json` | 13594 | `PDF` | "summary": "Уточнено отображение времени формирования PDF-отчетов и подготовлено единое правило для системных отметок времени.", |
+| `backend/AppReleases/releases.json` | 13600 | `PDF` | "text": "В PDF-отчетах по юридической работе и управленческих отчетах строка «сформировано» теперь показывает время по часовому поясу пользователя из профиля, а не по локальному времени сервера." |
+| `backend/AppReleases/releases.json` | 13685 | `CSV` | "text": "В отчете по загрузке юристов ближайшие задачи теперь показываются и выгружаются в CSV с учетом часового пояса профиля. В карточке дела время последнего просмотра, подтверждения активности и загрузки документов т |
+| `backend/AppReleases/releases.json` | 13709 | `CSV` | "text": "Экспорт реестра дел и печатные формы заказ-наряда теперь показывают время формирования по часовому поясу пользователя. Имена файлов CSV, Excel и PDF также получают дату и время из профиля сотрудника." |
+| `backend/AppReleases/releases.json` | 13709 | `PDF` | "text": "Экспорт реестра дел и печатные формы заказ-наряда теперь показывают время формирования по часовому поясу пользователя. Имена файлов CSV, Excel и PDF также получают дату и время из профиля сотрудника." |
+| `backend/AppReleases/releases.json` | 13728 | `ICS` | "text": "В настройках внешних календарей добавлен блок «Выполненные задачи в календарях». Администратор может оставить выполненные задачи в календарях с отдельной отметкой или скрывать их после выполнения. Правило примен |
+| `backend/AppReleases/releases.json` | 13736 | `ICS` | "text": "Исправлена выгрузка календаря дел и календаря задач в ICS: судебные заседания, задачи и другие события с точным временем больше не получают сдвиг при добавлении во внешний календарь." |
+| `backend/AppReleases/releases.json` | 14711 | `PDF` | "text": "При выгрузке акта в Word или PDF CRM заменяет символы, которые могут мешать сохранению файла на разных устройствах и серверах. Документ по-прежнему содержит исходный номер акта внутри печатной формы." |
+| `backend/AppReleases/releases.json` | 14777 | `PDF` | "summary": "В карточке акта появилась ручная отправка PDF акта на Яндекс.Диск по правилам CRM-синхронизации.", |
+| `backend/AppReleases/releases.json` | 14783 | `PDF` | "text": "В карточке акта рядом с действиями отправки, печати и скачивания появилась кнопка «Я.Диск». Она формирует PDF акта и отправляет его в подключенный Яндекс.Диск по шаблонам папки и имени файла из раздела «Я.Диск». |
+| `backend/AppReleases/releases.json` | 14796 | `PDF` | "summary": "В карточке счета появилась ручная отправка PDF счета на Яндекс.Диск по правилам CRM-синхронизации.", |
+| `backend/AppReleases/releases.json` | 14802 | `PDF` | "text": "В карточке счета рядом с действиями отправки, печати и скачивания появилась кнопка «Я.Диск». Она формирует PDF счета и отправляет его в подключенный Яндекс.Диск по шаблонам папки и имени файла из раздела «Я.Диск |
+| `backend/AppReleases/releases.json` | 14815 | `PDF` | "summary": "В карточке договора появилась ручная отправка PDF договора на Яндекс.Диск по настроенным правилам CRM-синхронизации.", |
+| `backend/AppReleases/releases.json` | 14821 | `PDF` | "text": "В карточке договора рядом с действиями Word, PDF и Email появилась кнопка «Я.Диск». Она формирует PDF договора и отправляет его в подключенный Яндекс.Диск по шаблонам папки и имени файла из раздела «Я.Диск»." |
+| `backend/AppReleases/releases.json` | 14974 | `PDF` | "text": "Акт сверки теперь печатается в фиксированной альбомной форме A4 с размерами колонок, полями, итогами и блоками подписей, приближенными к приложенному бухгалтерскому образцу. Для Excel сохранена структура эталонн |
+| `backend/AppReleases/releases.json` | 15001 | `PDF` | "text": "Кнопка Excel выгружает акт сверки в формате .xls с той же бухгалтерской структурой, а кнопка PDF открывает чистую печатную форму без лишних элементов интерфейса." |
+| `backend/AppReleases/releases.json` | 15737 | `ICS` | "text": "ICS-выгрузка отдельно отмечена как доступный безопасный контур, а Google Calendar и Яндекс Календарь остаются в подготовительном режиме до закрытия обязательных пунктов." |
+| `backend/AppReleases/releases.json` | 15750 | `ICS` | "summary": "В настройках интеграций появился блок состояния календарных провайдеров: видно, что ICS-выгрузка уже доступна, а Google Calendar и Яндекс Календарь ждут отдельной настройки и приемки.", |
+| `backend/AppReleases/releases.json` | 15756 | `ICS` | "text": "В разделе «Ключи и внешние сервисы» добавлен блок «Провайдеры календарной синхронизации». Он показывает доступность ICS, Google Calendar и Яндекс Календаря." |
+| `backend/AppReleases/releases.json` | 15773 | `ICS` | "summary": "Выгрузки календаря задач и календаря дел в ICS теперь фиксируются в общем журнале действий, чтобы администраторы могли видеть, когда и кем был сформирован файл календаря.", |
+| `backend/AppReleases/releases.json` | 15779 | `ICS` | "text": "В журнале всех действий появился тип «Синхронизация календаря». В нем отражаются выгрузки ICS-файлов из журнала задач и календаря дел." |
+| `backend/AppReleases/releases.json` | 15795 | `ICS` | "title": "Настройка напоминаний в ICS-календарях", |
+| `backend/AppReleases/releases.json` | 15796 | `ICS` | "summary": "В журнале задач можно выбрать, за сколько времени напоминать о событиях при выгрузке календаря задач и календаря дел в ICS.", |
+| `backend/AppReleases/releases.json` | 15802 | `ICS` | "text": "Перед выгрузкой ICS в журнале задач теперь можно выбрать набор напоминаний: стандартный вариант за 1 час и 15 минут, только за 1 час, за 2 часа и 30 минут или за 1 день." |
+| `backend/AppReleases/releases.json` | 15810 | `ICS` | "text": "Если напоминания не выбраны явно, ICS-файлы продолжают выгружаться со стандартными уведомлениями за 1 час и за 15 минут до события." |
+| `backend/AppReleases/releases.json` | 15979 | `PDF` | "title": "Excel и PDF выгрузки юридических отчетов", |
+| `backend/AppReleases/releases.json` | 15980 | `CSV` | "summary": "В разделе «Отчеты» расширены выгрузки управленческих юридических отчетов: теперь ключевые отчеты по делам можно сохранять не только в CSV, но и в Excel или PDF.", |
+| `backend/AppReleases/releases.json` | 15980 | `PDF` | "summary": "В разделе «Отчеты» расширены выгрузки управленческих юридических отчетов: теперь ключевые отчеты по делам можно сохранять не только в CSV, но и в Excel или PDF.", |
+| `backend/AppReleases/releases.json` | 15986 | `PDF` | "text": "Для финансового отчета по делам, статистики успешности, текущих дел, загрузки юристов, просроченных процессуальных сроков и диагностики активности добавлены кнопки Excel и PDF." |
+| `backend/AppReleases/releases.json` | 15994 | `PDF` | "text": "PDF и Excel показывают сводные показатели и детальные строки отчета, чтобы руководитель мог передать файл дальше без ручной сборки данных из нескольких блоков CRM." |
+| `backend/AppReleases/releases.json` | 16017 | `CSV` | "text": "Отчет учитывает доступ пользователя к делам, группирует статистику по ответственным, типам и статусам, а строки можно выгрузить в CSV." |
+| `backend/AppReleases/releases.json` | 16036 | `CSV` | "text": "Отчет учитывает доступ пользователя к делам и платежам, группирует суммы по ответственным и статусам дел, а строки отчета можно выгрузить в CSV." |
+| `backend/AppReleases/releases.json` | 16330 | `ICS` | "summary": "ICS-файл журнала задач теперь передает во внешние календари напоминания перед началом задачи.", |
+| `backend/AppReleases/releases.json` | 16336 | `ICS` | "text": "При выгрузке календаря задач в ICS в каждую задачу добавляются напоминания за 1 час и за 15 минут до срока выполнения." |
+| `backend/AppReleases/releases.json` | 16349 | `ICS` | "summary": "ICS-файл календаря дел теперь передает во внешние календари напоминания по событиям с точным временем.", |
+| `backend/AppReleases/releases.json` | 16355 | `ICS` | "text": "При выгрузке календаря дел в ICS для судебных заседаний, задач и других событий с указанным временем добавляются напоминания за 1 час и за 15 минут до начала." |
+| `backend/AppReleases/releases.json` | 16390 | `PDF` | "title": "Выгрузка реестра дел в Excel и PDF", |
+| `backend/AppReleases/releases.json` | 16391 | `CSV` | "summary": "В разделе «Дела» расширены выгрузки реестра: теперь текущую выборку можно скачать не только в CSV, но и в Excel или PDF.", |
+| `backend/AppReleases/releases.json` | 16391 | `PDF` | "summary": "В разделе «Дела» расширены выгрузки реестра: теперь текущую выборку можно скачать не только в CSV, но и в Excel или PDF.", |
+| `backend/AppReleases/releases.json` | 16397 | `CSV` | "text": "В реестре дел рядом с кнопкой CSV появились кнопки Excel и PDF. Они формируют файл по текущим фильтрам, сортировке и выбранному режиму реестра." |
+| `backend/AppReleases/releases.json` | 16397 | `PDF` | "text": "В реестре дел рядом с кнопкой CSV появились кнопки Excel и PDF. Они формируют файл по текущим фильтрам, сортировке и выбранному режиму реестра." |
+| `backend/AppReleases/releases.json` | 16401 | `PDF` | "text": "Excel-файл содержит основные данные по делам, задачам, финансам, суду и активности, а PDF использует печатную форму реестра с итогами по выборке." |
+| `backend/AppReleases/releases.json` | 16413 | `ICS` | "title": "Выгрузка календаря дел в ICS", |
+| `backend/AppReleases/releases.json` | 16414 | `ICS` | "summary": "В календаре дел появилась выгрузка судебных событий и процессуальных сроков в файл ICS для внешних календарей.", |
+| `backend/AppReleases/releases.json` | 16420 | `ICS` | "text": "В блоке «Календарь дел» добавлена кнопка ICS. Она формирует файл с судебными заседаниями, процессуальными сроками и другими событиями дел за текущий период календаря." |
+| `backend/AppReleases/releases.json` | 16436 | `PDF` | "title": "Выгрузка юридического отчета в Excel и PDF", |
+| `backend/AppReleases/releases.json` | 16443 | `CSV` | "text": "В отчете «Юридическая работа» появились серверные выгрузки CSV, Excel и PDF. Кнопки доступны в шапке отчета рядом с обновлением данных." |
+| `backend/AppReleases/releases.json` | 16443 | `PDF` | "text": "В отчете «Юридическая работа» появились серверные выгрузки CSV, Excel и PDF. Кнопки доступны в шапке отчета рядом с обновлением данных." |
+| `backend/AppReleases/releases.json` | 16525 | `PDF` | "summary": "В журнале задач появился отчет «Планинг по клиентам», который можно выгрузить в Word, PDF или HTML для передачи и печати.", |
+| `backend/AppReleases/releases.json` | 16531 | `PDF` | "text": "В «Журнале задач» добавлены кнопки Word, PDF и HTML. Они формируют отчет «Планинг по клиентам» с группировкой задач по клиенту и делу." |
+| `backend/AppReleases/releases.json` | 16535 | `PDF` | "text": "В отчете выводятся номер строки, вид задачи, описание, срок, статус, исполнитель и комментарий. Формат подходит для просмотра в браузере, печати, отправки в PDF и открытия в Word." |
+| `backend/AppReleases/releases.json` | 16975 | `CSV` | "text": "Номер связанного акта также попадает в выгрузки журнала в CSV, Excel и печатную форму PDF." |
+| `backend/AppReleases/releases.json` | 16975 | `PDF` | "text": "Номер связанного акта также попадает в выгрузки журнала в CSV, Excel и печатную форму PDF." |
+| `backend/AppReleases/releases.json` | 17127 | `PDF` | "text": "В карточке расторгнутого договора появилась кнопка «Соглашение PDF». Она формирует соглашение о расторжении с данными сторон, датой расторжения, причиной, условиями и финансовыми условиями из карточки договора." |
+| `backend/AppReleases/releases.json` | 17154 | `PDF` | "text": "Печать договора, скачивание в Word или PDF и отправка договора по email теперь используют активный шаблон из настроек, поэтому оформление можно поддерживать в одном месте." |
+| `backend/AppReleases/releases.json` | 17211 | `PDF` | "text": "В карточке договора появились действия «Печать», «Word», «PDF» и «Email». Теперь договор можно открыть в печатном виде, скачать или отправить клиенту прямо из карточки." |
+| `backend/AppReleases/releases.json` | 17242 | `CSV` | "text": "Информация о постановщике также добавлена в карточки доски, подсказки календаря и выгрузку журнала задач в CSV." |
 | `backend/Controllers/ActsController.cs` | 1826 | `PDF` | "PDF-генератор не зарегистрирован на сервере. Проверьте настройки приложения."); |
 | `backend/Controllers/CashOrdersController.cs` | 1308 | `PDF` | "PDF-генератор не зарегистрирован на сервере. Проверьте настройки приложения."); |
 | `backend/Controllers/CashOrdersController.cs` | 889 | `DownloadPdf` | public async Task<IActionResult> DownloadPdf(int id, CancellationToken ct) |
-| `backend/Controllers/ClientPortalController.cs` | 131 | `DownloadDocument` | public async Task<IActionResult> DownloadDocument( |
+| `backend/Controllers/ClientPortalController.cs` | 133 | `DownloadDocument` | public async Task<IActionResult> DownloadDocument( |
 | `backend/Controllers/ContactsController.cs` | 418 | `ImportYealinkXml` | public async Task<ActionResult<YealinkContactImportResultDto>> ImportYealinkXml( |
 | `backend/Controllers/ContactsController.cs` | 369 | `DownloadYealinkXml` | public async Task<IActionResult> DownloadYealinkXml(CancellationToken ct) |
 | `backend/Controllers/ContractsController.cs` | 1265 | `PDF` | "PDF-генератор не зарегистрирован на сервере. Проверьте настройки приложения."); |
@@ -1831,10 +1831,10 @@ JS/TS места, где браузер может применить локал
 | `backend/Controllers/ElectronicSignaturesController.cs` | 82 | `PDF` | return BadRequest(new { message = "Сформированный PDF не передан." }); |
 | `backend/Controllers/ElectronicSignaturesController.cs` | 183 | `DownloadEvidencePackage` | public async Task<IActionResult> DownloadEvidencePackage(Guid publicId, CancellationToken ct) |
 | `backend/Controllers/InvoicesController.cs` | 3159 | `PDF` | "PDF-генератор не зарегистрирован на сервере. Проверьте настройки приложения."); |
-| `backend/Controllers/MessengerDocumentDeliveriesController.cs` | 183 | `PDF` | return BadRequest(new { message = "Сформированный PDF не передан." }); |
-| `backend/Controllers/MessengerDocumentDeliveriesController.cs` | 155 | `DownloadPath` | DownloadPath = prepared.Token is null |
-| `backend/Controllers/MessengerDocumentDeliveriesController.cs` | 259 | `DownloadCount` | item.DownloadCount, |
-| `backend/Controllers/MessengerDocumentDeliveriesController.cs` | 389 | `Download` | public async Task<IActionResult> Download(Guid publicId, [FromQuery] string? token, CancellationToken ct) |
+| `backend/Controllers/MessengerDocumentDeliveriesController.cs` | 181 | `PDF` | return BadRequest(new { message = "Сформированный PDF не передан." }); |
+| `backend/Controllers/MessengerDocumentDeliveriesController.cs` | 257 | `DownloadCount` | item.DownloadCount, |
+| `backend/Controllers/MessengerDocumentDeliveriesController.cs` | 388 | `Download` | public async Task<IActionResult> Download( |
+| `backend/Controllers/MessengerDocumentDeliveriesController.cs` | 409 | `DownloadSecurely` | public async Task<IActionResult> DownloadSecurely( |
 | `backend/Controllers/MoneyOperationsController.cs` | 2185 | `CSV` | return BadRequest("Поддерживаются файлы CSV, TSV, TXT и 1C ClientBankExchange."); |
 | `backend/Controllers/MoneyOperationsController.cs` | 3405 | `PDF` | "PDF-генератор не зарегистрирован на сервере. Проверьте настройки приложения."); |
 | `backend/Controllers/MoneyOperationsController.cs` | 413 | `ExportCsv` | public async Task<IActionResult> ExportCsv( |
@@ -1847,8 +1847,8 @@ JS/TS места, где браузер может применить локал
 | `backend/Controllers/MoneyOperationsController.cs` | 2631 | `ImportBankStatementItemsAsync` | return Ok(await ImportBankStatementItemsAsync( |
 | `backend/Controllers/MoneyOperationsController.cs` | 3482 | `ImportBankStatementItemsAsync` | private async Task<BankStatementImportResultDto> ImportBankStatementItemsAsync( |
 | `backend/Controllers/MoneyOperationsController.cs` | 3903 | `ImportKey` | ImportKey = importKey, |
-| `backend/Controllers/PublicWorkOrderApprovalController.cs` | 88 | `DownloadAttachment` | public async Task<IActionResult> DownloadAttachment( |
-| `backend/Controllers/PublicWorkOrderApprovalController.cs` | 97 | `DownloadAttachmentAsync` | var file = await _service.DownloadAttachmentAsync( |
+| `backend/Controllers/PublicWorkOrderApprovalController.cs` | 90 | `DownloadAttachment` | public async Task<IActionResult> DownloadAttachment( |
+| `backend/Controllers/PublicWorkOrderApprovalController.cs` | 99 | `DownloadAttachmentAsync` | var file = await _service.DownloadAttachmentAsync( |
 | `backend/Controllers/ReportsController.cs` | 279 | `PDF` | return Problem("Сервис формирования PDF недоступен."); |
 | `backend/Controllers/ReportsController.cs` | 440 | `PDF` | return Problem("Сервис формирования PDF недоступен."); |
 | `backend/Controllers/ReportsController.cs` | 224 | `ExportLegalWorkCsv` | public async Task<IActionResult> ExportLegalWorkCsv( |
@@ -1867,7 +1867,7 @@ JS/TS места, где браузер может применить локал
 | `backend/Controllers/StickyNotesController.cs` | 24 | `ImportantNoteDeletedAction` | private const string ImportantNoteDeletedAction = "deleted"; |
 | `backend/Controllers/StickyNotesController.cs` | 652 | `ImportantNoteDeletedAction` | await NotifyImportantSharedBoardChangeAsync(note, boardTitle, ImportantNoteDeletedAction, access.Value, ct); |
 | `backend/Controllers/StickyNotesController.cs` | 1072 | `ImportantNotePinnedAction` | return ImportantNotePinnedAction; |
-| Еще 1174 совпадений | - | - | Категория ограничена первыми 250 строками, полное количество указано в сводке. |
+| Еще 1229 совпадений | - | - | Категория ограничена первыми 250 строками, полное количество указано в сводке. |
 
 ### Интеграции календарей
 
@@ -1875,94 +1875,95 @@ Google/Yandex/ICS синхронизация, где надо хранить UTC
 
 | Файл | Строка | Совпадение | Контекст |
 | --- | ---: | --- | --- |
-| `backend/AppReleases/releases.json` | 4896 | `Google Calendar` | "text": "Синхронизация с Google Calendar стала устойчивее к кратковременным сбоям внешнего сервиса. Если Google временно недоступен, CRM повторяет запрос и не показывает лишнее предупреждение пользователям из-за одиночно |
-| `backend/AppReleases/releases.json` | 5152 | `Google Calendar` | "summary": "Исправлена ситуация после переноса VPS, когда ранее подключенный Google Calendar не мог синхронизироваться из-за серверных ключей защиты. Уже подключенные календари снова продолжают создавать и обновлять собы |
-| `backend/AppReleases/releases.json` | 5158 | `Google Calendar` | "text": "Синхронизация Google Calendar снова работает для ранее подключенных пользователей после переноса сервера: задачи из CRM создаются и обновляются во внешнем календаре без ошибки служебного ключа." |
-| `backend/AppReleases/releases.json` | 5799 | `Google Calendar` | "text": "Профиль пользователя стал точнее учитывать право на раздел «Календарь». Если сотруднику закрыт календарь, в личном профиле больше не показывается вкладка подключения Google Calendar и Яндекс.Календаря, а действи |
-| `backend/AppReleases/releases.json` | 6656 | `Google Calendar` | "summary": "Настройки личной синхронизации Google Calendar и Яндекс.Календаря теперь учитывают актуальную роль пользователя в CRM. Если управление календарями ограничено администратором, старый открытый сеанс больше не п |
-| `backend/AppReleases/releases.json` | 6666 | `Google Calendar` | "text": "Пользователь с актуальной ролью администратора в CRM по-прежнему может менять настройки синхронизации Google Calendar и Яндекс.Календаря." |
-| `backend/AppReleases/releases.json` | 9162 | `Google Calendar` | "summary": "Google Calendar и Яндекс.Календарь теперь используют те же права видимости календаря, что и CRM: если роли доступны только выбранные сотрудники, во внешнем аккаунте синхронизируются только их календарные зада |
-| `backend/AppReleases/releases.json` | 11491 | `Google Calendar` | "summary": "Улучшена синхронизация задач с Google Calendar и Яндекс.Календарём. Если во внешнем календаре появилось несколько событий одной и той же задачи CRM, PayPlanner оставит актуальное событие и удалит лишние дубли |
-| `backend/AppReleases/releases.json` | 11497 | `Google Calendar` | "text": "В Google Calendar и Яндекс.Календаре добавлена дополнительная защита от повторного появления одинаковых событий одной CRM-задачи. При синхронизации лишние внешние события удаляются автоматически." |
-| `backend/AppReleases/releases.json` | 11600 | `Google Calendar` | "text": "Синхронизация с SUDRF, Google Calendar, Яндекс.Календарём, Яндекс.Диском, Telegram и S3 получила более предсказуемую обработку отказов доступа, отсутствующих объектов, лимитов запросов и временных сбоев." |
-| `backend/AppReleases/releases.json` | 11716 | `Google Calendar` | "summary": "В режиме отдельных календарей сотрудников Google Calendar и Яндекс.Календарь теперь создают календарь для активного одобренного пользователя даже тогда, когда у него еще нет задач в периоде синхронизации. Это |
-| `backend/AppReleases/releases.json` | 11722 | `Google Calendar` | "text": "Исправлена ситуация, когда в Google Calendar или Яндекс.Календаре мог отсутствовать календарь активного пользователя, если у него еще не было задач для синхронизации." |
-| `backend/AppReleases/releases.json` | 11810 | `Google Calendar` | "title": "Google Calendar не откатывает задачи из-за старых дублей", |
-| `backend/AppReleases/releases.json` | 11811 | `Google Calendar` | "summary": "Улучшена синхронизация с Google Calendar после удаления или переноса дублей. Если во внешнем календаре осталось старое событие PayPlanner, которое уже не является актуальной связью задачи, CRM больше не приме |
-| `backend/AppReleases/releases.json` | 11817 | `Google Calendar` | "text": "Старые дубли событий Google Calendar больше не могут вернуть задачу CRM на прежнее время или в прежний календарь." |
-| `backend/AppReleases/releases.json` | 11829 | `Google Calendar` | "title": "Google Calendar больше не дублирует задачи при переносе между календарями", |
-| `backend/AppReleases/releases.json` | 11830 | `Google Calendar` | "summary": "Исправлена синхронизация задач с Google Calendar в режиме отдельных календарей сотрудников. Если задача переходит в другой календарь или меняется ответственный, CRM обновляет существующую связь и убирает стар |
-| `backend/AppReleases/releases.json` | 11836 | `Google Calendar` | "text": "При синхронизации с Google Calendar одна задача CRM больше не создает несколько одинаковых событий, если для нее меняется календарь сотрудника." |
-| `backend/AppReleases/releases.json` | 11906 | `Google Calendar` | "summary": "При синхронизации задач с Google Calendar и Яндекс.Календарем система теперь проверяет часовой пояс внешнего календаря и приводит его к часовому поясу владельца из профиля. Это помогает избежать ситуации, ког |
-| `backend/AppReleases/releases.json` | 11916 | `Google Calendar` | "text": "Ранее подключенные календари Google Calendar и Яндекс.Календаря при следующей синхронизации также обновляются до часового пояса владельца, чтобы события отображались без ручной правки timezone у провайдера." |
-| `backend/AppReleases/releases.json` | 12913 | `Google Calendar` | "summary": "Синхронизация Google Calendar и Яндекс Календаря дополнительно проверяет переносы задач обратно в CRM и показывает время изменений в журнале по часовому поясу исполнителя.", |
-| `backend/AppReleases/releases.json` | 12927 | `Google Calendar` | "text": "Обновление уже созданных событий из CRM в Google Calendar и Яндекс Календаре дополнительно проверено для задач около полуночи." |
-| `backend/AppReleases/releases.json` | 12936 | `Google Calendar` | "summary": "Синхронизация задач с Google Calendar и Яндекс Календарем дополнительно проверена для сотрудников из других регионов и событий около полуночи.", |
-| `backend/AppReleases/releases.json` | 12946 | `Google Calendar` | "text": "События Google Calendar и Яндекс Календаря получают служебную отметку часового пояса PayPlanner, чтобы последующие синхронизации устойчивее распознавали регион, для которого рассчитано время задачи." |
-| `backend/AppReleases/releases.json` | 13057 | `Google Calendar` | "text": "Администраторам из разных регионов стало проще сверять журнал Google Calendar и Яндекс Календаря: один и тот же выбранный период больше не смещается при применении фильтра." |
-| `backend/AppReleases/releases.json` | 13453 | `Google Calendar` | "summary": "Задачи, судебные заседания и события календарей теперь обрабатываются по единому правилу: система хранит точный момент времени и показывает его в часовом поясе пользователя из профиля. Это помогает избежать с |
-| `backend/AppReleases/releases.json` | 13459 | `Google Calendar` | "text": "Исправлена обработка времени задач при синхронизации с Google Calendar и Яндекс Календарем. Перенос задачи во внешнем календаре теперь сохраняется в CRM как точный момент времени и не пересчитывается повторно пр |
-| `backend/AppReleases/releases.json` | 13530 | `Google Calendar` | "text": "В настройках внешних календарей добавлен блок «Выполненные задачи в календарях». Администратор может оставить выполненные задачи в календарях с отдельной отметкой или скрывать их после выполнения. Правило примен |
-| `backend/AppReleases/releases.json` | 13534 | `Google Calendar` | "text": "Исправлена выгрузка времени задач в Google Calendar и Яндекс Календарь: задачи теперь передаются по часовому поясу владельца календаря или исполнителя, а не по фиксированному времени CRM." |
-| `backend/AppReleases/releases.json` | 13555 | `Google Calendar` | "summary": "Администратор может задать паузу перед повторной полной синхронизацией внешних календарей. Это помогает не создавать лишнюю нагрузку на Google Calendar и Яндекс.Календарь, когда пользователь несколько раз наж |
-| `backend/AppReleases/releases.json` | 13565 | `Google Calendar` | "text": "В профиле пользователя кнопка ручной синхронизации Google Calendar и Яндекс.Календаря временно отключается, если полная синхронизация уже запускалась недавно. В это время обычная фоновая синхронизация продолжает |
-| `backend/AppReleases/releases.json` | 13574 | `Google Calendar` | "summary": "Исправлена синхронизация даты и времени задач при переносе событий во внешних календарях. Изменения, сделанные в Google Calendar, теперь корректно сохраняются в CRM и не перетираются следующим циклом обмена." |
-| `backend/AppReleases/releases.json` | 13580 | `Google Calendar` | "text": "При переносе задачи в Google Calendar новое время теперь корректно применяется к задаче в CRM и сохраняется при следующих циклах синхронизации." |
-| `backend/AppReleases/releases.json` | 13584 | `Google Calendar` | "text": "Исправлена обработка времени задач, сохраненных в базе без признака часового пояса: Google Calendar и Яндекс.Календарь больше не получают такие задачи со сдвигом времени." |
-| `backend/AppReleases/releases.json` | 13588 | `Google Calendar` | "text": "Если Google Calendar временно отвечает ограничением запросов, синхронизация делает повторные попытки и не показывает ошибку сразу после первого ответа Rate Limit Exceeded." |
-| `backend/AppReleases/releases.json` | 13603 | `Google Calendar` | "text": "В разделе настроек внешних календарей появились отдельные интервалы фоновой синхронизации для Google Calendar и Яндекс.Календаря. По умолчанию обмен выполняется каждые 10 минут, а администратор может увеличить и |
-| `backend/AppReleases/releases.json` | 13607 | `Google Calendar` | "text": "После сохранения интервала фоновые сервисы Google Calendar и Яндекс.Календаря применяют новые настройки без перезапуска приложения и начинают следующий цикл уже с обновленным расписанием." |
-| `backend/AppReleases/releases.json` | 13615 | `Google Calendar` | "text": "Для изменений, пришедших из Google Calendar или Яндекс.Календаря, журнал показывает, что именно поменялось в задаче CRM: срок, длительность, статус или название." |
-| `backend/AppReleases/releases.json` | 13634 | `Google Calendar` | "text": "В разделе «Аудит объектов» поля календарной синхронизации теперь отображаются по-русски: «Внешняя синхронизация календарей», «Синхронизация Google Calendar» и «Синхронизация Яндекс.Календаря»." |
-| `backend/AppReleases/releases.json` | 13651 | `Google Calendar` | "summary": "В подсказках настройки Google Calendar и Яндекс.Календаря теперь сразу показаны готовые Redirect URI, которые нужно внести в кабинеты OAuth.", |
-| `backend/AppReleases/releases.json` | 13657 | `Google Calendar` | "text": "В разделе «Настройки» → «Ключи интеграций» → блок внешних календарей вопросительные знаки рядом с Google Calendar и Яндекс.Календарем теперь показывают отдельный блок «Redirect URI для кабинета провайдера»." |
-| `backend/AppReleases/releases.json` | 13661 | `Google Calendar` | "text": "Администратору больше не нужно искать callback URL в профиле пользователя: адрес для Google Calendar и Яндекс.Календаря можно скопировать прямо из окна подсказки." |
-| `backend/AppReleases/releases.json` | 13712 | `Google Calendar` | "summary": "В настройках внешних календарей появились инструкции по подключению Google Calendar и Яндекс.Календаря, а профиль пользователя больше не показывает отключенные администратором провайдеры.", |
-| `backend/AppReleases/releases.json` | 13718 | `Google Calendar` | "text": "В блоке «Модель синхронизации и конфликты» вопросительные знаки рядом с Google Calendar и Яндекс.Календарем теперь открывают инструкцию по настройке OAuth-приложения и ссылки на нужные кабинеты провайдеров." |
-| `backend/AppReleases/releases.json` | 13722 | `Google Calendar` | "text": "Если администратор выключил Google Calendar или Яндекс.Календарь в настройках, соответствующая карточка больше не отображается в профиле пользователя." |
-| `backend/AppReleases/releases.json` | 13741 | `Google Calendar` | "text": "В полном журнале синхронизации появилась постраничная навигация, чтобы администратор мог просматривать не только последние события Google Calendar и Яндекс.Календаря." |
-| `backend/AppReleases/releases.json` | 13783 | `Google Calendar` | "text": "Исправлена ошибка загрузки статуса Google Calendar и Яндекс Календаря в профиле пользователя. Страница снова корректно показывает состояние подключения и предупреждение о настройке OAuth." |
-| `backend/AppReleases/releases.json` | 13791 | `Google Calendar` | "text": "Пояснение помогает администратору понять, как работают отдельные включатели Google Calendar и Яндекс Календаря, главный источник событий, правила конфликтов, дата начала синхронизации, действия при потере доступ |
-| `backend/AppReleases/releases.json` | 13799 | `Google Calendar` | "title": "Google Calendar и Яндекс Календарь включаются отдельно", |
-| `backend/AppReleases/releases.json` | 13800 | `Google Calendar` | "summary": "В настройках внешних календарей администратор теперь может включать Google Calendar и Яндекс Календарь независимо друг от друга.", |
-| `backend/AppReleases/releases.json` | 13806 | `Google Calendar` | "text": "В разделе внешних календарей вместо одного общего переключателя появились отдельные переключатели для Google Calendar и Яндекс Календаря." |
-| `backend/AppReleases/releases.json` | 13810 | `Google Calendar` | "text": "Карточки провайдеров и чек-лист готовности теперь учитывают выбранный календарь отдельно. Если включен только Google Calendar, выключенный Яндекс Календарь не будет блокировать подготовку подключения." |
-| `backend/AppReleases/releases.json` | 13814 | `Google Calendar` | "text": "Фоновые проверки запускаются только для включенных провайдеров: Google Calendar и Яндекс Календарь больше не зависят от одного общего включателя." |
-| `backend/AppReleases/releases.json` | 13823 | `Google Calendar` | "summary": "В настройках внешних календарей появился понятный переключатель для включения Google Calendar и Яндекс Календаря.", |
-| `backend/AppReleases/releases.json` | 13829 | `Google Calendar` | "text": "В разделе внешних календарей добавлен главный переключатель «Включить Google Calendar и Яндекс Календарь». Администратор может включить календарный контур прямо из настроек без изменения серверного конфига." |
-| `backend/AppReleases/releases.json` | 13846 | `Google Calendar` | "summary": "В настройках внешних календарей администратор теперь может задавать общие правила синхронизации Google Calendar и Яндекс Календаря, а также смотреть полный журнал событий.", |
-| `backend/AppReleases/releases.json` | 13856 | `Google Calendar` | "text": "Добавлена дата начала синхронизации по умолчанию. Если включен режим управления администратором, эта дата применяется к подключениям Google Calendar и Яндекс Календаря." |
-| `backend/AppReleases/releases.json` | 13864 | `Google Calendar` | "text": "В настройках добавлен полный журнал синхронизации по Google Calendar и Яндекс Календарю. Администратор видит провайдера, сотрудника, действие, статус, время и сообщение по каждому событию." |
-| `backend/AppReleases/releases.json` | 13873 | `Google Calendar` | "summary": "В настройках Google Calendar и Яндекс.Календаря можно указать, с какой даты задачи CRM должны попадать во внешний календарь.", |
-| `backend/AppReleases/releases.json` | 13879 | `Google Calendar` | "text": "В профиле пользователя в настройках Google Calendar и Яндекс.Календаря добавлено поле «Синхронизировать задачи с даты». Если указать дату, во внешний календарь будут попадать только задачи со сроком выполнения н |
-| `backend/AppReleases/releases.json` | 13896 | `Google Calendar` | "summary": "При отключении Google Calendar или Яндекс.Календаря CRM теперь сначала удаляет созданные PayPlanner календари и события во внешнем календаре.", |
-| `backend/AppReleases/releases.json` | 13902 | `Google Calendar` | "text": "В профиле пользователя отключение Google Calendar и Яндекс.Календаря теперь работает с обязательной очисткой: CRM удаляет созданные PayPlanner календари и события во внешнем календаре, а только потом убирает под |
-| `backend/AppReleases/releases.json` | 13915 | `Google Calendar` | "summary": "В профиле пользователя появился блок Яндекс.Календаря. Он работает по тем же правилам, что Google Calendar, и позволяет синхронизировать задачи CRM с календарем Яндекса.", |
-| `backend/AppReleases/releases.json` | 13925 | `Google Calendar` | "text": "Если у пользователя подключены Google Calendar и Яндекс.Календарь, изменения проходят через CRM и передаются во второй календарь без зацикливания. Например, изменение события в Google обновит задачу CRM, а затем |
-| `backend/AppReleases/releases.json` | 13979 | `Google Calendar` | "title": "Исправлена загрузка блока Google Calendar в профиле", |
-| `backend/AppReleases/releases.json` | 13980 | `Google Calendar` | "summary": "Блок Google Calendar в профиле пользователя теперь стабильно открывается и показывает состояние подключения, настройки синхронизации, список календарей и последние события.", |
-| `backend/AppReleases/releases.json` | 13986 | `Google Calendar` | "text": "Исправлена ошибка, из-за которой раздел Google Calendar в профиле мог не получить статус подключения и не запустить синхронизацию из-за внутренней ошибки сервиса." |
-| `backend/AppReleases/releases.json` | 13990 | `Google Calendar` | "text": "Добавлена дополнительная проверка, которая контролирует, что сервис Google Calendar корректно создаётся при запуске приложения." |
-| `backend/AppReleases/releases.json` | 14071 | `Google Calendar` | "title": "Улучшено удаление задач и календарей Google Calendar", |
-| `backend/AppReleases/releases.json` | 14072 | `Google Calendar` | "summary": "Синхронизация Google Calendar теперь аккуратнее очищает внешние события и календари, чтобы после удаления задач или сотрудников в Google не оставались лишние записи PayPlanner.", |
-| `backend/AppReleases/releases.json` | 14078 | `Google Calendar` | "text": "При удалении задачи CRM связанное событие PayPlanner удаляется из Google Calendar. Если событие не удалось удалить, задача не удаляется сразу, а пользователь видит ошибку и может проверить журнал синхронизации." |
-| `backend/AppReleases/releases.json` | 14086 | `Google Calendar` | "text": "Журнал Google Calendar теперь фиксирует удаление событий и календарей, а также ошибки очистки, чтобы администратор видел, что именно произошло при удалении задачи или пользователя." |
-| `backend/AppReleases/releases.json` | 14090 | `Google Calendar` | "text": "Права на удаление задач по-прежнему управляются ролями в разделе задач. Пользователь без права удаления не сможет удалить задачу и, соответственно, связанное событие в Google Calendar." |
-| `backend/AppReleases/releases.json` | 14201 | `Google Calendar` | "title": "Добавлена синхронизация задач с Google Calendar", |
-| `backend/AppReleases/releases.json` | 14202 | `Google Calendar` | "summary": "Пользователи могут подключить личный Google Calendar в профиле и синхронизировать с ним задачи CRM. Для администратора поддержан отдельный режим, при котором задачи раскладываются по календарям сотрудников.", |
-| `backend/AppReleases/releases.json` | 14208 | `Google Calendar` | "text": "В профиле появился блок Google Calendar. Пользователь может подключить календарь через Google, включить или остановить синхронизацию, запустить обмен вручную и посмотреть последние события синхронизации." |
-| `backend/AppReleases/releases.json` | 14212 | `Google Calendar` | "text": "Задачи, назначенные пользователю, создаются и обновляются в Google Calendar. Изменения времени, длительности, названия и статуса события могут возвращаться обратно в CRM по выбранному правилу конфликтов." |
-| `backend/AppReleases/releases.json` | 14216 | `Google Calendar` | "text": "Для администратора доступен режим отдельных календарей по исполнителям: при синхронизации все задачи CRM попадают в Google Calendar аккуратно, с разделением по сотрудникам." |
-| `backend/AppReleases/releases.json` | 15345 | `Google Calendar` | "summary": "Администратор теперь видит отдельный фоновый сервис для подготовки синхронизации Google Calendar и Яндекс Календаря. Сервис проверяет готовность подключения и события-кандидаты, не меняя внешние календари до  |
-| `backend/AppReleases/releases.json` | 15359 | `Google Calendar` | "text": "Google Calendar и Яндекс Календарь по-прежнему не включаются автоматически. До настройки OAuth и приемки модели конфликтов сервис работает как диагностический и подготовительный контур." |
-| `backend/AppReleases/releases.json` | 15483 | `Google Calendar` | "summary": "Изменения правил подключения Google Calendar и Яндекс Календаря теперь фиксируются в общем журнале действий. Администраторы могут увидеть, кто изменил модель синхронизации, правило конфликтов, ручное подтверж |
-| `backend/AppReleases/releases.json` | 15516 | `Google Calendar` | "text": "Чек-лист готовности теперь учитывает сохраненные правила конфликтов и отметку о dry-run на копии базы. После сохранения этих пунктов видно, какие обязательные шаги еще остаются перед подключением Google Calendar |
-| `backend/AppReleases/releases.json` | 15529 | `Google Calendar` | "summary": "В настройках интеграций появился чек-лист готовности к подключению Google Calendar и Яндекс Календаря. Он показывает, какие обязательные шаги уже закрыты, а что еще нужно согласовать перед запуском внешней си |
-| `backend/AppReleases/releases.json` | 15539 | `Google Calendar` | "text": "ICS-выгрузка отдельно отмечена как доступный безопасный контур, а Google Calendar и Яндекс Календарь остаются в подготовительном режиме до закрытия обязательных пунктов." |
-| `backend/AppReleases/releases.json` | 15552 | `Google Calendar` | "summary": "В настройках интеграций появился блок состояния календарных провайдеров: видно, что ICS-выгрузка уже доступна, а Google Calendar и Яндекс Календарь ждут отдельной настройки и приемки.", |
-| `backend/AppReleases/releases.json` | 15558 | `Google Calendar` | "text": "В разделе «Ключи и внешние сервисы» добавлен блок «Провайдеры календарной синхронизации». Он показывает доступность ICS, Google Calendar и Яндекс Календаря." |
-| `backend/AppReleases/releases.json` | 15566 | `Google Calendar` | "text": "Google Calendar и Яндекс Календарь не запускаются автоматически: до настройки OAuth и утверждения модели конфликтов они отображаются как недоступные или требующие настройки." |
-| `backend/AppReleases/releases.json` | 17399 | `Google Calendar` | "text": "Исправлена синхронизация с Google Calendar: при повторном или параллельном запуске CRM больше не создает несколько одинаковых календарей PayPlanner для одного сотрудника. Если такие дубли уже появились, ближайша |
+| `backend/AppReleases/releases.json` | 17 | `Google Calendar` | "text": "Webhook Google Calendar, Telegram и MAX, а также служебные публичные маршруты получили отдельные ограничения частоты и размера запроса. Это снижает лишнюю нагрузку от повторных уведомлений и некорректных запросо |
+| `backend/AppReleases/releases.json` | 5094 | `Google Calendar` | "text": "Синхронизация с Google Calendar стала устойчивее к кратковременным сбоям внешнего сервиса. Если Google временно недоступен, CRM повторяет запрос и не показывает лишнее предупреждение пользователям из-за одиночно |
+| `backend/AppReleases/releases.json` | 5350 | `Google Calendar` | "summary": "Исправлена ситуация после переноса VPS, когда ранее подключенный Google Calendar не мог синхронизироваться из-за серверных ключей защиты. Уже подключенные календари снова продолжают создавать и обновлять собы |
+| `backend/AppReleases/releases.json` | 5356 | `Google Calendar` | "text": "Синхронизация Google Calendar снова работает для ранее подключенных пользователей после переноса сервера: задачи из CRM создаются и обновляются во внешнем календаре без ошибки служебного ключа." |
+| `backend/AppReleases/releases.json` | 5997 | `Google Calendar` | "text": "Профиль пользователя стал точнее учитывать право на раздел «Календарь». Если сотруднику закрыт календарь, в личном профиле больше не показывается вкладка подключения Google Calendar и Яндекс.Календаря, а действи |
+| `backend/AppReleases/releases.json` | 6854 | `Google Calendar` | "summary": "Настройки личной синхронизации Google Calendar и Яндекс.Календаря теперь учитывают актуальную роль пользователя в CRM. Если управление календарями ограничено администратором, старый открытый сеанс больше не п |
+| `backend/AppReleases/releases.json` | 6864 | `Google Calendar` | "text": "Пользователь с актуальной ролью администратора в CRM по-прежнему может менять настройки синхронизации Google Calendar и Яндекс.Календаря." |
+| `backend/AppReleases/releases.json` | 9360 | `Google Calendar` | "summary": "Google Calendar и Яндекс.Календарь теперь используют те же права видимости календаря, что и CRM: если роли доступны только выбранные сотрудники, во внешнем аккаунте синхронизируются только их календарные зада |
+| `backend/AppReleases/releases.json` | 11689 | `Google Calendar` | "summary": "Улучшена синхронизация задач с Google Calendar и Яндекс.Календарём. Если во внешнем календаре появилось несколько событий одной и той же задачи CRM, PayPlanner оставит актуальное событие и удалит лишние дубли |
+| `backend/AppReleases/releases.json` | 11695 | `Google Calendar` | "text": "В Google Calendar и Яндекс.Календаре добавлена дополнительная защита от повторного появления одинаковых событий одной CRM-задачи. При синхронизации лишние внешние события удаляются автоматически." |
+| `backend/AppReleases/releases.json` | 11798 | `Google Calendar` | "text": "Синхронизация с SUDRF, Google Calendar, Яндекс.Календарём, Яндекс.Диском, Telegram и S3 получила более предсказуемую обработку отказов доступа, отсутствующих объектов, лимитов запросов и временных сбоев." |
+| `backend/AppReleases/releases.json` | 11914 | `Google Calendar` | "summary": "В режиме отдельных календарей сотрудников Google Calendar и Яндекс.Календарь теперь создают календарь для активного одобренного пользователя даже тогда, когда у него еще нет задач в периоде синхронизации. Это |
+| `backend/AppReleases/releases.json` | 11920 | `Google Calendar` | "text": "Исправлена ситуация, когда в Google Calendar или Яндекс.Календаре мог отсутствовать календарь активного пользователя, если у него еще не было задач для синхронизации." |
+| `backend/AppReleases/releases.json` | 12008 | `Google Calendar` | "title": "Google Calendar не откатывает задачи из-за старых дублей", |
+| `backend/AppReleases/releases.json` | 12009 | `Google Calendar` | "summary": "Улучшена синхронизация с Google Calendar после удаления или переноса дублей. Если во внешнем календаре осталось старое событие PayPlanner, которое уже не является актуальной связью задачи, CRM больше не приме |
+| `backend/AppReleases/releases.json` | 12015 | `Google Calendar` | "text": "Старые дубли событий Google Calendar больше не могут вернуть задачу CRM на прежнее время или в прежний календарь." |
+| `backend/AppReleases/releases.json` | 12027 | `Google Calendar` | "title": "Google Calendar больше не дублирует задачи при переносе между календарями", |
+| `backend/AppReleases/releases.json` | 12028 | `Google Calendar` | "summary": "Исправлена синхронизация задач с Google Calendar в режиме отдельных календарей сотрудников. Если задача переходит в другой календарь или меняется ответственный, CRM обновляет существующую связь и убирает стар |
+| `backend/AppReleases/releases.json` | 12034 | `Google Calendar` | "text": "При синхронизации с Google Calendar одна задача CRM больше не создает несколько одинаковых событий, если для нее меняется календарь сотрудника." |
+| `backend/AppReleases/releases.json` | 12104 | `Google Calendar` | "summary": "При синхронизации задач с Google Calendar и Яндекс.Календарем система теперь проверяет часовой пояс внешнего календаря и приводит его к часовому поясу владельца из профиля. Это помогает избежать ситуации, ког |
+| `backend/AppReleases/releases.json` | 12114 | `Google Calendar` | "text": "Ранее подключенные календари Google Calendar и Яндекс.Календаря при следующей синхронизации также обновляются до часового пояса владельца, чтобы события отображались без ручной правки timezone у провайдера." |
+| `backend/AppReleases/releases.json` | 13111 | `Google Calendar` | "summary": "Синхронизация Google Calendar и Яндекс Календаря дополнительно проверяет переносы задач обратно в CRM и показывает время изменений в журнале по часовому поясу исполнителя.", |
+| `backend/AppReleases/releases.json` | 13125 | `Google Calendar` | "text": "Обновление уже созданных событий из CRM в Google Calendar и Яндекс Календаре дополнительно проверено для задач около полуночи." |
+| `backend/AppReleases/releases.json` | 13134 | `Google Calendar` | "summary": "Синхронизация задач с Google Calendar и Яндекс Календарем дополнительно проверена для сотрудников из других регионов и событий около полуночи.", |
+| `backend/AppReleases/releases.json` | 13144 | `Google Calendar` | "text": "События Google Calendar и Яндекс Календаря получают служебную отметку часового пояса PayPlanner, чтобы последующие синхронизации устойчивее распознавали регион, для которого рассчитано время задачи." |
+| `backend/AppReleases/releases.json` | 13255 | `Google Calendar` | "text": "Администраторам из разных регионов стало проще сверять журнал Google Calendar и Яндекс Календаря: один и тот же выбранный период больше не смещается при применении фильтра." |
+| `backend/AppReleases/releases.json` | 13651 | `Google Calendar` | "summary": "Задачи, судебные заседания и события календарей теперь обрабатываются по единому правилу: система хранит точный момент времени и показывает его в часовом поясе пользователя из профиля. Это помогает избежать с |
+| `backend/AppReleases/releases.json` | 13657 | `Google Calendar` | "text": "Исправлена обработка времени задач при синхронизации с Google Calendar и Яндекс Календарем. Перенос задачи во внешнем календаре теперь сохраняется в CRM как точный момент времени и не пересчитывается повторно пр |
+| `backend/AppReleases/releases.json` | 13728 | `Google Calendar` | "text": "В настройках внешних календарей добавлен блок «Выполненные задачи в календарях». Администратор может оставить выполненные задачи в календарях с отдельной отметкой или скрывать их после выполнения. Правило примен |
+| `backend/AppReleases/releases.json` | 13732 | `Google Calendar` | "text": "Исправлена выгрузка времени задач в Google Calendar и Яндекс Календарь: задачи теперь передаются по часовому поясу владельца календаря или исполнителя, а не по фиксированному времени CRM." |
+| `backend/AppReleases/releases.json` | 13753 | `Google Calendar` | "summary": "Администратор может задать паузу перед повторной полной синхронизацией внешних календарей. Это помогает не создавать лишнюю нагрузку на Google Calendar и Яндекс.Календарь, когда пользователь несколько раз наж |
+| `backend/AppReleases/releases.json` | 13763 | `Google Calendar` | "text": "В профиле пользователя кнопка ручной синхронизации Google Calendar и Яндекс.Календаря временно отключается, если полная синхронизация уже запускалась недавно. В это время обычная фоновая синхронизация продолжает |
+| `backend/AppReleases/releases.json` | 13772 | `Google Calendar` | "summary": "Исправлена синхронизация даты и времени задач при переносе событий во внешних календарях. Изменения, сделанные в Google Calendar, теперь корректно сохраняются в CRM и не перетираются следующим циклом обмена." |
+| `backend/AppReleases/releases.json` | 13778 | `Google Calendar` | "text": "При переносе задачи в Google Calendar новое время теперь корректно применяется к задаче в CRM и сохраняется при следующих циклах синхронизации." |
+| `backend/AppReleases/releases.json` | 13782 | `Google Calendar` | "text": "Исправлена обработка времени задач, сохраненных в базе без признака часового пояса: Google Calendar и Яндекс.Календарь больше не получают такие задачи со сдвигом времени." |
+| `backend/AppReleases/releases.json` | 13786 | `Google Calendar` | "text": "Если Google Calendar временно отвечает ограничением запросов, синхронизация делает повторные попытки и не показывает ошибку сразу после первого ответа Rate Limit Exceeded." |
+| `backend/AppReleases/releases.json` | 13801 | `Google Calendar` | "text": "В разделе настроек внешних календарей появились отдельные интервалы фоновой синхронизации для Google Calendar и Яндекс.Календаря. По умолчанию обмен выполняется каждые 10 минут, а администратор может увеличить и |
+| `backend/AppReleases/releases.json` | 13805 | `Google Calendar` | "text": "После сохранения интервала фоновые сервисы Google Calendar и Яндекс.Календаря применяют новые настройки без перезапуска приложения и начинают следующий цикл уже с обновленным расписанием." |
+| `backend/AppReleases/releases.json` | 13813 | `Google Calendar` | "text": "Для изменений, пришедших из Google Calendar или Яндекс.Календаря, журнал показывает, что именно поменялось в задаче CRM: срок, длительность, статус или название." |
+| `backend/AppReleases/releases.json` | 13832 | `Google Calendar` | "text": "В разделе «Аудит объектов» поля календарной синхронизации теперь отображаются по-русски: «Внешняя синхронизация календарей», «Синхронизация Google Calendar» и «Синхронизация Яндекс.Календаря»." |
+| `backend/AppReleases/releases.json` | 13849 | `Google Calendar` | "summary": "В подсказках настройки Google Calendar и Яндекс.Календаря теперь сразу показаны готовые Redirect URI, которые нужно внести в кабинеты OAuth.", |
+| `backend/AppReleases/releases.json` | 13855 | `Google Calendar` | "text": "В разделе «Настройки» → «Ключи интеграций» → блок внешних календарей вопросительные знаки рядом с Google Calendar и Яндекс.Календарем теперь показывают отдельный блок «Redirect URI для кабинета провайдера»." |
+| `backend/AppReleases/releases.json` | 13859 | `Google Calendar` | "text": "Администратору больше не нужно искать callback URL в профиле пользователя: адрес для Google Calendar и Яндекс.Календаря можно скопировать прямо из окна подсказки." |
+| `backend/AppReleases/releases.json` | 13910 | `Google Calendar` | "summary": "В настройках внешних календарей появились инструкции по подключению Google Calendar и Яндекс.Календаря, а профиль пользователя больше не показывает отключенные администратором провайдеры.", |
+| `backend/AppReleases/releases.json` | 13916 | `Google Calendar` | "text": "В блоке «Модель синхронизации и конфликты» вопросительные знаки рядом с Google Calendar и Яндекс.Календарем теперь открывают инструкцию по настройке OAuth-приложения и ссылки на нужные кабинеты провайдеров." |
+| `backend/AppReleases/releases.json` | 13920 | `Google Calendar` | "text": "Если администратор выключил Google Calendar или Яндекс.Календарь в настройках, соответствующая карточка больше не отображается в профиле пользователя." |
+| `backend/AppReleases/releases.json` | 13939 | `Google Calendar` | "text": "В полном журнале синхронизации появилась постраничная навигация, чтобы администратор мог просматривать не только последние события Google Calendar и Яндекс.Календаря." |
+| `backend/AppReleases/releases.json` | 13981 | `Google Calendar` | "text": "Исправлена ошибка загрузки статуса Google Calendar и Яндекс Календаря в профиле пользователя. Страница снова корректно показывает состояние подключения и предупреждение о настройке OAuth." |
+| `backend/AppReleases/releases.json` | 13989 | `Google Calendar` | "text": "Пояснение помогает администратору понять, как работают отдельные включатели Google Calendar и Яндекс Календаря, главный источник событий, правила конфликтов, дата начала синхронизации, действия при потере доступ |
+| `backend/AppReleases/releases.json` | 13997 | `Google Calendar` | "title": "Google Calendar и Яндекс Календарь включаются отдельно", |
+| `backend/AppReleases/releases.json` | 13998 | `Google Calendar` | "summary": "В настройках внешних календарей администратор теперь может включать Google Calendar и Яндекс Календарь независимо друг от друга.", |
+| `backend/AppReleases/releases.json` | 14004 | `Google Calendar` | "text": "В разделе внешних календарей вместо одного общего переключателя появились отдельные переключатели для Google Calendar и Яндекс Календаря." |
+| `backend/AppReleases/releases.json` | 14008 | `Google Calendar` | "text": "Карточки провайдеров и чек-лист готовности теперь учитывают выбранный календарь отдельно. Если включен только Google Calendar, выключенный Яндекс Календарь не будет блокировать подготовку подключения." |
+| `backend/AppReleases/releases.json` | 14012 | `Google Calendar` | "text": "Фоновые проверки запускаются только для включенных провайдеров: Google Calendar и Яндекс Календарь больше не зависят от одного общего включателя." |
+| `backend/AppReleases/releases.json` | 14021 | `Google Calendar` | "summary": "В настройках внешних календарей появился понятный переключатель для включения Google Calendar и Яндекс Календаря.", |
+| `backend/AppReleases/releases.json` | 14027 | `Google Calendar` | "text": "В разделе внешних календарей добавлен главный переключатель «Включить Google Calendar и Яндекс Календарь». Администратор может включить календарный контур прямо из настроек без изменения серверного конфига." |
+| `backend/AppReleases/releases.json` | 14044 | `Google Calendar` | "summary": "В настройках внешних календарей администратор теперь может задавать общие правила синхронизации Google Calendar и Яндекс Календаря, а также смотреть полный журнал событий.", |
+| `backend/AppReleases/releases.json` | 14054 | `Google Calendar` | "text": "Добавлена дата начала синхронизации по умолчанию. Если включен режим управления администратором, эта дата применяется к подключениям Google Calendar и Яндекс Календаря." |
+| `backend/AppReleases/releases.json` | 14062 | `Google Calendar` | "text": "В настройках добавлен полный журнал синхронизации по Google Calendar и Яндекс Календарю. Администратор видит провайдера, сотрудника, действие, статус, время и сообщение по каждому событию." |
+| `backend/AppReleases/releases.json` | 14071 | `Google Calendar` | "summary": "В настройках Google Calendar и Яндекс.Календаря можно указать, с какой даты задачи CRM должны попадать во внешний календарь.", |
+| `backend/AppReleases/releases.json` | 14077 | `Google Calendar` | "text": "В профиле пользователя в настройках Google Calendar и Яндекс.Календаря добавлено поле «Синхронизировать задачи с даты». Если указать дату, во внешний календарь будут попадать только задачи со сроком выполнения н |
+| `backend/AppReleases/releases.json` | 14094 | `Google Calendar` | "summary": "При отключении Google Calendar или Яндекс.Календаря CRM теперь сначала удаляет созданные PayPlanner календари и события во внешнем календаре.", |
+| `backend/AppReleases/releases.json` | 14100 | `Google Calendar` | "text": "В профиле пользователя отключение Google Calendar и Яндекс.Календаря теперь работает с обязательной очисткой: CRM удаляет созданные PayPlanner календари и события во внешнем календаре, а только потом убирает под |
+| `backend/AppReleases/releases.json` | 14113 | `Google Calendar` | "summary": "В профиле пользователя появился блок Яндекс.Календаря. Он работает по тем же правилам, что Google Calendar, и позволяет синхронизировать задачи CRM с календарем Яндекса.", |
+| `backend/AppReleases/releases.json` | 14123 | `Google Calendar` | "text": "Если у пользователя подключены Google Calendar и Яндекс.Календарь, изменения проходят через CRM и передаются во второй календарь без зацикливания. Например, изменение события в Google обновит задачу CRM, а затем |
+| `backend/AppReleases/releases.json` | 14177 | `Google Calendar` | "title": "Исправлена загрузка блока Google Calendar в профиле", |
+| `backend/AppReleases/releases.json` | 14178 | `Google Calendar` | "summary": "Блок Google Calendar в профиле пользователя теперь стабильно открывается и показывает состояние подключения, настройки синхронизации, список календарей и последние события.", |
+| `backend/AppReleases/releases.json` | 14184 | `Google Calendar` | "text": "Исправлена ошибка, из-за которой раздел Google Calendar в профиле мог не получить статус подключения и не запустить синхронизацию из-за внутренней ошибки сервиса." |
+| `backend/AppReleases/releases.json` | 14188 | `Google Calendar` | "text": "Добавлена дополнительная проверка, которая контролирует, что сервис Google Calendar корректно создаётся при запуске приложения." |
+| `backend/AppReleases/releases.json` | 14269 | `Google Calendar` | "title": "Улучшено удаление задач и календарей Google Calendar", |
+| `backend/AppReleases/releases.json` | 14270 | `Google Calendar` | "summary": "Синхронизация Google Calendar теперь аккуратнее очищает внешние события и календари, чтобы после удаления задач или сотрудников в Google не оставались лишние записи PayPlanner.", |
+| `backend/AppReleases/releases.json` | 14276 | `Google Calendar` | "text": "При удалении задачи CRM связанное событие PayPlanner удаляется из Google Calendar. Если событие не удалось удалить, задача не удаляется сразу, а пользователь видит ошибку и может проверить журнал синхронизации." |
+| `backend/AppReleases/releases.json` | 14284 | `Google Calendar` | "text": "Журнал Google Calendar теперь фиксирует удаление событий и календарей, а также ошибки очистки, чтобы администратор видел, что именно произошло при удалении задачи или пользователя." |
+| `backend/AppReleases/releases.json` | 14288 | `Google Calendar` | "text": "Права на удаление задач по-прежнему управляются ролями в разделе задач. Пользователь без права удаления не сможет удалить задачу и, соответственно, связанное событие в Google Calendar." |
+| `backend/AppReleases/releases.json` | 14399 | `Google Calendar` | "title": "Добавлена синхронизация задач с Google Calendar", |
+| `backend/AppReleases/releases.json` | 14400 | `Google Calendar` | "summary": "Пользователи могут подключить личный Google Calendar в профиле и синхронизировать с ним задачи CRM. Для администратора поддержан отдельный режим, при котором задачи раскладываются по календарям сотрудников.", |
+| `backend/AppReleases/releases.json` | 14406 | `Google Calendar` | "text": "В профиле появился блок Google Calendar. Пользователь может подключить календарь через Google, включить или остановить синхронизацию, запустить обмен вручную и посмотреть последние события синхронизации." |
+| `backend/AppReleases/releases.json` | 14410 | `Google Calendar` | "text": "Задачи, назначенные пользователю, создаются и обновляются в Google Calendar. Изменения времени, длительности, названия и статуса события могут возвращаться обратно в CRM по выбранному правилу конфликтов." |
+| `backend/AppReleases/releases.json` | 14414 | `Google Calendar` | "text": "Для администратора доступен режим отдельных календарей по исполнителям: при синхронизации все задачи CRM попадают в Google Calendar аккуратно, с разделением по сотрудникам." |
+| `backend/AppReleases/releases.json` | 15543 | `Google Calendar` | "summary": "Администратор теперь видит отдельный фоновый сервис для подготовки синхронизации Google Calendar и Яндекс Календаря. Сервис проверяет готовность подключения и события-кандидаты, не меняя внешние календари до  |
+| `backend/AppReleases/releases.json` | 15557 | `Google Calendar` | "text": "Google Calendar и Яндекс Календарь по-прежнему не включаются автоматически. До настройки OAuth и приемки модели конфликтов сервис работает как диагностический и подготовительный контур." |
+| `backend/AppReleases/releases.json` | 15681 | `Google Calendar` | "summary": "Изменения правил подключения Google Calendar и Яндекс Календаря теперь фиксируются в общем журнале действий. Администраторы могут увидеть, кто изменил модель синхронизации, правило конфликтов, ручное подтверж |
+| `backend/AppReleases/releases.json` | 15714 | `Google Calendar` | "text": "Чек-лист готовности теперь учитывает сохраненные правила конфликтов и отметку о dry-run на копии базы. После сохранения этих пунктов видно, какие обязательные шаги еще остаются перед подключением Google Calendar |
+| `backend/AppReleases/releases.json` | 15727 | `Google Calendar` | "summary": "В настройках интеграций появился чек-лист готовности к подключению Google Calendar и Яндекс Календаря. Он показывает, какие обязательные шаги уже закрыты, а что еще нужно согласовать перед запуском внешней си |
+| `backend/AppReleases/releases.json` | 15737 | `Google Calendar` | "text": "ICS-выгрузка отдельно отмечена как доступный безопасный контур, а Google Calendar и Яндекс Календарь остаются в подготовительном режиме до закрытия обязательных пунктов." |
+| `backend/AppReleases/releases.json` | 15750 | `Google Calendar` | "summary": "В настройках интеграций появился блок состояния календарных провайдеров: видно, что ICS-выгрузка уже доступна, а Google Calendar и Яндекс Календарь ждут отдельной настройки и приемки.", |
+| `backend/AppReleases/releases.json` | 15756 | `Google Calendar` | "text": "В разделе «Ключи и внешние сервисы» добавлен блок «Провайдеры календарной синхронизации». Он показывает доступность ICS, Google Calendar и Яндекс Календаря." |
+| `backend/AppReleases/releases.json` | 15764 | `Google Calendar` | "text": "Google Calendar и Яндекс Календарь не запускаются автоматически: до настройки OAuth и утверждения модели конфликтов они отображаются как недоступные или требующие настройки." |
+| `backend/AppReleases/releases.json` | 17597 | `Google Calendar` | "text": "Исправлена синхронизация с Google Calendar: при повторном или параллельном запуске CRM больше не создает несколько одинаковых календарей PayPlanner для одного сотрудника. Если такие дубли уже появились, ближайша |
 | `backend/Controllers/CalendarSyncController.cs` | 231 | `Google Calendar` | ProviderLabel = "Google Calendar", |
 | `backend/Controllers/SystemJobsController.cs` | 798 | `CalendarSync` | _configuration.GetValue("CalendarSync:LogRetention:Enabled", true)); |
 | `backend/Controllers/SystemJobsController.cs` | 801 | `CalendarSync` | _configuration.GetValue("CalendarSync:LogRetention:RetentionDays", CalendarSyncLogRetentionService.DefaultRetentionDays))); |
@@ -1977,17 +1978,17 @@ Google/Yandex/ICS синхронизация, где надо хранить UTC
 | `backend/PayPlanner.Api.Tests/AppFeatureFlagsTests.cs` | 496 | `Google Calendar` | Assert.Equal("CRM → Google Calendar", item.DirectionLabel); |
 | `backend/PayPlanner.Api.Tests/AppFeatureFlagsTests.cs` | 545 | `Google Calendar` | Message = "Календарь «PayPlanner - Иван Иванов» удален из Google Calendar.", |
 | `backend/PayPlanner.Api.Tests/ExternalCalendarSyncCoordinatorTests.cs` | 120 | `Google Calendar` | Assert.Contains("Google Calendar", notification.Title); |
-| `backend/PayPlanner.Api.Tests/GoogleCalendarSyncServiceTests.cs` | 1399 | `GoogleCalendar` | var protector = TestDataProtectionProvider.CreateProtector("PayPlanner.GoogleCalendar.Tokens.v1"); |
+| `backend/PayPlanner.Api.Tests/GoogleCalendarSyncServiceTests.cs` | 1423 | `GoogleCalendar` | var protector = TestDataProtectionProvider.CreateProtector("PayPlanner.GoogleCalendar.Tokens.v1"); |
 | `backend/PayPlanner.Api.Tests/GoogleCalendarSyncServiceTests.cs` | 106 | `Google Calendar` | Assert.Contains("Google Calendar отключен администратором", error.Message); |
-| `backend/PayPlanner.Api.Tests/GoogleCalendarSyncServiceTests.cs` | 706 | `Google Calendar` | Assert.Contains("Повторную полную синхронизацию Google Calendar можно запустить после", error.Message); |
-| `backend/PayPlanner.Api.Tests/GoogleCalendarSyncServiceTests.cs` | 1042 | `Google Calendar` | var task = await CreateTaskAsync(db, user.Id, "Отключить Google Calendar"); |
-| `backend/PayPlanner.Api.Tests/GoogleCalendarSyncServiceTests.cs` | 1090 | `Google Calendar` | Assert.Contains("Не удалось отключить Google Calendar", error.Message); |
-| `backend/PayPlanner.Api.Tests/GoogleCalendarSyncServiceTests.cs` | 1127 | `Google Calendar` | new TaskCanceledException("Google Calendar timeout.")))); |
-| `backend/PayPlanner.Api.Tests/GoogleCalendarSyncServiceTests.cs` | 1132 | `Google Calendar` | Assert.Contains("Не удалось отключить Google Calendar", error.Message); |
+| `backend/PayPlanner.Api.Tests/GoogleCalendarSyncServiceTests.cs` | 730 | `Google Calendar` | Assert.Contains("Повторную полную синхронизацию Google Calendar можно запустить после", error.Message); |
+| `backend/PayPlanner.Api.Tests/GoogleCalendarSyncServiceTests.cs` | 1066 | `Google Calendar` | var task = await CreateTaskAsync(db, user.Id, "Отключить Google Calendar"); |
+| `backend/PayPlanner.Api.Tests/GoogleCalendarSyncServiceTests.cs` | 1114 | `Google Calendar` | Assert.Contains("Не удалось отключить Google Calendar", error.Message); |
+| `backend/PayPlanner.Api.Tests/GoogleCalendarSyncServiceTests.cs` | 1151 | `Google Calendar` | new TaskCanceledException("Google Calendar timeout.")))); |
+| `backend/PayPlanner.Api.Tests/GoogleCalendarSyncServiceTests.cs` | 1156 | `Google Calendar` | Assert.Contains("Не удалось отключить Google Calendar", error.Message); |
 | `backend/PayPlanner.Api.Tests/NotificationServiceTests.cs` | 6505 | `Google Calendar` | "Google Calendar", |
 | `backend/PayPlanner.Api.Tests/NotificationServiceTests.cs` | 6510 | `Google Calendar` | "Google Calendar", |
 | `backend/PayPlanner.Api.Tests/NotificationServiceTests.cs` | 6520 | `Google Calendar` | Assert.Contains("Google Calendar", notification.Title); |
-| `backend/PayPlanner.Api.Tests/YandexCalendarSyncServiceTests.cs` | 1075 | `YandexCalendar` | var protector = TestDataProtectionProvider.CreateProtector("PayPlanner.YandexCalendar.Tokens.v1"); |
+| `backend/PayPlanner.Api.Tests/YandexCalendarSyncServiceTests.cs` | 1099 | `YandexCalendar` | var protector = TestDataProtectionProvider.CreateProtector("PayPlanner.YandexCalendar.Tokens.v1"); |
 | `backend/Services/CalendarSyncLogRetentionService.cs` | 225 | `CalendarSync` | ParseBool(settings.GetValueOrDefault(EnabledSettingKey), _configuration.GetValue("CalendarSync:LogRetention:Enabled", true)), |
 | `backend/Services/CalendarSyncLogRetentionService.cs` | 226 | `CalendarSync` | NormalizeRetentionDays(ParseInt(settings.GetValueOrDefault(RetentionDaysSettingKey), _configuration.GetValue("CalendarSync:LogRetention:RetentionDays", DefaultRetentionDays))), |
 | `backend/Services/CalendarSyncLogRetentionService.cs` | 227 | `CalendarSync` | NormalizeIntervalHours(ParseInt(settings.GetValueOrDefault(IntervalHoursSettingKey), _configuration.GetValue("CalendarSync:LogRetention:IntervalHours", DefaultIntervalHours))), |
@@ -2018,84 +2019,89 @@ Google/Yandex/ICS синхронизация, где надо хранить UTC
 | `backend/Services/GoogleCalendarSyncService.cs` | 92 | `Google Calendar` | throw new InvalidOperationException("Google Calendar отключен администратором."); |
 | `backend/Services/GoogleCalendarSyncService.cs` | 141 | `Google Calendar` | throw new KeyNotFoundException("Запрос подключения Google Calendar не найден."); |
 | `backend/Services/GoogleCalendarSyncService.cs` | 178 | `Google Calendar` | return BuildPopupHtml(false, "Запрос подключения Google Calendar не найден."); |
-| `backend/Services/GoogleCalendarSyncService.cs` | 226 | `Google Calendar` | return BuildPopupHtml(true, "Google Calendar подключён. Вернитесь в CRM.", authRequest.ReturnUrl); |
-| `backend/Services/GoogleCalendarSyncService.cs` | 248 | `Google Calendar` | throw new KeyNotFoundException("Подключение Google Calendar не найдено."); |
-| `backend/Services/GoogleCalendarSyncService.cs` | 257 | `Google Calendar` | await AddLogAsync(connection.Id, null, null, "system", "settings-updated", "success", "Настройки Google Calendar сохранены.", BuildConnectionSettingsDetails(connection), cancellationToken); |
-| `backend/Services/GoogleCalendarSyncService.cs` | 278 | `Google Calendar` | "Подключение Google Calendar отключается пользователем.", |
-| `backend/Services/GoogleCalendarSyncService.cs` | 286 | `Google Calendar` | "Не удалось отключить Google Calendar: сначала нужно удалить созданные PayPlanner календари и события во внешнем календаре. " |
-| `backend/Services/GoogleCalendarSyncService.cs` | 309 | `Google Calendar` | ? "Синхронизация Google Calendar выполнена." |
-| `backend/Services/GoogleCalendarSyncService.cs` | 310 | `Google Calendar` | : "Синхронизация Google Calendar завершена с ошибками. Проверьте журнал.", |
-| `backend/Services/GoogleCalendarSyncService.cs` | 340 | `Google Calendar` | _logger.LogWarning(ex, "Google Calendar scheduled sync failed for user {UserId}", userId); |
-| `backend/Services/GoogleCalendarSyncService.cs` | 362 | `Google Calendar` | $"Повторную полную синхронизацию Google Calendar можно запустить после {FormatLogDateTime(availableAt.Value)}. До этого времени работает обычная фоновая синхронизация.", |
-| `backend/Services/GoogleCalendarSyncService.cs` | 401 | `Google Calendar` | _logger.LogWarning(ex, "Google Calendar task sync failed for task {TaskId} and user {UserId}", taskId, item.UserId); |
-| `backend/Services/GoogleCalendarSyncService.cs` | 438 | `Google Calendar` | ? "Событие удалено из Google Calendar после удаления задачи в CRM." |
-| `backend/Services/GoogleCalendarSyncService.cs` | 439 | `Google Calendar` | : "Событие уже отсутствовало в Google Calendar при удалении задачи в CRM.", |
-| `backend/Services/GoogleCalendarSyncService.cs` | 454 | `Google Calendar` | "Не удалось удалить событие из Google Calendar после удаления задачи в CRM.", |
-| `backend/Services/GoogleCalendarSyncService.cs` | 499 | `Google Calendar` | $"Сотрудник #{userId} удаляется из CRM, календарь сотрудника убирается из админского Google Calendar.", |
-| `backend/Services/GoogleCalendarSyncService.cs` | 524 | `Google Calendar` | throw new UnauthorizedAccessException("Google Calendar webhook не содержит channel id или token."); |
-| `backend/Services/GoogleCalendarSyncService.cs` | 533 | `Google Calendar` | throw new UnauthorizedAccessException("Google Calendar webhook не прошёл проверку канала."); |
-| `backend/Services/GoogleCalendarSyncService.cs` | 574 | `Google Calendar` | await AddLogAsync(connection.Id, null, null, "system", "ensure-calendars", "error", "Не удалось подготовить календари сотрудников в Google Calendar.", ex.Message, cancellationToken); |
-| `backend/Services/GoogleCalendarSyncService.cs` | 585 | `Google Calendar` | await AddLogAsync(connection.Id, null, null, "google-to-crm", "import", "error", "Не удалось загрузить изменения из Google Calendar.", ex.Message, cancellationToken); |
-| `backend/Services/GoogleCalendarSyncService.cs` | 618 | `Google Calendar` | await AddLogAsync(connection.Id, null, task.Id, "crm-to-google", "upsert", "error", "Не удалось синхронизировать задачу с Google Calendar.", ex.Message, cancellationToken); |
-| `backend/Services/GoogleCalendarSyncService.cs` | 750 | `Google Calendar` | ? $"Дублирующий календарь «{duplicate.Name}» удален из Google Calendar." |
-| `backend/Services/GoogleCalendarSyncService.cs` | 751 | `Google Calendar` | : $"Дублирующий календарь «{duplicate.Name}» уже отсутствовал в Google Calendar.", |
-| `backend/Services/GoogleCalendarSyncService.cs` | 769 | `Google Calendar` | $"Не удалось удалить дублирующий календарь «{duplicate.Name}» из Google Calendar.", |
-| `backend/Services/GoogleCalendarSyncService.cs` | 809 | `Google Calendar` | "Не удалось получить токен Google Calendar для очистки календарей удаляемого пользователя.", |
-| `backend/Services/GoogleCalendarSyncService.cs` | 828 | `Google Calendar` | ? $"Календарь «{calendar.Name}» удален из Google Calendar." |
-| `backend/Services/GoogleCalendarSyncService.cs` | 829 | `Google Calendar` | : $"Календарь «{calendar.Name}» уже отсутствовал в Google Calendar.", |
-| `backend/Services/GoogleCalendarSyncService.cs` | 857 | `Google Calendar` | $"Не удалось удалить календарь «{calendar.Name}» из Google Calendar.", |
-| `backend/Services/GoogleCalendarSyncService.cs` | 932 | `Google Calendar` | ? "Устаревший дубль события Google Calendar удален, задача CRM оставлена без изменений." |
-| `backend/Services/GoogleCalendarSyncService.cs` | 933 | `Google Calendar` | : "Устаревший дубль события Google Calendar уже отсутствует, задача CRM оставлена без изменений.", |
-| `backend/Services/GoogleCalendarSyncService.cs` | 947 | `Google Calendar` | "Не удалось удалить устаревший дубль события Google Calendar, задача CRM оставлена без изменений.", |
-| `backend/Services/GoogleCalendarSyncService.cs` | 974 | `Google Calendar` | await AddLogAsync(connection.Id, calendar.Id, link.TaskJournalItemId, "google-to-crm", "detach", "success", "Событие удалено в Google Calendar, связь с задачей помечена как отключённая.", null, cancellationToken); |
-| `backend/Services/GoogleCalendarSyncService.cs` | 990 | `Google Calendar` | await AddLogAsync(connection.Id, calendar.Id, link.TaskJournalItemId, "google-to-crm", "skip", "success", "Изменения в Google Calendar прочитаны, но правило конфликтов оставляет CRM главным источником.", null, cancellati |
-| `backend/Services/GoogleCalendarSyncService.cs` | 1047 | `Google Calendar` | await AddLogAsync(connection.Id, calendar.Id, task.Id, "google-to-crm", "update-task", "success", "Изменения из Google Calendar применены к задаче.", string.Join("; ", changes), cancellationToken); |
-| `backend/Services/GoogleCalendarSyncService.cs` | 1114 | `Google Calendar` | await AddLogAsync(connection.Id, calendar.Id, task.Id, "crm-to-google", "delete-event", "success", "Старое событие Google Calendar удалено после переноса задачи в другой календарь.", BuildTaskSnapshotDetails(task, timeZo |
-| `backend/Services/GoogleCalendarSyncService.cs` | 1118 | `Google Calendar` | await AddLogAsync(connection.Id, calendar.Id, task.Id, "crm-to-google", "delete-event", "error", "Не удалось удалить старое событие Google Calendar после переноса задачи в другой календарь.", ex.Message, cancellationToke |
-| `backend/Services/GoogleCalendarSyncService.cs` | 1121 | `Google Calendar` | await AddLogAsync(connection.Id, calendar.Id, task.Id, "crm-to-google", "create-event", "success", "Задача создана в Google Calendar.", BuildTaskSnapshotDetails(task, timeZone), cancellationToken); |
-| `backend/Services/GoogleCalendarSyncService.cs` | 1131 | `Google Calendar` | await AddLogAsync(connection.Id, calendar.Id, task.Id, "crm-to-google", "update-event", "success", "Задача обновлена в Google Calendar.", BuildTaskSnapshotDetails(task, timeZone), cancellationToken); |
-| `backend/Services/GoogleCalendarSyncService.cs` | 1299 | `Google Calendar` | await AddLogAsync(connection.Id, calendar.Id, null, "system", "create-calendar", "success", $"В Google Calendar создан календарь «{name}».", null, cancellationToken); |
-| `backend/Services/GoogleCalendarSyncService.cs` | 1453 | `Google Calendar` | ? "Событие удалено из Google Calendar, потому что задача раньше даты начала синхронизации." |
-| `backend/Services/GoogleCalendarSyncService.cs` | 1454 | `Google Calendar` | : "Событие уже отсутствовало в Google Calendar при очистке задач раньше даты начала синхронизации.", |
-| `backend/Services/GoogleCalendarSyncService.cs` | 1463 | `Google Calendar` | await AddLogAsync(connection.Id, link.CalendarSyncCalendarId, link.TaskJournalItemId, "crm-to-google", "delete-event", "error", "Не удалось удалить событие Google Calendar для задачи раньше даты начала синхронизации.", e |
-| `backend/Services/GoogleCalendarSyncService.cs` | 1499 | `Google Calendar` | ? "Событие удалено из Google Calendar, потому что задача раньше даты начала синхронизации." |
-| `backend/Services/GoogleCalendarSyncService.cs` | 1500 | `Google Calendar` | : "Событие уже отсутствовало в Google Calendar при очистке задачи раньше даты начала синхронизации.", |
-| `backend/Services/GoogleCalendarSyncService.cs` | 1529 | `Google Calendar` | ? "Событие удалено из Google Calendar, потому что в настройках включено скрытие выполненных задач." |
-| `backend/Services/GoogleCalendarSyncService.cs` | 1530 | `Google Calendar` | : "Событие уже отсутствовало в Google Calendar при скрытии выполненной задачи.", |
-| `backend/Services/GoogleCalendarSyncService.cs` | 1559 | `Google Calendar` | ? "Событие удалено из Google Calendar, потому что доступ к календарю сотрудника отозван в правах роли." |
-| `backend/Services/GoogleCalendarSyncService.cs` | 1560 | `Google Calendar` | : "Событие уже отсутствовало в Google Calendar при отзыве доступа к календарю сотрудника.", |
-| `backend/Services/GoogleCalendarSyncService.cs` | 1685 | `Google Calendar` | await AddLogAsync(connection.Id == 0 ? null : connection.Id, null, null, "system", "oauth-connected", "success", "Google Calendar подключён к профилю.", null, cancellationToken); |
-| `backend/Services/GoogleCalendarSyncService.cs` | 1698 | `Google Calendar` | throw new InvalidOperationException("Нет refresh token для Google Calendar. Подключите календарь заново."); |
-| `backend/Services/GoogleCalendarSyncService.cs` | 1843 | `Google Calendar` | ? "Лишний дубль события Google Calendar для задачи CRM удалён." |
-| `backend/Services/GoogleCalendarSyncService.cs` | 1844 | `Google Calendar` | : "Лишний дубль события Google Calendar для задачи CRM уже отсутствовал.", |
-| `backend/Services/GoogleCalendarSyncService.cs` | 1857 | `Google Calendar` | "Не удалось удалить лишний дубль события Google Calendar для задачи CRM.", |
-| `backend/Services/GoogleCalendarSyncService.cs` | 1988 | `Google Calendar` | throw new InvalidOperationException(ReadProviderError(response.Payload, response.ReasonPhrase) ?? "Google Calendar API вернул ошибку."); |
-| `backend/Services/GoogleCalendarSyncService.cs` | 2004 | `Google Calendar` | throw new InvalidOperationException(ReadProviderError(response.Payload, response.ReasonPhrase) ?? "Google Calendar API вернул ошибку при удалении."); |
-| `backend/Services/GoogleCalendarSyncService.cs` | 2528 | `Google Calendar` | var title = success ? "Google Calendar подключён" : "Ошибка подключения Google Calendar"; |
-| `backend/Services/GoogleCalendarSyncService.cs` | 2762 | `Google Calendar` | "googleWins" => "Google Calendar главный", |
-| `backend/Services/GoogleCalendarSyncService.cs` | 1789 | `calendarId` | private async Task<bool> DeleteGoogleCalendarAsync(string accessToken, string calendarId, CancellationToken cancellationToken) |
-| `backend/Services/GoogleCalendarSyncService.cs` | 1791 | `calendarId` | using var request = BuildGoogleRequest(HttpMethod.Delete, $"{GoogleApiBaseUrl}/calendars/{Uri.EscapeDataString(calendarId)}", accessToken); |
-| `backend/Services/GoogleCalendarSyncService.cs` | 1795 | `calendarId` | private async Task<GoogleEventWriteResult> CreateGoogleEventAsync(string accessToken, string calendarId, GoogleEventPayload payload, CancellationToken cancellationToken) |
-| `backend/Services/GoogleCalendarSyncService.cs` | 1797 | `calendarId` | using var request = BuildGoogleRequest(HttpMethod.Post, $"{GoogleApiBaseUrl}/calendars/{Uri.EscapeDataString(calendarId)}/events", accessToken, JsonSerializer.Serialize(payload, JsonOptions)); |
-| `backend/Services/GoogleCalendarSyncService.cs` | 1804 | `calendarId` | private async Task<GoogleEventWriteResult> UpdateGoogleEventAsync(string accessToken, string calendarId, string eventId, GoogleEventPayload payload, CancellationToken cancellationToken) |
-| `backend/Services/GoogleCalendarSyncService.cs` | 1806 | `calendarId` | using var request = BuildGoogleRequest(HttpMethod.Put, $"{GoogleApiBaseUrl}/calendars/{Uri.EscapeDataString(calendarId)}/events/{Uri.EscapeDataString(eventId)}", accessToken, JsonSerializer.Serialize(payload, JsonOptions |
-| `backend/Services/GoogleCalendarSyncService.cs` | 1813 | `calendarId` | private async Task<bool> DeleteGoogleEventAsync(string accessToken, string calendarId, string eventId, CancellationToken cancellationToken) |
-| `backend/Services/GoogleCalendarSyncService.cs` | 1815 | `calendarId` | using var request = BuildGoogleRequest(HttpMethod.Delete, $"{GoogleApiBaseUrl}/calendars/{Uri.EscapeDataString(calendarId)}/events/{Uri.EscapeDataString(eventId)}", accessToken); |
-| `backend/Services/GoogleCalendarSyncService.cs` | 1866 | `calendarId` | string calendarId, |
-| `backend/Services/GoogleCalendarSyncService.cs` | 1886 | `calendarId` | var url = QueryHelpers.AddQueryString($"{GoogleApiBaseUrl}/calendars/{Uri.EscapeDataString(calendarId)}/events", query!); |
-| `backend/Services/GoogleCalendarSyncService.cs` | 2196 | `calendarId` | int? calendarId, |
-| `backend/Services/GoogleCalendarSyncService.cs` | 2205 | `calendarId` | var detailsJson = await BuildLogDetailsJsonAsync(connectionId, calendarId, taskId, details, cancellationToken); |
-| `backend/Services/GoogleCalendarSyncService.cs` | 2210 | `calendarId` | CalendarSyncCalendarId = calendarId, |
-| `backend/Services/GoogleCalendarSyncService.cs` | 2225 | `calendarId` | int? calendarId, |
-| `backend/Services/GoogleCalendarSyncService.cs` | 2252 | `calendarId` | if (calendarId.HasValue) |
-| `backend/Services/GoogleCalendarSyncService.cs` | 2256 | `calendarId` | .Where(item => item.Id == calendarId.Value) |
+| `backend/Services/GoogleCalendarSyncService.cs` | 243 | `Google Calendar` | return BuildPopupHtml(true, "Google Calendar подключён. Вернитесь в CRM.", authRequest.ReturnUrl); |
+| `backend/Services/GoogleCalendarSyncService.cs` | 258 | `Google Calendar` | "completed" => BuildPopupHtml(true, "Google Calendar уже подключён. Вернитесь в CRM.", authRequest.ReturnUrl), |
+| `backend/Services/GoogleCalendarSyncService.cs` | 259 | `Google Calendar` | "failed" or "expired" => BuildPopupHtml(false, authRequest.Error ?? "Подключение Google Calendar не завершено.", authRequest.ReturnUrl), |
+| `backend/Services/GoogleCalendarSyncService.cs` | 260 | `Google Calendar` | _ => BuildPopupHtml(false, "Запрос подключения Google Calendar уже обрабатывается.", authRequest.ReturnUrl), |
+| `backend/Services/GoogleCalendarSyncService.cs` | 273 | `Google Calendar` | throw new KeyNotFoundException("Подключение Google Calendar не найдено."); |
+| `backend/Services/GoogleCalendarSyncService.cs` | 282 | `Google Calendar` | await AddLogAsync(connection.Id, null, null, "system", "settings-updated", "success", "Настройки Google Calendar сохранены.", BuildConnectionSettingsDetails(connection), cancellationToken); |
+| `backend/Services/GoogleCalendarSyncService.cs` | 303 | `Google Calendar` | "Подключение Google Calendar отключается пользователем.", |
+| `backend/Services/GoogleCalendarSyncService.cs` | 311 | `Google Calendar` | "Не удалось отключить Google Calendar: сначала нужно удалить созданные PayPlanner календари и события во внешнем календаре. " |
+| `backend/Services/GoogleCalendarSyncService.cs` | 334 | `Google Calendar` | ? "Синхронизация Google Calendar выполнена." |
+| `backend/Services/GoogleCalendarSyncService.cs` | 335 | `Google Calendar` | : "Синхронизация Google Calendar завершена с ошибками. Проверьте журнал.", |
+| `backend/Services/GoogleCalendarSyncService.cs` | 365 | `Google Calendar` | _logger.LogWarning(ex, "Google Calendar scheduled sync failed for user {UserId}", userId); |
+| `backend/Services/GoogleCalendarSyncService.cs` | 387 | `Google Calendar` | $"Повторную полную синхронизацию Google Calendar можно запустить после {FormatLogDateTime(availableAt.Value)}. До этого времени работает обычная фоновая синхронизация.", |
+| `backend/Services/GoogleCalendarSyncService.cs` | 426 | `Google Calendar` | _logger.LogWarning(ex, "Google Calendar task sync failed for task {TaskId} and user {UserId}", taskId, item.UserId); |
+| `backend/Services/GoogleCalendarSyncService.cs` | 463 | `Google Calendar` | ? "Событие удалено из Google Calendar после удаления задачи в CRM." |
+| `backend/Services/GoogleCalendarSyncService.cs` | 464 | `Google Calendar` | : "Событие уже отсутствовало в Google Calendar при удалении задачи в CRM.", |
+| `backend/Services/GoogleCalendarSyncService.cs` | 479 | `Google Calendar` | "Не удалось удалить событие из Google Calendar после удаления задачи в CRM.", |
+| `backend/Services/GoogleCalendarSyncService.cs` | 524 | `Google Calendar` | $"Сотрудник #{userId} удаляется из CRM, календарь сотрудника убирается из админского Google Calendar.", |
+| `backend/Services/GoogleCalendarSyncService.cs` | 549 | `Google Calendar` | throw new UnauthorizedAccessException("Google Calendar webhook не содержит channel id или token."); |
+| `backend/Services/GoogleCalendarSyncService.cs` | 558 | `Google Calendar` | throw new UnauthorizedAccessException("Google Calendar webhook не прошёл проверку канала."); |
+| `backend/Services/GoogleCalendarSyncService.cs` | 599 | `Google Calendar` | await AddLogAsync(connection.Id, null, null, "system", "ensure-calendars", "error", "Не удалось подготовить календари сотрудников в Google Calendar.", ex.Message, cancellationToken); |
+| `backend/Services/GoogleCalendarSyncService.cs` | 610 | `Google Calendar` | await AddLogAsync(connection.Id, null, null, "google-to-crm", "import", "error", "Не удалось загрузить изменения из Google Calendar.", ex.Message, cancellationToken); |
+| `backend/Services/GoogleCalendarSyncService.cs` | 643 | `Google Calendar` | await AddLogAsync(connection.Id, null, task.Id, "crm-to-google", "upsert", "error", "Не удалось синхронизировать задачу с Google Calendar.", ex.Message, cancellationToken); |
+| `backend/Services/GoogleCalendarSyncService.cs` | 775 | `Google Calendar` | ? $"Дублирующий календарь «{duplicate.Name}» удален из Google Calendar." |
+| `backend/Services/GoogleCalendarSyncService.cs` | 776 | `Google Calendar` | : $"Дублирующий календарь «{duplicate.Name}» уже отсутствовал в Google Calendar.", |
+| `backend/Services/GoogleCalendarSyncService.cs` | 794 | `Google Calendar` | $"Не удалось удалить дублирующий календарь «{duplicate.Name}» из Google Calendar.", |
+| `backend/Services/GoogleCalendarSyncService.cs` | 834 | `Google Calendar` | "Не удалось получить токен Google Calendar для очистки календарей удаляемого пользователя.", |
+| `backend/Services/GoogleCalendarSyncService.cs` | 853 | `Google Calendar` | ? $"Календарь «{calendar.Name}» удален из Google Calendar." |
+| `backend/Services/GoogleCalendarSyncService.cs` | 854 | `Google Calendar` | : $"Календарь «{calendar.Name}» уже отсутствовал в Google Calendar.", |
+| `backend/Services/GoogleCalendarSyncService.cs` | 882 | `Google Calendar` | $"Не удалось удалить календарь «{calendar.Name}» из Google Calendar.", |
+| `backend/Services/GoogleCalendarSyncService.cs` | 957 | `Google Calendar` | ? "Устаревший дубль события Google Calendar удален, задача CRM оставлена без изменений." |
+| `backend/Services/GoogleCalendarSyncService.cs` | 958 | `Google Calendar` | : "Устаревший дубль события Google Calendar уже отсутствует, задача CRM оставлена без изменений.", |
+| `backend/Services/GoogleCalendarSyncService.cs` | 972 | `Google Calendar` | "Не удалось удалить устаревший дубль события Google Calendar, задача CRM оставлена без изменений.", |
+| `backend/Services/GoogleCalendarSyncService.cs` | 999 | `Google Calendar` | await AddLogAsync(connection.Id, calendar.Id, link.TaskJournalItemId, "google-to-crm", "detach", "success", "Событие удалено в Google Calendar, связь с задачей помечена как отключённая.", null, cancellationToken); |
+| `backend/Services/GoogleCalendarSyncService.cs` | 1015 | `Google Calendar` | await AddLogAsync(connection.Id, calendar.Id, link.TaskJournalItemId, "google-to-crm", "skip", "success", "Изменения в Google Calendar прочитаны, но правило конфликтов оставляет CRM главным источником.", null, cancellati |
+| `backend/Services/GoogleCalendarSyncService.cs` | 1072 | `Google Calendar` | await AddLogAsync(connection.Id, calendar.Id, task.Id, "google-to-crm", "update-task", "success", "Изменения из Google Calendar применены к задаче.", string.Join("; ", changes), cancellationToken); |
+| `backend/Services/GoogleCalendarSyncService.cs` | 1139 | `Google Calendar` | await AddLogAsync(connection.Id, calendar.Id, task.Id, "crm-to-google", "delete-event", "success", "Старое событие Google Calendar удалено после переноса задачи в другой календарь.", BuildTaskSnapshotDetails(task, timeZo |
+| `backend/Services/GoogleCalendarSyncService.cs` | 1143 | `Google Calendar` | await AddLogAsync(connection.Id, calendar.Id, task.Id, "crm-to-google", "delete-event", "error", "Не удалось удалить старое событие Google Calendar после переноса задачи в другой календарь.", ex.Message, cancellationToke |
+| `backend/Services/GoogleCalendarSyncService.cs` | 1146 | `Google Calendar` | await AddLogAsync(connection.Id, calendar.Id, task.Id, "crm-to-google", "create-event", "success", "Задача создана в Google Calendar.", BuildTaskSnapshotDetails(task, timeZone), cancellationToken); |
+| `backend/Services/GoogleCalendarSyncService.cs` | 1156 | `Google Calendar` | await AddLogAsync(connection.Id, calendar.Id, task.Id, "crm-to-google", "update-event", "success", "Задача обновлена в Google Calendar.", BuildTaskSnapshotDetails(task, timeZone), cancellationToken); |
+| `backend/Services/GoogleCalendarSyncService.cs` | 1324 | `Google Calendar` | await AddLogAsync(connection.Id, calendar.Id, null, "system", "create-calendar", "success", $"В Google Calendar создан календарь «{name}».", null, cancellationToken); |
+| `backend/Services/GoogleCalendarSyncService.cs` | 1478 | `Google Calendar` | ? "Событие удалено из Google Calendar, потому что задача раньше даты начала синхронизации." |
+| `backend/Services/GoogleCalendarSyncService.cs` | 1479 | `Google Calendar` | : "Событие уже отсутствовало в Google Calendar при очистке задач раньше даты начала синхронизации.", |
+| `backend/Services/GoogleCalendarSyncService.cs` | 1488 | `Google Calendar` | await AddLogAsync(connection.Id, link.CalendarSyncCalendarId, link.TaskJournalItemId, "crm-to-google", "delete-event", "error", "Не удалось удалить событие Google Calendar для задачи раньше даты начала синхронизации.", e |
+| `backend/Services/GoogleCalendarSyncService.cs` | 1524 | `Google Calendar` | ? "Событие удалено из Google Calendar, потому что задача раньше даты начала синхронизации." |
+| `backend/Services/GoogleCalendarSyncService.cs` | 1525 | `Google Calendar` | : "Событие уже отсутствовало в Google Calendar при очистке задачи раньше даты начала синхронизации.", |
+| `backend/Services/GoogleCalendarSyncService.cs` | 1554 | `Google Calendar` | ? "Событие удалено из Google Calendar, потому что в настройках включено скрытие выполненных задач." |
+| `backend/Services/GoogleCalendarSyncService.cs` | 1555 | `Google Calendar` | : "Событие уже отсутствовало в Google Calendar при скрытии выполненной задачи.", |
+| `backend/Services/GoogleCalendarSyncService.cs` | 1584 | `Google Calendar` | ? "Событие удалено из Google Calendar, потому что доступ к календарю сотрудника отозван в правах роли." |
+| `backend/Services/GoogleCalendarSyncService.cs` | 1585 | `Google Calendar` | : "Событие уже отсутствовало в Google Calendar при отзыве доступа к календарю сотрудника.", |
+| `backend/Services/GoogleCalendarSyncService.cs` | 1710 | `Google Calendar` | await AddLogAsync(connection.Id == 0 ? null : connection.Id, null, null, "system", "oauth-connected", "success", "Google Calendar подключён к профилю.", null, cancellationToken); |
+| `backend/Services/GoogleCalendarSyncService.cs` | 1723 | `Google Calendar` | throw new InvalidOperationException("Нет refresh token для Google Calendar. Подключите календарь заново."); |
+| `backend/Services/GoogleCalendarSyncService.cs` | 1868 | `Google Calendar` | ? "Лишний дубль события Google Calendar для задачи CRM удалён." |
+| `backend/Services/GoogleCalendarSyncService.cs` | 1869 | `Google Calendar` | : "Лишний дубль события Google Calendar для задачи CRM уже отсутствовал.", |
+| `backend/Services/GoogleCalendarSyncService.cs` | 1882 | `Google Calendar` | "Не удалось удалить лишний дубль события Google Calendar для задачи CRM.", |
+| `backend/Services/GoogleCalendarSyncService.cs` | 2013 | `Google Calendar` | throw new InvalidOperationException(ReadProviderError(response.Payload, response.ReasonPhrase) ?? "Google Calendar API вернул ошибку."); |
+| `backend/Services/GoogleCalendarSyncService.cs` | 2029 | `Google Calendar` | throw new InvalidOperationException(ReadProviderError(response.Payload, response.ReasonPhrase) ?? "Google Calendar API вернул ошибку при удалении."); |
+| `backend/Services/GoogleCalendarSyncService.cs` | 2553 | `Google Calendar` | var title = success ? "Google Calendar подключён" : "Ошибка подключения Google Calendar"; |
+| `backend/Services/GoogleCalendarSyncService.cs` | 2787 | `Google Calendar` | "googleWins" => "Google Calendar главный", |
+| `backend/Services/GoogleCalendarSyncService.cs` | 1814 | `calendarId` | private async Task<bool> DeleteGoogleCalendarAsync(string accessToken, string calendarId, CancellationToken cancellationToken) |
+| `backend/Services/GoogleCalendarSyncService.cs` | 1816 | `calendarId` | using var request = BuildGoogleRequest(HttpMethod.Delete, $"{GoogleApiBaseUrl}/calendars/{Uri.EscapeDataString(calendarId)}", accessToken); |
+| `backend/Services/GoogleCalendarSyncService.cs` | 1820 | `calendarId` | private async Task<GoogleEventWriteResult> CreateGoogleEventAsync(string accessToken, string calendarId, GoogleEventPayload payload, CancellationToken cancellationToken) |
+| `backend/Services/GoogleCalendarSyncService.cs` | 1822 | `calendarId` | using var request = BuildGoogleRequest(HttpMethod.Post, $"{GoogleApiBaseUrl}/calendars/{Uri.EscapeDataString(calendarId)}/events", accessToken, JsonSerializer.Serialize(payload, JsonOptions)); |
+| `backend/Services/GoogleCalendarSyncService.cs` | 1829 | `calendarId` | private async Task<GoogleEventWriteResult> UpdateGoogleEventAsync(string accessToken, string calendarId, string eventId, GoogleEventPayload payload, CancellationToken cancellationToken) |
+| `backend/Services/GoogleCalendarSyncService.cs` | 1831 | `calendarId` | using var request = BuildGoogleRequest(HttpMethod.Put, $"{GoogleApiBaseUrl}/calendars/{Uri.EscapeDataString(calendarId)}/events/{Uri.EscapeDataString(eventId)}", accessToken, JsonSerializer.Serialize(payload, JsonOptions |
+| `backend/Services/GoogleCalendarSyncService.cs` | 1838 | `calendarId` | private async Task<bool> DeleteGoogleEventAsync(string accessToken, string calendarId, string eventId, CancellationToken cancellationToken) |
+| `backend/Services/GoogleCalendarSyncService.cs` | 1840 | `calendarId` | using var request = BuildGoogleRequest(HttpMethod.Delete, $"{GoogleApiBaseUrl}/calendars/{Uri.EscapeDataString(calendarId)}/events/{Uri.EscapeDataString(eventId)}", accessToken); |
+| `backend/Services/GoogleCalendarSyncService.cs` | 1891 | `calendarId` | string calendarId, |
+| `backend/Services/GoogleCalendarSyncService.cs` | 1911 | `calendarId` | var url = QueryHelpers.AddQueryString($"{GoogleApiBaseUrl}/calendars/{Uri.EscapeDataString(calendarId)}/events", query!); |
+| `backend/Services/GoogleCalendarSyncService.cs` | 2221 | `calendarId` | int? calendarId, |
+| `backend/Services/GoogleCalendarSyncService.cs` | 2230 | `calendarId` | var detailsJson = await BuildLogDetailsJsonAsync(connectionId, calendarId, taskId, details, cancellationToken); |
+| `backend/Services/GoogleCalendarSyncService.cs` | 2235 | `calendarId` | CalendarSyncCalendarId = calendarId, |
+| `backend/Services/GoogleCalendarSyncService.cs` | 2250 | `calendarId` | int? calendarId, |
+| `backend/Services/GoogleCalendarSyncService.cs` | 2277 | `calendarId` | if (calendarId.HasValue) |
+| `backend/Services/GoogleCalendarSyncService.cs` | 2281 | `calendarId` | .Where(item => item.Id == calendarId.Value) |
 | `backend/Services/YandexCalendarSyncService.cs` | 71 | `YandexCalendar` | _tokenProtector = dataProtectionProvider.CreateProtector("PayPlanner.YandexCalendar.Tokens.v1"); |
-| `backend/Services/YandexCalendarSyncService.cs` | 2192 | `calendarId` | int? calendarId, |
-| `backend/Services/YandexCalendarSyncService.cs` | 2201 | `calendarId` | var detailsJson = await BuildLogDetailsJsonAsync(connectionId, calendarId, taskId, details, cancellationToken); |
-| `backend/Services/YandexCalendarSyncService.cs` | 2206 | `calendarId` | CalendarSyncCalendarId = calendarId, |
-| `backend/Services/YandexCalendarSyncService.cs` | 2221 | `calendarId` | int? calendarId, |
-| `backend/Services/YandexCalendarSyncService.cs` | 2248 | `calendarId` | if (calendarId.HasValue) |
-| `backend/Services/YandexCalendarSyncService.cs` | 2252 | `calendarId` | .Where(item => item.Id == calendarId.Value) |
+| `backend/Services/YandexCalendarSyncService.cs` | 2217 | `calendarId` | int? calendarId, |
+| `backend/Services/YandexCalendarSyncService.cs` | 2226 | `calendarId` | var detailsJson = await BuildLogDetailsJsonAsync(connectionId, calendarId, taskId, details, cancellationToken); |
+| `backend/Services/YandexCalendarSyncService.cs` | 2231 | `calendarId` | CalendarSyncCalendarId = calendarId, |
+| `backend/Services/YandexCalendarSyncService.cs` | 2246 | `calendarId` | int? calendarId, |
+| `backend/Services/YandexCalendarSyncService.cs` | 2273 | `calendarId` | if (calendarId.HasValue) |
+| `backend/Services/YandexCalendarSyncService.cs` | 2277 | `calendarId` | .Where(item => item.Id == calendarId.Value) |
+| `docs/anonymous-integration-security.md` | 7 | `Google Calendar` | - OAuth-callback Google Calendar, Яндекс.Календаря и Яндекс.Диска ограничены 30 запросами в минуту на внешний IP и конкретный маршрут. |
+| `docs/anonymous-integration-security.md` | 8 | `Google Calendar` | - Webhook Google Calendar, Telegram и MAX ограничены 300 запросами в минуту на внешний IP и маршрут. Очередь rate limiter отключена, поэтому лишние запросы сразу получают `429` и не удерживают ресурсы приложения. |
 | `docs/archive/roadmaps/audit-roadmap-2026-06-10.md` | 492 | `Google Calendar` | - Google Calendar; |
 | `docs/archive/roadmaps/audit-roadmap-2026-06-10.md` | 497 | `Google Calendar` | - Выполнено: добавлены/расширены mocked tests для DaData, Sudrf, Yandex Disk, Google Calendar, Yandex Calendar, Telegram и S3; матрица покрытия зафиксирована в `docs/http-integration-error-coverage-2026-06-10.md`; target |
 | `docs/archive/roadmaps/audit-roadmap-2026-06-10.md` | 504 | `Google Calendar` | - Google Calendar webhook; |
@@ -2104,9 +2110,11 @@ Google/Yandex/ICS синхронизация, где надо хранить UTC
 | `docs/archive/roadmaps/calendar-specific-employee-access-roadmap-2026-06-17.md` | 239 | `Google Calendar` | - [x] Проверить Google Calendar. |
 | `docs/archive/roadmaps/calendar-specific-employee-access-roadmap-2026-06-17.md` | 241 | `Google Calendar` | - Выполнено: покрыто unit-тестами Google Calendar sync; реальный аккаунт остается acceptance после деплоя. |
 | `docs/archive/roadmaps/remaining-roadmap.md` | 251 | `Google Calendar` | - `[x]` 2026-06-23: пользовательские действия Google Calendar и Яндекс.Календаря в режиме `adminManaged` больше не доверяют старому `admin` claim и проверяют актуальную роль пользователя в БД перед изменением личной синх |
+| `docs/batch-operations-audit-coverage-2026-06-10.md` | 22 | `Google Calendar` | \| `backend/Services/GoogleCalendarSyncService.cs:190` \| `ExecuteUpdateAsync` \| Один ожидающий OAuth-запрос подключения Google Calendar \| Персональный объектный аудит не создаётся: техническая строка хранит собственный ст |
 | `docs/crm-legal-module-gap-report-2026-05-25.md` | 117 | `Google Calendar` | - диагностика календарных провайдеров в настройках интеграций: ICS активен, Google Calendar и Яндекс Календарь явно показывают статус feature flag/OAuth до запуска двусторонней синхронизации; |
 | `docs/crm-legal-module-gap-report-2026-05-25.md` | 129 | `Google Calendar` | - Google Calendar и Яндекс Календарь; |
 | `docs/full-project-audit-2026-06-10.md` | 1601 | `Google Calendar` | \| Google Calendar \| services + background sync \| Есть OAuth/calendar sync/manual sync/webhook paths. \| |
+| `docs/full-system-quality-roadmap-2026-08-04.md` | 115 | `Google Calendar` | Оставшиеся анонимные маршруты Google Calendar, Яндекс.Календаря, Яндекс.Диска, Telegram, MAX, feature flags и health получили централизованные ограничения по IP и маршруту; тела webhook ограничены до разбора JSON. OAuth- |
 | `docs/google-calendar-sync-guide.md` | 1 | `Google Calendar` | # Google Calendar: подключение и синхронизация задач |
 | `docs/google-calendar-sync-guide.md` | 5 | `Google Calendar` | Подключение Google Calendar добавлено в профиль пользователя, а не в общие настройки CRM. |
 | `docs/google-calendar-sync-guide.md` | 7 | `Google Calendar` | Путь для пользователя: профиль пользователя -> блок "Google Calendar". |
@@ -2117,15 +2125,7 @@ Google/Yandex/ICS синхронизация, где надо хранить UTC
 | `docs/google-calendar-sync-guide.md` | 39 | `Google Calendar` | Эти же настройки используются существующим механизмом Google OAuth в CRM. Для календаря дополнительно требуется, чтобы в Google Cloud был включен Google Calendar API и OAuth-приложение разрешало scope календаря. |
 | `docs/google-calendar-sync-guide.md` | 54 | `Google Calendar` | 2. В блоке "Google Calendar" нажимает кнопку подключения. |
 | `docs/google-calendar-sync-guide.md` | 69 | `Google Calendar` | При создании или изменении задачи в CRM сервис создает или обновляет событие в Google Calendar. В событии сохраняется служебная связь с задачей CRM, поэтому последующие изменения обновляют уже существующее событие, а не  |
-| `docs/google-calendar-sync-guide.md` | 71 | `Google Calendar` | Из Google Calendar обратно в CRM могут возвращаться изменения времени, длительности, названия и статуса события. Правило обработки конфликтов задается в настройках подключения: |
-| `docs/google-calendar-sync-guide.md` | 78 | `Google Calendar` | Администратор при подключении Google Calendar может синхронизировать все задачи CRM. |
-| `docs/google-calendar-sync-guide.md` | 91 | `Google Calendar` | - автоматически при удалении задачи в CRM, чтобы связанное событие PayPlanner исчезло из Google Calendar; |
-| `docs/google-calendar-sync-guide.md` | 92 | `Google Calendar` | - вручную из блока "Google Calendar" в профиле; |
-| `docs/google-calendar-sync-guide.md` | 94 | `Google Calendar` | - при получении webhook-события Google Calendar, если для календаря зарегистрирован канал уведомлений. |
-| `docs/google-calendar-sync-guide.md` | 96 | `Google Calendar` | Даже если Google Calendar временно недоступен, сохранение задачи в CRM не блокируется. Ошибка синхронизации записывается в журнал, а пользователь может повторить обмен вручную. |
-| `docs/google-calendar-sync-guide.md` | 98 | `Google Calendar` | Удаление задач работает строже: если у задачи уже есть связанное событие Google Calendar и CRM не смогла удалить его через Google API, удаление задачи останавливается. Это защищает календарь от оставшихся событий, которы |
-| `docs/google-calendar-sync-guide.md` | 102 | `Google Calendar` | Если пользователь удаляется из CRM, система сначала очищает созданные для него календари PayPlanner в Google Calendar: |
-| Еще 67 совпадений | - | - | Категория ограничена первыми 250 строками, полное количество указано в сводке. |
+| Еще 75 совпадений | - | - | Категория ограничена первыми 250 строками, полное количество указано в сводке. |
 
 ## Правила разбора
 

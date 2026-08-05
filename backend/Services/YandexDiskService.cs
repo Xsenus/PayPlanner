@@ -350,11 +350,20 @@ public sealed class YandexDiskService : IYandexDiskService
         }
 
         YandexDiskOAuthRequestState? authRequest;
+        var claimed = false;
         await OAuthRequestLock.WaitAsync(cancellationToken);
         try
         {
             var requests = await LoadOAuthRequestsAsync(cancellationToken);
-            authRequest = requests.FirstOrDefault(item => string.Equals(item.State, normalizedState, StringComparison.Ordinal));
+            var requestIndex = requests.FindIndex(item => string.Equals(item.State, normalizedState, StringComparison.Ordinal));
+            authRequest = requestIndex >= 0 ? requests[requestIndex] : null;
+            if (authRequest?.Status == "pending")
+            {
+                authRequest = authRequest with { Status = "processing" };
+                requests[requestIndex] = authRequest;
+                await SaveOAuthRequestsAsync(requests, cancellationToken);
+                claimed = true;
+            }
         }
         finally
         {
@@ -366,14 +375,19 @@ public sealed class YandexDiskService : IYandexDiskService
             return BuildOAuthPopupHtml(false, "Запрос подключения Я.Диска не найден.");
         }
 
-        if (authRequest.Status == "completed")
+        if (!claimed && authRequest.Status == "completed")
         {
             return BuildOAuthPopupHtml(true, "Яндекс.Диск уже подключён. Можно вернуться в CRM.", authRequest.ReturnUrl);
         }
 
-        if (authRequest.Status == "failed")
+        if (!claimed && authRequest.Status is "failed" or "expired")
         {
             return BuildOAuthPopupHtml(false, authRequest.Error ?? "Подключение Яндекс.Диска не завершено.", authRequest.ReturnUrl);
+        }
+
+        if (!claimed)
+        {
+            return BuildOAuthPopupHtml(false, "Запрос подключения Яндекс.Диска уже обрабатывается.", authRequest.ReturnUrl);
         }
 
         if (authRequest.ExpiresAt <= DateTime.UtcNow)
@@ -384,7 +398,8 @@ public sealed class YandexDiskService : IYandexDiskService
 
         if (!string.IsNullOrWhiteSpace(error))
         {
-            var detail = string.IsNullOrWhiteSpace(errorDescription) ? error.Trim() : errorDescription.Trim();
+            var rawDetail = string.IsNullOrWhiteSpace(errorDescription) ? error.Trim() : errorDescription.Trim();
+            var detail = rawDetail.Length <= 2000 ? rawDetail : rawDetail[..2000];
             await UpdateOAuthRequestAsync(authRequest with { Status = "failed", Error = detail, CompletedAt = DateTime.UtcNow }, cancellationToken);
             return BuildOAuthPopupHtml(false, detail, authRequest.ReturnUrl);
         }

@@ -1,8 +1,10 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
+using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.LegalIntegrations;
 
 namespace PayPlanner.Api.Controllers;
@@ -24,13 +26,14 @@ public sealed class FeatureFlagsController : ControllerBase
 
     [HttpGet]
     [AllowAnonymous]
+    [EnableRateLimiting(AnonymousIntegrationRateLimitPolicies.PublicMetadata)]
     public ActionResult<AppFeatureFlagsDto> Get()
     {
         return Ok(AppFeatureFlagsDto.FromOptions(_options.Value));
     }
 
     [HttpGet("legal-integrations/diagnostics")]
-    [AllowAnonymous]
+    [Authorize(Roles = "admin")]
     public ActionResult<LegalIntegrationDiagnosticsDto> GetLegalIntegrationDiagnostics()
     {
         return Ok(_legalIntegrationDiagnostics?.GetDiagnostics()
