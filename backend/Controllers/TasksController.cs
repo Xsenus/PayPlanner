@@ -145,6 +145,11 @@ public class TasksController : ControllerBase
         [FromQuery] int? legalEntityId = null,
         [FromQuery] string? priority = null,
         [FromQuery] bool? underControl = null,
+        [FromQuery] int? authorUserId = null,
+        [FromQuery] bool approvalScope = false,
+        [FromQuery] string? metric = null,
+        [FromQuery] DateTime? todayFrom = null,
+        [FromQuery] DateTime? todayTo = null,
         [FromQuery] bool calendarView = false,
         [FromQuery] bool includeDeadlineChangeRequests = false,
         [FromQuery] int page = 1,
@@ -164,8 +169,8 @@ public class TasksController : ControllerBase
             return Forbid();
         }
 
-        var query = ApplyTaskJournalFilters(
-            BuildVisibleTaskBaseQuery(access).AsNoTracking(),
+        var query = BuildTaskJournalListQuery(
+            access,
             search,
             status,
             type,
@@ -176,7 +181,12 @@ public class TasksController : ControllerBase
             clientId,
             legalEntityId,
             priority,
-            underControl);
+            underControl,
+            authorUserId,
+            approvalScope,
+            metric,
+            todayFrom,
+            todayTo);
 
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, 200);
@@ -601,6 +611,104 @@ public class TasksController : ControllerBase
             CreatedTaskCountLast7Days = auditStatistics?.CreatedCountLast7Days ?? 0,
             LastCreatedAt = auditStatistics?.LastCreatedAt is { } lastCreatedAt ? ToIso(lastCreatedAt) : null,
             LastCreatedDescription = auditStatistics?.LastCreatedDescription,
+        });
+    }
+
+    /// <summary>
+    /// Возвращает счётчики журнала без загрузки полных карточек задач.
+    /// Фильтры совпадают со списком, поэтому переключение метрики не требует
+    /// последовательного чтения всех страниц и повторной фильтрации в браузере.
+    /// </summary>
+    [HttpGet("summary")]
+    public async Task<ActionResult<TaskJournalListSummaryDto>> GetTaskListSummary(
+        [FromQuery] string? search,
+        [FromQuery] string? status,
+        [FromQuery] string? type,
+        [FromQuery] int? assigneeUserId,
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] int? clientCaseId = null,
+        [FromQuery] int? clientId = null,
+        [FromQuery] int? legalEntityId = null,
+        [FromQuery] string? priority = null,
+        [FromQuery] bool? underControl = null,
+        [FromQuery] int? authorUserId = null,
+        [FromQuery] bool approvalScope = false,
+        [FromQuery] DateTime? todayFrom = null,
+        [FromQuery] DateTime? todayTo = null,
+        CancellationToken ct = default)
+    {
+        var access = await GetTaskAccessAsync(ct);
+        if (access is null)
+        {
+            return Unauthorized();
+        }
+
+        if (!access.IsAdmin && access.Permission?.CanView != true)
+        {
+            return Forbid();
+        }
+
+        var now = DateTime.UtcNow;
+        var normalizedTodayFrom = todayFrom ?? now.Date;
+        var normalizedTodayTo = todayTo is { } requestedTodayTo && requestedTodayTo > normalizedTodayFrom
+            ? requestedTodayTo
+            : normalizedTodayFrom.AddDays(1);
+        var query = BuildTaskJournalListQuery(
+            access,
+            search,
+            status,
+            type,
+            assigneeUserId,
+            from,
+            to,
+            clientCaseId,
+            clientId,
+            legalEntityId,
+            priority,
+            underControl,
+            authorUserId,
+            approvalScope,
+            metric: null,
+            todayFrom: normalizedTodayFrom,
+            todayTo: normalizedTodayTo);
+
+        var aggregate = await query
+            .GroupBy(_ => 1)
+            .Select(group => new
+            {
+                Active = group.Count(task => task.Status != "done" && task.Status != "cancelled"),
+                Overdue = group.Count(task =>
+                    task.Status != "done" &&
+                    task.Status != "cancelled" &&
+                    task.DueAt < now),
+                Today = group.Count(task =>
+                    task.Status != "done" &&
+                    task.Status != "cancelled" &&
+                    task.DueAt >= normalizedTodayFrom &&
+                    task.DueAt < normalizedTodayTo),
+                HighPriority = group.Count(task =>
+                    task.Status != "done" &&
+                    task.Status != "cancelled" &&
+                    (task.Priority == "high" || task.Priority == "urgent")),
+            })
+            .SingleOrDefaultAsync(ct);
+
+        var unbilledCount = await BuildVisibleTaskBaseQuery(access)
+            .AsNoTracking()
+            .CountAsync(task =>
+                task.ClientBillingClassification == TaskClientBillingClassification.Billable &&
+                !task.BillingInvoiceId.HasValue &&
+                task.BillingModeSnapshot != ContractBillingMode.Fixed,
+                ct);
+
+        return Ok(new TaskJournalListSummaryDto
+        {
+            Active = aggregate?.Active ?? 0,
+            Overdue = aggregate?.Overdue ?? 0,
+            Today = aggregate?.Today ?? 0,
+            HighPriority = aggregate?.HighPriority ?? 0,
+            Unbilled = unbilledCount,
         });
     }
 
@@ -3788,6 +3896,141 @@ public class TasksController : ControllerBase
     private static bool IntervalsOverlap(DateTime firstStart, DateTime firstEnd, DateTime secondStart, DateTime secondEnd)
         => firstStart < secondEnd && secondStart < firstEnd;
 
+    /// <summary>
+    /// Собирает единый запрос списка и сводки задач. Все ограничения применяются
+    /// до Count/Skip/Take, чтобы API не читал скрытые или отфильтрованные строки
+    /// и не заставлял frontend последовательно выгружать журнал целиком.
+    /// </summary>
+    private IQueryable<TaskJournalItem> BuildTaskJournalListQuery(
+        TaskAccess access,
+        string? search,
+        string? status,
+        string? type,
+        int? assigneeUserId,
+        DateTime? from,
+        DateTime? to,
+        int? clientCaseId,
+        int? clientId,
+        int? legalEntityId,
+        string? priority,
+        bool? underControl,
+        int? authorUserId,
+        bool approvalScope,
+        string? metric,
+        DateTime? todayFrom,
+        DateTime? todayTo)
+    {
+        var query = ApplyTaskJournalFilters(
+            BuildVisibleTaskBaseQuery(access).AsNoTracking(),
+            search,
+            status,
+            type,
+            assigneeUserId,
+            from,
+            to,
+            clientCaseId,
+            clientId,
+            legalEntityId,
+            priority,
+            underControl,
+            authorUserId);
+
+        query = ApplyTaskApprovalScope(query, access, approvalScope);
+        return ApplyTaskMetricFilter(query, metric, todayFrom, todayTo);
+    }
+
+    /// <summary>
+    /// Ограничивает режим «Согласования» только задачами, по которым текущий
+    /// пользователь действительно принимает следующее решение, либо рассматривает
+    /// запрос переноса срока. Администратор видит все активные решения.
+    /// </summary>
+    private static IQueryable<TaskJournalItem> ApplyTaskApprovalScope(
+        IQueryable<TaskJournalItem> query,
+        TaskAccess access,
+        bool approvalScope)
+    {
+        if (!approvalScope)
+        {
+            return query;
+        }
+
+        if (access.IsAdmin)
+        {
+            return query.Where(task =>
+                (task.Status == "onApproval" || task.Status == "overdueApproval") ||
+                task.DeadlineChangeRequests.Any(request => request.Status == "pending"));
+        }
+
+        var userId = access.UserId;
+        return query.Where(task =>
+            task.DeadlineChangeRequests.Any(request =>
+                request.Status == "pending" && request.ReviewerUserId == userId) ||
+            ((task.Status == "onApproval" || task.Status == "overdueApproval") &&
+             task.Participants.Any(participant =>
+                 participant.Role == "approver" &&
+                 participant.UserId == userId &&
+                 participant.ApprovalStatus != "approved" &&
+                 !task.Participants.Any(previous =>
+                     previous.Role == "approver" &&
+                     previous.ApprovalStatus != "approved" &&
+                     (previous.SortOrder < participant.SortOrder ||
+                      (previous.SortOrder == participant.SortOrder && previous.Id < participant.Id))))));
+    }
+
+    /// <summary>
+    /// Применяет выбранную карточку-метрику как SQL-фильтр. Границы «Сегодня»
+    /// приходят от frontend в часовом поясе пользователя и сравниваются как
+    /// полуинтервал [начало; начало следующего дня).
+    /// </summary>
+    private static IQueryable<TaskJournalItem> ApplyTaskMetricFilter(
+        IQueryable<TaskJournalItem> query,
+        string? metric,
+        DateTime? todayFrom,
+        DateTime? todayTo)
+    {
+        var normalizedMetric = metric?.Trim();
+        if (string.IsNullOrWhiteSpace(normalizedMetric) ||
+            string.Equals(normalizedMetric, "none", StringComparison.OrdinalIgnoreCase))
+        {
+            return query;
+        }
+
+        var now = DateTime.UtcNow;
+        if (string.Equals(normalizedMetric, "active", StringComparison.OrdinalIgnoreCase))
+        {
+            return query.Where(task => task.Status != "done" && task.Status != "cancelled");
+        }
+
+        if (string.Equals(normalizedMetric, "overdue", StringComparison.OrdinalIgnoreCase))
+        {
+            return query.Where(task =>
+                task.Status != "done" &&
+                task.Status != "cancelled" &&
+                task.DueAt < now);
+        }
+
+        if (string.Equals(normalizedMetric, "today", StringComparison.OrdinalIgnoreCase))
+        {
+            var from = todayFrom ?? now.Date;
+            var to = todayTo is { } requestedTo && requestedTo > from ? requestedTo : from.AddDays(1);
+            return query.Where(task =>
+                task.Status != "done" &&
+                task.Status != "cancelled" &&
+                task.DueAt >= from &&
+                task.DueAt < to);
+        }
+
+        if (string.Equals(normalizedMetric, "highPriority", StringComparison.OrdinalIgnoreCase))
+        {
+            return query.Where(task =>
+                task.Status != "done" &&
+                task.Status != "cancelled" &&
+                (task.Priority == "high" || task.Priority == "urgent"));
+        }
+
+        return query;
+    }
+
     private static IQueryable<TaskJournalItem> ApplyTaskJournalFilters(
         IQueryable<TaskJournalItem> query,
         string? search,
@@ -3800,13 +4043,22 @@ public class TasksController : ControllerBase
         int? clientId,
         int? legalEntityId,
         string? priority = null,
-        bool? underControl = null)
+        bool? underControl = null,
+        int? authorUserId = null)
     {
         if (!string.IsNullOrWhiteSpace(status) && !string.Equals(status, "all", StringComparison.OrdinalIgnoreCase))
         {
             if (string.Equals(status, "active", StringComparison.OrdinalIgnoreCase))
             {
                 query = query.Where(task => task.Status != "done" && task.Status != "cancelled");
+            }
+            else if (string.Equals(status, "overdue", StringComparison.OrdinalIgnoreCase))
+            {
+                var now = DateTime.UtcNow;
+                query = query.Where(task =>
+                    task.Status != "done" &&
+                    task.Status != "cancelled" &&
+                    task.DueAt < now);
             }
             else
             {
@@ -3846,6 +4098,11 @@ public class TasksController : ControllerBase
                 task.Participants.Any(participant =>
                     participant.Role == "assignee" &&
                     participant.UserId == assigneeUserId.Value));
+        }
+
+        if (authorUserId.HasValue)
+        {
+            query = query.Where(task => task.AuthorUserId == authorUserId.Value);
         }
 
         if (clientCaseId.HasValue)

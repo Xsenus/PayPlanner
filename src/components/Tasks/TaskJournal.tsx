@@ -53,8 +53,15 @@ import { useClientCases } from '../../hooks/useClientCases';
 import { useLegalEntities } from '../../hooks/useLegalEntities';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useToast } from '../../hooks/useToast';
+import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings';
-import { apiService, type TaskJournalSettingsDto } from '../../services/api';
+import {
+  apiService,
+  type TaskJournalListParams,
+  type TaskJournalListSummary,
+  type TaskJournalSettingsDto,
+} from '../../services/api';
+import { TablePagination } from '../ui/TablePagination';
 import {
   clearOfflineCalendarSnapshot,
   getOfflineCalendarTrustedDevice,
@@ -2074,6 +2081,8 @@ export function TaskJournal({
       }
     : initialPreferencesRef.current;
   const [tasks, setTasks] = useState<TaskJournalItem[]>([]);
+  const [taskListTotal, setTaskListTotal] = useState(0);
+  const [taskListSummary, setTaskListSummary] = useState<TaskJournalListSummary | null>(null);
   const [caseCalendarEvents, setCaseCalendarEvents] = useState<CaseCalendarEvent[]>([]);
   const [caseCalendarSummary, setCaseCalendarSummary] = useState<CaseCalendarSummary | null>(null);
   const [caseCalendarLoading, setCaseCalendarLoading] = useState(false);
@@ -2097,6 +2106,7 @@ export function TaskJournal({
   const [quickFilter, setQuickFilter] = useState<QuickFilter>(initialPreferences.quickFilter);
   const [metricFilter, setMetricFilter] = useState<MetricFilter>(initialPreferences.metricFilter);
   const [search, setSearch] = useState(initialPreferences.search);
+  const debouncedSearch = useDebouncedValue(search, 300);
   const searchRef = useRef(initialPreferences.search);
   const [dateFromFilter, setDateFromFilter] = useState(initialPreferences.dateFrom);
   const [dateToFilter, setDateToFilter] = useState(initialPreferences.dateTo);
@@ -2122,6 +2132,13 @@ export function TaskJournal({
   const selectedFilterLegalEntityId = counterpartyFilter.startsWith('legal:')
     ? Number(counterpartyFilter.slice('legal:'.length))
     : undefined;
+  const { cases: filterClientCases, loading: filterClientCasesLoading } = useClientCases(
+    selectedFilterClientId,
+    {
+      enabled: counterpartyFilter !== 'all' && canViewCases,
+      legalEntityId: selectedFilterLegalEntityId,
+    },
+  );
   const [assigneeFilter, setAssigneeFilter] = useState(initialPreferences.assigneeFilter);
   const [typeFilter, setTypeFilter] = useState<TaskJournalType | 'all'>(initialPreferences.typeFilter);
   const [priorityFilter, setPriorityFilter] = useState<TaskJournalPriority | 'all'>(initialPreferences.priorityFilter);
@@ -2168,6 +2185,8 @@ export function TaskJournal({
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [templatesPanelOpen, setTemplatesPanelOpen] = useState(false);
   const routeTaskRequestRef = useRef(0);
+  const taskListRequestRef = useRef<AbortController | null>(null);
+  const taskListLoadedRef = useRef(false);
   const lastOpenedRouteTaskIdRef = useRef<number | null>(null);
   const processedDeadlineChangeRequestIdsRef = useRef<Set<number>>(new Set());
   const previousCalendarTimeZoneRef = useRef(currentTimeZoneId);
@@ -2460,8 +2479,102 @@ export function TaskJournal({
       : apiService.getTaskJournalCaseAutomationCandidates(params);
   }, [canCreateTasks, canViewCases, embedded, isApprovalsMode, underControlOnly]);
 
-  const refreshTasks = useCallback(async () => {
-    setLoading(true);
+  // Преобразует состояние панели фильтров в единый контракт API. Значения -1
+  // намеренно обозначают несовместимое сочетание фильтров и дают пустой SQL-результат.
+  const listFilterParams = useMemo<TaskJournalListParams>(() => {
+    const explicitAssigneeUserId = assigneeFilter !== 'all' && /^\d+$/.test(assigneeFilter)
+      ? Number(assigneeFilter)
+      : undefined;
+    const quickAssigneeUserId = quickFilter === 'assignedToMe' && currentUserId
+      ? currentUserId
+      : undefined;
+    const assigneeUserId = quickAssigneeUserId && explicitAssigneeUserId && quickAssigneeUserId !== explicitAssigneeUserId
+      ? -1
+      : quickAssigneeUserId ?? explicitAssigneeUserId;
+    const selectedCaseId = caseFilter !== 'all' && /^\d+$/.test(caseFilter)
+      ? Number(caseFilter)
+      : undefined;
+    const contextClientId = contextFilter?.clientId ?? undefined;
+    const contextLegalEntityId = contextFilter?.legalEntityId ?? undefined;
+    const clientId = contextClientId && selectedFilterClientId && contextClientId !== selectedFilterClientId
+      ? -1
+      : contextClientId ?? selectedFilterClientId;
+    const legalEntityId = contextLegalEntityId && selectedFilterLegalEntityId && contextLegalEntityId !== selectedFilterLegalEntityId
+      ? -1
+      : contextLegalEntityId ?? selectedFilterLegalEntityId;
+    const manualRange = getTaskDateRangeBounds(dateFromFilter, dateToFilter);
+    let from = manualRange.from?.toISOString();
+    let to = manualRange.to?.toISOString();
+    if (!from && !to && metricFilter === 'none' && periodMode !== 'all') {
+      const period = getTaskPeriodBounds(getCurrentCalendarDate(), periodMode);
+      from = period.periodStart.toISOString();
+      to = period.periodEnd.toISOString();
+    }
+
+    const today = getCurrentCalendarDate();
+    const todayKey = toLocalDateKey(today);
+    const todayFrom = parseDateFilterValue(todayKey, 'start')?.toISOString();
+    const todayTo = parseDateFilterValue(todayKey, 'end');
+
+    return {
+      search: debouncedSearch.trim() || undefined,
+      status: statusFilter,
+      type: typeFilter === 'all' ? undefined : typeFilter,
+      priority: priorityFilter === 'all' ? undefined : priorityFilter,
+      underControl: underControlOnly || undefined,
+      assigneeUserId,
+      authorUserId: quickFilter === 'authoredByMe' && currentUserId ? currentUserId : undefined,
+      approvalScope: isApprovalsMode || undefined,
+      metric: metricFilter === 'none' ? undefined : metricFilter,
+      clientCaseId: selectedCaseId,
+      clientId,
+      legalEntityId,
+      from,
+      to,
+      todayFrom,
+      todayTo: todayTo ? new Date(todayTo.getTime() + 1).toISOString() : undefined,
+      calendarView: shouldUseCalendarVisibility || undefined,
+      includeDeadlineChangeRequests: true,
+      pageSize: taskTableLayoutSettings.pageSize,
+      sortBy,
+      sortDir,
+    };
+  }, [
+    assigneeFilter,
+    caseFilter,
+    contextFilter,
+    currentUserId,
+    dateFromFilter,
+    dateToFilter,
+    debouncedSearch,
+    isApprovalsMode,
+    metricFilter,
+    periodMode,
+    priorityFilter,
+    quickFilter,
+    selectedFilterClientId,
+    selectedFilterLegalEntityId,
+    shouldUseCalendarVisibility,
+    sortBy,
+    sortDir,
+    statusFilter,
+    taskTableLayoutSettings.pageSize,
+    typeFilter,
+    underControlOnly,
+  ]);
+  const listFilterKey = useMemo(() => JSON.stringify(listFilterParams), [listFilterParams]);
+  const [taskPageState, setTaskPageState] = useState({ filterKey: listFilterKey, page: 1 });
+  const taskPage = taskPageState.filterKey === listFilterKey ? taskPageState.page : 1;
+
+  useEffect(() => {
+    if (taskPageState.filterKey !== listFilterKey) {
+      setTaskPageState({ filterKey: listFilterKey, page: 1 });
+    }
+  }, [listFilterKey, taskPageState.filterKey]);
+
+  // Загружает редко меняющиеся справочники и настройки отдельно от списка задач,
+  // чтобы создание или редактирование задачи не повторяло эти запросы.
+  const refreshTaskMetadata = useCallback(async () => {
     try {
       const settingsPromise = apiService.getTaskJournalSettings();
       const featureFlagsPromise = apiService.getFeatureFlags().catch(() => null);
@@ -2473,8 +2586,7 @@ export function TaskJournal({
         automationSearchValue = searchRef.current;
         return loadAutomationCandidates(settingsResponse, automationSearchValue);
       });
-      const [taskItems, assigneeResponse, settingsResponse, notificationDefaultsResponse, timeZoneResponse, calendarSyncSettingsResponse, automationResponse, featureFlagsResponse, trustedDevice] = await Promise.all([
-        loadAllTaskJournalItems(contextFilter, underControlOnly, shouldUseCalendarVisibility, sortBy, sortDir, true),
+      const [assigneeResponse, settingsResponse, notificationDefaultsResponse, timeZoneResponse, calendarSyncSettingsResponse, automationResponse, featureFlagsResponse, trustedDevice] = await Promise.all([
         apiService.getTaskJournalAssignees({ calendarView: shouldUseCalendarVisibility }),
         settingsPromise,
         apiService.getUserSetting(TASK_NOTIFICATION_DEFAULTS_SETTING_KEY).catch(() => null),
@@ -2484,8 +2596,6 @@ export function TaskJournal({
         featureFlagsPromise,
         trustedDevicePromise,
       ]);
-      setTasks(taskItems);
-      setOfflineCalendarSnapshot(null);
       setOfflineCalendarTrustedDeviceState(trustedDevice);
       const offlineEnabled = featureFlagsResponse?.legal.offlineCalendarReadOnly === true;
       setOfflineCalendarEnabled(offlineEnabled);
@@ -2504,24 +2614,103 @@ export function TaskJournal({
       setCurrentTimeZoneId(normalizeUserTimeZoneId(timeZoneResponse?.value));
       setCompletedTaskCalendarAction(calendarSyncSettingsResponse?.completedTaskCalendarAction === 'hide' ? 'hide' : 'color');
     } catch {
-      const snapshot = currentUserId && shouldUseOfflineCalendarRef.current
+      toast.error('Не удалось загрузить настройки журнала задач.', 'Журнал задач');
+    }
+  }, [currentUserId, loadAutomationCandidates, shouldUseCalendarVisibility, toast]);
+
+  useEffect(() => {
+    void refreshTaskMetadata();
+  }, [refreshTaskMetadata]);
+
+  // В режиме списка читает только текущую страницу и компактную сводку параллельно.
+  // Календарь и доска сохраняют полную выборку, поскольку им нужны все события периода.
+  const refreshTasks = useCallback(async () => {
+    taskListRequestRef.current?.abort();
+    const controller = new AbortController();
+    taskListRequestRef.current = controller;
+    if (!taskListLoadedRef.current) {
+      setLoading(true);
+    }
+    try {
+      if (viewMode === 'list') {
+        const pageParams = { ...listFilterParams, page: taskPage };
+        const summaryParams = { ...listFilterParams };
+        delete summaryParams.metric;
+        delete summaryParams.pageSize;
+        delete summaryParams.sortBy;
+        delete summaryParams.sortDir;
+        delete summaryParams.includeDeadlineChangeRequests;
+        delete summaryParams.calendarView;
+        const [response, summary] = await Promise.all([
+          apiService.getTaskJournalItems(pageParams, { signal: controller.signal }),
+          apiService.getTaskJournalSummary(summaryParams, { signal: controller.signal }),
+        ]);
+        if (controller.signal.aborted) return;
+        const lastPage = Math.max(1, Math.ceil(response.total / (response.pageSize || taskTableLayoutSettings.pageSize)));
+        if (taskPage > lastPage) {
+          setTaskPageState({ filterKey: listFilterKey, page: lastPage });
+          return;
+        }
+        setTasks(response.items);
+        taskListLoadedRef.current = true;
+        setTaskListTotal(response.total);
+        setTaskListSummary(summary);
+        setOfflineCalendarSnapshot(null);
+      } else {
+        const taskItems = await loadAllTaskJournalItems(
+          contextFilter,
+          underControlOnly,
+          shouldUseCalendarVisibility,
+          sortBy,
+          sortDir,
+          true,
+        );
+        if (controller.signal.aborted) return;
+        setTasks(taskItems);
+        taskListLoadedRef.current = true;
+        setTaskListTotal(taskItems.length);
+        setTaskListSummary(null);
+        setOfflineCalendarSnapshot(null);
+      }
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      const snapshot = viewMode !== 'list' && currentUserId && shouldUseOfflineCalendarRef.current
         ? await loadOfflineCalendarSnapshot(currentUserId).catch(() => null)
         : null;
       if (snapshot) {
         setTasks(snapshot.items);
+        taskListLoadedRef.current = true;
+        setTaskListTotal(snapshot.items.length);
+        setTaskListSummary(null);
         setAssignees([]);
         setAutomationCandidates([]);
         setOfflineCalendarEnabled(true);
         setOfflineCalendarSnapshot(snapshot);
         setOfflineCalendarTrustedDeviceState(snapshot.trustedDevice);
         toast.info('Показан сохранённый календарь. Изменения недоступны до восстановления связи.', 'Офлайн-календарь');
-      } else {
+      } else if (!(error instanceof DOMException && error.name === 'AbortError')) {
         toast.error('Не удалось загрузить журнал задач.', 'Журнал задач');
       }
     } finally {
-      setLoading(false);
+      if (taskListRequestRef.current === controller) {
+        taskListRequestRef.current = null;
+        setLoading(false);
+      }
     }
-  }, [contextFilter, currentUserId, loadAutomationCandidates, shouldUseCalendarVisibility, sortBy, sortDir, toast, underControlOnly]);
+  }, [
+    contextFilter,
+    currentUserId,
+    listFilterParams,
+    listFilterKey,
+    shouldUseCalendarVisibility,
+    sortBy,
+    sortDir,
+    taskPage,
+    taskTableLayoutSettings.pageSize,
+    toast,
+    underControlOnly,
+    viewMode,
+  ]);
 
   useEffect(() => {
     void refreshTasks();
@@ -2536,7 +2725,10 @@ export function TaskJournal({
       void refreshTasks();
     };
     window.addEventListener(TASK_JOURNAL_EVENT, refresh);
-    return () => window.removeEventListener(TASK_JOURNAL_EVENT, refresh);
+    return () => {
+      taskListRequestRef.current?.abort();
+      window.removeEventListener(TASK_JOURNAL_EVENT, refresh);
+    };
   }, [refreshTasks]);
 
   useEffect(() => {
@@ -2623,59 +2815,27 @@ export function TaskJournal({
 
   const assigneeOptions = useMemo(() => Array.from(assigneeById.values()), [assigneeById]);
 
-  const counterpartyCaseFilterData = useMemo(() => {
-    const counterparties = new Map<string, string>();
-    const casesByCounterparty = new Map<string, Map<number, string>>();
-    tasks.forEach((task) => {
-      const counterpartyKey = task.clientId
-        ? `client:${task.clientId}`
-        : task.legalEntityId
-          ? `legal:${task.legalEntityId}`
-          : '';
-      const counterpartyName = task.clientName?.trim() || task.legalEntityName?.trim() || '';
-      if (!counterpartyKey || !counterpartyName) {
-        return;
-      }
-
-      if (!counterparties.has(counterpartyKey)) {
-        counterparties.set(counterpartyKey, counterpartyName);
-      }
-      if (!task.clientCaseId || !task.clientCaseTitle?.trim()) {
-        return;
-      }
-
-      let counterpartyCases = casesByCounterparty.get(counterpartyKey);
-      if (!counterpartyCases) {
-        counterpartyCases = new Map<number, string>();
-        casesByCounterparty.set(counterpartyKey, counterpartyCases);
-      }
-      if (!counterpartyCases.has(task.clientCaseId)) {
-        counterpartyCases.set(task.clientCaseId, task.clientCaseTitle.trim());
-      }
-    });
-
-    return {
-      counterparties: Array.from(counterparties, ([value, label]) => ({ value, label }))
-        .sort((left, right) => left.label.localeCompare(right.label, 'ru')),
-      casesByCounterparty,
-    };
-  }, [tasks]);
+  const filterCounterpartyOptions = useMemo(() => clients
+    .filter((client) => client?.id && client?.name)
+    .map((client) => ({ value: `client:${client.id}`, label: client.name }))
+    .concat(legalEntities
+      .filter((entity) => entity?.id && getLegalEntityDisplayName(entity))
+      .map((entity) => ({ value: `legal:${entity.id}`, label: getLegalEntityDisplayName(entity) })))
+    .sort((left, right) => left.label.localeCompare(right.label, 'ru')), [clients, legalEntities]);
 
   const caseFilterOptions = useMemo(() => {
     if (counterpartyFilter === 'all') {
       return [];
     }
 
-    const counterpartyCases = counterpartyCaseFilterData.casesByCounterparty.get(counterpartyFilter);
-    return counterpartyCases
-      ? Array.from(counterpartyCases, ([id, label]) => ({ id, label }))
-          .sort((left, right) => left.label.localeCompare(right.label, 'ru'))
-      : [];
-  }, [counterpartyCaseFilterData, counterpartyFilter]);
+    return filterClientCases
+      .map((clientCase) => ({ id: clientCase.id, label: clientCase.title }))
+      .sort((left, right) => left.label.localeCompare(right.label, 'ru'));
+  }, [counterpartyFilter, filterClientCases]);
 
   const selectedFilterCounterparty = useMemo(
-    () => counterpartyCaseFilterData.counterparties.find((counterparty) => counterparty.value === counterpartyFilter) ?? null,
-    [counterpartyCaseFilterData.counterparties, counterpartyFilter],
+    () => filterCounterpartyOptions.find((counterparty) => counterparty.value === counterpartyFilter) ?? null,
+    [counterpartyFilter, filterCounterpartyOptions],
   );
 
   const counterpartySearchOptions = useMemo(() => {
@@ -2684,24 +2844,20 @@ export function TaskJournal({
       return [];
     }
 
-    return counterpartyCaseFilterData.counterparties
+    return filterCounterpartyOptions
       .filter((counterparty) => counterparty.label.toLocaleLowerCase('ru').includes(normalizedSearch))
       .slice(0, 8);
-  }, [counterpartyCaseFilterData.counterparties, search]);
+  }, [filterCounterpartyOptions, search]);
 
   useEffect(() => {
-    if (caseFilter === 'all' || counterpartyFilter !== 'all') {
+    if (caseFilter === 'all' || counterpartyFilter === 'all' || filterClientCasesLoading) {
       return;
     }
 
-    const matchingCounterparty = Array.from(counterpartyCaseFilterData.casesByCounterparty)
-      .find(([, cases]) => cases.has(Number(caseFilter)))?.[0];
-    if (matchingCounterparty) {
-      setCounterpartyFilter(matchingCounterparty);
-    } else {
+    if (!filterClientCases.some((clientCase) => clientCase.id === Number(caseFilter))) {
       setCaseFilter('all');
     }
-  }, [caseFilter, counterpartyCaseFilterData, counterpartyFilter]);
+  }, [caseFilter, counterpartyFilter, filterClientCases, filterClientCasesLoading]);
 
   const visibleTaskCalendarUserIds = useMemo(() => {
     if (isAdminUser || taskCalendarViewScope === 'all') {
@@ -3273,6 +3429,9 @@ export function TaskJournal({
     () => tasks.filter((task) => task.billingStatus === 'unbilled'),
     [tasks],
   );
+  const unbilledClientTaskCount = viewMode === 'list'
+    ? taskListSummary?.unbilled ?? 0
+    : unbilledClientTasks.length;
   const allVisibleBulkSelected = selectableTasks.length > 0 && selectableTasks.every((task) => selectedTaskIds.has(task.id));
 
   const shiftCalendarPeriod = (direction: -1 | 1) => {
@@ -3299,12 +3458,21 @@ export function TaskJournal({
   };
 
   const stats = useMemo(() => {
+    if (viewMode === 'list' && taskListSummary) {
+      return {
+        active: taskListSummary.active,
+        overdue: taskListSummary.overdue,
+        today: taskListSummary.today,
+        high: taskListSummary.highPriority,
+      };
+    }
+
     const active = statusAndPeriodFilteredTasks.filter((task) => isTaskJournalActive(task.status));
     const overdue = active.filter((task) => new Date(task.dueAt).getTime() < Date.now());
     const today = active.filter((task) => isSameTaskDay(task.dueAt, getCurrentCalendarDate()));
     const high = active.filter((task) => task.priority === 'high' || task.priority === 'urgent');
     return { active: active.length, overdue: overdue.length, today: today.length, high: high.length };
-  }, [statusAndPeriodFilteredTasks]);
+  }, [statusAndPeriodFilteredTasks, taskListSummary, viewMode]);
 
   const boardColumns = useMemo(() => {
     const nowDate = getCurrentCalendarDate();
@@ -4967,12 +5135,12 @@ export function TaskJournal({
           </div>
         </section>
 
-        {!isApprovalsMode && unbilledClientTasks.length > 0 ? (
+        {!isApprovalsMode && unbilledClientTaskCount > 0 ? (
           <section className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-rose-200 bg-gradient-to-r from-rose-50 to-amber-50 p-3" data-testid="task-unbilled-reminder">
             <div className="flex items-center gap-3">
               <span className="rounded-xl bg-rose-600 p-2 text-white"><WalletCards className="h-5 w-5" /></span>
               <div>
-                <div className="font-semibold text-rose-950">Платные задачи без счёта: {unbilledClientTasks.length}</div>
+                <div className="font-semibold text-rose-950">Платные задачи без счёта: {unbilledClientTaskCount}</div>
                 <div className="text-sm text-rose-700">Отметьте задачи одного клиента в таблице и подготовьте по ним единый счёт.</div>
               </div>
             </div>
@@ -5025,34 +5193,47 @@ export function TaskJournal({
               Загружаем журнал задач...
             </div>
           ) : (
-          <TaskTable
-            tasks={filteredTasks}
-            highlightedTaskId={highlightedTaskId}
-            currentUserId={currentUserId}
-            isAdminUser={isAdminUser}
-            taskSettings={taskSettings}
-            taskPermissions={permissions.tasks}
-            selectedTaskIds={selectedTaskIds}
-            selectableTaskIds={selectableTaskIds}
-            allVisibleSelected={allVisibleBulkSelected}
-            onOpenClient={onOpenClient}
-            onOpenCase={onOpenCase}
-            onOpenLegalEntity={onOpenLegalEntity}
-            onToggleTaskSelection={toggleTaskSelection}
-            onToggleAllVisibleSelection={toggleAllVisibleSelection}
-            onEdit={openTaskEditor}
-            onDelete={handleDelete}
-            canDeleteTasks={canDeleteTasks}
-            onStatusChange={setTaskStatus}
-            onToggleControl={toggleTaskControl}
-            onDone={handleQuickTaskCompletion}
-            onReviewDeadlineChange={openDeadlineChangeDecisionPrompt}
-            onReviewApproval={openApprovalDecisionPrompt}
-            sortBy={sortBy}
-            sortDir={sortDir}
-            onSortChange={handleSortChange}
-            layoutSettings={taskTableLayoutSettings}
-          />
+          <>
+            <TaskTable
+              tasks={filteredTasks}
+              highlightedTaskId={highlightedTaskId}
+              currentUserId={currentUserId}
+              isAdminUser={isAdminUser}
+              taskSettings={taskSettings}
+              taskPermissions={permissions.tasks}
+              selectedTaskIds={selectedTaskIds}
+              selectableTaskIds={selectableTaskIds}
+              allVisibleSelected={allVisibleBulkSelected}
+              onOpenClient={onOpenClient}
+              onOpenCase={onOpenCase}
+              onOpenLegalEntity={onOpenLegalEntity}
+              onToggleTaskSelection={toggleTaskSelection}
+              onToggleAllVisibleSelection={toggleAllVisibleSelection}
+              onEdit={openTaskEditor}
+              onDelete={handleDelete}
+              canDeleteTasks={canDeleteTasks}
+              onStatusChange={setTaskStatus}
+              onToggleControl={toggleTaskControl}
+              onDone={handleQuickTaskCompletion}
+              onReviewDeadlineChange={openDeadlineChangeDecisionPrompt}
+              onReviewApproval={openApprovalDecisionPrompt}
+              sortBy={sortBy}
+              sortDir={sortDir}
+              onSortChange={handleSortChange}
+              layoutSettings={taskTableLayoutSettings}
+            />
+            <TablePagination
+              page={taskPage}
+              totalPages={Math.max(1, Math.ceil(taskListTotal / taskTableLayoutSettings.pageSize))}
+              totalItems={taskListTotal}
+              pageSize={taskTableLayoutSettings.pageSize}
+              pageSizeOptions={[10, 25, 50, 100]}
+              onPageChange={(page) => setTaskPageState({ filterKey: listFilterKey, page })}
+              onPageSizeChange={taskTableLayoutSettings.setPageSize}
+              className="mt-2 rounded-xl border border-slate-200"
+              recordsLabel="Задач найдено"
+            />
+          </>
           )
         ) : viewMode === 'board' ? (
           <TaskBoard

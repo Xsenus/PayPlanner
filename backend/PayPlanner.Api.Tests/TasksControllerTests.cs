@@ -997,6 +997,283 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task GetTasks_AppliesAuthorAndAdditionalAssigneeBeforePagination()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "server-filter-author@example.com", "Автор фильтра");
+        var otherAuthor = await CreateAdminUserAsync(db, "server-filter-other@example.com", "Другой автор");
+        var assignee = await CreateAdminUserAsync(db, "server-filter-assignee@example.com", "Дополнительный исполнитель");
+        var expected = await CreateTaskAsync(db, author.Id, null, author.Id);
+        expected.Title = "Нужная задача";
+        expected.Participants.Add(new TaskJournalParticipant
+        {
+            UserId = assignee.Id,
+            Role = "assignee",
+            DisplayName = assignee.FullName,
+            SortOrder = 1,
+        });
+        var excluded = await CreateTaskAsync(db, otherAuthor.Id, null, assignee.Id);
+        excluded.Title = "Задача другого автора";
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.GetTasks(
+            search: null,
+            status: "all",
+            type: null,
+            assigneeUserId: assignee.Id,
+            from: null,
+            to: null,
+            authorUserId: author.Id,
+            page: 1,
+            pageSize: 1,
+            ct: CancellationToken.None);
+
+        var page = Assert.IsType<PagedResponse<TaskJournalItemDto>>(
+            Assert.IsType<OkObjectResult>(result.Result).Value);
+        Assert.Equal(1, page.Total);
+        Assert.Equal(expected.Id, Assert.Single(page.Items).Id);
+    }
+
+    [Fact]
+    public async Task GetTaskListSummary_CalculatesMetricsAndUnbilledCountInDatabase()
+    {
+        await using var db = await CreateContextAsync();
+        var admin = await CreateAdminUserAsync(db, "server-summary@example.com", "Администратор сводки");
+        var now = DateTime.UtcNow;
+        var todayFrom = now.AddHours(-1);
+        var todayTo = now.AddHours(1);
+        var activeToday = await CreateTaskAsync(db, admin.Id, null, admin.Id);
+        activeToday.DueAt = now.AddMinutes(30);
+        activeToday.ClientBillingClassification = TaskClientBillingClassification.Billable;
+        activeToday.BillingModeSnapshot = ContractBillingMode.Actual;
+        var overdue = await CreateTaskAsync(db, admin.Id, null, admin.Id);
+        overdue.DueAt = now.AddHours(-2);
+        overdue.Priority = "urgent";
+        overdue.ClientBillingClassification = TaskClientBillingClassification.Internal;
+        var completed = await CreateTaskAsync(db, admin.Id, null, admin.Id, status: "done");
+        completed.DueAt = now.AddMinutes(15);
+        completed.Priority = "high";
+        var fixedTask = await CreateTaskAsync(db, admin.Id, null, admin.Id);
+        fixedTask.DueAt = now.AddMinutes(45);
+        fixedTask.ClientBillingClassification = TaskClientBillingClassification.Billable;
+        fixedTask.BillingModeSnapshot = ContractBillingMode.Fixed;
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), admin);
+
+        var result = await controller.GetTaskListSummary(
+            search: null,
+            status: "all",
+            type: null,
+            assigneeUserId: null,
+            from: null,
+            to: null,
+            todayFrom: todayFrom,
+            todayTo: todayTo,
+            ct: CancellationToken.None);
+
+        var summary = Assert.IsType<TaskJournalListSummaryDto>(
+            Assert.IsType<OkObjectResult>(result.Result).Value);
+        Assert.Equal(3, summary.Active);
+        Assert.Equal(1, summary.Overdue);
+        Assert.Equal(2, summary.Today);
+        Assert.Equal(1, summary.HighPriority);
+        Assert.Equal(1, summary.Unbilled);
+    }
+
+    [Fact]
+    public async Task GetTasks_AndSummaryUseFixedNumberOfTaskQueriesForLargeJournal()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+        var admin = await CreateAdminUserAsync(db, "server-query-budget@example.com", "Администратор нагрузки");
+        var dueAt = DateTime.UtcNow.AddDays(1);
+        db.TaskJournalItems.AddRange(Enumerable.Range(1, 120).Select(index => new TaskJournalItem
+        {
+            ObjectName = "Нагрузочная проверка",
+            Title = $"Задача {index}",
+            AuthorUserId = admin.Id,
+            AuthorName = admin.FullName,
+            AssigneeUserId = admin.Id,
+            AssigneeName = admin.FullName,
+            DueAt = dueAt.AddMinutes(index),
+            Status = "new",
+            Type = "task",
+            Priority = "normal",
+            ClientBillingClassification = TaskClientBillingClassification.Internal,
+        }));
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        var controller = CreateController(db, new RecordingNotificationService(), admin);
+
+        interceptor.Commands.Clear();
+        var listResult = await controller.GetTasks(
+            search: null,
+            status: "active",
+            type: null,
+            assigneeUserId: null,
+            from: null,
+            to: null,
+            includeDeadlineChangeRequests: true,
+            page: 3,
+            pageSize: 25,
+            ct: CancellationToken.None);
+
+        var page = Assert.IsType<PagedResponse<TaskJournalItemDto>>(
+            Assert.IsType<OkObjectResult>(listResult.Result).Value);
+        Assert.Equal(120, page.Total);
+        Assert.Equal(25, page.Items.Count);
+        // SQLite-тесты используют SplitQuery: страница и её участники читаются
+        // двумя ограниченными запросами, ещё один запрос получает только COUNT.
+        Assert.Equal(3, interceptor.Commands.Count(command =>
+            command.Contains("FROM \"TaskJournalItems\"", StringComparison.Ordinal) &&
+            !command.Contains("TaskJournalDeadlineChangeRequests", StringComparison.Ordinal)));
+        Assert.Single(interceptor.Commands, command =>
+            command.Contains("FROM \"TaskJournalDeadlineChangeRequests\"", StringComparison.Ordinal));
+
+        interceptor.Commands.Clear();
+        var summaryResult = await controller.GetTaskListSummary(
+            search: null,
+            status: "active",
+            type: null,
+            assigneeUserId: null,
+            from: null,
+            to: null,
+            ct: CancellationToken.None);
+
+        var summary = Assert.IsType<TaskJournalListSummaryDto>(
+            Assert.IsType<OkObjectResult>(summaryResult.Result).Value);
+        Assert.Equal(120, summary.Active);
+        Assert.Equal(2, interceptor.Commands.Count(command =>
+            command.Contains("FROM \"TaskJournalItems\"", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public async Task GetTaskListSummary_DoesNotCountTasksOutsideOwnVisibility()
+    {
+        await using var db = await CreateContextAsync();
+        var current = await CreateTaskUserAsync(
+            db,
+            "summary-own-visibility@example.com",
+            "Ограниченный сотрудник",
+            canEdit: false);
+        var other = await CreateTaskUserAsync(
+            db,
+            "summary-hidden-visibility@example.com",
+            "Скрытый сотрудник",
+            canEdit: false);
+        var visible = await CreateTaskAsync(db, current.Id, null, current.Id);
+        visible.ClientBillingClassification = TaskClientBillingClassification.Billable;
+        visible.BillingModeSnapshot = ContractBillingMode.Actual;
+        var hidden = await CreateTaskAsync(db, other.Id, null, other.Id);
+        hidden.ClientBillingClassification = TaskClientBillingClassification.Billable;
+        hidden.BillingModeSnapshot = ContractBillingMode.Actual;
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), current);
+
+        var result = await controller.GetTaskListSummary(
+            search: null,
+            status: "active",
+            type: null,
+            assigneeUserId: null,
+            from: null,
+            to: null,
+            ct: CancellationToken.None);
+
+        var summary = Assert.IsType<TaskJournalListSummaryDto>(
+            Assert.IsType<OkObjectResult>(result.Result).Value);
+        Assert.Equal(1, summary.Active);
+        Assert.Equal(1, summary.Unbilled);
+    }
+
+    [Fact]
+    public async Task GetTasks_ApprovalScopeReturnsOnlyCurrentDecisionAndDeadlineReview()
+    {
+        await using var db = await CreateContextAsync();
+        var reviewer = await CreateTaskUserAsync(
+            db,
+            "approval-scope-reviewer@example.com",
+            "Текущий согласующий",
+            canEdit: true,
+            viewScope: DataVisibilityScope.All);
+        var author = await CreateAdminUserAsync(db, "approval-scope-author@example.com", "Постановщик");
+        var firstApprover = await CreateAdminUserAsync(db, "approval-scope-first@example.com", "Первый согласующий");
+
+        var currentDecision = await CreateTaskAsync(db, author.Id, null, reviewer.Id, status: "onApproval");
+        currentDecision.Title = "Текущее согласование";
+        currentDecision.Participants.Add(new TaskJournalParticipant
+        {
+            UserId = firstApprover.Id,
+            Role = "approver",
+            DisplayName = firstApprover.FullName,
+            SortOrder = 0,
+            ApprovalStatus = "approved",
+        });
+        currentDecision.Participants.Add(new TaskJournalParticipant
+        {
+            UserId = reviewer.Id,
+            Role = "approver",
+            DisplayName = reviewer.FullName,
+            SortOrder = 1,
+            ApprovalStatus = "pending",
+        });
+
+        var blockedDecision = await CreateTaskAsync(db, author.Id, null, reviewer.Id, status: "onApproval");
+        blockedDecision.Title = "Ожидает первого согласующего";
+        blockedDecision.Participants.Add(new TaskJournalParticipant
+        {
+            UserId = firstApprover.Id,
+            Role = "approver",
+            DisplayName = firstApprover.FullName,
+            SortOrder = 0,
+            ApprovalStatus = "pending",
+        });
+        blockedDecision.Participants.Add(new TaskJournalParticipant
+        {
+            UserId = reviewer.Id,
+            Role = "approver",
+            DisplayName = reviewer.FullName,
+            SortOrder = 1,
+            ApprovalStatus = "pending",
+        });
+
+        var deadlineReview = await CreateTaskAsync(db, author.Id, null, reviewer.Id);
+        deadlineReview.Title = "Запрос переноса срока";
+        deadlineReview.DeadlineChangeRequests.Add(new TaskJournalDeadlineChangeRequest
+        {
+            RequestedByUserId = author.Id,
+            RequestedByName = author.FullName,
+            ReviewerUserId = reviewer.Id,
+            ReviewerName = reviewer.FullName,
+            CurrentDueAt = deadlineReview.DueAt,
+            RequestedDueAt = deadlineReview.DueAt.AddDays(1),
+            Reason = "Нужно дождаться документа",
+            Status = "pending",
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), reviewer);
+
+        var result = await controller.GetTasks(
+            search: null,
+            status: "active",
+            type: null,
+            assigneeUserId: null,
+            from: null,
+            to: null,
+            approvalScope: true,
+            page: 1,
+            pageSize: 20,
+            ct: CancellationToken.None);
+
+        var page = Assert.IsType<PagedResponse<TaskJournalItemDto>>(
+            Assert.IsType<OkObjectResult>(result.Result).Value);
+        Assert.Equal(2, page.Total);
+        Assert.Contains(page.Items, item => item.Id == currentDecision.Id);
+        Assert.Contains(page.Items, item => item.Id == deadlineReview.Id);
+        Assert.DoesNotContain(page.Items, item => item.Id == blockedDecision.Id);
+    }
+
+    [Fact]
     public async Task CreateTask_BindsClientAndClientCase()
     {
         await using var db = await CreateContextAsync();

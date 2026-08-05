@@ -16,6 +16,7 @@ import {
 
 const apiMock = vi.hoisted(() => ({
   getTaskJournalItems: vi.fn(),
+  getTaskJournalSummary: vi.fn(),
   getTaskJournalAssignees: vi.fn(),
   getTaskJournalSettings: vi.fn(),
   getCalendarSyncSettings: vi.fn(),
@@ -130,8 +131,16 @@ vi.mock('../../hooks/useClients', () => ({
 }));
 
 vi.mock('../../hooks/useClientCases', () => ({
-  useClientCases: () => ({
-    cases: casesState.cases,
+  useClientCases: (clientId?: number | string, options?: { legalEntityId?: number | string }) => ({
+    cases: casesState.cases.filter((clientCase) => {
+      const normalizedClientId = clientId == null ? undefined : Number(clientId);
+      const normalizedLegalEntityId = options?.legalEntityId == null ? undefined : Number(options.legalEntityId);
+      return normalizedClientId
+        ? clientCase.clientId === normalizedClientId
+        : normalizedLegalEntityId
+          ? clientCase.legalEntityId === normalizedLegalEntityId
+          : true;
+    }),
     loading: false,
   }),
 }));
@@ -276,6 +285,55 @@ function createTask(overrides: Partial<TaskJournalItem> = {}): TaskJournalItem {
   };
 }
 
+function filterTaskJournalMockItems(tasks: TaskJournalItem[], params: Record<string, unknown> = {}) {
+  const now = Date.now();
+  const from = typeof params.from === 'string' ? new Date(params.from).getTime() : null;
+  const to = typeof params.to === 'string' ? new Date(params.to).getTime() : null;
+  const todayFrom = typeof params.todayFrom === 'string' ? new Date(params.todayFrom).getTime() : null;
+  const todayTo = typeof params.todayTo === 'string' ? new Date(params.todayTo).getTime() : null;
+  const search = typeof params.search === 'string' ? params.search.trim().toLocaleLowerCase('ru') : '';
+
+  return tasks.filter((task) => {
+    const dueAt = new Date(task.dueAt).getTime();
+    const active = task.status !== 'done' && task.status !== 'cancelled';
+    const statusMatches = params.status === 'active'
+      ? active
+      : params.status === 'overdue'
+        ? active && dueAt < now
+        : typeof params.status === 'string' && params.status !== 'all'
+          ? task.status === params.status
+          : true;
+    const metricMatches = params.metric === 'active'
+      ? active
+      : params.metric === 'overdue'
+        ? active && dueAt < now
+        : params.metric === 'today'
+          ? active && todayFrom !== null && todayTo !== null && dueAt >= todayFrom && dueAt < todayTo
+          : params.metric === 'highPriority'
+            ? active && (task.priority === 'high' || task.priority === 'urgent')
+            : true;
+    const assigneeMatches = typeof params.assigneeUserId !== 'number'
+      || task.assigneeUserId === params.assigneeUserId
+      || task.participants?.some((participant) => participant.role === 'assignee' && participant.userId === params.assigneeUserId);
+    const searchMatches = !search || [task.objectName, task.clientName, task.legalEntityName, task.clientCaseTitle, task.title]
+      .some((value) => value?.toLocaleLowerCase('ru').includes(search));
+
+    return statusMatches
+      && metricMatches
+      && assigneeMatches
+      && (typeof params.authorUserId !== 'number' || task.authorUserId === params.authorUserId)
+      && (typeof params.clientId !== 'number' || task.clientId === params.clientId)
+      && (typeof params.legalEntityId !== 'number' || task.legalEntityId === params.legalEntityId)
+      && (typeof params.clientCaseId !== 'number' || task.clientCaseId === params.clientCaseId)
+      && (typeof params.type !== 'string' || task.type === params.type)
+      && (typeof params.priority !== 'string' || task.priority === params.priority)
+      && (params.underControl !== true || task.isUnderControl === true)
+      && (from === null || dueAt >= from)
+      && (to === null || dueAt <= to)
+      && searchMatches;
+  });
+}
+
 async function renderJournal(
   tasks: TaskJournalItem[] = [createTask()],
   options: {
@@ -302,11 +360,28 @@ async function renderJournal(
   } = {},
 ) {
   apiMock.getTaskJournalItems.mockReset();
-  apiMock.getTaskJournalItems.mockResolvedValue({
-    items: tasks,
-    total: tasks.length,
-    page: 1,
-    pageSize: 200,
+  apiMock.getTaskJournalItems.mockImplementation(async (params: Record<string, unknown> = {}) => {
+    const filtered = filterTaskJournalMockItems(tasks, params);
+    const page = typeof params.page === 'number' ? params.page : 1;
+    const pageSize = typeof params.pageSize === 'number' ? params.pageSize : 100;
+    const offset = (page - 1) * pageSize;
+    return {
+      items: filtered.slice(offset, offset + pageSize),
+      total: filtered.length,
+      page,
+      pageSize,
+    };
+  });
+  apiMock.getTaskJournalSummary.mockReset();
+  apiMock.getTaskJournalSummary.mockImplementation(async (params: Record<string, unknown> = {}) => {
+    const filtered = filterTaskJournalMockItems(tasks, params);
+    return {
+      active: filtered.filter((task) => task.status !== 'done' && task.status !== 'cancelled').length,
+      overdue: filtered.filter((task) => task.status !== 'done' && task.status !== 'cancelled' && new Date(task.dueAt).getTime() < Date.now()).length,
+      today: filtered.filter((task) => task.status !== 'done' && task.status !== 'cancelled' && toTimeZoneDateKey(task.dueAt) === toTimeZoneDateKey(new Date())).length,
+      highPriority: filtered.filter((task) => task.status !== 'done' && task.status !== 'cancelled' && (task.priority === 'high' || task.priority === 'urgent')).length,
+      unbilled: tasks.filter((task) => task.billingStatus === 'unbilled').length,
+    };
   });
   apiMock.getTaskJournalAssignees.mockResolvedValue(options.assignees ?? [
     { id: 7, name: 'Администратор', email: 'admin@example.com' },
@@ -588,6 +663,17 @@ describe('TaskJournal', () => {
 
   it('shows a valid cached calendar as read-only when the task API is unavailable', async () => {
     const cachedTask = createTask({ title: 'Сохранённая задача' });
+    apiMock.getFeatureFlags.mockResolvedValue({
+      legal: {
+        externalCourtSync: false,
+        externalCalendarSync: false,
+        courtEvents: false,
+        documentTemplateLibrary: false,
+        externalWorkOrderApproval: false,
+        clientPortal: false,
+        offlineCalendarReadOnly: true,
+      },
+    });
     apiMock.getTaskJournalItems.mockRejectedValue(new Error('offline'));
     offlineCalendarMock.loadOfflineCalendarSnapshot.mockResolvedValue({
       schemaVersion: 1,
@@ -630,7 +716,7 @@ describe('TaskJournal', () => {
     expect(screen.getByRole('heading', { name: 'На контроле' })).toBeTruthy();
     expect(apiMock.getTaskJournalItems).toHaveBeenCalledWith(expect.objectContaining({
       underControl: true,
-    }));
+    }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(apiMock.getTaskJournalCaseAutomationCandidates).not.toHaveBeenCalled();
   });
 
@@ -752,21 +838,73 @@ describe('TaskJournal', () => {
     await waitFor(() => expect(apiMock.getTaskJournalItems).toHaveBeenCalledWith(expect.objectContaining({
       sortBy: 'dueAt',
       sortDir: 'asc',
-    })));
+    }), expect.objectContaining({ signal: expect.any(AbortSignal) })));
 
     fireEvent.click(screen.getByRole('button', { name: 'Сортировать по колонке Исполнитель' }));
 
     await waitFor(() => expect(apiMock.getTaskJournalItems).toHaveBeenLastCalledWith(expect.objectContaining({
       sortBy: 'assignee',
       sortDir: 'asc',
-    })));
+    }), expect.objectContaining({ signal: expect.any(AbortSignal) })));
 
     fireEvent.click(screen.getByRole('button', { name: 'Сортировать по колонке Исполнитель' }));
 
     await waitFor(() => expect(apiMock.getTaskJournalItems).toHaveBeenLastCalledWith(expect.objectContaining({
       sortBy: 'assignee',
       sortDir: 'desc',
-    })));
+    }), expect.objectContaining({ signal: expect.any(AbortSignal) })));
+  });
+
+  it('loads one server page and moves to the next page without reloading metadata', async () => {
+    const tasks = Array.from({ length: 60 }, (_, index) => createTask({
+      id: index + 1,
+      title: `Задача страницы ${index + 1}`,
+    }));
+    await renderJournal(tasks, { waitForTitle: 'Задача страницы 1' });
+
+    const totalLabel = screen.getByText('Задач найдено:');
+    expect(within(totalLabel.parentElement as HTMLElement).getByText('60')).toBeTruthy();
+    expect(screen.queryByText('Задача страницы 26')).toBeNull();
+    expect(apiMock.getTaskJournalItems).toHaveBeenCalledWith(
+      expect.objectContaining({ page: 1, pageSize: 25 }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+
+    apiMock.getTaskJournalAssignees.mockClear();
+    apiMock.getTaskJournalSettings.mockClear();
+    apiMock.getCalendarSyncSettings.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: 'Вперёд' }));
+
+    expect(await screen.findByText('Задача страницы 26')).toBeTruthy();
+    await waitFor(() => expect(apiMock.getTaskJournalItems).toHaveBeenLastCalledWith(
+      expect.objectContaining({ page: 2, pageSize: 25 }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    ));
+    expect(apiMock.getTaskJournalAssignees).not.toHaveBeenCalled();
+    expect(apiMock.getTaskJournalSettings).not.toHaveBeenCalled();
+    expect(apiMock.getCalendarSyncSettings).not.toHaveBeenCalled();
+  });
+
+  it('debounces server search and keeps global unbilled counter independent of the page', async () => {
+    const tasks = Array.from({ length: 30 }, (_, index) => createTask({
+      id: index + 1,
+      title: index === 29 ? 'Наследство найдено' : `Обычная задача ${index + 1}`,
+      billingStatus: 'unbilled',
+    }));
+    await renderJournal(tasks, { waitForTitle: 'Обычная задача 1' });
+
+    expect(screen.getByText('Платные задачи без счёта: 30')).toBeTruthy();
+    apiMock.getTaskJournalItems.mockClear();
+    fireEvent.change(screen.getByRole('textbox', {
+      name: 'Поиск по контрагенту, делу или наименованию задачи',
+    }), { target: { value: 'Наследство' } });
+
+    await waitFor(() => expect(apiMock.getTaskJournalItems).toHaveBeenCalledWith(
+      expect.objectContaining({ search: 'Наследство', page: 1, pageSize: 25 }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    ), { timeout: 2000 });
+    expect(await screen.findByText('Наследство найдено')).toBeTruthy();
+    expect(screen.queryByText('Обычная задача 1')).toBeNull();
   });
 
   it('marks a task for manual control from the row actions', async () => {
@@ -901,8 +1039,8 @@ describe('TaskJournal', () => {
     expect(apiMock.getTaskJournalItems).toHaveBeenCalledWith(expect.objectContaining({
       clientId: 10,
       page: 1,
-      pageSize: 200,
-    }));
+      pageSize: 25,
+    }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(screen.getByText('Задачи: Иванов Иван Иванович')).toBeTruthy();
     expect(screen.queryByText('Проверка дел без задач')).toBeNull();
 
@@ -1756,7 +1894,10 @@ describe('TaskJournal', () => {
       waitForTitle: deadlineRequestTask.title,
     });
 
-    expect(apiMock.getTaskJournalItems).toHaveBeenCalledWith(expect.objectContaining({ includeDeadlineChangeRequests: true }));
+    expect(apiMock.getTaskJournalItems).toHaveBeenCalledWith(
+      expect.objectContaining({ includeDeadlineChangeRequests: true }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
     expect(screen.getAllByText(deadlineRequestTask.title).length).toBeGreaterThan(0);
     expect(screen.getByTestId('task-deadline-change-request-badge-204')).toBeTruthy();
     expect(screen.getAllByText('Запрос переноса срока').length).toBeGreaterThan(0);
@@ -1903,7 +2044,10 @@ describe('TaskJournal', () => {
 
     await renderJournal([task], { waitForTitle: task.title });
 
-    expect(apiMock.getTaskJournalItems).toHaveBeenCalledWith(expect.objectContaining({ includeDeadlineChangeRequests: true }));
+    expect(apiMock.getTaskJournalItems).toHaveBeenCalledWith(
+      expect.objectContaining({ includeDeadlineChangeRequests: true }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
     fireEvent.click(screen.getByRole('button', { name: 'Рассмотреть запрос переноса срока' }));
 
     const prompt = await screen.findByTestId('deadline-change-decision-prompt');
@@ -2580,6 +2724,12 @@ describe('TaskJournal', () => {
   });
 
   it('filters tasks by case and remembers the selected case', async () => {
+    clientsState.clients.push({ id: 11, name: 'Петров Петр Петрович' } as Client);
+    casesState.cases = [
+      { id: 100, clientId: 10, title: 'БАНКРОТСТВО', status: 'Open', createdAt: todayAt(8) } as ClientCase,
+      { id: 200, clientId: 11, title: 'НАСЛЕДСТВО', status: 'Open', createdAt: todayAt(8) } as ClientCase,
+      { id: 300, legalEntityId: 20, title: 'КОРПОРАТИВНЫЙ СПОР', status: 'Open', createdAt: todayAt(8) } as ClientCase,
+    ];
     await renderJournal([
       createTask({
         id: 101,
@@ -3504,10 +3654,10 @@ describe('TaskJournal', () => {
     await waitFor(() => expect(apiMock.updateTaskJournalStatus).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(apiMock.getTaskJournalItems).toHaveBeenCalledTimes(1));
     expect(apiMock.updateTaskJournalStatus).toHaveBeenCalledWith(101, 'done', undefined);
-    expect(apiMock.getTaskJournalAssignees).toHaveBeenCalledTimes(1);
-    expect(apiMock.getTaskJournalSettings).toHaveBeenCalledTimes(1);
-    expect(apiMock.getCalendarSyncSettings).toHaveBeenCalledTimes(1);
-    expect(apiMock.getUserSetting).toHaveBeenCalledTimes(2);
+    expect(apiMock.getTaskJournalAssignees).not.toHaveBeenCalled();
+    expect(apiMock.getTaskJournalSettings).not.toHaveBeenCalled();
+    expect(apiMock.getCalendarSyncSettings).not.toHaveBeenCalled();
+    expect(apiMock.getUserSetting).not.toHaveBeenCalled();
     expect(toastMock.error).not.toHaveBeenCalledWith('Добавьте результат по задаче перед завершением.', 'Журнал задач');
   });
 
@@ -5254,8 +5404,8 @@ describe('TaskJournal', () => {
     expect(screen.getByText('Календарь нагрузки')).toBeTruthy();
     expect(screen.getByText('Мои / выбранный исполнитель')).toBeTruthy();
     expect(screen.getByText('Выполненные/отмененные')).toBeTruthy();
-    expect(screen.getByTestId('task-timeline-task-101')).toBeTruthy();
-    expect(screen.getByTestId('task-timeline-task-102')).toBeTruthy();
+    expect(await screen.findByTestId('task-timeline-task-101')).toBeTruthy();
+    expect(await screen.findByTestId('task-timeline-task-102')).toBeTruthy();
   });
 
   it('keeps overlapping workload timeline tasks wide enough to show text', async () => {

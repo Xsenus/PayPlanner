@@ -267,3 +267,16 @@ public class TaskJournalOverdueSummaryDto
 {
     public int Count { get; set; }
 }
+
+/// <summary>
+/// Компактные счётчики журнала задач. Они рассчитываются в базе и позволяют
+/// странице показывать метрики без выгрузки всех карточек задач в браузер.
+/// </summary>
+public class TaskJournalListSummaryDto
+{
+    public int Active { get; set; }
+    public int Overdue { get; set; }
+    public int Today { get; set; }
+    public int HighPriority { get; set; }
+    public int Unbilled { get; set; }
+}

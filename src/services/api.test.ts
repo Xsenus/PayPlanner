@@ -1925,6 +1925,67 @@ describe('apiService case calendar', () => {
     expect(String(assigneesUrl)).toContain('calendarView=true');
   });
 
+  it('passes server task journal filters, pagination, summary bounds and abort signals', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+      items: [], total: 0, page: 2, pageSize: 25,
+    }), {
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
+
+    await apiService.getTaskJournalItems({
+      search: 'Наследство',
+      status: 'active',
+      assigneeUserId: 7,
+      authorUserId: 8,
+      approvalScope: true,
+      metric: 'highPriority',
+      clientId: 10,
+      clientCaseId: 100,
+      todayFrom: '2026-08-05T00:00:00.000Z',
+      todayTo: '2026-08-06T00:00:00.000Z',
+      includeDeadlineChangeRequests: true,
+      page: 2,
+      pageSize: 25,
+      sortBy: 'author',
+      sortDir: 'desc',
+    }, { signal: controller.signal });
+
+    const [itemsUrl, itemsOptions] = fetchMock.mock.calls[0];
+    const itemsQuery = new URL(String(itemsUrl)).searchParams;
+    expect(itemsQuery.get('search')).toBe('Наследство');
+    expect(itemsQuery.get('status')).toBe('active');
+    expect(itemsQuery.get('assigneeUserId')).toBe('7');
+    expect(itemsQuery.get('authorUserId')).toBe('8');
+    expect(itemsQuery.get('approvalScope')).toBe('true');
+    expect(itemsQuery.get('metric')).toBe('highPriority');
+    expect(itemsQuery.get('clientCaseId')).toBe('100');
+    expect(itemsQuery.get('page')).toBe('2');
+    expect(itemsQuery.get('pageSize')).toBe('25');
+    expect(itemsQuery.get('sortBy')).toBe('author');
+    expect(itemsQuery.get('sortDir')).toBe('desc');
+    expect(itemsOptions?.signal).toBe(controller.signal);
+
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      active: 2, overdue: 1, today: 1, highPriority: 1, unbilled: 3,
+    }), { headers: { 'Content-Type': 'application/json' } }));
+    await apiService.getTaskJournalSummary({
+      status: 'all',
+      todayFrom: '2026-08-05T00:00:00.000Z',
+      todayTo: '2026-08-06T00:00:00.000Z',
+    }, { signal: controller.signal });
+
+    const [summaryUrl, summaryOptions] = fetchMock.mock.calls[1];
+    const summaryQuery = new URL(String(summaryUrl)).searchParams;
+    expect(String(summaryUrl)).toContain('/tasks/summary?');
+    expect(summaryQuery.get('status')).toBe('all');
+    expect(summaryQuery.get('todayFrom')).toBe('2026-08-05T00:00:00.000Z');
+    expect(summaryQuery.get('todayTo')).toBe('2026-08-06T00:00:00.000Z');
+    expect(summaryQuery.has('page')).toBe(false);
+    expect(summaryOptions?.signal).toBe(controller.signal);
+  });
+
   it('passes an abort signal to the case automation search request', async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify([]), {
       headers: { 'Content-Type': 'application/json' },

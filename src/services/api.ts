@@ -1882,6 +1882,41 @@ export interface TaskJournalSettingsDto {
   stickerStyles: TaskStickerStyles;
 }
 
+/** Параметры серверного списка журнала задач. Все фильтры применяются до пагинации. */
+export interface TaskJournalListParams {
+  search?: string;
+  status?: string;
+  type?: string;
+  priority?: string;
+  underControl?: boolean;
+  assigneeUserId?: number;
+  authorUserId?: number;
+  approvalScope?: boolean;
+  metric?: 'active' | 'overdue' | 'today' | 'highPriority';
+  clientCaseId?: number;
+  clientId?: number;
+  legalEntityId?: number;
+  from?: string;
+  to?: string;
+  todayFrom?: string;
+  todayTo?: string;
+  calendarView?: boolean;
+  includeDeadlineChangeRequests?: boolean;
+  page?: number;
+  pageSize?: number;
+  sortBy?: TaskJournalSortKey;
+  sortDir?: SortDir;
+}
+
+/** Компактные счётчики журнала, рассчитанные сервером без выгрузки карточек. */
+export interface TaskJournalListSummary {
+  active: number;
+  overdue: number;
+  today: number;
+  highPriority: number;
+  unbilled: number;
+}
+
 export interface TaskJournalAutomationDiagnosticsDto {
   enabled: boolean;
   inactivityDays: number;
@@ -2285,7 +2320,7 @@ export interface SimpleDictionaryMergeResult {
   removedIds: number[];
 }
 
-type SortDir = 'asc' | 'desc';
+export type SortDir = 'asc' | 'desc';
 type PaymentSortKey =
   | 'date'
   | 'plannedDate'
@@ -2297,7 +2332,7 @@ type PaymentSortKey =
   | 'amount'
   | 'paidDate'
   | 'createdAt';
-type TaskJournalSortKey =
+export type TaskJournalSortKey =
   | 'counterparty'
   | 'title'
   | 'assignee'
@@ -4240,25 +4275,8 @@ export class ApiService {
   }
 
   // ===== Task journal =====
-  async getTaskJournalItems(params?: {
-    search?: string;
-    status?: string;
-    type?: string;
-    priority?: string;
-    underControl?: boolean;
-    assigneeUserId?: number;
-    clientCaseId?: number;
-    clientId?: number;
-    legalEntityId?: number;
-    from?: string;
-    to?: string;
-    calendarView?: boolean;
-    includeDeadlineChangeRequests?: boolean;
-    page?: number;
-    pageSize?: number;
-    sortBy?: TaskJournalSortKey;
-    sortDir?: SortDir;
-  }) {
+  /** Загружает одну страницу задач; сервер применяет фильтры до COUNT и LIMIT. */
+  async getTaskJournalItems(params?: TaskJournalListParams, options?: Pick<RequestInit, 'signal'>) {
     const q = buildQuery({
       search: params?.search,
       status: params?.status,
@@ -4266,11 +4284,16 @@ export class ApiService {
       priority: params?.priority,
       underControl: params?.underControl,
       assigneeUserId: params?.assigneeUserId,
+      authorUserId: params?.authorUserId,
+      approvalScope: params?.approvalScope,
+      metric: params?.metric,
       clientCaseId: params?.clientCaseId,
       clientId: params?.clientId,
       legalEntityId: params?.legalEntityId,
       from: params?.from,
       to: params?.to,
+      todayFrom: params?.todayFrom,
+      todayTo: params?.todayTo,
       calendarView: params?.calendarView,
       includeDeadlineChangeRequests: params?.includeDeadlineChangeRequests,
       page: params?.page ?? 1,
@@ -4278,7 +4301,32 @@ export class ApiService {
       sortBy: params?.sortBy,
       sortDir: params?.sortDir,
     });
-    return this.request<PagedResult<TaskJournalItem>>(`/tasks${q}`);
+    return this.request<PagedResult<TaskJournalItem>>(`/tasks${q}`, options);
+  }
+
+  /** Получает счётчики для карточек журнала без передачи полных задач. */
+  async getTaskJournalSummary(
+    params?: Omit<TaskJournalListParams, 'metric' | 'page' | 'pageSize' | 'sortBy' | 'sortDir' | 'calendarView' | 'includeDeadlineChangeRequests'>,
+    options?: Pick<RequestInit, 'signal'>,
+  ) {
+    const q = buildQuery({
+      search: params?.search,
+      status: params?.status,
+      type: params?.type,
+      priority: params?.priority,
+      underControl: params?.underControl,
+      assigneeUserId: params?.assigneeUserId,
+      authorUserId: params?.authorUserId,
+      approvalScope: params?.approvalScope,
+      clientCaseId: params?.clientCaseId,
+      clientId: params?.clientId,
+      legalEntityId: params?.legalEntityId,
+      from: params?.from,
+      to: params?.to,
+      todayFrom: params?.todayFrom,
+      todayTo: params?.todayTo,
+    });
+    return this.request<TaskJournalListSummary>(`/tasks/summary${q}`, options);
   }
 
   async getTaskJournalAssignees(params?: { calendarView?: boolean }) {
