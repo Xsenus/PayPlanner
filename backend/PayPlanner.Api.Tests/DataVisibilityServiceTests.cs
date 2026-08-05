@@ -3,6 +3,7 @@ using System.Security.Claims;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Npgsql;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
@@ -13,6 +14,235 @@ namespace PayPlanner.Api.Tests;
 
 public class DataVisibilityServiceTests
 {
+    private const string PostgreSqlEnvironmentVariable = "PAYPLANNER_TEST_POSTGRES";
+    private const string PostgreSqlDatabasePrefix = "payplanner_section_access_test_";
+
+    [Fact]
+    public async Task ResolveSectionAccessAsync_ReturnsPermissionAndOwnVisibilityInOneQuery()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+        var role = new Role { Name = "case-editor", Description = "case-editor" };
+        db.Roles.Add(role);
+        await db.SaveChangesAsync();
+        db.RolePermissions.Add(new RolePermission
+        {
+            RoleId = role.Id,
+            Section = RolePermissionCatalog.Cases,
+            CanView = true,
+            CanCreate = true,
+            CanEdit = true,
+            CanDelete = false,
+            CanExport = true,
+            CanViewAnalytics = false,
+            ViewScope = DataVisibilityScope.Own,
+            CanEditOthers = false,
+            CanCompleteOthers = true,
+            CanDeleteOthers = false,
+        });
+        var user = CreateUser("section-access@example.com", "Редактор дел", role.Id);
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+        interceptor.ReaderCommands.Clear();
+
+        var access = await db.ResolveSectionAccessAsync(
+            CreatePrincipal(user.Id),
+            RolePermissionCatalog.Cases);
+
+        Assert.NotNull(access);
+        Assert.Equal(DataVisibilityScope.Own, access!.Visibility.ViewScope);
+        Assert.Equal(new[] { user.Id }, access.Visibility.VisibleUserIds);
+        var permission = Assert.IsType<RolePermissionValues>(access.Permission);
+        Assert.True(permission.CanCreate);
+        Assert.True(permission.CanEdit);
+        Assert.True(permission.CanExport);
+        Assert.True(permission.CanCompleteOthers);
+        Assert.False(permission.CanDelete);
+        Assert.False(permission.CanViewAnalytics);
+        var sql = Assert.Single(interceptor.ReaderCommands);
+        Assert.Contains("RolePermissions", sql, StringComparison.Ordinal);
+        Assert.InRange(CountOccurrences(sql, "RolePermissions"), 1, 2);
+    }
+
+    [Fact]
+    public async Task ResolveSectionAccessAsync_LoadsDepartmentMembersWithSecondBoundedQuery()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+        var role = new Role { Name = "department-lawyer", Description = "department-lawyer" };
+        var department = new DepartmentDictionaryItem { Name = "Арбитраж", IsActive = true };
+        var otherDepartment = new DepartmentDictionaryItem { Name = "Исполнение", IsActive = true };
+        db.AddRange(role, department, otherDepartment);
+        await db.SaveChangesAsync();
+        db.RolePermissions.Add(CreatePermission(
+            role.Id,
+            RolePermissionCatalog.Cases,
+            DataVisibilityScope.Department));
+        var current = CreateUser("department-current@example.com", "Юрист отдела", role.Id, department);
+        var teammate = CreateUser("department-teammate@example.com", "Коллега отдела", role.Id, department);
+        var outsider = CreateUser("department-outsider@example.com", "Другой отдел", role.Id, otherDepartment);
+        db.Users.AddRange(current, teammate, outsider);
+        await db.SaveChangesAsync();
+        interceptor.ReaderCommands.Clear();
+
+        var access = await db.ResolveSectionAccessAsync(
+            CreatePrincipal(current.Id),
+            RolePermissionCatalog.Cases);
+
+        Assert.NotNull(access);
+        Assert.Equal(DataVisibilityScope.Department, access!.Visibility.ViewScope);
+        Assert.True(access.Visibility.CanSeeUser(current.Id));
+        Assert.True(access.Visibility.CanSeeUser(teammate.Id));
+        Assert.False(access.Visibility.CanSeeUser(outsider.Id));
+        Assert.Equal(2, interceptor.ReaderCommands.Count);
+        Assert.Contains(interceptor.ReaderCommands, sql => sql.Contains("RolePermissions", StringComparison.Ordinal));
+        Assert.Contains(interceptor.ReaderCommands, sql => sql.Contains("Users", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ResolveSectionAccessAsync_UsesDatabaseAdminRoleAndRejectsMissingPermission()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+        var adminRole = new Role { Name = "admin", Description = "admin" };
+        var deniedRole = new Role { Name = "no-cases", Description = "no-cases" };
+        db.Roles.AddRange(adminRole, deniedRole);
+        await db.SaveChangesAsync();
+        db.RolePermissions.Add(CreatePermission(
+            deniedRole.Id,
+            RolePermissionCatalog.Tasks,
+            DataVisibilityScope.Own));
+        var admin = CreateUser("section-admin@example.com", "Администратор", adminRole.Id);
+        var denied = CreateUser("section-denied@example.com", "Без права дел", deniedRole.Id);
+        db.Users.AddRange(admin, denied);
+        await db.SaveChangesAsync();
+        interceptor.ReaderCommands.Clear();
+
+        var adminAccess = await db.ResolveSectionAccessAsync(
+            CreatePrincipal(admin.Id),
+            RolePermissionCatalog.Cases);
+        var deniedAccess = await db.ResolveSectionAccessAsync(
+            CreatePrincipal(denied.Id, isAdminClaim: true),
+            RolePermissionCatalog.Cases);
+
+        Assert.NotNull(adminAccess);
+        Assert.True(adminAccess!.Visibility.SeesAll);
+        var adminPermission = Assert.IsType<RolePermissionValues>(adminAccess.Permission);
+        Assert.True(adminPermission.CanView);
+        Assert.True(adminPermission.CanCreate);
+        Assert.True(adminPermission.CanEdit);
+        Assert.True(adminPermission.CanDelete);
+        Assert.Null(deniedAccess);
+        Assert.Equal(2, interceptor.ReaderCommands.Count);
+    }
+
+    [Fact]
+    public async Task ResolveSectionAccessAsync_PreservesLegacyOwnVisibilityWithoutOperationPermission()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+        var emptyRole = new Role { Name = "legacy-empty-role", Description = "legacy-empty-role" };
+        db.Roles.Add(emptyRole);
+        await db.SaveChangesAsync();
+        var user = CreateUser("legacy-section-access@example.com", "Сотрудник старой роли", emptyRole.Id);
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+        interceptor.ReaderCommands.Clear();
+
+        var access = await db.ResolveSectionAccessAsync(
+            CreatePrincipal(user.Id),
+            RolePermissionCatalog.Cases);
+
+        Assert.NotNull(access);
+        Assert.Equal(DataVisibilityScope.Own, access!.Visibility.ViewScope);
+        Assert.Equal(new[] { user.Id }, access.Visibility.VisibleUserIds);
+        Assert.Null(access.Permission);
+        Assert.Single(interceptor.ReaderCommands);
+    }
+
+    [Fact]
+    public async Task ResolveSectionAccessAsync_TranslatesOnFreshPostgreSqlDatabase()
+    {
+        var adminConnectionString = Environment.GetEnvironmentVariable(PostgreSqlEnvironmentVariable);
+        if (string.IsNullOrWhiteSpace(adminConnectionString))
+        {
+            Assert.False(
+                string.Equals(Environment.GetEnvironmentVariable("CI"), "true", StringComparison.OrdinalIgnoreCase),
+                $"{PostgreSqlEnvironmentVariable} must be configured in CI.");
+            return;
+        }
+
+        var databaseName = PostgreSqlDatabasePrefix + Guid.NewGuid().ToString("N");
+        Assert.StartsWith(PostgreSqlDatabasePrefix, databaseName, StringComparison.Ordinal);
+        var adminBuilder = new NpgsqlConnectionStringBuilder(adminConnectionString)
+        {
+            Database = "postgres",
+            Pooling = false,
+        };
+        await using var adminConnection = new NpgsqlConnection(adminBuilder.ConnectionString);
+        await adminConnection.OpenAsync();
+
+        try
+        {
+            await using (var create = adminConnection.CreateCommand())
+            {
+                create.CommandText = $"CREATE DATABASE \"{databaseName}\"";
+                await create.ExecuteNonQueryAsync();
+            }
+
+            var testBuilder = new NpgsqlConnectionStringBuilder(adminBuilder.ConnectionString)
+            {
+                Database = databaseName,
+                Pooling = false,
+            };
+            var interceptor = new RecordingCommandInterceptor();
+            var options = new DbContextOptionsBuilder<PostgreSqlPaymentContext>()
+                .UseNpgsql(testBuilder.ConnectionString)
+                .AddInterceptors(interceptor)
+                .ConfigureWarnings(warnings => warnings.Ignore(RelationalEventId.PendingModelChangesWarning))
+                .Options;
+            await using var db = new PostgreSqlPaymentContext(options);
+            await db.Database.MigrateAsync();
+            var role = new Role { Name = "postgres-case-viewer", Description = "postgres-case-viewer" };
+            db.Roles.Add(role);
+            await db.SaveChangesAsync();
+            db.RolePermissions.Add(CreatePermission(
+                role.Id,
+                RolePermissionCatalog.Cases,
+                DataVisibilityScope.Own));
+            var user = CreateUser("postgres-section-access@example.com", "PostgreSQL пользователь", role.Id);
+            db.Users.Add(user);
+            await db.SaveChangesAsync();
+            interceptor.ReaderCommands.Clear();
+
+            var access = await db.ResolveSectionAccessAsync(
+                CreatePrincipal(user.Id),
+                RolePermissionCatalog.Cases);
+
+            Assert.NotNull(access);
+            Assert.Equal(DataVisibilityScope.Own, access!.Visibility.ViewScope);
+            Assert.Equal(new[] { user.Id }, access.Visibility.VisibleUserIds);
+            var sql = Assert.Single(interceptor.ReaderCommands);
+            Assert.InRange(CountOccurrences(sql, "RolePermissions"), 1, 2);
+        }
+        finally
+        {
+            await using var terminate = adminConnection.CreateCommand();
+            terminate.CommandText =
+                """
+                SELECT pg_terminate_backend(pid)
+                FROM pg_stat_activity
+                WHERE datname = @databaseName AND pid <> pg_backend_pid()
+                """;
+            terminate.Parameters.AddWithValue("databaseName", databaseName);
+            await terminate.ExecuteNonQueryAsync();
+            await using var drop = adminConnection.CreateCommand();
+            drop.CommandText = $"DROP DATABASE IF EXISTS \"{databaseName}\"";
+            await drop.ExecuteNonQueryAsync();
+            NpgsqlConnection.ClearAllPools();
+        }
+    }
+
     [Fact]
     public async Task ResolveDataVisibilitiesForUsersAsync_BatchesRoleAndDepartmentQueries()
     {
@@ -594,4 +824,7 @@ public class DataVisibilityServiceTests
 
         return new ClaimsPrincipal(new ClaimsIdentity(claims, "test"));
     }
+
+    private static int CountOccurrences(string source, string value)
+        => source.Split(value, StringSplitOptions.None).Length - 1;
 }

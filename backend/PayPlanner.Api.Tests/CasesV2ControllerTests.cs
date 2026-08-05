@@ -7559,6 +7559,160 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task GetExternalWorkOrderApproval_ReusesSingleAccessSnapshotAndReturnsStatus()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+        var owner = await CreateUserAsync(db, "external-approval-status@example.com", "Владелец согласования");
+        var clientCase = new ClientCase
+        {
+            Client = new Client
+            {
+                Name = "Клиент внешнего согласования",
+                IsActive = true,
+                ResponsibleUserId = owner.Id,
+            },
+            Title = "Дело внешнего согласования",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = owner.Id,
+        };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        var service = new RecordingExternalWorkOrderApprovalService
+        {
+            LatestStatus = new ExternalWorkOrderApprovalStatusDto
+            {
+                PublicId = Guid.NewGuid(),
+                Version = 2,
+                Status = "opened",
+                RecipientName = "Представитель клиента",
+                RecipientEmail = "representative@example.com",
+            },
+        };
+        var controller = CreateController(db, owner, externalWorkOrderApprovalService: service);
+        interceptor.Commands.Clear();
+
+        var result = await controller.GetExternalWorkOrderApproval(clientCase.Id, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var status = Assert.IsType<ExternalWorkOrderApprovalStatusDto>(ok.Value);
+        Assert.Equal("opened", status.Status);
+        Assert.Equal(clientCase.Id, service.LastCaseId);
+        Assert.Equal(1, service.GetCalls);
+        Assert.Equal(2, interceptor.Commands.Count);
+        Assert.Contains(interceptor.Commands, command => command.Contains("RolePermissions", StringComparison.Ordinal));
+        Assert.Contains(interceptor.Commands, command => command.Contains("ClientCases", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task CreateExternalWorkOrderApproval_PassesActorAndRequestToService()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "external-approval-create@example.com", "Анна Постановщик");
+        var clientCase = new ClientCase
+        {
+            Client = new Client { Name = "Клиент", IsActive = true, ResponsibleUserId = owner.Id },
+            Title = "Дело для отправки согласования",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = owner.Id,
+        };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        var service = new RecordingExternalWorkOrderApprovalService
+        {
+            CreatedStatus = new ExternalWorkOrderApprovalStatusDto
+            {
+                PublicId = Guid.NewGuid(),
+                Version = 1,
+                Status = "pending",
+                RecipientName = "Клиент",
+                RecipientEmail = "client@example.com",
+            },
+        };
+        var controller = CreateController(db, owner, externalWorkOrderApprovalService: service);
+        var request = new CreateExternalWorkOrderApprovalRequest
+        {
+            RecipientName = "Клиент",
+            RecipientEmail = "client@example.com",
+            RecipientType = "client",
+        };
+
+        var result = await controller.CreateExternalWorkOrderApproval(clientCase.Id, request, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.Same(service.CreatedStatus, ok.Value);
+        Assert.Same(request, service.LastCreateRequest);
+        Assert.Equal(owner.Id, service.LastActorUserId);
+        Assert.Equal(owner.FullName, service.LastActorName);
+        Assert.Equal(1, service.CreateCalls);
+    }
+
+    [Fact]
+    public async Task RevokeExternalWorkOrderApproval_ReturnsNotFoundWhenActiveRequestIsMissing()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "external-approval-revoke@example.com", "Сотрудник отзыва");
+        var clientCase = new ClientCase
+        {
+            Client = new Client { Name = "Клиент", IsActive = true, ResponsibleUserId = owner.Id },
+            Title = "Дело без активного согласования",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = owner.Id,
+        };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        var service = new RecordingExternalWorkOrderApprovalService { RevokeResult = false };
+        var controller = CreateController(db, owner, externalWorkOrderApprovalService: service);
+
+        var result = await controller.RevokeExternalWorkOrderApproval(clientCase.Id, CancellationToken.None);
+
+        var notFound = Assert.IsType<NotFoundObjectResult>(result);
+        var message = notFound.Value?.GetType().GetProperty("message")?.GetValue(notFound.Value) as string;
+        Assert.Contains("не найден", message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(owner.Id, service.LastActorUserId);
+        Assert.Equal(1, service.RevokeCalls);
+    }
+
+    [Fact]
+    public async Task ExternalWorkOrderApproval_DoesNotCallServiceWithoutEditPermissionOrCaseVisibility()
+    {
+        await using var db = await CreateContextAsync();
+        var viewer = await CreateUserAsync(db, "external-approval-viewer@example.com", "Наблюдатель");
+        var other = await CreateUserAsync(db, "external-approval-other@example.com", "Другой ответственный");
+        viewer.Role!.Permissions.Single(permission => permission.Section == RolePermissionCatalog.Cases).CanEdit = false;
+        var visibleCase = new ClientCase
+        {
+            Client = new Client { Name = "Видимый клиент", IsActive = true, ResponsibleUserId = viewer.Id },
+            Title = "Видимое дело",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = viewer.Id,
+        };
+        var hiddenCase = new ClientCase
+        {
+            Client = new Client { Name = "Скрытый клиент", IsActive = true, ResponsibleUserId = other.Id },
+            Title = "Скрытое дело",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = other.Id,
+        };
+        db.ClientCases.AddRange(visibleCase, hiddenCase);
+        await db.SaveChangesAsync();
+        var service = new RecordingExternalWorkOrderApprovalService();
+
+        var editController = CreateController(db, viewer, externalWorkOrderApprovalService: service);
+        var createResult = await editController.CreateExternalWorkOrderApproval(
+            visibleCase.Id,
+            new CreateExternalWorkOrderApprovalRequest(),
+            CancellationToken.None);
+        var readController = CreateController(db, viewer, externalWorkOrderApprovalService: service);
+        var getResult = await readController.GetExternalWorkOrderApproval(hiddenCase.Id, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(createResult.Result);
+        Assert.IsType<NotFoundResult>(getResult.Result);
+        Assert.Equal(0, service.CreateCalls);
+        Assert.Equal(0, service.GetCalls);
+    }
+
+    [Fact]
     public async Task WorkOrder_ForbidsReadAndPrintWithoutCaseViewPermission()
     {
         await using var db = await CreateContextAsync();
@@ -8977,11 +9131,12 @@ public class CasesV2ControllerTests
         IOptionsMonitor<AppFeatureFlagsOptions>? featureFlags = null,
         INotificationService? notificationService = null,
         bool includeAdminRoleClaim = false,
-        CourtSyncMetrics? courtSyncMetrics = null)
+        CourtSyncMetrics? courtSyncMetrics = null,
+        IExternalWorkOrderApprovalService? externalWorkOrderApprovalService = null)
         => new(db, new TestWebHostEnvironment
         {
             ContentRootPath = contentRootPath ?? Path.Combine(Path.GetTempPath(), "payplanner-case-documents", Guid.NewGuid().ToString("N")),
-        }, sudrfCourtSyncService: sudrfCourtSyncService, pdfService: pdfService, courtSyncProviderRegistry: courtSyncProviderRegistry, configuration: configuration, featureFlags: featureFlags, notificationService: notificationService, courtSyncMetrics: courtSyncMetrics)
+        }, sudrfCourtSyncService: sudrfCourtSyncService, pdfService: pdfService, courtSyncProviderRegistry: courtSyncProviderRegistry, configuration: configuration, featureFlags: featureFlags, notificationService: notificationService, courtSyncMetrics: courtSyncMetrics, externalWorkOrderApprovalService: externalWorkOrderApprovalService)
         {
             ControllerContext = new ControllerContext
             {
@@ -9054,6 +9209,76 @@ public class CasesV2ControllerTests
 
         public Task<TelegramNotificationSettingsDto> GetSettingsAsync(CancellationToken cancellationToken = default)
             => Task.FromResult(new TelegramNotificationSettingsDto());
+    }
+
+    private sealed class RecordingExternalWorkOrderApprovalService : IExternalWorkOrderApprovalService
+    {
+        public ExternalWorkOrderApprovalStatusDto? LatestStatus { get; init; }
+        public ExternalWorkOrderApprovalStatusDto CreatedStatus { get; init; } = new();
+        public bool RevokeResult { get; init; }
+        public int GetCalls { get; private set; }
+        public int CreateCalls { get; private set; }
+        public int RevokeCalls { get; private set; }
+        public int LastCaseId { get; private set; }
+        public int? LastActorUserId { get; private set; }
+        public string LastActorName { get; private set; } = string.Empty;
+        public CreateExternalWorkOrderApprovalRequest? LastCreateRequest { get; private set; }
+
+        public Task<ExternalWorkOrderApprovalStatusDto?> GetLatestStatusAsync(int caseId, CancellationToken ct)
+        {
+            GetCalls++;
+            LastCaseId = caseId;
+            return Task.FromResult(LatestStatus);
+        }
+
+        public Task<ExternalWorkOrderApprovalStatusDto> CreateAsync(
+            int caseId,
+            CreateExternalWorkOrderApprovalRequest request,
+            int? actorUserId,
+            string actorName,
+            CancellationToken ct)
+        {
+            CreateCalls++;
+            LastCaseId = caseId;
+            LastCreateRequest = request;
+            LastActorUserId = actorUserId;
+            LastActorName = actorName;
+            return Task.FromResult(CreatedStatus);
+        }
+
+        public Task<bool> RevokeAsync(int caseId, int? actorUserId, string actorName, CancellationToken ct)
+        {
+            RevokeCalls++;
+            LastCaseId = caseId;
+            LastActorUserId = actorUserId;
+            LastActorName = actorName;
+            return Task.FromResult(RevokeResult);
+        }
+
+        public Task<PublicWorkOrderApprovalDto> OpenAsync(Guid publicId, string token, CancellationToken ct)
+            => throw new NotSupportedException();
+
+        public Task<PublicWorkOrderApprovalDecisionDto> DecideAsync(
+            Guid publicId,
+            PublicWorkOrderApprovalDecisionRequest request,
+            string? remoteIp,
+            string? userAgent,
+            CancellationToken ct)
+            => throw new NotSupportedException();
+
+        public Task<PublicWorkOrderAttachmentGrantDto> CreateAttachmentGrantAsync(
+            Guid publicId,
+            Guid attachmentPublicId,
+            string token,
+            CancellationToken ct)
+            => throw new NotSupportedException();
+
+        public Task<PublicWorkOrderAttachmentDownload> DownloadAttachmentAsync(
+            Guid publicId,
+            Guid attachmentPublicId,
+            string grantToken,
+            CancellationToken ct)
+            => throw new NotSupportedException();
     }
 
     private sealed class FakeInvoiceDocumentPdfService(string content) : IInvoiceDocumentPdfService

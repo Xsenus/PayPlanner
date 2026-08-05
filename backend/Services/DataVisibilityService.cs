@@ -19,8 +19,144 @@ public sealed record DataVisibilityAccess(
         => SeesAll || VisibleUserIds.Contains(userId);
 }
 
+/// <summary>
+/// Неизменяемый снимок прав операции и области видимости одного раздела.
+/// Он позволяет контроллеру не читать пользователя, роль и право повторно
+/// перед каждой последующей выборкой в рамках одного HTTP-запроса.
+/// Отсутствующее право означает только legacy-видимость собственных данных
+/// и не разрешает операции раздела.
+/// </summary>
+public sealed record SectionAccessContext(
+    DataVisibilityAccess Visibility,
+    RolePermissionValues? Permission);
+
 public static class DataVisibilityService
 {
+    /// <summary>
+    /// Одним SQL-запросом читает активного пользователя, его роль и право раздела,
+    /// затем при необходимости отдельным ограниченным запросом получает сотрудников
+    /// того же отдела или явно разрешённых пользователей календаря.
+    /// </summary>
+    /// <remarks>
+    /// Метод предназначен для защищённых API. Идентификатор и роль из JWT не дают
+    /// доступ сами по себе: пользователь, роль и право обязательно подтверждаются
+    /// актуальными данными БД. Для администратора формируется полный набор операций.
+    /// </remarks>
+    /// <param name="db">Контекст базы данных.</param>
+    /// <param name="principal">Текущий аутентифицированный пользователь.</param>
+    /// <param name="section">Раздел из <see cref="RolePermissionCatalog"/>.</param>
+    /// <param name="ct">Токен отмены запроса.</param>
+    /// <returns>Снимок доступа или <see langword="null"/>, если доступ не подтверждён.</returns>
+    public static async Task<SectionAccessContext?> ResolveSectionAccessAsync(
+        this PaymentContext db,
+        ClaimsPrincipal? principal,
+        string section,
+        CancellationToken ct = default)
+    {
+        var userId = principal?.GetUserId();
+        if (!userId.HasValue)
+        {
+            return null;
+        }
+
+        var user = await (
+            from item in db.Users.AsNoTracking()
+            join configuredPermission in db.RolePermissions
+                    .AsNoTracking()
+                    .Where(permission => permission.Section == section)
+                on item.RoleId equals configuredPermission.RoleId into configuredPermissions
+            from configuredPermission in configuredPermissions.DefaultIfEmpty()
+            where item.Id == userId.Value && item.IsActive
+            select new
+            {
+                item.Id,
+                item.RoleId,
+                item.DepartmentId,
+                item.Department,
+                RoleName = item.Role != null ? item.Role.Name : string.Empty,
+                HasAnyPermissions = db.RolePermissions.Any(permission => permission.RoleId == item.RoleId),
+                CanView = configuredPermission == null ? (bool?)null : configuredPermission.CanView,
+                CanCreate = configuredPermission == null ? (bool?)null : configuredPermission.CanCreate,
+                CanEdit = configuredPermission == null ? (bool?)null : configuredPermission.CanEdit,
+                CanDelete = configuredPermission == null ? (bool?)null : configuredPermission.CanDelete,
+                CanExport = configuredPermission == null ? (bool?)null : configuredPermission.CanExport,
+                CanViewAnalytics = configuredPermission == null ? (bool?)null : configuredPermission.CanViewAnalytics,
+                ViewScope = configuredPermission == null ? null : configuredPermission.ViewScope,
+                CanEditOthers = configuredPermission == null ? (bool?)null : configuredPermission.CanEditOthers,
+                CanCompleteOthers = configuredPermission == null ? (bool?)null : configuredPermission.CanCompleteOthers,
+                CanDeleteOthers = configuredPermission == null ? (bool?)null : configuredPermission.CanDeleteOthers,
+            }).FirstOrDefaultAsync(ct);
+        if (user is null)
+        {
+            return null;
+        }
+
+        var isAdmin = string.Equals(user.RoleName, "admin", StringComparison.OrdinalIgnoreCase);
+        if (!isAdmin
+            && (user.CanView is false
+                || user.CanView is null && user.HasAnyPermissions))
+        {
+            return null;
+        }
+
+        RolePermissionValues? permission = isAdmin
+            ? new RolePermissionValues(true, true, true, true, true, true, DataVisibilityScope.All, true, true, true)
+            : user.CanView is null
+                ? null
+                : new RolePermissionValues(
+                    user.CanView.Value,
+                    user.CanCreate.GetValueOrDefault(),
+                    user.CanEdit.GetValueOrDefault(),
+                    user.CanDelete.GetValueOrDefault(),
+                    user.CanExport.GetValueOrDefault(),
+                    user.CanViewAnalytics.GetValueOrDefault(),
+                    user.ViewScope ?? DataVisibilityScope.Own,
+                    user.CanEditOthers.GetValueOrDefault(),
+                    user.CanCompleteOthers.GetValueOrDefault(),
+                    user.CanDeleteOthers.GetValueOrDefault());
+        var scope = NormalizeScope(section, permission?.ViewScope, isAdmin);
+        IReadOnlyCollection<int> visibleUserIds = new[] { user.Id };
+
+        if (!isAdmin
+            && string.Equals(scope, DataVisibilityScope.Department, StringComparison.OrdinalIgnoreCase)
+            && (user.DepartmentId.HasValue || !string.IsNullOrWhiteSpace(user.Department)))
+        {
+            var departmentId = user.DepartmentId;
+            var department = user.Department?.Trim();
+            var hasDepartmentName = !string.IsNullOrWhiteSpace(department);
+            visibleUserIds = (await db.Users
+                    .AsNoTracking()
+                    .Where(item => item.IsActive
+                        && ((departmentId.HasValue && item.DepartmentId == departmentId.Value)
+                            || (hasDepartmentName && item.Department != null && item.Department == department)))
+                    .Select(item => item.Id)
+                    .ToListAsync(ct))
+                .Append(user.Id)
+                .Distinct()
+                .ToArray();
+        }
+        else if (!isAdmin
+                 && string.Equals(scope, DataVisibilityScope.Specific, StringComparison.OrdinalIgnoreCase)
+                 && string.Equals(section, RolePermissionCatalog.Calendar, StringComparison.OrdinalIgnoreCase))
+        {
+            visibleUserIds = (await db.RoleCalendarVisibleUsers
+                    .AsNoTracking()
+                    .Where(item => item.RoleId == user.RoleId
+                        && item.User != null
+                        && item.User.IsActive
+                        && item.User.IsApproved)
+                    .Select(item => item.UserId)
+                    .ToListAsync(ct))
+                .Append(user.Id)
+                .Distinct()
+                .ToArray();
+        }
+
+        return new SectionAccessContext(
+            new DataVisibilityAccess(user.Id, isAdmin, section, scope, visibleUserIds),
+            permission);
+    }
+
     /// <summary>
     /// Пакетно вычисляет видимость одного раздела для нескольких сотрудников.
     /// Метод загружает пользователей и права их ролей общими запросами, поэтому число

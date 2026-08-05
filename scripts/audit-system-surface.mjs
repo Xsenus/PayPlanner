@@ -275,8 +275,11 @@ function hasDirectMethodEvidence(source, controller, method) {
  */
 function findEndpointDocumentation(sources, controller, endpoint) {
   const methodMarker = `${controller}.${endpoint.method}`;
+  const routeWithoutConstraints = endpoint.route.replace(/\{([^}:]+):[^}]+\}/g, '{$1}');
   return sources
-    .filter(item => item.source.includes(methodMarker) || item.source.includes(endpoint.route))
+    .filter(item => item.source.includes(methodMarker)
+      || item.source.includes(endpoint.route)
+      || item.source.includes(routeWithoutConstraints))
     .map(item => item.file);
 }
 

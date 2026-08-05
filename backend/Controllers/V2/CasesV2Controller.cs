@@ -125,6 +125,7 @@ public class CasesV2Controller : ControllerBase
     private readonly INotificationService? _notificationService;
     private readonly CourtSyncMetrics? _courtSyncMetrics;
     private readonly IExternalWorkOrderApprovalService? _externalWorkOrderApprovalService;
+    private Task<SectionAccessContext?>? _casesAccessTask;
     private CaseStatusClock? _caseStatusClock;
 
     public CasesV2Controller(
@@ -152,30 +153,25 @@ public class CasesV2Controller : ControllerBase
         _externalWorkOrderApprovalService = externalWorkOrderApprovalService;
     }
 
-    private Task<DataVisibilityAccess?> ResolveCasesVisibilityAsync(CancellationToken ct)
-        => _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
+    /// <summary>
+    /// Возвращает область видимости дел из единого снимка доступа текущего запроса.
+    /// Повторные проверки действия и видимости не создают новые SQL-запросы.
+    /// </summary>
+    private async Task<DataVisibilityAccess?> ResolveCasesVisibilityAsync(CancellationToken ct)
+        => (await ResolveCasesAccessAsync(ct))?.Visibility;
+
+    private Task<SectionAccessContext?> ResolveCasesAccessAsync(CancellationToken ct)
+        => _casesAccessTask ??= _db.ResolveSectionAccessAsync(User, RolePermissionCatalog.Cases, ct);
 
     private ActionResult MissingCasesVisibilityResult()
         => User.GetUserId().HasValue ? Forbid() : Unauthorized();
 
     private async Task<ActionResult?> RequireCasesPermissionAsync(
-        Func<RolePermission, bool> predicate,
+        Func<RolePermissionValues, bool> predicate,
         CancellationToken ct)
     {
-        var userId = User.GetUserId();
-        if (!userId.HasValue)
-        {
-            return Forbid();
-        }
-
-        var isAdmin = await _db.IsUserAdminAsync(userId.Value, ct);
-        if (isAdmin)
-        {
-            return null;
-        }
-
-        var permission = await _db.GetUserSectionPermissionAsync(userId.Value, RolePermissionCatalog.Cases, ct);
-        return permission is not null && predicate(permission) ? null : Forbid();
+        var access = await ResolveCasesAccessAsync(ct);
+        return access?.Permission is { } permission && predicate(permission) ? null : Forbid();
     }
 
     private async Task<ActionResult?> RequireDocumentTemplateEditPermissionAsync(CancellationToken ct)
