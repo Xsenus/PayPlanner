@@ -138,7 +138,7 @@ public class CaseNotificationInventoryTests
         AssertMethodContains(
             deadlineReminderSource,
             "RunOnceAsync",
-            "NotifyCaseProceduralDeadlineAsync",
+            "NotifyCaseProceduralDeadlineRemindersAsync",
             "ResolveCaseNotificationRecipientIdsAsync");
         AssertMethodContains(
             deadlineReminderSource,
@@ -153,6 +153,8 @@ public class CaseNotificationInventoryTests
             "NotifyCaseInactivityControlTaskCreatedAsync");
         Assert.Contains("RunCourtSync", courtSyncSource, StringComparison.Ordinal);
         Assert.Contains("ClientCaseStageClassifier.IsPretrial", courtSyncSource, StringComparison.Ordinal);
+        Assert.Contains("CursorCaseIdSettingKey", courtSyncSource, StringComparison.Ordinal);
+        Assert.Contains("item.Role.Name == \"admin\"", courtSyncSource, StringComparison.Ordinal);
 
         Assert.Contains("UserNotificationTypes.CaseCourtEvent", inboxSource, StringComparison.Ordinal);
         Assert.Contains("UserNotificationTypes.CourtHearing", inboxSource, StringComparison.Ordinal);

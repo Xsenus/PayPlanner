@@ -17,6 +17,7 @@ public sealed class ClientCaseCourtSyncSchedulerService : BackgroundService
     public const string EnabledSettingKey = "legalIntegrations.courtSyncScheduler.enabled";
     public const string IntervalMinutesSettingKey = "legalIntegrations.courtSyncScheduler.intervalMinutes";
     public const string BatchSizeSettingKey = "legalIntegrations.courtSyncScheduler.batchSize";
+    public const string CursorCaseIdSettingKey = "legalIntegrations.courtSyncScheduler.cursorCaseId";
     public const int DefaultIntervalMinutes = 360;
     public const int MinIntervalMinutes = 15;
     public const int MaxIntervalMinutes = 1440;
@@ -133,7 +134,7 @@ public sealed class ClientCaseCourtSyncSchedulerService : BackgroundService
         var db = scope.ServiceProvider.GetRequiredService<PaymentContext>();
         var admin = await db.Users
             .AsNoTracking()
-            .Where(item => item.IsActive && item.IsApproved)
+            .Where(item => item.IsActive && item.IsApproved && item.Role != null && item.Role.Name == "admin")
             .OrderBy(item => item.Id)
             .FirstOrDefaultAsync(cancellationToken);
         if (admin is null)
@@ -145,22 +146,42 @@ public sealed class ClientCaseCourtSyncSchedulerService : BackgroundService
         var metrics = scope.ServiceProvider.GetService<CourtSyncMetrics>();
         var normalizedBatchSize = NormalizeBatchSize(batchSize);
         var candidateLimit = normalizedBatchSize * 5;
-        var candidates = await db.ClientCases
+        var cursorCaseId = await db.SystemSettings
             .AsNoTracking()
-            .Where(item => item.Status == ClientCaseStatus.Open)
-            .Where(item => item.CourtUrl != string.Empty)
-            .OrderBy(item => item.Id)
-            .Select(item => new { item.Id, item.CourtUrl, item.Stage, item.CaseType })
-            .Take(candidateLimit)
-            .ToListAsync(cancellationToken);
-        var caseIds = candidates
-            .Where(item => !ClientCaseStageClassifier.IsPretrial(item.Stage, item.CaseType))
-            .Where(item => registry?.Resolve(item.CourtUrl) is not null || item.CourtUrl.Contains(".sudrf.ru", StringComparison.OrdinalIgnoreCase))
-            .Select(item => item.Id)
-            .Take(normalizedBatchSize)
-            .ToList();
+            .Where(item => item.Key == CursorCaseIdSettingKey)
+            .Select(item => item.Value)
+            .SingleOrDefaultAsync(cancellationToken);
+        var cursor = ParseNonNegativeIntSetting(cursorCaseId);
+        var candidates = await LoadCandidatesAfterAsync(db, cursor, candidateLimit, cancellationToken);
+        if (cursor > 0 && candidates.Count < candidateLimit)
+        {
+            var wrappedCandidates = await LoadCandidatesThroughAsync(
+                db,
+                cursor,
+                candidateLimit - candidates.Count,
+                cancellationToken);
+            candidates.AddRange(wrappedCandidates);
+        }
 
-        if (caseIds.Count == 0)
+        var caseIds = new List<int>(normalizedBatchSize);
+        var lastExaminedCaseId = 0;
+        foreach (var candidate in candidates)
+        {
+            lastExaminedCaseId = candidate.Id;
+            var sourceUrl = candidate.CourtUrl ?? string.Empty;
+            var isSupported = registry?.Resolve(sourceUrl) is not null
+                || sourceUrl.Contains(".sudrf.ru", StringComparison.OrdinalIgnoreCase);
+            if (!ClientCaseStageClassifier.IsPretrial(candidate.Stage, candidate.CaseType) && isSupported)
+            {
+                caseIds.Add(candidate.Id);
+                if (caseIds.Count == normalizedBatchSize)
+                {
+                    break;
+                }
+            }
+        }
+
+        if (lastExaminedCaseId == 0)
         {
             return 0;
         }
@@ -195,11 +216,86 @@ public sealed class ClientCaseCourtSyncSchedulerService : BackgroundService
         foreach (var caseId in caseIds)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            await controller.RunCourtSync(caseId, null, cancellationToken);
-            processed++;
+            var result = await controller.RunCourtSync(caseId, null, cancellationToken);
+            if (result.Result is OkObjectResult)
+            {
+                processed++;
+            }
         }
 
+        await SaveCursorAsync(db, lastExaminedCaseId, cancellationToken);
+
         return processed;
+    }
+
+    /// <summary>
+    /// Загружает ограниченную порцию дел после сохраненного курсора. Выборка содержит
+    /// только поля, необходимые для определения провайдера, поэтому размер прохода не
+    /// зависит от объема карточек и их истории.
+    /// </summary>
+    private static Task<List<CourtSyncCandidate>> LoadCandidatesAfterAsync(
+        PaymentContext db,
+        int cursor,
+        int take,
+        CancellationToken cancellationToken)
+        => BuildCandidateQuery(db)
+            .Where(item => item.Id > cursor)
+            .OrderBy(item => item.Id)
+            .Take(take)
+            .Select(item => new CourtSyncCandidate(item.Id, item.CourtUrl, item.Stage, item.CaseType))
+            .ToListAsync(cancellationToken);
+
+    /// <summary>
+    /// Дополняет циклический проход делами из начала реестра после достижения конца.
+    /// Верхняя граница не дает одному делу попасть в одну и ту же порцию дважды.
+    /// </summary>
+    private static Task<List<CourtSyncCandidate>> LoadCandidatesThroughAsync(
+        PaymentContext db,
+        int cursor,
+        int take,
+        CancellationToken cancellationToken)
+        => BuildCandidateQuery(db)
+            .Where(item => item.Id <= cursor)
+            .OrderBy(item => item.Id)
+            .Take(take)
+            .Select(item => new CourtSyncCandidate(item.Id, item.CourtUrl, item.Stage, item.CaseType))
+            .ToListAsync(cancellationToken);
+
+    private static IQueryable<ClientCase> BuildCandidateQuery(PaymentContext db)
+        => db.ClientCases
+            .AsNoTracking()
+            .Where(item => item.Status == ClientCaseStatus.Open)
+            .Where(item => item.CourtUrl != string.Empty);
+
+    /// <summary>
+    /// Сохраняет позицию циклического обхода. Курсор двигается и при неподдерживаемой
+    /// ссылке или ошибке отдельного дела, чтобы одна запись не блокировала остальные.
+    /// </summary>
+    private static async Task SaveCursorAsync(
+        PaymentContext db,
+        int caseId,
+        CancellationToken cancellationToken)
+    {
+        var now = DateTime.UtcNow;
+        var setting = await db.SystemSettings
+            .SingleOrDefaultAsync(item => item.Key == CursorCaseIdSettingKey, cancellationToken);
+        if (setting is null)
+        {
+            db.SystemSettings.Add(new SystemSetting
+            {
+                Key = CursorCaseIdSettingKey,
+                Value = caseId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                CreatedAt = now,
+                UpdatedAt = now,
+            });
+        }
+        else
+        {
+            setting.Value = caseId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            setting.UpdatedAt = now;
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
     }
 
     public static int NormalizeIntervalMinutes(int value)
@@ -240,6 +336,11 @@ public sealed class ClientCaseCourtSyncSchedulerService : BackgroundService
 
     private static int ParseIntSetting(string? value, int fallback)
         => int.TryParse(value, out var parsed) ? parsed : fallback;
+
+    private static int ParseNonNegativeIntSetting(string? value)
+        => int.TryParse(value, out var parsed) && parsed > 0 ? parsed : 0;
+
+    private sealed record CourtSyncCandidate(int Id, string? CourtUrl, string Stage, string CaseType);
 
     private readonly record struct CourtSyncSchedulerSettings(
         bool IsEnabled,

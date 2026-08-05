@@ -18,6 +18,20 @@ namespace PayPlanner.Api.Tests;
 public class CaseProceduralDeadlineReminderNotificationServiceTests
 {
     [Fact]
+    public async Task RunOnceAsync_UsesFixedQueryCountAndSkipsAlreadyCreatedDailyReminders()
+    {
+        var singleDeadline = await RunRealNotificationBatchScenarioAsync(1);
+        var twelveDeadlines = await RunRealNotificationBatchScenarioAsync(12);
+
+        Assert.Equal(1, singleDeadline.Created);
+        Assert.Equal(12, twelveDeadlines.Created);
+        Assert.Equal(0, singleDeadline.CreatedOnRepeat);
+        Assert.Equal(0, twelveDeadlines.CreatedOnRepeat);
+        Assert.Equal(singleDeadline.ReaderQueryCount, twelveDeadlines.ReaderQueryCount);
+        Assert.InRange(twelveDeadlines.ReaderQueryCount, 1, 10);
+    }
+
+    [Fact]
     public async Task RunOnceAsync_BatchesRecipientQueriesAndPreservesCaseVisibility()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
@@ -288,7 +302,7 @@ public class CaseProceduralDeadlineReminderNotificationServiceTests
         var secondRun = await service.RunOnceAsync(CancellationToken.None);
 
         Assert.Equal(1, firstRun);
-        Assert.Equal(1, secondRun);
+        Assert.Equal(0, secondRun);
         await using var assertScope = provider.CreateAsyncScope();
         var assertDb = assertScope.ServiceProvider.GetRequiredService<PaymentContext>();
         var notification = await assertDb.UserNotifications.SingleAsync();
@@ -447,6 +461,16 @@ public class CaseProceduralDeadlineReminderNotificationServiceTests
 
         protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
         {
+            if (targetMethod?.Name == nameof(INotificationService.NotifyCaseProceduralDeadlineRemindersAsync)
+                && args is { Length: 2 })
+            {
+                var reminders = Assert.IsAssignableFrom<IReadOnlyCollection<CaseProceduralDeadlineReminderBatchItem>>(args[0]);
+                Calls.AddRange(reminders.Select(reminder => new CaseNotificationCall(
+                    reminder.ClientCase.Id,
+                    reminder.RecipientUserIds.ToArray())));
+                return Task.FromResult(reminders.Count);
+            }
+
             if (targetMethod?.Name == nameof(INotificationService.NotifyCaseProceduralDeadlineAsync)
                 && args is { Length: 7 })
             {
@@ -461,4 +485,108 @@ public class CaseProceduralDeadlineReminderNotificationServiceTests
     }
 
     private sealed record CaseNotificationCall(int ClientCaseId, IReadOnlyCollection<int> RecipientUserIds);
+
+    private static async Task<NotificationBatchScenarioResult> RunRealNotificationBatchScenarioAsync(int deadlineCount)
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var interceptor = new RecordingCommandInterceptor();
+        var services = new ServiceCollection();
+        services.AddDbContext<PaymentContext>(options => options
+            .UseSqlite(connection)
+            .AddInterceptors(interceptor));
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Notifications:CaseProceduralDeadlineReminders:BatchSize"] = "100",
+            })
+            .Build());
+        services.AddSingleton<IEmailService, NoopEmailService>();
+        services.AddSingleton<ITelegramNotificationService, NoopTelegramNotificationService>();
+        services.AddSingleton<Microsoft.Extensions.Logging.ILogger<NotificationService>>(NullLogger<NotificationService>.Instance);
+        services.AddScoped<INotificationService, NotificationService>();
+        await using var provider = services.BuildServiceProvider();
+
+        await using (var scope = provider.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<PaymentContext>();
+            await db.Database.EnsureCreatedAsync();
+            var role = new Role
+            {
+                Name = $"case-deadline-real-batch-{Guid.NewGuid():N}",
+                CreatedAt = DateTime.UtcNow,
+            };
+            db.Roles.Add(role);
+            await db.SaveChangesAsync();
+            db.RolePermissions.Add(new RolePermission
+            {
+                RoleId = role.Id,
+                Section = RolePermissionCatalog.Cases,
+                CanView = true,
+                ViewScope = DataVisibilityScope.Own,
+            });
+            var user = new User
+            {
+                Email = $"case-deadline-real-{Guid.NewGuid():N}@example.com",
+                FullName = "Ответственный пакетных напоминаний",
+                PasswordHash = "hash",
+                RoleId = role.Id,
+                IsActive = true,
+                IsApproved = true,
+            };
+            db.Users.Add(user);
+            await db.SaveChangesAsync();
+            var client = new Client
+            {
+                Name = "Клиент пакетных напоминаний",
+                IsActive = true,
+                ResponsibleUserId = user.Id,
+            };
+            db.Clients.Add(client);
+            await db.SaveChangesAsync();
+
+            for (var index = 1; index <= deadlineCount; index++)
+            {
+                var clientCase = new ClientCase
+                {
+                    ClientId = client.Id,
+                    Title = $"Дело пакетного напоминания {index}",
+                    CaseNumber = $"BATCH-{index}",
+                    Status = ClientCaseStatus.Open,
+                    ResponsibleUserId = user.Id,
+                };
+                db.ClientCases.Add(clientCase);
+                db.ClientCaseProceduralDeadlines.Add(new ClientCaseProceduralDeadline
+                {
+                    ClientCase = clientCase,
+                    DeadlineType = "appeal",
+                    Title = $"Подать документ {index}",
+                    DueAt = DateTime.UtcNow.Date.AddDays(2),
+                    AllDay = true,
+                    Status = "active",
+                    WarningDaysBefore = 7,
+                    CreatedAt = DateTime.UtcNow,
+                });
+            }
+
+            await db.SaveChangesAsync();
+        }
+
+        interceptor.ReaderCommands.Clear();
+        var service = new CaseProceduralDeadlineReminderNotificationService(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            provider.GetRequiredService<IConfiguration>(),
+            NullLogger<CaseProceduralDeadlineReminderNotificationService>.Instance);
+        var created = await service.RunOnceAsync(CancellationToken.None);
+        var readerQueryCount = interceptor.ReaderCommands.Count(command =>
+            command.TrimStart().StartsWith("SELECT", StringComparison.OrdinalIgnoreCase));
+        var createdOnRepeat = await service.RunOnceAsync(CancellationToken.None);
+
+        return new NotificationBatchScenarioResult(created, createdOnRepeat, readerQueryCount);
+    }
+
+    private sealed record NotificationBatchScenarioResult(
+        int Created,
+        int CreatedOnRepeat,
+        int ReaderQueryCount);
 }

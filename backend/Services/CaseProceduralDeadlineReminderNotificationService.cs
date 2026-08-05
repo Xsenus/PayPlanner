@@ -92,27 +92,18 @@ public sealed class CaseProceduralDeadlineReminderNotificationService : Backgrou
             deadlines.Select(deadline => deadline.ClientCaseId).Distinct().ToArray(),
             cancellationToken);
 
-        var notified = 0;
-        foreach (var deadline in deadlines)
-        {
-            if (!recipientsByCaseId.TryGetValue(deadline.ClientCaseId, out var recipients)
-                || recipients.Count == 0)
-            {
-                continue;
-            }
-
-            await notificationService.NotifyCaseProceduralDeadlineAsync(
+        var reminders = deadlines
+            .Where(deadline => recipientsByCaseId.TryGetValue(deadline.ClientCaseId, out var recipients)
+                && recipients.Count > 0)
+            .Select(deadline => new CaseProceduralDeadlineReminderBatchItem(
                 deadline.ClientCase,
                 deadline,
-                "reminder",
-                "CRM",
-                actorUserId: 0,
-                recipientUserIds: recipients,
-                cancellationToken: cancellationToken);
-            notified++;
-        }
+                recipientsByCaseId[deadline.ClientCaseId]))
+            .ToArray();
 
-        return notified;
+        return await notificationService.NotifyCaseProceduralDeadlineRemindersAsync(
+            reminders,
+            cancellationToken);
     }
 
     private bool IsEnabled()

@@ -452,6 +452,15 @@ public sealed record NotificationEventEnvelope(
             : channels;
 }
 
+/// <summary>
+/// Подготовленное напоминание о процессуальном сроке. Получатели уже проверены
+/// фоновым заданием по актуальным правам и видимости конкретного дела.
+/// </summary>
+public sealed record CaseProceduralDeadlineReminderBatchItem(
+    ClientCase ClientCase,
+    ClientCaseProceduralDeadline Deadline,
+    IReadOnlyCollection<int> RecipientUserIds);
+
 public static class UserNotificationAntiSpamPolicy
 {
     public static bool ShouldSuppressSelfNotification(int recipientUserId, int? actorUserId)
@@ -1216,6 +1225,26 @@ public interface INotificationService
     Task NotifyContractExpiringAsync(Contract contract, int daysLeft, IReadOnlyCollection<int> recipientUserIds, CancellationToken cancellationToken = default);
     Task NotifyCaseCourtEventAsync(ClientCase clientCase, ClientCaseCourtEvent courtEvent, string action, string actorName, int actorUserId, IReadOnlyCollection<int> recipientUserIds, CancellationToken cancellationToken = default);
     Task NotifyCaseProceduralDeadlineAsync(ClientCase clientCase, ClientCaseProceduralDeadline deadline, string action, string actorName, int actorUserId, IReadOnlyCollection<int> recipientUserIds, CancellationToken cancellationToken = default);
+    async Task<int> NotifyCaseProceduralDeadlineRemindersAsync(
+        IReadOnlyCollection<CaseProceduralDeadlineReminderBatchItem> reminders,
+        CancellationToken cancellationToken = default)
+    {
+        var notified = 0;
+        foreach (var reminder in reminders)
+        {
+            await NotifyCaseProceduralDeadlineAsync(
+                reminder.ClientCase,
+                reminder.Deadline,
+                "reminder",
+                "CRM",
+                actorUserId: 0,
+                reminder.RecipientUserIds,
+                cancellationToken);
+            notified++;
+        }
+
+        return notified;
+    }
     Task NotifyCaseConversationAsync(ClientCase clientCase, string messageText, int attachmentCount, string actorName, int actorUserId, IReadOnlyCollection<int> recipientUserIds, DateTime occurredAtUtc, CancellationToken cancellationToken = default);
     Task NotifyCaseDocumentAsync(ClientCase clientCase, ClientCaseDocument document, string action, string actorName, int actorUserId, IReadOnlyCollection<int> recipientUserIds, CancellationToken cancellationToken = default);
     Task NotifyCaseAccessRequestedAsync(ClientCase clientCase, string requesterName, int requesterUserId, string? reason, DateTime requestedAt, IReadOnlyCollection<int> managerUserIds, CancellationToken cancellationToken = default);
