@@ -2524,6 +2524,20 @@ public class PaymentContext : DbContext
                 .HasDatabaseName("IX_YandexCalendarSyncLogs_TaskJournalItemId");
         });
 
+        modelBuilder.Entity<ExternalCalendarTaskSyncRequest>(entity =>
+        {
+            entity.HasKey(item => item.Id);
+            entity.Property(item => item.SourceProvider).HasMaxLength(32).IsRequired();
+            entity.Property(item => item.Status).HasMaxLength(32).IsRequired();
+            entity.Property(item => item.LastError).HasMaxLength(2000);
+            entity.Property(item => item.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(item => item.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.HasIndex(item => new { item.Status, item.NextAttemptAt, item.Id })
+                .HasDatabaseName("IX_ExternalCalendarTaskSyncRequests_Status_NextAttempt_Id");
+            entity.HasIndex(item => new { item.TaskJournalItemId, item.SourceProvider, item.Id })
+                .HasDatabaseName("IX_ExternalCalendarTaskSyncRequests_Task_Source_Id");
+        });
+
         modelBuilder.Entity<TelegramAuthRequest>(entity =>
         {
             entity.HasKey(e => e.Id);
@@ -4371,6 +4385,7 @@ public class PaymentContext : DbContext
     public DbSet<YandexCalendarSyncCalendar> YandexCalendarSyncCalendars { get; set; }
     public DbSet<YandexCalendarTaskLink> YandexCalendarTaskLinks { get; set; }
     public DbSet<YandexCalendarSyncLog> YandexCalendarSyncLogs { get; set; }
+    public DbSet<ExternalCalendarTaskSyncRequest> ExternalCalendarTaskSyncRequests { get; set; }
 
     /// <summary>
     /// Пользователи системы.

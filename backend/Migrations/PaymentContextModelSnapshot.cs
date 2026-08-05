@@ -4043,6 +4043,56 @@ namespace PayPlanner.Api.Migrations
                     b.ToTable("ExternalAuthRequests");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.ExternalCalendarTaskSyncRequest", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(2000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("NextAttemptAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceProvider")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("TaskJournalItemId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Status", "NextAttemptAt", "Id")
+                        .HasDatabaseName("IX_ExternalCalendarTaskSyncRequests_Status_NextAttempt_Id");
+
+                    b.HasIndex("TaskJournalItemId", "SourceProvider", "Id")
+                        .HasDatabaseName("IX_ExternalCalendarTaskSyncRequests_Task_Source_Id");
+
+                    b.ToTable("ExternalCalendarTaskSyncRequests");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.ExternalContact", b =>
                 {
                     b.Property<int>("Id")

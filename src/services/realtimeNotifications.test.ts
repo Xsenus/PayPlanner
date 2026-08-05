@@ -68,4 +68,18 @@ describe('realtimeNotifications', () => {
     expect(isExpectedRealtimeStartupError(new Error('ERR_CONNECTION_REFUSED'))).toBe(true);
     expect(isExpectedRealtimeStartupError(new Error('401 Unauthorized'))).toBe(false);
   });
+
+  it('does not report deliberate stop during negotiation as a console error', () => {
+    const sink = createConsoleSink();
+    const logger = createNotificationsHubLogger(sink);
+
+    logger.log(LogLevel.Error, 'Failed to start the connection: Error: The connection was stopped during negotiation.');
+
+    expect(isExpectedRealtimeStartupError(new Error('The connection was stopped during negotiation.'))).toBe(true);
+    expect(sink.error).not.toHaveBeenCalled();
+    expect(sink.debug).toHaveBeenCalledWith(
+      expect.stringContaining('Realtime notifications are unavailable'),
+      expect.stringContaining('stopped during negotiation'),
+    );
+  });
 });

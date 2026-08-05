@@ -225,6 +225,9 @@ builder.Services.AddHttpClient<ISudrfCourtSyncService, SudrfCourtSyncService>();
 builder.Services.AddHttpClient<IYandexDiskService, YandexDiskService>();
 builder.Services.AddHttpClient();
 builder.Services.AddScoped<IExternalCalendarSyncCoordinator, ExternalCalendarSyncCoordinator>();
+builder.Services.AddScoped<IExternalCalendarTaskSyncOutbox, ExternalCalendarTaskSyncOutbox>();
+builder.Services.AddScoped<IExternalCalendarTaskSyncOutboxProcessor, ExternalCalendarTaskSyncOutboxProcessor>();
+builder.Services.AddSingleton<ExternalCalendarTaskSyncWakeSignal>();
 builder.Services.AddScoped<IGoogleCalendarSyncService, GoogleCalendarSyncService>();
 builder.Services.AddScoped<IYandexCalendarSyncService, YandexCalendarSyncService>();
 builder.Services.AddSingleton<IS3StorageClientFactory, S3StorageClientFactory>();
@@ -267,6 +270,7 @@ if (builder.Configuration.GetValue("BackgroundServices:Enabled", true))
     builder.Services.AddHostedService<DatabaseBackupSchedulerService>();
     builder.Services.AddHostedService<MessengerDocumentOutboxWorker>();
     builder.Services.AddHostedService<MaxOutboxWorker>();
+    builder.Services.AddHostedService<ExternalCalendarTaskSyncOutboxWorker>();
     builder.Services.AddHostedService<ExternalWorkOrderApprovalExpirationService>();
     builder.Services.AddHostedService<PaymentStatusUpdater>();
     builder.Services.AddHostedService<InvoicePaymentStateReconciliationService>();

@@ -3,7 +3,7 @@
 Файл сформирован командой `npm run audit:encryption-inventory:update`.
 Он дополняет ручную карту и не является утверждённой бизнес-классификацией.
 
-Всего кандидатов вне ручной карты: 280.
+Всего кандидатов вне ручной карты: 281.
 
 - `Act`: `Act.Comment`, `Act.CounterpartyInn`
 - `ActLineItem`: `ActLineItem.Name`
@@ -98,7 +98,7 @@
 - `TaxSystemDictionaryItem`: `TaxSystemDictionaryItem.Description`, `TaxSystemDictionaryItem.Name`
 - `TaxSystemModeDictionaryItem`: `TaxSystemModeDictionaryItem.Description`, `TaxSystemModeDictionaryItem.Name`
 - `TimezoneDictionaryItem`: `TimezoneDictionaryItem.Description`, `TimezoneDictionaryItem.Name`
-- `User`: `User.FirstName`, `User.LastName`, `User.MiddleName`
+- `User`: `User.AuthTokenVersion`, `User.FirstName`, `User.LastName`, `User.MiddleName`
 - `UserActivityLog`: `UserActivityLog.Description`, `UserActivityLog.UserFullName`
 - `UserExternalIdentity`: `UserExternalIdentity.DisplayName`, `UserExternalIdentity.ProviderEmail`, `UserExternalIdentity.ProviderUsername`
 - `UserPushSubscription`: `UserPushSubscription.DeviceName`, `UserPushSubscription.UserAgent`

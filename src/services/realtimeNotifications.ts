@@ -40,6 +40,7 @@ const EXPECTED_NETWORK_ERROR_PATTERNS = [
   /err_connection_refused/i,
   /err_name_not_resolved/i,
   /err_internet_disconnected/i,
+  /connection was stopped during negotiation/i,
 ];
 const VISIBLE_STATUS_ERROR_PATTERN = /\b(401|403|404|429|500|502|503|504)\b|status code/i;
 

@@ -111,6 +111,7 @@ public class TasksController : ControllerBase
     private readonly ICaseDocumentStorage _caseDocumentStorage;
     private readonly IInvoiceDocumentPdfService? _pdfService;
     private readonly IExternalCalendarSyncCoordinator? _externalCalendarSyncCoordinator;
+    private readonly IExternalCalendarTaskSyncOutbox? _externalCalendarTaskSyncOutbox;
     private readonly string _taskFilesRoot;
 
     public TasksController(
@@ -120,6 +121,7 @@ public class TasksController : ControllerBase
         ICaseDocumentStorage? caseDocumentStorage = null,
         IInvoiceDocumentPdfService? pdfService = null,
         IExternalCalendarSyncCoordinator? externalCalendarSyncCoordinator = null,
+        IExternalCalendarTaskSyncOutbox? externalCalendarTaskSyncOutbox = null,
         IConfiguration? configuration = null)
     {
         _db = db;
@@ -127,6 +129,7 @@ public class TasksController : ControllerBase
         _caseDocumentStorage = caseDocumentStorage ?? new LocalCaseDocumentStorage(environment, configuration);
         _pdfService = pdfService;
         _externalCalendarSyncCoordinator = externalCalendarSyncCoordinator;
+        _externalCalendarTaskSyncOutbox = externalCalendarTaskSyncOutbox;
         _taskFilesRoot = Path.Combine(
             ApplicationFileStoragePaths.ResolveRoot(environment, configuration, AppContext.BaseDirectory),
             "task-files");
@@ -3778,6 +3781,19 @@ public class TasksController : ControllerBase
 
     private async Task SafeSyncExternalCalendarTaskAsync(int taskId, CancellationToken ct)
     {
+        if (_externalCalendarTaskSyncOutbox is not null)
+        {
+            try
+            {
+                await _externalCalendarTaskSyncOutbox.EnqueueAsync(taskId, cancellationToken: ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                Console.Error.WriteLine($"[ExternalCalendar] Task sync queue failed for task {taskId}: {ex.Message}");
+            }
+            return;
+        }
+
         if (_externalCalendarSyncCoordinator is null)
         {
             return;

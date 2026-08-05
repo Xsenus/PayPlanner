@@ -885,6 +885,96 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task CreateTask_QueuesExternalCalendarSyncWithoutWaitingForProvider()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "task-calendar-outbox@example.com", "Автор");
+        var outbox = new RecordingExternalCalendarTaskSyncOutbox();
+        var coordinator = new ThrowingExternalCalendarSyncCoordinator();
+        var controller = CreateController(
+            db,
+            new RecordingNotificationService(),
+            author,
+            externalCalendarSyncCoordinator: coordinator,
+            externalCalendarTaskSyncOutbox: outbox);
+
+        var result = await controller.CreateTask(new UpsertTaskJournalItemRequest
+        {
+            IsInternal = true,
+            Title = "Передать задачу в очередь календаря",
+            AssigneeUserId = author.Id,
+            DueAt = DateTime.UtcNow.AddHours(2),
+            Participants =
+            [
+                new TaskJournalParticipantRequest
+                {
+                    UserId = author.Id,
+                    Role = "assignee",
+                },
+            ],
+        }, CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(result.Result);
+        var dto = Assert.IsType<TaskJournalItemDto>(created.Value);
+        Assert.Equal([dto.Id], outbox.TaskIds);
+        Assert.Equal(0, coordinator.SyncCalls);
+    }
+
+    [Fact]
+    public async Task CreateTask_SucceedsWhenExternalCalendarQueueIsUnavailable()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "task-calendar-outbox-failure@example.com", "Автор");
+        var controller = CreateController(
+            db,
+            new RecordingNotificationService(),
+            author,
+            externalCalendarTaskSyncOutbox: new ThrowingExternalCalendarTaskSyncOutbox());
+
+        var result = await controller.CreateTask(new UpsertTaskJournalItemRequest
+        {
+            IsInternal = true,
+            Title = "Сохранить задачу при недоступной очереди календаря",
+            AssigneeUserId = author.Id,
+            DueAt = DateTime.UtcNow.AddHours(2),
+            Participants =
+            [
+                new TaskJournalParticipantRequest
+                {
+                    UserId = author.Id,
+                    Role = "assignee",
+                },
+            ],
+        }, CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(result.Result);
+        var dto = Assert.IsType<TaskJournalItemDto>(created.Value);
+        Assert.True(await db.TaskJournalItems.AnyAsync(item => item.Id == dto.Id));
+    }
+
+    [Fact]
+    public async Task GetSettings_ReturnsGlobalTaskRulesForAuthorizedUser()
+    {
+        await using var db = await CreateContextAsync();
+        var admin = await CreateAdminUserAsync(db, "task-settings-read@example.com", "Администратор");
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = "tasks.taskCardWindowMode",
+            Value = "modern",
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), admin);
+
+        var result = await controller.GetSettings(CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var settings = Assert.IsType<TaskJournalSettingsDto>(ok.Value);
+        Assert.Equal("modern", settings.TaskCardWindowMode);
+        Assert.True(settings.RequireCompletionResult);
+    }
+
+    [Fact]
     public async Task GetTasks_SortsByAssigneeOnServer()
     {
         await using var db = await CreateContextAsync();
@@ -7634,8 +7724,15 @@ public class TasksControllerTests
         PaymentContext db,
         INotificationService notificationService,
         User user,
-        IInvoiceDocumentPdfService? pdfService = null)
-        => new(db, notificationService, pdfService: pdfService)
+        IInvoiceDocumentPdfService? pdfService = null,
+        IExternalCalendarSyncCoordinator? externalCalendarSyncCoordinator = null,
+        IExternalCalendarTaskSyncOutbox? externalCalendarTaskSyncOutbox = null)
+        => new(
+            db,
+            notificationService,
+            pdfService: pdfService,
+            externalCalendarSyncCoordinator: externalCalendarSyncCoordinator,
+            externalCalendarTaskSyncOutbox: externalCalendarTaskSyncOutbox)
         {
             ControllerContext = new ControllerContext
             {
@@ -7999,6 +8096,52 @@ public class TasksControllerTests
             LastHtml = html;
             return Task.FromResult(_bytes);
         }
+    }
+
+    private sealed class RecordingExternalCalendarTaskSyncOutbox : IExternalCalendarTaskSyncOutbox
+    {
+        public List<int> TaskIds { get; } = [];
+
+        public Task EnqueueAsync(
+            int taskId,
+            string sourceProvider = ExternalCalendarSyncCoordinator.CrmProvider,
+            CancellationToken cancellationToken = default)
+        {
+            TaskIds.Add(taskId);
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class ThrowingExternalCalendarTaskSyncOutbox : IExternalCalendarTaskSyncOutbox
+    {
+        public Task EnqueueAsync(
+            int taskId,
+            string sourceProvider = ExternalCalendarSyncCoordinator.CrmProvider,
+            CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("Хранилище очереди временно недоступно.");
+    }
+
+    private sealed class ThrowingExternalCalendarSyncCoordinator : IExternalCalendarSyncCoordinator
+    {
+        public int SyncCalls { get; private set; }
+
+        public Task SyncTaskForConnectedUsersAsync(
+            int taskId,
+            string sourceProvider = ExternalCalendarSyncCoordinator.CrmProvider,
+            CancellationToken cancellationToken = default)
+        {
+            SyncCalls++;
+            throw new InvalidOperationException("Сетевой вызов не должен выполняться в HTTP-запросе создания задачи.");
+        }
+
+        public Task DeleteTaskForConnectedUsersAsync(int taskId, string sourceProvider = "crm", CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
+        public Task CleanupDeletedUserAsync(int userId, int actorUserId, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
+        public Task HandleUserAccessRevokedAsync(int userId, int actorUserId, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
     }
 
     private sealed class RecordingNotificationService : INotificationService
