@@ -5271,7 +5271,10 @@ describe('TaskJournal', () => {
 
   it('updates task duration from the calendar load panel', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    vi.setSystemTime(new Date('2026-06-03T13:30:00.000Z'));
+    // Полдень UTC сохраняет один календарный день и в UTC окружения CI,
+    // и в часовом поясе пользователя, поэтому тест проверяет изменение
+    // длительности, а не зависит от локального часового пояса runner.
+    vi.setSystemTime(new Date('2026-06-04T08:00:00.000Z'));
     const dueAt = fromTimeZoneDateTimeInput('2026-06-04T11:00', 'Asia/Kamchatka');
     apiMock.getUserSetting.mockImplementation(async (key: string) => (
       key === 'profile.timeZoneId'
