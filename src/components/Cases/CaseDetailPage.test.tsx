@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { apiService } from '../../services/api';
@@ -904,6 +904,44 @@ describe('CaseDetailPage', () => {
     });
     vi.mocked(apiService.deleteCaseRelatedParty).mockReset();
     vi.mocked(apiService.deleteCaseRelatedParty).mockResolvedValue(undefined);
+  });
+
+  it('keeps quick case settings in a wrapping responsive grid', async () => {
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+
+    expect(await screen.findByText('ЗЕМЦОВ - банкротство')).toBeTruthy();
+
+    const settingsGrid = screen.getByRole('button', { name: 'Сохранить' }).parentElement;
+    expect(settingsGrid?.className).toContain('md:grid-cols-2');
+    expect(settingsGrid?.className).toContain('xl:grid-cols-4');
+    expect(settingsGrid?.className).not.toContain('xl:grid-cols-[');
+  });
+
+  it('wraps dense court and document forms before the wide desktop breakpoint', async () => {
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+
+    expect(await screen.findByText('ЗЕМЦОВ - банкротство')).toBeTruthy();
+    const tabBar = screen.getByRole('button', { name: 'Обзор' }).parentElement;
+    expect(tabBar).toBeTruthy();
+
+    fireEvent.click(within(tabBar!).getByRole('button', { name: 'Суд' }));
+    expect(await screen.findByText('Судебные события')).toBeTruthy();
+
+    const courtPartyGrid = screen.getByPlaceholderText('Например, ООО Ответчик').closest('label')?.parentElement;
+    const courtEventGrid = screen.getByPlaceholderText('Например, предварительное заседание').closest('label')?.parentElement;
+    const deadlineGrid = screen.getByPlaceholderText('Например, подать жалобу').closest('label')?.parentElement;
+    for (const grid of [courtPartyGrid, courtEventGrid, deadlineGrid]) {
+      expect(grid?.className).toContain('lg:grid-cols-2');
+      expect(grid?.className).toContain('2xl:grid-cols-[');
+      expect(grid?.className).not.toContain('lg:grid-cols-[');
+    }
+
+    fireEvent.click(within(tabBar!).getByRole('button', { name: 'Документы' }));
+    expect(await screen.findByText('Загрузить файл')).toBeTruthy();
+    const documentUploadGrid = screen.getByRole('button', { name: 'Загрузить' }).parentElement;
+    expect(documentUploadGrid?.className).toContain('lg:grid-cols-2');
+    expect(documentUploadGrid?.className).toContain('2xl:grid-cols-[');
+    expect(documentUploadGrid?.className).not.toContain('lg:grid-cols-[');
   });
 
   it('loads case summary, tasks, documents and history', async () => {

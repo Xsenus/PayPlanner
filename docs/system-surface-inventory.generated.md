@@ -29,7 +29,7 @@
 | reports | (permissions) => permissions.reports.canView | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md, docs/full-project-audit-2026-06-10.md |
 | calculator | (permissions) => permissions.calculator.canView | да | docs/full-project-audit-2026-06-10.md |
 | legalEntities | (permissions) => permissions.legalEntities.canView | да | docs/full-project-audit-2026-06-10.md |
-| cases | (permissions) => permissions.cases.canView | да | docs/case-access-query-optimization.md, docs/case-conversation-current-state-2026-07-08.md, docs/case-detail-query-optimization.md, docs/case-registry-query-optimization.md, docs/crm-legal-module-acceptance-checklist.md, docs/full-project-audit-2026-06-10.md |
+| cases | (permissions) => permissions.cases.canView | да | docs/case-access-query-optimization.md, docs/case-conversation-current-state-2026-07-08.md, docs/case-detail-query-optimization.md, docs/case-registry-query-optimization.md, docs/crm-legal-module-acceptance-checklist.md, docs/full-project-audit-2026-06-10.md, docs/full-system-quality-roadmap-2026-08-04.md |
 | caseDetail | (permissions) => permissions.cases.canView | да | docs/full-project-audit-2026-06-10.md |
 | clients | (permissions) => permissions.clients.canView | да | docs/final-acceptance-2026-06-10.md, docs/full-project-audit-2026-06-10.md |
 | contacts | (permissions) => permissions.clients.canView \|\| permissions.legalEntities.canView | да | docs/contacts-directory-implementation-log.md, docs/full-project-audit-2026-06-10.md |

@@ -106,10 +106,10 @@ export default function TopBar({ title, onSignOut, onOpenProfile, onOpenNotifica
 
   return (
     <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/90 backdrop-blur">
-      <div className="flex h-16 items-center justify-between px-6">
-        <div className="text-sm font-semibold text-slate-700">{title}</div>
+      <div className="flex h-16 items-center justify-between gap-3 pl-16 pr-3 lg:px-6">
+        <div className="min-w-0 truncate text-sm font-semibold text-slate-700">{title}</div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex shrink-0 items-center gap-3">
           <button
             type="button"
             onClick={onOpenNotifications}

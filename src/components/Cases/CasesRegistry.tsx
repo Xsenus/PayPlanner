@@ -1560,8 +1560,8 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
         ) : null}
 
         <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="mb-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div className="inline-flex w-fit rounded-lg bg-slate-100 p-1">
+          <div className="mb-3 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+            <div className="flex w-full flex-wrap rounded-lg bg-slate-100 p-1 sm:inline-flex sm:w-fit sm:flex-nowrap">
               {CASE_SCOPE_OPTIONS.map((option) => (
                 <button
                   key={option.value}

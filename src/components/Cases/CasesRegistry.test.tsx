@@ -281,6 +281,22 @@ describe('CasesRegistry', () => {
     vi.mocked(apiService.upsertUserSetting).mockResolvedValue({ key: 'cases_registry_table_settings_v1', value: '{}' });
   });
 
+  it('wraps scope controls and saved views without expanding tablet and mobile pages', async () => {
+    render(<CasesRegistry />);
+
+    expect(await screen.findByText('Реестр дел')).toBeTruthy();
+
+    const scopeBar = screen.getByRole('button', { name: 'Все' }).parentElement;
+    expect(scopeBar?.className).toContain('w-full');
+    expect(scopeBar?.className).toContain('flex-wrap');
+    expect(scopeBar?.className).toContain('sm:w-fit');
+
+    const savedViewBar = screen.getByRole('button', { name: 'Сохранить вид' }).parentElement;
+    const filterHeader = savedViewBar?.parentElement;
+    expect(filterHeader?.className).toContain('xl:flex-row');
+    expect(filterHeader?.className).not.toContain('lg:flex-row');
+  });
+
   it('loads the registry and opens the related client case', async () => {
     const onOpenClient = vi.fn();
 

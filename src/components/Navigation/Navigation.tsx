@@ -76,7 +76,9 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
         body.pp-with-sidebar {
           padding-left: var(--pp-sidebar-w, ${WIDTH_OPEN});
         }
-        @media (max-width: 1024px) {
+        /* Граница совпадает с Tailwind lg: при 1024 px меню уже видно,
+           поэтому содержимое должно получить отступ той же ширины. */
+        @media (max-width: 1023px) {
           body.pp-with-sidebar { padding-left: 0 !important; }
         }
         .pp-sidebar-scroll {

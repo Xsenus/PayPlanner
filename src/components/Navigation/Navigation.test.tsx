@@ -131,6 +131,15 @@ describe('Navigation links', () => {
     });
   });
 
+  it('keeps page padding aligned with the desktop sidebar breakpoint', async () => {
+    renderNavigation();
+    await waitForNavigationPermissions();
+
+    const responsiveStyles = document.getElementById('pp-sidebar-style');
+    expect(responsiveStyles?.textContent).toContain('@media (max-width: 1023px)');
+    expect(responsiveStyles?.textContent).not.toContain('@media (max-width: 1024px)');
+  });
+
   it('renders navigation destinations as real links', async () => {
     renderNavigation();
     await waitForNavigationPermissions();
