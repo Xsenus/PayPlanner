@@ -2197,6 +2197,11 @@ public class CasesV2Controller : ControllerBase
         });
     }
 
+    /// <summary>
+    /// Возвращает производственный календарь, который используется при расчёте
+    /// процессуальных сроков. Настройки доступны только пользователям с правом
+    /// просмотра дел и загружаются из общего системного параметра.
+    /// </summary>
     [HttpGet("procedural-deadlines/calendar-settings")]
     public async Task<ActionResult<ProceduralDeadlineCalendarSettingsDto>> GetProceduralDeadlineCalendarSettings(CancellationToken ct)
     {
@@ -2516,6 +2521,12 @@ public class CasesV2Controller : ControllerBase
         return Created($"/api/v2/cases/{id}/procedural-deadlines/{deadline.Id}", MapProceduralDeadline(deadline, await ResolveCaseStatusClockAsync(ct)));
     }
 
+    /// <summary>
+    /// Изменяет процессуальный срок видимого дела, проверяет принадлежность всех
+    /// связанных объектов этому же делу и синхронизирует задачу и судебное событие.
+    /// При закрытии фиксирует автора и причину, а при повторном открытии очищает
+    /// прежние реквизиты закрытия.
+    /// </summary>
     [HttpPut("{id:int}/procedural-deadlines/{deadlineId:int}")]
     public async Task<ActionResult<ClientCaseProceduralDeadlineDto>> UpdateProceduralDeadline(
         int id,
@@ -3097,6 +3108,11 @@ public class CasesV2Controller : ControllerBase
         return Created($"/api/v2/cases/{id}/court-events/{courtEvent.Id}", MapCourtEvent(courtEvent, await ResolveCaseStatusClockAsync(ct)));
     }
 
+    /// <summary>
+    /// Обновляет судебное событие видимого дела. Связанные документ и
+    /// процессуальный срок принимаются только из того же дела; смена срока
+    /// атомарно снимает прежнюю обратную связь и создаёт новую запись истории.
+    /// </summary>
     [HttpPut("{id:int}/court-events/{courtEventId:int}")]
     public async Task<ActionResult<ClientCaseCourtEventDto>> UpdateCourtEvent(
         int id,
@@ -11894,6 +11910,10 @@ public class CasesV2Controller : ControllerBase
         return null;
     }
 
+    /// <summary>
+    /// Поддерживает двустороннюю связь судебного события с процессуальным сроком:
+    /// отвязывает прежний срок и помечает новый срок источником court-event.
+    /// </summary>
     private async Task SyncCourtEventDeadlineSourceAsync(
         ClientCaseCourtEvent courtEvent,
         int? previousDeadlineId,
@@ -11935,6 +11955,10 @@ public class CasesV2Controller : ControllerBase
         deadline.UpdatedByUserName = Truncate(actorName, 256);
     }
 
+    /// <summary>
+    /// Поддерживает обратную сторону связи срока с судебным событием. При смене
+    /// источника старое событие освобождается, а новое получает идентификатор срока.
+    /// </summary>
     private async Task SyncDeadlineCourtEventLinkAsync(
         ClientCaseProceduralDeadline deadline,
         string? previousSourceType,

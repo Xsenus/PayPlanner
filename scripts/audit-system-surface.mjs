@@ -276,10 +276,10 @@ function hasDirectMethodEvidence(source, controller, method) {
 function findEndpointDocumentation(sources, controller, endpoint) {
   const methodMarker = `${controller}.${endpoint.method}`;
   const routeWithoutConstraints = endpoint.route.replace(/\{([^}:]+):[^}]+\}/g, '{$1}');
+  const routeMarkers = [endpoint.route, routeWithoutConstraints].filter(Boolean);
   return sources
     .filter(item => item.source.includes(methodMarker)
-      || item.source.includes(endpoint.route)
-      || item.source.includes(routeWithoutConstraints))
+      || routeMarkers.some(marker => item.source.includes(marker)))
     .map(item => item.file);
 }
 
@@ -396,6 +396,8 @@ function selfTest() {
   if (!multiController[1].endpoints[0].access.startsWith('публичный')) throw new Error('Атрибут второго контроллера определён неверно.');
   if (!hasDirectMethodEvidence('var controller = new SecureController(); await controller.Put();', 'SecureController', 'Put')) throw new Error('Не найдена прямая тестовая связь endpoint.');
   if (hasDirectMethodEvidence('var controller = new SecureController();', 'SecureController', 'Put')) throw new Error('Упоминание контроллера ошибочно принято за тест endpoint.');
+  const documentationSources = [{ file: 'docs/example.md', source: 'Документ без ссылки на API.' }];
+  if (findEndpointDocumentation(documentationSources, 'ItemsController', { method: 'Get', route: '' }).length !== 0) throw new Error('Пустой маршрут ошибочно принят за ссылку из документации.');
   if (parseForms('a\n<form onSubmit={save}>', 'Editor.tsx')[0]?.line !== 2) throw new Error('Не удалось разобрать форму.');
   if (parseTabs('export const TAB_ACCESS_RULES = {\n clients: () => true,\n} satisfies Record<string, unknown>;').join() !== 'clients') throw new Error('Не удалось разобрать разделы.');
   const tabRules = parseTabAccessRules('export const TAB_ACCESS_RULES = {\n clients: (permissions) => permissions.clients.canView,\n} satisfies Record<string, unknown>;');

@@ -3385,6 +3385,217 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task UpdateProceduralDeadline_MovesClosesReopensAndRebindsCourtEvent()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "deadline-update-owner@example.com", "Владелец срока");
+        var client = new Client
+        {
+            Name = "Клиент с изменяемым сроком",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Дело с переносом срока",
+            Status = ClientCaseStatus.Open,
+            Priority = "normal",
+            ResponsibleUserId = owner.Id,
+        };
+        var firstCourtEvent = new ClientCaseCourtEvent
+        {
+            ClientCase = clientCase,
+            EventType = "hearing",
+            Title = "Первое заседание",
+            ScheduledAt = new DateTime(2026, 8, 10, 10, 0, 0, DateTimeKind.Utc),
+            CourtInstance = "first",
+            MovementStatus = "scheduled",
+            CreatedByUserId = owner.Id,
+            CreatedByUserName = owner.FullName,
+        };
+        var secondCourtEvent = new ClientCaseCourtEvent
+        {
+            ClientCase = clientCase,
+            EventType = "hearing",
+            Title = "Повторное заседание",
+            ScheduledAt = new DateTime(2026, 8, 20, 10, 0, 0, DateTimeKind.Utc),
+            CourtInstance = "first",
+            MovementStatus = "scheduled",
+            CreatedByUserId = owner.Id,
+            CreatedByUserName = owner.FullName,
+        };
+        db.Clients.Add(client);
+        db.ClientCaseCourtEvents.AddRange(firstCourtEvent, secondCourtEvent);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, owner);
+
+        var createResult = await controller.CreateProceduralDeadline(
+            clientCase.Id,
+            new CasesV2Controller.UpsertClientCaseProceduralDeadlineRequest
+            {
+                DeadlineType = "motion",
+                Title = "Подать позицию",
+                DueAt = new DateTime(2026, 8, 8, 0, 0, 0, DateTimeKind.Utc),
+                SourceType = "court-event",
+                SourceId = firstCourtEvent.Id,
+            },
+            CancellationToken.None);
+        var created = Assert.IsType<CasesV2Controller.ClientCaseProceduralDeadlineDto>(
+            Assert.IsType<CreatedResult>(createResult.Result).Value);
+
+        var closeResult = await controller.UpdateProceduralDeadline(
+            clientCase.Id,
+            created.Id,
+            new CasesV2Controller.UpsertClientCaseProceduralDeadlineRequest
+            {
+                DeadlineType = "motion",
+                Title = "Подать уточнённую позицию",
+                DueAt = new DateTime(2026, 8, 18, 0, 0, 0, DateTimeKind.Utc),
+                Status = "closed",
+                WarningDaysBefore = 2,
+                SourceType = "court-event",
+                SourceId = secondCourtEvent.Id,
+                CloseReason = "Документы поданы",
+            },
+            CancellationToken.None);
+
+        var closed = Assert.IsType<CasesV2Controller.ClientCaseProceduralDeadlineDto>(
+            Assert.IsType<OkObjectResult>(closeResult.Result).Value);
+        Assert.Equal("closed", closed.Status);
+        Assert.Equal("Документы поданы", closed.CloseReason);
+        Assert.Equal(owner.Id, closed.ClosedByUserId);
+        Assert.NotNull(closed.ClosedAt);
+        Assert.Equal(secondCourtEvent.Id, closed.SourceId);
+        Assert.Null(firstCourtEvent.ProceduralDeadlineId);
+        Assert.Equal(created.Id, secondCourtEvent.ProceduralDeadlineId);
+        Assert.Contains("Перенос: 08.08.2026 -> 18.08.2026", clientCase.EventHistory, StringComparison.Ordinal);
+
+        var reopenResult = await controller.UpdateProceduralDeadline(
+            clientCase.Id,
+            created.Id,
+            new CasesV2Controller.UpsertClientCaseProceduralDeadlineRequest
+            {
+                DeadlineType = "motion",
+                Title = "Подать уточнённую позицию",
+                DueAt = new DateTime(2026, 8, 18, 0, 0, 0, DateTimeKind.Utc),
+                Status = "active",
+                SourceType = "manual",
+            },
+            CancellationToken.None);
+
+        var reopened = Assert.IsType<CasesV2Controller.ClientCaseProceduralDeadlineDto>(
+            Assert.IsType<OkObjectResult>(reopenResult.Result).Value);
+        Assert.Equal("active", reopened.Status);
+        Assert.Null(reopened.ClosedAt);
+        Assert.Null(reopened.ClosedByUserId);
+        Assert.Empty(reopened.ClosedByUserName);
+        Assert.Empty(reopened.CloseReason);
+        Assert.Null(reopened.SourceId);
+        Assert.Null(secondCourtEvent.ProceduralDeadlineId);
+    }
+
+    [Fact]
+    public async Task UpdateCourtEvent_RebindsDeadlineAndWritesHistory()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "court-event-update-owner@example.com", "Владелец события");
+        var client = new Client
+        {
+            Name = "Клиент с изменяемым заседанием",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Дело со сменой связанного срока",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = owner.Id,
+            CourtName = "Районный суд",
+            CourtCaseNumber = "2-100/2026",
+        };
+        var firstDeadline = new ClientCaseProceduralDeadline
+        {
+            ClientCase = clientCase,
+            DeadlineType = "motion",
+            Title = "Первый срок",
+            DueAt = new DateTime(2026, 9, 1, 0, 0, 0, DateTimeKind.Utc),
+            CreatedByUserId = owner.Id,
+            CreatedByUserName = owner.FullName,
+        };
+        var secondDeadline = new ClientCaseProceduralDeadline
+        {
+            ClientCase = clientCase,
+            DeadlineType = "motion",
+            Title = "Второй срок",
+            DueAt = new DateTime(2026, 9, 5, 0, 0, 0, DateTimeKind.Utc),
+            CreatedByUserId = owner.Id,
+            CreatedByUserName = owner.FullName,
+        };
+        db.Clients.Add(client);
+        db.ClientCaseProceduralDeadlines.AddRange(firstDeadline, secondDeadline);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, owner);
+
+        var createResult = await controller.CreateCourtEvent(
+            clientCase.Id,
+            new CasesV2Controller.UpsertClientCaseCourtEventRequest
+            {
+                EventType = "hearing",
+                Title = "Предварительное заседание",
+                ScheduledAt = new DateTime(2026, 9, 10, 9, 0, 0, DateTimeKind.Utc),
+                CourtInstance = "first",
+                MovementStatus = "scheduled",
+                ProceduralDeadlineId = firstDeadline.Id,
+            },
+            CancellationToken.None);
+        var created = Assert.IsType<CasesV2Controller.ClientCaseCourtEventDto>(
+            Assert.IsType<CreatedResult>(createResult.Result).Value);
+
+        var updateResult = await controller.UpdateCourtEvent(
+            clientCase.Id,
+            created.Id,
+            new CasesV2Controller.UpsertClientCaseCourtEventRequest
+            {
+                EventType = "decision",
+                Title = "Оглашение решения",
+                Description = "Дата уточнена судом",
+                ScheduledAt = new DateTime(2026, 9, 12, 14, 30, 0, DateTimeKind.Utc),
+                AllDay = false,
+                CourtInstance = "first",
+                MovementStatus = "completed",
+                ResultSummary = "Решение оглашено",
+                ProceduralDeadlineId = secondDeadline.Id,
+            },
+            CancellationToken.None);
+
+        var updated = Assert.IsType<CasesV2Controller.ClientCaseCourtEventDto>(
+            Assert.IsType<OkObjectResult>(updateResult.Result).Value);
+        Assert.Equal("decision", updated.EventType);
+        Assert.Equal("Оглашение решения", updated.Title);
+        Assert.Equal("completed", updated.MovementStatus);
+        Assert.Equal(secondDeadline.Id, updated.ProceduralDeadlineId);
+        Assert.Equal("manual", firstDeadline.SourceType);
+        Assert.Null(firstDeadline.SourceId);
+        Assert.Equal("court-event", secondDeadline.SourceType);
+        Assert.Equal(created.Id, secondDeadline.SourceId);
+
+        var history = await db.ClientCaseCourtEventHistory
+            .Where(item => item.ClientCaseCourtEventId == created.Id)
+            .OrderBy(item => item.Id)
+            .ToListAsync();
+        Assert.Collection(
+            history,
+            item => Assert.Equal("created", item.Action),
+            item =>
+            {
+                Assert.Equal("updated", item.Action);
+                Assert.Contains("Оглашение решения", item.Summary, StringComparison.Ordinal);
+            });
+    }
+
+    [Fact]
     public async Task CourtParties_CreateListAndArchive()
     {
         await using var db = await CreateContextAsync();
@@ -3536,6 +3747,13 @@ public class CasesV2ControllerTests
             Assert.IsType<OkObjectResult>(updateResult.Result).Value);
         Assert.Contains(saved.WorkingDates, item => item.Date == "2026-05-02" && item.Note == "Рабочая суббота");
         Assert.Contains(saved.NonWorkingDates, item => item.Date == "2026-05-04" && item.Note == "Перенос выходного");
+
+        var getResult = await controller.GetProceduralDeadlineCalendarSettings(CancellationToken.None);
+        var reloaded = Assert.IsType<CasesV2Controller.ProceduralDeadlineCalendarSettingsDto>(
+            Assert.IsType<OkObjectResult>(getResult.Result).Value);
+        Assert.Contains(reloaded.WorkingDates, item => item.Date == "2026-05-02" && item.Note == "Рабочая суббота");
+        Assert.Contains(reloaded.NonWorkingDates, item => item.Date == "2026-05-04" && item.Note == "Перенос выходного");
+        Assert.NotNull(reloaded.UpdatedAt);
 
         var result = await controller.CalculateProceduralDeadlinePreview(new ProceduralDeadlineCalculationRequest
         {
