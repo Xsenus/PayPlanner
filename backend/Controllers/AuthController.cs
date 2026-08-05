@@ -22,6 +22,7 @@ public class AuthController : ControllerBase
     [HttpPost("login")]
     [AllowAnonymous]
     [EnableRateLimiting(AuthRateLimitPolicies.LoginPolicy)]
+    [RequestSizeLimit(16 * 1024)]
     public async Task<IActionResult> Login([FromBody] LoginRequest req, CancellationToken ct)
     {
         try
@@ -118,6 +119,7 @@ public class AuthController : ControllerBase
     [HttpPost("register")]
     [AllowAnonymous]
     [EnableRateLimiting(AuthRateLimitPolicies.RegisterPolicy)]
+    [RequestSizeLimit(16 * 1024)]
     public async Task<IActionResult> Register([FromBody] RegisterRequest req, CancellationToken ct)
     {
         try

@@ -226,10 +226,10 @@
 | PUT | api/app-version/admin/releases/{id:int} | AppVersionController | UpdateRelease | backend/Controllers/AppVersionController.cs:187 | [Authorize]; [Authorize(Policy = "Admin")] | да |
 | DELETE | api/app-version/admin/releases/{id:int} | AppVersionController | DeleteRelease | backend/Controllers/AppVersionController.cs:229 | [Authorize]; [Authorize(Policy = "Admin")] | да |
 | POST | api/[controller]/login | AuthController | Login | backend/Controllers/AuthController.cs:22 | публичный ([AllowAnonymous]) | да |
-| POST | api/[controller]/refresh | AuthController | RefreshSession | backend/Controllers/AuthController.cs:63 | [Authorize] | да |
-| POST | api/[controller]/logout | AuthController | Logout | backend/Controllers/AuthController.cs:100 | [Authorize] | да |
-| POST | api/[controller]/register | AuthController | Register | backend/Controllers/AuthController.cs:118 | публичный ([AllowAnonymous]) | да |
-| GET | api/[controller]/me | AuthController | Me | backend/Controllers/AuthController.cs:164 | [Authorize] | да |
+| POST | api/[controller]/refresh | AuthController | RefreshSession | backend/Controllers/AuthController.cs:64 | [Authorize] | да |
+| POST | api/[controller]/logout | AuthController | Logout | backend/Controllers/AuthController.cs:101 | [Authorize] | да |
+| POST | api/[controller]/register | AuthController | Register | backend/Controllers/AuthController.cs:119 | публичный ([AllowAnonymous]) | да |
+| GET | api/[controller]/me | AuthController | Me | backend/Controllers/AuthController.cs:166 | [Authorize] | да |
 | GET | api/auth/admin/providers | AuthProvidersAdminController | GetSettings | backend/Controllers/AuthProvidersAdminController.cs:37 | [Authorize(Policy = "Admin")] | да |
 | PUT | api/auth/admin/providers | AuthProvidersAdminController | UpdateSettings | backend/Controllers/AuthProvidersAdminController.cs:41 | [Authorize(Policy = "Admin")] | да |
 | PUT | api/auth/admin/providers/google | AuthProvidersAdminController | UpdateGoogleSettings | backend/Controllers/AuthProvidersAdminController.cs:56 | [Authorize(Policy = "Admin")] | да |
@@ -456,12 +456,12 @@
 | GET | api/electronic-signatures/{publicId:guid}/evidence-package | ElectronicSignaturesController | DownloadEvidencePackage | backend/Controllers/ElectronicSignaturesController.cs:182 | [Authorize(Policy = "Admin")] | да |
 | GET | api/auth/providers | ExternalAuthController | GetProviders | backend/Controllers/ExternalAuthController.cs:29 | публичный ([AllowAnonymous]) | да |
 | POST | api/auth/external/start | ExternalAuthController | StartExternal | backend/Controllers/ExternalAuthController.cs:36 | публичный ([AllowAnonymous]) | да |
-| GET | api/auth/external/status/{state} | ExternalAuthController | GetExternalStatus | backend/Controllers/ExternalAuthController.cs:60 | публичный ([AllowAnonymous]) | да |
-| GET | api/auth/external/callback/{provider} | ExternalAuthController | ExternalCallback | backend/Controllers/ExternalAuthController.cs:82 | публичный ([AllowAnonymous]) | да |
-| POST | api/auth/telegram/widget | ExternalAuthController | CompleteTelegramWidget | backend/Controllers/ExternalAuthController.cs:108 | публичный ([AllowAnonymous]) | да |
-| POST | api/auth/telegram/bot/start | ExternalAuthController | StartTelegramBot | backend/Controllers/ExternalAuthController.cs:126 | публичный ([AllowAnonymous]) | да |
-| GET | api/auth/telegram/bot/status/{state} | ExternalAuthController | GetTelegramBotStatus | backend/Controllers/ExternalAuthController.cs:144 | публичный ([AllowAnonymous]) | да |
-| POST | api/auth/telegram/webhook | ExternalAuthController | TelegramWebhook | backend/Controllers/ExternalAuthController.cs:166 | публичный ([AllowAnonymous]) | да |
+| GET | api/auth/external/status/{state} | ExternalAuthController | GetExternalStatus | backend/Controllers/ExternalAuthController.cs:61 | публичный ([AllowAnonymous]) | да |
+| GET | api/auth/external/callback/{provider} | ExternalAuthController | ExternalCallback | backend/Controllers/ExternalAuthController.cs:83 | публичный ([AllowAnonymous]) | да |
+| POST | api/auth/telegram/widget | ExternalAuthController | CompleteTelegramWidget | backend/Controllers/ExternalAuthController.cs:109 | публичный ([AllowAnonymous]) | да |
+| POST | api/auth/telegram/bot/start | ExternalAuthController | StartTelegramBot | backend/Controllers/ExternalAuthController.cs:128 | публичный ([AllowAnonymous]) | да |
+| GET | api/auth/telegram/bot/status/{state} | ExternalAuthController | GetTelegramBotStatus | backend/Controllers/ExternalAuthController.cs:147 | публичный ([AllowAnonymous]) | да |
+| POST | api/auth/telegram/webhook | ExternalAuthController | TelegramWebhook | backend/Controllers/ExternalAuthController.cs:169 | публичный ([AllowAnonymous]) | да |
 | GET | api/features | FeatureFlagsController | Get | backend/Controllers/FeatureFlagsController.cs:27 | публичный ([AllowAnonymous]) | да |
 | GET | api/features/legal-integrations/diagnostics | FeatureFlagsController | GetLegalIntegrationDiagnostics | backend/Controllers/FeatureFlagsController.cs:35 | [Authorize(Roles = "admin")] | да |
 | GET | api/form-requirements | FormRequirementsController | Get | backend/Controllers/FormRequirementsController.cs:242 | [Authorize] | да |

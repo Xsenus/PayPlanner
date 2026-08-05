@@ -36,6 +36,7 @@ public class ExternalAuthController : ControllerBase
     [HttpPost("external/start")]
     [AllowAnonymous]
     [EnableRateLimiting(AuthRateLimitPolicies.ExternalStartPolicy)]
+    [RequestSizeLimit(16 * 1024)]
     public async Task<IActionResult> StartExternal([FromBody] ExternalAuthStartRequest request, CancellationToken cancellationToken)
     {
         try
@@ -108,6 +109,7 @@ public class ExternalAuthController : ControllerBase
     [HttpPost("telegram/widget")]
     [AllowAnonymous]
     [EnableRateLimiting(AuthRateLimitPolicies.ExternalStartPolicy)]
+    [RequestSizeLimit(16 * 1024)]
     public async Task<IActionResult> CompleteTelegramWidget(
         [FromBody] TelegramWidgetLoginRequest request,
         CancellationToken cancellationToken)
@@ -126,6 +128,7 @@ public class ExternalAuthController : ControllerBase
     [HttpPost("telegram/bot/start")]
     [AllowAnonymous]
     [EnableRateLimiting(AuthRateLimitPolicies.ExternalStartPolicy)]
+    [RequestSizeLimit(16 * 1024)]
     public async Task<IActionResult> StartTelegramBot(
         [FromBody] TelegramBotAuthStartRequest request,
         CancellationToken cancellationToken)
