@@ -69,6 +69,17 @@ public static class UserAccessExtensions
         return null;
     }
 
+    /// <summary>
+    /// Проверяет право текущего пользователя на операцию раздела по актуальной роли в БД.
+    /// Для существующего пользователя роль, право раздела и признак legacy-роли без настроек
+    /// читаются одной SQL-командой, чтобы последовательные проверки контроллеров не создавали
+    /// отдельные запросы к пользователю и таблице прав.
+    /// </summary>
+    /// <remarks>
+    /// Роль администратора подтверждается только базой данных. Если у legacy-роли ещё нет ни
+    /// одной строки прав, сохраняются исторические значения по умолчанию. Отсутствующий в уже
+    /// заполненной БД пользователь не получает доступ даже при устаревшем admin-claim в токене.
+    /// </remarks>
     public static async Task<bool> HasUserSectionPermissionAsync(
         this PaymentContext db,
         ClaimsPrincipal? principal,
@@ -87,15 +98,27 @@ public static class UserAccessExtensions
             return principal.IsInRole("admin") || principal.Identity?.IsAuthenticated != true;
         }
 
-        var user = await db.Users
-            .AsNoTracking()
-            .Where(item => item.Id == userId.Value && item.IsActive)
-            .Select(item => new
+        var user = await (
+            from item in db.Users.AsNoTracking()
+            join configuredPermission in db.RolePermissions
+                    .AsNoTracking()
+                    .Where(permission => permission.Section == section)
+                on item.RoleId equals configuredPermission.RoleId into configuredPermissions
+            from configuredPermission in configuredPermissions.DefaultIfEmpty()
+            where item.Id == userId.Value && item.IsActive
+            select new
             {
                 item.RoleId,
                 RoleName = item.Role != null ? item.Role.Name : string.Empty,
-            })
-            .FirstOrDefaultAsync(ct);
+                HasAnyPermissions = db.RolePermissions.Any(permission => permission.RoleId == item.RoleId),
+                CanView = configuredPermission == null ? (bool?)null : configuredPermission.CanView,
+                CanCreate = configuredPermission == null ? (bool?)null : configuredPermission.CanCreate,
+                CanEdit = configuredPermission == null ? (bool?)null : configuredPermission.CanEdit,
+                CanDelete = configuredPermission == null ? (bool?)null : configuredPermission.CanDelete,
+                CanExport = configuredPermission == null ? (bool?)null : configuredPermission.CanExport,
+                CanViewAnalytics = configuredPermission == null ? (bool?)null : configuredPermission.CanViewAnalytics,
+                ViewScope = configuredPermission == null ? null : configuredPermission.ViewScope,
+            }).FirstOrDefaultAsync(ct);
 
         if (user is null)
         {
@@ -116,13 +139,9 @@ public static class UserAccessExtensions
             return true;
         }
 
-        var permission = await db.RolePermissions
-            .AsNoTracking()
-            .Where(item => item.RoleId == user.RoleId && item.Section == section)
-            .FirstOrDefaultAsync(ct);
-        if (permission is null)
+        if (user.CanView is null)
         {
-            if (!await db.RolePermissions.AsNoTracking().AnyAsync(item => item.RoleId == user.RoleId, ct))
+            if (!user.HasAnyPermissions)
             {
                 var fallbackValues = RolePermissionCatalog.BuildDefaults(allowRoleManagement: false)[section];
                 return fallbackValues.CanView && isAllowed(fallbackValues);
@@ -132,13 +151,13 @@ public static class UserAccessExtensions
         }
 
         var values = new RolePermissionValues(
-            permission.CanView,
-            permission.CanCreate,
-            permission.CanEdit,
-            permission.CanDelete,
-            permission.CanExport,
-            permission.CanViewAnalytics,
-            permission.ViewScope);
+            user.CanView.Value,
+            user.CanCreate.GetValueOrDefault(),
+            user.CanEdit.GetValueOrDefault(),
+            user.CanDelete.GetValueOrDefault(),
+            user.CanExport.GetValueOrDefault(),
+            user.CanViewAnalytics.GetValueOrDefault(),
+            user.ViewScope ?? DataVisibilityScope.Own);
 
         return values.CanView && isAllowed(values);
     }

@@ -126,6 +126,7 @@ public class CasesV2Controller : ControllerBase
     private readonly CourtSyncMetrics? _courtSyncMetrics;
     private readonly IExternalWorkOrderApprovalService? _externalWorkOrderApprovalService;
     private Task<SectionAccessContext?>? _casesAccessTask;
+    private Task<bool>? _canViewCaseFinanceTask;
     private CaseStatusClock? _caseStatusClock;
 
     public CasesV2Controller(
@@ -202,24 +203,23 @@ public class CasesV2Controller : ControllerBase
             : Forbid();
     }
 
+    /// <summary>
+    /// Возвращает право просмотра финансов дела и сохраняет результат до конца HTTP-запроса.
+    /// Это исключает повторное чтение одной роли при составлении нескольких блоков карточки.
+    /// </summary>
     private Task<bool> CanViewCaseFinanceAsync(CancellationToken ct)
-        => _db.HasUserSectionPermissionAsync(User, RolePermissionCatalog.Payments, static permission => permission.CanView, ct);
+        => _canViewCaseFinanceTask ??= _db.HasUserSectionPermissionAsync(
+            User,
+            RolePermissionCatalog.Payments,
+            static permission => permission.CanView,
+            ct);
 
     private async Task<bool> CanRevealCaseSensitiveDataAsync(CancellationToken ct)
     {
-        var userId = User.GetUserId();
-        if (!userId.HasValue)
-        {
-            return false;
-        }
-
-        if (await _db.IsUserAdminAsync(userId.Value, ct))
-        {
-            return true;
-        }
-
-        var permission = await _db.GetUserSectionPermissionAsync(userId.Value, RolePermissionCatalog.Cases, ct);
-        return permission?.CanEdit == true;
+        // Право Cases уже подтверждено и закэшировано перед загрузкой карточки.
+        // Повторные запросы к Users и RolePermissions здесь не нужны.
+        var access = await ResolveCasesAccessAsync(ct);
+        return access?.Permission?.CanEdit == true;
     }
 
     private static void HideCaseSensitiveData(ClientCase clientCase)
@@ -3221,6 +3221,10 @@ public class CasesV2Controller : ControllerBase
         return Ok(history);
     }
 
+    /// <summary>
+    /// Возвращает участников судебного процесса только для видимого пользователю дела.
+    /// Проверка дела и загрузка упорядоченного списка выполняются одной SQL-командой.
+    /// </summary>
     [HttpGet("{id:int}/court-parties")]
     public async Task<ActionResult<IReadOnlyList<ClientCaseCourtPartyDto>>> GetCourtParties(
         int id,
@@ -3238,32 +3242,27 @@ public class CasesV2Controller : ControllerBase
             return Unauthorized();
         }
 
-        var exists = await _db.ClientCases
+        var result = await _db.ClientCases
             .AsNoTracking()
             .ApplyClientCaseVisibility(visibility)
-            .AnyAsync(item => item.Id == id, ct);
-        if (!exists)
+            .Where(item => item.Id == id)
+            .Select(item => new
+            {
+                Parties = item.CourtParties
+                    .Where(party => includeArchived || !party.IsArchived)
+                    .OrderBy(party => party.IsArchived)
+                    .ThenBy(party => party.Side)
+                    .ThenBy(party => party.DisplayName)
+                    .ThenBy(party => party.Id)
+                    .ToList(),
+            })
+            .FirstOrDefaultAsync(ct);
+        if (result is null)
         {
             return NotFound();
         }
 
-        var query = _db.ClientCaseCourtParties
-            .AsNoTracking()
-            .Where(item => item.ClientCaseId == id);
-        if (!includeArchived)
-        {
-            query = query.Where(item => !item.IsArchived);
-        }
-
-        var items = await query
-            .OrderBy(item => item.IsArchived)
-            .ThenBy(item => item.Side)
-            .ThenBy(item => item.DisplayName)
-            .ThenBy(item => item.Id)
-            .Select(item => MapCourtParty(item))
-            .ToListAsync(ct);
-
-        return Ok(items);
+        return Ok(result.Parties.Select(MapCourtParty).ToList());
     }
 
     [HttpPost("{id:int}/court-parties")]
@@ -3606,6 +3605,10 @@ public class CasesV2Controller : ControllerBase
         });
     }
 
+    /// <summary>
+    /// Формирует хронологию дела из сохранённой истории с учётом часового пояса пользователя.
+    /// История и настройка пояса выбираются одной компактной SQL-проекцией.
+    /// </summary>
     [HttpGet("{id:int}/timeline")]
     public async Task<ActionResult<IReadOnlyList<ClientCaseTimelineEntryDto>>> GetTimeline(int id, CancellationToken ct)
     {
@@ -3620,18 +3623,15 @@ public class CasesV2Controller : ControllerBase
             return Unauthorized();
         }
 
-        var clientCase = await _db.ClientCases
-            .ApplyClientCaseVisibility(visibility)
-            .AsNoTracking()
-            .FirstOrDefaultAsync(item => item.Id == id, ct);
-        if (clientCase is null)
+        var history = await LoadCaseHistoryAsync(id, visibility, ct);
+        if (history is null)
         {
             return NotFound();
         }
 
-        var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
-        var timeline = SplitCaseHistory(clientCase.EventHistory)
-            .Select((line, index) => MapTimelineEntry(clientCase.Id, line, index, timeZone))
+        var timeZone = CalendarTimeZoneHelper.ResolveTimeZone(history.TimeZoneId);
+        var timeline = SplitCaseHistory(history.EventHistory)
+            .Select((line, index) => MapTimelineEntry(history.Id, line, index, timeZone))
             .OrderByDescending(item => item.OccurredAt ?? DateTime.MinValue)
             .ThenByDescending(item => item.Id)
             .ToList();
@@ -3639,6 +3639,11 @@ public class CasesV2Controller : ControllerBase
         return Ok(timeline);
     }
 
+    /// <summary>
+    /// Возвращает внутреннюю переписку дела и доступные метаданные её вложений.
+    /// Дело и часовой пояс читаются вместе; документы загружаются одним пакетным запросом
+    /// только тогда, когда в истории действительно присутствуют ссылки на вложения.
+    /// </summary>
     [HttpGet("{id:int}/conversation")]
     public async Task<ActionResult<IReadOnlyList<ClientCaseConversationEntryDto>>> GetConversation(int id, CancellationToken ct)
     {
@@ -3653,21 +3658,22 @@ public class CasesV2Controller : ControllerBase
             return Unauthorized();
         }
 
-        var clientCase = await _db.ClientCases
-            .ApplyClientCaseVisibility(visibility)
-            .AsNoTracking()
-            .FirstOrDefaultAsync(item => item.Id == id, ct);
-        if (clientCase is null)
+        var history = await LoadCaseHistoryAsync(id, visibility, ct);
+        if (history is null)
         {
             return NotFound();
         }
 
-        var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
-        var conversation = MapCaseConversation(clientCase.Id, clientCase.EventHistory, timeZone);
+        var timeZone = CalendarTimeZoneHelper.ResolveTimeZone(history.TimeZoneId);
+        var conversation = MapCaseConversation(history.Id, history.EventHistory, timeZone);
         await PopulateConversationAttachmentsAsync(conversation, ct);
         return Ok(conversation);
     }
 
+    /// <summary>
+    /// Возвращает компактную сводку одного дела, не загружая поля полной карточки.
+    /// Суммы и статистика задач рассчитываются пакетными агрегатами.
+    /// </summary>
     [HttpGet("{id:int}/summary")]
     public async Task<ActionResult<ClientCaseSummaryDto>> GetSummary(int id, CancellationToken ct)
     {
@@ -3684,10 +3690,46 @@ public class CasesV2Controller : ControllerBase
 
         var canViewFinance = await CanViewCaseFinanceAsync(ct);
         var clientCase = await _db.ClientCases
-            .WithCaseIncludes(includePayments: canViewFinance)
             .ApplyClientCaseVisibility(visibility)
             .AsNoTracking()
-            .FirstOrDefaultAsync(item => item.Id == id, ct);
+            .Where(item => item.Id == id)
+            .Select(item => new ClientCase
+            {
+                Id = item.Id,
+                Title = item.Title,
+                CaseNumber = item.CaseNumber,
+                Status = item.Status,
+                Priority = item.Priority,
+                Stage = item.Stage,
+                ResponsibleUserId = item.ResponsibleUserId,
+                StartDate = item.StartDate,
+                DueDate = item.DueDate,
+                NextHearingAt = item.NextHearingAt,
+                FeeAmount = item.FeeAmount,
+                LastViewedAt = item.LastViewedAt,
+                LastViewedByUserId = item.LastViewedByUserId,
+                LastViewedByUserName = item.LastViewedByUserName,
+                Client = item.Client == null
+                    ? null
+                    : new Client { Id = item.Client.Id, Name = item.Client.Name },
+                LegalEntity = item.LegalEntity == null
+                    ? null
+                    : new LegalEntity
+                    {
+                        Id = item.LegalEntity.Id,
+                        ShortName = item.LegalEntity.ShortName,
+                        FullName = item.LegalEntity.FullName,
+                    },
+                ResponsibleUser = item.ResponsibleUser == null
+                    ? null
+                    : new User
+                    {
+                        Id = item.ResponsibleUser.Id,
+                        FullName = item.ResponsibleUser.FullName,
+                        Email = item.ResponsibleUser.Email,
+                    },
+            })
+            .FirstOrDefaultAsync(ct);
         if (clientCase is null)
         {
             return NotFound();
@@ -3706,6 +3748,11 @@ public class CasesV2Controller : ControllerBase
         return Ok(MapCaseSummary(clientCase, canViewFinance));
     }
 
+    /// <summary>
+    /// Возвращает финансовую сводку дела: счета, платежи, календарь и договоры.
+    /// Карточка дела выбирается компактно, а договоры из разных типов связей объединяются
+    /// на стороне БД одной командой без повторной загрузки одинаковых записей.
+    /// </summary>
     [HttpGet("{id:int}/finance")]
     public async Task<ActionResult<ClientCaseFinanceDetailDto>> GetFinance(int id, CancellationToken ct)
     {
@@ -3725,10 +3772,27 @@ public class CasesV2Controller : ControllerBase
         }
 
         var clientCase = await _db.ClientCases
-            .WithCaseIncludes()
             .ApplyClientCaseVisibility(visibility)
             .AsNoTracking()
-            .FirstOrDefaultAsync(item => item.Id == id, ct);
+            .Where(item => item.Id == id)
+            .Select(item => new ClientCase
+            {
+                Id = item.Id,
+                Title = item.Title,
+                FeeAmount = item.FeeAmount,
+                Client = item.Client == null
+                    ? null
+                    : new Client { Id = item.Client.Id, Name = item.Client.Name },
+                LegalEntity = item.LegalEntity == null
+                    ? null
+                    : new LegalEntity
+                    {
+                        Id = item.LegalEntity.Id,
+                        ShortName = item.LegalEntity.ShortName,
+                        FullName = item.LegalEntity.FullName,
+                    },
+            })
+            .FirstOrDefaultAsync(ct);
         if (clientCase is null)
         {
             return NotFound();
@@ -4736,6 +4800,32 @@ public class CasesV2Controller : ControllerBase
         DateTime NowInstantUtc);
 
     private readonly record struct CaseStatusClock(DateTime TodayDate, DateTime NowInstantUtc, DateTime NowLocal, TimeZoneInfo TimeZone);
+
+    private sealed record CaseHistoryReadModel(int Id, string EventHistory, string? TimeZoneId);
+
+    /// <summary>
+    /// Загружает только историю видимого дела и настройку часового пояса пользователя.
+    /// Скалярный подзапрос к настройкам входит в ту же SQL-команду, поэтому timeline и
+    /// переписка не выполняют отдельное обращение к UserSettings.
+    /// </summary>
+    private Task<CaseHistoryReadModel?> LoadCaseHistoryAsync(
+        int id,
+        DataVisibilityAccess visibility,
+        CancellationToken ct)
+        => _db.ClientCases
+            .AsNoTracking()
+            .ApplyClientCaseVisibility(visibility)
+            .Where(item => item.Id == id)
+            .Select(item => new CaseHistoryReadModel(
+                item.Id,
+                item.EventHistory,
+                _db.UserSettings
+                    .Where(setting =>
+                        setting.UserId == visibility.UserId &&
+                        setting.Key == CalendarTimeZoneHelper.UserTimeZoneSettingKey)
+                    .Select(setting => setting.Value)
+                    .FirstOrDefault()))
+            .FirstOrDefaultAsync(ct);
 
     private async Task<CaseStatusClock> ResolveCaseStatusClockAsync(CancellationToken ct)
     {
@@ -10396,34 +10486,26 @@ public class CasesV2Controller : ControllerBase
             .GroupBy(contract => contract.Id)
             .ToDictionary(group => group.Key, group => group.First());
 
-        if (invoicePaymentIds.Count > 0)
+        if (invoicePaymentIds.Count == 0 && paymentIds.Count == 0)
         {
-            var invoiceContracts = await _db.ContractInvoices
-                .AsNoTracking()
-                .Include(link => link.Contract)
-                .Where(link => invoicePaymentIds.Contains(link.InvoiceId))
-                .Select(link => link.Contract)
-                .ToListAsync(ct);
-
-            foreach (var contract in invoiceContracts)
-            {
-                contractsById.TryAdd(contract.Id, contract);
-            }
+            return contractsById;
         }
 
-        if (paymentIds.Count > 0)
-        {
-            var paymentContracts = await _db.ContractPayments
+        // Обе таблицы связей имеют одинаковый результат — договор. UNION ALL позволяет
+        // получить их одним запросом; дубликаты безопасно устраняются словарём в памяти.
+        var linkedContracts = await _db.ContractInvoices
+            .AsNoTracking()
+            .Where(link => invoicePaymentIds.Contains(link.InvoiceId))
+            .Select(link => link.Contract)
+            .Concat(_db.ContractPayments
                 .AsNoTracking()
-                .Include(link => link.Contract)
                 .Where(link => paymentIds.Contains(link.PaymentId))
-                .Select(link => link.Contract)
-                .ToListAsync(ct);
+                .Select(link => link.Contract))
+            .ToListAsync(ct);
 
-            foreach (var contract in paymentContracts)
-            {
-                contractsById.TryAdd(contract.Id, contract);
-            }
+        foreach (var contract in linkedContracts)
+        {
+            contractsById.TryAdd(contract.Id, contract);
         }
 
         return contractsById;

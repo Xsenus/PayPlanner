@@ -498,6 +498,45 @@ public class DataVisibilityServiceTests
     }
 
     [Fact]
+    public async Task HasUserSectionPermissionAsync_ReadsExistingUserAndPermissionWithOneCommand()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+        var role = new Role { Name = "finance-viewer", Description = "finance-viewer" };
+        db.Roles.Add(role);
+        await db.SaveChangesAsync();
+        db.RolePermissions.Add(new RolePermission
+        {
+            RoleId = role.Id,
+            Section = RolePermissionCatalog.Payments,
+            CanView = true,
+            CanExport = false,
+            ViewScope = DataVisibilityScope.All,
+        });
+        var user = new User
+        {
+            Email = "single-permission-query@example.com",
+            PasswordHash = "hash",
+            FullName = "Проверка одного запроса",
+            RoleId = role.Id,
+            IsActive = true,
+        };
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+        interceptor.ReaderCommands.Clear();
+
+        var canView = await db.HasUserSectionPermissionAsync(
+            CreatePrincipal(user.Id),
+            RolePermissionCatalog.Payments,
+            static permission => permission.CanView);
+
+        Assert.True(canView);
+        var command = Assert.Single(interceptor.ReaderCommands);
+        Assert.Contains("RolePermissions", command, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("EXISTS", command, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task ResolveDataVisibilityAsync_ReturnsNullForMissingUserWhenDatabaseHasUsers()
     {
         await using var db = await CreateContextAsync();

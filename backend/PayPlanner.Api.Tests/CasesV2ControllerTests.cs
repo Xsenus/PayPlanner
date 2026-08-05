@@ -85,6 +85,92 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task CaseReadEndpoints_UseBoundedQueriesAndCompactHistoryProjection()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+        var owner = await CreateUserAsync(
+            db,
+            "case-read-query-budget@example.com",
+            "Владелец карточки",
+            DataVisibilityScope.All);
+        await GrantSectionPermissionAsync(
+            db,
+            owner,
+            RolePermissionCatalog.Payments,
+            viewScope: DataVisibilityScope.All);
+        var clientCase = new ClientCase
+        {
+            Client = new Client
+            {
+                Name = "Клиент компактной карточки",
+                IsActive = true,
+                ResponsibleUserId = owner.Id,
+            },
+            ResponsibleUserId = owner.Id,
+            Title = "Дело с ограниченным числом запросов",
+            Description = "Полное описание нужно только полной карточке",
+            EventHistory = "05.08.2026 10:15: Внутреннее сообщение: Проверить документы. Автор: Владелец карточки.",
+            Status = ClientCaseStatus.Open,
+            FeeAmount = 12500m,
+            CourtParties =
+            [
+                new ClientCaseCourtParty
+                {
+                    DisplayName = "ООО Ответчик",
+                    Side = "respondent",
+                    ProcessRole = "Ответчик",
+                },
+            ],
+        };
+        db.ClientCases.Add(clientCase);
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = owner.Id,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = "UTC",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+
+        interceptor.Commands.Clear();
+        var details = await CreateController(db, owner).GetById(clientCase.Id, CancellationToken.None);
+        Assert.IsType<OkObjectResult>(details);
+        Assert.Equal(5, interceptor.Commands.Count);
+
+        interceptor.Commands.Clear();
+        var summary = await CreateController(db, owner).GetSummary(clientCase.Id, CancellationToken.None);
+        Assert.IsType<OkObjectResult>(summary.Result);
+        Assert.Equal(5, interceptor.Commands.Count);
+        Assert.DoesNotContain(
+            interceptor.Commands,
+            command => command.Contains("Description", StringComparison.OrdinalIgnoreCase));
+
+        interceptor.Commands.Clear();
+        var parties = await CreateController(db, owner).GetCourtParties(
+            clientCase.Id,
+            includeArchived: false,
+            CancellationToken.None);
+        var partyItems = Assert.IsAssignableFrom<IReadOnlyList<CasesV2Controller.ClientCaseCourtPartyDto>>(
+            Assert.IsType<OkObjectResult>(parties.Result).Value);
+        Assert.Single(partyItems);
+        Assert.Equal(2, interceptor.Commands.Count);
+
+        interceptor.Commands.Clear();
+        var timeline = await CreateController(db, owner).GetTimeline(clientCase.Id, CancellationToken.None);
+        Assert.IsType<OkObjectResult>(timeline.Result);
+        Assert.Equal(2, interceptor.Commands.Count);
+        Assert.Contains("UserSettings", interceptor.Commands[^1], StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Description", interceptor.Commands[^1], StringComparison.OrdinalIgnoreCase);
+
+        interceptor.Commands.Clear();
+        var conversation = await CreateController(db, owner).GetConversation(clientCase.Id, CancellationToken.None);
+        Assert.IsType<OkObjectResult>(conversation.Result);
+        Assert.Equal(2, interceptor.Commands.Count);
+    }
+
+    [Fact]
     public async Task Get_AppliesOwnerVisibility()
     {
         await using var db = await CreateContextAsync();
@@ -1356,7 +1442,7 @@ public class CasesV2ControllerTests
             && command.Contains("ClientCaseDocuments", StringComparison.Ordinal)
             && command.Contains("ClientCaseCourtEvents", StringComparison.Ordinal));
         Assert.Contains("UNION ALL", activityCommand, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal(11, interceptor.Commands.Count);
+        Assert.Equal(10, interceptor.Commands.Count);
     }
 
     [Fact]
@@ -1534,7 +1620,8 @@ public class CasesV2ControllerTests
     [Fact]
     public async Task GetFinance_ReturnsDeduplicatedInvoicesContractsAndPayments()
     {
-        await using var db = await CreateContextAsync();
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
         var owner = await CreateUserAsync(db, "owner@example.com", "Owner", DataVisibilityScope.All);
         await GrantSectionPermissionAsync(db, owner, RolePermissionCatalog.Payments, viewScope: DataVisibilityScope.All);
         var client = new Client
@@ -1653,6 +1740,7 @@ public class CasesV2ControllerTests
         });
         await db.SaveChangesAsync();
         var controller = CreateController(db, owner);
+        interceptor.Commands.Clear();
 
         var result = await controller.GetFinance(clientCase.Id, CancellationToken.None);
 
@@ -1660,6 +1748,11 @@ public class CasesV2ControllerTests
         var dto = Assert.IsType<CasesV2Controller.ClientCaseFinanceDetailDto>(ok.Value);
 
         Assert.Equal(clientCase.Id, dto.CaseId);
+        Assert.Equal(6, interceptor.Commands.Count);
+        var linkedContractsCommand = Assert.Single(interceptor.Commands, command =>
+            command.Contains("ContractInvoices", StringComparison.OrdinalIgnoreCase) &&
+            command.Contains("ContractPayments", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains("UNION ALL", linkedContractsCommand, StringComparison.OrdinalIgnoreCase);
         Assert.Equal("Земцов Виктор Александрович", dto.OwnerName);
         Assert.Equal(25000m, dto.Totals.IncomeTotal);
         Assert.Equal(25000m, dto.Totals.IncomePaid);
