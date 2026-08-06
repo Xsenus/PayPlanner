@@ -3046,6 +3046,10 @@ export function TaskJournal({
 
     const existingTask = tasks.find((task) => task.id === routeTaskId);
     if (existingTask) {
+      if (!isTaskJournalActive(existingTask.status)) {
+        setTasks((previous) => previous.filter((item) => item.id !== existingTask.id));
+      }
+
       showTask(existingTask);
       return;
     }
@@ -3060,7 +3064,9 @@ export function TaskJournal({
           return;
         }
 
-        setTasks((previous) => (previous.some((item) => item.id === task.id) ? previous : [task, ...previous]));
+        if (isTaskJournalActive(task.status)) {
+          setTasks((previous) => (previous.some((item) => item.id === task.id) ? previous : [task, ...previous]));
+        }
         showTask(task);
       } catch {
         if (routeTaskRequestRef.current !== requestId) {
