@@ -523,13 +523,13 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
 
   const handleItemDragOver = useCallback(
     (itemId: string, event: DragEvent<HTMLDivElement>) => {
-      if (!draggedItemId || draggedItemId === itemId || collapsed) {
+      if (!draggedItemId || draggedItemId === itemId) {
         return;
       }
 
       event.preventDefault();
     },
-    [collapsed, draggedItemId],
+    [draggedItemId],
   );
 
   const handleItemDrop = useCallback((itemId: string, event: DragEvent<HTMLDivElement>) => {
@@ -658,7 +658,7 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
               const isActive = isParentActive || isChildActive;
               const isExpanded = expandedSections[item.id] ?? false;
               const badgeCount = item.id === 'payments' ? advanceDecisionCount : 0;
-              const canDrag = !collapsed && sidebarItems.length > 1;
+              const canDrag = sidebarItems.length > 1;
               const isDragging = draggedItemId === item.id;
 
               return (
@@ -721,7 +721,7 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
                       {isActive && !collapsed && (
                         <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-8 bg-white rounded-l-full" />
                       )}
-                      {!collapsed && canDrag ? (
+                      {canDrag ? (
                         <GripVertical className="h-3.5 w-3.5 shrink-0 text-slate-400 transition-colors group-hover:text-slate-200" />
                       ) : null}
                     </a>
