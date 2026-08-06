@@ -86,7 +86,7 @@ interface AccountsProps {
   onInitialCreateDraftHandled?: (key: number) => void;
   onOpenClient?: (clientId: number) => void;
   onOpenContract?: (contractId: number) => void;
-  onOpenPayment?: (payment: Payment) => void;
+  onOpenPayment?: (paymentId: number, paymentType?: PaymentKind) => void;
   onOpenActPage?: (actId: number, options?: { invoiceId?: number | null }) => void;
   onCreateActPage?: (
     initialValues?: Partial<ActInput> & { amount?: number | null },

@@ -34,7 +34,7 @@ type RealtimeNotificationToastsProps = {
   onOpenTask?: (taskId: number) => void;
   onOpenCase?: (caseId: number) => void;
   onOpenCaseDocument?: (caseId: number, documentId?: number) => void;
-  onOpenPayment?: (paymentId: number) => void;
+  onOpenPayment?: (paymentId: number, type?: 'Income' | 'Expense') => void;
   onOpenInvoice?: (invoiceId: number) => void;
   onOpenAct?: (actId: number) => void;
   onOpenContract?: (contractId: number) => void;
@@ -76,6 +76,29 @@ function buildToastDedupeKey(notification: RealtimeUserNotification): string {
   }
 
   return notification.eventKey || `notification:${notification.id}`;
+}
+
+function getPaymentTypeFromNotification(metadataJson?: string | null): 'Income' | 'Expense' | undefined {
+  const metadata = parseUserNotificationMetadata(metadataJson);
+  const rawType = metadata.paymentType ?? metadata.paymentKind ?? metadata.type ?? metadata.PaymentType ?? metadata.PaymentKind;
+  if (typeof rawType !== 'string') {
+    return undefined;
+  }
+
+  if (rawType === 'Income' || rawType === 'Expense') {
+    return rawType;
+  }
+
+  const normalizedType = rawType.toLowerCase();
+  if (normalizedType === 'income') {
+    return 'Income';
+  }
+
+  if (normalizedType === 'expense') {
+    return 'Expense';
+  }
+
+  return undefined;
 }
 
 const REALTIME_TOAST_TYPES = new Set([
@@ -281,6 +304,14 @@ function resolveToastAction(
         break;
       case 'payment':
         if (handlers.onOpenPayment) {
+          const paymentType = getPaymentTypeFromNotification(notification.metadataJson);
+          if (paymentType) {
+            return {
+              label: 'Открыть платеж',
+              run: () => handlers.onOpenPayment?.(notification.objectId!, paymentType),
+            };
+          }
+
           return {
             label: 'Открыть платеж',
             run: () => handlers.onOpenPayment?.(notification.objectId!),

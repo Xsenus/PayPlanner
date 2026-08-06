@@ -64,7 +64,9 @@ import { WebPushDevicePanel } from './WebPushDevicePanel';
 import {
   getClientCaseDocumentIdFromNotification,
   getClientCaseIdFromNotification,
+  parseUserNotificationMetadata,
 } from '../../utils/userNotificationMetadata';
+import type { PaymentKind } from '../../types';
 
 type NotificationStatusFilter = NonNullable<UserNotificationsQuery['status']>;
 type NotificationTaskRoleFilter = 'all' | 'assignee' | 'author' | 'observer' | 'approver';
@@ -74,7 +76,7 @@ type NotificationCenterProps = {
   onOpenTask?: (taskId: number) => void;
   onOpenCase?: (caseId: number) => void;
   onOpenCaseDocument?: (caseId: number, documentId?: number) => void;
-  onOpenPayment?: (paymentId: number) => void;
+  onOpenPayment?: (paymentId: number, type?: PaymentKind) => void;
   onOpenInvoice?: (invoiceId: number) => void;
   onOpenAct?: (actId: number) => void;
   onOpenContract?: (contractId: number) => void;
@@ -157,6 +159,29 @@ function notificationPriorityBadgeClass(priority?: string) {
     default:
       return 'bg-blue-50 text-blue-700';
   }
+}
+
+function getPaymentTypeFromNotification(metadataJson?: string | null): PaymentKind | undefined {
+  const metadata = parseUserNotificationMetadata(metadataJson);
+  const rawType = metadata.paymentType ?? metadata.paymentKind ?? metadata.type ?? metadata.PaymentType ?? metadata.PaymentKind;
+  if (typeof rawType !== 'string') {
+    return undefined;
+  }
+
+  if (rawType === 'Income' || rawType === 'Expense') {
+    return rawType;
+  }
+
+  const normalizedType = rawType.toLowerCase();
+  if (normalizedType === 'income') {
+    return 'Income';
+  }
+
+  if (normalizedType === 'expense') {
+    return 'Expense';
+  }
+
+  return undefined;
 }
 
 const EMPTY_PAGE: PagedResult<UserNotificationDto> = {
@@ -595,13 +620,6 @@ export function NotificationCenter({
     }
   };
 
-  const openLinkedObjectHandlers: Record<string, ((objectId: number) => void) | undefined> = {
-    payment: onOpenPayment,
-    invoice: onOpenInvoice,
-    act: onOpenAct,
-    contract: onOpenContract,
-  };
-
   const openLinkedObjectLabels: Record<string, string> = {
     payment: 'К платежу',
     invoice: 'К счету',
@@ -610,15 +628,38 @@ export function NotificationCenter({
   };
 
   const handleOpenLinkedObject = async (item: UserNotificationDto) => {
-    const handler = openLinkedObjectHandlers[item.objectType];
-    if (!handler || !item.objectId) {
+    if (!item.objectId) {
       return;
     }
 
     try {
       setBusyId(item.id);
       await markRead(item);
-      handler(item.objectId);
+      switch (item.objectType) {
+        case 'payment': {
+          const paymentType = getPaymentTypeFromNotification(item.metadataJson);
+          if (!onOpenPayment) {
+            return;
+          }
+
+          if (paymentType) {
+            onOpenPayment(item.objectId, paymentType);
+            return;
+          }
+
+          onOpenPayment(item.objectId);
+          return;
+        }
+        case 'invoice':
+          onOpenInvoice?.(item.objectId);
+          return;
+        case 'act':
+          onOpenAct?.(item.objectId);
+          return;
+        case 'contract':
+          onOpenContract?.(item.objectId);
+          return;
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Не удалось открыть связанный документ.');
     } finally {
@@ -1301,21 +1342,27 @@ export function NotificationCenter({
           <div className="text-right">Действия</div>
         </div>
 
-        {loading ? (
-          <div className="flex items-center justify-center gap-3 px-4 py-12 text-sm text-slate-500">
-            <RefreshCw className="h-5 w-5 animate-spin" />
-            Загружаем уведомления...
-          </div>
-        ) : itemsPage.items.length === 0 ? (
-          <div className="px-4 py-12 text-center text-sm text-slate-500">По текущим фильтрам уведомлений нет.</div>
-        ) : (
-          <div className="divide-y divide-slate-100">
-            {itemsPage.items.map((item) => {
-              const itemBusy = busyId === item.id;
-              const linkedObjectLabel = item.objectId ? openLinkedObjectLabels[item.objectType] : undefined;
-              const canOpenLinkedObject = Boolean(linkedObjectLabel && openLinkedObjectHandlers[item.objectType]);
-              const caseDocumentId = getClientCaseDocumentIdFromNotification(item);
-              const caseId = getClientCaseIdFromNotification(item);
+              {loading ? (
+              <div className="flex items-center justify-center gap-3 px-4 py-12 text-sm text-slate-500">
+                <RefreshCw className="h-5 w-5 animate-spin" />
+                Загружаем уведомления...
+              </div>
+            ) : itemsPage.items.length === 0 ? (
+              <div className="px-4 py-12 text-center text-sm text-slate-500">По текущим фильтрам уведомлений нет.</div>
+            ) : (
+              <div className="divide-y divide-slate-100">
+                {itemsPage.items.map((item) => {
+                  const itemBusy = busyId === item.id;
+                  const linkedObjectLabel = item.objectId ? openLinkedObjectLabels[item.objectType] : undefined;
+                  const canOpenLinkedObject = Boolean(
+                    linkedObjectLabel &&
+                      ((item.objectType === 'payment' && onOpenPayment) ||
+                        (item.objectType === 'invoice' && onOpenInvoice) ||
+                        (item.objectType === 'act' && onOpenAct) ||
+                        (item.objectType === 'contract' && onOpenContract)),
+                  );
+                  const caseDocumentId = getClientCaseDocumentIdFromNotification(item);
+                  const caseId = getClientCaseIdFromNotification(item);
               const isCaseInactivity = CASE_INACTIVITY_NOTIFICATION_TYPES.has(item.type) && Boolean(caseId);
               const caseButtonLabel = caseDocumentId && onOpenCaseDocument ? 'К документам' : 'К делу';
               return (

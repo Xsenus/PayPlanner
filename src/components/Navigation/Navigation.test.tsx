@@ -158,6 +158,22 @@ describe('Navigation links', () => {
     expect(findLinkByHref(getTabHref('s3Storage'))).toBeFalsy();
   });
 
+  it('keeps sidebar order from saved preferences', async () => {
+    window.localStorage.setItem('pp.sidebar_order', JSON.stringify(['tasks', 'calendar', 'notifications']));
+
+    renderNavigation();
+    await waitForNavigationPermissions();
+
+    const navigation = screen.getByRole('navigation', { name: 'Навигация' });
+    const topLevelLinks = Array.from(navigation.querySelectorAll('ul > li > div > a')).map((link) =>
+      (link.textContent ?? '').trim(),
+    );
+
+    expect(topLevelLinks[0] ?? '').toContain('Журнал задач');
+    expect(topLevelLinks[1] ?? '').toContain('Календарь');
+    expect(topLevelLinks[2] ?? '').toContain('Уведомления');
+  });
+
   it('shows settings for a non-admin role that can view integrations only', async () => {
     authState.isAdmin = false;
     authState.roleId = 99;

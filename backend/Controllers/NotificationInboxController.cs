@@ -621,7 +621,12 @@ public class NotificationInboxController : ControllerBase
             return query;
         }
 
-        var taskQuery = context.TaskJournalItems.AsNoTracking().AsQueryable();
+        var taskQuery = context.TaskJournalItems
+            .AsNoTracking()
+            .Where(task =>
+                task.Status == null ||
+                (task.Status.ToLower() != "done" && task.Status.ToLower() != "cancelled"))
+            .AsQueryable();
 
         if (hasClientFilter)
         {
@@ -736,6 +741,9 @@ public class NotificationInboxController : ControllerBase
         }
 
         var visibleTaskIds = context.TaskJournalItems
+            .Where(task =>
+                task.Status == null ||
+                (task.Status.ToLower() != "done" && task.Status.ToLower() != "cancelled"))
             .ApplyTaskVisibility(visibility.Tasks)
             .Select(task => task.Id);
         var visibleCaseIds = context.ClientCases

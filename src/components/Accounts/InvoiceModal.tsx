@@ -265,7 +265,7 @@ interface InvoiceModalProps {
   onOpenClient?: (clientId: number) => void;
   onOpenContract?: (contractId: number) => void;
   onOpenActPage?: (actId: number, options?: { invoiceId?: number | null }) => void;
-  onOpenPayment?: (payment: Payment) => void;
+  onOpenPayment?: (paymentId: number, paymentType?: PaymentKind) => void;
   onSubmit: (payload: InvoiceInput) => Promise<void>;
   submitting: boolean;
   errorMessage?: string | null;
@@ -5384,7 +5384,7 @@ export function InvoiceModal({
                   type="button"
                   onClick={() => {
                     closePaymentPreview();
-                    onOpenPayment(selectedPaymentPreview);
+                    onOpenPayment(selectedPaymentPreview.id, selectedPaymentPreview.type);
                   }}
                   className="mr-auto rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-medium text-blue-700 transition hover:bg-blue-100"
                 >

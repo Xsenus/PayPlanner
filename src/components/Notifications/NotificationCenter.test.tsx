@@ -337,6 +337,9 @@ describe('NotificationCenter', () => {
       objectType,
       objectId: 777,
       taskId: null,
+      ...(objectType === 'payment'
+        ? { metadataJson: JSON.stringify({ paymentType: 'Expense' }) }
+        : {}),
     });
     apiMock.getUserNotifications.mockResolvedValue(createPage([item]));
 
@@ -346,7 +349,11 @@ describe('NotificationCenter', () => {
     fireEvent.click(screen.getByRole('button', { name: buttonLabel }));
 
     await waitFor(() => expect(apiMock.markUserNotificationRead).toHaveBeenCalledWith(30));
-    expect(handlers[handlerName]).toHaveBeenCalledWith(777);
+    if (objectType === 'payment') {
+      expect(handlers[handlerName]).toHaveBeenCalledWith(777, 'Expense');
+    } else {
+      expect(handlers[handlerName]).toHaveBeenCalledWith(777);
+    }
   });
 
   it('opens linked task notification from the inbox action', async () => {

@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useState, type MouseEvent } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useState,
+  type DragEvent,
+  type MouseEvent,
+} from 'react';
 import {
   Calendar,
   CalendarDays,
@@ -29,6 +37,7 @@ import {
   Bell,
   Briefcase,
   StickyNote,
+  GripVertical,
 } from 'lucide-react';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useAuth } from '../../contexts/AuthContext';
@@ -47,9 +56,26 @@ const WIDTH_OPEN = '17rem';
 const WIDTH_COLLAPSED = '5rem';
 const STYLE_ID = 'pp-sidebar-style';
 const EXPANDED_KEY = 'pp.sidebar_expanded';
+const ORDER_KEY = 'pp.sidebar_order';
 
 function formatBadgeCount(count: number) {
   return count > 99 ? '99+' : String(count);
+}
+
+function normalizeSidebarOrder(raw: string | null, validIds: string[]): string[] {
+  if (!raw) {
+    return validIds;
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    const list = Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : [];
+    const existing = list.filter((itemId) => validIds.includes(itemId));
+    const missing = validIds.filter((itemId) => !existing.includes(itemId));
+    return existing.length > 0 ? [...existing, ...missing] : validIds;
+  } catch {
+    return validIds;
+  }
 }
 
 export default function Navigation({ activeTab, onTabChange }: NavigationProps) {
@@ -390,7 +416,32 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
     ];
   }, [canManageRoles, canViewAudit, canViewSettings, canViewYandexDisk, canViewS3Storage, isAdmin]);
 
-  const sidebarItems = useMemo(() => [...mainItems, ...adminItems], [mainItems, adminItems]);
+  const availableSidebarItems = useMemo(() => [...mainItems, ...adminItems], [mainItems, adminItems]);
+  const availableSidebarItemIds = useMemo(
+    () => availableSidebarItems.map((item) => item.id),
+    [availableSidebarItems],
+  );
+  const [orderedSidebarItemIds, setOrderedSidebarItemIds] = useState<string[]>(() => {
+    if (typeof window === 'undefined') {
+      return availableSidebarItemIds;
+    }
+
+    return normalizeSidebarOrder(
+      window.localStorage.getItem(ORDER_KEY),
+      availableSidebarItemIds,
+    );
+  });
+  const sidebarItems = useMemo(() => {
+    const itemMap = new Map<string, SidebarItem>();
+    availableSidebarItems.forEach((item) => itemMap.set(item.id, item));
+
+    return orderedSidebarItemIds
+      .map((id) => itemMap.get(id))
+      .filter((item): item is SidebarItem => item !== undefined)
+      .concat(
+        availableSidebarItems.filter((item) => !orderedSidebarItemIds.includes(item.id)),
+      );
+  }, [availableSidebarItems, orderedSidebarItemIds]);
 
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>(() => {
     if (typeof window === 'undefined') {
@@ -441,6 +492,71 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
     },
     [onTabChange],
   );
+
+  useEffect(() => {
+    setOrderedSidebarItemIds((prev) => {
+      const synced = normalizeSidebarOrder(
+        JSON.stringify(prev),
+        availableSidebarItemIds,
+      );
+      return synced.length === prev.length && synced.every((id, index) => id === prev[index])
+        ? prev
+        : synced;
+    });
+  }, [availableSidebarItemIds]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(ORDER_KEY, JSON.stringify(orderedSidebarItemIds));
+    } catch {
+      /** */
+    }
+  }, [orderedSidebarItemIds]);
+
+  const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
+
+  const handleItemDragStart = useCallback((itemId: string, event: DragEvent<HTMLDivElement>) => {
+    setDraggedItemId(itemId);
+    event.dataTransfer.setData('text/plain', itemId);
+    event.dataTransfer.effectAllowed = 'move';
+  }, []);
+
+  const handleItemDragOver = useCallback(
+    (itemId: string, event: DragEvent<HTMLDivElement>) => {
+      if (!draggedItemId || draggedItemId === itemId || collapsed) {
+        return;
+      }
+
+      event.preventDefault();
+    },
+    [collapsed, draggedItemId],
+  );
+
+  const handleItemDrop = useCallback((itemId: string, event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    if (!draggedItemId || draggedItemId === itemId) {
+      return;
+    }
+
+    setOrderedSidebarItemIds((prev) => {
+      const next = [...prev];
+      const sourceIndex = next.indexOf(draggedItemId);
+      const targetIndex = next.indexOf(itemId);
+      if (sourceIndex < 0 || targetIndex < 0) {
+        return prev;
+      }
+
+      const [movedItemId] = next.splice(sourceIndex, 1);
+      const insertIndex = sourceIndex < targetIndex ? targetIndex - 1 : targetIndex;
+      next.splice(insertIndex, 0, movedItemId);
+      return next;
+    });
+    setDraggedItemId(null);
+  }, [draggedItemId]);
+
+  const handleItemDragEnd = useCallback(() => {
+    setDraggedItemId(null);
+  }, []);
 
   useEffect(() => {
     setExpandedSections((prev) => {
@@ -542,10 +658,23 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
               const isActive = isParentActive || isChildActive;
               const isExpanded = expandedSections[item.id] ?? false;
               const badgeCount = item.id === 'payments' ? advanceDecisionCount : 0;
+              const canDrag = !collapsed && sidebarItems.length > 1;
+              const isDragging = draggedItemId === item.id;
 
               return (
                 <li key={item.id} className="space-y-1">
-                  <div className="relative">
+                  <div
+                    draggable={canDrag}
+                    onDragStart={(event) => canDrag && handleItemDragStart(item.id, event)}
+                    onDragOver={(event) => handleItemDragOver(item.id, event)}
+                    onDrop={(event) => canDrag && handleItemDrop(item.id, event)}
+                    onDragEnd={handleItemDragEnd}
+                    className={[
+                      'relative',
+                      canDrag ? 'cursor-grab' : '',
+                      isDragging ? 'opacity-70' : '',
+                    ].join(' ')}
+                  >
                     <a
                       href={item.tab ? getTabHref(item.tab) : '#'}
                       onClick={(event) => {
@@ -592,6 +721,9 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
                       {isActive && !collapsed && (
                         <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-8 bg-white rounded-l-full" />
                       )}
+                      {!collapsed && canDrag ? (
+                        <GripVertical className="h-3.5 w-3.5 shrink-0 text-slate-400 transition-colors group-hover:text-slate-200" />
+                      ) : null}
                     </a>
                     {!collapsed && hasChildren ? (
                       <button

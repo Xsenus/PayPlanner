@@ -35,6 +35,7 @@ export interface PaymentTableColumnDefinition {
 interface PaymentsTableProps {
   payments: Payment[];
   onEditPayment: (payment: Payment) => void;
+  onOpenPayment?: (paymentId: number, paymentType: Payment['type']) => void;
   onOpenClient?: (clientId: number, caseId?: number) => void;
   onOpenUser?: (userId: number) => void;
   onAddPayment?: (type: Payment['type'], payment?: Payment) => void;
@@ -79,6 +80,7 @@ type MenuState = { payment: Payment; x: number; y: number } | null;
 export function PaymentsTable({
   payments,
   onEditPayment,
+  onOpenPayment,
   onOpenClient,
   onOpenUser,
   onAddPayment,
@@ -469,11 +471,16 @@ export function PaymentsTable({
 
   const openPayment = useCallback(
     (payment: Payment) => {
+      if (onOpenPayment) {
+        onOpenPayment(payment.id, payment.type);
+        return;
+      }
+
       if (isEditAllowed(payment)) {
         onEditPayment(payment);
       }
     },
-    [isEditAllowed, onEditPayment],
+    [isEditAllowed, onOpenPayment, onEditPayment],
   );
 
   const handleRowKeyDown = useCallback(
@@ -592,9 +599,11 @@ export function PaymentsTable({
                   onContextMenu={(event) => openMenu(event, payment)}
                   onClick={() => openPayment(payment)}
                   onKeyDown={(event) => handleRowKeyDown(event, payment)}
-                  tabIndex={isEditAllowed(payment) ? 0 : undefined}
+                  tabIndex={onOpenPayment || isEditAllowed(payment) ? 0 : undefined}
                   className={`transition-colors hover:bg-gray-50/60 ${
-                    isEditAllowed(payment) ? 'cursor-pointer focus:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-emerald-500' : 'cursor-default'
+                    onOpenPayment || isEditAllowed(payment)
+                      ? 'cursor-pointer focus:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-emerald-500'
+                      : 'cursor-default'
                   }`}
                   title={
                     canAdd || isEditAllowed(payment) || isDeleteAllowed(payment)

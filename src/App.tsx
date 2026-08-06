@@ -561,9 +561,17 @@ function AppContent() {
       }
 
       setSelectedPaymentId(paymentId);
-      setActiveTab(type === 'Expense' ? 'paymentsExpense' : type === 'Income' ? 'paymentsIncome' : 'payments');
+      setActiveTab(
+        type === 'Expense'
+          ? 'paymentsExpense'
+          : type === 'Income'
+            ? 'paymentsIncome'
+            : activeTab === 'paymentsIncome' || activeTab === 'paymentsExpense'
+              ? activeTab
+              : 'payments',
+      );
     },
-    [permissions.payments.canView],
+    [permissions.payments.canView, activeTab],
   );
 
   const openRelatedCase = useCallback(
@@ -1076,7 +1084,7 @@ function AppContent() {
             onOpenTask={permissions.tasks.canView ? (taskId) => openTaskDetail(taskId, { returnTo: 'notifications' }) : undefined}
             onOpenCase={permissions.cases.canView ? openRelatedCase : undefined}
             onOpenCaseDocument={permissions.cases.canView ? (caseId) => openCaseDetailSection(caseId, 'documents') : undefined}
-            onOpenPayment={permissions.payments.canView ? (paymentId) => openPaymentPage(paymentId) : undefined}
+            onOpenPayment={permissions.payments.canView ? (paymentId, paymentType) => openPaymentPage(paymentId, paymentType) : undefined}
             onOpenInvoice={permissions.accounts.canView ? (invoiceId) => openInvoicePage(invoiceId, { returnTo: { tab: 'notifications' } }) : undefined}
             onOpenAct={permissions.acts.canView ? (actId) => openActDetail(actId, { tab: 'notifications' }) : undefined}
             onOpenContract={permissions.contracts.canView ? (contractId) => openContractDetail(contractId, { returnTo: 'notifications' }) : undefined}
@@ -1480,7 +1488,7 @@ function AppContent() {
                 }}
                 onOpenClient={(id) => handleOpenClient(id, undefined, { returnTo: { tab: 'accounts' } })}
                 onOpenContract={(id) => openContractDetail(id, { returnTo: 'accounts' })}
-                onOpenPayment={openPaymentDetail}
+                onOpenPayment={openPaymentPage}
                 onOpenActPage={(id, options) => openActDetail(id, { tab: 'accounts', invoiceId: options?.invoiceId ?? null })}
                 onCreateActPage={(initialValues, options) =>
                   openActCreate({
@@ -1508,7 +1516,7 @@ function AppContent() {
                 }}
                 onOpenClient={(id) => handleOpenClient(id, undefined, { returnTo: { tab: 'accountsIncome' } })}
                 onOpenContract={(id) => openContractDetail(id, { returnTo: 'accountsIncome' })}
-                onOpenPayment={openPaymentDetail}
+                onOpenPayment={openPaymentPage}
                 onOpenActPage={(id, options) =>
                   openActDetail(id, { tab: 'accountsIncome', invoiceId: options?.invoiceId ?? null })
                 }
@@ -1538,7 +1546,7 @@ function AppContent() {
                 }}
                 onOpenClient={(id) => handleOpenClient(id, undefined, { returnTo: { tab: 'accountsExpense' } })}
                 onOpenContract={(id) => openContractDetail(id, { returnTo: 'accountsExpense' })}
-                onOpenPayment={openPaymentDetail}
+                onOpenPayment={openPaymentPage}
                 onOpenActPage={(id, options) =>
                   openActDetail(id, { tab: 'accountsExpense', invoiceId: options?.invoiceId ?? null })
                 }
@@ -1640,6 +1648,7 @@ function AppContent() {
                 onOpenClient={(id) =>
                   handleOpenClient(id, undefined, { returnTo: { tab: 'contractDetail', contractId: selectedContractId } })
                 }
+                onOpenPayment={openPaymentPage}
                 routePaymentId={selectedPaymentId}
                 onRoutePaymentChange={setSelectedPaymentId}
                 defaultType="Income"
@@ -1662,6 +1671,7 @@ function AppContent() {
                 onOpenClient={(id) =>
                   handleOpenClient(id, undefined, { returnTo: { tab: 'contractDetail', contractId: selectedContractId } })
                 }
+                onOpenPayment={openPaymentPage}
                 routePaymentId={selectedPaymentId}
                 onRoutePaymentChange={setSelectedPaymentId}
                 defaultType="Expense"
@@ -1682,6 +1692,7 @@ function AppContent() {
           ? (
               <Payments
                 onOpenClient={handleOpenClient}
+                onOpenPayment={openPaymentPage}
                 routePaymentId={selectedPaymentId}
                 onRoutePaymentChange={setSelectedPaymentId}
                 initialCreatePayment={casePaymentCreateDraft}
@@ -1865,7 +1876,7 @@ function AppContent() {
           onOpenTask={permissions.tasks.canView ? (taskId) => openTaskDetail(taskId, { returnTo: activeTab }) : undefined}
           onOpenCase={permissions.cases.canView ? openRelatedCase : undefined}
           onOpenCaseDocument={permissions.cases.canView ? (caseId) => openCaseDetailSection(caseId, 'documents') : undefined}
-          onOpenPayment={permissions.payments.canView ? (paymentId) => openPaymentPage(paymentId) : undefined}
+          onOpenPayment={permissions.payments.canView ? (paymentId, paymentType) => openPaymentPage(paymentId, paymentType) : undefined}
           onOpenInvoice={permissions.accounts.canView ? (invoiceId) => openInvoicePage(invoiceId) : undefined}
           onOpenAct={permissions.acts.canView ? (actId) => openActDetail(actId, { tab: 'notifications' }) : undefined}
           onOpenContract={permissions.contracts.canView ? (contractId) => openContractDetail(contractId, { returnTo: activeTab }) : undefined}
