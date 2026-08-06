@@ -1,4 +1,13 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import {
+  Suspense,
+  lazy,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import { AuthProvider } from './contexts/AuthContext';
 import Navigation from './components/Navigation/Navigation';
 import { Login } from './components/Auth/Login';
@@ -291,6 +300,7 @@ function AppContent() {
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<number | null>(getInitialInvoiceId);
   const [selectedPaymentId, setSelectedPaymentId] = useState<number | null>(getInitialPaymentId);
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(getInitialTaskId);
+  const paymentTypeByIdRef = useRef<Map<number, PaymentKind>>(new Map());
   const [overdueTaskFilterSignal, setOverdueTaskFilterSignal] = useState(0);
   const [taskReturnTab, setTaskReturnTab] = useState<Tab | null>(null);
   const [selectedLegalEntityId, setSelectedLegalEntityId] = useState<number | null>(null);
@@ -554,24 +564,47 @@ function AppContent() {
     [permissions.payments.canView],
   );
 
+  const resolvePaymentType = useCallback(async (paymentId: number) => {
+    const cached = paymentTypeByIdRef.current.get(paymentId);
+    if (cached) {
+      return cached;
+    }
+
+    try {
+      const payment = await apiService.getPayment(paymentId);
+      if (!payment?.type) {
+        return undefined;
+      }
+      paymentTypeByIdRef.current.set(paymentId, payment.type);
+      return payment.type;
+    } catch {
+      return undefined;
+    }
+  }, []);
+
   const openPaymentPage = useCallback(
-    (paymentId: number, type?: 'Income' | 'Expense') => {
+    async (paymentId: number, type?: 'Income' | 'Expense') => {
       if (!permissions.payments.canView || !(paymentId > 0)) {
         return;
       }
 
+      if (type) {
+        paymentTypeByIdRef.current.set(paymentId, type);
+      }
+
+      const resolvedType = type ?? await resolvePaymentType(paymentId);
       setSelectedPaymentId(paymentId);
       setActiveTab(
-        type === 'Expense'
+        resolvedType === 'Expense'
           ? 'paymentsExpense'
-          : type === 'Income'
+          : resolvedType === 'Income'
             ? 'paymentsIncome'
             : activeTab === 'paymentsIncome' || activeTab === 'paymentsExpense'
               ? activeTab
               : 'payments',
       );
     },
-    [permissions.payments.canView, activeTab],
+    [permissions.payments.canView, activeTab, resolvePaymentType],
   );
 
   const openRelatedCase = useCallback(
