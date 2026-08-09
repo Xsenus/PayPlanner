@@ -352,7 +352,6 @@ function CashFlowReportSection({
   error,
   onReload,
   filters,
-  profileTimeZoneId,
 }: {
   report: CashFlowReport | null;
   loading: boolean;
@@ -523,7 +522,6 @@ function CashFlowForecastReportSection({
   error,
   onReload,
   filters,
-  profileTimeZoneId,
 }: {
   report: CashFlowForecastReport | null;
   loading: boolean;
@@ -664,7 +662,6 @@ function CashReportSection({
   error,
   onReload,
   filters,
-  profileTimeZoneId,
   canExportPaymentReports,
 }: {
   report: CashBookSummary | null;
@@ -798,7 +795,6 @@ function BankReportSection({
   error,
   onReload,
   filters,
-  profileTimeZoneId,
 }: {
   report: CashFlowReport | null;
   loading: boolean;
@@ -954,7 +950,6 @@ function CategoryReportSection({
   error,
   onReload,
   filters,
-  profileTimeZoneId,
 }: {
   report: MoneyCategoryReport | null;
   loading: boolean;
@@ -1074,7 +1069,6 @@ function CounterpartyReportSection({
   error,
   onReload,
   filters,
-  profileTimeZoneId,
 }: {
   report: CounterpartyReport | null;
   loading: boolean;
@@ -1219,7 +1213,6 @@ function ProjectReportSection({
   error,
   onReload,
   filters,
-  profileTimeZoneId,
 }: {
   report: ProjectReport | null;
   loading: boolean;
@@ -1907,7 +1900,6 @@ function CaseFinanceReportSection({
   filters,
   onReload,
   onOpenCase,
-  profileTimeZoneId,
 }: {
   report: CaseFinanceReport | null;
   loading: boolean;
@@ -3365,7 +3357,6 @@ function DirectionReportSection({
   error,
   onReload,
   filters,
-  profileTimeZoneId,
 }: {
   report: DirectionReport | null;
   loading: boolean;
@@ -3502,7 +3493,6 @@ function SalesPointReportSection({
   error,
   onReload,
   filters,
-  profileTimeZoneId,
 }: {
   report: SalesPointReport | null;
   loading: boolean;
@@ -3636,7 +3626,6 @@ function VatReportSection({
   error,
   onReload,
   filters,
-  profileTimeZoneId,
 }: {
   report: VatReport | null;
   loading: boolean;
@@ -3790,7 +3779,6 @@ function PlanFactReportSection({
   error,
   onReload,
   filters,
-  profileTimeZoneId,
 }: {
   report: PlanFactReport | null;
   loading: boolean;
@@ -3930,7 +3918,6 @@ function AdvanceReportSection({
   error,
   onReload,
   filters,
-  profileTimeZoneId,
 }: {
   report: AdvanceReport | null;
   loading: boolean;
@@ -4083,7 +4070,6 @@ function PaymentPriorityReportSection({
   error,
   onReload,
   filters,
-  profileTimeZoneId,
 }: {
   report: PaymentPriorityReport | null;
   loading: boolean;
@@ -4218,7 +4204,6 @@ function PaidAccountReportSection({
   error,
   onReload,
   filters,
-  profileTimeZoneId,
 }: {
   report: PaidAccountReport | null;
   loading: boolean;
@@ -4349,7 +4334,6 @@ function PaidInvoiceReportSection({
   error,
   onReload,
   filters,
-  profileTimeZoneId,
 }: {
   report: PaidInvoiceReport | null;
   loading: boolean;
@@ -4477,7 +4461,6 @@ function InvoiceStatusReportSection({
   error,
   onReload,
   filters,
-  profileTimeZoneId,
 }: {
   report: InvoiceStatusReport | null;
   loading: boolean;
@@ -4615,7 +4598,6 @@ function ActStatusReportSection({
   error,
   onReload,
   filters,
-  profileTimeZoneId,
 }: {
   report: ActStatusReport | null;
   loading: boolean;
@@ -4753,7 +4735,6 @@ function ContractStatusReportSection({
   error,
   onReload,
   filters,
-  profileTimeZoneId,
 }: {
   report: ContractStatusReport | null;
   loading: boolean;
@@ -4885,7 +4866,6 @@ function PaymentOrderReportSection({
   error,
   onReload,
   filters,
-  profileTimeZoneId,
 }: {
   report: PaymentOrderReport | null;
   loading: boolean;
@@ -5013,7 +4993,6 @@ function PaymentPurposeReportSection({
   error,
   onReload,
   filters,
-  profileTimeZoneId,
 }: {
   report: PaymentPurposeReport | null;
   loading: boolean;
@@ -5142,7 +5121,6 @@ function MatchStatusReportSection({
   error,
   onReload,
   filters,
-  profileTimeZoneId,
 }: {
   report: MatchStatusReport | null;
   loading: boolean;
@@ -5270,7 +5248,6 @@ function JournalStatusReportSection({
   error,
   onReload,
   filters,
-  profileTimeZoneId,
 }: {
   report: JournalStatusReport | null;
   loading: boolean;
@@ -5393,7 +5370,6 @@ function CurrencyReportSection({
   error,
   onReload,
   filters,
-  profileTimeZoneId,
 }: {
   report: CurrencyReport | null;
   loading: boolean;
@@ -5520,7 +5496,6 @@ function CashOrderReportSection({
   error,
   onReload,
   filters,
-  profileTimeZoneId,
   canExportPaymentReports,
 }: {
   report: CashOrderReport | null;
@@ -5645,7 +5620,6 @@ function BankStatementImportReportSection({
   error,
   onReload,
   filters,
-  profileTimeZoneId,
   canExportPaymentReports,
 }: {
   report: BankStatementImportReport | null;
@@ -5785,7 +5759,6 @@ function SpreadsheetImportReportSection({
   error,
   onReload,
   filters,
-  profileTimeZoneId,
 }: {
   report: SpreadsheetImportReport | null;
   loading: boolean;
