@@ -377,6 +377,7 @@ public class CashOrdersControllerTests
                 Basis = "Выдача под отчёт",
                 Appendix = "Заявление от 09.08.2026",
             },
+            "ООО Тестовая организация",
         }));
 
         Assert.Contains("Унифицированная форма № КО-2", html);
