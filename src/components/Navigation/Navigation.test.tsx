@@ -6,6 +6,10 @@ import { getTabHref } from '../../appRouting';
 import { ALL_TABS, type Tab } from '../../types/tabs';
 import { apiService } from '../../services/api';
 import { defaultRestrictedRolePermissions, defaultRolePermissions, type RolePermissions } from '../../types/permissions';
+import {
+  PAYMENT_ADVANCE_REVIEW_CHANGED_EVENT,
+  PAYMENT_ADVANCE_REVIEW_FILTER_INTENT_KEY,
+} from '../../utils/paymentAdvanceReview';
 
 const authState = vi.hoisted(() => ({
   isAdmin: true,
@@ -110,6 +114,7 @@ describe('Navigation links', () => {
   beforeEach(() => {
     window.history.replaceState({}, '', '/');
     window.localStorage.clear();
+    window.sessionStorage.clear();
     vi.clearAllMocks();
     authState.isAdmin = true;
     authState.roleId = 1;
@@ -395,7 +400,7 @@ describe('Navigation links', () => {
       },
     });
 
-    renderNavigation();
+    const onTabChange = renderNavigation();
 
     await waitFor(() => {
       expect(apiMock.getPaymentsV2).toHaveBeenCalledWith({
@@ -407,5 +412,34 @@ describe('Navigation links', () => {
       });
     });
     expect((await screen.findByTestId('advance-review-nav-badge')).textContent).toBe('5');
+
+    const paymentsLink = findLinkByHref(getTabHref('payments'));
+    expect(paymentsLink).toBeTruthy();
+    fireEvent.click(paymentsLink!);
+
+    expect(window.sessionStorage.getItem(PAYMENT_ADVANCE_REVIEW_FILTER_INTENT_KEY)).toBe('RequiresDecision');
+    expect(onTabChange).toHaveBeenCalledWith('payments');
+  });
+
+  it('refreshes the payments badge after an advance review decision', async () => {
+    apiMock.getPaymentsV2
+      .mockResolvedValueOnce({
+        items: [], total: 1, page: 1, pageSize: 1,
+        summary: { income: 0, expense: 0, balance: 0, incomeCount: 0, expenseCount: 0, total: 1 },
+      })
+      .mockResolvedValueOnce({
+        items: [], total: 0, page: 1, pageSize: 1,
+        summary: { income: 0, expense: 0, balance: 0, incomeCount: 0, expenseCount: 0, total: 0 },
+      });
+
+    renderNavigation();
+    expect((await screen.findByTestId('advance-review-nav-badge')).textContent).toBe('1');
+
+    window.dispatchEvent(new Event(PAYMENT_ADVANCE_REVIEW_CHANGED_EVENT));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('advance-review-nav-badge')).toBeNull();
+    });
+    expect(apiMock.getPaymentsV2).toHaveBeenCalledTimes(2);
   });
 });

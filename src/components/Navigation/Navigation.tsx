@@ -45,6 +45,10 @@ import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { Tab } from '../../types/tabs';
 import { getTabHref } from '../../appRouting';
 import { apiService } from '../../services/api';
+import {
+  PAYMENT_ADVANCE_REVIEW_CHANGED_EVENT,
+  PAYMENT_ADVANCE_REVIEW_FILTER_INTENT_KEY,
+} from '../../utils/paymentAdvanceReview';
 
 interface NavigationProps {
   activeTab: Tab;
@@ -177,8 +181,12 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
     };
 
     void loadAdvanceDecisionCount();
+    const timer = window.setInterval(loadAdvanceDecisionCount, 60_000);
+    window.addEventListener(PAYMENT_ADVANCE_REVIEW_CHANGED_EVENT, loadAdvanceDecisionCount);
     return () => {
       cancelled = true;
+      window.clearInterval(timer);
+      window.removeEventListener(PAYMENT_ADVANCE_REVIEW_CHANGED_EVENT, loadAdvanceDecisionCount);
     };
   }, [permissions.payments.canView]);
 
@@ -679,6 +687,12 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
                       href={item.tab ? getTabHref(item.tab) : '#'}
                       onClick={(event) => {
                         if (item.tab) {
+                          if (item.id === 'payments' && advanceDecisionCount > 0) {
+                            window.sessionStorage.setItem(
+                              PAYMENT_ADVANCE_REVIEW_FILTER_INTENT_KEY,
+                              'RequiresDecision',
+                            );
+                          }
                           handleNavLinkClick(event, item.tab);
                           return;
                         }

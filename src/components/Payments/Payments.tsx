@@ -29,6 +29,10 @@ import { apiService } from '../../services/api';
 import { isInvoiceManagedPayment, isPartialRemainderSourcePayment, isTransferredRemainderPayment } from '../../utils/invoicePayments';
 import { parseInstallmentPaymentMetadata } from '../../utils/installmentPlan';
 import { buildCancelledPaymentPayload } from '../../utils/paymentActions';
+import {
+  notifyPaymentAdvanceReviewChanged,
+  PAYMENT_ADVANCE_REVIEW_FILTER_INTENT_KEY,
+} from '../../utils/paymentAdvanceReview';
 
 type TypeFilter = 'all' | Payment['type'];
 
@@ -36,7 +40,7 @@ type StatusFilter = 'all' | PaymentStatus;
 type AdvanceReviewFilter = 'all' | PaymentAdvanceReviewStatus;
 type ClientRoleFilter = 'all' | ClientRole;
 
-const ADVANCE_REVIEW_FILTER_INTENT_KEY = 'pp.payments.advanceReviewFilter';
+const ADVANCE_REVIEW_FILTER_INTENT_KEY = PAYMENT_ADVANCE_REVIEW_FILTER_INTENT_KEY;
 
 interface PaymentsProps {
   onOpenClient?: (clientId: number, caseId?: number) => void;
@@ -1295,6 +1299,7 @@ export function Payments({
         await apiService.acceptPaymentAdvance(payment.id, 'Принято как аванс из журнала платежей');
         toast.success('Платеж принят как аванс и добавлен на баланс клиента.', 'Платежи');
         await refresh();
+        notifyPaymentAdvanceReviewChanged();
       } catch (error) {
         toast.error(
           extractDisplayErrorMessage(error, 'Не удалось принять платеж как аванс.'),
@@ -1326,6 +1331,7 @@ export function Payments({
         await apiService.ignorePaymentAdvance(payment.id, 'Исключено из контроля авансов из журнала платежей');
         toast.success('Платеж исключен из контроля авансов.', 'Платежи');
         await refresh();
+        notifyPaymentAdvanceReviewChanged();
       } catch (error) {
         toast.error(
           extractDisplayErrorMessage(error, 'Не удалось исключить платеж из контроля авансов.'),
@@ -1362,6 +1368,7 @@ export function Payments({
         await apiService.refundPaymentAdvance(payment.id, 'Возврат аванса из журнала платежей');
         toast.success('Аванс возвращен клиенту и списан с баланса.', 'Платежи');
         await refresh();
+        notifyPaymentAdvanceReviewChanged();
       } catch (error) {
         toast.error(
           extractDisplayErrorMessage(error, 'Не удалось вернуть аванс клиенту.'),
