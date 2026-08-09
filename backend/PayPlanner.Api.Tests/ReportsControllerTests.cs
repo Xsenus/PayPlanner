@@ -564,6 +564,10 @@ public class ReportsControllerTests
             from, to, null, null, null, CancellationToken.None));
         Assert.Equal("text/html; charset=utf-8", legalPrint.ContentType);
         Assert.Contains("<!doctype html>", legalPrint.Content, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("table-layout: fixed", legalPrint.Content, StringComparison.Ordinal);
+        Assert.Contains("thead { display: table-header-group; }", legalPrint.Content, StringComparison.Ordinal);
+        Assert.Contains("page-break-inside: avoid", legalPrint.Content, StringComparison.Ordinal);
+        Assert.Contains("overflow-wrap: anywhere", legalPrint.Content, StringComparison.Ordinal);
         Assert.DoesNotContain("NaN", legalPrint.Content, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Infinity", legalPrint.Content, StringComparison.OrdinalIgnoreCase);
     }

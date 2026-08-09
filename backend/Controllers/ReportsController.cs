@@ -4162,8 +4162,10 @@ public class ReportsController : ControllerBase
     .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 16px 0; }
     .metric { border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px; }
     .metric strong { display: block; font-size: 17px; margin-top: 4px; }
-    table { width: 100%; border-collapse: collapse; margin-top: 8px; }
-    th, td { border: 1px solid #e5e7eb; padding: 5px 6px; vertical-align: top; }
+    table { width: 100%; table-layout: fixed; border-collapse: collapse; margin-top: 8px; font-size: 9px; line-height: 1.2; }
+    thead { display: table-header-group; }
+    tr { break-inside: avoid; page-break-inside: avoid; }
+    th, td { border: 1px solid #e5e7eb; padding: 4px; vertical-align: top; overflow-wrap: anywhere; word-break: break-word; }
     th { background: #f3f4f6; text-align: left; }
     .num { text-align: right; white-space: nowrap; }
   </style>
