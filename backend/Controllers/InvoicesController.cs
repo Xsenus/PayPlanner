@@ -2140,6 +2140,30 @@ public class InvoicesController : ControllerBase
         return Ok(await DocumentTemplateHistoryService.GetVersionsAsync(_db, InvoiceDocumentTemplateHistoryObjectId, ct));
     }
 
+    [HttpGet("document-template-settings/history/{versionId:int}")]
+    public async Task<ActionResult<InvoiceDocumentTemplateSettingsDto>> GetDocumentTemplateVersion(
+        int versionId,
+        CancellationToken ct)
+    {
+        if (!await IsCurrentUserAdminAsync(ct))
+        {
+            return Forbid();
+        }
+
+        var settingsJson = await DocumentTemplateHistoryService.GetVersionSettingsAsync(
+            _db,
+            InvoiceDocumentTemplateHistoryObjectId,
+            versionId,
+            ct);
+        var request = settingsJson is null ? null : DocumentTemplateHistoryService.DeserializeSettings(settingsJson);
+        if (request is null)
+        {
+            return NotFound();
+        }
+
+        return Ok(InvoiceDocumentTemplateEngine.CreateResponse(InvoiceDocumentTemplateEngine.NormalizeRequest(request)));
+    }
+
     [HttpPost("document-template-settings/history/{versionId:int}/restore")]
     public async Task<ActionResult<InvoiceDocumentTemplateSettingsDto>> RestoreDocumentTemplateVersion(
         int versionId,

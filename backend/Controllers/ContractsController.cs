@@ -683,6 +683,30 @@ public class ContractsController : ControllerBase
         return Ok(await DocumentTemplateHistoryService.GetVersionsAsync(_db, ContractDocumentTemplateHistoryObjectId, ct));
     }
 
+    [HttpGet("document-template-settings/history/{versionId:int}")]
+    public async Task<ActionResult<InvoiceDocumentTemplateSettingsDto>> GetDocumentTemplateVersion(
+        int versionId,
+        CancellationToken ct)
+    {
+        if (!await IsDatabaseAdminAsync(ct))
+        {
+            return Forbid();
+        }
+
+        var settingsJson = await DocumentTemplateHistoryService.GetVersionSettingsAsync(
+            _db,
+            ContractDocumentTemplateHistoryObjectId,
+            versionId,
+            ct);
+        var request = settingsJson is null ? null : DocumentTemplateHistoryService.DeserializeSettings(settingsJson);
+        if (request is null)
+        {
+            return NotFound();
+        }
+
+        return Ok(ContractDocumentTemplateEngine.CreateResponse(ContractDocumentTemplateEngine.NormalizeRequest(request)));
+    }
+
     [HttpPost("document-template-settings/history/{versionId:int}/restore")]
     public async Task<ActionResult<InvoiceDocumentTemplateSettingsDto>> RestoreDocumentTemplateVersion(
         int versionId,

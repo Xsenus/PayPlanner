@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { apiService, type InvoiceDocumentTemplateDto, type InvoiceDocumentTemplateSettingsDto } from '../../services/api';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { useToast } from '../../hooks/useToast';
+import { DocumentTemplateHistoryPanel } from './DocumentTemplateHistoryPanel';
 
 function createEmptySettings(): InvoiceDocumentTemplateSettingsDto {
   return {
@@ -41,6 +42,7 @@ export function ContractDocumentTemplateSettings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
 
   const activeTemplate = useMemo(
     () => settings.templates.find((template) => template.key === selectedKey) ?? settings.templates[0] ?? null,
@@ -87,6 +89,7 @@ export function ContractDocumentTemplateSettings() {
       }));
       setSettings(response);
       setSelectedKey(response.activeTemplateKey || response.templates[0]?.key || selectedKey);
+      setHistoryRefreshKey((value) => value + 1);
       toast.success('Печатный шаблон договора сохранён.', 'Договоры');
     } catch (err) {
       const message = extractDisplayErrorMessage(err, 'Не удалось сохранить шаблон договора');
@@ -132,6 +135,17 @@ export function ContractDocumentTemplateSettings() {
           {error}
         </div>
       )}
+
+      <DocumentTemplateHistoryPanel
+        kind="contract"
+        refreshKey={historyRefreshKey}
+        onRestored={(response) => {
+          const restored = ensureStandardTemplate(response);
+          setSettings(restored);
+          setSelectedKey(restored.activeTemplateKey || restored.templates[0]?.key || 'contract-standard');
+          setHistoryRefreshKey((value) => value + 1);
+        }}
+      />
 
       {loading ? (
         <div className="rounded-xl border border-gray-200 px-4 py-6 text-sm text-gray-500">Загрузка шаблона...</div>

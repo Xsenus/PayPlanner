@@ -1859,6 +1859,18 @@ export interface InvoiceDocumentTemplateSettingsDto {
   defaultTemplateHtml: string;
 }
 
+export interface DocumentTemplateVersionDto {
+  id: number;
+  revision: number;
+  documentType: 'invoice' | 'contract' | 'act' | string;
+  activeTemplateKey: string;
+  templateNames: string[];
+  createdByUserId?: number | null;
+  createdByUserName?: string | null;
+  createdAt: string;
+  restoredFromVersionId?: number | null;
+}
+
 export interface TaskJournalSettingsDto {
   restrictExecutorEditing: boolean;
   allowExecutorDeadlineChangeRequests: boolean;
@@ -3228,6 +3240,20 @@ export class ApiService {
     });
   }
 
+  async getContractDocumentTemplateHistory() {
+    return this.request<DocumentTemplateVersionDto[]>('/contracts/document-template-settings/history');
+  }
+
+  async getContractDocumentTemplateVersion(versionId: number) {
+    return this.request<InvoiceDocumentTemplateSettingsDto>(`/contracts/document-template-settings/history/${versionId}`);
+  }
+
+  async restoreContractDocumentTemplateVersion(versionId: number) {
+    return this.request<InvoiceDocumentTemplateSettingsDto>(`/contracts/document-template-settings/history/${versionId}/restore`, {
+      method: 'POST',
+    });
+  }
+
   async createContract(payload: ContractInput) {
     return this.request<Contract>('/contracts', {
       method: 'POST',
@@ -3903,6 +3929,20 @@ export class ApiService {
     return this.request<InvoiceDocumentTemplateSettingsDto>('/invoices/document-template-settings', {
       method: 'PUT',
       body: JSON.stringify(payload),
+    });
+  }
+
+  async getInvoiceDocumentTemplateHistory() {
+    return this.request<DocumentTemplateVersionDto[]>('/invoices/document-template-settings/history');
+  }
+
+  async getInvoiceDocumentTemplateVersion(versionId: number) {
+    return this.request<InvoiceDocumentTemplateSettingsDto>(`/invoices/document-template-settings/history/${versionId}`);
+  }
+
+  async restoreInvoiceDocumentTemplateVersion(versionId: number) {
+    return this.request<InvoiceDocumentTemplateSettingsDto>(`/invoices/document-template-settings/history/${versionId}/restore`, {
+      method: 'POST',
     });
   }
 
