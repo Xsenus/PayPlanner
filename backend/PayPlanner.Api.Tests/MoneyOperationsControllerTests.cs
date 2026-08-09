@@ -3100,8 +3100,8 @@ public class MoneyOperationsControllerTests
         Assert.Contains("Ахмедова Айтан Рафик Кызы", content.Content);
         Assert.Contains("Черновиков", content.Content);
         Assert.Contains("thead { display: table-header-group; }", content.Content);
-        Assert.Contains("tbody tr { break-inside: avoid-page !important; page-break-inside: avoid !important; }", content.Content);
-        Assert.Contains("th:nth-child(8), td:nth-child(8) { width: 29%; }", content.Content);
+        Assert.Matches(@"tbody\s+tr\s*\{[^}]*break-inside:\s*avoid-page\s*!important;[^}]*page-break-inside:\s*avoid\s*!important;", content.Content);
+        Assert.Matches(@"th:nth-child\(8\),\s*td:nth-child\(8\)\s*\{[^}]*width:\s*29%;", content.Content);
         AssertPrintHtmlHasNoGeneratedTimestamp(content.Content);
         AssertPrintHtmlUsesSharedDocumentStyle(content.Content);
     }
