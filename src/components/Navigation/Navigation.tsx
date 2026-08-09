@@ -86,6 +86,7 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
   const { t } = useTranslation();
   const { user, isAdmin } = useAuth();
   const permissions = useRolePermissions(user?.role?.id);
+  const orderStorageKey = `${ORDER_KEY}.${user?.id ?? 'guest'}`;
   const [mobileOpen, setMobileOpen] = useState(false);
   const [advanceDecisionCount, setAdvanceDecisionCount] = useState(0);
 
@@ -435,7 +436,7 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
     }
 
     return normalizeSidebarOrder(
-      window.localStorage.getItem(ORDER_KEY),
+      window.localStorage.getItem(orderStorageKey) ?? window.localStorage.getItem(ORDER_KEY),
       availableSidebarItemIds,
     );
   });
@@ -502,6 +503,21 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
   );
 
   useEffect(() => {
+    const storedOrder = normalizeSidebarOrder(
+      window.localStorage.getItem(orderStorageKey) ?? window.localStorage.getItem(ORDER_KEY),
+      availableSidebarItemIds,
+    );
+    setOrderedSidebarItemIds((prev) =>
+      storedOrder.length === prev.length && storedOrder.every((id, index) => id === prev[index])
+        ? prev
+        : storedOrder,
+    );
+    // Доступные пункты синхронизируются отдельным эффектом ниже; здесь перечитываем
+    // сохраненный порядок только при смене учетной записи.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orderStorageKey]);
+
+  useEffect(() => {
     setOrderedSidebarItemIds((prev) => {
       const synced = normalizeSidebarOrder(
         JSON.stringify(prev),
@@ -515,11 +531,11 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
 
   useEffect(() => {
     try {
-      localStorage.setItem(ORDER_KEY, JSON.stringify(orderedSidebarItemIds));
+      localStorage.setItem(orderStorageKey, JSON.stringify(orderedSidebarItemIds));
     } catch {
       /** */
     }
-  }, [orderedSidebarItemIds]);
+  }, [orderStorageKey, orderedSidebarItemIds]);
 
   const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
 

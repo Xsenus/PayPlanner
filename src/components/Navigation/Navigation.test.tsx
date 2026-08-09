@@ -164,7 +164,7 @@ describe('Navigation links', () => {
   });
 
   it('keeps sidebar order from saved preferences', async () => {
-    window.localStorage.setItem('pp.sidebar_order', JSON.stringify(['tasks', 'calendar', 'notifications']));
+    window.localStorage.setItem('pp.sidebar_order.1', JSON.stringify(['tasks', 'calendar', 'notifications']));
 
     renderNavigation();
     await waitForNavigationPermissions();
@@ -203,8 +203,35 @@ describe('Navigation links', () => {
     fireEvent.drop(calendarItem!, { dataTransfer });
 
     await waitFor(() => {
-      const order = JSON.parse(window.localStorage.getItem('pp.sidebar_order') || '[]') as string[];
+      const order = JSON.parse(window.localStorage.getItem('pp.sidebar_order.1') || '[]') as string[];
       expect(order.indexOf('tasks')).toBeLessThan(order.indexOf('calendar'));
+    });
+  });
+
+  it('keeps settings in the same movable list instead of a fixed footer', async () => {
+    window.localStorage.setItem('pp.sidebar_order.1', JSON.stringify(['settings', 'calendar', 'notifications']));
+
+    renderNavigation();
+    await waitForNavigationPermissions();
+
+    const navigation = screen.getByRole('navigation', { name: 'Навигация' });
+    const topLevelLinks = Array.from(navigation.querySelectorAll('ul > li > div > a')).map((link) =>
+      (link.textContent ?? '').trim(),
+    );
+    expect(topLevelLinks[0] ?? '').toContain('Настройки');
+    expect(findLinkByHref(getTabHref('settings'))?.closest('div[draggable="true"]')).toBeTruthy();
+  });
+
+  it('migrates the previous shared order into the current user preference', async () => {
+    window.localStorage.setItem('pp.sidebar_order', JSON.stringify(['tasks', 'calendar']));
+
+    renderNavigation();
+    await waitForNavigationPermissions();
+
+    await waitFor(() => {
+      const order = JSON.parse(window.localStorage.getItem('pp.sidebar_order.1') || '[]') as string[];
+      expect(order[0]).toBe('tasks');
+      expect(order[1]).toBe('calendar');
     });
   });
 
