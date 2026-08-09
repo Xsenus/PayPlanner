@@ -20,11 +20,16 @@ public class CashOrdersController : ControllerBase
     private const string CashRegisterSourceToken = "кас";
     private readonly PaymentContext _db;
     private readonly IInvoiceDocumentPdfService? _pdfService;
+    private readonly IConfiguration? _configuration;
 
-    public CashOrdersController(PaymentContext db, IInvoiceDocumentPdfService? pdfService = null)
+    public CashOrdersController(
+        PaymentContext db,
+        IInvoiceDocumentPdfService? pdfService = null,
+        IConfiguration? configuration = null)
     {
         _db = db;
         _pdfService = pdfService;
+        _configuration = configuration;
     }
 
     private async Task<ForbidResult?> RequirePaymentsPermissionAsync(
@@ -833,7 +838,7 @@ public class CashOrdersController : ControllerBase
         {
             Number = await GenerateNumberAsync(source.Type, today, ct),
             Type = source.Type,
-            Status = CashOrderStatus.Posted,
+            Status = CashOrderStatus.Draft,
             Date = today,
             Amount = source.Amount,
             Currency = string.IsNullOrWhiteSpace(source.Currency) ? "RUB" : source.Currency,
@@ -882,7 +887,8 @@ public class CashOrdersController : ControllerBase
             return NotFound();
         }
 
-        return Content(BuildPrintHtml(order), "text/html; charset=utf-8", Encoding.UTF8);
+        var organizationName = await ResolveOrganizationNameAsync(order, ct);
+        return Content(BuildPrintHtml(order, organizationName), "text/html; charset=utf-8", Encoding.UTF8);
     }
 
     [HttpGet("{id:int}/pdf")]
@@ -913,7 +919,8 @@ public class CashOrdersController : ControllerBase
 
         try
         {
-            var pdfBytes = await RenderPdfAsync(BuildPrintHtml(order), ct);
+            var organizationName = await ResolveOrganizationNameAsync(order, ct);
+            var pdfBytes = await RenderPdfAsync(BuildPrintHtml(order, organizationName), ct);
             return File(pdfBytes, "application/pdf", $"cash-order-{SanitizeFilePart(order.Number)}.pdf");
         }
         catch (InvalidOperationException ex)
@@ -1435,14 +1442,43 @@ public class CashOrdersController : ControllerBase
             UpdatedAt = inventory.UpdatedAt,
         };
 
-    private static string BuildIncomingCashOrderPrintHtml(CashOrder order)
+    private async Task<string> ResolveOrganizationNameAsync(CashOrder order, CancellationToken ct)
+    {
+        var configured = _configuration?["App:OrganizationName"]?.Trim();
+        if (!string.IsNullOrWhiteSpace(configured))
+        {
+            return configured;
+        }
+
+        var rawId = await _db.SystemSettings.AsNoTracking()
+            .Where(item => item.Key == "legalEntities.defaultMainCompanyId"
+                || item.Key == "legalEntities.mainCompanyId")
+            .OrderByDescending(item => item.Key == "legalEntities.defaultMainCompanyId")
+            .Select(item => item.Value)
+            .FirstOrDefaultAsync(ct);
+        if (int.TryParse(rawId, out var id) && id > 0)
+        {
+            var legalEntityName = await _db.LegalEntities.AsNoTracking()
+                .Where(item => item.Id == id)
+                .Select(item => item.FullName ?? item.ShortName)
+                .FirstOrDefaultAsync(ct);
+            if (!string.IsNullOrWhiteSpace(legalEntityName))
+            {
+                return legalEntityName;
+            }
+        }
+
+        return order.CreatedByUserName ?? "Организация не указана";
+    }
+
+    private static string BuildIncomingCashOrderPrintHtml(CashOrder order, string organizationName)
     {
         var number = Html(order.Number);
-        var organization = Html(order.Account ?? order.ReceiverName ?? "-");
+        var organization = Html(organizationName);
         var payer = Html(order.PayerName ?? order.Client?.Name ?? "-");
         var basis = Html(order.Basis ?? "-");
         var appendix = Html(order.Appendix ?? string.Empty);
-        var signer = Html(order.ReceiverName ?? order.Account ?? string.Empty);
+        var signer = Html(order.CreatedByUserName ?? string.Empty);
         var amountRubKop = Html(FormatCashOrderRubKop(order.Amount));
         var rubles = Html(FormatWholeRubles(order.Amount));
         var kopecks = Html(FormatKopecks(order.Amount));
@@ -1618,11 +1654,16 @@ public class CashOrdersController : ControllerBase
 """;
     }
 
-    private static string BuildPrintHtml(CashOrder order)
+    private static string BuildPrintHtml(CashOrder order, string organizationName)
     {
         if (order.Type == CashOrderType.Incoming)
         {
-            return BuildIncomingCashOrderPrintHtml(order);
+            return BuildIncomingCashOrderPrintHtml(order, organizationName);
+        }
+
+        if (order.Type == CashOrderType.Outgoing)
+        {
+            return BuildOutgoingCashOrderPrintHtml(order, organizationName);
         }
 
         var isIncoming = order.Type == CashOrderType.Incoming;
@@ -1745,6 +1786,144 @@ public class CashOrdersController : ControllerBase
 """;
     }
 
+    private static string BuildOutgoingCashOrderPrintHtml(CashOrder order, string organizationName)
+    {
+        var number = Html(order.Number);
+        var organization = Html(organizationName);
+        var receiver = Html(order.ReceiverName ?? order.PayerName ?? order.Client?.Name ?? "-");
+        var basis = Html(order.Basis ?? "-");
+        var appendix = Html(order.Appendix ?? string.Empty);
+        var signer = Html(order.CreatedByUserName ?? string.Empty);
+        var amountRubKop = Html(FormatCashOrderRubKop(order.Amount));
+        var amountWords = Html(AmountRublesToWordsRu(order.Amount));
+        var kopecks = Html(FormatKopecks(order.Amount));
+        var cancelNotice = order.Status == CashOrderStatus.Cancelled
+            ? $"""<div class="cancelled">Документ отменён{(order.CancelledAt.HasValue ? $" {order.CancelledAt:dd.MM.yyyy HH:mm}" : string.Empty)}{(string.IsNullOrWhiteSpace(order.CancelledReason) ? string.Empty : $": {Html(order.CancelledReason)}")}</div>"""
+            : string.Empty;
+
+        return $$"""
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <title>Расходный кассовый ордер {{number}}</title>
+  <style>
+    @page { size: A4 portrait; margin: 0; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: #111;
+      font-family: Arial, "DejaVu Sans", sans-serif;
+      font-size: 10px;
+      line-height: 1.15;
+      background: #fff;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
+    .ko2 { position: relative; width: 178mm; margin: 24mm 0 0 16mm; }
+    .top-note { margin-left: 116mm; margin-bottom: 3mm; font-size: 7px; line-height: 1.3; }
+    .header-row { display: block; padding-right: 42mm; }
+    .org-line { border-bottom: 2px solid #111; min-height: 18px; padding: 0 6px 2px; }
+    .hint { color: #333; font-size: 6px; text-align: center; }
+    .code-box, .doc-meta, .ledger { border-collapse: collapse; width: 100%; table-layout: fixed; }
+    .code-box td, .doc-meta td, .ledger th, .ledger td { border: 1px solid #111; padding: 1.5mm 1mm; text-align: center; vertical-align: middle; }
+    .code-box { position: absolute; top: 10mm; right: 0; width: 28mm; }
+    .code-box td:first-child { border-left: 0; text-align: right; padding-right: 8px; }
+    .code-box td:last-child { font-weight: 700; }
+    .title { width: 92mm; margin: 9mm auto 5mm; text-align: center; font-size: 13px; line-height: 1.05; font-weight: 800; letter-spacing: .02em; text-transform: uppercase; }
+    .doc-meta { width: 52mm; margin: 0 auto 4mm; font-size: 7px; }
+    .doc-meta .value { font-size: 10px; font-weight: 700; }
+    .ledger { font-size: 7px; }
+    .ledger th { font-weight: 400; }
+    .ledger .sum { font-size: 8px; white-space: nowrap; }
+    .line-field { display: grid; grid-template-columns: auto 1fr; gap: 2mm; align-items: end; margin-top: 2mm; font-size: 8px; }
+    .line { min-height: 4.4mm; border-bottom: 1px solid #111; padding: 0 1.5mm .4mm; }
+    .long-line { margin-top: 1.5mm; min-height: 4.4mm; border-bottom: 1px solid #111; }
+    .amount-words { display: grid; grid-template-columns: auto 1fr auto 15mm auto; gap: 2mm; align-items: end; margin-top: 2mm; font-size: 8px; }
+    .kopecks { text-align: center; }
+    .sign-row { display: grid; grid-template-columns: 36mm 35mm 1fr; gap: 5mm; align-items: end; margin-top: 3mm; font-size: 8px; }
+    .leader-row { grid-template-columns: 38mm 35mm 35mm 1fr; }
+    .sign-line { border-bottom: 1px solid #111; min-height: 4.4mm; text-align: center; padding-bottom: .4mm; }
+    .sign-label { font-size: 6px; text-align: center; color: #333; margin-top: .5mm; }
+    .received { display: grid; grid-template-columns: auto 1fr auto 15mm auto; gap: 2mm; align-items: end; margin-top: 6mm; font-size: 8px; }
+    .received-date { display: grid; grid-template-columns: auto 8mm auto 25mm 16mm auto 1fr; gap: 2mm; align-items: end; margin-top: 2mm; font-size: 8px; }
+    .identity-note { margin: .6mm 0 0 10mm; font-size: 6px; text-align: center; }
+    .cancelled { margin: 0 0 3mm; border: 1px solid #111; padding: 2mm; font-weight: 700; }
+  </style>
+</head>
+<body>
+  <main class="ko2">
+    <div class="top-note">
+      <div>Унифицированная форма № КО-2</div>
+      <div>Утверждена постановлением Госкомстата</div>
+      <div>России от 18.08.98 № 88</div>
+    </div>
+    <div class="header-row">
+      <div class="org-line">{{organization}}</div>
+      <div class="hint">(организация)</div>
+      <div class="org-line" style="margin-top:3mm;"></div>
+      <div class="hint">(структурное подразделение)</div>
+    </div>
+    <table class="code-box">
+      <tr><td>Код</td><td></td></tr>
+      <tr><td>Форма по ОКУД</td><td>0310002</td></tr>
+      <tr><td>по ОКПО</td><td></td></tr>
+    </table>
+    <h1 class="title">Расходный кассовый ордер</h1>
+    <table class="doc-meta">
+      <tr><td>Номер документа</td><td>Дата составления</td></tr>
+      <tr><td class="value">{{number}}</td><td class="value">{{order.Date:dd.MM.yyyy}}</td></tr>
+    </table>
+    {{cancelNotice}}
+    <table class="ledger">
+      <tr>
+        <th colspan="4">Дебет</th>
+        <th rowspan="2" style="width:22mm;">Кредит</th>
+        <th rowspan="2" style="width:28mm;">Сумма,<br>руб. коп.</th>
+        <th rowspan="2" style="width:29mm;">Код целевого<br>назначения</th>
+      </tr>
+      <tr>
+        <th style="width:25mm;">код структурного<br>подразделения</th>
+        <th style="width:30mm;">корреспондирующий<br>счет, субсчет</th>
+        <th style="width:25mm;">код аналитического<br>учета</th>
+        <th style="width:18mm;">&nbsp;</th>
+      </tr>
+      <tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td class="sum">{{amountRubKop}}</td><td>&nbsp;</td></tr>
+    </table>
+    <div class="line-field"><span>Выдать</span><div class="line">{{receiver}}</div></div>
+    <div class="hint">(фамилия, имя, отчество)</div>
+    <div class="line-field"><span>Основание</span><div class="line">{{basis}}</div></div>
+    <div class="long-line"></div>
+    <div class="amount-words"><span>Сумма</span><div class="line">{{amountWords}}</div><span>руб.</span><div class="line kopecks">{{kopecks}}</div><span>коп.</span></div>
+    <div class="hint">(прописью)</div>
+    <div class="line-field"><span>Приложение</span><div class="line">{{appendix}}</div></div>
+    <div class="sign-row leader-row">
+      <div>Руководитель организации</div>
+      <div><div class="sign-line"></div><div class="sign-label">(должность)</div></div>
+      <div><div class="sign-line"></div><div class="sign-label">(подпись)</div></div>
+      <div><div class="sign-line">{{signer}}</div><div class="sign-label">(расшифровка подписи)</div></div>
+    </div>
+    <div class="sign-row">
+      <div>Главный бухгалтер</div>
+      <div><div class="sign-line"></div><div class="sign-label">(подпись)</div></div>
+      <div><div class="sign-line">{{signer}}</div><div class="sign-label">(расшифровка подписи)</div></div>
+    </div>
+    <div class="received"><span>Получил</span><div class="line">{{amountWords}}</div><span>руб.</span><div class="line kopecks">{{kopecks}}</div><span>коп.</span></div>
+    <div class="received-date"><span>«</span><div class="line"></div><span>»</span><div class="line"></div><div class="line">{{order.Date:yyyy}}</div><span>г.</span><div class="line"></div></div>
+    <div class="sign-label" style="text-align:right;">(подпись)</div>
+    <div class="line-field"><span>По</span><div class="line"></div></div>
+    <div class="identity-note">(наименование, номер, дата и место выдачи документа, удостоверяющего личность получателя)</div>
+    <div class="sign-row">
+      <div>Выдал кассир</div>
+      <div><div class="sign-line"></div><div class="sign-label">(подпись)</div></div>
+      <div><div class="sign-line">{{signer}}</div><div class="sign-label">(расшифровка подписи)</div></div>
+    </div>
+  </main>
+</body>
+</html>
+""";
+    }
+
     private static string BuildCashBookPrintHtml(CashBookResponseDto cashBook)
     {
         var accountText = string.IsNullOrWhiteSpace(cashBook.AccountName)
@@ -1854,6 +2033,25 @@ public class CashOrdersController : ControllerBase
   <meta charset="utf-8" />
   <title>Журнал регистрации ПКО/РКО</title>
   {{BuildRegisterPrintStyles()}}
+  <style>
+    thead { display: table-header-group; }
+    tbody tr {
+      break-inside: avoid-page !important;
+      page-break-inside: avoid !important;
+    }
+    @media print {
+      table { font-size: 10px; }
+      th, td { padding: 4px 5px; line-height: 1.15; }
+      th:nth-child(1), td:nth-child(1) { width: 4%; }
+      th:nth-child(2), td:nth-child(2) { width: 9%; }
+      th:nth-child(3), td:nth-child(3) { width: 12%; }
+      th:nth-child(4), td:nth-child(4) { width: 6%; }
+      th:nth-child(5), td:nth-child(5) { width: 9%; }
+      th:nth-child(6), td:nth-child(6) { width: 12%; }
+      th:nth-child(7), td:nth-child(7) { width: 19%; }
+      th:nth-child(8), td:nth-child(8) { width: 29%; }
+    }
+  </style>
 </head>
 <body>
   <main class="document">

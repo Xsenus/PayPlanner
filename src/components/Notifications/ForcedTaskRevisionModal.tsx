@@ -454,8 +454,15 @@ export function ForcedTaskRevisionModal({ onOpenTask }: ForcedTaskRevisionModalP
 
     setDeadlineChangeRequestLoading(true);
     apiService.getTaskJournalDeadlineChangeRequest(currentDeadlineChangeTaskId, currentDeadlineChangeRequestId)
-      .then((persistedRequest) => {
+      .then(async (persistedRequest) => {
         if (cancelled) return;
+
+        if (!persistedRequest || persistedRequest.status.toLowerCase() !== 'pending') {
+          if (current?.id) {
+            await finishNotificationById(current.id, 'forced-task-deadline-change-processed');
+          }
+          return;
+        }
 
         setDeadlineChangeRequest(persistedRequest);
         if (persistedRequest?.requestedDueAt) {

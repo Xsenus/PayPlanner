@@ -290,6 +290,25 @@ public class ReportsController : ControllerBase
         return File(pdf, "application/pdf", $"legal-work-report-{now.Local:yyyyMMdd-HHmm}.pdf");
     }
 
+    [HttpGet("legal-work.print")]
+    public async Task<IActionResult> PrintLegalWork(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] string? status,
+        [FromQuery] int? responsibleUserId,
+        [FromQuery] string? caseType,
+        CancellationToken ct)
+    {
+        var (report, error) = await BuildLegalWorkExportReportAsync(from, to, status, responsibleUserId, caseType, ct);
+        if (error is not null)
+        {
+            return error;
+        }
+
+        var now = await ResolveReportNowAsync(ct);
+        return Content(BuildLegalWorkPrintHtml(report!, now.Utc, now.TimeZone), "text/html; charset=utf-8");
+    }
+
     [HttpGet("management.xls")]
     public async Task<IActionResult> ExportManagementReportExcel(
         [FromQuery] string report,
@@ -2817,7 +2836,7 @@ public class ReportsController : ControllerBase
         => new(
             "bank-report",
             "Отчет по банку",
-            $"Период: {DateCell(report.From)} - {DateCell(report.To)} · Источник: Банк{BuildCashFlowFilterSuffix(report)}",
+            $"Период: {DateCell(report.From)} - {DateCell(report.To)}{BuildCashFlowFilterSuffix(report)}",
             [
                 new("Начальный остаток", MoneyCell(report.OpeningBalance)),
                 new("Поступления", MoneyCell(report.Income)),
@@ -3804,9 +3823,15 @@ public class ReportsController : ControllerBase
     .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 16px 0; }
     .metric { border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px; }
     .metric strong { display: block; font-size: 16px; margin-top: 4px; }
-    table { width: 100%; border-collapse: collapse; margin-top: 8px; }
-    th, td { border: 1px solid #e5e7eb; padding: 5px 6px; vertical-align: top; }
+    table { width: 100%; table-layout: fixed; border-collapse: collapse; margin-top: 8px; }
+    thead { display: table-header-group; }
+    tr { break-inside: avoid; page-break-inside: avoid; }
+    th, td { border: 1px solid #e5e7eb; padding: 5px 6px; vertical-align: top; overflow-wrap: anywhere; word-break: break-word; }
     th { background: #f3f4f6; text-align: left; }
+    .report-table--wide { font-size: 9px; line-height: 1.2; }
+    .report-table--wide th, .report-table--wide td { padding: 4px; }
+    .report-table--very-wide { font-size: 7px; line-height: 1.15; }
+    .report-table--very-wide th, .report-table--very-wide td { padding: 3px; }
   </style>
 </head>
 <body>
@@ -3827,7 +3852,18 @@ public class ReportsController : ControllerBase
         builder.AppendLine("</div>");
         foreach (var table in document.Tables)
         {
-            builder.Append("<h2>").Append(Html(table.Title)).AppendLine("</h2><table><thead><tr>");
+            var tableClass = table.Headers.Count >= 14
+                ? "report-table--very-wide"
+                : table.Headers.Count >= 10
+                    ? "report-table--wide"
+                    : string.Empty;
+            builder.Append("<h2>").Append(Html(table.Title)).Append("</h2><table");
+            if (tableClass.Length > 0)
+            {
+                builder.Append(" class=\"").Append(tableClass).Append('"');
+            }
+
+            builder.AppendLine("><thead><tr>");
             foreach (var header in table.Headers)
             {
                 builder.Append("<th>").Append(Html(header)).Append("</th>");
@@ -4126,8 +4162,10 @@ public class ReportsController : ControllerBase
     .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 16px 0; }
     .metric { border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px; }
     .metric strong { display: block; font-size: 17px; margin-top: 4px; }
-    table { width: 100%; border-collapse: collapse; margin-top: 8px; }
-    th, td { border: 1px solid #e5e7eb; padding: 5px 6px; vertical-align: top; }
+    table { width: 100%; table-layout: fixed; border-collapse: collapse; margin-top: 8px; font-size: 9px; line-height: 1.2; }
+    thead { display: table-header-group; }
+    tr { break-inside: avoid; page-break-inside: avoid; }
+    th, td { border: 1px solid #e5e7eb; padding: 4px; vertical-align: top; overflow-wrap: anywhere; word-break: break-word; }
     th { background: #f3f4f6; text-align: left; }
     .num { text-align: right; white-space: nowrap; }
   </style>

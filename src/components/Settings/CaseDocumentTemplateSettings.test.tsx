@@ -1,6 +1,7 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { DialogProvider } from '../../contexts/DialogContext';
 import { apiService } from '../../services/api';
 import { CaseDocumentTemplateSettings } from './CaseDocumentTemplateSettings';
 
@@ -8,6 +9,14 @@ const toastMock = {
   success: vi.fn(),
   error: vi.fn(),
 };
+
+function renderSettings() {
+  return render(
+    <DialogProvider>
+      <CaseDocumentTemplateSettings />
+    </DialogProvider>,
+  );
+}
 
 vi.mock('../../hooks/useToast', () => ({
   useToast: () => toastMock,
@@ -20,6 +29,9 @@ vi.mock('../../services/api', () => ({
     createCaseDocumentTemplate: vi.fn(),
     updateCaseDocumentTemplate: vi.fn(),
     renderCaseDocumentTemplate: vi.fn(),
+    getCaseDocumentTemplateHistory: vi.fn(),
+    getCaseDocumentTemplateVersion: vi.fn(),
+    restoreCaseDocumentTemplateVersion: vi.fn(),
     getUserSetting: vi.fn(),
   },
 }));
@@ -31,8 +43,12 @@ describe('CaseDocumentTemplateSettings', () => {
     vi.mocked(apiService.createCaseDocumentTemplate).mockReset();
     vi.mocked(apiService.updateCaseDocumentTemplate).mockReset();
     vi.mocked(apiService.renderCaseDocumentTemplate).mockReset();
+    vi.mocked(apiService.getCaseDocumentTemplateHistory).mockReset();
+    vi.mocked(apiService.getCaseDocumentTemplateVersion).mockReset();
+    vi.mocked(apiService.restoreCaseDocumentTemplateVersion).mockReset();
     vi.mocked(apiService.getUserSetting).mockReset();
     vi.mocked(apiService.getUserSetting).mockResolvedValue({ key: 'profile.timeZoneId', value: 'Europe/Samara' });
+    vi.mocked(apiService.getCaseDocumentTemplateHistory).mockResolvedValue([]);
     toastMock.success.mockReset();
     toastMock.error.mockReset();
   });
@@ -86,7 +102,7 @@ describe('CaseDocumentTemplateSettings', () => {
       html: '<html><body>Rendered claim</body></html>',
     });
 
-    render(<CaseDocumentTemplateSettings />);
+    renderSettings();
 
     expect(await screen.findByText('Claim template')).toBeTruthy();
     expect(screen.getByText('{{case.title}}')).toBeTruthy();
@@ -123,5 +139,60 @@ describe('CaseDocumentTemplateSettings', () => {
       });
     });
     expect(await screen.findByTitle('Предпросмотр шаблона документа дела')).toBeTruthy();
+  });
+
+  it('previews and restores a saved library version', async () => {
+    const currentTemplate = {
+      key: 'claim',
+      label: 'Текущий иск',
+      documentType: 'Иск',
+      heading: 'Текущий иск',
+      caseTypes: [],
+      description: 'Текущая версия.',
+      content: '<p>Текущий HTML</p>',
+      version: 2,
+      isActive: true,
+      updatedAt: '2026-08-09T10:00:00Z',
+    };
+    const restoredTemplate = {
+      ...currentTemplate,
+      label: 'Исходный иск',
+      description: 'Исходная версия.',
+      content: '<p>Исходный HTML</p>',
+      version: 1,
+    };
+    const history = [{
+      id: 41,
+      revision: 1,
+      documentType: 'case-document',
+      activeTemplateKey: '',
+      templateNames: ['Исходный иск'],
+      createdByUserId: 3,
+      createdByUserName: 'Администратор',
+      createdAt: '2026-08-09T09:00:00Z',
+      restoredFromVersionId: null,
+    }];
+
+    vi.mocked(apiService.getCaseDocumentTemplates).mockResolvedValue([currentTemplate]);
+    vi.mocked(apiService.getCaseDocumentTemplateTokens).mockResolvedValue([]);
+    vi.mocked(apiService.getCaseDocumentTemplateHistory).mockResolvedValue(history);
+    vi.mocked(apiService.getCaseDocumentTemplateVersion).mockResolvedValue([restoredTemplate]);
+    vi.mocked(apiService.restoreCaseDocumentTemplateVersion).mockResolvedValue([restoredTemplate]);
+    renderSettings();
+
+    fireEvent.click(await screen.findByRole('button', { name: /История версий/ }));
+    expect(await screen.findByText('Версия №1')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Просмотреть' }));
+    expect(await screen.findByText('<p>Исходный HTML</p>')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Восстановить' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Восстановить версию №1' });
+    expect(within(dialog).getByText(/Текущая библиотека шаблонов/)).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Восстановить' }));
+    await waitFor(() => {
+      expect(apiService.restoreCaseDocumentTemplateVersion).toHaveBeenCalledWith(41);
+    });
+    expect((await screen.findAllByText('Исходный иск')).length).toBeGreaterThanOrEqual(2);
+    expect(toastMock.success).toHaveBeenCalledWith('Версия №1 восстановлена.', 'История шаблонов');
   });
 });

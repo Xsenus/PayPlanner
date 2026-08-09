@@ -5,6 +5,7 @@ import type { InvoiceDocumentTemplateDto, InvoiceDocumentTemplateSettingsDto } f
 import { useDialog } from '../../hooks/useDialog';
 import { useToast } from '../../hooks/useToast';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import { DocumentTemplateHistoryPanel } from './DocumentTemplateHistoryPanel';
 
 function slugifyTemplateKey(value: string) {
   const normalized = value
@@ -225,6 +226,7 @@ export function InvoiceDocumentTemplateSettings() {
   const [tokenSearch, setTokenSearch] = useState('');
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
   const [validationResult, setValidationResult] = useState<TemplateValidationResult | null>(null);
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -235,6 +237,7 @@ export function InvoiceDocumentTemplateSettings() {
     try {
       const response = await apiService.getInvoiceDocumentTemplateSettings();
       setSettings(response);
+      setHistoryRefreshKey((value) => value + 1);
       setSelectedTemplateKey((prev) => {
         if (prev && response.templates.some((item) => item.key === prev)) {
           return prev;
@@ -576,6 +579,16 @@ export function InvoiceDocumentTemplateSettings() {
           {error ?? message}
         </div>
       )}
+
+      <DocumentTemplateHistoryPanel
+        kind="invoice"
+        refreshKey={historyRefreshKey}
+        onRestored={(response) => {
+          setSettings(response);
+          setSelectedTemplateKey(response.activeTemplateKey || response.templates[0]?.key || '');
+          setHistoryRefreshKey((value) => value + 1);
+        }}
+      />
 
       <div className="mt-6 grid gap-6 xl:grid-cols-[320px,minmax(0,1fr)]">
         <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4 xl:sticky xl:top-4 xl:self-start">

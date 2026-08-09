@@ -680,29 +680,33 @@ public class TasksController : ControllerBase
             .GroupBy(_ => 1)
             .Select(group => new
             {
-                Active = group.Count(task => task.Status != "done" && task.Status != "cancelled"),
+                Active = group.Count(task =>
+                    (task.Status == null || task.Status.ToLower() != "done") &&
+                    (task.Status == null || task.Status.ToLower() != "cancelled")),
                 Overdue = group.Count(task =>
-                    task.Status != "done" &&
-                    task.Status != "cancelled" &&
+                    (task.Status == null || task.Status.ToLower() != "done") &&
+                    (task.Status == null || task.Status.ToLower() != "cancelled") &&
                     task.DueAt < now),
                 Today = group.Count(task =>
-                    task.Status != "done" &&
-                    task.Status != "cancelled" &&
+                    (task.Status == null || task.Status.ToLower() != "done") &&
+                    (task.Status == null || task.Status.ToLower() != "cancelled") &&
                     task.DueAt >= normalizedTodayFrom &&
                     task.DueAt < normalizedTodayTo),
                 HighPriority = group.Count(task =>
-                    task.Status != "done" &&
-                    task.Status != "cancelled" &&
+                    (task.Status == null || task.Status.ToLower() != "done") &&
+                    (task.Status == null || task.Status.ToLower() != "cancelled") &&
                     (task.Priority == "high" || task.Priority == "urgent")),
             })
             .SingleOrDefaultAsync(ct);
 
-        var unbilledCount = await BuildVisibleTaskBaseQuery(access)
-            .AsNoTracking()
+        var unbilledCount = await query
             .CountAsync(task =>
                 task.ClientBillingClassification == TaskClientBillingClassification.Billable &&
                 !task.BillingInvoiceId.HasValue &&
-                task.BillingModeSnapshot != ContractBillingMode.Fixed,
+                (task.BillingModeSnapshot == null ||
+                 task.BillingModeSnapshot.ToLower() != ContractBillingMode.Fixed.ToLower()) &&
+                (task.Status == null || task.Status.ToLower() != "done") &&
+                (task.Status == null || task.Status.ToLower() != "cancelled"),
                 ct);
 
         return Ok(new TaskJournalListSummaryDto

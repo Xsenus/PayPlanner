@@ -30,3 +30,11 @@ export function buildVisibleReportGroups(access: ReportSectionAccess): ReportGro
 
   return groups;
 }
+
+export function isReportGroupEnabled(
+  activeGroup: ReportGroupId,
+  targetGroup: ReportGroupId,
+  visibleGroups: readonly ReportGroupId[],
+): boolean {
+  return activeGroup === targetGroup && visibleGroups.includes(targetGroup);
+}

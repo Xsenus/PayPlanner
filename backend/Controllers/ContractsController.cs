@@ -14,6 +14,7 @@ using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.Contracts;
+using PayPlanner.Api.Services.Documents;
 using PayPlanner.Api.Services.Invoices;
 using PayPlanner.Api.Services.Notifications;
 
@@ -30,6 +31,7 @@ public class ContractsController : ControllerBase
     private const string ContractAutoGenerateNumberSettingKey = "contracts.rules.autoGenerateWhenEmpty";
     private const string ContractAllowManualNumberEditSettingKey = "contracts.rules.allowManualNumberEdit";
     private const string ContractDocumentTemplatesSettingKey = "contracts.documentTemplates";
+    private const int ContractDocumentTemplateHistoryObjectId = 2;
     private const string LegacyMainCompanySettingKey = "legalEntities.mainCompanyId";
     private const string MainCompanyIdsSettingKey = "legalEntities.mainCompanyIds";
     private const string DefaultMainCompanyIdSettingKey = "legalEntities.defaultMainCompanyId";
@@ -653,7 +655,103 @@ public class ContractsController : ControllerBase
         }
 
         var now = DateTime.UtcNow;
-        await UpsertSystemSettingAsync(ContractDocumentTemplatesSettingKey, ContractDocumentTemplateEngine.Serialize(storage), now, ct);
+        await DocumentTemplateHistoryService.SaveVersionedSettingAsync(
+            _db,
+            ContractDocumentTemplatesSettingKey,
+            ContractDocumentTemplateHistoryObjectId,
+            "contract",
+            DocumentTemplateHistoryService.SerializeSettings(ContractDocumentTemplateEngine.CreateDefaultSettings()),
+            ContractDocumentTemplateEngine.Serialize(storage),
+            User.GetUserId(),
+            User.GetDisplayName(),
+            now,
+            null,
+            ct);
+        await _db.SaveChangesAsync(ct);
+
+        return Ok(ContractDocumentTemplateEngine.CreateResponse(storage));
+    }
+
+    [HttpGet("document-template-settings/history")]
+    public async Task<ActionResult<IReadOnlyList<DocumentTemplateVersionDto>>> GetDocumentTemplateHistory(CancellationToken ct)
+    {
+        if (!await IsDatabaseAdminAsync(ct))
+        {
+            return Forbid();
+        }
+
+        return Ok(await DocumentTemplateHistoryService.GetVersionsAsync(_db, ContractDocumentTemplateHistoryObjectId, ct));
+    }
+
+    [HttpGet("document-template-settings/history/{versionId:int}")]
+    public async Task<ActionResult<InvoiceDocumentTemplateSettingsDto>> GetDocumentTemplateVersion(
+        int versionId,
+        CancellationToken ct)
+    {
+        if (!await IsDatabaseAdminAsync(ct))
+        {
+            return Forbid();
+        }
+
+        var settingsJson = await DocumentTemplateHistoryService.GetVersionSettingsAsync(
+            _db,
+            ContractDocumentTemplateHistoryObjectId,
+            versionId,
+            ct);
+        var request = settingsJson is null ? null : DocumentTemplateHistoryService.DeserializeSettings(settingsJson);
+        if (request is null)
+        {
+            return NotFound();
+        }
+
+        return Ok(ContractDocumentTemplateEngine.CreateResponse(ContractDocumentTemplateEngine.NormalizeRequest(request)));
+    }
+
+    [HttpPost("document-template-settings/history/{versionId:int}/restore")]
+    public async Task<ActionResult<InvoiceDocumentTemplateSettingsDto>> RestoreDocumentTemplateVersion(
+        int versionId,
+        CancellationToken ct)
+    {
+        if (!await IsDatabaseAdminAsync(ct))
+        {
+            return Forbid();
+        }
+
+        var settingsJson = await DocumentTemplateHistoryService.GetVersionSettingsAsync(
+            _db,
+            ContractDocumentTemplateHistoryObjectId,
+            versionId,
+            ct);
+        if (settingsJson is null)
+        {
+            return NotFound();
+        }
+
+        var request = DocumentTemplateHistoryService.DeserializeSettings(settingsJson);
+        if (request is null)
+        {
+            return BadRequest("Сохраненная версия шаблонов повреждена.");
+        }
+
+        var storage = ContractDocumentTemplateEngine.NormalizeRequest(request);
+        var validationError = ValidateContractDocumentTemplateSettings(storage);
+        if (validationError is not null)
+        {
+            return BadRequest(validationError);
+        }
+
+        await DocumentTemplateHistoryService.SaveVersionedSettingAsync(
+            _db,
+            ContractDocumentTemplatesSettingKey,
+            ContractDocumentTemplateHistoryObjectId,
+            "contract",
+            DocumentTemplateHistoryService.SerializeSettings(ContractDocumentTemplateEngine.CreateDefaultSettings()),
+            ContractDocumentTemplateEngine.Serialize(storage),
+            User.GetUserId(),
+            User.GetDisplayName(),
+            DateTime.UtcNow,
+            versionId,
+            ct);
         await _db.SaveChangesAsync(ct);
 
         return Ok(ContractDocumentTemplateEngine.CreateResponse(storage));

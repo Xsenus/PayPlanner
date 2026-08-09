@@ -166,6 +166,7 @@ public static class InvoiceDocumentTemplateEngine
             new() { Key = "invoice.dueDateHtml", Category = "Счет", Description = "HTML-блок срока оплаты", IsRepeating = false },
             new() { Key = "invoice.notForAccountingHtml", Category = "Счет", Description = "HTML-блок пометки, что счет не для бухгалтерии", IsRepeating = false },
             new() { Key = "invoice.total", Category = "Счет", Description = "Итого по позициям", IsRepeating = false },
+            new() { Key = "invoice.subTotal", Category = "Счет", Description = "Итого без НДС", IsRepeating = false },
             new() { Key = "invoice.totalWords", Category = "Счет", Description = "Итого прописью", IsRepeating = false },
             new() { Key = "invoice.itemsCount", Category = "Счет", Description = "Количество наименований в счете", IsRepeating = false },
             new() { Key = "invoice.vatText", Category = "Счет", Description = "Строка по НДС", IsRepeating = false },
@@ -173,10 +174,13 @@ public static class InvoiceDocumentTemplateEngine
             new() { Key = "invoice.qrCodeHtml", Category = "Счет", Description = "HTML-блок QR-кода для оплаты", IsRepeating = false },
             new() { Key = "seller.shortName", Category = "Продавец", Description = "Краткое название продавца", IsRepeating = false },
             new() { Key = "seller.fullName", Category = "Продавец", Description = "Полное название продавца", IsRepeating = false },
+            new() { Key = "seller.organizationForm", Category = "Продавец", Description = "Организационно-правовая форма продавца", IsRepeating = false },
+            new() { Key = "seller.okpo", Category = "Продавец", Description = "Код ОКПО продавца", IsRepeating = false },
             new() { Key = "seller.inn", Category = "Продавец", Description = "ИНН продавца", IsRepeating = false },
             new() { Key = "seller.kpp", Category = "Продавец", Description = "КПП продавца", IsRepeating = false },
             new() { Key = "seller.kppOrDash", Category = "Продавец", Description = "КПП или дефис, если значение не заполнено", IsRepeating = false },
             new() { Key = "seller.ogrn", Category = "Продавец", Description = "ОГРН или ОГРНИП продавца", IsRepeating = false },
+            new() { Key = "seller.vatText", Category = "Продавец", Description = "Короткая пометка по НДС продавца", IsRepeating = false },
             new() { Key = "seller.address", Category = "Продавец", Description = "Адрес продавца", IsRepeating = false },
             new() { Key = "seller.phone", Category = "Продавец", Description = "Телефон продавца", IsRepeating = false },
             new() { Key = "seller.email", Category = "Продавец", Description = "Email продавца", IsRepeating = false },
@@ -198,11 +202,13 @@ public static class InvoiceDocumentTemplateEngine
             new() { Key = "seller.signatureHtml", Category = "Продавец", Description = "HTML-блок подписи", IsRepeating = false },
             new() { Key = "buyer.name", Category = "Покупатель", Description = "ФИО или название покупателя", IsRepeating = false },
             new() { Key = "buyer.address", Category = "Покупатель", Description = "Адрес покупателя", IsRepeating = false },
+            new() { Key = "buyer.organizationForm", Category = "Покупатель", Description = "Организационно-правовая форма покупателя", IsRepeating = false },
             new() { Key = "buyer.passport", Category = "Покупатель", Description = "Паспортные данные покупателя", IsRepeating = false },
             new() { Key = "buyer.inn", Category = "Покупатель", Description = "ИНН покупателя", IsRepeating = false },
             new() { Key = "buyer.kpp", Category = "Покупатель", Description = "КПП покупателя", IsRepeating = false },
             new() { Key = "buyer.kppOrDash", Category = "Покупатель", Description = "КПП покупателя или пустое значение", IsRepeating = false },
             new() { Key = "buyer.ogrn", Category = "Покупатель", Description = "ОГРН или ОГРНИП покупателя", IsRepeating = false },
+            new() { Key = "buyer.okpo", Category = "Покупатель", Description = "Код ОКПО покупателя", IsRepeating = false },
             new() { Key = "buyer.snils", Category = "Покупатель", Description = "СНИЛС покупателя", IsRepeating = false },
             new() { Key = "buyer.phone", Category = "Покупатель", Description = "Телефон покупателя", IsRepeating = false },
             new() { Key = "buyer.email", Category = "Покупатель", Description = "Email покупателя", IsRepeating = false },
@@ -219,6 +225,7 @@ public static class InvoiceDocumentTemplateEngine
             new() { Key = "unit", Category = "Позиции", Description = "Единица измерения", IsRepeating = true },
             new() { Key = "price", Category = "Позиции", Description = "Цена позиции", IsRepeating = true },
             new() { Key = "total", Category = "Позиции", Description = "Сумма позиции", IsRepeating = true },
+            new() { Key = "vat", Category = "Позиции", Description = "НДС позиции", IsRepeating = true },
         ];
     }
 
@@ -263,6 +270,8 @@ public static class InvoiceDocumentTemplateEngine
             : "Главный (старший) бухгалтер";
         var qrCodeHtml = BuildInvoiceQrCodeHtml(payment, seller, total, invoiceDate, number);
         var hasInstallmentSchedule = !string.IsNullOrWhiteSpace(installmentScheduleHtml);
+        var vatText = ResolveVatText(seller);
+        var lineItemVat = ResolveLineItemVat(seller);
         var dueDateHtml = !hasInstallmentSchedule && dueDate != invoiceDate
             ? $"<div class=\"invoice-meta-line\"><strong>Срок оплаты:</strong> {Encode(FormatDate(dueDate))}</div>"
             : string.Empty;
@@ -288,18 +297,22 @@ public static class InvoiceDocumentTemplateEngine
                 ["invoice.clientCommentHtml"] = clientCommentHtml,
                 ["invoice.dueDateHtml"] = dueDateHtml,
                 ["invoice.notForAccountingHtml"] = notForAccountingHtml,
+                ["invoice.subTotal"] = Encode(FormatMoney(total)),
                 ["invoice.total"] = Encode(FormatMoney(total)),
                 ["invoice.totalWords"] = Encode(SpellMoney(total)),
                 ["invoice.itemsCount"] = Encode(normalizedLineItems.Count.ToString(CultureInfo.InvariantCulture)),
-                ["invoice.vatText"] = "Без налога (НДС): —",
+                ["invoice.vatText"] = Encode(vatText),
                 ["invoice.qrCodeHtml"] = qrCodeHtml,
                 ["invoice.installmentScheduleHtml"] = installmentScheduleHtml ?? string.Empty,
                 ["seller.shortName"] = Encode(seller.ShortName),
                 ["seller.fullName"] = Encode(seller.FullName),
+                ["seller.organizationForm"] = Encode(seller.OrganizationForm),
+                ["seller.okpo"] = Encode(seller.Okpo),
                 ["seller.inn"] = Encode(seller.Inn),
                 ["seller.kpp"] = Encode(seller.Kpp),
                 ["seller.kppOrDash"] = Encode(string.IsNullOrWhiteSpace(seller.Kpp) ? "-" : seller.Kpp),
                 ["seller.ogrn"] = Encode(seller.Ogrn),
+                ["seller.vatText"] = Encode(vatText),
                 ["seller.address"] = Encode(seller.Address),
                 ["seller.phone"] = Encode(seller.Phone),
                 ["seller.email"] = Encode(seller.Email),
@@ -326,9 +339,11 @@ public static class InvoiceDocumentTemplateEngine
                 ["buyer.name"] = Encode(buyer.Name),
                 ["buyer.address"] = Encode(buyer.Address),
                 ["buyer.passport"] = Encode(buyer.Passport),
+                ["buyer.organizationForm"] = Encode(buyer.OrganizationForm),
                 ["buyer.inn"] = Encode(buyer.Inn),
                 ["buyer.kpp"] = Encode(buyer.Kpp),
                 ["buyer.kppOrDash"] = Encode(string.IsNullOrWhiteSpace(buyer.Kpp) ? string.Empty : buyer.Kpp),
+                ["buyer.okpo"] = Encode(buyer.Okpo),
                 ["buyer.ogrn"] = Encode(buyer.Ogrn),
                 ["buyer.snils"] = Encode(buyer.Snils),
                 ["buyer.phone"] = Encode(buyer.Phone),
@@ -349,6 +364,7 @@ public static class InvoiceDocumentTemplateEngine
                     ["unit"] = Encode(string.IsNullOrWhiteSpace(item.Unit) ? "шт" : item.Unit),
                     ["price"] = Encode(FormatMoney(item.Price)),
                     ["total"] = Encode(FormatMoney(item.Quantity * item.Price)),
+                    ["vat"] = lineItemVat,
                 })
                 .ToList(),
         };
@@ -393,6 +409,7 @@ public static class InvoiceDocumentTemplateEngine
     {
         var profile = ParseBuyerProfile(client.Notes);
         var name = FirstNotEmpty(client.Name, fallbackName, "Поставщик");
+        var organizationForm = string.Empty;
         var company = client.Company ?? string.Empty;
         var address = ResolveBuyerAddress(client);
         var inn = profile?.Inn?.Trim() ?? string.Empty;
@@ -417,9 +434,12 @@ public static class InvoiceDocumentTemplateEngine
         {
             ShortName = name,
             FullName = name,
+            OrganizationForm = organizationForm,
             Inn = inn,
             Kpp = string.Empty,
             Ogrn = string.Empty,
+            Okpo = string.Empty,
+            IsVatExempt = false,
             Address = address,
             Phone = client.Phone ?? string.Empty,
             Email = client.Email ?? string.Empty,
@@ -443,15 +463,18 @@ public static class InvoiceDocumentTemplateEngine
 
         var fullName = FirstNotEmpty(mainCompany?.FullName, mainCompany?.ShortName, "Организация не выбрана");
         var shortName = FirstNotEmpty(mainCompany?.ShortName, mainCompany?.FullName, "Организация");
+        var organizationForm = mainCompany?.OrganizationForm?.Trim() ?? string.Empty;
+        var okpo = mainCompany?.Okpo?.Trim() ?? string.Empty;
         var address = LegalEntityAddressResolver.ResolvePreferredAddress(mainCompany);
         var bankName = FirstNotEmpty(bankAccount.Bank, mainCompany?.TreasuryBankName);
         var bik = FirstNotEmpty(bankAccount.Bik, mainCompany?.TreasuryBankBik);
         var accountNumber = FirstNotEmpty(bankAccount.AccountNumber, mainCompany?.TreasuryAccountNumber);
         var corrAccountNumber = FirstNotEmpty(bankAccount.CorrAccountNumber, mainCompany?.TreasuryCorrAccountNumber);
+        var legalName = string.IsNullOrWhiteSpace(organizationForm) ? fullName : $"{fullName} ({organizationForm})";
 
         var requisitesParts = new List<string>
         {
-            fullName,
+            legalName,
         };
 
         if (!string.IsNullOrWhiteSpace(mainCompany?.Inn))
@@ -484,13 +507,21 @@ public static class InvoiceDocumentTemplateEngine
             requisitesParts.Add($"БИК {bik}");
         }
 
+        if (!string.IsNullOrWhiteSpace(okpo))
+        {
+            requisitesParts.Add($"ОКПО {okpo}");
+        }
+
         return new SellerInfo
         {
             ShortName = shortName,
             FullName = fullName,
+            OrganizationForm = organizationForm,
             Inn = mainCompany?.Inn ?? string.Empty,
             Kpp = mainCompany?.Kpp ?? string.Empty,
             Ogrn = mainCompany?.Ogrn ?? string.Empty,
+            Okpo = okpo,
+            IsVatExempt = mainCompany?.VatWithoutVat == true,
             Address = address,
             Phone = mainCompany?.Phone ?? string.Empty,
             Email = mainCompany?.Email ?? string.Empty,
@@ -517,6 +548,10 @@ public static class InvoiceDocumentTemplateEngine
         if (directLegalEntity is not null)
         {
             var legalName = FirstNotEmpty(directLegalEntity.FullName, directLegalEntity.ShortName, payment.CounterpartyName, "Контрагент");
+            var legalOrganizationForm = directLegalEntity.OrganizationForm?.Trim() ?? string.Empty;
+            var legalNameWithForm = string.IsNullOrWhiteSpace(legalOrganizationForm)
+                ? legalName
+                : $"{legalName} ({legalOrganizationForm})";
             var legalAddress = LegalEntityAddressResolver.ResolvePreferredAddress(directLegalEntity);
             var legalContractValue = BuildBuyerContractValue(payment.Contract);
             var legalContract = string.IsNullOrWhiteSpace(legalContractValue)
@@ -526,10 +561,11 @@ public static class InvoiceDocumentTemplateEngine
             {
                 string.Join(", ", new[]
                 {
-                    legalName,
+                    legalNameWithForm,
                     string.IsNullOrWhiteSpace(directLegalEntity.Inn) ? null : $"ИНН {directLegalEntity.Inn}",
                     string.IsNullOrWhiteSpace(directLegalEntity.Kpp) ? null : $"КПП {directLegalEntity.Kpp}",
                     string.IsNullOrWhiteSpace(directLegalEntity.Ogrn) ? null : $"ОГРН {directLegalEntity.Ogrn}",
+                    string.IsNullOrWhiteSpace(directLegalEntity.Okpo) ? null : $"ОКПО {directLegalEntity.Okpo}",
                 }.Where(static part => !string.IsNullOrWhiteSpace(part))),
             };
             if (!string.IsNullOrWhiteSpace(legalAddress))
@@ -552,11 +588,13 @@ public static class InvoiceDocumentTemplateEngine
             return new BuyerInfo
             {
                 Name = legalName,
+                OrganizationForm = legalOrganizationForm,
                 Address = legalAddress,
                 Passport = string.Empty,
                 Inn = directLegalEntity.Inn ?? string.Empty,
                 Kpp = directLegalEntity.Kpp ?? string.Empty,
                 Ogrn = directLegalEntity.Ogrn ?? string.Empty,
+                Okpo = directLegalEntity.Okpo ?? string.Empty,
                 Snils = string.Empty,
                 Phone = directLegalEntity.Phone ?? string.Empty,
                 Email = directLegalEntity.Email ?? string.Empty,
@@ -629,11 +667,13 @@ public static class InvoiceDocumentTemplateEngine
         return new BuyerInfo
         {
             Name = name,
+            OrganizationForm = "",
             Address = address,
             Passport = passport,
             Inn = inn,
             Kpp = string.Empty,
             Ogrn = string.Empty,
+            Okpo = string.Empty,
             Snils = snils,
             Phone = phone,
             Email = email,
@@ -719,6 +759,40 @@ public static class InvoiceDocumentTemplateEngine
             ? string.Empty
             : $"Дело: {string.Join("; ", labels)}";
     }
+
+    private static string ResolveVatText(SellerInfo seller)
+    {
+        var taxSystem = seller.TaxSystem.Trim();
+        if (seller.IsVatExempt)
+        {
+            return "Без НДС";
+        }
+
+        if (string.IsNullOrWhiteSpace(taxSystem))
+        {
+            return "По реквизитам документа";
+        }
+
+        if (taxSystem.Contains("УСН", StringComparison.OrdinalIgnoreCase)
+            || taxSystem.Contains("ЕНВД", StringComparison.OrdinalIgnoreCase)
+            || taxSystem.Contains("ПСН", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Без НДС";
+        }
+
+        if (taxSystem.Contains("ОСНО", StringComparison.OrdinalIgnoreCase)
+            || taxSystem.Contains("ОСН", StringComparison.OrdinalIgnoreCase)
+            || taxSystem.Contains("ООО", StringComparison.OrdinalIgnoreCase)
+            || taxSystem.Contains("ИП", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Включено (указать в сумме позиции)";
+        }
+
+        return "По реквизитам документа";
+    }
+
+    private static string ResolveLineItemVat(SellerInfo seller)
+        => seller.IsVatExempt ? "Без НДС" : "—";
 
     private static string BuildBuyerFoundationRowHtml(string foundation)
     {
@@ -1335,9 +1409,12 @@ public static class InvoiceDocumentTemplateEngine
     {
         public string ShortName { get; init; } = string.Empty;
         public string FullName { get; init; } = string.Empty;
+        public string OrganizationForm { get; init; } = string.Empty;
         public string Inn { get; init; } = string.Empty;
         public string Kpp { get; init; } = string.Empty;
         public string Ogrn { get; init; } = string.Empty;
+        public string Okpo { get; init; } = string.Empty;
+        public bool IsVatExempt { get; init; }
         public string Address { get; init; } = string.Empty;
         public string Phone { get; init; } = string.Empty;
         public string Email { get; init; } = string.Empty;
@@ -1353,11 +1430,13 @@ public static class InvoiceDocumentTemplateEngine
     private sealed class BuyerInfo
     {
         public string Name { get; init; } = string.Empty;
+        public string OrganizationForm { get; init; } = string.Empty;
         public string Address { get; init; } = string.Empty;
         public string Passport { get; init; } = string.Empty;
         public string Inn { get; init; } = string.Empty;
         public string Kpp { get; init; } = string.Empty;
         public string Ogrn { get; init; } = string.Empty;
+        public string Okpo { get; init; } = string.Empty;
         public string Snils { get; init; } = string.Empty;
         public string Phone { get; init; } = string.Empty;
         public string Email { get; init; } = string.Empty;
@@ -1632,7 +1711,7 @@ public static class InvoiceDocumentTemplateEngine
       text-align: center;
     }
     .items-table .name {
-      width: 55%;
+      width: 48%;
       overflow-wrap: anywhere;
       word-break: break-word;
     }
@@ -1647,8 +1726,9 @@ public static class InvoiceDocumentTemplateEngine
       white-space: nowrap;
     }
     .items-table .price,
+    .items-table .vat,
     .items-table .sum {
-      width: 12%;
+      width: 11%;
       text-align: right;
       white-space: nowrap;
     }
@@ -1826,6 +1906,7 @@ public static class InvoiceDocumentTemplateEngine
             <th class="qty">Кол-во</th>
             <th class="unit">Ед.</th>
             <th class="price">Цена</th>
+            <th class="vat">НДС</th>
             <th class="sum">Сумма</th>
           </tr>
         </thead>
@@ -1837,6 +1918,7 @@ public static class InvoiceDocumentTemplateEngine
             <td class="qty">{{quantity}}</td>
             <td class="unit">{{unit}}</td>
             <td class="price">{{price}}</td>
+            <td class="vat">{{vat}}</td>
             <td class="sum">{{total}}</td>
           </tr>
           {{/lineItems}}
@@ -1847,11 +1929,11 @@ public static class InvoiceDocumentTemplateEngine
         <tbody>
           <tr>
             <td class="totals-label">Итого:</td>
-            <td class="totals-value">{{invoice.total}}</td>
+            <td class="totals-value">{{invoice.subTotal}}</td>
           </tr>
           <tr>
-            <td class="totals-label">Без налога (НДС):</td>
-            <td class="totals-value">-</td>
+            <td class="totals-label">НДС:</td>
+            <td class="totals-value">{{invoice.vatText}}</td>
           </tr>
           <tr>
             <td class="totals-label">Всего к оплате:</td>

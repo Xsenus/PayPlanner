@@ -14,7 +14,14 @@ vi.mock('../../services/api', () => ({
   apiService: {
     getContractDocumentTemplateSettings: vi.fn(),
     updateContractDocumentTemplateSettings: vi.fn(),
+    getContractDocumentTemplateHistory: vi.fn(),
+    getContractDocumentTemplateVersion: vi.fn(),
+    restoreContractDocumentTemplateVersion: vi.fn(),
   },
+}));
+
+vi.mock('../../hooks/useDialog', () => ({
+  useDialog: () => ({ confirm: vi.fn() }),
 }));
 
 const settingsFixture = {
@@ -43,6 +50,7 @@ describe('ContractDocumentTemplateSettings', () => {
   beforeEach(() => {
     vi.mocked(apiService.getContractDocumentTemplateSettings).mockReset();
     vi.mocked(apiService.updateContractDocumentTemplateSettings).mockReset();
+    vi.mocked(apiService.getContractDocumentTemplateHistory).mockResolvedValue([]);
     vi.mocked(apiService.getContractDocumentTemplateSettings).mockResolvedValue(settingsFixture);
     vi.mocked(apiService.updateContractDocumentTemplateSettings).mockImplementation(async (payload) => ({
       ...settingsFixture,

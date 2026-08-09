@@ -1,0 +1,3 @@
+export const MANAGEMENT_REPORT_KINDS = ['case-finance', 'case-success', 'current-cases', 'tasks', 'lawyer-workload', 'overdue-deadlines', 'case-activity', 'cash-flow', 'cash-flow-forecast', 'cash', 'bank', 'plan-fact', 'advances', 'payment-priorities', 'paid-accounts', 'paid-invoices', 'invoice-statuses', 'act-statuses', 'contract-statuses', 'categories', 'counterparties', 'projects', 'directions', 'sales-points', 'vat', 'payment-orders', 'payment-purposes', 'match-statuses', 'journal-statuses', 'currencies', 'cash-orders', 'bank-statement-imports', 'spreadsheet-imports'] as const;
+
+export type ManagementReportKind = typeof MANAGEMENT_REPORT_KINDS[number];

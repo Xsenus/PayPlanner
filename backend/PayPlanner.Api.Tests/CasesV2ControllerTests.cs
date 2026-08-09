@@ -1813,6 +1813,15 @@ public class CasesV2ControllerTests
         var result = await controller.GetFinance(clientCase.Id, CancellationToken.None);
 
         Assert.IsType<ForbidResult>(result.Result);
+
+        var historyResult = await controller.GetDocumentTemplateHistory(CancellationToken.None);
+        Assert.IsType<ForbidResult>(historyResult.Result);
+
+        var versionResult = await controller.GetDocumentTemplateVersion(1, CancellationToken.None);
+        Assert.IsType<ForbidResult>(versionResult.Result);
+
+        var restoreResult = await controller.RestoreDocumentTemplateVersion(1, CancellationToken.None);
+        Assert.IsType<ForbidResult>(restoreResult.Result);
     }
 
     [Fact]
@@ -4616,10 +4625,43 @@ public class CasesV2ControllerTests
         Assert.Equal(2, updatedDto.Version);
         Assert.Equal(new[] { "Банкротство", "Семейное право" }, updatedDto.CaseTypes);
 
+        var duplicateUpdateResult = await controller.UpdateDocumentTemplate(
+            "custom-claim",
+            new CasesV2Controller.UpsertCaseDocumentTemplateRequest
+            {
+                Label = "Обновленный шаблон",
+                Content = "<p>{{case.title}} / {{responsible.name}} / {{nextHearingAt}}</p>",
+            },
+            CancellationToken.None);
+        var duplicateUpdate = Assert.IsType<OkObjectResult>(duplicateUpdateResult.Result);
+        Assert.Equal(2, Assert.IsType<CasesV2Controller.CaseDocumentTemplateDefinitionDto>(duplicateUpdate.Value).Version);
+
+        var historyResult = await controller.GetDocumentTemplateHistory(CancellationToken.None);
+        var historyOk = Assert.IsType<OkObjectResult>(historyResult.Result);
+        var history = Assert.IsAssignableFrom<IReadOnlyList<DocumentTemplateVersionDto>>(historyOk.Value);
+        Assert.Equal(3, history.Count);
+        var createdVersion = Assert.Single(history, item => item.Revision == 2);
+
+        var versionResult = await controller.GetDocumentTemplateVersion(createdVersion.Id, CancellationToken.None);
+        var versionOk = Assert.IsType<OkObjectResult>(versionResult.Result);
+        var versionTemplates = Assert.IsAssignableFrom<IReadOnlyList<CasesV2Controller.CaseDocumentTemplateDefinitionDto>>(versionOk.Value);
+        Assert.Contains(versionTemplates, item => item.Key == "custom-claim" && item.Label == "Рабочий шаблон");
+
+        var restoreResult = await controller.RestoreDocumentTemplateVersion(createdVersion.Id, CancellationToken.None);
+        var restoreOk = Assert.IsType<OkObjectResult>(restoreResult.Result);
+        var restoredTemplates = Assert.IsAssignableFrom<IReadOnlyList<CasesV2Controller.CaseDocumentTemplateDefinitionDto>>(restoreOk.Value);
+        Assert.Contains(restoredTemplates, item => item.Key == "custom-claim" && item.Label == "Рабочий шаблон");
+
+        historyResult = await controller.GetDocumentTemplateHistory(CancellationToken.None);
+        historyOk = Assert.IsType<OkObjectResult>(historyResult.Result);
+        history = Assert.IsAssignableFrom<IReadOnlyList<DocumentTemplateVersionDto>>(historyOk.Value);
+        Assert.Equal(4, history.Count);
+        Assert.Equal(createdVersion.Id, history[0].RestoredFromVersionId);
+
         var listResult = await controller.GetDocumentTemplates(CancellationToken.None);
         var listOk = Assert.IsType<OkObjectResult>(listResult.Result);
         var templates = Assert.IsAssignableFrom<IReadOnlyList<CasesV2Controller.CaseDocumentTemplateDefinitionDto>>(listOk.Value);
-        Assert.Contains(templates, item => item.Key == "custom-claim" && item.Label == "Обновленный шаблон");
+        Assert.Contains(templates, item => item.Key == "custom-claim" && item.Label == "Рабочий шаблон");
 
         var renderResult = await controller.RenderDocumentTemplate(
             "custom-claim",
@@ -4630,9 +4672,9 @@ public class CasesV2ControllerTests
         var rendered = Assert.IsType<CasesV2Controller.RenderedCaseDocumentTemplateDto>(renderOk.Value);
         Assert.Equal("custom-claim", rendered.TemplateKey);
         Assert.Contains("Земцов - банкротство", rendered.Html, StringComparison.Ordinal);
-        Assert.Contains("Владелец", rendered.Html, StringComparison.Ordinal);
-        Assert.Contains("05.06.2026 16:00", rendered.Html, StringComparison.Ordinal);
-        Assert.DoesNotContain("05.06.2026 12:00", rendered.Html, StringComparison.Ordinal);
+        Assert.Contains("Земцов Виктор Александрович", rendered.Html, StringComparison.Ordinal);
+        Assert.Contains("Арбитражный суд Самарской области", rendered.Html, StringComparison.Ordinal);
+        Assert.DoesNotContain("{{case.title}}", rendered.Html, StringComparison.Ordinal);
 
         var restrictedCase = new ClientCase
         {

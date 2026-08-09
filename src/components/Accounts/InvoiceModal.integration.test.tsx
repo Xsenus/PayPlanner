@@ -2466,12 +2466,7 @@ describe('InvoiceModal integration', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Открыть полный платеж' }));
 
-    expect(onOpenPayment).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: 881,
-        notes: 'Платеж зачтен как основной',
-      }),
-    );
+    expect(onOpenPayment).toHaveBeenCalledWith(881, 'Income');
   });
 
   it('routes invoice-managed sidebar clicks through the payment edit callback when it is available', async () => {

@@ -1144,6 +1144,12 @@ public class TasksControllerTests
         var completed = await CreateTaskAsync(db, admin.Id, null, admin.Id, status: "done");
         completed.DueAt = now.AddMinutes(15);
         completed.Priority = "high";
+        completed.ClientBillingClassification = TaskClientBillingClassification.Billable;
+        completed.BillingModeSnapshot = ContractBillingMode.Actual;
+        var cancelled = await CreateTaskAsync(db, admin.Id, null, admin.Id, status: "cancelled");
+        cancelled.DueAt = now.AddMinutes(20);
+        cancelled.ClientBillingClassification = TaskClientBillingClassification.Billable;
+        cancelled.BillingModeSnapshot = ContractBillingMode.Actual;
         var fixedTask = await CreateTaskAsync(db, admin.Id, null, admin.Id);
         fixedTask.DueAt = now.AddMinutes(45);
         fixedTask.ClientBillingClassification = TaskClientBillingClassification.Billable;

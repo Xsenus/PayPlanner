@@ -1859,6 +1859,18 @@ export interface InvoiceDocumentTemplateSettingsDto {
   defaultTemplateHtml: string;
 }
 
+export interface DocumentTemplateVersionDto {
+  id: number;
+  revision: number;
+  documentType: 'invoice' | 'contract' | 'act' | string;
+  activeTemplateKey: string;
+  templateNames: string[];
+  createdByUserId?: number | null;
+  createdByUserName?: string | null;
+  createdAt: string;
+  restoredFromVersionId?: number | null;
+}
+
 export interface TaskJournalSettingsDto {
   restrictExecutorEditing: boolean;
   allowExecutorDeadlineChangeRequests: boolean;
@@ -3117,6 +3129,31 @@ export class ApiService {
     return this.request<Act>(`/acts/${id}`);
   }
 
+  async getActDocumentTemplateSettings() {
+    return this.request<InvoiceDocumentTemplateSettingsDto>('/acts/document-template-settings');
+  }
+
+  async updateActDocumentTemplateSettings(payload: Pick<InvoiceDocumentTemplateSettingsDto, 'activeTemplateKey' | 'templates' | 'printWithSignatureAndSealByDefault'>) {
+    return this.request<InvoiceDocumentTemplateSettingsDto>('/acts/document-template-settings', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async getActDocumentTemplateHistory() {
+    return this.request<DocumentTemplateVersionDto[]>('/acts/document-template-settings/history');
+  }
+
+  async getActDocumentTemplateVersion(versionId: number) {
+    return this.request<InvoiceDocumentTemplateSettingsDto>(`/acts/document-template-settings/history/${versionId}`);
+  }
+
+  async restoreActDocumentTemplateVersion(versionId: number) {
+    return this.request<InvoiceDocumentTemplateSettingsDto>(`/acts/document-template-settings/history/${versionId}/restore`, {
+      method: 'POST',
+    });
+  }
+
   async createAct(payload: ActInput) {
     return this.request<Act>('/acts', { method: 'POST', body: JSON.stringify(payload) });
   }
@@ -3225,6 +3262,20 @@ export class ApiService {
     return this.request<InvoiceDocumentTemplateSettingsDto>('/contracts/document-template-settings', {
       method: 'PUT',
       body: JSON.stringify(payload),
+    });
+  }
+
+  async getContractDocumentTemplateHistory() {
+    return this.request<DocumentTemplateVersionDto[]>('/contracts/document-template-settings/history');
+  }
+
+  async getContractDocumentTemplateVersion(versionId: number) {
+    return this.request<InvoiceDocumentTemplateSettingsDto>(`/contracts/document-template-settings/history/${versionId}`);
+  }
+
+  async restoreContractDocumentTemplateVersion(versionId: number) {
+    return this.request<InvoiceDocumentTemplateSettingsDto>(`/contracts/document-template-settings/history/${versionId}/restore`, {
+      method: 'POST',
     });
   }
 
@@ -3903,6 +3954,20 @@ export class ApiService {
     return this.request<InvoiceDocumentTemplateSettingsDto>('/invoices/document-template-settings', {
       method: 'PUT',
       body: JSON.stringify(payload),
+    });
+  }
+
+  async getInvoiceDocumentTemplateHistory() {
+    return this.request<DocumentTemplateVersionDto[]>('/invoices/document-template-settings/history');
+  }
+
+  async getInvoiceDocumentTemplateVersion(versionId: number) {
+    return this.request<InvoiceDocumentTemplateSettingsDto>(`/invoices/document-template-settings/history/${versionId}`);
+  }
+
+  async restoreInvoiceDocumentTemplateVersion(versionId: number) {
+    return this.request<InvoiceDocumentTemplateSettingsDto>(`/invoices/document-template-settings/history/${versionId}/restore`, {
+      method: 'POST',
     });
   }
 
@@ -6248,6 +6313,20 @@ export class ApiService {
     return this.request<ClientCaseDocumentTemplateToken[]>('/v2/cases/document-template-tokens');
   }
 
+  async getCaseDocumentTemplateHistory() {
+    return this.request<DocumentTemplateVersionDto[]>('/v2/cases/document-templates/history');
+  }
+
+  async getCaseDocumentTemplateVersion(versionId: number) {
+    return this.request<ClientCaseDocumentTemplate[]>(`/v2/cases/document-templates/history/${versionId}`);
+  }
+
+  async restoreCaseDocumentTemplateVersion(versionId: number) {
+    return this.request<ClientCaseDocumentTemplate[]>(`/v2/cases/document-templates/history/${versionId}/restore`, {
+      method: 'POST',
+    });
+  }
+
   async createCaseDocumentTemplate(payload: Partial<ClientCaseDocumentTemplate> & { key?: string; label?: string; name?: string; content?: string; html?: string }) {
     return this.request<ClientCaseDocumentTemplate>('/document-templates', {
       method: 'POST',
@@ -7003,8 +7082,19 @@ export class ApiService {
     };
   }
 
+  async getLegalWorkReportPrintHtml(params?: {
+    from?: string;
+    to?: string;
+    status?: string;
+    responsibleUserId?: number;
+    caseType?: string;
+  }) {
+    const q = buildQuery(params ?? {});
+    return this.request<string>(`/reports/legal-work.print${q}`);
+  }
+
   async downloadManagementReport(params: {
-    report: 'case-finance' | 'case-success' | 'current-cases' | 'lawyer-workload' | 'overdue-deadlines' | 'case-activity' | 'cash-flow' | 'cash-flow-forecast' | 'cash' | 'bank' | 'plan-fact' | 'advances' | 'payment-priorities' | 'paid-accounts' | 'paid-invoices' | 'invoice-statuses' | 'act-statuses' | 'contract-statuses' | 'categories' | 'counterparties' | 'projects' | 'directions' | 'sales-points' | 'vat' | 'payment-orders' | 'payment-purposes' | 'match-statuses' | 'journal-statuses' | 'currencies' | 'cash-orders' | 'bank-statement-imports' | 'spreadsheet-imports';
+    report: 'case-finance' | 'case-success' | 'current-cases' | 'tasks' | 'lawyer-workload' | 'overdue-deadlines' | 'case-activity' | 'cash-flow' | 'cash-flow-forecast' | 'cash' | 'bank' | 'plan-fact' | 'advances' | 'payment-priorities' | 'paid-accounts' | 'paid-invoices' | 'invoice-statuses' | 'act-statuses' | 'contract-statuses' | 'categories' | 'counterparties' | 'projects' | 'directions' | 'sales-points' | 'vat' | 'payment-orders' | 'payment-purposes' | 'match-statuses' | 'journal-statuses' | 'currencies' | 'cash-orders' | 'bank-statement-imports' | 'spreadsheet-imports';
     format: 'csv' | 'excel' | 'pdf';
     from?: string;
     to?: string;
@@ -7052,7 +7142,7 @@ export class ApiService {
   }
 
   async getManagementReportPrintHtml(params: {
-    report: 'case-finance' | 'case-success' | 'current-cases' | 'lawyer-workload' | 'overdue-deadlines' | 'case-activity' | 'cash-flow' | 'cash-flow-forecast' | 'cash' | 'bank' | 'plan-fact' | 'advances' | 'payment-priorities' | 'paid-accounts' | 'paid-invoices' | 'invoice-statuses' | 'act-statuses' | 'contract-statuses' | 'categories' | 'counterparties' | 'projects' | 'directions' | 'sales-points' | 'vat' | 'payment-orders' | 'payment-purposes' | 'match-statuses' | 'journal-statuses' | 'currencies' | 'cash-orders' | 'bank-statement-imports' | 'spreadsheet-imports';
+    report: 'case-finance' | 'case-success' | 'current-cases' | 'tasks' | 'lawyer-workload' | 'overdue-deadlines' | 'case-activity' | 'cash-flow' | 'cash-flow-forecast' | 'cash' | 'bank' | 'plan-fact' | 'advances' | 'payment-priorities' | 'paid-accounts' | 'paid-invoices' | 'invoice-statuses' | 'act-statuses' | 'contract-statuses' | 'categories' | 'counterparties' | 'projects' | 'directions' | 'sales-points' | 'vat' | 'payment-orders' | 'payment-purposes' | 'match-statuses' | 'journal-statuses' | 'currencies' | 'cash-orders' | 'bank-statement-imports' | 'spreadsheet-imports';
     from?: string;
     to?: string;
     source?: MoneyOperationSource;

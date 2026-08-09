@@ -2,7 +2,8 @@
 
 import { describe, expect, it } from 'vitest';
 import { buildBankReportFilters } from './reportFilters';
-import { buildVisibleReportGroups } from './reportAccess';
+import { buildVisibleReportGroups, isReportGroupEnabled } from './reportAccess';
+import { MANAGEMENT_REPORT_KINDS } from './reportKinds';
 
 describe('Reports bank filters', () => {
   it('keeps selected money filters and forces bank source', () => {
@@ -71,5 +72,19 @@ describe('Reports access matrix', () => {
       acts: false,
       contracts: false,
     })).toEqual([]);
+  });
+
+  it('loads data only for the active visible report group', () => {
+    const visibleGroups = ['payments', 'tasks', 'legal', 'analytics'] as const;
+
+    expect(isReportGroupEnabled('payments', 'payments', visibleGroups)).toBe(true);
+    expect(isReportGroupEnabled('payments', 'tasks', visibleGroups)).toBe(false);
+    expect(isReportGroupEnabled('analytics', 'analytics', ['payments'])).toBe(false);
+  });
+});
+
+describe('Reports export registry', () => {
+  it('includes the task report supported by the backend exporter', () => {
+    expect(MANAGEMENT_REPORT_KINDS).toContain('tasks');
   });
 });

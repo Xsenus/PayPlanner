@@ -17,6 +17,7 @@ import { DatabaseMaintenanceSettings } from './DatabaseMaintenanceSettings';
 import { CaseDocumentTemplateSettings } from './CaseDocumentTemplateSettings';
 import { CalendarSyncProviderSettings } from './CalendarSyncProviderSettings';
 import { ContractDocumentTemplateSettings } from './ContractDocumentTemplateSettings';
+import { ActDocumentTemplateSettings } from './ActDocumentTemplateSettings';
 import { CourtSyncJournalSettings } from './CourtSyncJournalSettings';
 import { CourtSyncSchedulerSettings } from './CourtSyncSchedulerSettings';
 import { FeatureFlagSettings } from './FeatureFlagSettings';
@@ -70,7 +71,7 @@ type SettingsSection =
   | 'db-import'
   | 'db-operations'
   | 'form-requirements';
-type FinancialRulesSubsection = 'invoices' | 'contracts' | 'case-documents';
+type FinancialRulesSubsection = 'invoices' | 'acts' | 'contracts' | 'case-documents';
 type DatabaseOperationsSubsection = 'invoices' | 'addresses' | 'dictionary-merge' | 'users-merge';
 type IntegrationSettingsTab = 'dadata' | 'feature-flags' | 'calendars' | 'courts';
 type MergeKind = 'countries' | 'base-currencies' | 'service-languages' | 'organization-forms' | 'timezones' | 'tax-systems' | 'tax-system-modes';
@@ -1094,6 +1095,17 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
                     </button>
                     <button
                       type="button"
+                      onClick={() => setActiveFinancialRulesSubsection('acts')}
+                      className={`rounded-xl border px-4 py-2 text-sm font-semibold transition ${
+                        activeFinancialRulesSubsection === 'acts'
+                          ? 'border-blue-200 bg-blue-50 text-blue-900'
+                          : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+                      }`}
+                    >
+                      Акты
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => setActiveFinancialRulesSubsection('contracts')}
                       className={`rounded-xl border px-4 py-2 text-sm font-semibold transition ${
                         activeFinancialRulesSubsection === 'contracts'
@@ -1228,7 +1240,6 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
                       </div>
                     </div>
 
-                    <ContractDocumentTemplateSettings />
                   </div>
                 )}
 
@@ -1236,6 +1247,10 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
                   <Suspense fallback={<SettingsPanelLoading />}>
                     <InvoiceDocumentTemplateSettings />
                   </Suspense>
+                )}
+
+                {activeFinancialRulesSubsection === 'acts' && (
+                  <ActDocumentTemplateSettings />
                 )}
 
                 {activeFinancialRulesSubsection === 'case-documents' && (
@@ -1250,6 +1265,8 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
                     <div className="mb-6">
                       <h4 className="text-xl font-semibold text-gray-900">Договоры</h4>
                     </div>
+
+                    <ContractDocumentTemplateSettings />
 
                     <div className="grid gap-6 xl:grid-cols-2">
                       <div className="flex h-full flex-col rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">

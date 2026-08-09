@@ -1,9 +1,10 @@
 import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Check, Copy, Eye, FileText, Loader2, Plus, RefreshCw, Save, Search } from 'lucide-react';
+import { Check, Copy, Eye, FileText, History, Loader2, Plus, RefreshCw, RotateCcw, Save, Search } from 'lucide-react';
 
-import { apiService } from '../../services/api';
+import { apiService, type DocumentTemplateVersionDto } from '../../services/api';
 import type { ClientCaseDocumentTemplate, ClientCaseDocumentTemplateToken } from '../../types';
+import { useDialog } from '../../hooks/useDialog';
 import { useToast } from '../../hooks/useToast';
 import { useUserTimeZone } from '../../hooks/useUserTimeZone';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
@@ -54,6 +55,7 @@ function cloneTemplate(template: ClientCaseDocumentTemplate): ClientCaseDocument
 }
 
 export function CaseDocumentTemplateSettings() {
+  const { confirm } = useDialog();
   const toast = useToast();
   const timeZoneId = useUserTimeZone();
   const [templates, setTemplates] = useState<ClientCaseDocumentTemplate[]>([]);
@@ -70,6 +72,12 @@ export function CaseDocumentTemplateSettings() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyVersions, setHistoryVersions] = useState<DocumentTemplateVersionDto[]>([]);
+  const [historyPreview, setHistoryPreview] = useState<ClientCaseDocumentTemplate[] | null>(null);
+  const [historyPreviewRevision, setHistoryPreviewRevision] = useState<number | null>(null);
+  const [restoringVersionId, setRestoringVersionId] = useState<number | null>(null);
 
   const load = useCallback(async (showToast = false) => {
     setLoading(true);
@@ -106,6 +114,72 @@ export function CaseDocumentTemplateSettings() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const loadHistory = useCallback(async () => {
+    setHistoryLoading(true);
+    try {
+      setHistoryVersions(await apiService.getCaseDocumentTemplateHistory());
+    } catch (err) {
+      const nextError = extractDisplayErrorMessage(err, 'Не удалось загрузить историю шаблонов документов дела.');
+      setError(nextError);
+      toast.error(nextError, 'История шаблонов');
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, [toast]);
+
+  const toggleHistory = async () => {
+    const nextOpen = !historyOpen;
+    setHistoryOpen(nextOpen);
+    if (nextOpen) {
+      await loadHistory();
+    }
+  };
+
+  const previewHistoryVersion = async (version: DocumentTemplateVersionDto) => {
+    setHistoryLoading(true);
+    try {
+      const snapshot = await apiService.getCaseDocumentTemplateVersion(version.id);
+      setHistoryPreview(snapshot.map(cloneTemplate));
+      setHistoryPreviewRevision(version.revision);
+    } catch (err) {
+      const nextError = extractDisplayErrorMessage(err, 'Не удалось открыть версию шаблонов.');
+      setError(nextError);
+      toast.error(nextError, 'История шаблонов');
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  const restoreHistoryVersion = async (version: DocumentTemplateVersionDto) => {
+    const approved = await confirm({
+      title: `Восстановить версию №${version.revision}`,
+      description: 'Текущая библиотека шаблонов документов дела будет заменена выбранной версией.',
+      confirmLabel: 'Восстановить',
+      cancelLabel: 'Отмена',
+    });
+    if (!approved) return;
+    setRestoringVersionId(version.id);
+    setError(null);
+    try {
+      const restored = (await apiService.restoreCaseDocumentTemplateVersion(version.id)).map(cloneTemplate);
+      setTemplates(restored);
+      setOriginalKeys(new Set(restored.map((item) => item.key)));
+      setSelectedKey((current) => restored.some((item) => item.key === current) ? current : restored[0]?.key ?? '');
+      setHistoryPreview(null);
+      setHistoryPreviewRevision(null);
+      await loadHistory();
+      const nextMessage = `Версия №${version.revision} восстановлена.`;
+      setMessage(nextMessage);
+      toast.success(nextMessage, 'История шаблонов');
+    } catch (err) {
+      const nextError = extractDisplayErrorMessage(err, 'Не удалось восстановить версию шаблонов.');
+      setError(nextError);
+      toast.error(nextError, 'История шаблонов');
+    } finally {
+      setRestoringVersionId(null);
+    }
+  };
 
   const selectedTemplate = useMemo(
     () => templates.find((item) => item.key === selectedKey) ?? null,
@@ -181,6 +255,9 @@ export function CaseDocumentTemplateSettings() {
       setPreviewHtml('');
       setPreviewError(null);
       toast.success(nextMessage, 'Настройки');
+      if (historyOpen) {
+        await loadHistory();
+      }
     } catch (err) {
       const nextError = extractDisplayErrorMessage(err, 'Не удалось сохранить шаблон документа дела.');
       setError(nextError);
@@ -248,6 +325,15 @@ export function CaseDocumentTemplateSettings() {
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
+            onClick={() => void toggleHistory()}
+            disabled={loading || saving || historyLoading}
+            className="inline-flex items-center gap-2 rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+          >
+            <History className="h-4 w-4" />
+            История версий{historyVersions.length > 0 ? `: ${historyVersions.length}` : ''}
+          </button>
+          <button
+            type="button"
             onClick={() => void load(true)}
             disabled={loading || saving}
             className="inline-flex items-center gap-2 rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60"
@@ -271,6 +357,86 @@ export function CaseDocumentTemplateSettings() {
         <div className={`mt-5 rounded-2xl border px-4 py-3 text-sm ${error ? 'border-red-200 bg-red-50 text-red-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
           {error ?? message}
         </div>
+      ) : null}
+
+      {historyOpen ? (
+        <section className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold text-slate-900">История библиотеки шаблонов</div>
+              <div className="mt-1 text-xs text-slate-500">Каждое фактическое изменение сохраняется отдельной восстановимой версией.</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => void loadHistory()}
+              disabled={historyLoading || restoringVersionId !== null}
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 disabled:opacity-60"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${historyLoading ? 'animate-spin' : ''}`} />
+              Обновить историю
+            </button>
+          </div>
+
+          {historyVersions.length === 0 && !historyLoading ? (
+            <div className="mt-4 rounded-xl border border-dashed border-slate-300 bg-white px-4 py-5 text-sm text-slate-500">
+              История появится после первого фактического изменения библиотеки.
+            </div>
+          ) : (
+            <div className="mt-4 grid gap-3 lg:grid-cols-2">
+              {historyVersions.map((version) => (
+                <article key={version.id} className="rounded-xl border border-slate-200 bg-white p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold text-slate-900">Версия №{version.revision}</div>
+                      <div className="mt-1 text-xs text-slate-500">
+                        {formatTemplateDate(version.createdAt, timeZoneId)} · {version.createdByUserName || 'Система'}
+                      </div>
+                    </div>
+                    {version.restoredFromVersionId ? (
+                      <span className="rounded-full bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-700">Восстановление</span>
+                    ) : null}
+                  </div>
+                  <div className="mt-2 line-clamp-2 text-xs text-slate-600">
+                    {version.templateNames.join(', ') || 'Без названий'}
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void previewHistoryVersion(version)}
+                      disabled={historyLoading || restoringVersionId !== null}
+                      className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 disabled:opacity-60"
+                    >
+                      Просмотреть
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void restoreHistoryVersion(version)}
+                      disabled={historyLoading || restoringVersionId !== null}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 disabled:opacity-60"
+                    >
+                      <RotateCcw className={`h-3.5 w-3.5 ${restoringVersionId === version.id ? 'animate-spin' : ''}`} />
+                      Восстановить
+                    </button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+
+          {historyPreview ? (
+            <div className="mt-4 rounded-xl border border-blue-200 bg-white p-4">
+              <div className="text-sm font-semibold text-slate-900">Содержимое версии №{historyPreviewRevision}</div>
+              <div className="mt-3 space-y-2">
+                {historyPreview.map((template) => (
+                  <details key={template.key} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                    <summary className="cursor-pointer text-sm font-medium text-slate-800">{template.label} · {template.key}</summary>
+                    <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-slate-950 p-3 text-xs leading-5 text-slate-100">{template.content}</pre>
+                  </details>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </section>
       ) : null}
 
       <div className="mt-6 grid gap-6 xl:grid-cols-[300px_minmax(0,1fr)]">

@@ -40,6 +40,7 @@ const ADVANCE_REVIEW_FILTER_INTENT_KEY = 'pp.payments.advanceReviewFilter';
 
 interface PaymentsProps {
   onOpenClient?: (clientId: number, caseId?: number) => void;
+  onOpenPayment?: (paymentId: number, paymentType: Payment['type']) => void;
   routePaymentId?: number | null;
   onRoutePaymentChange?: (paymentId: number | null) => void;
   initialCreatePayment?: PaymentCreatePrefill | null;
@@ -358,6 +359,7 @@ function downloadBlob(fileName: string, blob: Blob) {
 
 export function Payments({
   onOpenClient,
+  onOpenPayment,
   routePaymentId,
   onRoutePaymentChange,
   initialCreatePayment,
@@ -1184,6 +1186,17 @@ export function Payments({
       return true;
     },
     [paymentsPermissions.canEdit, showPermissionNotice, t, toast],
+  );
+
+  const openPayment = useCallback(
+    (payment: Payment) => {
+      if (onOpenPayment) {
+        onOpenPayment(payment.id, payment.type);
+        return;
+      }
+      void handleEditPayment(payment);
+    },
+    [handleEditPayment, onOpenPayment],
   );
 
   const handleDeletePayment = useCallback(
@@ -2543,6 +2556,7 @@ export function Payments({
               <PaymentsTable
                 payments={payments}
                 onEditPayment={handleEditPayment}
+                onOpenPayment={openPayment}
                 onOpenClient={onOpenClient}
                 onAddPayment={handleAddPayment}
                 onDeletePayment={async (payment) => {

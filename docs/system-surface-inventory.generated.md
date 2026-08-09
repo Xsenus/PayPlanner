@@ -7,9 +7,9 @@
 
 - Разделов frontend: 49.
 - Backend-контроллеров: 66.
-- HTTP endpoints: 780; с прямой тестовой связью: 513.
-- HTTP endpoints с точной ссылкой из документации: 149; критичных без такой ссылки: 468.
-- Критичных endpoints без прямой тестовой связи: 224.
+- HTTP endpoints: 798; с прямой тестовой связью: 529.
+- HTTP endpoints с точной ссылкой из документации: 184; критичных без такой ссылки: 477.
+- Критичных endpoints без прямой тестовой связи: 226.
 - Реальных HTML-форм: 17; с найденной тестовой связью: 15.
 - Фоновых сервисов: 27; с найденной тестовой связью: 24.
 - Исходящих HTTP-интеграций: 12; с найденной тестовой связью: 12.
@@ -21,12 +21,12 @@
 | notifications | () => true | да | docs/deploy-runbook.md, docs/full-project-audit-2026-06-10.md, docs/task-critical-events-matrix-2026-07-09.md, docs/task-critical-notifications-audit-2026-07-09.md, docs/tz-crm-acceptance-baseline-roadmap-2026-07-08.md, docs/tz-crm-release-stability-roadmap-2026-07-08.md |
 | profile | () => true | да | docs/full-project-audit-2026-06-10.md |
 | calendar | (permissions) => permissions.calendar.canView | да | docs/date-time-inventory.md, docs/final-acceptance-2026-06-10.md, docs/full-project-audit-2026-06-10.md, docs/legal-feature-flag-ci-gate-2026-06-10.md |
-| tasks | (permissions) => permissions.tasks.canView | да | docs/crm-legal-module-gap-report-2026-05-25.md, docs/final-acceptance-2026-06-10.md, docs/full-project-audit-2026-06-10.md, docs/task-critical-events-matrix-2026-07-09.md, docs/task-deadline-change-current-state-2026-07-09.md, docs/task-deadline-change-model-design-2026-07-09.md, docs/task-journal-query-optimization.md, docs/task-result-approval-current-state-2026-07-09.md, docs/task-template-current-state-2026-07-09.md |
+| tasks | (permissions) => permissions.tasks.canView | да | docs/crm-legal-module-gap-report-2026-05-25.md, docs/final-acceptance-2026-06-10.md, docs/full-project-audit-2026-06-10.md, docs/report-inventory-2026-08-09.md, docs/task-critical-events-matrix-2026-07-09.md, docs/task-deadline-change-current-state-2026-07-09.md, docs/task-deadline-change-model-design-2026-07-09.md, docs/task-journal-query-optimization.md, docs/task-result-approval-current-state-2026-07-09.md, docs/task-template-current-state-2026-07-09.md |
 | tasksControl | (permissions) => permissions.tasks.canView | да | нет |
 | tasksApprovals | (permissions) => permissions.tasks.canView | да | docs/full-project-audit-2026-06-10.md |
 | tasksCalendar | (permissions) => permissions.tasks.canView | да | docs/full-project-audit-2026-06-10.md |
 | notes | (permissions) => permissions.notes.canView | да | docs/deploy-runbook.md, docs/tz-crm-acceptance-baseline-roadmap-2026-07-08.md, docs/tz-crm-release-stability-roadmap-2026-07-08.md |
-| reports | (permissions) => permissions.reports.canView | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md, docs/full-project-audit-2026-06-10.md |
+| reports | (permissions) => permissions.reports.canView | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md, docs/full-project-audit-2026-06-10.md, docs/report-inventory-2026-08-09.md |
 | calculator | (permissions) => permissions.calculator.canView | да | docs/full-project-audit-2026-06-10.md |
 | legalEntities | (permissions) => permissions.legalEntities.canView | да | docs/full-project-audit-2026-06-10.md |
 | cases | (permissions) => permissions.cases.canView | да | docs/case-access-query-optimization.md, docs/case-conversation-current-state-2026-07-08.md, docs/case-detail-query-optimization.md, docs/case-registry-query-optimization.md, docs/crm-legal-module-acceptance-checklist.md, docs/full-project-audit-2026-06-10.md, docs/full-system-quality-roadmap-2026-08-04.md |
@@ -142,7 +142,7 @@
 | Контроллер | Файл | Endpoints | Правило доступа | Тест найден |
 | --- | --- | --- | --- | --- |
 | AccountsController | backend/Controllers/AccountsController.cs | 3 | [Authorize] | да |
-| ActsController | backend/Controllers/ActsController.cs | 16 | [Authorize] | да |
+| ActsController | backend/Controllers/ActsController.cs | 21 | [Authorize] | да |
 | AdminUsersController | backend/Controllers/AdminUsersController.cs | 8 | [Authorize(Policy = "Admin")] | да |
 | AppVersionController | backend/Controllers/AppVersionController.cs | 7 | [Authorize] | да |
 | AuthController | backend/Controllers/AuthController.cs | 5 | не задано | да |
@@ -158,7 +158,7 @@
 | ClientReferenceDataController | backend/Controllers/ClientReferenceDataController.cs | 3 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Clients)] | да |
 | ClientsController | backend/Controllers/ClientsController.cs | 12 | [Authorize] | да |
 | ContactsController | backend/Controllers/ContactsController.cs | 7 | [Authorize] | да |
-| ContractsController | backend/Controllers/ContractsController.cs | 23 | [Authorize] | да |
+| ContractsController | backend/Controllers/ContractsController.cs | 26 | [Authorize] | да |
 | DadataIntegrationSettingsController | backend/Controllers/DadataIntegrationSettingsController.cs | 2 | [Authorize] | да |
 | DatabaseAdminController | backend/Controllers/DatabaseAdminController.cs | 15 | [Authorize(Policy = "Admin")] | да |
 | DictionariesAdminController | backend/Controllers/DictionariesAdminController.cs | 74 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Dictionaries)] | да |
@@ -170,7 +170,7 @@
 | GoogleCalendarController | backend/Controllers/GoogleCalendarController.cs | 8 | не задано | да |
 | HealthController | backend/Controllers/HealthController.cs | 1 | не задано | да |
 | InstallmentsController | backend/Controllers/InstallmentsController.cs | 1 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Accounts)] | нет |
-| InvoicesController | backend/Controllers/InvoicesController.cs | 31 | [Authorize] | да |
+| InvoicesController | backend/Controllers/InvoicesController.cs | 34 | [Authorize] | да |
 | LegalEntitiesController | backend/Controllers/LegalEntitiesController.cs | 17 | [Authorize] | да |
 | LegalEntityBalancesController | backend/Controllers/LegalEntityBalancesController.cs | 3 | не задано | да |
 | MaxMessengerController | backend/Controllers/MaxMessengerController.cs | 7 | [Authorize] | нет |
@@ -187,7 +187,7 @@
 | ProfileController | backend/Controllers/ProfileController.cs | 6 | [Authorize] | да |
 | PublicWorkOrderApprovalController | backend/Controllers/PublicWorkOrderApprovalController.cs | 4 | публичный ([AllowAnonymous]) | да |
 | PushSubscriptionsController | backend/Controllers/PushSubscriptionsController.cs | 6 | [Authorize] | да |
-| ReportsController | backend/Controllers/ReportsController.cs | 39 | [Authorize] | да |
+| ReportsController | backend/Controllers/ReportsController.cs | 40 | [Authorize] | да |
 | RolePermissionsController | backend/Controllers/RolePermissionsController.cs | 6 | [Authorize] | да |
 | RolesController | backend/Controllers/RolesController.cs | 7 | [Authorize] | нет |
 | S3StorageController | backend/Controllers/S3StorageController.cs | 13 | [Authorize] | да |
@@ -201,7 +201,7 @@
 | CasesV1Controller | backend/Controllers/V1/CasesV1Controller.cs | 5 | [Authorize] | да |
 | ClientsV1Controller | backend/Controllers/V1/ClientsV1Controller.cs | 5 | [Authorize] | да |
 | PaymentsV1Controller | backend/Controllers/V1/PaymentsV1Controller.cs | 5 | [Authorize] | да |
-| CasesV2Controller | backend/Controllers/V2/CasesV2Controller.cs | 98 | [Authorize] | да |
+| CasesV2Controller | backend/Controllers/V2/CasesV2Controller.cs | 104 | [Authorize] | да |
 | ClientsV2Controller | backend/Controllers/V2/ClientsV2Controller.cs | 5 | [Authorize] | да |
 | PaymentsV2Controller | backend/Controllers/V2/PaymentsV2Controller.cs | 7 | [Authorize] | да |
 | StatsV2Controller | backend/Controllers/V2/StatsV2Controller.cs | 2 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Payments)] | нет |
@@ -326,20 +326,22 @@
 | POST |  | PowerOfAttorneyController.Create | изменение данных | backend/Controllers/PowerOfAttorneyController.cs:32 |
 | PUT | {id:int} | PowerOfAttorneyController.Update | изменение данных | backend/Controllers/PowerOfAttorneyController.cs:55 |
 | DELETE | {id:int} | PowerOfAttorneyController.Delete | изменение данных | backend/Controllers/PowerOfAttorneyController.cs:74 |
-| POST | api/[controller]/{id:int}/mark-not-signed | ActsController.MarkNotSigned | изменение данных | backend/Controllers/ActsController.cs:489 |
-| POST | api/[controller]/{id:int}/mark-not-signed | ContractsController.MarkNotSigned | изменение данных | backend/Controllers/ContractsController.cs:727 |
-| POST | api/[controller]/{id:int}/mark-not-signed | InvoicesController.MarkNotSigned | изменение данных | backend/Controllers/InvoicesController.cs:752 |
+| POST | api/[controller]/{id:int}/mark-not-signed | ActsController.MarkNotSigned | изменение данных | backend/Controllers/ActsController.cs:492 |
+| POST | api/[controller]/{id:int}/mark-not-signed | ContractsController.MarkNotSigned | изменение данных | backend/Controllers/ContractsController.cs:825 |
+| POST | api/[controller]/{id:int}/mark-not-signed | InvoicesController.MarkNotSigned | изменение данных | backend/Controllers/InvoicesController.cs:754 |
 | POST | api/[controller]/{id:int}/status | PaymentsController.UpdateStatus | изменение данных | backend/Controllers/PaymentsController.cs:683 |
 | POST | api/[controller]/calc | InstallmentsController.Calc | изменение данных | backend/Controllers/InstallmentsController.cs:19 |
-| GET | api/[controller]/document-template-settings | ContractsController.GetDocumentTemplateSettings | чувствительные данные или операция | backend/Controllers/ContractsController.cs:629 |
-| GET | api/[controller]/numbering-settings | ContractsController.GetNumberingSettings | чувствительные данные или операция | backend/Controllers/ContractsController.cs:974 |
-| GET | api/[controller]/rules-settings | ContractsController.GetRulesSettings | чувствительные данные или операция | backend/Controllers/ContractsController.cs:994 |
+| GET | api/[controller]/document-template-settings | ActsController.GetDocumentTemplateSettings | чувствительные данные или операция | backend/Controllers/ActsController.cs:1119 |
+| GET | api/[controller]/document-template-settings | ContractsController.GetDocumentTemplateSettings | чувствительные данные или операция | backend/Controllers/ContractsController.cs:631 |
+| GET | api/[controller]/document-template-settings/history/{versionId:int} | InvoicesController.GetDocumentTemplateVersion | чувствительные данные или операция | backend/Controllers/InvoicesController.cs:2143 |
+| GET | api/[controller]/numbering-settings | ContractsController.GetNumberingSettings | чувствительные данные или операция | backend/Controllers/ContractsController.cs:1072 |
+| GET | api/[controller]/rules-settings | ContractsController.GetRulesSettings | чувствительные данные или операция | backend/Controllers/ContractsController.cs:1092 |
 | GET | api/auth/admin/providers | AuthProvidersAdminController.GetSettings | чувствительные данные или операция | backend/Controllers/AuthProvidersAdminController.cs:37 |
 | GET | api/auth/admin/roles | AdminUsersController.GetRoles | чувствительные данные или операция | backend/Controllers/AdminUsersController.cs:192 |
 | GET | api/auth/admin/users | AdminUsersController.GetUsers | чувствительные данные или операция | backend/Controllers/AdminUsersController.cs:38 |
 | GET | api/auth/admin/users/{id:int} | AdminUsersController.GetUser | чувствительные данные или операция | backend/Controllers/AdminUsersController.cs:42 |
 | GET | api/calendar-sync/settings | CalendarSyncController.GetSettings | чувствительные данные или операция | backend/Controllers/CalendarSyncController.cs:74 |
-| POST | api/cash-orders/from-money-operation/{operationId:int} | CashOrdersController.CreateFromMoneyOperation | изменение данных | backend/Controllers/CashOrdersController.cs:542 |
+| POST | api/cash-orders/from-money-operation/{operationId:int} | CashOrdersController.CreateFromMoneyOperation | изменение данных | backend/Controllers/CashOrdersController.cs:547 |
 | GET | api/database/backups | DatabaseAdminController.GetBackupsAsync | чувствительные данные или операция | backend/Controllers/DatabaseAdminController.cs:67 |
 | GET | api/database/backups/download | DatabaseAdminController.DownloadBackupAsync | чувствительные данные или операция | backend/Controllers/DatabaseAdminController.cs:198 |
 | GET | api/database/import/spreadsheets/batches | DatabaseAdminController.GetSpreadsheetImportBatchesAsync | чувствительные данные или операция | backend/Controllers/DatabaseAdminController.cs:310 |
@@ -463,22 +465,27 @@
 | GET | api/[controller]/registry | AccountsController | GetRegistry | backend/Controllers/AccountsController.cs:32 | [Authorize] | да | нет |
 | GET | api/[controller]/payables-dashboard | AccountsController | GetPayablesDashboard | backend/Controllers/AccountsController.cs:495 | [Authorize] | да | нет |
 | GET | api/[controller] | AccountsController | Get | backend/Controllers/AccountsController.cs:638 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
-| GET | api/[controller] | ActsController | Get | backend/Controllers/ActsController.cs:190 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
-| GET | api/[controller]/{id:int} | ActsController | GetById | backend/Controllers/ActsController.cs:419 | [Authorize] | да | нет |
-| POST | api/[controller]/{id:int}/send-to-signing | ActsController | SendToSigning | backend/Controllers/ActsController.cs:437 | [Authorize] | да | нет |
-| POST | api/[controller]/{id:int}/mark-signed | ActsController | MarkSigned | backend/Controllers/ActsController.cs:462 | [Authorize] | да | нет |
-| POST | api/[controller]/{id:int}/mark-not-signed | ActsController | MarkNotSigned | backend/Controllers/ActsController.cs:489 | [Authorize] | нет | нет |
-| POST | api/[controller]/{id:int}/workflow-status | ActsController | UpdateWorkflowStatus | backend/Controllers/ActsController.cs:515 | [Authorize] | да | нет |
-| POST | api/[controller]/{id:int}/cancel | ActsController | Cancel | backend/Controllers/ActsController.cs:608 | [Authorize] | да | нет |
-| POST | api/[controller]/{id:int}/correction | ActsController | CreateCorrection | backend/Controllers/ActsController.cs:650 | [Authorize] | да | нет |
-| GET | api/[controller]/summary | ActsController | GetSummary | backend/Controllers/ActsController.cs:762 | [Authorize] | да | нет |
-| GET | api/[controller]/responsibles | ActsController | GetResponsibles | backend/Controllers/ActsController.cs:898 | [Authorize] | да | нет |
-| POST | api/[controller] | ActsController | Create | backend/Controllers/ActsController.cs:914 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
-| PUT | api/[controller]/{id:int} | ActsController | Update | backend/Controllers/ActsController.cs:992 | [Authorize] | да | нет |
-| DELETE | api/[controller]/{id:int} | ActsController | Delete | backend/Controllers/ActsController.cs:1083 | [Authorize] | да | нет |
-| GET | api/[controller]/{id:int}/document | ActsController | GetDocument | backend/Controllers/ActsController.cs:1116 | [Authorize] | да | нет |
-| POST | api/[controller]/{id:int}/yandex-disk | ActsController | UploadDocumentToYandexDisk | backend/Controllers/ActsController.cs:1168 | [Authorize] | да | нет |
-| POST | api/[controller]/{id:int}/send-email | ActsController | SendActEmail | backend/Controllers/ActsController.cs:1296 | [Authorize] | да | нет |
+| GET | api/[controller] | ActsController | Get | backend/Controllers/ActsController.cs:193 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
+| GET | api/[controller]/{id:int} | ActsController | GetById | backend/Controllers/ActsController.cs:422 | [Authorize] | да | нет |
+| POST | api/[controller]/{id:int}/send-to-signing | ActsController | SendToSigning | backend/Controllers/ActsController.cs:440 | [Authorize] | да | нет |
+| POST | api/[controller]/{id:int}/mark-signed | ActsController | MarkSigned | backend/Controllers/ActsController.cs:465 | [Authorize] | да | нет |
+| POST | api/[controller]/{id:int}/mark-not-signed | ActsController | MarkNotSigned | backend/Controllers/ActsController.cs:492 | [Authorize] | нет | нет |
+| POST | api/[controller]/{id:int}/workflow-status | ActsController | UpdateWorkflowStatus | backend/Controllers/ActsController.cs:518 | [Authorize] | да | нет |
+| POST | api/[controller]/{id:int}/cancel | ActsController | Cancel | backend/Controllers/ActsController.cs:611 | [Authorize] | да | нет |
+| POST | api/[controller]/{id:int}/correction | ActsController | CreateCorrection | backend/Controllers/ActsController.cs:653 | [Authorize] | да | нет |
+| GET | api/[controller]/summary | ActsController | GetSummary | backend/Controllers/ActsController.cs:765 | [Authorize] | да | нет |
+| GET | api/[controller]/responsibles | ActsController | GetResponsibles | backend/Controllers/ActsController.cs:901 | [Authorize] | да | нет |
+| POST | api/[controller] | ActsController | Create | backend/Controllers/ActsController.cs:917 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
+| PUT | api/[controller]/{id:int} | ActsController | Update | backend/Controllers/ActsController.cs:995 | [Authorize] | да | нет |
+| DELETE | api/[controller]/{id:int} | ActsController | Delete | backend/Controllers/ActsController.cs:1086 | [Authorize] | да | нет |
+| GET | api/[controller]/document-template-settings | ActsController | GetDocumentTemplateSettings | backend/Controllers/ActsController.cs:1119 | [Authorize] | нет | нет |
+| PUT | api/[controller]/document-template-settings | ActsController | UpsertDocumentTemplateSettings | backend/Controllers/ActsController.cs:1123 | [Authorize] | да | нет |
+| GET | api/[controller]/document-template-settings/history | ActsController | GetDocumentTemplateHistory | backend/Controllers/ActsController.cs:1151 | [Authorize] | да | нет |
+| GET | api/[controller]/document-template-settings/history/{versionId:int} | ActsController | GetDocumentTemplateVersion | backend/Controllers/ActsController.cs:1158 | [Authorize] | да | нет |
+| POST | api/[controller]/document-template-settings/history/{versionId:int}/restore | ActsController | RestoreDocumentTemplateVersion | backend/Controllers/ActsController.cs:1168 | [Authorize] | да | нет |
+| GET | api/[controller]/{id:int}/document | ActsController | GetDocument | backend/Controllers/ActsController.cs:1196 | [Authorize] | да | нет |
+| POST | api/[controller]/{id:int}/yandex-disk | ActsController | UploadDocumentToYandexDisk | backend/Controllers/ActsController.cs:1251 | [Authorize] | да | нет |
+| POST | api/[controller]/{id:int}/send-email | ActsController | SendActEmail | backend/Controllers/ActsController.cs:1382 | [Authorize] | да | нет |
 | GET | api/auth/admin/users | AdminUsersController | GetUsers | backend/Controllers/AdminUsersController.cs:38 | [Authorize(Policy = "Admin")] | нет | docs/full-project-audit-2026-06-10.md |
 | GET | api/auth/admin/users/{id:int} | AdminUsersController | GetUser | backend/Controllers/AdminUsersController.cs:42 | [Authorize(Policy = "Admin")] | нет | нет |
 | POST | api/auth/admin/users | AdminUsersController | CreateUser | backend/Controllers/AdminUsersController.cs:49 | [Authorize(Policy = "Admin")] | нет | docs/full-project-audit-2026-06-10.md |
@@ -522,25 +529,25 @@
 | POST | api/[controller] | CasesController | Create | backend/Controllers/CasesController.cs:82 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
 | PUT | api/[controller]/{id:int} | CasesController | Update | backend/Controllers/CasesController.cs:105 | [Authorize] | да | нет |
 | DELETE | api/[controller]/{id:int} | CasesController | Delete | backend/Controllers/CasesController.cs:144 | [Authorize] | да | нет |
-| GET | api/cash-orders/cashbook | CashOrdersController | GetCashBook | backend/Controllers/CashOrdersController.cs:40 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
-| GET | api/cash-orders/cashbook/print | CashOrdersController | PrintCashBook | backend/Controllers/CashOrdersController.cs:76 | [Authorize] | да | нет |
-| GET | api/cash-orders/next-number | CashOrdersController | GetNextNumber | backend/Controllers/CashOrdersController.cs:113 | [Authorize] | да | нет |
-| GET | api/cash-orders/paged | CashOrdersController | GetPaged | backend/Controllers/CashOrdersController.cs:135 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
-| GET | api/cash-orders/register | CashOrdersController | GetRegister | backend/Controllers/CashOrdersController.cs:181 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
-| GET | api/cash-orders/register/print | CashOrdersController | PrintRegister | backend/Controllers/CashOrdersController.cs:251 | [Authorize] | да | нет |
-| GET | api/cash-orders/inventories | CashOrdersController | GetInventories | backend/Controllers/CashOrdersController.cs:316 | [Authorize] | да | нет |
-| POST | api/cash-orders/inventories | CashOrdersController | CreateInventory | backend/Controllers/CashOrdersController.cs:372 | [Authorize] | да | нет |
-| GET | api/cash-orders/{id:int} | CashOrdersController | GetById | backend/Controllers/CashOrdersController.cs:445 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
-| POST | api/cash-orders/from-payment/{paymentId:int} | CashOrdersController | CreateFromPayment | backend/Controllers/CashOrdersController.cs:470 | [Authorize] | да | нет |
-| POST | api/cash-orders/from-money-operation/{operationId:int} | CashOrdersController | CreateFromMoneyOperation | backend/Controllers/CashOrdersController.cs:542 | [Authorize] | нет | нет |
-| POST | api/cash-orders | CashOrdersController | Create | backend/Controllers/CashOrdersController.cs:603 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md, docs/full-project-audit-2026-06-10.md |
-| PUT | api/cash-orders/{id:int} | CashOrdersController | Update | backend/Controllers/CashOrdersController.cs:640 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
-| DELETE | api/cash-orders/{id:int} | CashOrdersController | Delete | backend/Controllers/CashOrdersController.cs:695 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
-| POST | api/cash-orders/{id:int}/post | CashOrdersController | Post | backend/Controllers/CashOrdersController.cs:728 | [Authorize] | да | нет |
-| POST | api/cash-orders/{id:int}/cancel | CashOrdersController | Cancel | backend/Controllers/CashOrdersController.cs:772 | [Authorize] | да | нет |
-| POST | api/cash-orders/{id:int}/copy | CashOrdersController | Copy | backend/Controllers/CashOrdersController.cs:808 | [Authorize] | да | нет |
-| GET | api/cash-orders/{id:int}/print | CashOrdersController | Print | backend/Controllers/CashOrdersController.cs:859 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
-| GET | api/cash-orders/{id:int}/pdf | CashOrdersController | DownloadPdf | backend/Controllers/CashOrdersController.cs:888 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
+| GET | api/cash-orders/cashbook | CashOrdersController | GetCashBook | backend/Controllers/CashOrdersController.cs:45 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
+| GET | api/cash-orders/cashbook/print | CashOrdersController | PrintCashBook | backend/Controllers/CashOrdersController.cs:81 | [Authorize] | да | нет |
+| GET | api/cash-orders/next-number | CashOrdersController | GetNextNumber | backend/Controllers/CashOrdersController.cs:118 | [Authorize] | да | нет |
+| GET | api/cash-orders/paged | CashOrdersController | GetPaged | backend/Controllers/CashOrdersController.cs:140 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
+| GET | api/cash-orders/register | CashOrdersController | GetRegister | backend/Controllers/CashOrdersController.cs:186 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
+| GET | api/cash-orders/register/print | CashOrdersController | PrintRegister | backend/Controllers/CashOrdersController.cs:256 | [Authorize] | да | нет |
+| GET | api/cash-orders/inventories | CashOrdersController | GetInventories | backend/Controllers/CashOrdersController.cs:321 | [Authorize] | да | нет |
+| POST | api/cash-orders/inventories | CashOrdersController | CreateInventory | backend/Controllers/CashOrdersController.cs:377 | [Authorize] | да | нет |
+| GET | api/cash-orders/{id:int} | CashOrdersController | GetById | backend/Controllers/CashOrdersController.cs:450 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
+| POST | api/cash-orders/from-payment/{paymentId:int} | CashOrdersController | CreateFromPayment | backend/Controllers/CashOrdersController.cs:475 | [Authorize] | да | нет |
+| POST | api/cash-orders/from-money-operation/{operationId:int} | CashOrdersController | CreateFromMoneyOperation | backend/Controllers/CashOrdersController.cs:547 | [Authorize] | нет | нет |
+| POST | api/cash-orders | CashOrdersController | Create | backend/Controllers/CashOrdersController.cs:608 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md, docs/full-project-audit-2026-06-10.md, docs/report-inventory-2026-08-09.md |
+| PUT | api/cash-orders/{id:int} | CashOrdersController | Update | backend/Controllers/CashOrdersController.cs:645 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
+| DELETE | api/cash-orders/{id:int} | CashOrdersController | Delete | backend/Controllers/CashOrdersController.cs:700 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
+| POST | api/cash-orders/{id:int}/post | CashOrdersController | Post | backend/Controllers/CashOrdersController.cs:733 | [Authorize] | да | нет |
+| POST | api/cash-orders/{id:int}/cancel | CashOrdersController | Cancel | backend/Controllers/CashOrdersController.cs:777 | [Authorize] | да | нет |
+| POST | api/cash-orders/{id:int}/copy | CashOrdersController | Copy | backend/Controllers/CashOrdersController.cs:813 | [Authorize] | да | нет |
+| GET | api/cash-orders/{id:int}/print | CashOrdersController | Print | backend/Controllers/CashOrdersController.cs:864 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
+| GET | api/cash-orders/{id:int}/pdf | CashOrdersController | DownloadPdf | backend/Controllers/CashOrdersController.cs:894 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
 | GET |  | ClientBalancesController | GetSummary | backend/Controllers/ClientBalancesController.cs:57 | не задано | да | нет |
 | GET | transactions | ClientBalancesController | GetTransactions | backend/Controllers/ClientBalancesController.cs:78 | не задано | да | docs/delete-behavior-contract-2026-06-10.md |
 | POST | apply | ClientBalancesController | ApplyCredit | backend/Controllers/ClientBalancesController.cs:116 | не задано | да | docs/file-upload-limits-2026-06-10.md, docs/full-project-audit-2026-06-10.md |
@@ -585,29 +592,32 @@
 | DELETE | api/contacts/external/{id:int} | ContactsController | DeleteExternalContact | backend/Controllers/ContactsController.cs:342 | [Authorize] | да | нет |
 | GET | api/contacts/exports/yealink | ContactsController | DownloadYealinkXml | backend/Controllers/ContactsController.cs:368 | [Authorize] | да | docs/contacts-directory-implementation-log.md |
 | POST | api/contacts/imports/yealink | ContactsController | ImportYealinkXml | backend/Controllers/ContactsController.cs:416 | [Authorize] | нет | docs/contacts-directory-implementation-log.md |
-| GET | api/[controller] | ContractsController | Get | backend/Controllers/ContractsController.cs:307 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
-| GET | api/[controller]/{id:int} | ContractsController | GetById | backend/Controllers/ContractsController.cs:338 | [Authorize] | да | нет |
-| GET | api/[controller]/{id:int}/document | ContractsController | GetDocument | backend/Controllers/ContractsController.cs:352 | [Authorize] | да | нет |
-| GET | api/[controller]/{id:int}/termination-agreement | ContractsController | GetTerminationAgreement | backend/Controllers/ContractsController.cs:396 | [Authorize] | да | нет |
-| POST | api/[controller]/{id:int}/yandex-disk | ContractsController | UploadDocumentToYandexDisk | backend/Controllers/ContractsController.cs:441 | [Authorize] | да | нет |
-| POST | api/[controller]/{id:int}/send-email | ContractsController | SendEmail | backend/Controllers/ContractsController.cs:559 | [Authorize] | да | нет |
-| GET | api/[controller]/document-template-settings | ContractsController | GetDocumentTemplateSettings | backend/Controllers/ContractsController.cs:629 | [Authorize] | нет | нет |
-| PUT | api/[controller]/document-template-settings | ContractsController | UpsertDocumentTemplateSettings | backend/Controllers/ContractsController.cs:633 | [Authorize] | да | нет |
-| POST | api/[controller]/{id:int}/send-to-signing | ContractsController | SendToSigning | backend/Controllers/ContractsController.cs:662 | [Authorize] | да | нет |
-| GET | api/[controller]/{id:int}/termination-check | ContractsController | GetTerminationCheck | backend/Controllers/ContractsController.cs:689 | [Authorize] | да | нет |
-| POST | api/[controller]/{id:int}/mark-concluded | ContractsController | MarkConcluded | backend/Controllers/ContractsController.cs:698 | [Authorize] | да | нет |
-| POST | api/[controller]/{id:int}/mark-not-signed | ContractsController | MarkNotSigned | backend/Controllers/ContractsController.cs:727 | [Authorize] | нет | нет |
-| POST | api/[controller]/{id:int}/status | ContractsController | UpdateStatus | backend/Controllers/ContractsController.cs:755 | [Authorize] | да | нет |
-| POST | api/[controller]/{id:int}/terminate | ContractsController | Terminate | backend/Controllers/ContractsController.cs:871 | [Authorize] | да | нет |
-| POST | api/[controller]/{id:int}/cancel | ContractsController | Cancel | backend/Controllers/ContractsController.cs:926 | [Authorize] | да | нет |
-| GET | api/[controller]/numbering-settings | ContractsController | GetNumberingSettings | backend/Controllers/ContractsController.cs:974 | [Authorize] | нет | нет |
-| PUT | api/[controller]/numbering-settings | ContractsController | UpsertNumberingSettings | backend/Controllers/ContractsController.cs:978 | [Authorize] | да | нет |
-| GET | api/[controller]/rules-settings | ContractsController | GetRulesSettings | backend/Controllers/ContractsController.cs:994 | [Authorize] | нет | нет |
-| PUT | api/[controller]/rules-settings | ContractsController | UpsertRulesSettings | backend/Controllers/ContractsController.cs:998 | [Authorize] | да | нет |
-| GET | api/[controller]/next-number | ContractsController | GetNextNumber | backend/Controllers/ContractsController.cs:1010 | [Authorize] | нет | нет |
-| POST | api/[controller] | ContractsController | Create | backend/Controllers/ContractsController.cs:1027 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
-| PUT | api/[controller]/{id:int} | ContractsController | Update | backend/Controllers/ContractsController.cs:1079 | [Authorize] | да | нет |
-| DELETE | api/[controller]/{id:int} | ContractsController | Delete | backend/Controllers/ContractsController.cs:1149 | [Authorize] | да | нет |
+| GET | api/[controller] | ContractsController | Get | backend/Controllers/ContractsController.cs:309 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
+| GET | api/[controller]/{id:int} | ContractsController | GetById | backend/Controllers/ContractsController.cs:340 | [Authorize] | да | нет |
+| GET | api/[controller]/{id:int}/document | ContractsController | GetDocument | backend/Controllers/ContractsController.cs:354 | [Authorize] | да | нет |
+| GET | api/[controller]/{id:int}/termination-agreement | ContractsController | GetTerminationAgreement | backend/Controllers/ContractsController.cs:398 | [Authorize] | да | нет |
+| POST | api/[controller]/{id:int}/yandex-disk | ContractsController | UploadDocumentToYandexDisk | backend/Controllers/ContractsController.cs:443 | [Authorize] | да | нет |
+| POST | api/[controller]/{id:int}/send-email | ContractsController | SendEmail | backend/Controllers/ContractsController.cs:561 | [Authorize] | да | нет |
+| GET | api/[controller]/document-template-settings | ContractsController | GetDocumentTemplateSettings | backend/Controllers/ContractsController.cs:631 | [Authorize] | нет | нет |
+| PUT | api/[controller]/document-template-settings | ContractsController | UpsertDocumentTemplateSettings | backend/Controllers/ContractsController.cs:635 | [Authorize] | да | нет |
+| GET | api/[controller]/document-template-settings/history | ContractsController | GetDocumentTemplateHistory | backend/Controllers/ContractsController.cs:675 | [Authorize] | да | нет |
+| GET | api/[controller]/document-template-settings/history/{versionId:int} | ContractsController | GetDocumentTemplateVersion | backend/Controllers/ContractsController.cs:686 | [Authorize] | да | нет |
+| POST | api/[controller]/document-template-settings/history/{versionId:int}/restore | ContractsController | RestoreDocumentTemplateVersion | backend/Controllers/ContractsController.cs:710 | [Authorize] | да | нет |
+| POST | api/[controller]/{id:int}/send-to-signing | ContractsController | SendToSigning | backend/Controllers/ContractsController.cs:760 | [Authorize] | да | нет |
+| GET | api/[controller]/{id:int}/termination-check | ContractsController | GetTerminationCheck | backend/Controllers/ContractsController.cs:787 | [Authorize] | да | нет |
+| POST | api/[controller]/{id:int}/mark-concluded | ContractsController | MarkConcluded | backend/Controllers/ContractsController.cs:796 | [Authorize] | да | нет |
+| POST | api/[controller]/{id:int}/mark-not-signed | ContractsController | MarkNotSigned | backend/Controllers/ContractsController.cs:825 | [Authorize] | нет | нет |
+| POST | api/[controller]/{id:int}/status | ContractsController | UpdateStatus | backend/Controllers/ContractsController.cs:853 | [Authorize] | да | нет |
+| POST | api/[controller]/{id:int}/terminate | ContractsController | Terminate | backend/Controllers/ContractsController.cs:969 | [Authorize] | да | нет |
+| POST | api/[controller]/{id:int}/cancel | ContractsController | Cancel | backend/Controllers/ContractsController.cs:1024 | [Authorize] | да | нет |
+| GET | api/[controller]/numbering-settings | ContractsController | GetNumberingSettings | backend/Controllers/ContractsController.cs:1072 | [Authorize] | нет | нет |
+| PUT | api/[controller]/numbering-settings | ContractsController | UpsertNumberingSettings | backend/Controllers/ContractsController.cs:1076 | [Authorize] | да | нет |
+| GET | api/[controller]/rules-settings | ContractsController | GetRulesSettings | backend/Controllers/ContractsController.cs:1092 | [Authorize] | нет | нет |
+| PUT | api/[controller]/rules-settings | ContractsController | UpsertRulesSettings | backend/Controllers/ContractsController.cs:1096 | [Authorize] | да | нет |
+| GET | api/[controller]/next-number | ContractsController | GetNextNumber | backend/Controllers/ContractsController.cs:1108 | [Authorize] | нет | нет |
+| POST | api/[controller] | ContractsController | Create | backend/Controllers/ContractsController.cs:1125 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
+| PUT | api/[controller]/{id:int} | ContractsController | Update | backend/Controllers/ContractsController.cs:1177 | [Authorize] | да | нет |
+| DELETE | api/[controller]/{id:int} | ContractsController | Delete | backend/Controllers/ContractsController.cs:1247 | [Authorize] | да | нет |
 | GET | api/integrations/dadata/settings | DadataIntegrationSettingsController | Get | backend/Controllers/DadataIntegrationSettingsController.cs:26 | [Authorize] | да | нет |
 | PUT | api/integrations/dadata/settings | DadataIntegrationSettingsController | Update | backend/Controllers/DadataIntegrationSettingsController.cs:61 | [Authorize] | да | нет |
 | GET | api/database/status | DatabaseAdminController | GetStatus | backend/Controllers/DatabaseAdminController.cs:55 | [Authorize(Policy = "Admin")] | нет | docs/crm-legal-module-release-runbook.md, docs/full-project-audit-2026-06-10.md |
@@ -746,37 +756,40 @@
 | POST | api/google-calendar/webhook | GoogleCalendarController | Webhook | backend/Controllers/GoogleCalendarController.cs:181 | публичный ([AllowAnonymous]) | да | нет |
 | GET | api/[controller] | HealthController | Get | backend/Controllers/HealthController.cs:12 | публичный ([AllowAnonymous]) | да | docs/full-project-audit-2026-06-10.md |
 | POST | api/[controller]/calc | InstallmentsController | Calc | backend/Controllers/InstallmentsController.cs:19 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Accounts)] | нет | нет |
-| GET | api/[controller]/reference-dictionaries | InvoicesController | GetReferenceDictionaries | backend/Controllers/InvoicesController.cs:66 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Accounts)] | да | нет |
-| GET | api/[controller] | InvoicesController | Get | backend/Controllers/InvoicesController.cs:239 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
-| GET | api/[controller]/summary | InvoicesController | GetSummary | backend/Controllers/InvoicesController.cs:366 | [Authorize] | да | нет |
-| GET | api/[controller]/{id:int} | InvoicesController | GetById | backend/Controllers/InvoicesController.cs:504 | [Authorize] | да | нет |
-| POST | api/[controller]/repair-payment-state | InvoicesController | RepairPaymentState | backend/Controllers/InvoicesController.cs:528 | [Authorize] | да | нет |
-| POST | api/[controller]/recalculate-payment-state | InvoicesController | RepairPaymentState | backend/Controllers/InvoicesController.cs:529 | [Authorize] | да | нет |
-| POST | api/[controller]/backfill-expense-cases | InvoicesController | BackfillExpenseInvoiceCases | backend/Controllers/InvoicesController.cs:666 | [Authorize] | да | нет |
-| POST | api/[controller]/{id:int}/send-to-signing | InvoicesController | SendToSigning | backend/Controllers/InvoicesController.cs:693 | [Authorize] | да | нет |
-| POST | api/[controller]/{id:int}/mark-signed | InvoicesController | MarkSigned | backend/Controllers/InvoicesController.cs:723 | [Authorize] | да | нет |
-| POST | api/[controller]/{id:int}/mark-not-signed | InvoicesController | MarkNotSigned | backend/Controllers/InvoicesController.cs:752 | [Authorize] | нет | нет |
-| POST | api/[controller]/{id:int}/workflow-status | InvoicesController | UpdateWorkflowStatus | backend/Controllers/InvoicesController.cs:781 | [Authorize] | да | нет |
-| POST | api/[controller]/{id:int}/cancel | InvoicesController | Cancel | backend/Controllers/InvoicesController.cs:884 | [Authorize] | да | нет |
-| POST | api/[controller] | InvoicesController | Create | backend/Controllers/InvoicesController.cs:1287 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
-| PUT | api/[controller]/{id:int} | InvoicesController | Update | backend/Controllers/InvoicesController.cs:1505 | [Authorize] | да | нет |
-| GET | api/[controller]/numbering-settings | InvoicesController | GetNumberingSettings | backend/Controllers/InvoicesController.cs:1980 | [Authorize] | да | нет |
-| PUT | api/[controller]/numbering-settings | InvoicesController | UpsertNumberingSettings | backend/Controllers/InvoicesController.cs:2001 | [Authorize] | да | нет |
-| GET | api/[controller]/next-number | InvoicesController | GetNextNumber | backend/Controllers/InvoicesController.cs:2029 | [Authorize] | да | нет |
-| GET | api/[controller]/rules-settings | InvoicesController | GetRulesSettings | backend/Controllers/InvoicesController.cs:2057 | [Authorize] | да | нет |
-| PUT | api/[controller]/rules-settings | InvoicesController | UpsertRulesSettings | backend/Controllers/InvoicesController.cs:2063 | [Authorize] | да | нет |
-| GET | api/[controller]/document-template-settings | InvoicesController | GetDocumentTemplateSettings | backend/Controllers/InvoicesController.cs:2084 | [Authorize] | да | нет |
-| PUT | api/[controller]/document-template-settings | InvoicesController | UpsertDocumentTemplateSettings | backend/Controllers/InvoicesController.cs:2090 | [Authorize] | да | нет |
-| POST | api/[controller]/migrate-legacy-links | InvoicesController | MigrateLegacyInvoiceLinks | backend/Controllers/InvoicesController.cs:2120 | [Authorize] | да | нет |
-| POST | api/[controller]/cleanup-counterparty-names | InvoicesController | CleanupCounterpartyNames | backend/Controllers/InvoicesController.cs:2334 | [Authorize] | да | нет |
-| POST | api/[controller]/cleanup-orphan-invoices | InvoicesController | CleanupOrphanInvoices | backend/Controllers/InvoicesController.cs:2369 | [Authorize] | да | нет |
-| POST | api/[controller]/{invoiceEntityId:int}/repair-legacy-installments | InvoicesController | RepairLegacyInstallments | backend/Controllers/InvoicesController.cs:2411 | [Authorize] | да | нет |
-| DELETE | api/[controller]/{id:int} | InvoicesController | Delete | backend/Controllers/InvoicesController.cs:2570 | [Authorize] | да | нет |
-| POST | api/[controller]/bulk-delete | InvoicesController | BulkDelete | backend/Controllers/InvoicesController.cs:2616 | [Authorize] | да | нет |
-| POST | api/[controller]/change-responsible | InvoicesController | ChangeResponsible | backend/Controllers/InvoicesController.cs:2791 | [Authorize] | да | нет |
-| GET | api/[controller]/{id:int}/document | InvoicesController | GetDocument | backend/Controllers/InvoicesController.cs:2872 | [Authorize] | да | нет |
-| POST | api/[controller]/{id:int}/yandex-disk | InvoicesController | UploadDocumentToYandexDisk | backend/Controllers/InvoicesController.cs:2932 | [Authorize] | да | нет |
-| POST | api/[controller]/{id:int}/send-email | InvoicesController | SendInvoiceEmail | backend/Controllers/InvoicesController.cs:3066 | [Authorize] | да | нет |
+| GET | api/[controller]/reference-dictionaries | InvoicesController | GetReferenceDictionaries | backend/Controllers/InvoicesController.cs:68 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Accounts)] | да | нет |
+| GET | api/[controller] | InvoicesController | Get | backend/Controllers/InvoicesController.cs:241 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
+| GET | api/[controller]/summary | InvoicesController | GetSummary | backend/Controllers/InvoicesController.cs:368 | [Authorize] | да | нет |
+| GET | api/[controller]/{id:int} | InvoicesController | GetById | backend/Controllers/InvoicesController.cs:506 | [Authorize] | да | нет |
+| POST | api/[controller]/repair-payment-state | InvoicesController | RepairPaymentState | backend/Controllers/InvoicesController.cs:530 | [Authorize] | да | нет |
+| POST | api/[controller]/recalculate-payment-state | InvoicesController | RepairPaymentState | backend/Controllers/InvoicesController.cs:531 | [Authorize] | да | нет |
+| POST | api/[controller]/backfill-expense-cases | InvoicesController | BackfillExpenseInvoiceCases | backend/Controllers/InvoicesController.cs:668 | [Authorize] | да | нет |
+| POST | api/[controller]/{id:int}/send-to-signing | InvoicesController | SendToSigning | backend/Controllers/InvoicesController.cs:695 | [Authorize] | да | нет |
+| POST | api/[controller]/{id:int}/mark-signed | InvoicesController | MarkSigned | backend/Controllers/InvoicesController.cs:725 | [Authorize] | да | нет |
+| POST | api/[controller]/{id:int}/mark-not-signed | InvoicesController | MarkNotSigned | backend/Controllers/InvoicesController.cs:754 | [Authorize] | нет | нет |
+| POST | api/[controller]/{id:int}/workflow-status | InvoicesController | UpdateWorkflowStatus | backend/Controllers/InvoicesController.cs:783 | [Authorize] | да | нет |
+| POST | api/[controller]/{id:int}/cancel | InvoicesController | Cancel | backend/Controllers/InvoicesController.cs:886 | [Authorize] | да | нет |
+| POST | api/[controller] | InvoicesController | Create | backend/Controllers/InvoicesController.cs:1289 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
+| PUT | api/[controller]/{id:int} | InvoicesController | Update | backend/Controllers/InvoicesController.cs:1507 | [Authorize] | да | нет |
+| GET | api/[controller]/numbering-settings | InvoicesController | GetNumberingSettings | backend/Controllers/InvoicesController.cs:1982 | [Authorize] | да | нет |
+| PUT | api/[controller]/numbering-settings | InvoicesController | UpsertNumberingSettings | backend/Controllers/InvoicesController.cs:2003 | [Authorize] | да | нет |
+| GET | api/[controller]/next-number | InvoicesController | GetNextNumber | backend/Controllers/InvoicesController.cs:2031 | [Authorize] | да | нет |
+| GET | api/[controller]/rules-settings | InvoicesController | GetRulesSettings | backend/Controllers/InvoicesController.cs:2059 | [Authorize] | да | нет |
+| PUT | api/[controller]/rules-settings | InvoicesController | UpsertRulesSettings | backend/Controllers/InvoicesController.cs:2065 | [Authorize] | да | нет |
+| GET | api/[controller]/document-template-settings | InvoicesController | GetDocumentTemplateSettings | backend/Controllers/InvoicesController.cs:2086 | [Authorize] | да | нет |
+| PUT | api/[controller]/document-template-settings | InvoicesController | UpsertDocumentTemplateSettings | backend/Controllers/InvoicesController.cs:2092 | [Authorize] | да | нет |
+| GET | api/[controller]/document-template-settings/history | InvoicesController | GetDocumentTemplateHistory | backend/Controllers/InvoicesController.cs:2132 | [Authorize] | да | нет |
+| GET | api/[controller]/document-template-settings/history/{versionId:int} | InvoicesController | GetDocumentTemplateVersion | backend/Controllers/InvoicesController.cs:2143 | [Authorize] | нет | нет |
+| POST | api/[controller]/document-template-settings/history/{versionId:int}/restore | InvoicesController | RestoreDocumentTemplateVersion | backend/Controllers/InvoicesController.cs:2167 | [Authorize] | да | нет |
+| POST | api/[controller]/migrate-legacy-links | InvoicesController | MigrateLegacyInvoiceLinks | backend/Controllers/InvoicesController.cs:2218 | [Authorize] | да | нет |
+| POST | api/[controller]/cleanup-counterparty-names | InvoicesController | CleanupCounterpartyNames | backend/Controllers/InvoicesController.cs:2432 | [Authorize] | да | нет |
+| POST | api/[controller]/cleanup-orphan-invoices | InvoicesController | CleanupOrphanInvoices | backend/Controllers/InvoicesController.cs:2467 | [Authorize] | да | нет |
+| POST | api/[controller]/{invoiceEntityId:int}/repair-legacy-installments | InvoicesController | RepairLegacyInstallments | backend/Controllers/InvoicesController.cs:2509 | [Authorize] | да | нет |
+| DELETE | api/[controller]/{id:int} | InvoicesController | Delete | backend/Controllers/InvoicesController.cs:2668 | [Authorize] | да | нет |
+| POST | api/[controller]/bulk-delete | InvoicesController | BulkDelete | backend/Controllers/InvoicesController.cs:2714 | [Authorize] | да | нет |
+| POST | api/[controller]/change-responsible | InvoicesController | ChangeResponsible | backend/Controllers/InvoicesController.cs:2889 | [Authorize] | да | нет |
+| GET | api/[controller]/{id:int}/document | InvoicesController | GetDocument | backend/Controllers/InvoicesController.cs:2970 | [Authorize] | да | нет |
+| POST | api/[controller]/{id:int}/yandex-disk | InvoicesController | UploadDocumentToYandexDisk | backend/Controllers/InvoicesController.cs:3030 | [Authorize] | да | нет |
+| POST | api/[controller]/{id:int}/send-email | InvoicesController | SendInvoiceEmail | backend/Controllers/InvoicesController.cs:3164 | [Authorize] | да | нет |
 | POST | api/legal-entities/clean/address | LegalEntitiesController | CleanAddress | backend/Controllers/LegalEntitiesController.cs:851 | [Authorize] | да | нет |
 | POST | api/legal-entities/clean/email | LegalEntitiesController | CleanEmail | backend/Controllers/LegalEntitiesController.cs:883 | [Authorize] | да | нет |
 | POST | api/legal-entities/clean/phone | LegalEntitiesController | CleanPhone | backend/Controllers/LegalEntitiesController.cs:904 | [Authorize] | да | нет |
@@ -924,45 +937,46 @@
 | POST | api/notifications/inbox/push/subscriptions | PushSubscriptionsController | UpsertSubscription | backend/Controllers/PushSubscriptionsController.cs:135 | [Authorize] | да | нет |
 | DELETE | api/notifications/inbox/push/subscriptions/{id:int} | PushSubscriptionsController | RevokeSubscriptionById | backend/Controllers/PushSubscriptionsController.cs:188 | [Authorize] | да | нет |
 | POST | api/notifications/inbox/push/subscriptions/revoke | PushSubscriptionsController | RevokeSubscriptionByEndpoint | backend/Controllers/PushSubscriptionsController.cs:209 | [Authorize] | нет | нет |
-| GET | api/reports/legal-work | ReportsController | LegalWork | backend/Controllers/ReportsController.cs:187 | [Authorize] | да | нет |
+| GET | api/reports/legal-work | ReportsController | LegalWork | backend/Controllers/ReportsController.cs:187 | [Authorize] | да | docs/report-inventory-2026-08-09.md |
 | GET | api/reports/legal-work.csv | ReportsController | ExportLegalWorkCsv | backend/Controllers/ReportsController.cs:223 | [Authorize] | да | нет |
 | GET | api/reports/legal-work.xls | ReportsController | ExportLegalWorkExcel | backend/Controllers/ReportsController.cs:245 | [Authorize] | да | нет |
 | GET | api/reports/legal-work.pdf | ReportsController | ExportLegalWorkPdf | backend/Controllers/ReportsController.cs:268 | [Authorize] | да | нет |
-| GET | api/reports/management.xls | ReportsController | ExportManagementReportExcel | backend/Controllers/ReportsController.cs:293 | [Authorize] | да | нет |
-| GET | api/reports/management.csv | ReportsController | ExportManagementReportCsv | backend/Controllers/ReportsController.cs:353 | [Authorize] | да | нет |
-| GET | api/reports/management.pdf | ReportsController | ExportManagementReportPdf | backend/Controllers/ReportsController.cs:413 | [Authorize] | да | нет |
-| GET | api/reports/management.print | ReportsController | PrintManagementReport | backend/Controllers/ReportsController.cs:476 | [Authorize] | да | нет |
-| GET | api/reports/case-finance | ReportsController | CaseFinance | backend/Controllers/ReportsController.cs:533 | [Authorize] | да | нет |
-| GET | api/reports/case-success | ReportsController | CaseSuccess | backend/Controllers/ReportsController.cs:569 | [Authorize] | да | нет |
-| GET | api/reports/case-activity | ReportsController | CaseActivity | backend/Controllers/ReportsController.cs:1242 | [Authorize] | да | нет |
-| GET | api/reports/current-cases | ReportsController | CurrentCases | backend/Controllers/ReportsController.cs:1281 | [Authorize] | да | нет |
-| GET | api/reports/tasks | ReportsController | Tasks | backend/Controllers/ReportsController.cs:1325 | [Authorize] | да | нет |
-| GET | api/reports/lawyer-workload | ReportsController | LawyerWorkload | backend/Controllers/ReportsController.cs:1362 | [Authorize] | да | нет |
-| GET | api/reports/overdue-deadlines | ReportsController | OverdueDeadlines | backend/Controllers/ReportsController.cs:1401 | [Authorize] | да | нет |
-| GET | api/reports/cash-flow | ReportsController | CashFlow | backend/Controllers/ReportsController.cs:1438 | [Authorize] | да | нет |
-| GET | api/reports/cash-flow-forecast | ReportsController | CashFlowForecast | backend/Controllers/ReportsController.cs:1479 | [Authorize] | да | нет |
-| GET | api/reports/categories | ReportsController | Categories | backend/Controllers/ReportsController.cs:1518 | [Authorize] | да | нет |
-| GET | api/reports/counterparties | ReportsController | Counterparties | backend/Controllers/ReportsController.cs:1539 | [Authorize] | да | нет |
-| GET | api/reports/projects | ReportsController | Projects | backend/Controllers/ReportsController.cs:1560 | [Authorize] | да | нет |
-| GET | api/reports/directions | ReportsController | Directions | backend/Controllers/ReportsController.cs:1581 | [Authorize] | да | нет |
-| GET | api/reports/sales-points | ReportsController | SalesPoints | backend/Controllers/ReportsController.cs:1602 | [Authorize] | да | нет |
-| GET | api/reports/vat | ReportsController | Vat | backend/Controllers/ReportsController.cs:1623 | [Authorize] | да | нет |
-| GET | api/reports/plan-fact | ReportsController | PlanFact | backend/Controllers/ReportsController.cs:1644 | [Authorize] | да | нет |
-| GET | api/reports/advances | ReportsController | Advances | backend/Controllers/ReportsController.cs:1665 | [Authorize] | да | нет |
-| GET | api/reports/payment-priorities | ReportsController | PaymentPriorities | backend/Controllers/ReportsController.cs:1686 | [Authorize] | да | нет |
-| GET | api/reports/paid-accounts | ReportsController | PaidAccounts | backend/Controllers/ReportsController.cs:1707 | [Authorize] | да | нет |
-| GET | api/reports/paid-invoices | ReportsController | PaidInvoices | backend/Controllers/ReportsController.cs:1728 | [Authorize] | да | нет |
-| GET | api/reports/invoice-statuses | ReportsController | InvoiceStatuses | backend/Controllers/ReportsController.cs:1749 | [Authorize] | да | нет |
-| GET | api/reports/act-statuses | ReportsController | ActStatuses | backend/Controllers/ReportsController.cs:1770 | [Authorize] | да | нет |
-| GET | api/reports/contract-statuses | ReportsController | ContractStatuses | backend/Controllers/ReportsController.cs:1791 | [Authorize] | да | нет |
-| GET | api/reports/payment-orders | ReportsController | PaymentOrders | backend/Controllers/ReportsController.cs:1812 | [Authorize] | да | нет |
-| GET | api/reports/payment-purposes | ReportsController | PaymentPurposes | backend/Controllers/ReportsController.cs:1833 | [Authorize] | да | нет |
-| GET | api/reports/match-statuses | ReportsController | MatchStatuses | backend/Controllers/ReportsController.cs:1854 | [Authorize] | да | нет |
-| GET | api/reports/journal-statuses | ReportsController | JournalStatuses | backend/Controllers/ReportsController.cs:1875 | [Authorize] | да | нет |
-| GET | api/reports/currencies | ReportsController | Currencies | backend/Controllers/ReportsController.cs:1896 | [Authorize] | да | нет |
-| GET | api/reports/cash-orders | ReportsController | CashOrders | backend/Controllers/ReportsController.cs:1917 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
-| GET | api/reports/bank-statement-imports | ReportsController | BankStatementImports | backend/Controllers/ReportsController.cs:1951 | [Authorize] | да | нет |
-| GET | api/reports/spreadsheet-imports | ReportsController | SpreadsheetImports | backend/Controllers/ReportsController.cs:1997 | [Authorize] | да | нет |
+| GET | api/reports/legal-work.print | ReportsController | PrintLegalWork | backend/Controllers/ReportsController.cs:293 | [Authorize] | да | нет |
+| GET | api/reports/management.xls | ReportsController | ExportManagementReportExcel | backend/Controllers/ReportsController.cs:312 | [Authorize] | да | docs/report-inventory-2026-08-09.md |
+| GET | api/reports/management.csv | ReportsController | ExportManagementReportCsv | backend/Controllers/ReportsController.cs:372 | [Authorize] | да | docs/report-inventory-2026-08-09.md |
+| GET | api/reports/management.pdf | ReportsController | ExportManagementReportPdf | backend/Controllers/ReportsController.cs:432 | [Authorize] | да | docs/report-inventory-2026-08-09.md |
+| GET | api/reports/management.print | ReportsController | PrintManagementReport | backend/Controllers/ReportsController.cs:495 | [Authorize] | да | docs/report-inventory-2026-08-09.md |
+| GET | api/reports/case-finance | ReportsController | CaseFinance | backend/Controllers/ReportsController.cs:552 | [Authorize] | да | docs/report-inventory-2026-08-09.md |
+| GET | api/reports/case-success | ReportsController | CaseSuccess | backend/Controllers/ReportsController.cs:588 | [Authorize] | да | docs/report-inventory-2026-08-09.md |
+| GET | api/reports/case-activity | ReportsController | CaseActivity | backend/Controllers/ReportsController.cs:1261 | [Authorize] | да | docs/report-inventory-2026-08-09.md |
+| GET | api/reports/current-cases | ReportsController | CurrentCases | backend/Controllers/ReportsController.cs:1300 | [Authorize] | да | docs/report-inventory-2026-08-09.md |
+| GET | api/reports/tasks | ReportsController | Tasks | backend/Controllers/ReportsController.cs:1344 | [Authorize] | да | docs/report-inventory-2026-08-09.md |
+| GET | api/reports/lawyer-workload | ReportsController | LawyerWorkload | backend/Controllers/ReportsController.cs:1381 | [Authorize] | да | docs/report-inventory-2026-08-09.md |
+| GET | api/reports/overdue-deadlines | ReportsController | OverdueDeadlines | backend/Controllers/ReportsController.cs:1420 | [Authorize] | да | docs/report-inventory-2026-08-09.md |
+| GET | api/reports/cash-flow | ReportsController | CashFlow | backend/Controllers/ReportsController.cs:1457 | [Authorize] | да | docs/report-inventory-2026-08-09.md |
+| GET | api/reports/cash-flow-forecast | ReportsController | CashFlowForecast | backend/Controllers/ReportsController.cs:1498 | [Authorize] | да | docs/report-inventory-2026-08-09.md |
+| GET | api/reports/categories | ReportsController | Categories | backend/Controllers/ReportsController.cs:1537 | [Authorize] | да | docs/report-inventory-2026-08-09.md |
+| GET | api/reports/counterparties | ReportsController | Counterparties | backend/Controllers/ReportsController.cs:1558 | [Authorize] | да | docs/report-inventory-2026-08-09.md |
+| GET | api/reports/projects | ReportsController | Projects | backend/Controllers/ReportsController.cs:1579 | [Authorize] | да | docs/report-inventory-2026-08-09.md |
+| GET | api/reports/directions | ReportsController | Directions | backend/Controllers/ReportsController.cs:1600 | [Authorize] | да | docs/report-inventory-2026-08-09.md |
+| GET | api/reports/sales-points | ReportsController | SalesPoints | backend/Controllers/ReportsController.cs:1621 | [Authorize] | да | docs/report-inventory-2026-08-09.md |
+| GET | api/reports/vat | ReportsController | Vat | backend/Controllers/ReportsController.cs:1642 | [Authorize] | да | docs/report-inventory-2026-08-09.md |
+| GET | api/reports/plan-fact | ReportsController | PlanFact | backend/Controllers/ReportsController.cs:1663 | [Authorize] | да | docs/report-inventory-2026-08-09.md |
+| GET | api/reports/advances | ReportsController | Advances | backend/Controllers/ReportsController.cs:1684 | [Authorize] | да | docs/report-inventory-2026-08-09.md |
+| GET | api/reports/payment-priorities | ReportsController | PaymentPriorities | backend/Controllers/ReportsController.cs:1705 | [Authorize] | да | docs/report-inventory-2026-08-09.md |
+| GET | api/reports/paid-accounts | ReportsController | PaidAccounts | backend/Controllers/ReportsController.cs:1726 | [Authorize] | да | docs/report-inventory-2026-08-09.md |
+| GET | api/reports/paid-invoices | ReportsController | PaidInvoices | backend/Controllers/ReportsController.cs:1747 | [Authorize] | да | docs/report-inventory-2026-08-09.md |
+| GET | api/reports/invoice-statuses | ReportsController | InvoiceStatuses | backend/Controllers/ReportsController.cs:1768 | [Authorize] | да | docs/report-inventory-2026-08-09.md |
+| GET | api/reports/act-statuses | ReportsController | ActStatuses | backend/Controllers/ReportsController.cs:1789 | [Authorize] | да | docs/report-inventory-2026-08-09.md |
+| GET | api/reports/contract-statuses | ReportsController | ContractStatuses | backend/Controllers/ReportsController.cs:1810 | [Authorize] | да | docs/report-inventory-2026-08-09.md |
+| GET | api/reports/payment-orders | ReportsController | PaymentOrders | backend/Controllers/ReportsController.cs:1831 | [Authorize] | да | docs/report-inventory-2026-08-09.md |
+| GET | api/reports/payment-purposes | ReportsController | PaymentPurposes | backend/Controllers/ReportsController.cs:1852 | [Authorize] | да | docs/report-inventory-2026-08-09.md |
+| GET | api/reports/match-statuses | ReportsController | MatchStatuses | backend/Controllers/ReportsController.cs:1873 | [Authorize] | да | docs/report-inventory-2026-08-09.md |
+| GET | api/reports/journal-statuses | ReportsController | JournalStatuses | backend/Controllers/ReportsController.cs:1894 | [Authorize] | да | docs/report-inventory-2026-08-09.md |
+| GET | api/reports/currencies | ReportsController | Currencies | backend/Controllers/ReportsController.cs:1915 | [Authorize] | да | docs/report-inventory-2026-08-09.md |
+| GET | api/reports/cash-orders | ReportsController | CashOrders | backend/Controllers/ReportsController.cs:1936 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md, docs/report-inventory-2026-08-09.md |
+| GET | api/reports/bank-statement-imports | ReportsController | BankStatementImports | backend/Controllers/ReportsController.cs:1970 | [Authorize] | да | docs/report-inventory-2026-08-09.md |
+| GET | api/reports/spreadsheet-imports | ReportsController | SpreadsheetImports | backend/Controllers/ReportsController.cs:2016 | [Authorize] | да | docs/report-inventory-2026-08-09.md |
 | GET | api/role-permissions/audit | RolePermissionsController | GetAudit | backend/Controllers/RolePermissionsController.cs:36 | [Authorize] | да | docs/crm-legal-module-release-runbook.md |
 | GET | api/role-permissions/audit.csv | RolePermissionsController | ExportAuditCsv | backend/Controllers/RolePermissionsController.cs:69 | [Authorize] | да | docs/crm-legal-module-release-runbook.md |
 | GET | api/role-permissions/{roleId:int} | RolePermissionsController | Get | backend/Controllers/RolePermissionsController.cs:113 | [Authorize] | да | нет |
@@ -1014,39 +1028,39 @@
 | PUT | api/tasks/settings | TasksController | UpdateSettings | backend/Controllers/TasksController.cs:383 | [Authorize] | да | нет |
 | GET | api/tasks/automation/case-control/diagnostics | TasksController | GetCaseControlAutomationDiagnostics | backend/Controllers/TasksController.cs:477 | [Authorize] | да | нет |
 | GET | api/tasks/summary | TasksController | GetTaskListSummary | backend/Controllers/TasksController.cs:625 | [Authorize] | да | docs/task-journal-query-optimization.md |
-| GET | api/tasks/automation/case-control/preview | TasksController | PreviewCaseControlAutomation | backend/Controllers/TasksController.cs:718 | [Authorize] | да | нет |
-| GET | api/tasks/calendar.ics | TasksController | ExportCalendar | backend/Controllers/TasksController.cs:826 | [Authorize] | да | нет |
-| GET | api/tasks/planning-report.{format} | TasksController | ExportPlanningReport | backend/Controllers/TasksController.cs:916 | [Authorize] | да | нет |
-| GET | api/tasks/automation/case-candidates | TasksController | GetAutomationCaseCandidates | backend/Controllers/TasksController.cs:1004 | [Authorize] | да | docs/task-template-current-state-2026-07-09.md |
-| POST | api/tasks/automation/case-candidates/{clientCaseId:int}/task | TasksController | CreateAutomationTaskForCase | backend/Controllers/TasksController.cs:1177 | [Authorize] | да | docs/task-template-current-state-2026-07-09.md |
-| POST | api/tasks/automation/case-candidates/tasks | TasksController | CreateAutomationTasksForCandidates | backend/Controllers/TasksController.cs:1348 | [Authorize] | да | docs/task-template-current-state-2026-07-09.md |
-| GET | api/tasks/templates | TasksController | GetTemplates | backend/Controllers/TasksController.cs:1488 | [Authorize] | да | нет |
-| GET | api/tasks/templates/{id:int} | TasksController | GetTemplate | backend/Controllers/TasksController.cs:1573 | [Authorize] | да | нет |
-| POST | api/tasks/templates | TasksController | CreateTemplate | backend/Controllers/TasksController.cs:1594 | [Authorize] | да | нет |
-| PUT | api/tasks/templates/{id:int} | TasksController | UpdateTemplate | backend/Controllers/TasksController.cs:1659 | [Authorize] | да | нет |
-| PATCH | api/tasks/templates/{id:int}/active | TasksController | UpdateTemplateActive | backend/Controllers/TasksController.cs:1731 | [Authorize] | да | нет |
-| DELETE | api/tasks/templates/{id:int} | TasksController | DeleteTemplate | backend/Controllers/TasksController.cs:1762 | [Authorize] | да | нет |
-| GET | api/tasks/{id:int} | TasksController | GetTask | backend/Controllers/TasksController.cs:1787 | [Authorize] | да | docs/task-deadline-change-current-state-2026-07-09.md, docs/task-deadline-change-model-design-2026-07-09.md, docs/task-result-approval-current-state-2026-07-09.md |
-| GET | api/tasks/{id:int}/comments | TasksController | GetComments | backend/Controllers/TasksController.cs:1808 | [Authorize] | да | нет |
-| POST | api/tasks/{id:int}/comments | TasksController | CreateComment | backend/Controllers/TasksController.cs:1839 | [Authorize] | да | нет |
-| POST | api/tasks/{id:int}/deadline-change-requests | TasksController | CreateDeadlineChangeRequest | backend/Controllers/TasksController.cs:1891 | [Authorize] | да | docs/task-deadline-change-current-state-2026-07-09.md, docs/task-deadline-change-model-design-2026-07-09.md |
-| GET | api/tasks/{id:int}/deadline-change-requests | TasksController | GetDeadlineChangeRequests | backend/Controllers/TasksController.cs:1986 | [Authorize] | да | docs/task-deadline-change-current-state-2026-07-09.md, docs/task-deadline-change-model-design-2026-07-09.md |
-| GET | api/tasks/{id:int}/deadline-change-requests/{requestId:int} | TasksController | GetDeadlineChangeRequest | backend/Controllers/TasksController.cs:2017 | [Authorize] | да | нет |
-| POST | api/tasks/{id:int}/deadline-change-requests/{requestId:int}/approve | TasksController | ApproveDeadlineChangeRequest | backend/Controllers/TasksController.cs:2045 | [Authorize] | да | нет |
-| POST | api/tasks/{id:int}/deadline-change-requests/{requestId:int}/reject | TasksController | RejectDeadlineChangeRequest | backend/Controllers/TasksController.cs:2141 | [Authorize] | да | нет |
-| GET | api/tasks/{id:int}/files | TasksController | GetFiles | backend/Controllers/TasksController.cs:2230 | [Authorize] | да | нет |
-| POST | api/tasks/{id:int}/files | TasksController | UploadFile | backend/Controllers/TasksController.cs:2331 | [Authorize] | да | docs/file-upload-limits-2026-06-10.md |
-| GET | api/tasks/{id:int}/files/{fileId:int}/download | TasksController | DownloadFile | backend/Controllers/TasksController.cs:2494 | [Authorize] | да | нет |
-| DELETE | api/tasks/{id:int}/files/{fileId:int} | TasksController | DeleteFile | backend/Controllers/TasksController.cs:2531 | [Authorize] | да | нет |
-| GET | api/tasks/billing-context | TasksController | GetBillingContext | backend/Controllers/TasksController.cs:2582 | [Authorize] | да | нет |
-| POST | api/tasks | TasksController | CreateTask | backend/Controllers/TasksController.cs:2654 | [Authorize] | да | docs/full-project-audit-2026-06-10.md, docs/task-deadline-change-current-state-2026-07-09.md, docs/task-deadline-change-model-design-2026-07-09.md, docs/task-journal-query-optimization.md, docs/task-result-approval-current-state-2026-07-09.md, docs/task-template-current-state-2026-07-09.md |
-| PUT | api/tasks/{id:int} | TasksController | UpdateTask | backend/Controllers/TasksController.cs:2782 | [Authorize] | да | docs/task-deadline-change-current-state-2026-07-09.md, docs/task-deadline-change-model-design-2026-07-09.md, docs/task-result-approval-current-state-2026-07-09.md |
-| PATCH | api/tasks/{id:int}/status | TasksController | UpdateStatus | backend/Controllers/TasksController.cs:3028 | [Authorize] | да | docs/task-result-approval-current-state-2026-07-09.md |
-| PATCH | api/tasks/{id:int}/control | TasksController | UpdateControl | backend/Controllers/TasksController.cs:3174 | [Authorize] | да | нет |
-| POST | api/tasks/bulk | TasksController | BulkUpdateTasks | backend/Controllers/TasksController.cs:3239 | [Authorize] | да | нет |
-| POST | api/tasks/bulk/delete | TasksController | BulkDeleteTasks | backend/Controllers/TasksController.cs:3489 | [Authorize] | да | нет |
-| PATCH | api/tasks/{id:int}/approval | TasksController | UpdateApproval | backend/Controllers/TasksController.cs:3565 | [Authorize] | да | нет |
-| DELETE | api/tasks/{id:int} | TasksController | DeleteTask | backend/Controllers/TasksController.cs:3718 | [Authorize] | да | docs/task-deadline-change-current-state-2026-07-09.md, docs/task-deadline-change-model-design-2026-07-09.md, docs/task-result-approval-current-state-2026-07-09.md |
+| GET | api/tasks/automation/case-control/preview | TasksController | PreviewCaseControlAutomation | backend/Controllers/TasksController.cs:722 | [Authorize] | да | нет |
+| GET | api/tasks/calendar.ics | TasksController | ExportCalendar | backend/Controllers/TasksController.cs:830 | [Authorize] | да | нет |
+| GET | api/tasks/planning-report.{format} | TasksController | ExportPlanningReport | backend/Controllers/TasksController.cs:920 | [Authorize] | да | нет |
+| GET | api/tasks/automation/case-candidates | TasksController | GetAutomationCaseCandidates | backend/Controllers/TasksController.cs:1008 | [Authorize] | да | docs/task-template-current-state-2026-07-09.md |
+| POST | api/tasks/automation/case-candidates/{clientCaseId:int}/task | TasksController | CreateAutomationTaskForCase | backend/Controllers/TasksController.cs:1181 | [Authorize] | да | docs/task-template-current-state-2026-07-09.md |
+| POST | api/tasks/automation/case-candidates/tasks | TasksController | CreateAutomationTasksForCandidates | backend/Controllers/TasksController.cs:1352 | [Authorize] | да | docs/task-template-current-state-2026-07-09.md |
+| GET | api/tasks/templates | TasksController | GetTemplates | backend/Controllers/TasksController.cs:1492 | [Authorize] | да | нет |
+| GET | api/tasks/templates/{id:int} | TasksController | GetTemplate | backend/Controllers/TasksController.cs:1577 | [Authorize] | да | нет |
+| POST | api/tasks/templates | TasksController | CreateTemplate | backend/Controllers/TasksController.cs:1598 | [Authorize] | да | нет |
+| PUT | api/tasks/templates/{id:int} | TasksController | UpdateTemplate | backend/Controllers/TasksController.cs:1663 | [Authorize] | да | нет |
+| PATCH | api/tasks/templates/{id:int}/active | TasksController | UpdateTemplateActive | backend/Controllers/TasksController.cs:1735 | [Authorize] | да | нет |
+| DELETE | api/tasks/templates/{id:int} | TasksController | DeleteTemplate | backend/Controllers/TasksController.cs:1766 | [Authorize] | да | нет |
+| GET | api/tasks/{id:int} | TasksController | GetTask | backend/Controllers/TasksController.cs:1791 | [Authorize] | да | docs/task-deadline-change-current-state-2026-07-09.md, docs/task-deadline-change-model-design-2026-07-09.md, docs/task-result-approval-current-state-2026-07-09.md |
+| GET | api/tasks/{id:int}/comments | TasksController | GetComments | backend/Controllers/TasksController.cs:1812 | [Authorize] | да | нет |
+| POST | api/tasks/{id:int}/comments | TasksController | CreateComment | backend/Controllers/TasksController.cs:1843 | [Authorize] | да | нет |
+| POST | api/tasks/{id:int}/deadline-change-requests | TasksController | CreateDeadlineChangeRequest | backend/Controllers/TasksController.cs:1895 | [Authorize] | да | docs/task-deadline-change-current-state-2026-07-09.md, docs/task-deadline-change-model-design-2026-07-09.md |
+| GET | api/tasks/{id:int}/deadline-change-requests | TasksController | GetDeadlineChangeRequests | backend/Controllers/TasksController.cs:1990 | [Authorize] | да | docs/task-deadline-change-current-state-2026-07-09.md, docs/task-deadline-change-model-design-2026-07-09.md |
+| GET | api/tasks/{id:int}/deadline-change-requests/{requestId:int} | TasksController | GetDeadlineChangeRequest | backend/Controllers/TasksController.cs:2021 | [Authorize] | да | нет |
+| POST | api/tasks/{id:int}/deadline-change-requests/{requestId:int}/approve | TasksController | ApproveDeadlineChangeRequest | backend/Controllers/TasksController.cs:2049 | [Authorize] | да | нет |
+| POST | api/tasks/{id:int}/deadline-change-requests/{requestId:int}/reject | TasksController | RejectDeadlineChangeRequest | backend/Controllers/TasksController.cs:2145 | [Authorize] | да | нет |
+| GET | api/tasks/{id:int}/files | TasksController | GetFiles | backend/Controllers/TasksController.cs:2234 | [Authorize] | да | нет |
+| POST | api/tasks/{id:int}/files | TasksController | UploadFile | backend/Controllers/TasksController.cs:2335 | [Authorize] | да | docs/file-upload-limits-2026-06-10.md |
+| GET | api/tasks/{id:int}/files/{fileId:int}/download | TasksController | DownloadFile | backend/Controllers/TasksController.cs:2498 | [Authorize] | да | нет |
+| DELETE | api/tasks/{id:int}/files/{fileId:int} | TasksController | DeleteFile | backend/Controllers/TasksController.cs:2535 | [Authorize] | да | нет |
+| GET | api/tasks/billing-context | TasksController | GetBillingContext | backend/Controllers/TasksController.cs:2586 | [Authorize] | да | нет |
+| POST | api/tasks | TasksController | CreateTask | backend/Controllers/TasksController.cs:2658 | [Authorize] | да | docs/full-project-audit-2026-06-10.md, docs/task-deadline-change-current-state-2026-07-09.md, docs/task-deadline-change-model-design-2026-07-09.md, docs/task-journal-query-optimization.md, docs/task-result-approval-current-state-2026-07-09.md, docs/task-template-current-state-2026-07-09.md |
+| PUT | api/tasks/{id:int} | TasksController | UpdateTask | backend/Controllers/TasksController.cs:2786 | [Authorize] | да | docs/task-deadline-change-current-state-2026-07-09.md, docs/task-deadline-change-model-design-2026-07-09.md, docs/task-result-approval-current-state-2026-07-09.md |
+| PATCH | api/tasks/{id:int}/status | TasksController | UpdateStatus | backend/Controllers/TasksController.cs:3032 | [Authorize] | да | docs/task-result-approval-current-state-2026-07-09.md |
+| PATCH | api/tasks/{id:int}/control | TasksController | UpdateControl | backend/Controllers/TasksController.cs:3178 | [Authorize] | да | нет |
+| POST | api/tasks/bulk | TasksController | BulkUpdateTasks | backend/Controllers/TasksController.cs:3243 | [Authorize] | да | нет |
+| POST | api/tasks/bulk/delete | TasksController | BulkDeleteTasks | backend/Controllers/TasksController.cs:3493 | [Authorize] | да | нет |
+| PATCH | api/tasks/{id:int}/approval | TasksController | UpdateApproval | backend/Controllers/TasksController.cs:3569 | [Authorize] | да | нет |
+| DELETE | api/tasks/{id:int} | TasksController | DeleteTask | backend/Controllers/TasksController.cs:3722 | [Authorize] | да | docs/task-deadline-change-current-state-2026-07-09.md, docs/task-deadline-change-model-design-2026-07-09.md, docs/task-result-approval-current-state-2026-07-09.md |
 | GET | api/user-activity | UserActivityController | GetAsync | backend/Controllers/UserActivityController.cs:62 | [Authorize]; [Authorize(Policy = "Admin")] | нет | docs/full-project-audit-2026-06-10.md |
 | GET | api/user-activity/online | UserActivityController | GetOnlineAsync | backend/Controllers/UserActivityController.cs:153 | [Authorize]; [Authorize(Policy = "Admin")] | да | нет |
 | GET | api/user-activity/filters | UserActivityController | GetFiltersAsync | backend/Controllers/UserActivityController.cs:287 | [Authorize]; [Authorize(Policy = "Admin")] | нет | нет |
@@ -1087,104 +1101,110 @@
 | POST | api/v1/payments | PaymentsV1Controller | Create | backend/Controllers/V1/PaymentsV1Controller.cs:79 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
 | PUT | api/v1/payments/{id:int} | PaymentsV1Controller | Update | backend/Controllers/V1/PaymentsV1Controller.cs:107 | [Authorize] | да | нет |
 | DELETE | api/v1/payments/{id:int} | PaymentsV1Controller | Delete | backend/Controllers/V1/PaymentsV1Controller.cs:171 | [Authorize] | да | нет |
-| GET | api/v2/cases | CasesV2Controller | Get | backend/Controllers/V2/CasesV2Controller.cs:257 | [Authorize] | да | docs/case-access-query-optimization.md, docs/case-business-rules.md, docs/case-conversation-current-state-2026-07-08.md, docs/case-detail-query-optimization.md, docs/case-registry-query-optimization.md, docs/full-project-audit-2026-06-10.md |
-| GET | api/v2/cases/export.csv | CasesV2Controller | ExportRegistryCsv | backend/Controllers/V2/CasesV2Controller.cs:328 | [Authorize] | да | docs/case-registry-query-optimization.md |
-| GET | api/v2/cases/export.xls | CasesV2Controller | ExportRegistryExcel | backend/Controllers/V2/CasesV2Controller.cs:377 | [Authorize] | да | docs/case-registry-query-optimization.md |
-| GET | api/v2/cases/export.pdf | CasesV2Controller | ExportRegistryPdf | backend/Controllers/V2/CasesV2Controller.cs:426 | [Authorize] | да | docs/case-registry-query-optimization.md |
-| GET | api/v2/cases/print | CasesV2Controller | PrintRegistry | backend/Controllers/V2/CasesV2Controller.cs:480 | [Authorize] | да | docs/case-registry-query-optimization.md |
-| GET | api/v2/cases/document-templates | CasesV2Controller | GetDocumentTemplates | backend/Controllers/V2/CasesV2Controller.cs:1843 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
-| GET | api/document-templates | CasesV2Controller | GetDocumentTemplates | backend/Controllers/V2/CasesV2Controller.cs:1844 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
-| GET | api/v2/cases/document-template-tokens | CasesV2Controller | GetDocumentTemplateTokens | backend/Controllers/V2/CasesV2Controller.cs:1859 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
-| GET | api/document-template-tokens | CasesV2Controller | GetDocumentTemplateTokens | backend/Controllers/V2/CasesV2Controller.cs:1860 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
-| POST | api/v2/cases/document-templates | CasesV2Controller | CreateDocumentTemplate | backend/Controllers/V2/CasesV2Controller.cs:1879 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
-| POST | api/document-templates | CasesV2Controller | CreateDocumentTemplate | backend/Controllers/V2/CasesV2Controller.cs:1880 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
-| PATCH | api/v2/cases/document-templates/{templateKey} | CasesV2Controller | UpdateDocumentTemplate | backend/Controllers/V2/CasesV2Controller.cs:1908 | [Authorize] | да | нет |
-| PATCH | api/document-templates/{templateKey} | CasesV2Controller | UpdateDocumentTemplate | backend/Controllers/V2/CasesV2Controller.cs:1909 | [Authorize] | да | нет |
-| POST | api/v2/cases/document-templates/{templateKey}/render | CasesV2Controller | RenderDocumentTemplate | backend/Controllers/V2/CasesV2Controller.cs:1945 | [Authorize] | да | нет |
-| POST | api/document-templates/{templateKey}/render | CasesV2Controller | RenderDocumentTemplate | backend/Controllers/V2/CasesV2Controller.cs:1946 | [Authorize] | да | нет |
-| GET | api/v2/cases/document-types | CasesV2Controller | GetDocumentTypes | backend/Controllers/V2/CasesV2Controller.cs:2013 | [Authorize] | да | нет |
-| GET | api/case-calendar/events | CasesV2Controller | GetCaseCalendarEvents | backend/Controllers/V2/CasesV2Controller.cs:2045 | [Authorize] | да | нет |
-| GET | api/case-calendar/summary | CasesV2Controller | GetCaseCalendarSummary | backend/Controllers/V2/CasesV2Controller.cs:2076 | [Authorize] | да | нет |
-| GET | api/case-calendar/events.ics | CasesV2Controller | ExportCaseCalendarIcs | backend/Controllers/V2/CasesV2Controller.cs:2107 | [Authorize] | да | нет |
-| POST | api/v2/cases/procedural-deadlines/calculate | CasesV2Controller | CalculateProceduralDeadlinePreview | backend/Controllers/V2/CasesV2Controller.cs:2164 | [Authorize] | да | нет |
-| GET | api/v2/cases/procedural-deadlines/calendar-settings | CasesV2Controller | GetProceduralDeadlineCalendarSettings | backend/Controllers/V2/CasesV2Controller.cs:2205 | [Authorize] | да | docs/case-business-rules.md |
-| PUT | api/v2/cases/procedural-deadlines/calendar-settings | CasesV2Controller | UpdateProceduralDeadlineCalendarSettings | backend/Controllers/V2/CasesV2Controller.cs:2216 | [Authorize] | да | docs/case-business-rules.md |
-| GET | api/v2/cases/court-directory | CasesV2Controller | GetCourtDirectory | backend/Controllers/V2/CasesV2Controller.cs:2242 | [Authorize] | да | нет |
-| POST | api/v2/cases/court-directory | CasesV2Controller | CreateCourtDirectoryItem | backend/Controllers/V2/CasesV2Controller.cs:2267 | [Authorize] | да | нет |
-| PUT | api/v2/cases/court-directory/{courtId:int} | CasesV2Controller | UpdateCourtDirectoryItem | backend/Controllers/V2/CasesV2Controller.cs:2311 | [Authorize] | да | нет |
-| GET | api/v2/cases/{id:int} | CasesV2Controller | GetById | backend/Controllers/V2/CasesV2Controller.cs:2352 | [Authorize] | да | docs/case-access-query-optimization.md, docs/case-conversation-current-state-2026-07-08.md, docs/case-detail-query-optimization.md |
-| GET | api/v2/cases/{id:int}/procedural-deadlines | CasesV2Controller | GetProceduralDeadlines | backend/Controllers/V2/CasesV2Controller.cs:2409 | [Authorize] | да | нет |
-| POST | api/v2/cases/{id:int}/procedural-deadlines | CasesV2Controller | CreateProceduralDeadline | backend/Controllers/V2/CasesV2Controller.cs:2445 | [Authorize] | да | нет |
-| PUT | api/v2/cases/{id:int}/procedural-deadlines/{deadlineId:int} | CasesV2Controller | UpdateProceduralDeadline | backend/Controllers/V2/CasesV2Controller.cs:2530 | [Authorize] | да | docs/case-business-rules.md |
-| POST | api/v2/cases/{id:int}/procedural-deadlines/{deadlineId:int}/close | CasesV2Controller | CloseProceduralDeadline | backend/Controllers/V2/CasesV2Controller.cs:2631 | [Authorize] | да | нет |
-| GET | api/v2/cases/{id:int}/court-instances | CasesV2Controller | GetCourtInstances | backend/Controllers/V2/CasesV2Controller.cs:2685 | [Authorize] | да | нет |
-| PUT | api/v2/cases/{id:int}/court-instances/{instance} | CasesV2Controller | UpsertCourtInstance | backend/Controllers/V2/CasesV2Controller.cs:2728 | [Authorize] | да | нет |
-| POST | api/v2/cases/{id:int}/court-instances/{instance}/complaints | CasesV2Controller | CreateCourtComplaint | backend/Controllers/V2/CasesV2Controller.cs:2805 | [Authorize] | да | нет |
-| PUT | api/v2/cases/{id:int}/court-instances/{instance}/complaints/{complaintId:int} | CasesV2Controller | UpdateCourtComplaint | backend/Controllers/V2/CasesV2Controller.cs:2869 | [Authorize] | да | нет |
-| DELETE | api/v2/cases/{id:int}/court-instances/{instance}/complaints/{complaintId:int} | CasesV2Controller | ArchiveCourtComplaint | backend/Controllers/V2/CasesV2Controller.cs:2936 | [Authorize] | да | нет |
-| GET | api/v2/cases/{id:int}/court-events | CasesV2Controller | GetCourtEvents | backend/Controllers/V2/CasesV2Controller.cs:2989 | [Authorize] | да | нет |
-| POST | api/v2/cases/{id:int}/court-events | CasesV2Controller | CreateCourtEvent | backend/Controllers/V2/CasesV2Controller.cs:3024 | [Authorize] | да | нет |
-| PUT | api/v2/cases/{id:int}/court-events/{courtEventId:int} | CasesV2Controller | UpdateCourtEvent | backend/Controllers/V2/CasesV2Controller.cs:3116 | [Authorize] | да | docs/case-business-rules.md |
-| GET | api/v2/cases/{id:int}/court-events/{courtEventId:int}/history | CasesV2Controller | GetCourtEventHistory | backend/Controllers/V2/CasesV2Controller.cs:3201 | [Authorize] | да | нет |
-| GET | api/v2/cases/{id:int}/court-parties | CasesV2Controller | GetCourtParties | backend/Controllers/V2/CasesV2Controller.cs:3244 | [Authorize] | да | docs/case-detail-query-optimization.md |
-| POST | api/v2/cases/{id:int}/court-parties | CasesV2Controller | CreateCourtParty | backend/Controllers/V2/CasesV2Controller.cs:3284 | [Authorize] | да | docs/case-detail-query-optimization.md |
-| DELETE | api/v2/cases/{id:int}/court-parties/{partyId:int} | CasesV2Controller | ArchiveCourtParty | backend/Controllers/V2/CasesV2Controller.cs:3343 | [Authorize] | да | нет |
-| POST | api/v2/cases/{id:int}/access-request | CasesV2Controller | RequestAccess | backend/Controllers/V2/CasesV2Controller.cs:3386 | [Authorize] | да | нет |
-| GET | api/v2/cases/access-requests | CasesV2Controller | GetAccessRequests | backend/Controllers/V2/CasesV2Controller.cs:3473 | [Authorize] | да | нет |
-| POST | api/v2/cases/{id:int}/access-request/resolve | CasesV2Controller | ResolveAccessRequest | backend/Controllers/V2/CasesV2Controller.cs:3514 | [Authorize] | да | нет |
-| GET | api/v2/cases/{id:int}/timeline | CasesV2Controller | GetTimeline | backend/Controllers/V2/CasesV2Controller.cs:3628 | [Authorize] | да | docs/case-detail-query-optimization.md |
-| GET | api/v2/cases/{id:int}/conversation | CasesV2Controller | GetConversation | backend/Controllers/V2/CasesV2Controller.cs:3663 | [Authorize] | да | docs/case-conversation-current-state-2026-07-08.md, docs/case-detail-query-optimization.md |
-| GET | api/v2/cases/{id:int}/summary | CasesV2Controller | GetSummary | backend/Controllers/V2/CasesV2Controller.cs:3693 | [Authorize] | да | docs/case-detail-query-optimization.md |
-| GET | api/v2/cases/{id:int}/finance | CasesV2Controller | GetFinance | backend/Controllers/V2/CasesV2Controller.cs:3772 | [Authorize] | да | docs/case-detail-query-optimization.md |
-| GET | api/v2/cases/{id:int}/documents | CasesV2Controller | GetDocuments | backend/Controllers/V2/CasesV2Controller.cs:3867 | [Authorize] | да | нет |
-| GET | api/case-documents | CasesV2Controller | GetDocumentRegistry | backend/Controllers/V2/CasesV2Controller.cs:3905 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
-| GET | api/case-documents/{documentId:int} | CasesV2Controller | GetDocumentById | backend/Controllers/V2/CasesV2Controller.cs:4020 | [Authorize] | да | нет |
-| POST | api/v2/cases/{id:int}/documents | CasesV2Controller | UploadDocument | backend/Controllers/V2/CasesV2Controller.cs:4059 | [Authorize] | да | docs/file-upload-limits-2026-06-10.md |
-| POST | api/case-documents/{documentId:int}/versions | CasesV2Controller | UploadDocumentVersionById | backend/Controllers/V2/CasesV2Controller.cs:4098 | [Authorize] | да | docs/file-upload-limits-2026-06-10.md |
-| POST | api/v2/cases/{id:int}/documents/generate-template | CasesV2Controller | GenerateDocumentTemplate | backend/Controllers/V2/CasesV2Controller.cs:4144 | [Authorize] | да | нет |
-| GET | api/v2/cases/{id:int}/documents/{documentId:int}/download | CasesV2Controller | DownloadDocument | backend/Controllers/V2/CasesV2Controller.cs:4239 | [Authorize] | да | нет |
-| GET | api/case-documents/{documentId:int}/download | CasesV2Controller | DownloadDocumentById | backend/Controllers/V2/CasesV2Controller.cs:4281 | [Authorize] | да | нет |
-| PATCH | api/case-documents/{documentId:int} | CasesV2Controller | UpdateDocumentById | backend/Controllers/V2/CasesV2Controller.cs:4318 | [Authorize] | да | нет |
-| PATCH | api/v2/cases/{id:int}/documents/{documentId:int} | CasesV2Controller | UpdateDocument | backend/Controllers/V2/CasesV2Controller.cs:4354 | [Authorize] | да | нет |
-| DELETE | api/v2/cases/{id:int}/documents/{documentId:int} | CasesV2Controller | DeleteDocument | backend/Controllers/V2/CasesV2Controller.cs:4733 | [Authorize] | да | нет |
-| POST | api/v2/cases/{id:int}/activity | CasesV2Controller | MarkActivity | backend/Controllers/V2/CasesV2Controller.cs:5355 | [Authorize] | да | нет |
-| POST | api/v2/cases/{id:int}/history | CasesV2Controller | AddHistoryEntry | backend/Controllers/V2/CasesV2Controller.cs:5422 | [Authorize] | да | нет |
-| POST | api/v2/cases/{id:int}/conversation | CasesV2Controller | AddConversationEntry | backend/Controllers/V2/CasesV2Controller.cs:5482 | [Authorize] | да | docs/case-conversation-current-state-2026-07-08.md, docs/case-detail-query-optimization.md |
-| POST | api/v2/cases/{id:int}/conversation | CasesV2Controller | AddConversationEntryWithAttachments | backend/Controllers/V2/CasesV2Controller.cs:5519 | [Authorize] | да | docs/case-conversation-current-state-2026-07-08.md, docs/case-detail-query-optimization.md |
-| GET | api/v2/cases/{id:int}/related-parties | CasesV2Controller | GetRelatedParties | backend/Controllers/V2/CasesV2Controller.cs:5557 | [Authorize] | да | нет |
-| POST | api/v2/cases/{id:int}/related-parties | CasesV2Controller | AddRelatedParty | backend/Controllers/V2/CasesV2Controller.cs:5603 | [Authorize] | да | нет |
-| DELETE | api/v2/cases/{id:int}/related-parties/{partyId:int} | CasesV2Controller | DeleteRelatedParty | backend/Controllers/V2/CasesV2Controller.cs:5847 | [Authorize] | да | нет |
-| GET | api/v2/cases/{id:int}/work-order | CasesV2Controller | GetWorkOrder | backend/Controllers/V2/CasesV2Controller.cs:5893 | [Authorize] | да | docs/case-access-query-optimization.md |
-| GET | api/v2/cases/{id:int}/work-order/external-approval | CasesV2Controller | GetExternalWorkOrderApproval | backend/Controllers/V2/CasesV2Controller.cs:5926 | [Authorize] | да | docs/case-access-query-optimization.md |
-| POST | api/v2/cases/{id:int}/work-order/external-approval | CasesV2Controller | CreateExternalWorkOrderApproval | backend/Controllers/V2/CasesV2Controller.cs:5957 | [Authorize] | да | docs/case-access-query-optimization.md |
-| DELETE | api/v2/cases/{id:int}/work-order/external-approval | CasesV2Controller | RevokeExternalWorkOrderApproval | backend/Controllers/V2/CasesV2Controller.cs:5994 | [Authorize] | да | docs/case-access-query-optimization.md |
-| GET | api/v2/cases/{id:int}/work-order/print | CasesV2Controller | PrintWorkOrder | backend/Controllers/V2/CasesV2Controller.cs:6046 | [Authorize] | да | нет |
-| POST | api/v2/cases/{id:int}/work-order/generate-document | CasesV2Controller | GenerateWorkOrderDocument | backend/Controllers/V2/CasesV2Controller.cs:6085 | [Authorize] | да | нет |
-| POST | api/v2/cases/{id:int}/work-order | CasesV2Controller | CreateWorkOrder | backend/Controllers/V2/CasesV2Controller.cs:6133 | [Authorize] | да | docs/case-access-query-optimization.md |
-| PATCH | api/v2/cases/{id:int}/work-order | CasesV2Controller | UpdateWorkOrder | backend/Controllers/V2/CasesV2Controller.cs:6187 | [Authorize] | да | docs/case-access-query-optimization.md |
-| DELETE | api/v2/cases/{id:int}/work-order | CasesV2Controller | DeleteWorkOrder | backend/Controllers/V2/CasesV2Controller.cs:6264 | [Authorize] | да | docs/case-access-query-optimization.md |
-| POST | api/v2/cases/{id:int}/work-order/items | CasesV2Controller | AddWorkOrderItem | backend/Controllers/V2/CasesV2Controller.cs:6297 | [Authorize] | да | нет |
-| PATCH | api/v2/cases/{id:int}/work-order/items/{itemId:int} | CasesV2Controller | UpdateWorkOrderItem | backend/Controllers/V2/CasesV2Controller.cs:6342 | [Authorize] | да | нет |
-| DELETE | api/v2/cases/{id:int}/work-order/items/{itemId:int} | CasesV2Controller | DeleteWorkOrderItem | backend/Controllers/V2/CasesV2Controller.cs:6392 | [Authorize] | да | нет |
-| POST | api/v2/cases/{id:int}/work-order/create-invoice | CasesV2Controller | CreateInvoiceFromWorkOrder | backend/Controllers/V2/CasesV2Controller.cs:6432 | [Authorize] | да | нет |
-| POST | api/v2/cases/{id:int}/work-order/create-act | CasesV2Controller | CreateActFromWorkOrder | backend/Controllers/V2/CasesV2Controller.cs:6564 | [Authorize] | да | нет |
-| POST | api/v2/cases/{id:int}/work-order/create-contract | CasesV2Controller | CreateContractFromWorkOrder | backend/Controllers/V2/CasesV2Controller.cs:6689 | [Authorize] | да | нет |
-| POST | api/v2/cases/{id:int}/work-order/submit-approval | CasesV2Controller | SubmitWorkOrderApproval | backend/Controllers/V2/CasesV2Controller.cs:6805 | [Authorize] | да | нет |
-| POST | api/v2/cases/{id:int}/work-order/approve | CasesV2Controller | ApproveWorkOrder | backend/Controllers/V2/CasesV2Controller.cs:6846 | [Authorize] | да | нет |
-| POST | api/v2/cases/{id:int}/work-order/request-revision | CasesV2Controller | RequestWorkOrderRevision | backend/Controllers/V2/CasesV2Controller.cs:6877 | [Authorize] | да | нет |
-| GET | api/v2/cases/{id:int}/court-sync/logs | CasesV2Controller | GetCourtSyncLogs | backend/Controllers/V2/CasesV2Controller.cs:6909 | [Authorize] | да | нет |
-| GET | api/v2/cases/court-sync/logs | CasesV2Controller | GetCourtSyncJournal | backend/Controllers/V2/CasesV2Controller.cs:6943 | [Authorize] | да | нет |
-| GET | api/v2/cases/court-sync/settings | CasesV2Controller | GetCourtSyncSettings | backend/Controllers/V2/CasesV2Controller.cs:7051 | [Authorize] | да | нет |
-| GET | api/v2/cases/court-sync/providers | CasesV2Controller | GetCourtSyncProviders | backend/Controllers/V2/CasesV2Controller.cs:7062 | [Authorize] | да | нет |
-| POST | api/v2/cases/{id:int}/court-sync/search | CasesV2Controller | SearchCourtSyncCases | backend/Controllers/V2/CasesV2Controller.cs:7093 | [Authorize] | да | нет |
-| POST | api/v2/cases/{id:int}/court-sync/bind | CasesV2Controller | BindCourtSyncCase | backend/Controllers/V2/CasesV2Controller.cs:7161 | [Authorize] | да | нет |
-| PUT | api/v2/cases/court-sync/settings | CasesV2Controller | UpdateCourtSyncSettings | backend/Controllers/V2/CasesV2Controller.cs:7337 | [Authorize] | да | нет |
-| POST | api/v2/cases/{id:int}/court-sync/run | CasesV2Controller | RunCourtSync | backend/Controllers/V2/CasesV2Controller.cs:7361 | [Authorize] | да | нет |
-| POST | api/v2/cases | CasesV2Controller | Create | backend/Controllers/V2/CasesV2Controller.cs:8420 | [Authorize] | да | docs/case-access-query-optimization.md, docs/case-conversation-current-state-2026-07-08.md, docs/case-detail-query-optimization.md, docs/case-registry-query-optimization.md, docs/full-project-audit-2026-06-10.md |
-| PUT | api/v2/cases/{id:int} | CasesV2Controller | Update | backend/Controllers/V2/CasesV2Controller.cs:8460 | [Authorize] | да | docs/case-access-query-optimization.md, docs/case-business-rules.md, docs/case-conversation-current-state-2026-07-08.md, docs/case-detail-query-optimization.md |
-| PATCH | api/v2/cases/{id:int}/control | CasesV2Controller | UpdateControl | backend/Controllers/V2/CasesV2Controller.cs:8531 | [Authorize] | да | нет |
-| DELETE | api/v2/cases/{id:int} | CasesV2Controller | Delete | backend/Controllers/V2/CasesV2Controller.cs:8570 | [Authorize] | да | docs/case-access-query-optimization.md, docs/case-conversation-current-state-2026-07-08.md, docs/case-detail-query-optimization.md |
-| POST | api/v2/cases/bulk-update | CasesV2Controller | BulkUpdate | backend/Controllers/V2/CasesV2Controller.cs:8598 | [Authorize] | да | нет |
+| GET | api/v2/cases | CasesV2Controller | Get | backend/Controllers/V2/CasesV2Controller.cs:259 | [Authorize] | да | docs/case-access-query-optimization.md, docs/case-business-rules.md, docs/case-conversation-current-state-2026-07-08.md, docs/case-detail-query-optimization.md, docs/case-registry-query-optimization.md, docs/full-project-audit-2026-06-10.md |
+| GET | api/v2/cases/export.csv | CasesV2Controller | ExportRegistryCsv | backend/Controllers/V2/CasesV2Controller.cs:330 | [Authorize] | да | docs/case-registry-query-optimization.md |
+| GET | api/v2/cases/export.xls | CasesV2Controller | ExportRegistryExcel | backend/Controllers/V2/CasesV2Controller.cs:379 | [Authorize] | да | docs/case-registry-query-optimization.md |
+| GET | api/v2/cases/export.pdf | CasesV2Controller | ExportRegistryPdf | backend/Controllers/V2/CasesV2Controller.cs:428 | [Authorize] | да | docs/case-registry-query-optimization.md |
+| GET | api/v2/cases/print | CasesV2Controller | PrintRegistry | backend/Controllers/V2/CasesV2Controller.cs:482 | [Authorize] | да | docs/case-registry-query-optimization.md |
+| GET | api/v2/cases/document-templates | CasesV2Controller | GetDocumentTemplates | backend/Controllers/V2/CasesV2Controller.cs:1845 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
+| GET | api/document-templates | CasesV2Controller | GetDocumentTemplates | backend/Controllers/V2/CasesV2Controller.cs:1846 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
+| GET | api/v2/cases/document-template-tokens | CasesV2Controller | GetDocumentTemplateTokens | backend/Controllers/V2/CasesV2Controller.cs:1861 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
+| GET | api/document-template-tokens | CasesV2Controller | GetDocumentTemplateTokens | backend/Controllers/V2/CasesV2Controller.cs:1862 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
+| GET | api/v2/cases/document-templates/history | CasesV2Controller | GetDocumentTemplateHistory | backend/Controllers/V2/CasesV2Controller.cs:1881 | [Authorize] | да | нет |
+| GET | api/document-templates/history | CasesV2Controller | GetDocumentTemplateHistory | backend/Controllers/V2/CasesV2Controller.cs:1882 | [Authorize] | да | нет |
+| GET | api/v2/cases/document-templates/history/{versionId:int} | CasesV2Controller | GetDocumentTemplateVersion | backend/Controllers/V2/CasesV2Controller.cs:1893 | [Authorize] | да | нет |
+| GET | api/document-templates/history/{versionId:int} | CasesV2Controller | GetDocumentTemplateVersion | backend/Controllers/V2/CasesV2Controller.cs:1894 | [Authorize] | да | нет |
+| POST | api/v2/cases/document-templates/history/{versionId:int}/restore | CasesV2Controller | RestoreDocumentTemplateVersion | backend/Controllers/V2/CasesV2Controller.cs:1915 | [Authorize] | да | нет |
+| POST | api/document-templates/history/{versionId:int}/restore | CasesV2Controller | RestoreDocumentTemplateVersion | backend/Controllers/V2/CasesV2Controller.cs:1916 | [Authorize] | да | нет |
+| POST | api/v2/cases/document-templates | CasesV2Controller | CreateDocumentTemplate | backend/Controllers/V2/CasesV2Controller.cs:1944 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
+| POST | api/document-templates | CasesV2Controller | CreateDocumentTemplate | backend/Controllers/V2/CasesV2Controller.cs:1945 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
+| PATCH | api/v2/cases/document-templates/{templateKey} | CasesV2Controller | UpdateDocumentTemplate | backend/Controllers/V2/CasesV2Controller.cs:1973 | [Authorize] | да | нет |
+| PATCH | api/document-templates/{templateKey} | CasesV2Controller | UpdateDocumentTemplate | backend/Controllers/V2/CasesV2Controller.cs:1974 | [Authorize] | да | нет |
+| POST | api/v2/cases/document-templates/{templateKey}/render | CasesV2Controller | RenderDocumentTemplate | backend/Controllers/V2/CasesV2Controller.cs:2015 | [Authorize] | да | нет |
+| POST | api/document-templates/{templateKey}/render | CasesV2Controller | RenderDocumentTemplate | backend/Controllers/V2/CasesV2Controller.cs:2016 | [Authorize] | да | нет |
+| GET | api/v2/cases/document-types | CasesV2Controller | GetDocumentTypes | backend/Controllers/V2/CasesV2Controller.cs:2083 | [Authorize] | да | нет |
+| GET | api/case-calendar/events | CasesV2Controller | GetCaseCalendarEvents | backend/Controllers/V2/CasesV2Controller.cs:2115 | [Authorize] | да | нет |
+| GET | api/case-calendar/summary | CasesV2Controller | GetCaseCalendarSummary | backend/Controllers/V2/CasesV2Controller.cs:2146 | [Authorize] | да | нет |
+| GET | api/case-calendar/events.ics | CasesV2Controller | ExportCaseCalendarIcs | backend/Controllers/V2/CasesV2Controller.cs:2177 | [Authorize] | да | нет |
+| POST | api/v2/cases/procedural-deadlines/calculate | CasesV2Controller | CalculateProceduralDeadlinePreview | backend/Controllers/V2/CasesV2Controller.cs:2234 | [Authorize] | да | нет |
+| GET | api/v2/cases/procedural-deadlines/calendar-settings | CasesV2Controller | GetProceduralDeadlineCalendarSettings | backend/Controllers/V2/CasesV2Controller.cs:2275 | [Authorize] | да | docs/case-business-rules.md |
+| PUT | api/v2/cases/procedural-deadlines/calendar-settings | CasesV2Controller | UpdateProceduralDeadlineCalendarSettings | backend/Controllers/V2/CasesV2Controller.cs:2286 | [Authorize] | да | docs/case-business-rules.md |
+| GET | api/v2/cases/court-directory | CasesV2Controller | GetCourtDirectory | backend/Controllers/V2/CasesV2Controller.cs:2312 | [Authorize] | да | нет |
+| POST | api/v2/cases/court-directory | CasesV2Controller | CreateCourtDirectoryItem | backend/Controllers/V2/CasesV2Controller.cs:2337 | [Authorize] | да | нет |
+| PUT | api/v2/cases/court-directory/{courtId:int} | CasesV2Controller | UpdateCourtDirectoryItem | backend/Controllers/V2/CasesV2Controller.cs:2381 | [Authorize] | да | нет |
+| GET | api/v2/cases/{id:int} | CasesV2Controller | GetById | backend/Controllers/V2/CasesV2Controller.cs:2422 | [Authorize] | да | docs/case-access-query-optimization.md, docs/case-conversation-current-state-2026-07-08.md, docs/case-detail-query-optimization.md |
+| GET | api/v2/cases/{id:int}/procedural-deadlines | CasesV2Controller | GetProceduralDeadlines | backend/Controllers/V2/CasesV2Controller.cs:2479 | [Authorize] | да | нет |
+| POST | api/v2/cases/{id:int}/procedural-deadlines | CasesV2Controller | CreateProceduralDeadline | backend/Controllers/V2/CasesV2Controller.cs:2515 | [Authorize] | да | нет |
+| PUT | api/v2/cases/{id:int}/procedural-deadlines/{deadlineId:int} | CasesV2Controller | UpdateProceduralDeadline | backend/Controllers/V2/CasesV2Controller.cs:2600 | [Authorize] | да | docs/case-business-rules.md |
+| POST | api/v2/cases/{id:int}/procedural-deadlines/{deadlineId:int}/close | CasesV2Controller | CloseProceduralDeadline | backend/Controllers/V2/CasesV2Controller.cs:2701 | [Authorize] | да | нет |
+| GET | api/v2/cases/{id:int}/court-instances | CasesV2Controller | GetCourtInstances | backend/Controllers/V2/CasesV2Controller.cs:2755 | [Authorize] | да | нет |
+| PUT | api/v2/cases/{id:int}/court-instances/{instance} | CasesV2Controller | UpsertCourtInstance | backend/Controllers/V2/CasesV2Controller.cs:2798 | [Authorize] | да | нет |
+| POST | api/v2/cases/{id:int}/court-instances/{instance}/complaints | CasesV2Controller | CreateCourtComplaint | backend/Controllers/V2/CasesV2Controller.cs:2875 | [Authorize] | да | нет |
+| PUT | api/v2/cases/{id:int}/court-instances/{instance}/complaints/{complaintId:int} | CasesV2Controller | UpdateCourtComplaint | backend/Controllers/V2/CasesV2Controller.cs:2939 | [Authorize] | да | нет |
+| DELETE | api/v2/cases/{id:int}/court-instances/{instance}/complaints/{complaintId:int} | CasesV2Controller | ArchiveCourtComplaint | backend/Controllers/V2/CasesV2Controller.cs:3006 | [Authorize] | да | нет |
+| GET | api/v2/cases/{id:int}/court-events | CasesV2Controller | GetCourtEvents | backend/Controllers/V2/CasesV2Controller.cs:3059 | [Authorize] | да | нет |
+| POST | api/v2/cases/{id:int}/court-events | CasesV2Controller | CreateCourtEvent | backend/Controllers/V2/CasesV2Controller.cs:3094 | [Authorize] | да | нет |
+| PUT | api/v2/cases/{id:int}/court-events/{courtEventId:int} | CasesV2Controller | UpdateCourtEvent | backend/Controllers/V2/CasesV2Controller.cs:3186 | [Authorize] | да | docs/case-business-rules.md |
+| GET | api/v2/cases/{id:int}/court-events/{courtEventId:int}/history | CasesV2Controller | GetCourtEventHistory | backend/Controllers/V2/CasesV2Controller.cs:3271 | [Authorize] | да | нет |
+| GET | api/v2/cases/{id:int}/court-parties | CasesV2Controller | GetCourtParties | backend/Controllers/V2/CasesV2Controller.cs:3314 | [Authorize] | да | docs/case-detail-query-optimization.md |
+| POST | api/v2/cases/{id:int}/court-parties | CasesV2Controller | CreateCourtParty | backend/Controllers/V2/CasesV2Controller.cs:3354 | [Authorize] | да | docs/case-detail-query-optimization.md |
+| DELETE | api/v2/cases/{id:int}/court-parties/{partyId:int} | CasesV2Controller | ArchiveCourtParty | backend/Controllers/V2/CasesV2Controller.cs:3413 | [Authorize] | да | нет |
+| POST | api/v2/cases/{id:int}/access-request | CasesV2Controller | RequestAccess | backend/Controllers/V2/CasesV2Controller.cs:3456 | [Authorize] | да | нет |
+| GET | api/v2/cases/access-requests | CasesV2Controller | GetAccessRequests | backend/Controllers/V2/CasesV2Controller.cs:3543 | [Authorize] | да | нет |
+| POST | api/v2/cases/{id:int}/access-request/resolve | CasesV2Controller | ResolveAccessRequest | backend/Controllers/V2/CasesV2Controller.cs:3584 | [Authorize] | да | нет |
+| GET | api/v2/cases/{id:int}/timeline | CasesV2Controller | GetTimeline | backend/Controllers/V2/CasesV2Controller.cs:3698 | [Authorize] | да | docs/case-detail-query-optimization.md |
+| GET | api/v2/cases/{id:int}/conversation | CasesV2Controller | GetConversation | backend/Controllers/V2/CasesV2Controller.cs:3733 | [Authorize] | да | docs/case-conversation-current-state-2026-07-08.md, docs/case-detail-query-optimization.md |
+| GET | api/v2/cases/{id:int}/summary | CasesV2Controller | GetSummary | backend/Controllers/V2/CasesV2Controller.cs:3763 | [Authorize] | да | docs/case-detail-query-optimization.md |
+| GET | api/v2/cases/{id:int}/finance | CasesV2Controller | GetFinance | backend/Controllers/V2/CasesV2Controller.cs:3842 | [Authorize] | да | docs/case-detail-query-optimization.md |
+| GET | api/v2/cases/{id:int}/documents | CasesV2Controller | GetDocuments | backend/Controllers/V2/CasesV2Controller.cs:3937 | [Authorize] | да | нет |
+| GET | api/case-documents | CasesV2Controller | GetDocumentRegistry | backend/Controllers/V2/CasesV2Controller.cs:3975 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
+| GET | api/case-documents/{documentId:int} | CasesV2Controller | GetDocumentById | backend/Controllers/V2/CasesV2Controller.cs:4090 | [Authorize] | да | нет |
+| POST | api/v2/cases/{id:int}/documents | CasesV2Controller | UploadDocument | backend/Controllers/V2/CasesV2Controller.cs:4129 | [Authorize] | да | docs/file-upload-limits-2026-06-10.md |
+| POST | api/case-documents/{documentId:int}/versions | CasesV2Controller | UploadDocumentVersionById | backend/Controllers/V2/CasesV2Controller.cs:4168 | [Authorize] | да | docs/file-upload-limits-2026-06-10.md |
+| POST | api/v2/cases/{id:int}/documents/generate-template | CasesV2Controller | GenerateDocumentTemplate | backend/Controllers/V2/CasesV2Controller.cs:4214 | [Authorize] | да | нет |
+| GET | api/v2/cases/{id:int}/documents/{documentId:int}/download | CasesV2Controller | DownloadDocument | backend/Controllers/V2/CasesV2Controller.cs:4309 | [Authorize] | да | нет |
+| GET | api/case-documents/{documentId:int}/download | CasesV2Controller | DownloadDocumentById | backend/Controllers/V2/CasesV2Controller.cs:4351 | [Authorize] | да | нет |
+| PATCH | api/case-documents/{documentId:int} | CasesV2Controller | UpdateDocumentById | backend/Controllers/V2/CasesV2Controller.cs:4388 | [Authorize] | да | нет |
+| PATCH | api/v2/cases/{id:int}/documents/{documentId:int} | CasesV2Controller | UpdateDocument | backend/Controllers/V2/CasesV2Controller.cs:4424 | [Authorize] | да | нет |
+| DELETE | api/v2/cases/{id:int}/documents/{documentId:int} | CasesV2Controller | DeleteDocument | backend/Controllers/V2/CasesV2Controller.cs:4803 | [Authorize] | да | нет |
+| POST | api/v2/cases/{id:int}/activity | CasesV2Controller | MarkActivity | backend/Controllers/V2/CasesV2Controller.cs:5425 | [Authorize] | да | нет |
+| POST | api/v2/cases/{id:int}/history | CasesV2Controller | AddHistoryEntry | backend/Controllers/V2/CasesV2Controller.cs:5492 | [Authorize] | да | нет |
+| POST | api/v2/cases/{id:int}/conversation | CasesV2Controller | AddConversationEntry | backend/Controllers/V2/CasesV2Controller.cs:5552 | [Authorize] | да | docs/case-conversation-current-state-2026-07-08.md, docs/case-detail-query-optimization.md |
+| POST | api/v2/cases/{id:int}/conversation | CasesV2Controller | AddConversationEntryWithAttachments | backend/Controllers/V2/CasesV2Controller.cs:5589 | [Authorize] | да | docs/case-conversation-current-state-2026-07-08.md, docs/case-detail-query-optimization.md |
+| GET | api/v2/cases/{id:int}/related-parties | CasesV2Controller | GetRelatedParties | backend/Controllers/V2/CasesV2Controller.cs:5627 | [Authorize] | да | нет |
+| POST | api/v2/cases/{id:int}/related-parties | CasesV2Controller | AddRelatedParty | backend/Controllers/V2/CasesV2Controller.cs:5673 | [Authorize] | да | нет |
+| DELETE | api/v2/cases/{id:int}/related-parties/{partyId:int} | CasesV2Controller | DeleteRelatedParty | backend/Controllers/V2/CasesV2Controller.cs:5917 | [Authorize] | да | нет |
+| GET | api/v2/cases/{id:int}/work-order | CasesV2Controller | GetWorkOrder | backend/Controllers/V2/CasesV2Controller.cs:5963 | [Authorize] | да | docs/case-access-query-optimization.md |
+| GET | api/v2/cases/{id:int}/work-order/external-approval | CasesV2Controller | GetExternalWorkOrderApproval | backend/Controllers/V2/CasesV2Controller.cs:5996 | [Authorize] | да | docs/case-access-query-optimization.md |
+| POST | api/v2/cases/{id:int}/work-order/external-approval | CasesV2Controller | CreateExternalWorkOrderApproval | backend/Controllers/V2/CasesV2Controller.cs:6027 | [Authorize] | да | docs/case-access-query-optimization.md |
+| DELETE | api/v2/cases/{id:int}/work-order/external-approval | CasesV2Controller | RevokeExternalWorkOrderApproval | backend/Controllers/V2/CasesV2Controller.cs:6064 | [Authorize] | да | docs/case-access-query-optimization.md |
+| GET | api/v2/cases/{id:int}/work-order/print | CasesV2Controller | PrintWorkOrder | backend/Controllers/V2/CasesV2Controller.cs:6116 | [Authorize] | да | нет |
+| POST | api/v2/cases/{id:int}/work-order/generate-document | CasesV2Controller | GenerateWorkOrderDocument | backend/Controllers/V2/CasesV2Controller.cs:6155 | [Authorize] | да | нет |
+| POST | api/v2/cases/{id:int}/work-order | CasesV2Controller | CreateWorkOrder | backend/Controllers/V2/CasesV2Controller.cs:6203 | [Authorize] | да | docs/case-access-query-optimization.md |
+| PATCH | api/v2/cases/{id:int}/work-order | CasesV2Controller | UpdateWorkOrder | backend/Controllers/V2/CasesV2Controller.cs:6257 | [Authorize] | да | docs/case-access-query-optimization.md |
+| DELETE | api/v2/cases/{id:int}/work-order | CasesV2Controller | DeleteWorkOrder | backend/Controllers/V2/CasesV2Controller.cs:6334 | [Authorize] | да | docs/case-access-query-optimization.md |
+| POST | api/v2/cases/{id:int}/work-order/items | CasesV2Controller | AddWorkOrderItem | backend/Controllers/V2/CasesV2Controller.cs:6367 | [Authorize] | да | нет |
+| PATCH | api/v2/cases/{id:int}/work-order/items/{itemId:int} | CasesV2Controller | UpdateWorkOrderItem | backend/Controllers/V2/CasesV2Controller.cs:6412 | [Authorize] | да | нет |
+| DELETE | api/v2/cases/{id:int}/work-order/items/{itemId:int} | CasesV2Controller | DeleteWorkOrderItem | backend/Controllers/V2/CasesV2Controller.cs:6462 | [Authorize] | да | нет |
+| POST | api/v2/cases/{id:int}/work-order/create-invoice | CasesV2Controller | CreateInvoiceFromWorkOrder | backend/Controllers/V2/CasesV2Controller.cs:6502 | [Authorize] | да | нет |
+| POST | api/v2/cases/{id:int}/work-order/create-act | CasesV2Controller | CreateActFromWorkOrder | backend/Controllers/V2/CasesV2Controller.cs:6634 | [Authorize] | да | нет |
+| POST | api/v2/cases/{id:int}/work-order/create-contract | CasesV2Controller | CreateContractFromWorkOrder | backend/Controllers/V2/CasesV2Controller.cs:6759 | [Authorize] | да | нет |
+| POST | api/v2/cases/{id:int}/work-order/submit-approval | CasesV2Controller | SubmitWorkOrderApproval | backend/Controllers/V2/CasesV2Controller.cs:6875 | [Authorize] | да | нет |
+| POST | api/v2/cases/{id:int}/work-order/approve | CasesV2Controller | ApproveWorkOrder | backend/Controllers/V2/CasesV2Controller.cs:6916 | [Authorize] | да | нет |
+| POST | api/v2/cases/{id:int}/work-order/request-revision | CasesV2Controller | RequestWorkOrderRevision | backend/Controllers/V2/CasesV2Controller.cs:6947 | [Authorize] | да | нет |
+| GET | api/v2/cases/{id:int}/court-sync/logs | CasesV2Controller | GetCourtSyncLogs | backend/Controllers/V2/CasesV2Controller.cs:6979 | [Authorize] | да | нет |
+| GET | api/v2/cases/court-sync/logs | CasesV2Controller | GetCourtSyncJournal | backend/Controllers/V2/CasesV2Controller.cs:7013 | [Authorize] | да | нет |
+| GET | api/v2/cases/court-sync/settings | CasesV2Controller | GetCourtSyncSettings | backend/Controllers/V2/CasesV2Controller.cs:7121 | [Authorize] | да | нет |
+| GET | api/v2/cases/court-sync/providers | CasesV2Controller | GetCourtSyncProviders | backend/Controllers/V2/CasesV2Controller.cs:7132 | [Authorize] | да | нет |
+| POST | api/v2/cases/{id:int}/court-sync/search | CasesV2Controller | SearchCourtSyncCases | backend/Controllers/V2/CasesV2Controller.cs:7163 | [Authorize] | да | нет |
+| POST | api/v2/cases/{id:int}/court-sync/bind | CasesV2Controller | BindCourtSyncCase | backend/Controllers/V2/CasesV2Controller.cs:7231 | [Authorize] | да | нет |
+| PUT | api/v2/cases/court-sync/settings | CasesV2Controller | UpdateCourtSyncSettings | backend/Controllers/V2/CasesV2Controller.cs:7407 | [Authorize] | да | нет |
+| POST | api/v2/cases/{id:int}/court-sync/run | CasesV2Controller | RunCourtSync | backend/Controllers/V2/CasesV2Controller.cs:7431 | [Authorize] | да | нет |
+| POST | api/v2/cases | CasesV2Controller | Create | backend/Controllers/V2/CasesV2Controller.cs:8490 | [Authorize] | да | docs/case-access-query-optimization.md, docs/case-conversation-current-state-2026-07-08.md, docs/case-detail-query-optimization.md, docs/case-registry-query-optimization.md, docs/full-project-audit-2026-06-10.md |
+| PUT | api/v2/cases/{id:int} | CasesV2Controller | Update | backend/Controllers/V2/CasesV2Controller.cs:8530 | [Authorize] | да | docs/case-access-query-optimization.md, docs/case-business-rules.md, docs/case-conversation-current-state-2026-07-08.md, docs/case-detail-query-optimization.md |
+| PATCH | api/v2/cases/{id:int}/control | CasesV2Controller | UpdateControl | backend/Controllers/V2/CasesV2Controller.cs:8601 | [Authorize] | да | нет |
+| DELETE | api/v2/cases/{id:int} | CasesV2Controller | Delete | backend/Controllers/V2/CasesV2Controller.cs:8640 | [Authorize] | да | docs/case-access-query-optimization.md, docs/case-conversation-current-state-2026-07-08.md, docs/case-detail-query-optimization.md |
+| POST | api/v2/cases/bulk-update | CasesV2Controller | BulkUpdate | backend/Controllers/V2/CasesV2Controller.cs:8668 | [Authorize] | да | нет |
 | GET | api/v2/clients | ClientsV2Controller | Get | backend/Controllers/V2/ClientsV2Controller.cs:91 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
 | GET | api/v2/clients/{id:int} | ClientsV2Controller | GetById | backend/Controllers/V2/ClientsV2Controller.cs:531 | [Authorize] | да | нет |
 | POST | api/v2/clients | ClientsV2Controller | Create | backend/Controllers/V2/ClientsV2Controller.cs:561 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |

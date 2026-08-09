@@ -16,6 +16,7 @@ using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Documents;
 using PayPlanner.Api.Services.Invoices;
 using PayPlanner.Api.Services.Notifications;
 
@@ -31,6 +32,7 @@ public class InvoicesController : ControllerBase
     private const string InvoiceMaxClientCasesSettingKey = "invoices.rules.maxClientCasesPerInvoice";
     private const string InvoiceMaxActsSettingKey = "invoices.rules.maxActsPerInvoice";
     private const string InvoiceDocumentTemplatesSettingKey = "invoices.documentTemplates";
+    private const int InvoiceDocumentTemplateHistoryObjectId = 1;
     private const string LegacyMainCompanySettingKey = "legalEntities.mainCompanyId";
     private const string MainCompanyIdsSettingKey = "legalEntities.mainCompanyIds";
     private const string DefaultMainCompanyIdSettingKey = "legalEntities.defaultMainCompanyId";
@@ -2110,7 +2112,103 @@ public class InvoicesController : ControllerBase
         }
 
         var now = DateTime.UtcNow;
-        await UpsertSystemSettingAsync(InvoiceDocumentTemplatesSettingKey, InvoiceDocumentTemplateEngine.Serialize(storage), now, ct);
+        await DocumentTemplateHistoryService.SaveVersionedSettingAsync(
+            _db,
+            InvoiceDocumentTemplatesSettingKey,
+            InvoiceDocumentTemplateHistoryObjectId,
+            "invoice",
+            DocumentTemplateHistoryService.SerializeSettings(InvoiceDocumentTemplateEngine.CreateDefaultSettings()),
+            InvoiceDocumentTemplateEngine.Serialize(storage),
+            User.GetUserId(),
+            User.GetDisplayName(),
+            now,
+            null,
+            ct);
+        await _db.SaveChangesAsync(ct);
+
+        return Ok(InvoiceDocumentTemplateEngine.CreateResponse(storage));
+    }
+
+    [HttpGet("document-template-settings/history")]
+    public async Task<ActionResult<IReadOnlyList<DocumentTemplateVersionDto>>> GetDocumentTemplateHistory(CancellationToken ct)
+    {
+        if (!await IsCurrentUserAdminAsync(ct))
+        {
+            return Forbid();
+        }
+
+        return Ok(await DocumentTemplateHistoryService.GetVersionsAsync(_db, InvoiceDocumentTemplateHistoryObjectId, ct));
+    }
+
+    [HttpGet("document-template-settings/history/{versionId:int}")]
+    public async Task<ActionResult<InvoiceDocumentTemplateSettingsDto>> GetDocumentTemplateVersion(
+        int versionId,
+        CancellationToken ct)
+    {
+        if (!await IsCurrentUserAdminAsync(ct))
+        {
+            return Forbid();
+        }
+
+        var settingsJson = await DocumentTemplateHistoryService.GetVersionSettingsAsync(
+            _db,
+            InvoiceDocumentTemplateHistoryObjectId,
+            versionId,
+            ct);
+        var request = settingsJson is null ? null : DocumentTemplateHistoryService.DeserializeSettings(settingsJson);
+        if (request is null)
+        {
+            return NotFound();
+        }
+
+        return Ok(InvoiceDocumentTemplateEngine.CreateResponse(InvoiceDocumentTemplateEngine.NormalizeRequest(request)));
+    }
+
+    [HttpPost("document-template-settings/history/{versionId:int}/restore")]
+    public async Task<ActionResult<InvoiceDocumentTemplateSettingsDto>> RestoreDocumentTemplateVersion(
+        int versionId,
+        CancellationToken ct)
+    {
+        if (!await IsCurrentUserAdminAsync(ct))
+        {
+            return Forbid();
+        }
+
+        var settingsJson = await DocumentTemplateHistoryService.GetVersionSettingsAsync(
+            _db,
+            InvoiceDocumentTemplateHistoryObjectId,
+            versionId,
+            ct);
+        if (settingsJson is null)
+        {
+            return NotFound();
+        }
+
+        var request = DocumentTemplateHistoryService.DeserializeSettings(settingsJson);
+        if (request is null)
+        {
+            return BadRequest("Сохраненная версия шаблонов повреждена.");
+        }
+
+        var storage = InvoiceDocumentTemplateEngine.NormalizeRequest(request);
+        var validationError = ValidateInvoiceDocumentTemplateSettings(storage);
+        if (validationError is not null)
+        {
+            return BadRequest(validationError);
+        }
+
+        await DocumentTemplateHistoryService.SaveVersionedSettingAsync(
+            _db,
+            InvoiceDocumentTemplatesSettingKey,
+            InvoiceDocumentTemplateHistoryObjectId,
+            "invoice",
+            DocumentTemplateHistoryService.SerializeSettings(InvoiceDocumentTemplateEngine.CreateDefaultSettings()),
+            InvoiceDocumentTemplateEngine.Serialize(storage),
+            User.GetUserId(),
+            User.GetDisplayName(),
+            DateTime.UtcNow,
+            versionId,
+            ct);
         await _db.SaveChangesAsync(ct);
 
         return Ok(InvoiceDocumentTemplateEngine.CreateResponse(storage));

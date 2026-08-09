@@ -501,14 +501,14 @@ export function PaymentModal({
     || selectedPaymentSource,
   );
   const paymentDocumentNumberLabel = isIncomingCashPayment
-    ? '№ приходника'
+    ? '№ приходного кассового ордера'
     : isOutgoingCashPayment
-      ? '№ расходника'
+      ? '№ расходного кассового ордера'
       : '№ документа';
   const paymentDocumentDateLabel = isIncomingCashPayment
-    ? 'Дата приходника'
+    ? 'Дата приходного кассового ордера'
     : isOutgoingCashPayment
-      ? 'Дата расходника'
+      ? 'Дата расходного кассового ордера'
       : 'Дата документа';
   const paymentDocumentNumberPlaceholder = isIncomingCashPayment
     ? 'Например: ПКО-2026-0001'

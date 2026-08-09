@@ -566,6 +566,44 @@ describe('RealtimeNotificationToasts', () => {
     expect(openPayment).toHaveBeenCalledWith(321);
   });
 
+  it('opens the payment from toast using metadata payment type', async () => {
+    const openPayment = vi.fn();
+    render(<RealtimeNotificationToasts userId={5} onOpenPayment={openPayment} />);
+
+    await waitFor(() => expect(connectionState.start).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      connectionState.handlers.get(REALTIME_USER_NOTIFICATION_CREATED_EVENT)?.({
+        id: 46,
+        recipientUserId: 5,
+        type: 'paymentAdvanceReviewRequired',
+        eventKey: 'payment:323:advance-review',
+        title: 'Проверьте платеж',
+        bodyPreview: 'По платежу требуется проверка аванса.',
+        tone: 'rose',
+        objectType: 'payment',
+        objectId: 323,
+        taskJournalItemId: null,
+        metadataJson: JSON.stringify({ paymentType: 'Income' }),
+        createdAt: '2026-05-25T10:00:00Z',
+      });
+    });
+
+    expect(toastMock.showToast).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'Проверьте платеж',
+      variant: 'error',
+      durationMs: 16000,
+      actionLabel: 'Открыть платеж',
+      dedupeKey: 'payment:323',
+      domain: 'payment',
+    }));
+
+    const toastOptions = toastMock.showToast.mock.calls[0][0] as { onAction: () => void };
+    act(() => toastOptions.onAction());
+
+    expect(openPayment).toHaveBeenCalledWith(323, 'Income');
+  });
+
   it('opens notification center for payment toast when the payment action is unavailable', async () => {
     const openNotifications = vi.fn();
     render(<RealtimeNotificationToasts userId={5} onOpenNotifications={openNotifications} />);

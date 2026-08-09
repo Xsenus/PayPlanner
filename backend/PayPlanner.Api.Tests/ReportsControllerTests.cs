@@ -216,6 +216,18 @@ public class ReportsControllerTests
         Assert.Equal([0x25, 0x50, 0x44, 0x46], pdf.FileContents);
         Assert.Contains("Отчет по юридической работе", pdfService.LastHtml, StringComparison.Ordinal);
 
+        var printAction = await controller.PrintLegalWork(
+            today.AddDays(-30),
+            today.AddDays(30),
+            nameof(ClientCaseStatus.Open),
+            responsible.Id,
+            "Банк",
+            CancellationToken.None);
+        var print = Assert.IsType<ContentResult>(printAction);
+        Assert.Equal("text/html; charset=utf-8", print.ContentType);
+        Assert.Contains("Отчет по юридической работе", print.Content, StringComparison.Ordinal);
+        Assert.Contains("Банкротство", print.Content, StringComparison.Ordinal);
+
         var csvText = System.Text.Encoding.UTF8.GetString(csv.FileContents);
         Assert.Contains("Банкротство", csvText, StringComparison.Ordinal);
         Assert.Contains("Финансы по статусам", csvText, StringComparison.Ordinal);
@@ -355,6 +367,13 @@ public class ReportsControllerTests
             var print = Assert.IsType<ContentResult>(printAction);
             Assert.Equal("text/html; charset=utf-8", print.ContentType);
             Assert.Contains("<!doctype html>", print.Content, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("table-layout: fixed", print.Content, StringComparison.Ordinal);
+            Assert.Contains("overflow-wrap: anywhere", print.Content, StringComparison.Ordinal);
+            Assert.Contains("thead { display: table-header-group; }", print.Content, StringComparison.Ordinal);
+            if (reportKind == "tasks")
+            {
+                Assert.Contains("class=\"report-table--very-wide\"", print.Content, StringComparison.Ordinal);
+            }
 
             var excelAction = await controller.ExportManagementReportExcel(
                 reportKind,
@@ -412,6 +431,145 @@ public class ReportsControllerTests
         Assert.Equal("application/pdf", pdf.ContentType);
         Assert.Equal([0x25, 0x50, 0x44, 0x46], pdf.FileContents);
         Assert.Contains("Прогноз денежных потоков", pdfService.LastHtml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AllReportExports_RenderValidEmptyTemplatesInEveryFormat()
+    {
+        await using var db = await CreateContextAsync();
+        var pdfService = new FakeInvoiceDocumentPdfService([0x25, 0x50, 0x44, 0x46]);
+        var controller = CreateController(db, CreateAdminPrincipal(), pdfService);
+        var from = new DateTime(1900, 1, 1);
+        var to = new DateTime(1900, 1, 2);
+        var reportKinds = new[]
+        {
+            "case-finance",
+            "cash-flow",
+            "cash",
+            "bank",
+            "plan-fact",
+            "advances",
+            "payment-priorities",
+            "paid-accounts",
+            "paid-invoices",
+            "invoice-statuses",
+            "act-statuses",
+            "contract-statuses",
+            "categories",
+            "counterparties",
+            "projects",
+            "directions",
+            "sales-points",
+            "vat",
+            "payment-orders",
+            "payment-purposes",
+            "match-statuses",
+            "journal-statuses",
+            "currencies",
+            "cash-orders",
+            "bank-statement-imports",
+            "spreadsheet-imports",
+            "case-success",
+            "current-cases",
+            "tasks",
+            "lawyer-workload",
+            "overdue-deadlines",
+            "case-activity",
+            "cash-flow-forecast",
+        };
+
+        foreach (var reportKind in reportKinds)
+        {
+            var csvAction = await controller.ExportManagementReportCsv(
+                reportKind, from, to, null, null, null, null, null, null, null,
+                to, null, null, null, null, 7, null, "all", null, null, 200,
+                CancellationToken.None);
+            var csv = Assert.IsType<FileContentResult>(csvAction);
+            var csvText = Encoding.UTF8.GetString(csv.FileContents);
+            Assert.Equal("text/csv; charset=utf-8", csv.ContentType);
+            Assert.EndsWith(".csv", csv.FileDownloadName, StringComparison.Ordinal);
+            Assert.Contains(';', csvText);
+            Assert.DoesNotContain("NaN", csvText, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("Infinity", csvText, StringComparison.OrdinalIgnoreCase);
+            if (reportKind == "bank")
+            {
+                Assert.DoesNotContain("Источник: Банк · Источник: Банк", csvText, StringComparison.Ordinal);
+            }
+
+            var excelAction = await controller.ExportManagementReportExcel(
+                reportKind, from, to, null, null, null, null, null, null, null,
+                to, null, null, null, null, 7, null, "all", null, null, 200,
+                CancellationToken.None);
+            var excel = Assert.IsType<FileContentResult>(excelAction);
+            var excelText = Encoding.UTF8.GetString(excel.FileContents);
+            Assert.Equal("application/vnd.ms-excel; charset=utf-8", excel.ContentType);
+            Assert.EndsWith(".xls", excel.FileDownloadName, StringComparison.Ordinal);
+            Assert.Contains("Excel.Sheet", excelText, StringComparison.Ordinal);
+            Assert.DoesNotContain("NaN", excelText, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("Infinity", excelText, StringComparison.OrdinalIgnoreCase);
+            if (reportKind == "bank")
+            {
+                Assert.DoesNotContain("Источник: Банк &#183; Источник: Банк", excelText, StringComparison.Ordinal);
+            }
+
+            var pdfAction = await controller.ExportManagementReportPdf(
+                reportKind, from, to, null, null, null, null, null, null, null,
+                to, null, null, null, null, 7, null, "all", null, null, 200,
+                CancellationToken.None);
+            var pdf = Assert.IsType<FileContentResult>(pdfAction);
+            Assert.Equal("application/pdf", pdf.ContentType);
+            Assert.Equal([0x25, 0x50, 0x44, 0x46], pdf.FileContents);
+            Assert.Contains("<!doctype html>", pdfService.LastHtml, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("NaN", pdfService.LastHtml, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("Infinity", pdfService.LastHtml, StringComparison.OrdinalIgnoreCase);
+            if (reportKind == "bank")
+            {
+                Assert.DoesNotContain("Источник: Банк &#183; Источник: Банк", pdfService.LastHtml, StringComparison.Ordinal);
+            }
+
+            var printAction = await controller.PrintManagementReport(
+                reportKind, from, to, null, null, null, null, null, null, null,
+                to, null, null, null, null, 7, null, "all", null, null, 200,
+                CancellationToken.None);
+            var print = Assert.IsType<ContentResult>(printAction);
+            Assert.Equal("text/html; charset=utf-8", print.ContentType);
+            Assert.Contains("<!doctype html>", print.Content, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("table-layout: fixed", print.Content, StringComparison.Ordinal);
+            Assert.DoesNotContain("NaN", print.Content, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("Infinity", print.Content, StringComparison.OrdinalIgnoreCase);
+            if (reportKind == "bank")
+            {
+                Assert.DoesNotContain("Источник: Банк &#183; Источник: Банк", print.Content, StringComparison.Ordinal);
+            }
+        }
+
+        var legalCsv = Assert.IsType<FileContentResult>(await controller.ExportLegalWorkCsv(
+            from, to, null, null, null, CancellationToken.None));
+        Assert.Equal("text/csv; charset=utf-8", legalCsv.ContentType);
+        Assert.Contains(';', Encoding.UTF8.GetString(legalCsv.FileContents));
+
+        var legalExcel = Assert.IsType<FileContentResult>(await controller.ExportLegalWorkExcel(
+            from, to, null, null, null, CancellationToken.None));
+        Assert.Equal("application/vnd.ms-excel; charset=utf-8", legalExcel.ContentType);
+        Assert.Contains("Excel.Sheet", Encoding.UTF8.GetString(legalExcel.FileContents), StringComparison.Ordinal);
+
+        var legalPdf = Assert.IsType<FileContentResult>(await controller.ExportLegalWorkPdf(
+            from, to, null, null, null, CancellationToken.None));
+        Assert.Equal("application/pdf", legalPdf.ContentType);
+        Assert.Equal([0x25, 0x50, 0x44, 0x46], legalPdf.FileContents);
+        Assert.DoesNotContain("NaN", pdfService.LastHtml, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Infinity", pdfService.LastHtml, StringComparison.OrdinalIgnoreCase);
+
+        var legalPrint = Assert.IsType<ContentResult>(await controller.PrintLegalWork(
+            from, to, null, null, null, CancellationToken.None));
+        Assert.Equal("text/html; charset=utf-8", legalPrint.ContentType);
+        Assert.Contains("<!doctype html>", legalPrint.Content, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("table-layout: fixed", legalPrint.Content, StringComparison.Ordinal);
+        Assert.Contains("thead { display: table-header-group; }", legalPrint.Content, StringComparison.Ordinal);
+        Assert.Contains("page-break-inside: avoid", legalPrint.Content, StringComparison.Ordinal);
+        Assert.Contains("overflow-wrap: anywhere", legalPrint.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain("NaN", legalPrint.Content, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Infinity", legalPrint.Content, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

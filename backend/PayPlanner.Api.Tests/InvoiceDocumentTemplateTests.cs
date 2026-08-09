@@ -19,6 +19,47 @@ namespace PayPlanner.Api.Tests;
 public class InvoiceDocumentTemplateTests
 {
     [Fact]
+    public async Task DocumentTemplateHistory_StoresBaseline_Deduplicates_AndRestores()
+    {
+        await using var db = await CreateContextAsync();
+        var controller = CreateController(db, isAdmin: true);
+        var request = new InvoiceDocumentTemplateSettingsRequest
+        {
+            ActiveTemplateKey = "custom-invoice",
+            Templates =
+            [
+                new InvoiceDocumentTemplateRequest
+                {
+                    Key = "custom-invoice",
+                    Name = "Кастомный шаблон",
+                    Html = "<html><body>{{invoice.number}}</body></html>",
+                },
+            ],
+        };
+
+        await controller.UpsertDocumentTemplateSettings(request, CancellationToken.None);
+        await controller.UpsertDocumentTemplateSettings(request, CancellationToken.None);
+
+        var historyAction = await controller.GetDocumentTemplateHistory(CancellationToken.None);
+        var historyOk = Assert.IsType<OkObjectResult>(historyAction.Result);
+        var history = Assert.IsAssignableFrom<IReadOnlyList<DocumentTemplateVersionDto>>(historyOk.Value);
+        Assert.Equal(2, history.Count);
+        Assert.Equal([2, 1], history.Select(item => item.Revision));
+
+        var baseline = history.Single(item => item.Revision == 1);
+        var restoreAction = await controller.RestoreDocumentTemplateVersion(baseline.Id, CancellationToken.None);
+        var restoreOk = Assert.IsType<OkObjectResult>(restoreAction.Result);
+        var restored = Assert.IsType<InvoiceDocumentTemplateSettingsDto>(restoreOk.Value);
+        Assert.Equal(InvoiceDocumentTemplateEngine.DefaultTemplateKey, restored.ActiveTemplateKey);
+
+        historyAction = await controller.GetDocumentTemplateHistory(CancellationToken.None);
+        historyOk = Assert.IsType<OkObjectResult>(historyAction.Result);
+        history = Assert.IsAssignableFrom<IReadOnlyList<DocumentTemplateVersionDto>>(historyOk.Value);
+        Assert.Equal(3, history.Count);
+        Assert.Equal(baseline.Id, history[0].RestoredFromVersionId);
+    }
+
+    [Fact]
     public async Task GetDocumentTemplateSettings_ReturnsDefaultTemplate_WhenSettingsMissing()
     {
         await using var db = await CreateContextAsync();
