@@ -1813,6 +1813,15 @@ public class CasesV2ControllerTests
         var result = await controller.GetFinance(clientCase.Id, CancellationToken.None);
 
         Assert.IsType<ForbidResult>(result.Result);
+
+        var historyResult = await controller.GetDocumentTemplateHistory(CancellationToken.None);
+        Assert.IsType<ForbidResult>(historyResult.Result);
+
+        var versionResult = await controller.GetDocumentTemplateVersion(1, CancellationToken.None);
+        Assert.IsType<ForbidResult>(versionResult.Result);
+
+        var restoreResult = await controller.RestoreDocumentTemplateVersion(1, CancellationToken.None);
+        Assert.IsType<ForbidResult>(restoreResult.Result);
     }
 
     [Fact]
