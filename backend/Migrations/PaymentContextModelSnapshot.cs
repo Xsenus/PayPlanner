@@ -6861,6 +6861,9 @@ namespace PayPlanner.Api.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("InvoiceDocumentTemplateKey")
+                        .HasColumnType("TEXT");
+
                     b.Property<int?>("InvoiceId")
                         .HasColumnType("INTEGER");
 

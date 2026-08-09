@@ -33,6 +33,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="Assets\Fonts\DejaVuSansCondensed.ttf">
+      <LogicalName>PayPlanner.Fonts.DejaVuSansCondensed.ttf</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Assets\Fonts\DejaVuSansCondensed-Bold.ttf">
+      <LogicalName>PayPlanner.Fonts.DejaVuSansCondensed-Bold.ttf</LogicalName>
+    </EmbeddedResource>
+
     <Compile Remove="PayPlanner.Api.Tests\**\*.cs" />
     <Compile Remove=".codex-build\**\*.cs" />
     <Compile Remove="obj\**\*.cs" />

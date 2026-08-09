@@ -57,6 +57,12 @@ namespace PayPlanner.Api.Models
 
         public ICollection<InvoiceLineItem> InvoiceLineItems { get; set; } = new List<InvoiceLineItem>();
 
+        /// <summary>
+        /// Последний выбранный печатный шаблон счета. Используется связанными документами,
+        /// чтобы различать обычный счет и счет-договор.
+        /// </summary>
+        public string? InvoiceDocumentTemplateKey { get; set; }
+
         public ICollection<CashOrder> CashOrders { get; set; } = new List<CashOrder>();
 
         public string InvoiceWorkflowStatus { get; set; } = PayPlanner.Api.Models.InvoiceWorkflowStatus.Draft;

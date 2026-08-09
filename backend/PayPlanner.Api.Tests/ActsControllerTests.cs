@@ -1046,12 +1046,14 @@ public class ActsControllerTests
             Number = "1199",
             Date = new DateTime(2025, 12, 25),
             Amount = 20_000m,
+            Comment = "Служебный комментарий из учета",
             Client = client,
             InvoiceNumber = "182",
             Invoice = new Payment
             {
                 Account = "182",
                 Date = new DateTime(2025, 12, 24),
+                InvoiceDocumentTemplateKey = "invoice-offer",
             },
         };
 
@@ -1085,6 +1087,7 @@ public class ActsControllerTests
                 TreasuryBankName = "ООО \"Банк Точка\"",
                 TreasuryBankBik = "044525104",
                 TreasuryCorrAccountNumber = "30101810745374525104",
+                VatWithoutVat = true,
             },
             includeSignatureAndSeal: false);
 
@@ -1094,11 +1097,20 @@ public class ActsControllerTests
         Assert.Contains("doc-main-title", normalizedHtml);
         Assert.Contains("counterparty-table", normalizedHtml);
         Assert.Contains("Акт № 1199 от 25 декабря 2025 г.", normalizedHtml);
-        Assert.Contains("Счет № 182 от 24.12.2025", normalizedHtml);
+        Assert.Contains("Счет-договор № 182 от 24.12.2025", normalizedHtml);
         Assert.Contains("к/с 30101810745374525104", normalizedHtml);
         Assert.Contains("Паспорт 36 07 № 763332", normalizedHtml);
+        Assert.True(
+            normalizedHtml.IndexOf(client.Address, StringComparison.Ordinal) <
+            normalizedHtml.IndexOf("Паспорт 36 07 № 763332", StringComparison.Ordinal));
         Assert.Contains("Всего оказано услуг 2", normalizedHtml);
         Assert.Contains("20 000,00", normalizedHtml);
+        Assert.Contains("@page { size: A4; margin: 10mm 7.3mm 10mm 15mm; }", normalizedHtml);
+        Assert.Contains("font-family: \"DejaVu Sans Condensed\"", normalizedHtml);
+        Assert.Contains("data:font/ttf;base64,", normalizedHtml);
+        Assert.Contains("width: 45%;", normalizedHtml);
+        Assert.Contains("Без налога (НДС):", normalizedHtml);
+        Assert.DoesNotContain("Служебный комментарий из учета", normalizedHtml);
         Assert.Contains("ИСПОЛНИТЕЛЬ", normalizedHtml);
     }
 
@@ -1243,7 +1255,8 @@ public class ActsControllerTests
         Assert.Contains("Счет № INV-ACT-LOCAL от 04.06.2026", normalizedHtml);
         Assert.Contains("Паспорт 4321 № 098765, выдан 05.06.2026", normalizedHtml);
         Assert.DoesNotContain("T00:00:00", normalizedHtml, StringComparison.Ordinal);
-        Assert.DoesNotContain("Z", normalizedHtml, StringComparison.Ordinal);
+        var visibleHtml = Regex.Replace(normalizedHtml, "<style[\\s\\S]*?</style>", string.Empty, RegexOptions.IgnoreCase);
+        Assert.DoesNotContain("Z", visibleHtml, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1313,8 +1326,8 @@ public class ActsControllerTests
         Assert.True(buyerNameIndex >= 0, "Buyer name should be present in the rendered act.");
         Assert.True(innIndex > buyerNameIndex, "ИНН should be rendered after the buyer name.");
         Assert.True(snilsIndex > innIndex, "СНИЛС should be rendered after ИНН.");
-        Assert.True(passportIndex > snilsIndex, "Passport details should be rendered after СНИЛС.");
-        Assert.True(addressIndex > passportIndex, "Address should be rendered after passport details.");
+        Assert.True(addressIndex > snilsIndex, "Address should be rendered after СНИЛС.");
+        Assert.True(passportIndex > addressIndex, "Passport details should be rendered after the address.");
     }
 
     [Fact]
@@ -1379,7 +1392,7 @@ public class ActsControllerTests
         Assert.Contains("Общество с ограниченной ответственностью &quot;Ромашка&quot;, ИНН 6311000000, КПП 631101001, ОГРН 1236300000000", normalizedHtml);
         Assert.Contains("Самара, ул. Юридическая, д. 5", normalizedHtml);
         Assert.Contains("Счет № 77 от 10.04.2026", normalizedHtml);
-        Assert.Contains("/ Романов Р. Р. /", normalizedHtml);
+        Assert.Contains("/ Романов Р.Р. /", normalizedHtml);
     }
 
     [Fact]
@@ -1425,7 +1438,7 @@ public class ActsControllerTests
         Assert.Contains("data:image/png;base64,signature-demo", normalizedHtml);
         Assert.Contains("data:image/png;base64,seal-demo", normalizedHtml);
         Assert.Contains("/ Кожеваткин А. В. /", normalizedHtml);
-        Assert.Contains("/ Губанова О. И. /", normalizedHtml);
+        Assert.Contains("/ Губанова О.И. /", normalizedHtml);
         Assert.DoesNotContain("signature-lines-table", normalizedHtml);
         Assert.DoesNotContain("расшифровка подписи", normalizedHtml);
     }
@@ -2417,12 +2430,12 @@ public class ActsControllerTests
         var action = await controller.GetDocument(act.Id, "xlsx", false, CancellationToken.None);
 
         var file = Assert.IsType<FileContentResult>(action);
-        Assert.Equal("application/msword", file.ContentType);
-        Assert.EndsWith(".doc", file.FileDownloadName, StringComparison.Ordinal);
+        Assert.Equal("application/vnd.openxmlformats-officedocument.wordprocessingml.document", file.ContentType);
+        Assert.EndsWith(".docx", file.FileDownloadName, StringComparison.Ordinal);
         Assert.DoesNotContain(":", file.FileDownloadName, StringComparison.Ordinal);
         Assert.DoesNotContain("/", file.FileDownloadName, StringComparison.Ordinal);
         Assert.DoesNotContain("?", file.FileDownloadName, StringComparison.Ordinal);
-        Assert.Contains("ACT:311/TEST?", System.Text.Encoding.UTF8.GetString(file.FileContents));
+        Assert.True(file.FileContents.AsSpan().StartsWith("PK"u8));
     }
 
     [Fact]
@@ -2556,8 +2569,8 @@ public class ActsControllerTests
         Assert.Equal("custom@example.com", emailService.ToEmail);
         Assert.Equal("Custom subject", emailService.Subject);
         Assert.Equal("Custom body", emailService.Body);
-        Assert.Equal("act-ACT-313-MAIL.doc", emailService.AttachmentFileName);
-        Assert.Equal("application/msword", emailService.AttachmentContentType);
+        Assert.Equal("act-ACT-313-MAIL.docx", emailService.AttachmentFileName);
+        Assert.Equal("application/vnd.openxmlformats-officedocument.wordprocessingml.document", emailService.AttachmentContentType);
     }
 
     [Fact]
@@ -2662,15 +2675,15 @@ public class ActsControllerTests
 
         var result = Assert.IsType<YandexDiskOperationResultDto>(action.Value);
         Assert.True(result.Success);
-        Assert.Equal("/CRM/act-ACT-YD-1.doc", result.Path);
+        Assert.Equal("/CRM/act-ACT-YD-1.docx", result.Path);
         Assert.NotNull(yandexDiskService.Upload);
         Assert.Equal("act", yandexDiskService.Upload.DocumentKind);
         Assert.Equal("Акт", yandexDiskService.Upload.DocumentType);
         Assert.Equal("ACT-YD-1", yandexDiskService.Upload.DocumentNumber);
         Assert.Equal("Акт по юридическим услугам", yandexDiskService.Upload.DocumentTitle);
         Assert.Equal("Тестовый клиент", yandexDiskService.Upload.ClientName);
-        Assert.Equal("act-ACT-YD-1.doc", yandexDiskService.Upload.OriginalFileName);
-        Assert.Equal("application/msword", yandexDiskService.Upload.ContentType);
+        Assert.Equal("act-ACT-YD-1.docx", yandexDiskService.Upload.OriginalFileName);
+        Assert.Equal("application/vnd.openxmlformats-officedocument.wordprocessingml.document", yandexDiskService.Upload.ContentType);
         Assert.True(yandexDiskService.Upload.OverwriteExisting);
         Assert.NotEmpty(yandexDiskService.UploadBytes!);
 
@@ -2685,8 +2698,8 @@ public class ActsControllerTests
             && item.ObjectType == "act"
             && item.ObjectId == act.Id);
         Assert.Equal(YandexDiskCrmSyncStatus.Success, syncState.Status);
-        Assert.Equal("/CRM/act-ACT-YD-1.doc", syncState.YandexDiskPath);
-        Assert.Equal("act-ACT-YD-1.doc", syncState.FileName);
+        Assert.Equal("/CRM/act-ACT-YD-1.docx", syncState.YandexDiskPath);
+        Assert.Equal("act-ACT-YD-1.docx", syncState.FileName);
         Assert.Equal(1, syncState.AttemptCount);
     }
 
@@ -3230,7 +3243,7 @@ public class ActsControllerTests
         var action = await controller.GetDocument(actId, "word", false, CancellationToken.None);
 
         var file = Assert.IsType<FileContentResult>(action);
-        Assert.Equal("act-export.doc", file.FileDownloadName);
+        Assert.Equal("act-export.docx", file.FileDownloadName);
     }
 
     [Fact]

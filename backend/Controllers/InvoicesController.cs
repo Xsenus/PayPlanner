@@ -2992,6 +2992,7 @@ public class InvoicesController : ControllerBase
         var installmentDocumentContext = await BuildInstallmentDocumentContextAsync(payment, lineItems, ct);
         var documentSettings = await GetInvoiceDocumentTemplateSettingsAsync(ct);
         var template = SelectInvoiceDocumentTemplate(documentSettings, templateKey);
+        await RememberInvoiceDocumentTemplateAsync(payment, template.Key, ct);
         var mainCompany = await LoadMainCompanyAsync(ct);
         var shouldIncludeSignatureAndSeal = includeSignatureAndSeal ?? documentSettings.PrintWithSignatureAndSealByDefault;
         var documentHtml = InvoiceDocumentTemplateEngine.RenderHtml(
@@ -3067,6 +3068,7 @@ public class InvoicesController : ControllerBase
         var installmentDocumentContext = await BuildInstallmentDocumentContextAsync(payment, lineItems, ct);
         var documentSettings = await GetInvoiceDocumentTemplateSettingsAsync(ct);
         var template = SelectInvoiceDocumentTemplate(documentSettings, templateKey);
+        await RememberInvoiceDocumentTemplateAsync(payment, template.Key, ct);
         var mainCompany = await LoadMainCompanyAsync(ct);
         var shouldIncludeSignatureAndSeal = includeSignatureAndSeal ?? documentSettings.PrintWithSignatureAndSealByDefault;
         var documentHtml = InvoiceDocumentTemplateEngine.RenderHtml(
@@ -6992,6 +6994,17 @@ public class InvoicesController : ControllerBase
         return settings.Templates.FirstOrDefault(template =>
                    string.Equals(template.Key, settings.ActiveTemplateKey, StringComparison.OrdinalIgnoreCase))
                ?? settings.Templates[0];
+    }
+
+    private async Task RememberInvoiceDocumentTemplateAsync(Payment payment, string templateKey, CancellationToken ct)
+    {
+        if (string.Equals(payment.InvoiceDocumentTemplateKey, templateKey, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        payment.InvoiceDocumentTemplateKey = templateKey;
+        await _db.SaveChangesAsync(ct);
     }
 
     private static string? ValidateInvoiceDocumentTemplateSettings(InvoiceDocumentTemplateEngine.InvoiceDocumentTemplateSettingsStorage storage)
