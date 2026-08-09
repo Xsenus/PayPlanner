@@ -174,6 +174,35 @@ describe('Navigation links', () => {
     expect(topLevelLinks[2] ?? '').toContain('Уведомления');
   });
 
+  it('allows reordering top-level items while the sidebar is collapsed', async () => {
+    window.localStorage.setItem('pp.sidebar_collapsed', '1');
+    renderNavigation();
+    await waitForNavigationPermissions();
+
+    expect(screen.getByRole('button', { name: 'Развернуть меню' })).toBeTruthy();
+    const tasksLink = findLinkByHref(getTabHref('tasks'));
+    const calendarLink = findLinkByHref(getTabHref('calendar'));
+    const tasksItem = tasksLink?.closest('div[draggable="true"]');
+    const calendarItem = calendarLink?.closest('div[draggable="true"]');
+    expect(tasksItem).toBeTruthy();
+    expect(calendarItem).toBeTruthy();
+
+    const dataTransfer = {
+      effectAllowed: 'none',
+      dropEffect: 'none',
+      setData: vi.fn(),
+      getData: vi.fn(() => 'tasks'),
+    };
+    fireEvent.dragStart(tasksItem!, { dataTransfer });
+    fireEvent.dragOver(calendarItem!, { dataTransfer });
+    fireEvent.drop(calendarItem!, { dataTransfer });
+
+    await waitFor(() => {
+      const order = JSON.parse(window.localStorage.getItem('pp.sidebar_order') || '[]') as string[];
+      expect(order.indexOf('tasks')).toBeLessThan(order.indexOf('calendar'));
+    });
+  });
+
   it('shows settings for a non-admin role that can view integrations only', async () => {
     authState.isAdmin = false;
     authState.roleId = 99;
