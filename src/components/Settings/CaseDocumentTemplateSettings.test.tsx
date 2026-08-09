@@ -1,6 +1,7 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { DialogProvider } from '../../contexts/DialogContext';
 import { apiService } from '../../services/api';
 import { CaseDocumentTemplateSettings } from './CaseDocumentTemplateSettings';
 
@@ -8,6 +9,14 @@ const toastMock = {
   success: vi.fn(),
   error: vi.fn(),
 };
+
+function renderSettings() {
+  return render(
+    <DialogProvider>
+      <CaseDocumentTemplateSettings />
+    </DialogProvider>,
+  );
+}
 
 vi.mock('../../hooks/useToast', () => ({
   useToast: () => toastMock,
@@ -93,7 +102,7 @@ describe('CaseDocumentTemplateSettings', () => {
       html: '<html><body>Rendered claim</body></html>',
     });
 
-    render(<CaseDocumentTemplateSettings />);
+    renderSettings();
 
     expect(await screen.findByText('Claim template')).toBeTruthy();
     expect(screen.getByText('{{case.title}}')).toBeTruthy();
@@ -169,9 +178,7 @@ describe('CaseDocumentTemplateSettings', () => {
     vi.mocked(apiService.getCaseDocumentTemplateHistory).mockResolvedValue(history);
     vi.mocked(apiService.getCaseDocumentTemplateVersion).mockResolvedValue([restoredTemplate]);
     vi.mocked(apiService.restoreCaseDocumentTemplateVersion).mockResolvedValue([restoredTemplate]);
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
-
-    render(<CaseDocumentTemplateSettings />);
+    renderSettings();
 
     fireEvent.click(await screen.findByRole('button', { name: /История версий/ }));
     expect(await screen.findByText('Версия №1')).toBeTruthy();
@@ -179,6 +186,9 @@ describe('CaseDocumentTemplateSettings', () => {
     expect(await screen.findByText('<p>Исходный HTML</p>')).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: 'Восстановить' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Восстановить версию №1' });
+    expect(within(dialog).getByText(/Текущая библиотека шаблонов/)).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Восстановить' }));
     await waitFor(() => {
       expect(apiService.restoreCaseDocumentTemplateVersion).toHaveBeenCalledWith(41);
     });
