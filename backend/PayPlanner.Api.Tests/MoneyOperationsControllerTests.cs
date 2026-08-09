@@ -3099,6 +3099,9 @@ public class MoneyOperationsControllerTests
         Assert.Contains("ПКО-2026-0001", content.Content);
         Assert.Contains("Ахмедова Айтан Рафик Кызы", content.Content);
         Assert.Contains("Черновиков", content.Content);
+        Assert.Contains("thead { display: table-header-group; }", content.Content);
+        Assert.Contains("tbody tr { break-inside: avoid-page !important; page-break-inside: avoid !important; }", content.Content);
+        Assert.Contains("th:nth-child(8), td:nth-child(8) { width: 29%; }", content.Content);
         AssertPrintHtmlHasNoGeneratedTimestamp(content.Content);
         AssertPrintHtmlUsesSharedDocumentStyle(content.Content);
     }
