@@ -27,6 +27,52 @@ namespace PayPlanner.Api.Tests;
 public class ActsControllerTests
 {
     [Fact]
+    public async Task DocumentTemplateSettings_SaveRenderHistoryAndRestore()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+        var act = await CreateManualActAsync(db, client.Id, "ACT-TEMPLATE-1", 12_500m, ActStatus.Created);
+        var controller = CreateAdminController(db);
+        var request = new InvoiceDocumentTemplateSettingsRequest
+        {
+            ActiveTemplateKey = "act-custom",
+            PrintWithSignatureAndSealByDefault = false,
+            Templates =
+            [
+                new InvoiceDocumentTemplateRequest
+                {
+                    Key = "act-custom",
+                    Name = "Проверочный акт",
+                    Html = "<html><body>CUSTOM {{act.number}} {{#lineItems}}{{name}}={{total}}{{/lineItems}}</body></html>",
+                },
+            ],
+        };
+
+        var saveAction = await controller.UpsertDocumentTemplateSettings(request, CancellationToken.None);
+        Assert.IsType<OkObjectResult>(saveAction.Result);
+
+        var documentAction = await controller.GetDocument(act.Id, "html", false, CancellationToken.None);
+        var document = Assert.IsType<ContentResult>(documentAction);
+        var normalizedDocument = System.Net.WebUtility.HtmlDecode(document.Content!)
+            .Replace("\u00A0", " ")
+            .Replace("\u202F", " ");
+        Assert.Contains("CUSTOM ACT-TEMPLATE-1", normalizedDocument);
+        Assert.Contains("12 500,00", normalizedDocument);
+
+        var historyAction = await controller.GetDocumentTemplateHistory(CancellationToken.None);
+        var historyOk = Assert.IsType<OkObjectResult>(historyAction.Result);
+        var history = Assert.IsAssignableFrom<IReadOnlyList<DocumentTemplateVersionDto>>(historyOk.Value);
+        Assert.Equal(2, history.Count);
+        Assert.Equal("act", history[0].DocumentType);
+
+        var baseline = history.Single(version => version.Revision == 1);
+        var restoreAction = await controller.RestoreDocumentTemplateVersion(baseline.Id, CancellationToken.None);
+        var restoreOk = Assert.IsType<OkObjectResult>(restoreAction.Result);
+        var restored = Assert.IsType<InvoiceDocumentTemplateSettingsDto>(restoreOk.Value);
+        Assert.Equal(ActDocumentTemplateEngine.DefaultTemplateKey, restored.ActiveTemplateKey);
+    }
+
+    [Fact]
     public void UpsertActRequest_AllowsLongCommentForLegalNotes()
     {
         var request = new UpsertActRequest

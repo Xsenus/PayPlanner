@@ -17,6 +17,7 @@ using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.Acts;
+using PayPlanner.Api.Services.Documents;
 using PayPlanner.Api.Services.Invoices;
 using PayPlanner.Api.Services.Notifications;
 
@@ -27,6 +28,8 @@ namespace PayPlanner.Api.Controllers;
 [Authorize]
 public class ActsController : ControllerBase
 {
+    private const string ActDocumentTemplatesSettingKey = "acts.documentTemplates";
+    private const int ActDocumentTemplateHistoryObjectId = 3;
     private const string LegacyMainCompanySettingKey = "legalEntities.mainCompanyId";
     private const string MainCompanyIdsSettingKey = "legalEntities.mainCompanyIds";
     private const string DefaultMainCompanyIdSettingKey = "legalEntities.defaultMainCompanyId";
@@ -1113,6 +1116,83 @@ public class ActsController : ControllerBase
         return NoContent();
     }
 
+    [HttpGet("document-template-settings")]
+    public async Task<ActionResult<InvoiceDocumentTemplateSettingsDto>> GetDocumentTemplateSettings(CancellationToken ct)
+        => Ok(await GetActDocumentTemplateSettingsAsync(ct));
+
+    [HttpPut("document-template-settings")]
+    public async Task<ActionResult<InvoiceDocumentTemplateSettingsDto>> UpsertDocumentTemplateSettings(
+        [FromBody] InvoiceDocumentTemplateSettingsRequest request,
+        CancellationToken ct)
+    {
+        if (!await IsCurrentUserAdminAsync(ct)) return Forbid();
+        if (!ModelState.IsValid) return ValidationProblem(ModelState);
+
+        var storage = ActDocumentTemplateEngine.NormalizeRequest(request);
+        var validationError = ValidateActDocumentTemplateSettings(storage);
+        if (validationError is not null) return BadRequest(validationError);
+
+        await DocumentTemplateHistoryService.SaveVersionedSettingAsync(
+            _db,
+            ActDocumentTemplatesSettingKey,
+            ActDocumentTemplateHistoryObjectId,
+            "act",
+            DocumentTemplateHistoryService.SerializeSettings(ActDocumentTemplateEngine.CreateDefaultSettings()),
+            ActDocumentTemplateEngine.Serialize(storage),
+            User.GetUserId(),
+            User.GetDisplayName(),
+            DateTime.UtcNow,
+            null,
+            ct);
+        await _db.SaveChangesAsync(ct);
+        return Ok(ActDocumentTemplateEngine.CreateResponse(storage));
+    }
+
+    [HttpGet("document-template-settings/history")]
+    public async Task<ActionResult<IReadOnlyList<DocumentTemplateVersionDto>>> GetDocumentTemplateHistory(CancellationToken ct)
+    {
+        if (!await IsCurrentUserAdminAsync(ct)) return Forbid();
+        return Ok(await DocumentTemplateHistoryService.GetVersionsAsync(_db, ActDocumentTemplateHistoryObjectId, ct));
+    }
+
+    [HttpGet("document-template-settings/history/{versionId:int}")]
+    public async Task<ActionResult<InvoiceDocumentTemplateSettingsDto>> GetDocumentTemplateVersion(int versionId, CancellationToken ct)
+    {
+        if (!await IsCurrentUserAdminAsync(ct)) return Forbid();
+        var settingsJson = await DocumentTemplateHistoryService.GetVersionSettingsAsync(_db, ActDocumentTemplateHistoryObjectId, versionId, ct);
+        var request = settingsJson is null ? null : DocumentTemplateHistoryService.DeserializeSettings(settingsJson);
+        if (request is null) return NotFound();
+        return Ok(ActDocumentTemplateEngine.CreateResponse(ActDocumentTemplateEngine.NormalizeRequest(request)));
+    }
+
+    [HttpPost("document-template-settings/history/{versionId:int}/restore")]
+    public async Task<ActionResult<InvoiceDocumentTemplateSettingsDto>> RestoreDocumentTemplateVersion(int versionId, CancellationToken ct)
+    {
+        if (!await IsCurrentUserAdminAsync(ct)) return Forbid();
+        var settingsJson = await DocumentTemplateHistoryService.GetVersionSettingsAsync(_db, ActDocumentTemplateHistoryObjectId, versionId, ct);
+        var request = settingsJson is null ? null : DocumentTemplateHistoryService.DeserializeSettings(settingsJson);
+        if (request is null) return NotFound();
+
+        var storage = ActDocumentTemplateEngine.NormalizeRequest(request);
+        var validationError = ValidateActDocumentTemplateSettings(storage);
+        if (validationError is not null) return BadRequest(validationError);
+
+        await DocumentTemplateHistoryService.SaveVersionedSettingAsync(
+            _db,
+            ActDocumentTemplatesSettingKey,
+            ActDocumentTemplateHistoryObjectId,
+            "act",
+            DocumentTemplateHistoryService.SerializeSettings(ActDocumentTemplateEngine.CreateDefaultSettings()),
+            ActDocumentTemplateEngine.Serialize(storage),
+            User.GetUserId(),
+            User.GetDisplayName(),
+            DateTime.UtcNow,
+            versionId,
+            ct);
+        await _db.SaveChangesAsync(ct);
+        return Ok(ActDocumentTemplateEngine.CreateResponse(storage));
+    }
+
     [HttpGet("{id:int}/document")]
     public async Task<IActionResult> GetDocument(
         int id,
@@ -1132,15 +1212,18 @@ public class ActsController : ControllerBase
         }
 
         var normalizedFormat = NormalizeDocumentFormat(format);
+        var documentSettings = await GetActDocumentTemplateSettingsAsync(ct);
+        var template = SelectActDocumentTemplate(documentSettings);
         var mainCompany = await LoadMainCompanyAsync(ct);
         var documentHtml = ActDocumentTemplateEngine.RenderHtml(
+            template.Html,
             act,
             act.LineItems
                 .OrderBy(item => item.SortOrder)
                 .ThenBy(item => item.Id)
                 .ToList(),
             mainCompany,
-            includeSignatureAndSeal ?? true);
+            includeSignatureAndSeal ?? documentSettings.PrintWithSignatureAndSealByDefault);
 
         if (normalizedFormat == "html")
         {
@@ -1200,15 +1283,18 @@ public class ActsController : ControllerBase
             normalizedFormat = "word";
         }
 
+        var documentSettings = await GetActDocumentTemplateSettingsAsync(ct);
+        var template = SelectActDocumentTemplate(documentSettings);
         var mainCompany = await LoadMainCompanyAsync(ct);
         var documentHtml = ActDocumentTemplateEngine.RenderHtml(
+            template.Html,
             act,
             act.LineItems
                 .OrderBy(item => item.SortOrder)
                 .ThenBy(item => item.Id)
                 .ToList(),
             mainCompany,
-            includeSignatureAndSeal ?? false);
+            includeSignatureAndSeal ?? documentSettings.PrintWithSignatureAndSealByDefault);
 
         byte[] bytes;
         string fileName;
@@ -1332,15 +1418,18 @@ public class ActsController : ControllerBase
             normalizedFormat = "word";
         }
 
+        var documentSettings = await GetActDocumentTemplateSettingsAsync(ct);
+        var template = SelectActDocumentTemplate(documentSettings);
         var mainCompany = await LoadMainCompanyAsync(ct);
         var documentHtml = ActDocumentTemplateEngine.RenderHtml(
+            template.Html,
             act,
             act.LineItems
                 .OrderBy(item => item.SortOrder)
                 .ThenBy(item => item.Id)
                 .ToList(),
             mainCompany,
-            includeSignatureAndSeal: true);
+            documentSettings.PrintWithSignatureAndSealByDefault);
 
         byte[] bytes;
         string fileName;
@@ -1500,6 +1589,39 @@ public class ActsController : ControllerBase
         AuditDeletedByUserId = EF.Property<int?>(act, "DeletedByUserId"),
         AuditDeletedByUserName = EF.Property<string?>(act, "DeletedByUserName"),
     };
+
+    private async Task<InvoiceDocumentTemplateSettingsDto> GetActDocumentTemplateSettingsAsync(CancellationToken ct)
+    {
+        var rawJson = await _db.SystemSettings
+            .AsNoTracking()
+            .Where(setting => setting.Key == ActDocumentTemplatesSettingKey)
+            .Select(setting => setting.Value)
+            .FirstOrDefaultAsync(ct);
+        var storage = ActDocumentTemplateEngine.Deserialize(rawJson);
+        return storage is null
+            ? ActDocumentTemplateEngine.CreateDefaultSettings()
+            : ActDocumentTemplateEngine.CreateResponse(storage);
+    }
+
+    private static InvoiceDocumentTemplateDto SelectActDocumentTemplate(InvoiceDocumentTemplateSettingsDto settings)
+        => settings.Templates.FirstOrDefault(template =>
+               string.Equals(template.Key, settings.ActiveTemplateKey, StringComparison.OrdinalIgnoreCase))
+           ?? settings.Templates[0];
+
+    private static string? ValidateActDocumentTemplateSettings(ActDocumentTemplateEngine.ActDocumentTemplateSettingsStorage storage)
+    {
+        if (storage.Templates.Count == 0) return "Добавьте хотя бы один шаблон акта.";
+        var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var template in storage.Templates)
+        {
+            if (string.IsNullOrWhiteSpace(template.Key)) return "У каждого шаблона акта должен быть внутренний ключ.";
+            if (!keys.Add(template.Key)) return $"Шаблон акта с ключом '{template.Key}' уже существует.";
+            if (string.IsNullOrWhiteSpace(template.Name)) return "У каждого шаблона акта должно быть название.";
+            if (string.IsNullOrWhiteSpace(template.Html)) return $"Шаблон акта '{template.Name}' не содержит HTML.";
+        }
+        if (!keys.Contains(storage.ActiveTemplateKey)) return "Выбранный активный шаблон акта не найден.";
+        return null;
+    }
 
     private async Task<Act?> LoadActDocumentAsync(int id, CancellationToken ct)
     {

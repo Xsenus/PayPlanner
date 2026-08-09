@@ -2,7 +2,10 @@ using System.Globalization;
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Models.Requests;
+using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.LegalEntities;
 
@@ -10,11 +13,225 @@ namespace PayPlanner.Api.Services.Acts;
 
 public static class ActDocumentTemplateEngine
 {
+    public const string DefaultTemplateKey = "act-standard";
     private static readonly CultureInfo RuCulture = CultureInfo.GetCultureInfo("ru-RU");
+    private static readonly Regex TokenRegex = new("""\{\{\s*([a-zA-Z0-9\._]+)\s*\}\}""", RegexOptions.Compiled);
+    private static readonly Regex LineItemsRegex = new("""\{\{#lineItems\}\}([\s\S]*?)\{\{/lineItems\}\}""", RegexOptions.Compiled);
     private const string ClientProfileNotesPrefix = "__PP_CLIENT_PROFILE_V2__:";
     private static readonly JsonSerializerOptions ClientProfileJsonOptions = new(JsonSerializerDefaults.Web);
 
+    public static readonly string DefaultTemplateHtml = """
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <title>{{document.title}}</title>
+  <style>
+    @page { size: A4; margin: 15mm 14mm; }
+    * { box-sizing: border-box; }
+    body { margin: 0; color: #000; font-family: Arial, "DejaVu Sans", sans-serif; font-size: 12px; line-height: 1.3; }
+    .document { width: 100%; max-width: 182mm; margin: 0 auto; }
+    h1 { margin: 8px 0 14px; text-align: center; font-size: 17px; line-height: 1.2; }
+    table { width: 100%; border-collapse: collapse; }
+    .parties td { padding: 3px 4px; vertical-align: top; }
+    .label { width: 17%; white-space: nowrap; }
+    .party { font-weight: 600; overflow-wrap: anywhere; }
+    .items { margin: 10px 0 7px; }
+    .items th, .items td { border: 1px solid #000; padding: 4px 5px; vertical-align: top; }
+    .items th { text-align: center; font-weight: 700; }
+    .num, .qty, .unit { text-align: center; }
+    .price, .sum, .total-value { text-align: right; white-space: nowrap; }
+    .num { width: 5%; }
+    .name { width: 53%; overflow-wrap: anywhere; }
+    .qty { width: 8%; }
+    .unit { width: 9%; }
+    .price, .sum { width: 12.5%; }
+    .totals td { padding: 2px 0; }
+    .total-label { text-align: right; padding-right: 10px !important; font-weight: 700; }
+    .total-value { width: 17%; }
+    .summary { margin-top: 9px; }
+    .summary-words { margin-top: 3px; font-weight: 700; }
+    .acceptance { margin-top: 14px; line-height: 1.4; }
+    .comment { margin-top: 10px; }
+    .signatures { margin-top: 24px; table-layout: fixed; }
+    .signatures td { width: 48%; vertical-align: top; }
+    .signatures .gap { width: 4%; }
+    .role { margin-bottom: 7px; font-weight: 700; }
+    .party-name { min-height: 34px; }
+    .sign-line { position: relative; min-height: 70px; padding-top: 38px; text-align: center; }
+    .signature { position: absolute; left: 8px; bottom: 10px; z-index: 2; max-width: 145px; max-height: 42px; object-fit: contain; }
+    .seal { position: absolute; left: 75px; bottom: -22px; z-index: 1; max-width: 112px; max-height: 112px; object-fit: contain; opacity: .92; }
+    .mark { position: relative; z-index: 3; white-space: nowrap; }
+    @media print { thead { display: table-header-group; } tr { break-inside: avoid; } }
+  </style>
+</head>
+<body>
+  <main class="document">
+    <h1>{{document.title}}</h1>
+    <table class="parties"><tbody>
+      <tr><td class="label">Исполнитель:</td><td class="party">{{seller.requisitesHtml}}</td></tr>
+      <tr><td class="label">Заказчик:</td><td class="party">{{buyer.requisitesHtml}}</td></tr>
+      <tr><td class="label">Основание:</td><td class="party">{{act.basis}}</td></tr>
+    </tbody></table>
+    <table class="items">
+      <thead><tr><th class="num">№</th><th class="name">Наименование работ, услуг</th><th class="qty">Кол-во</th><th class="unit">Ед.</th><th class="price">Цена</th><th class="sum">Сумма</th></tr></thead>
+      <tbody>{{#lineItems}}<tr><td class="num">{{index}}</td><td class="name">{{name}}</td><td class="qty">{{quantity}}</td><td class="unit">{{unit}}</td><td class="price">{{price}}</td><td class="sum">{{total}}</td></tr>{{/lineItems}}</tbody>
+    </table>
+    <table class="totals"><tbody>
+      <tr><td class="total-label">Итого:</td><td class="total-value">{{act.total}}</td></tr>
+      <tr><td class="total-label">В том числе НДС:</td><td class="total-value">{{act.vat}}</td></tr>
+    </tbody></table>
+    <div class="summary">Всего оказано услуг {{act.itemsCount}}, на сумму {{act.total}} руб.</div>
+    <div class="summary-words">{{act.totalWords}}</div>
+    <div class="acceptance">Вышеперечисленные услуги выполнены полностью и в срок. Заказчик претензий по объему, качеству и срокам оказания услуг не имеет.</div>
+    {{act.commentHtml}}
+    <table class="signatures"><tbody><tr>
+      <td><div class="role">ИСПОЛНИТЕЛЬ</div><div class="party-name">{{seller.signaturePartyName}}</div><div class="sign-line">{{seller.signatureHtml}}{{seller.sealHtml}}<span class="mark">/ {{seller.signatoryShortName}} /</span></div></td>
+      <td class="gap"></td>
+      <td><div class="role">ЗАКАЗЧИК</div><div class="party-name">{{buyer.signaturePartyName}}</div><div class="sign-line"><span class="mark">/ {{buyer.signatoryShortName}} /</span></div></td>
+    </tr></tbody></table>
+  </main>
+</body>
+</html>
+""";
+
+    public static InvoiceDocumentTemplateSettingsDto CreateDefaultSettings()
+        => CreateResponse(new ActDocumentTemplateSettingsStorage
+        {
+            ActiveTemplateKey = DefaultTemplateKey,
+            PrintWithSignatureAndSealByDefault = false,
+            Templates =
+            [
+                new ActDocumentTemplateStorageItem
+                {
+                    Key = DefaultTemplateKey,
+                    Name = "Стандартный акт",
+                    Description = "Печатный шаблон акта выполненных работ с реквизитами, услугами и подписями.",
+                    Html = DefaultTemplateHtml,
+                },
+            ],
+        });
+
+    public static InvoiceDocumentTemplateSettingsDto CreateResponse(ActDocumentTemplateSettingsStorage storage)
+    {
+        var templates = storage.Templates
+            .Where(static item => !string.IsNullOrWhiteSpace(item.Key) && !string.IsNullOrWhiteSpace(item.Name) && !string.IsNullOrWhiteSpace(item.Html))
+            .GroupBy(item => item.Key.Trim(), StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .Select(item => new InvoiceDocumentTemplateDto
+            {
+                Key = item.Key.Trim(),
+                Name = item.Name.Trim(),
+                Description = string.IsNullOrWhiteSpace(item.Description) ? null : item.Description.Trim(),
+                Html = item.Html.Trim(),
+            })
+            .ToList();
+
+        if (templates.Count == 0)
+        {
+            return CreateDefaultSettings();
+        }
+
+        var activeTemplateKey = templates.Any(item => string.Equals(item.Key, storage.ActiveTemplateKey, StringComparison.OrdinalIgnoreCase))
+            ? templates.First(item => string.Equals(item.Key, storage.ActiveTemplateKey, StringComparison.OrdinalIgnoreCase)).Key
+            : templates[0].Key;
+
+        return new InvoiceDocumentTemplateSettingsDto
+        {
+            ActiveTemplateKey = activeTemplateKey,
+            PrintWithSignatureAndSealByDefault = storage.PrintWithSignatureAndSealByDefault,
+            Templates = templates,
+            Tokens = GetAvailableTokens(),
+            DefaultTemplateHtml = DefaultTemplateHtml,
+        };
+    }
+
+    public static ActDocumentTemplateSettingsStorage NormalizeRequest(InvoiceDocumentTemplateSettingsRequest request)
+        => new()
+        {
+            ActiveTemplateKey = request.ActiveTemplateKey.Trim(),
+            PrintWithSignatureAndSealByDefault = request.PrintWithSignatureAndSealByDefault,
+            Templates = request.Templates
+                .Where(static item => !string.IsNullOrWhiteSpace(item.Key) || !string.IsNullOrWhiteSpace(item.Name) || !string.IsNullOrWhiteSpace(item.Html))
+                .Select(item => new ActDocumentTemplateStorageItem
+                {
+                    Key = item.Key.Trim(),
+                    Name = item.Name.Trim(),
+                    Description = string.IsNullOrWhiteSpace(item.Description) ? null : item.Description.Trim(),
+                    Html = item.Html.Trim(),
+                })
+                .ToList(),
+        };
+
+    public static string Serialize(ActDocumentTemplateSettingsStorage storage)
+        => JsonSerializer.Serialize(storage);
+
+    public static ActDocumentTemplateSettingsStorage? Deserialize(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        try
+        {
+            return JsonSerializer.Deserialize<ActDocumentTemplateSettingsStorage>(json);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    public static List<InvoiceDocumentTemplateTokenDto> GetAvailableTokens()
+        =>
+        [
+            new() { Key = "document.title", Category = "Акт", Description = "Полный заголовок акта", IsRepeating = false },
+            new() { Key = "act.number", Category = "Акт", Description = "Номер акта", IsRepeating = false },
+            new() { Key = "act.date", Category = "Акт", Description = "Дата акта", IsRepeating = false },
+            new() { Key = "act.dateLong", Category = "Акт", Description = "Дата акта прописью", IsRepeating = false },
+            new() { Key = "act.basis", Category = "Акт", Description = "Основание оказания услуг", IsRepeating = false },
+            new() { Key = "act.total", Category = "Акт", Description = "Итоговая сумма", IsRepeating = false },
+            new() { Key = "act.totalWords", Category = "Акт", Description = "Итоговая сумма прописью", IsRepeating = false },
+            new() { Key = "act.vat", Category = "Акт", Description = "Сумма НДС", IsRepeating = false },
+            new() { Key = "act.itemsCount", Category = "Акт", Description = "Количество строк услуг", IsRepeating = false },
+            new() { Key = "act.commentHtml", Category = "HTML-блоки", Description = "Комментарий к акту", IsRepeating = false },
+            new() { Key = "seller.requisitesHtml", Category = "Исполнитель", Description = "Реквизиты исполнителя", IsRepeating = false },
+            new() { Key = "seller.signaturePartyName", Category = "Исполнитель", Description = "Название стороны в подписи", IsRepeating = false },
+            new() { Key = "seller.signatoryShortName", Category = "Исполнитель", Description = "Подписант исполнителя", IsRepeating = false },
+            new() { Key = "seller.signatureHtml", Category = "HTML-блоки", Description = "Изображение подписи", IsRepeating = false },
+            new() { Key = "seller.sealHtml", Category = "HTML-блоки", Description = "Изображение печати", IsRepeating = false },
+            new() { Key = "buyer.requisitesHtml", Category = "Заказчик", Description = "Реквизиты заказчика", IsRepeating = false },
+            new() { Key = "buyer.signaturePartyName", Category = "Заказчик", Description = "Название стороны в подписи", IsRepeating = false },
+            new() { Key = "buyer.signatoryShortName", Category = "Заказчик", Description = "Подписант заказчика", IsRepeating = false },
+            new() { Key = "lineItems", Category = "Строки услуг", Description = "Повторяемый блок строк услуг", IsRepeating = true },
+            new() { Key = "index", Category = "Строки услуг", Description = "Номер строки", IsRepeating = true },
+            new() { Key = "name", Category = "Строки услуг", Description = "Наименование услуги", IsRepeating = true },
+            new() { Key = "quantity", Category = "Строки услуг", Description = "Количество", IsRepeating = true },
+            new() { Key = "unit", Category = "Строки услуг", Description = "Единица измерения", IsRepeating = true },
+            new() { Key = "price", Category = "Строки услуг", Description = "Цена", IsRepeating = true },
+            new() { Key = "total", Category = "Строки услуг", Description = "Сумма строки", IsRepeating = true },
+        ];
+
     public static string RenderHtml(
+        Act act,
+        IReadOnlyCollection<ActLineItem> lineItems,
+        LegalEntity? mainCompany,
+        bool includeSignatureAndSeal)
+        => RenderSystemDefaultHtml(act, lineItems, mainCompany, includeSignatureAndSeal);
+
+    public static string RenderHtml(
+        string templateHtml,
+        Act act,
+        IReadOnlyCollection<ActLineItem> lineItems,
+        LegalEntity? mainCompany,
+        bool includeSignatureAndSeal)
+    {
+        if (string.IsNullOrWhiteSpace(templateHtml) || string.Equals(templateHtml.Trim(), DefaultTemplateHtml, StringComparison.Ordinal))
+        {
+            return RenderSystemDefaultHtml(act, lineItems, mainCompany, includeSignatureAndSeal);
+        }
+
+        return RenderCustomTemplateHtml(templateHtml, act, lineItems, mainCompany, includeSignatureAndSeal);
+    }
+
+    private static string RenderSystemDefaultHtml(
         Act act,
         IReadOnlyCollection<ActLineItem> lineItems,
         LegalEntity? mainCompany,
@@ -364,6 +581,91 @@ public static class ActDocumentTemplateEngine
 </body>
 </html>
 """;
+    }
+
+    private static string RenderCustomTemplateHtml(
+        string templateHtml,
+        Act act,
+        IReadOnlyCollection<ActLineItem> lineItems,
+        LegalEntity? mainCompany,
+        bool includeSignatureAndSeal)
+    {
+        var companyParty = BuildSeller(mainCompany);
+        var isExpenseAct = act.Invoice?.Type == PaymentType.Expense;
+        var seller = isExpenseAct ? BuildExpenseSeller(act) : companyParty;
+        var buyer = isExpenseAct ? BuildCompanyBuyer(companyParty) : BuildBuyer(act);
+        var effectiveLineItems = BuildEffectiveLineItems(act, lineItems);
+        var totalAmount = effectiveLineItems.Sum(item => item.Total);
+        var documentTitle = $"Акт № {act.Number} от {FormatLongDate(act.Date)}";
+        var signatureHtml = includeSignatureAndSeal && !isExpenseAct
+            ? BuildImageHtml(mainCompany?.DirectorSignatureDataUrl, "Подпись", "signature")
+            : string.Empty;
+        var sealHtml = includeSignatureAndSeal && !isExpenseAct
+            ? BuildImageHtml(mainCompany?.SealDataUrl, "Печать", "seal")
+            : string.Empty;
+        var commentHtml = string.IsNullOrWhiteSpace(act.Comment)
+            ? string.Empty
+            : $"<div class=\"comment\"><b>Комментарий:</b> {Encode(act.Comment)}</div>";
+
+        var rendered = LineItemsRegex.Replace(templateHtml, match =>
+        {
+            var rowTemplate = match.Groups[1].Value;
+            return string.Concat(effectiveLineItems.Select((item, index) =>
+            {
+                var rowTokens = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["index"] = (index + 1).ToString(CultureInfo.InvariantCulture),
+                    ["name"] = Encode(item.Name),
+                    ["quantity"] = Encode(FormatQuantity(item.Quantity)),
+                    ["unit"] = Encode(item.Unit),
+                    ["price"] = Encode(FormatMoney(item.Price)),
+                    ["total"] = Encode(FormatMoney(item.Total)),
+                };
+                return ReplaceTokens(rowTemplate, rowTokens);
+            }));
+        });
+
+        var tokens = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["document.title"] = Encode(documentTitle),
+            ["act.number"] = Encode(act.Number),
+            ["act.date"] = Encode(act.Date.ToString("dd.MM.yyyy", RuCulture)),
+            ["act.dateLong"] = Encode(FormatLongDate(act.Date)),
+            ["act.basis"] = Encode(BuildBasis(act)),
+            ["act.total"] = Encode(FormatMoney(totalAmount)),
+            ["act.totalWords"] = Encode(SpellMoney(totalAmount)),
+            ["act.vat"] = "0,00",
+            ["act.itemsCount"] = effectiveLineItems.Count.ToString(CultureInfo.InvariantCulture),
+            ["act.commentHtml"] = commentHtml,
+            ["seller.requisitesHtml"] = seller.RequisitesHtml,
+            ["seller.signaturePartyName"] = Encode(seller.SignaturePartyName),
+            ["seller.signatoryShortName"] = Encode(seller.SignatoryShortName),
+            ["seller.signatureHtml"] = signatureHtml,
+            ["seller.sealHtml"] = sealHtml,
+            ["buyer.requisitesHtml"] = buyer.RequisitesHtml,
+            ["buyer.signaturePartyName"] = Encode(buyer.SignaturePartyName),
+            ["buyer.signatoryShortName"] = Encode(buyer.SignatoryShortName),
+        };
+
+        return ReplaceTokens(rendered, tokens);
+    }
+
+    private static string ReplaceTokens(string templateHtml, IReadOnlyDictionary<string, string> tokens)
+        => TokenRegex.Replace(templateHtml, match => tokens.TryGetValue(match.Groups[1].Value, out var value) ? value : string.Empty);
+
+    public sealed class ActDocumentTemplateSettingsStorage
+    {
+        public string ActiveTemplateKey { get; set; } = string.Empty;
+        public bool PrintWithSignatureAndSealByDefault { get; set; }
+        public List<ActDocumentTemplateStorageItem> Templates { get; set; } = new();
+    }
+
+    public sealed class ActDocumentTemplateStorageItem
+    {
+        public string Key { get; set; } = string.Empty;
+        public string Name { get; set; } = string.Empty;
+        public string? Description { get; set; }
+        public string Html { get; set; } = string.Empty;
     }
 
     private static List<RenderedActLineItem> BuildEffectiveLineItems(
