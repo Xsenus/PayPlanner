@@ -47,6 +47,33 @@ public static class DocumentTemplateHistoryService
         DateTime nowUtc,
         int? restoredFromVersionId,
         CancellationToken ct)
+        => await SaveRawVersionedSettingAsync(
+            db,
+            settingKey,
+            historyObjectId,
+            documentType,
+            defaultSettingsJson,
+            newSettingsJson,
+            ReadSettingsSummary,
+            actorUserId,
+            actorUserName,
+            nowUtc,
+            restoredFromVersionId,
+            ct);
+
+    public static async Task<bool> SaveRawVersionedSettingAsync(
+        PaymentContext db,
+        string settingKey,
+        int historyObjectId,
+        string documentType,
+        string defaultSettingsJson,
+        string newSettingsJson,
+        Func<string, DocumentTemplateVersionSummary> readSummary,
+        int? actorUserId,
+        string? actorUserName,
+        DateTime nowUtc,
+        int? restoredFromVersionId,
+        CancellationToken ct)
     {
         var setting = await db.SystemSettings.FirstOrDefaultAsync(item => item.Key == settingKey, ct);
         var currentSettingsJson = setting?.Value ?? defaultSettingsJson;
@@ -85,7 +112,8 @@ public static class DocumentTemplateHistoryService
                 actorUserName,
                 nowUtc,
                 null,
-                "Сохранено исходное состояние шаблонов перед изменением.");
+                "Сохранено исходное состояние шаблонов перед изменением.",
+                readSummary(currentSettingsJson));
         }
 
         revision += 1;
@@ -102,7 +130,8 @@ public static class DocumentTemplateHistoryService
             restoredFromVersionId,
             restoredFromVersionId.HasValue
                 ? $"Восстановлена версия шаблонов #{restoredFromVersionId.Value}."
-                : "Сохранена новая версия шаблонов.");
+                : "Сохранена новая версия шаблонов.",
+            readSummary(newSettingsJson));
 
         if (setting is null)
         {
@@ -193,15 +222,15 @@ public static class DocumentTemplateHistoryService
         string? actorUserName,
         DateTime createdAt,
         int? restoredFromVersionId,
-        string description)
+        string description,
+        DocumentTemplateVersionSummary summary)
     {
-        var summary = ReadSettingsSummary(settingsJson);
         var metadata = new TemplateVersionMetadata
         {
             Revision = revision,
             DocumentType = documentType,
             ActiveTemplateKey = summary.ActiveTemplateKey,
-            TemplateNames = summary.TemplateNames,
+            TemplateNames = summary.TemplateNames.ToList(),
             ContentHash = contentHash,
             SettingsJson = settingsJson,
             RestoredFromVersionId = restoredFromVersionId,
@@ -220,13 +249,19 @@ public static class DocumentTemplateHistoryService
         });
     }
 
-    private static (string ActiveTemplateKey, List<string> TemplateNames) ReadSettingsSummary(string settingsJson)
+    private static DocumentTemplateVersionSummary ReadSettingsSummary(string settingsJson)
     {
         var request = DeserializeSettings(settingsJson);
         return request is null
-            ? (string.Empty, new List<string>())
-            : (request.ActiveTemplateKey, request.Templates.Select(template => template.Name).ToList());
+            ? new DocumentTemplateVersionSummary(string.Empty, [])
+            : new DocumentTemplateVersionSummary(
+                request.ActiveTemplateKey,
+                request.Templates.Select(template => template.Name).ToList());
     }
+
+    public sealed record DocumentTemplateVersionSummary(
+        string ActiveTemplateKey,
+        IReadOnlyList<string> TemplateNames);
 
     private static TemplateVersionMetadata? DeserializeMetadata(string? metadataJson)
     {

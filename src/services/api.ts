@@ -6313,6 +6313,20 @@ export class ApiService {
     return this.request<ClientCaseDocumentTemplateToken[]>('/v2/cases/document-template-tokens');
   }
 
+  async getCaseDocumentTemplateHistory() {
+    return this.request<DocumentTemplateVersionDto[]>('/v2/cases/document-templates/history');
+  }
+
+  async getCaseDocumentTemplateVersion(versionId: number) {
+    return this.request<ClientCaseDocumentTemplate[]>(`/v2/cases/document-templates/history/${versionId}`);
+  }
+
+  async restoreCaseDocumentTemplateVersion(versionId: number) {
+    return this.request<ClientCaseDocumentTemplate[]>(`/v2/cases/document-templates/history/${versionId}/restore`, {
+      method: 'POST',
+    });
+  }
+
   async createCaseDocumentTemplate(payload: Partial<ClientCaseDocumentTemplate> & { key?: string; label?: string; name?: string; content?: string; html?: string }) {
     return this.request<ClientCaseDocumentTemplate>('/document-templates', {
       method: 'POST',

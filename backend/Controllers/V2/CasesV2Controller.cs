@@ -16,6 +16,7 @@ using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Documents;
 using PayPlanner.Api.Services.Invoices;
 using PayPlanner.Api.Services.LegalIntegrations;
 using PayPlanner.Api.Services.LegalIntegrations.Models;
@@ -41,6 +42,7 @@ public class CasesV2Controller : ControllerBase
     private const string CaseHistoryCommentPrefix = "Комментарий по делу:";
     private const string CaseHistoryAuthorMarker = "Автор:";
     private const string CaseDocumentTemplatesSettingKey = "cases.documentTemplates";
+    private const int CaseDocumentTemplateHistoryObjectId = 4;
     private const string CaseProductionCalendarSettingKey = "cases.productionCalendar";
     private const string CaseInactivityAutomationEnabledSettingKey = "tasks.automation.caseControl.enabled";
     private const string CaseInactivityAutomationDaysSettingKey = "tasks.automation.caseControl.inactiveDays";
@@ -1876,6 +1878,69 @@ public class CasesV2Controller : ControllerBase
             .ToList());
     }
 
+    [HttpGet("document-templates/history")]
+    [HttpGet("/api/document-templates/history")]
+    public async Task<ActionResult<IReadOnlyList<DocumentTemplateVersionDto>>> GetDocumentTemplateHistory(CancellationToken ct)
+    {
+        if (await RequireDocumentTemplateEditPermissionAsync(ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        return Ok(await DocumentTemplateHistoryService.GetVersionsAsync(_db, CaseDocumentTemplateHistoryObjectId, ct));
+    }
+
+    [HttpGet("document-templates/history/{versionId:int}")]
+    [HttpGet("/api/document-templates/history/{versionId:int}")]
+    public async Task<ActionResult<IReadOnlyList<CaseDocumentTemplateDefinitionDto>>> GetDocumentTemplateVersion(
+        int versionId,
+        CancellationToken ct)
+    {
+        if (await RequireDocumentTemplateEditPermissionAsync(ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var settingsJson = await DocumentTemplateHistoryService.GetVersionSettingsAsync(
+            _db,
+            CaseDocumentTemplateHistoryObjectId,
+            versionId,
+            ct);
+        var templates = DeserializeCaseDocumentTemplateDefinitions(settingsJson);
+        return templates is null
+            ? NotFound()
+            : Ok(templates.Select(MapDocumentTemplateDefinition).ToList());
+    }
+
+    [HttpPost("document-templates/history/{versionId:int}/restore")]
+    [HttpPost("/api/document-templates/history/{versionId:int}/restore")]
+    public async Task<ActionResult<IReadOnlyList<CaseDocumentTemplateDefinitionDto>>> RestoreDocumentTemplateVersion(
+        int versionId,
+        CancellationToken ct)
+    {
+        if (await RequireDocumentTemplateEditPermissionAsync(ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var settingsJson = await DocumentTemplateHistoryService.GetVersionSettingsAsync(
+            _db,
+            CaseDocumentTemplateHistoryObjectId,
+            versionId,
+            ct);
+        var templates = DeserializeCaseDocumentTemplateDefinitions(settingsJson);
+        if (templates is null)
+        {
+            return NotFound();
+        }
+
+        await SaveCaseDocumentTemplateLibraryAsync(templates, ct, versionId);
+        var restored = (await GetCaseDocumentTemplateLibraryAsync(ct))
+            .Select(MapDocumentTemplateDefinition)
+            .ToList();
+        return Ok(restored);
+    }
+
     [HttpPost("document-templates")]
     [HttpPost("/api/document-templates")]
     public async Task<ActionResult<CaseDocumentTemplateDefinitionDto>> CreateDocumentTemplate(
@@ -1934,6 +1999,11 @@ public class CasesV2Controller : ControllerBase
         if (validation.Error is not null)
         {
             return BadRequest(new { message = validation.Error });
+        }
+
+        if (CaseDocumentTemplateContentEquals(templates[index], validation.Template))
+        {
+            return Ok(MapDocumentTemplateDefinition(templates[index]));
         }
 
         templates[index] = validation.Template;
@@ -9409,20 +9479,7 @@ public class CasesV2Controller : ControllerBase
             .Select(setting => setting.Value)
             .FirstOrDefaultAsync(ct);
 
-        var storage = DeserializeCaseDocumentTemplateLibrary(rawJson);
-        var templates = storage?.Templates
-            .Select(static item => new CaseDocumentTemplateDefinition(
-                item.Key,
-                item.Label,
-                item.DocumentType,
-                item.Heading,
-                NormalizeCaseDocumentTemplateCaseTypes(item.CaseTypes),
-                item.Description,
-                item.Content,
-                item.Version <= 0 ? 1 : item.Version,
-                item.IsActive,
-                item.UpdatedAt))
-            .ToList();
+        var templates = DeserializeCaseDocumentTemplateDefinitions(rawJson);
 
         return NormalizeCaseDocumentTemplateLibrary(
             templates is { Count: > 0 }
@@ -9432,9 +9489,42 @@ public class CasesV2Controller : ControllerBase
 
     private async Task SaveCaseDocumentTemplateLibraryAsync(
         IReadOnlyCollection<CaseDocumentTemplateDefinition> templates,
-        CancellationToken ct)
+        CancellationToken ct,
+        int? restoredFromVersionId = null)
     {
         var now = DateTime.UtcNow;
+        var value = SerializeCaseDocumentTemplateLibrary(templates, now);
+        var defaultValue = SerializeCaseDocumentTemplateLibrary(CaseDocumentTemplateDefinitions, null);
+        var actorUserId = User.GetUserId();
+        var actorUserName = actorUserId.HasValue
+            ? await _db.Users
+                .AsNoTracking()
+                .Where(item => item.Id == actorUserId.Value)
+                .Select(item => item.FullName)
+                .FirstOrDefaultAsync(ct)
+            : null;
+
+        await DocumentTemplateHistoryService.SaveRawVersionedSettingAsync(
+            _db,
+            CaseDocumentTemplatesSettingKey,
+            CaseDocumentTemplateHistoryObjectId,
+            "case-document",
+            defaultValue,
+            value,
+            ReadCaseDocumentTemplateVersionSummary,
+            actorUserId,
+            actorUserName,
+            now,
+            restoredFromVersionId,
+            ct);
+
+        await _db.SaveChangesAsync(ct);
+    }
+
+    private static string SerializeCaseDocumentTemplateLibrary(
+        IEnumerable<CaseDocumentTemplateDefinition> templates,
+        DateTime? defaultUpdatedAt)
+    {
         var storage = new CaseDocumentTemplateLibraryStorage
         {
             Templates = NormalizeCaseDocumentTemplateLibrary(templates)
@@ -9449,30 +9539,51 @@ public class CasesV2Controller : ControllerBase
                     Content = template.Content,
                     Version = template.Version <= 0 ? 1 : template.Version,
                     IsActive = template.IsActive,
-                    UpdatedAt = template.UpdatedAt ?? now,
+                    UpdatedAt = template.UpdatedAt ?? defaultUpdatedAt,
                 })
                 .ToList(),
         };
-        var value = JsonSerializer.Serialize(storage, CaseDocumentTemplateJsonOptions);
-        var setting = await _db.SystemSettings.FirstOrDefaultAsync(item => item.Key == CaseDocumentTemplatesSettingKey, ct);
-        if (setting is null)
-        {
-            _db.SystemSettings.Add(new SystemSetting
-            {
-                Key = CaseDocumentTemplatesSettingKey,
-                Value = value,
-                CreatedAt = now,
-                UpdatedAt = now,
-            });
-        }
-        else
-        {
-            setting.Value = value;
-            setting.UpdatedAt = now;
-        }
-
-        await _db.SaveChangesAsync(ct);
+        return JsonSerializer.Serialize(storage, CaseDocumentTemplateJsonOptions);
     }
+
+    private static List<CaseDocumentTemplateDefinition>? DeserializeCaseDocumentTemplateDefinitions(string? rawJson)
+    {
+        var storage = DeserializeCaseDocumentTemplateLibrary(rawJson);
+        return storage?.Templates
+            .Select(static item => new CaseDocumentTemplateDefinition(
+                item.Key,
+                item.Label,
+                item.DocumentType,
+                item.Heading,
+                NormalizeCaseDocumentTemplateCaseTypes(item.CaseTypes),
+                item.Description,
+                item.Content,
+                item.Version <= 0 ? 1 : item.Version,
+                item.IsActive,
+                item.UpdatedAt))
+            .ToList();
+    }
+
+    private static DocumentTemplateHistoryService.DocumentTemplateVersionSummary ReadCaseDocumentTemplateVersionSummary(string settingsJson)
+    {
+        var templates = DeserializeCaseDocumentTemplateDefinitions(settingsJson) ?? [];
+        return new DocumentTemplateHistoryService.DocumentTemplateVersionSummary(
+            string.Empty,
+            templates.Select(item => item.Title).ToList());
+    }
+
+    private static bool CaseDocumentTemplateContentEquals(
+        CaseDocumentTemplateDefinition left,
+        CaseDocumentTemplateDefinition right)
+        => string.Equals(left.Key, right.Key, StringComparison.Ordinal)
+            && string.Equals(left.Title, right.Title, StringComparison.Ordinal)
+            && string.Equals(left.DocumentType, right.DocumentType, StringComparison.Ordinal)
+            && string.Equals(left.Heading, right.Heading, StringComparison.Ordinal)
+            && string.Equals(left.Description, right.Description, StringComparison.Ordinal)
+            && string.Equals(left.Content, right.Content, StringComparison.Ordinal)
+            && left.IsActive == right.IsActive
+            && NormalizeCaseDocumentTemplateCaseTypes(left.CaseTypes)
+                .SequenceEqual(NormalizeCaseDocumentTemplateCaseTypes(right.CaseTypes), StringComparer.Ordinal);
 
     private async Task<ClientCaseCourtSyncSettingsDto> ResolveCourtSyncSettingsAsync(CancellationToken ct)
     {
