@@ -367,6 +367,13 @@ public class ReportsControllerTests
             var print = Assert.IsType<ContentResult>(printAction);
             Assert.Equal("text/html; charset=utf-8", print.ContentType);
             Assert.Contains("<!doctype html>", print.Content, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("table-layout: fixed", print.Content, StringComparison.Ordinal);
+            Assert.Contains("overflow-wrap: anywhere", print.Content, StringComparison.Ordinal);
+            Assert.Contains("thead { display: table-header-group; }", print.Content, StringComparison.Ordinal);
+            if (reportKind == "tasks")
+            {
+                Assert.Contains("class=\"report-table--very-wide\"", print.Content, StringComparison.Ordinal);
+            }
 
             var excelAction = await controller.ExportManagementReportExcel(
                 reportKind,
