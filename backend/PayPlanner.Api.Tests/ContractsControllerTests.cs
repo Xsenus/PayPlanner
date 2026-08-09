@@ -1241,6 +1241,12 @@ public class ContractsControllerTests
 
         var stored = await db.SystemSettings.AsNoTracking().SingleAsync(setting => setting.Key == "contracts.documentTemplates");
         Assert.Contains("custom-contract", stored.Value);
+
+        var historyAction = await controller.GetDocumentTemplateHistory(CancellationToken.None);
+        var historyOk = Assert.IsType<OkObjectResult>(historyAction.Result);
+        var history = Assert.IsAssignableFrom<IReadOnlyList<DocumentTemplateVersionDto>>(historyOk.Value);
+        Assert.Equal(2, history.Count);
+        Assert.Equal("contract", history[0].DocumentType);
     }
 
     [Fact]
