@@ -81,7 +81,7 @@ import {
   normalizeYmRange,
 } from '../../utils/reportPresentation';
 import type { ActStatusReport, AdvanceReport, BankStatementImportReport, CaseActivityReport, CaseFinanceReport, CaseSuccessReport, CashBookSummary, CashFlowForecastReport, CashFlowReport, CashOrderReport, Client, ClientCase, Contract, ContractStatusReport, CounterpartyReport, CurrencyReport, CurrentCasesReport, DirectionReport, IncomeType, InvoiceStatusReport, JournalStatusReport, LawyerWorkloadReport, LegalWorkReport, MatchStatusReport, MoneyAccount, MoneyCategoryReport, MoneyOperationSource, OverdueProceduralDeadlinesReport, PaidAccountReport, PaidInvoiceReport, PaymentOrderReport, PaymentPurposeReport, PaymentPriorityReport, PlanFactReport, ProjectReport, SalesPointReport, SpreadsheetImportReport, TaskReport, VatReport } from '../../types';
-import { buildVisibleReportGroups, type ReportGroupId, type ReportSectionAccess } from './reportAccess';
+import { buildVisibleReportGroups, isReportGroupEnabled, type ReportGroupId, type ReportSectionAccess } from './reportAccess';
 import type { ManagementReportKind } from './reportKinds';
 
 const statusMeta: Record<
@@ -6002,7 +6002,12 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     [range.from, range.to, ymNow],
   );
 
-  const { stats, types, loading, error, refresh } = usePeriodStats(normalizedRange.fromYM, normalizedRange.toYM, { enabled: canViewPaymentReports });
+  const paymentReportsEnabled = isReportGroupEnabled(activeGroup, 'payments', visibleReportGroupIds);
+  const taskReportsEnabled = isReportGroupEnabled(activeGroup, 'tasks', visibleReportGroupIds);
+  const legalReportsEnabled = isReportGroupEnabled(activeGroup, 'legal', visibleReportGroupIds);
+  const analyticsReportsEnabled = isReportGroupEnabled(activeGroup, 'analytics', visibleReportGroupIds);
+
+  const { stats, types, loading, error, refresh } = usePeriodStats(normalizedRange.fromYM, normalizedRange.toYM, { enabled: paymentReportsEnabled && canViewPaymentReports });
   const cashFlowDates = useMemo(
     () => monthRangeToDates(normalizedRange.fromYM, normalizedRange.toYM),
     [normalizedRange.fromYM, normalizedRange.toYM],
@@ -6322,19 +6327,19 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     loading: cashFlowLoading,
     error: cashFlowError,
     reload: reloadCashFlow,
-  } = useCashFlowReport(moneyOperationReportFilters, { enabled: canViewPaymentReports });
+  } = useCashFlowReport(moneyOperationReportFilters, { enabled: paymentReportsEnabled && canViewPaymentReports });
   const {
     report: cashFlowForecastReport,
     loading: cashFlowForecastLoading,
     error: cashFlowForecastError,
     reload: reloadCashFlowForecast,
-  } = useCashFlowForecastReport(moneyAccountReportFilters, { enabled: canViewPaymentReports });
+  } = useCashFlowForecastReport(moneyAccountReportFilters, { enabled: paymentReportsEnabled && canViewPaymentReports });
   const {
     report: cashReport,
     loading: cashReportLoading,
     error: cashReportError,
     reload: reloadCashReport,
-  } = useCashReport(cashBookReportFilters, { enabled: canViewPaymentReports });
+  } = useCashReport(cashBookReportFilters, { enabled: paymentReportsEnabled && canViewPaymentReports });
   const bankReportFilters = useMemo(
     () => buildBankReportFilters(moneyOperationReportFilters),
     [moneyOperationReportFilters],
@@ -6354,31 +6359,31 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     loading: bankReportLoading,
     error: bankReportError,
     reload: reloadBankReport,
-  } = useCashFlowReport(bankReportFilters, { enabled: canViewPaymentReports });
+  } = useCashFlowReport(bankReportFilters, { enabled: paymentReportsEnabled && canViewPaymentReports });
   const {
     report: categoryReport,
     loading: categoryReportLoading,
     error: categoryReportError,
     reload: reloadCategoryReport,
-  } = useMoneyCategoryReport(moneyOperationReportFilters, { enabled: canViewPaymentReports });
+  } = useMoneyCategoryReport(moneyOperationReportFilters, { enabled: paymentReportsEnabled && canViewPaymentReports });
   const {
     report: counterpartyReport,
     loading: counterpartyReportLoading,
     error: counterpartyReportError,
     reload: reloadCounterpartyReport,
-  } = useCounterpartyReport(moneyOperationReportFilters, { enabled: canViewPaymentReports });
+  } = useCounterpartyReport(moneyOperationReportFilters, { enabled: paymentReportsEnabled && canViewPaymentReports });
   const {
     report: projectReport,
     loading: projectReportLoading,
     error: projectReportError,
     reload: reloadProjectReport,
-  } = useProjectReport(moneyOperationReportFilters, { enabled: canViewPaymentReports });
+  } = useProjectReport(moneyOperationReportFilters, { enabled: paymentReportsEnabled && canViewPaymentReports });
   const {
     report: legalWorkReport,
     loading: legalWorkReportLoading,
     error: legalWorkReportError,
     reload: reloadLegalWorkReport,
-  } = useLegalWorkReport(cashFlowDates, { enabled: canViewLegalWorkReports });
+  } = useLegalWorkReport(cashFlowDates, { enabled: legalReportsEnabled && canViewLegalWorkReports });
   const {
     report: caseFinanceReport,
     loading: caseFinanceReportLoading,
@@ -6386,7 +6391,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     reload: reloadCaseFinanceReport,
   } = useCaseFinanceReport({
     ...casePeriodReportFilters,
-  }, { enabled: canViewCaseFinanceReports });
+  }, { enabled: legalReportsEnabled && canViewCaseFinanceReports });
   const {
     report: caseSuccessReport,
     loading: caseSuccessReportLoading,
@@ -6394,7 +6399,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     reload: reloadCaseSuccessReport,
   } = useCaseSuccessReport({
     ...casePeriodReportFilters,
-  }, { enabled: canViewCaseReports });
+  }, { enabled: legalReportsEnabled && canViewCaseReports });
   const {
     report: caseActivityReport,
     loading: caseActivityReportLoading,
@@ -6402,7 +6407,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     reload: reloadCaseActivityReport,
   } = useCaseActivityReport({
     ...caseActivityReportFilters,
-  }, { enabled: canViewCaseTaskReports });
+  }, { enabled: legalReportsEnabled && canViewCaseTaskReports });
   const {
     report: currentCasesReport,
     loading: currentCasesReportLoading,
@@ -6410,7 +6415,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     reload: reloadCurrentCasesReport,
   } = useCurrentCasesReport({
     ...currentCasesReportFilters,
-  }, { enabled: canViewCaseTaskReports });
+  }, { enabled: legalReportsEnabled && canViewCaseTaskReports });
   const {
     report: lawyerWorkloadReport,
     loading: lawyerWorkloadReportLoading,
@@ -6418,7 +6423,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     reload: reloadLawyerWorkloadReport,
   } = useLawyerWorkloadReport({
     ...lawyerWorkloadReportFilters,
-  }, { enabled: canViewCaseTaskReports });
+  }, { enabled: legalReportsEnabled && canViewCaseTaskReports });
   const {
     report: overdueDeadlinesReport,
     loading: overdueDeadlinesReportLoading,
@@ -6426,7 +6431,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     reload: reloadOverdueDeadlinesReport,
   } = useOverdueProceduralDeadlinesReport({
     ...overdueDeadlinesReportFilters,
-  }, { enabled: canViewCaseReports });
+  }, { enabled: legalReportsEnabled && canViewCaseReports });
   const {
     report: taskReport,
     loading: taskReportLoading,
@@ -6434,121 +6439,121 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     reload: reloadTaskReport,
   } = useTaskReport({
     ...taskReportFilters,
-  }, { enabled: canViewTaskReports });
+  }, { enabled: taskReportsEnabled && canViewTaskReports });
   const {
     report: directionReport,
     loading: directionReportLoading,
     error: directionReportError,
     reload: reloadDirectionReport,
-  } = useDirectionReport(moneyOperationReportFilters, { enabled: canViewPaymentReports });
+  } = useDirectionReport(moneyOperationReportFilters, { enabled: analyticsReportsEnabled && canViewPaymentReports });
   const {
     report: salesPointReport,
     loading: salesPointReportLoading,
     error: salesPointReportError,
     reload: reloadSalesPointReport,
-  } = useSalesPointReport(moneyOperationReportFilters, { enabled: canViewPaymentReports });
+  } = useSalesPointReport(moneyOperationReportFilters, { enabled: analyticsReportsEnabled && canViewPaymentReports });
   const {
     report: vatReport,
     loading: vatReportLoading,
     error: vatReportError,
     reload: reloadVatReport,
-  } = useVatReport(moneyOperationReportFilters, { enabled: canViewPaymentReports });
+  } = useVatReport(moneyOperationReportFilters, { enabled: analyticsReportsEnabled && canViewPaymentReports });
   const {
     report: planFactReport,
     loading: planFactReportLoading,
     error: planFactReportError,
     reload: reloadPlanFactReport,
-  } = usePlanFactReport(moneyOperationReportFilters, { enabled: canViewPaymentReports });
+  } = usePlanFactReport(moneyOperationReportFilters, { enabled: analyticsReportsEnabled && canViewPaymentReports });
   const {
     report: advanceReport,
     loading: advanceReportLoading,
     error: advanceReportError,
     reload: reloadAdvanceReport,
-  } = useAdvanceReport(moneyOperationReportFilters, { enabled: canViewPaymentReports });
+  } = useAdvanceReport(moneyOperationReportFilters, { enabled: analyticsReportsEnabled && canViewPaymentReports });
   const {
     report: paymentPriorityReport,
     loading: paymentPriorityReportLoading,
     error: paymentPriorityReportError,
     reload: reloadPaymentPriorityReport,
-  } = usePaymentPriorityReport(moneyOperationReportFilters, { enabled: canViewPaymentReports });
+  } = usePaymentPriorityReport(moneyOperationReportFilters, { enabled: analyticsReportsEnabled && canViewPaymentReports });
   const {
     report: paidAccountReport,
     loading: paidAccountReportLoading,
     error: paidAccountReportError,
     reload: reloadPaidAccountReport,
-  } = usePaidAccountReport(moneyOperationReportFilters, { enabled: canViewPaymentReports });
+  } = usePaidAccountReport(moneyOperationReportFilters, { enabled: analyticsReportsEnabled && canViewPaymentReports });
   const {
     report: paidInvoiceReport,
     loading: paidInvoiceReportLoading,
     error: paidInvoiceReportError,
     reload: reloadPaidInvoiceReport,
-  } = usePaidInvoiceReport(moneyOperationReportFilters, { enabled: canViewPaymentReports });
+  } = usePaidInvoiceReport(moneyOperationReportFilters, { enabled: analyticsReportsEnabled && canViewPaymentReports });
   const {
     report: invoiceStatusReport,
     loading: invoiceStatusReportLoading,
     error: invoiceStatusReportError,
     reload: reloadInvoiceStatusReport,
-  } = useInvoiceStatusReport(moneyOperationReportFilters, { enabled: canViewAccountReports });
+  } = useInvoiceStatusReport(moneyOperationReportFilters, { enabled: analyticsReportsEnabled && canViewAccountReports });
   const {
     report: actStatusReport,
     loading: actStatusReportLoading,
     error: actStatusReportError,
     reload: reloadActStatusReport,
-  } = useActStatusReport(moneyOperationReportFilters, { enabled: canViewActReports });
+  } = useActStatusReport(moneyOperationReportFilters, { enabled: analyticsReportsEnabled && canViewActReports });
   const {
     report: contractStatusReport,
     loading: contractStatusReportLoading,
     error: contractStatusReportError,
     reload: reloadContractStatusReport,
-  } = useContractStatusReport(moneyOperationReportFilters, { enabled: canViewContractReports });
+  } = useContractStatusReport(moneyOperationReportFilters, { enabled: analyticsReportsEnabled && canViewContractReports });
   const {
     report: paymentOrderReport,
     loading: paymentOrderReportLoading,
     error: paymentOrderReportError,
     reload: reloadPaymentOrderReport,
-  } = usePaymentOrderReport(moneyOperationReportFilters, { enabled: canViewPaymentReports });
+  } = usePaymentOrderReport(moneyOperationReportFilters, { enabled: analyticsReportsEnabled && canViewPaymentReports });
   const {
     report: paymentPurposeReport,
     loading: paymentPurposeReportLoading,
     error: paymentPurposeReportError,
     reload: reloadPaymentPurposeReport,
-  } = usePaymentPurposeReport(moneyOperationReportFilters, { enabled: canViewPaymentReports });
+  } = usePaymentPurposeReport(moneyOperationReportFilters, { enabled: analyticsReportsEnabled && canViewPaymentReports });
   const {
     report: matchStatusReport,
     loading: matchStatusReportLoading,
     error: matchStatusReportError,
     reload: reloadMatchStatusReport,
-  } = useMatchStatusReport(moneyOperationReportFilters, { enabled: canViewPaymentReports });
+  } = useMatchStatusReport(moneyOperationReportFilters, { enabled: analyticsReportsEnabled && canViewPaymentReports });
   const {
     report: journalStatusReport,
     loading: journalStatusReportLoading,
     error: journalStatusReportError,
     reload: reloadJournalStatusReport,
-  } = useJournalStatusReport(moneyOperationReportFilters, { enabled: canViewPaymentReports });
+  } = useJournalStatusReport(moneyOperationReportFilters, { enabled: analyticsReportsEnabled && canViewPaymentReports });
   const {
     report: currencyReport,
     loading: currencyReportLoading,
     error: currencyReportError,
     reload: reloadCurrencyReport,
-  } = useCurrencyReport(moneyOperationReportFilters, { enabled: canViewPaymentReports });
+  } = useCurrencyReport(moneyOperationReportFilters, { enabled: analyticsReportsEnabled && canViewPaymentReports });
   const {
     report: cashOrderReport,
     loading: cashOrderReportLoading,
     error: cashOrderReportError,
     reload: reloadCashOrderReport,
-  } = useCashOrderReport(moneyOperationReportFilters, { enabled: canViewPaymentReports });
+  } = useCashOrderReport(moneyOperationReportFilters, { enabled: analyticsReportsEnabled && canViewPaymentReports });
   const {
     report: bankStatementImportReport,
     loading: bankStatementImportReportLoading,
     error: bankStatementImportReportError,
     reload: reloadBankStatementImportReport,
-  } = useBankStatementImportReport(bankStatementImportReportFilters, { enabled: canViewPaymentReports });
+  } = useBankStatementImportReport(bankStatementImportReportFilters, { enabled: analyticsReportsEnabled && canViewPaymentReports });
   const {
     report: spreadsheetImportReport,
     loading: spreadsheetImportReportLoading,
     error: spreadsheetImportReportError,
     reload: reloadSpreadsheetImportReport,
-  } = useSpreadsheetImportReport(cashFlowDates, { enabled: canViewSpreadsheetImportReport });
+  } = useSpreadsheetImportReport(cashFlowDates, { enabled: analyticsReportsEnabled && canViewSpreadsheetImportReport });
 
   const titleSuffix = useMemo(
     () => buildTitleSuffix(normalizedRange.fromYM, normalizedRange.toYM),
