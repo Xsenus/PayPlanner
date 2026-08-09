@@ -352,6 +352,41 @@ public class CashOrdersControllerTests
         var copied = Assert.IsType<CashOrderDto>(copyCreated.Value);
         Assert.Equal(selectedZone.ProfileToday, copied.Date);
         Assert.StartsWith($"ПКО-{selectedZone.ProfileToday.Year}-", copied.Number);
+        Assert.Equal(CashOrderStatus.Draft, copied.Status);
+    }
+
+    [Fact]
+    public void OutgoingCashOrderPrint_UsesUnifiedKo2Form()
+    {
+        var method = typeof(CashOrdersController).GetMethod(
+            "BuildPrintHtml",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var html = Assert.IsType<string>(method.Invoke(null, new object[]
+        {
+            new CashOrder
+            {
+                Number = "РКО-2026-0042",
+                Type = CashOrderType.Outgoing,
+                Status = CashOrderStatus.Posted,
+                Date = new DateTime(2026, 8, 9),
+                Amount = 12_345.67m,
+                Account = "Основная касса",
+                ReceiverName = "Иванов Иван Иванович",
+                Basis = "Выдача под отчёт",
+                Appendix = "Заявление от 09.08.2026",
+            },
+        }));
+
+        Assert.Contains("Унифицированная форма № КО-2", html);
+        Assert.Contains("Форма по ОКУД", html);
+        Assert.Contains("0310002", html);
+        Assert.Contains("РАСХОДНЫЙ КАССОВЫЙ ОРДЕР", html, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Иванов Иван Иванович", html);
+        Assert.Contains("Выдал кассир", html);
+        Assert.Contains("удостоверяющего личность получателя", html);
+        Assert.DoesNotContain("Документ сформирован в PayPlanner", html);
     }
 
     [Fact]
