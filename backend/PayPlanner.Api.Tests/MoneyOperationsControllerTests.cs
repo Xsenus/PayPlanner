@@ -2611,10 +2611,15 @@ public class MoneyOperationsControllerTests
             Appendix = "Договор и счёт",
             Comment = "Без замечаний",
             CreatedAt = DateTime.UtcNow,
+            CreatedByUserName = "Кассир Тестовый",
         });
         await db.SaveChangesAsync();
 
-        var controller = new CashOrdersController(db);
+        var configuration = new Microsoft.Extensions.Configuration.ConfigurationManager
+        {
+            ["App:OrganizationName"] = "ООО Тестовая организация",
+        };
+        var controller = new CashOrdersController(db, configuration: configuration);
         var order = await db.CashOrders.SingleAsync();
 
         var action = await controller.Print(order.Id, CancellationToken.None);
@@ -2643,7 +2648,9 @@ public class MoneyOperationsControllerTests
         Assert.Contains("апреля", content.Content);
         Assert.Contains("Принято от", content.Content);
         Assert.Contains("Ахмедова Айтан Рафик Кызы", content.Content);
-        Assert.Contains("Основная касса", content.Content);
+        Assert.Contains("ООО Тестовая организация", content.Content);
+        Assert.Contains("Кассир Тестовый", content.Content);
+        Assert.DoesNotContain("Основная касса", content.Content);
         Assert.Contains("Договор и счёт", content.Content);
         Assert.Contains("Главный бухгалтер", content.Content);
         Assert.Contains("Получил кассир", content.Content);

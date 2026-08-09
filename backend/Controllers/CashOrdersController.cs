@@ -20,11 +20,16 @@ public class CashOrdersController : ControllerBase
     private const string CashRegisterSourceToken = "кас";
     private readonly PaymentContext _db;
     private readonly IInvoiceDocumentPdfService? _pdfService;
+    private readonly IConfiguration? _configuration;
 
-    public CashOrdersController(PaymentContext db, IInvoiceDocumentPdfService? pdfService = null)
+    public CashOrdersController(
+        PaymentContext db,
+        IInvoiceDocumentPdfService? pdfService = null,
+        IConfiguration? configuration = null)
     {
         _db = db;
         _pdfService = pdfService;
+        _configuration = configuration;
     }
 
     private async Task<ForbidResult?> RequirePaymentsPermissionAsync(
@@ -882,7 +887,8 @@ public class CashOrdersController : ControllerBase
             return NotFound();
         }
 
-        return Content(BuildPrintHtml(order), "text/html; charset=utf-8", Encoding.UTF8);
+        var organizationName = await ResolveOrganizationNameAsync(order, ct);
+        return Content(BuildPrintHtml(order, organizationName), "text/html; charset=utf-8", Encoding.UTF8);
     }
 
     [HttpGet("{id:int}/pdf")]
@@ -913,7 +919,8 @@ public class CashOrdersController : ControllerBase
 
         try
         {
-            var pdfBytes = await RenderPdfAsync(BuildPrintHtml(order), ct);
+            var organizationName = await ResolveOrganizationNameAsync(order, ct);
+            var pdfBytes = await RenderPdfAsync(BuildPrintHtml(order, organizationName), ct);
             return File(pdfBytes, "application/pdf", $"cash-order-{SanitizeFilePart(order.Number)}.pdf");
         }
         catch (InvalidOperationException ex)
@@ -1435,14 +1442,43 @@ public class CashOrdersController : ControllerBase
             UpdatedAt = inventory.UpdatedAt,
         };
 
-    private static string BuildIncomingCashOrderPrintHtml(CashOrder order)
+    private async Task<string> ResolveOrganizationNameAsync(CashOrder order, CancellationToken ct)
+    {
+        var configured = _configuration?["App:OrganizationName"]?.Trim();
+        if (!string.IsNullOrWhiteSpace(configured))
+        {
+            return configured;
+        }
+
+        var rawId = await _db.SystemSettings.AsNoTracking()
+            .Where(item => item.Key == "legalEntities.defaultMainCompanyId"
+                || item.Key == "legalEntities.mainCompanyId")
+            .OrderByDescending(item => item.Key == "legalEntities.defaultMainCompanyId")
+            .Select(item => item.Value)
+            .FirstOrDefaultAsync(ct);
+        if (int.TryParse(rawId, out var id) && id > 0)
+        {
+            var legalEntityName = await _db.LegalEntities.AsNoTracking()
+                .Where(item => item.Id == id)
+                .Select(item => item.FullName ?? item.ShortName)
+                .FirstOrDefaultAsync(ct);
+            if (!string.IsNullOrWhiteSpace(legalEntityName))
+            {
+                return legalEntityName;
+            }
+        }
+
+        return order.CreatedByUserName ?? "Организация не указана";
+    }
+
+    private static string BuildIncomingCashOrderPrintHtml(CashOrder order, string organizationName)
     {
         var number = Html(order.Number);
-        var organization = Html(order.Account ?? order.ReceiverName ?? "-");
+        var organization = Html(organizationName);
         var payer = Html(order.PayerName ?? order.Client?.Name ?? "-");
         var basis = Html(order.Basis ?? "-");
         var appendix = Html(order.Appendix ?? string.Empty);
-        var signer = Html(order.ReceiverName ?? order.Account ?? string.Empty);
+        var signer = Html(order.CreatedByUserName ?? string.Empty);
         var amountRubKop = Html(FormatCashOrderRubKop(order.Amount));
         var rubles = Html(FormatWholeRubles(order.Amount));
         var kopecks = Html(FormatKopecks(order.Amount));
@@ -1618,16 +1654,16 @@ public class CashOrdersController : ControllerBase
 """;
     }
 
-    private static string BuildPrintHtml(CashOrder order)
+    private static string BuildPrintHtml(CashOrder order, string organizationName)
     {
         if (order.Type == CashOrderType.Incoming)
         {
-            return BuildIncomingCashOrderPrintHtml(order);
+            return BuildIncomingCashOrderPrintHtml(order, organizationName);
         }
 
         if (order.Type == CashOrderType.Outgoing)
         {
-            return BuildOutgoingCashOrderPrintHtml(order);
+            return BuildOutgoingCashOrderPrintHtml(order, organizationName);
         }
 
         var isIncoming = order.Type == CashOrderType.Incoming;
@@ -1750,14 +1786,14 @@ public class CashOrdersController : ControllerBase
 """;
     }
 
-    private static string BuildOutgoingCashOrderPrintHtml(CashOrder order)
+    private static string BuildOutgoingCashOrderPrintHtml(CashOrder order, string organizationName)
     {
         var number = Html(order.Number);
-        var organization = Html(order.Account ?? "-");
+        var organization = Html(organizationName);
         var receiver = Html(order.ReceiverName ?? order.PayerName ?? order.Client?.Name ?? "-");
         var basis = Html(order.Basis ?? "-");
         var appendix = Html(order.Appendix ?? string.Empty);
-        var signer = Html(order.Account ?? string.Empty);
+        var signer = Html(order.CreatedByUserName ?? string.Empty);
         var amountRubKop = Html(FormatCashOrderRubKop(order.Amount));
         var amountWords = Html(AmountRublesToWordsRu(order.Amount));
         var kopecks = Html(FormatKopecks(order.Amount));
