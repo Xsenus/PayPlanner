@@ -1,5 +1,5 @@
 import { SystemSelect } from '../ui/SystemSelect';
-import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, Fragment, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   AlertTriangle,
   ArrowUpRight,
@@ -159,1108 +159,6 @@ const reportGroups: Array<{
     icon: Target,
   },
 ];
-
-function csvCell(value: unknown) {
-  const text = value === null || value === undefined ? '' : String(value);
-  return `"${text.replace(/"/g, '""')}"`;
-}
-
-function downloadCsv(filename: string, rows: unknown[][]) {
-  const csv = rows.map((row) => row.map(csvCell).join(';')).join('\n');
-  const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' });
-  downloadBlob(filename, blob);
-}
-
-function downloadBlob(filename: string, blob: Blob) {
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename;
-  link.click();
-  URL.revokeObjectURL(url);
-}
-
-function openPrintHtml(html: string) {
-  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const opened = window.open(url, '_blank', 'noopener,noreferrer');
-  if (!opened) {
-    URL.revokeObjectURL(url);
-    return;
-  }
-
-  setTimeout(() => URL.revokeObjectURL(url), 60_000);
-}
-
-function exportCaseFinanceReport(report: CaseFinanceReport, timeZoneId?: string | null) {
-  const rows: unknown[][] = [
-    ['Дело', 'Клиент / юрлицо', 'Ответственный', 'Тип', 'Статус дела', 'Финансовый статус', 'Гонорар', 'Доходы', 'Расходы', 'Долг', 'Маржа', 'Оплачено %', 'Маржинальность %', 'Срок дела'],
-  ];
-
-  report.items.forEach((item) => {
-    rows.push([
-      item.caseNumber ? `${item.caseNumber} · ${item.caseTitle}` : item.caseTitle,
-      item.clientName,
-      item.responsibleName,
-      item.caseType,
-      item.statusLabel,
-      item.financeStateLabel,
-      item.feeAmount,
-      item.paidTotal,
-      item.expenseTotal,
-      item.outstandingTotal,
-      item.marginTotal,
-      item.paymentRate,
-      item.marginRate,
-      item.dueDate ? formatDate(item.dueDate, timeZoneId) : '',
-    ]);
-  });
-
-  downloadCsv('case-finance-report.csv', rows);
-}
-
-function exportCaseSuccessReport(report: CaseSuccessReport, timeZoneId?: string | null) {
-  const rows: unknown[][] = [
-    ['Дело', 'Клиент / юрлицо', 'Ответственный', 'Тип', 'Статус дела', 'Исход', 'Дней в работе', 'Дата начала', 'Срок дела'],
-  ];
-
-  report.items.forEach((item) => {
-    rows.push([
-      item.caseNumber ? `${item.caseNumber} · ${item.caseTitle}` : item.caseTitle,
-      item.clientName,
-      item.responsibleName,
-      item.caseType,
-      item.statusLabel,
-      item.outcomeLabel,
-      item.daysInWork,
-      item.startDate ? formatDate(item.startDate, timeZoneId) : formatDate(item.createdAt, timeZoneId),
-      item.dueDate ? formatDate(item.dueDate, timeZoneId) : '',
-    ]);
-  });
-
-  downloadCsv('case-success-report.csv', rows);
-}
-
-function exportCaseActivityReport(report: CaseActivityReport, timeZoneId?: string | null) {
-  const rows: unknown[][] = [
-    ['Раздел', 'Клиент / юрлицо', 'Дело', 'Ответственный', 'Статус активности', 'Дней без активности', 'Последняя активность', 'Активные задачи', 'Завершенные задачи', 'Причина'],
-    ['Сводка', 'Всего дел', '', '', '', '', '', report.activeCaseCount, report.finishedCaseCount, `Неактивные: ${report.inactiveCaseCount}; эскалации: ${report.escalatedCaseCount}; автоконтроль выключен: ${report.disabledCaseCount}`],
-  ];
-
-  report.items.forEach((item) => {
-    rows.push([
-      item.isEscalated ? 'Эскалация' : item.isInactive ? 'Неактивное дело' : 'Диагностика',
-      item.ownerName,
-      item.caseTitle || item.caseNumber || `Дело #${item.caseId}`,
-      item.responsibleName,
-      item.isInactive ? 'Неактивно' : 'Активно',
-      item.daysWithoutActivity,
-      formatDateTime(item.lastActivityAt, timeZoneId),
-      item.activeTaskCount,
-      item.completedTaskCount,
-      item.reason,
-    ]);
-  });
-
-  downloadCsv('case-activity-report.csv', rows);
-}
-
-function exportCurrentCasesReport(report: CurrentCasesReport, timeZoneId?: string | null) {
-  const rows: unknown[][] = [
-    ['Дело', 'Клиент / юрлицо', 'Ответственный', 'Тип', 'Статус', 'Срок дела', 'Дней в работе', 'Задачи', 'Сроки', 'Последняя активность'],
-  ];
-
-  report.items.forEach((item) => {
-    rows.push([
-      item.caseNumber ? `${item.caseNumber} · ${item.caseTitle}` : item.caseTitle,
-      item.clientName,
-      item.responsibleName,
-      item.caseType,
-      item.statusLabel,
-      item.dueDate ? formatDate(item.dueDate, timeZoneId) : '',
-      item.daysInWork,
-      `${item.openTaskCount} открытых; ${item.overdueTaskCount} просроченных`,
-      `${item.activeDeadlineCount} активных; ${item.overdueDeadlineCount} просроченных`,
-      formatDateTime(item.lastActivityAt, timeZoneId),
-    ]);
-  });
-
-  downloadCsv('current-cases-report.csv', rows);
-}
-
-function exportLawyerWorkloadReport(report: LawyerWorkloadReport, timeZoneId?: string | null) {
-  const rows: unknown[][] = [
-    ['Юрист', 'Активные дела', 'Открытые задачи', 'Просроченные задачи', 'На согласовании', 'Сегодня', 'Ближайшие дни', 'Просроченные сроки', 'Активные сроки', 'Плановые часы', 'Индекс нагрузки', 'Риск', 'Ближайшая задача', 'Ближайший срок'],
-  ];
-
-  report.items.forEach((item) => {
-    rows.push([
-      item.lawyerName,
-      item.activeCaseCount,
-      item.openTaskCount,
-      item.overdueTaskCount,
-      item.onApprovalTaskCount,
-      item.dueTodayTaskCount,
-      item.dueSoonTaskCount,
-      item.overdueDeadlineCount,
-      item.activeDeadlineCount,
-      item.plannedHours,
-      item.workloadScore,
-      item.riskLabel,
-      item.nearestTaskDueAt ? formatDateTime(item.nearestTaskDueAt, timeZoneId) : '',
-      item.nearestDeadlineAt ? formatDeadlineDate(item.nearestDeadlineAt, item.nearestDeadlineAllDay, timeZoneId) : '',
-    ]);
-  });
-
-  downloadCsv('lawyer-workload-report.csv', rows);
-}
-
-function exportOverdueProceduralDeadlinesReport(report: OverdueProceduralDeadlinesReport, timeZoneId?: string | null) {
-  const rows: unknown[][] = [
-    ['Дело', 'Клиент / юрлицо', 'Ответственный', 'Тип срока', 'Срок', 'Дата', 'Дней просрочки', 'Статус', 'Задача', 'Документ'],
-  ];
-
-  report.items.forEach((item) => {
-    rows.push([
-      item.caseNumber ? `${item.caseNumber} · ${item.caseTitle}` : item.caseTitle,
-      item.clientName,
-      item.responsibleName,
-      item.deadlineTypeLabel,
-      item.title,
-      formatDeadlineDate(item.dueAt, item.allDay, timeZoneId),
-      item.daysOverdue,
-      item.statusLabel,
-      item.taskTitle || (item.taskJournalItemId ? `Задача #${item.taskJournalItemId}` : ''),
-      item.documentName || (item.clientCaseDocumentId ? `Документ #${item.clientCaseDocumentId}` : ''),
-    ]);
-  });
-
-  downloadCsv('overdue-procedural-deadlines-report.csv', rows);
-}
-
-function exportCashFlowReport(report: CashFlowReport, timeZoneId?: string | null) {
-  const rows: unknown[][] = [
-    ['Показатель', 'Значение'],
-    ['Период с', formatDate(report.from, timeZoneId)],
-    ['Период по', formatDate(report.to, timeZoneId)],
-    ['Источник', report.source ? sourceLabel(report.source) : 'Все источники'],
-    ['Счет', report.accountName ?? 'Все счета'],
-    ['Начальный остаток', report.openingBalance],
-    ['Поступления', report.income],
-    ['Списания', report.expense],
-    ['Чистый поток', report.netCashFlow],
-    ['Конечный остаток', report.closingBalance],
-    ['Фактические приходы', report.incomeCount],
-    ['Фактические расходы', report.expenseCount],
-    [],
-    ['Динамика по дням'],
-    ['Дата', 'Начальный остаток', 'Поступления', 'Списания', 'Чистый поток', 'Конечный остаток', 'Приходов', 'Расходов'],
-  ];
-
-  report.days.forEach((day) => {
-    rows.push([
-      formatDate(day.date, timeZoneId),
-      day.openingBalance,
-      day.income,
-      day.expense,
-      day.netCashFlow,
-      day.closingBalance,
-      day.incomeCount,
-      day.expenseCount,
-    ]);
-  });
-
-  rows.push(
-    [],
-    ['Счета и источники'],
-    ['Источник', 'Счет', 'Начальный остаток', 'Поступления', 'Списания', 'Чистый поток', 'Конечный остаток', 'Приходов', 'Расходов'],
-  );
-  report.byAccount.forEach((account) => {
-    rows.push([
-      sourceLabel(account.source),
-      account.accountName,
-      account.openingBalance,
-      account.income,
-      account.expense,
-      account.netCashFlow,
-      account.closingBalance,
-      account.incomeCount,
-      account.expenseCount,
-    ]);
-  });
-
-  rows.push(
-    [],
-    ['Итоги по источникам'],
-    ['Источник', 'Начальный остаток', 'Поступления', 'Списания', 'Чистый поток', 'Конечный остаток', 'Приходов', 'Расходов'],
-  );
-  report.bySource.forEach((source) => {
-    rows.push([
-      sourceLabel(source.source),
-      source.openingBalance,
-      source.income,
-      source.expense,
-      source.netCashFlow,
-      source.closingBalance,
-      source.incomeCount,
-      source.expenseCount,
-    ]);
-  });
-
-  downloadCsv('cash-flow-report.csv', rows);
-}
-
-function exportCashReport(report: CashBookSummary, timeZoneId?: string | null) {
-  const rows: unknown[][] = [
-    ['Показатель', 'Значение'],
-    ['Период с', formatDate(report.from, timeZoneId)],
-    ['Период по', formatDate(report.to, timeZoneId)],
-    ['Касса', report.accountName ?? 'Все кассы'],
-    ['Остаток на начало', report.openingBalance],
-    ['Приход по кассе', report.income],
-    ['Расход по кассе', report.expense],
-    ['Остаток на конец', report.closingBalance],
-    ['ПКО за период', report.incomingCount],
-    ['РКО за период', report.outgoingCount],
-    [],
-    ['Дневное движение кассы'],
-    ['Дата', 'Остаток на начало', 'Приход', 'Расход', 'Остаток на конец', 'ПКО', 'РКО'],
-  ];
-
-  report.days.forEach((day) => {
-    rows.push([
-      formatDate(day.date, timeZoneId),
-      day.openingBalance,
-      day.income,
-      day.expense,
-      day.closingBalance,
-      day.incomingCount,
-      day.outgoingCount,
-    ]);
-  });
-
-  downloadCsv('cash-book-report.csv', rows);
-}
-
-function exportBankReport(report: CashFlowReport, timeZoneId?: string | null) {
-  const rows: unknown[][] = [
-    ['Показатель', 'Значение'],
-    ['Период с', formatDate(report.from, timeZoneId)],
-    ['Период по', formatDate(report.to, timeZoneId)],
-    ['Источник', 'Банк'],
-    ['Начальный остаток', report.openingBalance],
-    ['Поступления', report.income],
-    ['Списания', report.expense],
-    ['Чистый поток', report.netCashFlow],
-    ['Конечный остаток', report.closingBalance],
-    ['Фактические приходы', report.incomeCount],
-    ['Фактические расходы', report.expenseCount],
-    [],
-    ['Динамика по дням'],
-    ['Дата', 'Начальный остаток', 'Поступления', 'Списания', 'Чистый поток', 'Конечный остаток', 'Приходов', 'Расходов'],
-  ];
-
-  report.days.forEach((day) => {
-    rows.push([
-      formatDate(day.date, timeZoneId),
-      day.openingBalance,
-      day.income,
-      day.expense,
-      day.netCashFlow,
-      day.closingBalance,
-      day.incomeCount,
-      day.expenseCount,
-    ]);
-  });
-
-  rows.push(
-    [],
-    ['Расчетные счета'],
-    ['Счет', 'Начальный остаток', 'Поступления', 'Списания', 'Чистый поток', 'Конечный остаток', 'Приходов', 'Расходов'],
-  );
-  report.byAccount.forEach((account) => {
-    rows.push([
-      account.accountName,
-      account.openingBalance,
-      account.income,
-      account.expense,
-      account.netCashFlow,
-      account.closingBalance,
-      account.incomeCount,
-      account.expenseCount,
-    ]);
-  });
-
-  downloadCsv('bank-report.csv', rows);
-}
-
-function exportPlanFactReport(report: PlanFactReport, timeZoneId?: string | null) {
-  const rows: unknown[][] = [
-    ['Показатель', 'Значение'],
-    ['Период с', formatDate(report.from, timeZoneId)],
-    ['Период по', formatDate(report.to, timeZoneId)],
-    ['Источник', report.source ? sourceLabel(report.source) : 'Все источники'],
-    ['План доходов', report.planIncome],
-    ['Факт доходов', report.factIncome],
-    ['Отклонение доходов', report.incomeVariance],
-    ['Выполнение доходов', `${report.incomeCompletionPercent}%`],
-    ['План расходов', report.planExpense],
-    ['Факт расходов', report.factExpense],
-    ['Отклонение расходов', report.expenseVariance],
-    ['Исполнение расходов', `${report.expenseExecutionPercent}%`],
-    ['Итоговое отклонение', report.netVariance],
-    [],
-    ['Динамика по дням'],
-    ['Дата', 'План доходов', 'Факт доходов', 'Отклонение доходов', 'План расходов', 'Факт расходов', 'Отклонение расходов', 'План итог', 'Факт итог', 'Итоговое отклонение'],
-  ];
-
-  report.days.forEach((day) => {
-    rows.push([
-      formatDate(day.date, timeZoneId),
-      day.planIncome,
-      day.factIncome,
-      day.incomeVariance,
-      day.planExpense,
-      day.factExpense,
-      day.expenseVariance,
-      day.planNetTotal,
-      day.factNetTotal,
-      day.netVariance,
-    ]);
-  });
-
-  downloadCsv('plan-fact-report.csv', rows);
-}
-
-function exportAdvanceReport(report: AdvanceReport, timeZoneId?: string | null) {
-  const rows: unknown[][] = [
-    ['Показатель', 'Значение'],
-    ['Период с', formatDate(report.from, timeZoneId)],
-    ['Период по', formatDate(report.to, timeZoneId)],
-    ['Источник', report.source ? sourceLabel(report.source) : 'Все источники'],
-    ['Полученные авансы', report.incomeTotal],
-    ['Выданные авансы', report.expenseTotal],
-    ['Признано', report.recognizedTotal],
-    ['К признанию', report.unrecognizedTotal],
-    ['Нераспределенные авансы на балансе', report.unallocatedBalanceTotal],
-    ['Признанных операций', report.recognizedCount],
-    ['Непризнанных операций', report.unrecognizedCount],
-    ['Нераспределенных авансов на балансе', report.unallocatedBalanceCount],
-    [],
-    ['Контрагенты по авансам'],
-    ['Контрагент', 'Получено', 'Выдано', 'Признано', 'К признанию', 'Нераспределено на балансе', 'Приходов', 'Расходов', 'Признанных операций', 'Непризнанных операций', 'Нераспределенных авансов'],
-  ];
-
-  report.counterparties.forEach((item) => {
-    rows.push([
-      item.counterpartyName,
-      item.incomeTotal,
-      item.expenseTotal,
-      item.recognizedTotal,
-      item.unrecognizedTotal,
-      item.unallocatedBalanceTotal,
-      item.incomeCount,
-      item.expenseCount,
-      item.recognizedCount,
-      item.unrecognizedCount,
-      item.unallocatedBalanceCount,
-    ]);
-  });
-
-  downloadCsv('advance-report.csv', rows);
-}
-
-function exportPaymentPriorityReport(report: PaymentPriorityReport, timeZoneId?: string | null) {
-  const rows: unknown[][] = [
-    ['Показатель', 'Значение'],
-    ['Период с', formatDate(report.from, timeZoneId)],
-    ['Период по', formatDate(report.to, timeZoneId)],
-    ['Источник', report.source ? sourceLabel(report.source) : 'Все источники'],
-    ['Поступило', report.incomeTotal],
-    ['Списано', report.expenseTotal],
-    ['Итог', report.netTotal],
-    ['Групп приоритета', report.priorities.length],
-    [],
-    ['Приоритеты'],
-    ['Приоритет', 'Поступления', 'Списания', 'Итог', 'Оборот', 'Приходов', 'Расходов', 'Доля оборота'],
-  ];
-
-  report.priorities.forEach((item) => {
-    rows.push([
-      item.priorityLabel,
-      item.income,
-      item.expense,
-      item.netTotal,
-      item.totalAmount,
-      item.incomeCount,
-      item.expenseCount,
-      `${item.share}%`,
-    ]);
-  });
-
-  downloadCsv('payment-priority-report.csv', rows);
-}
-
-function exportPaidAccountReport(report: PaidAccountReport, timeZoneId?: string | null) {
-  const rows: unknown[][] = [
-    ['Показатель', 'Значение'],
-    ['Период с', formatDate(report.from, timeZoneId)],
-    ['Период по', formatDate(report.to, timeZoneId)],
-    ['Источник', report.source ? sourceLabel(report.source) : 'Все источники'],
-    ['Поступило', report.incomeTotal],
-    ['Списано', report.expenseTotal],
-    ['Итог', report.netTotal],
-    ['Счетов оплаты', report.accounts.length],
-    [],
-    ['Счета оплаты'],
-    ['Счет оплаты', 'Поступления', 'Списания', 'Итог', 'Оборот', 'Приходов', 'Расходов', 'Доля оборота'],
-  ];
-
-  report.accounts.forEach((item) => {
-    rows.push([
-      item.paidAccountName,
-      item.income,
-      item.expense,
-      item.netTotal,
-      item.totalAmount,
-      item.incomeCount,
-      item.expenseCount,
-      `${item.share}%`,
-    ]);
-  });
-
-  downloadCsv('paid-account-report.csv', rows);
-}
-
-function exportPaidInvoiceReport(report: PaidInvoiceReport, timeZoneId?: string | null) {
-  const rows: unknown[][] = [
-    ['Показатель', 'Значение'],
-    ['Период с', formatDate(report.from, timeZoneId)],
-    ['Период по', formatDate(report.to, timeZoneId)],
-    ['Источник', report.source ? sourceLabel(report.source) : 'Все источники'],
-    ['Поступило', report.incomeTotal],
-    ['Списано', report.expenseTotal],
-    ['Итог', report.netTotal],
-    ['Оплачено по счетам', report.paidAmountTotal],
-    ['Счетов', report.invoices.length],
-    [],
-    ['Оплаченные счета'],
-    ['Счет', 'Поступления', 'Списания', 'Итог', 'Оборот операций', 'Оплачено', 'Приходов', 'Расходов', 'Доля оборота'],
-  ];
-
-  report.invoices.forEach((item) => {
-    rows.push([
-      item.paidInvoiceNumber,
-      item.income,
-      item.expense,
-      item.netTotal,
-      item.operationTotal,
-      item.paidAmountTotal,
-      item.incomeCount,
-      item.expenseCount,
-      `${item.share}%`,
-    ]);
-  });
-
-  downloadCsv('paid-invoice-report.csv', rows);
-}
-
-function exportInvoiceStatusReport(report: InvoiceStatusReport, timeZoneId?: string | null) {
-  const rows: unknown[][] = [
-    ['Показатель', 'Значение'],
-    ['Период с', formatDate(report.from, timeZoneId)],
-    ['Период по', formatDate(report.to, timeZoneId)],
-    ['Счетов', report.invoiceCount],
-    ['Входящих', report.incomeCount],
-    ['Исходящих', report.expenseCount],
-    ['Оплачено счетов', report.paidCount],
-    ['Просрочено счетов', report.overdueCount],
-    ['Сумма счетов', report.totalAmount],
-    ['Оплачено', report.paidAmount],
-    ['Остаток', report.outstandingAmount],
-    [],
-    ['Статусы счетов'],
-    ['Статус', 'Счетов', 'Входящих', 'Исходящих', 'Оплачено счетов', 'Просрочено', 'Сумма', 'Оплачено', 'Остаток', 'Доля'],
-  ];
-
-  report.statuses.forEach((item) => {
-    rows.push([
-      item.statusLabel,
-      item.invoiceCount,
-      item.incomeCount,
-      item.expenseCount,
-      item.paidCount,
-      item.overdueCount,
-      item.totalAmount,
-      item.paidAmount,
-      item.outstandingAmount,
-      `${item.share}%`,
-    ]);
-  });
-
-  downloadCsv('invoice-status-report.csv', rows);
-}
-
-function exportActStatusReport(report: ActStatusReport, timeZoneId?: string | null) {
-  const rows: unknown[][] = [
-    ['Показатель', 'Значение'],
-    ['Период с', formatDate(report.from, timeZoneId)],
-    ['Период по', formatDate(report.to, timeZoneId)],
-    ['Актов', report.actCount],
-    ['Создано', report.createdCount],
-    ['Передано', report.transferredCount],
-    ['Подписано', report.signedCount],
-    ['Расторгнуто', report.terminatedCount],
-    ['Сумма актов', report.totalAmount],
-    ['Подписано на сумму', report.signedAmount],
-    ['В работе', report.pendingAmount],
-    [],
-    ['Статусы актов'],
-    ['Статус', 'Актов', 'Создано', 'Передано', 'Подписано', 'Расторгнуто', 'Сумма', 'Подписано на сумму', 'В работе', 'Доля'],
-  ];
-
-  report.statuses.forEach((item) => {
-    rows.push([
-      item.workflowStatusLabel,
-      item.actCount,
-      item.createdCount,
-      item.transferredCount,
-      item.signedCount,
-      item.terminatedCount,
-      item.totalAmount,
-      item.signedAmount,
-      item.pendingAmount,
-      `${item.share}%`,
-    ]);
-  });
-
-  downloadCsv('act-status-report.csv', rows);
-}
-
-function exportContractStatusReport(report: ContractStatusReport, timeZoneId?: string | null) {
-  const rows: unknown[][] = [
-    ['Показатель', 'Значение'],
-    ['Период с', formatDate(report.from, timeZoneId)],
-    ['Период по', formatDate(report.to, timeZoneId)],
-    ['Договоров', report.contractCount],
-    ['Черновиков', report.draftCount],
-    ['Не подписано', report.notSignedCount],
-    ['На подписании', report.onSigningCount],
-    ['Подписано', report.concludedCount],
-    ['Расторгнуто', report.terminatedCount],
-    ['Аннулировано', report.cancelledCount],
-    ['Бессрочно', report.openEndedCount],
-    ['Сумма договоров', report.totalAmount],
-    ['Активно', report.activeAmount],
-    ['Закрыто', report.closedAmount],
-    [],
-    ['Статусы договоров'],
-    ['Статус', 'Договоров', 'Бессрочно', 'Истекает в периоде', 'Сумма', 'Доля'],
-  ];
-
-  report.statuses.forEach((item) => {
-    rows.push([
-      item.statusLabel,
-      item.contractCount,
-      item.openEndedCount,
-      item.expiringCount,
-      item.totalAmount,
-      `${item.share}%`,
-    ]);
-  });
-
-  downloadCsv('contract-status-report.csv', rows);
-}
-
-function exportCategoryReport(report: MoneyCategoryReport, timeZoneId?: string | null) {
-  const rows: unknown[][] = [
-    ['Показатель', 'Значение'],
-    ['Период с', formatDate(report.from, timeZoneId)],
-    ['Период по', formatDate(report.to, timeZoneId)],
-    ['Доходы по статьям', report.incomeTotal],
-    ['Расходы по статьям', report.expenseTotal],
-    ['Итог по статьям', report.netTotal],
-    ['Статей доходов', report.income.length],
-    ['Статей расходов', report.expense.length],
-    [],
-    ['Статьи доходов'],
-    ['Статья', 'Сумма', 'Операций', 'Доля'],
-  ];
-
-  report.income.forEach((item) => {
-    rows.push([item.categoryName, item.amount, item.count, `${item.share}%`]);
-  });
-
-  rows.push([], ['Статьи расходов'], ['Статья', 'Сумма', 'Операций', 'Доля']);
-  report.expense.forEach((item) => {
-    rows.push([item.categoryName, item.amount, item.count, `${item.share}%`]);
-  });
-
-  downloadCsv('money-category-report.csv', rows);
-}
-
-function exportCounterpartyReport(report: CounterpartyReport, timeZoneId?: string | null) {
-  const rows: unknown[][] = [
-    ['Показатель', 'Значение'],
-    ['Период с', formatDate(report.from, timeZoneId)],
-    ['Период по', formatDate(report.to, timeZoneId)],
-    ['Источник', report.source ? sourceLabel(report.source) : 'Все источники'],
-    ['Поступило', report.incomeTotal],
-    ['Списано', report.expenseTotal],
-    ['Итог', report.netTotal],
-    ['Контрагентов', report.counterparties.length],
-    [],
-    ['Контрагенты'],
-    ['Контрагент', 'Поступило', 'Списано', 'Итог', 'Оборот', 'Приходов', 'Расходов', 'Доля оборота'],
-  ];
-
-  report.counterparties.forEach((item) => {
-    rows.push([
-      item.counterpartyName,
-      item.income,
-      item.expense,
-      item.netTotal,
-      item.totalAmount,
-      item.incomeCount,
-      item.expenseCount,
-      `${item.share}%`,
-    ]);
-  });
-
-  downloadCsv('counterparty-report.csv', rows);
-}
-
-function exportProjectReport(report: ProjectReport, timeZoneId?: string | null) {
-  const rows: unknown[][] = [
-    ['Показатель', 'Значение'],
-    ['Период с', formatDate(report.from, timeZoneId)],
-    ['Период по', formatDate(report.to, timeZoneId)],
-    ['Источник', report.source ? sourceLabel(report.source) : 'Все источники'],
-    ['Поступило', report.incomeTotal],
-    ['Списано', report.expenseTotal],
-    ['Итог', report.netTotal],
-    ['Проектов', report.projects.length],
-    [],
-    ['Проекты'],
-    ['Проект', 'Поступило', 'Списано', 'Итог', 'Оборот', 'Приходов', 'Расходов', 'Доля оборота'],
-  ];
-
-  report.projects.forEach((item) => {
-    rows.push([
-      item.projectName,
-      item.income,
-      item.expense,
-      item.netTotal,
-      item.totalAmount,
-      item.incomeCount,
-      item.expenseCount,
-      `${item.share}%`,
-    ]);
-  });
-
-  downloadCsv('project-report.csv', rows);
-}
-
-function exportDirectionReport(report: DirectionReport, timeZoneId?: string | null) {
-  const rows: unknown[][] = [
-    ['Показатель', 'Значение'],
-    ['Период с', formatDate(report.from, timeZoneId)],
-    ['Период по', formatDate(report.to, timeZoneId)],
-    ['Источник', report.source ? sourceLabel(report.source) : 'Все источники'],
-    ['Поступило', report.incomeTotal],
-    ['Списано', report.expenseTotal],
-    ['Итог', report.netTotal],
-    ['Направлений', report.directions.length],
-    [],
-    ['Направления'],
-    ['Направление', 'Поступило', 'Списано', 'Итог', 'Оборот', 'Приходов', 'Расходов', 'Доля оборота'],
-  ];
-
-  report.directions.forEach((item) => {
-    rows.push([
-      item.directionName,
-      item.income,
-      item.expense,
-      item.netTotal,
-      item.totalAmount,
-      item.incomeCount,
-      item.expenseCount,
-      `${item.share}%`,
-    ]);
-  });
-
-  downloadCsv('direction-report.csv', rows);
-}
-
-function exportSalesPointReport(report: SalesPointReport, timeZoneId?: string | null) {
-  const rows: unknown[][] = [
-    ['Показатель', 'Значение'],
-    ['Период с', formatDate(report.from, timeZoneId)],
-    ['Период по', formatDate(report.to, timeZoneId)],
-    ['Источник', report.source ? sourceLabel(report.source) : 'Все источники'],
-    ['Поступило', report.incomeTotal],
-    ['Списано', report.expenseTotal],
-    ['Итог', report.netTotal],
-    ['Точек продаж', report.salesPoints.length],
-    [],
-    ['Точки продаж'],
-    ['Точка продаж', 'Поступило', 'Списано', 'Итог', 'Оборот', 'Приходов', 'Расходов', 'Доля оборота'],
-  ];
-
-  report.salesPoints.forEach((item) => {
-    rows.push([
-      item.salesPointName,
-      item.income,
-      item.expense,
-      item.netTotal,
-      item.totalAmount,
-      item.incomeCount,
-      item.expenseCount,
-      `${item.share}%`,
-    ]);
-  });
-
-  downloadCsv('sales-point-report.csv', rows);
-}
-
-function exportVatReport(report: VatReport, timeZoneId?: string | null) {
-  const rows: unknown[][] = [
-    ['Показатель', 'Значение'],
-    ['Период с', formatDate(report.from, timeZoneId)],
-    ['Период по', formatDate(report.to, timeZoneId)],
-    ['Источник', report.source ? sourceLabel(report.source) : 'Все источники'],
-    ['Поступления с НДС', report.incomeAmountTotal],
-    ['НДС с поступлений', report.incomeVatTotal],
-    ['Расходы с НДС', report.expenseAmountTotal],
-    ['Входящий НДС', report.expenseVatTotal],
-    ['Баланс НДС', report.vatBalance],
-    ['Ставок НДС', report.rates.length],
-    [],
-    ['Ставки НДС'],
-    ['Ставка НДС', 'База доходов', 'НДС доходов', 'Доходы с НДС', 'База расходов', 'НДС расходов', 'Расходы с НДС', 'Итог НДС', 'Приходов', 'Расходов'],
-  ];
-
-  report.rates.forEach((item) => {
-    rows.push([
-      item.vatRateLabel,
-      item.incomeBase,
-      item.incomeVat,
-      item.incomeGross,
-      item.expenseBase,
-      item.expenseVat,
-      item.expenseGross,
-      item.netVat,
-      item.incomeCount,
-      item.expenseCount,
-    ]);
-  });
-
-  downloadCsv('vat-report.csv', rows);
-}
-
-function exportPaymentOrderReport(report: PaymentOrderReport, timeZoneId?: string | null) {
-  const rows: unknown[][] = [
-    ['Показатель', 'Значение'],
-    ['Период с', formatDate(report.from, timeZoneId)],
-    ['Период по', formatDate(report.to, timeZoneId)],
-    ['Источник', report.source ? sourceLabel(report.source) : 'Все источники'],
-    ['Поступило', report.incomeTotal],
-    ['Списано', report.expenseTotal],
-    ['Итог', report.netTotal],
-    ['Платежных поручений', report.orders.length],
-    [],
-    ['Платежные поручения'],
-    ['Номер платежки', 'Поступило', 'Списано', 'Итог', 'Оборот', 'Приходов', 'Расходов', 'Доля оборота'],
-  ];
-
-  report.orders.forEach((item) => {
-    rows.push([
-      item.paymentOrderNumber,
-      item.income,
-      item.expense,
-      item.netTotal,
-      item.totalAmount,
-      item.incomeCount,
-      item.expenseCount,
-      `${item.share}%`,
-    ]);
-  });
-
-  downloadCsv('payment-order-report.csv', rows);
-}
-
-function exportPaymentPurposeReport(report: PaymentPurposeReport, timeZoneId?: string | null) {
-  const rows: unknown[][] = [
-    ['Показатель', 'Значение'],
-    ['Период с', formatDate(report.from, timeZoneId)],
-    ['Период по', formatDate(report.to, timeZoneId)],
-    ['Источник', report.source ? sourceLabel(report.source) : 'Все источники'],
-    ['Поступило', report.incomeTotal],
-    ['Списано', report.expenseTotal],
-    ['Итог', report.netTotal],
-    ['Назначений платежей', report.purposes.length],
-    [],
-    ['Назначения платежей'],
-    ['Назначение', 'Поступило', 'Списано', 'Итог', 'Оборот', 'Приходов', 'Расходов', 'Доля оборота'],
-  ];
-
-  report.purposes.forEach((item) => {
-    rows.push([
-      item.purpose,
-      item.income,
-      item.expense,
-      item.netTotal,
-      item.totalAmount,
-      item.incomeCount,
-      item.expenseCount,
-      `${item.share}%`,
-    ]);
-  });
-
-  downloadCsv('payment-purpose-report.csv', rows);
-}
-
-function exportMatchStatusReport(report: MatchStatusReport, timeZoneId?: string | null) {
-  const rows: unknown[][] = [
-    ['Показатель', 'Значение'],
-    ['Период с', formatDate(report.from, timeZoneId)],
-    ['Период по', formatDate(report.to, timeZoneId)],
-    ['Источник', report.source ? sourceLabel(report.source) : 'Все источники'],
-    ['Операций', report.operationCount],
-    ['Сверено', report.matchedCount],
-    ['Требуют внимания', report.needsAttentionCount],
-    ['Поступило', report.incomeTotal],
-    ['Списано', report.expenseTotal],
-    ['Итог', report.netTotal],
-    [],
-    ['Статусы сверки'],
-    ['Статус', 'Поступило', 'Списано', 'Итог', 'Оборот', 'Операций', 'Приходов', 'Расходов', 'Доля оборота'],
-  ];
-
-  report.statuses.forEach((item) => {
-    rows.push([
-      item.statusLabel,
-      item.income,
-      item.expense,
-      item.netTotal,
-      item.totalAmount,
-      item.operationCount,
-      item.incomeCount,
-      item.expenseCount,
-      `${item.share}%`,
-    ]);
-  });
-
-  downloadCsv('match-status-report.csv', rows);
-}
-
-function exportJournalStatusReport(report: JournalStatusReport, timeZoneId?: string | null) {
-  const rows: unknown[][] = [
-    ['Показатель', 'Значение'],
-    ['Период с', formatDate(report.from, timeZoneId)],
-    ['Период по', formatDate(report.to, timeZoneId)],
-    ['Источник', report.source ? sourceLabel(report.source) : 'Все источники'],
-    ['Операций', report.operationCount],
-    ['Проведено', report.postedCount],
-    ['В обработке', report.processingCount],
-    ['Ошибок', report.errorCount],
-    ['Поступило', report.incomeTotal],
-    ['Списано', report.expenseTotal],
-    ['Итог', report.netTotal],
-    [],
-    ['Журнальные статусы'],
-    ['Статус', 'Поступило', 'Списано', 'Итог', 'Оборот', 'Операций', 'Приходов', 'Расходов', 'Доля оборота'],
-  ];
-
-  report.statuses.forEach((item) => {
-    rows.push([
-      item.statusLabel,
-      item.income,
-      item.expense,
-      item.netTotal,
-      item.totalAmount,
-      item.operationCount,
-      item.incomeCount,
-      item.expenseCount,
-      `${item.share}%`,
-    ]);
-  });
-
-  downloadCsv('journal-status-report.csv', rows);
-}
-
-function exportCurrencyReport(report: CurrencyReport, timeZoneId?: string | null) {
-  const rows: unknown[][] = [
-    ['Показатель', 'Значение'],
-    ['Период с', formatDate(report.from, timeZoneId)],
-    ['Период по', formatDate(report.to, timeZoneId)],
-    ['Источник', report.source ? sourceLabel(report.source) : 'Все источники'],
-    ['Поступило', report.incomeTotal],
-    ['Списано', report.expenseTotal],
-    ['Итог', report.netTotal],
-    ['Валют', report.currencies.length],
-    [],
-    ['Валюты'],
-    ['Валюта', 'Поступило', 'Списано', 'Итог', 'Оборот', 'Приходов', 'Расходов', 'Доля оборота'],
-  ];
-
-  report.currencies.forEach((item) => {
-    rows.push([
-      item.currency,
-      item.income,
-      item.expense,
-      item.netTotal,
-      item.totalAmount,
-      item.incomeCount,
-      item.expenseCount,
-      `${item.share}%`,
-    ]);
-  });
-
-  downloadCsv('currency-report.csv', rows);
-}
-
-function exportCashOrderReport(report: CashOrderReport, timeZoneId?: string | null) {
-  const rows: unknown[][] = [
-    ['Показатель', 'Значение'],
-    ['Период с', formatDate(report.from, timeZoneId)],
-    ['Период по', formatDate(report.to, timeZoneId)],
-    ['Приход проведен', report.postedIncomingTotal],
-    ['Расход проведен', report.postedOutgoingTotal],
-    ['Итог проведенных ордеров', report.postedNetTotal],
-    ['Всего ордеров', report.orderCount],
-    ['Черновиков', report.draftCount],
-    ['Проведено', report.postedCount],
-    ['Отменено', report.cancelledCount],
-    [],
-    ['Статусы кассовых ордеров'],
-    ['Статус', 'Приход', 'Расход', 'Итог', 'Оборот', 'Ордеров', 'ПКО', 'РКО', 'Доля оборота'],
-  ];
-
-  report.statuses.forEach((item) => {
-    rows.push([
-      item.statusLabel,
-      item.incomingTotal,
-      item.outgoingTotal,
-      item.netTotal,
-      item.totalAmount,
-      item.orderCount,
-      item.incomingCount,
-      item.outgoingCount,
-      `${item.share}%`,
-    ]);
-  });
-
-  downloadCsv('cash-order-report.csv', rows);
-}
-
-function exportBankStatementImportReport(report: BankStatementImportReport, timeZoneId?: string | null) {
-  const rows: unknown[][] = [
-    ['Показатель', 'Значение'],
-    ['Период с', formatDate(report.from, timeZoneId)],
-    ['Период по', formatDate(report.to, timeZoneId)],
-    ['Импортов', report.batchCount],
-    ['Прочитано строк', report.rowsReadTotal],
-    ['Создано операций', report.createdRowsTotal],
-    ['Пропущено строк', report.skippedRowsTotal],
-    ['Ошибок', report.errorRowsTotal],
-    ['Строк отката', report.rollbackRowsTotal],
-    ['Применено', report.appliedCount],
-    ['Применено с ошибками', report.appliedWithErrorsCount],
-    ['Откатано', report.rolledBackCount],
-    ['Откат заблокирован', report.rollbackBlockedCount],
-    [],
-    ['Статусы импортов'],
-    ['Статус', 'Импортов', 'Прочитано строк', 'Создано', 'Пропущено', 'Ошибки', 'Откатано строк', 'Доля импортов'],
-  ];
-
-  report.statuses.forEach((item) => {
-    rows.push([
-      item.statusLabel,
-      item.batchCount,
-      item.rowsRead,
-      item.createdRows,
-      item.skippedRows,
-      item.errorRows,
-      item.rollbackRows,
-      `${item.share}%`,
-    ]);
-  });
-
-  downloadCsv('bank-statement-import-report.csv', rows);
-}
-
-function exportSpreadsheetImportReport(report: SpreadsheetImportReport, timeZoneId?: string | null) {
-  const rows: unknown[][] = [
-    ['Показатель', 'Значение'],
-    ['Период с', formatDate(report.from, timeZoneId)],
-    ['Период по', formatDate(report.to, timeZoneId)],
-    ['Пакетов', report.batchCount],
-    ['Файлов', report.fileCount],
-    ['Строк', report.totalRows],
-    ['Создано', report.createdRows],
-    ['Обновлено', report.updatedRows],
-    ['Пропущено', report.skippedRows],
-    ['Ошибок', report.errorRows],
-    ['Строк отката', report.rollbackRows],
-    ['Применено', report.appliedCount],
-    ['Применено с ошибками', report.appliedWithErrorsCount],
-    ['Откатано', report.rolledBackCount],
-    ['Откатано с конфликтами', report.rolledBackWithConflictsCount],
-    [],
-    ['Статусы импортов'],
-    ['Статус', 'Пакетов', 'Файлов', 'Строк', 'Создано', 'Обновлено', 'Пропущено', 'Ошибки', 'Откатано строк', 'Доля пакетов'],
-  ];
-
-  report.statuses.forEach((item) => {
-    rows.push([
-      item.statusLabel,
-      item.batchCount,
-      item.fileCount,
-      item.totalRows,
-      item.createdRows,
-      item.updatedRows,
-      item.skippedRows,
-      item.errorRows,
-      item.rollbackRows,
-      `${item.share}%`,
-    ]);
-  });
-
-  downloadCsv('spreadsheet-import-report.csv', rows);
-}
-
-function exportCashFlowForecastReport(report: CashFlowForecastReport, timeZoneId?: string | null) {
-  const rows: unknown[][] = [
-    ['Показатель', 'Значение'],
-    ['Период с', formatDate(report.from, timeZoneId)],
-    ['Период по', formatDate(report.to, timeZoneId)],
-    ['Счет', report.accountName ?? 'Все счета'],
-    ['Стартовый остаток', report.openingBalance],
-    ['Ожидаемые поступления', report.expectedIncome],
-    ['Ожидаемые списания', report.expectedExpense],
-    ['Чистый прогноз', report.netProjectedFlow],
-    ['Прогнозный остаток', report.projectedClosingBalance],
-    ['Незакрытые приходы', report.incomeCount],
-    ['Незакрытые расходы', report.expenseCount],
-    [],
-    ['Дата', 'Ожидаемые поступления', 'Ожидаемые списания', 'Чистый поток', 'Прогнозный остаток', 'Приходов', 'Расходов'],
-  ];
-
-  report.days.forEach((day) => {
-    rows.push([
-      formatDate(day.date, timeZoneId),
-      day.expectedIncome,
-      day.expectedExpense,
-      day.netProjectedFlow,
-      day.projectedClosingBalance,
-      day.incomeCount,
-      day.expenseCount,
-    ]);
-  });
-
-  downloadCsv('cash-flow-forecast-report.csv', rows);
-}
 
 function sourceLabel(source: MoneyOperationSource) {
   switch (source) {
@@ -1480,15 +378,6 @@ function CashFlowReportSection({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => report && exportCashFlowReport(report, profileTimeZoneId)}
-            disabled={!report || loading || filters?.exportDisabled}
-            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <FileSpreadsheet className="h-4 w-4" />
-            CSV
-          </button>
           <ManagementReportExportButtons reportKind="cash-flow" filters={filters} disabled={!report || loading || filters?.exportDisabled} />
           <button
             type="button"
@@ -1659,15 +548,6 @@ function CashFlowForecastReportSection({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => report && exportCashFlowForecastReport(report, profileTimeZoneId)}
-            disabled={!report || loading || filters?.exportDisabled}
-            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <FileSpreadsheet className="h-4 w-4" />
-            CSV
-          </button>
           <ManagementReportExportButtons reportKind="cash-flow-forecast" filters={filters} disabled={!report || loading || filters?.exportDisabled} />
           <button
             type="button"
@@ -1811,15 +691,6 @@ function CashReportSection({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => report && exportCashReport(report, profileTimeZoneId)}
-            disabled={!report || loading || !canExportPaymentReports}
-            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <FileSpreadsheet className="h-4 w-4" />
-            CSV
-          </button>
           <ManagementReportExportButtons reportKind="cash" filters={filters} disabled={!report || loading || !canExportPaymentReports} />
           <button
             type="button"
@@ -1953,15 +824,6 @@ function BankReportSection({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => report && exportBankReport(report, profileTimeZoneId)}
-            disabled={!report || loading || filters?.exportDisabled}
-            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <FileSpreadsheet className="h-4 w-4" />
-            CSV
-          </button>
           <ManagementReportExportButtons reportKind="bank" filters={filters} disabled={!report || loading || filters?.exportDisabled} />
           <button
             type="button"
@@ -2143,15 +1005,6 @@ function CategoryReportSection({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => report && exportCategoryReport(report, profileTimeZoneId)}
-            disabled={!report || loading || filters?.exportDisabled}
-            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <FileSpreadsheet className="h-4 w-4" />
-            CSV
-          </button>
           <ManagementReportExportButtons reportKind="categories" filters={filters} disabled={!report || loading || filters?.exportDisabled} />
           <button
             type="button"
@@ -2246,15 +1099,6 @@ function CounterpartyReportSection({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => report && exportCounterpartyReport(report, profileTimeZoneId)}
-            disabled={!report || loading || filters?.exportDisabled}
-            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <FileSpreadsheet className="h-4 w-4" />
-            CSV
-          </button>
           <ManagementReportExportButtons reportKind="counterparties" filters={filters} disabled={!report || loading || filters?.exportDisabled} />
           <button
             type="button"
@@ -2400,15 +1244,6 @@ function ProjectReportSection({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => report && exportProjectReport(report, profileTimeZoneId)}
-            disabled={!report || loading || filters?.exportDisabled}
-            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <FileSpreadsheet className="h-4 w-4" />
-            CSV
-          </button>
           <ManagementReportExportButtons reportKind="projects" filters={filters} disabled={!report || loading || filters?.exportDisabled} />
           <button
             type="button"
@@ -2545,6 +1380,8 @@ type ManagementReportExportFilters = {
   exportDisabled?: boolean;
 };
 
+const ReportExportPermissionContext = createContext(false);
+
 function ManagementReportExportButtons({
   reportKind,
   filters,
@@ -2558,7 +1395,8 @@ function ManagementReportExportButtons({
   const [error, setError] = useState<string | null>(null);
   const exportDisabled = filters?.exportDisabled ?? false;
   const apiFilters = toManagementReportApiFilters(filters);
-  const isDisabled = disabled || exportDisabled;
+  const canExportReports = useContext(ReportExportPermissionContext);
+  const isDisabled = disabled || exportDisabled || !canExportReports;
 
   async function handleExport(format: ManagementReportExportFormat) {
     setExporting(format);
@@ -3098,15 +1936,6 @@ function CaseFinanceReportSection({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => report && exportCaseFinanceReport(report, profileTimeZoneId)}
-            disabled={!report}
-            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <FileSpreadsheet className="h-4 w-4" />
-            CSV
-          </button>
           <ManagementReportExportButtons reportKind="case-finance" filters={filters} disabled={!report} />
           <button
             type="button"
@@ -3358,15 +2187,6 @@ function CaseSuccessReportSection({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => report && exportCaseSuccessReport(report, profileTimeZoneId)}
-            disabled={!report}
-            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <FileSpreadsheet className="h-4 w-4" />
-            CSV
-          </button>
           <ManagementReportExportButtons reportKind="case-success" filters={filters} disabled={!report} />
           <button
             type="button"
@@ -3812,15 +2632,6 @@ function CurrentCasesReportSection({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => report && exportCurrentCasesReport(report, profileTimeZoneId)}
-            disabled={!report}
-            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <FileSpreadsheet className="h-4 w-4" />
-            CSV
-          </button>
           <ManagementReportExportButtons reportKind="current-cases" filters={filters} disabled={!report} />
           <button
             type="button"
@@ -4023,15 +2834,6 @@ function LawyerWorkloadReportSection({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => report && exportLawyerWorkloadReport(report, profileTimeZoneId)}
-            disabled={!report}
-            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <FileSpreadsheet className="h-4 w-4" />
-            CSV
-          </button>
           <ManagementReportExportButtons reportKind="lawyer-workload" filters={filters} disabled={!report} />
           <button
             type="button"
@@ -4230,15 +3032,6 @@ function OverdueProceduralDeadlinesReportSection({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => report && exportOverdueProceduralDeadlinesReport(report, profileTimeZoneId)}
-            disabled={!report}
-            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <FileSpreadsheet className="h-4 w-4" />
-            CSV
-          </button>
           <ManagementReportExportButtons reportKind="overdue-deadlines" filters={filters} disabled={!report} />
           <button
             type="button"
@@ -4443,15 +3236,6 @@ function CaseActivityReportSection({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => report && exportCaseActivityReport(report, profileTimeZoneId)}
-            disabled={!report}
-            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <FileSpreadsheet className="h-4 w-4" />
-            CSV
-          </button>
           <ManagementReportExportButtons reportKind="case-activity" filters={filters} disabled={!report} />
           <button
             type="button"
@@ -4606,15 +3390,6 @@ function DirectionReportSection({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => report && exportDirectionReport(report, profileTimeZoneId)}
-            disabled={!report || loading || filters?.exportDisabled}
-            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <FileSpreadsheet className="h-4 w-4" />
-            CSV
-          </button>
           <ManagementReportExportButtons reportKind="directions" filters={filters} disabled={!report || loading || filters?.exportDisabled} />
           <button
             type="button"
@@ -4752,15 +3527,6 @@ function SalesPointReportSection({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => report && exportSalesPointReport(report, profileTimeZoneId)}
-            disabled={!report || loading || filters?.exportDisabled}
-            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <FileSpreadsheet className="h-4 w-4" />
-            CSV
-          </button>
           <ManagementReportExportButtons reportKind="sales-points" filters={filters} disabled={!report || loading || filters?.exportDisabled} />
           <button
             type="button"
@@ -4895,15 +3661,6 @@ function VatReportSection({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => report && exportVatReport(report, profileTimeZoneId)}
-            disabled={!report || loading || filters?.exportDisabled}
-            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <FileSpreadsheet className="h-4 w-4" />
-            CSV
-          </button>
           <ManagementReportExportButtons reportKind="vat" filters={filters} disabled={!report || loading || filters?.exportDisabled} />
           <button
             type="button"
@@ -5058,15 +3815,6 @@ function PlanFactReportSection({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => report && exportPlanFactReport(report, profileTimeZoneId)}
-            disabled={!report || loading || filters?.exportDisabled}
-            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <FileSpreadsheet className="h-4 w-4" />
-            CSV
-          </button>
           <ManagementReportExportButtons reportKind="plan-fact" filters={filters} disabled={!report || loading || filters?.exportDisabled} />
           <button
             type="button"
@@ -5207,15 +3955,6 @@ function AdvanceReportSection({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => report && exportAdvanceReport(report, profileTimeZoneId)}
-            disabled={!report || loading || filters?.exportDisabled}
-            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <FileSpreadsheet className="h-4 w-4" />
-            CSV
-          </button>
           <ManagementReportExportButtons reportKind="advances" filters={filters} disabled={!report || loading || filters?.exportDisabled} />
           <button
             type="button"
@@ -5369,15 +4108,6 @@ function PaymentPriorityReportSection({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => report && exportPaymentPriorityReport(report, profileTimeZoneId)}
-            disabled={!report || loading || filters?.exportDisabled}
-            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <FileSpreadsheet className="h-4 w-4" />
-            CSV
-          </button>
           <ManagementReportExportButtons reportKind="payment-priorities" filters={filters} disabled={!report || loading || filters?.exportDisabled} />
           <button
             type="button"
@@ -5513,15 +4243,6 @@ function PaidAccountReportSection({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => report && exportPaidAccountReport(report, profileTimeZoneId)}
-            disabled={!report || loading || filters?.exportDisabled}
-            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <FileSpreadsheet className="h-4 w-4" />
-            CSV
-          </button>
           <ManagementReportExportButtons reportKind="paid-accounts" filters={filters} disabled={!report || loading || filters?.exportDisabled} />
           <button
             type="button"
@@ -5653,15 +4374,6 @@ function PaidInvoiceReportSection({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => report && exportPaidInvoiceReport(report, profileTimeZoneId)}
-            disabled={!report || loading || filters?.exportDisabled}
-            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <FileSpreadsheet className="h-4 w-4" />
-            CSV
-          </button>
           <ManagementReportExportButtons reportKind="paid-invoices" filters={filters} disabled={!report || loading || filters?.exportDisabled} />
           <button
             type="button"
@@ -5790,15 +4502,6 @@ function InvoiceStatusReportSection({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => report && exportInvoiceStatusReport(report, profileTimeZoneId)}
-            disabled={!report || loading || filters?.exportDisabled}
-            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <FileSpreadsheet className="h-4 w-4" />
-            CSV
-          </button>
           <ManagementReportExportButtons reportKind="invoice-statuses" filters={filters} disabled={!report || loading || filters?.exportDisabled} />
           <button
             type="button"
@@ -5937,15 +4640,6 @@ function ActStatusReportSection({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => report && exportActStatusReport(report, profileTimeZoneId)}
-            disabled={!report || loading || filters?.exportDisabled}
-            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <FileSpreadsheet className="h-4 w-4" />
-            CSV
-          </button>
           <ManagementReportExportButtons reportKind="act-statuses" filters={filters} disabled={!report || loading || filters?.exportDisabled} />
           <button
             type="button"
@@ -6084,15 +4778,6 @@ function ContractStatusReportSection({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => report && exportContractStatusReport(report, profileTimeZoneId)}
-            disabled={!report || loading || filters?.exportDisabled}
-            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <FileSpreadsheet className="h-4 w-4" />
-            CSV
-          </button>
           <ManagementReportExportButtons reportKind="contract-statuses" filters={filters} disabled={!report || loading || filters?.exportDisabled} />
           <button
             type="button"
@@ -6225,15 +4910,6 @@ function PaymentOrderReportSection({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => report && exportPaymentOrderReport(report, profileTimeZoneId)}
-            disabled={!report || loading || filters?.exportDisabled}
-            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <FileSpreadsheet className="h-4 w-4" />
-            CSV
-          </button>
           <ManagementReportExportButtons reportKind="payment-orders" filters={filters} disabled={!report || loading || filters?.exportDisabled} />
           <button
             type="button"
@@ -6362,15 +5038,6 @@ function PaymentPurposeReportSection({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => report && exportPaymentPurposeReport(report, profileTimeZoneId)}
-            disabled={!report || loading || filters?.exportDisabled}
-            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <FileSpreadsheet className="h-4 w-4" />
-            CSV
-          </button>
           <ManagementReportExportButtons reportKind="payment-purposes" filters={filters} disabled={!report || loading || filters?.exportDisabled} />
           <button
             type="button"
@@ -6500,15 +5167,6 @@ function MatchStatusReportSection({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => report && exportMatchStatusReport(report, profileTimeZoneId)}
-            disabled={!report || loading || filters?.exportDisabled}
-            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <FileSpreadsheet className="h-4 w-4" />
-            CSV
-          </button>
           <ManagementReportExportButtons reportKind="match-statuses" filters={filters} disabled={!report || loading || filters?.exportDisabled} />
           <button
             type="button"
@@ -6637,15 +5295,6 @@ function JournalStatusReportSection({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => report && exportJournalStatusReport(report, profileTimeZoneId)}
-            disabled={!report || loading || filters?.exportDisabled}
-            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <FileSpreadsheet className="h-4 w-4" />
-            CSV
-          </button>
           <ManagementReportExportButtons reportKind="journal-statuses" filters={filters} disabled={!report || loading || filters?.exportDisabled} />
           <button
             type="button"
@@ -6769,15 +5418,6 @@ function CurrencyReportSection({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => report && exportCurrencyReport(report, profileTimeZoneId)}
-            disabled={!report || loading || filters?.exportDisabled}
-            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <FileSpreadsheet className="h-4 w-4" />
-            CSV
-          </button>
           <ManagementReportExportButtons reportKind="currencies" filters={filters} disabled={!report || loading || filters?.exportDisabled} />
           <button
             type="button"
@@ -6907,15 +5547,6 @@ function CashOrderReportSection({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => report && exportCashOrderReport(report, profileTimeZoneId)}
-            disabled={!report || loading || !canExportPaymentReports}
-            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <FileSpreadsheet className="h-4 w-4" />
-            CSV
-          </button>
           <ManagementReportExportButtons reportKind="cash-orders" filters={filters} disabled={!report || loading || !canExportPaymentReports} />
           <button
             type="button"
@@ -7041,15 +5672,6 @@ function BankStatementImportReportSection({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => report && exportBankStatementImportReport(report, profileTimeZoneId)}
-            disabled={!report || loading || !canExportPaymentReports}
-            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <FileSpreadsheet className="h-4 w-4" />
-            CSV
-          </button>
           <ManagementReportExportButtons reportKind="bank-statement-imports" filters={filters} disabled={!report || loading || !canExportPaymentReports} />
           <button
             type="button"
@@ -7188,15 +5810,6 @@ function SpreadsheetImportReportSection({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => report && exportSpreadsheetImportReport(report, profileTimeZoneId)}
-            disabled={!report || loading || filters?.exportDisabled}
-            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <FileSpreadsheet className="h-4 w-4" />
-            CSV
-          </button>
           <ManagementReportExportButtons reportKind="spreadsheet-imports" filters={filters} disabled={!report || loading || filters?.exportDisabled} />
           <button
             type="button"
@@ -7327,6 +5940,7 @@ function formatContractOptionLabel(item: Contract) {
 export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsProps = {}) {
   const { user, isAdmin } = useAuth();
   const permissions = useRolePermissions(user?.role?.id);
+  const canExportReports = permissions.reports.canExport;
   const canViewPaymentReports = permissions.payments.canView;
   const canExportPaymentReports = permissions.payments.canExport;
   const canViewTaskReports = permissions.tasks.canView;
@@ -7987,6 +6601,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
   }
 
   return (
+    <ReportExportPermissionContext.Provider value={canExportReports}>
     <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(14,165,233,0.12),_transparent_28%),radial-gradient(circle_at_top_right,_rgba(16,185,129,0.14),_transparent_24%),linear-gradient(180deg,_#f8fafc_0%,_#eef6ff_45%,_#f8fafc_100%)]">
       <div className="mx-auto w-full max-w-[calc(100vw-2rem)] px-4 py-8 sm:px-6 lg:px-8">
         <section className="overflow-hidden rounded-[32px] border border-white/70 bg-white/80 shadow-[0_24px_80px_-32px_rgba(15,23,42,0.35)] backdrop-blur">
@@ -8765,5 +7380,6 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
         )}
       </div>
     </div>
+    </ReportExportPermissionContext.Provider>
   );
 }
