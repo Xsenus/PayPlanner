@@ -16,7 +16,7 @@ import { AwaitingApproval } from './components/Auth/AwaitingApproval';
 import TopBar from './components/TopBar/TopBar';
 import { RouteErrorBoundary } from './components/ui/RouteErrorBoundary';
 import { DoubleHorizontalScrollbars } from './components/ui/DoubleHorizontalScrollbars';
-import type { Act, ActInput, ClientCase, Invoice, Payment, PaymentKind } from './types';
+import type { Act, ActInput, ClientCase, Invoice, PaymentKind } from './types';
 import type { Tab } from './types/tabs';
 import { useAuth } from './contexts/AuthContext';
 import { useRolePermissions, useRolePermissionsLoaded } from './hooks/useRolePermissions';
@@ -550,18 +550,6 @@ function AppContent() {
       setActiveTab('contractDetail');
     },
     [permissions.contracts.canView],
-  );
-
-  const openPaymentDetail = useCallback(
-    (payment: Payment) => {
-      if (!permissions.payments.canView || !(payment.id > 0)) {
-        return;
-      }
-
-      setSelectedPaymentId(payment.id);
-      setActiveTab(payment.type === 'Expense' ? 'paymentsExpense' : 'paymentsIncome');
-    },
-    [permissions.payments.canView],
   );
 
   const resolvePaymentType = useCallback(async (paymentId: number) => {
