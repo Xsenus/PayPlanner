@@ -406,6 +406,31 @@ describe('ForcedTaskRevisionModal', () => {
     consoleError.mockRestore();
   });
 
+  it('closes a deadline change notification when the request was already processed', async () => {
+    apiMock.getTaskJournalDeadlineChangeRequest.mockResolvedValue({
+      id: 901,
+      taskJournalItemId: 303,
+      requestedByUserId: 7,
+      requestedByName: 'Иван Петров',
+      reviewerUserId: 8,
+      reviewerName: 'Анна Смирнова',
+      currentDueAt: '2026-06-28T09:00:00Z',
+      requestedDueAt: '2026-06-30T09:00:00Z',
+      reason: 'Нужно дождаться ответа клиента.',
+      status: 'approved',
+      createdAt: '2026-06-27T09:00:00Z',
+    });
+    mockNotificationPages([], [], [createDeadlineChangeNotification()]);
+
+    render(<ForcedTaskRevisionModal />);
+
+    expect(await screen.findByTestId('forced-deadline-change-prompt')).toBeTruthy();
+    await waitFor(() => expect(apiMock.markUserNotificationRead).toHaveBeenCalledWith(51));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(apiMock.approveTaskJournalDeadlineChangeRequest).not.toHaveBeenCalled();
+    expect(apiMock.rejectTaskJournalDeadlineChangeRequest).not.toHaveBeenCalled();
+  });
+
   it('requires a comment before rejecting a deadline change request from the forced queue', async () => {
     mockNotificationPages([], [], [createDeadlineChangeNotification({ id: 52 })]);
 
