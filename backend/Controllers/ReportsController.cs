@@ -2836,7 +2836,7 @@ public class ReportsController : ControllerBase
         => new(
             "bank-report",
             "Отчет по банку",
-            $"Период: {DateCell(report.From)} - {DateCell(report.To)} · Источник: Банк{BuildCashFlowFilterSuffix(report)}",
+            $"Период: {DateCell(report.From)} - {DateCell(report.To)}{BuildCashFlowFilterSuffix(report)}",
             [
                 new("Начальный остаток", MoneyCell(report.OpeningBalance)),
                 new("Поступления", MoneyCell(report.Income)),

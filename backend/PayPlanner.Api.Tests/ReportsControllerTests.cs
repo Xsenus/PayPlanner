@@ -491,6 +491,10 @@ public class ReportsControllerTests
             Assert.Contains(';', csvText);
             Assert.DoesNotContain("NaN", csvText, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("Infinity", csvText, StringComparison.OrdinalIgnoreCase);
+            if (reportKind == "bank")
+            {
+                Assert.DoesNotContain("Источник: Банк · Источник: Банк", csvText, StringComparison.Ordinal);
+            }
 
             var excelAction = await controller.ExportManagementReportExcel(
                 reportKind, from, to, null, null, null, null, null, null, null,
@@ -503,6 +507,10 @@ public class ReportsControllerTests
             Assert.Contains("Excel.Sheet", excelText, StringComparison.Ordinal);
             Assert.DoesNotContain("NaN", excelText, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("Infinity", excelText, StringComparison.OrdinalIgnoreCase);
+            if (reportKind == "bank")
+            {
+                Assert.DoesNotContain("Источник: Банк &#183; Источник: Банк", excelText, StringComparison.Ordinal);
+            }
 
             var pdfAction = await controller.ExportManagementReportPdf(
                 reportKind, from, to, null, null, null, null, null, null, null,
@@ -514,6 +522,10 @@ public class ReportsControllerTests
             Assert.Contains("<!doctype html>", pdfService.LastHtml, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("NaN", pdfService.LastHtml, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("Infinity", pdfService.LastHtml, StringComparison.OrdinalIgnoreCase);
+            if (reportKind == "bank")
+            {
+                Assert.DoesNotContain("Источник: Банк &#183; Источник: Банк", pdfService.LastHtml, StringComparison.Ordinal);
+            }
 
             var printAction = await controller.PrintManagementReport(
                 reportKind, from, to, null, null, null, null, null, null, null,
@@ -525,6 +537,10 @@ public class ReportsControllerTests
             Assert.Contains("table-layout: fixed", print.Content, StringComparison.Ordinal);
             Assert.DoesNotContain("NaN", print.Content, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("Infinity", print.Content, StringComparison.OrdinalIgnoreCase);
+            if (reportKind == "bank")
+            {
+                Assert.DoesNotContain("Источник: Банк &#183; Источник: Банк", print.Content, StringComparison.Ordinal);
+            }
         }
 
         var legalCsv = Assert.IsType<FileContentResult>(await controller.ExportLegalWorkCsv(
