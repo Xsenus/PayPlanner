@@ -4,6 +4,7 @@ import { Check, Copy, Eye, FileText, History, Loader2, Plus, RefreshCw, RotateCc
 
 import { apiService, type DocumentTemplateVersionDto } from '../../services/api';
 import type { ClientCaseDocumentTemplate, ClientCaseDocumentTemplateToken } from '../../types';
+import { useDialog } from '../../hooks/useDialog';
 import { useToast } from '../../hooks/useToast';
 import { useUserTimeZone } from '../../hooks/useUserTimeZone';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
@@ -54,6 +55,7 @@ function cloneTemplate(template: ClientCaseDocumentTemplate): ClientCaseDocument
 }
 
 export function CaseDocumentTemplateSettings() {
+  const { confirm } = useDialog();
   const toast = useToast();
   const timeZoneId = useUserTimeZone();
   const [templates, setTemplates] = useState<ClientCaseDocumentTemplate[]>([]);
@@ -150,7 +152,13 @@ export function CaseDocumentTemplateSettings() {
   };
 
   const restoreHistoryVersion = async (version: DocumentTemplateVersionDto) => {
-    if (!window.confirm(`Восстановить версию №${version.revision} библиотеки шаблонов документов дела?`)) return;
+    const approved = await confirm({
+      title: `Восстановить версию №${version.revision}`,
+      description: 'Текущая библиотека шаблонов документов дела будет заменена выбранной версией.',
+      confirmLabel: 'Восстановить',
+      cancelLabel: 'Отмена',
+    });
+    if (!approved) return;
     setRestoringVersionId(version.id);
     setError(null);
     try {
