@@ -3129,6 +3129,31 @@ export class ApiService {
     return this.request<Act>(`/acts/${id}`);
   }
 
+  async getActDocumentTemplateSettings() {
+    return this.request<InvoiceDocumentTemplateSettingsDto>('/acts/document-template-settings');
+  }
+
+  async updateActDocumentTemplateSettings(payload: Pick<InvoiceDocumentTemplateSettingsDto, 'activeTemplateKey' | 'templates' | 'printWithSignatureAndSealByDefault'>) {
+    return this.request<InvoiceDocumentTemplateSettingsDto>('/acts/document-template-settings', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async getActDocumentTemplateHistory() {
+    return this.request<DocumentTemplateVersionDto[]>('/acts/document-template-settings/history');
+  }
+
+  async getActDocumentTemplateVersion(versionId: number) {
+    return this.request<InvoiceDocumentTemplateSettingsDto>(`/acts/document-template-settings/history/${versionId}`);
+  }
+
+  async restoreActDocumentTemplateVersion(versionId: number) {
+    return this.request<InvoiceDocumentTemplateSettingsDto>(`/acts/document-template-settings/history/${versionId}/restore`, {
+      method: 'POST',
+    });
+  }
+
   async createAct(payload: ActInput) {
     return this.request<Act>('/acts', { method: 'POST', body: JSON.stringify(payload) });
   }

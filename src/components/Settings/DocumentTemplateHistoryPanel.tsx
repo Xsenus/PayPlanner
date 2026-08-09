@@ -5,7 +5,7 @@ import { useDialog } from '../../hooks/useDialog';
 import { useToast } from '../../hooks/useToast';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 
-type DocumentTemplateKind = 'invoice' | 'contract';
+type DocumentTemplateKind = 'invoice' | 'contract' | 'act';
 
 interface DocumentTemplateHistoryPanelProps {
   kind: DocumentTemplateKind;
@@ -16,6 +16,7 @@ interface DocumentTemplateHistoryPanelProps {
 const labels: Record<DocumentTemplateKind, string> = {
   invoice: 'счета',
   contract: 'договора',
+  act: 'акта',
 };
 
 export function DocumentTemplateHistoryPanel({ kind, refreshKey, onRestored }: DocumentTemplateHistoryPanelProps) {
@@ -36,7 +37,9 @@ export function DocumentTemplateHistoryPanel({ kind, refreshKey, onRestored }: D
     try {
       const response = kind === 'invoice'
         ? await apiService.getInvoiceDocumentTemplateHistory()
-        : await apiService.getContractDocumentTemplateHistory();
+        : kind === 'contract'
+          ? await apiService.getContractDocumentTemplateHistory()
+          : await apiService.getActDocumentTemplateHistory();
       setVersions(response);
     } catch (err) {
       setError(extractDisplayErrorMessage(err, `Не удалось загрузить историю шаблона ${labels[kind]}`));
@@ -59,7 +62,9 @@ export function DocumentTemplateHistoryPanel({ kind, refreshKey, onRestored }: D
     try {
       const response = kind === 'invoice'
         ? await apiService.getInvoiceDocumentTemplateVersion(version.id)
-        : await apiService.getContractDocumentTemplateVersion(version.id);
+        : kind === 'contract'
+          ? await apiService.getContractDocumentTemplateVersion(version.id)
+          : await apiService.getActDocumentTemplateVersion(version.id);
       setPreview(response);
       setPreviewVersion(version);
       setPreviewTemplateKey(response.activeTemplateKey || response.templates[0]?.key || '');
@@ -82,7 +87,9 @@ export function DocumentTemplateHistoryPanel({ kind, refreshKey, onRestored }: D
     try {
       const response = kind === 'invoice'
         ? await apiService.restoreInvoiceDocumentTemplateVersion(version.id)
-        : await apiService.restoreContractDocumentTemplateVersion(version.id);
+        : kind === 'contract'
+          ? await apiService.restoreContractDocumentTemplateVersion(version.id)
+          : await apiService.restoreActDocumentTemplateVersion(version.id);
       onRestored(response);
       setPreview(null);
       setPreviewVersion(null);
