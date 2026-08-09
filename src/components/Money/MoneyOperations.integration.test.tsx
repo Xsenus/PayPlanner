@@ -2209,7 +2209,7 @@ describe('MoneyOperations integration', () => {
 
     await screen.findByText('Ахмедова Айтан Рафик Кызы');
     expect(screen.getByText('Из графика')).toBeTruthy();
-    await user.click(screen.getByRole('button', { name: 'Создать ПКО' }));
+    await user.click(screen.getByRole('button', { name: 'Создать приходный кассовый ордер' }));
 
     await waitFor(() => expect(createCashOrderFromPaymentMock).toHaveBeenCalledWith(77));
     expect(toastSuccessMock).toHaveBeenCalledWith('Создан кассовый ордер ПКО-2026-0001.', 'Касса');
@@ -2235,7 +2235,7 @@ describe('MoneyOperations integration', () => {
     render(<MoneyOperations source="Cash" />);
 
     await screen.findByText('Клиент без права создания');
-    expect(screen.queryByRole('button', { name: 'Создать ПКО' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Создать приходный кассовый ордер' })).toBeNull();
     await screen.findByText('Кассовые ордера');
     expect(screen.queryByRole('button', { name: 'Создать ордер' })).toBeNull();
     expect(createCashOrderFromPaymentMock).not.toHaveBeenCalled();
@@ -2261,7 +2261,7 @@ describe('MoneyOperations integration', () => {
     render(<MoneyOperations source="Cash" />);
 
     await screen.findByText('Ручной клиент');
-    await user.click(screen.getByRole('button', { name: 'Создать ПКО' }));
+    await user.click(screen.getByRole('button', { name: 'Создать приходный кассовый ордер' }));
 
     await waitFor(() => expect(createCashOrderFromMoneyOperationMock).toHaveBeenCalledWith(11));
     expect(toastSuccessMock).toHaveBeenCalledWith('Создан кассовый ордер ПКО-2026-0002.', 'Касса');
@@ -2310,7 +2310,8 @@ describe('MoneyOperations integration', () => {
 
     await screen.findByText('Кассовые ордера');
     await screen.findByText('ПКО-2026-0003');
-    await screen.findByText('ПКО: 1, РКО: 0');
+    const incomingSummary = await screen.findByText('Приходные ордера');
+    expect(incomingSummary.nextElementSibling?.textContent).toContain('1 на');
     await screen.findByText('Оплата от клиента. счет №33');
     expect(getCashOrderRegisterMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -2401,7 +2402,7 @@ describe('MoneyOperations integration', () => {
     expect(registerSignals[0]).toBe(bookSignals[0]);
     expect(registerSignals[0].aborted).toBe(false);
 
-    await user.click(screen.getByRole('button', { name: 'ПКО' }));
+    await user.click(screen.getByRole('button', { name: 'Приходный кассовый ордер' }));
 
     await waitFor(() => expect(getCashOrderRegisterMock).toHaveBeenCalledTimes(2));
     expect(registerSignals[0].aborted).toBe(true);
@@ -2467,7 +2468,7 @@ describe('MoneyOperations integration', () => {
     const registerCallsBeforeFilter = getCashOrderRegisterMock.mock.calls.length;
     const bookCallsBeforeFilter = getCashBookMock.mock.calls.length;
 
-    await user.click(screen.getByRole('button', { name: 'РКО' }));
+    await user.click(screen.getByRole('button', { name: 'Расходный кассовый ордер' }));
 
     await waitFor(() =>
       expect(getCashOrderRegisterMock).toHaveBeenLastCalledWith(
@@ -2659,7 +2660,7 @@ describe('MoneyOperations integration', () => {
     render(<MoneyOperations source="Cash" />);
 
     await screen.findByText('Кассовые ордера');
-    await user.click(screen.getByRole('button', { name: 'РКО' }));
+    await user.click(screen.getByRole('button', { name: 'Расходный кассовый ордер' }));
 
     await waitFor(() =>
       expect(getCashOrderRegisterMock).toHaveBeenLastCalledWith(
