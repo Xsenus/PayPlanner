@@ -82,6 +82,7 @@ import {
 } from '../../utils/reportPresentation';
 import type { ActStatusReport, AdvanceReport, BankStatementImportReport, CaseActivityReport, CaseFinanceReport, CaseSuccessReport, CashBookSummary, CashFlowForecastReport, CashFlowReport, CashOrderReport, Client, ClientCase, Contract, ContractStatusReport, CounterpartyReport, CurrencyReport, CurrentCasesReport, DirectionReport, IncomeType, InvoiceStatusReport, JournalStatusReport, LawyerWorkloadReport, LegalWorkReport, MatchStatusReport, MoneyAccount, MoneyCategoryReport, MoneyOperationSource, OverdueProceduralDeadlinesReport, PaidAccountReport, PaidInvoiceReport, PaymentOrderReport, PaymentPurposeReport, PaymentPriorityReport, PlanFactReport, ProjectReport, SalesPointReport, SpreadsheetImportReport, TaskReport, VatReport } from '../../types';
 import { buildVisibleReportGroups, type ReportGroupId, type ReportSectionAccess } from './reportAccess';
+import type { ManagementReportKind } from './reportKinds';
 
 const statusMeta: Record<
   'Completed' | 'Pending' | 'Overdue',
@@ -2510,7 +2511,6 @@ function ProjectReportSection({
 
 type LegalWorkExportFormat = 'csv' | 'excel' | 'pdf';
 type ManagementReportExportFormat = 'csv' | 'excel' | 'pdf' | 'print';
-type ManagementReportKind = 'case-finance' | 'case-success' | 'current-cases' | 'lawyer-workload' | 'overdue-deadlines' | 'case-activity' | 'cash-flow' | 'cash-flow-forecast' | 'cash' | 'bank' | 'plan-fact' | 'advances' | 'payment-priorities' | 'paid-accounts' | 'paid-invoices' | 'invoice-statuses' | 'act-statuses' | 'contract-statuses' | 'categories' | 'counterparties' | 'projects' | 'directions' | 'sales-points' | 'vat' | 'payment-orders' | 'payment-purposes' | 'match-statuses' | 'journal-statuses' | 'currencies' | 'cash-orders' | 'bank-statement-imports' | 'spreadsheet-imports';
 type ReportCaseSection = 'tasks' | 'documents' | 'court' | 'workOrder';
 
 type LegalWorkReportFilters = {
@@ -3540,6 +3540,7 @@ function TaskReportSection({
   onReload,
   onOpenTask,
   profileTimeZoneId,
+  exportFilters,
 }: {
   report: TaskReport | null;
   loading: boolean;
@@ -3549,6 +3550,7 @@ function TaskReportSection({
   onReload: () => void;
   onOpenTask?: (taskId: number) => void;
   profileTimeZoneId?: string | null;
+  exportFilters: ManagementReportExportFilters;
 }) {
   const rows = report?.items ?? [];
   const responsibleRows = report?.byResponsible ?? [];
@@ -3597,6 +3599,11 @@ function TaskReportSection({
             <RefreshCcw className="h-4 w-4" />
             Обновить
           </button>
+          <ManagementReportExportButtons
+            reportKind="tasks"
+            filters={exportFilters}
+            disabled={!report || loading}
+          />
         </div>
       </div>
 
@@ -7309,6 +7316,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
   const canViewPaymentReports = permissions.payments.canView;
   const canExportPaymentReports = permissions.payments.canExport;
   const canViewTaskReports = permissions.tasks.canView;
+  const canExportTaskReports = permissions.tasks.canExport;
   const canViewCaseReports = permissions.cases.canView;
   const canViewAccountReports = permissions.accounts.canView;
   const canViewActReports = permissions.acts.canView;
@@ -7506,6 +7514,15 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
   const taskReportFilters = useMemo(
     () => ({ asOf: cashFlowDates.to, scope: taskReportScope, limit: 200 }),
     [cashFlowDates.to, taskReportScope],
+  );
+  const taskReportExportFilters = useMemo<ManagementReportExportFilters>(
+    () => ({
+      asOf: cashFlowDates.to,
+      status: taskReportScope,
+      limit: 200,
+      exportDisabled: !canExportTaskReports,
+    }),
+    [canExportTaskReports, cashFlowDates.to, taskReportScope],
   );
 
   useEffect(() => {
@@ -8440,6 +8457,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
                 onReload={reloadTaskReport}
                 onOpenTask={onOpenTask}
                 profileTimeZoneId={profileTimeZoneId}
+                exportFilters={taskReportExportFilters}
               />
             ) : null}
 
