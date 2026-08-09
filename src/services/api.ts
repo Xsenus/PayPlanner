@@ -7068,6 +7068,17 @@ export class ApiService {
     };
   }
 
+  async getLegalWorkReportPrintHtml(params?: {
+    from?: string;
+    to?: string;
+    status?: string;
+    responsibleUserId?: number;
+    caseType?: string;
+  }) {
+    const q = buildQuery(params ?? {});
+    return this.request<string>(`/reports/legal-work.print${q}`);
+  }
+
   async downloadManagementReport(params: {
     report: 'case-finance' | 'case-success' | 'current-cases' | 'tasks' | 'lawyer-workload' | 'overdue-deadlines' | 'case-activity' | 'cash-flow' | 'cash-flow-forecast' | 'cash' | 'bank' | 'plan-fact' | 'advances' | 'payment-priorities' | 'paid-accounts' | 'paid-invoices' | 'invoice-statuses' | 'act-statuses' | 'contract-statuses' | 'categories' | 'counterparties' | 'projects' | 'directions' | 'sales-points' | 'vat' | 'payment-orders' | 'payment-purposes' | 'match-statuses' | 'journal-statuses' | 'currencies' | 'cash-orders' | 'bank-statement-imports' | 'spreadsheet-imports';
     format: 'csv' | 'excel' | 'pdf';

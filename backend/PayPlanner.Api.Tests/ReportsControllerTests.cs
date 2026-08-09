@@ -216,6 +216,18 @@ public class ReportsControllerTests
         Assert.Equal([0x25, 0x50, 0x44, 0x46], pdf.FileContents);
         Assert.Contains("Отчет по юридической работе", pdfService.LastHtml, StringComparison.Ordinal);
 
+        var printAction = await controller.PrintLegalWork(
+            today.AddDays(-30),
+            today.AddDays(30),
+            nameof(ClientCaseStatus.Open),
+            responsible.Id,
+            "Банк",
+            CancellationToken.None);
+        var print = Assert.IsType<ContentResult>(printAction);
+        Assert.Equal("text/html; charset=utf-8", print.ContentType);
+        Assert.Contains("Отчет по юридической работе", print.Content, StringComparison.Ordinal);
+        Assert.Contains("Банкротство", print.Content, StringComparison.Ordinal);
+
         var csvText = System.Text.Encoding.UTF8.GetString(csv.FileContents);
         Assert.Contains("Банкротство", csvText, StringComparison.Ordinal);
         Assert.Contains("Финансы по статусам", csvText, StringComparison.Ordinal);

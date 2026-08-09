@@ -290,6 +290,25 @@ public class ReportsController : ControllerBase
         return File(pdf, "application/pdf", $"legal-work-report-{now.Local:yyyyMMdd-HHmm}.pdf");
     }
 
+    [HttpGet("legal-work.print")]
+    public async Task<IActionResult> PrintLegalWork(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] string? status,
+        [FromQuery] int? responsibleUserId,
+        [FromQuery] string? caseType,
+        CancellationToken ct)
+    {
+        var (report, error) = await BuildLegalWorkExportReportAsync(from, to, status, responsibleUserId, caseType, ct);
+        if (error is not null)
+        {
+            return error;
+        }
+
+        var now = await ResolveReportNowAsync(ct);
+        return Content(BuildLegalWorkPrintHtml(report!, now.Utc, now.TimeZone), "text/html; charset=utf-8");
+    }
+
     [HttpGet("management.xls")]
     public async Task<IActionResult> ExportManagementReportExcel(
         [FromQuery] string report,
