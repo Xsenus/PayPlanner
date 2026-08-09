@@ -1188,17 +1188,6 @@ export function Payments({
     [paymentsPermissions.canEdit, showPermissionNotice, t, toast],
   );
 
-  const openPayment = useCallback(
-    (payment: Payment) => {
-      if (onOpenPayment) {
-        onOpenPayment(payment.id, payment.type);
-        return;
-      }
-      void handleEditPayment(payment);
-    },
-    [handleEditPayment, onOpenPayment],
-  );
-
   const handleDeletePayment = useCallback(
     async (payment: Payment) => {
       const isTransferredRemainder = isTransferredRemainderPayment(payment);
@@ -2556,7 +2545,7 @@ export function Payments({
               <PaymentsTable
                 payments={payments}
                 onEditPayment={handleEditPayment}
-                onOpenPayment={openPayment}
+                onOpenPayment={onOpenPayment}
                 onOpenClient={onOpenClient}
                 onAddPayment={handleAddPayment}
                 onDeletePayment={async (payment) => {
