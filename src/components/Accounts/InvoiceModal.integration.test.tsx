@@ -3439,7 +3439,8 @@ describe('InvoiceModal integration', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /Печать/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^Печать/i }));
+    fireEvent.click(screen.getAllByRole('button', { name: /С подписью и печатью/i })[0]);
 
     expect(openMock).toHaveBeenCalled();
     await waitFor(() => {
@@ -3451,6 +3452,16 @@ describe('InvoiceModal integration', () => {
     };
     await waitFor(() => {
       expect(printWindow.document.write).toHaveBeenCalledWith(expect.stringContaining('<body>preview</body>'));
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /^Печать/i }));
+    fireEvent.click(screen.getAllByRole('button', { name: /Без печати/i })[1]);
+
+    await waitFor(() => {
+      expect(downloadMock).toHaveBeenLastCalledWith(552, 'html', {
+        includeSignatureAndSeal: false,
+        templateKey: 'invoice-offer',
+      });
     });
   });
 });

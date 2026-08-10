@@ -1010,6 +1010,7 @@ export function InvoiceModal({
   const [documentPreviewLoading, setDocumentPreviewLoading] = useState(false);
   const [documentPreviewError, setDocumentPreviewError] = useState<string | null>(null);
   const [yandexDiskUploading, setYandexDiskUploading] = useState(false);
+  const [printMenuOpen, setPrintMenuOpen] = useState(false);
   const [downloadMenuOpen, setDownloadMenuOpen] = useState(false);
   const [messengerDeliveryOpen, setMessengerDeliveryOpen] = useState(false);
   const [electronicSignatureOpen, setElectronicSignatureOpen] = useState(false);
@@ -4266,7 +4267,7 @@ export function InvoiceModal({
             </aside>
           </div>
 
-          <div className="grid grid-cols-2 gap-2 rounded-lg border border-slate-300 bg-white p-2 md:grid-cols-4 xl:grid-cols-12">
+          <div className="grid auto-rows-[2.75rem] grid-cols-2 gap-2 rounded-lg border border-slate-300 bg-white p-2 md:grid-cols-4 xl:grid-cols-12 [&>button]:h-11 [&>div]:h-11">
             <button type="button" onClick={() => void handlePageAction('send')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Send className="h-4 w-4" />Отправить</button>
             {isAdmin && invoice && (invoice.type === 'Expense' ? invoice.expenseClientId : invoice.clientId) ? (
               <button type="button" onClick={() => setMessengerDeliveryOpen(true)} className="inline-flex items-center justify-center gap-2 rounded border border-violet-200 px-3 py-2 text-sm text-violet-700"><Send className="h-4 w-4" />Мессенджер</button>
@@ -4274,9 +4275,54 @@ export function InvoiceModal({
             {isAdmin && invoice && (invoice.type === 'Expense' ? invoice.expenseClientId : invoice.clientId) ? (
               <button type="button" onClick={() => setElectronicSignatureOpen(true)} className="inline-flex items-center justify-center gap-2 rounded border border-blue-200 px-3 py-2 text-sm text-blue-700"><FileText className="h-4 w-4" />Э-подпись</button>
             ) : null}
-            <button type="button" onClick={() => void handlePrintDocument()} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Printer className="h-4 w-4" />Печать</button>
-            <button type="button" onClick={() => void handlePrintDocument(INVOICE_OFFER_TEMPLATE_KEY)} className="inline-flex items-center justify-center gap-2 rounded border border-emerald-200 px-3 py-2 text-sm text-emerald-700"><FileText className="h-4 w-4" />Оферта</button>
-            <button type="button" onClick={() => void handlePrintDocument(INVOICE_ORDER_TEMPLATE_KEY)} className="inline-flex items-center justify-center gap-2 rounded border border-amber-200 px-3 py-2 text-sm text-amber-800"><FileText className="h-4 w-4" />Заказ</button>
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => {
+                  setPrintMenuOpen((prev) => !prev);
+                  setDownloadMenuOpen(false);
+                }}
+                aria-expanded={printMenuOpen}
+                className="inline-flex h-full w-full items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"
+              >
+                <Printer className="h-4 w-4" />Печать<ChevronDown className="h-4 w-4" />
+              </button>
+              {printMenuOpen ? (
+                <div className="absolute bottom-full left-0 z-30 mb-2 w-[21rem] rounded-xl border border-slate-200 bg-white p-1 shadow-lg">
+                  {[
+                    { label: 'Счет', templateKey: undefined },
+                    { label: 'Счет-договор', templateKey: INVOICE_OFFER_TEMPLATE_KEY },
+                    { label: 'Заказ', templateKey: INVOICE_ORDER_TEMPLATE_KEY },
+                  ].map((document) => (
+                    <div key={document.label} className="rounded-lg px-1 py-1">
+                      <div className="px-2 pb-1 pt-1 text-xs font-semibold uppercase tracking-wide text-slate-400">{document.label}</div>
+                      <div className="grid grid-cols-2 gap-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPrintMenuOpen(false);
+                            void handlePrintDocument(document.templateKey, false);
+                          }}
+                          className="rounded-md px-2 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+                        >
+                          Без печати
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPrintMenuOpen(false);
+                            void handlePrintDocument(document.templateKey, true);
+                          }}
+                          className="rounded-md px-2 py-2 text-left text-sm font-medium text-emerald-700 hover:bg-emerald-50"
+                        >
+                          С подписью и печатью
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
             <button
               type="button"
               onClick={() => void handleUploadDocumentToYandexDisk()}
@@ -4292,8 +4338,11 @@ export function InvoiceModal({
             <div className="relative" ref={downloadMenuRef}>
               <button
                 type="button"
-                onClick={() => setDownloadMenuOpen((prev) => !prev)}
-                className="inline-flex w-full items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"
+                onClick={() => {
+                  setDownloadMenuOpen((prev) => !prev);
+                  setPrintMenuOpen(false);
+                }}
+                className="inline-flex h-full w-full items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"
               >
                 <Download className="h-4 w-4" />Скачать<ChevronDown className="h-4 w-4" />
               </button>
