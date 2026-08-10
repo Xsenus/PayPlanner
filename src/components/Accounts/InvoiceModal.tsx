@@ -3130,30 +3130,18 @@ export function InvoiceModal({
     return previewWindow;
   };
 
-  const buildAutoPrintHtml = (html: string) => html;
-
-  const openHtmlInWindow = (html: string, previewWindow?: Window | null) => {
+  const openBlobInWindow = (blob: Blob, previewWindow?: Window | null) => {
     if (!previewWindow || previewWindow.closed) {
       throw new Error('Окно печати было закрыто до загрузки документа. Повторите ещё раз.');
     }
 
-    previewWindow.document.open();
-    previewWindow.document.write(buildAutoPrintHtml(html));
-    previewWindow.document.close();
-  };
-
-  const printHtmlInWindow = (html: string, previewWindow?: Window | null) => {
-    openHtmlInWindow(html, previewWindow);
-    if (!previewWindow || previewWindow.closed) return;
-
-    window.setTimeout(() => {
-      try {
-        previewWindow.focus();
-        previewWindow.print();
-      } catch (error) {
-        console.error('html print failed', error);
-      }
-    }, 250);
+    const href = URL.createObjectURL(blob);
+    previewWindow.onload = () => {
+      previewWindow.focus();
+      previewWindow.print();
+      window.setTimeout(() => URL.revokeObjectURL(href), 60_000);
+    };
+    previewWindow.location.href = href;
   };
 
   const deferClose = useCallback((callback: () => void) => {
@@ -3192,12 +3180,12 @@ export function InvoiceModal({
       previewWindow = openPendingDocumentWindow();
       const blob = await apiService.downloadInvoiceDocument(
         invoice.id,
-        'html',
+        'pdf',
         templateKey
           ? { includeSignatureAndSeal, templateKey }
           : { includeSignatureAndSeal },
       );
-      printHtmlInWindow(await blob.text(), previewWindow);
+      openBlobInWindow(blob, previewWindow);
     } catch (err) {
       if (previewWindow && !previewWindow.closed) {
         previewWindow.close();
@@ -4267,14 +4255,17 @@ export function InvoiceModal({
             </aside>
           </div>
 
-          <div className="grid auto-rows-[2.75rem] grid-cols-2 gap-2 rounded-lg border border-slate-300 bg-white p-2 md:grid-cols-4 xl:grid-cols-12 [&>button]:h-11 [&>div]:h-11">
-            <button type="button" onClick={() => void handlePageAction('send')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Send className="h-4 w-4" />Отправить</button>
+          <div className="flex flex-wrap items-start gap-2 rounded-lg border border-slate-300 bg-white p-2 [&_button]:h-10 [&_button]:whitespace-nowrap">
+            <div className="flex flex-wrap gap-1 rounded-md border border-slate-200 bg-slate-50 p-1">
+            <button type="button" onClick={() => void handlePageAction('send')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 bg-white px-3 py-2 text-sm"><Send className="h-4 w-4" />Отправить</button>
             {isAdmin && invoice && (invoice.type === 'Expense' ? invoice.expenseClientId : invoice.clientId) ? (
-              <button type="button" onClick={() => setMessengerDeliveryOpen(true)} className="inline-flex items-center justify-center gap-2 rounded border border-violet-200 px-3 py-2 text-sm text-violet-700"><Send className="h-4 w-4" />Мессенджер</button>
+              <button type="button" onClick={() => setMessengerDeliveryOpen(true)} className="inline-flex items-center justify-center gap-2 rounded border border-violet-200 bg-white px-3 py-2 text-sm text-violet-700"><Send className="h-4 w-4" />Мессенджер</button>
             ) : null}
             {isAdmin && invoice && (invoice.type === 'Expense' ? invoice.expenseClientId : invoice.clientId) ? (
-              <button type="button" onClick={() => setElectronicSignatureOpen(true)} className="inline-flex items-center justify-center gap-2 rounded border border-blue-200 px-3 py-2 text-sm text-blue-700"><FileText className="h-4 w-4" />Э-подпись</button>
+              <button type="button" onClick={() => setElectronicSignatureOpen(true)} className="inline-flex items-center justify-center gap-2 rounded border border-blue-200 bg-white px-3 py-2 text-sm text-blue-700"><FileText className="h-4 w-4" />Э-подпись</button>
             ) : null}
+            </div>
+            <div className="flex flex-wrap gap-1 rounded-md border border-slate-200 bg-slate-50 p-1">
             <div className="relative">
               <button
                 type="button"
@@ -4283,12 +4274,12 @@ export function InvoiceModal({
                   setDownloadMenuOpen(false);
                 }}
                 aria-expanded={printMenuOpen}
-                className="inline-flex h-full w-full items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"
+                className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 bg-white px-3 py-2 text-sm"
               >
                 <Printer className="h-4 w-4" />Печать<ChevronDown className="h-4 w-4" />
               </button>
               {printMenuOpen ? (
-                <div className="absolute bottom-full left-0 z-30 mb-2 w-[21rem] rounded-xl border border-slate-200 bg-white p-1 shadow-lg">
+                <div className="absolute bottom-full left-0 z-30 mb-2 w-[24rem] max-w-[calc(100vw-2rem)] rounded-xl border border-slate-200 bg-white p-1 shadow-lg">
                   {[
                     { label: 'Счет', templateKey: undefined },
                     { label: 'Счет-договор', templateKey: INVOICE_OFFER_TEMPLATE_KEY },
@@ -4305,7 +4296,7 @@ export function InvoiceModal({
                           }}
                           className="rounded-md px-2 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
                         >
-                          Без печати
+                          Без подписи и печати
                         </button>
                         <button
                           type="button"
@@ -4327,14 +4318,11 @@ export function InvoiceModal({
               type="button"
               onClick={() => void handleUploadDocumentToYandexDisk()}
               disabled={yandexDiskUploading}
-              className="inline-flex items-center justify-center gap-2 rounded border border-sky-200 px-3 py-2 text-sm text-sky-700 disabled:opacity-60"
+              className="inline-flex items-center justify-center gap-2 rounded border border-sky-200 bg-white px-3 py-2 text-sm text-sky-700 disabled:opacity-60"
             >
               {yandexDiskUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
               Я.Диск
             </button>
-            <button type="button" onClick={() => void handlePageAction('markNotSigned')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Ban className="h-4 w-4" />Не подписан</button>
-            <button type="button" onClick={() => void handlePageAction('sendToSigning')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Send className="h-4 w-4" />На подписание</button>
-            <button type="button" onClick={() => void handlePageAction('markSigned')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Check className="h-4 w-4" />Подписан</button>
             <div className="relative" ref={downloadMenuRef}>
               <button
                 type="button"
@@ -4342,84 +4330,56 @@ export function InvoiceModal({
                   setDownloadMenuOpen((prev) => !prev);
                   setPrintMenuOpen(false);
                 }}
-                className="inline-flex h-full w-full items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"
+                className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 bg-white px-3 py-2 text-sm"
               >
                 <Download className="h-4 w-4" />Скачать<ChevronDown className="h-4 w-4" />
               </button>
               {downloadMenuOpen ? (
-                <div className="absolute bottom-full left-0 z-20 mb-2 w-full min-w-[20rem] rounded-xl border border-slate-200 bg-white p-1 shadow-lg">
-                  <button
-                    type="button"
-                    onClick={() => void handleDownloadDocument('pdf', false)}
-                    className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
-                  >
-                    <span>PDF без подписи и печати</span>
-                    <span className="text-xs text-slate-400">.pdf</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void handleDownloadDocument('pdf', true)}
-                    className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
-                  >
-                    <span>PDF с подписью и печатью</span>
-                    <span className="text-xs text-slate-400">.pdf</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void handleDownloadDocument('pdf', false, INVOICE_OFFER_TEMPLATE_KEY)}
-                    className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm text-emerald-700 hover:bg-emerald-50"
-                  >
-                    <span>PDF счет-оферта</span>
-                    <span className="text-xs text-slate-400">.pdf</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void handleDownloadDocument('pdf', false, INVOICE_ORDER_TEMPLATE_KEY)}
-                    className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm text-amber-800 hover:bg-amber-50"
-                  >
-                    <span>PDF заказа</span>
-                    <span className="text-xs text-slate-400">.pdf</span>
-                  </button>
-                  <div className="my-1 border-t border-slate-100" />
-                  <button
-                    type="button"
-                    onClick={() => void handleDownloadDocument('word', false)}
-                    className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
-                  >
-                    <span>Word без подписи и печати</span>
-                    <span className="text-xs text-slate-400">.docx</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void handleDownloadDocument('word', true)}
-                    className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
-                  >
-                    <span>Word с подписью и печатью</span>
-                    <span className="text-xs text-slate-400">.docx</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void handleDownloadDocument('word', false, INVOICE_OFFER_TEMPLATE_KEY)}
-                    className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm text-emerald-700 hover:bg-emerald-50"
-                  >
-                    <span>Word счет-оферта</span>
-                    <span className="text-xs text-slate-400">.docx</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void handleDownloadDocument('word', false, INVOICE_ORDER_TEMPLATE_KEY)}
-                    className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm text-amber-800 hover:bg-amber-50"
-                  >
-                    <span>Word заказа</span>
-                    <span className="text-xs text-slate-400">.docx</span>
-                  </button>
+                <div className="absolute bottom-full left-0 z-20 mb-2 w-[28rem] max-w-[calc(100vw-2rem)] rounded-xl border border-slate-200 bg-white p-1 shadow-lg">
+                  {[
+                    { label: 'Счет', templateKey: undefined, tone: 'text-slate-700' },
+                    { label: 'Счет-договор', templateKey: INVOICE_OFFER_TEMPLATE_KEY, tone: 'text-emerald-700' },
+                    { label: 'Заказ', templateKey: INVOICE_ORDER_TEMPLATE_KEY, tone: 'text-amber-800' },
+                  ].map((document) => (
+                    <div key={document.label} className="rounded-lg px-1 py-1">
+                      <div className="px-2 pb-1 pt-1 text-xs font-semibold uppercase tracking-wide text-slate-400">{document.label}</div>
+                      <div className="grid grid-cols-2 gap-1">
+                        {(['pdf', 'word'] as const).flatMap((format) => ([
+                          { signed: false, label: `${format === 'pdf' ? 'PDF' : 'Word'} без подписи и печати` },
+                          { signed: true, label: `${format === 'pdf' ? 'PDF' : 'Word'} с подписью и печатью` },
+                        ])).map((variant) => (
+                          <button
+                            key={variant.label}
+                            type="button"
+                            onClick={() => void handleDownloadDocument(
+                              variant.label.startsWith('PDF') ? 'pdf' : 'word',
+                              variant.signed,
+                              document.templateKey,
+                            )}
+                            aria-label={`${document.label}: ${variant.label}`}
+                            className={`rounded-md px-2 py-2 text-left text-sm hover:bg-slate-50 ${variant.signed ? 'font-medium text-emerald-700 hover:bg-emerald-50' : document.tone}`}
+                          >
+                            {variant.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               ) : null}
             </div>
-            <button type="button" onClick={() => void handlePageAction('copy')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Copy className="h-4 w-4" />Копировать</button>
-            <button type="button" onClick={() => void handlePageAction('paid')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Check className="h-4 w-4" />Оплачен</button>
-            <button type="button" onClick={() => void handlePageAction('cancel')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Ban className="h-4 w-4" />Отменен</button>
-            <button type="button" onClick={() => void handlePageAction('delete')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Trash2 className="h-4 w-4" />Удалить</button>
+            </div>
+            <div className="flex flex-wrap gap-1 rounded-md border border-slate-200 bg-slate-50 p-1">
+              <button type="button" onClick={() => void handlePageAction('markNotSigned')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 bg-white px-3 py-2 text-sm"><Ban className="h-4 w-4" />Не подписан</button>
+              <button type="button" onClick={() => void handlePageAction('sendToSigning')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 bg-white px-3 py-2 text-sm"><Send className="h-4 w-4" />На подписание</button>
+              <button type="button" onClick={() => void handlePageAction('markSigned')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 bg-white px-3 py-2 text-sm"><Check className="h-4 w-4" />Подписан</button>
+            </div>
+            <div className="flex flex-wrap gap-1 rounded-md border border-slate-200 bg-slate-50 p-1">
+              <button type="button" onClick={() => void handlePageAction('copy')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 bg-white px-3 py-2 text-sm"><Copy className="h-4 w-4" />Копировать</button>
+              <button type="button" onClick={() => void handlePageAction('paid')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 bg-white px-3 py-2 text-sm"><Check className="h-4 w-4" />Оплачен</button>
+              <button type="button" onClick={() => void handlePageAction('cancel')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 bg-white px-3 py-2 text-sm"><Ban className="h-4 w-4" />Отменен</button>
+              <button type="button" onClick={() => void handlePageAction('delete')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 bg-white px-3 py-2 text-sm"><Trash2 className="h-4 w-4" />Удалить</button>
+            </div>
           </div>
         </div>
       ) : (

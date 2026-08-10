@@ -3320,7 +3320,7 @@ describe('InvoiceModal integration', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: /Скачать/i }));
-    fireEvent.click(screen.getByRole('button', { name: /PDF без подписи и печати/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Счет: PDF без подписи и печати' }));
 
     await waitFor(() => {
       expect(downloadMock).toHaveBeenCalledWith(551, 'pdf', { includeSignatureAndSeal: false });
@@ -3360,7 +3360,7 @@ describe('InvoiceModal integration', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: /Скачать/i }));
-    fireEvent.click(screen.getByRole('button', { name: /PDF счет-оферта/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Счет-договор: PDF без подписи и печати' }));
 
     await waitFor(() => {
       expect(downloadMock).toHaveBeenCalledWith(553, 'pdf', {
@@ -3370,12 +3370,22 @@ describe('InvoiceModal integration', () => {
     });
 
     fireEvent.click(screen.getByRole('button', { name: /Скачать/i }));
-    fireEvent.click(screen.getByRole('button', { name: /PDF заказа/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Заказ: PDF без подписи и печати' }));
 
     await waitFor(() => {
       expect(downloadMock).toHaveBeenCalledWith(553, 'pdf', {
         includeSignatureAndSeal: false,
         templateKey: 'invoice-order',
+      });
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Скачать/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Счет-договор: Word с подписью и печатью' }));
+
+    await waitFor(() => {
+      expect(downloadMock).toHaveBeenCalledWith(553, 'word', {
+        includeSignatureAndSeal: true,
+        templateKey: 'invoice-offer',
       });
     });
   });
@@ -3406,7 +3416,7 @@ describe('InvoiceModal integration', () => {
     });
   });
 
-  it('prints invoice through html document without requesting server pdf rendering', async () => {
+  it('prints invoice through server PDF with the requested signature and seal mode', async () => {
     const downloadMock = vi.mocked(apiService.downloadInvoiceDocument);
     downloadMock.mockClear();
     const openMock = vi.mocked(window.open);
@@ -3444,21 +3454,14 @@ describe('InvoiceModal integration', () => {
 
     expect(openMock).toHaveBeenCalled();
     await waitFor(() => {
-      expect(downloadMock).toHaveBeenCalledWith(552, 'html', { includeSignatureAndSeal: true });
-    });
-
-    const printWindow = openMock.mock.results[0]?.value as Window & {
-      document: { write: ReturnType<typeof vi.fn> };
-    };
-    await waitFor(() => {
-      expect(printWindow.document.write).toHaveBeenCalledWith(expect.stringContaining('<body>preview</body>'));
+      expect(downloadMock).toHaveBeenCalledWith(552, 'pdf', { includeSignatureAndSeal: true });
     });
 
     fireEvent.click(screen.getByRole('button', { name: /^Печать/i }));
-    fireEvent.click(screen.getAllByRole('button', { name: /Без печати/i })[1]);
+    fireEvent.click(screen.getAllByRole('button', { name: /Без подписи и печати/i })[1]);
 
     await waitFor(() => {
-      expect(downloadMock).toHaveBeenLastCalledWith(552, 'html', {
+      expect(downloadMock).toHaveBeenLastCalledWith(552, 'pdf', {
         includeSignatureAndSeal: false,
         templateKey: 'invoice-offer',
       });

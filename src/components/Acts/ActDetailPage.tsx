@@ -9,6 +9,7 @@ import { useTranslation } from '../../hooks/useTranslation';
 import { apiService } from '../../services/api';
 import type { Act, ActInput, ActResponsible, ActStatus, ActWorkflowStatus, Client, PaymentKind } from '../../types';
 import { normalizeAct, normalizeActResponsibleArray, normalizeClientArray } from '../../utils/acts';
+import { buildActDocumentFileName } from '../../utils/actDocumentFileName';
 import { toDateInputValue } from '../../utils/dateUtils';
 import { getDocumentStatusCodes, getDocumentStatusLabels } from '../../utils/documentStatusSettings';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
@@ -186,6 +187,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorSubmitting, setEditorSubmitting] = useState(false);
   const [editorError, setEditorError] = useState<string | null>(null);
+  const [printMenuOpen, setPrintMenuOpen] = useState(false);
   const [downloadMenuOpen, setDownloadMenuOpen] = useState(false);
   const [pageActionLoading, setPageActionLoading] = useState<PageAction | null>(null);
   const [statusChangeOpen, setStatusChangeOpen] = useState(false);
@@ -196,6 +198,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
   const [statusChangeSubmitting, setStatusChangeSubmitting] = useState(false);
   const [statusChangeError, setStatusChangeError] = useState<string | null>(null);
 
+  const printMenuRef = useRef<HTMLDivElement | null>(null);
   const downloadMenuRef = useRef<HTMLDivElement | null>(null);
 
   const loadActBundle = useCallback(async () => {
@@ -270,17 +273,19 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
   }, [act?.id, act?.updatedAt, act?.auditUpdatedAt]);
 
   useEffect(() => {
-    if (!downloadMenuOpen) return undefined;
+    if (!printMenuOpen && !downloadMenuOpen) return undefined;
 
     const handlePointerDown = (event: MouseEvent) => {
-      if (!downloadMenuRef.current) return;
-      if (!downloadMenuRef.current.contains(event.target as Node)) {
+      const target = event.target as Node;
+      if (!printMenuRef.current?.contains(target) && !downloadMenuRef.current?.contains(target)) {
+        setPrintMenuOpen(false);
         setDownloadMenuOpen(false);
       }
     };
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
+        setPrintMenuOpen(false);
         setDownloadMenuOpen(false);
       }
     };
@@ -291,7 +296,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
       document.removeEventListener('mousedown', handlePointerDown);
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [downloadMenuOpen]);
+  }, [downloadMenuOpen, printMenuOpen]);
 
   const selectedClient = useMemo(
     () => clients.find((client) => client.id === act?.clientId) ?? null,
@@ -412,15 +417,16 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
     return `${url.origin}${url.pathname}${url.search}${url.hash}`;
   }, [act?.id]);
 
-  const handlePrintDocument = async () => {
+  const handlePrintDocument = async (includeSignatureAndSeal: boolean) => {
     if (!act?.id) return;
 
     let previewWindow: Window | null | undefined;
     try {
       previewWindow = window.open('', '_blank', 'width=1180,height=900');
       const blob = await apiService.downloadActDocument(act.id, 'pdf', {
-        includeSignatureAndSeal: false,
+        includeSignatureAndSeal,
       });
+      setPrintMenuOpen(false);
       openBlobInWindow(blob, previewWindow, { autoPrint: true });
     } catch (printError) {
       if (previewWindow && !previewWindow.closed) {
@@ -440,8 +446,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
       const blob = await apiService.downloadActDocument(act.id, format, {
         includeSignatureAndSeal,
       });
-      const extension = format === 'pdf' ? 'pdf' : 'doc';
-      downloadBlob(`act-${act.number || act.id}.${extension}`, blob);
+      downloadBlob(buildActDocumentFileName(act.number || String(act.id), act.date || '', format), blob);
       setDownloadMenuOpen(false);
     } catch (downloadError) {
       setError(getDocumentActionErrorMessage(downloadError, 'Не удалось скачать документ акта.'));
@@ -1019,12 +1024,13 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
             </aside>
           </div>
 
-          <div className={`grid gap-2 rounded-lg border border-slate-300 bg-white p-2 ${canDelete ? 'grid-cols-2 md:grid-cols-3 xl:grid-cols-9' : 'grid-cols-2 md:grid-cols-3 xl:grid-cols-8'}`}>
+          <div className="flex flex-wrap items-start gap-2 rounded-lg border border-slate-300 bg-white p-2 [&_button]:h-10 [&_button]:whitespace-nowrap">
+            <div className="flex flex-wrap gap-1 rounded-md border border-slate-200 bg-slate-50 p-1">
             <button
               type="button"
               onClick={() => void handleSend()}
               disabled={pageActionLoading === 'send'}
-              className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {pageActionLoading === 'send' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
               Отправить
@@ -1034,7 +1040,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
               <button
                 type="button"
                 onClick={() => setMessengerDeliveryOpen(true)}
-                className="inline-flex items-center justify-center gap-2 rounded border border-violet-200 px-3 py-2 text-sm text-violet-700 transition hover:bg-violet-50"
+                className="inline-flex items-center justify-center gap-2 rounded border border-violet-200 bg-white px-3 py-2 text-sm text-violet-700 transition hover:bg-violet-50"
               >
                 <Send className="h-4 w-4" />
                 Мессенджер
@@ -1044,27 +1050,49 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
               <button
                 type="button"
                 onClick={() => setElectronicSignatureOpen(true)}
-                className="inline-flex items-center justify-center gap-2 rounded border border-blue-200 px-3 py-2 text-sm text-blue-700 transition hover:bg-blue-50"
+                className="inline-flex items-center justify-center gap-2 rounded border border-blue-200 bg-white px-3 py-2 text-sm text-blue-700 transition hover:bg-blue-50"
               >
                 <FilePlus2 className="h-4 w-4" />
                 Э-подпись
               </button>
             ) : null}
+            </div>
 
-            <button
-              type="button"
-              onClick={() => void handlePrintDocument()}
-              className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-50"
-            >
-              <Printer className="h-4 w-4" />
-              Печать
-            </button>
+            <div className="flex flex-wrap gap-1 rounded-md border border-slate-200 bg-slate-50 p-1">
+            <div className="relative" ref={printMenuRef}>
+              <button
+                type="button"
+                onClick={() => {
+                  setPrintMenuOpen((previous) => !previous);
+                  setDownloadMenuOpen(false);
+                }}
+                aria-expanded={printMenuOpen}
+                className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-50"
+              >
+                <Printer className="h-4 w-4" />
+                Печать
+                <ChevronDown className="h-4 w-4" />
+              </button>
+              {printMenuOpen ? (
+                <div className="absolute bottom-full left-0 z-30 mb-2 w-[22rem] max-w-[calc(100vw-2rem)] rounded-xl border border-slate-200 bg-white p-2 shadow-lg">
+                  <div className="px-2 pb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">Акт</div>
+                  <div className="grid grid-cols-2 gap-1">
+                    <button type="button" onClick={() => void handlePrintDocument(false)} className="rounded-md px-2 py-2 text-left text-sm text-slate-700 hover:bg-slate-50">
+                      Без подписи и печати
+                    </button>
+                    <button type="button" onClick={() => void handlePrintDocument(true)} className="rounded-md px-2 py-2 text-left text-sm font-medium text-emerald-700 hover:bg-emerald-50">
+                      С подписью и печатью
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
 
             <button
               type="button"
               onClick={() => void handleUploadDocumentToYandexDisk()}
               disabled={pageActionLoading === 'yandexDisk'}
-              className="inline-flex items-center justify-center gap-2 rounded border border-sky-200 px-3 py-2 text-sm text-sky-700 transition hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex items-center justify-center gap-2 rounded border border-sky-200 bg-white px-3 py-2 text-sm text-sky-700 transition hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {pageActionLoading === 'yandexDisk' ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
               Я.Диск
@@ -1074,7 +1102,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
               type="button"
               onClick={() => void handleCreateCorrection()}
               disabled={correctionDisabled || pageActionLoading === 'correction'}
-              className="inline-flex items-center justify-center gap-2 rounded border border-blue-200 px-3 py-2 text-sm text-blue-700 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex items-center justify-center gap-2 rounded border border-blue-200 bg-white px-3 py-2 text-sm text-blue-700 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
               title={act.originalActId ? 'Корректировка создается только от исходного акта' : 'Создать корректировочный акт'}
             >
               {pageActionLoading === 'correction' ? <Loader2 className="h-4 w-4 animate-spin" /> : <FilePlus2 className="h-4 w-4" />}
@@ -1084,52 +1112,55 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
             <div className="relative" ref={downloadMenuRef}>
               <button
                 type="button"
-                onClick={() => setDownloadMenuOpen((prev) => !prev)}
-                className="inline-flex w-full items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-50"
+                onClick={() => {
+                  setDownloadMenuOpen((previous) => !previous);
+                  setPrintMenuOpen(false);
+                }}
+                className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-50"
               >
                 <Download className="h-4 w-4" />
                 Скачать
                 <ChevronDown className="h-4 w-4" />
               </button>
               {downloadMenuOpen ? (
-                <div className="absolute bottom-full left-0 z-20 mb-2 w-full min-w-[20rem] rounded-xl border border-slate-200 bg-white p-1 shadow-lg">
+                <div className="absolute bottom-full left-0 z-20 mb-2 w-[22rem] max-w-[calc(100vw-2rem)] rounded-xl border border-slate-200 bg-white p-2 shadow-lg">
+                  <div className="px-2 pb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">Акт</div>
+                  <div className="grid grid-cols-2 gap-1">
                   <button
                     type="button"
                     onClick={() => void handleDownloadDocument('pdf', false)}
-                    className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                    className="rounded-md px-2 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
                   >
                     <span>PDF без подписи и печати</span>
-                    <span className="text-xs text-slate-400">.pdf</span>
                   </button>
                   <button
                     type="button"
                     onClick={() => void handleDownloadDocument('pdf', true)}
-                    className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                    className="rounded-md px-2 py-2 text-left text-sm font-medium text-emerald-700 hover:bg-emerald-50"
                   >
                     <span>PDF с подписью и печатью</span>
-                    <span className="text-xs text-slate-400">.pdf</span>
                   </button>
-                  <div className="my-1 border-t border-slate-100" />
                   <button
                     type="button"
                     onClick={() => void handleDownloadDocument('word', false)}
-                    className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                    className="rounded-md px-2 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
                   >
                     <span>Word без подписи и печати</span>
-                    <span className="text-xs text-slate-400">.doc</span>
                   </button>
                   <button
                     type="button"
                     onClick={() => void handleDownloadDocument('word', true)}
-                    className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                    className="rounded-md px-2 py-2 text-left text-sm font-medium text-emerald-700 hover:bg-emerald-50"
                   >
                     <span>Word с подписью и печатью</span>
-                    <span className="text-xs text-slate-400">.doc</span>
                   </button>
+                  </div>
                 </div>
               ) : null}
             </div>
+            </div>
 
+            <div className="flex flex-wrap gap-1 rounded-md border border-slate-200 bg-slate-50 p-1">
             <button
               type="button"
               onClick={() => void handleStatusAction(
@@ -1141,7 +1172,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
                 'Статус акта обновлен: Не подписан.',
               )}
               disabled={notSignedDisabled || pageActionLoading === 'notSigned'}
-              className={`inline-flex items-center justify-center gap-2 rounded border px-3 py-2 text-sm transition disabled:cursor-not-allowed disabled:opacity-60 ${
+              className={`inline-flex items-center justify-center gap-2 rounded border bg-white px-3 py-2 text-sm transition disabled:cursor-not-allowed disabled:opacity-60 ${
                 currentWorkflowStatus === 'NotSigned'
                   ? 'border-slate-200 bg-slate-50 text-slate-700'
                   : 'border-slate-200 text-slate-700 hover:bg-slate-50'
@@ -1162,7 +1193,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
                 'Статус акта обновлен: Передано.',
               )}
               disabled={transferredDisabled || pageActionLoading === 'transferred'}
-              className={`inline-flex items-center justify-center gap-2 rounded border px-3 py-2 text-sm transition disabled:cursor-not-allowed disabled:opacity-60 ${
+              className={`inline-flex items-center justify-center gap-2 rounded border bg-white px-3 py-2 text-sm transition disabled:cursor-not-allowed disabled:opacity-60 ${
                 act.status === 'Transferred'
                   ? 'border-amber-200 bg-amber-50 text-amber-700'
                   : 'border-slate-200 text-slate-700 hover:bg-slate-50'
@@ -1183,7 +1214,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
                 'Статус акта обновлен: Подписан клиентом.',
               )}
               disabled={signedDisabled || pageActionLoading === 'signed'}
-              className={`inline-flex items-center justify-center gap-2 rounded border px-3 py-2 text-sm transition disabled:cursor-not-allowed disabled:opacity-60 ${
+              className={`inline-flex items-center justify-center gap-2 rounded border bg-white px-3 py-2 text-sm transition disabled:cursor-not-allowed disabled:opacity-60 ${
                 act.status === 'Signed'
                   ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
                   : 'border-slate-200 text-slate-700 hover:bg-slate-50'
@@ -1197,7 +1228,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
               type="button"
               onClick={() => void handleCancelAct()}
               disabled={cancelDisabled || pageActionLoading === 'cancel'}
-              className={`inline-flex items-center justify-center gap-2 rounded border px-3 py-2 text-sm transition disabled:cursor-not-allowed disabled:opacity-60 ${
+              className={`inline-flex items-center justify-center gap-2 rounded border bg-white px-3 py-2 text-sm transition disabled:cursor-not-allowed disabled:opacity-60 ${
                 act.status === 'Terminated'
                   ? 'border-rose-200 bg-rose-50 text-rose-700'
                   : 'border-slate-200 text-slate-700 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700'
@@ -1206,17 +1237,20 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
               {pageActionLoading === 'cancel' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Ban className="h-4 w-4" />}
               Аннулировать
             </button>
+            </div>
 
             {canDelete ? (
+              <div className="flex flex-wrap gap-1 rounded-md border border-slate-200 bg-slate-50 p-1">
               <button
                 type="button"
                 onClick={() => void handleDelete()}
                 disabled={pageActionLoading === 'delete'}
-                className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {pageActionLoading === 'delete' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
                 Удалить
               </button>
+              </div>
             ) : null}
           </div>
         </div>

@@ -191,6 +191,19 @@ public class InvoiceDocumentTemplateTests
     }
 
     [Fact]
+    public void OrderWordRenderer_EmbedsRequestedSignatureAndSeal()
+    {
+        const string pixel = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+        var html = $"<html><body><img class=\"signature\" src=\"data:image/png;base64,{pixel}\"><img class=\"seal\" src=\"data:image/png;base64,{pixel}\"></body></html>";
+
+        var bytes = InvoiceOrderWordDocumentRenderer.Render(html);
+
+        using var stream = new MemoryStream(bytes);
+        using var package = new System.IO.Compression.ZipArchive(stream, System.IO.Compression.ZipArchiveMode.Read);
+        Assert.Equal(2, package.Entries.Count(entry => entry.FullName.StartsWith("word/media/", StringComparison.Ordinal)));
+    }
+
+    [Fact]
     public void RenderHtml_RendersOfferTemplate_WithInvoiceAndOfferText()
     {
         var payment = new Payment
@@ -491,6 +504,17 @@ public class InvoiceDocumentTemplateTests
         Assert.NotNull(content.Content);
         Assert.Contains("data:image/png;base64,seal-demo", content.Content);
         Assert.Contains("data:image/png;base64,signature-demo", content.Content);
+
+        var orderResult = await controller.GetDocument(
+            paymentId,
+            "html",
+            InvoiceDocumentTemplateEngine.OrderTemplateKey,
+            true,
+            CancellationToken.None);
+        var orderContent = Assert.IsType<ContentResult>(orderResult);
+        Assert.NotNull(orderContent.Content);
+        Assert.Contains("data:image/png;base64,seal-demo", orderContent.Content);
+        Assert.Contains("data:image/png;base64,signature-demo", orderContent.Content);
     }
 
     [Fact]

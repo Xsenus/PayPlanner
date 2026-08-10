@@ -6,7 +6,79 @@ namespace PayPlanner.Api.Services.Invoices;
 public static class InvoiceOrderWordDocumentRenderer
 {
     public static byte[] Render(string html)
-        => HtmlWordDocumentBuilder.Build(ApplyFixedTableWidths(html));
+    {
+        var itemCount = Regex.Matches(
+            html,
+            "<td class=\"index\"",
+            RegexOptions.CultureInvariant).Count;
+        var overlays = BuildSignatureAndSealOverlays(html, itemCount);
+        var normalizedHtml = InvoiceStandardWordDocumentRenderer.RemoveEmbeddedImages(html);
+        return HtmlWordDocumentBuilder.Build(ApplyFixedTableWidths(normalizedHtml), overlays);
+    }
+
+    private static IReadOnlyList<WordImageOverlay> BuildSignatureAndSealOverlays(string html, int itemCount)
+    {
+        var startsOnNewPage = itemCount > 12;
+        var overlays = new List<WordImageOverlay>(2);
+        AddImageOverlay(
+            overlays,
+            html,
+            "seal",
+            340,
+            startsOnNewPage ? 5 : 473,
+            70,
+            70,
+            "Печать",
+            1);
+        AddImageOverlay(
+            overlays,
+            html,
+            "signature",
+            308,
+            startsOnNewPage ? 20 : 498,
+            60,
+            30,
+            "Подпись",
+            2);
+        return overlays;
+    }
+
+    private static void AddImageOverlay(
+        ICollection<WordImageOverlay> overlays,
+        string html,
+        string cssClass,
+        double x,
+        double y,
+        double width,
+        double height,
+        string name,
+        int zOrder)
+    {
+        var pattern = $"<img(?=[^>]*class=\"[^\"]*\\b{Regex.Escape(cssClass)}\\b[^\"]*\")(?=[^>]*src=\"data:(?<contentType>image/(?:png|jpe?g|gif));base64,(?<data>[^\"]+)\")[^>]*>";
+        var match = Regex.Match(html, pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        if (!match.Success)
+        {
+            return;
+        }
+
+        var contentType = match.Groups["contentType"].Value.ToLowerInvariant();
+        var extension = contentType switch
+        {
+            "image/jpeg" or "image/jpg" => "jpg",
+            "image/gif" => "gif",
+            _ => "png",
+        };
+        overlays.Add(new WordImageOverlay(
+            Convert.FromBase64String(match.Groups["data"].Value),
+            contentType,
+            extension,
+            x,
+            y,
+            width,
+            height,
+            name,
+            zOrder));
+    }
 
     private static string ApplyFixedTableWidths(string html)
     {

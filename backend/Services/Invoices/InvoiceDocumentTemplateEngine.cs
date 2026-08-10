@@ -2190,6 +2190,9 @@ public static class InvoiceDocumentTemplateEngine
     .signature .sign { width: 25%; }
     .signature .name { width: 31%; padding-right: 0; }
     .signature .line { min-height: 4.5mm; border-bottom: .7pt solid #000; text-align: center; }
+    .signature .sign .line { position: relative; }
+    .signature .sign .signature { position: absolute; left: 50%; bottom: -1pt; z-index: 2; width: 60pt; height: 30pt; object-fit: contain; transform: translateX(-50%); }
+    .signature .sign .seal { position: absolute; left: 82%; bottom: -25pt; z-index: 1; width: 70pt; height: 70pt; object-fit: contain; opacity: .9; transform: translateX(-50%); }
     .signature .caption { margin-top: .6mm; text-align: center; font-size: 6.5pt; }
   </style>
 </head>
@@ -2216,7 +2219,7 @@ public static class InvoiceDocumentTemplateEngine
       <tr><td class="label"><p>Всего к оплате:</p></td><td class="value"><p>{{invoice.total}}</p></td></tr>
     </table>
     <div class="summary"><p>Всего наименований {{invoice.itemsCount}}, на сумму {{invoice.total}} руб.</p><p class="words">Всего к оплате: {{invoice.totalWords}}</p></div>
-    <div class="signature-block{{order.signaturePageBreakClass}}"><table class="signature"><tr><td class="role">Руководитель:</td><td class="position"><div class="line">{{seller.orderDirectorPosition}}</div><div class="caption">должность</div></td><td class="sign"><div class="line"></div><div class="caption">подпись</div></td><td class="name"><div class="line">{{seller.orderSignatoryShortName}}</div><div class="caption">расшифровка подписи</div></td></tr></table></div>
+    <div class="signature-block{{order.signaturePageBreakClass}}"><table class="signature"><tr><td class="role">Руководитель:</td><td class="position"><div class="line">{{seller.orderDirectorPosition}}</div><div class="caption">должность</div></td><td class="sign"><div class="line">{{seller.signatureHtml}}{{seller.sealHtml}}</div><div class="caption">подпись</div></td><td class="name"><div class="line">{{seller.orderSignatoryShortName}}</div><div class="caption">расшифровка подписи</div></td></tr></table></div>
   </div>
 </body>
 </html>
