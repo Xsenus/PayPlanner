@@ -712,6 +712,60 @@ END:VCALENDAR
     }
 
     [Fact]
+    public async Task SyncNowAsync_DoesNotReopenCompletedTaskFromStaleYandexSummary()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "executor-yandex-closed-task@example.com", "user");
+        var connection = await CreateConnectionAsync(db, user.Id);
+        var calendar = await CreateCalendarAsync(db, connection.Id, "calendar-yandex-closed-task", "PayPlanner задачи");
+        var task = await CreateTaskAsync(
+            db,
+            user.Id,
+            "Закрытая задача",
+            new DateTime(2026, 6, 5, 8, 0, 0, DateTimeKind.Utc));
+        task.Status = "done";
+        db.YandexCalendarTaskLinks.Add(new YandexCalendarTaskLink
+        {
+            ConnectionId = connection.Id,
+            CalendarSyncCalendarId = calendar.Id,
+            TaskJournalItemId = task.Id,
+            YandexCalendarId = calendar.YandexCalendarId,
+            YandexEventId = "event-yandex-closed-task",
+            YandexEventUrl = $"{calendar.CalendarUrl}event-yandex-closed-task.ics",
+            SyncStatus = "active",
+            LastYandexHash = "old-yandex-hash",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var reportResponse = BuildYandexReportResponse(
+            calendar.CalendarUrl,
+            "event-yandex-closed-task",
+            $"""
+BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:event-yandex-closed-task
+DTSTART:20260605T120000Z
+DTEND:20260605T130000Z
+SUMMARY:[Новая] Закрытая задача
+X-PAYPLANNER-TASK-ID:{task.Id}
+X-PAYPLANNER-HASH:yandex-closed-task-hash
+END:VEVENT
+END:VCALENDAR
+""");
+        var service = CreateService(db, new FakeHttpClientFactory(new RecordingYandexHandler(reportResponse: reportResponse)));
+
+        var result = await service.SyncNowAsync(user.Id, CreateHttpRequest(user.Id), CancellationToken.None);
+
+        Assert.Equal(1, result.ImportedEvents);
+        Assert.Equal(0, result.ErrorCount);
+        var updatedTask = await db.TaskJournalItems.SingleAsync(item => item.Id == task.Id);
+        Assert.Equal("done", updatedTask.Status);
+        Assert.Equal(new DateTime(2026, 6, 5, 12, 0, 0, DateTimeKind.Utc), updatedTask.DueAt);
+    }
+
+    [Fact]
     public async Task SyncTaskForConnectedUsersAsync_UpdatesLinkedYandexEventAndWritesLocalTimeLog()
     {
         await using var db = await CreateContextAsync();

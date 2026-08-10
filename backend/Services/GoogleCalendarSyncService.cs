@@ -1041,7 +1041,14 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         }
 
         var importedStatus = ResolveStatusFromGoogleSummary(googleEvent.Summary);
-        if (!string.IsNullOrWhiteSpace(importedStatus) && task.Status != importedStatus)
+        var importedStatusWouldReopenClosedTask =
+            (string.Equals(task.Status, "done", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(task.Status, "cancelled", StringComparison.OrdinalIgnoreCase)) &&
+            !string.Equals(importedStatus, "done", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(importedStatus, "cancelled", StringComparison.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(importedStatus) &&
+            task.Status != importedStatus &&
+            !importedStatusWouldReopenClosedTask)
         {
             changes.Add($"Статус: {FormatTaskStatus(task.Status)} → {FormatTaskStatus(importedStatus)}");
             task.Status = importedStatus;

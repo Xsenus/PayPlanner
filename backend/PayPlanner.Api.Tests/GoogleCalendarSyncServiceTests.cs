@@ -588,6 +588,59 @@ public class GoogleCalendarSyncServiceTests
     }
 
     [Fact]
+    public async Task SyncNowAsync_DoesNotReopenCompletedTaskFromStaleGoogleSummary()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "executor-google-closed-task@example.com", "user");
+        await EnableGoogleSettingsAsync(db);
+        var connection = await CreateConnectionAsync(db, user.Id);
+        var calendar = await CreateCalendarAsync(db, connection.Id, "calendar-google-closed-task", "PayPlanner задачи");
+        var task = await CreateTaskAsync(db, user.Id, "Закрытая задача", dueAt: new DateTime(2026, 6, 5, 8, 0, 0, DateTimeKind.Utc));
+        task.Status = "done";
+        db.GoogleCalendarTaskLinks.Add(new GoogleCalendarTaskLink
+        {
+            ConnectionId = connection.Id,
+            CalendarSyncCalendarId = calendar.Id,
+            TaskJournalItemId = task.Id,
+            GoogleCalendarId = calendar.GoogleCalendarId,
+            GoogleEventId = "event-google-closed-task",
+            SyncStatus = "active",
+            LastGoogleHash = "old-google-hash",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var googleEvents = new object[]
+        {
+            new
+            {
+                id = "event-google-closed-task",
+                etag = "\"etag-google-closed-task\"",
+                status = "confirmed",
+                summary = "[Новая] Закрытая задача",
+                start = new { dateTime = "2026-06-05T12:00:00Z" },
+                end = new { dateTime = "2026-06-05T13:00:00Z" },
+                extendedProperties = new
+                {
+                    @private = new Dictionary<string, string>
+                    {
+                        ["payPlannerTaskId"] = task.Id.ToString(),
+                    },
+                },
+            },
+        };
+        var service = CreateService(db, new FakeHttpClientFactory(new RecordingGoogleHandler(eventItems: googleEvents)));
+
+        var result = await service.SyncNowAsync(user.Id, CreateHttpRequest(user.Id), CancellationToken.None);
+
+        Assert.Equal(1, result.ImportedEvents);
+        Assert.Equal(0, result.ErrorCount);
+        var updatedTask = await db.TaskJournalItems.SingleAsync(item => item.Id == task.Id);
+        Assert.Equal("done", updatedTask.Status);
+        Assert.Equal(new DateTime(2026, 6, 5, 12, 0, 0, DateTimeKind.Utc), updatedTask.DueAt);
+    }
+
+    [Fact]
     public async Task SyncNowAsync_DeletesStaleGoogleDuplicateWithoutMovingTask()
     {
         await using var db = await CreateContextAsync();
