@@ -3443,7 +3443,7 @@ describe('InvoiceModal integration', () => {
 
     expect(openMock).toHaveBeenCalled();
     await waitFor(() => {
-      expect(downloadMock).toHaveBeenCalledWith(552, 'html', { includeSignatureAndSeal: false });
+      expect(downloadMock).toHaveBeenCalledWith(552, 'html', { includeSignatureAndSeal: true });
     });
 
     const printWindow = openMock.mock.results[0]?.value as Window & {

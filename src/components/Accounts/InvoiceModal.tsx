@@ -3179,7 +3179,7 @@ export function InvoiceModal({
     return message;
   }, []);
 
-  const handlePrintDocument = async (templateKey?: string) => {
+  const handlePrintDocument = async (templateKey?: string, includeSignatureAndSeal = true) => {
     if (!invoice?.id) {
       toast.error('Сначала сохраните счёт, затем можно печатать документ.');
       return;
@@ -3192,8 +3192,8 @@ export function InvoiceModal({
         invoice.id,
         'html',
         templateKey
-          ? { includeSignatureAndSeal: false, templateKey }
-          : { includeSignatureAndSeal: false },
+          ? { includeSignatureAndSeal, templateKey }
+          : { includeSignatureAndSeal },
       );
       printHtmlInWindow(await blob.text(), previewWindow);
     } catch (err) {
