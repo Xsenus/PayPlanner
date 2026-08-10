@@ -114,7 +114,7 @@ public static class InvoiceStandardWordDocumentRenderer
     .items .unit { width: 25.5pt; text-align: center; vertical-align: middle; }
     .items .price { width: 76pt; text-align: right; vertical-align: middle; }
     .items .sum { width: 91.5pt; text-align: right; vertical-align: middle; }
-    .totals { width: 177pt; margin: 23pt 0 0 329pt; }
+    .totals { width: 177pt; margin: 23pt 0 0 318pt; }
     .totals td { height: 12pt; padding: 0; line-height: 10pt; mso-line-height-rule: exactly; }
     .totals .totals-label { width: 103pt; text-align: right; padding-right: 5.7pt; }
     .totals .totals-value { width: 74pt; text-align: right; font-weight: 700; }
