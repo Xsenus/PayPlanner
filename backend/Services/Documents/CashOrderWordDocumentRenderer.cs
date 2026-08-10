@@ -10,13 +10,13 @@ public static partial class CashOrderWordDocumentRenderer
 
         var organization = Extract(sourceHtml, "<div class=\"org-line\">(?<value>.*?)</div>");
         var documentMeta = Match(sourceHtml, "<tr><td class=\"value\">(?<number>.*?)</td><td class=\"value\">(?<date>.*?)</td></tr>");
-        var payer = Extract(sourceHtml, "<div class=\"line-field\"><span>Принято от</span><div class=\"line\">(?<value>.*?)</div></div>");
-        var basis = Extract(sourceHtml, "<div class=\"line-field\"><span>Основание:</span><div class=\"line\">(?<value>.*?)</div></div>");
-        var appendix = Extract(sourceHtml, "<div class=\"line-field\"><span>Приложение</span><div class=\"line\">(?<value>.*?)</div></div>");
+        var payer = Extract(sourceHtml, "<div class=\"[^\"]*\\bline-field\\b[^\"]*\"><span>Принято от</span><div class=\"line\">(?<value>.*?)</div></div>");
+        var basis = Extract(sourceHtml, "<div class=\"[^\"]*\\bline-field\\b[^\"]*\"><span>Основание:</span><div class=\"line\">(?<value>.*?)</div></div>");
+        var appendix = Extract(sourceHtml, "<div class=\"[^\"]*\\bline-field\\b[^\"]*\"><span>Приложение</span><div class=\"line\">(?<value>.*?)</div></div>");
         var amountRubKop = Extract(sourceHtml, "<td class=\"sum\">(?<value>.*?)</td>");
-        var amountWordsBlock = Match(sourceHtml, "<div class=\"amount-words\">\\s*<span>Сумма</span><div class=\"line\">(?<words>.*?)</div><span>руб\\.</span><div class=\"line kopecks\">(?<kopecks>.*?)</div>");
-        var amountDigits = Match(sourceHtml, "<div class=\"amount-digits\"><span>Сумма</span><div class=\"line\">(?<rubles>.*?)</div><span>руб\\.</span><div class=\"line\">(?<kopecks>.*?)</div>");
-        var receiptDate = Match(sourceHtml, "<div class=\"receipt-date\"><span>от</span><span>\"</span><div class=\"line\">(?<day>.*?)</div><span>\" (?<month>.*?)</span><div class=\"line\">(?<year>.*?)</div>");
+        var amountWordsBlock = Match(sourceHtml, "<div class=\"[^\"]*\\bamount-words\\b[^\"]*\">\\s*<span>Сумма</span><div class=\"line\">(?<words>.*?)</div><span>руб\\.</span><div class=\"line kopecks\">(?<kopecks>.*?)</div>");
+        var amountDigits = Match(sourceHtml, "<div class=\"[^\"]*\\bamount-digits\\b[^\"]*\"><span>Сумма</span><div class=\"line\">(?<rubles>.*?)</div><span>руб\\.</span><div class=\"line\">(?<kopecks>.*?)</div>");
+        var receiptDate = Match(sourceHtml, "<div class=\"[^\"]*\\breceipt-date\\b[^\"]*\"><span>от</span><span>\"</span><div class=\"line\">(?<day>.*?)</div><span>\" (?<month>.*?)</span><div class=\"line\">(?<year>.*?)</div>");
         var signer = Extract(sourceHtml, "<div class=\"sign-line\">(?<value>[^<]+)</div><div class=\"sign-label\">\\(расшифровка подписи\\)</div>");
         var cancelNotice = OptionalExtract(sourceHtml, "(?<value><div class=\"cancelled\">.*?</div>)");
 
