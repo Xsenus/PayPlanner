@@ -152,10 +152,16 @@ public static class HtmlWordDocumentBuilder
 
     private static string BuildDocumentXml(IReadOnlyList<WordImageOverlay> overlays)
     {
-        var drawings = string.Join(Environment.NewLine, overlays.Select(BuildDrawingXml));
+        var indexedOverlays = overlays.Select((item, index) => (Item: item, Index: index)).ToArray();
+        var drawingsBeforeHtml = string.Join(
+            Environment.NewLine,
+            indexedOverlays.Where(item => item.Item.BeforeHtml).Select(item => BuildDrawingXml(item.Item, item.Index)));
+        var drawingsAfterHtml = string.Join(
+            Environment.NewLine,
+            indexedOverlays.Where(item => !item.Item.BeforeHtml).Select(item => BuildDrawingXml(item.Item, item.Index)));
         return $$"""
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><w:body><w:altChunk r:id="rIdHtml"/>{{drawings}}<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="567" w:right="476" w:bottom="567" w:left="901" w:header="0" w:footer="0" w:gutter="0"/></w:sectPr></w:body></w:document>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><w:body>{{drawingsBeforeHtml}}<w:altChunk r:id="rIdHtml"/>{{drawingsAfterHtml}}<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="567" w:right="476" w:bottom="567" w:left="901" w:header="0" w:footer="0" w:gutter="0"/></w:sectPr></w:body></w:document>
 """;
     }
 
@@ -195,4 +201,5 @@ public sealed record WordImageOverlay(
     double Width,
     double Height,
     string Name,
-    int ZOrder);
+    int ZOrder,
+    bool BeforeHtml = false);

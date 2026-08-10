@@ -210,6 +210,7 @@ public static class InvoiceDocumentTemplateEngine
             new() { Key = "buyer.kpp", Category = "Покупатель", Description = "КПП покупателя", IsRepeating = false },
             new() { Key = "buyer.kppOrDash", Category = "Покупатель", Description = "КПП покупателя или пустое значение", IsRepeating = false },
             new() { Key = "buyer.ogrn", Category = "Покупатель", Description = "ОГРН или ОГРНИП покупателя", IsRepeating = false },
+            new() { Key = "buyer.bankRequisites", Category = "Покупатель", Description = "Банковские реквизиты покупателя", IsRepeating = false },
             new() { Key = "buyer.okpo", Category = "Покупатель", Description = "Код ОКПО покупателя", IsRepeating = false },
             new() { Key = "buyer.snils", Category = "Покупатель", Description = "СНИЛС покупателя", IsRepeating = false },
             new() { Key = "buyer.phone", Category = "Покупатель", Description = "Телефон покупателя", IsRepeating = false },
@@ -356,6 +357,7 @@ public static class InvoiceDocumentTemplateEngine
                 ["buyer.kppOrDash"] = Encode(string.IsNullOrWhiteSpace(buyer.Kpp) ? string.Empty : buyer.Kpp),
                 ["buyer.okpo"] = Encode(buyer.Okpo),
                 ["buyer.ogrn"] = Encode(buyer.Ogrn),
+                ["buyer.bankRequisites"] = Encode(buyer.BankRequisites),
                 ["buyer.snils"] = Encode(buyer.Snils),
                 ["buyer.phone"] = Encode(buyer.Phone),
                 ["buyer.email"] = Encode(buyer.Email),
@@ -646,6 +648,7 @@ public static class InvoiceDocumentTemplateEngine
                 Case = BuildBuyerCase(payment),
                 Requisites = string.Join(", ", legalRequisitesLines.Where(static part => !string.IsNullOrWhiteSpace(part))),
                 RequisitesHtml = BuildCounterpartyLinesHtml(legalRequisitesLines),
+                BankRequisites = bankRequisites,
             };
         }
         var buyerProfile = ParseBuyerProfile(directClient?.Notes);
@@ -1517,6 +1520,7 @@ public static class InvoiceDocumentTemplateEngine
         public string Case { get; init; } = string.Empty;
         public string Requisites { get; init; } = string.Empty;
         public string RequisitesHtml { get; init; } = string.Empty;
+        public string BankRequisites { get; init; } = string.Empty;
     }
 
     private sealed class BuyerProfileInfo
@@ -2254,13 +2258,13 @@ public static class InvoiceDocumentTemplateEngine
 """,
             """
     @page { size: A4; margin: 10mm 11.8mm; }
-    .offer-template { padding-top: 8.6pt; }
+    .offer-template { padding-top: 0; }
     .offer-template .doc-main-title {
       margin: 8px 0 9px;
       font-size: 18px !important;
     }
     .offer-contract-subject {
-      margin-top: -2pt;
+      margin-top: 14.6pt;
       font-size: 14px !important;
       line-height: 1.16;
       letter-spacing: -.8pt;
@@ -2290,6 +2294,8 @@ public static class InvoiceDocumentTemplateEngine
     .offer-page-break-before {
       page-break-before: always;
     }
+    .offer-terms-page { margin-top: 4px; }
+    .offer-payment-page { margin-top: 3.1pt; }
     .offer-requisites-heading {
       page-break-before: always;
       margin-top: 0;
@@ -2331,6 +2337,8 @@ public static class InvoiceDocumentTemplateEngine
     }
     .offer-signature-name .signature { max-width: 120px; max-height: 38px; position: absolute; left: 18%; bottom: 5px; z-index: 2; }
     .offer-signature-name .seal { max-width: 90px; max-height: 90px; position: absolute; left: 42%; bottom: -8px; opacity: .9; z-index: 1; }
+    .offer-signature-name .signature { width: 95.8pt; height: 53.2pt; max-width: none; max-height: none; left: 2.5pt; bottom: 12.6pt; }
+    .offer-signature-name .seal { width: 112.4pt; height: 113.1pt; max-width: none; max-height: none; bottom: -88.5pt; }
     .offer-signature-caption {
       text-align: center;
       font-size: 11px !important;
@@ -2369,7 +2377,7 @@ public static class InvoiceDocumentTemplateEngine
         <div class="offer-clause">1.4. Настоящий Счет-договор действителен в течение 10 (десяти) календарных дней от даты его составления включительно. При отсутствии оплаты в указанный срок настоящий Счет-договор признается недействительным.</div>
         <div class="offer-clause">1.5. В связи с вышеизложенным, внимательно прочитайте текст данной публичной Оферты. Если Вы не согласны с каким-либо пунктом настоящей Оферты, Исполнитель предлагает Вам отказаться от ее акцепта и заключить с Исполнителем отдельный договор.</div>
 
-        <div class="offer-heading offer-page-break-before">2. Термины и определения</div>
+        <div class="offer-heading offer-page-break-before offer-terms-page">2. Термины и определения</div>
         <div class="offer-clause">2.1. Оферта - настоящий документ «Договор публичной оферты по оказанию юридических услуг».</div>
         <div class="offer-clause">2.2. Акцепт Оферты - полное и безоговорочное принятие Оферты Заказчиком путем обращения к Исполнителю за оказанием предоставляемых им услуг. Акцепт Оферты создает Договор Оферты.</div>
         <div class="offer-clause">2.3. Тарифы - действующий систематизированный перечень услуг Исполнителя с ценами.</div>
@@ -2405,7 +2413,7 @@ public static class InvoiceDocumentTemplateEngine
         <div class="offer-heading">5. Оплата услуг</div>
         <div class="offer-clause">5.1. Стоимость Услуг не включает НДС (НДС не облагается) исполнитель применяет УСН.</div>
         <div class="offer-clause">5.2. Стоимость Услуги определяется исходя из задания Заказчика, согласно стоимости по каждой услуге, определенной Исполнителем.</div>
-        <div class="offer-clause offer-page-break-before">5.3. Оплата услуг осуществляется в рублях путем перечисления соответствующих денежных средств на расчетный счет Исполнителя.</div>
+        <div class="offer-clause offer-page-break-before offer-payment-page">5.3. Оплата услуг осуществляется в рублях путем перечисления соответствующих денежных средств на расчетный счет Исполнителя.</div>
         <div class="offer-clause">5.4. При оплате ссылка на номер и дату Счета-договора обязательны.</div>
         <div class="offer-clause">5.5. Оплата Счета-договора третьими лицами (сторонами), а также неполная (частичная) оплата Счета-договора не допускается. Заказчик не имеет права производить выборочную оплату позиций счета и требовать оказания услуг по выбранным позициям.</div>
 
@@ -2469,7 +2477,7 @@ public static class InvoiceDocumentTemplateEngine
             </tr>
             <tr>
               <td>Р/сч {{seller.accountNumber}}<br/>в {{seller.bankName}}</td>
-              <td>{{buyer.requisitesHtml}}</td>
+              <td>{{buyer.bankRequisites}}</td>
             </tr>
             <tr>
               <td>Кор.счет {{seller.corrAccountNumber}}<br/>БИК {{seller.bik}}</td>

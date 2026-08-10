@@ -1,5 +1,7 @@
 using System.IO.Compression;
 using System.Text;
+using PayPlanner.Api.Models;
+using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services.Invoices;
 using Xunit;
 
@@ -39,6 +41,81 @@ public class InvoiceStandardWordDocumentRendererTests
         Assert.Contains("<wp:posOffset>5270500</wp:posOffset>", documentXml, StringComparison.Ordinal);
         Assert.Contains("<wp:posOffset>400050</wp:posOffset>", documentXml, StringComparison.Ordinal);
         Assert.Equal(4, documentXml.Split("<w:drawing>", StringSplitOptions.None).Length - 1);
+    }
+
+    [Fact]
+    public void OfferRender_PlacesBrandingOnFirstPageAndSignedImagesAfterContract()
+    {
+        const string image = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+        var seller = new LegalEntity
+        {
+            ShortName = "ИП Тестовый Т. Т.",
+            FullName = "Индивидуальный предприниматель Тестовый Тест Тестович",
+            Inn = "123456789012",
+            Ogrn = "123456789012345",
+            Address = "г. Самара",
+            TreasuryAccountNumber = "40802810000000000001",
+            TreasuryBankName = "Тестовый банк",
+            TreasuryBankBik = "044525225",
+            TreasuryCorrAccountNumber = "30101810000000000225",
+            Director = "Тестовый Тест Тестович",
+            LogoDataUrl = image,
+            DirectorSignatureDataUrl = image,
+            SealDataUrl = image,
+        };
+        var buyer = new LegalEntity
+        {
+            ShortName = "ООО Покупатель",
+            FullName = "ООО Покупатель",
+            Inn = "1234567890",
+            Address = "г. Москва",
+            TreasuryAccountNumber = "40702810000000000001",
+            TreasuryBankName = "Банк покупателя",
+            TreasuryBankBik = "044525999",
+            TreasuryCorrAccountNumber = "30101810000000000999",
+        };
+        var payment = new Payment
+        {
+            Type = PaymentType.Income,
+            Account = "32",
+            AccountDate = new DateTime(2026, 6, 9),
+            Date = new DateTime(2026, 6, 9),
+            Amount = 7_000m,
+            LegalEntity = buyer,
+        };
+        var items = new[]
+        {
+            new InvoiceLineItemDto { Name = "Юридическая услуга", Quantity = 1m, Unit = "шт.", Price = 7_000m },
+        };
+
+        var unsignedHtml = InvoiceDocumentTemplateEngine.RenderHtml(
+            InvoiceDocumentTemplateEngine.OfferTemplateHtml,
+            payment,
+            items,
+            seller,
+            includeSignatureAndSeal: false);
+        var signedHtml = InvoiceDocumentTemplateEngine.RenderHtml(
+            InvoiceDocumentTemplateEngine.OfferTemplateHtml,
+            payment,
+            items,
+            seller,
+            includeSignatureAndSeal: true);
+
+        using var unsignedArchive = new ZipArchive(
+            new MemoryStream(InvoiceOfferWordDocumentRenderer.Render(unsignedHtml)),
+            ZipArchiveMode.Read);
+        Assert.Equal(2, unsignedArchive.Entries.Count(entry => entry.FullName.StartsWith("word/media/", StringComparison.Ordinal)));
+
+        using var signedArchive = new ZipArchive(
+            new MemoryStream(InvoiceOfferWordDocumentRenderer.Render(signedHtml)),
+            ZipArchiveMode.Read);
+        Assert.Equal(4, signedArchive.Entries.Count(entry => entry.FullName.StartsWith("word/media/", StringComparison.Ordinal)));
+        var documentXml = ReadText(signedArchive, "word/document.xml");
+        var htmlIndex = documentXml.IndexOf("<w:altChunk", StringComparison.Ordinal);
+        var firstDrawingIndex = documentXml.IndexOf("<w:drawing>", StringComparison.Ordinal);
+        var lastDrawingIndex = documentXml.LastIndexOf("<w:drawing>", StringComparison.Ordinal);
+        Assert.True(firstDrawingIndex < htmlIndex);
+        Assert.True(lastDrawingIndex > htmlIndex);
     }
 
     private static string ReadText(ZipArchive archive, string path)

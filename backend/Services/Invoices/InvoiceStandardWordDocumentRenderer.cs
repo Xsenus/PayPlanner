@@ -7,12 +7,8 @@ public static class InvoiceStandardWordDocumentRenderer
 {
     public static byte[] Render(string html)
     {
-        var overlays = BuildImageOverlays(html);
-        var normalizedHtml = Regex.Replace(
-            html,
-            "<img(?=[^>]*src=\"data:image/)[^>]*>",
-            string.Empty,
-            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        var overlays = BuildImageOverlays(html, offer: false);
+        var normalizedHtml = RemoveEmbeddedImages(html);
         return HtmlWordDocumentBuilder.Build(BuildWordHtml(normalizedHtml), overlays);
     }
 
@@ -173,15 +169,22 @@ public static class InvoiceStandardWordDocumentRenderer
         return match.Groups[1].Value.Trim();
     }
 
-    private static IReadOnlyList<WordImageOverlay> BuildImageOverlays(string html)
+    internal static IReadOnlyList<WordImageOverlay> BuildImageOverlays(string html, bool offer)
     {
         var overlays = new List<WordImageOverlay>(4);
-        AddImageOverlay(overlays, html, "logo", 415, 31.5, 132.8, 75, "Логотип", 4);
-        AddImageOverlay(overlays, html, "invoice-qr", 435.3, 117, 112.5, 112.5, "QR-код", 3);
-        AddImageOverlay(overlays, html, "seal", 300.5, 577.9, 112.4, 113.2, "Печать", 1);
-        AddImageOverlay(overlays, html, "signature", 225.9, 586.9, 67.5, 37.5, "Подпись", 2);
+        AddImageOverlay(overlays, html, "logo", 415, 31.5, 132.8, 75, "Логотип", 4, beforeHtml: offer);
+        AddImageOverlay(overlays, html, "invoice-qr", 435.3, 117, 112.5, 112.5, "QR-код", 3, beforeHtml: offer);
+        AddImageOverlay(overlays, html, "seal", offer ? 142 : 300.5, offer ? 333 : 577.9, 112.4, 113.2, "Печать", 1, beforeHtml: false);
+        AddImageOverlay(overlays, html, "signature", offer ? 47.5 : 225.9, offer ? 290.8 : 586.9, offer ? 95.8 : 67.5, offer ? 53.2 : 37.5, "Подпись", 2, beforeHtml: false);
         return overlays;
     }
+
+    internal static string RemoveEmbeddedImages(string html)
+        => Regex.Replace(
+            html,
+            "<img(?=[^>]*src=\"data:image/)[^>]*>",
+            string.Empty,
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
     private static void AddImageOverlay(
         ICollection<WordImageOverlay> overlays,
@@ -192,7 +195,8 @@ public static class InvoiceStandardWordDocumentRenderer
         double width,
         double height,
         string name,
-        int zOrder)
+        int zOrder,
+        bool beforeHtml)
     {
         var pattern = $"<img(?=[^>]*class=\"[^\"]*\\b{Regex.Escape(cssClass)}\\b[^\"]*\")(?=[^>]*src=\"data:(?<contentType>image/(?:png|jpe?g|gif));base64,(?<data>[^\"]+)\")[^>]*>";
         var match = Regex.Match(html, pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
@@ -217,7 +221,8 @@ public static class InvoiceStandardWordDocumentRenderer
             width,
             height,
             name,
-            zOrder));
+            zOrder,
+            beforeHtml));
     }
 
     private static string WordParagraph(string value)
