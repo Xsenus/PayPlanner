@@ -16,6 +16,7 @@ public static class InvoiceDocumentTemplateEngine
 {
     public const string DefaultTemplateKey = "invoice-standard";
     public const string OfferTemplateKey = "invoice-offer";
+    public const string OrderTemplateKey = "invoice-order";
     private const string ClientProfileNotesPrefix = "__PP_CLIENT_PROFILE_V2__:";
     private static readonly HashSet<string> LegacyManagedStandardTemplateFingerprints = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -51,6 +52,7 @@ public static class InvoiceDocumentTemplateEngine
                     Html = DefaultTemplateHtml,
                 },
                 CreateOfferTemplateStorageItem(),
+                CreateOrderTemplateStorageItem(),
             ],
         });
     }
@@ -272,6 +274,10 @@ public static class InvoiceDocumentTemplateEngine
         var hasInstallmentSchedule = !string.IsNullOrWhiteSpace(installmentScheduleHtml);
         var vatText = ResolveVatText(seller);
         var lineItemVat = ResolveLineItemVat(seller);
+        var orderSellerPosition = sellerLegalEntity is null ? string.Empty : directorPosition;
+        var orderSellerSignatory = sellerLegalEntity is null ? seller.ShortName : directorShortName;
+        var orderVatLabel = seller.IsVatExempt ? "Без налога (НДС):" : "В том числе НДС:";
+        var orderVatValue = seller.IsVatExempt ? "-" : "0,00";
         var dueDateHtml = !hasInstallmentSchedule && dueDate != invoiceDate
             ? $"<div class=\"invoice-meta-line\"><strong>Срок оплаты:</strong> {Encode(FormatDate(dueDate))}</div>"
             : string.Empty;
@@ -302,6 +308,8 @@ public static class InvoiceDocumentTemplateEngine
                 ["invoice.totalWords"] = Encode(SpellMoney(total)),
                 ["invoice.itemsCount"] = Encode(normalizedLineItems.Count.ToString(CultureInfo.InvariantCulture)),
                 ["invoice.vatText"] = Encode(vatText),
+                ["invoice.orderVatLabel"] = Encode(orderVatLabel),
+                ["invoice.orderVatValue"] = Encode(orderVatValue),
                 ["invoice.qrCodeHtml"] = qrCodeHtml,
                 ["invoice.installmentScheduleHtml"] = installmentScheduleHtml ?? string.Empty,
                 ["seller.shortName"] = Encode(seller.ShortName),
@@ -323,6 +331,9 @@ public static class InvoiceDocumentTemplateEngine
                 ["seller.accountNumber"] = Encode(seller.AccountNumber),
                 ["seller.corrAccountNumber"] = Encode(seller.CorrAccountNumber),
                 ["seller.requisites"] = Encode(seller.Requisites),
+                ["seller.orderRequisites"] = Encode(BuildOrderRequisites(seller.ShortName, seller.Inn, seller.Address)),
+                ["seller.orderDirectorPosition"] = Encode(orderSellerPosition),
+                ["seller.orderSignatoryShortName"] = Encode(orderSellerSignatory),
                 ["seller.documentDirectorPosition"] = Encode(directorPosition),
                 ["seller.documentDirectorFullName"] = Encode(directorFullName),
                 ["seller.documentDirectorShortName"] = Encode(directorShortName),
@@ -352,6 +363,9 @@ public static class InvoiceDocumentTemplateEngine
                 ["buyer.foundation"] = Encode(buyer.Foundation),
                 ["buyer.case"] = Encode(buyer.Case),
                 ["buyer.requisites"] = Encode(buyer.Requisites),
+                ["buyer.orderRequisites"] = Encode(BuildOrderRequisites(buyer.Name, buyer.Inn, buyer.Address)),
+                ["order.counterpartyName"] = Encode(payment.Type == PaymentType.Expense ? seller.ShortName : buyer.Name),
+                ["order.signaturePageBreakClass"] = normalizedLineItems.Count >= 12 ? " signature-new-page" : string.Empty,
                 ["buyer.requisitesHtml"] = buyer.RequisitesHtml,
                 ["buyer.foundationRowHtml"] = BuildBuyerFoundationRowHtml(buyer.Foundation),
             },
@@ -368,6 +382,14 @@ public static class InvoiceDocumentTemplateEngine
                 })
                 .ToList(),
         };
+    }
+
+    private static string BuildOrderRequisites(string name, string inn, string address)
+    {
+        var parts = new List<string> { name.Trim() };
+        if (!string.IsNullOrWhiteSpace(inn)) parts.Add($"ИНН {inn.Trim()}");
+        if (!string.IsNullOrWhiteSpace(address)) parts.Add(address.Trim());
+        return string.Join(", ", parts.Where(static part => !string.IsNullOrWhiteSpace(part)));
     }
 
     private static LegalEntity? ResolveSellerLegalEntity(Payment payment, LegalEntity? mainCompany)
@@ -1284,6 +1306,7 @@ public static class InvoiceDocumentTemplateEngine
         if (normalized.Templates.Count > 0)
         {
             EnsureOfferTemplate(normalized.Templates);
+            EnsureOrderTemplate(normalized.Templates);
         }
 
         return normalized;
@@ -1323,6 +1346,31 @@ public static class InvoiceDocumentTemplateEngine
             Name = "Счет-оферта",
             Description = "Счет с теми же реквизитами и позициями, дополненный текстом публичной оферты для удаленных клиентов.",
             Html = OfferTemplateHtml,
+        };
+
+    private static void EnsureOrderTemplate(List<InvoiceDocumentTemplateStorageItem> templates)
+    {
+        var existing = templates.FirstOrDefault(item => string.Equals(item.Key, OrderTemplateKey, StringComparison.OrdinalIgnoreCase));
+        if (existing is null)
+        {
+            templates.Add(CreateOrderTemplateStorageItem());
+            return;
+        }
+
+        existing.Name = string.IsNullOrWhiteSpace(existing.Name) ? "Заказ" : existing.Name;
+        existing.Description = string.IsNullOrWhiteSpace(existing.Description)
+            ? "Заказ с банковскими реквизитами, перечнем товаров и услуг и подписью руководителя."
+            : existing.Description;
+        existing.Html = string.IsNullOrWhiteSpace(existing.Html) ? OrderTemplateHtml : existing.Html;
+    }
+
+    private static InvoiceDocumentTemplateStorageItem CreateOrderTemplateStorageItem()
+        => new()
+        {
+            Key = OrderTemplateKey,
+            Name = "Заказ",
+            Description = "Заказ с банковскими реквизитами, перечнем товаров и услуг и подписью руководителя.",
+            Html = OrderTemplateHtml,
         };
 
     private static string? ResolveManagedStandardTemplateFingerprint(string? templateHtml, string? currentFingerprint)
@@ -1992,6 +2040,109 @@ public static class InvoiceDocumentTemplateEngine
 </body>
 </html>
 """;
+
+    private const string OrderTemplateHtmlSource = """
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <style>
+    __PP_ORDER_FONT_CSS__
+    @page { size: A4; margin: 11.3mm 8.5mm 10mm 16mm; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body { color: #000; font-family: 'DejaVu Sans Condensed', sans-serif; font-size: 9pt; line-height: 1.18; }
+    p { margin-top: 0; margin-bottom: 0; mso-margin-top-alt: 0; mso-margin-bottom-alt: 0; }
+    .order { width: 100%; }
+    .counterparty-title { margin: 0 0 2.75mm; font-size: 12pt; font-weight: 700; }
+    table { width: 100%; border-collapse: collapse; }
+    .bank { table-layout: fixed; margin-bottom: 0; font-size: 8.8pt; line-height: 1.12; }
+    .bank tr { height: 7mm; }
+    .bank td { border: .7pt solid #000; padding: .5mm 1mm; vertical-align: top; }
+    .bank .bank-label { padding-left: .7mm; padding-right: .4mm; }
+    .caption { margin-top: 1mm; font-size: 6.5pt; }
+    h1 { margin: 0 0 1.5mm; padding: 6.5mm 0 2.2mm; border-bottom: 1.5pt solid #000; font-size: 12pt; line-height: 1.1; text-align: center; }
+    .party { margin: 0 0 2.7mm; font-size: 9pt; }
+    .party-label { font-weight: 700; }
+    .items { table-layout: fixed; margin-top: 5.6mm; font-size: 8.8pt; line-height: 1.14; }
+    .items thead { display: table-header-group; }
+    .items tr { break-inside: avoid; page-break-inside: avoid; }
+    .items th, .items td { border: .7pt solid #000; padding: 1.8mm 1mm; mso-padding-alt: 5.1pt 2.8pt 5.1pt 2.8pt; vertical-align: top; }
+    .items th p, .items td p { margin: 0 !important; mso-margin-top-alt: 0; mso-margin-bottom-alt: 0; }
+    .items th { font-weight: 700; text-align: center; vertical-align: middle; }
+    .items .index { width: 5%; text-align: center; }
+    .items .name { width: 52%; text-align: left; }
+    .items td.name { text-align: justify; text-justify: inter-character; }
+    .items .quantity { width: 8%; text-align: right; }
+    .items .unit { width: 9%; text-align: center; }
+    .items .price, .items .sum { width: 13%; text-align: right; }
+    .totals { width: 48%; margin: 2.2mm 0 0 auto; font-size: 9pt; }
+    .totals td { padding: .45mm 0 .45mm 2mm; }
+    .totals .label { text-align: right; font-weight: 700; }
+    .totals .value { width: 30%; text-align: right; font-weight: 700; }
+    .summary { margin-top: 3.5mm; font-size: 9pt; }
+    .summary p { margin: 0 0 1.8mm; }
+    .summary .words { font-weight: 700; }
+    .signature-block { margin-top: 5mm; padding-top: 2mm; border-top: 1.5pt solid #000; break-inside: avoid; page-break-inside: avoid; }
+    .signature-block.signature-new-page { margin-top: 0; break-before: page; page-break-before: always; }
+    .signature { table-layout: fixed; }
+    .signature td { padding: 0 1.3mm; vertical-align: bottom; }
+    .signature .role { width: 21%; padding-left: 0; font-weight: 700; }
+    .signature .position { width: 26%; }
+    .signature .sign { width: 24%; }
+    .signature .name { width: 29%; padding-right: 0; }
+    .signature .line { min-height: 4.5mm; border-bottom: .7pt solid #000; text-align: center; }
+    .signature .caption { margin-top: .6mm; text-align: center; font-size: 6.5pt; }
+  </style>
+</head>
+<body>
+  <div class="order">
+    <div class="counterparty-title">{{order.counterpartyName}}</div>
+    <table class="bank" width="100%">
+      <colgroup><col width="24%" style="width:24%" /><col width="27%" style="width:27%" /><col width="7%" style="width:7%" /><col width="42%" style="width:42%" /></colgroup>
+      <tr><td colspan="2" rowspan="2">{{seller.bankName}}<div class="caption">Банк получателя</div></td><td class="bank-label">БИК</td><td>{{seller.bik}}</td></tr>
+      <tr><td class="bank-label">Сч. №</td><td>{{seller.corrAccountNumber}}</td></tr>
+      <tr><td><strong>ИНН {{seller.inn}}</strong></td><td>КПП {{seller.kpp}}</td><td class="bank-label" rowspan="2">Сч. №</td><td rowspan="2">{{seller.accountNumber}}</td></tr>
+      <tr><td colspan="2">{{seller.shortName}}<div class="caption">Получатель</div></td></tr>
+    </table>
+    <h1>Заказ № {{invoice.number}} от {{invoice.dateLong}}</h1>
+    <p class="party"><span class="party-label">Поставщик:</span> {{seller.orderRequisites}}</p>
+    <p class="party"><span class="party-label">Покупатель:</span> {{buyer.orderRequisites}}</p>
+    <table class="items" width="100%">
+      <colgroup><col width="5%" style="width:5%" /><col width="52%" style="width:52%" /><col width="8%" style="width:8%" /><col width="9%" style="width:9%" /><col width="13%" style="width:13%" /><col width="13%" style="width:13%" /></colgroup>
+      <thead><tr><th class="index" width="5%" style="width:5%">№</th><th class="name" width="52%" style="width:52%">Товары (работы, услуги)</th><th class="quantity" width="8%" style="width:8%">Кол-во</th><th class="unit" width="9%" style="width:9%">Ед.</th><th class="price" width="13%" style="width:13%">Цена</th><th class="sum" width="13%" style="width:13%">Сумма</th></tr></thead>
+      <tbody>{{#lineItems}}<tr><td class="index" width="5%" style="width:5%">{{index}}</td><td class="name" width="52%" style="width:52%">{{name}}</td><td class="quantity" width="8%" style="width:8%">{{quantity}}</td><td class="unit" width="9%" style="width:9%">{{unit}}</td><td class="price" width="13%" style="width:13%">{{price}}</td><td class="sum" width="13%" style="width:13%">{{total}}</td></tr>{{/lineItems}}</tbody>
+    </table>
+    <table class="totals">
+      <tr><td class="label">{{invoice.orderVatLabel}}</td><td class="value">{{invoice.orderVatValue}}</td></tr>
+      <tr><td class="label">Итого:</td><td class="value">{{invoice.total}}</td></tr>
+      <tr><td class="label">Всего к оплате:</td><td class="value">{{invoice.total}}</td></tr>
+    </table>
+    <div class="summary"><p>Всего наименований {{invoice.itemsCount}}, на сумму {{invoice.total}} руб.</p><p class="words">Всего к оплате: {{invoice.totalWords}}</p></div>
+    <div class="signature-block{{order.signaturePageBreakClass}}"><table class="signature"><tr><td class="role">Руководитель:</td><td class="position"><div class="line">{{seller.orderDirectorPosition}}</div><div class="caption">должность</div></td><td class="sign"><div class="line"></div><div class="caption">подпись</div></td><td class="name"><div class="line">{{seller.orderSignatoryShortName}}</div><div class="caption">расшифровка подписи</div></td></tr></table></div>
+  </div>
+</body>
+</html>
+""";
+
+    public static readonly string OrderTemplateHtml = OrderTemplateHtmlSource.Replace("__PP_ORDER_FONT_CSS__", BuildEmbeddedOrderFontCss(), StringComparison.Ordinal);
+
+    private static string BuildEmbeddedOrderFontCss()
+    {
+        var assembly = typeof(InvoiceDocumentTemplateEngine).Assembly;
+        static string ReadFontBase64(System.Reflection.Assembly assembly, string resourceName)
+        {
+            using var stream = assembly.GetManifestResourceStream(resourceName) ?? throw new InvalidOperationException($"Встроенный шрифт {resourceName} не найден.");
+            using var memory = new MemoryStream();
+            stream.CopyTo(memory);
+            return Convert.ToBase64String(memory.ToArray());
+        }
+
+        var regular = ReadFontBase64(assembly, "PayPlanner.Fonts.DejaVuSansCondensed.ttf");
+        var bold = ReadFontBase64(assembly, "PayPlanner.Fonts.DejaVuSansCondensed-Bold.ttf");
+        return $"@font-face {{ font-family: 'DejaVu Sans Condensed'; src: url(data:font/ttf;base64,{regular}) format('truetype'); font-weight: 400; }} "
+            + $"@font-face {{ font-family: 'DejaVu Sans Condensed'; src: url(data:font/ttf;base64,{bold}) format('truetype'); font-weight: 700; }}";
+    }
 
     public static readonly string OfferTemplateHtml = DefaultTemplateHtml
         .Replace(

@@ -3008,8 +3008,11 @@ public class InvoicesController : ControllerBase
             return Content(documentHtml, "text/html; charset=utf-8");
         }
 
-        var bytes = Encoding.UTF8.GetBytes(documentHtml);
-        var ext = normalizedFormat == "pdf" ? "pdf" : "doc";
+        var isOrderTemplate = string.Equals(template.Key, InvoiceDocumentTemplateEngine.OrderTemplateKey, StringComparison.OrdinalIgnoreCase);
+        var bytes = isOrderTemplate && normalizedFormat == "word"
+            ? InvoiceOrderWordDocumentRenderer.Render(documentHtml)
+            : Encoding.UTF8.GetBytes(documentHtml);
+        var ext = normalizedFormat == "pdf" ? "pdf" : isOrderTemplate ? "docx" : "doc";
         var fileName = $"invoice-{SanitizeFilePart(payment.Invoice?.Number ?? payment.Account)}.{ext}";
 
         if (normalizedFormat == "pdf")
@@ -3025,7 +3028,7 @@ public class InvoicesController : ControllerBase
             }
         }
 
-        return File(bytes, "application/msword", fileName);
+        return File(bytes, isOrderTemplate ? PayPlanner.Api.Services.Documents.HtmlWordDocumentBuilder.ContentType : "application/msword", fileName);
     }
 
     [HttpPost("{id:int}/yandex-disk")]
@@ -3096,6 +3099,12 @@ public class InvoicesController : ControllerBase
 
             fileName = $"invoice-{SanitizeFilePart(documentNumber)}.pdf";
             contentType = "application/pdf";
+        }
+        else if (string.Equals(template.Key, InvoiceDocumentTemplateEngine.OrderTemplateKey, StringComparison.OrdinalIgnoreCase))
+        {
+            bytes = InvoiceOrderWordDocumentRenderer.Render(documentHtml);
+            fileName = $"invoice-order-{SanitizeFilePart(documentNumber)}.docx";
+            contentType = PayPlanner.Api.Services.Documents.HtmlWordDocumentBuilder.ContentType;
         }
         else
         {
@@ -3226,6 +3235,12 @@ public class InvoicesController : ControllerBase
 
             fileName = $"invoice-{SanitizeFilePart(payment.Invoice?.Number ?? payment.Account)}.pdf";
             contentType = "application/pdf";
+        }
+        else if (string.Equals(template.Key, InvoiceDocumentTemplateEngine.OrderTemplateKey, StringComparison.OrdinalIgnoreCase))
+        {
+            bytes = InvoiceOrderWordDocumentRenderer.Render(documentHtml);
+            fileName = $"invoice-order-{SanitizeFilePart(payment.Invoice?.Number ?? payment.Account)}.docx";
+            contentType = PayPlanner.Api.Services.Documents.HtmlWordDocumentBuilder.ContentType;
         }
         else
         {

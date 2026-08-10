@@ -121,6 +121,7 @@ const DEFAULT_INVOICE_WORKFLOW_STATUS_LABELS: Record<InvoiceWorkflowStatus, stri
 };
 
 const INVOICE_OFFER_TEMPLATE_KEY = 'invoice-offer';
+const INVOICE_ORDER_TEMPLATE_KEY = 'invoice-order';
 
 const INVOICE_WORKFLOW_STATUS_CLASSES: Record<InvoiceWorkflowStatus, string> = {
   Draft: 'bg-slate-100 text-slate-700 border border-slate-200',
@@ -3221,8 +3222,12 @@ export function InvoiceModal({
           ? { includeSignatureAndSeal, templateKey }
           : { includeSignatureAndSeal },
       );
-      const extension = format === 'pdf' ? 'pdf' : 'doc';
-      const filePrefix = templateKey === INVOICE_OFFER_TEMPLATE_KEY ? 'invoice-offer' : 'invoice';
+      const extension = format === 'pdf' ? 'pdf' : templateKey === INVOICE_ORDER_TEMPLATE_KEY ? 'docx' : 'doc';
+      const filePrefix = templateKey === INVOICE_OFFER_TEMPLATE_KEY
+        ? 'invoice-offer'
+        : templateKey === INVOICE_ORDER_TEMPLATE_KEY
+          ? 'invoice-order'
+          : 'invoice';
       downloadBlob(`${filePrefix}-${form.number || 'export'}.${extension}`, blob);
       setDownloadMenuOpen(false);
     } catch (err) {
@@ -4276,6 +4281,7 @@ export function InvoiceModal({
             ) : null}
             <button type="button" onClick={() => void handlePrintDocument()} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Printer className="h-4 w-4" />Печать</button>
             <button type="button" onClick={() => void handlePrintDocument(INVOICE_OFFER_TEMPLATE_KEY)} className="inline-flex items-center justify-center gap-2 rounded border border-emerald-200 px-3 py-2 text-sm text-emerald-700"><FileText className="h-4 w-4" />Оферта</button>
+            <button type="button" onClick={() => void handlePrintDocument(INVOICE_ORDER_TEMPLATE_KEY)} className="inline-flex items-center justify-center gap-2 rounded border border-amber-200 px-3 py-2 text-sm text-amber-800"><FileText className="h-4 w-4" />Заказ</button>
             <button
               type="button"
               onClick={() => void handleUploadDocumentToYandexDisk()}
@@ -4322,6 +4328,14 @@ export function InvoiceModal({
                     <span>PDF счет-оферта</span>
                     <span className="text-xs text-slate-400">.pdf</span>
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleDownloadDocument('pdf', false, INVOICE_ORDER_TEMPLATE_KEY)}
+                    className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm text-amber-800 hover:bg-amber-50"
+                  >
+                    <span>PDF заказа</span>
+                    <span className="text-xs text-slate-400">.pdf</span>
+                  </button>
                   <div className="my-1 border-t border-slate-100" />
                   <button
                     type="button"
@@ -4346,6 +4360,14 @@ export function InvoiceModal({
                   >
                     <span>Word счет-оферта</span>
                     <span className="text-xs text-slate-400">.doc</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleDownloadDocument('word', false, INVOICE_ORDER_TEMPLATE_KEY)}
+                    className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm text-amber-800 hover:bg-amber-50"
+                  >
+                    <span>Word заказа</span>
+                    <span className="text-xs text-slate-400">.docx</span>
                   </button>
                 </div>
               ) : null}

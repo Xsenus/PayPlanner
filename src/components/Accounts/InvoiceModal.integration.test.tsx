@@ -3368,6 +3368,16 @@ describe('InvoiceModal integration', () => {
         templateKey: 'invoice-offer',
       });
     });
+
+    fireEvent.click(screen.getByRole('button', { name: /Скачать/i }));
+    fireEvent.click(screen.getByRole('button', { name: /PDF заказа/i }));
+
+    await waitFor(() => {
+      expect(downloadMock).toHaveBeenCalledWith(553, 'pdf', {
+        includeSignatureAndSeal: false,
+        templateKey: 'invoice-order',
+      });
+    });
   });
 
   it('shows the calculated line item amount and keeps invoice total in sync', async () => {

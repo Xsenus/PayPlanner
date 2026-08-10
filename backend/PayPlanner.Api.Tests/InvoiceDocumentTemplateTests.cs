@@ -83,6 +83,7 @@ public class InvoiceDocumentTemplateTests
         Assert.Contains(".counterparty-line", dto.DefaultTemplateHtml);
         Assert.Contains("overflow-wrap: anywhere;", dto.DefaultTemplateHtml);
         Assert.Contains(dto.Templates, template => template.Key == InvoiceDocumentTemplateEngine.OfferTemplateKey);
+        Assert.Contains(dto.Templates, template => template.Key == InvoiceDocumentTemplateEngine.OrderTemplateKey);
         Assert.DoesNotContain("class=\"brand-column\" rowspan=\"2\"", dto.DefaultTemplateHtml);
     }
 
@@ -107,6 +108,57 @@ public class InvoiceDocumentTemplateTests
         Assert.Equal("Счет-оферта", offerTemplate.Name);
         Assert.Contains("Договор публичной оферты об оказании юридических услуг", offerTemplate.Html);
         Assert.Equal(InvoiceDocumentTemplateEngine.DefaultTemplateKey, settings.ActiveTemplateKey);
+        var orderTemplate = Assert.Single(settings.Templates, template => template.Key == InvoiceDocumentTemplateEngine.OrderTemplateKey);
+        Assert.Equal("Заказ", orderTemplate.Name);
+        Assert.Contains("Товары (работы, услуги)", orderTemplate.Html);
+    }
+
+    [Fact]
+    public void RenderHtml_RendersOrderTemplate_WithKubColumnsAndTotals()
+    {
+        var payment = new Payment
+        {
+            Type = PaymentType.Income,
+            Amount = 1_500m,
+            Date = new DateTime(2022, 7, 5),
+            Account = "15",
+            Client = new Client { Name = "Исаева Марина" },
+        };
+
+        var html = InvoiceDocumentTemplateEngine.RenderHtml(
+            InvoiceDocumentTemplateEngine.OrderTemplateHtml,
+            payment,
+            [new InvoiceLineItemDto { Name = "Подготовка искового заявления", Quantity = 1m, Unit = "усл.ед.", Price = 1_500m }],
+            null,
+            false);
+
+        Assert.Contains("Заказ № 15 от 5 июля 2022 г.", html);
+        Assert.Contains("Исаева Марина", html);
+        Assert.Contains("Товары (работы, услуги)", html);
+        Assert.Contains("Всего к оплате:", html);
+        Assert.DoesNotContain("seller.sealHtml", html);
+    }
+
+    [Fact]
+    public async Task GetDocument_ReturnsOrderAsRealDocx()
+    {
+        await using var db = await CreateContextAsync();
+        var paymentId = await CreateInvoiceDocumentFixtureAsync(db);
+        var controller = CreateController(db, isAdmin: true);
+
+        var result = await controller.GetDocument(
+            paymentId,
+            "word",
+            InvoiceDocumentTemplateEngine.OrderTemplateKey,
+            false,
+            CancellationToken.None);
+
+        var file = Assert.IsType<FileContentResult>(result);
+        Assert.Equal("application/vnd.openxmlformats-officedocument.wordprocessingml.document", file.ContentType);
+        Assert.EndsWith(".docx", file.FileDownloadName, StringComparison.OrdinalIgnoreCase);
+        Assert.True(file.FileContents.Length > 4);
+        Assert.Equal((byte)'P', file.FileContents[0]);
+        Assert.Equal((byte)'K', file.FileContents[1]);
     }
 
     [Fact]
