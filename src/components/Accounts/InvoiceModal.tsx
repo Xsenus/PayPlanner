@@ -62,6 +62,7 @@ import {
   type InvoiceAmountReconciliation,
 } from '../../utils/invoiceAmountReconciliation';
 import { getAppliedClientBalanceAmount } from '../../utils/systemNotes';
+import { buildInvoiceDocumentFileName } from '../../utils/invoiceDocumentFileName';
 
 const EMPTY_RELATED_PAYMENTS: Payment[] = [];
 
@@ -3222,13 +3223,7 @@ export function InvoiceModal({
           ? { includeSignatureAndSeal, templateKey }
           : { includeSignatureAndSeal },
       );
-      const extension = format === 'pdf' ? 'pdf' : 'docx';
-      const filePrefix = templateKey === INVOICE_OFFER_TEMPLATE_KEY
-        ? 'invoice-offer'
-        : templateKey === INVOICE_ORDER_TEMPLATE_KEY
-          ? 'invoice-order'
-          : 'invoice';
-      downloadBlob(`${filePrefix}-${form.number || 'export'}.${extension}`, blob);
+      downloadBlob(buildInvoiceDocumentFileName(form.number, form.date, format, templateKey), blob);
       setDownloadMenuOpen(false);
     } catch (err) {
       toast.error(getDocumentActionErrorMessage(err, 'Не удалось скачать документ.'));
