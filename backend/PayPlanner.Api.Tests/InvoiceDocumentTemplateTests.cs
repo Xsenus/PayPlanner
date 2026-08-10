@@ -77,7 +77,7 @@ public class InvoiceDocumentTemplateTests
         Assert.Contains("{{seller.sealHtml}}", dto.DefaultTemplateHtml);
         Assert.Contains("{{buyer.foundationRowHtml}}", dto.DefaultTemplateHtml);
         Assert.Contains("{{invoice.qrCodeHtml}}", dto.DefaultTemplateHtml);
-        Assert.Contains("{{seller.chiefAccountantShortName}}", dto.DefaultTemplateHtml);
+        Assert.Contains("Предприниматель", dto.DefaultTemplateHtml);
         Assert.Contains("<th class=\"sum\">Сумма</th>", dto.DefaultTemplateHtml);
         Assert.Contains("<td class=\"sum\">{{total}}</td>", dto.DefaultTemplateHtml);
         Assert.Contains(".counterparty-line", dto.DefaultTemplateHtml);
@@ -476,11 +476,8 @@ public class InvoiceDocumentTemplateTests
 
         var content = Assert.IsType<ContentResult>(result);
         Assert.NotNull(content.Content);
-        Assert.Contains("Руководитель:", content.Content);
         Assert.Contains("Предприниматель", content.Content);
-        Assert.Contains("Главный (старший) бухгалтер:", content.Content);
         Assert.Contains("Кожеваткин", content.Content);
-        Assert.Contains(">должность</td>", content.Content);
         Assert.Contains(">подпись</td>", content.Content);
         Assert.Contains(">расшифровка подписи</td>", content.Content);
     }
@@ -507,7 +504,7 @@ public class InvoiceDocumentTemplateTests
         Assert.Contains("Срок оплаты:</strong> 12.04.2026", content.Content);
         Assert.Contains("Счет не для бухгалтерии", content.Content);
         Assert.Contains("class=\"logo-wrap\" style=\"width: 40%; vertical-align: middle;\"", content.Content);
-        Assert.Contains("<td style=\"width: 150px; vertical-align: top;\">", content.Content);
+        Assert.Contains("<td class=\"invoice-qr-cell\" style=\"width: 150px; vertical-align: top;\">", content.Content);
         Assert.DoesNotContain("class=\"brand-column\" rowspan=\"2\"", content.Content);
         Assert.DoesNotContain("Дело:", content.Content);
         Assert.DoesNotContain("Тел.:", content.Content);
@@ -1394,8 +1391,8 @@ public class InvoiceDocumentTemplateTests
         var action = await controller.GetDocument(paymentId, "xlsx", null, null, CancellationToken.None);
 
         var file = Assert.IsType<FileContentResult>(action);
-        Assert.Equal("application/msword", file.ContentType);
-        Assert.Equal("invoice-25.doc", file.FileDownloadName);
+        Assert.Equal("application/vnd.openxmlformats-officedocument.wordprocessingml.document", file.ContentType);
+        Assert.Equal("invoice-25.docx", file.FileDownloadName);
     }
 
     [Fact]
@@ -1487,8 +1484,8 @@ public class InvoiceDocumentTemplateTests
         Assert.Equal("custom@example.com", emailService.ToEmail);
         Assert.Equal("Custom subject", emailService.Subject);
         Assert.Equal("Custom body", emailService.Body);
-        Assert.Equal("invoice-25.doc", emailService.AttachmentFileName);
-        Assert.Equal("application/msword", emailService.AttachmentContentType);
+        Assert.Equal("invoice-25.docx", emailService.AttachmentFileName);
+        Assert.Equal("application/vnd.openxmlformats-officedocument.wordprocessingml.document", emailService.AttachmentContentType);
     }
 
     [Fact]
@@ -1529,15 +1526,15 @@ public class InvoiceDocumentTemplateTests
 
         var result = Assert.IsType<YandexDiskOperationResultDto>(action.Value);
         Assert.True(result.Success);
-        Assert.Equal("/CRM/invoice-25.doc", result.Path);
+        Assert.Equal("/CRM/invoice-25.docx", result.Path);
         Assert.NotNull(yandexDiskService.Upload);
         Assert.Equal("invoice", yandexDiskService.Upload.DocumentKind);
         Assert.Equal("Счет", yandexDiskService.Upload.DocumentType);
         Assert.Equal("25", yandexDiskService.Upload.DocumentNumber);
         Assert.Equal("Тестовый счет", yandexDiskService.Upload.DocumentTitle);
         Assert.Equal("Тестовый клиент", yandexDiskService.Upload.ClientName);
-        Assert.Equal("invoice-25.doc", yandexDiskService.Upload.OriginalFileName);
-        Assert.Equal("application/msword", yandexDiskService.Upload.ContentType);
+        Assert.Equal("invoice-25.docx", yandexDiskService.Upload.OriginalFileName);
+        Assert.Equal("application/vnd.openxmlformats-officedocument.wordprocessingml.document", yandexDiskService.Upload.ContentType);
         Assert.True(yandexDiskService.Upload.OverwriteExisting);
         Assert.NotEmpty(yandexDiskService.UploadBytes!);
 
@@ -1552,8 +1549,8 @@ public class InvoiceDocumentTemplateTests
             && item.ObjectType == "payment"
             && item.ObjectId == paymentId);
         Assert.Equal(YandexDiskCrmSyncStatus.Success, syncState.Status);
-        Assert.Equal("/CRM/invoice-25.doc", syncState.YandexDiskPath);
-        Assert.Equal("invoice-25.doc", syncState.FileName);
+        Assert.Equal("/CRM/invoice-25.docx", syncState.YandexDiskPath);
+        Assert.Equal("invoice-25.docx", syncState.FileName);
         Assert.Equal(1, syncState.AttemptCount);
     }
 

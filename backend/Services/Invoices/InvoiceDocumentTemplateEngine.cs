@@ -1617,13 +1617,14 @@ public static class InvoiceDocumentTemplateEngine
         "девять",
     ];
 
-    public static readonly string DefaultTemplateHtml = """
+    private const string DefaultTemplateHtmlSource = """
 <!doctype html>
 <html lang="ru">
 <head>
   <meta charset="utf-8" />
   <title>{{document.title}}</title>
   <style>
+    __PP_STANDARD_FONT_CSS__
     @page { size: A4; margin: 45px 0; }
     * { box-sizing: border-box; }
     body {
@@ -1860,6 +1861,65 @@ public static class InvoiceDocumentTemplateEngine
       color: #222222;
       font-size: 11px !important;
     }
+    @page { size: A4; margin: 14mm 11.8mm; }
+    body { font-family: 'DejaVu Sans Condensed', sans-serif; font-size: 10.5pt; line-height: 1.16; }
+    .page-content { width: 178.5mm; height: auto; padding: 0; margin: 0 auto; box-sizing: border-box; }
+    .document-template,
+    .document-template div,
+    .document-template span,
+    .document-template table,
+    .document-template tbody,
+    .document-template thead,
+    .document-template tfoot,
+    .document-template tr,
+    .document-template th,
+    .document-template td { font-size: 10.5pt; }
+    .doc-title { width: 72mm !important; padding: 0 !important; position: relative; top: 7.9pt; font-size: 13.5pt !important; line-height: 1.18; }
+    .invoice-template > table:first-child { width: 134.4mm; min-height: 17mm; margin: 0 0 12mm 0 !important; }
+    .logo-wrap, .invoice-qr-cell { display: none; }
+    .invoice-template > table:nth-of-type(2) { width: 134.4mm; margin: 0 0 2mm 1.2mm !important; transform: translateY(-5pt); }
+    .bank-grid { table-layout: fixed; }
+    .bank-grid td { height: 5.75mm; padding: .7mm 1.2mm; border-width: .75pt; font-size: 10.5pt !important; line-height: 1.08; }
+    .bank-grid tr:nth-child(2) td { height: 5.75mm; }
+    .bank-grid tr:nth-child(4) td { height: 5.75mm; }
+    .bank-grid tr:nth-child(5) td,
+    .bank-grid tr:nth-child(6) td,
+    .bank-grid tr:nth-child(7) td { height: 5.4mm; }
+    .doc-main-title { margin: 2mm 0 1.7mm; padding-bottom: 1.5mm; transform: translateY(-11.3pt); border-bottom: 1.5pt solid #000; text-align: center; font-size: 14pt !important; line-height: 1.05; }
+    .doc-main-title + .color-line { display: none; }
+    .counterparty-table { margin: 0 !important; transform: translateY(-4.5pt); }
+    .counterparty-table td { padding: 1.2mm 1mm; font-size: 10.5pt !important; line-height: 1.18; }
+    .counterparty-label { width: 15%; font-weight: 700; }
+    .counterparty-value { padding-left: 0 !important; font-weight: 400; }
+    .items-table { margin: 2.2mm 0 1.6mm; transform: translateY(-7.3pt); border-width: 1.5pt; }
+    .items-table th, .items-table td { padding: 1.3mm 1mm; border-width: .75pt; font-size: 10.5pt !important; line-height: 1.15; }
+    .items-table th { height: 6mm; }
+    .items-table th.name { position: relative; left: 11.7pt; }
+    .items-table td { min-height: 28mm; padding-top: 0; }
+    .items-table td.num,
+    .items-table td.qty,
+    .items-table td.unit,
+    .items-table td.price,
+    .items-table td.sum { vertical-align: middle; }
+    .items-table .num { width: 5%; }
+    .items-table .name { width: 49%; }
+    .items-table .qty { width: 8%; }
+    .items-table .unit { width: 5%; }
+    .items-table .price { width: 15%; }
+    .items-table .sum { width: 18%; }
+    .items-table .vat { display: none; }
+    .totals-table { width: 35% !important; margin-left: auto; transform: translate(-10.5pt, -5.4pt); }
+    .totals-table td { padding: .5mm 0; font-size: 10.5pt !important; }
+    .totals-label { width: 58%; padding-right: 2mm !important; }
+    .totals-value { width: 42%; }
+    .summary-line { margin-top: 1.5mm; }
+    .words { margin-top: .7mm; }
+    .invoice-meta, .installment-schedule { margin-top: 1.5mm; }
+    .invoice-meta:empty, .installment-schedule:empty { display: none; }
+    .invoice-meta + .color-line { margin: 1.8mm 0 0 !important; border-bottom-width: 1.5pt; }
+    .signature-table { margin-top: 10mm; transform: translateY(-16pt); table-layout: fixed; }
+    .signature-line { height: 6mm; }
+    .signature-caption { padding-top: 1mm; font-size: 8pt !important; }
   </style>
 </head>
 <body>
@@ -1919,7 +1979,7 @@ public static class InvoiceDocumentTemplateEngine
                 </tbody>
               </table>
             </td>
-            <td style="width: 150px; vertical-align: top;">
+            <td class="invoice-qr-cell" style="width: 150px; vertical-align: top;">
               {{invoice.qrCodeHtml}}
             </td>
           </tr>
@@ -1980,7 +2040,7 @@ public static class InvoiceDocumentTemplateEngine
             <td class="totals-value">{{invoice.subTotal}}</td>
           </tr>
           <tr>
-            <td class="totals-label">НДС:</td>
+            <td class="totals-label">Без налога (НДС):</td>
             <td class="totals-value">{{invoice.vatText}}</td>
           </tr>
           <tr>
@@ -2006,32 +2066,16 @@ public static class InvoiceDocumentTemplateEngine
       <table class="signature-table">
         <tbody>
           <tr>
-            <td class="v-al-b" style="width: 18%;">Руководитель:</td>
-            <td class="signature-line text-c v-al-b" style="width: 24%;">{{seller.documentDirectorPosition}}</td>
-            <td style="width: 4%;"></td>
-            <td class="signature-line text-c" style="width: 24%;">{{seller.signatureHtml}}</td>
-            <td class="seal-slot text-c" style="width: 8%;">{{seller.sealHtml}}</td>
-            <td class="signature-line text-c v-al-b" style="width: 22%;">{{seller.documentDirectorShortName}}</td>
+            <td class="v-al-b" style="width: 25%;">Предприниматель</td>
+            <td class="signature-line text-c" style="width: 35%;">{{seller.signatureHtml}}</td>
+            <td class="seal-slot text-c" style="width: 5%;">{{seller.sealHtml}}</td>
+            <td class="signature-line text-c v-al-b" style="width: 35%;">{{seller.documentDirectorShortName}}</td>
           </tr>
           <tr>
-            <td style="width: 18%;"></td>
-            <td class="text-c signature-caption" style="width: 24%;">должность</td>
-            <td style="width: 4%;"></td>
-            <td class="text-c signature-caption" style="width: 24%;">подпись</td>
-            <td style="width: 8%;"></td>
-            <td class="text-c signature-caption" style="width: 22%;">расшифровка подписи</td>
-          </tr>
-          <tr>
-            <td class="v-al-b" colspan="3" style="width: 46%;">{{seller.chiefAccountantPosition}}:</td>
-            <td class="signature-line text-c" style="width: 24%;"></td>
-            <td style="width: 8%;"></td>
-            <td class="signature-line text-c v-al-b" style="width: 22%;">{{seller.chiefAccountantShortName}}</td>
-          </tr>
-          <tr>
-            <td colspan="3" style="width: 46%;"></td>
-            <td class="text-c signature-caption" style="width: 24%;">подпись</td>
-            <td style="width: 8%;"></td>
-            <td class="text-c signature-caption" style="width: 22%;">расшифровка подписи</td>
+            <td></td>
+            <td class="text-c signature-caption">подпись</td>
+            <td></td>
+            <td class="text-c signature-caption">расшифровка подписи</td>
           </tr>
         </tbody>
       </table>
@@ -2040,6 +2084,11 @@ public static class InvoiceDocumentTemplateEngine
 </body>
 </html>
 """;
+
+    public static readonly string DefaultTemplateHtml = DefaultTemplateHtmlSource.Replace(
+        "__PP_STANDARD_FONT_CSS__",
+        BuildEmbeddedOrderFontCss(),
+        StringComparison.Ordinal);
 
     private const string OrderTemplateHtmlSource = """
 <!doctype html>
