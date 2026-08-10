@@ -12,35 +12,35 @@ public static class InvoiceStandardWordDocumentRenderer
     {
         try
         {
-        var seller = Extract(html, "<td class=\"doc-title\"[^>]*>(.*?)</td>");
-        var bankSource = Extract(html, "<table class=\"bank-grid\">(.*?)</table>");
-        var title = Extract(html, "<div class=\"doc-main-title text-c\">(.*?)</div>");
-        var parties = Extract(html, "<table class=\"counterparty-table\"[^>]*>(.*?)</table>");
-        var items = Extract(html, "<table class=\"items-table\">(.*?)</table>");
-        var totals = Extract(html, "<table class=\"totals-table\">(.*?)</table>");
-        var summary = Extract(html, "<div class=\"summary-line\">(.*?)</div>");
-        var words = Extract(html, "<div class=\"words\">(.*?)</div>");
-        var signature = Extract(html, "<table class=\"signature-table[^\"]*\">(.*?)</table>");
-        var bankCells = Regex.Matches(bankSource, "<td[^>]*>(.*?)</td>", RegexOptions.Singleline | RegexOptions.CultureInvariant)
-            .Select(match => match.Groups[1].Value.Trim())
-            .ToArray();
-        if (bankCells.Length < 16)
-        {
-            throw new InvalidOperationException("Не удалось распознать банковские реквизиты стандартного счета для Word.");
-        }
+            var seller = Extract(html, "<td class=\"doc-title\"[^>]*>(.*?)</td>");
+            var bankSource = Extract(html, "<table class=\"bank-grid\">(.*?)</table>");
+            var title = Extract(html, "<div class=\"doc-main-title text-c\">(.*?)</div>");
+            var parties = Extract(html, "<table class=\"counterparty-table\"[^>]*>(.*?)</table>");
+            var items = Extract(html, "<table class=\"items-table\">(.*?)</table>");
+            var totals = Extract(html, "<table class=\"totals-table\">(.*?)</table>");
+            var summary = Extract(html, "<div class=\"summary-line\">(.*?)</div>");
+            var words = Extract(html, "<div class=\"words\">(.*?)</div>");
+            var signature = Extract(html, "<table class=\"signature-table[^\"]*\">(.*?)</table>");
+            var bankCells = Regex.Matches(bankSource, "<td[^>]*>(.*?)</td>", RegexOptions.Singleline | RegexOptions.CultureInvariant)
+                .Select(match => match.Groups[1].Value.Trim())
+                .ToArray();
+            if (bankCells.Length < 16)
+            {
+                throw new InvalidOperationException("Не удалось распознать банковские реквизиты стандартного счета для Word.");
+            }
 
-        var partyCells = Regex.Matches(parties, "<td[^>]*>(.*?)</td>", RegexOptions.Singleline | RegexOptions.CultureInvariant)
-            .Select(match => match.Groups[1].Value.Trim())
-            .ToArray();
-        if (partyCells.Length < 4)
-        {
-            throw new InvalidOperationException("Не удалось распознать реквизиты сторон стандартного счета для Word.");
-        }
+            var partyCells = Regex.Matches(parties, "<td[^>]*>(.*?)</td>", RegexOptions.Singleline | RegexOptions.CultureInvariant)
+                .Select(match => match.Groups[1].Value.Trim())
+                .ToArray();
+            if (partyCells.Length < 4)
+            {
+                throw new InvalidOperationException("Не удалось распознать реквизиты сторон стандартного счета для Word.");
+            }
 
-        var foundationRow = partyCells.Length > 4
-            ? $"<tr><td colspan=\"2\">{WordParagraph(partyCells[4], "12pt")}</td></tr>"
-            : string.Empty;
-        parties = $$"""
+            var foundationRow = partyCells.Length > 4
+                ? $"<tr><td colspan=\"2\">{WordParagraph(partyCells[4], "12pt")}</td></tr>"
+                : string.Empty;
+            parties = $$"""
 <tr><td width="102" style="width:76pt;font-weight:700">{{WordParagraph(partyCells[0], "12pt")}}</td><td width="573" style="width:430pt">{{WordParagraph(partyCells[1], "12pt")}}</td></tr>
 <tr><td colspan="2">{{Spacer("5.2pt")}}</td></tr>
 <tr><td width="102" style="width:76pt;font-weight:700">{{WordParagraph(partyCells[2], "12pt")}}</td><td width="573" style="width:430pt">{{WordParagraph(partyCells[3], "12pt")}}</td></tr>
@@ -48,7 +48,7 @@ public static class InvoiceStandardWordDocumentRenderer
 {{foundationRow}}
 """;
 
-        var bank = $$"""
+            var bank = $$"""
 <colgroup><col width="127" /><col width="127" /><col width="76" /><col width="178" /></colgroup>
 <tr class="bank-row-1"><td colspan="2">{{WordParagraph(bankCells[0])}}</td><td>{{WordParagraph(bankCells[1])}}</td><td>{{WordParagraph(bankCells[2])}}</td></tr>
 <tr class="bank-row-2"><td colspan="2">{{WordParagraph("&nbsp;")}}</td><td>{{WordParagraph(bankCells[3])}}</td><td rowspan="2">{{WordParagraph(bankCells[4])}}</td></tr>
@@ -57,12 +57,12 @@ public static class InvoiceStandardWordDocumentRenderer
 <tr class="bank-row-5"><td colspan="2">{{WordParagraph(bankCells[11])}}<div class="bank-caption">{{WordParagraph(bankCells[14])}}</div></td></tr>
 """;
 
-        items = Regex.Replace(items, "<(?:th|td) class=\"vat\"[^>]*>.*?</(?:th|td)>", string.Empty, RegexOptions.Singleline | RegexOptions.CultureInvariant);
-        items = WrapTableCells(items, "10pt");
-        totals = WrapTableCells(totals, "10pt");
-        signature = WrapTableCells(signature, "11pt");
+            items = Regex.Replace(items, "<(?:th|td) class=\"vat\"[^>]*>.*?</(?:th|td)>", string.Empty, RegexOptions.Singleline | RegexOptions.CultureInvariant);
+            items = WrapTableCells(items, "10pt");
+            totals = WrapTableCells(totals, "10pt");
+            signature = WrapTableCells(signature, "11pt");
 
-        var wordHtml = $$"""
+            var wordHtml = $$"""
 <!doctype html>
 <html lang="ru">
 <head>
