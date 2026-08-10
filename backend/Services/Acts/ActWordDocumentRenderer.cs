@@ -20,6 +20,14 @@ public static class ActWordDocumentRenderer
     private static readonly Regex ImageRegex = new(
         "<img\\s+src=\"data:(image/(?<type>png|jpeg));base64,(?<data>[^\"]+)\"[^>]*class=\"(?<class>signature|seal)\"[^>]*/>",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex CounterpartyRowRegex = new(
+        "<tr>([\\s\\S]*?)</tr>",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex CounterpartyValueRegex = new(
+        "<td class=\"counterparty-value[^\"]*\">([\\s\\S]*?)</td>",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex HtmlTagRegex = new("<[^>]+>", RegexOptions.Compiled);
+    private static readonly Regex WhitespaceRegex = new("\\s+", RegexOptions.Compiled);
 
     public static byte[] Render(string html)
     {
@@ -59,11 +67,12 @@ public static class ActWordDocumentRenderer
             .Replace("<th class=\"bor item-sum\">", "<th class=\"bor item-sum\" width=\"15%\">", StringComparison.Ordinal)
             .Replace("<td class=\"bor item-index\">", "<td class=\"bor item-index\" width=\"5%\" align=\"center\">", StringComparison.Ordinal)
             .Replace("<td class=\"bor item-name\">", "<td class=\"bor item-name\" width=\"45%\" align=\"justify\" style=\"text-align:justify;\">", StringComparison.Ordinal)
-            .Replace("<td class=\"bor item-qty\">", "<td class=\"bor item-qty\" width=\"10%\" align=\"center\">", StringComparison.Ordinal)
+            .Replace("<td class=\"bor item-qty\">", "<td class=\"bor item-qty\" width=\"10%\" align=\"right\">", StringComparison.Ordinal)
             .Replace("<td class=\"bor item-unit\">", "<td class=\"bor item-unit\" width=\"10%\" align=\"center\">", StringComparison.Ordinal)
             .Replace("<td class=\"bor item-price\">", "<td class=\"bor item-price\" width=\"15%\" align=\"right\">", StringComparison.Ordinal)
             .Replace("<td class=\"bor item-sum\">", "<td class=\"bor item-sum\" width=\"15%\" align=\"right\">", StringComparison.Ordinal)
-            .Replace("<table class=\"signature-table\" cellspacing=\"0\" width=\"100%\">", "<table class=\"signature-table\" cellspacing=\"0\" width=\"100%\" style=\"width:100%;table-layout:fixed;\">", StringComparison.Ordinal);
+            .Replace("<table class=\"signature-table\" cellspacing=\"0\" width=\"100%\">", "<table class=\"signature-table\" cellspacing=\"0\" width=\"526\" style=\"width:526pt;table-layout:fixed;mso-table-layout-alt:fixed;\">", StringComparison.Ordinal)
+            .Replace("<td class=\"signature-gap\" width=\"2.575%\"></td>", "<td class=\"signature-gap\" width=\"15\" style=\"width:15.15pt;\"></td>", StringComparison.Ordinal);
 
         html = html.Replace("</style>", WordCss + "</style>", StringComparison.OrdinalIgnoreCase);
         html = ReplaceCounterpartyRows(html);
@@ -80,10 +89,19 @@ public static class ActWordDocumentRenderer
             return html;
         }
 
-        var rowHeights = new Queue<string>(["35.4pt", "24.6pt", "12.9pt"]);
-        var replacement = Regex.Replace(table.Value, "<tr>", _ =>
-            $"<tr style=\"height:{rowHeights.Dequeue()};mso-height-rule:exactly;\">",
-            RegexOptions.IgnoreCase);
+        var replacement = CounterpartyRowRegex.Replace(table.Value, match =>
+        {
+            var rowHtml = match.Groups[1].Value;
+            var valueMatch = CounterpartyValueRegex.Match(rowHtml);
+            var plainText = valueMatch.Success
+                ? WhitespaceRegex.Replace(
+                    System.Net.WebUtility.HtmlDecode(HtmlTagRegex.Replace(valueMatch.Groups[1].Value, " ")),
+                    " ").Trim()
+                : string.Empty;
+            var lineCount = Math.Max(1, (plainText.Length + 89) / 90);
+            var height = lineCount == 1 ? 12.9 : 13.8 + (lineCount - 1) * 10.8;
+            return $"<tr style=\"height:{height.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture)}pt;mso-height-rule:exactly;\">{rowHtml}</tr>";
+        });
         return ReplaceMatch(html, table, replacement);
     }
 
@@ -96,11 +114,11 @@ public static class ActWordDocumentRenderer
         }
 
         var table = match.Value
-            .Replace("<table class=\"totals-table mar-t-5\" cellspacing=\"0\">", "<table class=\"totals-table mar-t-5\" cellspacing=\"0\" width=\"100%\" style=\"width:100%;\">", StringComparison.Ordinal)
+            .Replace("<table class=\"totals-table mar-t-5\" cellspacing=\"0\">", "<table class=\"totals-table mar-t-5\" cellspacing=\"0\" width=\"100%\" style=\"width:100%;table-layout:fixed;mso-table-layout-alt:fixed;\">", StringComparison.Ordinal)
             .Replace("<tr>", "<tr style=\"height:13.8pt;mso-height-rule:exactly;\">", StringComparison.Ordinal)
-            .Replace("<td class=\"totals-label\">", "<td class=\"totals-label\" width=\"52%\" align=\"right\">", StringComparison.Ordinal)
-            .Replace("<td class=\"totals-value\">", "<td class=\"totals-value\" width=\"48%\" align=\"right\">", StringComparison.Ordinal);
-        var positioned = "<table cellspacing=\"0\" cellpadding=\"0\" width=\"100%\" style=\"width:100%;\"><tr><td width=\"68.5%\"></td><td width=\"31.5%\" style=\"padding-top:6.3pt;\">" + table + "</td></tr></table>";
+            .Replace("<td class=\"totals-label\">", "<td class=\"totals-label\" width=\"52%\" align=\"right\" style=\"width:52%;\">", StringComparison.Ordinal)
+            .Replace("<td class=\"totals-value\">", "<td class=\"totals-value\" width=\"48%\" align=\"right\" style=\"width:48%;\">", StringComparison.Ordinal);
+        var positioned = "<table cellspacing=\"0\" cellpadding=\"0\" width=\"100%\" style=\"width:100%;table-layout:fixed;mso-table-layout-alt:fixed;\"><tr><td width=\"69%\" style=\"width:69%;\"></td><td width=\"31%\" style=\"width:31%;padding-top:6.3pt;\">" + table + "</td></tr></table>";
         return ReplaceMatch(html, match, positioned);
     }
 
@@ -133,7 +151,9 @@ public static class ActWordDocumentRenderer
             var outerPadding = index == 1
                 ? "padding:0 0 0 1.4pt;mso-padding-alt:0pt 0pt 0pt 1.4pt;"
                 : "padding:0;mso-padding-alt:0pt 0pt 0pt 0pt;";
-            var replacement = "<td class=\"signature-party-cell\" width=\"" + match.Groups[1].Value + "\" valign=\"top\" style=\"" + outerPadding + "\"><table cellspacing=\"0\" cellpadding=\"0\" width=\"100%\" style=\"width:100%;mso-cellspacing:0;mso-padding-alt:0pt 0pt 0pt 0pt;\"><tr style=\"height:17.2pt;mso-height-rule:exactly;\"><td valign=\"top\" class=\"signature-role\" style=\"padding:0;margin:0;mso-padding-alt:0pt 0pt 0pt 0pt;\">" + role.Groups[1].Value.Trim() + "</td></tr><tr style=\"height:26.3pt;mso-height-rule:exactly;\"><td valign=\"top\" class=\"signature-party\" style=\"padding:0;margin:0;mso-padding-alt:0pt 0pt 0pt 0pt;\">" + party.Groups[1].Value.Trim() + "</td></tr><tr><td valign=\"top\" class=\"signature-sign-cell\" style=\"padding:0;margin:0;mso-padding-alt:0pt 0pt 0pt 0pt;\">" + sign.Groups[1].Value.Trim() + "</td></tr></table></td>";
+            var widthAttribute = index == 1 ? "256" : "255";
+            var widthStyle = index == 1 ? "255.85pt" : "255pt";
+            var replacement = "<td class=\"signature-party-cell\" width=\"" + widthAttribute + "\" valign=\"top\" style=\"width:" + widthStyle + ";" + outerPadding + "\"><table cellspacing=\"0\" cellpadding=\"0\" width=\"100%\" style=\"width:100%;table-layout:fixed;mso-table-layout-alt:fixed;mso-cellspacing:0;mso-padding-alt:0pt 0pt 0pt 0pt;\"><tr style=\"height:17.2pt;mso-height-rule:exactly;\"><td valign=\"top\" class=\"signature-role\" style=\"padding:0;margin:0;mso-padding-alt:0pt 0pt 0pt 0pt;\">" + role.Groups[1].Value.Trim() + "</td></tr><tr style=\"height:26.3pt;mso-height-rule:exactly;\"><td valign=\"top\" class=\"signature-party\" style=\"padding:0;margin:0;mso-padding-alt:0pt 0pt 0pt 0pt;\">" + party.Groups[1].Value.Trim() + "</td></tr><tr><td valign=\"top\" class=\"signature-sign-cell\" style=\"padding:0;margin:0;mso-padding-alt:0pt 0pt 0pt 0pt;\">" + sign.Groups[1].Value.Trim() + "</td></tr></table></td>";
             html = ReplaceMatch(html, match, replacement);
         }
 

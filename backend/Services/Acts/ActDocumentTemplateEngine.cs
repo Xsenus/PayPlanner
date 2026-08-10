@@ -379,7 +379,7 @@ public static class ActDocumentTemplateEngine
       border: 1px solid #000000;
       padding: 2px 3px;
       vertical-align: top;
-      line-height: 1.25;
+      line-height: 1.2;
     }
     .items-table th {
       font-weight: 700;
@@ -393,6 +393,13 @@ public static class ActDocumentTemplateEngine
     .items-table .item-name {
       width: 45%;
       word-break: break-word;
+    }
+    .items-table tbody .item-name {
+      text-align: justify;
+      text-justify: inter-character;
+    }
+    .items-table tbody .item-qty {
+      text-align: right;
     }
     .items-table .item-qty {
       width: 10%;
@@ -413,9 +420,17 @@ public static class ActDocumentTemplateEngine
       vertical-align: middle;
       white-space: nowrap;
     }
+    .items-table tbody .item-index,
+    .items-table tbody .item-qty,
+    .items-table tbody .item-unit,
+    .items-table tbody .item-price,
+    .items-table tbody .item-sum {
+      vertical-align: top;
+    }
     .totals-table td {
       padding: 0;
       font-size: 12px !important;
+      line-height: 13.8pt;
     }
     .totals-label {
       width: 85%;
@@ -430,25 +445,27 @@ public static class ActDocumentTemplateEngine
     }
     .summary-block {
       margin-top: 6px;
-      line-height: 1.25;
+      line-height: 1.2;
     }
     .mar-t-5 { margin-top: 5px !important; }
     .mar-t-10 { margin-top: 10px !important; }
     .mar-t-15 { margin-top: 15px !important; }
     .summary-words {
-      margin-top: 2px;
+      margin-top: 0;
       font-weight: 700;
     }
+    .totals-table.mar-t-5 { margin-top: 6.08px !important; }
+    .summary-block .mar-t-5 { margin-top: 3px !important; }
     .acceptance {
       margin-top: 12px;
-      line-height: 1.35;
+      line-height: 1.2;
     }
     .comment {
       margin-top: 10px;
       line-height: 1.35;
     }
     .signature-area {
-      margin-top: 8.3px;
+      margin-top: 15.02px;
     }
     .signature-table {
       margin-top: 10.8px;
@@ -785,13 +802,16 @@ public static class ActDocumentTemplateEngine
         }
 
         var accountNumber = FirstNotEmpty(bankAccount.AccountNumber, mainCompany?.TreasuryAccountNumber);
-        if (!string.IsNullOrWhiteSpace(accountNumber))
+        var bankName = FirstNotEmpty(bankAccount.Bank, mainCompany?.TreasuryBankName);
+        if (!string.IsNullOrWhiteSpace(accountNumber) && !string.IsNullOrWhiteSpace(bankName))
+        {
+            requisites.Add($"р/с {accountNumber} в банке {bankName}");
+        }
+        else if (!string.IsNullOrWhiteSpace(accountNumber))
         {
             requisites.Add($"р/с {accountNumber}");
         }
-
-        var bankName = FirstNotEmpty(bankAccount.Bank, mainCompany?.TreasuryBankName);
-        if (!string.IsNullOrWhiteSpace(bankName))
+        else if (!string.IsNullOrWhiteSpace(bankName))
         {
             requisites.Add($"в банке {bankName}");
         }
@@ -1191,11 +1211,11 @@ public static class ActDocumentTemplateEngine
             var passportIdentity = string.Empty;
             if (!string.IsNullOrWhiteSpace(series) && !string.IsNullOrWhiteSpace(number))
             {
-                passportIdentity = $"Паспорт {series.Trim()} № {number.Trim()}";
+                passportIdentity = $"Паспорт серия {series.Trim()} № {number.Trim()}";
             }
             else if (!string.IsNullOrWhiteSpace(series))
             {
-                passportIdentity = $"Паспорт {series.Trim()}";
+                passportIdentity = $"Паспорт серия {series.Trim()}";
             }
             else if (!string.IsNullOrWhiteSpace(number))
             {

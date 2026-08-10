@@ -1099,16 +1099,25 @@ public class ActsControllerTests
         Assert.Contains("Акт № 1199 от 25 декабря 2025 г.", normalizedHtml);
         Assert.Contains("Счет-договор № 182 от 24.12.2025", normalizedHtml);
         Assert.Contains("к/с 30101810745374525104", normalizedHtml);
-        Assert.Contains("Паспорт 36 07 № 763332", normalizedHtml);
+        Assert.Contains("Паспорт серия 36 07 № 763332", normalizedHtml);
         Assert.True(
             normalizedHtml.IndexOf(client.Address, StringComparison.Ordinal) <
-            normalizedHtml.IndexOf("Паспорт 36 07 № 763332", StringComparison.Ordinal));
+            normalizedHtml.IndexOf("Паспорт серия 36 07 № 763332", StringComparison.Ordinal));
         Assert.Contains("Всего оказано услуг 2", normalizedHtml);
         Assert.Contains("20 000,00", normalizedHtml);
         Assert.Contains("@page { size: A4; margin: 10mm 7.3mm 10mm 15mm; }", normalizedHtml);
         Assert.Contains("font-family: \"DejaVu Sans Condensed\"", normalizedHtml);
         Assert.Contains("data:font/ttf;base64,", normalizedHtml);
         Assert.Contains("width: 45%;", normalizedHtml);
+        Assert.Contains(".items-table tbody .item-name", normalizedHtml);
+        Assert.Contains("text-align: justify;", normalizedHtml);
+        Assert.Contains("text-justify: inter-character;", normalizedHtml);
+        Assert.Contains(".items-table tbody .item-qty", normalizedHtml);
+        Assert.Contains("text-align: right;", normalizedHtml);
+        Assert.Contains(".items-table tbody .item-qty", normalizedHtml);
+        Assert.Contains("vertical-align: top;", normalizedHtml);
+        Assert.Contains("line-height: 1.2;", normalizedHtml);
+        Assert.Contains("line-height: 13.8pt;", normalizedHtml);
         Assert.Contains("Без налога (НДС):", normalizedHtml);
         Assert.DoesNotContain("Служебный комментарий из учета", normalizedHtml);
         Assert.Contains("ИСПОЛНИТЕЛЬ", normalizedHtml);
@@ -1191,7 +1200,7 @@ public class ActsControllerTests
         Assert.Contains("Счет № 34 от 15.04.2026", normalizedHtml);
         Assert.DoesNotContain("Счет-договор № 34", normalizedHtml);
         Assert.DoesNotContain("Счет № 34 от 27.04.2026", normalizedHtml);
-        Assert.Contains("Паспорт 8113 № 527051", normalizedHtml);
+        Assert.Contains("Паспорт серия 8113 № 527051", normalizedHtml);
         Assert.DoesNotContain("9999", normalizedHtml);
     }
 
@@ -1253,7 +1262,7 @@ public class ActsControllerTests
         var normalizedHtml = html.Replace("&nbsp;", " ").Replace("\u00A0", " ");
         Assert.Contains("Акт № LOCAL-ACT от 8 июня 2026 г.", normalizedHtml);
         Assert.Contains("Счет № INV-ACT-LOCAL от 04.06.2026", normalizedHtml);
-        Assert.Contains("Паспорт 4321 № 098765, выдан 05.06.2026", normalizedHtml);
+        Assert.Contains("Паспорт серия 4321 № 098765, выдан 05.06.2026", normalizedHtml);
         Assert.DoesNotContain("T00:00:00", normalizedHtml, StringComparison.Ordinal);
         var visibleHtml = Regex.Replace(normalizedHtml, "<style[\\s\\S]*?</style>", string.Empty, RegexOptions.IgnoreCase);
         Assert.DoesNotContain("Z", visibleHtml, StringComparison.Ordinal);
@@ -1315,13 +1324,13 @@ public class ActsControllerTests
         var normalizedHtml = html.Replace("&nbsp;", " ").Replace("\u00A0", " ");
 
         Assert.Contains("Тестовый клиент, ИНН 123456789012, СНИЛС 123-456-789 00", normalizedHtml);
-        Assert.Contains("Паспорт 1234 № 567890", normalizedHtml);
+        Assert.Contains("Паспорт серия 1234 № 567890", normalizedHtml);
         Assert.Contains("Самара, ул. Тестовая, д. 1", normalizedHtml);
 
         var buyerNameIndex = normalizedHtml.IndexOf("Тестовый клиент", StringComparison.Ordinal);
         var innIndex = normalizedHtml.IndexOf("ИНН 123456789012", StringComparison.Ordinal);
         var snilsIndex = normalizedHtml.IndexOf("СНИЛС 123-456-789 00", StringComparison.Ordinal);
-        var passportIndex = normalizedHtml.IndexOf("Паспорт 1234 № 567890", StringComparison.Ordinal);
+        var passportIndex = normalizedHtml.IndexOf("Паспорт серия 1234 № 567890", StringComparison.Ordinal);
         var addressIndex = normalizedHtml.IndexOf("Самара, ул. Тестовая, д. 1", StringComparison.Ordinal);
         Assert.True(buyerNameIndex >= 0, "Buyer name should be present in the rendered act.");
         Assert.True(innIndex > buyerNameIndex, "ИНН should be rendered after the buyer name.");
@@ -1514,6 +1523,17 @@ public class ActsControllerTests
         Assert.DoesNotContain("Павлов Павел Олегович", normalizedHtml);
         Assert.DoesNotContain("data:image/png;base64,signature-demo", normalizedHtml);
         Assert.DoesNotContain("data:image/png;base64,seal-demo", normalizedHtml);
+
+        var wordBytes = ActWordDocumentRenderer.Render(html);
+        using var wordStream = new MemoryStream(wordBytes);
+        using var archive = new System.IO.Compression.ZipArchive(wordStream, System.IO.Compression.ZipArchiveMode.Read);
+        var htmlEntry = Assert.Single(archive.Entries, entry => entry.FullName == "word/afchunk.html");
+        using var htmlReader = new StreamReader(htmlEntry.Open());
+        var wordHtml = htmlReader.ReadToEnd();
+        Assert.Contains("height:12.9pt;mso-height-rule:exactly", wordHtml);
+        Assert.Contains("height:35.4pt;mso-height-rule:exactly", wordHtml);
+        Assert.Contains("mso-table-layout-alt:fixed", wordHtml);
+        Assert.Contains("width:255.85pt", wordHtml);
     }
 
     [Fact]
