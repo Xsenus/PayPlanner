@@ -1161,8 +1161,11 @@ public static class InvoiceDocumentTemplateEngine
             + "|TechCode=15"
             + $"|Sum={(long)Math.Round(total * 100m, MidpointRounding.AwayFromZero)}";
 
-        var qrUrl = $"https://api.qrserver.com/v1/create-qr-code/?size=150x150&data={Uri.EscapeDataString(qrPayload)}";
-        return $"<img src=\"{WebUtility.HtmlEncode(qrUrl)}\" alt=\"QR-код для оплаты\" class=\"invoice-qr\" />";
+        using var generator = new QRCoder.QRCodeGenerator();
+        using var qrData = generator.CreateQrCode(qrPayload, QRCoder.QRCodeGenerator.ECCLevel.M);
+        var qrCode = new QRCoder.PngByteQRCode(qrData);
+        var png = qrCode.GetGraphic(8);
+        return $"<img src=\"data:image/png;base64,{Convert.ToBase64String(png)}\" alt=\"QR-код для оплаты\" class=\"invoice-qr\" />";
     }
 
     private static string FormatMoney(decimal value)
@@ -1896,9 +1899,13 @@ public static class InvoiceDocumentTemplateEngine
     .document-template th,
     .document-template td { font-size: 10.5pt; }
     .doc-title { width: 72mm !important; padding: 0 !important; position: relative; top: 7.9pt; font-size: 13.5pt !important; line-height: 1.18; }
-    .invoice-template > table:first-child { width: 134.4mm; min-height: 17mm; margin: 0 0 12mm 0 !important; }
-    .logo-wrap, .invoice-qr-cell { display: none; }
-    .invoice-template > table:nth-of-type(2) { width: 134.4mm; margin: 0 0 2mm 1.2mm !important; transform: translateY(-5pt); }
+    .invoice-template > table:first-child { width: 178.5mm; min-height: 17mm; margin: 0 0 12mm 0 !important; table-layout: fixed; }
+    .logo-wrap { display: table-cell; position: relative; width: 47mm !important; padding: 0 !important; }
+    .logo-wrap .logo { position: absolute; top: -8.2pt; right: 3.4pt; width: 132.8pt; height: 75pt; max-width: none; max-height: none; margin: 0; }
+    .invoice-template > table:nth-of-type(2) { width: 178.5mm; margin: 0 0 2mm 0 !important; transform: translateY(-5pt); table-layout: fixed; }
+    .invoice-template > table:nth-of-type(2) > tbody > tr > td:first-child { width: 134.4mm; }
+    .invoice-qr-cell { display: table-cell; width: 44.1mm !important; padding: 0 0 0 9.3pt; vertical-align: top; }
+    .invoice-qr { position: relative; left: -3.5pt; width: 112.5pt; height: 112.5pt; max-width: none; max-height: none; }
     .bank-grid { table-layout: fixed; }
     .bank-grid td { height: 5.75mm; padding: .7mm 1.2mm; border-width: .75pt; font-size: 10.5pt !important; line-height: 1.08; }
     .bank-grid tr:nth-child(2) td { height: 5.75mm; }
@@ -1940,6 +1947,8 @@ public static class InvoiceDocumentTemplateEngine
     .invoice-meta + .color-line { margin: 1.8mm 0 0 !important; border-bottom-width: 1.5pt; }
     .signature-table { margin-top: 10mm; transform: translateY(-16pt); table-layout: fixed; }
     .signature-line { height: 6mm; }
+    .signature-line .signature { width: 67.5pt; height: 37.5pt; max-width: none; max-height: none; bottom: .3pt; transform: translateX(calc(-50% - .6pt)); }
+    .seal-slot .seal { width: 112.5pt; height: 113.2pt; max-width: none; max-height: none; top: -11.4pt; transform: translateX(calc(-50% - 4.7pt)); }
     .signature-caption { padding-top: 1mm; font-size: 8pt !important; }
   </style>
 </head>

@@ -365,9 +365,9 @@ public class InvoiceDocumentTemplateTests
         Assert.Contains("|04.06.2026|10.06.2026|", html);
         Assert.Contains("Договор № DOG-LOCAL от 01.06.2026", html);
         Assert.Contains("выдан 05.06.2026", html);
-        Assert.Contains("от 04.06.2026 на сумму", Uri.UnescapeDataString(html));
-        Assert.DoesNotContain("T00:00:00", html, StringComparison.Ordinal);
-        Assert.DoesNotContain("Z", html, StringComparison.Ordinal);
+        Assert.Contains("data:image/png;base64,", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("api.qrserver.com", html, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("T00:00:00Z", html, StringComparison.Ordinal);
     }
 
     [Fact]

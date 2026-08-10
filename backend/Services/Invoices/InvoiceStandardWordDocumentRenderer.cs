@@ -6,14 +6,24 @@ namespace PayPlanner.Api.Services.Invoices;
 public static class InvoiceStandardWordDocumentRenderer
 {
     public static byte[] Render(string html)
-        => HtmlWordDocumentBuilder.Build(BuildWordHtml(html));
+    {
+        var overlays = BuildImageOverlays(html);
+        var normalizedHtml = Regex.Replace(
+            html,
+            "<img(?=[^>]*src=\"data:image/)[^>]*>",
+            string.Empty,
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        return HtmlWordDocumentBuilder.Build(BuildWordHtml(normalizedHtml), overlays);
+    }
 
     internal static string BuildWordHtml(string html)
     {
         try
         {
             var seller = Extract(html, "<td class=\"doc-title\"[^>]*>(.*?)</td>");
+            var logo = Extract(html, "<td class=\"logo-wrap\"[^>]*>(.*?)</td>");
             var bankSource = Extract(html, "<table class=\"bank-grid\">(.*?)</table>");
+            var qrCode = Extract(html, "<td class=\"invoice-qr-cell\"[^>]*>(.*?)</td>");
             var title = Extract(html, "<div class=\"doc-main-title text-c\">(.*?)</div>");
             var parties = Extract(html, "<table class=\"counterparty-table\"[^>]*>(.*?)</table>");
             var items = Extract(html, "<table class=\"items-table\">(.*?)</table>");
@@ -72,8 +82,15 @@ public static class InvoiceStandardWordDocumentRenderer
     * { box-sizing: border-box; }
     body { margin: 0; color: #000; font-family: 'DejaVu Sans Condensed', sans-serif; font-size: 10.5pt; line-height: 12pt; }
     table { border-collapse: collapse; }
-    .seller { width: 216pt; margin-top: 24.5pt; font-size: 13.5pt; line-height: 16pt; font-weight: 700; }
-    .bank { width: 381pt; table-layout: fixed; margin-left: 3.4pt; font-size: 10.5pt; }
+    .top { width: 506pt; height: 48pt; table-layout: fixed; margin-top: -8.2pt; }
+    .seller { width: 348pt; padding: 21.5pt 0 0; vertical-align: top; font-size: 13.5pt; line-height: 16pt; font-weight: 700; }
+    .logo { width: 158pt; padding: 0; vertical-align: top; text-align: right; }
+    .logo img { position: relative; top: -18.3pt; left: -2.5pt; width: 132.8pt; height: 75pt; }
+    .payment { width: 506pt; table-layout: fixed; }
+    .payment > tbody > tr > td { padding: 0; vertical-align: top; }
+    .bank { width: 381pt; table-layout: fixed; margin: 0; font-size: 10.5pt; }
+    .qr { width: 125pt; padding-left: 9.3pt !important; }
+    .qr img { position: relative; top: -4.6pt; left: -1.6pt; width: 112.5pt; height: 112.5pt; }
     .bank td { border: .75pt solid #000; padding: 0 3.4pt; vertical-align: top; line-height: 11pt; }
     .bank-row-1 { height: 16pt; mso-height-source: exactly; }
     .bank-row-2 { height: 16pt; mso-height-source: exactly; }
@@ -84,7 +101,7 @@ public static class InvoiceStandardWordDocumentRenderer
     .bank-row-5 > td > p:first-child { position: relative; top: -14pt; }
     .bank-caption { margin-top: 7pt; }
     .title { width: 506pt; margin-top: -14pt; padding: 0 0 5pt; border-bottom: 1.5pt solid #000; text-align: center; font-size: 15pt; line-height: 17pt; font-weight: 700; }
-    .parties { width: 506pt; table-layout: fixed; margin-top: 17.5pt; }
+    .parties { width: 506pt; table-layout: fixed; margin-top: 24.5pt; }
     .parties td { padding: 0 2.8pt; vertical-align: top; line-height: 12pt; }
     .parties .counterparty-label { width: 76pt; font-weight: 700; }
     .parties .counterparty-value { width: 430pt; padding-left: 0; }
@@ -110,14 +127,19 @@ public static class InvoiceStandardWordDocumentRenderer
     .rule { margin-top: 4pt; border-bottom: 1.5pt solid #000; }
     .signature { width: 506pt; table-layout: fixed; margin-top: 94pt; }
     .signature td { vertical-align: bottom; }
-    .signature .signature-line { height: 18pt; border-bottom: .75pt solid #000; text-align: center; }
+    .signature .signature-line { position: relative; overflow: visible; height: 18pt; border-bottom: .75pt solid #000; text-align: center; }
+    .signature .signature-line .signature { width: 67.5pt; height: 37.5pt; position: absolute; left: 50%; bottom: 0; margin-left: 11pt; }
+    .signature .seal-slot { position: relative; overflow: visible; }
+    .signature .seal-slot .seal { width: 112.5pt; height: 113.2pt; position: absolute; left: 50%; bottom: -118pt; margin-left: -45.25pt; }
     .signature .signature-caption { padding-top: 2.8pt; text-align: center; font-size: 8pt; }
   </style>
 </head>
 <body>
-  <div class="seller">{{seller}}</div><p style="margin:0;mso-margin-top-alt:0;mso-margin-bottom-alt:0;font-size:1pt;line-height:41pt;mso-line-height-rule:exactly">&nbsp;</p>
-  <table class="bank" width="508">{{bank}}</table>
+  <table class="top" width="675"><tr><td class="seller" width="464">{{seller}}</td><td class="logo" width="211">{{logo}}</td></tr></table>
+  {{Spacer("19.5pt")}}
+  <table class="payment" width="675"><tr><td width="508"><table class="bank" width="508">{{bank}}</table></td><td class="qr" width="167">{{qrCode}}</td></tr></table>
   <div class="title">{{title}}</div>
+  {{Spacer("7pt")}}
   <table class="parties" width="675"><colgroup><col width="102" /><col width="573" /></colgroup>{{parties}}</table>
   {{Spacer("9.8pt")}}
   <table class="items" width="675">{{items}}</table>
@@ -149,6 +171,53 @@ public static class InvoiceStandardWordDocumentRenderer
         }
 
         return match.Groups[1].Value.Trim();
+    }
+
+    private static IReadOnlyList<WordImageOverlay> BuildImageOverlays(string html)
+    {
+        var overlays = new List<WordImageOverlay>(4);
+        AddImageOverlay(overlays, html, "logo", 415, 31.5, 132.8, 75, "Логотип", 4);
+        AddImageOverlay(overlays, html, "invoice-qr", 435.3, 117, 112.5, 112.5, "QR-код", 3);
+        AddImageOverlay(overlays, html, "seal", 300.5, 577.9, 112.4, 113.2, "Печать", 1);
+        AddImageOverlay(overlays, html, "signature", 225.9, 586.9, 67.5, 37.5, "Подпись", 2);
+        return overlays;
+    }
+
+    private static void AddImageOverlay(
+        ICollection<WordImageOverlay> overlays,
+        string html,
+        string cssClass,
+        double x,
+        double y,
+        double width,
+        double height,
+        string name,
+        int zOrder)
+    {
+        var pattern = $"<img(?=[^>]*class=\"[^\"]*\\b{Regex.Escape(cssClass)}\\b[^\"]*\")(?=[^>]*src=\"data:(?<contentType>image/(?:png|jpe?g|gif));base64,(?<data>[^\"]+)\")[^>]*>";
+        var match = Regex.Match(html, pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        if (!match.Success)
+        {
+            return;
+        }
+
+        var contentType = match.Groups["contentType"].Value.ToLowerInvariant();
+        var extension = contentType switch
+        {
+            "image/jpeg" or "image/jpg" => "jpg",
+            "image/gif" => "gif",
+            _ => "png",
+        };
+        overlays.Add(new WordImageOverlay(
+            Convert.FromBase64String(match.Groups["data"].Value),
+            contentType,
+            extension,
+            x,
+            y,
+            width,
+            height,
+            name,
+            zOrder));
     }
 
     private static string WordParagraph(string value)
