@@ -760,6 +760,7 @@ function CashOrderModal({
   onDeleteOrder,
   onCopy,
   onDownloadPdf,
+  onDownloadWord,
   onPrint,
   canCreate,
   canEdit,
@@ -777,6 +778,7 @@ function CashOrderModal({
   onDeleteOrder: (order: CashOrder) => Promise<void>;
   onCopy: (order: CashOrder) => Promise<void>;
   onDownloadPdf: (id: number) => Promise<void>;
+  onDownloadWord: (id: number) => Promise<void>;
   onPrint: (id: number) => void;
   canCreate: boolean;
   canEdit: boolean;
@@ -1072,6 +1074,14 @@ function CashOrderModal({
               className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">
               <Download className="h-4 w-4" />
               PDF
+            </button>
+            <button
+              type="button"
+              onClick={() => void onDownloadWord(form.id)}
+              disabled={!isPersisted || isSaving}
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+              <Download className="h-4 w-4" />
+              Word
             </button>
             <button
               type="button"
@@ -3593,6 +3603,24 @@ export function MoneyOperations({
     }
   };
 
+  const handleDownloadCashOrderWord = async (cashOrderId: number) => {
+    try {
+      const blob = await apiService.downloadCashOrderWord(cashOrderId);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${selectedCashOrder?.number ?? `cash-order-${cashOrderId}`}.docx`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (error) {
+      const message = extractDisplayErrorMessage(error, 'Не удалось скачать Word кассового ордера.');
+      toast.error(message, 'Касса');
+      throw new Error(message);
+    }
+  };
+
   const handleCreateCashOrder = async (item: MoneyOperation) => {
     if (!canCreateMoneyOperations) {
       toast.error('У вас нет прав на создание кассового ордера.', 'Касса');
@@ -5742,6 +5770,7 @@ export function MoneyOperations({
         onDeleteOrder={handleDeleteCashOrder}
         onCopy={handleCopyCashOrder}
         onDownloadPdf={handleDownloadCashOrderPdf}
+        onDownloadWord={handleDownloadCashOrderWord}
         onPrint={handlePrintCashOrder}
         canCreate={canCreateMoneyOperations}
         canEdit={canEditMoneyOperations}

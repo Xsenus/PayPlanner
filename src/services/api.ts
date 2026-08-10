@@ -8026,6 +8026,21 @@ export class ApiService {
     return response.blob();
   }
 
+  async downloadCashOrderWord(id: number) {
+    const token = getAuthToken();
+    const response = await fetch(`${API_BASE_URL}/cash-orders/${id}/word`, {
+      method: 'GET',
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+
+    if (!response.ok) {
+      const text = await extractResponseErrorMessage(response);
+      throw new Error(text || `HTTP ${response.status} ${response.statusText}`);
+    }
+
+    return response.blob();
+  }
+
   getCashOrderPrintUrl(id: number) {
     return `${API_BASE_URL}/cash-orders/${id}/print`;
   }

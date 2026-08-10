@@ -929,6 +929,43 @@ public class CashOrdersController : ControllerBase
         }
     }
 
+    [HttpGet("{id:int}/word")]
+    public async Task<IActionResult> DownloadWord(int id, CancellationToken ct)
+    {
+        if (await RequirePaymentsPermissionAsync(static permission => permission.CanView, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var visibility = await ResolvePaymentsVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Forbid();
+        }
+
+        var order = await _db.CashOrders
+            .Include(item => item.Client)
+            .Include(item => item.Payment)
+            .Include(item => item.MoneyOperation)
+            .AsNoTracking()
+            .ApplyCashOrderVisibility(visibility)
+            .FirstOrDefaultAsync(item => item.Id == id, ct);
+        if (order is null)
+        {
+            return NotFound();
+        }
+
+        var organizationName = await ResolveOrganizationNameAsync(order, ct);
+        var html = BuildPrintHtml(order, organizationName);
+        var bytes = order.Type == CashOrderType.Incoming
+            ? PayPlanner.Api.Services.Documents.CashOrderWordDocumentRenderer.RenderIncoming(html)
+            : PayPlanner.Api.Services.Documents.HtmlWordDocumentBuilder.Build(html);
+        return File(
+            bytes,
+            PayPlanner.Api.Services.Documents.HtmlWordDocumentBuilder.ContentType,
+            $"cash-order-{SanitizeFilePart(order.Number)}.docx");
+    }
+
     private static bool IsCashPayment(Payment payment)
         => payment.PaymentSource?.Name?.Contains(CashSourceToken, StringComparison.OrdinalIgnoreCase) == true ||
            payment.PaymentSource?.Name?.Contains(CashRegisterSourceToken, StringComparison.OrdinalIgnoreCase) == true;
@@ -1460,7 +1497,7 @@ public class CashOrdersController : ControllerBase
         {
             var legalEntityName = await _db.LegalEntities.AsNoTracking()
                 .Where(item => item.Id == id)
-                .Select(item => item.FullName ?? item.ShortName)
+                .Select(item => item.ShortName ?? item.FullName)
                 .FirstOrDefaultAsync(ct);
             if (!string.IsNullOrWhiteSpace(legalEntityName))
             {
@@ -1478,7 +1515,8 @@ public class CashOrdersController : ControllerBase
         var payer = Html(order.PayerName ?? order.Client?.Name ?? "-");
         var basis = Html(order.Basis ?? "-");
         var appendix = Html(order.Appendix ?? string.Empty);
-        var signer = Html(order.CreatedByUserName ?? string.Empty);
+        var signer = Html(ShortCashOrderSigner(order.CreatedByUserName));
+        var fontCss = BuildCashOrderFontCss();
         var amountRubKop = Html(FormatCashOrderRubKop(order.Amount));
         var rubles = Html(FormatWholeRubles(order.Amount));
         var kopecks = Html(FormatKopecks(order.Amount));
@@ -1495,12 +1533,13 @@ public class CashOrdersController : ControllerBase
   <meta charset="utf-8" />
   <title>Приходный кассовый ордер {{number}}</title>
   <style>
+    {{fontCss}}
     @page { size: A4 portrait; margin: 0; }
     * { box-sizing: border-box; }
     body {
       margin: 0;
       color: #111;
-      font-family: Arial, "DejaVu Sans", sans-serif;
+      font-family: "DejaVu Sans Condensed", sans-serif;
       font-size: 10px;
       line-height: 1.15;
       background: #fff;
@@ -1509,7 +1548,7 @@ public class CashOrdersController : ControllerBase
     }
     .ko1 {
       display: grid;
-      grid-template-columns: 100mm 13mm 64mm;
+      grid-template-columns: 100mm 12mm 64mm;
       gap: 1mm;
       width: 178mm;
       margin: 27mm 0 0 16mm;
@@ -1522,39 +1561,109 @@ public class CashOrdersController : ControllerBase
     .org-line { border-bottom: 2px solid #111; min-height: 18px; padding: 0 6px 2px; }
     .hint { color: #333; font-size: 6px; text-align: center; }
     .header-row { display: block; padding-right: 38mm; margin-top: 8mm; }
+    .header-row > div { position: relative; top: 3.6mm; }
+    .order .org-line { padding-left: 0; }
     .code-box, .doc-meta, .ledger { border-collapse: collapse; width: 100%; table-layout: fixed; }
     .code-box td, .doc-meta td, .ledger th, .ledger td { border: 1px solid #111; padding: 1.5mm 1mm; text-align: center; vertical-align: middle; }
-    .code-box { position: absolute; top: 10mm; right: 0; width: 21mm; }
-    .code-box td:first-child { border-left: 0; text-align: right; padding-right: 8px; }
-    .code-box td:last-child { font-weight: 700; }
-    .title { width: 62mm; margin: 6mm 0 5mm 4mm; text-align: center; font-size: 11px; line-height: 1.05; font-weight: 800; letter-spacing: .02em; text-transform: uppercase; }
-    .doc-meta { position: absolute; top: 31mm; right: 0; width: 36mm; margin: 0; font-size: 7px; }
-    .doc-meta .value { font-size: 10px; font-weight: 700; }
-    .ledger { font-size: 7px; }
+    .code-box { position: absolute; top: 7.93mm; right: .4mm; width: 32mm; font-size: 6pt; }
+    .code-box td { padding: 0 1mm; }
+    .code-box td:first-child { width: 17mm; border-left: 0; text-align: right; }
+    .code-box td:last-child { width: 15mm; font-weight: 700; }
+    .code-box tr:nth-child(1) { height: 4.6mm; }
+    .code-box tr:nth-child(1) td:first-child { font-size: 7pt; }
+    .code-box tr:nth-child(2) { height: 8.1mm; }
+    .code-box tr:nth-child(3) { height: 6mm; }
+    .title { width: 62mm; margin: 6mm 0 5mm 3.5mm; position: relative; top: .5mm; text-align: center; font-size: 9pt; line-height: 1.05; font-weight: 700; text-transform: uppercase; }
+    .doc-meta { position: absolute; top: 27.9mm; right: 0; width: 36mm; margin: 0; font-size: 6pt; }
+    .doc-meta td:nth-child(2) { padding-left: 6.8pt; }
+    .doc-meta .value { font-size: 7pt; font-weight: 700; }
+    .ledger { font-size: 6pt; }
     .ledger th { font-weight: 400; }
-    .ledger .sum { font-size: 7px; white-space: nowrap; }
-    .line-field { display: grid; grid-template-columns: auto 1fr; gap: 2mm; align-items: end; margin-top: 1.4mm; font-size: 7px; }
+    .ledger th, .ledger td { padding: 0 1pt; }
+    .ledger { position: relative; top: 4.5pt; margin-bottom: -8.4pt; }
+    .ledger th:first-child { width: 28.5pt !important; }
+    .ledger th[rowspan]:nth-last-child(2) { width: 39pt !important; }
+    .ledger th[rowspan]:last-child { width: 63pt !important; }
+    .ledger tr:nth-child(2) th:nth-child(1) { width: 37.5pt !important; }
+    .ledger tr:nth-child(2) th:nth-child(2) { width: 52.5pt !important; }
+    .ledger tr:nth-child(2) th:nth-child(3) { width: 63pt !important; }
+    .ledger tr:nth-child(1) { height: 11.5pt; }
+    .ledger tr:nth-child(2) { height: 30pt; }
+    .ledger tr:nth-child(3) { height: 10pt; }
+    .ledger th[rowspan] { vertical-align: top; padding-top: 2pt; }
+    .ledger tr:nth-child(2) th:nth-child(1) { padding-top: 0; }
+    .ledger tr:nth-child(2) th:nth-child(2) { padding-top: 1.6pt; }
+    .ledger tr:nth-child(2) th:nth-child(3) { padding-top: 3.5pt; }
+    .ledger .sum { font-size: 6pt; white-space: nowrap; padding-top: .2pt; }
+    .line-field { display: grid; grid-template-columns: auto 1fr; gap: 2mm; align-items: end; margin-top: 1.4mm; font-size: 6pt; }
     .line { min-height: 4mm; border-bottom: 1px solid #111; padding: 0 1.5mm .4mm; }
     .long-line { margin-top: 1.4mm; min-height: 4.2mm; border-bottom: 1px solid #111; }
-    .amount-words { display: grid; grid-template-columns: auto 1fr auto 18mm auto 12mm auto; gap: 2mm; align-items: end; margin-top: 1.8mm; font-size: 7px; }
+    .amount-words { display: grid; grid-template-columns: auto 1fr auto 18mm auto 12mm auto; gap: 2mm; align-items: end; margin-top: 1.8mm; font-size: 6pt; }
     .amount-words .line { text-align: left; }
     .amount-words .kopecks, .receipt .kopecks { text-align: center; }
-    .sign-row { display: grid; grid-template-columns: 28mm 1fr 1fr; gap: 6mm; align-items: end; margin-top: 2mm; font-size: 7px; }
+    .sign-row { display: grid; grid-template-columns: 28mm 1fr 1fr; gap: 6mm; align-items: end; margin-top: 2mm; font-size: 6pt; }
     .sign-line { border-bottom: 1px solid #111; min-height: 4.4mm; text-align: center; padding-bottom: .4mm; }
     .sign-label { font-size: 6px; text-align: center; color: #333; margin-top: .5mm; }
-    .receipt .org-line { margin: 0 0 0; text-align: center; }
-    .receipt-title { text-align: center; font-size: 15px; font-weight: 800; margin: 2mm 0 9mm; text-transform: uppercase; }
-    .receipt-subtitle { margin-bottom: 2mm; font-size: 7px; }
+    .receipt { height: 370pt; }
+    .receipt .org-line { position: absolute; top: 8pt; left: 0; width: 100%; margin: 0; text-align: center; font-size: 6pt; }
+    .receipt > .hint { position: absolute; top: 17pt; left: 0; width: 100%; font-size: 5pt; }
+    .receipt-title { position: absolute; top: 24pt; left: 0; width: 100%; text-align: center; font-size: 10pt; font-weight: 700; margin: 0; text-transform: uppercase; }
+    .receipt-subtitle { margin: 0; font-size: 6pt; }
     .receipt-number { display: grid; grid-template-columns: 1fr 12mm; gap: 3mm; align-items: end; }
-    .receipt-date { display: grid; grid-template-columns: auto 7mm auto 18mm 13mm auto; gap: 2mm; align-items: end; margin-top: 1.5mm; font-size: 7px; }
-    .receipt .line-field { grid-template-columns: auto 1fr; margin-top: 2mm; }
-    .receipt .amount-digits { display: grid; grid-template-columns: auto 1fr auto 10mm auto; gap: 2mm; align-items: end; margin-top: 8mm; font-size: 7px; }
+    .receipt-date { display: grid; grid-template-columns: auto 7mm auto 18mm 13mm auto; gap: 2mm; align-items: end; margin: 0; font-size: 6pt; }
+    .receipt .line-field { grid-template-columns: auto 1fr; margin: 0; }
+    .receipt .amount-digits { display: grid; grid-template-columns: auto 1fr auto 10mm auto; gap: 2mm; align-items: end; margin: 0; font-size: 6pt; }
     .receipt .amount-digits .line { text-align: center; }
     .receipt .amount-words { grid-template-columns: 1fr auto 45px auto; margin-top: 8px; }
     .receipt .amount-words .line { grid-column: 1 / 5; }
-    .receipt .small-hint { text-align: center; font-size: 6px; color: #333; margin-top: .5mm; }
-    .receipt .stamp-row { display: grid; grid-template-columns: 1fr auto 18mm auto 13mm auto; gap: 2mm; align-items: end; margin-top: 4mm; font-size: 7px; }
-    .receipt .sign-row { grid-template-columns: 24mm 1fr 1fr; gap: 4mm; margin-top: 4mm; }
+    .receipt .small-hint { text-align: center; font-size: 5pt; color: #333; margin: 0; }
+    .receipt .stamp-row { display: grid; grid-template-columns: 1fr auto 18mm auto 13mm auto; gap: 2mm; align-items: end; margin: 0; font-size: 6pt; }
+    .receipt .sign-row { grid-template-columns: 24mm 1fr 1fr; gap: 4mm; margin: 0; }
+    .receipt-number { position: absolute; top: 58pt; left: 0; width: 100%; }
+    .receipt-date-main { position: absolute; top: 70pt; left: 0; width: 100%; }
+    .payer-field { position: absolute; top: 81pt; left: 0; width: 100%; }
+    .basis-field { position: absolute; top: 102.5pt; left: 0; width: 100%; }
+    .receipt-lines { position: absolute; top: 119pt; left: 0; width: 100%; height: 21pt; border-top: 1px solid #111; border-bottom: 1px solid #111; }
+    .receipt-lines::after { content: ""; position: absolute; left: 0; right: 0; top: 10pt; border-top: 1px solid #111; }
+    .receipt-digits { position: absolute !important; top: 145pt; left: 0; width: 100%; }
+    .digits-hint { position: absolute; top: 157pt; left: 0; width: 100%; }
+    .receipt-words { position: absolute !important; top: 160pt; left: 0; width: 100%; }
+    .words-hint { position: absolute; top: 175pt; left: 0; width: 100%; }
+    .tax-field { position: absolute; top: 200pt; left: 0; width: 100%; }
+    .receipt-stamp-date { position: absolute; top: 215pt; left: 0; width: 100%; }
+    .stamp-label { position: absolute; top: 231pt; left: 0; margin: 0 !important; font-size: 6pt; }
+    .chief-sign { position: absolute; top: 232.8pt; left: 0; width: 100%; }
+    .cashier-sign { position: absolute; top: 249.5pt; left: 0; width: 100%; }
+    .order .line-field > span { position: relative; top: -4.3pt; }
+    .order-received { position: absolute; top: 187pt; left: 0; width: 100%; margin: 0; }
+    .order-basis { position: absolute; top: 197.9pt; left: 0; width: 100%; margin: 0; }
+    .order-blank { position: absolute; top: 209.5pt; left: 0; width: 100%; height: 14pt; margin: 0; }
+    .order-amount { position: absolute; top: 222.2pt; left: 0; width: 100%; height: 29pt; margin: 0; display: block !important; }
+    .order-amount > * { position: absolute; margin: 0; }
+    .order-amount > span:nth-child(1) { left: 0; top: 0; }
+    .order-amount > div:nth-child(2) { left: 31.3pt; top: 0; width: 147pt; }
+    .order-amount > span:nth-child(3) { left: 195.1pt; top: 17.8pt; }
+    .order-amount > div:nth-child(4) { left: 232.8pt; top: 17.8pt; width: 48pt; }
+    .order-amount > span:nth-child(5) { left: 265.7pt; top: 17.8pt; }
+    .order-amount-hint { position: absolute; top: 231.3pt; left: 139.5pt; margin: 0; font-size: 5pt; }
+    .order-tax { position: absolute; top: 251.1pt; left: 0; width: 100%; margin: 0; }
+    .order-appendix { position: absolute; top: 261.9pt; left: 0; width: 100%; margin: 0; }
+    .order-chief { position: absolute; top: 273pt; left: 0; width: 100%; margin: 0; grid-template-columns: 76pt 88pt 96pt 23.5pt; gap: 0; align-items: start; }
+    .order-cashier { position: absolute; top: 289.9pt; left: 0; width: 100%; margin: 0; grid-template-columns: 76pt 88pt 96pt 23.5pt; gap: 0; align-items: start; }
+    .order-chief > div:nth-child(3), .order-cashier > div:nth-child(3) { grid-column: 3; }
+    .receipt-number, .receipt-date-main, .payer-field, .basis-field, .receipt-digits, .digits-hint, .receipt-words, .words-hint, .tax-field, .receipt-stamp-date { transform: translateY(-4.2pt); }
+    .order-amount .line { position: relative; left: -4.6pt; }
+    .receipt-words .line { padding-left: 3pt; }
+    .receipt-digits { transform: translateY(-3.6pt); }
+    .receipt-words { transform: translateY(-3.55pt); }
+    .receipt .sign-row { align-items: start; }
+    .chief-sign { grid-template-columns: 63.6pt 38.3pt 79.6pt; gap: 0; }
+    .chief-sign > div:nth-child(3) { position: relative; left: 3.75pt; }
+    .cashier-sign { grid-template-columns: 32.5pt 32.2pt 27.8pt 54pt 35pt; gap: 0; }
+    .cashier-sign > div:nth-child(1) { grid-column: 1; }
+    .cashier-sign > div:nth-child(2) { grid-column: 2; }
+    .cashier-sign > div:nth-child(3) { grid-column: 4; }
+    .cashier-sign > div:nth-child(3) { position: relative; left: -3.15pt; }
     .cancelled { margin: 0 0 10px; border: 1px solid #111; padding: 6px 8px; font-weight: 700; }
   </style>
 </head>
@@ -1575,7 +1684,7 @@ public class CashOrdersController : ControllerBase
         </div>
         <table class="code-box">
           <tr><td>Код</td><td></td></tr>
-          <tr><td>Форма по ОКУД</td><td>0310001</td></tr>
+          <tr><td>Форма по ОКУД</td><td>0310002</td></tr>
           <tr><td>по ОКПО</td><td></td></tr>
         </table>
       </div>
@@ -1601,20 +1710,21 @@ public class CashOrdersController : ControllerBase
           <td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td class="sum">{{amountRubKop}}</td><td>&nbsp;</td>
         </tr>
       </table>
-      <div class="line-field"><span>Принято от</span><div class="line">{{payer}}</div></div>
-      <div class="line-field"><span>Основание:</span><div class="line">{{basis}}</div></div>
-      <div class="long-line"></div>
-      <div class="amount-words">
+      <div class="line-field order-received"><span>Принято от</span><div class="line">{{payer}}</div></div>
+      <div class="line-field order-basis"><span>Основание:</span><div class="line">{{basis}}</div></div>
+      <div class="long-line order-blank"></div>
+      <div class="amount-words order-amount">
         <span>Сумма</span><div class="line">{{amountWords}}</div><span>руб.</span><div class="line kopecks">{{kopecks}}</div><span>коп.</span>
       </div>
-      <div class="line-field" style="grid-template-columns:auto 1fr; margin-top:8px;"><span>В том числе</span><div class="line">Без налога (НДС) 0,00 руб.</div></div>
-      <div class="line-field"><span>Приложение</span><div class="line">{{appendix}}</div></div>
-      <div class="sign-row">
+      <div class="order-amount-hint">(прописью)</div>
+      <div class="line-field order-tax" style="grid-template-columns:auto 1fr;"><span>В том числе</span><div class="line">Без налога (НДС) 0,00 руб.</div></div>
+      <div class="line-field order-appendix"><span>Приложение</span><div class="line">{{appendix}}</div></div>
+      <div class="sign-row order-chief">
         <div>Главный бухгалтер</div>
         <div><div class="sign-line"></div><div class="sign-label">(подпись)</div></div>
         <div><div class="sign-line">{{signer}}</div><div class="sign-label">(расшифровка подписи)</div></div>
       </div>
-      <div class="sign-row">
+      <div class="sign-row order-cashier">
         <div>Получил кассир</div>
         <div><div class="sign-line"></div><div class="sign-label">(подпись)</div></div>
         <div><div class="sign-line">{{signer}}</div><div class="sign-label">(расшифровка подписи)</div></div>
@@ -1626,23 +1736,23 @@ public class CashOrdersController : ControllerBase
       <div class="hint">(организация)</div>
       <div class="receipt-title">Квитанция</div>
       <div class="receipt-subtitle receipt-number"><span>к приходному кассовому ордеру №</span><div class="line">{{number}}</div></div>
-      <div class="receipt-date"><span>от</span><span>"</span><div class="line">{{order.Date.Day}}</div><span>" {{month}}</span><div class="line">{{order.Date:yyyy}}</div><span>г.</span></div>
-      <div class="line-field"><span>Принято от</span><div class="line">{{payer}}</div></div>
-      <div class="line-field"><span>Основание:</span><div class="line">{{basis}}</div></div>
-      <div class="long-line"></div>
-      <div class="amount-digits"><span>Сумма</span><div class="line">{{rubles}}</div><span>руб.</span><div class="line">{{kopecks}}</div><span>коп.</span></div>
-      <div class="small-hint">(цифрами)</div>
-      <div class="amount-words"><div class="line">{{amountWords}}</div><span>руб.</span><div class="line kopecks">{{kopecks}}</div><span>коп.</span></div>
-      <div class="small-hint">(прописью)</div>
-      <div class="line-field" style="grid-template-columns:auto 1fr; margin-top:10px;"><span>В том числе</span><div class="line">Без налога (НДС) 0,00 руб.</div></div>
-      <div class="stamp-row"><span>"</span><div class="line">{{order.Date.Day}}</div><span>" {{month}}</span><div class="line">{{order.Date:yyyy}}</div><span>г.</span></div>
-      <div style="margin-top:12px;">М.П. (штампа)</div>
-      <div class="sign-row">
+      <div class="receipt-date receipt-date-main"><span>от</span><span>"</span><div class="line">{{order.Date.Day}}</div><span>" {{month}}</span><div class="line">{{order.Date:yyyy}}</div><span>г.</span></div>
+      <div class="line-field payer-field"><span>Принято от</span><div class="line">{{payer}}</div></div>
+      <div class="line-field basis-field"><span>Основание:</span><div class="line">{{basis}}</div></div>
+      <div class="receipt-lines"></div>
+      <div class="amount-digits receipt-digits"><span>Сумма</span><div class="line">{{rubles}}</div><span>руб.</span><div class="line">{{kopecks}}</div><span>коп.</span></div>
+      <div class="small-hint digits-hint">(цифрами)</div>
+      <div class="amount-words receipt-words"><div class="line">{{amountWords}}</div><span>руб.</span><div class="line kopecks">{{kopecks}}</div><span>коп.</span></div>
+      <div class="small-hint words-hint">(прописью)</div>
+      <div class="line-field tax-field" style="grid-template-columns:auto 1fr;"><span>В том числе</span><div class="line">Без налога (НДС) 0,00 руб.</div></div>
+      <div class="stamp-row receipt-stamp-date"><span>"</span><div class="line">{{order.Date.Day}}</div><span>" {{month}}</span><div class="line">{{order.Date:yyyy}}</div><span>г.</span></div>
+      <div class="stamp-label">М.П. (штампа)</div>
+      <div class="sign-row chief-sign">
         <div>Главный бухгалтер</div>
         <div><div class="sign-line"></div><div class="sign-label">(подпись)</div></div>
         <div><div class="sign-line">{{signer}}</div><div class="sign-label">(расшифровка подписи)</div></div>
       </div>
-      <div class="sign-row">
+      <div class="sign-row cashier-sign">
         <div>Кассир</div>
         <div><div class="sign-line"></div><div class="sign-label">(подпись)</div></div>
         <div><div class="sign-line">{{signer}}</div><div class="sign-label">(расшифровка подписи)</div></div>
@@ -2143,8 +2253,34 @@ public class CashOrdersController : ControllerBase
 
     private static string FormatWholeRubles(decimal value)
         => Math.Truncate(Math.Round(Math.Abs(value), 2, MidpointRounding.AwayFromZero))
-            .ToString("N0", System.Globalization.CultureInfo.GetCultureInfo("ru-RU"))
-            .Replace('\u00A0', ' ');
+            .ToString("0", System.Globalization.CultureInfo.InvariantCulture);
+
+    private static string ShortCashOrderSigner(string? value)
+    {
+        var parts = (value ?? string.Empty)
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return parts.Length >= 3
+            ? $"{parts[0]} {parts[1][0]}.{parts[2][0]}."
+            : string.Join(' ', parts);
+    }
+
+    private static string BuildCashOrderFontCss()
+    {
+        var assembly = typeof(CashOrdersController).Assembly;
+        static string ReadFont(System.Reflection.Assembly assembly, string resourceName)
+        {
+            using var stream = assembly.GetManifestResourceStream(resourceName)
+                ?? throw new InvalidOperationException($"Встроенный шрифт {resourceName} не найден.");
+            using var memory = new MemoryStream();
+            stream.CopyTo(memory);
+            return Convert.ToBase64String(memory.ToArray());
+        }
+
+        var regular = ReadFont(assembly, "PayPlanner.Fonts.DejaVuSansCondensed.ttf");
+        var bold = ReadFont(assembly, "PayPlanner.Fonts.DejaVuSansCondensed-Bold.ttf");
+        return $"@font-face {{ font-family:'DejaVu Sans Condensed'; src:url(data:font/ttf;base64,{regular}) format('truetype'); font-weight:400; }} "
+            + $"@font-face {{ font-family:'DejaVu Sans Condensed'; src:url(data:font/ttf;base64,{bold}) format('truetype'); font-weight:700; }}";
+    }
 
     private static string FormatKopecks(decimal value)
     {
