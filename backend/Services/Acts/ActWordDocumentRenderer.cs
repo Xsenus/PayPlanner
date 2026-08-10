@@ -26,12 +26,16 @@ public static class ActWordDocumentRenderer
     private static readonly Regex CounterpartyValueRegex = new(
         "<td class=\"counterparty-value[^\"]*\">([\\s\\S]*?)</td>",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex ItemNameCellRegex = new(
+        "<td class=\"bor item-name\">",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
     private static readonly Regex HtmlTagRegex = new("<[^>]+>", RegexOptions.Compiled);
     private static readonly Regex WhitespaceRegex = new("\\s+", RegexOptions.Compiled);
 
     public static byte[] Render(string html)
     {
         var overlays = new List<WordImageOverlay>();
+        var overlayYOffset = Math.Max(0, ItemNameCellRegex.Matches(html).Count - 2) * 3.7;
         var withoutImages = ImageRegex.Replace(html, match =>
         {
             var isSignature = string.Equals(match.Groups["class"].Value, "signature", StringComparison.OrdinalIgnoreCase);
@@ -41,7 +45,7 @@ public static class ActWordDocumentRenderer
                 $"image/{type}",
                 type == "jpeg" ? "jpg" : type,
                 isSignature ? 42.02 : 150.77,
-                isSignature ? 368.4 : 338.4,
+                (isSignature ? 368.4 : 338.4) + overlayYOffset,
                 isSignature ? 67.5 : 111.75,
                 isSignature ? 37.5 : 112.5,
                 isSignature ? "Подпись" : "Печать",
