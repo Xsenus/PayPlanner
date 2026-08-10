@@ -6,6 +6,9 @@ namespace PayPlanner.Api.Services.Invoices;
 public static class InvoiceStandardWordDocumentRenderer
 {
     public static byte[] Render(string html)
+        => HtmlWordDocumentBuilder.Build(BuildWordHtml(html));
+
+    internal static string BuildWordHtml(string html)
     {
         try
         {
@@ -17,7 +20,7 @@ public static class InvoiceStandardWordDocumentRenderer
         var totals = Extract(html, "<table class=\"totals-table\">(.*?)</table>");
         var summary = Extract(html, "<div class=\"summary-line\">(.*?)</div>");
         var words = Extract(html, "<div class=\"words\">(.*?)</div>");
-        var signature = Extract(html, "<table class=\"signature-table\">(.*?)</table>");
+        var signature = Extract(html, "<table class=\"signature-table[^\"]*\">(.*?)</table>");
         var bankCells = Regex.Matches(bankSource, "<td[^>]*>(.*?)</td>", RegexOptions.Singleline | RegexOptions.CultureInvariant)
             .Select(match => match.Groups[1].Value.Trim())
             .ToArray();
@@ -29,17 +32,20 @@ public static class InvoiceStandardWordDocumentRenderer
         var partyCells = Regex.Matches(parties, "<td[^>]*>(.*?)</td>", RegexOptions.Singleline | RegexOptions.CultureInvariant)
             .Select(match => match.Groups[1].Value.Trim())
             .ToArray();
-        if (partyCells.Length < 5)
+        if (partyCells.Length < 4)
         {
             throw new InvalidOperationException("Не удалось распознать реквизиты сторон стандартного счета для Word.");
         }
 
+        var foundationRow = partyCells.Length > 4
+            ? $"<tr><td colspan=\"2\">{WordParagraph(partyCells[4], "12pt")}</td></tr>"
+            : string.Empty;
         parties = $$"""
 <tr><td width="102" style="width:76pt;font-weight:700">{{WordParagraph(partyCells[0], "12pt")}}</td><td width="573" style="width:430pt">{{WordParagraph(partyCells[1], "12pt")}}</td></tr>
 <tr><td colspan="2">{{Spacer("5.2pt")}}</td></tr>
 <tr><td width="102" style="width:76pt;font-weight:700">{{WordParagraph(partyCells[2], "12pt")}}</td><td width="573" style="width:430pt">{{WordParagraph(partyCells[3], "12pt")}}</td></tr>
 <tr><td colspan="2">{{Spacer("6.4pt")}}</td></tr>
-<tr><td colspan="2">{{WordParagraph(partyCells[4], "12pt")}}</td></tr>
+{{foundationRow}}
 """;
 
         var bank = $$"""
@@ -126,11 +132,11 @@ public static class InvoiceStandardWordDocumentRenderer
 </html>
 """;
 
-            return HtmlWordDocumentBuilder.Build(wordHtml);
+            return wordHtml;
         }
         catch (InvalidOperationException)
         {
-            return HtmlWordDocumentBuilder.Build(html);
+            return html;
         }
     }
 

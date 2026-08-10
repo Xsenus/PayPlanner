@@ -2209,14 +2209,17 @@ public static class InvoiceDocumentTemplateEngine
     }
 """,
             """
+    @page { size: A4; margin: 10mm 11.8mm; }
+    .offer-template { padding-top: 8.6pt; }
     .offer-template .doc-main-title {
       margin: 8px 0 9px;
       font-size: 18px !important;
     }
     .offer-contract-subject {
-      margin-top: 8px;
+      margin-top: -2pt;
       font-size: 14px !important;
-      line-height: 1.18;
+      line-height: 1.16;
+      letter-spacing: -.8pt;
     }
     .offer-subject-label {
       font-weight: 700;
@@ -2227,7 +2230,8 @@ public static class InvoiceDocumentTemplateEngine
     .offer-section {
       margin-top: 0;
       font-size: 14px !important;
-      line-height: 1.18;
+      line-height: 1.16;
+      letter-spacing: -.8pt;
     }
     .offer-title {
       margin: 0;
@@ -2279,7 +2283,10 @@ public static class InvoiceDocumentTemplateEngine
       text-align: center;
       height: 48px;
       vertical-align: bottom !important;
+      position: relative;
     }
+    .offer-signature-name .signature { max-width: 120px; max-height: 38px; position: absolute; left: 18%; bottom: 5px; z-index: 2; }
+    .offer-signature-name .seal { max-width: 90px; max-height: 90px; position: absolute; left: 42%; bottom: -8px; opacity: .9; z-index: 1; }
     .offer-signature-caption {
       text-align: center;
       font-size: 11px !important;
@@ -2435,7 +2442,7 @@ public static class InvoiceDocumentTemplateEngine
               <td class="offer-signature-role" style="width: 45%;">Предприниматель</td>
             </tr>
             <tr>
-              <td class="offer-signature-name">{{seller.documentDirectorShortName}}</td>
+              <td class="offer-signature-name">{{seller.signatureHtml}}{{seller.sealHtml}}{{seller.documentDirectorShortName}}</td>
               <td></td>
               <td class="offer-signature-name"></td>
             </tr>

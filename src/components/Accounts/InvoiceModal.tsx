@@ -3222,7 +3222,7 @@ export function InvoiceModal({
           ? { includeSignatureAndSeal, templateKey }
           : { includeSignatureAndSeal },
       );
-      const extension = format === 'pdf' ? 'pdf' : templateKey === INVOICE_OFFER_TEMPLATE_KEY ? 'doc' : 'docx';
+      const extension = format === 'pdf' ? 'pdf' : 'docx';
       const filePrefix = templateKey === INVOICE_OFFER_TEMPLATE_KEY
         ? 'invoice-offer'
         : templateKey === INVOICE_ORDER_TEMPLATE_KEY
@@ -4359,7 +4359,7 @@ export function InvoiceModal({
                     className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm text-emerald-700 hover:bg-emerald-50"
                   >
                     <span>Word счет-оферта</span>
-                    <span className="text-xs text-slate-400">.doc</span>
+                    <span className="text-xs text-slate-400">.docx</span>
                   </button>
                   <button
                     type="button"

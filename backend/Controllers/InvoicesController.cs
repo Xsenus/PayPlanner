@@ -3010,14 +3010,17 @@ public class InvoicesController : ControllerBase
 
         var isOrderTemplate = string.Equals(template.Key, InvoiceDocumentTemplateEngine.OrderTemplateKey, StringComparison.OrdinalIgnoreCase);
         var isStandardTemplate = string.Equals(template.Key, InvoiceDocumentTemplateEngine.DefaultTemplateKey, StringComparison.OrdinalIgnoreCase);
+        var isOfferTemplate = string.Equals(template.Key, InvoiceDocumentTemplateEngine.OfferTemplateKey, StringComparison.OrdinalIgnoreCase);
         var bytes = normalizedFormat == "word"
             ? isOrderTemplate
                 ? InvoiceOrderWordDocumentRenderer.Render(documentHtml)
+                : isOfferTemplate
+                    ? InvoiceOfferWordDocumentRenderer.Render(documentHtml)
                 : isStandardTemplate
                     ? InvoiceStandardWordDocumentRenderer.Render(documentHtml)
                     : Encoding.UTF8.GetBytes(documentHtml)
             : Encoding.UTF8.GetBytes(documentHtml);
-        var isDocx = normalizedFormat == "word" && (isOrderTemplate || isStandardTemplate);
+        var isDocx = normalizedFormat == "word" && (isOrderTemplate || isStandardTemplate || isOfferTemplate);
         var ext = normalizedFormat == "pdf" ? "pdf" : isDocx ? "docx" : "doc";
         var fileName = $"invoice-{SanitizeFilePart(payment.Invoice?.Number ?? payment.Account)}.{ext}";
 
@@ -3116,6 +3119,12 @@ public class InvoicesController : ControllerBase
         {
             bytes = InvoiceStandardWordDocumentRenderer.Render(documentHtml);
             fileName = $"invoice-{SanitizeFilePart(documentNumber)}.docx";
+            contentType = PayPlanner.Api.Services.Documents.HtmlWordDocumentBuilder.ContentType;
+        }
+        else if (string.Equals(template.Key, InvoiceDocumentTemplateEngine.OfferTemplateKey, StringComparison.OrdinalIgnoreCase))
+        {
+            bytes = InvoiceOfferWordDocumentRenderer.Render(documentHtml);
+            fileName = $"invoice-offer-{SanitizeFilePart(documentNumber)}.docx";
             contentType = PayPlanner.Api.Services.Documents.HtmlWordDocumentBuilder.ContentType;
         }
         else
@@ -3258,6 +3267,12 @@ public class InvoicesController : ControllerBase
         {
             bytes = InvoiceStandardWordDocumentRenderer.Render(documentHtml);
             fileName = $"invoice-{SanitizeFilePart(payment.Invoice?.Number ?? payment.Account)}.docx";
+            contentType = PayPlanner.Api.Services.Documents.HtmlWordDocumentBuilder.ContentType;
+        }
+        else if (string.Equals(template.Key, InvoiceDocumentTemplateEngine.OfferTemplateKey, StringComparison.OrdinalIgnoreCase))
+        {
+            bytes = InvoiceOfferWordDocumentRenderer.Render(documentHtml);
+            fileName = $"invoice-offer-{SanitizeFilePart(payment.Invoice?.Number ?? payment.Account)}.docx";
             contentType = PayPlanner.Api.Services.Documents.HtmlWordDocumentBuilder.ContentType;
         }
         else
