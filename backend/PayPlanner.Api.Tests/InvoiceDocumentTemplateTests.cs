@@ -136,7 +136,36 @@ public class InvoiceDocumentTemplateTests
         Assert.Contains("Исаева Марина", html);
         Assert.Contains("Товары (работы, услуги)", html);
         Assert.Contains("Всего к оплате:", html);
+        Assert.Contains("Поставщик<br/>(Исполнитель):", html);
+        Assert.Contains("Покупатель<br/>(Заказчик):", html);
+        Assert.Contains("<col width=\"50%\" style=\"width:50%\" />", html);
+        Assert.Contains("<table class=\"totals\">", html);
         Assert.DoesNotContain("seller.sealHtml", html);
+    }
+
+    [Fact]
+    public void RenderHtml_AbbreviatesIndividualEntrepreneurInOrderRequisites()
+    {
+        var payment = new Payment
+        {
+            Type = PaymentType.Income,
+            Amount = 1_500m,
+            Date = new DateTime(2022, 7, 5),
+            Account = "15",
+            Client = new Client
+            {
+                Name = "Индивидуальный предприниматель Кожеваткин Андрей Владимирович",
+            },
+        };
+
+        var html = InvoiceDocumentTemplateEngine.RenderHtml(
+            InvoiceDocumentTemplateEngine.OrderTemplateHtml,
+            payment,
+            [new InvoiceLineItemDto { Name = "Услуга", Quantity = 1m, Unit = "усл.ед.", Price = 1_500m }],
+            null,
+            false);
+
+        Assert.Contains("ИП Кожеваткин А.В.", html);
     }
 
     [Fact]

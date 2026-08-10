@@ -331,7 +331,7 @@ public static class InvoiceDocumentTemplateEngine
                 ["seller.accountNumber"] = Encode(seller.AccountNumber),
                 ["seller.corrAccountNumber"] = Encode(seller.CorrAccountNumber),
                 ["seller.requisites"] = Encode(seller.Requisites),
-                ["seller.orderRequisites"] = Encode(BuildOrderRequisites(seller.ShortName, seller.Inn, seller.Address)),
+                ["seller.orderRequisites"] = Encode(BuildOrderRequisites(BuildOrderPartyName(seller.ShortName), seller.Inn, seller.Address)),
                 ["seller.orderDirectorPosition"] = Encode(orderSellerPosition),
                 ["seller.orderSignatoryShortName"] = Encode(orderSellerSignatory),
                 ["seller.documentDirectorPosition"] = Encode(directorPosition),
@@ -363,8 +363,9 @@ public static class InvoiceDocumentTemplateEngine
                 ["buyer.foundation"] = Encode(buyer.Foundation),
                 ["buyer.case"] = Encode(buyer.Case),
                 ["buyer.requisites"] = Encode(buyer.Requisites),
-                ["buyer.orderRequisites"] = Encode(BuildOrderRequisites(buyer.Name, buyer.Inn, buyer.Address)),
+                ["buyer.orderRequisites"] = Encode(BuildOrderRequisites(BuildOrderPartyName(buyer.Name), buyer.Inn, buyer.Address)),
                 ["order.counterpartyName"] = Encode(payment.Type == PaymentType.Expense ? seller.ShortName : buyer.Name),
+                ["order.itemsClass"] = normalizedLineItems.Count >= 12 ? " compact-rows" : string.Empty,
                 ["order.signaturePageBreakClass"] = normalizedLineItems.Count >= 12 ? " signature-new-page" : string.Empty,
                 ["buyer.requisitesHtml"] = buyer.RequisitesHtml,
                 ["buyer.foundationRowHtml"] = BuildBuyerFoundationRowHtml(buyer.Foundation),
@@ -390,6 +391,26 @@ public static class InvoiceDocumentTemplateEngine
         if (!string.IsNullOrWhiteSpace(inn)) parts.Add($"ИНН {inn.Trim()}");
         if (!string.IsNullOrWhiteSpace(address)) parts.Add(address.Trim());
         return string.Join(", ", parts.Where(static part => !string.IsNullOrWhiteSpace(part)));
+    }
+
+    private static string BuildOrderPartyName(string name)
+    {
+        var normalized = name.Trim();
+        const string fullPrefix = "Индивидуальный предприниматель ";
+        const string shortPrefix = "ИП ";
+        if (!normalized.StartsWith(fullPrefix, StringComparison.OrdinalIgnoreCase)
+            && !normalized.StartsWith(shortPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return normalized;
+        }
+
+        var personName = normalized.StartsWith(fullPrefix, StringComparison.OrdinalIgnoreCase)
+            ? normalized[fullPrefix.Length..].Trim()
+            : normalized[shortPrefix.Length..].Trim();
+        var parts = personName.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return parts.Length >= 3
+            ? $"ИП {parts[0]} {parts[1][0]}.{parts[2][0]}."
+            : $"ИП {personName}";
     }
 
     private static LegalEntity? ResolveSellerLegalEntity(Payment payment, LegalEntity? mainCompany)
@@ -2097,7 +2118,7 @@ public static class InvoiceDocumentTemplateEngine
   <meta charset="utf-8" />
   <style>
     __PP_ORDER_FONT_CSS__
-    @page { size: A4; margin: 11.3mm 8.5mm 10mm 16mm; }
+    @page { size: A4; margin: 11.3mm 16mm 10mm; }
     * { box-sizing: border-box; }
     html, body { margin: 0; padding: 0; }
     body { color: #000; font-family: 'DejaVu Sans Condensed', sans-serif; font-size: 9pt; line-height: 1.18; }
@@ -2106,40 +2127,55 @@ public static class InvoiceDocumentTemplateEngine
     .counterparty-title { margin: 0 0 2.75mm; font-size: 12pt; font-weight: 700; }
     table { width: 100%; border-collapse: collapse; }
     .bank { table-layout: fixed; margin-bottom: 0; font-size: 8.8pt; line-height: 1.12; }
-    .bank tr { height: 7mm; }
+    .bank tr:nth-child(1), .bank tr:nth-child(3) { height: 5.2mm; mso-height-source: exactly; }
+    .bank tr:nth-child(2) { height: 8.8mm; mso-height-source: exactly; }
+    .bank tr:nth-child(4) { height: 12.8mm; mso-height-source: exactly; }
     .bank td { border: .7pt solid #000; padding: .5mm 1mm; vertical-align: top; }
+    .bank p { margin: 0; mso-margin-top-alt: 0; mso-margin-bottom-alt: 0; }
+    .bank .caption { font-size: 8.8pt; }
+    .bank tr:first-child > td:first-child { vertical-align: bottom; }
+    .bank tr:nth-child(4) > td:first-child { vertical-align: top; }
+    .bank tr:nth-child(4) .caption { margin-top: 6.5mm; }
     .bank .bank-label { padding-left: .7mm; padding-right: .4mm; }
     .caption { margin-top: 1mm; font-size: 6.5pt; }
-    h1 { margin: 0 0 1.5mm; padding: 6.5mm 0 2.2mm; border-bottom: 1.5pt solid #000; font-size: 12pt; line-height: 1.1; text-align: center; }
-    .party { margin: 0 0 2.7mm; font-size: 9pt; }
-    .party-label { font-weight: 700; }
-    .items { table-layout: fixed; margin-top: 5.6mm; font-size: 8.8pt; line-height: 1.14; }
+    h1 { margin: 0 0 1.5mm; padding: 1.3mm 0 3.4mm; border-bottom: 1.5pt solid #000; font-size: 12pt; line-height: 1.1; text-align: center; }
+    .parties { table-layout: fixed; margin: 0 0 2.5mm; font-size: 9pt; line-height: 1.12; }
+    .parties td { padding: .7mm 1mm; vertical-align: top; }
+    .parties tr:first-child td { padding-bottom: 1.7mm; }
+    .parties p, .totals p { margin: 0; mso-margin-top-alt: 0; mso-margin-bottom-alt: 0; }
+    .parties .party-label { width: 14.5%; padding-left: 1mm; }
+    .parties .party-value { width: 85.5%; font-weight: 700; }
+    .items { table-layout: fixed; margin-top: 0; font-size: 8.8pt; line-height: 1.14; }
     .items thead { display: table-header-group; }
     .items tr { break-inside: avoid; page-break-inside: avoid; }
-    .items th, .items td { border: .7pt solid #000; padding: 1.8mm 1mm; mso-padding-alt: 5.1pt 2.8pt 5.1pt 2.8pt; vertical-align: top; }
+    .items tbody tr { height: 9mm; }
+    .items.compact-rows tbody tr { height: 8mm; }
+    .items th, .items td { border: .7pt solid #000; padding: .8mm 1mm; mso-padding-alt: 2.3pt 2.8pt 2.3pt 2.8pt; vertical-align: top; }
     .items th p, .items td p { margin: 0 !important; mso-margin-top-alt: 0; mso-margin-bottom-alt: 0; }
     .items th { font-weight: 700; text-align: center; vertical-align: middle; }
+    .items th.name { text-align: center; }
     .items .index { width: 5%; text-align: center; }
-    .items .name { width: 52%; text-align: left; }
-    .items td.name { text-align: justify; text-justify: inter-character; }
-    .items .quantity { width: 8%; text-align: right; }
-    .items .unit { width: 9%; text-align: center; }
-    .items .price, .items .sum { width: 13%; text-align: right; }
-    .totals { width: 48%; margin: 2.2mm 0 0 auto; font-size: 9pt; }
+    .items .name { width: 50%; text-align: left; }
+    .items td.name { text-align: left; }
+    .items .quantity { width: 10%; text-align: right; }
+    .items .unit { width: 7%; text-align: center; }
+    .items .price { width: 13%; text-align: right; }
+    .items .sum { width: 15%; text-align: right; }
+    .totals { width: 48%; margin: 3.2mm 0 0 auto; font-size: 9pt; }
     .totals td { padding: .45mm 0 .45mm 2mm; }
     .totals .label { text-align: right; font-weight: 700; }
     .totals .value { width: 30%; text-align: right; font-weight: 700; }
     .summary { margin-top: 3.5mm; font-size: 9pt; }
     .summary p { margin: 0 0 1.8mm; }
     .summary .words { font-weight: 700; }
-    .signature-block { margin-top: 5mm; padding-top: 2mm; border-top: 1.5pt solid #000; break-inside: avoid; page-break-inside: avoid; }
-    .signature-block.signature-new-page { margin-top: 0; break-before: page; page-break-before: always; }
+    .signature-block { margin-top: -4.8mm; padding-top: 6.5mm; border-top: 1.5pt solid #000; break-inside: avoid; page-break-inside: avoid; }
+    .signature-block.signature-new-page { margin-top: 0; padding-top: 0; border-top: 0; break-before: page; page-break-before: always; }
     .signature { table-layout: fixed; }
     .signature td { padding: 0 1.3mm; vertical-align: bottom; }
-    .signature .role { width: 21%; padding-left: 0; font-weight: 700; }
-    .signature .position { width: 26%; }
-    .signature .sign { width: 24%; }
-    .signature .name { width: 29%; padding-right: 0; }
+    .signature .role { width: 17%; padding-left: 0; font-weight: 700; }
+    .signature .position { width: 27%; }
+    .signature .sign { width: 25%; }
+    .signature .name { width: 31%; padding-right: 0; }
     .signature .line { min-height: 4.5mm; border-bottom: .7pt solid #000; text-align: center; }
     .signature .caption { margin-top: .6mm; text-align: center; font-size: 6.5pt; }
   </style>
@@ -2148,24 +2184,23 @@ public static class InvoiceDocumentTemplateEngine
   <div class="order">
     <div class="counterparty-title">{{order.counterpartyName}}</div>
     <table class="bank" width="100%">
-      <colgroup><col width="24%" style="width:24%" /><col width="27%" style="width:27%" /><col width="7%" style="width:7%" /><col width="42%" style="width:42%" /></colgroup>
-      <tr><td colspan="2" rowspan="2">{{seller.bankName}}<div class="caption">Банк получателя</div></td><td class="bank-label">БИК</td><td>{{seller.bik}}</td></tr>
-      <tr><td class="bank-label">Сч. №</td><td>{{seller.corrAccountNumber}}</td></tr>
-      <tr><td><strong>ИНН {{seller.inn}}</strong></td><td>КПП {{seller.kpp}}</td><td class="bank-label" rowspan="2">Сч. №</td><td rowspan="2">{{seller.accountNumber}}</td></tr>
-      <tr><td colspan="2">{{seller.shortName}}<div class="caption">Получатель</div></td></tr>
+      <colgroup><col width="25.3%" style="width:25.3%" /><col width="28%" style="width:28%" /><col width="8.1%" style="width:8.1%" /><col width="38.6%" style="width:38.6%" /></colgroup>
+      <tr style="height:14.7pt;mso-height-source:exactly"><td colspan="2" rowspan="2"><p>{{seller.bankName}}</p><p class="caption">Банк получателя</p></td><td class="bank-label"><p>БИК</p></td><td><p>{{seller.bik}}</p></td></tr>
+      <tr style="height:24.9pt;mso-height-source:exactly"><td class="bank-label"><p>Сч. №</p></td><td><p>{{seller.corrAccountNumber}}</p></td></tr>
+      <tr style="height:14.7pt;mso-height-source:exactly"><td><p>ИНН {{seller.inn}}</p></td><td><p>КПП {{seller.kpp}}</p></td><td class="bank-label" rowspan="2"><p>Сч. №</p></td><td rowspan="2"><p>{{seller.accountNumber}}</p></td></tr>
+      <tr style="height:36.3pt;mso-height-source:exactly"><td colspan="2"><p>{{seller.shortName}}</p><p class="caption">Получатель</p></td></tr>
     </table>
     <h1>Заказ № {{invoice.number}} от {{invoice.dateLong}}</h1>
-    <p class="party"><span class="party-label">Поставщик:</span> {{seller.orderRequisites}}</p>
-    <p class="party"><span class="party-label">Покупатель:</span> {{buyer.orderRequisites}}</p>
-    <table class="items" width="100%">
-      <colgroup><col width="5%" style="width:5%" /><col width="52%" style="width:52%" /><col width="8%" style="width:8%" /><col width="9%" style="width:9%" /><col width="13%" style="width:13%" /><col width="13%" style="width:13%" /></colgroup>
-      <thead><tr><th class="index" width="5%" style="width:5%">№</th><th class="name" width="52%" style="width:52%">Товары (работы, услуги)</th><th class="quantity" width="8%" style="width:8%">Кол-во</th><th class="unit" width="9%" style="width:9%">Ед.</th><th class="price" width="13%" style="width:13%">Цена</th><th class="sum" width="13%" style="width:13%">Сумма</th></tr></thead>
-      <tbody>{{#lineItems}}<tr><td class="index" width="5%" style="width:5%">{{index}}</td><td class="name" width="52%" style="width:52%">{{name}}</td><td class="quantity" width="8%" style="width:8%">{{quantity}}</td><td class="unit" width="9%" style="width:9%">{{unit}}</td><td class="price" width="13%" style="width:13%">{{price}}</td><td class="sum" width="13%" style="width:13%">{{total}}</td></tr>{{/lineItems}}</tbody>
+    <table class="parties"><tr><td class="party-label"><p>Поставщик<br/>(Исполнитель):</p></td><td class="party-value"><p>{{seller.orderRequisites}}</p></td></tr><tr><td class="party-label"><p>Покупатель<br/>(Заказчик):</p></td><td class="party-value"><p>{{buyer.orderRequisites}}</p></td></tr></table>
+    <table class="items{{order.itemsClass}}" width="100%">
+      <colgroup><col width="5%" style="width:5%" /><col width="50%" style="width:50%" /><col width="10%" style="width:10%" /><col width="7%" style="width:7%" /><col width="13%" style="width:13%" /><col width="15%" style="width:15%" /></colgroup>
+      <thead><tr><th class="index" width="5%" style="width:5%">№</th><th class="name" width="50%" style="width:50%">Товары (работы, услуги)</th><th class="quantity" width="10%" style="width:10%">Кол-во</th><th class="unit" width="7%" style="width:7%">Ед.</th><th class="price" width="13%" style="width:13%">Цена</th><th class="sum" width="15%" style="width:15%">Сумма</th></tr></thead>
+      <tbody>{{#lineItems}}<tr><td class="index" width="5%" style="width:5%">{{index}}</td><td class="name" width="50%" style="width:50%">{{name}}</td><td class="quantity" width="10%" style="width:10%">{{quantity}}</td><td class="unit" width="7%" style="width:7%">{{unit}}</td><td class="price" width="13%" style="width:13%">{{price}}</td><td class="sum" width="15%" style="width:15%">{{total}}</td></tr>{{/lineItems}}</tbody>
     </table>
     <table class="totals">
-      <tr><td class="label">{{invoice.orderVatLabel}}</td><td class="value">{{invoice.orderVatValue}}</td></tr>
-      <tr><td class="label">Итого:</td><td class="value">{{invoice.total}}</td></tr>
-      <tr><td class="label">Всего к оплате:</td><td class="value">{{invoice.total}}</td></tr>
+      <tr><td class="label"><p>{{invoice.orderVatLabel}}</p></td><td class="value"><p>{{invoice.orderVatValue}}</p></td></tr>
+      <tr><td class="label"><p>Итого:</p></td><td class="value"><p>{{invoice.total}}</p></td></tr>
+      <tr><td class="label"><p>Всего к оплате:</p></td><td class="value"><p>{{invoice.total}}</p></td></tr>
     </table>
     <div class="summary"><p>Всего наименований {{invoice.itemsCount}}, на сумму {{invoice.total}} руб.</p><p class="words">Всего к оплате: {{invoice.totalWords}}</p></div>
     <div class="signature-block{{order.signaturePageBreakClass}}"><table class="signature"><tr><td class="role">Руководитель:</td><td class="position"><div class="line">{{seller.orderDirectorPosition}}</div><div class="caption">должность</div></td><td class="sign"><div class="line"></div><div class="caption">подпись</div></td><td class="name"><div class="line">{{seller.orderSignatoryShortName}}</div><div class="caption">расшифровка подписи</div></td></tr></table></div>
