@@ -1145,7 +1145,7 @@ public class ActsControllerTests
         Assert.Contains(".qty { width: 8%;", normalizedHtml);
         Assert.Contains(".unit { width: 9%;", normalizedHtml);
         Assert.Contains(".price, .sum { width: 12.5%;", normalizedHtml);
-        Assert.Contains(".signatures td:first-child .sign-line { padding-right: 8px; text-align: right; }", normalizedHtml);
+        Assert.Contains(".sign-content .seal { display: block; width: 90px; height: 90px;", normalizedHtml);
         Assert.Contains("В том числе НДС:", normalizedHtml);
         Assert.Contains("Служебный комментарий из учета", normalizedHtml);
         Assert.Contains("ИСПОЛНИТЕЛЬ", normalizedHtml);
@@ -1471,6 +1471,9 @@ public class ActsControllerTests
         var normalizedHtml = html.Replace("&nbsp;", " ").Replace("\u00A0", " ");
 
         Assert.Contains("class=\"sign-line\"", normalizedHtml);
+        Assert.Contains("class=\"sign-content\"", normalizedHtml);
+        Assert.Contains("class=\"signature\" width=\"76\" height=\"42\"", normalizedHtml);
+        Assert.Contains("class=\"seal\" width=\"90\" height=\"90\"", normalizedHtml);
         Assert.Equal(2, Regex.Matches(normalizedHtml, "<span class=\"mark\">", RegexOptions.CultureInvariant).Count);
         Assert.Contains("data:image/png;base64,signature-demo", normalizedHtml);
         Assert.Contains("data:image/png;base64,seal-demo", normalizedHtml);

@@ -1132,6 +1132,21 @@ public static class InvoiceDocumentTemplateEngine
             return string.Empty;
         }
 
+        if (string.Equals(cssClass, "logo", StringComparison.Ordinal))
+        {
+            return $"<img src=\"{dataUrl}\" alt=\"{Encode(alt)}\" class=\"{cssClass}\" width=\"120\" height=\"90\" style=\"width: 120px; height: 90px; object-fit: contain;\" />";
+        }
+
+        if (string.Equals(cssClass, "signature", StringComparison.Ordinal))
+        {
+            return $"<img src=\"{dataUrl}\" alt=\"{Encode(alt)}\" class=\"{cssClass}\" width=\"76\" height=\"42\" style=\"width: 76px; height: 42px; object-fit: contain;\" />";
+        }
+
+        if (string.Equals(cssClass, "seal", StringComparison.Ordinal))
+        {
+            return $"<img src=\"{dataUrl}\" alt=\"{Encode(alt)}\" class=\"{cssClass}\" width=\"90\" height=\"90\" style=\"width: 90px; height: 90px; object-fit: contain;\" />";
+        }
+
         return $"<img src=\"{dataUrl}\" alt=\"{Encode(alt)}\" class=\"{cssClass}\" />";
     }
 

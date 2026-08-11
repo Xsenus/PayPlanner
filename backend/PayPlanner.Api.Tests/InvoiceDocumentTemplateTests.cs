@@ -569,7 +569,10 @@ public class InvoiceDocumentTemplateTests
         Assert.NotNull(content.Content);
         Assert.Contains("Предприниматель", content.Content);
         Assert.Contains("Кожеваткин", content.Content);
+        Assert.Contains("class=\"logo\" width=\"120\" height=\"90\"", content.Content);
         Assert.Contains("class=\"invoice-qr\" width=\"150\" height=\"150\"", content.Content);
+        Assert.Contains("class=\"signature\" width=\"76\" height=\"42\"", content.Content);
+        Assert.Contains("class=\"seal\" width=\"90\" height=\"90\"", content.Content);
         Assert.Contains(">подпись</td>", content.Content);
         Assert.Contains(">расшифровка подписи</td>", content.Content);
     }

@@ -54,15 +54,19 @@ public static class ActDocumentTemplateEngine
     .acceptance { margin-top: 14px; line-height: 1.4; }
     .comment { margin-top: 10px; }
     .signatures { margin-top: 24px; table-layout: fixed; }
-    .signatures td { width: 48%; vertical-align: top; }
-    .signatures .gap { width: 4%; }
+    .signatures > tbody > tr > td { width: 48%; vertical-align: top; }
+    .signatures > tbody > tr > .gap { width: 4%; }
     .role { margin-bottom: 7px; font-weight: 700; }
     .party-name { min-height: 34px; }
-    .sign-line { position: relative; min-height: 70px; padding-top: 38px; text-align: center; }
-    .signatures td:first-child .sign-line { padding-right: 8px; text-align: right; }
-    .signature { position: absolute; left: 8px; bottom: 10px; z-index: 2; max-width: 145px; max-height: 42px; object-fit: contain; }
-    .seal { position: absolute; left: 75px; bottom: -22px; z-index: 1; max-width: 112px; max-height: 112px; object-fit: contain; opacity: .92; }
-    .mark { position: relative; z-index: 3; white-space: nowrap; }
+    .sign-line { min-height: 72px; text-align: center; }
+    .sign-content { width: 100%; min-height: 72px; table-layout: fixed; }
+    .sign-content td { padding: 0; border: 0; vertical-align: middle; }
+    .sign-content .signature-cell { width: 24%; }
+    .sign-content .seal-cell { width: 28%; }
+    .sign-content .mark-cell { width: 48%; text-align: right; }
+    .sign-content .signature { display: block; width: 76px; height: 42px; margin: 0 auto; object-fit: contain; }
+    .sign-content .seal { display: block; width: 90px; height: 90px; margin: 0 auto; object-fit: contain; opacity: .92; }
+    .mark { white-space: nowrap; }
     @media print { thead { display: table-header-group; } tr { break-inside: avoid; } }
   </style>
 </head>
@@ -87,7 +91,7 @@ public static class ActDocumentTemplateEngine
     <div class="acceptance">Вышеперечисленные услуги выполнены полностью и в срок. Заказчик претензий по объему, качеству и срокам оказания услуг не имеет.</div>
     {{act.commentHtml}}
     <table class="signatures"><tbody><tr>
-      <td><div class="role">ИСПОЛНИТЕЛЬ</div><div class="party-name">{{seller.signaturePartyName}}</div><div class="sign-line">{{seller.signatureHtml}}{{seller.sealHtml}}<span class="mark">/ {{seller.signatoryShortName}} /</span></div></td>
+      <td><div class="role">ИСПОЛНИТЕЛЬ</div><div class="party-name">{{seller.signaturePartyName}}</div><div class="sign-line"><table class="sign-content"><tbody><tr><td class="signature-cell">{{seller.signatureHtml}}</td><td class="seal-cell">{{seller.sealHtml}}</td><td class="mark-cell"><span class="mark">/ {{seller.signatoryShortName}} /</span></td></tr></tbody></table></div></td>
       <td class="gap"></td>
       <td><div class="role">ЗАКАЗЧИК</div><div class="party-name">{{buyer.signaturePartyName}}</div><div class="sign-line"><span class="mark">/ {{buyer.signatoryShortName}} /</span></div></td>
     </tr></tbody></table>
@@ -646,11 +650,12 @@ public static class ActDocumentTemplateEngine
         var effectiveLineItems = BuildEffectiveLineItems(act, lineItems);
         var totalAmount = effectiveLineItems.Sum(item => item.Total);
         var documentTitle = $"Акт № {act.Number} от {FormatLongDate(act.Date)}";
+        var usesManagedDefaultSignatureLayout = templateHtml.Contains("class=\"sign-content\"", StringComparison.Ordinal);
         var signatureHtml = includeSignatureAndSeal && !isExpenseAct
-            ? BuildImageHtml(mainCompany?.DirectorSignatureDataUrl, "Подпись", "signature")
+            ? BuildImageHtml(mainCompany?.DirectorSignatureDataUrl, "Подпись", "signature", usesManagedDefaultSignatureLayout ? 76 : null, usesManagedDefaultSignatureLayout ? 42 : null)
             : string.Empty;
         var sealHtml = includeSignatureAndSeal && !isExpenseAct
-            ? BuildImageHtml(mainCompany?.SealDataUrl, "Печать", "seal")
+            ? BuildImageHtml(mainCompany?.SealDataUrl, "Печать", "seal", usesManagedDefaultSignatureLayout ? 90 : null, usesManagedDefaultSignatureLayout ? 90 : null)
             : string.Empty;
         var commentHtml = string.IsNullOrWhiteSpace(act.Comment)
             ? string.Empty
@@ -1323,14 +1328,17 @@ public static class ActDocumentTemplateEngine
         return $"{parts[0]} {string.Concat(initials)}".Trim();
     }
 
-    private static string BuildImageHtml(string? dataUrl, string alt, string cssClass)
+    private static string BuildImageHtml(string? dataUrl, string alt, string cssClass, int? width = null, int? height = null)
     {
         if (string.IsNullOrWhiteSpace(dataUrl))
         {
             return string.Empty;
         }
 
-        return $"<img src=\"{WebUtility.HtmlEncode(dataUrl)}\" alt=\"{Encode(alt)}\" class=\"{cssClass}\" />";
+        var dimensions = width.HasValue && height.HasValue
+            ? $" width=\"{width.Value}\" height=\"{height.Value}\" style=\"width: {width.Value}px; height: {height.Value}px; object-fit: contain;\""
+            : string.Empty;
+        return $"<img src=\"{WebUtility.HtmlEncode(dataUrl)}\" alt=\"{Encode(alt)}\" class=\"{cssClass}\"{dimensions} />";
     }
 
     private static string FormatMoney(decimal value)
