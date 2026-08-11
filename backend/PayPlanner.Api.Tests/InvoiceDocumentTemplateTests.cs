@@ -569,6 +569,7 @@ public class InvoiceDocumentTemplateTests
         Assert.NotNull(content.Content);
         Assert.Contains("Предприниматель", content.Content);
         Assert.Contains("Кожеваткин", content.Content);
+        Assert.Contains("class=\"invoice-qr\" width=\"150\" height=\"150\"", content.Content);
         Assert.Contains(">подпись</td>", content.Content);
         Assert.Contains(">расшифровка подписи</td>", content.Content);
     }
@@ -624,9 +625,9 @@ public class InvoiceDocumentTemplateTests
 
         var content = Assert.IsType<ContentResult>(result);
         Assert.NotNull(content.Content);
-        Assert.Contains("<span class=\"counterparty-line\">Тестовый клиент, ИНН 123456789012, СНИЛС 123-456-789 00</span>", content.Content);
-        Assert.Contains("<span class=\"counterparty-line\">Паспорт 1234 № 567890", content.Content);
-        Assert.Contains("<span class=\"counterparty-line\">Самара, ул. Тестовая, д. 1</span>", content.Content);
+        Assert.Contains("<div class=\"counterparty-line\">Тестовый клиент, ИНН 123456789012, СНИЛС 123-456-789 00</div>", content.Content);
+        Assert.Contains("<div class=\"counterparty-line\">Паспорт 1234 № 567890", content.Content);
+        Assert.Contains("<div class=\"counterparty-line\">Самара, ул. Тестовая, д. 1</div>", content.Content);
         Assert.DoesNotContain("<br/>Паспорт", content.Content);
         Assert.DoesNotContain("<br/>Самара", content.Content);
     }
@@ -685,7 +686,7 @@ public class InvoiceDocumentTemplateTests
             includeSignatureAndSeal: false);
 
         Assert.Contains("Общество с ограниченной ответственностью &quot;Ромашка&quot;, ИНН 6311000000, КПП 631101001, ОГРН 1236300000000", html);
-        Assert.Contains("<span class=\"counterparty-line\">Самара, ул. Юридическая, д. 5</span>", html);
+        Assert.Contains("<div class=\"counterparty-line\">Самара, ул. Юридическая, д. 5</div>", html);
         Assert.Contains(">Основание:</td>", html);
         Assert.Contains("Договор № LE-9 от 05.04.2026 Договор с юрлицом", html);
     }
@@ -771,7 +772,7 @@ public class InvoiceDocumentTemplateTests
         Assert.Contains(sellerFullName, html);
         Assert.Contains(buyerFullName, html);
         Assert.Contains(longServiceName, html);
-        Assert.Contains("<span class=\"counterparty-line\">", html);
+        Assert.Contains("<div class=\"counterparty-line\">", html);
         Assert.Matches(@"\.counterparty-table\s*\{\s*table-layout:\s*fixed;", html);
         Assert.Matches(@"\.counterparty-value\s*\{[^}]*overflow-wrap:\s*anywhere;", html);
         Assert.Matches(@"\.items-table\s*\{[^}]*table-layout:\s*fixed;", html);

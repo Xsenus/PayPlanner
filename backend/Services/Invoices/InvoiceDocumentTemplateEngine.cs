@@ -1168,7 +1168,7 @@ public static class InvoiceDocumentTemplateEngine
         using var qrData = generator.CreateQrCode(qrPayload, QRCoder.QRCodeGenerator.ECCLevel.M);
         var qrCode = new QRCoder.PngByteQRCode(qrData);
         var png = qrCode.GetGraphic(8);
-        return $"<img src=\"data:image/png;base64,{Convert.ToBase64String(png)}\" alt=\"QR-код для оплаты\" class=\"invoice-qr\" />";
+        return $"<img src=\"data:image/png;base64,{Convert.ToBase64String(png)}\" alt=\"QR-код для оплаты\" class=\"invoice-qr\" width=\"150\" height=\"150\" style=\"width: 150px; height: 150px;\" />";
     }
 
     private static string FormatMoney(decimal value)
@@ -1460,7 +1460,7 @@ public static class InvoiceDocumentTemplateEngine
             string.Empty,
             lines
                 .Where(static line => !string.IsNullOrWhiteSpace(line))
-                .Select(static line => $"<span class=\"counterparty-line\">{Encode(line)}</span>"));
+                .Select(static line => $"<div class=\"counterparty-line\">{Encode(line)}</div>"));
 
     private static string FirstNotEmpty(params string?[] values)
         => values.FirstOrDefault(static value => !string.IsNullOrWhiteSpace(value)) ?? string.Empty;
