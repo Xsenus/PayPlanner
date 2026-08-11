@@ -3416,7 +3416,7 @@ describe('InvoiceModal integration', () => {
     });
   });
 
-  it('prints invoice through server PDF with the requested signature and seal mode', async () => {
+  it('prints the established HTML form with the requested signature and seal mode', async () => {
     const downloadMock = vi.mocked(apiService.downloadInvoiceDocument);
     downloadMock.mockClear();
     const openMock = vi.mocked(window.open);
@@ -3454,14 +3454,14 @@ describe('InvoiceModal integration', () => {
 
     expect(openMock).toHaveBeenCalled();
     await waitFor(() => {
-      expect(downloadMock).toHaveBeenCalledWith(552, 'pdf', { includeSignatureAndSeal: true });
+      expect(downloadMock).toHaveBeenCalledWith(552, 'html', { includeSignatureAndSeal: true });
     });
 
     fireEvent.click(screen.getByRole('button', { name: /^Печать/i }));
     fireEvent.click(screen.getAllByRole('button', { name: /Без подписи и печати/i })[1]);
 
     await waitFor(() => {
-      expect(downloadMock).toHaveBeenLastCalledWith(552, 'pdf', {
+      expect(downloadMock).toHaveBeenLastCalledWith(552, 'html', {
         includeSignatureAndSeal: false,
         templateKey: 'invoice-offer',
       });

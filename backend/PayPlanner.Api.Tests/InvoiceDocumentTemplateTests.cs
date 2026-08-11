@@ -88,6 +88,38 @@ public class InvoiceDocumentTemplateTests
     }
 
     [Fact]
+    public void CreateResponse_ReplacesRetiredCondensedStandardTemplate_AndPreservesCustomTemplate()
+    {
+        const string retiredDefault = """
+<style>body { font-family: 'DejaVu Sans Condensed'; } .page-content { width: 178.5mm; } .items-table .name { width: 49%; } .items-table .vat { display: none; }</style>
+{{seller.signatureHtml}}{{invoice.qrCodeHtml}}
+""";
+        const string customHtml = "<html><body>custom-invoice-{{invoice.number}}</body></html>";
+        var response = InvoiceDocumentTemplateEngine.CreateResponse(new InvoiceDocumentTemplateEngine.InvoiceDocumentTemplateSettingsStorage
+        {
+            ActiveTemplateKey = InvoiceDocumentTemplateEngine.DefaultTemplateKey,
+            Templates =
+            [
+                new InvoiceDocumentTemplateEngine.InvoiceDocumentTemplateStorageItem
+                {
+                    Key = InvoiceDocumentTemplateEngine.DefaultTemplateKey,
+                    Name = "Стандартный счет",
+                    Html = retiredDefault,
+                },
+                new InvoiceDocumentTemplateEngine.InvoiceDocumentTemplateStorageItem
+                {
+                    Key = "invoice-custom",
+                    Name = "Свой счет",
+                    Html = customHtml,
+                },
+            ],
+        });
+
+        Assert.Equal(InvoiceDocumentTemplateEngine.DefaultTemplateHtml, response.Templates.Single(item => item.Key == InvoiceDocumentTemplateEngine.DefaultTemplateKey).Html);
+        Assert.Equal(customHtml, response.Templates.Single(item => item.Key == "invoice-custom").Html);
+    }
+
+    [Fact]
     public void CreateResponse_AddsSystemOfferTemplate_ToExistingSettings()
     {
         var settings = InvoiceDocumentTemplateEngine.CreateResponse(new InvoiceDocumentTemplateEngine.InvoiceDocumentTemplateSettingsStorage
@@ -295,6 +327,12 @@ public class InvoiceDocumentTemplateTests
         Assert.Contains("<th class=\"sum\">Сумма</th>", content.Content);
         Assert.Matches(new Regex("<td class=\"sum\">\\s*[^<]+\\s*</td>", RegexOptions.Singleline), content.Content);
         Assert.Matches(new Regex("на сумму\\s*[^<]+\\s*руб\\.", RegexOptions.Singleline), content.Content);
+        Assert.Contains("font-family: Arial, \"DejaVu Sans\", sans-serif", content.Content);
+        Assert.DoesNotContain("DejaVu Sans Condensed", content.Content);
+        Assert.Contains(".items-table .name {\n      width: 48%;", content.Content);
+        Assert.Contains(".items-table .qty {\n      width: 7%;", content.Content);
+        Assert.Contains(".items-table .unit {\n      width: 6%;", content.Content);
+        Assert.Matches(@"\.items-table \.price,\s*\.items-table \.vat,\s*\.items-table \.sum\s*\{\s*width:\s*11%;", content.Content);
     }
 
     [Fact]
@@ -1444,8 +1482,8 @@ public class InvoiceDocumentTemplateTests
         var action = await controller.GetDocument(paymentId, "xlsx", null, null, CancellationToken.None);
 
         var file = Assert.IsType<FileContentResult>(action);
-        Assert.Equal("application/vnd.openxmlformats-officedocument.wordprocessingml.document", file.ContentType);
-        Assert.Equal("invoice-25.docx", file.FileDownloadName);
+        Assert.Equal("application/msword", file.ContentType);
+        Assert.Equal("invoice-25.doc", file.FileDownloadName);
     }
 
     [Fact]
@@ -1537,8 +1575,8 @@ public class InvoiceDocumentTemplateTests
         Assert.Equal("custom@example.com", emailService.ToEmail);
         Assert.Equal("Custom subject", emailService.Subject);
         Assert.Equal("Custom body", emailService.Body);
-        Assert.Equal("invoice-25.docx", emailService.AttachmentFileName);
-        Assert.Equal("application/vnd.openxmlformats-officedocument.wordprocessingml.document", emailService.AttachmentContentType);
+        Assert.Equal("invoice-25.doc", emailService.AttachmentFileName);
+        Assert.Equal("application/msword", emailService.AttachmentContentType);
     }
 
     [Fact]
@@ -1579,15 +1617,15 @@ public class InvoiceDocumentTemplateTests
 
         var result = Assert.IsType<YandexDiskOperationResultDto>(action.Value);
         Assert.True(result.Success);
-        Assert.Equal("/CRM/invoice-25.docx", result.Path);
+        Assert.Equal("/CRM/invoice-25.doc", result.Path);
         Assert.NotNull(yandexDiskService.Upload);
         Assert.Equal("invoice", yandexDiskService.Upload.DocumentKind);
         Assert.Equal("Счет", yandexDiskService.Upload.DocumentType);
         Assert.Equal("25", yandexDiskService.Upload.DocumentNumber);
         Assert.Equal("Тестовый счет", yandexDiskService.Upload.DocumentTitle);
         Assert.Equal("Тестовый клиент", yandexDiskService.Upload.ClientName);
-        Assert.Equal("invoice-25.docx", yandexDiskService.Upload.OriginalFileName);
-        Assert.Equal("application/vnd.openxmlformats-officedocument.wordprocessingml.document", yandexDiskService.Upload.ContentType);
+        Assert.Equal("invoice-25.doc", yandexDiskService.Upload.OriginalFileName);
+        Assert.Equal("application/msword", yandexDiskService.Upload.ContentType);
         Assert.True(yandexDiskService.Upload.OverwriteExisting);
         Assert.NotEmpty(yandexDiskService.UploadBytes!);
 
@@ -1602,8 +1640,8 @@ public class InvoiceDocumentTemplateTests
             && item.ObjectType == "payment"
             && item.ObjectId == paymentId);
         Assert.Equal(YandexDiskCrmSyncStatus.Success, syncState.Status);
-        Assert.Equal("/CRM/invoice-25.docx", syncState.YandexDiskPath);
-        Assert.Equal("invoice-25.docx", syncState.FileName);
+        Assert.Equal("/CRM/invoice-25.doc", syncState.YandexDiskPath);
+        Assert.Equal("invoice-25.doc", syncState.FileName);
         Assert.Equal(1, syncState.AttemptCount);
     }
 

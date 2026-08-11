@@ -1458,11 +1458,10 @@ public class InvoicesControllerInternalCoverageTests
         var ok = Assert.IsType<OkObjectResult>(action);
         Assert.NotNull(emailService.LastMessage);
         Assert.Equal("email-client@example.com", emailService.LastMessage!.ToEmail);
-        Assert.Equal("application/vnd.openxmlformats-officedocument.wordprocessingml.document", emailService.LastMessage.ContentType);
-        Assert.EndsWith(".docx", emailService.LastMessage.FileName, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("application/msword", emailService.LastMessage.ContentType);
+        Assert.EndsWith(".doc", emailService.LastMessage.FileName, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("INV-MAIL", emailService.LastMessage.Subject, StringComparison.Ordinal);
-        Assert.Equal((byte)'P', emailService.LastMessage.Bytes[0]);
-        Assert.Equal((byte)'K', emailService.LastMessage.Bytes[1]);
+        Assert.Contains("<!DOCTYPE html>", Encoding.UTF8.GetString(emailService.LastMessage.Bytes), StringComparison.OrdinalIgnoreCase);
         Assert.Contains("email-client@example.com", ok.Value?.ToString() ?? string.Empty, StringComparison.Ordinal);
     }
 
@@ -1580,10 +1579,9 @@ public class InvoicesControllerInternalCoverageTests
         var action = await controller.GetDocument(payment.Id, "word", null, false, CancellationToken.None);
 
         var file = Assert.IsType<FileContentResult>(action);
-        Assert.Equal("application/vnd.openxmlformats-officedocument.wordprocessingml.document", file.ContentType);
-        Assert.EndsWith(".docx", file.FileDownloadName, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal((byte)'P', file.FileContents[0]);
-        Assert.Equal((byte)'K', file.FileContents[1]);
+        Assert.Equal("application/msword", file.ContentType);
+        Assert.EndsWith(".doc", file.FileDownloadName, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("<!DOCTYPE html>", Encoding.UTF8.GetString(file.FileContents), StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

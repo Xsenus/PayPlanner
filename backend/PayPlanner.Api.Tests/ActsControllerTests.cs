@@ -2,6 +2,7 @@ using System.ComponentModel.DataAnnotations;
 using System.Data.Common;
 using System.Reflection;
 using System.Security.Claims;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Http;
@@ -26,6 +27,38 @@ namespace PayPlanner.Api.Tests;
 
 public class ActsControllerTests
 {
+    [Fact]
+    public void DocumentTemplateSettings_ReplacesRetiredCondensedDefault_AndPreservesCustomTemplates()
+    {
+        const string retiredDefault = """
+<style>body { font-family: "DejaVu Sans Condensed"; } @page WordSection1 { } .name { width: 45%; }</style>
+<div class="signature-party-cell">{{seller.signatureHtml}}</div>
+""";
+        const string customHtml = "<html><body>custom-act-{{act.number}}</body></html>";
+        var response = ActDocumentTemplateEngine.CreateResponse(new ActDocumentTemplateEngine.ActDocumentTemplateSettingsStorage
+        {
+            ActiveTemplateKey = ActDocumentTemplateEngine.DefaultTemplateKey,
+            Templates =
+            [
+                new ActDocumentTemplateEngine.ActDocumentTemplateStorageItem
+                {
+                    Key = ActDocumentTemplateEngine.DefaultTemplateKey,
+                    Name = "Стандартный акт",
+                    Html = retiredDefault,
+                },
+                new ActDocumentTemplateEngine.ActDocumentTemplateStorageItem
+                {
+                    Key = "act-custom",
+                    Name = "Свой акт",
+                    Html = customHtml,
+                },
+            ],
+        });
+
+        Assert.Equal(ActDocumentTemplateEngine.DefaultTemplateHtml, response.Templates.Single(item => item.Key == ActDocumentTemplateEngine.DefaultTemplateKey).Html);
+        Assert.Equal(customHtml, response.Templates.Single(item => item.Key == "act-custom").Html);
+    }
+
     [Fact]
     public async Task DocumentTemplateSettings_SaveRenderHistoryAndRestore()
     {
@@ -1093,9 +1126,9 @@ public class ActsControllerTests
 
         var normalizedHtml = html.Replace("&nbsp;", " ").Replace("\u00A0", " ");
 
-        Assert.Contains("document-template act-template", normalizedHtml);
-        Assert.Contains("doc-main-title", normalizedHtml);
-        Assert.Contains("counterparty-table", normalizedHtml);
+        Assert.Contains("<main class=\"document\">", normalizedHtml);
+        Assert.Contains("<h1>", normalizedHtml);
+        Assert.Contains("<table class=\"parties\">", normalizedHtml);
         Assert.Contains("Акт № 1199 от 25 декабря 2025 г.", normalizedHtml);
         Assert.Contains("Счет-договор № 182 от 24.12.2025", normalizedHtml);
         Assert.Contains("к/с 30101810745374525104", normalizedHtml);
@@ -1105,21 +1138,16 @@ public class ActsControllerTests
             normalizedHtml.IndexOf("Паспорт серия 36 07 № 763332", StringComparison.Ordinal));
         Assert.Contains("Всего оказано услуг 2", normalizedHtml);
         Assert.Contains("20 000,00", normalizedHtml);
-        Assert.Contains("@page { size: A4; margin: 10mm 7.3mm 10mm 15mm; }", normalizedHtml);
-        Assert.Contains("font-family: \"DejaVu Sans Condensed\"", normalizedHtml);
-        Assert.Contains("data:font/ttf;base64,", normalizedHtml);
-        Assert.Contains("width: 45%;", normalizedHtml);
-        Assert.Contains(".items-table tbody .item-name", normalizedHtml);
-        Assert.Contains("text-align: justify;", normalizedHtml);
-        Assert.Contains("text-justify: inter-character;", normalizedHtml);
-        Assert.Contains(".items-table tbody .item-qty", normalizedHtml);
-        Assert.Contains("text-align: right;", normalizedHtml);
-        Assert.Contains(".items-table tbody .item-qty", normalizedHtml);
-        Assert.Contains("vertical-align: top;", normalizedHtml);
-        Assert.Contains("line-height: 1.2;", normalizedHtml);
-        Assert.Contains("line-height: 13.8pt;", normalizedHtml);
-        Assert.Contains("Без налога (НДС):", normalizedHtml);
-        Assert.DoesNotContain("Служебный комментарий из учета", normalizedHtml);
+        Assert.Contains("@page { size: A4; margin: 15mm 14mm; }", normalizedHtml);
+        Assert.Contains("font-family: Arial, \"DejaVu Sans\", sans-serif", normalizedHtml);
+        Assert.DoesNotContain("DejaVu Sans Condensed", normalizedHtml);
+        Assert.Contains(".name { width: 53%;", normalizedHtml);
+        Assert.Contains(".qty { width: 8%;", normalizedHtml);
+        Assert.Contains(".unit { width: 9%;", normalizedHtml);
+        Assert.Contains(".price, .sum { width: 12.5%;", normalizedHtml);
+        Assert.Contains(".signatures td:first-child .sign-line { padding-right: 8px; text-align: right; }", normalizedHtml);
+        Assert.Contains("В том числе НДС:", normalizedHtml);
+        Assert.Contains("Служебный комментарий из учета", normalizedHtml);
         Assert.Contains("ИСПОЛНИТЕЛЬ", normalizedHtml);
     }
 
@@ -1405,7 +1433,7 @@ public class ActsControllerTests
     }
 
     [Fact]
-    public void ActDocumentTemplateEngine_RendersKubStyleSlashSignaturesForBothParties()
+    public void ActDocumentTemplateEngine_RendersEstablishedSlashSignaturesForBothParties()
     {
         var act = new Act
         {
@@ -1442,8 +1470,8 @@ public class ActsControllerTests
 
         var normalizedHtml = html.Replace("&nbsp;", " ").Replace("\u00A0", " ");
 
-        Assert.Contains("signature-sign-cell", normalizedHtml);
-        Assert.Equal(2, Regex.Matches(normalizedHtml, "<span class=\"signature-mark\">", RegexOptions.CultureInvariant).Count);
+        Assert.Contains("class=\"sign-line\"", normalizedHtml);
+        Assert.Equal(2, Regex.Matches(normalizedHtml, "<span class=\"mark\">", RegexOptions.CultureInvariant).Count);
         Assert.Contains("data:image/png;base64,signature-demo", normalizedHtml);
         Assert.Contains("data:image/png;base64,seal-demo", normalizedHtml);
         Assert.Contains("/ Кожеваткин А. В. /", normalizedHtml);
@@ -1530,10 +1558,10 @@ public class ActsControllerTests
         var htmlEntry = Assert.Single(archive.Entries, entry => entry.FullName == "word/afchunk.html");
         using var htmlReader = new StreamReader(htmlEntry.Open());
         var wordHtml = htmlReader.ReadToEnd();
-        Assert.Contains("height:12.9pt;mso-height-rule:exactly", wordHtml);
-        Assert.Contains("height:35.4pt;mso-height-rule:exactly", wordHtml);
-        Assert.Contains("mso-table-layout-alt:fixed", wordHtml);
-        Assert.Contains("width:255.85pt", wordHtml);
+        Assert.Contains("font-family: Arial", wordHtml);
+        Assert.Contains(".name { width: 53%;", wordHtml);
+        Assert.Contains(".qty { width: 8%;", wordHtml);
+        Assert.DoesNotContain("DejaVu Sans Condensed", wordHtml);
     }
 
     [Fact]
@@ -2450,12 +2478,12 @@ public class ActsControllerTests
         var action = await controller.GetDocument(act.Id, "xlsx", false, CancellationToken.None);
 
         var file = Assert.IsType<FileContentResult>(action);
-        Assert.Equal("application/vnd.openxmlformats-officedocument.wordprocessingml.document", file.ContentType);
-        Assert.EndsWith(".docx", file.FileDownloadName, StringComparison.Ordinal);
+        Assert.Equal("application/msword", file.ContentType);
+        Assert.EndsWith(".doc", file.FileDownloadName, StringComparison.Ordinal);
         Assert.DoesNotContain(":", file.FileDownloadName, StringComparison.Ordinal);
         Assert.DoesNotContain("/", file.FileDownloadName, StringComparison.Ordinal);
         Assert.DoesNotContain("?", file.FileDownloadName, StringComparison.Ordinal);
-        Assert.True(file.FileContents.AsSpan().StartsWith("PK"u8));
+        Assert.Contains("<!DOCTYPE html>", Encoding.UTF8.GetString(file.FileContents), StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -2589,8 +2617,8 @@ public class ActsControllerTests
         Assert.Equal("custom@example.com", emailService.ToEmail);
         Assert.Equal("Custom subject", emailService.Subject);
         Assert.Equal("Custom body", emailService.Body);
-        Assert.Equal("act-ACT-313-MAIL.docx", emailService.AttachmentFileName);
-        Assert.Equal("application/vnd.openxmlformats-officedocument.wordprocessingml.document", emailService.AttachmentContentType);
+        Assert.Equal("act-ACT-313-MAIL.doc", emailService.AttachmentFileName);
+        Assert.Equal("application/msword", emailService.AttachmentContentType);
     }
 
     [Fact]
@@ -2695,15 +2723,15 @@ public class ActsControllerTests
 
         var result = Assert.IsType<YandexDiskOperationResultDto>(action.Value);
         Assert.True(result.Success);
-        Assert.Equal("/CRM/act-ACT-YD-1.docx", result.Path);
+        Assert.Equal("/CRM/act-ACT-YD-1.doc", result.Path);
         Assert.NotNull(yandexDiskService.Upload);
         Assert.Equal("act", yandexDiskService.Upload.DocumentKind);
         Assert.Equal("Акт", yandexDiskService.Upload.DocumentType);
         Assert.Equal("ACT-YD-1", yandexDiskService.Upload.DocumentNumber);
         Assert.Equal("Акт по юридическим услугам", yandexDiskService.Upload.DocumentTitle);
         Assert.Equal("Тестовый клиент", yandexDiskService.Upload.ClientName);
-        Assert.Equal("act-ACT-YD-1.docx", yandexDiskService.Upload.OriginalFileName);
-        Assert.Equal("application/vnd.openxmlformats-officedocument.wordprocessingml.document", yandexDiskService.Upload.ContentType);
+        Assert.Equal("act-ACT-YD-1.doc", yandexDiskService.Upload.OriginalFileName);
+        Assert.Equal("application/msword", yandexDiskService.Upload.ContentType);
         Assert.True(yandexDiskService.Upload.OverwriteExisting);
         Assert.NotEmpty(yandexDiskService.UploadBytes!);
 
@@ -2718,8 +2746,8 @@ public class ActsControllerTests
             && item.ObjectType == "act"
             && item.ObjectId == act.Id);
         Assert.Equal(YandexDiskCrmSyncStatus.Success, syncState.Status);
-        Assert.Equal("/CRM/act-ACT-YD-1.docx", syncState.YandexDiskPath);
-        Assert.Equal("act-ACT-YD-1.docx", syncState.FileName);
+        Assert.Equal("/CRM/act-ACT-YD-1.doc", syncState.YandexDiskPath);
+        Assert.Equal("act-ACT-YD-1.doc", syncState.FileName);
         Assert.Equal(1, syncState.AttemptCount);
     }
 
@@ -3263,7 +3291,7 @@ public class ActsControllerTests
         var action = await controller.GetDocument(actId, "word", false, CancellationToken.None);
 
         var file = Assert.IsType<FileContentResult>(action);
-        Assert.Equal("act-export.docx", file.FileDownloadName);
+        Assert.Equal("act-export.doc", file.FileDownloadName);
     }
 
     [Fact]

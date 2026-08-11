@@ -3130,18 +3130,22 @@ export function InvoiceModal({
     return previewWindow;
   };
 
-  const openBlobInWindow = (blob: Blob, previewWindow?: Window | null) => {
+  const printHtmlInWindow = (html: string, previewWindow?: Window | null) => {
     if (!previewWindow || previewWindow.closed) {
       throw new Error('Окно печати было закрыто до загрузки документа. Повторите ещё раз.');
     }
 
-    const href = URL.createObjectURL(blob);
-    previewWindow.onload = () => {
-      previewWindow.focus();
-      previewWindow.print();
-      window.setTimeout(() => URL.revokeObjectURL(href), 60_000);
-    };
-    previewWindow.location.href = href;
+    previewWindow.document.open();
+    previewWindow.document.write(html);
+    previewWindow.document.close();
+    window.setTimeout(() => {
+      try {
+        previewWindow.focus();
+        previewWindow.print();
+      } catch (error) {
+        console.error('html print failed', error);
+      }
+    }, 250);
   };
 
   const deferClose = useCallback((callback: () => void) => {
@@ -3180,12 +3184,12 @@ export function InvoiceModal({
       previewWindow = openPendingDocumentWindow();
       const blob = await apiService.downloadInvoiceDocument(
         invoice.id,
-        'pdf',
+        'html',
         templateKey
           ? { includeSignatureAndSeal, templateKey }
           : { includeSignatureAndSeal },
       );
-      openBlobInWindow(blob, previewWindow);
+      printHtmlInWindow(await blob.text(), previewWindow);
     } catch (err) {
       if (previewWindow && !previewWindow.closed) {
         previewWindow.close();

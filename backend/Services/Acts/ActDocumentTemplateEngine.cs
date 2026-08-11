@@ -20,8 +20,6 @@ public static class ActDocumentTemplateEngine
     private static readonly Regex LineItemsRegex = new("""\{\{#lineItems\}\}([\s\S]*?)\{\{/lineItems\}\}""", RegexOptions.Compiled);
     private const string ClientProfileNotesPrefix = "__PP_CLIENT_PROFILE_V2__:";
     private static readonly JsonSerializerOptions ClientProfileJsonOptions = new(JsonSerializerDefaults.Web);
-    private static readonly Lazy<string> EmbeddedFontCss = new(BuildEmbeddedFontCss);
-
     public static readonly string DefaultTemplateHtml = """
 <!doctype html>
 <html lang="ru">
@@ -29,43 +27,41 @@ public static class ActDocumentTemplateEngine
   <meta charset="utf-8" />
   <title>{{document.title}}</title>
   <style>
-    @page { size: A4; margin: 10mm 7.3mm 10mm 15mm; }
-    @page WordSection1 { size: 595.3pt 841.9pt; margin: 28.35pt 20.69pt 28.35pt 42.52pt; }
+    @page { size: A4; margin: 15mm 14mm; }
     * { box-sizing: border-box; }
-    body { margin: 0; color: #000; font-family: "DejaVu Sans Condensed", "Arial Narrow", Arial, sans-serif; font-size: 12px; line-height: 1.25; }
-    .document { width: 531.78pt; margin: 0; page: WordSection1; }
-    h1 { margin: 0 0 14px; text-align: center; font-size: 18px; line-height: 1.15; }
-    table { width: 100%; border-collapse: collapse; border-spacing: 0; table-layout: fixed; mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
-    .parties td { padding: 1px 3px; vertical-align: top; }
-    .label { width: 12.5%; white-space: nowrap; }
+    body { margin: 0; color: #000; font-family: Arial, "DejaVu Sans", sans-serif; font-size: 12px; line-height: 1.3; }
+    .document { width: 100%; max-width: 182mm; margin: 0 auto; }
+    h1 { margin: 8px 0 14px; text-align: center; font-size: 17px; line-height: 1.2; }
+    table { width: 100%; border-collapse: collapse; }
+    .parties td { padding: 3px 4px; vertical-align: top; }
+    .label { width: 17%; white-space: nowrap; }
     .party { font-weight: 600; overflow-wrap: anywhere; }
-    .items { margin: 2px 0 2px; }
-    .items th, .items td { border: 1px solid #000; padding: 2px 3px; vertical-align: top; line-height: 1.2; }
+    .items { margin: 10px 0 7px; }
+    .items th, .items td { border: 1px solid #000; padding: 4px 5px; vertical-align: top; }
     .items th { text-align: center; font-weight: 700; }
     .num, .qty, .unit { text-align: center; }
     .price, .sum, .total-value { text-align: right; white-space: nowrap; }
     .num { width: 5%; }
-    .name { width: 45%; overflow-wrap: anywhere; }
-    .qty { width: 10%; }
-    .unit { width: 10%; }
-    .price, .sum { width: 15%; }
+    .name { width: 53%; overflow-wrap: anywhere; }
+    .qty { width: 8%; }
+    .unit { width: 9%; }
+    .price, .sum { width: 12.5%; }
     .totals td { padding: 2px 0; }
     .total-label { text-align: right; padding-right: 10px !important; font-weight: 700; }
-    .total-value { width: 15%; }
-    .summary { margin-top: 6px; }
+    .total-value { width: 17%; }
+    .summary { margin-top: 9px; }
     .summary-words { margin-top: 3px; font-weight: 700; }
     .acceptance { margin-top: 14px; line-height: 1.4; }
     .comment { margin-top: 10px; }
-    .signatures { margin-top: 10.8px; table-layout: fixed; }
-    .signatures .signature-party-cell:first-child { width: 48.5%; vertical-align: top; }
-    .signatures .gap { width: 2.575%; }
-    .signatures .signature-party-cell:last-child { width: 48.925%; vertical-align: top; }
-    .signatures .signature-party-cell:last-child .sign-line { padding-right: 3px; }
-    .role { margin-bottom: 7px; font-size: 13.333px; font-weight: 700; }
-    .party-name { min-height: 30px; font-size: 13.333px; }
-    .sign-line { position: relative; min-height: 28px; padding-top: 5px; border-bottom: 1px solid #000; text-align: right; }
-    .signature { position: absolute; left: -2px; bottom: -8px; z-index: 2; width: 90px; height: 50px; object-fit: contain; }
-    .seal { position: absolute; left: 143px; bottom: -67px; z-index: 1; width: 149px; height: 150px; object-fit: contain; opacity: .92; }
+    .signatures { margin-top: 24px; table-layout: fixed; }
+    .signatures td { width: 48%; vertical-align: top; }
+    .signatures .gap { width: 4%; }
+    .role { margin-bottom: 7px; font-weight: 700; }
+    .party-name { min-height: 34px; }
+    .sign-line { position: relative; min-height: 70px; padding-top: 38px; text-align: center; }
+    .signatures td:first-child .sign-line { padding-right: 8px; text-align: right; }
+    .signature { position: absolute; left: 8px; bottom: 10px; z-index: 2; max-width: 145px; max-height: 42px; object-fit: contain; }
+    .seal { position: absolute; left: 75px; bottom: -22px; z-index: 1; max-width: 112px; max-height: 112px; object-fit: contain; opacity: .92; }
     .mark { position: relative; z-index: 3; white-space: nowrap; }
     @media print { thead { display: table-header-group; } tr { break-inside: avoid; } }
   </style>
@@ -73,26 +69,27 @@ public static class ActDocumentTemplateEngine
 <body>
   <main class="document">
     <h1>{{document.title}}</h1>
-    <table class="parties" cellspacing="0"><tbody>
+    <table class="parties"><tbody>
       <tr><td class="label">Исполнитель:</td><td class="party">{{seller.requisitesHtml}}</td></tr>
       <tr><td class="label">Заказчик:</td><td class="party">{{buyer.requisitesHtml}}</td></tr>
       <tr><td class="label">Основание:</td><td class="party">{{act.basis}}</td></tr>
     </tbody></table>
-    <table class="items" cellspacing="0">
+    <table class="items">
       <thead><tr><th class="num">№</th><th class="name">Наименование работ, услуг</th><th class="qty">Кол-во</th><th class="unit">Ед.</th><th class="price">Цена</th><th class="sum">Сумма</th></tr></thead>
       <tbody>{{#lineItems}}<tr><td class="num">{{index}}</td><td class="name">{{name}}</td><td class="qty">{{quantity}}</td><td class="unit">{{unit}}</td><td class="price">{{price}}</td><td class="sum">{{total}}</td></tr>{{/lineItems}}</tbody>
     </table>
-    <table class="totals" cellspacing="0"><tbody>
+    <table class="totals"><tbody>
       <tr><td class="total-label">Итого:</td><td class="total-value">{{act.total}}</td></tr>
-      <tr><td class="total-label">Без налога (НДС):</td><td class="total-value">-</td></tr>
+      <tr><td class="total-label">В том числе НДС:</td><td class="total-value">{{act.vat}}</td></tr>
     </tbody></table>
     <div class="summary">Всего оказано услуг {{act.itemsCount}}, на сумму {{act.total}} руб.</div>
     <div class="summary-words">{{act.totalWords}}</div>
     <div class="acceptance">Вышеперечисленные услуги выполнены полностью и в срок. Заказчик претензий по объему, качеству и срокам оказания услуг не имеет.</div>
-    <table class="signatures" cellspacing="0" width="100%"><tbody><tr>
-      <td class="signature-party-cell" width="48.5%"><div class="role">ИСПОЛНИТЕЛЬ</div><div class="party-name">{{seller.signaturePartyName}}</div><div class="sign-line">{{seller.signatureHtml}}{{seller.sealHtml}}<span class="mark">/ {{seller.signatoryShortName}} /</span></div></td>
-      <td class="gap" width="2.575%"></td>
-      <td class="signature-party-cell" width="48.925%"><div class="role">ЗАКАЗЧИК</div><div class="party-name">{{buyer.signaturePartyName}}</div><div class="sign-line"><span class="mark">/ {{buyer.signatoryShortName}} /</span></div></td>
+    {{act.commentHtml}}
+    <table class="signatures"><tbody><tr>
+      <td><div class="role">ИСПОЛНИТЕЛЬ</div><div class="party-name">{{seller.signaturePartyName}}</div><div class="sign-line">{{seller.signatureHtml}}{{seller.sealHtml}}<span class="mark">/ {{seller.signatoryShortName}} /</span></div></td>
+      <td class="gap"></td>
+      <td><div class="role">ЗАКАЗЧИК</div><div class="party-name">{{buyer.signaturePartyName}}</div><div class="sign-line"><span class="mark">/ {{buyer.signatoryShortName}} /</span></div></td>
     </tr></tbody></table>
   </main>
 </body>
@@ -127,7 +124,9 @@ public static class ActDocumentTemplateEngine
                 Key = item.Key.Trim(),
                 Name = item.Name.Trim(),
                 Description = string.IsNullOrWhiteSpace(item.Description) ? null : item.Description.Trim(),
-                Html = item.Html.Trim(),
+                Html = IsRetiredManagedDefaultTemplate(item.Key, item.Html)
+                    ? DefaultTemplateHtml
+                    : item.Html.Trim(),
             })
             .ToList();
 
@@ -149,6 +148,15 @@ public static class ActDocumentTemplateEngine
             DefaultTemplateHtml = DefaultTemplateHtml,
         };
     }
+
+    private static bool IsRetiredManagedDefaultTemplate(string? key, string? html)
+        => string.Equals(key?.Trim(), DefaultTemplateKey, StringComparison.OrdinalIgnoreCase)
+            && !string.IsNullOrWhiteSpace(html)
+            && html.Contains("DejaVu Sans Condensed", StringComparison.Ordinal)
+            && html.Contains("@page WordSection1", StringComparison.Ordinal)
+            && html.Contains(".name { width: 45%;", StringComparison.Ordinal)
+            && html.Contains("signature-party-cell", StringComparison.Ordinal)
+            && html.Contains("{{seller.signatureHtml}}", StringComparison.Ordinal);
 
     public static ActDocumentTemplateSettingsStorage NormalizeRequest(InvoiceDocumentTemplateSettingsRequest request)
         => new()
@@ -218,7 +226,7 @@ public static class ActDocumentTemplateEngine
         IReadOnlyCollection<ActLineItem> lineItems,
         LegalEntity? mainCompany,
         bool includeSignatureAndSeal)
-        => RenderSystemDefaultHtml(act, lineItems, mainCompany, includeSignatureAndSeal);
+        => RenderCustomTemplateHtml(DefaultTemplateHtml, act, lineItems, mainCompany, includeSignatureAndSeal);
 
     public static string RenderHtml(
         string templateHtml,
@@ -229,7 +237,7 @@ public static class ActDocumentTemplateEngine
     {
         if (string.IsNullOrWhiteSpace(templateHtml) || string.Equals(templateHtml.Trim(), DefaultTemplateHtml, StringComparison.Ordinal))
         {
-            return RenderSystemDefaultHtml(act, lineItems, mainCompany, includeSignatureAndSeal);
+            return RenderCustomTemplateHtml(DefaultTemplateHtml, act, lineItems, mainCompany, includeSignatureAndSeal);
         }
 
         return RenderCustomTemplateHtml(templateHtml, act, lineItems, mainCompany, includeSignatureAndSeal);
@@ -291,7 +299,6 @@ public static class ActDocumentTemplateEngine
   <meta charset="utf-8" />
   <title>{{Encode(documentTitle)}}</title>
   <style>
-    {{EmbeddedFontCss.Value}}
     @page { size: A4; margin: 10mm 7.3mm 10mm 15mm; }
     @page WordSection1 { size: 595.3pt 841.9pt; margin: 28.35pt 20.69pt 28.35pt 42.52pt; }
     * { box-sizing: border-box; }
@@ -689,43 +696,7 @@ public static class ActDocumentTemplateEngine
             ["buyer.signatoryShortName"] = Encode(buyer.SignatoryShortName),
         };
 
-        return InjectEmbeddedFonts(ReplaceTokens(rendered, tokens));
-    }
-
-    private static string InjectEmbeddedFonts(string html)
-    {
-        var styleStart = html.IndexOf("<style", StringComparison.OrdinalIgnoreCase);
-        if (styleStart >= 0)
-        {
-            var styleTagEnd = html.IndexOf('>', styleStart);
-            if (styleTagEnd >= 0)
-            {
-                return html.Insert(styleTagEnd + 1, EmbeddedFontCss.Value);
-            }
-        }
-
-        var headEnd = html.IndexOf("</head>", StringComparison.OrdinalIgnoreCase);
-        var style = $"<style>{EmbeddedFontCss.Value}</style>";
-        return headEnd >= 0 ? html.Insert(headEnd, style) : style + html;
-    }
-
-    private static string BuildEmbeddedFontCss()
-    {
-        var regular = ReadEmbeddedResourceBase64("PayPlanner.Fonts.DejaVuSansCondensed.ttf");
-        var bold = ReadEmbeddedResourceBase64("PayPlanner.Fonts.DejaVuSansCondensed-Bold.ttf");
-        return $$"""
-@font-face { font-family: "DejaVu Sans Condensed"; src: url("data:font/ttf;base64,{{regular}}") format("truetype"); font-style: normal; font-weight: 400; }
-@font-face { font-family: "DejaVu Sans Condensed"; src: url("data:font/ttf;base64,{{bold}}") format("truetype"); font-style: normal; font-weight: 600 900; }
-""";
-    }
-
-    private static string ReadEmbeddedResourceBase64(string resourceName)
-    {
-        using var stream = typeof(ActDocumentTemplateEngine).Assembly.GetManifestResourceStream(resourceName)
-            ?? throw new InvalidOperationException($"Не найден встроенный шрифт '{resourceName}'.");
-        using var buffer = new MemoryStream();
-        stream.CopyTo(buffer);
-        return Convert.ToBase64String(buffer.ToArray());
+        return ReplaceTokens(rendered, tokens);
     }
 
     private static string ReplaceTokens(string templateHtml, IReadOnlyDictionary<string, string> tokens)
@@ -1363,7 +1334,7 @@ public static class ActDocumentTemplateEngine
     }
 
     private static string FormatMoney(decimal value)
-        => value.ToString("N2", RuCulture);
+        => value.ToString("N2", RuCulture).Replace('\u00A0', ' ');
 
     private static string FormatQuantity(decimal value)
         => value.ToString("0.####", RuCulture);

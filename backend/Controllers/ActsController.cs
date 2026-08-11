@@ -1230,7 +1230,7 @@ public class ActsController : ControllerBase
             return Content(documentHtml, "text/html; charset=utf-8");
         }
 
-        var ext = normalizedFormat == "pdf" ? "pdf" : "docx";
+        var ext = normalizedFormat == "pdf" ? "pdf" : "doc";
         var fileName = $"act-{SanitizeFilePart(act.Number)}.{ext}";
         if (normalizedFormat == "pdf")
         {
@@ -1245,7 +1245,7 @@ public class ActsController : ControllerBase
             }
         }
 
-        return File(ActWordDocumentRenderer.Render(documentHtml), HtmlWordDocumentBuilder.ContentType, fileName);
+        return File(Encoding.UTF8.GetBytes(documentHtml), "application/msword", fileName);
     }
 
     [HttpPost("{id:int}/yandex-disk")]
@@ -1315,9 +1315,9 @@ public class ActsController : ControllerBase
         }
         else
         {
-            bytes = ActWordDocumentRenderer.Render(documentHtml);
-            fileName = $"act-{SanitizeFilePart(act.Number)}.docx";
-            contentType = HtmlWordDocumentBuilder.ContentType;
+            bytes = Encoding.UTF8.GetBytes(documentHtml);
+            fileName = $"act-{SanitizeFilePart(act.Number)}.doc";
+            contentType = "application/msword";
         }
 
         await using var stream = new MemoryStream(bytes);
@@ -1450,9 +1450,9 @@ public class ActsController : ControllerBase
         }
         else
         {
-            bytes = ActWordDocumentRenderer.Render(documentHtml);
-            fileName = $"act-{SanitizeFilePart(act.Number)}.docx";
-            contentType = HtmlWordDocumentBuilder.ContentType;
+            bytes = Encoding.UTF8.GetBytes(documentHtml);
+            fileName = $"act-{SanitizeFilePart(act.Number)}.doc";
+            contentType = "application/msword";
         }
 
         var subject = string.IsNullOrWhiteSpace(request.Subject)
