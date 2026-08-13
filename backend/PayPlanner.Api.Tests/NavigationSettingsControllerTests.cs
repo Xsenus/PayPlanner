@@ -14,6 +14,28 @@ namespace PayPlanner.Api.Tests;
 public sealed class NavigationSettingsControllerTests
 {
     [Fact]
+    public async Task Get_ReadsLegacyConfigurationWithoutGroups()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "admin", canEditRoles: false);
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = "navigation.sidebar.configuration.v1",
+            Value = """{"order":["tasks","calendar"],"labels":{"tasks":"Рабочие задачи"}}""",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, user.Id);
+
+        var dto = AssertOk(await controller.Get(CancellationToken.None));
+
+        Assert.Empty(dto.Groups);
+        Assert.Equal("tasks", dto.Order[0]);
+        Assert.Equal("Рабочие задачи", dto.Labels["tasks"]);
+    }
+
+    [Fact]
     public async Task Update_PersistsNormalizedConfiguration_ForAdministrator()
     {
         await using var db = await CreateContextAsync();
@@ -27,7 +49,11 @@ public sealed class NavigationSettingsControllerTests
                 {
                     ["tasks"] = "  Рабочие задачи  ",
                     ["unknown"] = "Неизвестный пункт",
-                }),
+                },
+                [
+                    new NavigationGroupDto("group-accounting", "  Бухгалтерия  ", ["accounts", "acts", "unknown"]),
+                    new NavigationGroupDto("invalid", "Не сохранится", ["payments"]),
+                ]),
             CancellationToken.None);
 
         var dto = AssertOk(result);
@@ -36,11 +62,17 @@ public sealed class NavigationSettingsControllerTests
         Assert.Equal("Рабочие задачи", dto.Labels["tasks"]);
         Assert.DoesNotContain("unknown", dto.Order);
         Assert.False(dto.Labels.ContainsKey("unknown"));
+        var group = Assert.Single(dto.Groups);
+        Assert.Equal("group-accounting", group.Id);
+        Assert.Equal("Бухгалтерия", group.Name);
+        Assert.Equal(["accounts", "acts"], group.ItemIds);
+        Assert.DoesNotContain("accounts", dto.Order);
+        Assert.Contains("group-accounting", dto.Order);
         Assert.Single(await db.SystemSettings.AsNoTracking().ToListAsync());
     }
 
     [Fact]
-    public async Task Update_AllowsDelegatedRoleEditor()
+    public async Task Update_ForbidsDelegatedRoleEditor()
     {
         await using var db = await CreateContextAsync();
         var user = await CreateUserAsync(db, "office-manager", canEditRoles: true);
@@ -50,7 +82,8 @@ public sealed class NavigationSettingsControllerTests
             new UpdateNavigationSettingsRequest(["clients", "calendar"], new Dictionary<string, string>()),
             CancellationToken.None);
 
-        AssertOk(result);
+        Assert.IsType<ForbidResult>(result.Result);
+        Assert.Empty(await db.SystemSettings.AsNoTracking().ToListAsync());
     }
 
     [Fact]
@@ -66,6 +99,28 @@ public sealed class NavigationSettingsControllerTests
 
         Assert.IsType<ForbidResult>(result.Result);
         Assert.Empty(await db.SystemSettings.AsNoTracking().ToListAsync());
+    }
+
+    [Fact]
+    public async Task Update_AssignsEachSectionToOnlyOneGroup()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "admin", canEditRoles: false);
+        var controller = CreateController(db, user.Id);
+
+        var result = await controller.Update(
+            new UpdateNavigationSettingsRequest(
+                ["group-accounting", "group-management"],
+                new Dictionary<string, string>(),
+                [
+                    new NavigationGroupDto("group-accounting", "Бухгалтерия", ["accounts", "acts"]),
+                    new NavigationGroupDto("group-management", "Управление", ["accounts", "users"]),
+                ]),
+            CancellationToken.None);
+
+        var dto = AssertOk(result);
+        Assert.Equal(["accounts", "acts"], dto.Groups[0].ItemIds);
+        Assert.Equal(["users"], dto.Groups[1].ItemIds);
     }
 
     private static NavigationSettingsController CreateController(PaymentContext db, int userId)

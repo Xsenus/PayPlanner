@@ -124,8 +124,8 @@ describe('Navigation links', () => {
     authState.roleId = 1;
     authState.roleName = 'admin';
     apiMock.getRolePermissions.mockResolvedValue(defaultRolePermissions);
-    apiMock.getNavigationSettings.mockResolvedValue({ order: [], labels: {}, updatedAt: null });
-    apiMock.updateNavigationSettings.mockImplementation(async (order, labels) => ({ order, labels, updatedAt: null }));
+    apiMock.getNavigationSettings.mockResolvedValue({ order: [], labels: {}, groups: [], updatedAt: null });
+    apiMock.updateNavigationSettings.mockImplementation(async (order, labels, groups) => ({ order, labels, groups, updatedAt: null }));
     apiMock.getUserSetting.mockResolvedValue(null);
     apiMock.upsertUserSetting.mockResolvedValue({ key: 'navigation.sidebar.hidden-items.v1', value: '[]' });
     apiMock.getPaymentsV2.mockResolvedValue({
@@ -175,6 +175,7 @@ describe('Navigation links', () => {
     apiMock.getNavigationSettings.mockResolvedValueOnce({
       order: ['tasks', 'calendar', 'notifications'],
       labels: { tasks: 'Рабочие задачи' },
+      groups: [],
       updatedAt: null,
     });
 
@@ -218,7 +219,7 @@ describe('Navigation links', () => {
     await waitForNavigationPermissions();
 
     await user.click(screen.getByRole('button', { name: 'Ещё разделы' }));
-    await user.click(screen.getByRole('button', { name: 'Порядок и названия' }));
+    await user.click(screen.getByRole('button', { name: 'Группы и порядок' }));
     const calendarName = screen.getByRole('textbox', { name: /Название раздела Календарь/i });
     await user.clear(calendarName);
     await user.type(calendarName, 'Расписание');
@@ -230,10 +231,65 @@ describe('Navigation links', () => {
     await user.click(screen.getByRole('button', { name: 'Сохранить' }));
 
     await waitFor(() => expect(apiMock.updateNavigationSettings).toHaveBeenCalled());
-    const [order, labels] = apiMock.updateNavigationSettings.mock.calls.at(-1)!;
+    const [order, labels, groups] = apiMock.updateNavigationSettings.mock.calls.at(-1)!;
     expect(order[0]).toBe('notifications');
     expect(labels.calendar).toBe('Расписание');
+    expect(groups).toEqual([]);
     expect(await screen.findByRole('link', { name: /Расписание/i })).toBeTruthy();
+  });
+
+  it('lets an administrator create, position and fill a menu group', async () => {
+    const user = userEvent.setup();
+    renderNavigation();
+    await waitForNavigationPermissions();
+
+    await user.click(screen.getByRole('button', { name: 'Ещё разделы' }));
+    await user.click(screen.getByRole('button', { name: 'Группы и порядок' }));
+    await user.click(screen.getByRole('button', { name: 'Создать группу' }));
+    const groupName = screen.getByRole('textbox', { name: /Название группы Новая группа/i });
+    await user.clear(groupName);
+    await user.type(groupName, 'Бухгалтерия');
+    const accountsGroupSelect = screen.getByRole('combobox', { name: /Группа раздела Счета/i }) as HTMLSelectElement;
+    const groupValue = Array.from(accountsGroupSelect.options).find((option) => option.text === 'Бухгалтерия')?.value;
+    expect(groupValue).toBeTruthy();
+    await user.selectOptions(accountsGroupSelect, groupValue!);
+    await user.selectOptions(screen.getByRole('combobox', { name: /Группа раздела Акты/i }), groupValue!);
+    const groupDragHandle = screen.getByRole('button', { name: 'Перетащить группу Бухгалтерия' });
+    const calendarRow = screen.getByRole('button', { name: 'Перетащить Календарь' }).closest('div');
+    fireEvent.pointerDown(groupDragHandle, { button: 0, buttons: 1 });
+    fireEvent.pointerMove(calendarRow!, { buttons: 1 });
+    fireEvent.pointerUp(calendarRow!, { button: 0, buttons: 0 });
+    await user.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    await waitFor(() => expect(apiMock.updateNavigationSettings).toHaveBeenCalled());
+    const [order, , groups] = apiMock.updateNavigationSettings.mock.calls.at(-1)!;
+    const group = groups.find((candidate) => candidate.name === 'Бухгалтерия');
+    expect(group?.itemIds).toEqual(['accounts', 'acts']);
+    expect(order[0]).toBe(group?.id);
+    expect(order).not.toContain('accounts');
+    expect(order).not.toContain('acts');
+    expect(await screen.findByRole('button', { name: /Бухгалтерия/i })).toBeTruthy();
+  });
+
+  it('shows grouped sections only when they are allowed for the current role', async () => {
+    authState.isAdmin = false;
+    authState.roleId = 100;
+    authState.roleName = 'Юрист';
+    apiMock.getRolePermissions.mockResolvedValueOnce(createLawyerTemplatePermissions());
+    apiMock.getNavigationSettings.mockResolvedValueOnce({
+      order: ['group-contacts', 'reports'],
+      labels: {},
+      groups: [{ id: 'group-contacts', name: 'Работа с клиентами', itemIds: ['clients', 'legalEntities'] }],
+      updatedAt: null,
+    });
+
+    renderNavigation();
+
+    const group = await screen.findByRole('button', { name: /Работа с клиентами/i });
+    expect(group).toBeTruthy();
+    expect(findLinkByHref(getTabHref('clients'))).toBeTruthy();
+    expect(findLinkByHref(getTabHref('legalEntities'))).toBeFalsy();
+    expect(screen.queryByRole('button', { name: 'Группы и порядок' })).toBeNull();
   });
 
   it('shows settings for a non-admin role that can view integrations only', async () => {
@@ -321,7 +377,7 @@ describe('Navigation links', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Ещё разделы' }));
     expect(screen.getByRole('checkbox', { name: /Клиенты/i })).toBeTruthy();
     expect(screen.queryByRole('checkbox', { name: /Отчёты/i })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Порядок и названия' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Группы и порядок' })).toBeNull();
 
     expect(apiMock.getPaymentsV2).not.toHaveBeenCalled();
   });

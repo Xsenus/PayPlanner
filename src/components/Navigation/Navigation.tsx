@@ -44,13 +44,16 @@ import {
   ArrowUp,
   ArrowDown,
   Save,
+  Folder,
+  FolderPlus,
+  Trash2,
 } from 'lucide-react';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useAuth } from '../../contexts/AuthContext';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { Tab } from '../../types/tabs';
 import { getTabHref } from '../../appRouting';
-import { apiService } from '../../services/api';
+import { apiService, type NavigationGroupDto } from '../../services/api';
 import {
   PAYMENT_ADVANCE_REVIEW_CHANGED_EVENT,
   PAYMENT_ADVANCE_REVIEW_FILTER_INTENT_KEY,
@@ -99,6 +102,22 @@ function moveItemToTarget(items: string[], sourceId: string, targetId: string): 
   const [movedItemId] = next.splice(sourceIndex, 1);
   next.splice(targetIndex, 0, movedItemId);
   return next;
+}
+
+function normalizeNavigationRootOrder(
+  order: string[],
+  validItemIds: string[],
+  groups: NavigationGroupDto[],
+): string[] {
+  const assignedItemIds = new Set(groups.flatMap((group) => group.itemIds));
+  const validRootIds = new Set([
+    ...validItemIds.filter((itemId) => !assignedItemIds.has(itemId)),
+    ...groups.map((group) => group.id),
+  ]);
+  const existing = order.filter((entryId, index) => validRootIds.has(entryId) && order.indexOf(entryId) === index);
+  const missingItems = validItemIds.filter((itemId) => validRootIds.has(itemId) && !existing.includes(itemId));
+  const missingGroups = groups.map((group) => group.id).filter((groupId) => !existing.includes(groupId));
+  return [...existing, ...missingItems, ...missingGroups];
 }
 
 export default function Navigation({ activeTab, onTabChange }: NavigationProps) {
@@ -219,6 +238,9 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
     tab?: Tab;
     children?: SidebarChild[];
   };
+  type SidebarNode =
+    | { type: 'item'; item: SidebarItem }
+    | { type: 'group'; id: string; label: string; items: SidebarItem[] };
 
   const mainItems = useMemo<SidebarItem[]>(() => {
     const items: SidebarItem[] = [];
@@ -450,9 +472,10 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
     () => availableSidebarItems.map((item) => item.id),
     [availableSidebarItems],
   );
-  const canManageNavigation = isAdmin() || permissions.roles.canEdit;
+  const canManageNavigation = isAdmin();
   const [globalOrderIds, setGlobalOrderIds] = useState<string[]>([]);
   const [customLabels, setCustomLabels] = useState<Record<string, string>>({});
+  const [navigationGroups, setNavigationGroups] = useState<NavigationGroupDto[]>([]);
   const [hiddenItemIds, setHiddenItemIds] = useState<string[]>(() => {
     if (typeof window === 'undefined') return [];
     try {
@@ -468,26 +491,33 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
   const [navigationSettingsError, setNavigationSettingsError] = useState('');
   const [draftOrderIds, setDraftOrderIds] = useState<string[]>([]);
   const [draftLabels, setDraftLabels] = useState<Record<string, string>>({});
+  const [draftGroups, setDraftGroups] = useState<NavigationGroupDto[]>([]);
   const [draggedDraftItemId, setDraggedDraftItemId] = useState<string | null>(null);
+  const [draggedDraftGroupId, setDraggedDraftGroupId] = useState<string | null>(null);
+  const draggedDraftItemIdRef = useRef<string | null>(null);
+  const draggedDraftGroupIdRef = useRef<string | null>(null);
   const lastDraftPointerTargetIdRef = useRef<string | null>(null);
 
-  const orderedSidebarItemIds = useMemo(
-    () => normalizeSidebarOrder(JSON.stringify(globalOrderIds), availableSidebarItemIds),
-    [availableSidebarItemIds, globalOrderIds],
-  );
   const sidebarItems = useMemo(() => {
-    const itemMap = new Map<string, SidebarItem>();
-    availableSidebarItems.forEach((item) => itemMap.set(item.id, item));
-
-    return orderedSidebarItemIds
-      .map((id) => itemMap.get(id))
-      .filter((item): item is SidebarItem => item !== undefined)
-      .map((item) => ({ ...item, label: customLabels[item.id]?.trim() || item.label }));
-  }, [availableSidebarItems, customLabels, orderedSidebarItemIds]);
-  const visibleSidebarItems = useMemo(
-    () => sidebarItems.filter((item) => !hiddenItemIds.includes(item.id)),
-    [hiddenItemIds, sidebarItems],
-  );
+    return availableSidebarItems.map((item) => ({ ...item, label: customLabels[item.id]?.trim() || item.label }));
+  }, [availableSidebarItems, customLabels]);
+  const navigationNodes = useMemo<SidebarNode[]>(() => {
+    const itemMap = new Map(sidebarItems.map((item) => [item.id, item]));
+    const groupMap = new Map(navigationGroups.map((group) => [group.id, group]));
+    return normalizeNavigationRootOrder(globalOrderIds, availableSidebarItemIds, navigationGroups)
+      .map((entryId): SidebarNode | null => {
+        const group = groupMap.get(entryId);
+        if (group) {
+          const items = group.itemIds
+            .map((itemId) => itemMap.get(itemId))
+            .filter((item): item is SidebarItem => item !== undefined && !hiddenItemIds.includes(item.id));
+          return items.length > 0 ? { type: 'group', id: group.id, label: group.name, items } : null;
+        }
+        const item = itemMap.get(entryId);
+        return item && !hiddenItemIds.includes(item.id) ? { type: 'item', item } : null;
+      })
+      .filter((node): node is SidebarNode => node !== null);
+  }, [availableSidebarItemIds, globalOrderIds, hiddenItemIds, navigationGroups, sidebarItems]);
 
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>(() => {
     if (typeof window === 'undefined') {
@@ -551,6 +581,7 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
       if (navigationResult.status === 'fulfilled') {
         setGlobalOrderIds(navigationResult.value.order ?? []);
         setCustomLabels(navigationResult.value.labels ?? {});
+        setNavigationGroups(navigationResult.value.groups ?? []);
       } else if (canManageNavigation) {
         setGlobalOrderIds(normalizeSidebarOrder(
           window.localStorage.getItem(orderStorageKey) ?? window.localStorage.getItem(ORDER_KEY),
@@ -599,15 +630,16 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
   }, []);
 
   const openNavigationSettings = useCallback(() => {
-    setDraftOrderIds(orderedSidebarItemIds);
+    setDraftOrderIds(normalizeNavigationRootOrder(globalOrderIds, availableSidebarItemIds, navigationGroups));
     setDraftLabels({ ...customLabels });
+    setDraftGroups(navigationGroups.map((group) => ({ ...group, itemIds: [...group.itemIds] })));
     setNavigationSettingsError('');
     setNavigationSettingsOpen(true);
-  }, [customLabels, orderedSidebarItemIds]);
+  }, [availableSidebarItemIds, customLabels, globalOrderIds, navigationGroups]);
 
-  const moveDraftItem = useCallback((itemId: string, direction: -1 | 1) => {
+  const moveDraftRootEntry = useCallback((entryId: string, direction: -1 | 1) => {
     setDraftOrderIds((previous) => {
-      const index = previous.indexOf(itemId);
+      const index = previous.indexOf(entryId);
       const target = index + direction;
       if (index < 0 || target < 0 || target >= previous.length) return previous;
       const next = [...previous];
@@ -616,55 +648,175 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
     });
   }, []);
 
-  const handleDraftDragStart = useCallback((itemId: string, event: DragEvent<HTMLDivElement>) => {
+  const assignDraftItem = useCallback((itemId: string, targetGroupId: string | null, targetItemId?: string) => {
+    setDraftGroups((previousGroups) => previousGroups.map((group) => {
+      if (group.id !== targetGroupId) {
+        return { ...group, itemIds: group.itemIds.filter((candidateId) => candidateId !== itemId) };
+      }
+      if (targetItemId && group.itemIds.includes(itemId) && group.itemIds.includes(targetItemId)) {
+        return { ...group, itemIds: moveItemToTarget(group.itemIds, itemId, targetItemId) };
+      }
+      const itemIds = group.itemIds.filter((candidateId) => candidateId !== itemId);
+      const targetIndex = targetItemId ? itemIds.indexOf(targetItemId) : -1;
+      itemIds.splice(targetIndex >= 0 ? targetIndex : itemIds.length, 0, itemId);
+      return { ...group, itemIds };
+    }));
+    setDraftOrderIds((previousOrder) => {
+      if (targetGroupId) return previousOrder.filter((entryId) => entryId !== itemId);
+      if (targetItemId && previousOrder.includes(itemId) && previousOrder.includes(targetItemId)) {
+        return moveItemToTarget(previousOrder, itemId, targetItemId);
+      }
+      const withoutItem = previousOrder.filter((entryId) => entryId !== itemId);
+      const targetIndex = targetItemId ? withoutItem.indexOf(targetItemId) : -1;
+      const next = [...withoutItem];
+      next.splice(targetIndex >= 0 ? targetIndex : next.length, 0, itemId);
+      return next;
+    });
+  }, []);
+
+  const moveDraftItem = useCallback((itemId: string, direction: -1 | 1) => {
+    const group = draftGroups.find((candidate) => candidate.itemIds.includes(itemId));
+    if (!group) {
+      moveDraftRootEntry(itemId, direction);
+      return;
+    }
+    setDraftGroups((previous) => previous.map((candidate) => {
+      if (candidate.id !== group.id) return candidate;
+      const index = candidate.itemIds.indexOf(itemId);
+      const target = index + direction;
+      if (index < 0 || target < 0 || target >= candidate.itemIds.length) return candidate;
+      const itemIds = [...candidate.itemIds];
+      [itemIds[index], itemIds[target]] = [itemIds[target], itemIds[index]];
+      return { ...candidate, itemIds };
+    }));
+  }, [draftGroups, moveDraftRootEntry]);
+
+  const addDraftGroup = useCallback(() => {
+    const groupId = `group-${typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Date.now()}`;
+    setDraftGroups((previous) => [...previous, { id: groupId, name: 'Новая группа', itemIds: [] }]);
+    setDraftOrderIds((previous) => [...previous, groupId]);
+  }, []);
+
+  const deleteDraftGroup = useCallback((groupId: string) => {
+    const group = draftGroups.find((candidate) => candidate.id === groupId);
+    if (!group) return;
+    setDraftGroups((previous) => previous.filter((candidate) => candidate.id !== groupId));
+    setDraftOrderIds((previous) => {
+      const groupIndex = previous.indexOf(groupId);
+      const next = previous.filter((entryId) => entryId !== groupId);
+      next.splice(groupIndex >= 0 ? groupIndex : next.length, 0, ...group.itemIds);
+      return next;
+    });
+  }, [draftGroups]);
+
+  const handleDraftDragStart = useCallback((itemId: string, event: DragEvent<HTMLElement>) => {
     const target = event.target as HTMLElement;
     if (!target.closest('[data-menu-drag-handle]')) {
       event.preventDefault();
       return;
     }
     setDraggedDraftItemId(itemId);
+    draggedDraftItemIdRef.current = itemId;
     lastDraftPointerTargetIdRef.current = itemId;
     event.dataTransfer.setData('text/plain', itemId);
     event.dataTransfer.effectAllowed = 'move';
   }, []);
 
-  const handleDraftDragOver = useCallback((itemId: string, event: DragEvent<HTMLDivElement>) => {
-    if (!draggedDraftItemId || draggedDraftItemId === itemId) return;
+  const handleDraftGroupDragStart = useCallback((groupId: string, event: DragEvent<HTMLElement>) => {
+    const target = event.target as HTMLElement;
+    if (target.closest('[data-menu-item-id]')) return;
+    if (!target.closest('[data-menu-drag-handle]')) {
+      event.preventDefault();
+      return;
+    }
+    setDraggedDraftGroupId(groupId);
+    draggedDraftGroupIdRef.current = groupId;
+    lastDraftPointerTargetIdRef.current = groupId;
+    event.dataTransfer.setData('text/plain', groupId);
+    event.dataTransfer.effectAllowed = 'move';
+  }, []);
+
+  const handleDraftDragOver = useCallback((itemId: string, event: DragEvent<HTMLElement>) => {
+    if ((!draggedDraftItemId && !draggedDraftGroupId) || draggedDraftItemId === itemId) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = 'move';
-  }, [draggedDraftItemId]);
+  }, [draggedDraftGroupId, draggedDraftItemId]);
 
-  const handleDraftDrop = useCallback((itemId: string, event: DragEvent<HTMLDivElement>) => {
+  const handleDraftDrop = useCallback((itemId: string, groupId: string | null, event: DragEvent<HTMLElement>) => {
     event.preventDefault();
+    event.stopPropagation();
+    if (draggedDraftGroupId && !groupId) {
+      setDraftOrderIds((previous) => moveItemToTarget(previous, draggedDraftGroupId, itemId));
+      setDraggedDraftGroupId(null);
+      return;
+    }
     if (!draggedDraftItemId || draggedDraftItemId === itemId) {
       setDraggedDraftItemId(null);
       return;
     }
 
-    setDraftOrderIds((previous) => moveItemToTarget(previous, draggedDraftItemId, itemId));
+    assignDraftItem(draggedDraftItemId, groupId, itemId);
     setDraggedDraftItemId(null);
+    draggedDraftItemIdRef.current = null;
     lastDraftPointerTargetIdRef.current = null;
-  }, [draggedDraftItemId]);
+  }, [assignDraftItem, draggedDraftGroupId, draggedDraftItemId]);
+
+  const handleDraftGroupDrop = useCallback((groupId: string, event: DragEvent<HTMLElement>) => {
+    event.preventDefault();
+    if (draggedDraftItemId) {
+      assignDraftItem(draggedDraftItemId, groupId);
+      setDraggedDraftItemId(null);
+      draggedDraftItemIdRef.current = null;
+      return;
+    }
+    if (draggedDraftGroupId && draggedDraftGroupId !== groupId) {
+      setDraftOrderIds((previous) => moveItemToTarget(previous, draggedDraftGroupId, groupId));
+    }
+    setDraggedDraftGroupId(null);
+    draggedDraftGroupIdRef.current = null;
+  }, [assignDraftItem, draggedDraftGroupId, draggedDraftItemId]);
 
   const handleDraftPointerDown = useCallback((itemId: string, event: ReactPointerEvent<HTMLButtonElement>) => {
     if (event.button !== 0) return;
     setDraggedDraftItemId(itemId);
+    draggedDraftItemIdRef.current = itemId;
     lastDraftPointerTargetIdRef.current = itemId;
   }, []);
 
+  const handleDraftGroupPointerDown = useCallback((groupId: string, event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (event.button !== 0) return;
+    setDraggedDraftGroupId(groupId);
+    draggedDraftGroupIdRef.current = groupId;
+    lastDraftPointerTargetIdRef.current = groupId;
+  }, []);
+
   const handleDraftPointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!draggedDraftItemId) return;
+    const activeGroupId = draggedDraftGroupIdRef.current;
+    const activeItemId = draggedDraftItemIdRef.current;
+    if (activeGroupId) {
+      const rootEntry = (event.target as HTMLElement).closest<HTMLElement>('[data-menu-root-entry-id]');
+      const targetId = rootEntry?.dataset.menuRootEntryId;
+      if (!targetId || targetId === lastDraftPointerTargetIdRef.current) return;
+      lastDraftPointerTargetIdRef.current = targetId;
+      setDraftOrderIds((previous) => moveItemToTarget(previous, activeGroupId, targetId));
+      return;
+    }
+    if (!activeItemId) return;
     const row = (event.target as HTMLElement).closest<HTMLElement>('[data-menu-item-id]');
     const itemId = row?.dataset.menuItemId;
     if (!itemId || itemId === lastDraftPointerTargetIdRef.current) return;
     lastDraftPointerTargetIdRef.current = itemId;
-    setDraftOrderIds((previous) => moveItemToTarget(previous, draggedDraftItemId, itemId));
-  }, [draggedDraftItemId]);
+    const groupContainer = row?.closest<HTMLElement>('[data-menu-group-id]');
+    assignDraftItem(activeItemId, groupContainer?.dataset.menuGroupId || null, itemId);
+  }, [assignDraftItem]);
 
   useEffect(() => {
-    if (!draggedDraftItemId) return;
+    if (!draggedDraftItemId && !draggedDraftGroupId) return;
     const stopPointerDrag = () => {
       setDraggedDraftItemId(null);
+      setDraggedDraftGroupId(null);
+      draggedDraftItemIdRef.current = null;
+      draggedDraftGroupIdRef.current = null;
       lastDraftPointerTargetIdRef.current = null;
     };
     window.addEventListener('pointerup', stopPointerDrag);
@@ -673,28 +825,33 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
       window.removeEventListener('pointerup', stopPointerDrag);
       window.removeEventListener('pointercancel', stopPointerDrag);
     };
-  }, [draggedDraftItemId]);
+  }, [draggedDraftGroupId, draggedDraftItemId]);
 
   const saveNavigationSettings = useCallback(async () => {
     setNavigationSettingsSaving(true);
     setNavigationSettingsError('');
     try {
-      const saved = await apiService.updateNavigationSettings(draftOrderIds, draftLabels);
+      if (draftGroups.some((group) => !group.name.trim())) {
+        setNavigationSettingsError('Укажите название для каждой группы.');
+        return;
+      }
+      const saved = await apiService.updateNavigationSettings(draftOrderIds, draftLabels, draftGroups);
       setGlobalOrderIds(saved.order);
       setCustomLabels(saved.labels);
+      setNavigationGroups(saved.groups);
       setNavigationSettingsOpen(false);
     } catch {
       setNavigationSettingsError('Не удалось сохранить порядок меню. Повторите попытку.');
     } finally {
       setNavigationSettingsSaving(false);
     }
-  }, [draftLabels, draftOrderIds]);
+  }, [draftGroups, draftLabels, draftOrderIds]);
 
   useEffect(() => {
     setExpandedSections((prev) => {
       let changed = false;
       const next = { ...prev };
-      visibleSidebarItems.forEach((item) => {
+      navigationNodes.flatMap((node) => node.type === 'group' ? node.items : [node.item]).forEach((item) => {
         if (!item.children?.length) {
           return;
         }
@@ -706,9 +863,163 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
           changed = true;
         }
       });
+      navigationNodes.filter((node) => node.type === 'group').forEach((group) => {
+        const hasActiveItem = group.items.some((item) => item.tab === activeTab || item.children?.some((child) => child.id === activeTab));
+        if (hasActiveItem && !next[group.id]) {
+          next[group.id] = true;
+          changed = true;
+        }
+      });
       return changed ? next : prev;
     });
-  }, [activeTab, visibleSidebarItems]);
+  }, [activeTab, navigationNodes]);
+
+  const renderSidebarItem = (item: SidebarItem, nested = false) => {
+    const Icon = item.icon;
+    const childItems = item.children ?? [];
+    const hasChildren = childItems.length > 0;
+    const isParentActive = item.tab ? activeTab === item.tab : false;
+    const isChildActive = childItems.some((child) => child.id === activeTab);
+    const isActive = isParentActive || isChildActive;
+    const isExpanded = expandedSections[item.id] ?? false;
+    const badgeCount = item.id === 'payments' ? advanceDecisionCount : 0;
+
+    return (
+      <li key={item.id} className="space-y-1">
+        <div className="relative">
+          <a
+            href={item.tab ? getTabHref(item.tab) : '#'}
+            onClick={(event) => {
+              if (item.tab) {
+                if (item.id === 'payments' && advanceDecisionCount > 0) {
+                  window.sessionStorage.setItem(PAYMENT_ADVANCE_REVIEW_FILTER_INTENT_KEY, 'RequiresDecision');
+                }
+                handleNavLinkClick(event, item.tab);
+                return;
+              }
+              event.preventDefault();
+              if (hasChildren) toggleSection(item.id);
+            }}
+            aria-current={isActive ? 'page' : undefined}
+            title={item.label}
+            className={[
+              'w-full flex items-center rounded-xl transition-all duration-200 select-none group relative',
+              collapsed ? 'justify-center p-3' : nested ? 'gap-3 py-2.5 pl-9 pr-4' : 'gap-3 px-4 py-3',
+              isActive
+                ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-900/30'
+                : 'text-slate-300 hover:bg-slate-800/50 hover:text-white',
+            ].join(' ')}>
+            <Icon className={['shrink-0 transition-transform group-hover:scale-110', collapsed ? 'h-6 w-6' : 'h-5 w-5'].join(' ')} />
+            {!collapsed ? <span className="truncate text-sm font-medium">{item.label}</span> : null}
+            {badgeCount > 0 ? (
+              <span
+                className={[
+                  'inline-flex min-w-5 items-center justify-center rounded-full bg-rose-500 px-1.5 text-[11px] font-bold leading-5 text-white shadow-sm shadow-rose-950/30',
+                  collapsed ? 'absolute right-2 top-2' : 'ml-auto mr-7',
+                ].join(' ')}
+                title={`Платежи, требующие разбора аванса: ${badgeCount}`}
+                aria-label={`Платежи, требующие разбора аванса: ${badgeCount}`}
+                data-testid="advance-review-nav-badge">
+                {formatBadgeCount(badgeCount)}
+              </span>
+            ) : null}
+            {isActive && !collapsed ? <div className="absolute right-0 top-1/2 h-8 w-1 -translate-y-1/2 rounded-l-full bg-white" /> : null}
+          </a>
+          {!collapsed && hasChildren ? (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                toggleSection(item.id);
+              }}
+              className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-1 text-slate-400 transition-colors hover:text-white"
+              aria-label={isExpanded ? t('navigationCollapseSection') ?? 'Скрыть подпункты' : t('navigationExpandSection') ?? 'Показать подпункты'}>
+              <ChevronDown className={`h-4 w-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+            </button>
+          ) : null}
+        </div>
+        {!collapsed && hasChildren && isExpanded ? (
+          <ul className={`mt-1 space-y-1 ${nested ? 'pl-5' : 'pl-2'}`}>
+            {childItems.map((child) => {
+              const ChildIcon = child.icon;
+              const childActive = activeTab === child.id;
+              return (
+                <li key={child.id}>
+                  <a
+                    href={getTabHref(child.id)}
+                    onClick={(event) => handleNavLinkClick(event, child.id)}
+                    aria-current={childActive ? 'page' : undefined}
+                    title={child.label}
+                    className={[
+                      'group relative flex w-full items-center gap-3 rounded-xl py-2 pr-4 text-sm font-medium transition-all duration-200',
+                      nested ? 'pl-11' : 'pl-12',
+                      childActive ? 'border border-blue-400/40 bg-blue-500/25 text-blue-50 shadow-inner' : 'text-slate-300 hover:bg-slate-800/50 hover:text-white',
+                    ].join(' ')}>
+                    <ChildIcon className={`h-4 w-4 shrink-0 ${childActive ? 'text-blue-100' : 'text-slate-400 group-hover:text-white'}`} />
+                    <span className="truncate">{child.label}</span>
+                    {childActive ? <div className="absolute right-1.5 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full bg-blue-100/80" /> : null}
+                  </a>
+                </li>
+              );
+            })}
+          </ul>
+        ) : null}
+      </li>
+    );
+  };
+
+  const renderDraftItem = (itemId: string, groupId: string | null, index: number, itemCount: number) => {
+    const item = sidebarItems.find((candidate) => candidate.id === itemId);
+    if (!item) return null;
+    const ItemIcon = item.icon;
+    return (
+      <div
+        key={itemId}
+        data-menu-item-id={itemId}
+        data-menu-root-entry-id={groupId ? undefined : itemId}
+        draggable
+        onDragStart={(event) => handleDraftDragStart(itemId, event)}
+        onDragEnd={() => {
+          setDraggedDraftItemId(null);
+          draggedDraftItemIdRef.current = null;
+        }}
+        onDragOver={(event) => handleDraftDragOver(itemId, event)}
+        onDrop={(event) => handleDraftDrop(itemId, groupId, event)}
+        className={`flex items-center gap-2 rounded-xl border bg-white p-2 transition ${draggedDraftItemId === itemId ? 'border-blue-400 opacity-60' : 'border-slate-200'}`}>
+        <button
+          type="button"
+          data-menu-drag-handle
+          onPointerDown={(event) => handleDraftPointerDown(itemId, event)}
+          className="cursor-grab rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 active:cursor-grabbing"
+          aria-label={`Перетащить ${item.label}`}
+          title="Перетащите в нужное место или группу">
+          <GripVertical className="h-4 w-4" />
+        </button>
+        <ItemIcon className="h-4 w-4 shrink-0 text-slate-500" />
+        <input
+          value={draftLabels[itemId] ?? item.label}
+          maxLength={60}
+          onChange={(event) => setDraftLabels((previous) => ({ ...previous, [itemId]: event.target.value }))}
+          aria-label={`Название раздела ${item.label}`}
+          className="min-w-0 flex-1 rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+        />
+        <select
+          value={groupId ?? ''}
+          onChange={(event) => assignDraftItem(itemId, event.target.value || null)}
+          aria-label={`Группа раздела ${item.label}`}
+          className="w-36 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-700">
+          <option value="">Без группы</option>
+          {draftGroups.map((group) => <option key={group.id} value={group.id}>{group.name || 'Без названия'}</option>)}
+        </select>
+        <button type="button" disabled={index === 0} onClick={() => moveDraftItem(itemId, -1)} className="rounded-lg p-1.5 text-slate-600 hover:bg-slate-100 disabled:opacity-30" aria-label={`Поднять ${item.label}`}>
+          <ArrowUp className="h-4 w-4" />
+        </button>
+        <button type="button" disabled={index === itemCount - 1} onClick={() => moveDraftItem(itemId, 1)} className="rounded-lg p-1.5 text-slate-600 hover:bg-slate-100 disabled:opacity-30" aria-label={`Опустить ${item.label}`}>
+          <ArrowDown className="h-4 w-4" />
+        </button>
+      </div>
+    );
+  };
 
   const sidebarWidthClass = collapsed ? 'w-20' : 'w-[17rem]';
 
@@ -781,124 +1092,27 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
 
         <nav className="pp-sidebar-scroll flex-1 overflow-y-auto py-4 px-2" aria-label={t('navigation') ?? 'Навигация'}>
           <ul className="space-y-1.5">
-            {visibleSidebarItems.map((item) => {
-              const Icon = item.icon;
-              const childItems = item.children ?? [];
-              const hasChildren = childItems.length > 0;
-              const isParentActive = item.tab ? activeTab === item.tab : false;
-              const isChildActive = childItems.some((child) => child.id === activeTab);
-              const isActive = isParentActive || isChildActive;
-              const isExpanded = expandedSections[item.id] ?? false;
-              const badgeCount = item.id === 'payments' ? advanceDecisionCount : 0;
-
+            {navigationNodes.map((node) => {
+              if (node.type === 'item') return renderSidebarItem(node.item);
+              const isExpanded = expandedSections[node.id] ?? true;
+              const isActive = node.items.some((item) => item.tab === activeTab || item.children?.some((child) => child.id === activeTab));
               return (
-                <li key={item.id} className="space-y-1">
-                  <div className="relative">
-                    <a
-                      href={item.tab ? getTabHref(item.tab) : '#'}
-                      onClick={(event) => {
-                        if (item.tab) {
-                          if (item.id === 'payments' && advanceDecisionCount > 0) {
-                            window.sessionStorage.setItem(
-                              PAYMENT_ADVANCE_REVIEW_FILTER_INTENT_KEY,
-                              'RequiresDecision',
-                            );
-                          }
-                          handleNavLinkClick(event, item.tab);
-                          return;
-                        }
-
-                        event.preventDefault();
-                        if (hasChildren) {
-                          toggleSection(item.id);
-                        }
-                      }}
-                      aria-current={isActive ? 'page' : undefined}
-                      title={item.label}
-                      className={[
-                        'w-full flex items-center rounded-xl transition-all duration-200 select-none group relative',
-                        collapsed ? 'justify-center p-3' : 'gap-3 px-4 py-3',
-                        isActive
-                          ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-900/30'
-                          : 'text-slate-300 hover:bg-slate-800/50 hover:text-white',
-                      ].join(' ')}>
-                      <Icon
-                        className={[
-                          'shrink-0 transition-transform group-hover:scale-110',
-                          collapsed ? 'h-6 w-6' : 'h-5 w-5',
-                        ].join(' ')}
-                      />
-                      {!collapsed && (
-                        <span className="truncate font-medium text-sm">{item.label}</span>
-                      )}
-                      {badgeCount > 0 ? (
-                        <span
-                          className={[
-                            'inline-flex min-w-5 items-center justify-center rounded-full bg-rose-500 px-1.5 text-[11px] font-bold leading-5 text-white shadow-sm shadow-rose-950/30',
-                            collapsed ? 'absolute right-2 top-2' : 'ml-auto mr-7',
-                          ].join(' ')}
-                          title={`Платежи, требующие разбора аванса: ${badgeCount}`}
-                          aria-label={`Платежи, требующие разбора аванса: ${badgeCount}`}
-                          data-testid="advance-review-nav-badge">
-                          {formatBadgeCount(badgeCount)}
-                        </span>
-                      ) : null}
-                      {isActive && !collapsed && (
-                        <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-8 bg-white rounded-l-full" />
-                      )}
-                    </a>
-                    {!collapsed && hasChildren ? (
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          toggleSection(item.id);
-                        }}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-1 text-slate-400 transition-colors hover:text-white"
-                        aria-label={
-                          isExpanded
-                            ? t('navigationCollapseSection') ?? 'Скрыть подпункты'
-                            : t('navigationExpandSection') ?? 'Показать подпункты'
-                        }>
-                        <ChevronDown className={`h-4 w-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
-                      </button>
-                    ) : null}
-                  </div>
-
-                  {!collapsed && hasChildren && isExpanded ? (
-                    <ul className="mt-1 space-y-1 pl-2">
-                      {childItems.map((child) => {
-                        const ChildIcon = child.icon;
-                        const childActive = activeTab === child.id;
-                        return (
-                          <li key={child.id}>
-                            <a
-                              href={getTabHref(child.id)}
-                              onClick={(event) => handleNavLinkClick(event, child.id)}
-                              aria-current={childActive ? 'page' : undefined}
-                              title={child.label}
-                              className={[
-                                'w-full flex items-center rounded-xl transition-all duration-200 select-none group relative',
-                                'gap-3 pr-4 py-2 pl-12',
-                                childActive
-                                  ? 'bg-blue-500/25 text-blue-50 border border-blue-400/40 shadow-inner'
-                                  : 'text-slate-300 hover:bg-slate-800/50 hover:text-white',
-                              ].join(' ')}>
-                              <ChildIcon
-                                className={`h-4 w-4 shrink-0 transition-colors ${
-                                  childActive ? 'text-blue-100' : 'text-slate-400 group-hover:text-white'
-                                }`}
-                              />
-                              <span className="truncate text-sm font-medium">{child.label}</span>
-                              {childActive && (
-                                <div className="absolute right-1.5 top-1/2 -translate-y-1/2 h-5 w-0.5 rounded-full bg-blue-100/80" />
-                              )}
-                            </a>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  ) : null}
+                <li key={node.id} className="space-y-1" data-testid={`navigation-group-${node.id}`}>
+                  <button
+                    type="button"
+                    onClick={() => toggleSection(node.id)}
+                    className={[
+                      'relative flex w-full items-center rounded-xl transition-colors',
+                      collapsed ? 'justify-center p-3' : 'gap-3 px-4 py-3',
+                      isActive ? 'bg-slate-800 text-white' : 'text-slate-200 hover:bg-slate-800/60 hover:text-white',
+                    ].join(' ')}
+                    aria-expanded={isExpanded}
+                    title={node.label}>
+                    <Folder className={collapsed ? 'h-6 w-6' : 'h-5 w-5'} />
+                    {!collapsed ? <span className="min-w-0 flex-1 truncate text-left text-sm font-semibold">{node.label}</span> : null}
+                    {!collapsed ? <ChevronDown className={`h-4 w-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} /> : null}
+                  </button>
+                  {!collapsed && isExpanded ? <ul className="space-y-1 border-l border-slate-700/60 pl-1">{node.items.map((item) => renderSidebarItem(item, true))}</ul> : null}
                 </li>
               );
             })}
@@ -962,7 +1176,7 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
                       onClick={openNavigationSettings}
                       className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg border border-slate-600 px-2 py-2 text-xs font-medium text-slate-200 hover:bg-slate-800">
                       <Settings className="h-4 w-4" />
-                      Порядок и названия
+                      Группы и порядок
                     </button>
                   ) : null}
                 </div>
@@ -978,54 +1192,57 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
           <div className="flex max-h-[85vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
             <div className="flex items-start justify-between border-b border-slate-200 px-4 py-3">
               <div>
-                <h2 id="navigation-settings-title" className="text-base font-semibold text-slate-900">Порядок и названия разделов</h2>
-                <p className="mt-0.5 text-xs text-slate-500">Перетащите разделы за маркер слева. Настройка применяется ко всем пользователям, их личный выбор видимых разделов сохранится.</p>
+                <h2 id="navigation-settings-title" className="text-base font-semibold text-slate-900">Группы, порядок и названия разделов</h2>
+                <p className="mt-0.5 text-xs text-slate-500">Создавайте группы и перетаскивайте разделы за маркер. Настройка применяется ко всем пользователям с учётом их прав доступа.</p>
               </div>
               <button type="button" onClick={() => setNavigationSettingsOpen(false)} className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100" aria-label="Закрыть">
                 <X className="h-5 w-5" />
               </button>
             </div>
             <div className="space-y-2 overflow-y-auto p-3" onPointerMove={handleDraftPointerMove}>
-              {draftOrderIds.map((itemId, index) => {
-                const item = sidebarItems.find((candidate) => candidate.id === itemId);
-                if (!item) return null;
-                const ItemIcon = item.icon;
+              <button type="button" onClick={addDraftGroup} className="mb-1 flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-blue-300 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100">
+                <FolderPlus className="h-4 w-4" />
+                Создать группу
+              </button>
+              {draftOrderIds.map((entryId, rootIndex) => {
+                const group = draftGroups.find((candidate) => candidate.id === entryId);
+                if (!group) return renderDraftItem(entryId, null, rootIndex, draftOrderIds.length);
                 return (
-                  <div
-                    key={itemId}
-                    data-menu-item-id={itemId}
+                  <section
+                    key={group.id}
+                    data-menu-root-entry-id={group.id}
+                    data-menu-group-id={group.id}
                     draggable
-                    onDragStart={(event) => handleDraftDragStart(itemId, event)}
-                    onDragEnd={() => setDraggedDraftItemId(null)}
-                    onDragOver={(event) => handleDraftDragOver(itemId, event)}
-                    onDrop={(event) => handleDraftDrop(itemId, event)}
-                    className={`flex items-center gap-2 rounded-xl border bg-slate-50 p-2 transition ${
-                      draggedDraftItemId === itemId ? 'border-blue-400 opacity-60' : 'border-slate-200'
-                    }`}>
-                    <button
-                      type="button"
-                      data-menu-drag-handle
-                      onPointerDown={(event) => handleDraftPointerDown(itemId, event)}
-                      className="cursor-grab rounded-md p-1 text-slate-400 hover:bg-white hover:text-slate-700 active:cursor-grabbing"
-                      aria-label={`Перетащить ${item.label}`}
-                      title="Перетащите для изменения порядка">
-                      <GripVertical className="h-4 w-4" />
-                    </button>
-                    <ItemIcon className="h-4 w-4 shrink-0 text-slate-500" />
-                    <input
-                      value={draftLabels[itemId] ?? item.label}
-                      maxLength={60}
-                      onChange={(event) => setDraftLabels((previous) => ({ ...previous, [itemId]: event.target.value }))}
-                      aria-label={`Название раздела ${item.label}`}
-                      className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    />
-                    <button type="button" disabled={index === 0} onClick={() => moveDraftItem(itemId, -1)} className="rounded-lg p-1.5 text-slate-600 hover:bg-white disabled:opacity-30" aria-label={`Поднять ${item.label}`}>
-                      <ArrowUp className="h-4 w-4" />
-                    </button>
-                    <button type="button" disabled={index === draftOrderIds.length - 1} onClick={() => moveDraftItem(itemId, 1)} className="rounded-lg p-1.5 text-slate-600 hover:bg-white disabled:opacity-30" aria-label={`Опустить ${item.label}`}>
-                      <ArrowDown className="h-4 w-4" />
-                    </button>
-                  </div>
+                    onDragStart={(event) => handleDraftGroupDragStart(group.id, event)}
+                    onDragEnd={() => {
+                      setDraggedDraftGroupId(null);
+                      draggedDraftGroupIdRef.current = null;
+                    }}
+                    onDragOver={(event) => event.preventDefault()}
+                    onDrop={(event) => handleDraftGroupDrop(group.id, event)}
+                    className={`rounded-xl border p-2 transition ${draggedDraftGroupId === group.id ? 'border-blue-500 bg-blue-50/60 opacity-70' : 'border-blue-200 bg-blue-50/40'}`}>
+                    <div className="flex items-center gap-2">
+                      <button type="button" data-menu-drag-handle onPointerDown={(event) => handleDraftGroupPointerDown(group.id, event)} className="cursor-grab rounded-md p-1 text-blue-400 hover:bg-white hover:text-blue-700 active:cursor-grabbing" aria-label={`Перетащить группу ${group.name}`}>
+                        <GripVertical className="h-4 w-4" />
+                      </button>
+                      <Folder className="h-4 w-4 shrink-0 text-blue-600" />
+                      <input
+                        value={group.name}
+                        maxLength={60}
+                        onChange={(event) => setDraftGroups((previous) => previous.map((candidate) => candidate.id === group.id ? { ...candidate, name: event.target.value } : candidate))}
+                        aria-label={`Название группы ${group.name}`}
+                        className="min-w-0 flex-1 rounded-lg border border-blue-200 bg-white px-2.5 py-1.5 text-sm font-semibold text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      />
+                      <button type="button" disabled={rootIndex === 0} onClick={() => moveDraftRootEntry(group.id, -1)} className="rounded-lg p-1.5 text-slate-600 hover:bg-white disabled:opacity-30" aria-label={`Поднять группу ${group.name}`}><ArrowUp className="h-4 w-4" /></button>
+                      <button type="button" disabled={rootIndex === draftOrderIds.length - 1} onClick={() => moveDraftRootEntry(group.id, 1)} className="rounded-lg p-1.5 text-slate-600 hover:bg-white disabled:opacity-30" aria-label={`Опустить группу ${group.name}`}><ArrowDown className="h-4 w-4" /></button>
+                      <button type="button" onClick={() => deleteDraftGroup(group.id)} className="rounded-lg p-1.5 text-rose-600 hover:bg-white" aria-label={`Удалить группу ${group.name}`} title="Разделы вернутся в основное меню"><Trash2 className="h-4 w-4" /></button>
+                    </div>
+                    <div className="mt-2 space-y-1.5 border-l-2 border-blue-200 pl-3">
+                      {group.itemIds.length > 0
+                        ? group.itemIds.map((itemId, index) => renderDraftItem(itemId, group.id, index, group.itemIds.length))
+                        : <div className="rounded-lg border border-dashed border-blue-200 bg-white/70 px-3 py-3 text-center text-xs text-slate-500">Перетащите сюда раздел или выберите эту группу в списке раздела</div>}
+                    </div>
+                  </section>
                 );
               })}
             </div>

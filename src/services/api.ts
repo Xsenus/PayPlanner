@@ -112,7 +112,14 @@ export interface UserSettingDto {
 export interface NavigationSettingsDto {
   order: string[];
   labels: Record<string, string>;
+  groups: NavigationGroupDto[];
   updatedAt?: string | null;
+}
+
+export interface NavigationGroupDto {
+  id: string;
+  name: string;
+  itemIds: string[];
 }
 
 export interface DadataIntegrationSettingsDto {
@@ -3433,10 +3440,10 @@ export class ApiService {
     return this.request<NavigationSettingsDto>('/navigation-settings');
   }
 
-  async updateNavigationSettings(order: string[], labels: Record<string, string>) {
+  async updateNavigationSettings(order: string[], labels: Record<string, string>, groups: NavigationGroupDto[]) {
     return this.request<NavigationSettingsDto>('/navigation-settings', {
       method: 'PUT',
-      body: JSON.stringify({ order, labels }),
+      body: JSON.stringify({ order, labels, groups }),
     });
   }
 
