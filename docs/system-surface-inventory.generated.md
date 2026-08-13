@@ -6,10 +6,10 @@
 ## Сводка
 
 - Разделов frontend: 49.
-- Backend-контроллеров: 66.
-- HTTP endpoints: 799; с прямой тестовой связью: 529.
-- HTTP endpoints с точной ссылкой из документации: 184; критичных без такой ссылки: 477.
-- Критичных endpoints без прямой тестовой связи: 226.
+- Backend-контроллеров: 67.
+- HTTP endpoints: 801; с прямой тестовой связью: 530.
+- HTTP endpoints с точной ссылкой из документации: 184; критичных без такой ссылки: 479.
+- Критичных endpoints без прямой тестовой связи: 227.
 - Реальных HTML-форм: 17; с найденной тестовой связью: 15.
 - Фоновых сервисов: 27; с найденной тестовой связью: 24.
 - Исходящих HTTP-интеграций: 12; с найденной тестовой связью: 12.
@@ -179,6 +179,7 @@
 | PublicMessengerDocumentDeliveriesController | backend/Controllers/MessengerDocumentDeliveriesController.cs | 3 | публичный ([AllowAnonymous]) | да |
 | MoneyAccountsController | backend/Controllers/MoneyAccountsController.cs | 5 | [Authorize] | да |
 | MoneyOperationsController | backend/Controllers/MoneyOperationsController.cs | 25 | [Authorize] | да |
+| NavigationSettingsController | backend/Controllers/NavigationSettingsController.cs | 2 | [Authorize] | да |
 | NotificationInboxController | backend/Controllers/NotificationInboxController.cs | 11 | [Authorize] | да |
 | NotificationsController | backend/Controllers/NotificationsController.cs | 24 | [Authorize] | да |
 | ObjectAuditController | backend/Controllers/ObjectAuditController.cs | 4 | [Authorize] | да |
@@ -414,6 +415,7 @@
 | GET | api/messenger-document-deliveries/recipients | MessengerDocumentDeliveriesController.GetRecipients | чувствительные данные или операция | backend/Controllers/MessengerDocumentDeliveriesController.cs:55 |
 | GET | api/money-operations/bank-statement/imports | MoneyOperationsController.GetBankStatementImports | чувствительные данные или операция | backend/Controllers/MoneyOperationsController.cs:2394 |
 | GET | api/money-operations/bank-statement/imports/{batchId:int} | MoneyOperationsController.GetBankStatementImport | чувствительные данные или операция | backend/Controllers/MoneyOperationsController.cs:2432 |
+| GET | api/navigation-settings | NavigationSettingsController.Get | чувствительные данные или операция | backend/Controllers/NavigationSettingsController.cs:39 |
 | POST | api/notifications/deliveries/{id:int}/retry | NotificationsController.RetryDelivery | изменение данных | backend/Controllers/NotificationsController.cs:476 |
 | POST | api/notifications/inbox/push/subscriptions/revoke | PushSubscriptionsController.RevokeSubscriptionByEndpoint | изменение данных | backend/Controllers/PushSubscriptionsController.cs:209 |
 | GET | api/notifications/role-preferences | NotificationsController.GetRolePreferences | чувствительные данные или операция | backend/Controllers/NotificationsController.cs:130 |
@@ -859,6 +861,8 @@
 | POST | api/money-operations/bank-statement/imports/{batchId:int}/reprocess | MoneyOperationsController | ReprocessBankStatementImport | backend/Controllers/MoneyOperationsController.cs:2585 | [Authorize] | да | нет |
 | PUT | api/money-operations/{id:int} | MoneyOperationsController | Update | backend/Controllers/MoneyOperationsController.cs:2641 | [Authorize] | да | нет |
 | DELETE | api/money-operations/{id:int} | MoneyOperationsController | Delete | backend/Controllers/MoneyOperationsController.cs:2774 | [Authorize] | да | нет |
+| GET | api/navigation-settings | NavigationSettingsController | Get | backend/Controllers/NavigationSettingsController.cs:39 | [Authorize] | нет | нет |
+| PUT | api/navigation-settings | NavigationSettingsController | Update | backend/Controllers/NavigationSettingsController.cs:56 | [Authorize] | да | нет |
 | GET | api/notifications/inbox/types | NotificationInboxController | GetTypes | backend/Controllers/NotificationInboxController.cs:36 | [Authorize] | да | нет |
 | GET | api/notifications/inbox/unread-count | NotificationInboxController | GetUnreadCount | backend/Controllers/NotificationInboxController.cs:40 | [Authorize] | да | нет |
 | GET | api/notifications/inbox | NotificationInboxController | GetNotifications | backend/Controllers/NotificationInboxController.cs:67 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
