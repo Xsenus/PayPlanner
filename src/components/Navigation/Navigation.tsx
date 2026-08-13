@@ -3,8 +3,11 @@ import {
   useEffect,
   useLayoutEffect,
   useMemo,
+  useRef,
   useState,
+  type DragEvent,
   type MouseEvent,
+  type PointerEvent as ReactPointerEvent,
 } from 'react';
 import {
   Calendar,
@@ -85,6 +88,17 @@ function normalizeSidebarOrder(raw: string | null, validIds: string[]): string[]
   } catch {
     return validIds;
   }
+}
+
+function moveItemToTarget(items: string[], sourceId: string, targetId: string): string[] {
+  const sourceIndex = items.indexOf(sourceId);
+  const targetIndex = items.indexOf(targetId);
+  if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) return items;
+
+  const next = [...items];
+  const [movedItemId] = next.splice(sourceIndex, 1);
+  next.splice(targetIndex, 0, movedItemId);
+  return next;
 }
 
 export default function Navigation({ activeTab, onTabChange }: NavigationProps) {
@@ -454,6 +468,8 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
   const [navigationSettingsError, setNavigationSettingsError] = useState('');
   const [draftOrderIds, setDraftOrderIds] = useState<string[]>([]);
   const [draftLabels, setDraftLabels] = useState<Record<string, string>>({});
+  const [draggedDraftItemId, setDraggedDraftItemId] = useState<string | null>(null);
+  const lastDraftPointerTargetIdRef = useRef<string | null>(null);
 
   const orderedSidebarItemIds = useMemo(
     () => normalizeSidebarOrder(JSON.stringify(globalOrderIds), availableSidebarItemIds),
@@ -599,6 +615,65 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
       return next;
     });
   }, []);
+
+  const handleDraftDragStart = useCallback((itemId: string, event: DragEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement;
+    if (!target.closest('[data-menu-drag-handle]')) {
+      event.preventDefault();
+      return;
+    }
+    setDraggedDraftItemId(itemId);
+    lastDraftPointerTargetIdRef.current = itemId;
+    event.dataTransfer.setData('text/plain', itemId);
+    event.dataTransfer.effectAllowed = 'move';
+  }, []);
+
+  const handleDraftDragOver = useCallback((itemId: string, event: DragEvent<HTMLDivElement>) => {
+    if (!draggedDraftItemId || draggedDraftItemId === itemId) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+  }, [draggedDraftItemId]);
+
+  const handleDraftDrop = useCallback((itemId: string, event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    if (!draggedDraftItemId || draggedDraftItemId === itemId) {
+      setDraggedDraftItemId(null);
+      return;
+    }
+
+    setDraftOrderIds((previous) => moveItemToTarget(previous, draggedDraftItemId, itemId));
+    setDraggedDraftItemId(null);
+    lastDraftPointerTargetIdRef.current = null;
+  }, [draggedDraftItemId]);
+
+  const handleDraftPointerDown = useCallback((itemId: string, event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (event.button !== 0) return;
+    setDraggedDraftItemId(itemId);
+    lastDraftPointerTargetIdRef.current = itemId;
+  }, []);
+
+  const handleDraftPointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!draggedDraftItemId) return;
+    const row = (event.target as HTMLElement).closest<HTMLElement>('[data-menu-item-id]');
+    const itemId = row?.dataset.menuItemId;
+    if (!itemId || itemId === lastDraftPointerTargetIdRef.current) return;
+    lastDraftPointerTargetIdRef.current = itemId;
+    setDraftOrderIds((previous) => moveItemToTarget(previous, draggedDraftItemId, itemId));
+  }, [draggedDraftItemId]);
+
+  useEffect(() => {
+    if (!draggedDraftItemId) return;
+    const stopPointerDrag = () => {
+      setDraggedDraftItemId(null);
+      lastDraftPointerTargetIdRef.current = null;
+    };
+    window.addEventListener('pointerup', stopPointerDrag);
+    window.addEventListener('pointercancel', stopPointerDrag);
+    return () => {
+      window.removeEventListener('pointerup', stopPointerDrag);
+      window.removeEventListener('pointercancel', stopPointerDrag);
+    };
+  }, [draggedDraftItemId]);
 
   const saveNavigationSettings = useCallback(async () => {
     setNavigationSettingsSaving(true);
@@ -904,20 +979,38 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
             <div className="flex items-start justify-between border-b border-slate-200 px-4 py-3">
               <div>
                 <h2 id="navigation-settings-title" className="text-base font-semibold text-slate-900">Порядок и названия разделов</h2>
-                <p className="mt-0.5 text-xs text-slate-500">Настройка применяется ко всем пользователям. Их личный выбор видимых разделов сохранится.</p>
+                <p className="mt-0.5 text-xs text-slate-500">Перетащите разделы за маркер слева. Настройка применяется ко всем пользователям, их личный выбор видимых разделов сохранится.</p>
               </div>
               <button type="button" onClick={() => setNavigationSettingsOpen(false)} className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100" aria-label="Закрыть">
                 <X className="h-5 w-5" />
               </button>
             </div>
-            <div className="space-y-2 overflow-y-auto p-3">
+            <div className="space-y-2 overflow-y-auto p-3" onPointerMove={handleDraftPointerMove}>
               {draftOrderIds.map((itemId, index) => {
                 const item = sidebarItems.find((candidate) => candidate.id === itemId);
                 if (!item) return null;
                 const ItemIcon = item.icon;
                 return (
-                  <div key={itemId} className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2">
-                    <GripVertical className="h-4 w-4 shrink-0 text-slate-400" />
+                  <div
+                    key={itemId}
+                    data-menu-item-id={itemId}
+                    draggable
+                    onDragStart={(event) => handleDraftDragStart(itemId, event)}
+                    onDragEnd={() => setDraggedDraftItemId(null)}
+                    onDragOver={(event) => handleDraftDragOver(itemId, event)}
+                    onDrop={(event) => handleDraftDrop(itemId, event)}
+                    className={`flex items-center gap-2 rounded-xl border bg-slate-50 p-2 transition ${
+                      draggedDraftItemId === itemId ? 'border-blue-400 opacity-60' : 'border-slate-200'
+                    }`}>
+                    <button
+                      type="button"
+                      data-menu-drag-handle
+                      onPointerDown={(event) => handleDraftPointerDown(itemId, event)}
+                      className="cursor-grab rounded-md p-1 text-slate-400 hover:bg-white hover:text-slate-700 active:cursor-grabbing"
+                      aria-label={`Перетащить ${item.label}`}
+                      title="Перетащите для изменения порядка">
+                      <GripVertical className="h-4 w-4" />
+                    </button>
                     <ItemIcon className="h-4 w-4 shrink-0 text-slate-500" />
                     <input
                       value={draftLabels[itemId] ?? item.label}

@@ -222,7 +222,11 @@ describe('Navigation links', () => {
     const calendarName = screen.getByRole('textbox', { name: /Название раздела Календарь/i });
     await user.clear(calendarName);
     await user.type(calendarName, 'Расписание');
-    await user.click(screen.getByRole('button', { name: 'Опустить Календарь' }));
+    const calendarDragHandle = screen.getByRole('button', { name: 'Перетащить Календарь' });
+    const notificationsRow = screen.getByRole('button', { name: 'Перетащить Уведомления' }).closest('div');
+    fireEvent.pointerDown(calendarDragHandle, { button: 0, buttons: 1 });
+    fireEvent.pointerMove(notificationsRow!, { buttons: 1 });
+    fireEvent.pointerUp(notificationsRow!, { button: 0, buttons: 0 });
     await user.click(screen.getByRole('button', { name: 'Сохранить' }));
 
     await waitFor(() => expect(apiMock.updateNavigationSettings).toHaveBeenCalled());
