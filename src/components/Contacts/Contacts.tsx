@@ -18,6 +18,7 @@ import {
 import {
   apiService,
   type ContactDirectoryItemDto,
+  type ContactRole,
   type ContactScope,
   type YealinkContactImportDecisionAction,
   type YealinkContactImportResultDto,
@@ -48,6 +49,8 @@ type YealinkImportState = {
 interface ContactsProps {
   initialScope?: ContactScope;
   onScopeChange?: (scope: ContactScope) => void;
+  onOpenClient?: (id: number) => void;
+  onOpenLegalEntity?: (id: number) => void;
 }
 
 const PAGE_SIZE_OPTIONS = [20, 50, 100];
@@ -78,16 +81,26 @@ function formatEmails(contact: ContactDirectoryItemDto) {
 }
 
 function sourceBadge(sourceType: ContactDirectoryItemDto['sourceType']) {
-  return sourceType === 'client'
-    ? 'border-blue-200 bg-blue-50 text-blue-700'
-    : 'border-violet-200 bg-violet-50 text-violet-700';
+  if (sourceType === 'client') return 'border-blue-200 bg-blue-50 text-blue-700';
+  if (sourceType === 'legal') return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+  return 'border-violet-200 bg-violet-50 text-violet-700';
 }
 
-function sourceLabel(sourceType: ContactDirectoryItemDto['sourceType']) {
-  return sourceType === 'client' ? 'Клиент' : 'Сторонний';
+function sourceLabel(sourceType: ContactDirectoryItemDto['sourceType'], hasFullProfile?: boolean) {
+  if (hasFullProfile) return 'Полная карточка';
+  if (sourceType === 'client') return 'Полная карточка';
+  if (sourceType === 'legal') return 'Полная карточка';
+  return 'Быстрый контакт';
 }
 
-export function Contacts({ initialScope = 'all', onScopeChange }: ContactsProps) {
+const ROLE_LABELS: Record<ContactRole, string> = {
+  Contact: 'Контакт',
+  Client: 'Клиент',
+  Supplier: 'Поставщик',
+  Agent: 'Агент',
+};
+
+export function Contacts({ initialScope = 'all', onScopeChange, onOpenClient, onOpenLegalEntity }: ContactsProps) {
   const { isAdmin } = useAuth();
   const { confirm } = useDialog();
   const toast = useToast();
@@ -252,8 +265,8 @@ export function Contacts({ initialScope = 'all', onScopeChange }: ContactsProps)
   const counts = useMemo(
     () => ({
       all: summaryContacts.length,
-      clients: summaryContacts.filter((item) => item.sourceType === 'client').length,
-      external: summaryContacts.filter((item) => item.sourceType === 'external').length,
+      people: summaryContacts.filter((item) => item.contactType !== 'Organization').length,
+      organizations: summaryContacts.filter((item) => item.contactType === 'Organization').length,
     }),
     [summaryContacts],
   );
@@ -296,6 +309,31 @@ export function Contacts({ initialScope = 'all', onScopeChange }: ContactsProps)
       toast.success('Контакт удалён', 'Контакты');
     } catch (nextError) {
       toast.error(extractDisplayErrorMessage(nextError, 'Не удалось удалить контакт'), 'Контакты');
+    }
+  };
+
+  const handlePromote = async (contact: ContactDirectoryItemDto) => {
+    const target = contact.contactType === 'Organization' ? 'legalEntity' : 'client';
+    const role: ContactRole = contact.roles?.includes('Supplier') ? 'Supplier' : 'Client';
+    const approved = await confirm({
+      title: 'Создать полноценную карточку?',
+      description: contact.contactType === 'Organization'
+        ? `Для «${contact.fullName}» будет создано юридическое лицо. Сотрудники останутся привязаны к организации.`
+        : `Для «${contact.fullName}» будет создана карточка клиента с уже заполненными контактными данными.`,
+      confirmLabel: 'Создать карточку',
+      cancelLabel: 'Отмена',
+      variant: 'primary',
+    });
+    if (!approved) return;
+
+    try {
+      const saved = await apiService.promoteExternalContact(contact.sourceId, { target, role });
+      toast.success('Полноценная карточка создана', 'Контакты');
+      await loadDirectory();
+      if (saved.linkedClientId && onOpenClient) onOpenClient(saved.linkedClientId);
+      if (saved.linkedLegalEntityId && onOpenLegalEntity) onOpenLegalEntity(saved.linkedLegalEntityId);
+    } catch (nextError) {
+      toast.error(extractDisplayErrorMessage(nextError, 'Не удалось создать полноценную карточку'), 'Контакты');
     }
   };
 
@@ -425,9 +463,18 @@ export function Contacts({ initialScope = 'all', onScopeChange }: ContactsProps)
             <div className="flex flex-wrap items-center gap-2">
               <div className="truncate text-base font-semibold text-slate-900">{contact.fullName}</div>
               <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${sourceBadge(contact.sourceType)}`}>
-                {sourceLabel(contact.sourceType)}
+                {sourceLabel(contact.sourceType, contact.hasFullProfile)}
+              </span>
+              <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600">
+                {contact.contactType === 'Organization' ? 'Организация' : 'Человек'}
               </span>
             </div>
+            <div className="flex flex-wrap gap-1">
+              {(contact.roles ?? []).map((role) => (
+                <span key={role} className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">{ROLE_LABELS[role]}</span>
+              ))}
+            </div>
+            {contact.inn ? <div className="truncate text-sm text-slate-500">ИНН: {contact.inn}</div> : null}
             {contact.position ? <div className="truncate text-sm text-slate-600">{contact.position}</div> : null}
             {contact.powerOfAttorney ? (
               <div className="truncate text-sm text-slate-500">Доверенность: {contact.powerOfAttorney}</div>
@@ -441,7 +488,7 @@ export function Contacts({ initialScope = 'all', onScopeChange }: ContactsProps)
         return (
           <div className="flex items-start gap-2 text-sm text-slate-700">
             <Building2 className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
-            <span className="truncate">{contact.organizationName || 'Без привязки'}</span>
+            <span className="truncate">{contact.organizationName || contact.parentContactName || (contact.contactType === 'Organization' ? contact.fullName : 'Без привязки')}</span>
           </div>
         );
       case 'phones':
@@ -485,18 +532,18 @@ export function Contacts({ initialScope = 'all', onScopeChange }: ContactsProps)
   };
 
   return (
-    <div className="space-y-6 p-8">
-      <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
+    <div className="space-y-3 p-3 lg:p-4">
+      <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
           <div>
             <div className="flex items-center gap-3">
               <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50 text-blue-600">
                 <Users className="h-6 w-6" />
               </div>
               <div>
-                <h1 className="text-4xl font-bold tracking-tight text-slate-900">Контакты</h1>
-                <p className="mt-1 text-base text-slate-600">
-                  Единый справочник физических лиц из клиентов и сторонних контактов для CRM и телефонии.
+                <h1 className="text-2xl font-bold tracking-tight text-slate-900">Контакты</h1>
+                <p className="mt-1 text-sm text-slate-600">
+                  Люди и организации в одном месте: от быстрой записи до клиента, поставщика или агента.
                 </p>
               </div>
             </div>
@@ -504,8 +551,8 @@ export function Contacts({ initialScope = 'all', onScopeChange }: ContactsProps)
             <div className="mt-5 flex flex-wrap gap-2">
               {([
                 { key: 'all', label: 'Все', count: counts.all },
-                { key: 'clients', label: 'Клиенты', count: counts.clients },
-                { key: 'external', label: 'Сторонние', count: counts.external },
+                { key: 'people', label: 'Люди', count: counts.people },
+                { key: 'organizations', label: 'Организации', count: counts.organizations },
               ] as const).map((item) => (
                 <button
                   key={item.key}
@@ -561,13 +608,13 @@ export function Contacts({ initialScope = 'all', onScopeChange }: ContactsProps)
               className="inline-flex items-center gap-2 rounded-2xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-blue-700"
             >
               <Plus className="h-4 w-4" />
-              Добавить сторонний контакт
+              Добавить контакт
             </button>
           </div>
         </div>
       </div>
 
-      <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+      <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
         <div className="grid gap-3 xl:grid-cols-[minmax(220px,1fr)_260px_220px_auto]">
           <label className="block">
             <span className="text-sm font-medium text-slate-700">Поиск</span>
@@ -629,7 +676,7 @@ export function Contacts({ initialScope = 'all', onScopeChange }: ContactsProps)
             <div>
               <h2 className="text-lg font-semibold text-slate-900">Справочник контактов</h2>
               <p className="text-sm text-slate-500">
-                Клиентские контакты редактируются поверх карточек клиентов, сторонние живут как отдельные записи.
+                Быстрые контакты можно постепенно оформить как полноценного клиента или организацию.
               </p>
             </div>
             <div className="flex flex-wrap items-center justify-end gap-3">
@@ -760,7 +807,7 @@ export function Contacts({ initialScope = 'all', onScopeChange }: ContactsProps)
                       ))}
                       <td className="px-6 py-4">
                         <div className="flex items-center justify-end gap-2">
-                          <button
+                          {contact.sourceType !== 'legal' && !contact.hasFullProfile ? <button
                             type="button"
                             onClick={() =>
                               setEditor({
@@ -772,8 +819,37 @@ export function Contacts({ initialScope = 'all', onScopeChange }: ContactsProps)
                             aria-label="Редактировать"
                           >
                             <Pencil className="h-4 w-4" />
-                          </button>
-                          {contact.sourceType === 'external' ? (
+                          </button> : null}
+                          {contact.sourceType === 'external' && !contact.hasFullProfile ? (
+                            <button
+                              type="button"
+                              onClick={() => void handlePromote(contact)}
+                              className="rounded-xl border border-blue-200 px-3 py-2 text-xs font-semibold text-blue-700 transition hover:bg-blue-50"
+                            >
+                              Оформить
+                            </button>
+                          ) : null}
+                          {contact.sourceType === 'client' && onOpenClient ? (
+                            <button type="button" onClick={() => onOpenClient(contact.sourceId)} className="rounded-xl border border-blue-200 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50">
+                              Открыть
+                            </button>
+                          ) : null}
+                          {contact.sourceType === 'legal' && onOpenLegalEntity ? (
+                            <button type="button" onClick={() => onOpenLegalEntity(contact.sourceId)} className="rounded-xl border border-emerald-200 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-50">
+                              Открыть
+                            </button>
+                          ) : null}
+                          {contact.sourceType === 'external' && contact.linkedClientId && onOpenClient ? (
+                            <button type="button" onClick={() => onOpenClient(contact.linkedClientId!)} className="rounded-xl border border-blue-200 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50">
+                              Открыть
+                            </button>
+                          ) : null}
+                          {contact.sourceType === 'external' && contact.linkedLegalEntityId && onOpenLegalEntity ? (
+                            <button type="button" onClick={() => onOpenLegalEntity(contact.linkedLegalEntityId!)} className="rounded-xl border border-emerald-200 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-50">
+                              Открыть
+                            </button>
+                          ) : null}
+                          {contact.sourceType === 'external' && !contact.hasFullProfile ? (
                             <button
                               type="button"
                               onClick={() => void handleDelete(contact)}
@@ -810,6 +886,7 @@ export function Contacts({ initialScope = 'all', onScopeChange }: ContactsProps)
         contact={editor?.contact ?? null}
         legalEntities={legalEntities}
         responsibles={responsibles}
+        organizationContacts={summaryContacts.filter((item) => item.contactType === 'Organization')}
         canManageResponsible={isAdmin()}
         onClose={() => setEditor(null)}
         onSaved={handleSaved}

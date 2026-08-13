@@ -5,9 +5,17 @@ public class ContactDirectoryItemDto
     public string SourceType { get; set; } = string.Empty;
     public string Category { get; set; } = string.Empty;
     public int SourceId { get; set; }
+    public string ContactType { get; set; } = "Person";
+    public string? Inn { get; set; }
+    public List<string> Roles { get; set; } = new();
     public string FullName { get; set; } = string.Empty;
     public string? OrganizationName { get; set; }
     public int? LegalEntityId { get; set; }
+    public int? ParentContactId { get; set; }
+    public string? ParentContactName { get; set; }
+    public int? LinkedClientId { get; set; }
+    public int? LinkedLegalEntityId { get; set; }
+    public bool HasFullProfile { get; set; }
     public string? Position { get; set; }
     public string? PowerOfAttorney { get; set; }
     public string? Notes { get; set; }

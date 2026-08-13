@@ -655,6 +655,9 @@ public class PaymentContext : DbContext
         {
             entity.HasKey(e => e.Id);
             entity.Property(e => e.FullName).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.ContactType).HasMaxLength(32).HasDefaultValue("Person").IsRequired();
+            entity.Property(e => e.Inn).HasMaxLength(20);
+            entity.Property(e => e.RolesJson).HasMaxLength(2000);
             entity.Property(e => e.Phone).HasMaxLength(100);
             entity.Property(e => e.Email).HasMaxLength(200);
             entity.Property(e => e.Position).HasMaxLength(200);
@@ -669,6 +672,21 @@ public class PaymentContext : DbContext
                 .HasForeignKey(e => e.LegalEntityId)
                 .OnDelete(DeleteBehavior.SetNull);
 
+            entity.HasOne(e => e.ParentContact)
+                .WithMany(e => e.Employees)
+                .HasForeignKey(e => e.ParentContactId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasOne(e => e.LinkedClient)
+                .WithMany()
+                .HasForeignKey(e => e.LinkedClientId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasOne(e => e.LinkedLegalEntity)
+                .WithMany()
+                .HasForeignKey(e => e.LinkedLegalEntityId)
+                .OnDelete(DeleteBehavior.SetNull);
+
             entity.HasOne(e => e.ResponsibleUser)
                 .WithMany()
                 .HasForeignKey(e => e.ResponsibleUserId)
@@ -676,6 +694,11 @@ public class PaymentContext : DbContext
 
             entity.HasIndex(e => e.FullName).HasDatabaseName("IX_ExternalContacts_FullName");
             entity.HasIndex(e => e.LegalEntityId).HasDatabaseName("IX_ExternalContacts_LegalEntityId");
+            entity.HasIndex(e => e.ParentContactId).HasDatabaseName("IX_ExternalContacts_ParentContactId");
+            entity.HasIndex(e => e.LinkedClientId).IsUnique().HasDatabaseName("IX_ExternalContacts_LinkedClientId");
+            entity.HasIndex(e => e.LinkedLegalEntityId).IsUnique().HasDatabaseName("IX_ExternalContacts_LinkedLegalEntityId");
+            entity.HasIndex(e => e.ContactType).HasDatabaseName("IX_ExternalContacts_ContactType");
+            entity.HasIndex(e => e.Inn).HasDatabaseName("IX_ExternalContacts_Inn");
             entity.HasIndex(e => e.ResponsibleUserId).HasDatabaseName("IX_ExternalContacts_ResponsibleUserId");
             entity.HasIndex(e => e.IsActive).HasDatabaseName("IX_ExternalContacts_IsActive");
             entity.HasIndex(e => e.SyncToPhonebook).HasDatabaseName("IX_ExternalContacts_SyncToPhonebook");

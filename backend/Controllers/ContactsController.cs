@@ -3,8 +3,10 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
+using System.Security.Cryptography;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
@@ -29,11 +31,16 @@ public class ContactsController : ControllerBase
 
     private readonly PaymentContext _db;
     private readonly IFormRequirementsService _formRequirements;
+    private readonly IConfiguration _configuration;
 
-    public ContactsController(PaymentContext db, IFormRequirementsService formRequirements)
+    public ContactsController(
+        PaymentContext db,
+        IFormRequirementsService formRequirements,
+        IConfiguration configuration)
     {
         _db = db;
         _formRequirements = formRequirements;
+        _configuration = configuration;
     }
 
     private async Task<ActionResult?> RequireClientsPermissionAsync(
@@ -52,13 +59,24 @@ public class ContactsController : ControllerBase
         [FromQuery] bool? syncOnly = null,
         CancellationToken ct = default)
     {
-        if (await RequireClientsPermissionAsync(static permission => permission.CanView, ct) is { } forbidden)
+        var canViewClients = await _db.HasUserSectionPermissionAsync(
+            User,
+            RolePermissionCatalog.Clients,
+            static permission => permission.CanView,
+            ct);
+        var canViewLegalEntities = await _db.HasUserSectionPermissionAsync(
+            User,
+            RolePermissionCatalog.LegalEntities,
+            static permission => permission.CanView,
+            ct);
+        if (!canViewClients && !canViewLegalEntities)
         {
-            return forbidden;
+            return Forbid();
         }
 
         var access = await GetCurrentAccessAsync(ct);
-        if (access is null)
+        var legalAccess = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.LegalEntities, ct);
+        if (access is null && legalAccess is null)
         {
             return Unauthorized();
         }
@@ -66,11 +84,34 @@ public class ContactsController : ControllerBase
         var normalizedScope = NormalizeScope(scope);
         var items = new List<ContactDirectoryItemDto>();
 
-        if (!string.Equals(normalizedScope, "external", StringComparison.Ordinal))
+        var externalContacts = canViewClients && normalizedScope is "all" or "people" or "organizations" or "external"
+            ? await BuildVisibleExternalContactsQuery(access)
+                .Include(x => x.LegalEntity)
+                .Include(x => x.ParentContact)
+                .Include(x => x.LinkedClient)
+                    .ThenInclude(x => x!.ClientStatus)
+                .Include(x => x.LinkedLegalEntity)
+                    .ThenInclude(x => x!.ClientStatus)
+                .Include(x => x.ResponsibleUser)
+                .Where(x => includeInactive || x.IsActive)
+                .ToListAsync(ct)
+            : new List<ExternalContact>();
+
+        var linkedClientIds = externalContacts
+            .Where(x => x.LinkedClientId.HasValue)
+            .Select(x => x.LinkedClientId!.Value)
+            .ToHashSet();
+        var linkedLegalEntityIds = externalContacts
+            .Where(x => x.LinkedLegalEntityId.HasValue)
+            .Select(x => x.LinkedLegalEntityId!.Value)
+            .ToHashSet();
+
+        if (canViewClients && normalizedScope is "all" or "people" or "clients")
         {
             IQueryable<Client> clientsQuery = _db.Clients
-                .ApplyClientVisibility(access)
+                .ApplyClientVisibility(access!)
                 .Include(x => x.LegalEntity)
+                .Include(x => x.ClientStatus)
                 .Include(x => x.ResponsibleUser);
 
             if (legalEntityId.HasValue)
@@ -83,28 +124,51 @@ public class ContactsController : ControllerBase
                 clientsQuery = clientsQuery.Where(x => x.IsActive);
             }
 
+            if (linkedClientIds.Count > 0)
+            {
+                clientsQuery = clientsQuery.Where(x => !linkedClientIds.Contains(x.Id));
+            }
+
             var clients = await clientsQuery.ToListAsync(ct);
             items.AddRange(clients.Select(MapClientContact));
         }
 
-        if (!string.Equals(normalizedScope, "clients", StringComparison.Ordinal))
+        if (canViewLegalEntities && normalizedScope is "all" or "organizations")
         {
-            IQueryable<ExternalContact> externalQuery = BuildVisibleExternalContactsQuery(access)
-                .Include(x => x.LegalEntity)
+            IQueryable<LegalEntity> legalQuery = _db.LegalEntities
+                .ApplyLegalEntityVisibility(legalAccess)
+                .Include(x => x.ClientStatus)
                 .Include(x => x.ResponsibleUser);
 
             if (legalEntityId.HasValue)
             {
-                externalQuery = externalQuery.Where(x => x.LegalEntityId == legalEntityId.Value);
+                legalQuery = legalQuery.Where(x => x.Id == legalEntityId.Value);
             }
 
-            if (!includeInactive)
+            if (linkedLegalEntityIds.Count > 0)
             {
-                externalQuery = externalQuery.Where(x => x.IsActive);
+                legalQuery = legalQuery.Where(x => !linkedLegalEntityIds.Contains(x.Id));
             }
 
-            var externalContacts = await externalQuery.ToListAsync(ct);
-            items.AddRange(externalContacts.Select(MapExternalContact));
+            var legalEntities = await legalQuery.ToListAsync(ct);
+            items.AddRange(legalEntities.Select(MapLegalEntityContact));
+        }
+
+        foreach (var contact in externalContacts)
+        {
+            var isOrganization = IsOrganizationContact(contact.ContactType);
+            if (normalizedScope == "people" && isOrganization ||
+                normalizedScope == "organizations" && !isOrganization)
+            {
+                continue;
+            }
+
+            if (legalEntityId.HasValue && contact.LegalEntityId != legalEntityId.Value && contact.LinkedLegalEntityId != legalEntityId.Value)
+            {
+                continue;
+            }
+
+            items.Add(MapExternalContact(contact));
         }
 
         if (syncOnly.HasValue)
@@ -118,6 +182,7 @@ public class ContactsController : ControllerBase
             items = items.Where(item =>
                     (item.FullName?.ToLowerInvariant().Contains(term) ?? false) ||
                     (item.OrganizationName?.ToLowerInvariant().Contains(term) ?? false) ||
+                    (item.Inn?.ToLowerInvariant().Contains(term) ?? false) ||
                     (item.Position?.ToLowerInvariant().Contains(term) ?? false) ||
                     (item.PowerOfAttorney?.ToLowerInvariant().Contains(term) ?? false) ||
                     (item.Phone?.ToLowerInvariant().Contains(term) ?? false) ||
@@ -234,6 +299,30 @@ public class ContactsController : ControllerBase
             return BadRequest("Указанное юридическое лицо не найдено.");
         }
 
+        var contactType = NormalizeContactType(request.ContactType);
+        if (string.IsNullOrWhiteSpace(request.FullName))
+        {
+            return BadRequest(IsOrganizationContact(contactType) ? "Укажите название организации." : "Укажите ФИО контакта.");
+        }
+        if (!IsValidInn(contactType, request.Inn))
+        {
+            return BadRequest("ИНН организации должен содержать 10 или 12 цифр.");
+        }
+        if (IsOrganizationContact(contactType) && !string.IsNullOrWhiteSpace(request.Inn) &&
+            await _db.ExternalContacts.AsNoTracking().AnyAsync(x => x.Inn == request.Inn.Trim(), ct))
+        {
+            return Conflict("Контакт организации с таким ИНН уже существует.");
+        }
+        var parentContact = await ResolveParentContactAsync(request.ParentContactId, access, excludedContactId: null, ct);
+        if (request.ParentContactId.HasValue && parentContact is null)
+        {
+            return BadRequest("Указанная организация-контакт не найдена.");
+        }
+        if (IsOrganizationContact(contactType) && request.ParentContactId.HasValue)
+        {
+            return BadRequest("Организацию нельзя привязать как сотрудника другой организации.");
+        }
+
         var responsibleUserId = access.IsAdmin ? request.ResponsibleUserId ?? access.UserId : access.UserId;
         if (!await ResponsibleUserExistsAsync(responsibleUserId, ct))
         {
@@ -247,6 +336,9 @@ public class ContactsController : ControllerBase
         var entity = new ExternalContact
         {
             FullName = request.FullName.Trim(),
+            ContactType = contactType,
+            Inn = NormalizeOptional(request.Inn),
+            RolesJson = SerializeRoles(request.Roles),
             Phone = normalizedPhones.FirstOrDefault(),
             Email = normalizedEmails.FirstOrDefault(),
             PhonesJson = SerializeStringList(normalizedPhones),
@@ -255,9 +347,10 @@ public class ContactsController : ControllerBase
             PowerOfAttorney = NormalizeOptional(request.PowerOfAttorney),
             Notes = NormalizeOptional(request.Notes),
             LegalEntityId = request.LegalEntityId,
+            ParentContactId = request.ParentContactId,
             ResponsibleUserId = responsibleUserId,
             IsActive = request.IsActive,
-            SyncToPhonebook = request.SyncToPhonebook,
+            SyncToPhonebook = !IsOrganizationContact(contactType) && request.SyncToPhonebook,
             CreatedAt = now,
             UpdatedAt = now,
         };
@@ -266,6 +359,7 @@ public class ContactsController : ControllerBase
         await _db.SaveChangesAsync(ct);
 
         await _db.Entry(entity).Reference(x => x.LegalEntity).LoadAsync(ct);
+        await _db.Entry(entity).Reference(x => x.ParentContact).LoadAsync(ct);
         await _db.Entry(entity).Reference(x => x.ResponsibleUser).LoadAsync(ct);
 
         return Created($"/api/contacts/external/{entity.Id}", MapExternalContact(entity));
@@ -296,6 +390,11 @@ public class ContactsController : ControllerBase
 
         var entity = await BuildVisibleExternalContactsQuery(access)
             .Include(x => x.LegalEntity)
+            .Include(x => x.ParentContact)
+            .Include(x => x.LinkedClient)
+                .ThenInclude(x => x!.ClientStatus)
+            .Include(x => x.LinkedLegalEntity)
+                .ThenInclude(x => x!.ClientStatus)
             .Include(x => x.ResponsibleUser)
             .FirstOrDefaultAsync(x => x.Id == id, ct);
         if (entity is null)
@@ -309,6 +408,30 @@ public class ContactsController : ControllerBase
             return BadRequest("Указанное юридическое лицо не найдено.");
         }
 
+        var contactType = NormalizeContactType(request.ContactType);
+        if (string.IsNullOrWhiteSpace(request.FullName))
+        {
+            return BadRequest(IsOrganizationContact(contactType) ? "Укажите название организации." : "Укажите ФИО контакта.");
+        }
+        if (!IsValidInn(contactType, request.Inn))
+        {
+            return BadRequest("ИНН организации должен содержать 10 или 12 цифр.");
+        }
+        if (IsOrganizationContact(contactType) && !string.IsNullOrWhiteSpace(request.Inn) &&
+            await _db.ExternalContacts.AsNoTracking().AnyAsync(x => x.Id != id && x.Inn == request.Inn.Trim(), ct))
+        {
+            return Conflict("Контакт организации с таким ИНН уже существует.");
+        }
+        var parentContact = await ResolveParentContactAsync(request.ParentContactId, access, id, ct);
+        if (request.ParentContactId.HasValue && parentContact is null)
+        {
+            return BadRequest("Указанная организация-контакт не найдена.");
+        }
+        if (IsOrganizationContact(contactType) && request.ParentContactId.HasValue)
+        {
+            return BadRequest("Организацию нельзя привязать как сотрудника другой организации.");
+        }
+
         var responsibleUserId = access.IsAdmin ? request.ResponsibleUserId ?? entity.ResponsibleUserId : entity.ResponsibleUserId;
         if (!await ResponsibleUserExistsAsync(responsibleUserId, ct))
         {
@@ -319,6 +442,9 @@ public class ContactsController : ControllerBase
         var normalizedEmails = NormalizeStringList(request.Emails, request.Email);
 
         entity.FullName = request.FullName.Trim();
+        entity.ContactType = contactType;
+        entity.Inn = NormalizeOptional(request.Inn);
+        entity.RolesJson = SerializeRoles(request.Roles);
         entity.Phone = normalizedPhones.FirstOrDefault();
         entity.Email = normalizedEmails.FirstOrDefault();
         entity.PhonesJson = SerializeStringList(normalizedPhones);
@@ -327,13 +453,15 @@ public class ContactsController : ControllerBase
         entity.PowerOfAttorney = NormalizeOptional(request.PowerOfAttorney);
         entity.Notes = NormalizeOptional(request.Notes);
         entity.LegalEntityId = request.LegalEntityId;
+        entity.ParentContactId = request.ParentContactId;
         entity.ResponsibleUserId = responsibleUserId;
         entity.IsActive = request.IsActive;
-        entity.SyncToPhonebook = request.SyncToPhonebook;
+        entity.SyncToPhonebook = !IsOrganizationContact(contactType) && request.SyncToPhonebook;
         entity.UpdatedAt = DateTime.UtcNow;
 
         await _db.SaveChangesAsync(ct);
         await _db.Entry(entity).Reference(x => x.LegalEntity).LoadAsync(ct);
+        await _db.Entry(entity).Reference(x => x.ParentContact).LoadAsync(ct);
         await _db.Entry(entity).Reference(x => x.ResponsibleUser).LoadAsync(ct);
 
         return Ok(MapExternalContact(entity));
@@ -365,6 +493,147 @@ public class ContactsController : ControllerBase
         return NoContent();
     }
 
+    [HttpPost("external/{id:int}/promote")]
+    public async Task<ActionResult<ContactDirectoryItemDto>> PromoteExternalContact(
+        int id,
+        [FromBody] PromoteContactRequest request,
+        CancellationToken ct)
+    {
+        var access = await GetCurrentAccessAsync(ct);
+        if (access is null)
+        {
+            return Unauthorized();
+        }
+
+        var entity = await BuildVisibleExternalContactsQuery(access)
+            .Include(x => x.LegalEntity)
+            .Include(x => x.ParentContact)
+            .Include(x => x.LinkedClient)
+                .ThenInclude(x => x!.ClientStatus)
+            .Include(x => x.LinkedLegalEntity)
+                .ThenInclude(x => x!.ClientStatus)
+            .Include(x => x.ResponsibleUser)
+            .FirstOrDefaultAsync(x => x.Id == id, ct);
+        if (entity is null)
+        {
+            return NotFound();
+        }
+
+        var target = request.Target?.Trim().ToLowerInvariant();
+        var role = NormalizeRole(request.Role);
+        if (target == "client")
+        {
+            if (IsOrganizationContact(entity.ContactType))
+            {
+                return BadRequest("Организацию нужно оформить как юридическое лицо.");
+            }
+            if (await RequireClientsPermissionAsync(static permission => permission.CanCreate, ct) is { } forbidden)
+            {
+                return forbidden;
+            }
+            if (entity.LinkedClientId.HasValue)
+            {
+                return Conflict("Для контакта уже создана полноценная карточка физического лица.");
+            }
+
+            var statusKey = string.Equals(role, "Supplier", StringComparison.Ordinal)
+                ? ClientStatusSystemKeys.Supplier
+                : ClientStatusSystemKeys.Client;
+            var statusId = await _db.ClientStatuses.AsNoTracking()
+                .Where(x => x.SystemKey == statusKey)
+                .Select(x => (int?)x.Id)
+                .FirstOrDefaultAsync(ct);
+            var phones = DeserializeStringList(entity.PhonesJson, entity.Phone);
+            var emails = DeserializeStringList(entity.EmailsJson, entity.Email);
+            var client = new Client
+            {
+                Name = entity.FullName,
+                Phone = phones.FirstOrDefault() ?? string.Empty,
+                Email = emails.FirstOrDefault() ?? string.Empty,
+                Company = entity.LegalEntity?.ShortName ?? entity.ParentContact?.FullName ?? string.Empty,
+                LegalEntityId = entity.LegalEntityId,
+                ResponsibleUserId = entity.ResponsibleUserId,
+                ClientStatusId = statusId,
+                IsClientAndSupplier = HasRole(entity.RolesJson, "Client") && string.Equals(role, "Supplier", StringComparison.Ordinal),
+                IsActive = entity.IsActive,
+                Notes = entity.Notes ?? string.Empty,
+                CreatedAt = DateTime.UtcNow,
+            };
+            _db.Clients.Add(client);
+            entity.LinkedClient = client;
+            entity.RolesJson = SerializeRoles(DeserializeRoles(entity.RolesJson).Append(role));
+            entity.UpdatedAt = DateTime.UtcNow;
+            await _db.SaveChangesAsync(ct);
+        }
+        else if (target == "legalentity")
+        {
+            if (!IsOrganizationContact(entity.ContactType))
+            {
+                return BadRequest("Физическое лицо нужно оформить как клиента.");
+            }
+            var canCreateLegalEntity = await _db.HasUserSectionPermissionAsync(
+                User,
+                RolePermissionCatalog.LegalEntities,
+                static permission => permission.CanCreate,
+                ct);
+            if (!canCreateLegalEntity)
+            {
+                return Forbid();
+            }
+            if (entity.LinkedLegalEntityId.HasValue)
+            {
+                return Conflict("Для контакта уже создана полноценная карточка организации.");
+            }
+            if (!string.IsNullOrWhiteSpace(entity.Inn) &&
+                await _db.LegalEntities.AsNoTracking().AnyAsync(x => x.Inn == entity.Inn, ct))
+            {
+                return Conflict("Юридическое лицо с таким ИНН уже существует.");
+            }
+
+            var statusKey = string.Equals(role, "Supplier", StringComparison.Ordinal)
+                ? ClientStatusSystemKeys.Supplier
+                : ClientStatusSystemKeys.Client;
+            var statusId = await _db.ClientStatuses.AsNoTracking()
+                .Where(x => x.SystemKey == statusKey)
+                .Select(x => (int?)x.Id)
+                .FirstOrDefaultAsync(ct);
+            var legalEntity = new LegalEntity
+            {
+                ShortName = entity.FullName,
+                FullName = entity.FullName,
+                Inn = entity.Inn,
+                Phone = entity.Phone,
+                Email = entity.Email,
+                Director = entity.Position,
+                Notes = entity.Notes,
+                ResponsibleUserId = entity.ResponsibleUserId,
+                ClientStatusId = statusId,
+                IsClientAndSupplier = HasRole(entity.RolesJson, "Client") && string.Equals(role, "Supplier", StringComparison.Ordinal),
+                CreatedAt = DateTime.UtcNow,
+            };
+            _db.LegalEntities.Add(legalEntity);
+            entity.LinkedLegalEntity = legalEntity;
+            entity.RolesJson = SerializeRoles(DeserializeRoles(entity.RolesJson).Append(role));
+            entity.UpdatedAt = DateTime.UtcNow;
+
+            var employees = await _db.ExternalContacts
+                .Where(x => x.ParentContactId == entity.Id)
+                .ToListAsync(ct);
+            foreach (var employee in employees)
+            {
+                employee.LegalEntity = legalEntity;
+            }
+
+            await _db.SaveChangesAsync(ct);
+        }
+        else
+        {
+            return BadRequest("Неизвестный тип полноценной карточки.");
+        }
+
+        return Ok(MapExternalContact(entity));
+    }
+
     [HttpGet("exports/yealink")]
     public async Task<IActionResult> DownloadYealinkXml(CancellationToken ct)
     {
@@ -388,11 +657,18 @@ public class ContactsController : ControllerBase
 
         var externalContacts = await BuildVisibleExternalContactsQuery(access)
             .Include(x => x.LegalEntity)
+            .Include(x => x.ParentContact)
             .Include(x => x.ResponsibleUser)
-            .Where(x => x.IsActive)
+            .Where(x => x.IsActive && x.ContactType != "Organization")
             .ToListAsync(ct);
 
+        var linkedClientIds = externalContacts
+            .Where(x => x.LinkedClientId.HasValue)
+            .Select(x => x.LinkedClientId!.Value)
+            .ToHashSet();
+
         var clientContacts = clients.Select(MapClientContact)
+            .Where(x => !linkedClientIds.Contains(x.SourceId))
             .Where(x => x.SyncToPhonebook)
             .OrderBy(x => x.FullName, StringComparer.CurrentCultureIgnoreCase)
             .ToList();
@@ -411,6 +687,52 @@ public class ContactsController : ControllerBase
 
         var bytes = Encoding.UTF8.GetBytes(document.ToString(SaveOptions.DisableFormatting));
         return File(bytes, "text/xml; charset=utf-8", "RemotePhonebook.xml");
+    }
+
+    [AllowAnonymous]
+    [EnableRateLimiting(AnonymousIntegrationRateLimitPolicies.PublicMetadata)]
+    [HttpGet("phonebook/yealink/{token}")]
+    public async Task<IActionResult> GetYealinkRemotePhonebook(string token, CancellationToken ct)
+    {
+        var configuredToken = (
+            _configuration["Phonebook:Token"] ??
+            Environment.GetEnvironmentVariable("PAYPLANNER_PHONEBOOK_TOKEN"))?.Trim();
+        if (string.IsNullOrWhiteSpace(configuredToken) || !TokensMatch(configuredToken, token))
+        {
+            return NotFound();
+        }
+
+        var externalContacts = await _db.ExternalContacts
+            .AsNoTracking()
+            .Include(x => x.LegalEntity)
+            .Include(x => x.ParentContact)
+            .Include(x => x.ResponsibleUser)
+            .Where(x => x.IsActive && x.SyncToPhonebook && x.ContactType != "Organization")
+            .ToListAsync(ct);
+        var linkedClientIds = externalContacts
+            .Where(x => x.LinkedClientId.HasValue)
+            .Select(x => x.LinkedClientId!.Value)
+            .ToHashSet();
+        var clients = await _db.Clients
+            .AsNoTracking()
+            .Include(x => x.LegalEntity)
+            .Include(x => x.ResponsibleUser)
+            .Where(x => x.IsActive && !linkedClientIds.Contains(x.Id))
+            .ToListAsync(ct);
+
+        var people = clients.Select(MapClientContact)
+            .Concat(externalContacts.Select(MapExternalContact))
+            .Where(x => x.SyncToPhonebook && x.Phones.Count > 0)
+            .OrderBy(x => x.FullName, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+        var document = new XDocument(
+            new XDeclaration("1.0", "UTF-8", null),
+            new XElement("YealinkIPPhoneBook",
+                new XElement("Title", "PayPlanner"),
+                BuildYealinkMenu("КОНТАКТЫ", people)));
+
+        Response.Headers.CacheControl = "private, max-age=300";
+        return Content(document.ToString(SaveOptions.DisableFormatting), "text/xml", Encoding.UTF8);
     }
 
     [HttpPost("imports/yealink")]
@@ -702,6 +1024,8 @@ public class ContactsController : ControllerBase
         {
             "clients" => "clients",
             "external" => "external",
+            "people" => "people",
+            "organizations" => "organizations",
             _ => "all",
         };
     }
@@ -714,6 +1038,116 @@ public class ContactsController : ControllerBase
 
     private static string? NormalizeOptional(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static string NormalizeContactType(string? value)
+        => string.Equals(value?.Trim(), "Organization", StringComparison.OrdinalIgnoreCase)
+            ? "Organization"
+            : "Person";
+
+    private static bool IsOrganizationContact(string? value)
+        => string.Equals(NormalizeContactType(value), "Organization", StringComparison.Ordinal);
+
+    private static bool IsValidInn(string contactType, string? value)
+    {
+        if (!IsOrganizationContact(contactType) || string.IsNullOrWhiteSpace(value))
+        {
+            return true;
+        }
+
+        var normalized = value.Trim();
+        return (normalized.Length == 10 || normalized.Length == 12) && normalized.All(char.IsDigit);
+    }
+
+    private static bool TokensMatch(string expected, string actual)
+    {
+        var expectedBytes = Encoding.UTF8.GetBytes(expected);
+        var actualBytes = Encoding.UTF8.GetBytes(actual ?? string.Empty);
+        return expectedBytes.Length == actualBytes.Length &&
+               CryptographicOperations.FixedTimeEquals(expectedBytes, actualBytes);
+    }
+
+    private static readonly string[] AllowedContactRoles = ["Contact", "Client", "Supplier", "Agent"];
+
+    private static string NormalizeRole(string? value)
+        => AllowedContactRoles.FirstOrDefault(role => string.Equals(role, value?.Trim(), StringComparison.OrdinalIgnoreCase))
+            ?? "Client";
+
+    private static List<string> DeserializeRoles(string? rawJson)
+    {
+        if (!string.IsNullOrWhiteSpace(rawJson))
+        {
+            try
+            {
+                var values = JsonSerializer.Deserialize<List<string>>(rawJson, JsonOptions) ?? new List<string>();
+                var normalized = values
+                    .Select(value => AllowedContactRoles.FirstOrDefault(role => string.Equals(role, value, StringComparison.OrdinalIgnoreCase)))
+                    .Where(value => value is not null)
+                    .Cast<string>()
+                    .Distinct(StringComparer.Ordinal)
+                    .ToList();
+                if (normalized.Count > 0)
+                {
+                    return normalized;
+                }
+            }
+            catch
+            {
+                // Older or manually edited values fall back to the base role.
+            }
+        }
+
+        return ["Contact"];
+    }
+
+    private static string SerializeRoles(IEnumerable<string>? roles)
+    {
+        var normalized = (roles ?? Array.Empty<string>())
+            .Select(value => AllowedContactRoles.FirstOrDefault(role => string.Equals(role, value?.Trim(), StringComparison.OrdinalIgnoreCase)))
+            .Where(value => value is not null)
+            .Cast<string>()
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        if (normalized.Count == 0)
+        {
+            normalized.Add("Contact");
+        }
+
+        return JsonSerializer.Serialize(normalized, JsonOptions);
+    }
+
+    private static bool HasRole(string? rawJson, string role)
+        => DeserializeRoles(rawJson).Contains(role, StringComparer.Ordinal);
+
+    private static List<string> BuildEntityRoles(string? statusSystemKey, bool isClientAndSupplier)
+    {
+        if (isClientAndSupplier)
+        {
+            return ["Client", "Supplier"];
+        }
+
+        return ClientStatusSystemKeys.IsSupplierLike(statusSystemKey)
+            ? ["Supplier"]
+            : ["Client"];
+    }
+
+    private async Task<ExternalContact?> ResolveParentContactAsync(
+        int? parentContactId,
+        DataVisibilityAccess access,
+        int? excludedContactId,
+        CancellationToken ct)
+    {
+        if (!parentContactId.HasValue)
+        {
+            return null;
+        }
+
+        return await BuildVisibleExternalContactsQuery(access)
+            .FirstOrDefaultAsync(
+                x => x.Id == parentContactId.Value &&
+                     x.Id != excludedContactId &&
+                     x.ContactType == "Organization",
+                ct);
+    }
 
     private static string NormalizeImportedText(string? value)
     {
@@ -997,6 +1431,10 @@ public class ContactsController : ControllerBase
             SourceType = "client",
             Category = "client",
             SourceId = client.Id,
+            ContactType = "Person",
+            Roles = BuildEntityRoles(client.ClientStatus?.SystemKey, client.IsClientAndSupplier),
+            LinkedClientId = client.Id,
+            HasFullProfile = true,
             FullName = client.Name,
             OrganizationName = client.LegalEntity?.ShortName ?? client.Company,
             LegalEntityId = client.LegalEntityId,
@@ -1038,8 +1476,16 @@ public class ContactsController : ControllerBase
             SourceType = "external",
             Category = "external",
             SourceId = contact.Id,
+            ContactType = NormalizeContactType(contact.ContactType),
+            Inn = contact.Inn,
+            Roles = DeserializeRoles(contact.RolesJson),
+            ParentContactId = contact.ParentContactId,
+            ParentContactName = contact.ParentContact?.FullName,
+            LinkedClientId = contact.LinkedClientId,
+            LinkedLegalEntityId = contact.LinkedLegalEntityId,
+            HasFullProfile = contact.LinkedClientId.HasValue || contact.LinkedLegalEntityId.HasValue,
             FullName = contact.FullName,
-            OrganizationName = contact.LegalEntity?.ShortName,
+            OrganizationName = contact.LegalEntity?.ShortName ?? contact.ParentContact?.FullName,
             LegalEntityId = contact.LegalEntityId,
             Position = contact.Position,
             PowerOfAttorney = contact.PowerOfAttorney,
@@ -1056,6 +1502,50 @@ public class ContactsController : ControllerBase
                 : contact.ResponsibleUser.FullName,
             CreatedAt = contact.CreatedAt,
             UpdatedAt = contact.UpdatedAt,
+            AuditCreatedByUserId = audit?.CreatedByUserId,
+            AuditCreatedByUserName = audit?.CreatedByUserName,
+            AuditUpdatedAt = audit?.UpdatedAt,
+            AuditUpdatedByUserId = audit?.UpdatedByUserId,
+            AuditUpdatedByUserName = audit?.UpdatedByUserName,
+            AuditIsDeleted = audit?.IsDeleted ?? false,
+            AuditDeletedAt = audit?.DeletedAt,
+            AuditDeletedByUserId = audit?.DeletedByUserId,
+            AuditDeletedByUserName = audit?.DeletedByUserName,
+        };
+    }
+
+    private ContactDirectoryItemDto MapLegalEntityContact(LegalEntity entity)
+    {
+        var phones = DeserializeStringList(entity.ContactPhonesJson, entity.Phone);
+        var emails = DeserializeStringList(entity.ContactEmailsJson, entity.Email);
+        var audit = _db.ReadAuditSnapshot(entity);
+        return new ContactDirectoryItemDto
+        {
+            SourceType = "legal",
+            Category = "legal",
+            SourceId = entity.Id,
+            ContactType = "Organization",
+            Inn = entity.Inn,
+            Roles = BuildEntityRoles(entity.ClientStatus?.SystemKey, entity.IsClientAndSupplier),
+            FullName = entity.ShortName,
+            OrganizationName = entity.FullName,
+            LegalEntityId = entity.Id,
+            LinkedLegalEntityId = entity.Id,
+            HasFullProfile = true,
+            Position = entity.Director,
+            Notes = entity.Notes,
+            Phone = phones.FirstOrDefault(),
+            Email = emails.FirstOrDefault(),
+            Phones = phones,
+            Emails = emails,
+            IsActive = true,
+            SyncToPhonebook = false,
+            ResponsibleUserId = entity.ResponsibleUserId,
+            ResponsibleUserName = string.IsNullOrWhiteSpace(entity.ResponsibleUser?.FullName)
+                ? entity.ResponsibleUser?.Email
+                : entity.ResponsibleUser.FullName,
+            CreatedAt = entity.CreatedAt,
+            UpdatedAt = entity.UpdatedAt,
             AuditCreatedByUserId = audit?.CreatedByUserId,
             AuditCreatedByUserName = audit?.CreatedByUserName,
             AuditUpdatedAt = audit?.UpdatedAt,

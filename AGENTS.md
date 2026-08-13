@@ -39,6 +39,8 @@ Use short, meaningful Russian commit messages that describe the user-visible or 
 
 Do not rewrite commits that have already been pushed only to change their message, unless the user explicitly asks for history rewriting or force-push. If a pushed commit message is not ideal, keep history intact and use a clear Russian message for the next follow-up commit.
 
+When work is performed on a secondary development branch and is later merged into the main branch, delete the merged development branch both locally and on the remote so that only the main branch remains. When the user asks to push work from a secondary branch, merge it into the main branch first if it can be merged safely, then push the main branch and delete the secondary branch locally and remotely, unless the current chat explicitly specifies another branch strategy.
+
 ## Deployment Verification
 
 After pushing changes to a branch that triggers deployment, verify that GitHub Actions started, completed successfully, and deployed the expected revision without errors. If a workflow fails, a deployment does not start, or the deployed revision does not match the pushed commit, inspect the workflow logs and fix the problem before considering the deployment complete.

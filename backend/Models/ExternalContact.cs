@@ -11,6 +11,16 @@ public class ExternalContact
     [MaxLength(200)]
     public string FullName { get; set; } = string.Empty;
 
+    [Required]
+    [MaxLength(32)]
+    public string ContactType { get; set; } = "Person";
+
+    [MaxLength(20)]
+    public string? Inn { get; set; }
+
+    [MaxLength(2000)]
+    public string? RolesJson { get; set; }
+
     [MaxLength(100)]
     public string? Phone { get; set; }
 
@@ -35,6 +45,16 @@ public class ExternalContact
 
     public int? LegalEntityId { get; set; }
     public LegalEntity? LegalEntity { get; set; }
+
+    public int? ParentContactId { get; set; }
+    public ExternalContact? ParentContact { get; set; }
+    public ICollection<ExternalContact> Employees { get; set; } = new List<ExternalContact>();
+
+    public int? LinkedClientId { get; set; }
+    public Client? LinkedClient { get; set; }
+
+    public int? LinkedLegalEntityId { get; set; }
+    public LegalEntity? LinkedLegalEntity { get; set; }
 
     public int? ResponsibleUserId { get; set; }
     public User? ResponsibleUser { get; set; }

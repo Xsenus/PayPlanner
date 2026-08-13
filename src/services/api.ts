@@ -2056,8 +2056,10 @@ export interface FormRequirementSectionMetadataDto {
   fields: FormRequirementFieldMetadataDto[];
 }
 
-export type ContactSourceType = 'client' | 'external';
-export type ContactScope = 'all' | 'clients' | 'external';
+export type ContactSourceType = 'client' | 'legal' | 'external';
+export type ContactScope = 'all' | 'people' | 'organizations' | 'clients' | 'external';
+export type ContactType = 'Person' | 'Organization';
+export type ContactRole = 'Contact' | 'Client' | 'Supplier' | 'Agent';
 
 export interface MessengerDocumentDeliveryConfiguration {
   enabled: boolean;
@@ -2168,9 +2170,17 @@ export interface ContactDirectoryItemDto {
   sourceType: ContactSourceType;
   category: ContactScope;
   sourceId: number;
+  contactType: ContactType;
+  inn?: string | null;
+  roles: ContactRole[];
   fullName: string;
   organizationName?: string | null;
   legalEntityId?: number | null;
+  parentContactId?: number | null;
+  parentContactName?: string | null;
+  linkedClientId?: number | null;
+  linkedLegalEntityId?: number | null;
+  hasFullProfile: boolean;
   position?: string | null;
   powerOfAttorney?: string | null;
   notes?: string | null;
@@ -2209,6 +2219,10 @@ export interface UpdateClientContactRequestDto {
 }
 
 export interface UpsertExternalContactRequestDto extends UpdateClientContactRequestDto {
+  contactType: ContactType;
+  inn?: string | null;
+  roles: ContactRole[];
+  parentContactId?: number | null;
   responsibleUserId?: number | null;
   isActive: boolean;
 }
@@ -3849,6 +3863,13 @@ export class ApiService {
     });
   }
 
+  async promoteExternalContact(id: number, payload: { target: 'client' | 'legalEntity'; role: ContactRole }) {
+    return this.request<ContactDirectoryItemDto>(`/contacts/external/${id}/promote`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
   async deleteExternalContact(id: number) {
     return this.request<void>(`/contacts/external/${id}`, { method: 'DELETE' });
   }
@@ -4104,7 +4125,7 @@ export class ApiService {
       sortDir?: SortDir;
       page?: number;
       pageSize?: number;
-    },
+  },
     options?: { signal?: AbortSignal },
   ) {
     const q = buildQuery({

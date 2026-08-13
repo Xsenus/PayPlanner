@@ -52,6 +52,7 @@ vi.mock('../../services/api', () => ({
     getContacts: vi.fn(),
     getLegalEntities: vi.fn(),
     getActResponsibles: vi.fn(),
+    promoteExternalContact: vi.fn(),
   },
 }));
 
@@ -60,6 +61,9 @@ function createContact(id: number, fullName: string): ContactDirectoryItemDto {
     sourceType: 'external',
     category: 'external',
     sourceId: id,
+    contactType: 'Person',
+    roles: ['Contact'],
+    hasFullProfile: false,
     fullName,
     phones: [],
     emails: [],
@@ -73,6 +77,27 @@ describe('Contacts phone directory', () => {
     vi.clearAllMocks();
     vi.mocked(apiService.getLegalEntities).mockResolvedValue([]);
     vi.mocked(apiService.getActResponsibles).mockResolvedValue([]);
+  });
+
+  it('shows one directory for people and organizations', async () => {
+    const person = createContact(1, 'Иван Иванов');
+    const organization: ContactDirectoryItemDto = {
+      ...createContact(2, 'ООО Ромашка'),
+      contactType: 'Organization' as const,
+      inn: '5401000000',
+      roles: ['Client', 'Supplier'],
+      syncToPhonebook: false,
+    };
+    vi.mocked(apiService.getContacts).mockResolvedValue([person, organization]);
+
+    render(<Contacts />);
+
+    expect(await screen.findByText('Иван Иванов')).toBeTruthy();
+    expect(screen.getByText('ООО Ромашка')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Люди\s*1/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Организации\s*1/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Добавить контакт' })).toBeTruthy();
+    expect(screen.getByText('ИНН: 5401000000')).toBeTruthy();
   });
 
   it('aborts both obsolete directory requests and keeps the latest response', async () => {

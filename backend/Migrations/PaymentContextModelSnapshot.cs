@@ -4099,6 +4099,13 @@ namespace PayPlanner.Api.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("ContactType")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("Person");
+
                     b.Property<DateTime>("CreatedAt")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT")
@@ -4134,6 +4141,10 @@ namespace PayPlanner.Api.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("Inn")
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
                     b.Property<bool>("IsActive")
                         .HasColumnType("INTEGER");
 
@@ -4145,9 +4156,18 @@ namespace PayPlanner.Api.Migrations
                     b.Property<int?>("LegalEntityId")
                         .HasColumnType("INTEGER");
 
+                    b.Property<int?>("LinkedClientId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("LinkedLegalEntityId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Notes")
                         .HasMaxLength(2000)
                         .HasColumnType("TEXT");
+
+                    b.Property<int?>("ParentContactId")
+                        .HasColumnType("INTEGER");
 
                     b.Property<string>("Phone")
                         .HasMaxLength(100)
@@ -4168,6 +4188,10 @@ namespace PayPlanner.Api.Migrations
                     b.Property<int?>("ResponsibleUserId")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("RolesJson")
+                        .HasMaxLength(2000)
+                        .HasColumnType("TEXT");
+
                     b.Property<bool>("SyncToPhonebook")
                         .HasColumnType("INTEGER");
 
@@ -4183,11 +4207,17 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("ContactType")
+                        .HasDatabaseName("IX_ExternalContacts_ContactType");
+
                     b.HasIndex("DeletedAt")
                         .HasDatabaseName("IX_ExternalContact_DeletedAt_Audit");
 
                     b.HasIndex("FullName")
                         .HasDatabaseName("IX_ExternalContacts_FullName");
+
+                    b.HasIndex("Inn")
+                        .HasDatabaseName("IX_ExternalContacts_Inn");
 
                     b.HasIndex("IsActive")
                         .HasDatabaseName("IX_ExternalContacts_IsActive");
@@ -4197,6 +4227,17 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasIndex("LegalEntityId")
                         .HasDatabaseName("IX_ExternalContacts_LegalEntityId");
+
+                    b.HasIndex("LinkedClientId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_ExternalContacts_LinkedClientId");
+
+                    b.HasIndex("LinkedLegalEntityId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_ExternalContacts_LinkedLegalEntityId");
+
+                    b.HasIndex("ParentContactId")
+                        .HasDatabaseName("IX_ExternalContacts_ParentContactId");
 
                     b.HasIndex("ResponsibleUserId")
                         .HasDatabaseName("IX_ExternalContacts_ResponsibleUserId");
@@ -10955,12 +10996,33 @@ namespace PayPlanner.Api.Migrations
                         .HasForeignKey("LegalEntityId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.HasOne("PayPlanner.Api.Models.Client", "LinkedClient")
+                        .WithMany()
+                        .HasForeignKey("LinkedClientId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("PayPlanner.Api.Models.LegalEntity", "LinkedLegalEntity")
+                        .WithMany()
+                        .HasForeignKey("LinkedLegalEntityId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("PayPlanner.Api.Models.ExternalContact", "ParentContact")
+                        .WithMany("Employees")
+                        .HasForeignKey("ParentContactId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("PayPlanner.Api.Models.User", "ResponsibleUser")
                         .WithMany()
                         .HasForeignKey("ResponsibleUserId")
                         .OnDelete(DeleteBehavior.SetNull);
 
                     b.Navigation("LegalEntity");
+
+                    b.Navigation("LinkedClient");
+
+                    b.Navigation("LinkedLegalEntity");
+
+                    b.Navigation("ParentContact");
 
                     b.Navigation("ResponsibleUser");
                 });
@@ -12147,6 +12209,11 @@ namespace PayPlanner.Api.Migrations
                     b.Navigation("Events");
 
                     b.Navigation("Signers");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ExternalContact", b =>
+                {
+                    b.Navigation("Employees");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.ExternalWorkOrderApprovalRequest", b =>

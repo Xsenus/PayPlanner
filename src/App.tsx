@@ -196,7 +196,6 @@ const Calculator = lazy(() => import('./components/Calculator/Calculator').then(
 const Clients = lazy(() => import('./components/Clients/Clients').then((module) => ({ default: module.Clients })));
 const CasesRegistry = lazy(() => import('./components/Cases/CasesRegistry').then((module) => ({ default: module.CasesRegistry })));
 const CaseDetailPage = lazy(() => import('./components/Cases/CaseDetailPage').then((module) => ({ default: module.CaseDetailPage })));
-const Contacts = lazy(() => import('./components/Contacts/UnifiedContacts').then((module) => ({ default: module.UnifiedContacts })));
 const PhoneContacts = lazy(() => import('./components/Contacts/Contacts').then((module) => ({ default: module.Contacts })));
 const LegalEntities = lazy(() => import('./components/LegalEntities/LegalEntities').then((module) => ({ default: module.LegalEntities })));
 const ClientDetail = lazy(() => import('./components/Clients/ClientDetail').then((module) => ({ default: module.ClientDetail })));
@@ -1346,18 +1345,10 @@ function AppContent() {
       case 'contacts':
         return permissions.clients.canView || permissions.legalEntities.canView
           ? (
-              <Contacts
-                canViewClients={permissions.clients.canView}
-                canViewLegalEntities={permissions.legalEntities.canView}
-                initialKind="all"
+              <PhoneContacts
+                initialScope="all"
                 onOpenClient={(id) => handleOpenClient(id, undefined, { returnTo: { tab: 'contacts' } })}
-                onOpenCase={openRelatedCase}
-                onOpenContract={(id) => openContractDetail(id, { returnTo: 'contacts' })}
-                onOpenInvoice={(id, type) =>
-                  openInvoicePage(id, { ...(type ? { type } : {}), returnTo: { tab: 'contacts' } })
-                }
-                onOpenAct={(id) => openActDetail(id, { tab: 'contacts' })}
-                onOpenPayment={openPaymentPage}
+                onOpenLegalEntity={() => setActiveTab('legalEntities')}
               />
             )
           : renderNoAccess('Раздел контактов недоступен для вашей роли.');
@@ -1365,19 +1356,9 @@ function AppContent() {
       case 'contactsClients':
         return permissions.clients.canView
           ? (
-              <Contacts
-                canViewClients
-                canViewLegalEntities={false}
-                initialKind="client"
-                lockKind
+              <PhoneContacts
+                initialScope="people"
                 onOpenClient={(id) => handleOpenClient(id, undefined, { returnTo: { tab: 'contactsClients' } })}
-                onOpenCase={openRelatedCase}
-                onOpenContract={(id) => openContractDetail(id, { returnTo: 'contactsClients' })}
-                onOpenInvoice={(id, type) =>
-                  openInvoicePage(id, { ...(type ? { type } : {}), returnTo: { tab: 'contactsClients' } })
-                }
-                onOpenAct={(id) => openActDetail(id, { tab: 'contactsClients' })}
-                onOpenPayment={openPaymentPage}
               />
             )
           : renderNoAccess('Раздел контактов недоступен для вашей роли.');
@@ -1385,19 +1366,9 @@ function AppContent() {
       case 'contactsLegal':
         return permissions.legalEntities.canView
           ? (
-              <Contacts
-                canViewClients={permissions.clients.canView}
-                canViewLegalEntities
-                initialKind="legal"
-                lockKind
-                onOpenClient={(id) => handleOpenClient(id, undefined, { returnTo: { tab: 'contactsLegal' } })}
-                onOpenCase={openRelatedCase}
-                onOpenContract={(id) => openContractDetail(id, { returnTo: 'contactsLegal' })}
-                onOpenInvoice={(id, type) =>
-                  openInvoicePage(id, { ...(type ? { type } : {}), returnTo: { tab: 'contactsLegal' } })
-                }
-                onOpenAct={(id) => openActDetail(id, { tab: 'contactsLegal' })}
-                onOpenPayment={openPaymentPage}
+              <PhoneContacts
+                initialScope="organizations"
+                onOpenLegalEntity={() => setActiveTab('legalEntities')}
               />
             )
           : renderNoAccess('Раздел контактов недоступен для вашей роли.');
@@ -1405,7 +1376,13 @@ function AppContent() {
       case 'contactsExternal': {
         const contactScope: ContactScope = 'external';
         const handleContactScopeChange = (nextScope: ContactScope) => {
-          setActiveTab(nextScope === 'clients' ? 'contactsClients' : nextScope === 'external' ? 'contactsExternal' : 'contacts');
+          setActiveTab(nextScope === 'people' || nextScope === 'clients'
+            ? 'contactsClients'
+            : nextScope === 'organizations'
+              ? 'contactsLegal'
+              : nextScope === 'external'
+                ? 'contactsExternal'
+                : 'contacts');
         };
 
         return permissions.clients.canView

@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
@@ -79,6 +80,32 @@ public class ContactsControllerTests
         Assert.Contains("Visible External", xml);
         Assert.DoesNotContain("Hidden Client", xml);
         Assert.DoesNotContain("Hidden External", xml);
+    }
+
+    [Fact]
+    public async Task RemoteYealinkPhonebook_RequiresTokenAndExportsPeopleOnly()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateClientUserAsync(db, "contacts-remote-phonebook", true, true, true, true, true);
+        await CreateClientAsync(db, user.Id, "Телефонный клиент", "79990000001");
+        await CreateExternalContactAsync(db, user.Id, "Телефонный контакт", "79990000002");
+        var organization = await CreateExternalContactAsync(db, user.Id, "ООО Не звонить", "79990000003");
+        organization.ContactType = "Organization";
+        await db.SaveChangesAsync();
+        var controller = CreateController(
+            db,
+            user.Id,
+            new Dictionary<string, string?> { ["Phonebook:Token"] = "test-phonebook-token" });
+
+        var denied = await controller.GetYealinkRemotePhonebook("wrong-token", CancellationToken.None);
+        var allowed = await controller.GetYealinkRemotePhonebook("test-phonebook-token", CancellationToken.None);
+
+        Assert.IsType<NotFoundResult>(denied);
+        var content = Assert.IsType<ContentResult>(allowed);
+        Assert.Contains("Телефонный клиент", content.Content);
+        Assert.Contains("Телефонный контакт", content.Content);
+        Assert.DoesNotContain("ООО Не звонить", content.Content);
+        Assert.Equal("private, max-age=300", controller.Response.Headers.CacheControl);
     }
 
     [Fact]
@@ -265,6 +292,77 @@ public class ContactsControllerTests
         Assert.Equal(visibleLegal.Id, stored.LegalEntityId);
     }
 
+    [Fact]
+    public async Task GetAll_ReturnsPeopleAndOrganizations_InOneDirectory()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateClientUserAsync(
+            db,
+            "contacts-unified",
+            canView: true,
+            canCreate: true,
+            canEdit: true,
+            canDelete: true,
+            canExport: true,
+            viewScope: DataVisibilityScope.All,
+            legalEntityViewScope: DataVisibilityScope.All);
+        await CreateClientAsync(db, user.Id, "Иван Иванов", "79990000001");
+        await CreateLegalEntityAsync(db, user.Id, "ООО Ромашка");
+        var quickOrganization = await CreateExternalContactAsync(db, user.Id, "ООО Василёк", "79990000002");
+        quickOrganization.ContactType = "Organization";
+        quickOrganization.Inn = "5400000000";
+        quickOrganization.RolesJson = "[\"Supplier\"]";
+        await db.SaveChangesAsync();
+
+        var action = await CreateController(db, user.Id).GetAll(
+            scope: "all",
+            search: null,
+            legalEntityId: null,
+            includeInactive: false,
+            syncOnly: null,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var items = Assert.IsType<List<ContactDirectoryItemDto>>(ok.Value);
+        Assert.Contains(items, item => item.FullName == "Иван Иванов" && item.ContactType == "Person");
+        Assert.Contains(items, item => item.FullName == "ООО Ромашка" && item.SourceType == "legal");
+        Assert.Contains(items, item => item.FullName == "ООО Василёк" && item.Roles.Contains("Supplier"));
+    }
+
+    [Fact]
+    public async Task PromoteOrganization_CreatesLegalEntityAndMovesEmployeesToIt()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateClientUserAsync(
+            db,
+            "contacts-promote-organization",
+            canView: true,
+            canCreate: true,
+            canEdit: true,
+            canDelete: true,
+            canExport: true,
+            viewScope: DataVisibilityScope.All,
+            legalEntityViewScope: DataVisibilityScope.All);
+        var organization = await CreateExternalContactAsync(db, user.Id, "ООО Ромашка", "73830000000");
+        organization.ContactType = "Organization";
+        organization.Inn = "5401000000";
+        var employee = await CreateExternalContactAsync(db, user.Id, "Иван Иванов", "79990000000");
+        employee.ParentContactId = organization.Id;
+        await db.SaveChangesAsync();
+
+        var action = await CreateController(db, user.Id).PromoteExternalContact(
+            organization.Id,
+            new PromoteContactRequest { Target = "legalEntity", Role = "Client" },
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var item = Assert.IsType<ContactDirectoryItemDto>(ok.Value);
+        Assert.True(item.HasFullProfile);
+        Assert.NotNull(item.LinkedLegalEntityId);
+        var storedEmployee = await db.ExternalContacts.AsNoTracking().SingleAsync(x => x.Id == employee.Id);
+        Assert.Equal(item.LinkedLegalEntityId, storedEmployee.LegalEntityId);
+    }
+
     private static UpsertExternalContactRequest BuildExternalContactRequest(string name)
         => new()
         {
@@ -373,6 +471,8 @@ public class ContactsControllerTests
             {
                 Section = RolePermissionCatalog.LegalEntities,
                 CanView = true,
+                CanCreate = true,
+                CanEdit = true,
                 ViewScope = legalEntityViewScope,
             });
         }
@@ -398,8 +498,16 @@ public class ContactsControllerTests
         return user;
     }
 
-    private static ContactsController CreateController(PaymentContext db, int userId)
-        => new(db, new NoopFormRequirementsService())
+    private static ContactsController CreateController(
+        PaymentContext db,
+        int userId,
+        IReadOnlyDictionary<string, string?>? configurationValues = null)
+        => new(
+            db,
+            new NoopFormRequirementsService(),
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(configurationValues)
+                .Build())
         {
             ControllerContext = new ControllerContext
             {

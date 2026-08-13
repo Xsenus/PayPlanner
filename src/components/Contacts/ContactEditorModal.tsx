@@ -2,7 +2,7 @@ import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemSelect } from '../ui/SystemSelect';
 import { useEffect, useMemo, useState } from 'react';
 import { Loader2, Save, X } from 'lucide-react';
-import { apiService, type ContactDirectoryItemDto, type UpsertExternalContactRequestDto, type UpdateClientContactRequestDto } from '../../services/api';
+import { apiService, type ContactDirectoryItemDto, type ContactRole, type ContactType, type UpsertExternalContactRequestDto, type UpdateClientContactRequestDto } from '../../services/api';
 import type { ActResponsible, LegalEntitySummary } from '../../types';
 import { useFormRequirements } from '../../hooks/useFormRequirements';
 import { useToast } from '../../hooks/useToast';
@@ -17,6 +17,7 @@ interface ContactEditorModalProps {
   contact: ContactDirectoryItemDto | null;
   legalEntities: LegalEntitySummary[];
   responsibles: ActResponsible[];
+  organizationContacts?: ContactDirectoryItemDto[];
   canManageResponsible: boolean;
   onClose: () => void;
   onSaved: (contact: ContactDirectoryItemDto) => void;
@@ -24,12 +25,16 @@ interface ContactEditorModalProps {
 
 type ContactFormState = {
   fullName: string;
+  contactType: ContactType;
+  inn: string;
+  roles: ContactRole[];
   phonesText: string;
   emailsText: string;
   position: string;
   powerOfAttorney: string;
   notes: string;
   legalEntityId: string;
+  parentContactId: string;
   syncToPhonebook: boolean;
   isActive: boolean;
   responsibleUserId: string;
@@ -37,12 +42,16 @@ type ContactFormState = {
 
 const DEFAULT_FORM: ContactFormState = {
   fullName: '',
+  contactType: 'Person',
+  inn: '',
+  roles: ['Contact'],
   phonesText: '',
   emailsText: '',
   position: '',
   powerOfAttorney: '',
   notes: '',
   legalEntityId: '',
+  parentContactId: '',
   syncToPhonebook: true,
   isActive: true,
   responsibleUserId: '',
@@ -73,6 +82,7 @@ export function ContactEditorModal({
   contact,
   legalEntities,
   responsibles,
+  organizationContacts = [],
   canManageResponsible,
   onClose,
   onSaved,
@@ -97,12 +107,16 @@ export function ContactEditorModal({
 
     setForm({
       fullName: contact.fullName ?? '',
+      contactType: contact.contactType ?? 'Person',
+      inn: contact.inn ?? '',
+      roles: contact.roles?.length ? contact.roles : ['Contact'],
       phonesText: toMultiline(contact.phones ?? []),
       emailsText: toMultiline(contact.emails ?? []),
       position: contact.position ?? '',
       powerOfAttorney: contact.powerOfAttorney ?? '',
       notes: contact.notes ?? '',
       legalEntityId: contact.legalEntityId ? String(contact.legalEntityId) : '',
+      parentContactId: contact.parentContactId ? String(contact.parentContactId) : '',
       syncToPhonebook: contact.syncToPhonebook,
       isActive: contact.isActive,
       responsibleUserId: contact.responsibleUserId ? String(contact.responsibleUserId) : '',
@@ -112,10 +126,10 @@ export function ContactEditorModal({
 
   const title = useMemo(() => {
     if (mode === 'create-external') {
-      return 'Новый сторонний контакт';
+      return 'Новый контакт';
     }
 
-    return mode === 'edit-client' ? 'Контакт клиента' : 'Сторонний контакт';
+    return mode === 'edit-client' ? 'Контакт клиента' : 'Контакт';
   }, [mode]);
 
   if (!open) {
@@ -157,6 +171,9 @@ export function ContactEditorModal({
       } else {
         const payload: UpsertExternalContactRequestDto = {
           fullName: form.fullName.trim(),
+          contactType: form.contactType,
+          inn: form.contactType === 'Organization' ? form.inn.trim() || null : null,
+          roles: form.roles.length ? form.roles : ['Contact'],
           phone: phones[0] ?? null,
           email: emails[0] ?? null,
           phones,
@@ -165,6 +182,7 @@ export function ContactEditorModal({
           powerOfAttorney: form.powerOfAttorney.trim() || null,
           notes: form.notes.trim() || null,
           legalEntityId: form.legalEntityId ? Number(form.legalEntityId) : null,
+          parentContactId: form.contactType === 'Person' && form.parentContactId ? Number(form.parentContactId) : null,
           responsibleUserId: form.responsibleUserId ? Number(form.responsibleUserId) : null,
           isActive: form.isActive,
           syncToPhonebook: form.syncToPhonebook,
@@ -210,9 +228,28 @@ export function ContactEditorModal({
 
         <div className="overflow-y-auto px-6 py-6">
           <div className="grid gap-5 md:grid-cols-2">
+            {mode !== 'edit-client' ? (
+              <label className="block">
+                <span className="text-sm font-medium text-slate-700">Тип контакта</span>
+                <SystemSelect
+                  value={form.contactType}
+                  onChange={(event) => setForm((prev) => ({
+                    ...prev,
+                    contactType: event.target.value as ContactType,
+                    parentContactId: event.target.value === 'Organization' ? '' : prev.parentContactId,
+                    syncToPhonebook: event.target.value === 'Organization' ? false : prev.syncToPhonebook,
+                  }))}
+                  className="mt-1 w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm"
+                >
+                  <option value="Person">Физическое лицо</option>
+                  <option value="Organization">Организация</option>
+                </SystemSelect>
+              </label>
+            ) : null}
+
             <label className="block">
               <span className="text-sm font-medium text-slate-700">
-                ФИО
+                {form.contactType === 'Organization' ? 'Название организации' : 'ФИО'}
                 {requiredMark(isRequired('FullName'))}
               </span>
               <input
@@ -220,11 +257,24 @@ export function ContactEditorModal({
                 value={form.fullName}
                 onChange={(event) => setForm((prev) => ({ ...prev, fullName: event.target.value }))}
                 className="mt-1 w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
-                placeholder="Например: Иванов Иван Иванович"
+                placeholder={form.contactType === 'Organization' ? 'Например: ООО «Ромашка»' : 'Например: Иванов Иван Иванович'}
               />
             </label>
 
-            <label className="block">
+            {mode !== 'edit-client' && form.contactType === 'Organization' ? (
+              <label className="block">
+                <span className="text-sm font-medium text-slate-700">ИНН</span>
+                <input
+                  type="text"
+                  value={form.inn}
+                  onChange={(event) => setForm((prev) => ({ ...prev, inn: event.target.value }))}
+                  className="mt-1 w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm"
+                  placeholder="10 или 12 цифр"
+                />
+              </label>
+            ) : null}
+
+            {form.contactType === 'Person' ? <label className="block">
               <span className="text-sm font-medium text-slate-700">
                 Организация
                 {requiredMark(isRequired('LegalEntityId'))}
@@ -241,7 +291,23 @@ export function ContactEditorModal({
                   </option>
                 ))}
               </SystemSelect>
-            </label>
+            </label> : null}
+
+            {mode !== 'edit-client' && form.contactType === 'Person' ? (
+              <label className="block">
+                <span className="text-sm font-medium text-slate-700">Организация из быстрых контактов</span>
+                <SystemSelect
+                  value={form.parentContactId}
+                  onChange={(event) => setForm((prev) => ({ ...prev, parentContactId: event.target.value }))}
+                  className="mt-1 w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm"
+                >
+                  <option value="">Без привязки</option>
+                  {organizationContacts.filter((item) => item.sourceType === 'external' && item.sourceId !== contact?.sourceId).map((item) => (
+                    <option key={item.sourceId} value={item.sourceId}>{item.fullName}</option>
+                  ))}
+                </SystemSelect>
+              </label>
+            ) : null}
 
             <label className="block">
               <span className="text-sm font-medium text-slate-700">
@@ -334,6 +400,33 @@ export function ContactEditorModal({
             </label>
           </div>
 
+          {mode !== 'edit-client' ? (
+            <div className="mt-5">
+              <div className="text-sm font-medium text-slate-700">Роли контакта</div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {([
+                  ['Contact', 'Контакт'],
+                  ['Client', 'Клиент'],
+                  ['Supplier', 'Поставщик'],
+                  ['Agent', 'Агент'],
+                ] as Array<[ContactRole, string]>).map(([role, label]) => (
+                  <label key={role} className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm">
+                    <SystemCheckbox
+                      checked={form.roles.includes(role)}
+                      onChange={(event) => setForm((prev) => ({
+                        ...prev,
+                        roles: event.target.checked
+                          ? Array.from(new Set([...prev.roles, role]))
+                          : prev.roles.filter((item) => item !== role),
+                      }))}
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
           <div className="mt-6 grid gap-3 md:grid-cols-2">
             {mode !== 'edit-client' ? (
               <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700">
@@ -347,7 +440,7 @@ export function ContactEditorModal({
               </label>
             ) : null}
 
-            <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700">
+            {form.contactType === 'Person' ? <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700">
               <SystemCheckbox
                 type="checkbox"
                 checked={form.syncToPhonebook}
@@ -355,7 +448,7 @@ export function ContactEditorModal({
                 className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
               />
               Участвует в синхронизации Yealink
-            </label>
+            </label> : null}
           </div>
 
           {contact ? (

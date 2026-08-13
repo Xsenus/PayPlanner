@@ -48,6 +48,8 @@ const expandedSections = {
 
 const HIDDEN_NAVIGATION_TABS = [
   'caseDetail',
+  'clients',
+  'legalEntities',
   'contactsExternal',
   'actCreate',
   'actDetail',
@@ -163,7 +165,7 @@ describe('Navigation links', () => {
     expect(findLinkByHref(getTabHref('notifications'))).toBeTruthy();
     expect(findLinkByHref(getTabHref('tasksApprovals'))).toBeTruthy();
     expect(findLinkByHref(getTabHref('tasksCalendar'))).toBeTruthy();
-    expect(screen.getByRole('link', { name: /Клиенты/i }).getAttribute('href')).toBe(getTabHref('clients'));
+    expect(screen.getByRole('link', { name: /^Контакты$/i }).getAttribute('href')).toBe(getTabHref('contacts'));
     expect(findLinkByHref(getTabHref('accountsIncome'))).toBeTruthy();
     expect(findLinkByHref(getTabHref('moneyEMoney'))).toBeTruthy();
     expect(findLinkByHref(getTabHref('settings'))).toBeTruthy();
@@ -279,7 +281,7 @@ describe('Navigation links', () => {
     apiMock.getNavigationSettings.mockResolvedValueOnce({
       order: ['group-contacts', 'reports'],
       labels: {},
-      groups: [{ id: 'group-contacts', name: 'Работа с клиентами', itemIds: ['clients', 'legalEntities'] }],
+      groups: [{ id: 'group-contacts', name: 'Работа с клиентами', itemIds: ['contacts'] }],
       updatedAt: null,
     });
 
@@ -287,7 +289,7 @@ describe('Navigation links', () => {
 
     const group = await screen.findByRole('button', { name: /Работа с клиентами/i });
     expect(group).toBeTruthy();
-    expect(findLinkByHref(getTabHref('clients'))).toBeTruthy();
+    expect(findLinkByHref(getTabHref('contacts'))).toBeTruthy();
     expect(findLinkByHref(getTabHref('legalEntities'))).toBeFalsy();
     expect(screen.queryByRole('button', { name: 'Группы и порядок' })).toBeNull();
   });
@@ -329,7 +331,6 @@ describe('Navigation links', () => {
       'tasksControl',
       'tasksApprovals',
       'tasksCalendar',
-      'clients',
       'cases',
       'contacts',
       'contactsClients',
@@ -340,6 +341,7 @@ describe('Navigation links', () => {
       'reports',
       'calculator',
       'legalEntities',
+      'clients',
       'contactsLegal',
       'accounts',
       'accountsIncome',
@@ -375,7 +377,7 @@ describe('Navigation links', () => {
     }
 
     fireEvent.click(screen.getByRole('button', { name: 'Ещё разделы' }));
-    expect(screen.getByRole('checkbox', { name: /Клиенты/i })).toBeTruthy();
+    expect(screen.getByRole('checkbox', { name: /^Контакты/i })).toBeTruthy();
     expect(screen.queryByRole('checkbox', { name: /Отчёты/i })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Группы и порядок' })).toBeNull();
 
@@ -410,14 +412,14 @@ describe('Navigation links', () => {
     const user = userEvent.setup();
     const onTabChange = renderNavigation();
     await waitForNavigationPermissions();
-    const clientsLink = screen.getByRole('link', { name: /Клиенты/i });
+    const clientsLink = screen.getByRole('link', { name: /^Контакты$/i });
 
     clientsLink.focus();
     expect(document.activeElement).toBe(clientsLink);
 
     await user.keyboard('{Enter}');
 
-    expect(onTabChange).toHaveBeenCalledWith('clients');
+    expect(onTabChange).toHaveBeenCalledWith('contacts');
   });
 
   it('opens the approvals submenu inside the single page app', async () => {
@@ -434,7 +436,7 @@ describe('Navigation links', () => {
   it('keeps normal left clicks inside the single page app', async () => {
     const onTabChange = renderNavigation();
     await waitForNavigationPermissions();
-    const link = screen.getByRole('link', { name: /Клиенты/i });
+    const link = screen.getByRole('link', { name: /^Контакты$/i });
 
     const clickEvent = new MouseEvent('click', {
       bubbles: true,
@@ -445,7 +447,7 @@ describe('Navigation links', () => {
     link.dispatchEvent(clickEvent);
 
     expect(clickEvent.defaultPrevented).toBe(true);
-    expect(onTabChange).toHaveBeenCalledWith('clients');
+    expect(onTabChange).toHaveBeenCalledWith('contacts');
   });
 
   it('allows browser tab gestures on navigation links', async () => {
