@@ -4,7 +4,6 @@ import {
   useLayoutEffect,
   useMemo,
   useState,
-  type DragEvent,
   type MouseEvent,
 } from 'react';
 import {
@@ -38,6 +37,10 @@ import {
   Briefcase,
   StickyNote,
   GripVertical,
+  LayoutGrid,
+  ArrowUp,
+  ArrowDown,
+  Save,
 } from 'lucide-react';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useAuth } from '../../contexts/AuthContext';
@@ -61,6 +64,8 @@ const WIDTH_COLLAPSED = '5rem';
 const STYLE_ID = 'pp-sidebar-style';
 const EXPANDED_KEY = 'pp.sidebar_expanded';
 const ORDER_KEY = 'pp.sidebar_order';
+const HIDDEN_SETTING_KEY = 'navigation.sidebar.hidden-items.v1';
+const HIDDEN_STORAGE_KEY = 'pp.sidebar_hidden';
 
 function formatBadgeCount(count: number) {
   return count > 99 ? '99+' : String(count);
@@ -87,6 +92,7 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
   const { user, isAdmin } = useAuth();
   const permissions = useRolePermissions(user?.role?.id);
   const orderStorageKey = `${ORDER_KEY}.${user?.id ?? 'guest'}`;
+  const hiddenStorageKey = `${HIDDEN_STORAGE_KEY}.${user?.id ?? 'guest'}`;
   const [mobileOpen, setMobileOpen] = useState(false);
   const [advanceDecisionCount, setAdvanceDecisionCount] = useState(0);
 
@@ -430,16 +436,29 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
     () => availableSidebarItems.map((item) => item.id),
     [availableSidebarItems],
   );
-  const [orderedSidebarItemIds, setOrderedSidebarItemIds] = useState<string[]>(() => {
-    if (typeof window === 'undefined') {
-      return availableSidebarItemIds;
+  const canManageNavigation = isAdmin() || permissions.roles.canEdit;
+  const [globalOrderIds, setGlobalOrderIds] = useState<string[]>([]);
+  const [customLabels, setCustomLabels] = useState<Record<string, string>>({});
+  const [hiddenItemIds, setHiddenItemIds] = useState<string[]>(() => {
+    if (typeof window === 'undefined') return [];
+    try {
+      const parsed = JSON.parse(window.localStorage.getItem(hiddenStorageKey) ?? '[]') as unknown;
+      return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : [];
+    } catch {
+      return [];
     }
-
-    return normalizeSidebarOrder(
-      window.localStorage.getItem(orderStorageKey) ?? window.localStorage.getItem(ORDER_KEY),
-      availableSidebarItemIds,
-    );
   });
+  const [moreSectionsOpen, setMoreSectionsOpen] = useState(false);
+  const [navigationSettingsOpen, setNavigationSettingsOpen] = useState(false);
+  const [navigationSettingsSaving, setNavigationSettingsSaving] = useState(false);
+  const [navigationSettingsError, setNavigationSettingsError] = useState('');
+  const [draftOrderIds, setDraftOrderIds] = useState<string[]>([]);
+  const [draftLabels, setDraftLabels] = useState<Record<string, string>>({});
+
+  const orderedSidebarItemIds = useMemo(
+    () => normalizeSidebarOrder(JSON.stringify(globalOrderIds), availableSidebarItemIds),
+    [availableSidebarItemIds, globalOrderIds],
+  );
   const sidebarItems = useMemo(() => {
     const itemMap = new Map<string, SidebarItem>();
     availableSidebarItems.forEach((item) => itemMap.set(item.id, item));
@@ -447,10 +466,12 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
     return orderedSidebarItemIds
       .map((id) => itemMap.get(id))
       .filter((item): item is SidebarItem => item !== undefined)
-      .concat(
-        availableSidebarItems.filter((item) => !orderedSidebarItemIds.includes(item.id)),
-      );
-  }, [availableSidebarItems, orderedSidebarItemIds]);
+      .map((item) => ({ ...item, label: customLabels[item.id]?.trim() || item.label }));
+  }, [availableSidebarItems, customLabels, orderedSidebarItemIds]);
+  const visibleSidebarItems = useMemo(
+    () => sidebarItems.filter((item) => !hiddenItemIds.includes(item.id)),
+    [hiddenItemIds, sidebarItems],
+  );
 
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>(() => {
     if (typeof window === 'undefined') {
@@ -503,90 +524,102 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
   );
 
   useEffect(() => {
-    const storedOrder = normalizeSidebarOrder(
-      window.localStorage.getItem(orderStorageKey) ?? window.localStorage.getItem(ORDER_KEY),
-      availableSidebarItemIds,
-    );
-    setOrderedSidebarItemIds((prev) =>
-      storedOrder.length === prev.length && storedOrder.every((id, index) => id === prev[index])
-        ? prev
-        : storedOrder,
-    );
-    // Доступные пункты синхронизируются отдельным эффектом ниже; здесь перечитываем
-    // сохраненный порядок только при смене учетной записи.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orderStorageKey]);
+    let cancelled = false;
+    const loadNavigationPreferences = async () => {
+      const [navigationResult, hiddenResult] = await Promise.allSettled([
+        apiService.getNavigationSettings(),
+        apiService.getUserSetting(HIDDEN_SETTING_KEY),
+      ]);
+      if (cancelled) return;
 
-  useEffect(() => {
-    setOrderedSidebarItemIds((prev) => {
-      const synced = normalizeSidebarOrder(
-        JSON.stringify(prev),
-        availableSidebarItemIds,
-      );
-      return synced.length === prev.length && synced.every((id, index) => id === prev[index])
-        ? prev
-        : synced;
-    });
-  }, [availableSidebarItemIds]);
+      if (navigationResult.status === 'fulfilled') {
+        setGlobalOrderIds(navigationResult.value.order ?? []);
+        setCustomLabels(navigationResult.value.labels ?? {});
+      } else if (canManageNavigation) {
+        setGlobalOrderIds(normalizeSidebarOrder(
+          window.localStorage.getItem(orderStorageKey) ?? window.localStorage.getItem(ORDER_KEY),
+          availableSidebarItemIds,
+        ));
+      }
+
+      if (hiddenResult.status === 'fulfilled' && hiddenResult.value?.value) {
+        try {
+          const parsed = JSON.parse(hiddenResult.value.value) as unknown;
+          if (Array.isArray(parsed)) {
+            setHiddenItemIds(parsed.filter((item): item is string => typeof item === 'string'));
+          }
+        } catch {
+          // Повреждённая персональная настройка не должна скрыть всё меню.
+        }
+      }
+    };
+    void loadNavigationPreferences();
+    return () => {
+      cancelled = true;
+    };
+    // Настройки загружаются один раз для учетной записи. Изменение матрицы прав
+    // только фильтрует уже загруженный каталог и не должно повторять API-запросы.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
 
   useEffect(() => {
     try {
-      localStorage.setItem(orderStorageKey, JSON.stringify(orderedSidebarItemIds));
+      window.localStorage.setItem(hiddenStorageKey, JSON.stringify(hiddenItemIds));
     } catch {
       /** */
     }
-  }, [orderStorageKey, orderedSidebarItemIds]);
+  }, [hiddenItemIds, hiddenStorageKey]);
 
-  const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
-
-  const handleItemDragStart = useCallback((itemId: string, event: DragEvent<HTMLDivElement>) => {
-    setDraggedItemId(itemId);
-    event.dataTransfer.setData('text/plain', itemId);
-    event.dataTransfer.effectAllowed = 'move';
-  }, []);
-
-  const handleItemDragOver = useCallback(
-    (itemId: string, event: DragEvent<HTMLDivElement>) => {
-      if (!draggedItemId || draggedItemId === itemId) {
-        return;
-      }
-
-      event.preventDefault();
-    },
-    [draggedItemId],
-  );
-
-  const handleItemDrop = useCallback((itemId: string, event: DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    if (!draggedItemId || draggedItemId === itemId) {
-      return;
-    }
-
-    setOrderedSidebarItemIds((prev) => {
-      const next = [...prev];
-      const sourceIndex = next.indexOf(draggedItemId);
-      const targetIndex = next.indexOf(itemId);
-      if (sourceIndex < 0 || targetIndex < 0) {
-        return prev;
-      }
-
-      const [movedItemId] = next.splice(sourceIndex, 1);
-      const insertIndex = sourceIndex < targetIndex ? targetIndex - 1 : targetIndex;
-      next.splice(insertIndex, 0, movedItemId);
+  const toggleItemVisibility = useCallback((itemId: string) => {
+    setHiddenItemIds((previous) => {
+      const next = previous.includes(itemId)
+        ? previous.filter((id) => id !== itemId)
+        : [...previous, itemId];
+      void apiService.upsertUserSetting(HIDDEN_SETTING_KEY, JSON.stringify(next)).catch(() => {
+        setHiddenItemIds(previous);
+      });
       return next;
     });
-    setDraggedItemId(null);
-  }, [draggedItemId]);
-
-  const handleItemDragEnd = useCallback(() => {
-    setDraggedItemId(null);
   }, []);
+
+  const openNavigationSettings = useCallback(() => {
+    setDraftOrderIds(orderedSidebarItemIds);
+    setDraftLabels({ ...customLabels });
+    setNavigationSettingsError('');
+    setNavigationSettingsOpen(true);
+  }, [customLabels, orderedSidebarItemIds]);
+
+  const moveDraftItem = useCallback((itemId: string, direction: -1 | 1) => {
+    setDraftOrderIds((previous) => {
+      const index = previous.indexOf(itemId);
+      const target = index + direction;
+      if (index < 0 || target < 0 || target >= previous.length) return previous;
+      const next = [...previous];
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+  }, []);
+
+  const saveNavigationSettings = useCallback(async () => {
+    setNavigationSettingsSaving(true);
+    setNavigationSettingsError('');
+    try {
+      const saved = await apiService.updateNavigationSettings(draftOrderIds, draftLabels);
+      setGlobalOrderIds(saved.order);
+      setCustomLabels(saved.labels);
+      setNavigationSettingsOpen(false);
+    } catch {
+      setNavigationSettingsError('Не удалось сохранить порядок меню. Повторите попытку.');
+    } finally {
+      setNavigationSettingsSaving(false);
+    }
+  }, [draftLabels, draftOrderIds]);
 
   useEffect(() => {
     setExpandedSections((prev) => {
       let changed = false;
       const next = { ...prev };
-      sidebarItems.forEach((item) => {
+      visibleSidebarItems.forEach((item) => {
         if (!item.children?.length) {
           return;
         }
@@ -600,7 +633,7 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
       });
       return changed ? next : prev;
     });
-  }, [activeTab, sidebarItems]);
+  }, [activeTab, visibleSidebarItems]);
 
   const sidebarWidthClass = collapsed ? 'w-20' : 'w-[17rem]';
 
@@ -673,7 +706,7 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
 
         <nav className="pp-sidebar-scroll flex-1 overflow-y-auto py-4 px-2" aria-label={t('navigation') ?? 'Навигация'}>
           <ul className="space-y-1.5">
-            {sidebarItems.map((item) => {
+            {visibleSidebarItems.map((item) => {
               const Icon = item.icon;
               const childItems = item.children ?? [];
               const hasChildren = childItems.length > 0;
@@ -682,23 +715,10 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
               const isActive = isParentActive || isChildActive;
               const isExpanded = expandedSections[item.id] ?? false;
               const badgeCount = item.id === 'payments' ? advanceDecisionCount : 0;
-              const canDrag = sidebarItems.length > 1;
-              const isDragging = draggedItemId === item.id;
 
               return (
                 <li key={item.id} className="space-y-1">
-                  <div
-                    draggable={canDrag}
-                    onDragStart={(event) => canDrag && handleItemDragStart(item.id, event)}
-                    onDragOver={(event) => handleItemDragOver(item.id, event)}
-                    onDrop={(event) => canDrag && handleItemDrop(item.id, event)}
-                    onDragEnd={handleItemDragEnd}
-                    className={[
-                      'relative',
-                      canDrag ? 'cursor-grab' : '',
-                      isDragging ? 'opacity-70' : '',
-                    ].join(' ')}
-                  >
+                  <div className="relative">
                     <a
                       href={item.tab ? getTabHref(item.tab) : '#'}
                       onClick={(event) => {
@@ -751,9 +771,6 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
                       {isActive && !collapsed && (
                         <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-8 bg-white rounded-l-full" />
                       )}
-                      {canDrag ? (
-                        <GripVertical className="h-3.5 w-3.5 shrink-0 text-slate-400 transition-colors group-hover:text-slate-200" />
-                      ) : null}
                     </a>
                     {!collapsed && hasChildren ? (
                       <button
@@ -810,10 +827,128 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
                 </li>
               );
             })}
+            <li className="border-t border-slate-700/50 pt-2">
+              <button
+                type="button"
+                onClick={(event) => {
+                  const trigger = event.currentTarget;
+                  if (collapsed) setCollapsed(false);
+                  setMoreSectionsOpen((value) => {
+                    const next = !value;
+                    if (next) {
+                      window.setTimeout(() => {
+                        if (typeof trigger.scrollIntoView === 'function') {
+                          trigger.scrollIntoView({ block: 'start', behavior: 'smooth' });
+                        }
+                      }, 0);
+                    }
+                    return next;
+                  });
+                }}
+                aria-expanded={moreSectionsOpen}
+                className={[
+                  'flex w-full items-center rounded-xl text-slate-300 transition-colors hover:bg-slate-800/60 hover:text-white',
+                  collapsed ? 'justify-center p-3' : 'gap-3 px-4 py-3',
+                ].join(' ')}
+                title="Ещё разделы">
+                <LayoutGrid className={collapsed ? 'h-6 w-6' : 'h-5 w-5'} />
+                {!collapsed ? <span className="flex-1 text-left text-sm font-medium">Ещё разделы</span> : null}
+                {!collapsed ? (
+                  <ChevronDown className={`h-4 w-4 transition-transform ${moreSectionsOpen ? 'rotate-180' : ''}`} />
+                ) : null}
+              </button>
+
+              {!collapsed && moreSectionsOpen ? (
+                <div className="mx-1 mt-1 rounded-xl border border-slate-700 bg-slate-900/70 p-2" data-testid="more-sections-panel">
+                  <div className="mb-2 px-2 text-xs text-slate-400">Показывать в меню</div>
+                  <div className="max-h-64 space-y-0.5 overflow-y-auto">
+                    {sidebarItems.map((item) => {
+                      const ItemIcon = item.icon;
+                      const visible = !hiddenItemIds.includes(item.id);
+                      return (
+                        <label
+                          key={item.id}
+                          className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-slate-200 hover:bg-slate-800">
+                          <input
+                            type="checkbox"
+                            checked={visible}
+                            onChange={() => toggleItemVisibility(item.id)}
+                            className="h-4 w-4 rounded border-slate-500 bg-slate-800 text-blue-600 focus:ring-blue-500"
+                          />
+                          <ItemIcon className="h-4 w-4 shrink-0 text-slate-400" />
+                          <span className="truncate">{item.label}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  {canManageNavigation ? (
+                    <button
+                      type="button"
+                      onClick={openNavigationSettings}
+                      className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg border border-slate-600 px-2 py-2 text-xs font-medium text-slate-200 hover:bg-slate-800">
+                      <Settings className="h-4 w-4" />
+                      Порядок и названия
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
+            </li>
           </ul>
         </nav>
 
       </aside>
+
+      {navigationSettingsOpen ? (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/55 p-4" role="dialog" aria-modal="true" aria-labelledby="navigation-settings-title">
+          <div className="flex max-h-[85vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-start justify-between border-b border-slate-200 px-4 py-3">
+              <div>
+                <h2 id="navigation-settings-title" className="text-base font-semibold text-slate-900">Порядок и названия разделов</h2>
+                <p className="mt-0.5 text-xs text-slate-500">Настройка применяется ко всем пользователям. Их личный выбор видимых разделов сохранится.</p>
+              </div>
+              <button type="button" onClick={() => setNavigationSettingsOpen(false)} className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100" aria-label="Закрыть">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="space-y-2 overflow-y-auto p-3">
+              {draftOrderIds.map((itemId, index) => {
+                const item = sidebarItems.find((candidate) => candidate.id === itemId);
+                if (!item) return null;
+                const ItemIcon = item.icon;
+                return (
+                  <div key={itemId} className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2">
+                    <GripVertical className="h-4 w-4 shrink-0 text-slate-400" />
+                    <ItemIcon className="h-4 w-4 shrink-0 text-slate-500" />
+                    <input
+                      value={draftLabels[itemId] ?? item.label}
+                      maxLength={60}
+                      onChange={(event) => setDraftLabels((previous) => ({ ...previous, [itemId]: event.target.value }))}
+                      aria-label={`Название раздела ${item.label}`}
+                      className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                    <button type="button" disabled={index === 0} onClick={() => moveDraftItem(itemId, -1)} className="rounded-lg p-1.5 text-slate-600 hover:bg-white disabled:opacity-30" aria-label={`Поднять ${item.label}`}>
+                      <ArrowUp className="h-4 w-4" />
+                    </button>
+                    <button type="button" disabled={index === draftOrderIds.length - 1} onClick={() => moveDraftItem(itemId, 1)} className="rounded-lg p-1.5 text-slate-600 hover:bg-white disabled:opacity-30" aria-label={`Опустить ${item.label}`}>
+                      <ArrowDown className="h-4 w-4" />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="border-t border-slate-200 px-4 py-3">
+              {navigationSettingsError ? <p className="mb-2 text-sm text-rose-600">{navigationSettingsError}</p> : null}
+              <div className="flex justify-end gap-2">
+                <button type="button" onClick={() => setNavigationSettingsOpen(false)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50">Отмена</button>
+                <button type="button" disabled={navigationSettingsSaving} onClick={() => void saveNavigationSettings()} className="flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60">
+                  <Save className="h-4 w-4" />
+                  {navigationSettingsSaving ? 'Сохранение…' : 'Сохранить'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </>
   );
 }

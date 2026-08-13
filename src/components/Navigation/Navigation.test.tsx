@@ -28,6 +28,10 @@ vi.mock('../../services/api', () => ({
   apiService: {
     getPaymentsV2: vi.fn(),
     getRolePermissions: vi.fn(),
+    getNavigationSettings: vi.fn(),
+    updateNavigationSettings: vi.fn(),
+    getUserSetting: vi.fn(),
+    upsertUserSetting: vi.fn(),
   },
 }));
 
@@ -120,6 +124,10 @@ describe('Navigation links', () => {
     authState.roleId = 1;
     authState.roleName = 'admin';
     apiMock.getRolePermissions.mockResolvedValue(defaultRolePermissions);
+    apiMock.getNavigationSettings.mockResolvedValue({ order: [], labels: {}, updatedAt: null });
+    apiMock.updateNavigationSettings.mockImplementation(async (order, labels) => ({ order, labels, updatedAt: null }));
+    apiMock.getUserSetting.mockResolvedValue(null);
+    apiMock.upsertUserSetting.mockResolvedValue({ key: 'navigation.sidebar.hidden-items.v1', value: '[]' });
     apiMock.getPaymentsV2.mockResolvedValue({
       items: [],
       total: 0,
@@ -163,76 +171,65 @@ describe('Navigation links', () => {
     expect(findLinkByHref(getTabHref('s3Storage'))).toBeFalsy();
   });
 
-  it('keeps sidebar order from saved preferences', async () => {
-    window.localStorage.setItem('pp.sidebar_order.1', JSON.stringify(['tasks', 'calendar', 'notifications']));
+  it('uses the common server order and custom section names', async () => {
+    apiMock.getNavigationSettings.mockResolvedValueOnce({
+      order: ['tasks', 'calendar', 'notifications'],
+      labels: { tasks: 'Рабочие задачи' },
+      updatedAt: null,
+    });
 
     renderNavigation();
-    await waitForNavigationPermissions();
+    await screen.findByRole('link', { name: /Рабочие задачи/i });
 
     const navigation = screen.getByRole('navigation', { name: 'Навигация' });
     const topLevelLinks = Array.from(navigation.querySelectorAll('ul > li > div > a')).map((link) =>
       (link.textContent ?? '').trim(),
     );
 
-    expect(topLevelLinks[0] ?? '').toContain('Журнал задач');
+    expect(topLevelLinks[0] ?? '').toContain('Рабочие задачи');
     expect(topLevelLinks[1] ?? '').toContain('Календарь');
     expect(topLevelLinks[2] ?? '').toContain('Уведомления');
   });
 
-  it('allows reordering top-level items while the sidebar is collapsed', async () => {
-    window.localStorage.setItem('pp.sidebar_collapsed', '1');
+  it('lets a user hide and restore only available sections', async () => {
+    const user = userEvent.setup();
     renderNavigation();
     await waitForNavigationPermissions();
 
-    expect(screen.getByRole('button', { name: 'Развернуть меню' })).toBeTruthy();
-    const tasksLink = findLinkByHref(getTabHref('tasks'));
-    const calendarLink = findLinkByHref(getTabHref('calendar'));
-    const tasksItem = tasksLink?.closest('div[draggable="true"]');
-    const calendarItem = calendarLink?.closest('div[draggable="true"]');
-    expect(tasksItem).toBeTruthy();
-    expect(calendarItem).toBeTruthy();
-
-    const dataTransfer = {
-      effectAllowed: 'none',
-      dropEffect: 'none',
-      setData: vi.fn(),
-      getData: vi.fn(() => 'tasks'),
-    };
-    fireEvent.dragStart(tasksItem!, { dataTransfer });
-    fireEvent.dragOver(calendarItem!, { dataTransfer });
-    fireEvent.drop(calendarItem!, { dataTransfer });
+    await user.click(screen.getByRole('button', { name: 'Ещё разделы' }));
+    const reportsCheckbox = screen.getByRole('checkbox', { name: /Отчёты/i });
+    await user.click(reportsCheckbox);
+    expect(findLinkByHref(getTabHref('reports'))).toBeFalsy();
 
     await waitFor(() => {
-      const order = JSON.parse(window.localStorage.getItem('pp.sidebar_order.1') || '[]') as string[];
-      expect(order.indexOf('tasks')).toBeLessThan(order.indexOf('calendar'));
+      expect(apiMock.upsertUserSetting).toHaveBeenCalledWith(
+        'navigation.sidebar.hidden-items.v1',
+        expect.stringContaining('reports'),
+      );
     });
+
+    await user.click(reportsCheckbox);
+    expect(findLinkByHref(getTabHref('reports'))).toBeTruthy();
   });
 
-  it('keeps settings in the same movable list instead of a fixed footer', async () => {
-    window.localStorage.setItem('pp.sidebar_order.1', JSON.stringify(['settings', 'calendar', 'notifications']));
-
+  it('lets an administrator save the common order and names', async () => {
+    const user = userEvent.setup();
     renderNavigation();
     await waitForNavigationPermissions();
 
-    const navigation = screen.getByRole('navigation', { name: 'Навигация' });
-    const topLevelLinks = Array.from(navigation.querySelectorAll('ul > li > div > a')).map((link) =>
-      (link.textContent ?? '').trim(),
-    );
-    expect(topLevelLinks[0] ?? '').toContain('Настройки');
-    expect(findLinkByHref(getTabHref('settings'))?.closest('div[draggable="true"]')).toBeTruthy();
-  });
+    await user.click(screen.getByRole('button', { name: 'Ещё разделы' }));
+    await user.click(screen.getByRole('button', { name: 'Порядок и названия' }));
+    const calendarName = screen.getByRole('textbox', { name: /Название раздела Календарь/i });
+    await user.clear(calendarName);
+    await user.type(calendarName, 'Расписание');
+    await user.click(screen.getByRole('button', { name: 'Опустить Календарь' }));
+    await user.click(screen.getByRole('button', { name: 'Сохранить' }));
 
-  it('migrates the previous shared order into the current user preference', async () => {
-    window.localStorage.setItem('pp.sidebar_order', JSON.stringify(['tasks', 'calendar']));
-
-    renderNavigation();
-    await waitForNavigationPermissions();
-
-    await waitFor(() => {
-      const order = JSON.parse(window.localStorage.getItem('pp.sidebar_order.1') || '[]') as string[];
-      expect(order[0]).toBe('tasks');
-      expect(order[1]).toBe('calendar');
-    });
+    await waitFor(() => expect(apiMock.updateNavigationSettings).toHaveBeenCalled());
+    const [order, labels] = apiMock.updateNavigationSettings.mock.calls.at(-1)!;
+    expect(order[0]).toBe('notifications');
+    expect(labels.calendar).toBe('Расписание');
+    expect(await screen.findByRole('link', { name: /Расписание/i })).toBeTruthy();
   });
 
   it('shows settings for a non-admin role that can view integrations only', async () => {
@@ -316,6 +313,11 @@ describe('Navigation links', () => {
     for (const tab of hiddenTabs) {
       expect(findLinkByHref(getTabHref(tab)), `lawyer menu should hide ${tab}`).toBeFalsy();
     }
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ещё разделы' }));
+    expect(screen.getByRole('checkbox', { name: /Клиенты/i })).toBeTruthy();
+    expect(screen.queryByRole('checkbox', { name: /Отчёты/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Порядок и названия' })).toBeNull();
 
     expect(apiMock.getPaymentsV2).not.toHaveBeenCalled();
   });

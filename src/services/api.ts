@@ -109,6 +109,12 @@ export interface UserSettingDto {
   updatedAt?: string;
 }
 
+export interface NavigationSettingsDto {
+  order: string[];
+  labels: Record<string, string>;
+  updatedAt?: string | null;
+}
+
 export interface DadataIntegrationSettingsDto {
   apiKeyConfigured: boolean;
   secretConfigured: boolean;
@@ -3420,6 +3426,17 @@ export class ApiService {
     return this.request<UserSettingDto>(`/user-settings/users/${userId}/${encodeURIComponent(key)}`, {
       method: 'PUT',
       body: JSON.stringify({ value }),
+    });
+  }
+
+  async getNavigationSettings() {
+    return this.request<NavigationSettingsDto>('/navigation-settings');
+  }
+
+  async updateNavigationSettings(order: string[], labels: Record<string, string>) {
+    return this.request<NavigationSettingsDto>('/navigation-settings', {
+      method: 'PUT',
+      body: JSON.stringify({ order, labels }),
     });
   }
 
