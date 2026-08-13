@@ -3137,17 +3137,17 @@ public class TasksController : ControllerBase
             var changeLabels = new List<string>();
             if (statusChanged)
             {
-                changeLabels.Add("Статус");
+                changeLabels.Add($"Статус: {TaskStatusLabel(oldStatus)} -> {TaskStatusLabel(entity.Status)}");
             }
 
             if (resultChanged)
             {
-                changeLabels.Add("Результат");
+                changeLabels.Add($"Результат: {FormatChangeValue(oldResult)} -> {FormatChangeValue(entity.Result)}");
             }
 
             if (dueAtChanged)
             {
-                changeLabels.Add("Срок");
+                changeLabels.Add($"Срок: {FormatHistoryDateTime(oldDueAt)} -> {FormatHistoryDateTime(entity.DueAt)}");
             }
 
             if (approvalQueueRestarted || (!IsApprovalActiveStatus(oldStatus) && IsApprovalActiveStatus(entity.Status)))
@@ -3354,8 +3354,9 @@ public class TasksController : ControllerBase
 
             if (nextPriority is not null && !string.Equals(entity.Priority, nextPriority, StringComparison.OrdinalIgnoreCase))
             {
+                var oldPriority = entity.Priority;
                 entity.Priority = nextPriority;
-                changes.Add("Приоритет");
+                changes.Add($"Приоритет: {TaskPriorityLabel(oldPriority)} -> {TaskPriorityLabel(entity.Priority)}");
             }
 
             var requestDueAt = request.DueAt.HasValue ? NormalizeUtcInstant(request.DueAt.Value) : (DateTime?)null;
@@ -3396,8 +3397,9 @@ public class TasksController : ControllerBase
                     || (!IsApprovalActiveStatus(oldStatus) && IsApprovalActiveStatus(entity.Status));
                 if (approvalRequested && entity.ApprovalDueAt is null)
                 {
+                    var oldApprovalDueAt = entity.ApprovalDueAt;
                     entity.ApprovalDueAt = ResolveApprovalDueAt(nextStatus, null, settings.ApprovalDueDays, now);
-                    changes.Add("Срок согласования");
+                    changes.Add($"Срок согласования: {FormatOptionalDateTime(oldApprovalDueAt)} -> {FormatOptionalDateTime(entity.ApprovalDueAt)}");
                 }
                 if (requestedResult is not null
                     || (string.Equals(nextStatus, "done", StringComparison.OrdinalIgnoreCase)
@@ -3408,17 +3410,17 @@ public class TasksController : ControllerBase
 
                 if (!string.Equals(oldStatus, entity.Status, StringComparison.OrdinalIgnoreCase))
                 {
-                    changes.Add("Статус");
+                    changes.Add($"Статус: {TaskStatusLabel(oldStatus)} -> {TaskStatusLabel(entity.Status)}");
                 }
 
                 if (!string.Equals(NormalizeOptional(oldResult), NormalizeOptional(entity.Result), StringComparison.Ordinal))
                 {
-                    changes.Add("Результат");
+                    changes.Add($"Результат: {FormatChangeValue(oldResult)} -> {FormatChangeValue(entity.Result)}");
                 }
 
                 if (approvalQueueRestarted)
                 {
-                    changes.Add("Очередь согласования");
+                    changes.Add("Очередь согласования: запущена заново");
                 }
             }
 

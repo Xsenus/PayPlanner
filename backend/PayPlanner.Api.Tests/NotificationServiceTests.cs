@@ -2312,7 +2312,9 @@ public class NotificationServiceTests
         var notification = await db.UserNotifications.SingleAsync();
         Assert.Equal(UserNotificationTypes.TaskChanged, notification.Type);
         Assert.Equal("rose", notification.Tone);
-        Assert.Contains("Изменен срок задачи", notification.Title, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("Изменён срок задачи", notification.Title);
+        Assert.StartsWith("Задача: Подготовить заявление", notification.BodyPreview, StringComparison.Ordinal);
+        Assert.Contains($"Автор изменения: {author.FullName}", notification.BodyPreview, StringComparison.Ordinal);
         Assert.Contains("Срок: 04.06.2026 16:00 -> 04.06.2026 17:00", notification.BodyPreview, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("04.06.2026 11:00", notification.BodyPreview, StringComparison.OrdinalIgnoreCase);
         Assert.Contains($":due-at:{DateTime.SpecifyKind(newDueAt, DateTimeKind.Utc):yyyyMMddHHmm}:", notification.EventKey, StringComparison.Ordinal);
@@ -2814,8 +2816,9 @@ public class NotificationServiceTests
         Assert.Equal(UserNotificationTypes.TaskAssigned, notification.Type);
         Assert.Equal($"task:{task.Id}:assigned", notification.EventKey);
         Assert.Equal("blue", notification.Tone);
-        Assert.Contains("Новая задача", notification.Title);
-        Assert.Contains("Подготовить отзыв", notification.BodyPreview);
+        Assert.Equal("Новая задача", notification.Title);
+        Assert.StartsWith("Задача: Подготовить отзыв", notification.BodyPreview, StringComparison.Ordinal);
+        Assert.Contains("Постановщик:", notification.BodyPreview, StringComparison.Ordinal);
         Assert.False(notification.IsRead);
     }
 

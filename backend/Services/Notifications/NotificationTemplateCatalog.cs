@@ -280,7 +280,7 @@ public static class NotificationTemplateCatalog
             "Новая задача",
             "Уведомление исполнителю и участникам при назначении задачи.",
             "{{task.assignedSubject}}",
-            "{{actor.name}} назначил задачу: {{task.title}}\n\nОбъект: {{task.objectName}}\nСрок: {{task.dueAt}}\nИсполнитель: {{task.assigneeName}}\n{{task.assignmentDetails}}",
+            "Задача: {{task.title}}\nПостановщик: {{actor.name}}\nКлиент/дело: {{task.objectName}}\nСрок: {{task.dueAt}}\nИсполнитель: {{task.assigneeName}}\n{{task.assignmentDetails}}",
             TaskVariables),
         new(
             NotificationTemplateKeys.TaskReminder,
@@ -363,7 +363,7 @@ public static class NotificationTemplateCatalog
             "Изменения по задаче",
             "Уведомление участникам при изменении важных полей задачи.",
             "{{task.changeSubject}}",
-            "{{actor.name}} изменил задачу: {{task.title}}\n\nИзменения:\n{{task.changes}}\n\n{{task.commentBlock}}",
+            "Задача: {{task.title}}\nАвтор изменения: {{actor.name}}\nКлиент/дело: {{task.objectName}}\nТекущий срок: {{task.dueAt}}\n\nИзменения:\n{{task.changes}}\n\n{{task.commentBlock}}",
             [.. TaskVariables, new("task.changes", "Список изменений"), new("task.commentBlock", "Комментарий к изменению, если заполнен"), new("task.changeSubject", "Тема уведомления с учетом типа изменения")]),
         new(
             NotificationTemplateKeys.TaskComment,

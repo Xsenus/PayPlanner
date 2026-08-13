@@ -4612,10 +4612,22 @@ describe('TaskJournal', () => {
     expect(await screen.findByRole('heading', { name: 'Просмотр задачи' })).toBeTruthy();
 
     fireEvent.change(screen.getByPlaceholderText('Введите комментарий'), { target: { value: 'Комментарий исполнителя' } });
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Доступен во внешнем календаре' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Показать комментарий во внешнем календаре' }));
     fireEvent.click(screen.getByRole('button', { name: /Добавить комментарий/i }));
 
     await waitFor(() => expect(apiMock.createTaskJournalComment).toHaveBeenCalledWith(101, 'Комментарий исполнителя', true));
+  });
+
+  it.each(['legacy', 'modern'] as const)('explains external calendar comment visibility in the %s task card', async (taskCardWindowMode) => {
+    await renderJournal([createTask()], { settings: { taskCardWindowMode } });
+
+    fireEvent.click(screen.getByTitle('Просмотр'));
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+
+    expect(within(card).getByRole('checkbox', { name: 'Показать комментарий во внешнем календаре' })).toBeTruthy();
+    expect(within(card).getByText(
+      'Если календарь подключён, этот комментарий появится в описании события Google или Яндекс Календаря. Без отметки он останется только в CRM.',
+    )).toBeTruthy();
   });
 
   it.each(['legacy', 'modern'] as const)('allows executor to complete a read-only task from the %s task card', async (taskCardWindowMode) => {

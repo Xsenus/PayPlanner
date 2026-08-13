@@ -746,7 +746,7 @@ public sealed class NotificationService : INotificationService
         foreach (var userId in recipients)
         {
             var recipientTimeZone = recipientTimeZones[userId];
-            var taskAssignedSubject = $"Новая задача: {task.Title}";
+            const string taskAssignedSubject = "Новая задача";
             var taskAssignedBody = BuildTaskAssignedBody(task, actorName, recipientTimeZone);
             var message = RenderTemplate(
                 templateDefinition,
@@ -3748,8 +3748,8 @@ public sealed class NotificationService : INotificationService
 
         var hasDueAtChange = HasTaskDueAtChange(changeLabels);
         var taskChangedSubject = hasDueAtChange
-            ? $"Изменен срок задачи: {task.Title}"
-            : $"Изменения по задаче: {task.Title}";
+            ? "Изменён срок задачи"
+            : "Задача изменена";
         var eventKey = hasDueAtChange
             ? $"task:{task.Id}:due-at:{DateTime.SpecifyKind(task.DueAt, DateTimeKind.Utc):yyyyMMddHHmm}:{actorUserId}"
             : $"task:{task.Id}:changed:{DateTime.UtcNow:yyyyMMddHHmmssfff}:{actorUserId}";
@@ -5663,10 +5663,9 @@ public sealed class NotificationService : INotificationService
         var dueText = FormatTaskDueAt(task.DueAt, timeZone);
         var lines = new List<string>
         {
-            $"{actorName} назначил(а) задачу.",
-            string.Empty,
-            $"Клиент/дело: {task.ObjectName}",
             $"Задача: {task.Title}",
+            $"Постановщик: {actorName}",
+            $"Клиент/дело: {task.ObjectName}",
             $"Срок: {dueText}",
             $"Приоритет: {task.Priority}",
         };
@@ -6130,11 +6129,10 @@ public sealed class NotificationService : INotificationService
         var dueText = FormatTaskDueAt(task.DueAt, timeZone);
         var lines = new List<string>
         {
-            $"{actorName} изменил(а) задачу.",
-            string.Empty,
-            $"Клиент/дело: {task.ObjectName}",
             $"Задача: {task.Title}",
-            $"Срок: {dueText}",
+            $"Автор изменения: {actorName}",
+            $"Клиент/дело: {task.ObjectName}",
+            $"Текущий срок: {dueText}",
         };
 
         if (changeLabels.Count > 0)

@@ -2097,6 +2097,14 @@ public class TasksControllerTests
         Assert.Equal("done", dto.Status);
         Assert.Equal("Документы подготовлены и переданы клиенту.", dto.Result);
         Assert.Single(notificationService.CompletedTaskIds, task.Id);
+        var changeNotification = Assert.Single(notificationService.ChangedTasks);
+        Assert.Contains(changeNotification.ChangeLabels, label =>
+            label.Contains("Статус:", StringComparison.OrdinalIgnoreCase)
+            && label.Contains("Новая", StringComparison.OrdinalIgnoreCase)
+            && label.Contains("Готово", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(changeNotification.ChangeLabels, label =>
+            label.Contains("Результат:", StringComparison.OrdinalIgnoreCase)
+            && label.Contains("Документы подготовлены", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -7309,6 +7317,10 @@ public class TasksControllerTests
             Assert.Contains(notification.ChangeLabels, item =>
                 item.Contains("Срок:", StringComparison.OrdinalIgnoreCase)
                 && item.Contains("->", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(notification.ChangeLabels, item =>
+                item.Contains("Приоритет:", StringComparison.OrdinalIgnoreCase)
+                && item.Contains("Обычный", StringComparison.OrdinalIgnoreCase)
+                && item.Contains("Срочно", StringComparison.OrdinalIgnoreCase));
         });
     }
 

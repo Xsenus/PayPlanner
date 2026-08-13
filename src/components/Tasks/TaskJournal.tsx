@@ -192,6 +192,9 @@ type TaskCreationWizardState = {
 
 type TaskForm = TaskJournalUpsertPayload & { dueAt: string; approvalDueAt: string | null };
 
+const EXTERNAL_CALENDAR_COMMENT_HELP =
+  'Если календарь подключён, этот комментарий появится в описании события Google или Яндекс Календаря. Без отметки он останется только в CRM.';
+
 function isKeyword(value: string | null | undefined): value is string {
   return Boolean(value);
 }
@@ -10090,15 +10093,18 @@ function TaskModal({
                           {commentSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                         </button>
                       </div>
-                      <label className="mt-2 inline-flex cursor-pointer items-center gap-2 px-2 text-xs font-medium text-slate-600">
-                        <input
-                          type="checkbox"
-                          checked={commentExternalCalendarVisible}
-                          onChange={(event) => setCommentExternalCalendarVisible(event.target.checked)}
-                          className="form-checkbox"
-                        />
-                        Доступен во внешнем календаре
-                      </label>
+                      <div className="mt-2 px-2">
+                        <label className="inline-flex cursor-pointer items-center gap-2 text-xs font-medium text-slate-700">
+                          <input
+                            type="checkbox"
+                            checked={commentExternalCalendarVisible}
+                            onChange={(event) => setCommentExternalCalendarVisible(event.target.checked)}
+                            className="form-checkbox"
+                          />
+                          Показать комментарий во внешнем календаре
+                        </label>
+                        <p className="mt-1 max-w-2xl text-xs leading-5 text-slate-500">{EXTERNAL_CALENDAR_COMMENT_HELP}</p>
+                      </div>
                     </div>
                   ) : null}
                 </div>
@@ -11486,15 +11492,18 @@ function TaskModal({
                       placeholder="Введите комментарий"
                       maxLength={4000}
                     />
-                    <label className="mt-3 inline-flex cursor-pointer items-center gap-2 text-xs font-medium text-slate-600">
-                      <input
-                        type="checkbox"
-                        checked={commentExternalCalendarVisible}
-                        onChange={(event) => setCommentExternalCalendarVisible(event.target.checked)}
-                        className="form-checkbox"
-                      />
-                      Доступен во внешнем календаре
-                    </label>
+                    <div className="mt-3">
+                      <label className="inline-flex cursor-pointer items-center gap-2 text-xs font-medium text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={commentExternalCalendarVisible}
+                          onChange={(event) => setCommentExternalCalendarVisible(event.target.checked)}
+                          className="form-checkbox"
+                        />
+                        Показать комментарий во внешнем календаре
+                      </label>
+                      <p className="mt-1 max-w-2xl text-xs leading-5 text-slate-500">{EXTERNAL_CALENDAR_COMMENT_HELP}</p>
+                    </div>
                     <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                       <span className="text-xs text-slate-400">{commentText.trim().length}/4000</span>
                       <button
