@@ -456,7 +456,7 @@ function AppContent() {
     [getTaskReturnTab, handleOpenClient, permissions.clients.canView, toast],
   );
 
-  const handleOpenTaskLegalEntity = useCallback(
+  const handleOpenLegalEntity = useCallback(
     async (legalEntityId: number) => {
       if (!permissions.legalEntities.canView) {
         toast.error('Доступ к карточке юридического лица запрещен.');
@@ -474,7 +474,7 @@ function AppContent() {
           section: 'legalEntities',
           objectType: 'LegalEntity',
           objectId: String(legalEntityId),
-          description: `Открыта карточка юридического лица ${legalEntityId} из журнала задач`,
+          description: `Открыта карточка юридического лица ${legalEntityId}`,
           status: 'Info',
         });
       } catch (err) {
@@ -483,6 +483,16 @@ function AppContent() {
     },
     [logActivity, permissions.legalEntities.canView, toast],
   );
+
+  const handleContactScopeChange = useCallback((nextScope: ContactScope) => {
+    setActiveTab(nextScope === 'people' || nextScope === 'clients'
+      ? 'contactsClients'
+      : nextScope === 'organizations'
+        ? 'contactsLegal'
+        : nextScope === 'external'
+          ? 'contactsExternal'
+          : 'contacts');
+  }, []);
 
   const handleRouteInvoiceChange = useCallback((invoiceId: number | null) => {
     setSelectedInvoiceId(invoiceId);
@@ -1121,7 +1131,7 @@ function AppContent() {
                 onRouteTaskChange={handleRouteTaskChange}
                 onOpenClient={handleOpenTaskClient}
                 onOpenCase={openRelatedCase}
-                onOpenLegalEntity={handleOpenTaskLegalEntity}
+                onOpenLegalEntity={handleOpenLegalEntity}
                 onCreateInvoiceDraft={permissions.accounts.canCreate ? openTaskBillingInvoiceDraft : undefined}
               />
             )
@@ -1136,7 +1146,7 @@ function AppContent() {
                 onRouteTaskChange={handleRouteTaskChange}
                 onOpenClient={handleOpenTaskClient}
                 onOpenCase={openRelatedCase}
-                onOpenLegalEntity={handleOpenTaskLegalEntity}
+                onOpenLegalEntity={handleOpenLegalEntity}
                 onCreateInvoiceDraft={permissions.accounts.canCreate ? openTaskBillingInvoiceDraft : undefined}
               />
             )
@@ -1150,7 +1160,7 @@ function AppContent() {
                 mode="approvals"
                 onOpenClient={handleOpenTaskClient}
                 onOpenCase={openRelatedCase}
-                onOpenLegalEntity={handleOpenTaskLegalEntity}
+                onOpenLegalEntity={handleOpenLegalEntity}
                 onCreateInvoiceDraft={permissions.accounts.canCreate ? openTaskBillingInvoiceDraft : undefined}
               />
             )
@@ -1165,7 +1175,7 @@ function AppContent() {
                 onRouteTaskChange={handleRouteTaskChange}
                 onOpenClient={handleOpenTaskClient}
                 onOpenCase={openRelatedCase}
-                onOpenLegalEntity={handleOpenTaskLegalEntity}
+                onOpenLegalEntity={handleOpenLegalEntity}
                 onCreateInvoiceDraft={permissions.accounts.canCreate ? openTaskBillingInvoiceDraft : undefined}
               />
             )
@@ -1347,8 +1357,9 @@ function AppContent() {
           ? (
               <PhoneContacts
                 initialScope="all"
+                onScopeChange={handleContactScopeChange}
                 onOpenClient={(id) => handleOpenClient(id, undefined, { returnTo: { tab: 'contacts' } })}
-                onOpenLegalEntity={() => setActiveTab('legalEntities')}
+                onOpenLegalEntity={handleOpenLegalEntity}
               />
             )
           : renderNoAccess('Раздел контактов недоступен для вашей роли.');
@@ -1358,7 +1369,9 @@ function AppContent() {
           ? (
               <PhoneContacts
                 initialScope="people"
+                onScopeChange={handleContactScopeChange}
                 onOpenClient={(id) => handleOpenClient(id, undefined, { returnTo: { tab: 'contactsClients' } })}
+                onOpenLegalEntity={handleOpenLegalEntity}
               />
             )
           : renderNoAccess('Раздел контактов недоступен для вашей роли.');
@@ -1368,22 +1381,15 @@ function AppContent() {
           ? (
               <PhoneContacts
                 initialScope="organizations"
-                onOpenLegalEntity={() => setActiveTab('legalEntities')}
+                onScopeChange={handleContactScopeChange}
+                onOpenClient={(id) => handleOpenClient(id, undefined, { returnTo: { tab: 'contactsLegal' } })}
+                onOpenLegalEntity={handleOpenLegalEntity}
               />
             )
           : renderNoAccess('Раздел контактов недоступен для вашей роли.');
 
       case 'contactsExternal': {
         const contactScope: ContactScope = 'external';
-        const handleContactScopeChange = (nextScope: ContactScope) => {
-          setActiveTab(nextScope === 'people' || nextScope === 'clients'
-            ? 'contactsClients'
-            : nextScope === 'organizations'
-              ? 'contactsLegal'
-              : nextScope === 'external'
-                ? 'contactsExternal'
-                : 'contacts');
-        };
 
         return permissions.clients.canView
           ? <PhoneContacts initialScope={contactScope} onScopeChange={handleContactScopeChange} />

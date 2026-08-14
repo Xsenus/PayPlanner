@@ -75,8 +75,39 @@ function createContact(id: number, fullName: string): ContactDirectoryItemDto {
 describe('Contacts phone directory', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    window.localStorage.removeItem('pp.contacts_view.v1');
     vi.mocked(apiService.getLegalEntities).mockResolvedValue([]);
     vi.mocked(apiService.getActResponsibles).mockResolvedValue([]);
+  });
+
+  it('synchronizes the selected contact type with navigation', async () => {
+    vi.mocked(apiService.getContacts).mockResolvedValue([]);
+    const onScopeChange = vi.fn();
+    render(<Contacts onScopeChange={onScopeChange} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /Организации/i }));
+
+    expect(onScopeChange).toHaveBeenCalledWith('organizations');
+  });
+
+  it('switches to cards, remembers the view and opens an organization by id', async () => {
+    const organization: ContactDirectoryItemDto = {
+      ...createContact(24, 'ООО Ромашка'),
+      sourceType: 'legal',
+      category: 'legal',
+      contactType: 'Organization',
+      hasFullProfile: true,
+    };
+    vi.mocked(apiService.getContacts).mockResolvedValue([organization]);
+    const onOpenLegalEntity = vi.fn();
+    render(<Contacts onOpenLegalEntity={onOpenLegalEntity} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Карточки' }));
+
+    expect(window.localStorage.getItem('pp.contacts_view.v1')).toBe('cards');
+    expect(screen.getByRole('article')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Открыть' }));
+    expect(onOpenLegalEntity).toHaveBeenCalledWith(24);
   });
 
   it('shows one directory for people and organizations', async () => {

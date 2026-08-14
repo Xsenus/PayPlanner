@@ -13,7 +13,7 @@ namespace PayPlanner.Api.Controllers;
 [Authorize]
 public sealed class NavigationSettingsController : ControllerBase
 {
-    private const string SettingKey = "navigation.sidebar.configuration.v1";
+    private const string SettingKey = NavigationSettingsSeedService.SettingKey;
     private const int MaximumLabelLength = 60;
     private const int MaximumGroupCount = 30;
     private const string GroupIdPrefix = "group-";

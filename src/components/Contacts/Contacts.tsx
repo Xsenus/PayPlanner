@@ -5,6 +5,8 @@ import {
   Building2,
   Download,
   GripVertical,
+  LayoutGrid,
+  List,
   Loader2,
   Mail,
   Pencil,
@@ -54,6 +56,7 @@ interface ContactsProps {
 }
 
 const PAGE_SIZE_OPTIONS = [20, 50, 100];
+const CONTACT_VIEW_STORAGE_KEY = 'pp.contacts_view.v1';
 
 const CONTACT_COLUMNS = [
   { key: 'contact', label: 'Контакт', defaultVisible: true, defaultWidth: 320 },
@@ -123,6 +126,10 @@ export function Contacts({ initialScope = 'all', onScopeChange, onOpenClient, on
   const [yealinkImport, setYealinkImport] = useState<YealinkImportState | null>(null);
   const [page, setPage] = useState(1);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [viewMode, setViewMode] = useState<'table' | 'cards'>(() => {
+    if (typeof window === 'undefined') return 'table';
+    return window.localStorage.getItem(CONTACT_VIEW_STORAGE_KEY) === 'cards' ? 'cards' : 'table';
+  });
   const requestIdRef = useRef(0);
   const activeRequestControllerRef = useRef<AbortController | null>(null);
   const hasLoadedRef = useRef(false);
@@ -243,6 +250,11 @@ export function Contacts({ initialScope = 'all', onScopeChange, onOpenClient, on
   useEffect(() => {
     setPage(1);
   }, [scope, debouncedSearch, legalEntityId, syncOnly, includeInactive]);
+
+  useEffect(() => {
+    window.localStorage.setItem(CONTACT_VIEW_STORAGE_KEY, viewMode);
+    if (viewMode !== 'table') setSettingsOpen(false);
+  }, [viewMode]);
 
   useEffect(() => {
     const loadLookups = async () => {
@@ -531,6 +543,46 @@ export function Contacts({ initialScope = 'all', onScopeChange, onOpenClient, on
     }
   };
 
+  const renderContactActions = (contact: ContactDirectoryItemDto) => (
+    <div className="flex flex-wrap items-center justify-end gap-2">
+      {contact.sourceType !== 'legal' && !contact.hasFullProfile ? (
+        <button
+          type="button"
+          onClick={() => setEditor({
+            mode: contact.sourceType === 'client' ? 'edit-client' : 'edit-external',
+            contact,
+          })}
+          className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 text-slate-600 transition hover:bg-slate-50 hover:text-slate-900"
+          aria-label={`Редактировать ${contact.fullName}`}
+        >
+          <Pencil className="h-4 w-4" />
+        </button>
+      ) : null}
+      {contact.sourceType === 'external' && !contact.hasFullProfile ? (
+        <button type="button" onClick={() => void handlePromote(contact)} className="rounded-xl border border-blue-200 px-3 py-2 text-xs font-semibold text-blue-700 transition hover:bg-blue-50">
+          Оформить
+        </button>
+      ) : null}
+      {contact.sourceType === 'client' && onOpenClient ? (
+        <button type="button" onClick={() => onOpenClient(contact.sourceId)} className="rounded-xl border border-blue-200 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50">Открыть</button>
+      ) : null}
+      {contact.sourceType === 'legal' && onOpenLegalEntity ? (
+        <button type="button" onClick={() => onOpenLegalEntity(contact.sourceId)} className="rounded-xl border border-emerald-200 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-50">Открыть</button>
+      ) : null}
+      {contact.sourceType === 'external' && contact.linkedClientId && onOpenClient ? (
+        <button type="button" onClick={() => onOpenClient(contact.linkedClientId!)} className="rounded-xl border border-blue-200 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50">Открыть</button>
+      ) : null}
+      {contact.sourceType === 'external' && contact.linkedLegalEntityId && onOpenLegalEntity ? (
+        <button type="button" onClick={() => onOpenLegalEntity(contact.linkedLegalEntityId!)} className="rounded-xl border border-emerald-200 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-50">Открыть</button>
+      ) : null}
+      {contact.sourceType === 'external' && !contact.hasFullProfile ? (
+        <button type="button" onClick={() => void handleDelete(contact)} className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-rose-200 text-rose-600 transition hover:bg-rose-50" aria-label={`Удалить ${contact.fullName}`}>
+          <Trash2 className="h-4 w-4" />
+        </button>
+      ) : null}
+    </div>
+  );
+
   return (
     <div className="space-y-3 p-3 lg:p-4">
       <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
@@ -686,14 +738,36 @@ export function Contacts({ initialScope = 'all', onScopeChange, onOpenClient, on
                   Обновляем список…
                 </div>
               ) : null}
-              <button
-                type="button"
-                onClick={() => setSettingsOpen((value) => !value)}
-                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-              >
-                <Settings2 className="h-4 w-4" />
-                {settingsOpen ? 'Скрыть настройки' : 'Настроить таблицу'}
-              </button>
+              <div className="inline-flex rounded-xl border border-slate-200 bg-slate-50 p-1" aria-label="Вид контактов">
+                <button
+                  type="button"
+                  onClick={() => setViewMode('table')}
+                  aria-pressed={viewMode === 'table'}
+                  className={`inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium transition ${viewMode === 'table' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+                >
+                  <List className="h-4 w-4" />
+                  Таблица
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode('cards')}
+                  aria-pressed={viewMode === 'cards'}
+                  className={`inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium transition ${viewMode === 'cards' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+                >
+                  <LayoutGrid className="h-4 w-4" />
+                  Карточки
+                </button>
+              </div>
+              {viewMode === 'table' ? (
+                <button
+                  type="button"
+                  onClick={() => setSettingsOpen((value) => !value)}
+                  className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                >
+                  <Settings2 className="h-4 w-4" />
+                  {settingsOpen ? 'Скрыть настройки' : 'Настроить таблицу'}
+                </button>
+              ) : null}
             </div>
           </div>
         </div>
@@ -748,7 +822,8 @@ export function Contacts({ initialScope = 'all', onScopeChange, onOpenClient, on
           <div className="px-6 py-14 text-center text-slate-500">По текущим фильтрам контакты не найдены.</div>
         ) : (
           <>
-            <div className="overflow-x-auto">
+            {viewMode === 'table' ? (
+              <div className="overflow-x-auto">
               <table
                 className="w-full min-w-[1120px] table-fixed divide-y divide-slate-200"
                 style={{ width: getTableWidth(140, 1120), minWidth: '100%' }}
@@ -806,66 +881,43 @@ export function Contacts({ initialScope = 'all', onScopeChange, onOpenClient, on
                         </td>
                       ))}
                       <td className="px-6 py-4">
-                        <div className="flex items-center justify-end gap-2">
-                          {contact.sourceType !== 'legal' && !contact.hasFullProfile ? <button
-                            type="button"
-                            onClick={() =>
-                              setEditor({
-                                mode: contact.sourceType === 'client' ? 'edit-client' : 'edit-external',
-                                contact,
-                              })
-                            }
-                            className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 text-slate-600 transition hover:bg-slate-50 hover:text-slate-900"
-                            aria-label="Редактировать"
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </button> : null}
-                          {contact.sourceType === 'external' && !contact.hasFullProfile ? (
-                            <button
-                              type="button"
-                              onClick={() => void handlePromote(contact)}
-                              className="rounded-xl border border-blue-200 px-3 py-2 text-xs font-semibold text-blue-700 transition hover:bg-blue-50"
-                            >
-                              Оформить
-                            </button>
-                          ) : null}
-                          {contact.sourceType === 'client' && onOpenClient ? (
-                            <button type="button" onClick={() => onOpenClient(contact.sourceId)} className="rounded-xl border border-blue-200 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50">
-                              Открыть
-                            </button>
-                          ) : null}
-                          {contact.sourceType === 'legal' && onOpenLegalEntity ? (
-                            <button type="button" onClick={() => onOpenLegalEntity(contact.sourceId)} className="rounded-xl border border-emerald-200 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-50">
-                              Открыть
-                            </button>
-                          ) : null}
-                          {contact.sourceType === 'external' && contact.linkedClientId && onOpenClient ? (
-                            <button type="button" onClick={() => onOpenClient(contact.linkedClientId!)} className="rounded-xl border border-blue-200 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50">
-                              Открыть
-                            </button>
-                          ) : null}
-                          {contact.sourceType === 'external' && contact.linkedLegalEntityId && onOpenLegalEntity ? (
-                            <button type="button" onClick={() => onOpenLegalEntity(contact.linkedLegalEntityId!)} className="rounded-xl border border-emerald-200 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-50">
-                              Открыть
-                            </button>
-                          ) : null}
-                          {contact.sourceType === 'external' && !contact.hasFullProfile ? (
-                            <button
-                              type="button"
-                              onClick={() => void handleDelete(contact)}
-                              className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-rose-200 text-rose-600 transition hover:bg-rose-50"
-                              aria-label="Удалить"
-                            >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        ) : null}
-                        </div>
+                        {renderContactActions(contact)}
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-            </div>
+              </div>
+            ) : (
+              <div className="grid gap-3 p-3 sm:grid-cols-2 2xl:grid-cols-3">
+                {pagedContacts.map((contact) => (
+                  <article key={`${contact.sourceType}-${contact.sourceId}`} className="flex min-h-56 flex-col rounded-2xl border border-slate-200 bg-white p-3 shadow-sm transition hover:border-blue-200 hover:shadow-md">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <h3 className="truncate text-base font-semibold text-slate-900">{contact.fullName}</h3>
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          <span className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${sourceBadge(contact.sourceType)}`}>{sourceLabel(contact.sourceType, contact.hasFullProfile)}</span>
+                          <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-semibold text-slate-600">{contact.contactType === 'Organization' ? 'Организация' : 'Человек'}</span>
+                        </div>
+                      </div>
+                      {contact.isActive ? <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-emerald-500" title="Активен" /> : <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-slate-300" title="Неактивен" />}
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-1">
+                      {(contact.roles ?? []).map((role) => <span key={role} className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">{ROLE_LABELS[role]}</span>)}
+                    </div>
+                    <div className="mt-3 flex-1 space-y-2 text-sm text-slate-600">
+                      {(contact.organizationName || contact.parentContactName) ? <div className="flex items-center gap-2"><Building2 className="h-4 w-4 shrink-0 text-slate-400" /><span className="truncate">{contact.organizationName || contact.parentContactName}</span></div> : null}
+                      {contact.inn ? <div className="truncate">ИНН: {contact.inn}</div> : null}
+                      <div className="flex items-center gap-2"><Phone className="h-4 w-4 shrink-0 text-slate-400" /><span className="truncate">{formatPhones(contact) || 'Телефон не указан'}</span></div>
+                      <div className="flex items-center gap-2"><Mail className="h-4 w-4 shrink-0 text-slate-400" /><span className="truncate">{formatEmails(contact) || 'Email не указан'}</span></div>
+                      {contact.position ? <div className="truncate">Должность: {contact.position}</div> : null}
+                      {contact.responsibleUserName ? <div className="truncate">Ответственный: {contact.responsibleUserName}</div> : null}
+                    </div>
+                    <div className="mt-3 border-t border-slate-100 pt-3">{renderContactActions(contact)}</div>
+                  </article>
+                ))}
+              </div>
+            )}
 
             <TablePagination
               page={page}
