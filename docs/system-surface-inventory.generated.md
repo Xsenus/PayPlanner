@@ -7,8 +7,8 @@
 
 - Разделов frontend: 49.
 - Backend-контроллеров: 67.
-- HTTP endpoints: 801; с прямой тестовой связью: 531.
-- HTTP endpoints с точной ссылкой из документации: 184; критичных без такой ссылки: 479.
+- HTTP endpoints: 803; с прямой тестовой связью: 533.
+- HTTP endpoints с точной ссылкой из документации: 185; критичных без такой ссылки: 480.
 - Критичных endpoints без прямой тестовой связи: 226.
 - Реальных HTML-форм: 17; с найденной тестовой связью: 15.
 - Фоновых сервисов: 27; с найденной тестовой связью: 24.
@@ -157,7 +157,7 @@
 | ClientPortalController | backend/Controllers/ClientPortalController.cs | 10 | публичный ([AllowAnonymous]) | да |
 | ClientReferenceDataController | backend/Controllers/ClientReferenceDataController.cs | 3 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Clients)] | да |
 | ClientsController | backend/Controllers/ClientsController.cs | 12 | [Authorize] | да |
-| ContactsController | backend/Controllers/ContactsController.cs | 7 | [Authorize] | да |
+| ContactsController | backend/Controllers/ContactsController.cs | 9 | [Authorize] | да |
 | ContractsController | backend/Controllers/ContractsController.cs | 26 | [Authorize] | да |
 | DadataIntegrationSettingsController | backend/Controllers/DadataIntegrationSettingsController.cs | 2 | [Authorize] | да |
 | DatabaseAdminController | backend/Controllers/DatabaseAdminController.cs | 15 | [Authorize(Policy = "Admin")] | да |
@@ -245,7 +245,7 @@
 | DELETE | api/auth/admin/users/{id:int} | AdminUsersController.DeleteUser | изменение данных, чувствительные данные или операция | backend/Controllers/AdminUsersController.cs:116 |
 | POST | api/auth/admin/users/{id:int}/approve | AdminUsersController.ApproveUser | изменение данных, чувствительные данные или операция | backend/Controllers/AdminUsersController.cs:146 |
 | POST | api/auth/admin/users/{id:int}/reject | AdminUsersController.RejectUser | изменение данных, чувствительные данные или операция | backend/Controllers/AdminUsersController.cs:159 |
-| POST | api/contacts/imports/yealink | ContactsController.ImportYealinkXml | изменение данных, чувствительные данные или операция | backend/Controllers/ContactsController.cs:416 |
+| POST | api/contacts/imports/yealink | ContactsController.ImportYealinkXml | изменение данных, чувствительные данные или операция | backend/Controllers/ContactsController.cs:738 |
 | POST | api/database/backups | DatabaseAdminController.CreateBackupAsync | изменение данных, чувствительные данные или операция | backend/Controllers/DatabaseAdminController.cs:101 |
 | DELETE | api/database/backups/all | DatabaseAdminController.DeleteAllBackupsAsync | изменение данных, чувствительные данные или операция | backend/Controllers/DatabaseAdminController.cs:185 |
 | DELETE | api/database/backups/file | DatabaseAdminController.DeleteBackupAsync | изменение данных, чувствительные данные или операция | backend/Controllers/DatabaseAdminController.cs:163 |
@@ -587,13 +587,15 @@
 | DELETE | api/[controller]/{id:int} | ClientsController | Delete | backend/Controllers/ClientsController.cs:1358 | [Authorize] | да | нет |
 | POST | api/[controller]/bulk-delete | ClientsController | BulkDelete | backend/Controllers/ClientsController.cs:1393 | [Authorize] | да | нет |
 | POST | api/[controller]/change-responsible | ClientsController | ChangeResponsible | backend/Controllers/ClientsController.cs:1460 | [Authorize] | да | нет |
-| GET | api/contacts | ContactsController | GetAll | backend/Controllers/ContactsController.cs:46 | [Authorize] | да | docs/contacts-directory-implementation-log.md, docs/full-project-audit-2026-06-10.md |
-| PUT | api/contacts/clients/{id:int} | ContactsController | UpdateClientContact | backend/Controllers/ContactsController.cs:138 | [Authorize] | да | нет |
-| POST | api/contacts/external | ContactsController | CreateExternalContact | backend/Controllers/ContactsController.cs:209 | [Authorize] | да | нет |
-| PUT | api/contacts/external/{id:int} | ContactsController | UpdateExternalContact | backend/Controllers/ContactsController.cs:274 | [Authorize] | да | нет |
-| DELETE | api/contacts/external/{id:int} | ContactsController | DeleteExternalContact | backend/Controllers/ContactsController.cs:342 | [Authorize] | да | нет |
-| GET | api/contacts/exports/yealink | ContactsController | DownloadYealinkXml | backend/Controllers/ContactsController.cs:368 | [Authorize] | да | docs/contacts-directory-implementation-log.md |
-| POST | api/contacts/imports/yealink | ContactsController | ImportYealinkXml | backend/Controllers/ContactsController.cs:416 | [Authorize] | нет | docs/contacts-directory-implementation-log.md |
+| GET | api/contacts | ContactsController | GetAll | backend/Controllers/ContactsController.cs:53 | [Authorize] | да | docs/contacts-directory-implementation-log.md, docs/full-project-audit-2026-06-10.md |
+| PUT | api/contacts/clients/{id:int} | ContactsController | UpdateClientContact | backend/Controllers/ContactsController.cs:203 | [Authorize] | да | нет |
+| POST | api/contacts/external | ContactsController | CreateExternalContact | backend/Controllers/ContactsController.cs:274 | [Authorize] | да | нет |
+| PUT | api/contacts/external/{id:int} | ContactsController | UpdateExternalContact | backend/Controllers/ContactsController.cs:368 | [Authorize] | да | нет |
+| DELETE | api/contacts/external/{id:int} | ContactsController | DeleteExternalContact | backend/Controllers/ContactsController.cs:470 | [Authorize] | да | нет |
+| POST | api/contacts/external/{id:int}/promote | ContactsController | PromoteExternalContact | backend/Controllers/ContactsController.cs:496 | [Authorize] | да | нет |
+| GET | api/contacts/exports/yealink | ContactsController | DownloadYealinkXml | backend/Controllers/ContactsController.cs:637 | [Authorize] | да | docs/contacts-directory-implementation-log.md |
+| GET | api/contacts/phonebook/yealink/{token} | ContactsController | GetYealinkRemotePhonebook | backend/Controllers/ContactsController.cs:694 | публичный ([AllowAnonymous]) | да | docs/contacts-directory-implementation-log.md |
+| POST | api/contacts/imports/yealink | ContactsController | ImportYealinkXml | backend/Controllers/ContactsController.cs:738 | [Authorize] | нет | docs/contacts-directory-implementation-log.md |
 | GET | api/[controller] | ContractsController | Get | backend/Controllers/ContractsController.cs:309 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
 | GET | api/[controller]/{id:int} | ContractsController | GetById | backend/Controllers/ContractsController.cs:340 | [Authorize] | да | нет |
 | GET | api/[controller]/{id:int}/document | ContractsController | GetDocument | backend/Controllers/ContractsController.cs:354 | [Authorize] | да | нет |
