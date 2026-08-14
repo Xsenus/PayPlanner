@@ -94,7 +94,7 @@ describe('Contacts phone directory', () => {
     const organization: ContactDirectoryItemDto = {
       ...createContact(24, 'ООО Ромашка'),
       sourceType: 'legal',
-      category: 'legal',
+      category: 'organizations',
       contactType: 'Organization',
       hasFullProfile: true,
     };
