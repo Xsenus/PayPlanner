@@ -134,4 +134,41 @@ describe('installmentPlan', () => {
       ],
     });
   });
+
+  it('rebuilds metadata written by the backend with PascalCase fields and numeric rounding mode', () => {
+    const payment = createPayment({
+      systemNotes: `${INSTALLMENT_PAYMENT_MARKER} ${JSON.stringify({
+        Sequence: 1,
+        Total: 100000,
+        DownPayment: 0,
+        AnnualRate: 0,
+        Months: 4,
+        StartDate: '2026-07-11',
+        RoundingMode: 2,
+        RoundingStep: 6000,
+        ToPay: 100000,
+        Overpay: 0,
+        LoanAmount: 100000,
+        BaseMonthlyPayment: 25000,
+        RoundedMonthlyPayment: 30000,
+        Item: {
+          Sequence: 1,
+          Date: '2026-07-11',
+          Principal: 30000,
+          Interest: 0,
+          Payment: 30000,
+          Balance: 70000,
+        },
+      })}`,
+    });
+
+    expect(deriveInstallmentPlanFromPayments([payment])).toMatchObject({
+      total: 100000,
+      months: 4,
+      startDate: '2026-07-11',
+      roundingMode: 'up',
+      roundingStep: 6000,
+      items: [expect.objectContaining({ sequence: 1, payment: 30000, balance: 70000 })],
+    });
+  });
 });

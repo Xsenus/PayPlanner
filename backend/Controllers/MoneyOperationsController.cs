@@ -1964,15 +1964,20 @@ public class MoneyOperationsController : ControllerBase
             return forbidden;
         }
 
-        if (model.Amount < 0)
+        if (model.Amount <= 0)
         {
-            return BadRequest("Сумма денежной операции не может быть отрицательной.");
+            return BadRequest("Сумма денежной операции должна быть больше нуля.");
         }
 
         var moneyAccountError = await ApplyMoneyAccountAsync(model, ct);
         if (moneyAccountError is not null)
         {
             return BadRequest(moneyAccountError);
+        }
+
+        if (!model.MoneyAccountId.HasValue && string.IsNullOrWhiteSpace(model.AccountName))
+        {
+            return BadRequest("Укажите денежный счёт или его название.");
         }
 
         var incomeTypeError = await ApplyIncomeTypeAsync(model, ct);
@@ -2662,9 +2667,9 @@ public class MoneyOperationsController : ControllerBase
             return NotFound();
         }
 
-        if (model.Amount < 0)
+        if (model.Amount <= 0)
         {
-            return BadRequest("Сумма денежной операции не может быть отрицательной.");
+            return BadRequest("Сумма денежной операции должна быть больше нуля.");
         }
 
         var originalLinkedInvoiceId = entity.LinkedInvoiceId;
@@ -2687,6 +2692,11 @@ public class MoneyOperationsController : ControllerBase
         if (moneyAccountError is not null)
         {
             return BadRequest(moneyAccountError);
+        }
+
+        if (!model.MoneyAccountId.HasValue && string.IsNullOrWhiteSpace(model.AccountName))
+        {
+            return BadRequest("Укажите денежный счёт или его название.");
         }
 
         var incomeTypeError = await ApplyIncomeTypeAsync(model, ct);

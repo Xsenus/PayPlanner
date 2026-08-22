@@ -322,6 +322,80 @@ describe('DatabaseMaintenanceSettings', () => {
     expect(await screen.findByText('Выгрузка резервной копии на Яндекс.Диск повторена.')).toBeTruthy();
   });
 
+  it('disables retrying failed S3 upload when its connection is unavailable', async () => {
+    mocks.getS3StorageConnectionsMock.mockResolvedValue({
+      providerPresets: [],
+      connections: [{
+        id: 'hostkey-main',
+        name: 'HOSTKEY backup',
+        provider: 'hostkey',
+        providerName: 'HOSTKEY S3',
+        endpoint: 'https://s3-nl.hostkey.com',
+        region: 'nl',
+        bucket: 'payplanner',
+        rootPrefix: 'prod',
+        isEnabled: false,
+        isConfigured: true,
+      }],
+    });
+    mocks.getDatabaseBackupOverviewMock.mockResolvedValue({
+      ...buildBackupOverview(),
+      s3UploadResults: [{
+        id: 'failed-result',
+        backupRelativePath: '2026/06/backup.zip',
+        backupFileName: 'backup.zip',
+        connectionId: 'hostkey-main',
+        status: 'failed',
+        targetPath: '/backups/database/2026/06/backup.zip',
+        targetKey: null,
+        sizeBytes: 1024,
+        error: 'S3 unavailable',
+        createdAt: '2026-06-01T10:00:00+07:00',
+        updatedAt: '2026-06-01T10:01:00+07:00',
+      }],
+    });
+
+    render(<DatabaseMaintenanceSettings />);
+
+    await waitFor(() => expect(mocks.getDatabaseBackupOverviewMock).toHaveBeenCalled());
+    fireEvent.click(screen.getAllByRole('button')[4]);
+    const retryButton = await screen.findByRole('button', { name: /Повторить/i });
+    expect((retryButton as HTMLButtonElement).disabled).toBe(true);
+    expect(retryButton.getAttribute('title')).toBe('Сначала включите и настройте указанное S3-подключение');
+  });
+
+  it('disables retrying failed Yandex Disk upload when reconnection is required', async () => {
+    mocks.getYandexDiskSettingsMock.mockResolvedValue({
+      isConfigured: true,
+      requiresReconnect: true,
+      rootPath: '/PayPlanner',
+      tokenPreview: 'ya***',
+      updatedAt: '2026-06-01T10:00:00+07:00',
+    });
+    mocks.getDatabaseBackupOverviewMock.mockResolvedValue({
+      ...buildBackupOverview(),
+      yandexDiskUploadResults: [{
+        id: 'yandex-failed-result',
+        backupRelativePath: '2026/06/backup.zip',
+        backupFileName: 'backup.zip',
+        status: 'failed',
+        targetPath: '/backups/database/2026/06/backup.zip',
+        sizeBytes: 1024,
+        error: 'Yandex Disk unavailable',
+        createdAt: '2026-06-01T10:00:00+07:00',
+        updatedAt: '2026-06-01T10:01:00+07:00',
+      }],
+    });
+
+    render(<DatabaseMaintenanceSettings />);
+
+    await waitFor(() => expect(mocks.getDatabaseBackupOverviewMock).toHaveBeenCalled());
+    fireEvent.click(screen.getAllByRole('button')[4]);
+    const retryButton = await screen.findByRole('button', { name: /Повторить/i });
+    expect((retryButton as HTMLButtonElement).disabled).toBe(true);
+    expect(retryButton.getAttribute('title')).toBe('Сначала подключите Яндекс.Диск заново');
+  });
+
   it('hides deleted objects maintenance tab without audit view permission', async () => {
     mocks.authState.isAdmin = false;
     mocks.permissionsState.audit = {

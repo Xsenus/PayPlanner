@@ -6,6 +6,7 @@ import { defaultRolePermissions } from '../../types/permissions';
 
 const apiMocks = vi.hoisted(() => ({
   getLegalEntitiesPaged: vi.fn(),
+  getLegalEntity: vi.fn(),
 }));
 
 const permissionMocks = vi.hoisted(() => ({
@@ -20,7 +21,7 @@ const toastMocks = vi.hoisted(() => ({
 vi.mock('../../services/api', () => ({
   apiService: {
     getLegalEntitiesPaged: apiMocks.getLegalEntitiesPaged,
-    getLegalEntity: vi.fn(),
+    getLegalEntity: apiMocks.getLegalEntity,
     createLegalEntity: vi.fn(),
     updateLegalEntity: vi.fn(),
     deleteLegalEntity: vi.fn(),
@@ -76,7 +77,9 @@ vi.mock('../ui/TableColumnSettings', () => ({
 }));
 
 vi.mock('./LegalEntityModal', () => ({
-  LegalEntityModal: () => null,
+  LegalEntityModal: ({ isOpen, onBack }: { isOpen: boolean; onBack: () => void }) => (
+    isOpen ? <button type="button" onClick={onBack}>Назад из карточки</button> : null
+  ),
 }));
 
 const legalEntity = {
@@ -109,6 +112,8 @@ const legalEntity = {
 describe('LegalEntities permissions', () => {
   beforeEach(() => {
     apiMocks.getLegalEntitiesPaged.mockReset();
+    apiMocks.getLegalEntity.mockReset();
+    apiMocks.getLegalEntity.mockResolvedValue(legalEntity);
     apiMocks.getLegalEntitiesPaged.mockResolvedValue({
       items: [legalEntity],
       total: 1,
@@ -131,6 +136,19 @@ describe('LegalEntities permissions', () => {
       payments: { ...defaultRolePermissions.payments, canView: false },
     });
     window.localStorage.clear();
+  });
+
+  it('opens a legal entity directly without loading or showing the registry', async () => {
+    const onDetailClose = vi.fn();
+
+    render(<LegalEntities initialLegalEntityId={legalEntity.id} detailOnly onDetailClose={onDetailClose} />);
+
+    await waitFor(() => expect(apiMocks.getLegalEntity).toHaveBeenCalledWith(legalEntity.id));
+    expect(apiMocks.getLegalEntitiesPaged).not.toHaveBeenCalled();
+    expect(screen.queryByRole('heading', { name: 'Юридические лица' })).toBeNull();
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Назад из карточки' }));
+    expect(onDetailClose).toHaveBeenCalledTimes(1);
   });
 
   it('hides related finance and case columns when role cannot view those sections', async () => {

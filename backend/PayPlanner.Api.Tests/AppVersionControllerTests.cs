@@ -9,6 +9,7 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
 using Xunit;
 
@@ -245,6 +246,36 @@ public sealed class AppVersionControllerTests
     }
 
     [Fact]
+    public async Task GetAdminReleasesPaged_ReturnsRequestedPageAndSearchResults()
+    {
+        await using var scope = await CreateScopeAsync();
+        var user = await CreateUserAsync(scope.Db, "release-paged-admin@example.test", isAdmin: true);
+        var releases = Enumerable.Range(1, 25)
+            .Select(index => Release(
+                $"2026-08-{index:00}-release",
+                version: $"1.13.{index}",
+                releasedAt: new DateTime(2026, 8, index)))
+            .ToArray();
+        releases[12].Title = "Особый поиск релиза";
+        var controller = CreateController(scope.Db, user.Id, releases);
+
+        var pageResult = await controller.GetAdminReleasesPaged(2, 10, null, CancellationToken.None);
+        var searchResult = await controller.GetAdminReleasesPaged(1, 20, "ОСОБЫЙ", CancellationToken.None);
+
+        var pageOk = Assert.IsType<OkObjectResult>(pageResult.Result);
+        var page = Assert.IsType<PagedResponse<AppReleaseAdminDto>>(pageOk.Value);
+        Assert.Equal(25, page.Total);
+        Assert.Equal(2, page.Page);
+        Assert.Equal(10, page.PageSize);
+        Assert.Equal(10, page.Items.Count);
+
+        var searchOk = Assert.IsType<OkObjectResult>(searchResult.Result);
+        var search = Assert.IsType<PagedResponse<AppReleaseAdminDto>>(searchOk.Value);
+        Assert.Equal(1, search.Total);
+        Assert.Equal("Особый поиск релиза", Assert.Single(search.Items).Title);
+    }
+
+    [Fact]
     public async Task AdminReleaseEndpoints_ReturnForbid_ForNonAdminUser()
     {
         await using var scope = await CreateScopeAsync();
@@ -265,11 +296,13 @@ public sealed class AppVersionControllerTests
             [new SaveAppReleaseItemRequest("new", "Forbidden item")]);
 
         var listResult = await controller.GetAdminReleases(CancellationToken.None);
+        var pagedListResult = await controller.GetAdminReleasesPaged(1, 20, null, CancellationToken.None);
         var createResult = await controller.CreateRelease(request, CancellationToken.None);
         var updateResult = await controller.UpdateRelease(releaseId, request, CancellationToken.None);
         var deleteResult = await controller.DeleteRelease(releaseId, CancellationToken.None);
 
         Assert.IsType<ForbidResult>(listResult.Result);
+        Assert.IsType<ForbidResult>(pagedListResult.Result);
         Assert.IsType<ForbidResult>(createResult.Result);
         Assert.IsType<ForbidResult>(updateResult.Result);
         Assert.IsType<ForbidResult>(deleteResult);

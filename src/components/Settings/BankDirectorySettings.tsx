@@ -135,7 +135,7 @@ export function BankDirectorySettings() {
   const handleSave = async () => {
     const payload = normalizePayload(form);
     if (!payload.name) {
-      toast.error('Укажи название банка.', 'Банки');
+      toast.error('Укажите название банка.', 'Банки');
       return;
     }
 

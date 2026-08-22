@@ -362,6 +362,11 @@ namespace PayPlanner.Api.Models
         public ICollection<InvoiceClientCase> InvoiceClientCases { get; set; } = new List<InvoiceClientCase>();
 
         /// <summary>
+        /// Договоры, напрямую связанные с делом.
+        /// </summary>
+        public ICollection<ClientCaseContract> ClientCaseContracts { get; set; } = new List<ClientCaseContract>();
+
+        /// <summary>
         /// Документы, прикрепленные к делу.
         /// </summary>
         public ICollection<ClientCaseDocument> Documents { get; set; } = new List<ClientCaseDocument>();

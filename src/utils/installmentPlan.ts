@@ -31,6 +31,17 @@ function normalizeNumber(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0;
 }
 
+function readMetadataField(record: Record<string, unknown>, field: string): unknown {
+  const pascalField = `${field.charAt(0).toUpperCase()}${field.slice(1)}`;
+  return record[field] ?? record[pascalField];
+}
+
+function normalizeRoundingMode(value: unknown): InstallmentRoundingMode {
+  if (value === 1 || String(value).toLowerCase() === 'down') return 'down';
+  if (value === 2 || String(value).toLowerCase() === 'up') return 'up';
+  return 'none';
+}
+
 export function createInstallmentPlanInput(
   request: InstallmentRequest,
   response: InstallmentResponse,
@@ -102,55 +113,62 @@ export function parseInstallmentPaymentMetadata(systemNotes?: string | null): In
   }
 
   try {
-    const parsed = JSON.parse(rawJson) as Partial<InstallmentPaymentMetadata>;
+    const parsed = JSON.parse(rawJson) as Record<string, unknown>;
     if (!parsed || typeof parsed !== 'object') {
       return null;
     }
 
-    const item = parsed.item;
+    const item = readMetadataField(parsed, 'item') as Record<string, unknown> | undefined;
     if (!item || typeof item !== 'object') {
       return null;
     }
 
-    const sequence = Math.max(1, Math.trunc(normalizeNumber(parsed.sequence)));
-    const date = toDateInputValue(typeof item.date === 'string' ? item.date : '') || '';
+    const sequence = Math.max(1, Math.trunc(normalizeNumber(readMetadataField(parsed, 'sequence'))));
+    const itemDate = readMetadataField(item, 'date');
+    const date = toDateInputValue(typeof itemDate === 'string' ? itemDate : '') || '';
     if (!date) {
       return null;
     }
 
+    const startDate = readMetadataField(parsed, 'startDate');
+    const roundingStep = readMetadataField(parsed, 'roundingStep');
+    const loanAmount = readMetadataField(parsed, 'loanAmount');
+    const baseMonthlyPayment = readMetadataField(parsed, 'baseMonthlyPayment');
+    const roundedMonthlyPayment = readMetadataField(parsed, 'roundedMonthlyPayment');
+
     return {
       sequence,
-      total: normalizeNumber(parsed.total),
-      downPayment: normalizeNumber(parsed.downPayment),
-      annualRate: normalizeNumber(parsed.annualRate),
-      months: Math.max(1, Math.trunc(normalizeNumber(parsed.months))),
-      startDate: toDateInputValue(typeof parsed.startDate === 'string' ? parsed.startDate : '') || '',
-      roundingMode: (parsed.roundingMode ?? 'none') as InstallmentRoundingMode,
+      total: normalizeNumber(readMetadataField(parsed, 'total')),
+      downPayment: normalizeNumber(readMetadataField(parsed, 'downPayment')),
+      annualRate: normalizeNumber(readMetadataField(parsed, 'annualRate')),
+      months: Math.max(1, Math.trunc(normalizeNumber(readMetadataField(parsed, 'months')))),
+      startDate: toDateInputValue(typeof startDate === 'string' ? startDate : '') || '',
+      roundingMode: normalizeRoundingMode(readMetadataField(parsed, 'roundingMode')),
       roundingStep:
-        typeof parsed.roundingStep === 'number' && Number.isFinite(parsed.roundingStep)
-          ? parsed.roundingStep
+        typeof roundingStep === 'number' && Number.isFinite(roundingStep)
+          ? roundingStep
           : null,
-      toPay: normalizeNumber(parsed.toPay),
-      overpay: normalizeNumber(parsed.overpay),
+      toPay: normalizeNumber(readMetadataField(parsed, 'toPay')),
+      overpay: normalizeNumber(readMetadataField(parsed, 'overpay')),
       loanAmount:
-        typeof parsed.loanAmount === 'number' && Number.isFinite(parsed.loanAmount)
-          ? parsed.loanAmount
+        typeof loanAmount === 'number' && Number.isFinite(loanAmount)
+          ? loanAmount
           : null,
       baseMonthlyPayment:
-        typeof parsed.baseMonthlyPayment === 'number' && Number.isFinite(parsed.baseMonthlyPayment)
-          ? parsed.baseMonthlyPayment
+        typeof baseMonthlyPayment === 'number' && Number.isFinite(baseMonthlyPayment)
+          ? baseMonthlyPayment
           : null,
       roundedMonthlyPayment:
-        typeof parsed.roundedMonthlyPayment === 'number' && Number.isFinite(parsed.roundedMonthlyPayment)
-          ? parsed.roundedMonthlyPayment
+        typeof roundedMonthlyPayment === 'number' && Number.isFinite(roundedMonthlyPayment)
+          ? roundedMonthlyPayment
           : null,
       item: {
         sequence,
         date,
-        principal: normalizeNumber(item.principal),
-        interest: normalizeNumber(item.interest),
-        payment: normalizeNumber(item.payment),
-        balance: normalizeNumber(item.balance),
+        principal: normalizeNumber(readMetadataField(item, 'principal')),
+        interest: normalizeNumber(readMetadataField(item, 'interest')),
+        payment: normalizeNumber(readMetadataField(item, 'payment')),
+        balance: normalizeNumber(readMetadataField(item, 'balance')),
       },
     };
   } catch {

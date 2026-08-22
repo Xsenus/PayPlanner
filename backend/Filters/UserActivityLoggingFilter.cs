@@ -141,6 +141,11 @@ public class UserActivityLoggingFilter : IAsyncActionFilter
 
         foreach (var (key, value) in context.ActionArguments)
         {
+            if (value is CancellationToken)
+            {
+                continue;
+            }
+
             metadata[key] = SimplifyArgument(value);
         }
 

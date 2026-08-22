@@ -205,6 +205,36 @@ public class NotificationInboxController : ControllerBase
         return Ok(new UserNotificationBulkActionResultDto { UpdatedCount = items.Count });
     }
 
+    [HttpPost("bulk/unarchive")]
+    public async Task<ActionResult<UserNotificationBulkActionResultDto>> UnarchiveSelected([FromBody] BulkIdsRequest request, CancellationToken ct)
+    {
+        var items = await FindOwnedNotificationsAsync(request?.Ids, ct);
+        if (items is null)
+        {
+            return Unauthorized();
+        }
+
+        var updatedCount = 0;
+        foreach (var item in items)
+        {
+            if (!item.IsArchived)
+            {
+                continue;
+            }
+
+            item.IsArchived = false;
+            item.ArchivedAt = null;
+            updatedCount += 1;
+        }
+
+        if (updatedCount > 0)
+        {
+            await _context.SaveChangesAsync(ct);
+        }
+
+        return Ok(new UserNotificationBulkActionResultDto { UpdatedCount = updatedCount });
+    }
+
     [HttpPost("bulk/delete")]
     public async Task<ActionResult<UserNotificationBulkActionResultDto>> DeleteSelected([FromBody] BulkIdsRequest request, CancellationToken ct)
     {
@@ -274,6 +304,21 @@ public class NotificationInboxController : ControllerBase
             item.ArchivedAt = DateTime.UtcNow;
         }
 
+        await _context.SaveChangesAsync(ct);
+        return Ok(Map(item));
+    }
+
+    [HttpPatch("{id:int}/unarchive")]
+    public async Task<ActionResult<UserNotificationDto>> Unarchive(int id, CancellationToken ct)
+    {
+        var item = await FindOwnedNotificationAsync(id, ct);
+        if (item is null)
+        {
+            return NotFound();
+        }
+
+        item.IsArchived = false;
+        item.ArchivedAt = null;
         await _context.SaveChangesAsync(ct);
         return Ok(Map(item));
     }
@@ -621,11 +666,11 @@ public class NotificationInboxController : ControllerBase
             return query;
         }
 
+        // Фильтры журнала применяются и к историческим уведомлениям: завершённая или
+        // отменённая задача не должна исчезать из поиска по сотруднику, клиенту и роли.
         var taskQuery = context.TaskJournalItems
+            .IgnoreQueryFilters()
             .AsNoTracking()
-            .Where(task =>
-                task.Status == null ||
-                (task.Status.ToLower() != "done" && task.Status.ToLower() != "cancelled"))
             .AsQueryable();
 
         if (hasClientFilter)
@@ -741,9 +786,7 @@ public class NotificationInboxController : ControllerBase
         }
 
         var visibleTaskIds = context.TaskJournalItems
-            .Where(task =>
-                task.Status == null ||
-                (task.Status.ToLower() != "done" && task.Status.ToLower() != "cancelled"))
+            .IgnoreQueryFilters()
             .ApplyTaskVisibility(visibility.Tasks)
             .Select(task => task.Id);
         var visibleCaseIds = context.ClientCases

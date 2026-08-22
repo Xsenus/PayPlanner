@@ -81,10 +81,17 @@ export function UserMergeSettings() {
 
   const usersById = useMemo(() => new Map(users.map((user) => [user.id, user])), [users]);
 
-  const targetUser = form.targetUserId ? usersById.get(form.targetUserId) ?? null : null;
-  const sourceUsers = form.sourceUserIds
-    .map((userId) => usersById.get(userId) ?? null)
-    .filter(Boolean) as User[];
+  const targetUser = useMemo(
+    () => (form.targetUserId ? usersById.get(form.targetUserId) ?? null : null),
+    [form.targetUserId, usersById],
+  );
+  const sourceUsers = useMemo(
+    () =>
+      form.sourceUserIds
+        .map((userId) => usersById.get(userId) ?? null)
+        .filter(Boolean) as User[],
+    [form.sourceUserIds, usersById],
+  );
 
   const targetCandidates = useMemo(() => {
     const query = normalize(form.targetSearch);
@@ -135,26 +142,44 @@ export function UserMergeSettings() {
 
   useEffect(() => {
     if (!targetUser) {
-      setForm((current) => ({
-        ...current,
-        sourceUserIds: [],
-        primaryEmail: '',
-        primaryPhoneNumber: '',
-      }));
+      setForm((current) => {
+        if (
+          current.sourceUserIds.length === 0 &&
+          current.primaryEmail === '' &&
+          current.primaryPhoneNumber === ''
+        ) {
+          return current;
+        }
+
+        return {
+          ...current,
+          sourceUserIds: [],
+          primaryEmail: '',
+          primaryPhoneNumber: '',
+        };
+      });
       return;
     }
 
-    setForm((current) => ({
-      ...current,
-      primaryEmail:
+    setForm((current) => {
+      const primaryEmail =
         current.primaryEmail && emailOptions.includes(current.primaryEmail)
           ? current.primaryEmail
-          : emailOptions[0] ?? '',
-      primaryPhoneNumber:
+          : emailOptions[0] ?? '';
+      const primaryPhoneNumber =
         current.primaryPhoneNumber && phoneOptions.includes(current.primaryPhoneNumber)
           ? current.primaryPhoneNumber
-          : phoneOptions[0] ?? '',
-    }));
+          : phoneOptions[0] ?? '';
+
+      if (
+        primaryEmail === current.primaryEmail &&
+        primaryPhoneNumber === current.primaryPhoneNumber
+      ) {
+        return current;
+      }
+
+      return { ...current, primaryEmail, primaryPhoneNumber };
+    });
   }, [emailOptions, phoneOptions, targetUser]);
 
   const toggleSourceUser = (userId: number) =>

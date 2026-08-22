@@ -128,7 +128,9 @@ public sealed class PushSubscriptionsController : ControllerBase
             UsersWithActiveSubscriptionsCount = subscriptionStatistics?.UsersWithActive ?? 0,
             LastSuccessfulDeliveryAt = lastSuccessfulDeliveryAt,
             LastFailedDeliveryAt = lastFailedDelivery?.CreatedAt,
-            LastDeliveryError = lastFailedDelivery?.Error,
+            LastDeliveryError = NotificationDeliveryPresentation.ResolveError(
+                NotificationChannels.WebPush,
+                lastFailedDelivery?.Error),
         });
     }
 

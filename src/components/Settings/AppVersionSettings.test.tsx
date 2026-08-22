@@ -1,10 +1,10 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppReleaseAdminDto } from '../../services/api';
 import { AppVersionSettings } from './AppVersionSettings';
 
 const mocks = vi.hoisted(() => ({
-  getAdminAppReleases: vi.fn(),
+  getAdminAppReleasesPaged: vi.fn(),
   toast: { error: vi.fn(), success: vi.fn() },
   dialog: { confirm: vi.fn() },
 }));
@@ -15,7 +15,7 @@ vi.mock('../../services/api', async () => {
     ...actual,
     apiService: {
       ...actual.apiService,
-      getAdminAppReleases: mocks.getAdminAppReleases,
+      getAdminAppReleasesPaged: mocks.getAdminAppReleasesPaged,
     },
   };
 });
@@ -44,8 +44,13 @@ const release: AppReleaseAdminDto = {
 
 describe('AppVersionSettings', () => {
   beforeEach(() => {
-    mocks.getAdminAppReleases.mockReset();
-    mocks.getAdminAppReleases.mockResolvedValue([release]);
+    mocks.getAdminAppReleasesPaged.mockReset();
+    mocks.getAdminAppReleasesPaged.mockResolvedValue({
+      items: [release],
+      total: 855,
+      page: 1,
+      pageSize: 20,
+    });
     mocks.toast.error.mockReset();
     mocks.toast.success.mockReset();
     mocks.dialog.confirm.mockReset();
@@ -54,12 +59,31 @@ describe('AppVersionSettings', () => {
   it('не позволяет колонкам и длинному идентификатору расширять мобильную страницу', async () => {
     render(<AppVersionSettings />);
 
-    await waitFor(() => expect(mocks.getAdminAppReleases).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mocks.getAdminAppReleasesPaged).toHaveBeenCalledTimes(1));
+
+    expect(mocks.getAdminAppReleasesPaged).toHaveBeenCalledWith({ page: 1, pageSize: 20, search: '' });
+    expect(screen.getByText('855')).toBeTruthy();
 
     expect(screen.getByTestId('app-release-settings').className).toContain('grid-cols-[minmax(0,1fr)]');
     expect(screen.getByTestId('app-release-settings').className).toContain('xl:grid-cols-[320px_minmax(0,1fr)]');
     expect(screen.getByTestId('app-release-list').className).toContain('min-w-0');
+    expect(screen.getByTestId('app-release-list').textContent).toContain('Всего релизов');
     expect(screen.getByTestId('app-release-editor').className).toContain('min-w-0');
     expect(screen.getByText(release.releaseId).className).toContain('break-all');
+  });
+
+  it('запрашивает следующую страницу по кнопке пагинации', async () => {
+    render(<AppVersionSettings />);
+    await waitFor(() => expect(mocks.getAdminAppReleasesPaged).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Вперёд' }));
+
+    await waitFor(() =>
+      expect(mocks.getAdminAppReleasesPaged).toHaveBeenLastCalledWith({
+        page: 2,
+        pageSize: 20,
+        search: '',
+      }),
+    );
   });
 });

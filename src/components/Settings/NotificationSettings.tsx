@@ -33,6 +33,7 @@ import {
 } from '../../utils/userNotificationPreferences';
 import { AdminWebPushGuide } from '../Notifications/NotificationHelp';
 import { DEFAULT_TIME_ZONE_ID, USER_TIME_ZONE_OPTIONS } from '../../utils/timeZoneOptions';
+import { TablePagination } from '../ui/TablePagination';
 
 type SenderForm = {
   id?: number;
@@ -232,6 +233,26 @@ interface NotificationSettingsProps {
   canEdit?: boolean;
 }
 
+export const SMS_TEST_DELIVERY_GRID_CLASS =
+  'mt-3 grid min-w-0 gap-3 2xl:grid-cols-[minmax(0,0.8fr)_minmax(0,1.4fr)_auto] 2xl:items-end';
+
+// eslint-disable-next-line react-refresh/only-export-components -- фильтр экспортируется для проверки доступных каналов.
+export function notificationPurposesForChannel(
+  purposes: NotificationPurposeDto[],
+  channel: NotificationChannel,
+) {
+  return purposes.filter((purpose) => {
+    const channels = purpose.channels?.length
+      ? purpose.channels
+      : purpose.key === 'telegramAuth'
+        ? ['telegram']
+        : purpose.key === 'contractClient'
+          ? ['email']
+          : ['email', 'telegram'];
+    return channels.includes(channel);
+  });
+}
+
 function createBlankForm(channel: NotificationChannel = 'email', nextOrder = 10): SenderForm {
   return {
     channel,
@@ -341,11 +362,18 @@ function formFromSender(sender: NotificationSenderDto): SenderForm {
   };
 }
 
-function channelLabel(channel: NotificationChannel) {
-  if (channel === 'telegram') return 'Telegram';
-  if (channel === 'sms') return 'SMS';
-  return 'Email';
+// eslint-disable-next-line react-refresh/only-export-components -- форматтер экспортируется для проверки пользовательских подписей.
+export function notificationDeliveryChannelLabel(channel: string) {
+  const normalized = channel.trim().toLowerCase();
+  if (normalized === 'telegram') return 'Telegram';
+  if (normalized === 'sms') return 'SMS';
+  if (normalized === 'webpush') return 'Web Push';
+  if (normalized === 'max') return 'MAX';
+  if (normalized === 'email') return 'Email';
+  return channel.trim() || '—';
 }
+
+const channelLabel = notificationDeliveryChannelLabel;
 
 function channelCatalogIcon(key: string): typeof Monitor {
   if (key === 'email') return Mail;
@@ -405,6 +433,8 @@ export function NotificationSettings({ canEdit = true }: NotificationSettingsPro
   const [deliveriesTotal, setDeliveriesTotal] = useState(0);
   const [deliveriesLoading, setDeliveriesLoading] = useState(false);
   const [deliveryStatus, setDeliveryStatus] = useState('failed');
+  const [deliveryPage, setDeliveryPage] = useState(1);
+  const [deliveryPageSize, setDeliveryPageSize] = useState(20);
   const [retryingDeliveryId, setRetryingDeliveryId] = useState<number | null>(null);
   const [notificationTypes, setNotificationTypes] = useState<UserNotificationTypeDto[]>([]);
   const [rolePreferences, setRolePreferences] = useState<NotificationRolePreferenceDto[]>([]);
@@ -475,8 +505,8 @@ export function NotificationSettings({ canEdit = true }: NotificationSettingsPro
     try {
       const result = await apiService.getNotificationDeliveries({
         status: deliveryStatus === 'all' ? null : deliveryStatus,
-        page: 1,
-        pageSize: 20,
+        page: deliveryPage,
+        pageSize: deliveryPageSize,
       });
       setDeliveries(result.items);
       setDeliveriesTotal(result.total);
@@ -488,7 +518,7 @@ export function NotificationSettings({ canEdit = true }: NotificationSettingsPro
     } finally {
       setDeliveriesLoading(false);
     }
-  }, [deliveryStatus, toast]);
+  }, [deliveryPage, deliveryPageSize, deliveryStatus, toast]);
 
   useEffect(() => {
     if (route.mode === 'list') {
@@ -504,6 +534,10 @@ export function NotificationSettings({ canEdit = true }: NotificationSettingsPro
 
   const senders = useMemo(() => settings?.senders ?? [], [settings?.senders]);
   const purposes = useMemo(() => settings?.purposes ?? [], [settings?.purposes]);
+  const availablePurposes = useMemo(
+    () => notificationPurposesForChannel(purposes, form.channel),
+    [form.channel, purposes],
+  );
   const emailSenders = useMemo(() => senders.filter((item) => item.channel === 'email'), [senders]);
   const telegramSenders = useMemo(() => senders.filter((item) => item.channel === 'telegram'), [senders]);
   const selectedSender = form.id ? senders.find((item) => item.id === form.id) : null;
@@ -803,7 +837,7 @@ export function NotificationSettings({ canEdit = true }: NotificationSettingsPro
     channel: form.channel,
     name: form.name.trim(),
     isEnabled: form.isEnabled,
-    purposes: form.purposes,
+    purposes: form.purposes.filter((purpose) => availablePurposes.some((item) => item.key === purpose)),
     sortOrder: form.sortOrder,
     email: form.channel === 'email'
       ? {
@@ -1100,7 +1134,7 @@ export function NotificationSettings({ canEdit = true }: NotificationSettingsPro
                 </p>
               </div>
               <span className="rounded-full border border-blue-100 bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
-                {channelCatalog.filter((item) => item.isEnabled).length} из {channelCatalog.length || 0} активны
+                {channelCatalog.filter((item) => item.isEnabled).length} из {channelCatalog.length || 0} доступны в системе
               </span>
             </div>
 
@@ -1591,10 +1625,20 @@ export function NotificationSettings({ canEdit = true }: NotificationSettingsPro
             items={deliveries}
             total={deliveriesTotal}
             status={deliveryStatus}
+            page={deliveryPage}
+            pageSize={deliveryPageSize}
             loading={deliveriesLoading}
             retryingId={retryingDeliveryId}
             canEdit={canEdit}
-            onStatusChange={setDeliveryStatus}
+            onStatusChange={(status) => {
+              setDeliveryStatus(status);
+              setDeliveryPage(1);
+            }}
+            onPageChange={setDeliveryPage}
+            onPageSizeChange={(pageSize) => {
+              setDeliveryPageSize(pageSize);
+              setDeliveryPage(1);
+            }}
             onRefresh={loadDeliveries}
             onRetry={retryDelivery}
           />
@@ -1688,7 +1732,7 @@ export function NotificationSettings({ canEdit = true }: NotificationSettingsPro
               <div className="mt-5">
                 <div className="mb-2 text-sm font-semibold text-gray-800">Сценарии</div>
                 <div className="grid gap-2 md:grid-cols-2">
-                  {purposes.map((purpose) => (
+                  {availablePurposes.map((purpose) => (
                     <label key={purpose.key} className="flex items-start gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-700">
                       <SystemCheckbox
                         type="checkbox"
@@ -2251,8 +2295,8 @@ function SmsSettingsPanel({
           </span>
         </div>
 
-        <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(220px,0.8fr)_minmax(320px,1.4fr)_auto] lg:items-end">
-          <label className="text-sm font-medium text-gray-700">
+        <div data-testid="sms-test-delivery-grid" className={SMS_TEST_DELIVERY_GRID_CLASS}>
+          <label className="min-w-0 text-sm font-medium text-gray-700">
             Мобильный номер
             <input
               type="tel"
@@ -2265,7 +2309,7 @@ function SmsSettingsPanel({
               className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
             />
           </label>
-          <label className="text-sm font-medium text-gray-700">
+          <label className="min-w-0 text-sm font-medium text-gray-700">
             Текст
             <input
               value={testMessage}
@@ -2653,24 +2697,32 @@ function smsProviderStatusLabel(status?: string | null) {
   }
 }
 
-function DeliveryLogPanel({
+export function DeliveryLogPanel({
   items,
   total,
   status,
+  page,
+  pageSize,
   loading,
   retryingId,
   canEdit,
   onStatusChange,
+  onPageChange,
+  onPageSizeChange,
   onRefresh,
   onRetry,
 }: {
   items: NotificationDeliveryDto[];
   total: number;
   status: string;
+  page: number;
+  pageSize: number;
   loading: boolean;
   retryingId: number | null;
   canEdit: boolean;
   onStatusChange: (status: string) => void;
+  onPageChange: (page: number) => void;
+  onPageSizeChange: (pageSize: number) => void;
   onRefresh: () => void | Promise<void>;
   onRetry: (delivery: NotificationDeliveryDto) => void | Promise<void>;
 }) {
@@ -2679,7 +2731,7 @@ function DeliveryLogPanel({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h4 className="text-base font-semibold text-gray-900">Журнал доставки</h4>
-          <p className="text-sm text-gray-500">Последние попытки отправки email, Telegram и SMS. Ошибочные и пропущенные можно повторить вручную.</p>
+          <p className="text-sm text-gray-500">Последние попытки отправки по внешним каналам. Ошибочные и пропущенные можно повторить вручную.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <SystemSelect
@@ -2727,11 +2779,12 @@ function DeliveryLogPanel({
               </tr>
             ) : (
               items.map((item) => {
-                const canRetry = item.status === 'failed' || item.status === 'skipped';
+                const canRetry = (item.status === 'failed' || item.status === 'skipped')
+                  && (item.channel === 'email' || item.channel === 'telegram');
                 return (
                   <tr key={item.id} className="align-top hover:bg-gray-50">
                     <td className="whitespace-nowrap px-4 py-3 text-gray-700">{formatDeliveryDate(item.createdAt)}</td>
-                    <td className="px-4 py-3 text-gray-700">{channelLabel(item.channel as NotificationChannel)}</td>
+                    <td className="px-4 py-3 text-gray-700">{notificationDeliveryChannelLabel(item.channel)}</td>
                     <td className="max-w-[220px] px-4 py-3 text-gray-700">
                       <div className="truncate" title={item.recipientAddress}>{item.recipientAddress || '—'}</div>
                       {item.senderName ? <div className="text-xs text-gray-500">{item.senderName}</div> : null}
@@ -2776,7 +2829,17 @@ function DeliveryLogPanel({
         </table>
       </div>
 
-      <div className="mt-3 text-xs text-gray-500">Показано {items.length} из {total}</div>
+      <TablePagination
+        page={page}
+        totalPages={Math.max(1, Math.ceil(total / pageSize))}
+        totalItems={total}
+        pageSize={pageSize}
+        pageSizeOptions={[20, 50, 100]}
+        onPageChange={onPageChange}
+        onPageSizeChange={onPageSizeChange}
+        className="mt-3 rounded-xl border border-slate-200 py-3"
+        recordsLabel="Доставок"
+      />
     </section>
   );
 }

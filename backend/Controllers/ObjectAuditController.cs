@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Text.RegularExpressions;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
@@ -43,6 +44,9 @@ public class ObjectAuditController : ControllerBase
         [FromQuery] DateTime? to,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 50,
+        [FromQuery] string[]? searchAliases = null,
+        [FromQuery] DateTimeOffset? fromUtc = null,
+        [FromQuery] DateTimeOffset? toUtcExclusive = null,
         CancellationToken ct = default)
     {
         var access = await GetDeletedObjectsAccessAsync(ct);
@@ -72,13 +76,23 @@ public class ObjectAuditController : ControllerBase
             query = query.Where(item => item.Action.ToLower() == normalizedAction);
         }
 
-        if (from.HasValue)
+        if (fromUtc.HasValue)
+        {
+            var boundary = fromUtc.Value.UtcDateTime;
+            query = query.Where(item => item.CreatedAt >= boundary);
+        }
+        else if (from.HasValue)
         {
             var fromDate = from.Value.Date;
             query = query.Where(item => item.CreatedAt >= fromDate);
         }
 
-        if (to.HasValue)
+        if (toUtcExclusive.HasValue)
+        {
+            var boundary = toUtcExclusive.Value.UtcDateTime;
+            query = query.Where(item => item.CreatedAt < boundary);
+        }
+        else if (to.HasValue)
         {
             var toExclusive = to.Value.Date.AddDays(1);
             query = query.Where(item => item.CreatedAt < toExclusive);
@@ -86,48 +100,80 @@ public class ObjectAuditController : ControllerBase
 
         var actorFilter = actor?.Trim();
         var searchFilter = search?.Trim();
-        var orderedQuery = query
-            .OrderByDescending(item => item.CreatedAt)
-            .ThenByDescending(item => item.Id);
+        var normalizedSearchAliases = (searchAliases ?? [])
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Select(item => item.Trim())
+            .Where(item => item.Length <= 80)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(50)
+            .ToArray();
+        var supportsServerSideCaseInsensitiveSearch = _db.Database.IsNpgsql();
 
-        List<ObjectAuditEventDto> items;
-        int total;
-
-        if (!string.IsNullOrWhiteSpace(actorFilter) || !string.IsNullOrWhiteSpace(searchFilter))
+        if (supportsServerSideCaseInsensitiveSearch && !string.IsNullOrWhiteSpace(actorFilter))
         {
-            var filteredItems = (await orderedQuery.ToListAsync(ct))
+            var actorPattern = $"%{EscapeLikePattern(actorFilter)}%";
+            query = query.Where(item => EF.Functions.ILike(item.ActorUserName ?? string.Empty, actorPattern, "\\"));
+        }
+
+        if (supportsServerSideCaseInsensitiveSearch && !string.IsNullOrWhiteSpace(searchFilter))
+        {
+            var searchPattern = $"%{EscapeLikePattern(searchFilter)}%";
+            var aliasPattern = normalizedSearchAliases.Length > 0
+                ? string.Join('|', normalizedSearchAliases.Select(Regex.Escape))
+                : null;
+            var parsedObjectId = int.TryParse(searchFilter, out var objectId) ? objectId : (int?)null;
+            query = query.Where(item =>
+                EF.Functions.ILike(item.ObjectType, searchPattern, "\\")
+                || EF.Functions.ILike(item.Description ?? string.Empty, searchPattern, "\\")
+                || EF.Functions.ILike(item.MetadataJson ?? string.Empty, searchPattern, "\\")
+                || EF.Functions.ILike(item.ActorUserName ?? string.Empty, searchPattern, "\\")
+                || (aliasPattern != null && Regex.IsMatch(item.MetadataJson ?? string.Empty, aliasPattern, RegexOptions.IgnoreCase))
+                || (parsedObjectId.HasValue && item.ObjectId == parsedObjectId.Value));
+        }
+
+        if (!supportsServerSideCaseInsensitiveSearch
+            && (!string.IsNullOrWhiteSpace(actorFilter) || !string.IsNullOrWhiteSpace(searchFilter)))
+        {
+            var filteredItems = (await query
+                    .OrderByDescending(item => item.CreatedAt)
+                    .ThenByDescending(item => item.Id)
+                    .ToListAsync(ct))
                 .Where(item => MatchesActorFilter(item, actorFilter))
-                .Where(item => MatchesSearchFilter(item, searchFilter))
+                .Where(item => MatchesSearchFilter(item, searchFilter, normalizedSearchAliases))
                 .ToList();
 
-            total = filteredItems.Count;
-            items = filteredItems
-                .Skip((page - 1) * pageSize)
-                .Take(pageSize)
-                .Select(MapAuditEvent)
-                .ToList();
+            return Ok(new PagedResponse<ObjectAuditEventDto>
+            {
+                Items = filteredItems
+                    .Skip((page - 1) * pageSize)
+                    .Take(pageSize)
+                    .Select(MapAuditEvent)
+                    .ToList(),
+                Total = filteredItems.Count,
+                Page = page,
+                PageSize = pageSize,
+            });
         }
-        else
-        {
-            total = await query.CountAsync(ct);
 
-            items = await orderedQuery
-                .Skip((page - 1) * pageSize)
-                .Take(pageSize)
-                .Select(item => new ObjectAuditEventDto
-                {
-                    Id = item.Id,
-                    ObjectType = item.ObjectType,
-                    ObjectId = item.ObjectId,
-                    Action = item.Action,
-                    Description = item.Description,
-                    ActorUserId = item.ActorUserId,
-                    ActorUserName = item.ActorUserName,
-                    MetadataJson = item.MetadataJson,
-                    CreatedAt = item.CreatedAt,
-                })
-                .ToListAsync(ct);
-        }
+        var total = await query.CountAsync(ct);
+        var items = await query
+            .OrderByDescending(item => item.CreatedAt)
+            .ThenByDescending(item => item.Id)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .Select(item => new ObjectAuditEventDto
+            {
+                Id = item.Id,
+                ObjectType = item.ObjectType,
+                ObjectId = item.ObjectId,
+                Action = item.Action,
+                Description = item.Description,
+                ActorUserId = item.ActorUserId,
+                ActorUserName = item.ActorUserName,
+                MetadataJson = item.MetadataJson,
+                CreatedAt = item.CreatedAt,
+            })
+            .ToListAsync(ct);
 
         return Ok(new PagedResponse<ObjectAuditEventDto>
         {
@@ -388,6 +434,11 @@ public class ObjectAuditController : ControllerBase
     private static string NormalizeObjectType(string objectType)
         => objectType.Trim().ToLowerInvariant();
 
+    private static string EscapeLikePattern(string value)
+        => value.Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("%", "\\%", StringComparison.Ordinal)
+            .Replace("_", "\\_", StringComparison.Ordinal);
+
     private static ObjectAuditEventDto MapAuditEvent(ObjectAuditEvent item)
         => new()
         {
@@ -413,7 +464,10 @@ public class ObjectAuditController : ControllerBase
             .Contains(actorFilter.Trim(), StringComparison.CurrentCultureIgnoreCase);
     }
 
-    private static bool MatchesSearchFilter(ObjectAuditEvent item, string? searchFilter)
+    private static bool MatchesSearchFilter(
+        ObjectAuditEvent item,
+        string? searchFilter,
+        IReadOnlyCollection<string> searchAliases)
     {
         if (string.IsNullOrWhiteSpace(searchFilter))
         {
@@ -425,6 +479,8 @@ public class ObjectAuditController : ControllerBase
 
         return item.ObjectType.Contains(term, StringComparison.CurrentCultureIgnoreCase)
             || (item.Description?.Contains(term, StringComparison.CurrentCultureIgnoreCase) ?? false)
+            || (item.MetadataJson?.Contains(term, StringComparison.CurrentCultureIgnoreCase) ?? false)
+            || searchAliases.Any(alias => item.MetadataJson?.Contains(alias, StringComparison.OrdinalIgnoreCase) ?? false)
             || (item.ActorUserName?.Contains(term, StringComparison.CurrentCultureIgnoreCase) ?? false)
             || (parsedObjectId.HasValue && item.ObjectId == parsedObjectId.Value);
     }

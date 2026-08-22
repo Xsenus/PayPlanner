@@ -675,7 +675,7 @@ export function InvoiceDocumentTemplateSettings() {
                 <div>
                   <div className="text-base font-semibold text-gray-900">Рабочая область шаблона</div>
                   <div className="mt-1 text-sm text-gray-600">
-                    Настрой свойства шаблона, затем переключайся между превью, HTML и списком переменных.
+                    Настройте свойства шаблона, затем переключайтесь между превью, HTML и списком переменных.
                   </div>
                 </div>
 
@@ -846,7 +846,7 @@ export function InvoiceDocumentTemplateSettings() {
                       <div>
                         <div className="text-base font-semibold text-gray-900">Живое превью документа</div>
                         <div className="mt-1 max-w-2xl text-sm text-gray-600">
-                          Здесь показан итоговый документ на демо-данных, близких к твоему образцу. Это именно тот
+                          Здесь показан итоговый документ на демо-данных, близких к вашему образцу. Это именно тот
                           печатный HTML-шаблон, который будет использоваться системой.
                         </div>
                       </div>

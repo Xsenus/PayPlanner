@@ -990,6 +990,7 @@ export interface NotificationPurposeDto {
   key: string;
   label: string;
   description: string;
+  channels?: NotificationChannel[];
 }
 
 export interface NotificationTemplateVariableDto {
@@ -1773,6 +1774,9 @@ export interface SpreadsheetImportBatchSummaryDto {
 
 export interface SpreadsheetImportBatchDetailDto extends SpreadsheetImportBatchSummaryDto {
   operations: SpreadsheetImportBatchOperationDto[];
+  operationsTotal?: number;
+  operationsPage?: number;
+  operationsPageSize?: number;
 }
 
 export interface ObjectAuditEventDto {
@@ -1789,11 +1793,14 @@ export interface ObjectAuditEventDto {
 
 export interface ObjectAuditFeedQuery {
   search?: string;
+  searchAliases?: string[];
   objectType?: string;
   action?: string;
   actor?: string;
   from?: string;
   to?: string;
+  fromUtc?: string;
+  toUtcExclusive?: string;
   page?: number;
   pageSize?: number;
 }
@@ -2501,7 +2508,13 @@ export async function extractResponseErrorMessage(response: Response): Promise<s
   if (contentType.includes('application/json') || contentType.includes('application/problem+json')) {
     try {
       const payload = await response.json() as
-        | { detail?: string; title?: string; message?: string; errors?: Record<string, string[] | string> }
+        | {
+            detail?: string;
+            title?: string;
+            message?: string;
+            missingFields?: string[];
+            errors?: Record<string, string[] | string>;
+          }
         | null;
 
       const detail = payload?.detail?.trim();
@@ -2510,6 +2523,12 @@ export async function extractResponseErrorMessage(response: Response): Promise<s
       }
 
       const message = payload?.message?.trim();
+      const missingFields = Array.isArray(payload?.missingFields)
+        ? payload.missingFields.map((field) => `${field}`.trim()).filter(Boolean)
+        : [];
+      if (message && missingFields.length > 0) {
+        return JSON.stringify({ message, missingFields });
+      }
       if (message) {
         return message;
       }
@@ -2680,6 +2699,17 @@ export class ApiService {
 
   async getAdminAppReleases() {
     return this.request<AppReleaseAdminDto[]>('/app-version/admin/releases');
+  }
+
+  async getAdminAppReleasesPaged(params?: { page?: number; pageSize?: number; search?: string }) {
+    const query = new URLSearchParams();
+    if (params?.page) query.set('page', String(params.page));
+    if (params?.pageSize) query.set('pageSize', String(params.pageSize));
+    if (params?.search?.trim()) query.set('search', params.search.trim());
+    const suffix = query.toString();
+    return this.request<PagedResult<AppReleaseAdminDto>>(
+      `/app-version/admin/releases/paged${suffix ? `?${suffix}` : ''}`,
+    );
   }
 
   async createAdminAppRelease(payload: SaveAppReleaseRequest) {
@@ -3763,8 +3793,9 @@ export class ApiService {
     return this.request<SpreadsheetImportBatchSummaryDto[]>('/database/import/spreadsheets/batches');
   }
 
-  async getSpreadsheetImportBatch(batchId: number) {
-    return this.request<SpreadsheetImportBatchDetailDto>(`/database/import/spreadsheets/batches/${batchId}`);
+  async getSpreadsheetImportBatch(batchId: number, page = 1, pageSize = 25) {
+    const query = buildQuery({ page, pageSize });
+    return this.request<SpreadsheetImportBatchDetailDto>(`/database/import/spreadsheets/batches/${batchId}${query}`);
   }
 
   async rollbackSpreadsheetImportBatch(batchId: number) {
@@ -3932,6 +3963,7 @@ export class ApiService {
     responsibleId?: number;
     search?: string;
     type?: 'Income' | 'Expense';
+    installmentsOnly?: boolean;
     sortBy?: InvoicesSortKey;
     sortDir?: SortDir;
     page?: number;
@@ -3964,6 +3996,7 @@ export class ApiService {
     responsibleId?: number;
     search?: string;
     type?: 'Income' | 'Expense';
+    installmentsOnly?: boolean;
   }, options?: { signal?: AbortSignal }) {
     const q = buildQuery(params ?? {});
     return this.request<InvoiceSummary>(`/invoices/summary${q}`, { signal: options?.signal });
@@ -4119,6 +4152,7 @@ export class ApiService {
       legalEntityId?: number;
       clientIds?: string;
       contractId?: number;
+      invoiceId?: number;
       clientRole?: ClientRole;
       payablesOnly?: boolean;
       sortBy?: 'date' | 'number' | 'amount' | 'counterparty' | 'dueDate' | 'responsible';
@@ -4667,6 +4701,12 @@ export class ApiService {
     });
   }
 
+  async unarchiveUserNotification(id: number) {
+    return this.request<UserNotificationDto>(`/notifications/inbox/${id}/unarchive`, {
+      method: 'PATCH',
+    });
+  }
+
   async snoozeUserNotification(id: number, minutes = 30) {
     return this.request<UserNotificationDto>(`/notifications/inbox/${id}/snooze`, {
       method: 'PATCH',
@@ -4676,6 +4716,13 @@ export class ApiService {
 
   async archiveUserNotifications(ids: number[]) {
     return this.request<UserNotificationBulkActionResultDto>('/notifications/inbox/bulk/archive', {
+      method: 'POST',
+      body: JSON.stringify({ ids }),
+    });
+  }
+
+  async unarchiveUserNotifications(ids: number[]) {
+    return this.request<UserNotificationBulkActionResultDto>('/notifications/inbox/bulk/unarchive', {
       method: 'POST',
       body: JSON.stringify({ ids }),
     });
@@ -8095,6 +8142,8 @@ export class ApiService {
     pageSize?: number;
     from?: string;
     to?: string;
+    fromUtc?: string;
+    toUtc?: string;
     userId?: number;
     category?: string;
     action?: string;
@@ -8102,12 +8151,15 @@ export class ApiService {
     httpMethod?: string;
     status?: UserActivityStatus;
     search?: string;
+    searchAliases?: readonly string[];
   }, options?: { signal?: AbortSignal }) {
     const q = buildQuery({
       page: params?.page ?? 1,
       pageSize: params?.pageSize ?? 50,
       from: params?.from,
       to: params?.to,
+      fromUtc: params?.fromUtc,
+      toUtc: params?.toUtc,
       userId: params?.userId,
       category: params?.category,
       action: params?.action,
@@ -8115,6 +8167,7 @@ export class ApiService {
       httpMethod: params?.httpMethod,
       status: params?.status,
       search: params?.search,
+      searchAliases: params?.searchAliases,
     });
     return this.request<UserActivityLogResponse>(`/user-activity${q}`, {
       signal: options?.signal,

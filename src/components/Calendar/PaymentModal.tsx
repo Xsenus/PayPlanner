@@ -202,7 +202,7 @@ function formatMoneyDisplayValue(value: number | string | null | undefined): str
   if (!Number.isFinite(num)) return '';
 
   const [intPart, fracPart] = num.toFixed(2).split('.');
-  return `${intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')}.${fracPart}`;
+  return `${intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')},${fracPart}`;
 }
 
 function normalizeMoneyInputValue(value: string): string {
@@ -1577,8 +1577,6 @@ export function PaymentModal({
       return;
     }
 
-    setLoading(true);
-
     const normalizedDate = fromInputToApiDate(formData.date)!;
     const normalizedPaidDate =
       formData.isPaid && formData.paidDate ? fromInputToApiDate(formData.paidDate) : undefined;
@@ -1618,6 +1616,8 @@ export function PaymentModal({
         return;
       }
     }
+
+    setLoading(true);
 
     try {
       const baseAmount = shouldCreateRemainder ? Number(paidForRemainder.toFixed(2)) : amountNum;
@@ -2886,7 +2886,7 @@ export function PaymentModal({
               onClick={onClose}
               type="button"
               className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-              aria-label="Close">
+              aria-label="Закрыть">
               <X size={20} />
             </button>
           </div>
@@ -3076,14 +3076,14 @@ export function PaymentModal({
                         <label className={centeredLabelClass}>{t('dealType')}</label>
                         <SystemSelect name="dealTypeId" value={formData.dealTypeId} onChange={handleChange} className={paymentInfoSelectClass}>
                           <option value="">{t('selectDealType')}</option>
-                          {buildOptionsWithSelected(dealTypes, selDealTypeId, (d) => d.isActive).map((d) => (<option key={d.id} value={String(d.id)}>{d.name}{!d.isActive ? ' (inactive)' : ''}</option>))}
+                          {buildOptionsWithSelected(dealTypes, selDealTypeId, (d) => d.isActive).map((d) => (<option key={d.id} value={String(d.id)}>{d.name}{!d.isActive ? ' (неактивен)' : ''}</option>))}
                         </SystemSelect>
                       </div>
                       <div>
                         <label className={centeredLabelClass}>{formData.type === 'Income' ? t('incomeType') ?? 'Income type' : t('expenseType') ?? 'Expense type'}</label>
                         <SystemSelect name="incomeTypeId" value={formData.incomeTypeId} onChange={handleChange} className={paymentInfoSelectClass}>
                           <option value="">{formData.type === 'Income' ? t('selectIncomeType') ?? 'Select income type' : t('selectExpenseType') ?? 'Select expense type'}</option>
-                          {buildOptionsWithSelected(incomeTypes, selIncomeTypeId, (it) => it.isActive && it.paymentType === formData.type).map((it) => (<option key={it.id} value={String(it.id)}>{it.name}{!it.isActive ? ' (inactive)' : ''}{it.paymentType !== formData.type ? ' (other direction)' : ''}</option>))}
+                          {buildOptionsWithSelected(incomeTypes, selIncomeTypeId, (it) => it.isActive && it.paymentType === formData.type).map((it) => (<option key={it.id} value={String(it.id)}>{it.name}{!it.isActive ? ' (неактивен)' : ''}{it.paymentType !== formData.type ? ' (другое направление)' : ''}</option>))}
                         </SystemSelect>
                       </div>
                       <div className="sm:col-span-2">
@@ -3100,12 +3100,12 @@ export function PaymentModal({
                       </div>
                     </div>
                     <div className="grid gap-3 sm:grid-cols-2">
-                      <div><label className={centeredLabelClass}>{t('expectedPaymentDate') ?? 'Expected date'}</label><SystemDateInput type="date" name="date" value={formData.date} onChange={handleChange} required className={`${centeredFieldClass} ${isRequired('Date') ? 'border-red-400 focus:border-red-500 focus:ring-red-200' : ''}`} /></div>
-                      <div><label className={centeredLabelClass}>{t('plannedScheduleDate') ?? 'Planned date'}</label><SystemDateInput type="date" name="plannedDate" value={formData.plannedDate} onChange={handleChange} className={centeredFieldClass} /></div>
+                      <div><label className={centeredLabelClass}>{t('expectedPaymentDate') ?? 'Ожидаемая дата платежа'}</label><SystemDateInput type="date" name="date" aria-label="Ожидаемая дата платежа" value={formData.date} onChange={handleChange} required className={`${centeredFieldClass} ${isRequired('Date') ? 'border-red-400 focus:border-red-500 focus:ring-red-200' : ''}`} /></div>
+                      <div><label className={centeredLabelClass}>{t('plannedScheduleDate') ?? 'Плановая дата по графику'}</label><SystemDateInput type="date" name="plannedDate" aria-label="Плановая дата по графику" value={formData.plannedDate} onChange={handleChange} className={centeredFieldClass} /></div>
                     </div>
                     <div className="grid gap-3 sm:grid-cols-2">
-                      <div><label className={centeredLabelClass}>{t('amount')}</label><input ref={amountRef} type="text" name="amount" value={formData.amount} onFocus={() => handleMoneyFieldFocus('amount')} onChange={(e) => handleAmountInput(e.target.value, e.currentTarget)} onBlur={formatAmountOnBlur} onWheel={(e) => (e.currentTarget as HTMLInputElement).blur()} inputMode="decimal" className={`${centeredFieldClass} ${isRequired('Amount') ? 'border-red-400 focus:border-red-500 focus:ring-red-200' : ''}`} placeholder="0.00" /></div>
-                      <div><label className={centeredLabelClass}>{t('paidAmount') ?? 'Получено фактически'}</label><input type="text" name="paidAmount" value={formData.paidAmount} onFocus={() => handleMoneyFieldFocus('paidAmount')} onChange={(e) => handlePaidAmountInput(e.target.value)} onBlur={formatPaidAmountOnBlur} inputMode="decimal" className={centeredFieldClass} placeholder="0.00" /></div>
+                      <div><label className={centeredLabelClass}>{t('amount')}</label><input ref={amountRef} type="text" name="amount" aria-label={t('amount') ?? 'Сумма (₽)'} value={formData.amount} onFocus={() => handleMoneyFieldFocus('amount')} onChange={(e) => handleAmountInput(e.target.value, e.currentTarget)} onBlur={formatAmountOnBlur} onWheel={(e) => (e.currentTarget as HTMLInputElement).blur()} inputMode="decimal" className={`${centeredFieldClass} ${isRequired('Amount') ? 'border-red-400 focus:border-red-500 focus:ring-red-200' : ''}`} placeholder="0,00" /></div>
+                      <div><label className={centeredLabelClass}>{t('paidAmount') ?? 'Получено фактически'}</label><input type="text" name="paidAmount" aria-label={t('paidAmount') ?? 'Получено фактически'} value={formData.paidAmount} onFocus={() => handleMoneyFieldFocus('paidAmount')} onChange={(e) => handlePaidAmountInput(e.target.value)} onBlur={formatPaidAmountOnBlur} inputMode="decimal" className={centeredFieldClass} placeholder="0,00" /></div>
                     </div>
                     {hasPartial && (
                       <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 shadow-inner">
@@ -3302,13 +3302,13 @@ export function PaymentModal({
                     <div className="grid gap-3 sm:grid-cols-2">
                       <div>
                         <label className={centeredLabelClass}>{t('lastPaymentDate') ?? 'Дата фактического платежа'}</label>
-                        <SystemDateInput type="date" name="lastPaymentDate" value={formData.lastPaymentDate} onChange={handleChange} className={centeredFieldClass} />
+                        <SystemDateInput type="date" name="lastPaymentDate" aria-label="Дата фактического платежа" value={formData.lastPaymentDate} onChange={handleChange} className={centeredFieldClass} />
                       </div>
                       <div>
                         {formData.isPaid ? (
                           <>
                             <label className={centeredLabelClass}>{t('paidDate') ?? 'Дата оплаты'}</label>
-                            <SystemDateInput type="date" name="paidDate" value={formData.paidDate} onChange={handleChange} className={centeredFieldClass} />
+                            <SystemDateInput type="date" name="paidDate" aria-label="Дата оплаты" value={formData.paidDate} onChange={handleChange} className={centeredFieldClass} />
                           </>
                         ) : (
                           <div className="hidden h-full sm:block" aria-hidden="true" />
@@ -3660,6 +3660,7 @@ export function PaymentModal({
                       <SystemDateInput
                         type="date"
                         name="accountDate"
+                        aria-label="Дата счёта"
                         value={formData.accountDate}
                         readOnly
                         disabled

@@ -2134,12 +2134,21 @@ public class ClientsControllerTests
         Assert.Equal("4321", storedPassport.Series);
         Assert.Equal("098765", storedPassport.Number);
 
+        var sourceContact = new ExternalContact
+        {
+            FullName = "Исходный быстрый контакт",
+            LinkedClientId = dto.Id,
+        };
+        db.ExternalContacts.Add(sourceContact);
+        await db.SaveChangesAsync();
+
         var deleteAction = await controller.Delete(dto.Id, CancellationToken.None);
 
         Assert.IsType<NoContentResult>(deleteAction);
         Assert.Null(await db.Clients.AsNoTracking().SingleOrDefaultAsync(item => item.Id == dto.Id));
         Assert.Equal(0, await db.AddressRecords.AsNoTracking().CountAsync(item => item.ClientId == dto.Id));
         Assert.Equal(0, await db.ClientPassports.AsNoTracking().CountAsync(item => item.ClientId == dto.Id));
+        Assert.Null((await db.ExternalContacts.AsNoTracking().SingleAsync(item => item.Id == sourceContact.Id)).LinkedClientId);
     }
 
     [Fact]
@@ -2312,6 +2321,9 @@ public class ClientsControllerTests
         db.ClientPassports.AddRange(
             new ClientPassport { ClientId = firstClient.Id, Series = "1111", Number = "111111", IsPrimary = true },
             new ClientPassport { ClientId = secondClient.Id, Series = "2222", Number = "222222", IsPrimary = true });
+        var firstSourceContact = new ExternalContact { FullName = "Быстрый контакт 1", LinkedClientId = firstClient.Id };
+        var secondSourceContact = new ExternalContact { FullName = "Быстрый контакт 2", LinkedClientId = secondClient.Id };
+        db.ExternalContacts.AddRange(firstSourceContact, secondSourceContact);
         await db.SaveChangesAsync();
 
         var action = await controller.BulkDelete(new PayPlanner.Api.Models.Requests.BulkIdsRequest
@@ -2324,6 +2336,7 @@ public class ClientsControllerTests
         Assert.Equal(0, await db.Clients.AsNoTracking().CountAsync(item => item.Id == firstClient.Id || item.Id == secondClient.Id));
         Assert.Equal(0, await db.AddressRecords.AsNoTracking().CountAsync(item => item.ClientId == firstClient.Id || item.ClientId == secondClient.Id));
         Assert.Equal(0, await db.ClientPassports.AsNoTracking().CountAsync(item => item.ClientId == firstClient.Id || item.ClientId == secondClient.Id));
+        Assert.Equal(0, await db.ExternalContacts.AsNoTracking().CountAsync(item => item.LinkedClientId == firstClient.Id || item.LinkedClientId == secondClient.Id));
     }
 
     [Fact]

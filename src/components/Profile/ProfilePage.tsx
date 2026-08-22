@@ -195,6 +195,25 @@ function buildFormState(user?: User | null): FormState {
   };
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- чистая функция экспортируется для проверки контракта формы.
+export function buildProfileUpdatePayload(form: FormState): UpdateProfileDto {
+  return {
+    email: form.email.trim() || undefined,
+    fullName: form.fullName.trim(),
+    firstName: form.firstName.trim(),
+    lastName: form.lastName.trim(),
+    middleName: form.middleName.trim(),
+    dateOfBirth: form.dateOfBirth || undefined,
+    clearDateOfBirth: !form.dateOfBirth,
+    phoneNumber: form.phoneNumber.trim(),
+    whatsApp: form.whatsApp.trim(),
+    telegram: form.telegram.trim(),
+    instagram: form.instagram.trim(),
+    messenger: form.messenger.trim(),
+    viber: form.viber.trim(),
+  };
+}
+
 function providerLabel(provider?: string | null) {
   if (provider === 'vk') return 'VK ID';
   if (provider === 'yandex') return 'Яндекс ID';
@@ -555,20 +574,7 @@ export function ProfilePage() {
   const handleSave = async () => {
     setSaving(true);
     try {
-      const payload: UpdateProfileDto = {
-        email: form.email.trim() || undefined,
-        fullName: form.fullName.trim() || undefined,
-        firstName: form.firstName.trim() || undefined,
-        lastName: form.lastName.trim() || undefined,
-        middleName: form.middleName.trim() || undefined,
-        dateOfBirth: form.dateOfBirth || undefined,
-        phoneNumber: form.phoneNumber.trim() || undefined,
-        whatsApp: form.whatsApp.trim() || undefined,
-        telegram: form.telegram.trim() || undefined,
-        instagram: form.instagram.trim() || undefined,
-        messenger: form.messenger.trim() || undefined,
-        viber: form.viber.trim() || undefined,
-      };
+      const payload = buildProfileUpdatePayload(form);
 
       const nextProfile = await authService.updateProfile(payload);
       await apiService.upsertUserSetting(USER_TIME_ZONE_SETTING_KEY, timeZoneId);

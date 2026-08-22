@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { UserDetailPage } from './UserDetailPage';
+import { buildUpdatePayload, UserDetailPage } from './UserDetailPage';
 import { authService } from '../../services/authService';
 import { apiService } from '../../services/api';
 
@@ -95,6 +95,45 @@ describe('UserDetailPage', () => {
     vi.mocked(apiService.getMainCompanySettings).mockResolvedValue({ companies: [] });
     vi.mocked(apiService.getDict).mockResolvedValue([]);
     vi.mocked(apiService.getUserSettingForUser).mockResolvedValue(null);
+  });
+
+  it('отправляет пустые необязательные поля и признаки очистки дат', () => {
+    const form: Parameters<typeof buildUpdatePayload>[0] = {
+      email: ' audit@example.test ',
+      password: '',
+      fullName: ' Audit User ',
+      firstName: '',
+      lastName: '',
+      middleName: '',
+      dateOfBirth: '',
+      phoneNumber: '',
+      whatsApp: '',
+      telegram: '',
+      instagram: '',
+      messenger: '',
+      viber: '',
+      isEmployee: true,
+      isExternalContractor: false,
+      departmentId: '',
+      department: '',
+      requiresFinancialActionReason: false,
+      employmentStartDate: '',
+      employmentEndDate: '',
+      roleId: 1,
+      isActive: true,
+      companyIds: [],
+    };
+
+    expect(buildUpdatePayload(form)).toMatchObject({
+      email: 'audit@example.test',
+      fullName: 'Audit User',
+      firstName: '',
+      phoneNumber: '',
+      whatsApp: '',
+      clearDateOfBirth: true,
+      clearEmploymentStartDate: true,
+      clearEmploymentEndDate: true,
+    });
   });
 
   it('shows contractor task, client, case and payment as regular links', async () => {

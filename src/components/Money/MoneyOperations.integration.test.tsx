@@ -1346,6 +1346,8 @@ describe('MoneyOperations integration', () => {
     await user.selectOptions(screen.getByLabelText('Ответственный'), '12');
     await user.clear(categoryInput as HTMLElement);
     await user.type(categoryInput as HTMLElement, 'Хозрасходы');
+    await user.clear(screen.getByLabelText('Сумма, RUB'));
+    await user.type(screen.getByLabelText('Сумма, RUB'), '1500');
     await user.clear(screen.getByLabelText(/^Назначение$/));
     await user.type(screen.getByLabelText(/^Назначение$/), 'Оплата по договору');
 
@@ -1368,12 +1370,40 @@ describe('MoneyOperations integration', () => {
         responsibleName: 'Анна Иванова',
         incomeTypeId: 2,
         categoryName: null,
+        amount: 1500,
         purpose: 'Оплата по договору',
       }),
     );
     expect(toastSuccessMock).toHaveBeenCalledWith('Операция создана.', 'Деньги');
     await screen.findByText('Новый поставщик');
   }, 15000);
+
+  it('does not create a money operation with a zero amount or without an account', async () => {
+    const user = userEvent.setup();
+
+    render(<MoneyOperations source="Bank" />);
+
+    await screen.findByText('Поставщик А');
+    await user.click(screen.getByRole('button', { name: 'Добавить' }));
+    await screen.findByText('Добавить операцию по банку');
+
+    const modalSaveButton = screen
+      .getAllByRole('button', { name: 'Сохранить' })
+      .find((button) => button.className.includes('bg-blue-600'));
+    expect(modalSaveButton).toBeTruthy();
+
+    await user.click(modalSaveButton as HTMLElement);
+    expect(await screen.findByText('Сумма денежной операции должна быть больше нуля.')).toBeTruthy();
+    expect(createMoneyOperationMock).not.toHaveBeenCalled();
+
+    await user.clear(screen.getByLabelText('Сумма, RUB'));
+    await user.type(screen.getByLabelText('Сумма, RUB'), '1000');
+    await user.selectOptions(screen.getByLabelText('Банковский счёт'), '');
+    await user.click(modalSaveButton as HTMLElement);
+
+    expect(await screen.findByText('Укажите денежный счёт или его название.')).toBeTruthy();
+    expect(createMoneyOperationMock).not.toHaveBeenCalled();
+  });
 
   it('warns and marks a bank income without invoice as an advance', async () => {
     const user = userEvent.setup();
@@ -1491,6 +1521,18 @@ describe('MoneyOperations integration', () => {
     expect(toastSuccessMock).toHaveBeenCalledWith('Операция создана.', 'Деньги');
   }, 15000);
 
+  it('does not create a cash inventory while the actual balance is blank', async () => {
+    const user = userEvent.setup();
+
+    render(<MoneyOperations source="Cash" />);
+
+    await screen.findByRole('heading', { name: 'Инвентаризация кассы' });
+    await user.click(screen.getByRole('button', { name: 'Провести', exact: true }));
+
+    expect(createCashInventoryMock).not.toHaveBeenCalled();
+    expect(toastErrorMock).toHaveBeenCalledWith('Укажите фактический остаток кассы.', 'Касса');
+  });
+
   it('creates a paired transfer between money accounts from the operation form', async () => {
     const user = userEvent.setup();
 
@@ -1594,7 +1636,7 @@ describe('MoneyOperations integration', () => {
     expect(await screen.findByText('Общий баланс')).toBeTruthy();
     expect(screen.getByText('Приход за период')).toBeTruthy();
     expect(screen.getByText('Расход за период')).toBeTruthy();
-    expect(screen.getByText('E-money')).toBeTruthy();
+    expect(screen.getByText('Электронные деньги')).toBeTruthy();
     expect(document.body.textContent).toContain('25 000,00');
     expect(document.body.textContent).toContain('3 000,00');
     expect(document.body.textContent).toContain('5 000,00');
@@ -1717,7 +1759,7 @@ describe('MoneyOperations integration', () => {
 
     render(<MoneyOperations source="EMoney" />);
 
-    expect(await screen.findByText('E-money')).toBeTruthy();
+    expect(await screen.findByText('Электронные деньги')).toBeTruthy();
     expect(screen.getByText('Операции по электронным кошелькам')).toBeTruthy();
     await user.selectOptions(screen.getByLabelText('Кошелёк в заголовке'), '302');
     await waitFor(() =>
@@ -2697,6 +2739,7 @@ describe('MoneyOperations integration', () => {
       expect(createCashOrderMock).toHaveBeenCalledWith(
         expect.objectContaining({
           id: 0,
+          number: '',
           type: 'Incoming',
           status: 'Draft',
           amount: 25000,

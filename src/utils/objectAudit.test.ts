@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   formatAuditValue,
+  buildObjectAuditDateRange,
   formatAuditChangeSummary,
   formatObjectAuditText,
   getObjectAuditActorLabel,
   getObjectAuditActionLabel,
+  getObjectAuditSearchAliases,
   getObjectAuditTypeLabel,
   parseAuditFieldChanges,
   getObjectAuditFieldLabel,
@@ -79,6 +81,12 @@ describe('objectAudit utilities', () => {
     expect(getObjectAuditFieldLabel('user', 'Last Activity At')).toBe('Время последней активности');
     expect(getObjectAuditFieldLabel('user', 'Last Activity Section')).toBe('Последний раздел');
     expect(getObjectAuditFieldLabel('user', 'Last Login At')).toBe('Последний вход');
+    expect(getObjectAuditFieldLabel('legal-entity', 'ChiefAccountantJson')).toBe('Главный бухгалтер');
+    expect(getObjectAuditFieldLabel('legal-entity', 'BankAccountsJson')).toBe('Банковские счета');
+    expect(getObjectAuditFieldLabel('legal-entity', 'FullName')).toBe('Полное наименование');
+    expect(getObjectAuditFieldLabel('contract', 'BillingMode')).toBe('Порядок оплаты');
+    expect(getObjectAuditFieldLabel('sticky-note', 'FontSize')).toBe('Размер шрифта');
+    expect(getObjectAuditFieldLabel('cash-order', 'ReceiverName')).toBe('Получатель');
   });
 
   it('builds readable change summary', () => {
@@ -91,6 +99,9 @@ describe('objectAudit utilities', () => {
     );
     expect(formatAuditChangeSummary('user', '["FullName","RoleId"]')).toBe(
       'Изменены поля: ФИО пользователя, Роль',
+    );
+    expect(formatAuditChangeSummary('sticky-note', '["AssignedUserId","AssignedUserName","Version"]')).toBe(
+      'Изменены поля: Ответственный, Версия',
     );
   });
 
@@ -159,6 +170,13 @@ describe('objectAudit utilities', () => {
     expect(getObjectAuditActionLabel('ConnectionTested')).toBe('Проверка подключения');
     expect(getObjectAuditActionLabel('ConnectionUpdated')).toBe('Обновление подключения');
     expect(getObjectAuditActionLabel('ObjectMoved')).toBe('Перемещение объекта');
+    expect(getObjectAuditActionLabel('Generated')).toBe('Формирование документа');
+    expect(getObjectAuditActionLabel('ConversationAttached')).toBe('Прикрепление к переписке');
+    expect(getObjectAuditActionLabel('OAuthConnectionStarted')).toBe('Начало подключения');
+    expect(getObjectAuditActionLabel('CrmSyncSettingsUpdated')).toBe('Настройки синхронизации CRM');
+    expect(getObjectAuditActionLabel('YandexDiskUploaded')).toBe('Отправка на Я.Диск');
+    expect(getObjectAuditActionLabel('ConnectionDeleted')).toBe('Удаление подключения');
+    expect(getObjectAuditActionLabel('VersionCreated')).toBe('Новая версия документа');
     expect(getObjectAuditTypeLabel('s3 storage')).toBe('S3-хранилище');
     expect(getObjectAuditTypeLabel('s3-storage')).toBe('S3-хранилище');
     expect(getObjectAuditTypeLabel('yandex-disk')).toBe('Я.Диск');
@@ -169,6 +187,11 @@ describe('objectAudit utilities', () => {
     expect(getObjectAuditTypeLabel('client-case-document')).toBe('Документ дела');
     expect(getObjectAuditTypeLabel('client-case-work-order')).toBe('Заказ-наряд');
     expect(getObjectAuditTypeLabel('client-case-related-party')).toBe('Связанное лицо дела');
+    expect(getObjectAuditTypeLabel('client-case-court-event')).toBe('Судебное событие');
+    expect(getObjectAuditTypeLabel('client-case-court-party')).toBe('Участник судебного дела');
+    expect(getObjectAuditTypeLabel('client-case-procedural-deadline')).toBe('Процессуальный срок');
+    expect(getObjectAuditTypeLabel('sticky-note')).toBe('Заметка');
+    expect(getObjectAuditTypeLabel('sticky-note-board')).toBe('Доска заметок');
     expect(getObjectAuditFieldLabel('client-case-document', 'DocumentType')).toBe('Тип документа');
     expect(formatAuditValue('pending_approval')).toBe('На согласовании');
     expect(formatAuditValue('invoice_created')).toBe('Счет создан');
@@ -180,5 +203,19 @@ describe('objectAudit utilities', () => {
       'Администратор изменил Служебные заметки',
     );
     expect(formatObjectAuditText('ConnectionUpdated for s3 storage')).toBe('Подключение обновлено для S3-хранилища');
+  });
+
+  it('expands visible Russian labels into technical search aliases', () => {
+    expect(getObjectAuditSearchAliases('телефон')).toEqual(expect.arrayContaining(['Phone', 'Phones', 'PhoneNumber']));
+    expect(getObjectAuditSearchAliases('требовать причину')).toContain('RequiresFinancialActionReason');
+    expect(getObjectAuditSearchAliases('судебное событие')).toContain('client-case-court-event');
+    expect(getObjectAuditSearchAliases('x')).toEqual([]);
+  });
+
+  it('builds UTC audit boundaries from the user-visible calendar day', () => {
+    expect(buildObjectAuditDateRange('2026-08-16', '2026-08-16', 'Asia/Novosibirsk')).toEqual({
+      fromUtc: '2026-08-15T17:00:00.000Z',
+      toUtcExclusive: '2026-08-16T17:00:00.000Z',
+    });
   });
 });

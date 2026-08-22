@@ -154,9 +154,9 @@ const LINE_ITEM_GRID_MIN_WIDTH_CLASS = 'md:min-w-[58rem]';
 
 function formatMoneyValue(value: string | number | null | undefined): string {
   const parsed = parseMoneyInput(value);
-  if (!Number.isFinite(parsed)) return '0.00';
+  if (!Number.isFinite(parsed)) return '0,00';
   const [integer, decimal] = parsed.toFixed(2).split('.');
-  return `${groupThousands(integer)}.${decimal}`;
+  return `${groupThousands(integer)},${decimal}`;
 }
 
 function normalizeMoneyInput(value: string | number | null | undefined): string {
@@ -546,7 +546,7 @@ function moneyOperationSourceLabel(source?: MoneyOperation['source'] | null): st
     case 'Card':
       return 'Карты';
     case 'EMoney':
-      return 'E-money';
+      return 'Электронные деньги';
     case 'Bank':
     default:
       return 'Банк';
@@ -1183,7 +1183,7 @@ export function InvoiceModal({
   };
 
   const handleLineItemPriceBlur = (id: string, rawValue: string) => {
-    const formatted = formatMoneyInputValue(rawValue);
+    const formatted = rawValue.trim() ? formatMoneyDisplayValue(rawValue) : '';
     updateLineItem(id, { price: formatted || formatMoneyDisplayValue(0) });
   };
 
@@ -1509,6 +1509,7 @@ export function InvoiceModal({
     return [];
   }, [clientPickerMode, selectedClient, selectedExpenseClient, selectedExpenseLegalEntity, selectedLegalEntity]);
   const counterpartyLabel = isIncome ? 'Клиент' : 'Поставщик';
+  const counterpartyObjectLabel = isIncome ? 'клиента' : 'поставщика';
   const counterpartyBlockTitle = isIncome ? 'Клиент и договор' : 'Поставщик и договор';
   const counterpartyPlaceholder = isIncome ? 'Выберите клиента' : 'Выберите поставщика';
   const counterpartyOpenCardLabel = isIncome ? 'Открыть карточку клиента' : 'Открыть карточку поставщика';
@@ -2912,7 +2913,7 @@ export function InvoiceModal({
       return;
     }
     if (!form.clientId && !form.legalEntityId) {
-      setLocalError(`Выберите ${counterpartyLabel.toLocaleLowerCase('ru')}`);
+      setLocalError(`Выберите ${counterpartyObjectLabel}`);
       return;
     }
 
@@ -3801,7 +3802,7 @@ export function InvoiceModal({
           <div className="min-h-[136px] rounded-xl border border-slate-200 bg-slate-50/70 p-3">
             {!form.clientId && !form.legalEntityId ? (
               <div className="flex min-h-[108px] items-center justify-center text-center text-xs text-slate-500">
-                Сначала выберите {counterpartyLabel.toLocaleLowerCase('ru')}.
+                Сначала выберите {counterpartyObjectLabel}.
               </div>
             ) : selectedActs.length === 0 ? (
               <div className="flex min-h-[108px] items-center justify-center text-center text-xs text-slate-500">
@@ -3856,7 +3857,7 @@ export function InvoiceModal({
                   <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-600">{actsError}</div>
                 ) : actOptions.length === 0 ? (
                   <div className="rounded-lg border border-dashed border-slate-200 px-3 py-4 text-center text-xs text-slate-500">
-                    У выбранного {counterpartyLabel.toLocaleLowerCase('ru')} пока нет актов.
+                    У выбранного {counterpartyObjectLabel} пока нет актов.
                   </div>
                 ) : (
                   <div className="space-y-2">
@@ -4473,7 +4474,7 @@ export function InvoiceModal({
                                   value={formatMoneyDisplayValue(form.amount)}
                                   readOnly
                                   className="rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-right text-sm tabular-nums text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-                                  placeholder="0.00"
+                                  placeholder="0,00"
                                 />
                                 {installmentPlan ? (
                                   <span className={`text-xs ${installmentPlanAmountMismatch ? 'text-amber-600' : 'text-slate-500'}`}>
@@ -4654,7 +4655,7 @@ export function InvoiceModal({
                                         value={item.price}
                                         onChange={(event) => handleLineItemPriceChange(item.id, event.target.value)}
                                         onBlur={(event) => handleLineItemPriceBlur(item.id, event.target.value)}
-                                        placeholder="0.00"
+                                        placeholder="0,00"
                                         aria-label="Цена"
                                         className="w-full rounded-lg border border-slate-300 px-3 py-2 text-right text-sm tabular-nums"
                                       />
@@ -4838,7 +4839,7 @@ export function InvoiceModal({
                     Движения денег
                   </span>
                   <p className="text-sm text-slate-500">
-                    Банк, касса, карты и e-money, связанные с этим счётом.
+                    Банк, касса, карты и электронные кошельки, связанные с этим счётом.
                   </p>
                 </header>
 
@@ -4928,7 +4929,7 @@ export function InvoiceModal({
                                 />
                                 <button
                                   type="button"
-                                  aria-label={`Открыть выбор: ${counterpartyLabel.toLocaleLowerCase('ru')}`}
+                                  aria-label={`Открыть выбор: ${counterpartyObjectLabel}`}
                                   onClick={() => openClientPicker('main')}
                                   disabled={!canSelectCounterparty}
                                   className="inline-flex items-center rounded-lg border border-slate-200 px-3 py-2 text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
@@ -5073,7 +5074,7 @@ export function InvoiceModal({
                               {contractsError && <span className="text-xs text-rose-600">{contractsError}</span>}
                               {!form.clientId && (
                                 <span className="text-xs text-slate-500">
-                                  Сначала выберите {counterpartyLabel.toLocaleLowerCase('ru')}, затем можно будет быстро создать договор.
+                                  Сначала выберите {counterpartyObjectLabel}, затем можно будет быстро создать договор.
                                 </span>
                               )}
                             </label>
@@ -5471,7 +5472,7 @@ export function InvoiceModal({
 
       <CounterpartyPickerModal
         open={clientPickerOpen}
-        title={clientPickerMode === 'expense' ? 'Выбор контрагента расхода' : `Выбор ${counterpartyLabel.toLocaleLowerCase('ru')}`}
+        title={clientPickerMode === 'expense' ? 'Выбор контрагента расхода' : `Выбор ${counterpartyObjectLabel}`}
         initialScope={
           clientPickerMode === 'expense'
             ? (form.expenseLegalEntityId ? 'legalEntity' : 'client')

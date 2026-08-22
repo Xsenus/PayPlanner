@@ -31,6 +31,28 @@ describe('ObjectAuditPage', () => {
     vi.clearAllMocks();
   });
 
+  it('offers every action and object type used by the audit feed with readable labels', async () => {
+    vi.mocked(apiService.getObjectAuditEvents).mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      pageSize: 25,
+    });
+
+    render(<ObjectAuditPage />);
+
+    expect(await screen.findByText('По текущим фильтрам событий не найдено.')).toBeTruthy();
+    const selects = screen.getAllByRole('combobox');
+    fireEvent.click(selects[1]);
+    expect(screen.getByRole('option', { name: 'Формирование документа' })).toBeTruthy();
+    expect(screen.getByRole('option', { name: 'Прикрепление к переписке' })).toBeTruthy();
+    expect(screen.getByRole('option', { name: 'Настройки синхронизации CRM' })).toBeTruthy();
+    fireEvent.click(selects[1]);
+    fireEvent.click(selects[0]);
+    expect(screen.getByRole('option', { name: 'Судебное событие' })).toBeTruthy();
+    expect(screen.getByRole('option', { name: 'Доска заметок' })).toBeTruthy();
+  });
+
   it('aborts an obsolete filtered request and keeps the latest response', async () => {
     const signals: AbortSignal[] = [];
     const resolvers: Array<(value: {

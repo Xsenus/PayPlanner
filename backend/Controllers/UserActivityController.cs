@@ -66,6 +66,8 @@ public class UserActivityController : ControllerBase, IAsyncActionFilter
         [FromQuery] int pageSize = 50,
         [FromQuery] DateTime? from = null,
         [FromQuery] DateTime? to = null,
+        [FromQuery] DateTimeOffset? fromUtc = null,
+        [FromQuery] DateTimeOffset? toUtc = null,
         [FromQuery] int? userId = null,
         [FromQuery] string? category = null,
         [FromQuery] string? action = null,
@@ -73,21 +75,24 @@ public class UserActivityController : ControllerBase, IAsyncActionFilter
         [FromQuery] string? httpMethod = null,
         [FromQuery] UserActivityStatus? status = null,
         [FromQuery] string? search = null,
+        [FromQuery] string[]? searchAliases = null,
         CancellationToken cancellationToken = default)
     {
         page = Math.Max(page, 1);
         pageSize = Math.Clamp(pageSize, 10, 200);
 
         var query = _context.UserActivityLogs.AsNoTracking();
+        var effectiveFrom = fromUtc?.UtcDateTime ?? from;
+        var effectiveTo = toUtc?.UtcDateTime ?? to;
 
-        if (from.HasValue)
+        if (effectiveFrom.HasValue)
         {
-            query = query.Where(x => x.CreatedAt >= from.Value);
+            query = query.Where(x => x.CreatedAt >= effectiveFrom.Value);
         }
 
-        if (to.HasValue)
+        if (effectiveTo.HasValue)
         {
-            query = query.Where(x => x.CreatedAt <= to.Value);
+            query = query.Where(x => x.CreatedAt <= effectiveTo.Value);
         }
 
         if (userId.HasValue)
@@ -123,12 +128,22 @@ public class UserActivityController : ControllerBase, IAsyncActionFilter
         if (!string.IsNullOrWhiteSpace(search))
         {
             var term = search.Trim().ToLower();
+            var aliases = (searchAliases ?? [])
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Select(value => value.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(50)
+                .ToArray();
             query = query.Where(x =>
-                x.Description!.ToLower().Contains(term) ||
-                x.ObjectId!.ToLower().Contains(term) ||
-                x.ObjectType!.ToLower().Contains(term) ||
-                x.Category!.ToLower().Contains(term) ||
-                x.Action!.ToLower().Contains(term));
+                (x.Description ?? string.Empty).ToLower().Contains(term) ||
+                (x.ObjectId ?? string.Empty).ToLower().Contains(term) ||
+                (x.ObjectType ?? string.Empty).ToLower().Contains(term) ||
+                x.Category.ToLower().Contains(term) ||
+                x.Action.ToLower().Contains(term) ||
+                aliases.Contains(x.Category) ||
+                aliases.Contains(x.Action) ||
+                (x.Section != null && aliases.Contains(x.Section)) ||
+                (x.ObjectType != null && aliases.Contains(x.ObjectType)));
         }
 
         var total = await query.CountAsync(cancellationToken);

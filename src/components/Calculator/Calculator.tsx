@@ -126,7 +126,7 @@ export function Calculator() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-[calc(100vw-2rem)] px-4 py-6 sm:px-6">
+      <div className="mx-auto max-w-[calc(100vw-2rem)] px-4 py-6 sm:px-6">
         {draft ? (
           <div className="mb-5 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
             <div className="flex items-start justify-between gap-3">
@@ -167,7 +167,7 @@ export function Calculator() {
           canSavePayments={canSavePayments}
           onSavePayments={handleSavePayments}
         />
-      </main>
+      </div>
     </div>
   );
 }

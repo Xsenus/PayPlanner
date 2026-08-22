@@ -244,6 +244,7 @@ export interface UpdateUserDto {
   lastName?: string;
   middleName?: string;
   dateOfBirth?: string;
+  clearDateOfBirth?: boolean;
   photoUrl?: string;
   phoneNumber?: string;
   whatsApp?: string;
@@ -258,6 +259,8 @@ export interface UpdateUserDto {
   requiresFinancialActionReason?: boolean;
   employmentStartDate?: string;
   employmentEndDate?: string;
+  clearEmploymentStartDate?: boolean;
+  clearEmploymentEndDate?: boolean;
   roleId?: number;
   isActive?: boolean;
   companyIds?: number[];
@@ -270,6 +273,7 @@ export interface UpdateProfileDto {
   lastName?: string;
   middleName?: string;
   dateOfBirth?: string;
+  clearDateOfBirth?: boolean;
   photoUrl?: string;
   phoneNumber?: string;
   whatsApp?: string;

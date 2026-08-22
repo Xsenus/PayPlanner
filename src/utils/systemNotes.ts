@@ -17,6 +17,11 @@ const WINDOWS_1251_CHAR_TO_BYTE = new Map<string, number>(
   Array.from(WINDOWS_1251_DECODED_80_TO_FF).map((char, index) => [char, index + 0x80]),
 );
 const MOJIBAKE_CYRILLIC_PATTERN = /[РС][\u0080-\u04FF]|[\u0402-\u045F][РС]/;
+const INSTALLMENT_MONEY_LINE_PATTERN = /^(Основной долг|Проценты|Остаток):\s*([0-9\s.,-]+)(?:\s*₽)?$/i;
+const MONEY_FORMATTER = new Intl.NumberFormat('ru-RU', {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
 
 function stripListPrefix(line: string): string {
   return line.startsWith('\u2022 ') ? line.slice(2) : line;
@@ -165,7 +170,13 @@ function getVisibleLines(value?: string | null): string[] {
   return (value ?? '')
     .split(/\r?\n/)
     .map((line) => stripSystemNotePrefix(line))
-    .filter((line) => line && !isHiddenSystemNoteLine(line));
+    .filter((line) => line && !isHiddenSystemNoteLine(line))
+    .map((line) => {
+      const match = line.match(INSTALLMENT_MONEY_LINE_PATTERN);
+      if (!match) return line;
+
+      return `${match[1]}: ${MONEY_FORMATTER.format(parseMoneyFromText(match[2]))} ₽`;
+    });
 }
 
 export function getVisibleSystemNoteLines(systemNotes?: string | null): string[] {

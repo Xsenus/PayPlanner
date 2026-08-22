@@ -185,7 +185,8 @@ public static class NotificationPurposes
 public sealed record NotificationPurposeDefinition(
     string Key,
     string Label,
-    string Description);
+    string Description,
+    IReadOnlyList<string> Channels);
 
 public static class UserNotificationTypes
 {

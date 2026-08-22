@@ -57,12 +57,12 @@ public class ActLineItemRequest
     [MaxLength(2000)]
     public string? Name { get; set; }
 
-    [Range(typeof(decimal), "0.0000001", "79228162514264337593543950335")]
+    [Range(typeof(decimal), "0.0000001", "79228162514264337593543950335", ParseLimitsInInvariantCulture = true)]
     public decimal Quantity { get; set; }
 
     [MaxLength(32)]
     public string? Unit { get; set; }
 
-    [Range(typeof(decimal), "0", "79228162514264337593543950335")]
+    [Range(typeof(decimal), "0", "79228162514264337593543950335", ParseLimitsInInvariantCulture = true)]
     public decimal Price { get; set; }
 }

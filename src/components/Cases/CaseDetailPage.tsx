@@ -69,6 +69,7 @@ import type {
   ProceduralDeadlineCalculationResult,
 } from '../../types';
 import { toRuDate } from '../../utils/dateUtils';
+import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { formatCurrencySmart } from '../../utils/formatters';
 import { buildCaseTaskPayload, getCaseStageTaskTemplates, isPretrialCaseStage, type CaseStageTaskTemplate } from '../../utils/caseTaskPayload';
 import { formatDateTimeInTimeZone, fromTimeZoneDateTimeInput, toTimeZoneDateTimeInput } from '../../utils/timeZoneDate';
@@ -209,6 +210,11 @@ const COURT_SYNC_STATUS_LABELS: Record<string, string> = {
   history: 'История',
 };
 
+const COURT_SOURCE_LABELS: Record<string, string> = {
+  sudrf: 'ГАС «Правосудие»',
+  'court-event': 'Судебное событие',
+};
+
 const DETAIL_TABS: Array<{ key: CaseDetailTab; label: string }> = [
   { key: 'overview', label: 'Обзор' },
   { key: 'participants', label: 'Участники' },
@@ -323,7 +329,11 @@ interface DocumentPreviewState {
   url: string;
   contentType: string;
   fileName: string;
+  htmlContent?: string;
+  textContent?: string;
 }
+
+const MAX_INLINE_TEXT_PREVIEW_BYTES = 2 * 1024 * 1024;
 
 interface WorkOrderHeaderDraft {
   title: string;
@@ -393,6 +403,21 @@ function formatMoney(value?: number | null) {
   return typeof value === 'number' ? formatCurrencySmart(value).full : '—';
 }
 
+function formatRussianCount(value: number, forms: readonly [string, string, string]): string {
+  const absolute = Math.abs(value);
+  const lastTwo = absolute % 100;
+  const last = absolute % 10;
+  const form = lastTwo >= 11 && lastTwo <= 14
+    ? forms[2]
+    : last === 1
+      ? forms[0]
+      : last >= 2 && last <= 4
+        ? forms[1]
+        : forms[2];
+
+  return `${value} ${form}`;
+}
+
 function formatFileSize(value?: number | null) {
   if (!value || value <= 0) return '0 Б';
   if (value < 1024) return `${value} Б`;
@@ -402,16 +427,11 @@ function formatFileSize(value?: number | null) {
 
 function formatRuDateTime(value?: string | null) {
   if (!value) return '';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return toRuDate(value);
-  return formatDateTimeInTimeZone(date, activeCaseTimeZoneId);
+  return formatDateTimeInTimeZone(value, activeCaseTimeZoneId) || toRuDate(value);
 }
 
 function toDateInputValue(value?: string | null) {
-  if (!value) return '';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value.slice(0, 10);
-  return date.toISOString().slice(0, 10);
+  return value ? String(value).slice(0, 10) : '';
 }
 
 function parseMoneyInput(value: string, fallback = 0) {
@@ -2161,10 +2181,11 @@ export function CaseDetailPage({
         documentType: selectedTemplate.documentType,
         status: 'Подготовлен',
       });
+      setNotice(`Документ по шаблону «${selectedTemplate.label}» сформирован.`);
       setActiveTab('documents');
       setReloadToken((value) => value + 1);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось сформировать документ по делу.');
+      setError(extractDisplayErrorMessage(err, 'Не удалось сформировать документ по делу.'));
     } finally {
       setGeneratingDocument(false);
     }
@@ -2196,6 +2217,7 @@ export function CaseDetailPage({
         payload.documentKey = documentKey;
       }
       await apiService.uploadCaseDocument(caseItem.id, documentFile, payload);
+      setNotice(`Документ «${documentFile.name}» загружен.`);
       setDocumentTypeDraft('');
       setDocumentStatusDraft('');
       setDocumentFile(null);
@@ -2205,7 +2227,7 @@ export function CaseDetailPage({
       setActiveTab('documents');
       setReloadToken((value) => value + 1);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось загрузить документ по делу.');
+      setError(extractDisplayErrorMessage(err, 'Не удалось загрузить документ по делу.'));
     } finally {
       setUploadingDocument(false);
     }
@@ -2244,11 +2266,20 @@ export function CaseDetailPage({
     try {
       const result = await apiService.downloadCaseDocument(caseItem.id, caseDocument.id);
       const url = URL.createObjectURL(result.blob);
+      const contentType = result.blob.type || caseDocument.contentType || '';
+      const normalizedContentType = contentType.toLowerCase();
+      const isHtml = normalizedContentType.includes('html');
+      const isText = normalizedContentType.startsWith('text/') && !isHtml;
+      const readableContent = (isHtml || (isText && result.blob.size <= MAX_INLINE_TEXT_PREVIEW_BYTES))
+        ? await result.blob.text()
+        : undefined;
       setDocumentPreview({
         document: caseDocument,
         url,
-        contentType: result.blob.type || caseDocument.contentType || '',
+        contentType,
         fileName: result.fileName || caseDocument.originalFileName || `case-document-${caseDocument.id}`,
+        htmlContent: isHtml ? readableContent : undefined,
+        textContent: isText ? readableContent : undefined,
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось открыть предпросмотр документа по делу.');
@@ -2267,7 +2298,7 @@ export function CaseDetailPage({
       const result = await apiService.uploadCaseDocumentToYandexDisk(caseDocument.id);
       setNotice(`Документ «${caseDocument.originalFileName}» отправлен на Яндекс.Диск: ${result.path}.`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось отправить документ на Яндекс.Диск.');
+      setError(extractDisplayErrorMessage(err, 'Не удалось отправить документ на Яндекс.Диск.'));
     } finally {
       setSendingYandexDocumentId(null);
     }
@@ -4437,7 +4468,9 @@ function HistoryTimeline({ entries }: { entries: ClientCaseTimelineEntry[] }) {
     <section className="rounded-xl border border-slate-200 p-4">
       <div className="mb-4 flex items-center justify-between gap-3">
         <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Хронология дела</h2>
-        <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-500">{entries.length} записей</span>
+        <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-500">
+          {formatRussianCount(entries.length, ['запись', 'записи', 'записей'])}
+        </span>
       </div>
       <div className="space-y-0">
         {entries.map((entry, index) => {
@@ -4478,7 +4511,9 @@ function ConversationTimeline({
     <section className="rounded-xl border border-slate-200 p-4">
       <div className="mb-4 flex items-center justify-between gap-3">
         <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Лента переписки</h2>
-        <span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">{entries.length} сообщений</span>
+        <span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">
+          {formatRussianCount(entries.length, ['сообщение', 'сообщения', 'сообщений'])}
+        </span>
       </div>
       <div className="space-y-3">
         {entries.map((entry) => (
@@ -6175,7 +6210,7 @@ export function CourtSourceProvenance({
     return null;
   }
 
-  const sourceLabel = sourceType === 'sudrf' ? 'ГАС «Правосудие»' : item.sourceType || 'Внешний источник';
+  const sourceLabel = sourceType ? COURT_SOURCE_LABELS[sourceType] ?? 'Внешний источник' : 'Внешний источник';
   const confidenceLabel = item.sourceConfidence === 'official-source'
     ? 'официальный источник'
     : item.sourceConfidence === 'manual'
@@ -6782,7 +6817,9 @@ function CourtPanel({
       <section className="rounded-xl border border-slate-200 p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Судебная хронология</h2>
-          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-500">{courtTimeline.length} событий</span>
+          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-500">
+            {formatRussianCount(courtTimeline.length, ['событие', 'события', 'событий'])}
+          </span>
         </div>
         <CourtTimeline entries={courtTimeline} />
       </section>
@@ -6790,12 +6827,16 @@ function CourtPanel({
       <section className="rounded-xl border border-slate-200 p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Судебные события</h2>
-          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-500">{selectedCourtEvents.length} записей</span>
+          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-500">
+            {formatRussianCount(selectedCourtEvents.length, ['запись', 'записи', 'записей'])}
+          </span>
         </div>
         <div className="mt-5 rounded-lg border border-slate-100 bg-slate-50 p-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h3 className="text-sm font-semibold text-slate-800">Стороны процесса</h3>
-            <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-slate-500">{courtParties.length} активных</span>
+            <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-slate-500">
+              {formatRussianCount(courtParties.length, ['активная', 'активные', 'активных'])}
+            </span>
           </div>
           <div className="mt-3 grid gap-3 lg:grid-cols-2 2xl:grid-cols-[1fr_150px_160px_1fr_1fr_auto]">
             <label className="text-sm font-medium text-slate-700">
@@ -6943,7 +6984,9 @@ function CourtPanel({
       <section className="rounded-xl border border-slate-200 p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Процессуальные сроки 2.0</h2>
-          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-500">{activeProceduralDeadlines.length} активных</span>
+          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-500">
+            {formatRussianCount(activeProceduralDeadlines.length, ['активный', 'активных', 'активных'])}
+          </span>
         </div>
         <div className="mt-4 grid gap-3 lg:grid-cols-2 2xl:grid-cols-[160px_1fr_150px_120px_1fr_1fr_auto_auto]">
           <label className="text-sm font-medium text-slate-700">
@@ -7521,7 +7564,9 @@ function DocumentPreviewModal({
 }) {
   const contentType = preview.contentType.toLowerCase();
   const isImage = contentType.startsWith('image/');
-  const inlinePreview = canPreviewInline(contentType);
+  const isHtml = contentType.includes('html') && preview.htmlContent !== undefined;
+  const isText = contentType.startsWith('text/') && !contentType.includes('html') && preview.textContent !== undefined;
+  const inlinePreview = canPreviewInline(contentType) && !contentType.startsWith('text/');
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 px-4 py-6">
@@ -7555,6 +7600,18 @@ function DocumentPreviewModal({
             <div className="flex h-full min-h-[480px] items-center justify-center overflow-auto rounded-lg bg-white">
               <img src={preview.url} alt={preview.fileName} className="max-h-full max-w-full object-contain" />
             </div>
+          ) : isHtml ? (
+            <iframe
+              title={`Предпросмотр ${preview.fileName}`}
+              srcDoc={preview.htmlContent}
+              sandbox=""
+              referrerPolicy="no-referrer"
+              className="h-[70vh] w-full rounded-lg border border-slate-200 bg-white"
+            />
+          ) : isText ? (
+            <pre className="h-[70vh] w-full overflow-auto whitespace-pre-wrap break-words rounded-lg border border-slate-200 bg-white p-4 text-sm leading-6 text-slate-800">
+              {preview.textContent}
+            </pre>
           ) : inlinePreview ? (
             <iframe
               title={`Предпросмотр ${preview.fileName}`}

@@ -169,7 +169,7 @@ function sourceLabel(source: MoneyOperationSource) {
     case 'Card':
       return 'Карты';
     case 'EMoney':
-      return 'E-money';
+      return 'Электронные деньги';
     default:
       return source;
   }
@@ -6550,6 +6550,30 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     () => buildTitleSuffix(normalizedRange.fromYM, normalizedRange.toYM),
     [normalizedRange.fromYM, normalizedRange.toYM],
   );
+  const reportHeader = useMemo(() => {
+    switch (activeGroup) {
+      case 'tasks':
+        return {
+          title: 'Отчёты по задачам',
+          description: 'Сводка по журналу задач: статусы, сроки, исполнители и текущая нагрузка.',
+        };
+      case 'legal':
+        return {
+          title: 'Отчёты по делам',
+          description: 'Сводка по юридической работе: дела, процессуальные сроки, документы и нагрузка сотрудников.',
+        };
+      case 'analytics':
+        return {
+          title: 'Финансовая аналитика',
+          description: 'Разрезы по денежным операциям, направлениям, точкам продаж, НДС и план-факту.',
+        };
+      default:
+        return {
+          title: 'Отчёты по платежам',
+          description: 'Сводка строится по тем же данным, что и общая серверная статистика: выполнено берётся по фактически оплаченной сумме, ожидание и просрочка по остаткам.',
+        };
+    }
+  }, [activeGroup]);
 
   const statusBreakdown = useMemo(() => {
     if (!stats) return [];
@@ -6605,14 +6629,13 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
             <div>
               <div className="inline-flex items-center gap-2 rounded-full border border-sky-100 bg-sky-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">
                 <CalendarRange className="h-3.5 w-3.5" />
-                Reports
+                Отчёты
               </div>
               <h1 className="mt-4 text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">
-                Отчёты по платежам
+                {reportHeader.title}
               </h1>
               <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600 sm:text-base">
-                Сводка строится по тем же данным, что и общая серверная статистика:
-                выполнено берётся по фактически оплаченной сумме, ожидание и просрочка по остаткам.
+                {reportHeader.description}
               </p>
               <div className="mt-5 flex flex-wrap gap-2">
                 {(['this', 'prev', 'q', 'y'] as const satisfies readonly ReportMonthPreset[]).map((preset) => {
@@ -6893,7 +6916,11 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
                 <div className="mt-6 grid gap-6 lg:grid-cols-[0.95fr_1.05fr]">
                   <div className="h-[320px]">
                     {pieData.length > 0 ? (
-                      <ResponsiveContainer width="100%" height="100%">
+                      <ResponsiveContainer
+                        width="100%"
+                        height="100%"
+                        initialDimension={{ width: 320, height: 320 }}
+                      >
                         <PieChart>
                           <Pie
                             data={pieData}

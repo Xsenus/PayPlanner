@@ -29,6 +29,7 @@ export interface InvoicesFilters {
   responsibleId?: number;
   search?: string;
   type?: PaymentKind;
+  installmentsOnly?: boolean;
   sortBy?: InvoicesSortKey;
   sortDir?: 'asc' | 'desc';
   page?: number;
@@ -71,6 +72,7 @@ function makeSummaryKey(filters: InvoicesFilters): string {
     responsibleId: filters.responsibleId ?? null,
     search: filters.search ?? null,
     type: filters.type ?? null,
+    installmentsOnly: filters.installmentsOnly ?? false,
   });
 }
 
@@ -135,6 +137,7 @@ export function useInvoices(filters: InvoicesFilters): UseInvoicesResult {
             responsibleId: filters.responsibleId,
             search: filters.search,
             type: filters.type,
+            installmentsOnly: filters.installmentsOnly,
             sortBy: filters.sortBy,
             sortDir: filters.sortDir,
             page: filters.page,
@@ -182,6 +185,7 @@ export function useInvoices(filters: InvoicesFilters): UseInvoicesResult {
       filters.responsibleId,
       filters.search,
       filters.type,
+      filters.installmentsOnly,
       filters.sortBy,
       filters.sortDir,
       filters.page,
@@ -223,6 +227,7 @@ export function useInvoices(filters: InvoicesFilters): UseInvoicesResult {
             responsibleId: filters.responsibleId,
             search: filters.search,
             type: filters.type,
+            installmentsOnly: filters.installmentsOnly,
           },
           { signal: controller.signal },
         );
@@ -257,6 +262,7 @@ export function useInvoices(filters: InvoicesFilters): UseInvoicesResult {
       filters.responsibleId,
       filters.search,
       filters.type,
+      filters.installmentsOnly,
       enabled,
     ],
   );

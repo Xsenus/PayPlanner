@@ -24,7 +24,7 @@ const SOURCE_LABELS: Record<MoneyOperationSource, string> = {
   Bank: 'Банк',
   Cash: 'Касса',
   Card: 'Карты',
-  EMoney: 'E-money',
+  EMoney: 'Электронные деньги',
 };
 
 const SOURCE_HINTS: Record<MoneyOperationSource, string> = {
@@ -220,7 +220,7 @@ export function MoneyAccountSettings() {
         <div>
           <h4 className="text-xl font-semibold text-gray-900">Денежные счета</h4>
           <p className="mt-1 max-w-3xl text-sm text-gray-600">
-            Банковские счета, кассы, карты и e-money кошельки используются в журналах денег, фильтрах и формах операций.
+            Банковские счета, кассы, карты и электронные кошельки используются в журналах денег, фильтрах и формах операций.
           </p>
         </div>
 
@@ -274,7 +274,7 @@ export function MoneyAccountSettings() {
           <option value="Bank">Банк</option>
           <option value="Cash">Касса</option>
           <option value="Card">Карты</option>
-          <option value="EMoney">E-money</option>
+          <option value="EMoney">Электронные деньги</option>
         </SystemSelect>
 
         <button
@@ -401,7 +401,7 @@ export function MoneyAccountSettings() {
                     <option value="Bank">Банк</option>
                     <option value="Cash">Касса</option>
                     <option value="Card">Карты</option>
-                    <option value="EMoney">E-money</option>
+                    <option value="EMoney">Электронные деньги</option>
                   </SystemSelect>
                 </label>
 

@@ -50,7 +50,8 @@ public class ObjectAuditControllerTests
                 ObjectType = "client",
                 ObjectId = 11,
                 Action = "Updated",
-                Description = "Изменено поле: Телефон",
+                Description = "Пользователь изменил клиента",
+                MetadataJson = "{\"changedFields\":[\"PhoneNumber\"]}",
                 ActorUserId = user.Id,
                 ActorUserName = "Иван Аудитор",
                 CreatedAt = new DateTime(2026, 4, 9, 10, 30, 0, DateTimeKind.Utc),
@@ -85,10 +86,13 @@ public class ObjectAuditControllerTests
             objectType: "client",
             action: "updated",
             actor: "иван",
-            from: new DateTime(2026, 4, 9),
-            to: new DateTime(2026, 4, 9),
+            from: null,
+            to: null,
             page: 1,
             pageSize: 25,
+            searchAliases: ["PhoneNumber"],
+            fromUtc: new DateTimeOffset(2026, 4, 8, 21, 0, 0, TimeSpan.Zero),
+            toUtcExclusive: new DateTimeOffset(2026, 4, 9, 21, 0, 0, TimeSpan.Zero),
             ct: CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(result.Result);

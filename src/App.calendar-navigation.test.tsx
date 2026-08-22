@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import App from './App';
 import { LAST_TAB_STORAGE_KEY } from './appRouting';
+import { apiService } from './services/api';
 
 const permissionsState = vi.hoisted(() => ({
   paymentsCanView: true,
@@ -115,6 +116,10 @@ vi.mock('./components/Notifications/NotificationCenter', () => ({
   ),
 }));
 
+vi.mock('./components/Notifications/ForcedTaskRevisionModal', () => ({
+  ForcedTaskRevisionModal: () => null,
+}));
+
 vi.mock('./components/Reports/Reports', () => ({
   Reports: ({
     onOpenCaseSection,
@@ -152,11 +157,26 @@ vi.mock('./components/Tasks/TaskJournal', () => ({
 }));
 
 vi.mock('./components/Cases/CaseDetailPage', () => ({
-  CaseDetailPage: ({ caseId }: { caseId: number }) => (
+  CaseDetailPage: ({
+    caseId,
+    onOpenFinance,
+  }: {
+    caseId: number;
+    onOpenFinance?: (caseItem: { id: number; clientId: number | null; legalEntityId: number | null }) => void;
+  }) => (
     <section data-testid="case-detail">
       <span>case {caseId}</span>
       <span>{window.sessionStorage.getItem(`pp.case-detail.${caseId}.view.v1`)}</span>
+      <button type="button" onClick={() => onOpenFinance?.({ id: caseId, clientId: null, legalEntityId: 37 })}>
+        open legal entity finance
+      </button>
     </section>
+  ),
+}));
+
+vi.mock('./components/LegalEntities/LegalEntities', () => ({
+  LegalEntities: ({ initialLegalEntityId }: { initialLegalEntityId?: number | null }) => (
+    <section data-testid="legal-entities-view">legal entity {initialLegalEntityId ?? 'none'}</section>
   ),
 }));
 
@@ -236,6 +256,18 @@ describe('App calendar client navigation', () => {
       expect(screen.queryByTestId('clients-view')).toBeNull();
       expect(screen.getByTestId('calendar-view')).toBeTruthy();
     });
+  });
+
+  it('opens the organization card from case finance instead of leaving the active button without an action', async () => {
+    window.history.replaceState({}, '', '/cases/164');
+    vi.spyOn(apiService, 'getLegalEntity').mockResolvedValue({ id: 37 } as Awaited<ReturnType<typeof apiService.getLegalEntity>>);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'open legal entity finance' }));
+
+    expect((await screen.findByTestId('legal-entities-view')).textContent).toContain('legal entity 37');
+    expect(apiService.getLegalEntity).toHaveBeenCalledWith(37);
   });
 
   it('returns to notifications after saving a task opened from notifications', async () => {

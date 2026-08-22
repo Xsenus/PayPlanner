@@ -17,6 +17,11 @@ describe('timeZoneDate', () => {
     expect(toTimeZoneDateTimeInput('2026-06-05T12:00:00Z', 'Asia/Novosibirsk')).toBe('2026-06-05T19:00');
   });
 
+  it('treats backend timestamps without a suffix as UTC instants', () => {
+    expect(toTimeZoneDateTimeInput('2026-06-05T12:00:00', 'Europe/Moscow')).toBe('2026-06-05T15:00');
+    expect(formatDateTimeInTimeZone('2026-06-05T12:00:00', 'Asia/Novosibirsk')).toContain('19:00');
+  });
+
   it('converts datetime-local values from the selected user time zone to UTC', () => {
     expect(fromTimeZoneDateTimeInput('2026-06-05T15:00', 'Europe/Moscow')).toBe('2026-06-05T12:00:00.000Z');
     expect(fromTimeZoneDateTimeInput('2026-06-05T16:00', 'Europe/Samara')).toBe('2026-06-05T12:00:00.000Z');

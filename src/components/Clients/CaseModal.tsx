@@ -125,15 +125,11 @@ function caseTaskStatusClassName(status: TaskJournalStatus) {
 
 function formatTaskDateTime(value?: string | null) {
   if (!value) return '';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '';
-  return formatDateTimeInTimeZone(date, activeCaseModalTimeZoneId);
+  return formatDateTimeInTimeZone(value, activeCaseModalTimeZoneId);
 }
 
 function toDateInput(value?: string | null) {
-  if (!value) return '';
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? String(value).slice(0, 10) : date.toISOString().slice(0, 10);
+  return value ? String(value).slice(0, 10) : '';
 }
 
 function toDateTimeInput(value?: string | null) {
@@ -141,7 +137,7 @@ function toDateTimeInput(value?: string | null) {
 }
 
 function fromDateInput(value: string) {
-  return value ? new Date(`${value}T00:00:00`).toISOString() : null;
+  return value || null;
 }
 
 function fromDateTimeInput(value: string) {
@@ -208,9 +204,7 @@ function formatBytes(value: number) {
 
 function formatDocumentDate(value?: string | null) {
   if (!value) return '';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '';
-  return formatDateTimeInTimeZone(date, activeCaseModalTimeZoneId);
+  return formatDateTimeInTimeZone(value, activeCaseModalTimeZoneId);
 }
 
 function formatMoney(value?: number | null) {

@@ -259,7 +259,8 @@ public class InvoicesController : ControllerBase
         CancellationToken ct = default,
         [FromQuery] string? workflowStatus = null,
         [FromQuery] int? actId = null,
-        [FromQuery] int? paymentId = null)
+        [FromQuery] int? paymentId = null,
+        [FromQuery] bool installmentsOnly = false)
     {
         page = page <= 0 ? 1 : page;
         pageSize = pageSize <= 0 ? 20 : Math.Min(pageSize, 200);
@@ -296,7 +297,8 @@ public class InvoicesController : ControllerBase
                 clientRole,
                 includeMetadata: requiresMetadataBeforePagination,
                 ct,
-                visibility);
+                visibility,
+                installmentsOnly);
 
             statusItems = statusItems
                 .Where(item => item.Status == status.Value)
@@ -338,6 +340,7 @@ public class InvoicesController : ControllerBase
             clientRole,
             ParseIntList(clientIds));
         query = ApplyRelatedDocumentFilters(query, actId, paymentId);
+        query = ApplyInstallmentsFilter(query, installmentsOnly);
 
         if (normalizedWorkflowStatus is not null)
         {
@@ -381,7 +384,8 @@ public class InvoicesController : ControllerBase
         CancellationToken ct = default,
         [FromQuery] string? workflowStatus = null,
         [FromQuery] int? actId = null,
-        [FromQuery] int? paymentId = null)
+        [FromQuery] int? paymentId = null,
+        [FromQuery] bool installmentsOnly = false)
     {
         var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
         if (visibility is null)
@@ -414,7 +418,8 @@ public class InvoicesController : ControllerBase
             clientRole,
             includeMetadata: false,
             ct,
-            visibility);
+            visibility,
+            installmentsOnly);
 
         if (status.HasValue)
         {
@@ -4462,11 +4467,13 @@ public class InvoicesController : ControllerBase
         string? clientRole,
         bool includeMetadata,
         CancellationToken ct,
-        DataVisibilityAccess? visibility = null)
+        DataVisibilityAccess? visibility = null,
+        bool installmentsOnly = false)
     {
         var query = BuildInvoiceQuery(visibility);
         query = ApplyFilters(query, from, to, null, clientId, legalEntityId, contractId, caseId, responsibleId, search, type, clientRole, clientIds);
         query = ApplyRelatedDocumentFilters(query, actId, paymentId);
+        query = ApplyInstallmentsFilter(query, installmentsOnly);
         if (!string.IsNullOrWhiteSpace(workflowStatus))
         {
             query = query.Where(x => x.Payment.InvoiceWorkflowStatus == workflowStatus);
@@ -4487,6 +4494,23 @@ public class InvoicesController : ControllerBase
         }
 
         return items;
+    }
+
+    private IQueryable<InvoiceQueryItem> ApplyInstallmentsFilter(
+        IQueryable<InvoiceQueryItem> query,
+        bool installmentsOnly)
+    {
+        if (!installmentsOnly)
+        {
+            return query;
+        }
+
+        return query.Where(item =>
+            item.Payment.InvoiceId.HasValue
+            && _db.Payments.Any(payment =>
+                payment.InvoiceId == item.Payment.InvoiceId
+                && payment.SystemNotes != null
+                && payment.SystemNotes.Contains(InstallmentPaymentMarker)));
     }
 
     private async Task EnrichInvoiceDtosAsync(List<InvoiceDto> items, CancellationToken ct)
@@ -5530,13 +5554,15 @@ public class InvoicesController : ControllerBase
 
     private static string BuildInstallmentNotes(InvoiceInstallmentPlanItemRequest item)
     {
+        static string FormatAmount(decimal amount) => $"{amount.ToString("N2", RuCulture)} ₽";
+
         return string.Join(
             "\n",
             new[]
             {
-                $"Основной долг: {item.Principal:0.00}",
-                $"Проценты: {item.Interest:0.00}",
-                $"Остаток: {item.Balance:0.00}",
+                $"Основной долг: {FormatAmount(item.Principal)}",
+                $"Проценты: {FormatAmount(item.Interest)}",
+                $"Остаток: {FormatAmount(item.Balance)}",
             });
     }
 

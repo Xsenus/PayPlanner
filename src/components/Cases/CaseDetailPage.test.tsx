@@ -198,6 +198,14 @@ describe('CourtSourceProvenance', () => {
     const { container } = render(<CourtSourceProvenance item={{ sourceType: 'manual' }} />);
     expect(container.innerHTML).toBe('');
   });
+
+  it('shows a user-facing label for a deadline linked to a court event', () => {
+    render(<CourtSourceProvenance item={{ sourceType: 'court-event', sourceConfidence: 'manual' }} />);
+
+    expect(screen.getByText('Судебное событие')).toBeTruthy();
+    expect(screen.getByText('внесено вручную')).toBeTruthy();
+    expect(screen.queryByText('court-event')).toBeNull();
+  });
 });
 
 describe('CaseDetailPage', () => {
@@ -967,6 +975,7 @@ describe('CaseDetailPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'История' }));
     expect(await screen.findByText('Массовое изменение')).toBeTruthy();
+    expect(screen.getByText('3 записи')).toBeTruthy();
   });
 
   it('shows imported court data that moved to the archive as inactive', async () => {
@@ -1093,7 +1102,7 @@ describe('CaseDetailPage', () => {
   it('shows and saves case hearing times with the profile time zone', async () => {
     vi.mocked(apiService.getUserSetting).mockResolvedValue({ key: 'profile.timeZoneId', value: 'Europe/Samara' });
     vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({
-      nextHearingAt: '2026-06-05T12:00:00Z',
+      nextHearingAt: '2026-06-05T12:00:00',
     }));
     vi.mocked(apiService.getCaseCourtEvents).mockResolvedValue([
       {
@@ -1102,7 +1111,7 @@ describe('CaseDetailPage', () => {
         eventType: 'hearing',
         eventTypeLabel: 'Заседание',
         title: 'Судебное заседание',
-        scheduledAt: '2026-06-05T12:00:00Z',
+        scheduledAt: '2026-06-05T12:00:00',
         allDay: false,
         courtInstance: 'first',
         courtInstanceLabel: 'Первая инстанция',
@@ -1990,6 +1999,7 @@ describe('CaseDetailPage', () => {
         status: 'Подготовлен',
       });
     });
+    expect(await screen.findByText('Документ по шаблону «Исковое заявление» сформирован.')).toBeTruthy();
   });
 
   it('filters case documents by search, type, status and latest version', async () => {
@@ -2088,6 +2098,7 @@ describe('CaseDetailPage', () => {
       });
       expect(apiService.getCaseDocuments).toHaveBeenCalledTimes(2);
     });
+    expect(await screen.findByText('Документ «claim.pdf» загружен.')).toBeTruthy();
   });
 
   it('uploads a new case document version from the documents tab', async () => {
@@ -2153,6 +2164,75 @@ describe('CaseDetailPage', () => {
     await waitFor(() => {
       expect(revokeObjectUrl).toHaveBeenCalledWith('blob:case-document-preview');
     });
+  });
+
+  it('renders generated HTML documents through a sandboxed srcDoc preview', async () => {
+    const createObjectUrl = vi.fn(() => 'blob:case-document-html-preview');
+    const revokeObjectUrl = vi.fn();
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectUrl });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectUrl });
+    vi.mocked(apiService.downloadCaseDocument).mockResolvedValueOnce({
+      blob: new Blob(['<!doctype html><html><body><h1>Заказ-наряд</h1></body></html>'], { type: 'text/html' }),
+      fileName: 'Заказ-наряд.html',
+    });
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Документы' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Предпросмотр документа Заявление.docx' }));
+
+    const frame = await screen.findByTitle('Предпросмотр Заказ-наряд.html');
+    expect(frame.getAttribute('srcdoc')).toContain('<h1>Заказ-наряд</h1>');
+    expect(frame.getAttribute('sandbox')).toBe('');
+    expect(frame.getAttribute('src')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Закрыть предпросмотр' }));
+
+    await waitFor(() => {
+      expect(revokeObjectUrl).toHaveBeenCalledWith('blob:case-document-html-preview');
+    });
+  });
+
+  it('renders text documents without relying on a blob iframe', async () => {
+    const createObjectUrl = vi.fn(() => 'blob:case-document-text-preview');
+    const revokeObjectUrl = vi.fn();
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectUrl });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectUrl });
+    vi.mocked(apiService.downloadCaseDocument).mockResolvedValueOnce({
+      blob: new Blob(['# Карточка дела\n\nТекстовая версия документа.'], { type: 'text/markdown' }),
+      fileName: 'README.md',
+    });
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Документы' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Предпросмотр документа Заявление.docx' }));
+
+    expect(await screen.findByText(/Текстовая версия документа/)).toBeTruthy();
+    expect(screen.queryByTitle('Предпросмотр README.md')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Закрыть предпросмотр' }));
+
+    await waitFor(() => {
+      expect(revokeObjectUrl).toHaveBeenCalledWith('blob:case-document-text-preview');
+    });
+  });
+
+  it('shows a human-readable Yandex Disk error without HTTP internals', async () => {
+    vi.mocked(apiService.uploadCaseDocumentToYandexDisk).mockRejectedValueOnce(
+      new Error('HTTP 400 Bad Request at http://localhost:5080/api/yandex-disk/upload - Включите правила синхронизации CRM в разделе Я.Диск.'),
+    );
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Документы' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Отправить документ Заявление.docx на Яндекс.Диск' }));
+
+    expect(await screen.findByText('Включите правила синхронизации CRM в разделе Я.Диск.')).toBeTruthy();
+    expect(screen.queryByText(/HTTP 400 Bad Request/)).toBeNull();
   });
 
   it('shows case documents in read-only mode without mutation actions', async () => {

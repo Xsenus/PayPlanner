@@ -197,6 +197,13 @@ describe('Calendar integration', () => {
     localStorage.removeItem('pp.calendar_section_mode');
   });
 
+  it('uses Russian accessible labels for month navigation', async () => {
+    render(<Calendar />);
+
+    expect(await screen.findByRole('button', { name: 'Предыдущий месяц' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Следующий месяц' })).toBeTruthy();
+  });
+
   it('opens the existing payment modal for invoice-managed payments from the calendar grid', async () => {
     const invoiceManagedPayment = {
       id: 159,

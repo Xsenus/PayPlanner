@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Models.Responses;
 
 namespace PayPlanner.Api.Controllers;
 
@@ -138,6 +139,101 @@ public sealed class AppVersionController : ControllerBase
 
         return Ok(releases.Select(MapAdminRelease).ToArray());
     }
+
+    [HttpGet("admin/releases/paged")]
+    [Authorize(Policy = "Admin")]
+    public async Task<ActionResult<PagedResponse<AppReleaseAdminDto>>> GetAdminReleasesPaged(
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        [FromQuery] string? search = null,
+        CancellationToken ct = default)
+    {
+        if (await RequireAdminAccessAsync(ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 10, 100);
+
+        var query = _db.AppReleases.AsNoTracking();
+        var normalizedSearch = search?.Trim();
+        if (!string.IsNullOrWhiteSpace(normalizedSearch) && _db.Database.IsNpgsql())
+        {
+            var searchPattern = $"%{EscapeLikePattern(normalizedSearch)}%";
+            query = query.Where(release =>
+                EF.Functions.ILike(release.ReleaseId, searchPattern, "\\")
+                || EF.Functions.ILike(release.Version, searchPattern, "\\")
+                || EF.Functions.ILike(release.Title, searchPattern, "\\"));
+        }
+
+        // SQLite LOWER/NOCASE обрабатывает только ASCII. В тестовой и локальной SQLite-БД
+        // сначала читаем компактную проекцию без пунктов релизов и применяем Unicode-поиск
+        // в памяти; PostgreSQL выше сохраняет полностью серверную пагинацию через ILIKE.
+        if (!string.IsNullOrWhiteSpace(normalizedSearch) && !_db.Database.IsNpgsql())
+        {
+            var candidates = await query
+                .Select(release => new
+                {
+                    release.Id,
+                    release.ReleaseId,
+                    release.Version,
+                    release.Title,
+                    release.ReleasedAt,
+                })
+                .ToArrayAsync(ct);
+            var matchingIds = candidates
+                .Where(release =>
+                    release.ReleaseId.Contains(normalizedSearch, StringComparison.OrdinalIgnoreCase)
+                    || release.Version.Contains(normalizedSearch, StringComparison.OrdinalIgnoreCase)
+                    || release.Title.Contains(normalizedSearch, StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(release => release.ReleasedAt)
+                .ThenByDescending(release => release.Id)
+                .Select(release => release.Id)
+                .ToArray();
+            var pagedIds = matchingIds
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToArray();
+            var pageReleases = await _db.AppReleases
+                .AsNoTracking()
+                .Include(release => release.Items)
+                .Where(release => pagedIds.Contains(release.Id))
+                .OrderByDescending(release => release.ReleasedAt)
+                .ThenByDescending(release => release.Id)
+                .ToArrayAsync(ct);
+
+            return Ok(new PagedResponse<AppReleaseAdminDto>
+            {
+                Items = pageReleases.Select(MapAdminRelease).ToArray(),
+                Total = matchingIds.Length,
+                Page = page,
+                PageSize = pageSize,
+            });
+        }
+
+        var total = await query.CountAsync(ct);
+        var releases = await query
+            .Include(release => release.Items)
+            .OrderByDescending(release => release.ReleasedAt)
+            .ThenByDescending(release => release.Id)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToArrayAsync(ct);
+
+        return Ok(new PagedResponse<AppReleaseAdminDto>
+        {
+            Items = releases.Select(MapAdminRelease).ToArray(),
+            Total = total,
+            Page = page,
+            PageSize = pageSize,
+        });
+    }
+
+    private static string EscapeLikePattern(string value) => value
+        .Replace("\\", "\\\\", StringComparison.Ordinal)
+        .Replace("%", "\\%", StringComparison.Ordinal)
+        .Replace("_", "\\_", StringComparison.Ordinal);
 
     [HttpPost("admin/releases")]
     [Authorize(Policy = "Admin")]

@@ -4,6 +4,17 @@ type DateTimePart = (typeof DATE_TIME_PARTS)[number];
 
 type ZonedParts = Record<DateTimePart, number>;
 
+const NAIVE_ISO_DATE_TIME_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?$/;
+
+function parseInstant(value: string | Date): Date {
+  if (value instanceof Date) return value;
+
+  // PostgreSQL `timestamp without time zone` values contain UTC clock time,
+  // but ASP.NET serializes them without a suffix. JavaScript otherwise treats
+  // such strings as browser-local time and applies the user's offset twice.
+  return new Date(NAIVE_ISO_DATE_TIME_PATTERN.test(value) ? `${value}Z` : value);
+}
+
 function safeTimeZone(timeZoneId?: string | null) {
   const value = (timeZoneId || '').trim();
   return value || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
@@ -24,7 +35,7 @@ function getFormatter(timeZoneId?: string | null) {
 }
 
 export function getZonedParts(value: string | Date, timeZoneId?: string | null): ZonedParts | null {
-  const date = value instanceof Date ? value : new Date(value);
+  const date = parseInstant(value);
   if (Number.isNaN(date.getTime())) return null;
 
   const parts = getFormatter(timeZoneId).formatToParts(date);
@@ -69,7 +80,7 @@ export function fromTimeZoneDateTimeInput(value: string, timeZoneId?: string | n
 }
 
 export function formatDateTimeInTimeZone(value: string | Date, timeZoneId?: string | null) {
-  const date = value instanceof Date ? value : new Date(value);
+  const date = parseInstant(value);
   if (Number.isNaN(date.getTime())) return '';
   return new Intl.DateTimeFormat('ru-RU', {
     timeZone: safeTimeZone(timeZoneId),
@@ -82,7 +93,7 @@ export function formatDateTimeInTimeZone(value: string | Date, timeZoneId?: stri
 }
 
 export function formatDateTimeWithSecondsInTimeZone(value: string | Date, timeZoneId?: string | null) {
-  const date = value instanceof Date ? value : new Date(value);
+  const date = parseInstant(value);
   if (Number.isNaN(date.getTime())) return '';
   return new Intl.DateTimeFormat('ru-RU', {
     timeZone: safeTimeZone(timeZoneId),
@@ -96,7 +107,7 @@ export function formatDateTimeWithSecondsInTimeZone(value: string | Date, timeZo
 }
 
 export function formatDateInTimeZone(value: string | Date, timeZoneId?: string | null) {
-  const date = value instanceof Date ? value : new Date(value);
+  const date = parseInstant(value);
   if (Number.isNaN(date.getTime())) return '';
   return new Intl.DateTimeFormat('ru-RU', {
     timeZone: safeTimeZone(timeZoneId),

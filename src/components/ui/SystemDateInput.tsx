@@ -23,8 +23,7 @@ export interface SystemDateInputProps extends Omit<InputHTMLAttributes<HTMLInput
 
 type MenuPosition = {
   left: number;
-  top?: number;
-  bottom?: number;
+  top: number;
   width: number;
 };
 
@@ -35,6 +34,23 @@ const MONTHS = [
 const WEEKDAYS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
 const VIEWPORT_GAP = 8;
 const PANEL_WIDTH = 320;
+
+// eslint-disable-next-line react-refresh/only-export-components -- расчёт позиции экспортируется для граничных responsive-тестов.
+export function resolveDateMenuTop(
+  fieldTop: number,
+  fieldBottom: number,
+  panelHeight: number,
+  viewportHeight: number,
+) {
+  const spaceBelow = viewportHeight - fieldBottom - VIEWPORT_GAP;
+  const spaceAbove = fieldTop - VIEWPORT_GAP;
+  const preferredTop = spaceBelow >= panelHeight || spaceBelow >= spaceAbove
+    ? fieldBottom + 6
+    : fieldTop - panelHeight - 6;
+  const maximumTop = Math.max(VIEWPORT_GAP, viewportHeight - panelHeight - VIEWPORT_GAP);
+
+  return Math.min(Math.max(VIEWPORT_GAP, preferredTop), maximumTop);
+}
 
 function pad(value: number) {
   return String(value).padStart(2, '0');
@@ -185,12 +201,8 @@ export const SystemDateInput = forwardRef<HTMLInputElement, SystemDateInputProps
     const width = Math.min(PANEL_WIDTH, window.innerWidth - VIEWPORT_GAP * 2);
     const height = panel.getBoundingClientRect().height;
     const left = Math.min(Math.max(VIEWPORT_GAP, rect.left), window.innerWidth - width - VIEWPORT_GAP);
-    const spaceBelow = window.innerHeight - rect.bottom - VIEWPORT_GAP;
-    if (spaceBelow >= height || spaceBelow >= rect.top - VIEWPORT_GAP) {
-      setPosition({ left, top: rect.bottom + 6, width });
-    } else {
-      setPosition({ left, bottom: window.innerHeight - rect.top + 6, width });
-    }
+    const top = resolveDateMenuTop(rect.top, rect.bottom, height, window.innerHeight);
+    setPosition({ left, top, width });
   }, []);
 
   useEffect(() => {
@@ -266,7 +278,7 @@ export const SystemDateInput = forwardRef<HTMLInputElement, SystemDateInputProps
       ref={panelRef}
       role="dialog"
       aria-label={type === 'time' ? 'Выбор времени' : 'Выбор даты'}
-      className="fixed z-[5100] rounded-2xl border border-slate-200 bg-white p-3 shadow-2xl"
+      className="fixed z-[5100] max-h-[calc(100vh-1rem)] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-3 shadow-2xl"
       style={position ?? { left: VIEWPORT_GAP, top: VIEWPORT_GAP, width: PANEL_WIDTH }}
     >
       {type !== 'time' ? (

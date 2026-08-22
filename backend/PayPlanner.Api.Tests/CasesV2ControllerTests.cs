@@ -1647,6 +1647,14 @@ public class CasesV2ControllerTests
             Amount = 25000m,
             Status = ContractStatus.Concluded,
         };
+        var directlyLinkedContract = new Contract
+        {
+            Number = "2-2026",
+            Title = "Прямо связанный договор",
+            Date = new DateTime(2026, 2, 3, 0, 0, 0, DateTimeKind.Utc),
+            Amount = 10000m,
+            Status = ContractStatus.Draft,
+        };
         var source = new PaymentSource
         {
             Name = "Касса",
@@ -1655,7 +1663,7 @@ public class CasesV2ControllerTests
         };
         db.Clients.Add(client);
         db.ClientCases.Add(clientCase);
-        db.Contracts.Add(contract);
+        db.Contracts.AddRange(contract, directlyLinkedContract);
         db.PaymentSources.Add(source);
         await db.SaveChangesAsync();
 
@@ -1738,6 +1746,11 @@ public class CasesV2ControllerTests
             ContractId = contract.Id,
             PaymentId = paymentOne.Id,
         });
+        db.ClientCaseContracts.Add(new ClientCaseContract
+        {
+            ClientCaseId = clientCase.Id,
+            ContractId = directlyLinkedContract.Id,
+        });
         await db.SaveChangesAsync();
         var controller = CreateController(db, owner);
         interceptor.Commands.Clear();
@@ -1750,6 +1763,7 @@ public class CasesV2ControllerTests
         Assert.Equal(clientCase.Id, dto.CaseId);
         Assert.Equal(6, interceptor.Commands.Count);
         var linkedContractsCommand = Assert.Single(interceptor.Commands, command =>
+            command.Contains("ClientCaseContracts", StringComparison.OrdinalIgnoreCase) &&
             command.Contains("ContractInvoices", StringComparison.OrdinalIgnoreCase) &&
             command.Contains("ContractPayments", StringComparison.OrdinalIgnoreCase));
         Assert.Contains("UNION ALL", linkedContractsCommand, StringComparison.OrdinalIgnoreCase);
@@ -1769,9 +1783,9 @@ public class CasesV2ControllerTests
         Assert.Equal("8", invoice.Number);
         Assert.Equal(25000m, invoice.Amount);
         Assert.Equal(PaymentStatus.Completed.ToString(), invoice.Status);
-        var linkedContract = Assert.Single(dto.Contracts);
-        Assert.Equal(contract.Id, linkedContract.Id);
-        Assert.Equal("1-2026", linkedContract.Number);
+        Assert.Equal(2, dto.Contracts.Count);
+        Assert.Contains(dto.Contracts, linkedContract => linkedContract.Id == contract.Id && linkedContract.Number == "1-2026");
+        Assert.Contains(dto.Contracts, linkedContract => linkedContract.Id == directlyLinkedContract.Id && linkedContract.Number == "2-2026");
         Assert.Equal(2, dto.Payments.Count);
         Assert.All(dto.Payments, payment => Assert.Equal("Касса", payment.PaymentSourceName));
     }
@@ -8412,6 +8426,7 @@ public class CasesV2ControllerTests
         db.ClientCases.Add(clientCase);
         db.ClientCaseWorkOrders.Add(workOrder);
         await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
         var controller = CreateController(db, owner);
 
         var result = await controller.CreateInvoiceFromWorkOrder(clientCase.Id, new CasesV2Controller.CreateClientCaseWorkOrderInvoiceRequest
@@ -8451,11 +8466,12 @@ public class CasesV2ControllerTests
         Assert.Equal($"invoice-{payment.Id}", invoiceDocument.DocumentKey);
         Assert.Equal("Счет", invoiceDocument.DocumentType);
         Assert.Equal("text/html; charset=utf-8", invoiceDocument.ContentType);
+        Assert.Equal("Клиент счета", db.ClientCases.Local.Single(item => item.Id == clientCase.Id).Client?.Name);
 
-        await db.Entry(workOrder).ReloadAsync();
-        await db.Entry(clientCase).ReloadAsync();
-        Assert.Equal("invoice_created", workOrder.Status);
-        Assert.Contains("создан счет", clientCase.EventHistory, StringComparison.OrdinalIgnoreCase);
+        var reloadedWorkOrder = await db.ClientCaseWorkOrders.AsNoTracking().SingleAsync(item => item.Id == workOrder.Id);
+        var reloadedCase = await db.ClientCases.AsNoTracking().SingleAsync(item => item.Id == clientCase.Id);
+        Assert.Equal("invoice_created", reloadedWorkOrder.Status);
+        Assert.Contains("создан счет", reloadedCase.EventHistory, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -8592,6 +8608,7 @@ public class CasesV2ControllerTests
         await using var db = await CreateContextAsync();
         var owner = await CreateUserAsync(db, "work-order-contract-owner@example.com", "Владелец договора");
         await GrantSectionPermissionAsync(db, owner, RolePermissionCatalog.Contracts);
+        await GrantSectionPermissionAsync(db, owner, RolePermissionCatalog.Payments, viewScope: DataVisibilityScope.All);
         var client = new Client
         {
             Name = "Клиент договора",
@@ -8660,6 +8677,7 @@ public class CasesV2ControllerTests
         var contract = await db.Contracts
             .Include(item => item.ClientContracts)
             .Include(item => item.LegalEntityContracts)
+            .Include(item => item.ClientCaseContracts)
             .SingleAsync(item => item.Id == dto.ContractId);
         Assert.Equal(ContractStatus.Draft, contract.Status);
         Assert.Equal(ContractBillingMode.Fixed, contract.BillingMode);
@@ -8669,6 +8687,7 @@ public class CasesV2ControllerTests
         Assert.Contains("Юридическое сопровождение", contract.Description);
         Assert.Contains(contract.ClientContracts, item => item.ClientId == client.Id);
         Assert.Empty(contract.LegalEntityContracts);
+        Assert.Contains(contract.ClientCaseContracts, item => item.ClientCaseId == clientCase.Id);
 
         var contractDocument = await db.ClientCaseDocuments.SingleAsync(item => item.Id == dto.DocumentId);
         Assert.Equal($"contract-{contract.Id}", contractDocument.DocumentKey);
@@ -8679,6 +8698,13 @@ public class CasesV2ControllerTests
         await db.Entry(clientCase).ReloadAsync();
         Assert.Equal("approved", workOrder.Status);
         Assert.Contains("создан договор", clientCase.EventHistory, StringComparison.OrdinalIgnoreCase);
+
+        db.ChangeTracker.Clear();
+        var financeResult = await CreateController(db, owner).GetFinance(clientCase.Id, CancellationToken.None);
+        var finance = Assert.IsType<CasesV2Controller.ClientCaseFinanceDetailDto>(
+            Assert.IsType<OkObjectResult>(financeResult.Result).Value);
+        var financeContract = Assert.Single(finance.Contracts);
+        Assert.Equal(contract.Id, financeContract.Id);
     }
 
     [Fact]
@@ -8907,6 +8933,7 @@ public class CasesV2ControllerTests
         Assert.Contains("Заказ-наряд", content.Content, StringComparison.Ordinal);
         Assert.Contains("PRINT-1", content.Content, StringComparison.Ordinal);
         Assert.Contains("Подготовка заявления", content.Content, StringComparison.Ordinal);
+        Assert.Contains("<th>№</th>", content.Content, StringComparison.Ordinal);
         Assert.Contains("24", content.Content, StringComparison.Ordinal);
         Assert.Contains(selectedZone.LocalNow.ToString("dd.MM.yyyy", CultureInfo.GetCultureInfo("ru-RU")), content.Content, StringComparison.Ordinal);
     }

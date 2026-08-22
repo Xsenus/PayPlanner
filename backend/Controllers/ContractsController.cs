@@ -329,11 +329,13 @@ public class ContractsController : ControllerBase
 
         var query = ApplySort(ApplyFilters(BuildContractsListCountQuery(visibility), from, to, clientId, legalEntityId, invoiceId, actId, paymentId, normalizedStatus, search), sortBy, sortDir);
         var total = await query.CountAsync(ct);
-        var contracts = await ApplySort(ApplyFilters(BuildContractDetailQuery(visibility), from, to, clientId, legalEntityId, invoiceId, actId, paymentId, normalizedStatus, search), sortBy, sortDir)
+        var items = await ApplySort(ApplyFilters(BuildContractsListCountQuery(visibility), from, to, clientId, legalEntityId, invoiceId, actId, paymentId, normalizedStatus, search), sortBy, sortDir)
+            .AsSplitQuery()
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
+            .Select(MapToDtoExpression)
             .ToListAsync(ct);
-        var items = contracts.Select(MapToDto).ToList();
+        await ApplyFinancialSummariesAsync(items, ct);
         return Ok(new { items, total, page, pageSize });
     }
 
@@ -346,8 +348,15 @@ public class ContractsController : ControllerBase
             return MissingContractsVisibilityResult();
         }
 
-        var contract = await BuildContractDetailQuery(visibility).FirstOrDefaultAsync(c => c.Id == id, ct);
-        var dto = contract is null ? null : MapToDto(contract);
+        var dto = await BuildContractsListCountQuery(visibility)
+            .Where(contract => contract.Id == id)
+            .AsSplitQuery()
+            .Select(MapToDtoExpression)
+            .FirstOrDefaultAsync(ct);
+        if (dto is not null)
+        {
+            await ApplyFinancialSummariesAsync([dto], ct);
+        }
         return dto is null ? NotFound() : Ok(dto);
     }
 
@@ -1320,10 +1329,166 @@ public class ContractsController : ControllerBase
             Kpp = link.LegalEntity!.Kpp,
             Comment = link.Comment,
         }).OrderBy(entity => entity.ShortName).ToList(),
-        ActIds = contract.ContractActs.Select(x => x.ActId).ToList(),
-        InvoiceIds = contract.ContractInvoices.Select(x => x.InvoiceId).ToList(),
-        PaymentIds = contract.ContractPayments.Select(x => x.PaymentId).ToList(),
+        ActIds = new List<int>(),
+        InvoiceIds = new List<int>(),
+        PaymentIds = new List<int>(),
     };
+
+    private async Task ApplyFinancialSummariesAsync(IReadOnlyCollection<ContractDto> contracts, CancellationToken ct)
+    {
+        if (contracts.Count == 0)
+        {
+            return;
+        }
+
+        var contractIds = contracts.Select(contract => contract.Id).Distinct().ToArray();
+        var invoiceRows = await _db.ContractInvoices
+            .AsNoTracking()
+            .Where(link => contractIds.Contains(link.ContractId))
+            .Select(link => new
+            {
+                link.ContractId,
+                DocumentId = link.InvoiceId,
+                link.Invoice.Amount,
+            })
+            .Concat(_db.Payments
+                .AsNoTracking()
+                .Where(payment =>
+                    payment.ContractId.HasValue
+                    && contractIds.Contains(payment.ContractId.Value)
+                    && payment.DocumentKind == DocumentKind.Invoice
+                    && payment.InvoiceId.HasValue)
+                .Select(payment => new
+                {
+                    ContractId = payment.ContractId!.Value,
+                    DocumentId = payment.Id,
+                    payment.Amount,
+                }))
+            .ToArrayAsync(ct);
+
+        var actRows = await _db.ContractActs
+            .AsNoTracking()
+            .Where(link => contractIds.Contains(link.ContractId))
+            .Select(link => new
+            {
+                link.ContractId,
+                DocumentId = link.ActId,
+                link.Act.Amount,
+                IsDirect = true,
+            })
+            .Concat(
+                from link in _db.ContractInvoices.AsNoTracking()
+                join act in _db.Acts.AsNoTracking()
+                    on (int?)link.InvoiceId equals act.InvoiceId
+                where contractIds.Contains(link.ContractId)
+                select new
+                {
+                    link.ContractId,
+                    DocumentId = act.Id,
+                    act.Amount,
+                    IsDirect = false,
+                })
+            .Concat(
+                from invoiceDocument in _db.Payments.AsNoTracking()
+                join act in _db.Acts.AsNoTracking()
+                    on (int?)invoiceDocument.Id equals act.InvoiceId
+                where invoiceDocument.ContractId.HasValue
+                    && contractIds.Contains(invoiceDocument.ContractId.Value)
+                    && invoiceDocument.DocumentKind == DocumentKind.Invoice
+                    && invoiceDocument.InvoiceId.HasValue
+                select new
+                {
+                    ContractId = invoiceDocument.ContractId!.Value,
+                    DocumentId = act.Id,
+                    act.Amount,
+                    IsDirect = false,
+                })
+            .ToArrayAsync(ct);
+
+        var paymentRows = await _db.ContractPayments
+            .AsNoTracking()
+            .Where(link =>
+                contractIds.Contains(link.ContractId)
+                && link.Payment.DocumentKind != DocumentKind.Invoice)
+            .Select(link => new
+            {
+                link.ContractId,
+                DocumentId = link.PaymentId,
+                link.Payment.Amount,
+            })
+            .Concat(_db.Payments
+                .AsNoTracking()
+                .Where(payment =>
+                    payment.ContractId.HasValue
+                    && contractIds.Contains(payment.ContractId.Value)
+                    && payment.DocumentKind != DocumentKind.Invoice)
+                .Select(payment => new
+                {
+                    ContractId = payment.ContractId!.Value,
+                    DocumentId = payment.Id,
+                    payment.Amount,
+                }))
+            .Concat(
+                from link in _db.ContractInvoices.AsNoTracking()
+                join invoiceDocument in _db.Payments.AsNoTracking()
+                    on link.InvoiceId equals invoiceDocument.Id
+                join payment in _db.Payments.AsNoTracking()
+                    on invoiceDocument.InvoiceId equals payment.InvoiceId
+                where contractIds.Contains(link.ContractId)
+                    && invoiceDocument.InvoiceId.HasValue
+                    && payment.DocumentKind != DocumentKind.Invoice
+                select new
+                {
+                    link.ContractId,
+                    DocumentId = payment.Id,
+                    payment.Amount,
+                })
+            .Concat(
+                from invoiceDocument in _db.Payments.AsNoTracking()
+                join payment in _db.Payments.AsNoTracking()
+                    on invoiceDocument.InvoiceId equals payment.InvoiceId
+                where invoiceDocument.ContractId.HasValue
+                    && contractIds.Contains(invoiceDocument.ContractId.Value)
+                    && invoiceDocument.DocumentKind == DocumentKind.Invoice
+                    && invoiceDocument.InvoiceId.HasValue
+                    && payment.DocumentKind != DocumentKind.Invoice
+                select new
+                {
+                    ContractId = invoiceDocument.ContractId!.Value,
+                    DocumentId = payment.Id,
+                    payment.Amount,
+                })
+            .ToArrayAsync(ct);
+
+        var invoicesByContract = invoiceRows
+            .GroupBy(row => row.ContractId)
+            .ToDictionary(
+                group => group.Key,
+                group => group.GroupBy(row => row.DocumentId).Select(rows => rows.First()).ToArray());
+        var actsByContract = actRows
+            .GroupBy(row => row.ContractId)
+            .ToDictionary(
+                group => group.Key,
+                group => group.GroupBy(row => row.DocumentId).Select(rows => rows.First()).ToArray());
+        var paymentsByContract = paymentRows
+            .GroupBy(row => row.ContractId)
+            .ToDictionary(
+                group => group.Key,
+                group => group.GroupBy(row => row.DocumentId).Select(rows => rows.First()).ToArray());
+
+        foreach (var contract in contracts)
+        {
+            var invoices = invoicesByContract.GetValueOrDefault(contract.Id) ?? [];
+            var acts = actsByContract.GetValueOrDefault(contract.Id) ?? [];
+            var payments = paymentsByContract.GetValueOrDefault(contract.Id) ?? [];
+            contract.InvoiceIds = invoices.Select(row => row.DocumentId).ToList();
+            contract.InvoiceAmountTotal = invoices.Sum(row => row.Amount);
+            contract.ActIds = acts.Where(row => row.IsDirect).Select(row => row.DocumentId).ToList();
+            contract.ActAmountTotal = acts.Sum(row => row.Amount);
+            contract.PaymentIds = payments.Select(row => row.DocumentId).ToList();
+            contract.PaymentAmountTotal = payments.Sum(row => row.Amount);
+        }
+    }
 
     private IQueryable<Contract> BuildContractDetailQuery(DataVisibilityAccess? visibility = null)
     {

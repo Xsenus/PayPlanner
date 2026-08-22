@@ -128,7 +128,7 @@ const SOURCE_LABELS: Record<MoneyTab, string> = {
   Bank: 'Банк',
   Cash: 'Касса',
   Card: 'Карты',
-  EMoney: 'E-money',
+  EMoney: 'Электронные деньги',
   Total: 'Итого',
 };
 
@@ -157,7 +157,7 @@ const SOURCE_MODAL_LABELS: Record<MoneyOperationSource, string> = {
   Bank: 'банку',
   Cash: 'кассе',
   Card: 'картам',
-  EMoney: 'E-money',
+  EMoney: 'Электронные деньги',
 };
 
 const MONEY_DIRECTION_FILTER_LABELS: Record<MoneyOperationDirection, string> = {
@@ -816,7 +816,7 @@ function CashOrderModal({
     : isDraft
       ? 'bg-amber-50 text-amber-700'
       : 'bg-emerald-50 text-emerald-700';
-  const title = `${form.type === 'Incoming' ? 'Приходный кассовый ордер' : 'Расходный кассовый ордер'} ${form.number}`;
+  const title = `${form.type === 'Incoming' ? 'Приходный кассовый ордер' : 'Расходный кассовый ордер'} ${form.number || 'Новый'}`;
   const clientLabel = form.clientName ?? '—';
   const paymentLabel = form.paymentId ? `#${form.paymentId}` : '—';
   const invoiceLabel = form.invoiceId ? `#${form.invoiceId}` : '—';
@@ -1175,7 +1175,7 @@ function CashOrderModal({
         objectId={form.id}
         createdAt={form.createdAt}
         updatedAt={form.updatedAt}
-        title={`История кассового ордера ${form.number}`}
+        title={`История кассового ордера ${form.number || 'Новый'}`}
         subtitle="Здесь видны создание, изменения, отмена и удаление кассового ордера."
       />
       {helpOpen && (
@@ -1799,6 +1799,16 @@ function MoneyOperationModal({
 
   const handleSubmit = async () => {
     setError(null);
+    if (!Number.isFinite(form.amount) || form.amount <= 0) {
+      setError('Сумма денежной операции должна быть больше нуля.');
+      return;
+    }
+
+    if (!form.moneyAccountId && !form.accountName?.trim()) {
+      setError('Укажите денежный счёт или его название.');
+      return;
+    }
+
     if (form.direction === 'Transfer') {
       if (!form.moneyAccountId || !form.transferTargetMoneyAccountId) {
         setError('Выберите счёт списания и счёт зачисления для перевода.');
@@ -1926,7 +1936,7 @@ function MoneyOperationModal({
                   value={form.moneyAccountId ?? ''}
                   onChange={(event) => handleMoneyAccountChange(event.target.value)}
                   className="rounded-lg border border-slate-200 px-3 py-2 focus:border-blue-500 focus:outline-none">
-                  <option value="">Без привязки к счету</option>
+                  <option value="">Выберите денежный счёт</option>
                   {sourceMoneyAccounts.map((account) => (
                     <option key={account.id} value={account.id}>
                       {account.name}
@@ -3116,7 +3126,7 @@ export function MoneyOperations({
     }
 
     const actualBalance = Number(cashInventoryActualBalance);
-    if (!Number.isFinite(actualBalance) || actualBalance < 0) {
+    if (cashInventoryActualBalance.trim() === '' || !Number.isFinite(actualBalance) || actualBalance < 0) {
       toast.error('Укажите фактический остаток кассы.', 'Касса');
       return;
     }
@@ -3217,7 +3227,7 @@ export function MoneyOperations({
       { key: 'Bank', label: 'Банк' },
       { key: 'Cash', label: 'Касса' },
       { key: 'Card', label: 'Карты' },
-      { key: 'EMoney', label: 'E-money' },
+      { key: 'EMoney', label: 'Электронные деньги' },
     ] as const).map((row) => {
       const data = bySource.get(row.key) ?? {
         startBalance: 0,
@@ -3443,7 +3453,8 @@ export function MoneyOperations({
     const cashAccountName = accountName || selectedMoneyAccount?.name || '';
     const draft: CashOrder = {
       id: 0,
-      number: 'Новый',
+      // Пустой номер позволяет серверу назначить следующий номер ПКО/РКО при создании.
+      number: '',
       type: 'Incoming',
       status: 'Draft',
       date: todayYMD(),
@@ -4242,7 +4253,7 @@ export function MoneyOperations({
                     <option value="Bank">Банк</option>
                     <option value="Cash">Касса</option>
                     <option value="Card">Карты</option>
-                    <option value="EMoney">E-money</option>
+                    <option value="EMoney">Электронные деньги</option>
                   </SystemSelect>
                   <SystemSelect
                     value={directionFilter}

@@ -359,6 +359,28 @@ describe('PaymentModal integration', () => {
 
     expect(document.querySelector<HTMLInputElement>('input[name="date"]')?.value).toBe('2026-06-05');
     expect(document.querySelector<HTMLInputElement>('input[name="plannedDate"]')?.value).toBe('2026-06-05');
+    expect(screen.getByRole('button', { name: 'Закрыть' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Выбрать: Ожидаемая дата платежа' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Выбрать: Плановая дата по графику' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Выбрать: Дата фактического платежа' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Выбрать: Дата счёта' })).toBeTruthy();
+  });
+
+  it('keeps the create action available when confirmation is cancelled', async () => {
+    confirmMock.mockResolvedValueOnce(false);
+    render(
+      <PaymentModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    const submit = screen.getByRole('button', { name: 'addPayment' });
+    fireEvent.click(submit);
+
+    await waitFor(() => expect(confirmMock).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole('button', { name: 'addPayment' }).hasAttribute('disabled')).toBe(false);
   });
 
   it('syncs the planned date when the payment date changes', async () => {
@@ -946,7 +968,7 @@ describe('PaymentModal integration', () => {
     expect(screen.getByDisplayValue('2026-04-02')).toBeTruthy();
     expect(screen.queryByDisplayValue('OLD-24')).toBeNull();
     expect(screen.queryByDisplayValue('2026-01-01')).toBeNull();
-    expect(screen.getAllByDisplayValue('5 000.00')).toHaveLength(2);
+    expect(screen.getAllByDisplayValue('5 000,00')).toHaveLength(2);
     expect(screen.getByDisplayValue('Existing payment description')).toBeTruthy();
   });
 
@@ -1099,7 +1121,7 @@ describe('PaymentModal integration', () => {
 
     expect(await screen.findByTestId('invoice-create-modal')).toBeTruthy();
     expect(screen.getByText('draft-number:LEGACY-31')).toBeTruthy();
-    expect(screen.getByText('draft-amount:5 000.00')).toBeTruthy();
+    expect(screen.getByText('draft-amount:5 000,00')).toBeTruthy();
     expect(screen.getByText('draft-date:2026-04-01')).toBeTruthy();
     expect(screen.getByText('draft-client:69')).toBeTruthy();
     expect(screen.getByText('draft-contract:321')).toBeTruthy();
@@ -2128,7 +2150,7 @@ describe('PaymentModal integration', () => {
     );
 
     expect(await screen.findByText('Баланс:')).toBeTruthy();
-    expect(await screen.findByText('750.00')).toBeTruthy();
+    expect(await screen.findByText('750,00')).toBeTruthy();
 
     const balanceInput = screen.getByRole('textbox', { name: 'Сумма зачета' });
     fireEvent.change(balanceInput, { target: { value: '750' } });
@@ -2136,8 +2158,8 @@ describe('PaymentModal integration', () => {
 
     await waitFor(() => expect(applyClientBalanceMock).toHaveBeenCalledWith(69, { paymentId: 996, amount: 750 }));
     await waitFor(() => expect(onBalanceApplied).toHaveBeenCalledWith(996));
-    expect(screen.getAllByDisplayValue('750.00').length).toBeGreaterThan(0);
-    expect(await screen.findByText(/Зачтено с баланса: 750.00/i)).toBeTruthy();
+    expect(screen.getAllByDisplayValue('750,00').length).toBeGreaterThan(0);
+    expect(await screen.findByText(/Зачтено с баланса: 750,00/i)).toBeTruthy();
 
     const paidAmountInput = document.body.querySelector(
       'input[name="paidAmount"]',
@@ -2145,7 +2167,7 @@ describe('PaymentModal integration', () => {
     expect(paidAmountInput).not.toBeNull();
     fireEvent.change(paidAmountInput!, { target: { value: '100' } });
     fireEvent.blur(paidAmountInput!);
-    expect(paidAmountInput!.value).toBe('750.00');
+    expect(paidAmountInput!.value).toBe('750,00');
   });
 
   it('shows available legal entity balance before saving an income payment', async () => {
@@ -2162,7 +2184,7 @@ describe('PaymentModal integration', () => {
     );
 
     expect(await screen.findByText('Доступно на балансе юрлица')).toBeTruthy();
-    expect(await screen.findByText('9 000.00')).toBeTruthy();
+    expect(await screen.findByText('9 000,00')).toBeTruthy();
     expect(getLegalEntityBalanceMock).toHaveBeenCalledWith(301);
     expect(getClientBalanceMock).not.toHaveBeenCalled();
   });
@@ -2216,18 +2238,18 @@ describe('PaymentModal integration', () => {
       'input[name="paidAmount"]',
     ) as HTMLInputElement | null;
     expect(paidAmountInput).not.toBeNull();
-    await waitFor(() => expect(paidAmountInput!.value).toBe('500.00'));
+    await waitFor(() => expect(paidAmountInput!.value).toBe('500,00'));
 
     fireEvent.change(paidAmountInput!, { target: { value: '11' } });
     expect(paidAmountInput!.value).toBe('11');
     fireEvent.click(screen.getByRole('button', { name: 'save' }));
     expect(onSubmit).not.toHaveBeenCalled();
-    expect(paidAmountInput!.value).toBe('500.00');
+    expect(paidAmountInput!.value).toBe('500,00');
 
     fireEvent.change(paidAmountInput!, { target: { value: '11' } });
     expect(paidAmountInput!.value).toBe('11');
     fireEvent.blur(paidAmountInput!);
-    expect(paidAmountInput!.value).toBe('500.00');
+    expect(paidAmountInput!.value).toBe('500,00');
 
     fireEvent.click(screen.getByRole('button', { name: 'save' }));
 

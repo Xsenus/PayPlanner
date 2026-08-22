@@ -407,7 +407,7 @@ describe('InvoiceModal integration', () => {
     );
 
     expect(await screen.findByText('Доступно на балансе клиента')).toBeTruthy();
-    expect(await screen.findByText('7 100.00')).toBeTruthy();
+    expect(await screen.findByText('7 100,00')).toBeTruthy();
     expect(apiService.getClientBalance).toHaveBeenCalledWith(69);
   });
 
@@ -1898,7 +1898,7 @@ describe('InvoiceModal integration', () => {
 
     await waitFor(() => {
       expect((screen.getByLabelText('Единица измерения') as HTMLInputElement).value).toBe('усл.ед.');
-      expect((screen.getByLabelText('Цена') as HTMLInputElement).value).toBe('15 000.00');
+      expect((screen.getByLabelText('Цена') as HTMLInputElement).value).toBe('15 000,00');
       expect(screen.getByRole('button', { name: 'Наименование услуги' }).textContent).toContain('Составление иска');
       expect(screen.getByRole('button', { name: 'Наименование услуги' }).textContent).not.toContain('Гражданские дела');
     });
@@ -1964,7 +1964,7 @@ describe('InvoiceModal integration', () => {
     await waitFor(() => {
       expect(screen.getAllByTestId('invoice-line-item-service-trigger')[0].textContent).toContain(serviceName);
       expect((screen.getAllByTestId('invoice-line-item-unit-input')[0] as HTMLInputElement).value).toBe('svc');
-      expect((screen.getAllByTestId('invoice-line-item-price-input')[0] as HTMLInputElement).value).toBe('15 000.00');
+      expect((screen.getAllByTestId('invoice-line-item-price-input')[0] as HTMLInputElement).value).toBe('15 000,00');
     });
 
     fireEvent.click(screen.getAllByTestId('invoice-line-item-service-trigger')[0]);
@@ -1982,7 +1982,7 @@ describe('InvoiceModal integration', () => {
     await waitFor(() => {
       expect(screen.getAllByTestId('invoice-line-item-service-trigger')[0].textContent).toContain(customServiceName);
       expect((screen.getAllByTestId('invoice-line-item-unit-input')[0] as HTMLInputElement).value).toBe('svc');
-      expect((screen.getAllByTestId('invoice-line-item-price-input')[0] as HTMLInputElement).value).toBe('15 000.00');
+      expect((screen.getAllByTestId('invoice-line-item-price-input')[0] as HTMLInputElement).value).toBe('15 000,00');
     });
   });
 
@@ -3411,8 +3411,8 @@ describe('InvoiceModal integration', () => {
     fireEvent.blur(screen.getByLabelText('Цена'));
 
     await waitFor(() => {
-      expect(screen.getByLabelText('Сумма позиции').textContent).toBe('7 500.00');
-      expect(screen.getAllByText(/7 500\.00/).length).toBeGreaterThan(1);
+      expect(screen.getByLabelText('Сумма позиции').textContent).toBe('7 500,00');
+      expect(screen.getAllByText(/7 500,00/).length).toBeGreaterThan(1);
     });
   });
 

@@ -21,6 +21,7 @@ public class InvoicesControllerListTests
     {
         await using var db = await CreateContextAsync();
         var aggregate = await CreateInstallmentInvoiceAggregateAsync(db);
+        await CreateInvoiceDocumentAsync(db, "PLAIN-INV", new DateTime(2026, 4, 30), 8_000m);
         var controller = CreateController(db);
 
         var result = await controller.Get(
@@ -38,7 +39,8 @@ public class InvoicesControllerListTests
             sortDir: null,
             page: 1,
             pageSize: 20,
-            ct: CancellationToken.None);
+            ct: CancellationToken.None,
+            installmentsOnly: true);
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var items = ExtractInvoiceItems(ok);
@@ -516,9 +518,11 @@ public class InvoicesControllerListTests
 
         var firstInstallment = CreatePayment(invoice.Date, 4_100m, "Рассрочка по счёту №25 · платёж 1/2");
         firstInstallment.InvoiceId = invoice.Id;
+        firstInstallment.SystemNotes = "[pp:installment-payment] {\"sequence\":1}";
 
         var secondInstallment = CreatePayment(invoice.Date.AddMonths(1), 4_100m, "Рассрочка по счёту №25 · платёж 2/2");
         secondInstallment.InvoiceId = invoice.Id;
+        secondInstallment.SystemNotes = "[pp:installment-payment] {\"sequence\":2}";
 
         db.Payments.AddRange(invoicePayment, firstInstallment, secondInstallment);
         await db.SaveChangesAsync();

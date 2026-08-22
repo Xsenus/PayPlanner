@@ -22,6 +22,10 @@ const COMMON_FIELD_LABELS: Record<string, string> = {
   LastName: 'Фамилия',
   MiddleName: 'Отчество',
   DateOfBirth: 'Дата рождения',
+  ApprovedAt: 'Дата одобрения',
+  ApprovedByUserId: 'Одобрил',
+  AssignedUserId: 'Ответственный',
+  AssignedUserName: 'Ответственный',
   PhoneNumber: 'Телефон',
   WhatsApp: 'WhatsApp',
   Telegram: 'Telegram',
@@ -30,6 +34,12 @@ const COMMON_FIELD_LABELS: Record<string, string> = {
   Viber: 'Viber',
   Address: 'Адрес',
   AddressLine: 'Адрес',
+  Company: 'Организация',
+  Department: 'Подразделение',
+  DepartmentId: 'Подразделение',
+  Position: 'Должность',
+  Country: 'Страна',
+  BaseCurrency: 'Базовая валюта',
   ResponsibleUserId: 'Ответственный',
   ResponsibleId: 'Ответственный',
   ResponsibleName: 'Ответственный',
@@ -137,7 +147,19 @@ const COMMON_FIELD_LABELS: Record<string, string> = {
   EmploymentEndDate: 'Дата окончания работы',
   PhotoUrl: 'Фото',
   PermissionsUpdatedAt: 'Изменение прав',
+  PermissionsUpdatedByUserId: 'Изменил права',
   PermissionsUpdatedByUserName: 'Изменил права',
+  IsExternalContractor: 'Внешний подрядчик',
+  TotalAmount: 'Итого',
+  UnitPrice: 'Цена',
+  ObjectName: 'Объект',
+  TagsJson: 'Метки',
+  Purpose: 'Назначение',
+  IssuedAt: 'Дата выдачи',
+  Issuer: 'Кем выдана',
+  ValidUntil: 'Действительна до',
+  ShortName: 'Краткое наименование',
+  Text: 'Текст',
   LastActivityAction: 'Последнее действие',
   LastActivityAt: 'Время последней активности',
   LastActivitySection: 'Последний раздел',
@@ -177,6 +199,12 @@ const OBJECT_TYPE_FIELD_OVERRIDES: Record<string, Record<string, string>> = {
     Status: 'Статус дела',
     Priority: 'Приоритет дела',
     EventHistory: 'История событий',
+    CaseNumber: 'Номер дела',
+    CaseType: 'Вид дела',
+    CourtUrl: 'Ссылка на дело в суде',
+  },
+  'client-case-court-event': {
+    ProceduralDeadlineId: 'Процессуальный срок',
   },
   'client-case-document': {
     DocumentKey: 'Ключ документа',
@@ -260,17 +288,74 @@ const OBJECT_TYPE_FIELD_OVERRIDES: Record<string, Record<string, string>> = {
   act: {
     Description: 'Описание акта',
     Status: 'Статус акта',
+    CounterpartyInn: 'ИНН контрагента',
+    CreationMode: 'Способ формирования',
   },
   contract: {
     Description: 'Описание договора',
     Status: 'Статус договора',
     Number: 'Номер договора',
+    BillingMode: 'Порядок оплаты',
+    IsOpenEnded: 'Бессрочный договор',
+    TerminationDate: 'Дата прекращения',
+    TerminationFinancialTerms: 'Финансовые условия прекращения',
+    TerminationTerms: 'Условия прекращения',
   },
   'legal-entity': {
     Name: 'Наименование организации',
+    FullName: 'Полное наименование',
+    ClientStatusId: 'Статус организации',
+    BankAccountsJson: 'Банковские счета',
+    BaseCurrency: 'Базовая валюта',
+    CardsJson: 'Банковские карты',
+    CashRegistersJson: 'Кассы',
+    ChiefAccountantJson: 'Главный бухгалтер',
+    ContactEmailsJson: 'Контактные email',
+    ContactPhonesJson: 'Контактные телефоны',
+    Country: 'Страна регистрации',
+    Director: 'Руководитель',
+    DirectorSignatureDataUrl: 'Подпись руководителя',
+    DocumentDirectorJson: 'Руководитель в документах',
+    LogoDataUrl: 'Логотип',
+    Okato: 'ОКАТО',
+    Okfs: 'ОКФС',
+    Okogu: 'ОКОГУ',
+    Okpo: 'ОКПО',
+    Oktmo: 'ОКТМО',
+    Okved: 'ОКВЭД',
+    OrganizationForm: 'Организационно-правовая форма',
+    RequisitesEnglishJson: 'Реквизиты на английском языке',
+    SealDataUrl: 'Печать',
+    ServiceLanguage: 'Язык документов',
+    ShortName: 'Краткое наименование',
+    TaxSystem: 'Система налогообложения',
+    Timezone: 'Часовой пояс',
+    TreasuryAccountNumber: 'Казначейский счёт',
+    TreasuryBankBik: 'БИК банка казначейства',
+    TreasuryBankName: 'Банк казначейства',
+    TreasuryCorrAccountNumber: 'Корреспондентский счёт казначейства',
+    TreasuryInn: 'ИНН казначейства',
+    TreasuryKpp: 'КПП казначейства',
+    TreasuryRecipientName: 'Получатель казначейского платежа',
+    VatWithoutVat: 'Без НДС',
   },
   contact: {
     FullName: 'ФИО контакта',
+    LinkedClientId: 'Связанное физическое лицо',
+    LinkedLegalEntityId: 'Связанная организация',
+    Position: 'Должность',
+  },
+  'cash-order': {
+    Basis: 'Основание',
+    ReceiverName: 'Получатель',
+  },
+  'money-operation': {
+    Purpose: 'Назначение платежа',
+  },
+  'power-of-attorney': {
+    IssuedAt: 'Дата выдачи',
+    Issuer: 'Кем выдана',
+    ValidUntil: 'Действительна до',
   },
   user: {
     FullName: 'ФИО пользователя',
@@ -338,6 +423,27 @@ const OBJECT_TYPE_FIELD_OVERRIDES: Record<string, Record<string, string>> = {
     ContractorPaymentDueDate: 'Срок платежа подрядчику',
     ContractorPaymentOnResult: 'Платеж подрядчику по результату',
     ContractorPaymentResultDelayDays: 'Отсрочка платежа подрядчику',
+    ObjectName: 'Связанный объект',
+    TagsJson: 'Метки',
+  },
+  'sticky-note': {
+    AssignedUserId: 'Ответственный',
+    AssignedUserName: 'Ответственный',
+    Color: 'Цвет',
+    FontSize: 'Размер шрифта',
+    Height: 'Высота',
+    IsBold: 'Полужирный текст',
+    IsItalic: 'Курсив',
+    IsPinned: 'Закреплена',
+    IsUnderline: 'Подчёркнутый текст',
+    Opacity: 'Прозрачность',
+    Text: 'Текст заметки',
+    Version: 'Версия',
+    Width: 'Ширина',
+    ZIndex: 'Порядок наложения',
+  },
+  'sticky-note-board': {
+    Background: 'Фон доски',
   },
   'calendar-sync': {
     ExternalCalendarSyncEnabled: 'Внешняя синхронизация календарей',
@@ -347,6 +453,9 @@ const OBJECT_TYPE_FIELD_OVERRIDES: Record<string, Record<string, string>> = {
     ConflictResolutionMode: 'Правило спорных изменений',
     RequireManualConfirmation: 'Ручное подтверждение конфликтов',
     DryRunConfirmed: 'Dry-run на копии базы',
+    DefaultSyncFromDate: 'Синхронизировать с даты',
+    GoogleSyncIntervalMinutes: 'Интервал Google Calendar, мин.',
+    YandexSyncIntervalMinutes: 'Интервал Яндекс.Календаря, мин.',
     Notes: 'Комментарий к решению',
   },
   'notification-settings': {
@@ -375,6 +484,9 @@ const OBJECT_TYPE_LABELS: Record<string, string> = {
   client: 'Клиент',
   'client-case': 'Дело',
   'client-case-document': 'Документ дела',
+  'client-case-court-event': 'Судебное событие',
+  'client-case-court-party': 'Участник судебного дела',
+  'client-case-procedural-deadline': 'Процессуальный срок',
   'calendar-sync': 'Синхронизация календаря',
   'notification-settings': 'Настройки уведомлений',
   'client-case-work-order': 'Заказ-наряд',
@@ -400,6 +512,8 @@ const OBJECT_TYPE_LABELS: Record<string, string> = {
   'yandex-disk': 'Я.Диск',
   'yandex disk': 'Я.Диск',
   'task-journal-item': 'Задача',
+  'sticky-note': 'Заметка',
+  'sticky-note-board': 'Доска заметок',
 };
 
 const AUDIT_ACTOR_LABELS: Record<string, string> = {
@@ -458,6 +572,11 @@ const VALUE_LABELS: Record<string, string> = {
   crmwins: 'Оставлять версию CRM',
   externalwins: 'Принимать внешний календарь',
   latestwins: 'Брать последнее изменение',
+  fixed: 'Фиксированная сумма',
+  actual: 'Оплата по факту',
+  manual: 'Вручную',
+  full: 'Полный акт',
+  partial: 'Частичный акт',
   inprogress: 'В работе',
   done: 'Выполнена',
   new: 'Новая',
@@ -720,6 +839,51 @@ export function getObjectAuditTypeLabel(objectType: string | null | undefined): 
   return OBJECT_TYPE_LABELS[normalizedObjectType] ?? translateTechnicalWords(prettifyFieldName(normalizedObjectType || 'object'));
 }
 
+export function getObjectAuditSearchAliases(value: string | null | undefined): string[] {
+  const search = value?.trim().toLocaleLowerCase('ru-RU') ?? '';
+  if (search.length < 2) {
+    return [];
+  }
+
+  const aliases = new Set<string>();
+  const addMatchingLabels = (labels: Record<string, string>) => {
+    Object.entries(labels).forEach(([technicalName, label]) => {
+      const normalizedLabel = label.toLocaleLowerCase('ru-RU');
+      if (normalizedLabel.includes(search) || search.includes(normalizedLabel)) {
+        aliases.add(technicalName);
+      }
+    });
+  };
+
+  addMatchingLabels(COMMON_FIELD_LABELS);
+  Object.values(OBJECT_TYPE_FIELD_OVERRIDES).forEach(addMatchingLabels);
+  addMatchingLabels(OBJECT_TYPE_LABELS);
+
+  return Array.from(aliases).slice(0, 50);
+}
+
+function addDaysToDateKey(value: string, days: number): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(value);
+  if (!match) return value;
+
+  const [, year, month, day] = match;
+  const next = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day) + days));
+  return next.toISOString().slice(0, 10);
+}
+
+export function buildObjectAuditDateRange(
+  from: string,
+  to: string,
+  timeZoneId?: string | null,
+): { fromUtc?: string; toUtcExclusive?: string } {
+  return {
+    fromUtc: from ? fromTimeZoneDateTimeInput(`${from}T00:00`, timeZoneId) : undefined,
+    toUtcExclusive: to
+      ? fromTimeZoneDateTimeInput(`${addDaysToDateKey(to, 1)}T00:00`, timeZoneId)
+      : undefined,
+  };
+}
+
 export function getObjectAuditActionLabel(action?: string | null): string {
   switch (action?.toLowerCase()) {
     case 'created':
@@ -736,6 +900,8 @@ export function getObjectAuditActionLabel(action?: string | null): string {
       return 'Обновление подключения';
     case 'connectiontested':
       return 'Проверка подключения';
+    case 'connectiondeleted':
+      return 'Удаление подключения';
     case 'objectcreated':
       return 'Создание объекта';
     case 'objectuploaded':
@@ -752,6 +918,20 @@ export function getObjectAuditActionLabel(action?: string | null): string {
       return 'Редактирование файла';
     case 'exported':
       return 'Экспорт';
+    case 'uploaded':
+      return 'Загрузка';
+    case 'generated':
+      return 'Формирование документа';
+    case 'versioncreated':
+      return 'Новая версия документа';
+    case 'conversationattached':
+      return 'Прикрепление к переписке';
+    case 'oauthconnectionstarted':
+      return 'Начало подключения';
+    case 'crmsyncsettingsupdated':
+      return 'Настройки синхронизации CRM';
+    case 'yandexdiskuploaded':
+      return 'Отправка на Я.Диск';
     case 'restored':
       return 'Восстановление';
     case 'automation':
@@ -958,9 +1138,11 @@ export function formatAuditValue(
 }
 
 export function formatAuditChangeSummary(objectType: string | null | undefined, metadataJson: string | null | undefined): string | null {
-  const changedFields = parseAuditChangedFields(metadataJson).map((fieldName) =>
-    getObjectAuditFieldLabel(objectType, fieldName),
-  );
+  const changedFields = Array.from(new Set(
+    parseAuditChangedFields(metadataJson).map((fieldName) =>
+      getObjectAuditFieldLabel(objectType, fieldName),
+    ),
+  ));
 
   if (changedFields.length === 0) {
     return null;
@@ -977,4 +1159,4 @@ export function formatAuditChangeSummary(objectType: string | null | undefined, 
     ? `Изменены поля: ${visibleFields} и ещё ${remainingCount}`
     : `Изменены поля: ${visibleFields}`;
 }
-import { formatDateTimeInTimeZone } from './timeZoneDate';
+import { formatDateTimeInTimeZone, fromTimeZoneDateTimeInput } from './timeZoneDate';

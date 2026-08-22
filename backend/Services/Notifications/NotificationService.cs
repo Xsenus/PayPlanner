@@ -20,13 +20,13 @@ public sealed class NotificationService : INotificationService
     private static readonly CultureInfo RuCulture = CultureInfo.GetCultureInfo("ru-RU");
     private static readonly IReadOnlyList<NotificationPurposeDefinition> PurposeDefinitions =
     [
-        new(NotificationPurposes.TelegramAuth, "Вход через Telegram", "Telegram-бот для авторизации, привязки профиля и Login Widget."),
-        new(NotificationPurposes.RegistrationUser, "Регистрация пользователя", "Сообщения пользователю о заявке, одобрении или отклонении регистрации."),
-        new(NotificationPurposes.RegistrationAdmin, "Новая регистрация для админов", "Уведомления администраторам о новой заявке на регистрацию."),
-        new(NotificationPurposes.PasswordIssue, "Выдача пароля", "Служебные сообщения с новым временным паролем сотрудника."),
-        new(NotificationPurposes.TaskReminder, "Напоминания по задачам", "Плановые уведомления из журнала задач."),
-        new(NotificationPurposes.ContractClient, "Письма клиентам по договорам", "Автоматические сообщения клиентам по событиям договора."),
-        new(NotificationPurposes.ManualTest, "Ручные и тестовые сообщения", "Проверочные отправки из настроек уведомлений.")
+        new(NotificationPurposes.TelegramAuth, "Вход через Telegram", "Telegram-бот для авторизации, привязки профиля и Login Widget.", [NotificationChannels.Telegram]),
+        new(NotificationPurposes.RegistrationUser, "Регистрация пользователя", "Сообщения пользователю о заявке, одобрении или отклонении регистрации.", [NotificationChannels.Email, NotificationChannels.Telegram]),
+        new(NotificationPurposes.RegistrationAdmin, "Новая регистрация для админов", "Уведомления администраторам о новой заявке на регистрацию.", [NotificationChannels.Email, NotificationChannels.Telegram]),
+        new(NotificationPurposes.PasswordIssue, "Выдача пароля", "Служебные сообщения с новым временным паролем сотрудника.", [NotificationChannels.Email, NotificationChannels.Telegram]),
+        new(NotificationPurposes.TaskReminder, "Напоминания по задачам", "Плановые уведомления из журнала задач.", [NotificationChannels.Email, NotificationChannels.Telegram]),
+        new(NotificationPurposes.ContractClient, "Письма клиентам по договорам", "Автоматические сообщения клиентам по событиям договора.", [NotificationChannels.Email]),
+        new(NotificationPurposes.ManualTest, "Ручные и тестовые сообщения", "Проверочные отправки из настроек уведомлений.", [NotificationChannels.Email, NotificationChannels.Telegram])
     ];
 
     private const string EmailEnabledKey = "notifications.email.enabled";
@@ -157,7 +157,8 @@ public sealed class NotificationService : INotificationService
             {
                 Key = item.Key,
                 Label = item.Label,
-                Description = item.Description
+                Description = item.Description,
+                Channels = item.Channels
             }).ToList(),
             Templates = await GetTemplatesAsync(cancellationToken)
         };
@@ -188,7 +189,9 @@ public sealed class NotificationService : INotificationService
             AllowedEventTypes = Array.Empty<string>(),
             LastSuccessfulDeliveryAt = lastSuccessfulDeliveryAt == default ? null : lastSuccessfulDeliveryAt,
             LastFailedDeliveryAt = lastFailedDelivery?.CreatedAt,
-            LastDeliveryError = lastFailedDelivery?.Error,
+            LastDeliveryError = NotificationDeliveryPresentation.ResolveError(
+                NotificationChannels.Max,
+                lastFailedDelivery?.Error),
             StatusText = "MAX-уведомления не включены: API, бот и сценарии использования еще не подтверждены заказчиком."
         };
     }
@@ -449,7 +452,7 @@ public sealed class NotificationService : INotificationService
             ? DefaultSenderName(channel)
             : request.Name.Trim();
         sender.IsEnabled = request.IsEnabled;
-        sender.PurposesJson = JsonSerializer.Serialize(NormalizePurposes(request.Purposes), JsonOptions);
+        sender.PurposesJson = JsonSerializer.Serialize(NormalizePurposes(channel, request.Purposes), JsonOptions);
         sender.SortOrder = request.SortOrder;
         sender.UpdatedAt = now;
         sender.ConfigJson = channel == NotificationChannels.Email
@@ -5169,12 +5172,16 @@ public sealed class NotificationService : INotificationService
     private static string NormalizeChannel(string? channel)
         => (channel ?? string.Empty).Trim().ToLowerInvariant();
 
-    private static IReadOnlyList<string> NormalizePurposes(IEnumerable<string>? purposes)
+    private static IReadOnlyList<string> NormalizePurposes(string channel, IEnumerable<string>? purposes)
     {
+        var normalizedChannel = NormalizeChannel(channel);
         var normalized = (purposes ?? [])
             .Select(NormalizePurpose)
             .Where(purpose => purpose is not null)
             .Cast<string>()
+            .Where(purpose => PurposeDefinitions.Any(definition =>
+                string.Equals(definition.Key, purpose, StringComparison.OrdinalIgnoreCase)
+                && definition.Channels.Contains(normalizedChannel, StringComparer.OrdinalIgnoreCase)))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
@@ -5227,12 +5234,7 @@ public sealed class NotificationService : INotificationService
 
     private static NotificationSenderDto MapSender(NotificationSender sender, int subscriptionsCount = 0)
     {
-        var purposes = DeserializeList(sender.PurposesJson)
-            .Select(NormalizePurpose)
-            .Where(item => item is not null)
-            .Cast<string>()
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        var purposes = NormalizePurposes(sender.Channel, DeserializeList(sender.PurposesJson));
         var target = BuildSenderTarget(sender);
 
         return new NotificationSenderDto

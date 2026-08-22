@@ -254,6 +254,8 @@ public class InvoicesControllerCrudTests
             Assert.Equal(paymentStatusEntityId, installment.PaymentStatusId);
             Assert.Contains(installment.ClientCaseId ?? 0, new[] { caseId1, caseId2 });
             Assert.False(installment.IsPaid);
+            Assert.Contains("Основной долг: 9 000,00 ₽", installment.Notes, StringComparison.Ordinal);
+            Assert.Contains("Проценты: 0,00 ₽", installment.Notes, StringComparison.Ordinal);
         });
         Assert.All(storedInstallments, installment =>
         {

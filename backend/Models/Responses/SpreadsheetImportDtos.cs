@@ -93,6 +93,9 @@ public class SpreadsheetImportBatchSummaryDto
 public class SpreadsheetImportBatchDetailDto : SpreadsheetImportBatchSummaryDto
 {
     public List<SpreadsheetImportBatchOperationDto> Operations { get; set; } = new();
+    public int OperationsTotal { get; set; }
+    public int OperationsPage { get; set; } = 1;
+    public int OperationsPageSize { get; set; } = 25;
 }
 
 public class SpreadsheetImportBatchFileDto

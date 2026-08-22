@@ -1124,6 +1124,56 @@ public class SpreadsheetImportServiceTests
         Assert.Equal("Older batch", batches.Skip(1).First().Title);
     }
 
+    [Fact]
+    public async Task GetBatchAsync_ReturnsOnlyRequestedOperationsPage()
+    {
+        await using var connection = await CreateOpenConnectionAsync();
+        var service = await CreateServiceAsync(connection);
+        int batchId;
+
+        await using (var db = CreateContext(connection))
+        {
+            var createdAt = new DateTime(2026, 8, 16, 1, 0, 0, DateTimeKind.Utc);
+            var batch = new SpreadsheetImportBatch
+            {
+                Title = "Paged operations batch",
+                Status = SpreadsheetImportBatchStatus.Applied,
+                TotalRows = 30,
+                CreatedRows = 30,
+                CreatedAt = createdAt,
+                AppliedAt = createdAt,
+                Operations = Enumerable.Range(1, 30)
+                    .Select(index => new SpreadsheetImportBatchOperation
+                    {
+                        SectionKey = "acts",
+                        SourceFileName = "audit.xml",
+                        SourceFileHash = "audit-hash",
+                        SourceRowId = $"row-{index}",
+                        SourceRowNumber = index,
+                        SourceKey = $"acts-row-{index}",
+                        SourceTitle = $"Operation {index}",
+                        Action = SpreadsheetImportOperationAction.Created,
+                        EntityType = "act",
+                        CreatedAt = createdAt.AddSeconds(index),
+                    })
+                    .ToList(),
+            };
+            db.SpreadsheetImportBatches.Add(batch);
+            await db.SaveChangesAsync();
+            batchId = batch.Id;
+        }
+
+        var detail = await service.GetBatchAsync(batchId, page: 2, pageSize: 10);
+
+        Assert.NotNull(detail);
+        Assert.Equal(30, detail.OperationsTotal);
+        Assert.Equal(2, detail.OperationsPage);
+        Assert.Equal(10, detail.OperationsPageSize);
+        Assert.Equal(10, detail.Operations.Count);
+        Assert.Equal(11, detail.Operations.First().SourceRowNumber);
+        Assert.Equal(20, detail.Operations.Last().SourceRowNumber);
+    }
+
     private static SpreadsheetImportUploadFile CreateInvoiceFile(params string[][] rows)
         => CreateUploadFile("Счета.xlsx", CreateWorkbook(("Счета", rows)));
 

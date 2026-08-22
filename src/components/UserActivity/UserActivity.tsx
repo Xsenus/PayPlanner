@@ -19,6 +19,15 @@ import type {
 } from '../../types/userActivity';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { formatDateTimeInTimeZone } from '../../utils/timeZoneDate';
+import {
+  buildUserActivityDateRange,
+  formatUserActivityDescription,
+  formatUserActivityFilterOption,
+  getUserActivityActionLabel,
+  getUserActivityCategoryLabel,
+  getUserActivitySectionLabel,
+  getUserActivitySearchAliases,
+} from '../../utils/userActivity';
 
 const statusStyles: Record<UserActivityStatus, string> = {
   Info: 'bg-slate-100 text-slate-700 border border-slate-200',
@@ -35,6 +44,7 @@ const statusLabels: Record<UserActivityStatus, string> = {
 };
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+const EMPTY_SEARCH_ALIASES: string[] = [];
 
 const USER_ACTIVITY_COLUMNS = [
   { key: 'createdAt', label: 'Когда', defaultVisible: true, defaultWidth: 190 },
@@ -127,6 +137,20 @@ export const UserActivity = () => {
   });
 
   const debouncedSearch = useDebouncedValue(search, 500);
+  const dateRange = useMemo(
+    () => buildUserActivityDateRange(from, to, timeZoneId),
+    [from, timeZoneId, to],
+  );
+  const searchAliases = useMemo(
+    () => debouncedSearch
+      ? getUserActivitySearchAliases(debouncedSearch, {
+          categories: filters?.categories,
+          actions: filters?.actions,
+          sections: filters?.sections,
+        })
+      : EMPTY_SEARCH_ALIASES,
+    [debouncedSearch, filters?.actions, filters?.categories, filters?.sections],
+  );
   const activityQueryScopeKey = [
     debouncedSearch,
     status,
@@ -161,9 +185,9 @@ export const UserActivity = () => {
     const items: string[] = [];
     if (search) items.push(`Поиск: "${search}"`);
     if (status !== 'all') items.push(`Статус: ${statusLabels[status as UserActivityStatus] ?? status}`);
-    if (category !== 'all') items.push(`Категория: ${category}`);
-    if (action !== 'all') items.push(`Действие: ${action}`);
-    if (section !== 'all') items.push(`Раздел: ${section}`);
+    if (category !== 'all') items.push(`Категория: ${getUserActivityCategoryLabel(category)}`);
+    if (action !== 'all') items.push(`Действие: ${getUserActivityActionLabel(action)}`);
+    if (section !== 'all') items.push(`Раздел: ${getUserActivitySectionLabel(section)}`);
     if (method !== 'all') items.push(`Метод: ${method}`);
     if (actor !== 'all') items.push(`Пользователь: ${actor}`);
     if (from) items.push(`С: ${from}`);
@@ -188,7 +212,7 @@ export const UserActivity = () => {
 
     const confirmDelete = await confirm({
       title: 'Подтверждение удаления',
-      description: 'Удалить все записи пользовательского контроля? Для уменьшения файла SQLite после этого выполните уплотнение БД в настройках.',
+      description: 'Удалить все записи пользовательского контроля? При необходимости после этого выполните обслуживание базы данных в настройках.',
       confirmLabel: 'Удалить',
       cancelLabel: 'Отмена',
       variant: 'danger',
@@ -253,14 +277,15 @@ export const UserActivity = () => {
             page,
             pageSize,
             search: debouncedSearch || undefined,
+            searchAliases,
             status: status === 'all' ? undefined : status,
             category: category === 'all' ? undefined : category,
             action: action === 'all' ? undefined : action,
             section: section === 'all' ? undefined : section,
             httpMethod: method === 'all' ? undefined : method,
             userId: actor === 'all' ? undefined : actor,
-            from: from || undefined,
-            to: to || undefined,
+            fromUtc: dateRange.fromUtc,
+            toUtc: dateRange.toUtc,
           },
           { signal: controller.signal },
         );
@@ -285,7 +310,7 @@ export const UserActivity = () => {
     return () => {
       controller.abort();
     };
-  }, [actor, action, activityQueryScopeKey, category, debouncedSearch, from, isAdmin, method, page, pageSize, refreshToken, section, status, to]);
+  }, [actor, action, activityQueryScopeKey, category, dateRange.fromUtc, dateRange.toUtc, debouncedSearch, isAdmin, method, page, pageSize, refreshToken, searchAliases, section, status]);
 
   const totalPages = useMemo(() => (pageSize > 0 ? Math.max(1, Math.ceil(total / pageSize)) : 1), [total, pageSize]);
 
@@ -320,17 +345,21 @@ export const UserActivity = () => {
       case 'categoryAction':
         return (
           <>
-            <div className="font-medium text-slate-800">{log.category}</div>
-            <div className="text-xs text-slate-500">{log.action}</div>
+            <div className="font-medium text-slate-800" title={log.category}>
+              {getUserActivityCategoryLabel(log.category)}
+            </div>
+            <div className="text-xs text-slate-500" title={log.action}>
+              {getUserActivityActionLabel(log.action)}
+            </div>
           </>
         );
       case 'description':
         return (
           <>
-            <div className="line-clamp-3 text-sm text-slate-700">{log.description || '—'}</div>
-            {log.objectType ? (
+            <div className="line-clamp-3 text-sm text-slate-700">{formatUserActivityDescription(log)}</div>
+            {log.objectType && log.objectType !== log.category ? (
               <div className="mt-1 text-xs text-slate-500">
-                {log.objectType} {log.objectId ? `#${log.objectId}` : ''}
+                {getUserActivityCategoryLabel(log.objectType)} {log.objectId ? `№${log.objectId}` : ''}
               </div>
             ) : null}
           </>
@@ -351,7 +380,7 @@ export const UserActivity = () => {
           </>
         );
       case 'section':
-        return <span className="text-xs text-slate-600">{log.section || '—'}</span>;
+        return <span className="text-xs text-slate-600" title={log.section || undefined}>{getUserActivitySectionLabel(log.section)}</span>;
       case 'ipAddress':
         return <span className="text-xs text-slate-600">{log.ipAddress || '—'}</span>;
       case 'duration':
@@ -380,17 +409,17 @@ export const UserActivity = () => {
   }
 
   return (
-    <div className="p-8">
-      <div className="max-w-[calc(100vw-2rem)] mx-auto">
-        <div className="flex flex-col gap-6">
-          <div className="flex flex-wrap items-center justify-between gap-4">
+    <div className="p-3 lg:p-4">
+      <div className="max-w-[calc(100vw-1rem)] mx-auto">
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h1 className="text-3xl font-bold text-slate-900">Пользовательский контроль</h1>
-              <p className="text-slate-600 mt-2">
+              <h1 className="text-2xl font-bold text-slate-900">Пользовательский контроль</h1>
+              <p className="mt-1 text-sm text-slate-600">
                 Анализируйте действия пользователей, входы в разделы и системные события в режиме реального времени.
               </p>
             </div>
-            <div className="flex items-center gap-3 flex-wrap justify-end">
+            <div className="flex items-center gap-2 flex-wrap justify-end">
               <div className="text-sm text-slate-500">
                 Найдено записей: <span className="font-semibold text-slate-700">{total}</span>
               </div>
@@ -436,8 +465,8 @@ export const UserActivity = () => {
           </div>
 
           {filtersOpen && (
-            <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-4">
-              <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
+            <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-3">
+              <div className="grid grid-cols-1 gap-3 lg:grid-cols-4">
                 <label className="col-span-1 lg:col-span-2">
                   <span className="text-sm font-medium text-slate-600 flex items-center gap-2">
                     <Search className="w-4 h-4" /> Поиск
@@ -477,7 +506,7 @@ export const UserActivity = () => {
                     <option value="all">Все</option>
                     {filters?.categories.map((item) => (
                       <option key={item} value={item}>
-                        {item}
+                        {formatUserActivityFilterOption(item, 'category')}
                       </option>
                     ))}
                   </SystemSelect>
@@ -493,7 +522,7 @@ export const UserActivity = () => {
                     <option value="all">Все</option>
                     {filters?.actions.map((item) => (
                       <option key={item} value={item}>
-                        {item}
+                        {formatUserActivityFilterOption(item, 'action')}
                       </option>
                     ))}
                   </SystemSelect>
@@ -509,7 +538,7 @@ export const UserActivity = () => {
                     <option value="all">Все</option>
                     {filters?.sections.map((item) => (
                       <option key={item} value={item}>
-                        {item}
+                        {formatUserActivityFilterOption(item, 'section')}
                       </option>
                     ))}
                   </SystemSelect>
@@ -571,7 +600,7 @@ export const UserActivity = () => {
 
               </div>
 
-              <div className="mt-4 flex justify-end gap-2 text-sm">
+              <div className="mt-3 flex justify-end gap-2 text-sm">
                 <button
                   type="button"
                   onClick={resetFilters}
@@ -591,7 +620,7 @@ export const UserActivity = () => {
           )}
 
           {!filtersOpen && hasActiveFilters && (
-            <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-4 flex flex-wrap items-center gap-2 text-sm text-slate-700">
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white p-3 text-sm text-slate-700 shadow-sm">
               <span className="font-semibold text-slate-900">Активные фильтры:</span>
               {activeFiltersSummary.map((item) => (
                 <span key={item} className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1">
@@ -717,11 +746,11 @@ export const UserActivity = () => {
                             <td
                               key={column.key}
                               style={{ width: getColumnWidth(column.key) }}
-                              className="max-w-0 overflow-hidden px-4 py-3 align-top">
+                              className="max-w-0 overflow-hidden px-3 py-2.5 align-top">
                               {renderCell(log, column.key)}
                             </td>
                           ))}
-                          <td className="px-4 py-3 align-top text-right">
+                          <td className="px-3 py-2.5 align-top text-right">
                             <button
                               type="button"
                               onClick={() => setExpandedId(isExpanded ? null : log.id)}
@@ -739,15 +768,24 @@ export const UserActivity = () => {
             </div>
 
             {logs.length > 0 && (
-              <div className="border-t border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600 flex flex-col gap-3">
+              <div className="flex flex-col gap-3 border-t border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-600">
                 {expandedId !== null && (
-                  <div className="bg-white border border-slate-200 rounded-lg p-4 shadow-sm">
+                  <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
                     {(() => {
                       const current = logs.find((log) => log.id === expandedId);
                       if (!current) return null;
                       const metadataText = formatMetadata(current.metadata);
                       return (
-                        <div className="space-y-3">
+                        <div className="space-y-2">
+                          <div>
+                            <div className="text-xs uppercase text-slate-500 font-semibold">Событие</div>
+                            <div className="text-sm text-slate-700">
+                              {getUserActivityCategoryLabel(current.category)} · {getUserActivityActionLabel(current.action)}
+                            </div>
+                            <div className="font-mono text-xs text-slate-500">
+                              {current.category}.{current.action}
+                            </div>
+                          </div>
                           <div>
                             <div className="text-xs uppercase text-slate-500 font-semibold">Маршрут</div>
                             <div className="font-mono text-xs text-slate-700 break-all">
@@ -758,7 +796,7 @@ export const UserActivity = () => {
                           <div>
                             <div className="text-xs uppercase text-slate-500 font-semibold">Описание</div>
                             <div className="text-sm text-slate-700 whitespace-pre-wrap">
-                              {current.description || '—'}
+                              {formatUserActivityDescription(current)}
                             </div>
                           </div>
                           <div>

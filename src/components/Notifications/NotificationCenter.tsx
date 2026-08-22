@@ -684,6 +684,23 @@ export function NotificationCenter({
     }
   };
 
+  const handleUnarchive = async (item: UserNotificationDto) => {
+    try {
+      setBusyId(item.id);
+      const updated = await apiService.unarchiveUserNotification(item.id);
+      if (status === 'archived') {
+        removeItem(item.id);
+      } else {
+        updateItem(updated);
+      }
+      toast.success('Уведомление возвращено из архива.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Не удалось вернуть уведомление из архива.');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const handleDelete = async (item: UserNotificationDto) => {
     try {
       setBusyId(item.id);
@@ -762,6 +779,28 @@ export function NotificationCenter({
     }
   };
 
+  const handleBulkUnarchive = async () => {
+    const ids = [...selectedIds];
+    if (ids.length === 0) return;
+
+    try {
+      setBulkBusy(true);
+      const result = await apiService.unarchiveUserNotifications(ids);
+      setSelectedIds(new Set());
+      emitUserNotificationsChanged({ source: 'inbox', reason: 'bulk-unarchive' });
+      refresh();
+      toast.success(
+        result.updatedCount > 0
+          ? `Возвращено из архива: ${result.updatedCount}.`
+          : 'Выбранные уведомления уже находятся в активном журнале.',
+      );
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Не удалось вернуть выбранные уведомления из архива.');
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
   const handleBulkDelete = async () => {
     const ids = [...selectedIds];
     if (ids.length === 0) return;
@@ -823,7 +862,7 @@ export function NotificationCenter({
   };
 
   return (
-    <div className="space-y-5 p-6">
+    <div className="space-y-3 p-3 lg:p-4">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <div className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-500">Рабочий центр</div>
@@ -843,17 +882,31 @@ export function NotificationCenter({
             <CheckCheck className="h-4 w-4" />
             Прочитать все
           </button>
-          <button
-            type="button"
-            onClick={() => void handleBulkArchive()}
-            disabled={loading || bulkBusy || selectedCount === 0}
-            aria-label={`В архив выбранные уведомления: ${selectedCount}`}
-            className="inline-flex items-center justify-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-700 shadow-sm transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <Archive className="h-4 w-4" />
-            В архив
-            {selectedCount > 0 ? <span className="rounded-full bg-white px-2 py-0.5 text-xs">{selectedCount}</span> : null}
-          </button>
+          {status === 'archived' ? (
+            <button
+              type="button"
+              onClick={() => void handleBulkUnarchive()}
+              disabled={loading || bulkBusy || selectedCount === 0}
+              aria-label={`Вернуть выбранные уведомления из архива: ${selectedCount}`}
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-medium text-blue-700 shadow-sm transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <RotateCcw className="h-4 w-4" />
+              Вернуть
+              {selectedCount > 0 ? <span className="rounded-full bg-white px-2 py-0.5 text-xs">{selectedCount}</span> : null}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => void handleBulkArchive()}
+              disabled={loading || bulkBusy || selectedCount === 0}
+              aria-label={`В архив выбранные уведомления: ${selectedCount}`}
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-700 shadow-sm transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Archive className="h-4 w-4" />
+              В архив
+              {selectedCount > 0 ? <span className="rounded-full bg-white px-2 py-0.5 text-xs">{selectedCount}</span> : null}
+            </button>
+          )}
           <button
             type="button"
             onClick={() => void handleBulkDelete()}
@@ -1003,7 +1056,7 @@ export function NotificationCenter({
           </SystemSelect>
         </div>
 
-        <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-[10rem_10rem_minmax(12rem,1fr)_minmax(12rem,1fr)_12rem_auto]">
+        <div className="mt-3 grid gap-3 md:grid-cols-2 2xl:grid-cols-[10rem_10rem_minmax(12rem,1fr)_minmax(12rem,1fr)_12rem_auto]">
           <label className="block">
             <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">С даты</span>
             <SystemDateInput
@@ -1087,7 +1140,7 @@ export function NotificationCenter({
               type="button"
               onClick={handleResetFilters}
               disabled={!hasCustomFilters}
-              className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 xl:w-auto"
+              className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 2xl:w-auto"
             >
               <RotateCcw className="h-4 w-4" />
               Сбросить
@@ -1508,7 +1561,7 @@ export function NotificationCenter({
                       className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-wait disabled:opacity-60"
                     >
                       {item.isRead ? <RotateCcw className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}
-                      {item.isRead ? 'Вернуть' : 'Прочитано'}
+                      {item.isRead ? 'В непрочитанные' : 'Прочитано'}
                     </button>
                     {!item.isArchived ? (
                       <button
@@ -1523,7 +1576,20 @@ export function NotificationCenter({
                         <Archive className="h-4 w-4" />
                         Архив
                       </button>
-                    ) : null}
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={itemBusy}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void handleUnarchive(item);
+                        }}
+                        className="inline-flex h-9 items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 text-sm font-medium text-blue-700 transition hover:bg-blue-100 disabled:cursor-wait disabled:opacity-60"
+                      >
+                        <RotateCcw className="h-4 w-4" />
+                        Вернуть
+                      </button>
+                    )}
                     <button
                       type="button"
                       disabled={itemBusy}

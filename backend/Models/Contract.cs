@@ -91,6 +91,11 @@ public class Contract
     public ICollection<LegalEntityContract> LegalEntityContracts { get; set; } = new List<LegalEntityContract>();
 
     /// <summary>
+    /// Дела, к которым договор привязан напрямую.
+    /// </summary>
+    public ICollection<ClientCaseContract> ClientCaseContracts { get; set; } = new List<ClientCaseContract>();
+
+    /// <summary>
     /// Клиенты, привязанные к договору.
     /// </summary>
     public ICollection<Client> Clients { get; set; } = new List<Client>();

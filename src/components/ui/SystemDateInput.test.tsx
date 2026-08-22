@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import { SystemDateInput } from './SystemDateInput';
+import { resolveDateMenuTop, SystemDateInput } from './SystemDateInput';
 
 function ControlledDate({ initial = '' }: { initial?: string }) {
   const [value, setValue] = useState(initial);
@@ -63,7 +63,11 @@ describe('SystemDateInput', () => {
     expect((screen.getByRole('spinbutton', { name: 'Минуты' }) as HTMLInputElement).value).toBe('06');
   });
 
-  it('opens above the field when there is not enough room below', async () => {
+  it('keeps the calendar inside the viewport when neither side has enough room', () => {
+    expect(resolveDateMenuTop(306, 379, 360, 711)).toBe(343);
+  });
+
+  it('opens above the field when there is enough room there', async () => {
     const user = userEvent.setup();
     render(<SystemDateInput aria-label="Дата" type="date" value="2026-07-21" onChange={() => undefined} />);
     const button = screen.getByRole('button', { name: 'Выбрать: Дата' });
@@ -75,6 +79,6 @@ describe('SystemDateInput', () => {
     await user.click(button);
     await new Promise((resolve) => requestAnimationFrame(resolve));
     const dialog = screen.getByRole('dialog', { name: 'Выбор даты' });
-    expect(dialog.style.bottom).not.toBe('');
+    expect(dialog.style.top).not.toBe('');
   });
 });

@@ -177,6 +177,36 @@ public class PushSubscriptionsControllerTests
     }
 
     [Fact]
+    public async Task GetDiagnostics_ReplacesTechnicalWebPushErrorWithUserMessage()
+    {
+        await using var db = await CreateContextAsync();
+        var admin = await CreateUserAsync(db, "push-admin-error@example.com", "admin");
+        db.NotificationDeliveries.Add(new NotificationDelivery
+        {
+            EventKey = "push:failed:payload",
+            Channel = NotificationChannels.WebPush,
+            SenderName = "Web Push",
+            RecipientUserId = admin.Id,
+            RecipientAddress = "https://push.example/payload-error",
+            Subject = "Failed",
+            Status = NotificationDeliveryStatus.Failed,
+            Error = "Bad Request. Details: binary data passed in the request must be less than 4096 bytes.",
+            CreatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, admin.Id, new RecordingWebPushNotificationService(
+            new WebPushPublicKeyStatus(true, true, "public-key", true, true, true)));
+        var diagnostics = AssertOk<WebPushDiagnosticsDto>(
+            await controller.GetDiagnostics(CancellationToken.None));
+
+        Assert.Equal(
+            "Размер данных Push-уведомления превышает допустимый лимит.",
+            diagnostics.LastDeliveryError);
+        Assert.DoesNotContain("4096", diagnostics.LastDeliveryError, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task GetDiagnostics_DeactivatesStoredExpiredSubscriptionBeforeCounting()
     {
         await using var db = await CreateContextAsync();

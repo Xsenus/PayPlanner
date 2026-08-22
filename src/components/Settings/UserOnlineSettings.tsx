@@ -68,21 +68,21 @@ function formatDateTime(value?: string | null, timeZoneId?: string | null) {
   const date = parseServerDate(value);
   if (!date) return '—';
 
-  return formatDateTimeInTimeZone(date, timeZoneId) || value || 'вЂ”';
+  return formatDateTimeInTimeZone(date, timeZoneId) || value || '—';
 }
 
 function formatDate(value?: string | null, timeZoneId?: string | null) {
   const date = parseServerDate(value);
   if (!date) return '—';
 
-  return formatDateInTimeZone(date, timeZoneId) || value || 'вЂ”';
+  return formatDateInTimeZone(date, timeZoneId) || value || '—';
 }
 
 function formatTime(value?: string | null, timeZoneId?: string | null) {
   const date = parseServerDate(value);
   if (!date) return '—';
 
-  return formatDateTimeInTimeZone(date, timeZoneId).split(',').at(-1)?.trim() || value || 'вЂ”';
+  return formatDateTimeInTimeZone(date, timeZoneId).split(',').at(-1)?.trim() || value || '—';
 }
 
 function formatRelativeActivity(value?: string | null) {

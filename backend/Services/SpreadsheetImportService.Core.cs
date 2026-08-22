@@ -193,7 +193,7 @@ public sealed partial class SpreadsheetImportService
 
         await db.SaveChangesAsync(cancellationToken);
 
-        return await GetBatchCoreAsync(batchId, cancellationToken)
+        return await GetBatchCoreAsync(batchId, 1, 25, cancellationToken)
                ?? throw new InvalidOperationException("Не удалось загрузить результат импорта.");
     }
 
@@ -210,16 +210,38 @@ public sealed partial class SpreadsheetImportService
         return batches.Select(MapBatchSummary).ToList();
     }
 
-    private async Task<SpreadsheetImportBatchDetailDto?> GetBatchCoreAsync(int batchId, CancellationToken cancellationToken)
+    private async Task<SpreadsheetImportBatchDetailDto?> GetBatchCoreAsync(
+        int batchId,
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken)
     {
         await using var db = await _contextFactory.CreateDbContextAsync(cancellationToken);
         var batch = await db.SpreadsheetImportBatches
             .AsNoTracking()
             .Include(item => item.Files)
-            .Include(item => item.Operations)
             .FirstOrDefaultAsync(item => item.Id == batchId, cancellationToken);
 
-        return batch is null ? null : MapBatchDetail(batch);
+        if (batch is null)
+        {
+            return null;
+        }
+
+        var normalizedPageSize = Math.Clamp(pageSize, 10, 100);
+        var operationsQuery = db.SpreadsheetImportBatchOperations
+            .AsNoTracking()
+            .Where(operation => operation.BatchId == batchId);
+        var operationsTotal = await operationsQuery.CountAsync(cancellationToken);
+        var totalPages = Math.Max(1, (int)Math.Ceiling(operationsTotal / (double)normalizedPageSize));
+        var normalizedPage = Math.Clamp(page, 1, totalPages);
+        var operations = await operationsQuery
+            .OrderBy(operation => operation.CreatedAt)
+            .ThenBy(operation => operation.Id)
+            .Skip((normalizedPage - 1) * normalizedPageSize)
+            .Take(normalizedPageSize)
+            .ToListAsync(cancellationToken);
+
+        return MapBatchDetail(batch, operations, operationsTotal, normalizedPage, normalizedPageSize);
     }
 
     private async Task<SpreadsheetImportBatchDetailDto> RollbackCoreAsync(int batchId, CancellationToken cancellationToken)
@@ -267,7 +289,7 @@ public sealed partial class SpreadsheetImportService
 
         await db.SaveChangesAsync(cancellationToken);
 
-        return await GetBatchCoreAsync(batchId, cancellationToken)
+        return await GetBatchCoreAsync(batchId, 1, 25, cancellationToken)
                ?? throw new InvalidOperationException("Не удалось загрузить результат отката.");
     }
 

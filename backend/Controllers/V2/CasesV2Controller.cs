@@ -3914,7 +3914,7 @@ public class CasesV2Controller : ControllerBase
             .Distinct()
             .ToArray();
 
-        var linkedContracts = await LoadFinanceContractsAsync(visiblePayments, linkedInvoicePaymentIds, paymentIds, ct);
+        var linkedContracts = await LoadFinanceContractsAsync(id, visiblePayments, linkedInvoicePaymentIds, paymentIds, ct);
         var statusClock = await ResolveCaseStatusClockAsync(ct);
 
         return Ok(new ClientCaseFinanceDetailDto
@@ -6840,6 +6840,11 @@ public class CasesV2Controller : ControllerBase
                 Comment = $"Создан из заказ-наряда «{workOrder.Title}» по делу {clientCase.Title}.",
             });
         }
+
+        contract.ClientCaseContracts.Add(new ClientCaseContract
+        {
+            ClientCaseId = clientCase.Id,
+        });
 
         _db.Contracts.Add(contract);
         _db.SetAuditReason($"По предварительному расчету дела #{id} создан договор №{number}.");
@@ -10602,6 +10607,7 @@ public class CasesV2Controller : ControllerBase
         };
 
     private async Task<Dictionary<int, Contract>> LoadFinanceContractsAsync(
+        int clientCaseId,
         IReadOnlyCollection<Payment> visiblePayments,
         IReadOnlyCollection<int> invoicePaymentIds,
         IReadOnlyCollection<int> paymentIds,
@@ -10613,17 +10619,16 @@ public class CasesV2Controller : ControllerBase
             .GroupBy(contract => contract.Id)
             .ToDictionary(group => group.Key, group => group.First());
 
-        if (invoicePaymentIds.Count == 0 && paymentIds.Count == 0)
-        {
-            return contractsById;
-        }
-
-        // Обе таблицы связей имеют одинаковый результат — договор. UNION ALL позволяет
+        // Все таблицы связей имеют одинаковый результат — договор. UNION ALL позволяет
         // получить их одним запросом; дубликаты безопасно устраняются словарём в памяти.
-        var linkedContracts = await _db.ContractInvoices
+        var linkedContracts = await _db.ClientCaseContracts
             .AsNoTracking()
-            .Where(link => invoicePaymentIds.Contains(link.InvoiceId))
+            .Where(link => link.ClientCaseId == clientCaseId)
             .Select(link => link.Contract)
+            .Concat(_db.ContractInvoices
+                .AsNoTracking()
+                .Where(link => invoicePaymentIds.Contains(link.InvoiceId))
+                .Select(link => link.Contract))
             .Concat(_db.ContractPayments
                 .AsNoTracking()
                 .Where(link => paymentIds.Contains(link.PaymentId))
@@ -10885,6 +10890,9 @@ public class CasesV2Controller : ControllerBase
 
         var clientCase = await _db.ClientCases
             .ApplyClientCaseVisibility(visibility)
+            .Include(item => item.Client)
+            .Include(item => item.LegalEntity)
+            .Include(item => item.ResponsibleUser)
             .FirstOrDefaultAsync(item => item.Id == id, ct);
         if (clientCase is null)
         {
@@ -11115,7 +11123,7 @@ public class CasesV2Controller : ControllerBase
     <table>
       <thead>
         <tr>
-          <th>в"–</th>
+          <th>№</th>
           <th>Услуга</th>
           <th>Исполнитель</th>
           <th>Срок</th>

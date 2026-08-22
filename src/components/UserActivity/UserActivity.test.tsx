@@ -146,6 +146,31 @@ describe('UserActivity', () => {
     resolvePending.forEach((resolve) => resolve(emptyResponse));
   });
 
+  it('converts the visible date range from the user timezone before loading logs', async () => {
+    const { container } = render(<UserActivity />);
+    await waitFor(() => expect(apiService.getUserActivityLogs).toHaveBeenCalledTimes(1));
+    vi.mocked(apiService.getUserActivityLogs).mockClear();
+
+    fireEvent.click(screen.getByRole('button', { name: /Показать фильтры/u }));
+    const dateInputs = container.querySelectorAll<HTMLInputElement>('input[type="datetime-local"]');
+    expect(dateInputs).toHaveLength(2);
+    fireEvent.change(dateInputs[0], {
+      target: { value: '2026-08-16T00:00' },
+    });
+    fireEvent.change(dateInputs[1], {
+      target: { value: '2026-08-16T23:59' },
+    });
+
+    await waitFor(() => expect(apiService.getUserActivityLogs).toHaveBeenCalled());
+    expect(apiService.getUserActivityLogs).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        fromUtc: '2026-08-15T17:00:00.000Z',
+        toUtc: '2026-08-16T16:59:00.000Z',
+      }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
   it('loads a changed search directly on the first page', async () => {
     vi.mocked(apiService.getUserActivityLogs).mockResolvedValue({
       ...emptyResponse,

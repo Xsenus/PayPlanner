@@ -12,10 +12,12 @@ import {
   formatAuditChangeSummary,
   formatAuditValue,
   formatObjectAuditText,
+  buildObjectAuditDateRange,
   getObjectAuditActorLabel,
   getObjectAuditActionLabel,
   getObjectAuditActionTone,
   getObjectAuditFieldLabel,
+  getObjectAuditSearchAliases,
   getObjectAuditTypeLabel,
   parseAuditChangedFields,
   parseAuditFieldChanges,
@@ -30,6 +32,12 @@ const OBJECT_TYPE_OPTIONS = [
   'client',
   'client-case',
   'client-case-document',
+  'client-case-court-event',
+  'client-case-court-party',
+  'client-case-procedural-deadline',
+  'client-case-work-order',
+  'client-case-work-order-item',
+  'client-case-related-party',
   'calendar-sync',
   'notification-settings',
   'payment',
@@ -50,6 +58,8 @@ const OBJECT_TYPE_OPTIONS = [
   's3-storage',
   'yandex-disk',
   'task-journal-item',
+  'sticky-note',
+  'sticky-note-board',
 ] as const;
 
 const ACTION_OPTIONS = [
@@ -64,6 +74,9 @@ const ACTION_OPTIONS = [
   'ConnectionCreated',
   'ConnectionUpdated',
   'ConnectionTested',
+  'ConnectionDeleted',
+  'OAuthConnectionStarted',
+  'CrmSyncSettingsUpdated',
   'ObjectCreated',
   'ObjectUploaded',
   'ObjectDeleted',
@@ -71,6 +84,11 @@ const ACTION_OPTIONS = [
   'ObjectMoved',
   'ObjectDownloaded',
   'TextFileUpdated',
+  'Uploaded',
+  'Generated',
+  'VersionCreated',
+  'ConversationAttached',
+  'YandexDiskUploaded',
 ] as const;
 
 function formatDateTime(value?: string | null, timeZoneId?: string | null) {
@@ -112,18 +130,20 @@ export function ObjectAuditPage() {
   const activeRequestControllerRef = useRef<AbortController | null>(null);
   const debouncedSearch = useDebouncedValue(searchInput, 400);
   const debouncedActor = useDebouncedValue(actor, 400);
+  const searchAliases = useMemo(() => getObjectAuditSearchAliases(debouncedSearch), [debouncedSearch]);
+  const dateRange = useMemo(() => buildObjectAuditDateRange(from, to, timeZoneId), [from, timeZoneId, to]);
 
   const filterParams = useMemo(
     () => ({
       search: debouncedSearch || undefined,
+      searchAliases: searchAliases.length > 0 ? searchAliases : undefined,
       objectType: objectType === 'all' ? undefined : objectType,
       action: action === 'all' ? undefined : action,
       actor: debouncedActor || undefined,
-      from: from || undefined,
-      to: to || undefined,
+      ...dateRange,
       pageSize,
     }),
-    [action, debouncedActor, debouncedSearch, from, objectType, pageSize, to],
+    [action, dateRange, debouncedActor, debouncedSearch, objectType, pageSize, searchAliases],
   );
   const filterKey = useMemo(() => JSON.stringify(filterParams), [filterParams]);
   const previousFilterKeyRef = useRef(filterKey);
@@ -237,15 +257,15 @@ export function ObjectAuditPage() {
   const handleRefresh = () => setReloadToken((current) => current + 1);
 
   return (
-    <div className="p-6 lg:p-8">
-      <div className="space-y-6">
-        <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+    <div className="p-3 lg:p-4">
+      <div className="space-y-3">
+        <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <div className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-400">
                 Отдельная вкладка аудита
               </div>
-              <h1 className="mt-3 text-3xl font-semibold text-slate-900">Журнал всех действий</h1>
+              <h1 className="mt-2 text-2xl font-semibold text-slate-900">Журнал всех действий</h1>
               <p className="mt-2 max-w-3xl text-sm text-slate-600">
                 Здесь собраны все зафиксированные изменения по объектам системы: создание, правки,
                 удаление и восстановление.
@@ -271,7 +291,7 @@ export function ObjectAuditPage() {
           </div>
         </section>
 
-        <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+        <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <div className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
@@ -397,8 +417,8 @@ export function ObjectAuditPage() {
           ) : null}
         </section>
 
-        <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
-          <div className="border-b border-slate-200 px-6 py-5">
+        <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="border-b border-slate-200 px-3 py-3">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="text-lg font-semibold text-slate-900">События аудита</h2>
@@ -456,9 +476,11 @@ export function ObjectAuditPage() {
                 <tbody className="divide-y divide-slate-100 bg-white">
                   {items.map((item) => {
                     const detailedChanges = parseAuditFieldChanges(item.metadataJson);
-                    const changedFields = parseAuditChangedFields(item.metadataJson).map((fieldName) =>
-                      getObjectAuditFieldLabel(item.objectType, fieldName),
-                    );
+                    const changedFields = Array.from(new Set(
+                      parseAuditChangedFields(item.metadataJson).map((fieldName) =>
+                        getObjectAuditFieldLabel(item.objectType, fieldName),
+                      ),
+                    ));
                     const isExpanded = expandedId === item.id;
                     const canExpand = detailedChanges.length > 0;
 

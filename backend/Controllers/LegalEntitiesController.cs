@@ -1217,6 +1217,17 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
             _db.UserCompanyAccesses.RemoveRange(companyAccesses);
         }
 
+        // Legal entities are soft-deleted, therefore ON DELETE SET NULL does not
+        // run. Keep the source quick contact usable and remove its stale full-card
+        // link explicitly.
+        var linkedContacts = await _db.ExternalContacts
+            .Where(item => item.LinkedLegalEntityId == entity.Id)
+            .ToListAsync(ct);
+        foreach (var contact in linkedContacts)
+        {
+            contact.LinkedLegalEntityId = null;
+        }
+
         await RemoveCompanyFromMainCompanySettingsAsync(entity.Id, ct);
         _db.LegalEntities.Remove(entity);
         await _db.SaveChangesAsync(ct);

@@ -2899,7 +2899,8 @@ describe('TaskJournal', () => {
     const dateFrom = screen.getByTestId('task-date-from-filter');
     const dateTo = screen.getByTestId('task-date-to-filter');
 
-    expect(mainFilterRow.className).toContain('xl:grid-cols-[minmax(240px,1fr)_repeat(5,minmax(140px,190px))]');
+    expect(mainFilterRow.className).toContain('xl:grid-cols-3');
+    expect(mainFilterRow.className).toContain('2xl:grid-cols-[minmax(240px,1fr)_repeat(5,minmax(140px,190px))]');
     expect(screen.queryByTestId('task-counterparty-filter')).toBeNull();
     expect(screen.getByTestId('task-counterparty-search')).toBeTruthy();
     expect(mainFilterRow.contains(dateFrom)).toBe(false);
@@ -3521,7 +3522,10 @@ describe('TaskJournal', () => {
 
     expect(screen.getByText('Автоконтроль дел')).toBeTruthy();
     expect(screen.getByText('Эскалация')).toBeTruthy();
-    fireEvent.click(screen.getByTestId('task-automation-create-100'));
+    const createButton = screen.getByTestId('task-automation-create-100');
+    expect(createButton.className).toContain('w-full');
+    expect(createButton.closest('article')?.className).toContain('min-w-0');
+    fireEvent.click(createButton);
 
     await waitFor(() => expect(apiMock.createTaskJournalCaseAutomationTask).toHaveBeenCalledWith(100));
     expect(apiMock.createTaskJournalItem).not.toHaveBeenCalled();

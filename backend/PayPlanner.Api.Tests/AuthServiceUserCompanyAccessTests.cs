@@ -188,6 +188,75 @@ public class AuthServiceUserCompanyAccessTests
     }
 
     [Fact]
+    public async Task UpdateUserAsync_ClearsOptionalContactsAndDates_WhenRequested()
+    {
+        await using var db = await CreateContextAsync();
+        var service = CreateService(db);
+        var roleId = await CreateRoleAsync(db, "user-clear-fields");
+        var user = await CreateUserAsync(db, roleId, "clear-fields@example.com");
+        user.FirstName = "Иван";
+        user.PhoneNumber = "+79990000000";
+        user.WhatsApp = "+79990000000";
+        user.DateOfBirth = new DateTime(1990, 1, 10);
+        user.EmploymentStartDate = new DateTime(2025, 1, 1);
+        user.EmploymentEndDate = new DateTime(2026, 1, 1);
+        await db.SaveChangesAsync();
+
+        var result = await service.UpdateUserAsync(
+            user.Id,
+            new UpdateUserRequest
+            {
+                FirstName = string.Empty,
+                PhoneNumber = string.Empty,
+                WhatsApp = string.Empty,
+                ClearDateOfBirth = true,
+                ClearEmploymentStartDate = true,
+                ClearEmploymentEndDate = true,
+            },
+            actorUserId: user.Id);
+
+        Assert.NotNull(result);
+        Assert.Null(result!.FirstName);
+        Assert.Null(result.PhoneNumber);
+        Assert.Null(result.WhatsApp);
+        Assert.Null(result.DateOfBirth);
+        Assert.Null(result.EmploymentStartDate);
+        Assert.Null(result.EmploymentEndDate);
+
+        var storedUser = await db.Users.AsNoTracking().SingleAsync(item => item.Id == user.Id);
+        Assert.Null(storedUser.FirstName);
+        Assert.Null(storedUser.PhoneNumber);
+        Assert.Null(storedUser.WhatsApp);
+        Assert.Null(storedUser.DateOfBirth);
+        Assert.Null(storedUser.EmploymentStartDate);
+        Assert.Null(storedUser.EmploymentEndDate);
+    }
+
+    [Fact]
+    public async Task UpdateProfileAsync_ClearsOptionalContactsAndDate_WhenRequested()
+    {
+        await using var db = await CreateContextAsync();
+        var service = CreateService(db);
+        var roleId = await CreateRoleAsync(db, "profile-clear-fields");
+        var user = await CreateUserAsync(db, roleId, "profile-clear@example.com");
+        user.PhoneNumber = "+79990000001";
+        user.DateOfBirth = new DateTime(1991, 2, 11);
+        await db.SaveChangesAsync();
+
+        var result = await service.UpdateProfileAsync(
+            user.Id,
+            new UpdateProfileRequest
+            {
+                PhoneNumber = string.Empty,
+                ClearDateOfBirth = true,
+            });
+
+        Assert.NotNull(result);
+        Assert.Null(result!.PhoneNumber);
+        Assert.Null(result.DateOfBirth);
+    }
+
+    [Fact]
     public async Task UpdateUserAsync_UsesUserTimeZoneForDateOfBirthFutureValidation()
     {
         await using var db = await CreateContextAsync();

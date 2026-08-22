@@ -31,7 +31,7 @@ public class UpsertContractRequest
 
     public bool IsOpenEnded { get; set; }
 
-    [Range(typeof(decimal), "0", "79228162514264337593543950335")]
+    [Range(typeof(decimal), "0", "79228162514264337593543950335", ParseLimitsInInvariantCulture = true)]
     public decimal? Amount { get; set; }
 
     public DateTime? StartDate { get; set; }

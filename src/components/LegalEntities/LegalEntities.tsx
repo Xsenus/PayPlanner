@@ -55,6 +55,8 @@ type LegalEntityColumnKey = (typeof LEGAL_ENTITY_COLUMNS)[number]['key'];
 interface LegalEntitiesProps {
   initialLegalEntityId?: number | null;
   onInitialLegalEntityHandled?: () => void;
+  detailOnly?: boolean;
+  onDetailClose?: () => void;
   onOpenCase?: (caseId: number, clientId?: number | null, legalEntityId?: number | null) => void;
   onOpenContract?: (contractId: number) => void;
   onOpenInvoice?: (invoiceId: number, type?: PaymentKind) => void;
@@ -102,6 +104,8 @@ function normalizeRelatedPaymentKind(value?: string | null): PaymentKind | undef
 export function LegalEntities({
   initialLegalEntityId = null,
   onInitialLegalEntityHandled,
+  detailOnly = false,
+  onDetailClose,
   onOpenCase,
   onOpenContract,
   onOpenInvoice,
@@ -200,7 +204,7 @@ export function LegalEntities({
   );
 
   useEffect(() => {
-    if (detailPageOpen) {
+    if (detailOnly || detailPageOpen) {
       return undefined;
     }
     if (page !== 1 && previousLegalEntitiesQueryScopeRef.current !== legalEntitiesQueryScopeKey) {
@@ -213,7 +217,7 @@ export function LegalEntities({
     return () => {
       controller.abort();
     };
-  }, [detailPageOpen, fetchLegalEntities, legalEntitiesQueryScopeKey, page]);
+  }, [detailOnly, detailPageOpen, fetchLegalEntities, legalEntitiesQueryScopeKey, page]);
 
   useEffect(() => {
     setPage(1);
@@ -289,10 +293,13 @@ export function LegalEntities({
       toast.error(
         extractDisplayErrorMessage(err, 'Не удалось загрузить данные юридического лица'),
       );
+      if (detailOnly) {
+        onDetailClose?.();
+      }
     } finally {
       setModalBusy(false);
     }
-  }, [toast]);
+  }, [detailOnly, onDetailClose, toast]);
 
   useEffect(() => {
     if (!initialLegalEntityId || !(initialLegalEntityId > 0)) {
@@ -338,6 +345,7 @@ export function LegalEntities({
           setEditing(null);
           setReadOnlyMode(false);
           setDetailPageOpen(false);
+          onDetailClose?.();
           await refreshAfterMutation(Math.max(0, items.length - 1));
         }
       : undefined;
@@ -517,8 +525,16 @@ export function LegalEntities({
     }
   };
 
+  const closeDetailPage = () => {
+    setDetailPageOpen(false);
+    setEditing(null);
+    setReadOnlyMode(false);
+    onDetailClose?.();
+  };
+
   return (
-    <div className="p-6">
+    <div className={detailOnly ? 'p-3 lg:p-4' : 'p-6'}>
+      {!detailOnly ? (
       <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-gray-900">
@@ -595,6 +611,7 @@ export function LegalEntities({
           </button>
         </div>
       </div>
+      ) : null}
 
       {settingsOpen && viewMode === 'table' ? (
         <div className="mb-6">
@@ -650,11 +667,7 @@ export function LegalEntities({
       {detailPageOpen ? (
         <LegalEntityModal
           isOpen={detailPageOpen}
-          onClose={() => {
-            setDetailPageOpen(false);
-            setEditing(null);
-            setReadOnlyMode(false);
-          }}
+          onClose={closeDetailPage}
           onSubmit={handleSubmit}
           onDelete={handleDeleteFromDetail}
           initial={editing}
@@ -668,11 +681,7 @@ export function LegalEntities({
           canViewActs={permissions.acts.canView}
           canViewPayments={permissions.payments.canView}
           mode="page"
-          onBack={() => {
-            setDetailPageOpen(false);
-            setEditing(null);
-            setReadOnlyMode(false);
-          }}
+          onBack={closeDetailPage}
         />
       ) : items.length === 0 && !loading ? (
         <div className="rounded-2xl border border-dashed border-gray-300 bg-white p-10 text-center text-gray-500">

@@ -520,6 +520,21 @@ public class PaymentContext : DbContext
             entity.HasIndex(x => x.ClientCaseId).HasDatabaseName("IX_InvoiceClientCases_ClientCaseId");
         });
 
+        modelBuilder.Entity<ClientCaseContract>(entity =>
+        {
+            entity.HasKey(x => new { x.ClientCaseId, x.ContractId });
+            entity.ToTable("ClientCaseContracts");
+            entity.HasOne(x => x.ClientCase)
+                .WithMany(x => x.ClientCaseContracts)
+                .HasForeignKey(x => x.ClientCaseId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.Contract)
+                .WithMany(x => x.ClientCaseContracts)
+                .HasForeignKey(x => x.ContractId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(x => x.ContractId).HasDatabaseName("IX_ClientCaseContracts_ContractId");
+        });
+
         // ------------------ Invoice ------------------
         modelBuilder.Entity<Invoice>(entity =>
         {
@@ -3580,6 +3595,9 @@ public class PaymentContext : DbContext
         modelBuilder.Entity<InvoiceClientCase>()
             .HasQueryFilter(item => Payments.Any(parent => parent.Id == item.PaymentId)
                 && ClientCases.Any(parent => parent.Id == item.ClientCaseId));
+        modelBuilder.Entity<ClientCaseContract>()
+            .HasQueryFilter(item => ClientCases.Any(parent => parent.Id == item.ClientCaseId)
+                && Contracts.Any(parent => parent.Id == item.ContractId));
         modelBuilder.Entity<LegalEntityContract>()
             .HasQueryFilter(item => LegalEntities.Any(parent => parent.Id == item.LegalEntityId)
                 && Contracts.Any(parent => parent.Id == item.ContractId));
@@ -4217,6 +4235,8 @@ public class PaymentContext : DbContext
     /// Дела (кейсы) клиентов.
     /// </summary>
     public DbSet<ClientCase> ClientCases { get; set; }
+
+    public DbSet<ClientCaseContract> ClientCaseContracts { get; set; }
 
     public DbSet<ClientCaseDocument> ClientCaseDocuments { get; set; }
 

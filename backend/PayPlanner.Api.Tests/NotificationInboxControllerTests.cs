@@ -157,6 +157,11 @@ public class NotificationInboxControllerTests
         var archivedDto = Assert.IsType<UserNotificationDto>(Assert.IsType<OkObjectResult>(archiveResult.Result).Value);
         Assert.True(archivedDto.IsArchived);
 
+        var unarchiveResult = await controller.Unarchive(currentNotification.Id, CancellationToken.None);
+        var unarchivedDto = Assert.IsType<UserNotificationDto>(Assert.IsType<OkObjectResult>(unarchiveResult.Result).Value);
+        Assert.False(unarchivedDto.IsArchived);
+        Assert.Null(unarchivedDto.ArchivedAt);
+
         var deleteResult = await controller.Delete(currentNotification.Id, CancellationToken.None);
         Assert.IsType<NoContentResult>(deleteResult);
 
@@ -417,6 +422,11 @@ public class NotificationInboxControllerTests
             Ids = [visibleNotifications[0].Id, hiddenNotifications[1].Id],
         }, CancellationToken.None);
         var archiveDto = Assert.IsType<UserNotificationBulkActionResultDto>(Assert.IsType<OkObjectResult>(archiveResult.Result).Value);
+        var unarchiveResult = await controller.UnarchiveSelected(new PayPlanner.Api.Models.Requests.BulkIdsRequest
+        {
+            Ids = [visibleNotifications[0].Id, hiddenNotifications[1].Id],
+        }, CancellationToken.None);
+        var unarchiveDto = Assert.IsType<UserNotificationBulkActionResultDto>(Assert.IsType<OkObjectResult>(unarchiveResult.Result).Value);
 
         Assert.Equal(visibleNotifications.Length, page.Items.Count);
         Assert.Equal(visibleNotifications.Length, unreadCount);
@@ -424,6 +434,10 @@ public class NotificationInboxControllerTests
         Assert.All(hiddenNotifications, item => Assert.DoesNotContain(page.Items, dto => dto.Id == item.Id));
         Assert.IsType<NotFoundResult>(hiddenReadResult.Result);
         Assert.Equal(1, archiveDto.UpdatedCount);
+        Assert.Equal(1, unarchiveDto.UpdatedCount);
+        await db.Entry(visibleNotifications[0]).ReloadAsync();
+        Assert.False(visibleNotifications[0].IsArchived);
+        Assert.Null(visibleNotifications[0].ArchivedAt);
     }
 
     [Fact]
@@ -550,12 +564,14 @@ public class NotificationInboxControllerTests
         targetTask.ClientId = targetClient.Id;
         targetTask.AssigneeUserId = assignee.Id;
         targetTask.AssigneeName = assignee.FullName;
+        targetTask.Status = "done";
         var otherTask = CreateTask(currentUser.Id, "Other task");
         otherTask.ClientId = otherClient.Id;
         otherTask.AssigneeUserId = otherAssignee.Id;
         otherTask.AssigneeName = otherAssignee.FullName;
         db.TaskJournalItems.AddRange(targetTask, otherTask);
         await db.SaveChangesAsync();
+        db.Entry(targetTask).Property<bool>("IsDeleted").CurrentValue = true;
 
         var target = CreateNotification(currentUser.Id, "task:target:changed", title: "Target");
         target.TaskJournalItemId = targetTask.Id;

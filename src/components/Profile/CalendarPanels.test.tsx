@@ -8,22 +8,24 @@ const apiMock = vi.hoisted(() => ({
   getGoogleCalendarStatus: vi.fn(),
   getYandexCalendarStatus: vi.fn(),
 }));
+const toastMock = vi.hoisted(() => ({
+  error: vi.fn(),
+  success: vi.fn(),
+}));
+const dialogMock = vi.hoisted(() => ({
+  confirm: vi.fn(),
+}));
 
 vi.mock('../../services/api', () => ({
   apiService: apiMock,
 }));
 
 vi.mock('../../hooks/useToast', () => ({
-  useToast: () => ({
-    error: vi.fn(),
-    success: vi.fn(),
-  }),
+  useToast: () => toastMock,
 }));
 
 vi.mock('../../hooks/useDialog', () => ({
-  useDialog: () => ({
-    confirm: vi.fn(),
-  }),
+  useDialog: () => dialogMock,
 }));
 
 describe('calendar profile panels', () => {
@@ -31,7 +33,7 @@ describe('calendar profile panels', () => {
     vi.clearAllMocks();
   });
 
-  it('hides Google Calendar card when provider is disabled by admin', async () => {
+  it('explains why Google Calendar is unavailable when disabled by admin', async () => {
     apiMock.getGoogleCalendarStatus.mockResolvedValue({
       isAvailable: false,
       googleOAuthReady: true,
@@ -43,10 +45,11 @@ describe('calendar profile panels', () => {
     render(<GoogleCalendarPanel />);
 
     await waitFor(() => expect(apiMock.getGoogleCalendarStatus).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(screen.queryByText('Google Calendar')).toBeNull());
+    expect(await screen.findByText('Интеграция отключена администратором и сейчас недоступна для подключения.')).toBeTruthy();
+    expect(screen.getByText('Google Calendar')).toBeTruthy();
   });
 
-  it('hides Yandex Calendar card when provider is disabled by admin', async () => {
+  it('explains why Yandex Calendar is unavailable when disabled by admin', async () => {
     apiMock.getYandexCalendarStatus.mockResolvedValue({
       isAvailable: false,
       yandexOAuthReady: true,
@@ -58,7 +61,8 @@ describe('calendar profile panels', () => {
     render(<YandexCalendarPanel />);
 
     await waitFor(() => expect(apiMock.getYandexCalendarStatus).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(screen.queryByText('Яндекс.Календарь')).toBeNull());
+    expect(await screen.findByText('Интеграция отключена администратором и сейчас недоступна для подключения.')).toBeTruthy();
+    expect(screen.getByText('Яндекс.Календарь')).toBeTruthy();
   });
 
   it('disables Google manual sync button while full sync cooldown is active', async () => {

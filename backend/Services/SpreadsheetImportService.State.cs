@@ -340,7 +340,12 @@ public sealed partial class SpreadsheetImportService
         };
     }
 
-    private static SpreadsheetImportBatchDetailDto MapBatchDetail(SpreadsheetImportBatch batch)
+    private static SpreadsheetImportBatchDetailDto MapBatchDetail(
+        SpreadsheetImportBatch batch,
+        IReadOnlyCollection<SpreadsheetImportBatchOperation> operations,
+        int operationsTotal,
+        int operationsPage,
+        int operationsPageSize)
     {
         return new SpreadsheetImportBatchDetailDto
         {
@@ -363,9 +368,10 @@ public sealed partial class SpreadsheetImportService
                 .ThenBy(file => file.SheetName, StringComparer.OrdinalIgnoreCase)
                 .Select(MapBatchFile)
                 .ToList(),
-            Operations = batch.Operations
-                .OrderBy(operation => operation.CreatedAt)
-                .ThenBy(operation => operation.Id)
+            OperationsTotal = operationsTotal,
+            OperationsPage = operationsPage,
+            OperationsPageSize = operationsPageSize,
+            Operations = operations
                 .Select(operation => new SpreadsheetImportBatchOperationDto
                 {
                     Id = operation.Id,

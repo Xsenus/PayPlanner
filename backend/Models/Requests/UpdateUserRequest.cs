@@ -8,6 +8,7 @@ public class UpdateUserRequest
     public string? LastName { get; set; }
     public string? MiddleName { get; set; }
     public DateTime? DateOfBirth { get; set; }
+    public bool ClearDateOfBirth { get; set; }
     public string? PhotoUrl { get; set; }
     public string? PhoneNumber { get; set; }
     public string? WhatsApp { get; set; }
@@ -22,6 +23,8 @@ public class UpdateUserRequest
     public bool? RequiresFinancialActionReason { get; set; }
     public DateTime? EmploymentStartDate { get; set; }
     public DateTime? EmploymentEndDate { get; set; }
+    public bool ClearEmploymentStartDate { get; set; }
+    public bool ClearEmploymentEndDate { get; set; }
     public int? RoleId { get; set; }
     public bool? IsActive { get; set; }
     public List<int>? CompanyIds { get; set; }

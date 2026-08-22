@@ -18,6 +18,8 @@ const apiMock = vi.hoisted(() => ({
   markAllUserNotificationsRead: vi.fn(),
   archiveUserNotification: vi.fn(),
   archiveUserNotifications: vi.fn(),
+  unarchiveUserNotification: vi.fn(),
+  unarchiveUserNotifications: vi.fn(),
   deleteUserNotification: vi.fn(),
   deleteUserNotifications: vi.fn(),
   snoozeUserNotification: vi.fn(),
@@ -99,6 +101,9 @@ describe('NotificationCenter', () => {
     apiMock.markUserNotificationUnread.mockImplementation(async (id: number) => createNotification({ id, isRead: false }));
     apiMock.markAllUserNotificationsRead.mockResolvedValue({ updatedCount: 0 });
     apiMock.archiveUserNotifications.mockResolvedValue({ updatedCount: 0 });
+    apiMock.unarchiveUserNotification.mockImplementation(async (id: number) =>
+      createNotification({ id, isRead: true, isArchived: false, archivedAt: null }));
+    apiMock.unarchiveUserNotifications.mockResolvedValue({ updatedCount: 0 });
     apiMock.deleteUserNotifications.mockResolvedValue({ updatedCount: 0 });
     apiMock.snoozeUserNotification.mockImplementation(async (id: number) =>
       createNotification({ id, snoozedUntil: '2026-06-07T10:30:00Z' }));
@@ -177,6 +182,44 @@ describe('NotificationCenter', () => {
     await waitFor(() => expect(apiMock.deleteUserNotifications).toHaveBeenCalledWith([20]));
     expect(apiMock.deleteUserNotifications).not.toHaveBeenCalledWith([20, 21]);
     expect(toastMock.success).toHaveBeenCalledWith('Удалено уведомлений: 1.');
+  });
+
+  it('clearly labels the action that returns a read notification to unread', async () => {
+    apiMock.getUserNotifications.mockResolvedValue(
+      createPage([createNotification({ id: 30, isRead: true, readAt: '2026-06-07T10:05:00Z' })]),
+    );
+
+    render(<NotificationCenter />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'В непрочитанные' }));
+
+    await waitFor(() => expect(apiMock.markUserNotificationUnread).toHaveBeenCalledWith(30));
+  });
+
+  it('returns one or several archived notifications to the active journal', async () => {
+    const archived = createNotification({
+      id: 31,
+      title: 'Архивное уведомление',
+      isRead: true,
+      isArchived: true,
+      archivedAt: '2026-06-07T10:06:00Z',
+    });
+    apiMock.getUserNotifications.mockResolvedValue(createPage([archived]));
+    apiMock.unarchiveUserNotifications.mockResolvedValueOnce({ updatedCount: 1 });
+
+    render(<NotificationCenter />);
+
+    const statusCombobox = (await screen.findAllByRole('combobox'))[0];
+    fireEvent.click(statusCombobox);
+    fireEvent.click(await screen.findByRole('option', { name: 'Архив' }));
+
+    fireEvent.click(await screen.findByLabelText('Выбрать уведомление Архивное уведомление'));
+    fireEvent.click(screen.getByRole('button', { name: 'Вернуть выбранные уведомления из архива: 1' }));
+    await waitFor(() => expect(apiMock.unarchiveUserNotifications).toHaveBeenCalledWith([31]));
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Вернуть' }));
+    await waitFor(() => expect(apiMock.unarchiveUserNotification).toHaveBeenCalledWith(31));
+    expect(toastMock.success).toHaveBeenCalledWith('Уведомление возвращено из архива.');
   });
 
   it('refreshes the open list when a realtime notification arrives', async () => {

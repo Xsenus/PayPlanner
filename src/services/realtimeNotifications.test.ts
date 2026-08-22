@@ -82,4 +82,49 @@ describe('realtimeNotifications', () => {
       expect.stringContaining('stopped during negotiation'),
     );
   });
+
+  it('does not report deliberate HttpConnection stop during navigation as an error', () => {
+    const sink = createConsoleSink();
+    const logger = createNotificationsHubLogger(sink);
+    const message = 'Failed to start the HttpConnection before stop() was called.';
+
+    logger.log(LogLevel.Error, message);
+
+    expect(isExpectedRealtimeStartupError(new Error(message))).toBe(true);
+    expect(sink.error).not.toHaveBeenCalled();
+    expect(sink.debug).toHaveBeenCalledWith(
+      expect.stringContaining('Realtime notifications are unavailable'),
+      message,
+    );
+  });
+
+  it('does not print transport information containing the websocket access token', () => {
+    const sink = createConsoleSink();
+    const logger = createNotificationsHubLogger(sink);
+
+    logger.log(
+      LogLevel.Information,
+      'WebSocket connected to ws://localhost/hubs/notifications?id=1&access_token=secret.jwt.token',
+    );
+
+    expect(sink.info).not.toHaveBeenCalled();
+    expect(sink.debug).not.toHaveBeenCalled();
+    expect(sink.warn).not.toHaveBeenCalled();
+    expect(sink.error).not.toHaveBeenCalled();
+  });
+
+  it('masks access tokens if SignalR reports a warning or error', () => {
+    const sink = createConsoleSink();
+    const logger = createNotificationsHubLogger(sink);
+
+    logger.log(
+      LogLevel.Error,
+      'Connection failed: wss://example.test/hub?access_token=secret.jwt.token&transport=webSockets',
+    );
+
+    expect(sink.error).toHaveBeenCalledWith(
+      'Connection failed: wss://example.test/hub?access_token=[скрыто]&transport=webSockets',
+    );
+    expect(sink.error.mock.calls.flat().join(' ')).not.toContain('secret.jwt.token');
+  });
 });

@@ -310,7 +310,7 @@ export function CalendarSyncProviderSettings() {
             <div className="flex flex-col gap-1">
               <h6 className="text-sm font-semibold text-gray-900">Интервалы фоновой синхронизации</h6>
               <p className="text-xs leading-5 text-gray-600">
-                Стандартный интервал - 10 минут. Минимум в CRM - {MIN_CALENDAR_SYNC_INTERVAL_MINUTES} минут, чтобы не создавать лишнюю нагрузку на API календарей.
+                Стандартный интервал — 10 минут. Минимум в CRM — {MIN_CALENDAR_SYNC_INTERVAL_MINUTES} мин., чтобы не создавать лишнюю нагрузку на API календарей.
               </p>
             </div>
             <div className="mt-3 grid gap-3 md:grid-cols-2">

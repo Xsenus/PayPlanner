@@ -9,7 +9,7 @@ import { useToast } from '../../hooks/useToast';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { useInvoices, type InvoicesSortKey } from '../../hooks/useInvoices';
-import type { ActResponsible, Client, Invoice, InvoiceInput, PaymentKind, PaymentStatus } from '../../types';
+import type { ActResponsible, Client, Invoice, InvoiceInput, Payment, PaymentKind, PaymentStatus } from '../../types';
 import { apiService } from '../../services/api';
 import { toDateInputValue } from '../../utils/dateUtils';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
@@ -116,6 +116,8 @@ export function Installments({ defaultType, lockType = false }: AccountsProps) {
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
+  const [relatedPayments, setRelatedPayments] = useState<Payment[]>([]);
+  const [relatedPaymentsLoading, setRelatedPaymentsLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
@@ -138,6 +140,7 @@ export function Installments({ defaultType, lockType = false }: AccountsProps) {
     status: statusFilter === 'all' ? undefined : statusFilter,
     search: debouncedSearch || undefined,
     type: typeFilter === 'All' ? undefined : typeFilter,
+    installmentsOnly: true,
     sortBy: sortState.key,
     sortDir: sortState.direction,
     page,
@@ -155,7 +158,7 @@ export function Installments({ defaultType, lockType = false }: AccountsProps) {
 
   const summaryBuckets = useMemo(() => summary ?? { total: { amount: 0, count: 0 }, pending: { amount: 0, count: 0 }, paid: { amount: 0, count: 0 }, overdue: { amount: 0, count: 0 } }, [summary]);
   const summaryCards: SummaryCard[] = useMemo(() => [
-    { key: 'total', title: t('invoiceSummaryTotal') ?? 'Сумма счетов всего', amount: summaryBuckets.total.amount, count: summaryBuckets.total.count, accent: 'border border-blue-100 bg-blue-50 text-blue-700', icon: WalletCards },
+    { key: 'total', title: 'Сумма рассрочек', amount: summaryBuckets.total.amount, count: summaryBuckets.total.count, accent: 'border border-blue-100 bg-blue-50 text-blue-700', icon: WalletCards },
     { key: 'overdue', title: t('invoiceSummaryOverdue') ?? 'Просрочено', amount: summaryBuckets.overdue.amount, count: summaryBuckets.overdue.count, accent: 'border border-rose-100 bg-rose-50 text-rose-700', icon: AlertTriangle },
     { key: 'paid', title: t('invoiceSummaryPaid') ?? 'Оплачено', amount: summaryBuckets.paid.amount, count: summaryBuckets.paid.count, accent: 'border border-emerald-100 bg-emerald-50 text-emerald-700', icon: CheckCircle2 },
   ], [summaryBuckets, t]);
@@ -164,8 +167,12 @@ export function Installments({ defaultType, lockType = false }: AccountsProps) {
   const typeLabels: Record<PaymentKind, string> = { Income: t('invoiceTypeIncome') ?? 'Доходные счета', Expense: t('invoiceTypeExpense') ?? 'Расходные счета' };
   const typeFilterLabels: Record<FilterType, string> = { All: t('invoiceTypeAll') ?? 'Все счета', Income: t('invoiceTypeIncome') ?? 'Доходные счета', Expense: t('invoiceTypeExpense') ?? 'Расходные счета' };
   const typeBadgeClasses: Record<PaymentKind, string> = { Income: 'border border-emerald-200 bg-emerald-100 text-emerald-700', Expense: 'border border-rose-200 bg-rose-100 text-rose-700' };
-  const headingTitle = typeFilter === 'Expense' ? t('invoiceExpenseTitle') ?? 'Расходные счета' : typeFilter === 'Income' ? t('invoiceIncomeTitle') ?? t('invoicesTitle') ?? 'Доходные счета' : t('invoiceAllTitle') ?? t('accounts') ?? 'Все счета';
-  const headingDescription = typeFilter === 'Expense' ? t('invoiceSectionDescriptionExpense') ?? 'Учитывайте входящие счета от поставщиков и контролируйте их оплату.' : typeFilter === 'Income' ? t('invoiceSectionDescriptionIncome') ?? t('invoiceSectionDescription') ?? 'Отслеживайте выставленные счета и контролируйте их оплату.' : t('invoiceSectionDescriptionAll') ?? t('invoiceSectionDescription') ?? 'Просматривайте все входящие и исходящие счета компании.';
+  const headingTitle = typeFilter === 'Expense' ? 'Расходные рассрочки' : typeFilter === 'Income' ? 'Доходные рассрочки' : 'Рассрочки';
+  const headingDescription = typeFilter === 'Expense'
+    ? 'Контролируйте графики оплаты по входящим счетам поставщиков.'
+    : typeFilter === 'Income'
+      ? 'Контролируйте графики оплаты по выставленным клиентам счетам.'
+      : 'Просматривайте счета с настроенным графиком рассрочки и контролируйте их оплату.';
   const columnsByKey = useMemo(() => Object.fromEntries(INSTALLMENT_COLUMNS.map((column) => [column.key, column])) as Record<InstallmentColumnKey, (typeof INSTALLMENT_COLUMNS)[number]>, []);
   const visibleColumnsOrdered = useMemo(() => orderedVisibleColumns.map((key) => columnsByKey[key]).filter(Boolean), [columnsByKey, orderedVisibleColumns]);
   const handleSort = (key: InvoicesSortKey) => setSortState((prev) => prev.key === key ? { key, direction: prev.direction === 'asc' ? 'desc' : 'asc' } : { key, direction: key === 'date' || key === 'createdAt' ? 'desc' : 'asc' });
@@ -188,9 +195,25 @@ export function Installments({ defaultType, lockType = false }: AccountsProps) {
   }, [actResponsibles.length, clients, lookupsError, modalOpen]);
 
   useEffect(() => { if (modalOpen) void ensureLookups(); }, [ensureLookups, modalOpen]);
-  const openCreateModal = () => { setModalMode('create'); setSelectedInvoice(null); setModalError(null); setModalOpen(true); };
-  const openEditModal = (invoice: Invoice) => { setModalMode('edit'); setSelectedInvoice(invoice); setModalError(null); setModalOpen(true); };
-  const closeModal = () => { setModalOpen(false); setSelectedInvoice(null); setModalError(null); };
+  const openCreateModal = () => { setModalMode('create'); setSelectedInvoice(null); setRelatedPayments([]); setModalError(null); setModalOpen(true); };
+  const openEditModal = async (invoice: Invoice) => {
+    setModalMode('edit');
+    setSelectedInvoice(invoice);
+    setRelatedPayments([]);
+    setModalError(null);
+    setModalOpen(true);
+    setRelatedPaymentsLoading(true);
+    try {
+      const registry = await apiService.getAccountsRegistry({ invoiceId: invoice.id, page: 1, pageSize: 1 });
+      const account = registry.items.find((item) => item.invoice?.id === invoice.id);
+      setRelatedPayments(account?.payments ?? []);
+    } catch (err) {
+      setModalError(extractDisplayErrorMessage(err, 'Не удалось загрузить график платежей по рассрочке.'));
+    } finally {
+      setRelatedPaymentsLoading(false);
+    }
+  };
+  const closeModal = () => { setModalOpen(false); setSelectedInvoice(null); setRelatedPayments([]); setModalError(null); };
 
   const submitInvoice = async (payload: InvoiceInput) => {
     setSubmitting(true);
@@ -327,7 +350,7 @@ export function Installments({ defaultType, lockType = false }: AccountsProps) {
                   </div>
                   <Icon className="h-10 w-10 opacity-80" />
                 </div>
-                <p className="mt-4 text-xs">{t('invoiceSummaryCount') ?? 'Количество счетов'}: {card.count}</p>
+                <p className="mt-4 text-xs">Количество рассрочек: {card.count}</p>
               </div>
             );
           })}
@@ -467,7 +490,7 @@ export function Installments({ defaultType, lockType = false }: AccountsProps) {
                       <td className="px-4 py-4">
                         <div className="flex items-center justify-end gap-2">
                           {canEdit ? (
-                            <button type="button" onClick={() => openEditModal(invoice)} className="rounded-lg p-2 text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900" title={t('edit') ?? 'Редактировать'} aria-label={t('edit') ?? 'Редактировать'}>
+                            <button type="button" onClick={() => void openEditModal(invoice)} className="rounded-lg p-2 text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900" title={t('edit') ?? 'Редактировать'} aria-label={t('edit') ?? 'Редактировать'}>
                               <Pencil className="h-4 w-4" />
                             </button>
                           ) : null}
@@ -488,7 +511,7 @@ export function Installments({ defaultType, lockType = false }: AccountsProps) {
           <TablePagination page={page} totalPages={totalPages} totalItems={pagination.total ?? 0} pageSize={pageSize} pageSizeOptions={PAGE_SIZE_OPTIONS} onPageChange={setPage} onPageSizeChange={setPageSize} recordsLabel={t('recordsFound') ?? 'Найдено записей'} pageSizeLabel={t('rowsPerPage') ?? 'Строк на странице'} previousLabel={t('previous') ?? 'Назад'} nextLabel={t('next') ?? 'Вперед'} />
         </div>
 
-        <InvoiceModal open={modalOpen} mode={modalMode} invoice={selectedInvoice} onClose={closeModal} onSubmit={submitInvoice} submitting={submitting} errorMessage={modalError} clients={clients} responsibles={actResponsibles} lookupsLoading={lookupsLoading} lookupsError={lookupsError} defaultClientId={undefined} defaultResponsibleId={user?.id} defaultType={typeFilter === 'All' ? undefined : typeFilter} lockType={lockType} />
+        <InvoiceModal open={modalOpen} mode={modalMode} invoice={selectedInvoice} onClose={closeModal} onSubmit={submitInvoice} submitting={submitting} errorMessage={modalError} clients={clients} responsibles={actResponsibles} lookupsLoading={lookupsLoading} lookupsError={lookupsError} defaultClientId={undefined} defaultResponsibleId={user?.id} defaultType={typeFilter === 'All' ? undefined : typeFilter} lockType={lockType} relatedPayments={relatedPayments} paymentsLoading={relatedPaymentsLoading} />
       </div>
     </div>
   );

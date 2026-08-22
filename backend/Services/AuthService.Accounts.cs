@@ -313,7 +313,11 @@ public partial class AuthService
             user.Viber = NormalizeOptionalValue(request.Viber);
         }
 
-        if (request.DateOfBirth.HasValue)
+        if (request.ClearDateOfBirth)
+        {
+            user.DateOfBirth = null;
+        }
+        else if (request.DateOfBirth.HasValue)
         {
             var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_context, user.Id, cancellationToken);
             var today = CalendarTimeZoneHelper.ToUserLocal(DateTime.UtcNow, timeZone).Date;
@@ -329,12 +333,20 @@ public partial class AuthService
         {
             EnsureProtectedUserAdministrativeFieldsUnchanged(user, request);
 
-            if (request.EmploymentStartDate.HasValue)
+            if (request.ClearEmploymentStartDate)
+            {
+                user.EmploymentStartDate = null;
+            }
+            else if (request.EmploymentStartDate.HasValue)
             {
                 user.EmploymentStartDate = request.EmploymentStartDate;
             }
 
-            if (request.EmploymentEndDate.HasValue)
+            if (request.ClearEmploymentEndDate)
+            {
+                user.EmploymentEndDate = null;
+            }
+            else if (request.EmploymentEndDate.HasValue)
             {
                 user.EmploymentEndDate = request.EmploymentEndDate;
             }
@@ -431,6 +443,7 @@ public partial class AuthService
                 LastName = request.LastName,
                 MiddleName = request.MiddleName,
                 DateOfBirth = request.DateOfBirth,
+                ClearDateOfBirth = request.ClearDateOfBirth,
                 PhotoUrl = request.PhotoUrl,
                 PhoneNumber = request.PhoneNumber,
                 WhatsApp = request.WhatsApp,

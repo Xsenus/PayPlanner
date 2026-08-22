@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using System.Data.Common;
+using System.Globalization;
 using System.Reflection;
 using System.Security.Claims;
 using System.Text;
@@ -121,6 +122,39 @@ public class ActsControllerTests
         var isValid = Validator.TryValidateObject(request, new ValidationContext(request), results, validateAllProperties: true);
 
         Assert.True(isValid, string.Join(Environment.NewLine, results.Select(item => item.ErrorMessage)));
+    }
+
+    [Fact]
+    public void ActLineItemRequest_ValidatesDecimalRange_UnderRussianCulture()
+    {
+        var previousCulture = CultureInfo.CurrentCulture;
+        var previousUiCulture = CultureInfo.CurrentUICulture;
+        try
+        {
+            CultureInfo.CurrentCulture = new CultureInfo("ru-RU");
+            CultureInfo.CurrentUICulture = new CultureInfo("ru-RU");
+            var request = new ActLineItemRequest
+            {
+                SourceKey = "audit-line",
+                Name = "Тестовая позиция",
+                Quantity = 1m,
+                Price = 150_000m,
+            };
+            var results = new List<ValidationResult>();
+
+            var isValid = Validator.TryValidateObject(
+                request,
+                new ValidationContext(request),
+                results,
+                validateAllProperties: true);
+
+            Assert.True(isValid, string.Join("; ", results.Select(item => item.ErrorMessage)));
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = previousCulture;
+            CultureInfo.CurrentUICulture = previousUiCulture;
+        }
     }
 
     [Fact]

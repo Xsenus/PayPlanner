@@ -910,7 +910,11 @@ export function Contacts({ initialScope = 'all', onScopeChange, onOpenClient, on
                       {contact.inn ? <div className="truncate">ИНН: {contact.inn}</div> : null}
                       <div className="flex items-center gap-2"><Phone className="h-4 w-4 shrink-0 text-slate-400" /><span className="truncate">{formatPhones(contact) || 'Телефон не указан'}</span></div>
                       <div className="flex items-center gap-2"><Mail className="h-4 w-4 shrink-0 text-slate-400" /><span className="truncate">{formatEmails(contact) || 'Email не указан'}</span></div>
-                      {contact.position ? <div className="truncate">Должность: {contact.position}</div> : null}
+                      {contact.position ? (
+                        <div className="truncate">
+                          {contact.contactType === 'Organization' ? 'Руководитель' : 'Должность'}: {contact.position}
+                        </div>
+                      ) : null}
                       {contact.responsibleUserName ? <div className="truncate">Ответственный: {contact.responsibleUserName}</div> : null}
                     </div>
                     <div className="mt-3 border-t border-slate-100 pt-3">{renderContactActions(contact)}</div>

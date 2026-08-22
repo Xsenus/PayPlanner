@@ -1,7 +1,8 @@
 import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemDateInput } from '../ui/SystemDateInput';
+import { TablePagination } from '../ui/TablePagination';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { History, Loader2, Plus, Save, Trash2 } from 'lucide-react';
+import { History, Loader2, Plus, Save, Search, Trash2 } from 'lucide-react';
 import { apiService, type AppReleaseAdminDto, type AppReleaseItemDto, type SaveAppReleaseRequest } from '../../services/api';
 import { useToast } from '../../hooks/useToast';
 import { useDialog } from '../../hooks/useDialog';
@@ -131,6 +132,19 @@ export function AppVersionSettings() {
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [total, setTotal] = useState(0);
+  const [searchInput, setSearchInput] = useState('');
+  const [search, setSearch] = useState('');
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      setPage(1);
+      setSearch(searchInput.trim());
+    }, 250);
+    return () => window.clearTimeout(timeoutId);
+  }, [searchInput]);
 
   const selectedRelease = useMemo(
     () => releases.find((release) => release.id === form.id) ?? null,
@@ -141,14 +155,22 @@ export function AppVersionSettings() {
     setLoading(true);
     setError(null);
     try {
-      const data = await apiService.getAdminAppReleases();
+      const response = await apiService.getAdminAppReleasesPaged({ page, pageSize, search });
+      const totalPages = Math.max(1, Math.ceil(response.total / response.pageSize));
+      if (page > totalPages) {
+        setPage(totalPages);
+        return;
+      }
+
+      const data = response.items;
       setReleases(data);
+      setTotal(response.total);
       setForm((current) => {
         if (current.id) {
           const updated = data.find((release) => release.id === current.id);
-          return updated ? toForm(updated) : current;
+          return updated ? toForm(updated) : data[0] ? toForm(data[0]) : emptyForm();
         }
-        return data[0] ? toForm(data[0]) : current;
+        return data[0] ? toForm(data[0]) : emptyForm();
       });
     } catch (e) {
       const message = extractDisplayErrorMessage(e, 'Не удалось загрузить релизы приложения.');
@@ -157,7 +179,7 @@ export function AppVersionSettings() {
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, [page, pageSize, search, toast]);
 
   useEffect(() => {
     void load();
@@ -187,7 +209,13 @@ export function AppVersionSettings() {
         : await apiService.createAdminAppRelease(payload);
       toast.success('Релиз сохранён.', 'Версия приложения');
       setForm(toForm(saved));
-      await load();
+      if (!form.id && (page !== 1 || search)) {
+        setPage(1);
+        setSearchInput('');
+        setSearch('');
+      } else {
+        await load();
+      }
     } catch (e) {
       toast.error(extractDisplayErrorMessage(e, 'Не удалось сохранить релиз.'), 'Версия приложения');
     } finally {
@@ -219,10 +247,12 @@ export function AppVersionSettings() {
     try {
       await apiService.deleteAdminAppRelease(selectedRelease.id);
       toast.success('Релиз удален.', 'Версия приложения');
-      const nextReleases = releases.filter((release) => release.id !== selectedRelease.id);
-      setReleases(nextReleases);
-      setForm(nextReleases[0] ? toForm(nextReleases[0]) : emptyForm());
-      await load();
+      setForm(emptyForm());
+      if (releases.length === 1 && page > 1) {
+        setPage((current) => current - 1);
+      } else {
+        await load();
+      }
     } catch (e) {
       toast.error(extractDisplayErrorMessage(e, 'Не удалось удалить релиз.'), 'Версия приложения');
     } finally {
@@ -258,7 +288,19 @@ export function AppVersionSettings() {
 
         {error ? <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div> : null}
 
-        <div className="mt-4 space-y-2">
+        <label className="relative mt-4 block">
+          <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+          <input
+            type="search"
+            value={searchInput}
+            onChange={(event) => setSearchInput(event.target.value)}
+            placeholder="Версия, название или ID"
+            aria-label="Поиск релизов"
+            className="w-full rounded-lg border border-slate-200 py-2 pl-9 pr-3 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+          />
+        </label>
+
+        <div className="mt-3 space-y-2">
           {releases.map((release) => (
             <button
               key={release.id}
@@ -286,10 +328,26 @@ export function AppVersionSettings() {
             </div>
           ) : null}
         </div>
+
+        <TablePagination
+          page={page}
+          totalPages={Math.max(1, Math.ceil(total / pageSize))}
+          totalItems={total}
+          pageSize={pageSize}
+          pageSizeOptions={[10, 20, 50, 100]}
+          onPageChange={setPage}
+          onPageSizeChange={(nextPageSize) => {
+            setPage(1);
+            setPageSize(nextPageSize);
+          }}
+          recordsLabel="Всего релизов"
+          pageSizeLabel="На странице"
+          className="-mx-5 mt-4 -mb-5 !flex-col !items-stretch gap-3 rounded-b-3xl [&>div:last-child]:justify-between"
+        />
       </div>
 
       <div data-testid="app-release-editor" className="min-w-0 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-        <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="mb-5 flex flex-col gap-3 2xl:flex-row 2xl:items-start 2xl:justify-between">
           <div>
             <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
               <History className="h-4 w-4" />

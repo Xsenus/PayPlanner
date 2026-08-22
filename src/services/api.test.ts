@@ -46,15 +46,39 @@ describe('apiService object audit', () => {
     const controller = new AbortController();
 
     await apiService.getObjectAuditEvents(
-      { search: 'изменение', objectType: 'client', page: 2, pageSize: 25 },
+      { search: 'телефон', searchAliases: ['Phone', 'PhoneNumber'], objectType: 'client', page: 2, pageSize: 25 },
       { signal: controller.signal },
     );
 
     const [url, options] = fetchMock.mock.calls[0];
     expect(String(url)).toContain('/object-audit?');
     expect(String(url)).toContain('objectType=client');
+    expect(String(url)).toContain('searchAliases=Phone');
+    expect(String(url)).toContain('searchAliases=PhoneNumber');
     expect(String(url)).toContain('page=2');
     expect(options?.signal).toBe(controller.signal);
+  });
+});
+
+describe('apiService spreadsheet import history', () => {
+  it('requests only the selected operations page', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+      id: 7,
+      operations: [],
+      operationsTotal: 2490,
+      operationsPage: 3,
+      operationsPageSize: 50,
+    }), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await apiService.getSpreadsheetImportBatch(7, 3, 50);
+
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/database/import/spreadsheets/batches/7?');
+    expect(String(url)).toContain('page=3');
+    expect(String(url)).toContain('pageSize=50');
   });
 });
 
@@ -464,6 +488,28 @@ describe('extractResponseErrorMessage', () => {
 
     await expect(extractResponseErrorMessage(response)).resolves.toBe(
       'The field Comment must be a string or array type with a maximum length of 1000.',
+    );
+  });
+
+  it('preserves required field keys so forms can show their user-facing labels', async () => {
+    const response = new Response(
+      JSON.stringify({
+        message: 'Не заполнены обязательные поля',
+        missingFields: ['OrganizationForm'],
+      }),
+      {
+        status: 400,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      },
+    );
+
+    await expect(extractResponseErrorMessage(response)).resolves.toBe(
+      JSON.stringify({
+        message: 'Не заполнены обязательные поля',
+        missingFields: ['OrganizationForm'],
+      }),
     );
   });
 
@@ -1477,7 +1523,7 @@ describe('apiService auth handling', () => {
     expect(init?.method).toBe('POST');
   });
 
-  it('sends selected inbox notifications to archive and delete endpoints', async () => {
+  it('sends selected inbox notifications to archive, restore and delete endpoints', async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
       updatedCount: 2,
     }), {
@@ -1486,18 +1532,25 @@ describe('apiService auth handling', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const archiveResult = await apiService.archiveUserNotifications([10, 11]);
+    const unarchiveResult = await apiService.unarchiveUserNotifications([10, 11]);
     const deleteResult = await apiService.deleteUserNotifications([12, 13]);
 
     expect(archiveResult.updatedCount).toBe(2);
+    expect(unarchiveResult.updatedCount).toBe(2);
     expect(deleteResult.updatedCount).toBe(2);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
 
     const [archiveUrl, archiveInit] = fetchMock.mock.calls[0];
     expect(String(archiveUrl)).toContain('/notifications/inbox/bulk/archive');
     expect(archiveInit?.method).toBe('POST');
     expect(archiveInit?.body).toBe(JSON.stringify({ ids: [10, 11] }));
 
-    const [deleteUrl, deleteInit] = fetchMock.mock.calls[1];
+    const [unarchiveUrl, unarchiveInit] = fetchMock.mock.calls[1];
+    expect(String(unarchiveUrl)).toContain('/notifications/inbox/bulk/unarchive');
+    expect(unarchiveInit?.method).toBe('POST');
+    expect(unarchiveInit?.body).toBe(JSON.stringify({ ids: [10, 11] }));
+
+    const [deleteUrl, deleteInit] = fetchMock.mock.calls[2];
     expect(String(deleteUrl)).toContain('/notifications/inbox/bulk/delete');
     expect(deleteInit?.method).toBe('POST');
     expect(deleteInit?.body).toBe(JSON.stringify({ ids: [12, 13] }));
@@ -2033,14 +2086,40 @@ describe('apiService case calendar', () => {
     const controller = new AbortController();
 
     await apiService.getUserActivityLogs(
-      { search: 'вход', status: 'Success', page: 1, pageSize: 25 },
+      {
+        search: 'клиенты',
+        searchAliases: ['Clients', 'ClientsV2'],
+        status: 'Success',
+        page: 1,
+        pageSize: 25,
+      },
       { signal: controller.signal },
     );
 
     const [url, options] = fetchMock.mock.calls[0];
     expect(String(url)).toContain('/user-activity?');
     expect(String(url)).toContain('search=');
+    expect(String(url)).toContain('searchAliases=Clients');
+    expect(String(url)).toContain('searchAliases=ClientsV2');
     expect(options?.signal).toBe(controller.signal);
+  });
+
+  it('passes timezone-safe UTC boundaries to the user activity request', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+      items: [], total: 0, page: 1, pageSize: 25,
+    }), {
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await apiService.getUserActivityLogs({
+      fromUtc: '2026-08-15T17:00:00.000Z',
+      toUtc: '2026-08-16T16:59:00.000Z',
+    });
+
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('fromUtc=2026-08-15T17%3A00%3A00.000Z');
+    expect(String(url)).toContain('toUtc=2026-08-16T16%3A59%3A00.000Z');
   });
 
   it('passes an abort signal to the paged legal entities request', async () => {

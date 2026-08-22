@@ -72,6 +72,8 @@ public partial class AuthService
             || (request.DepartmentId.HasValue && request.DepartmentId.Value != user.DepartmentId)
             || (request.Department is not null && NormalizeOptionalValue(request.Department) != user.Department)
             || (request.RequiresFinancialActionReason.HasValue && request.RequiresFinancialActionReason.Value != user.RequiresFinancialActionReason)
+            || (request.ClearEmploymentStartDate && user.EmploymentStartDate.HasValue)
+            || (request.ClearEmploymentEndDate && user.EmploymentEndDate.HasValue)
             || (request.EmploymentStartDate.HasValue && request.EmploymentStartDate != user.EmploymentStartDate)
             || (request.EmploymentEndDate.HasValue && request.EmploymentEndDate != user.EmploymentEndDate)
             || (request.CompanyIds is not null

@@ -32,6 +32,7 @@ public interface ISpreadsheetImportService
 
     Task<IReadOnlyCollection<SpreadsheetImportBatchSummaryDto>> GetBatchesAsync(CancellationToken cancellationToken = default);
     Task<SpreadsheetImportBatchDetailDto?> GetBatchAsync(int batchId, CancellationToken cancellationToken = default);
+    Task<SpreadsheetImportBatchDetailDto?> GetBatchAsync(int batchId, int page, int pageSize, CancellationToken cancellationToken = default);
     Task<SpreadsheetImportBatchDetailDto> RollbackAsync(int batchId, CancellationToken cancellationToken = default);
 }
 
@@ -102,7 +103,14 @@ public sealed partial class SpreadsheetImportService : ISpreadsheetImportService
         => GetBatchesCoreAsync(cancellationToken);
 
     public Task<SpreadsheetImportBatchDetailDto?> GetBatchAsync(int batchId, CancellationToken cancellationToken = default)
-        => GetBatchCoreAsync(batchId, cancellationToken);
+        => GetBatchCoreAsync(batchId, 1, 25, cancellationToken);
+
+    public Task<SpreadsheetImportBatchDetailDto?> GetBatchAsync(
+        int batchId,
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken = default)
+        => GetBatchCoreAsync(batchId, page, pageSize, cancellationToken);
 
     public Task<SpreadsheetImportBatchDetailDto> RollbackAsync(int batchId, CancellationToken cancellationToken = default)
         => RollbackCoreAsync(batchId, cancellationToken);

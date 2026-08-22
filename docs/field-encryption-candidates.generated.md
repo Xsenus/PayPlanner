@@ -3,7 +3,7 @@
 Файл сформирован командой `npm run audit:encryption-inventory:update`.
 Он дополняет ручную карту и не является утверждённой бизнес-классификацией.
 
-Всего кандидатов вне ручной карты: 281.
+Всего кандидатов вне ручной карты: 285.
 
 - `Act`: `Act.Comment`, `Act.CounterpartyInn`
 - `ActLineItem`: `ActLineItem.Name`
@@ -45,7 +45,7 @@
 - `ElectronicSignatureArtifact`: `ElectronicSignatureArtifact.FileName`
 - `ElectronicSignatureEnvelope`: `ElectronicSignatureEnvelope.OriginalFileName`, `ElectronicSignatureEnvelope.SignatureType`
 - `ElectronicSignatureSigner`: `ElectronicSignatureSigner.ClientPortalAccount`, `ElectronicSignatureSigner.ClientPortalAccountId`, `ElectronicSignatureSigner.PartyType`
-- `ExternalContact`: `ExternalContact.SyncToPhonebook`
+- `ExternalContact`: `ExternalContact.ContactType`, `ExternalContact.Inn`, `ExternalContact.ParentContact`, `ExternalContact.ParentContactId`, `ExternalContact.SyncToPhonebook`
 - `ExternalWorkOrderApprovalAttachment`: `ExternalWorkOrderApprovalAttachment.FileName`
 - `ExternalWorkOrderApprovalRequest`: `ExternalWorkOrderApprovalRequest.CreatedByUserName`, `ExternalWorkOrderApprovalRequest.DecisionComment`, `ExternalWorkOrderApprovalRequest.RevokedByUserName`
 - `GoogleCalendarConnection`: `GoogleCalendarConnection.AccessTokenExpiresAt`, `GoogleCalendarConnection.DefaultCalendarName`, `GoogleCalendarConnection.DisplayName`

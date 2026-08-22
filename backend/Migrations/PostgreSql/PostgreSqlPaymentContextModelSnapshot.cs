@@ -1602,6 +1602,22 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         });
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseContract", b =>
+                {
+                    b.Property<int>("ClientCaseId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("ContractId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("ClientCaseId", "ContractId");
+
+                    b.HasIndex("ContractId")
+                        .HasDatabaseName("IX_ClientCaseContracts_ContractId");
+
+                    b.ToTable("ClientCaseContracts", (string)null);
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseCourt", b =>
                 {
                     b.Property<int>("Id")
@@ -10763,6 +10779,25 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("ResponsibleUser");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseContract", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.ClientCase", "ClientCase")
+                        .WithMany("ClientCaseContracts")
+                        .HasForeignKey("ClientCaseId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.Contract", "Contract")
+                        .WithMany("ClientCaseContracts")
+                        .HasForeignKey("ContractId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("ClientCase");
+
+                    b.Navigation("Contract");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseCourtComplaint", b =>
                 {
                     b.HasOne("PayPlanner.Api.Models.ClientCaseDocument", "ClientCaseDocument")
@@ -12365,6 +12400,8 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
             modelBuilder.Entity("PayPlanner.Api.Models.ClientCase", b =>
                 {
+                    b.Navigation("ClientCaseContracts");
+
                     b.Navigation("CourtComplaints");
 
                     b.Navigation("CourtEventHistory");
@@ -12419,6 +12456,8 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
             modelBuilder.Entity("PayPlanner.Api.Models.Contract", b =>
                 {
+                    b.Navigation("ClientCaseContracts");
+
                     b.Navigation("ClientContracts");
 
                     b.Navigation("ContractActs");

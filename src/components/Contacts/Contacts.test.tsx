@@ -97,6 +97,7 @@ describe('Contacts phone directory', () => {
       category: 'organizations',
       contactType: 'Organization',
       hasFullProfile: true,
+      position: 'Петров Пётр Петрович',
     };
     vi.mocked(apiService.getContacts).mockResolvedValue([organization]);
     const onOpenLegalEntity = vi.fn();
@@ -106,6 +107,7 @@ describe('Contacts phone directory', () => {
 
     expect(window.localStorage.getItem('pp.contacts_view.v1')).toBe('cards');
     expect(screen.getByRole('article')).toBeTruthy();
+    expect(screen.getByText('Руководитель: Петров Пётр Петрович')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Открыть' }));
     expect(onOpenLegalEntity).toHaveBeenCalledWith(24);
   });

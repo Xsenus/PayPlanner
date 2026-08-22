@@ -962,6 +962,13 @@ public class LegalEntitiesControllerTests
             UserId = employeeUserId,
             LegalEntityId = entity.Id,
         });
+        var sourceContact = new ExternalContact
+        {
+            FullName = "Исходный контакт юрлица",
+            ContactType = "Organization",
+            LinkedLegalEntityId = entity.Id,
+        };
+        db.ExternalContacts.Add(sourceContact);
         await db.SaveChangesAsync();
 
         var controller = CreateController(db, currentUserId);
@@ -971,6 +978,7 @@ public class LegalEntitiesControllerTests
         Assert.Null(await db.LegalEntities.AsNoTracking().SingleOrDefaultAsync(item => item.Id == entity.Id));
         Assert.Equal(0, await db.AddressRecords.AsNoTracking().CountAsync(item => item.LegalEntityId == entity.Id));
         Assert.Equal(0, await db.UserCompanyAccesses.AsNoTracking().CountAsync(item => item.LegalEntityId == entity.Id));
+        Assert.Null((await db.ExternalContacts.AsNoTracking().SingleAsync(item => item.Id == sourceContact.Id)).LinkedLegalEntityId);
     }
 
     private static LegalEntityRequest BuildRequest()

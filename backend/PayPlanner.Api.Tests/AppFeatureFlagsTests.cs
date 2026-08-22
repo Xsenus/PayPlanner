@@ -1,5 +1,6 @@
 using System.Data.Common;
 using System.Security.Claims;
+using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
@@ -506,6 +507,17 @@ public class AppFeatureFlagsTests
         Assert.Equal($"Задача: {task.Title}", item.TargetLabel);
         Assert.Equal("dry-run verified", item.Details);
 
+        var taskSearchResult = await controller.GetLogs(
+            null,
+            null,
+            null,
+            null,
+            search: "Дело клиента",
+            pageSize: 10,
+            ct: CancellationToken.None);
+        var taskSearchPage = Assert.IsType<CalendarSyncLogPageDto>(Assert.IsType<OkObjectResult>(taskSearchResult.Result).Value);
+        Assert.Equal("google-calendar", Assert.Single(taskSearchPage.Items).Provider);
+
         var databaseFilteredResult = await controller.GetLogs(
             null,
             "ERROR",
@@ -560,6 +572,35 @@ public class AppFeatureFlagsTests
     }
 
     [Fact]
+    public async Task CalendarSyncController_GetLogs_HidesDataProtectionDiagnosticsFromUserResponse()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        const string technicalError = "The key {calendar-key} was not found in the key ring. For more information go to https://aka.ms/aspnet/dataprotectionwarning";
+        scope.Db.GoogleCalendarSyncLogs.Add(new GoogleCalendarSyncLog
+        {
+            Direction = "crm-to-google",
+            Operation = "update-event",
+            Status = "error",
+            Message = technicalError,
+            DetailsJson = JsonSerializer.Serialize(new { detail = technicalError, changes = technicalError }),
+            CreatedAt = new DateTime(2026, 8, 16, 7, 0, 0, DateTimeKind.Utc),
+        });
+        await scope.Db.SaveChangesAsync();
+
+        var controller = new CalendarSyncController(new TestOptionsSnapshot<AppFeatureFlagsOptions>(new AppFeatureFlagsOptions()), scope.Db);
+
+        var result = await controller.GetLogs("google-calendar", null, null, null, pageSize: 10, ct: CancellationToken.None);
+        var page = Assert.IsType<CalendarSyncLogPageDto>(Assert.IsType<OkObjectResult>(result.Result).Value);
+        var item = Assert.Single(page.Items);
+
+        Assert.Equal("Сохранённые данные подключения недоступны. Подключите календарь заново.", item.Message);
+        Assert.Empty(item.Details);
+        Assert.Empty(item.ChangeSummary);
+        Assert.DoesNotContain("key ring", JsonSerializer.Serialize(item), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("aka.ms", JsonSerializer.Serialize(item), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task CalendarSyncController_GetLogs_LimitsProviderQueriesForLargePagedLog()
     {
         var interceptor = new RecordingCommandInterceptor();
@@ -602,6 +643,33 @@ public class AppFeatureFlagsTests
             !command.Contains("COUNT(", StringComparison.OrdinalIgnoreCase)).ToList();
         Assert.Equal(2, providerDataQueries.Count);
         Assert.All(providerDataQueries, command => Assert.Contains("LIMIT", command, StringComparison.OrdinalIgnoreCase));
+
+        interceptor.Commands.Clear();
+        var searchResult = await controller.GetLogs(
+            null,
+            null,
+            null,
+            null,
+            search: "GOOGLE-274",
+            pageSize: 25,
+            ct: CancellationToken.None);
+        var searchPage = Assert.IsType<CalendarSyncLogPageDto>(Assert.IsType<OkObjectResult>(searchResult.Result).Value);
+
+        Assert.Equal(1, searchPage.Total);
+        Assert.Equal("google-274", Assert.Single(searchPage.Items).Message);
+        var searchDataQueries = interceptor.Commands.Where(command =>
+            (command.Contains("GoogleCalendarSyncLogs", StringComparison.Ordinal) ||
+             command.Contains("YandexCalendarSyncLogs", StringComparison.Ordinal)) &&
+            !command.Contains("COUNT(", StringComparison.OrdinalIgnoreCase)).ToList();
+        Assert.Equal(2, searchDataQueries.Count);
+        Assert.All(searchDataQueries, command =>
+        {
+            Assert.True(
+                command.Contains("LIKE", StringComparison.OrdinalIgnoreCase) ||
+                command.Contains("instr", StringComparison.OrdinalIgnoreCase),
+                "Поисковое условие должно выполняться в SQL до ограничения страницы.");
+            Assert.Contains("LIMIT", command, StringComparison.OrdinalIgnoreCase);
+        });
     }
 
     private static CalendarSyncController CreateCalendarSyncControllerForUser(PaymentContext db, int userId)

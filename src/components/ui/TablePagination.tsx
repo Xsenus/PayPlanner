@@ -38,7 +38,7 @@ export function TablePagination({
     >
       <div className="flex flex-wrap items-center gap-3">
         <span>
-          {recordsLabel}: <span className="font-medium text-slate-800">{totalItems}</span>
+          {recordsLabel.replace(/:\s*$/, '')}: <span className="font-medium text-slate-800">{totalItems}</span>
         </span>
         <label className="flex items-center gap-2">
           <span>{pageSizeLabel}</span>
@@ -59,6 +59,7 @@ export function TablePagination({
       <div className="flex items-center gap-2">
         <button
           type="button"
+          data-testid="pagination-previous"
           onClick={() => onPageChange(Math.max(1, page - 1))}
           disabled={page <= 1}
           className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
@@ -71,6 +72,7 @@ export function TablePagination({
         </span>
         <button
           type="button"
+          data-testid="pagination-next"
           onClick={() => onPageChange(Math.min(totalPages, page + 1))}
           disabled={page >= totalPages}
           className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"

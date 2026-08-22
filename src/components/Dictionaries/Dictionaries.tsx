@@ -85,6 +85,17 @@ const makeKey = (): RowKey => `${Date.now()}-${Math.random().toString(36).slice(
 const isPersistedFullDictItem = (item: FullDictItem | Omit<FullDictItem, 'id' | 'createdAt'>): item is FullDictItem =>
   typeof (item as FullDictItem).id === 'number';
 
+function formatRecordCount(count: number): string {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  const noun = mod10 === 1 && mod100 !== 11
+    ? 'запись'
+    : mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)
+      ? 'записи'
+      : 'записей';
+  return `${count} ${noun}`;
+}
+
 const TABS: { value: VisibleKind; label: string }[] = [
   { value: 'departments', label: 'Отделы' },
   { value: 'deal-types', label: 'Тип сделки' },
@@ -295,23 +306,30 @@ export const Dictionaries = () => {
     if (!canCreate) return;
     setData((prev) => ({
       ...prev,
-      [kind]: [
-        {
-          _key: makeKey(),
-          mode: 'new' as const,
-          item: {
-            name: '',
-            unit: supportsInvoiceItemTemplateFields(kind) ? 'шт' : undefined,
-            defaultPrice: supportsInvoiceItemTemplateFields(kind) ? 0 : undefined,
-            categoryId: supportsServiceCategory(kind) ? (serviceCategories[0]?.id ?? null) : undefined,
-            description: '',
-            colorHex: defaultColor(kind),
-            isActive: true,
-          },
-        },
-        ...prev[kind],
-      ],
+      [kind]: prev[kind].some((row) => row.mode === 'new')
+        ? prev[kind]
+        : [
+            {
+              _key: makeKey(),
+              mode: 'new' as const,
+              item: {
+                name: '',
+                unit: supportsInvoiceItemTemplateFields(kind) ? 'шт' : undefined,
+                defaultPrice: supportsInvoiceItemTemplateFields(kind) ? 0 : undefined,
+                categoryId: supportsServiceCategory(kind) ? (serviceCategories[0]?.id ?? null) : undefined,
+                description: '',
+                colorHex: defaultColor(kind),
+                isActive: true,
+              },
+            },
+            ...prev[kind],
+          ],
     }));
+    window.setTimeout(() => {
+      document
+        .querySelector<HTMLInputElement>(`[data-dictionary-new-kind="${kind}"] input[type="text"]`)
+        ?.focus();
+    }, 0);
   };
 
   const setRow = (
@@ -489,7 +507,7 @@ export const Dictionaries = () => {
     useEffect(() => setLocal(item), [item]);
     const set = (patch: Partial<typeof local>) => setLocal((p) => ({ ...p, ...patch }));
     return (
-      <div className="rounded-xl border bg-slate-50 p-4">
+      <div data-dictionary-new-kind={kind} className="rounded-xl border bg-slate-50 p-4">
         <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-12">
           <div className="lg:col-span-4">
             <label className="block text-xs font-medium text-slate-700 mb-1.5">
@@ -963,8 +981,9 @@ export const Dictionaries = () => {
               {TABS.map((t) => {
                 const isActive = activeTab === t.value;
                 const rows = data[t.value] ?? [];
-                const activeCount = rows.filter((r) => r.item.isActive).length;
-                const inactiveCount = rows.length - activeCount;
+                const persistedRows = rows.filter((row) => row.mode !== 'new');
+                const activeCount = persistedRows.filter((row) => row.item.isActive).length;
+                const inactiveCount = persistedRows.length - activeCount;
 
                 return (
                   <button
@@ -977,7 +996,7 @@ export const Dictionaries = () => {
                     }`}>
                     <div className="font-medium">{t.label}</div>
                     <div className={`text-xs ${isActive ? 'text-slate-300' : 'text-slate-500'}`}>
-                      {rows.length} записей
+                      {formatRecordCount(persistedRows.length)}
                     </div>
                     <div className={`text-[11px] ${isActive ? 'text-slate-400' : 'text-slate-500'}`}>
                       Активно: {activeCount} · Отключено: {inactiveCount}
@@ -994,7 +1013,9 @@ export const Dictionaries = () => {
                 <div className="text-base font-semibold text-slate-900">
                   {TABS.find((t) => t.value === activeTab)?.label}
                 </div>
-                <div className="text-sm text-slate-600">Всего: {data[activeTab]?.length ?? 0}</div>
+                <div className="text-sm text-slate-600">
+                  Всего: {(data[activeTab] ?? []).filter((row) => row.mode !== 'new').length}
+                </div>
               </div>
 
               {canCreate && !isDocumentStatusKind(activeTab) && (

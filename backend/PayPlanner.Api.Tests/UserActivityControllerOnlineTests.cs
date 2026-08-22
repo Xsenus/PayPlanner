@@ -293,6 +293,70 @@ public class UserActivityControllerOnlineTests
             command.Contains("FROM \"UserActivityLogs\"", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public async Task GetAsync_PrefersExplicitUtcBoundaries()
+    {
+        await using var db = await CreateContextAsync();
+        db.UserActivityLogs.AddRange(
+            new UserActivityLog
+            {
+                Category = "test",
+                Action = "before",
+                CreatedAt = new DateTime(2026, 8, 15, 16, 59, 59, DateTimeKind.Utc),
+            },
+            new UserActivityLog
+            {
+                Category = "test",
+                Action = "inside",
+                CreatedAt = new DateTime(2026, 8, 15, 17, 0, 0, DateTimeKind.Utc),
+            },
+            new UserActivityLog
+            {
+                Category = "test",
+                Action = "after",
+                CreatedAt = new DateTime(2026, 8, 16, 17, 0, 1, DateTimeKind.Utc),
+            });
+        await db.SaveChangesAsync();
+
+        var result = await CreateController(db).GetAsync(
+            from: new DateTime(2030, 1, 1),
+            to: new DateTime(2030, 1, 2),
+            fromUtc: new DateTimeOffset(2026, 8, 15, 17, 0, 0, TimeSpan.Zero),
+            toUtc: new DateTimeOffset(2026, 8, 16, 16, 59, 0, TimeSpan.Zero),
+            cancellationToken: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        Assert.NotNull(ok.Value);
+        var value = ok.Value!;
+        var items = Assert.IsAssignableFrom<IEnumerable<UserActivityLogDto>>(
+            value.GetType().GetProperty("items")?.GetValue(value));
+        var item = Assert.Single(items);
+        Assert.Equal("inside", item.Action);
+    }
+
+    [Fact]
+    public async Task GetAsync_UsesVisibleLabelAliasesForSearch()
+    {
+        await using var db = await CreateContextAsync();
+        db.UserActivityLogs.AddRange(
+            new UserActivityLog { Category = "Clients", Action = "GetAll", Description = "Clients.GetAll | HTTP 200" },
+            new UserActivityLog { Category = "NotificationInbox", Action = "GetNotifications", Description = "NotificationInbox.GetNotifications | HTTP 200" });
+        await db.SaveChangesAsync();
+
+        var result = await CreateController(db).GetAsync(
+            search: "клиенты",
+            searchAliases: ["Clients"],
+            cancellationToken: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        Assert.NotNull(ok.Value);
+        var value = ok.Value!;
+        var items = Assert.IsAssignableFrom<IEnumerable<UserActivityLogDto>>(
+            value.GetType().GetProperty("items")?.GetValue(value));
+        var item = Assert.Single(items);
+        Assert.Equal("Clients", item.Category);
+    }
+
     private static UserActivityController CreateController(PaymentContext db)
         => new(
             db,

@@ -151,6 +151,7 @@ describe('RolePermissionAuditPanel', () => {
     });
     const createObjectURL = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:role-audit');
     const revokeObjectURL = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const setTimeoutSpy = vi.spyOn(window, 'setTimeout');
     const click = vi.fn();
     const appendChild = vi.spyOn(document.body, 'appendChild');
     const createElement = vi.spyOn(document, 'createElement');
@@ -174,6 +175,7 @@ describe('RolePermissionAuditPanel', () => {
     expect(createObjectURL).toHaveBeenCalled();
     expect(appendChild).toHaveBeenCalled();
     expect(click).toHaveBeenCalled();
-    expect(revokeObjectURL).toHaveBeenCalledWith('blob:role-audit');
+    expect(revokeObjectURL).not.toHaveBeenCalled();
+    expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 60_000);
   });
 });

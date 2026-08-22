@@ -57,6 +57,52 @@ public class ContractsControllerTests
     }
 
     [Fact]
+    public async Task Get_UsesFixedNarrowQueryBudget_WhenPageContainsManyContracts()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+        var user = await CreateContractUserAsync(
+            db,
+            "contracts-list-query-budget",
+            canCreate: true,
+            canEdit: true,
+            canDelete: true);
+        db.Contracts.Add(new Contract
+        {
+            Number = "BUDGET-001",
+            Date = new DateTime(2026, 8, 1),
+            BillingMode = ContractBillingMode.Actual,
+            IsOpenEnded = true,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateControllerForUser(db, user.Id);
+
+        interceptor.ReaderCommands.Clear();
+        await controller.Get(null, null, null, null, null, null, 1, 20, CancellationToken.None);
+        var singleContractQueryCount = interceptor.ReaderCommands.Count;
+
+        db.Contracts.AddRange(Enumerable.Range(2, 11).Select(index => new Contract
+        {
+            Number = $"BUDGET-{index:000}",
+            Date = new DateTime(2026, 8, Math.Min(index, 28)),
+            BillingMode = ContractBillingMode.Actual,
+            IsOpenEnded = true,
+        }));
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        interceptor.ReaderCommands.Clear();
+        await controller.Get(null, null, null, null, null, null, 1, 20, CancellationToken.None);
+
+        Assert.Equal(singleContractQueryCount, interceptor.ReaderCommands.Count);
+        Assert.Equal(9, singleContractQueryCount);
+        Assert.DoesNotContain(interceptor.ReaderCommands, command =>
+            command.Contains("InvoiceLineItems", StringComparison.Ordinal)
+            || command.Contains("InvoiceClientCases", StringComparison.Ordinal)
+            || command.Contains("CashOrders", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task Create_RequiresAmount_WhenBillingModeIsFixed()
     {
         await using var db = await CreateContextAsync();

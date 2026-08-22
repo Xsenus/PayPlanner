@@ -59,6 +59,48 @@ public class AccountsControllerTests
     }
 
     [Fact]
+    public async Task GetRegistry_FiltersByRepresentativeInvoiceId()
+    {
+        await using var db = await CreateContextAsync();
+        await CreateInvoiceDocumentAsync(db, "TARGET-INV", new DateTime(2026, 8, 15), 12_000m);
+        await CreateInvoiceDocumentAsync(db, "OTHER-INV", new DateTime(2026, 8, 15), 15_000m);
+        var targetId = await db.Payments
+            .Where(payment => payment.DocumentKind == DocumentKind.Invoice && payment.Account == "TARGET-INV")
+            .Select(payment => payment.Id)
+            .SingleAsync();
+        var targetInvoiceEntityId = await db.Payments
+            .Where(payment => payment.Id == targetId)
+            .Select(payment => payment.InvoiceId)
+            .SingleAsync();
+        var installment = CreatePayment(new DateTime(2026, 9, 15), 6_000m, "Installment for target invoice");
+        installment.InvoiceId = targetInvoiceEntityId;
+        installment.SystemNotes = "[pp:installment-payment] {\"sequence\":1}";
+        db.Payments.Add(installment);
+        await db.SaveChangesAsync();
+        var controller = new AccountsController(db);
+
+        var result = await controller.GetRegistry(
+            from: null,
+            to: null,
+            status: null,
+            search: null,
+            type: null,
+            sortBy: null,
+            sortDir: null,
+            invoiceId: targetId,
+            page: 1,
+            pageSize: 20,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var payload = Assert.IsType<AccountsPageResponse>(ok.Value);
+        var row = Assert.Single(payload.Items);
+        Assert.Equal(targetId, row.Invoice?.Id);
+        Assert.Equal("TARGET-INV", row.AccountNumber);
+        Assert.Collection(row.Payments, payment => Assert.Equal(installment.Id, payment.Id));
+    }
+
+    [Fact]
     public async Task GetSuggestions_ReturnsForbidden_ForAuthenticatedUserWithoutAccountsAccess()
     {
         await using var db = await CreateContextAsync();

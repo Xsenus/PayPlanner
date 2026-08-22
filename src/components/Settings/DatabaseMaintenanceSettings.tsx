@@ -567,7 +567,7 @@ export function DatabaseMaintenanceSettings() {
   }
 
   return (
-    <div className="grid gap-6 xl:grid-cols-[280px,minmax(0,1fr)]">
+    <div className="grid gap-4 2xl:grid-cols-[280px,minmax(0,1fr)]">
       <aside className="space-y-4">
         <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-400">Секция БД</div>
@@ -608,7 +608,7 @@ export function DatabaseMaintenanceSettings() {
         </div>
       </aside>
 
-      <div className="space-y-6">
+      <div className="min-w-0 space-y-4">
         {activeTab === 'overview' && (
           <>
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -935,8 +935,8 @@ export function DatabaseMaintenanceSettings() {
         )}
 
         {activeTab === 'backups' && (
-          <div className="space-y-6">
-            <div className="grid gap-6 xl:grid-cols-[minmax(0,1.4fr),minmax(320px,1fr)]">
+          <div className="space-y-4">
+            <div className="grid gap-4 2xl:grid-cols-[minmax(0,1.4fr),minmax(320px,1fr)]">
               <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
@@ -1190,7 +1190,21 @@ export function DatabaseMaintenanceSettings() {
                                 <button
                                   type="button"
                                   onClick={() => void retryDatabaseBackupS3Upload(result.id)}
-                                  disabled={databaseBackupS3RetryingId === result.id}
+                                  disabled={
+                                    databaseBackupS3RetryingId === result.id
+                                    || !s3StorageConnections.some((connection) => (
+                                      connection.id === result.connectionId
+                                      && connection.isEnabled
+                                      && connection.isConfigured
+                                    ))
+                                  }
+                                  title={s3StorageConnections.some((connection) => (
+                                    connection.id === result.connectionId
+                                    && connection.isEnabled
+                                    && connection.isConfigured
+                                  ))
+                                    ? 'Повторить выгрузку в S3'
+                                    : 'Сначала включите и настройте указанное S3-подключение'}
                                   className="inline-flex items-center gap-1.5 rounded-xl border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-800 hover:bg-amber-100 disabled:opacity-60"
                                 >
                                   {databaseBackupS3RetryingId === result.id ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
@@ -1234,7 +1248,14 @@ export function DatabaseMaintenanceSettings() {
                                 <button
                                   type="button"
                                   onClick={() => void retryDatabaseBackupYandexDiskUpload(result.id)}
-                                  disabled={databaseBackupYandexDiskRetryingId === result.id}
+                                  disabled={
+                                    databaseBackupYandexDiskRetryingId === result.id
+                                    || !yandexDiskSettings?.isConfigured
+                                    || yandexDiskSettings.requiresReconnect
+                                  }
+                                  title={yandexDiskSettings?.isConfigured && !yandexDiskSettings.requiresReconnect
+                                    ? 'Повторить выгрузку на Яндекс.Диск'
+                                    : 'Сначала подключите Яндекс.Диск заново'}
                                   className="inline-flex items-center gap-1.5 rounded-xl border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-800 hover:bg-amber-100 disabled:opacity-60"
                                 >
                                   {databaseBackupYandexDiskRetryingId === result.id ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}

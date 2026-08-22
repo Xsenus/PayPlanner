@@ -249,7 +249,7 @@ export function MainCompanySettings() {
 
           {selectedCompanies.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-5 py-8 text-center text-sm text-slate-500">
-              Основные компании пока не выбраны. Добавь хотя бы одну компанию, чтобы использовать её в профиле компании и документах.
+              Основные компании пока не выбраны. Добавьте хотя бы одну компанию, чтобы использовать её в профиле компании и документах.
             </div>
           ) : (
             <div className="space-y-3">

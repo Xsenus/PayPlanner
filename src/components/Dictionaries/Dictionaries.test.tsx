@@ -105,4 +105,18 @@ describe('Dictionaries page layout', () => {
     expect(screen.queryByRole('button', { name: 'Редактировать Доход от услуг' })).toBeFalsy();
     expect(screen.queryByRole('button', { name: 'Удалить Доход от услуг' })).toBeFalsy();
   });
+
+  it('keeps a single new dictionary draft when Add is clicked repeatedly', async () => {
+    const user = userEvent.setup();
+    render(<Dictionaries />);
+
+    await waitFor(() => expect(apiMocks.getIncomeTypes).toHaveBeenCalled());
+    const addButton = screen.getByRole('button', { name: 'Добавить' });
+    await user.click(addButton);
+    await user.click(addButton);
+
+    expect(screen.getAllByPlaceholderText('Например: Консультация')).toHaveLength(1);
+    expect(screen.getByText('Всего: 0')).toBeTruthy();
+    expect(document.activeElement).toBe(screen.getByPlaceholderText('Например: Консультация'));
+  });
 });

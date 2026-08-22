@@ -768,6 +768,11 @@ export function LegalEntityModal({
       Director: t("legalEntityDirector") || "Руководитель",
       Phone: t("legalEntityPhone") || "Телефон",
       Email: t("legalEntityEmail") || "Email",
+      Country: "Страна",
+      BaseCurrency: "Базовая валюта",
+      ServiceLanguage: "Язык сервиса",
+      OrganizationForm: "Форма организации",
+      Timezone: "Часовой пояс",
       Oktmo: "ОКТМО",
     }),
     [t],
@@ -4050,6 +4055,7 @@ export function LegalEntityModal({
                       <div className="mb-2 flex items-center justify-between gap-2">
                         <label className="block text-sm font-medium text-gray-700">
                           {item.label}
+                          {isRequired(requiredFieldKey(item.key)) ? "*" : ""}
                         </label>
                         {!hideDictionaryButtons ? (
                           <button
@@ -4069,7 +4075,7 @@ export function LegalEntityModal({
                         value={value}
                         onChange={handleInputChange}
                         disabled={readOnly}
-                        className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        className={requiredInputClass(item.key, value)}
                       >
                         <option value="">Не выбрано</option>
                         {!hasCurrent && value ? (

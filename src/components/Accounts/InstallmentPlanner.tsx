@@ -106,9 +106,9 @@ function parseMoneyInput(value: string | number | null | undefined): number {
 
 function formatFixedAmount(value: string | number | null | undefined): string {
   const parsed = parseMoneyInput(value);
-  if (!Number.isFinite(parsed)) return '0.00';
+  if (!Number.isFinite(parsed)) return '0,00';
   const [integerPart, decimalPart] = parsed.toFixed(2).split('.');
-  return `${groupThousands(integerPart)}.${decimalPart}`;
+  return `${groupThousands(integerPart)},${decimalPart}`;
 }
 
 function normalizeRateInput(value: string | number | null | undefined): string {
@@ -134,7 +134,7 @@ function formatRateInputValue(value: string | number | null | undefined): string
 
 function formatFixedRate(value: string | number | null | undefined): string {
   const parsed = Number.parseFloat(normalizeRateInput(value));
-  return Number.isFinite(parsed) ? parsed.toFixed(2) : '';
+  return Number.isFinite(parsed) ? parsed.toFixed(2).replace('.', ',') : '';
 }
 
 function normalizeIntegerInput(value: string | number | null | undefined): string {
@@ -154,7 +154,7 @@ function createFormState(props: InstallmentPlannerProps): RequestFormState {
   return {
     total: formatFixedAmount(total),
     downPayment: formatFixedAmount(downPayment),
-    annualRate: annualRate ? formatFixedRate(annualRate) : '0.00',
+    annualRate: annualRate ? formatFixedRate(annualRate) : '0,00',
     months: String(months),
     startDate,
     roundingMode,
@@ -376,7 +376,7 @@ export function InstallmentPlanner(props: InstallmentPlannerProps) {
   const handleRateBlur = () => {
     setRequestForm((prev) => ({
       ...prev,
-      annualRate: prev.annualRate ? formatFixedRate(prev.annualRate) : '0.00',
+      annualRate: prev.annualRate ? formatFixedRate(prev.annualRate) : '0,00',
     }));
   };
 
@@ -634,7 +634,7 @@ export function InstallmentPlanner(props: InstallmentPlannerProps) {
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h2 className="text-2xl font-semibold text-slate-900">
-            {isInvoiceMode ? 'Настройка рассрочки' : 'Калькулятор рассрочки'}
+            {isInvoiceMode ? 'Настройка рассрочки' : 'Параметры и график'}
           </h2>
           {!isInvoiceMode ? (
             <p className="mt-0.5 text-sm text-slate-500">
@@ -733,7 +733,7 @@ export function InstallmentPlanner(props: InstallmentPlannerProps) {
                   onBlur={handleMoneyFieldBlur('total')}
                   readOnly={isInvoiceMode}
                   className={`${fieldMoneyInputClass} read-only:bg-slate-50 read-only:text-slate-600`}
-                  placeholder="0.00"
+                  placeholder="0,00"
                 />
               </label>
 
@@ -747,7 +747,7 @@ export function InstallmentPlanner(props: InstallmentPlannerProps) {
                   onFocus={handleMoneyFieldFocus('downPayment')}
                   onBlur={handleMoneyFieldBlur('downPayment')}
                   className={fieldMoneyInputClass}
-                  placeholder="0.00"
+                  placeholder="0,00"
                 />
               </label>
             </div>
@@ -762,7 +762,7 @@ export function InstallmentPlanner(props: InstallmentPlannerProps) {
                   onChange={handleRateChange}
                   onBlur={handleRateBlur}
                   className={fieldMoneyInputClass}
-                  placeholder="0.00"
+                  placeholder="0,00"
                 />
               </label>
 
@@ -818,7 +818,7 @@ export function InstallmentPlanner(props: InstallmentPlannerProps) {
                   onBlur={handleMoneyFieldBlur('roundingStep')}
                   disabled={requestForm.roundingMode === 'none'}
                   className={`${fieldMoneyInputClass} disabled:bg-slate-100 disabled:text-slate-400`}
-                  placeholder="100.00"
+                  placeholder="100,00"
                 />
               </label>
             </div>

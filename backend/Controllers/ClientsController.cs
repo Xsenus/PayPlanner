@@ -1578,6 +1578,17 @@ public class ClientsController : ControllerBase
         {
             _db.ClientPassports.RemoveRange(passports);
         }
+
+        // Clients use soft deletion, so database-level ON DELETE SET NULL is not
+        // triggered. Explicitly demote originating quick contacts to prevent a
+        // stale "full profile" link from pointing at a deleted client.
+        var linkedContacts = await _db.ExternalContacts
+            .Where(item => item.LinkedClientId.HasValue && normalizedIds.Contains(item.LinkedClientId.Value))
+            .ToListAsync(ct);
+        foreach (var contact in linkedContacts)
+        {
+            contact.LinkedClientId = null;
+        }
     }
 
     private static List<string> NormalizeQuickClientModalMissingFields(

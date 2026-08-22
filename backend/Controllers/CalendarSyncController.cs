@@ -167,43 +167,41 @@ public sealed class CalendarSyncController : ControllerBase
             ? ApplyCalendarLogFilters(CreateYandexLogQuery(), normalizedStatus, normalizedOperation, userId, normalizedCreatedFrom, normalizedCreatedTo)
             : null;
 
+        var trimmedSearch = string.IsNullOrWhiteSpace(search) ? null : search.Trim();
+        if (trimmedSearch is not null)
+        {
+            var normalizedSearch = trimmedSearch.ToLowerInvariant();
+            var matchingTaskIds = await FindMatchingCalendarTaskIdsAsync(trimmedSearch, normalizedSearch, ct);
+            googleQuery = ApplyResolvedCalendarLogSearch(
+                googleQuery,
+                "Google Calendar",
+                trimmedSearch,
+                normalizedSearch,
+                matchingTaskIds);
+            yandexQuery = ApplyResolvedCalendarLogSearch(
+                yandexQuery,
+                "Яндекс Календарь",
+                trimmedSearch,
+                normalizedSearch,
+                matchingTaskIds);
+        }
+
         var rawLogs = new List<CalendarSyncLogRaw>();
         var total = 0;
-        if (string.IsNullOrWhiteSpace(search))
+        var candidateCount = (int)Math.Min(int.MaxValue, (long)page * pageSize);
+        if (googleQuery is not null)
         {
-            var candidateCount = (int)Math.Min(int.MaxValue, (long)page * pageSize);
-            if (googleQuery is not null)
-            {
-                total = AddToTotal(total, await googleQuery.CountAsync(ct));
-                rawLogs.AddRange(await LoadRecentLogsAsync(googleQuery, candidateCount, ct));
-            }
-
-            if (yandexQuery is not null)
-            {
-                total = AddToTotal(total, await yandexQuery.CountAsync(ct));
-                rawLogs.AddRange(await LoadRecentLogsAsync(yandexQuery, candidateCount, ct));
-            }
+            total = AddToTotal(total, await googleQuery.CountAsync(ct));
+            rawLogs.AddRange(await LoadRecentLogsAsync(googleQuery, candidateCount, ct));
         }
-        else
-        {
-            if (googleQuery is not null)
-            {
-                rawLogs.AddRange(await googleQuery.ToListAsync(ct));
-            }
 
-            if (yandexQuery is not null)
-            {
-                rawLogs.AddRange(await yandexQuery.ToListAsync(ct));
-            }
+        if (yandexQuery is not null)
+        {
+            total = AddToTotal(total, await yandexQuery.CountAsync(ct));
+            rawLogs.AddRange(await LoadRecentLogsAsync(yandexQuery, candidateCount, ct));
         }
 
         var logs = rawLogs.Select(MapCalendarSyncLog).ToList();
-        if (!string.IsNullOrWhiteSpace(search))
-        {
-            var normalizedSearch = search.Trim();
-            logs = logs.Where(item => MatchesCalendarLogSearch(item, normalizedSearch)).ToList();
-            total = logs.Count;
-        }
 
         var pageOffset = (int)Math.Min(int.MaxValue, ((long)page - 1) * pageSize);
         var orderedLogs = logs
@@ -316,6 +314,65 @@ public sealed class CalendarSyncController : ControllerBase
         return query;
     }
 
+    private static IQueryable<CalendarSyncLogRaw> ApplyCalendarLogSearch(
+        IQueryable<CalendarSyncLogRaw> query,
+        string search,
+        string normalizedSearch)
+        => query.Where(item =>
+            item.ProviderLabel.Contains(search) || item.ProviderLabel.ToLower().Contains(normalizedSearch) ||
+            item.UserName.Contains(search) || item.UserName.ToLower().Contains(normalizedSearch) ||
+            item.UserEmail.Contains(search) || item.UserEmail.ToLower().Contains(normalizedSearch) ||
+            item.CalendarName.Contains(search) || item.CalendarName.ToLower().Contains(normalizedSearch) ||
+            item.CalendarOwnerName.Contains(search) || item.CalendarOwnerName.ToLower().Contains(normalizedSearch) ||
+            item.TaskTitle.Contains(search) || item.TaskTitle.ToLower().Contains(normalizedSearch) ||
+            item.TaskObjectName.Contains(search) || item.TaskObjectName.ToLower().Contains(normalizedSearch) ||
+            item.Message.Contains(search) || item.Message.ToLower().Contains(normalizedSearch) ||
+            (item.DetailsJson ?? string.Empty).Contains(search) ||
+            (item.DetailsJson ?? string.Empty).ToLower().Contains(normalizedSearch));
+
+    private static IQueryable<CalendarSyncLogRaw>? ApplyResolvedCalendarLogSearch(
+        IQueryable<CalendarSyncLogRaw>? query,
+        string providerLabel,
+        string search,
+        string normalizedSearch,
+        int[] matchingTaskIds)
+    {
+        if (query is null || providerLabel.Contains(search, StringComparison.OrdinalIgnoreCase))
+        {
+            return query;
+        }
+
+        if (matchingTaskIds.Length > 0)
+        {
+            return query.Where(item =>
+                item.TaskJournalItemId.HasValue && matchingTaskIds.Contains(item.TaskJournalItemId.Value));
+        }
+
+        return ApplyCalendarLogSearch(query, search, normalizedSearch);
+    }
+
+    private async Task<int[]> FindMatchingCalendarTaskIdsAsync(
+        string search,
+        string normalizedSearch,
+        CancellationToken ct)
+    {
+        const int maxResolvedTasks = 5_000;
+        var taskIds = await _db.TaskJournalItems
+            .AsNoTracking()
+            .Where(item =>
+                item.Title.Contains(search) || item.Title.ToLower().Contains(normalizedSearch) ||
+                item.ObjectName.Contains(search) || item.ObjectName.ToLower().Contains(normalizedSearch) ||
+                item.AssigneeName.Contains(search) || item.AssigneeName.ToLower().Contains(normalizedSearch))
+            .OrderBy(item => item.Id)
+            .Select(item => item.Id)
+            .Take(maxResolvedTasks + 1)
+            .ToArrayAsync(ct);
+
+        // При слишком широком совпадении сохраняем общий поиск по журналу, чтобы ограниченная
+        // выборка идентификаторов не дала пользователю неполный результат.
+        return taskIds.Length <= maxResolvedTasks ? taskIds : [];
+    }
+
     private static Task<List<CalendarSyncLogRaw>> LoadRecentLogsAsync(
         IQueryable<CalendarSyncLogRaw> query,
         int candidateCount,
@@ -328,17 +385,6 @@ public sealed class CalendarSyncController : ControllerBase
 
     private static int AddToTotal(int current, int addition)
         => (int)Math.Min(int.MaxValue, (long)current + addition);
-
-    private static bool MatchesCalendarLogSearch(CalendarSyncLogEntryDto item, string query)
-        => item.ProviderLabel.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-           item.UserName.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-           item.UserEmail.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-           item.CalendarName.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-           item.CalendarOwnerName.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-           item.TaskTitle.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-           item.TaskObjectName.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-           item.Message.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-           item.Details.Contains(query, StringComparison.OrdinalIgnoreCase);
 
     private static CalendarSyncLogEntryDto MapCalendarSyncLog(CalendarSyncLogRaw item)
     {
@@ -397,8 +443,8 @@ public sealed class CalendarSyncController : ControllerBase
             OperationLabel = BuildOperationLabel(item.Operation),
             Status = item.Status,
             StatusLabel = BuildStatusLabel(item.Status),
-            Message = item.Message,
-            Details = details.GetValueOrDefault("detail") ?? string.Empty,
+            Message = SanitizeCalendarLogText(item.Message),
+            Details = SanitizeCalendarLogDetails(details.GetValueOrDefault("detail")),
             ChangeSummary = BuildChangeSummary(details),
             ActorLabel = BuildActorLabel(userName, userEmail),
             CalendarRoleLabel = BuildCalendarRoleLabel(calendarOwnerName, calendarOwnerEmail, taskAssigneeName),
@@ -414,12 +460,43 @@ public sealed class CalendarSyncController : ControllerBase
         var changeSummary = details.GetValueOrDefault("changes");
         if (!string.IsNullOrWhiteSpace(changeSummary))
         {
-            return changeSummary;
+            return IsTechnicalCalendarLogText(changeSummary) ? string.Empty : SanitizeCalendarLogText(changeSummary);
         }
 
         var detail = details.GetValueOrDefault("detail");
-        return detail?.Contains(":", StringComparison.Ordinal) == true ? detail : string.Empty;
+        return detail?.Contains(":", StringComparison.Ordinal) == true
+            ? SanitizeCalendarLogDetails(detail)
+            : string.Empty;
     }
+
+    private static string SanitizeCalendarLogDetails(string? value)
+        => IsTechnicalCalendarLogText(value) ? string.Empty : SanitizeCalendarLogText(value);
+
+    private static string SanitizeCalendarLogText(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var trimmed = value.Trim();
+        if (IsTechnicalCalendarLogText(trimmed))
+        {
+            return "Сохранённые данные подключения недоступны. Подключите календарь заново.";
+        }
+
+        const int maxUserVisibleLength = 2_000;
+        return trimmed.Length <= maxUserVisibleLength
+            ? trimmed
+            : $"{trimmed[..maxUserVisibleLength]}…";
+    }
+
+    private static bool IsTechnicalCalendarLogText(string? value)
+        => !string.IsNullOrWhiteSpace(value) &&
+           (value.Contains("key ring", StringComparison.OrdinalIgnoreCase) ||
+            value.Contains("dataprotectionwarning", StringComparison.OrdinalIgnoreCase) ||
+            value.Contains("CryptographicException", StringComparison.OrdinalIgnoreCase) ||
+            value.Contains("IDataProtector", StringComparison.OrdinalIgnoreCase));
 
     private static string BuildActorLabel(string userName, string userEmail)
     {

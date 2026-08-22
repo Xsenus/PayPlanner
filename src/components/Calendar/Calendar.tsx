@@ -662,7 +662,7 @@ export function Calendar({ onOpenClient, onOpenUser }: CalendarProps) {
                   type="button"
                   onClick={() => navigateMonth('prev')}
                   className="p-2 rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors"
-                  aria-label="Previous month">
+                  aria-label="Предыдущий месяц">
                   <ChevronLeft className="h-4 w-4 sm:h-5 sm:w-5" />
                 </button>
               )}
@@ -676,7 +676,7 @@ export function Calendar({ onOpenClient, onOpenUser }: CalendarProps) {
                   type="button"
                   onClick={() => navigateMonth('next')}
                   className="p-2 rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors"
-                  aria-label="Next month">
+                  aria-label="Следующий месяц">
                   <ChevronRight className="h-4 w-4 sm:h-5 sm:w-5" />
                 </button>
               )}

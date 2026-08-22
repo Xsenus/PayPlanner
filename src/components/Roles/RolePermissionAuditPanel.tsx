@@ -76,7 +76,7 @@ export function RolePermissionAuditPanel() {
       document.body.appendChild(link);
       link.click();
       link.remove();
-      URL.revokeObjectURL(url);
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
     } catch (error) {
       setErrorMessage(extractDisplayErrorMessage(error, 'Не удалось выгрузить аудит ролей'));
     } finally {

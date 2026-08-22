@@ -160,6 +160,74 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task UpsertSenderAsync_ReturnsPurposeChannelsAndDropsPurposesFromAnotherChannel()
+    {
+        await using var db = await CreateContextAsync();
+        var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService());
+
+        var settings = await service.UpsertSenderAsync(new UpsertNotificationSenderRequest
+        {
+            Channel = NotificationChannels.Email,
+            Name = "Email для проверки сценариев",
+            Purposes = [NotificationPurposes.TelegramAuth, NotificationPurposes.ContractClient, NotificationPurposes.ManualTest],
+            Email = new EmailNotificationSenderRequest()
+        });
+
+        var emailSender = Assert.Single(settings.Senders);
+        Assert.Equal(
+            [NotificationPurposes.ContractClient, NotificationPurposes.ManualTest],
+            emailSender.Purposes);
+
+        var telegramAuth = Assert.Single(settings.Purposes, item => item.Key == NotificationPurposes.TelegramAuth);
+        Assert.Equal([NotificationChannels.Telegram], telegramAuth.Channels);
+        var contractClient = Assert.Single(settings.Purposes, item => item.Key == NotificationPurposes.ContractClient);
+        Assert.Equal([NotificationChannels.Email], contractClient.Channels);
+
+        var storedPurposes = JsonSerializer.Deserialize<List<string>>(
+            Assert.Single(await db.NotificationSenders.AsNoTracking().ToListAsync()).PurposesJson);
+        Assert.DoesNotContain(NotificationPurposes.TelegramAuth, storedPurposes ?? []);
+    }
+
+    [Fact]
+    public void NotificationDeliveryPresentation_RecognizesAndMasksLegacyWebPush()
+    {
+        const string endpoint = "https://fcm.googleapis.com/fcm/send/private-device-endpoint";
+        var legacyDelivery = new NotificationDelivery
+        {
+            Channel = NotificationChannels.Email,
+            SenderName = "Web Push",
+            RecipientAddress = endpoint
+        };
+
+        Assert.Equal(NotificationChannels.WebPush, NotificationDeliveryPresentation.ResolveChannel(legacyDelivery));
+        var maskedAddress = NotificationDeliveryPresentation.ResolveRecipientAddress(legacyDelivery);
+        Assert.StartsWith("Push-устройство • ", maskedAddress, StringComparison.Ordinal);
+        Assert.DoesNotContain(endpoint, maskedAddress, StringComparison.Ordinal);
+        Assert.Equal(maskedAddress, NotificationDeliveryPresentation.ResolveRecipientAddress(legacyDelivery));
+
+        var emailDelivery = new NotificationDelivery
+        {
+            Channel = NotificationChannels.Email,
+            SenderName = "Основная почта",
+            RecipientAddress = "client@example.test"
+        };
+        Assert.Equal(NotificationChannels.Email, NotificationDeliveryPresentation.ResolveChannel(emailDelivery));
+        Assert.Equal("client@example.test", NotificationDeliveryPresentation.ResolveRecipientAddress(emailDelivery));
+
+        legacyDelivery.Error = "Received unexpected response code: 403. Details: the VAPID credentials in the authorization header do not correspond to the credentials used to create the subscriptions.";
+        var publicError = NotificationDeliveryPresentation.ResolveError(legacyDelivery);
+        Assert.Equal(
+            "Push-подписка создана с другими ключами. Пользователю нужно заново разрешить уведомления.",
+            publicError);
+        Assert.DoesNotContain("credentials", publicError, StringComparison.OrdinalIgnoreCase);
+
+        legacyDelivery.Error = "Bad Request. Details: binary data passed in the request must be less than 4096 bytes.";
+        Assert.Equal(
+            "Размер данных Push-уведомления превышает допустимый лимит.",
+            NotificationDeliveryPresentation.ResolveError(legacyDelivery));
+    }
+
+    [Fact]
     public async Task SmsChannel_IsSkippedAndLoggedWhenProviderIsDisabled()
     {
         await using var db = await CreateContextAsync();

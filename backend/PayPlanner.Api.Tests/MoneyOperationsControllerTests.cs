@@ -237,6 +237,7 @@ public class MoneyOperationsControllerTests
             Source = MoneyOperationSource.Bank,
             Direction = MoneyOperationDirection.Expense,
             AccountingType = MoneyOperationAccountingType.Fact,
+            AccountName = "Основной счёт",
             Amount = 1_000m,
             Date = new DateTime(2026, 4, 21),
             ResponsibleUserId = inactiveResponsible.Id,
@@ -285,7 +286,7 @@ public class MoneyOperationsControllerTests
     }
 
     [Fact]
-    public async Task CreateMoneyOperation_ReturnsBadRequest_WhenAmountIsNegative()
+    public async Task CreateMoneyOperation_ReturnsBadRequest_WhenAmountIsNotPositive()
     {
         await using var db = await CreateContextAsync();
         var controller = CreateController(db);
@@ -300,7 +301,27 @@ public class MoneyOperationsControllerTests
         });
 
         var badRequest = Assert.IsType<BadRequestObjectResult>(action);
-        Assert.Equal("Сумма денежной операции не может быть отрицательной.", badRequest.Value);
+        Assert.Equal("Сумма денежной операции должна быть больше нуля.", badRequest.Value);
+    }
+
+    [Fact]
+    public async Task CreateMoneyOperation_ReturnsBadRequest_WhenAccountIsMissing()
+    {
+        await using var db = await CreateContextAsync();
+        var controller = CreateController(db);
+
+        var action = await controller.Create(new MoneyOperation
+        {
+            Source = MoneyOperationSource.Bank,
+            Direction = MoneyOperationDirection.Expense,
+            AccountingType = MoneyOperationAccountingType.Fact,
+            Amount = 1_000m,
+            Date = new DateTime(2026, 4, 21),
+        });
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(action);
+        Assert.Equal("Укажите денежный счёт или его название.", badRequest.Value);
+        Assert.False(await db.MoneyOperations.AnyAsync());
     }
 
     [Fact]
@@ -935,6 +956,7 @@ public class MoneyOperationsControllerTests
             Source = MoneyOperationSource.Bank,
             Direction = MoneyOperationDirection.Income,
             AccountingType = MoneyOperationAccountingType.Fact,
+            AccountName = "Основной счёт",
             IncomeTypeId = incomeType.Id,
             CategoryName = "Ручной текст не должен победить справочник",
             Amount = 25_000m,
@@ -967,6 +989,7 @@ public class MoneyOperationsControllerTests
             Source = MoneyOperationSource.Bank,
             Direction = MoneyOperationDirection.Expense,
             AccountingType = MoneyOperationAccountingType.Fact,
+            AccountName = "Основной счёт",
             IncomeTypeId = incomeType.Id,
             Amount = 15_000m,
             Date = new DateTime(2026, 4, 30),
@@ -1007,6 +1030,7 @@ public class MoneyOperationsControllerTests
             Source = MoneyOperationSource.Bank,
             Direction = MoneyOperationDirection.Income,
             AccountingType = MoneyOperationAccountingType.Fact,
+            AccountName = "Основной счёт",
             Amount = 25_000m,
             Date = new DateTime(2026, 4, 29),
             LinkedInvoiceId = invoice.Id,
@@ -5132,6 +5156,7 @@ public class MoneyOperationsControllerTests
             Source = MoneyOperationSource.Bank,
             Direction = MoneyOperationDirection.Income,
             AccountingType = MoneyOperationAccountingType.Fact,
+            AccountName = "Основной счёт",
             Amount = 7_100m,
             Date = new DateTime(2026, 3, 2),
             CounterpartyName = "Винокуров Валерий Витальевич",

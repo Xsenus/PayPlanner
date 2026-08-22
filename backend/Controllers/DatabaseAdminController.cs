@@ -336,9 +336,11 @@ public class DatabaseAdminController : ControllerBase, IAsyncActionFilter
     [HttpGet("import/spreadsheets/batches/{batchId:int}")]
     public async Task<ActionResult<SpreadsheetImportBatchDetailDto>> GetSpreadsheetImportBatchAsync(
         int batchId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 25)
     {
-        var batch = await _spreadsheetImportService.GetBatchAsync(batchId, cancellationToken);
+        var batch = await _spreadsheetImportService.GetBatchAsync(batchId, page, pageSize, cancellationToken);
         return batch is null
             ? NotFound(new { message = "Сессия импорта не найдена." })
             : Ok(batch);

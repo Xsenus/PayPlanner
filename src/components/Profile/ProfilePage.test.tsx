@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ProfilePage } from './ProfilePage';
+import { buildProfileUpdatePayload, ProfilePage } from './ProfilePage';
 
 const authMock = vi.hoisted(() => ({
   getProfile: vi.fn(),
@@ -140,6 +140,39 @@ describe('ProfilePage', () => {
     });
     apiMock.getUserSetting.mockResolvedValue(null);
     apiMock.upsertUserSetting.mockResolvedValue({ key: 'profile.timeZoneId', value: 'Asia/Novosibirsk' });
+  });
+
+  it('передаёт очистку необязательных контактов и даты рождения', () => {
+    const form: Parameters<typeof buildProfileUpdatePayload>[0] = {
+      email: ' user@example.com ',
+      fullName: ' Иван Иванов ',
+      firstName: 'Иван',
+      lastName: 'Иванов',
+      middleName: '',
+      dateOfBirth: '',
+      phoneNumber: '',
+      whatsApp: '',
+      telegram: '',
+      instagram: '',
+      messenger: '',
+      viber: '',
+    };
+
+    expect(buildProfileUpdatePayload(form)).toEqual({
+      email: 'user@example.com',
+      fullName: 'Иван Иванов',
+      firstName: 'Иван',
+      lastName: 'Иванов',
+      middleName: '',
+      dateOfBirth: undefined,
+      clearDateOfBirth: true,
+      phoneNumber: '',
+      whatsApp: '',
+      telegram: '',
+      instagram: '',
+      messenger: '',
+      viber: '',
+    });
   });
 
   it('splits profile sections into tabs', async () => {

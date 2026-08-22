@@ -16,8 +16,10 @@ import { useUserTimeZone } from '../../hooks/useUserTimeZone';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { formatDateTimeInTimeZone } from '../../utils/timeZoneDate';
 import { SpreadsheetImportPreviewModal } from './SpreadsheetImportPreviewModal';
+import { TablePagination } from '../ui/TablePagination';
 
 const PREVIEW_PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+const BATCH_OPERATION_PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 
 function isSafeSpreadsheetImportRow(row: SpreadsheetImportPreviewRowDto) {
   return row.isSelectable && row.action === 'Created' && row.issues.length === 0;
@@ -128,6 +130,8 @@ export function SpreadsheetImportSettings() {
   const [historyLoading, setHistoryLoading] = useState(true);
   const [historyItems, setHistoryItems] = useState<SpreadsheetImportBatchSummaryDto[]>([]);
   const [selectedBatch, setSelectedBatch] = useState<SpreadsheetImportBatchDetailDto | null>(null);
+  const [batchOperationPage, setBatchOperationPage] = useState(1);
+  const [batchOperationPageSize, setBatchOperationPageSize] = useState(BATCH_OPERATION_PAGE_SIZE_OPTIONS[1]);
   const [batchLoadingId, setBatchLoadingId] = useState<number | null>(null);
   const [rollbackLoadingId, setRollbackLoadingId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -219,12 +223,24 @@ export function SpreadsheetImportSettings() {
   }, [requiredCounterpartiesByDocumentId, selectedPreviewIds]);
 
   const selectedCount = selectedPreviewIds.size;
+  const batchOperationTotal = selectedBatch?.operationsTotal ?? selectedBatch?.operations.length ?? 0;
+  const batchOperationTotalPages = Math.max(1, Math.ceil(batchOperationTotal / batchOperationPageSize));
+  const visibleBatchOperations = useMemo(() => {
+    if (selectedBatch?.operationsTotal != null) {
+      return selectedBatch.operations;
+    }
 
-  const loadBatch = useCallback(async (batchId: number) => {
+    const offset = (batchOperationPage - 1) * batchOperationPageSize;
+    return selectedBatch?.operations.slice(offset, offset + batchOperationPageSize) ?? [];
+  }, [batchOperationPage, batchOperationPageSize, selectedBatch]);
+
+  const loadBatch = useCallback(async (batchId: number, page = 1, pageSize = BATCH_OPERATION_PAGE_SIZE_OPTIONS[1]) => {
     setBatchLoadingId(batchId);
     try {
-      const batch = await apiService.getSpreadsheetImportBatch(batchId);
+      const batch = await apiService.getSpreadsheetImportBatch(batchId, page, pageSize);
       setSelectedBatch(batch);
+      setBatchOperationPage(batch.operationsPage ?? page);
+      setBatchOperationPageSize(batch.operationsPageSize ?? pageSize);
       setHistoryError(null);
     } catch (loadError) {
       const message = extractDisplayErrorMessage(loadError, 'Не удалось загрузить детали импорта.');
@@ -279,6 +295,14 @@ export function SpreadsheetImportSettings() {
   useEffect(() => {
     setPreviewPage(1);
   }, [activeSectionKey, previewPageSize, preview]);
+
+  useEffect(() => {
+    setBatchOperationPage(1);
+  }, [batchOperationPageSize, selectedBatch?.id]);
+
+  useEffect(() => {
+    setBatchOperationPage((previous) => Math.min(previous, batchOperationTotalPages));
+  }, [batchOperationTotalPages]);
 
   useEffect(() => {
     if (!activeSection) {
@@ -759,8 +783,8 @@ export function SpreadsheetImportSettings() {
         )}
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[360px_minmax(0,1fr)]">
-        <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
+      <div className="grid min-w-0 gap-3 2xl:grid-cols-[320px_minmax(0,1fr)]">
+        <div className="min-w-0 rounded-3xl border border-gray-200 bg-white p-3 shadow-sm">
           <div className="flex items-center gap-2 text-lg font-semibold text-gray-900">
             <History className="h-5 w-5 text-slate-500" />
             История партий
@@ -820,7 +844,7 @@ export function SpreadsheetImportSettings() {
           </div>
         </div>
 
-        <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
+        <div className="min-w-0 rounded-3xl border border-gray-200 bg-white p-3 shadow-sm">
           <h4 className="text-lg font-semibold text-gray-900">Детали партии</h4>
           {!selectedBatch ? (
             <div className="mt-4 text-sm text-gray-600">Выберите партию слева, чтобы посмотреть подробный журнал действий.</div>
@@ -834,10 +858,10 @@ export function SpreadsheetImportSettings() {
               </div>
 
               <div className="space-y-3">
-                {selectedBatch.operations.map((operation) => (
-                  <div key={operation.id} className="rounded-2xl border border-gray-200 p-4">
+                {visibleBatchOperations.map((operation) => (
+                  <div key={operation.id} className="min-w-0 rounded-2xl border border-gray-200 p-3">
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                      <div>
+                      <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="font-semibold text-gray-900">{operation.sourceTitle}</span>
                           <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${badgeClass(operation.action)}`}>
@@ -849,13 +873,13 @@ export function SpreadsheetImportSettings() {
                             </span>
                           )}
                         </div>
-                        <div className="mt-1 text-sm text-gray-600">
+                        <div className="mt-1 break-words text-sm text-gray-600">
                           {formatSectionLabel(operation.sectionKey)} · {operation.sourceFileName} · строка {operation.sourceRowNumber}
                         </div>
                         {operation.message && <div className="mt-2 text-sm text-gray-700">{operation.message}</div>}
                         {operation.rollbackMessage && <div className="mt-1 text-sm text-amber-700">{operation.rollbackMessage}</div>}
                       </div>
-                      <div className="text-xs text-gray-500">
+                      <div className="shrink-0 text-xs text-gray-500 lg:whitespace-nowrap">
                         <div>{formatDateTime(operation.createdAt, timeZoneId)}</div>
                         {operation.rolledBackAt && <div>Откат: {formatDateTime(operation.rolledBackAt, timeZoneId)}</div>}
                       </div>
@@ -863,6 +887,27 @@ export function SpreadsheetImportSettings() {
                   </div>
                 ))}
               </div>
+
+              <TablePagination
+                page={batchOperationPage}
+                totalPages={batchOperationTotalPages}
+                totalItems={batchOperationTotal}
+                pageSize={batchOperationPageSize}
+                pageSizeOptions={BATCH_OPERATION_PAGE_SIZE_OPTIONS}
+                onPageChange={(page) => {
+                  if (selectedBatch) {
+                    void loadBatch(selectedBatch.id, page, batchOperationPageSize);
+                  }
+                }}
+                onPageSizeChange={(pageSize) => {
+                  if (selectedBatch) {
+                    void loadBatch(selectedBatch.id, 1, pageSize);
+                  }
+                }}
+                recordsLabel="Операций"
+                pageSizeLabel="Операций на странице"
+                className="rounded-2xl border border-slate-200"
+              />
             </div>
           )}
         </div>

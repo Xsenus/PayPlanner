@@ -260,20 +260,22 @@ function buildForm(user?: User | null): FormState {
   };
 }
 
-function buildUpdatePayload(form: FormState): UpdateUserDto {
+// eslint-disable-next-line react-refresh/only-export-components -- чистая функция экспортируется для проверки контракта формы.
+export function buildUpdatePayload(form: FormState): UpdateUserDto {
   return {
     email: form.email.trim() || undefined,
-    fullName: form.fullName.trim() || undefined,
-    firstName: form.firstName.trim() || undefined,
-    lastName: form.lastName.trim() || undefined,
-    middleName: form.middleName.trim() || undefined,
+    fullName: form.fullName.trim(),
+    firstName: form.firstName.trim(),
+    lastName: form.lastName.trim(),
+    middleName: form.middleName.trim(),
     dateOfBirth: form.dateOfBirth || undefined,
-    phoneNumber: form.phoneNumber.trim() || undefined,
-    whatsApp: form.whatsApp.trim() || undefined,
-    telegram: form.telegram.trim() || undefined,
-    instagram: form.instagram.trim() || undefined,
-    messenger: form.messenger.trim() || undefined,
-    viber: form.viber.trim() || undefined,
+    clearDateOfBirth: !form.dateOfBirth,
+    phoneNumber: form.phoneNumber.trim(),
+    whatsApp: form.whatsApp.trim(),
+    telegram: form.telegram.trim(),
+    instagram: form.instagram.trim(),
+    messenger: form.messenger.trim(),
+    viber: form.viber.trim(),
     isEmployee: form.isEmployee,
     isExternalContractor: form.isExternalContractor,
     departmentId: form.departmentId ? Number(form.departmentId) : null,
@@ -281,6 +283,8 @@ function buildUpdatePayload(form: FormState): UpdateUserDto {
     requiresFinancialActionReason: form.requiresFinancialActionReason,
     employmentStartDate: form.employmentStartDate || undefined,
     employmentEndDate: form.employmentEndDate || undefined,
+    clearEmploymentStartDate: !form.employmentStartDate,
+    clearEmploymentEndDate: !form.employmentEndDate,
     roleId: form.roleId || undefined,
     isActive: form.isActive,
     companyIds: form.companyIds,

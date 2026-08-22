@@ -44,6 +44,7 @@ public class AccountsController : ControllerBase
         [FromQuery] string? clientRole = null,
         [FromQuery] int? contractId = null,
         [FromQuery] bool payablesOnly = false,
+        [FromQuery] int? invoiceId = null,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20,
         CancellationToken ct = default)
@@ -72,6 +73,16 @@ public class AccountsController : ControllerBase
             clientIds,
             clientRole,
             contractId);
+        if (invoiceId.HasValue)
+        {
+            candidateQuery = candidateQuery.Where(payment =>
+                payment.Id == invoiceId.Value
+                || (payment.InvoiceId.HasValue
+                    && payment.InvoiceId == _db.Payments
+                        .Where(target => target.Id == invoiceId.Value)
+                        .Select(target => target.InvoiceId)
+                        .FirstOrDefault()));
+        }
         var candidateItems = await candidateQuery
             .Select(payment => new AccountInvoiceCandidate
             {

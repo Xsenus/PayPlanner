@@ -348,7 +348,7 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
         { id: 'moneyBank' as Tab, label: 'Банк', icon: Landmark },
         { id: 'moneyCash' as Tab, label: 'Касса', icon: Banknote },
         { id: 'moneyCards' as Tab, label: 'Карты', icon: WalletCards },
-        { id: 'moneyEMoney' as Tab, label: 'E-money', icon: WalletCards },
+        { id: 'moneyEMoney' as Tab, label: 'Электронные деньги', icon: WalletCards },
         { id: 'moneyTotal' as Tab, label: 'Итого', icon: CircleDollarSign },
       ];
 
