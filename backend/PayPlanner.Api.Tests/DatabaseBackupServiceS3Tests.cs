@@ -178,6 +178,53 @@ public sealed class DatabaseBackupServiceS3Tests
         Assert.Equal("success", stored.Status);
     }
 
+    [Fact]
+    public async Task DeleteBackupAsync_DeletesOnlyResolvedBackupAndReportsActualCount()
+    {
+        await using var scope = await CreateScopeAsync();
+        var service = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        var created = await service.CreateManualBackupAsync(CancellationToken.None);
+        var fullPath = service.ResolveBackupPath(created.Backup.RelativePath);
+        Assert.NotNull(fullPath);
+
+        var result = await service.DeleteBackupAsync(created.Backup.RelativePath, CancellationToken.None);
+
+        Assert.Equal(1, result.DeletedCount);
+        Assert.False(result.DeletedAll);
+        Assert.False(File.Exists(fullPath));
+        Assert.Null(service.ResolveBackupPath(created.Backup.RelativePath));
+    }
+
+    [Fact]
+    public async Task DeleteBackupAsync_RejectsTraversalAndMissingFiles()
+    {
+        await using var scope = await CreateScopeAsync();
+        var service = scope.Provider.GetRequiredService<DatabaseBackupService>();
+
+        Assert.Null(service.ResolveBackupPath("../outside.dump"));
+        await Assert.ThrowsAsync<FileNotFoundException>(() =>
+            service.DeleteBackupAsync("../outside.dump", CancellationToken.None));
+        await Assert.ThrowsAsync<FileNotFoundException>(() =>
+            service.DeleteBackupAsync("missing.dump", CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task DeleteAllBackupsAsync_CountsOnlyFilesThatWereActuallyDeleted()
+    {
+        await using var scope = await CreateScopeAsync();
+        var service = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        var first = await service.CreateManualBackupAsync(CancellationToken.None);
+        var second = await service.CreateManualBackupAsync(CancellationToken.None);
+        Assert.NotEqual(first.Backup.RelativePath, second.Backup.RelativePath);
+
+        var result = await service.DeleteAllBackupsAsync(CancellationToken.None);
+
+        Assert.True(result.DeletedAll);
+        Assert.Equal(2, result.DeletedCount);
+        Assert.Null(service.ResolveBackupPath(first.Backup.RelativePath));
+        Assert.Null(service.ResolveBackupPath(second.Backup.RelativePath));
+    }
+
     private static async Task<TestScope> CreateScopeAsync()
     {
         var root = Path.Combine(Path.GetTempPath(), $"payplanner-backup-s3-{Guid.NewGuid():N}");

@@ -350,7 +350,10 @@ public sealed class DatabaseBackupService
             throw new FileNotFoundException("Резервная копия не найдена.");
         }
 
-        TryDeleteFile(resolvedPath);
+        if (!TryDeleteFile(resolvedPath))
+        {
+            throw new IOException("Не удалось удалить резервную копию.");
+        }
         CleanupEmptyDirectories();
         return Task.FromResult(new DatabaseBackupDeleteResult(1, DeletedAll: false));
     }
@@ -365,8 +368,10 @@ public sealed class DatabaseBackupService
             foreach (var filePath in Directory.EnumerateFiles(_backupRootDirectory, pattern, SearchOption.AllDirectories))
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                TryDeleteFile(filePath);
-                deletedCount++;
+                if (TryDeleteFile(filePath))
+                {
+                    deletedCount++;
+                }
             }
         }
 
@@ -1511,7 +1516,7 @@ public sealed class DatabaseBackupService
     private string BuildBackupFileName(string baseName, DateTimeOffset nowLocal, string trigger, string? scheduleSlot, string extension)
     {
         var scheduleSuffix = string.IsNullOrWhiteSpace(scheduleSlot) ? string.Empty : $"_{scheduleSlot}";
-        return $"{baseName}_{_databaseProvider.Key}_{nowLocal:yyyyMMdd_HHmmss}_{trigger}{scheduleSuffix}{extension}";
+        return $"{baseName}_{_databaseProvider.Key}_{nowLocal:yyyyMMdd_HHmmss_fff}_{trigger}{scheduleSuffix}{extension}";
     }
 
     private static DatabaseBackupFileInfo? BuildFileInfo(string filePath, string rootDirectory)
@@ -1560,17 +1565,21 @@ public sealed class DatabaseBackupService
         return fullPath + Path.DirectorySeparatorChar;
     }
 
-    private static void TryDeleteFile(string path)
+    private static bool TryDeleteFile(string path)
     {
         try
         {
-            if (File.Exists(path))
+            if (!File.Exists(path))
             {
-                File.Delete(path);
+                return false;
             }
+
+            File.Delete(path);
+            return !File.Exists(path);
         }
         catch
         {
+            return false;
         }
     }
 
