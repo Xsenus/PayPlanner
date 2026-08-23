@@ -330,6 +330,69 @@ public class ContactsControllerTests
     }
 
     [Fact]
+    public async Task GetAll_SearchesAllSourcesBeforeMaterialization_AndHidesPromotedDuplicates()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateClientUserAsync(
+            db,
+            "contacts-search",
+            canView: true,
+            canCreate: true,
+            canEdit: true,
+            canDelete: true,
+            canExport: true,
+            viewScope: DataVisibilityScope.All,
+            legalEntityViewScope: DataVisibilityScope.All);
+        var client = await CreateClientAsync(db, user.Id, "Клиент Альфа", "79991110001");
+        client.Email = "alpha-client@example.test";
+        await CreateClientAsync(db, user.Id, "Посторонний клиент", "79992220002");
+        var legal = await CreateLegalEntityAsync(db, user.Id, "ООО Альфа");
+        legal.Email = "alpha-legal@example.test";
+        await CreateLegalEntityAsync(db, user.Id, "ООО Постороннее");
+        db.ExternalContacts.AddRange(
+            new ExternalContact
+            {
+                FullName = "Быстрый клиент Альфа",
+                LinkedClientId = client.Id,
+                Phone = "79993330003",
+                Email = "alpha-client@example.test",
+                IsActive = true,
+            },
+            new ExternalContact
+            {
+                FullName = "Быстрая организация Альфа",
+                ContactType = "Organization",
+                LinkedLegalEntityId = legal.Id,
+                Inn = "5400000001",
+                Email = "alpha-legal@example.test",
+                IsActive = true,
+            },
+            new ExternalContact
+            {
+                FullName = "Ненужный быстрый контакт",
+                Phone = "79994440004",
+                IsActive = true,
+            });
+        await db.SaveChangesAsync();
+
+        var action = await CreateController(db, user.Id).GetAll(
+            scope: "all",
+            search: "alpha",
+            legalEntityId: null,
+            includeInactive: false,
+            syncOnly: null,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var items = Assert.IsType<List<ContactDirectoryItemDto>>(ok.Value);
+        Assert.Equal(2, items.Count);
+        Assert.Contains(items, item => item.FullName == "Быстрый клиент Альфа" && item.LinkedClientId == client.Id);
+        Assert.Contains(items, item => item.FullName == "Быстрая организация Альфа" && item.LinkedLegalEntityId == legal.Id);
+        Assert.DoesNotContain(items, item => item.SourceType == "client" && item.SourceId == client.Id);
+        Assert.DoesNotContain(items, item => item.SourceType == "legal" && item.SourceId == legal.Id);
+    }
+
+    [Fact]
     public async Task PromoteOrganization_CreatesLegalEntityAndMovesEmployeesToIt()
     {
         await using var db = await CreateContextAsync();

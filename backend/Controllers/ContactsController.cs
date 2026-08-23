@@ -82,10 +82,15 @@ public class ContactsController : ControllerBase
         }
 
         var normalizedScope = NormalizeScope(scope);
+        var normalizedSearch = string.IsNullOrWhiteSpace(search)
+            ? null
+            : search.Trim().ToLowerInvariant();
         var items = new List<ContactDirectoryItemDto>();
 
-        var externalContacts = canViewClients && normalizedScope is "all" or "people" or "organizations" or "external"
-            ? await BuildVisibleExternalContactsQuery(access)
+        var externalContacts = new List<ExternalContact>();
+        if (canViewClients && normalizedScope is "all" or "people" or "organizations" or "external")
+        {
+            var externalQuery = BuildVisibleExternalContactsQuery(access)
                 .Include(x => x.LegalEntity)
                 .Include(x => x.ParentContact)
                 .Include(x => x.LinkedClient)
@@ -93,9 +98,45 @@ public class ContactsController : ControllerBase
                 .Include(x => x.LinkedLegalEntity)
                     .ThenInclude(x => x!.ClientStatus)
                 .Include(x => x.ResponsibleUser)
-                .Where(x => includeInactive || x.IsActive)
-                .ToListAsync(ct)
-            : new List<ExternalContact>();
+                .Where(x => includeInactive || x.IsActive);
+
+            if (normalizedScope == "people")
+            {
+                externalQuery = externalQuery.Where(x => x.ContactType != "Organization");
+            }
+            else if (normalizedScope == "organizations")
+            {
+                externalQuery = externalQuery.Where(x => x.ContactType == "Organization");
+            }
+
+            if (legalEntityId.HasValue)
+            {
+                externalQuery = externalQuery.Where(x =>
+                    x.LegalEntityId == legalEntityId.Value || x.LinkedLegalEntityId == legalEntityId.Value);
+            }
+
+            if (syncOnly.HasValue)
+            {
+                externalQuery = externalQuery.Where(x => x.SyncToPhonebook == syncOnly.Value);
+            }
+
+            if (normalizedSearch is not null)
+            {
+                externalQuery = externalQuery.Where(x =>
+                    x.FullName.ToLower().Contains(normalizedSearch)
+                    || (x.Inn ?? string.Empty).ToLower().Contains(normalizedSearch)
+                    || (x.Position ?? string.Empty).ToLower().Contains(normalizedSearch)
+                    || (x.PowerOfAttorney ?? string.Empty).ToLower().Contains(normalizedSearch)
+                    || (x.Phone ?? string.Empty).ToLower().Contains(normalizedSearch)
+                    || (x.Email ?? string.Empty).ToLower().Contains(normalizedSearch)
+                    || (x.PhonesJson ?? string.Empty).ToLower().Contains(normalizedSearch)
+                    || (x.EmailsJson ?? string.Empty).ToLower().Contains(normalizedSearch)
+                    || (x.LegalEntity != null && x.LegalEntity.ShortName.ToLower().Contains(normalizedSearch))
+                    || (x.ParentContact != null && x.ParentContact.FullName.ToLower().Contains(normalizedSearch)));
+            }
+
+            externalContacts = await externalQuery.ToListAsync(ct);
+        }
 
         var linkedClientIds = externalContacts
             .Where(x => x.LinkedClientId.HasValue)
@@ -124,6 +165,17 @@ public class ContactsController : ControllerBase
                 clientsQuery = clientsQuery.Where(x => x.IsActive);
             }
 
+            if (normalizedSearch is not null)
+            {
+                clientsQuery = clientsQuery.Where(x =>
+                    x.Name.ToLower().Contains(normalizedSearch)
+                    || x.Company.ToLower().Contains(normalizedSearch)
+                    || x.Phone.ToLower().Contains(normalizedSearch)
+                    || x.Email.ToLower().Contains(normalizedSearch)
+                    || x.Notes.ToLower().Contains(normalizedSearch)
+                    || (x.LegalEntity != null && x.LegalEntity.ShortName.ToLower().Contains(normalizedSearch)));
+            }
+
             if (linkedClientIds.Count > 0)
             {
                 clientsQuery = clientsQuery.Where(x => !linkedClientIds.Contains(x.Id));
@@ -150,6 +202,17 @@ public class ContactsController : ControllerBase
                 legalQuery = legalQuery.Where(x => !linkedLegalEntityIds.Contains(x.Id));
             }
 
+            if (normalizedSearch is not null)
+            {
+                legalQuery = legalQuery.Where(x =>
+                    x.ShortName.ToLower().Contains(normalizedSearch)
+                    || (x.FullName ?? string.Empty).ToLower().Contains(normalizedSearch)
+                    || (x.Inn ?? string.Empty).ToLower().Contains(normalizedSearch)
+                    || (x.Phone ?? string.Empty).ToLower().Contains(normalizedSearch)
+                    || (x.Email ?? string.Empty).ToLower().Contains(normalizedSearch)
+                    || (x.Director ?? string.Empty).ToLower().Contains(normalizedSearch));
+            }
+
             var legalEntities = await legalQuery.ToListAsync(ct);
             items.AddRange(legalEntities.Select(MapLegalEntityContact));
         }
@@ -174,22 +237,6 @@ public class ContactsController : ControllerBase
         if (syncOnly.HasValue)
         {
             items = items.Where(x => x.SyncToPhonebook == syncOnly.Value).ToList();
-        }
-
-        if (!string.IsNullOrWhiteSpace(search))
-        {
-            var term = search.Trim().ToLowerInvariant();
-            items = items.Where(item =>
-                    (item.FullName?.ToLowerInvariant().Contains(term) ?? false) ||
-                    (item.OrganizationName?.ToLowerInvariant().Contains(term) ?? false) ||
-                    (item.Inn?.ToLowerInvariant().Contains(term) ?? false) ||
-                    (item.Position?.ToLowerInvariant().Contains(term) ?? false) ||
-                    (item.PowerOfAttorney?.ToLowerInvariant().Contains(term) ?? false) ||
-                    (item.Phone?.ToLowerInvariant().Contains(term) ?? false) ||
-                    (item.Email?.ToLowerInvariant().Contains(term) ?? false) ||
-                    item.Phones.Any(phone => phone.ToLowerInvariant().Contains(term)) ||
-                    item.Emails.Any(email => email.ToLowerInvariant().Contains(term)))
-                .ToList();
         }
 
         items = items

@@ -743,7 +743,42 @@ public class ObjectAuditController : ControllerBase
             .IgnoreQueryFilters()
             .FirstOrDefaultAsync(item => item.Id == objectId, ct);
 
-        return entity is null ? false : RestoreEntity(entity);
+        if (entity is null)
+        {
+            return false;
+        }
+
+        var restoredAnything = RestoreEntity(entity);
+        if (!restoredAnything)
+        {
+            return restoredAnything;
+        }
+
+        // Адреса и паспорта являются частями клиентского профиля и не имеют
+        // отдельного пользовательского восстановления. Возвращаем агрегат
+        // целиком, чтобы карточка не открылась без ранее сохранённых данных.
+        var addresses = await _db.AddressRecords
+            .IgnoreQueryFilters()
+            .Where(item => item.ClientId == objectId
+                && EF.Property<bool>(item, "IsDeleted"))
+            .ToListAsync(ct);
+        var passports = await _db.ClientPassports
+            .IgnoreQueryFilters()
+            .Where(item => item.ClientId == objectId
+                && EF.Property<bool>(item, "IsDeleted"))
+            .ToListAsync(ct);
+
+        foreach (var address in addresses)
+        {
+            restoredAnything = RestoreEntity(address) || restoredAnything;
+        }
+
+        foreach (var passport in passports)
+        {
+            restoredAnything = RestoreEntity(passport) || restoredAnything;
+        }
+
+        return restoredAnything;
     }
 
     private async Task<bool?> RestoreClientCaseAsync(int objectId, CancellationToken ct)
@@ -831,7 +866,29 @@ public class ObjectAuditController : ControllerBase
             .IgnoreQueryFilters()
             .FirstOrDefaultAsync(item => item.Id == objectId, ct);
 
-        return entity is null ? false : RestoreEntity(entity);
+        if (entity is null)
+        {
+            return false;
+        }
+
+        var restoredAnything = RestoreEntity(entity);
+        if (!restoredAnything)
+        {
+            return restoredAnything;
+        }
+
+        var addresses = await _db.AddressRecords
+            .IgnoreQueryFilters()
+            .Where(item => item.LegalEntityId == objectId
+                && EF.Property<bool>(item, "IsDeleted"))
+            .ToListAsync(ct);
+
+        foreach (var address in addresses)
+        {
+            restoredAnything = RestoreEntity(address) || restoredAnything;
+        }
+
+        return restoredAnything;
     }
 
     private async Task<bool?> RestoreContactAsync(int objectId, CancellationToken ct)

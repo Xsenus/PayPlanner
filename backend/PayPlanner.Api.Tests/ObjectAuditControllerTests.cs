@@ -3,6 +3,8 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using Npgsql;
 using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
@@ -13,6 +15,9 @@ namespace PayPlanner.Api.Tests;
 
 public class ObjectAuditControllerTests
 {
+    private const string PostgreSqlEnvironmentVariable = "PAYPLANNER_TEST_POSTGRES";
+    private const string PostgreSqlDatabasePrefix = "payplanner_object_audit_test_";
+
     [Fact]
     public async Task GetEvents_ReturnsFilteredPagedFeed_WhenUserHasAuditAccess()
     {
@@ -293,6 +298,267 @@ public class ObjectAuditControllerTests
         var feed = Assert.IsType<PagedResponse<ObjectAuditEventDto>>(feedOk.Value);
         var item = Assert.Single(feed.Items);
         Assert.Equal(visibleDocument.Id, item.ObjectId);
+    }
+
+    [Fact]
+    public async Task RestoreClient_RestoresCompleteProfileAggregate()
+    {
+        await using var db = await CreateContextAsync();
+        var admin = await CreateAdminAsync(db);
+        var client = new Client
+        {
+            Name = "Восстанавливаемый клиент",
+            Phone = "+7 999 555-01-02",
+            IsActive = true,
+        };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+
+        var currentAddress = new AddressRecord
+        {
+            ClientId = client.Id,
+            Type = AddressType.Registration,
+            Value = "Текущий адрес",
+            IsPrimary = true,
+        };
+        var oldAddress = new AddressRecord
+        {
+            ClientId = client.Id,
+            Type = AddressType.Actual,
+            Value = "Удалённый ранее адрес",
+        };
+        var passport = new ClientPassport
+        {
+            ClientId = client.Id,
+            Series = "1234",
+            Number = "567890",
+            IsPrimary = true,
+        };
+        db.AddRange(currentAddress, oldAddress, passport);
+        await db.SaveChangesAsync();
+
+        db.AddressRecords.Remove(oldAddress);
+        await db.SaveChangesAsync();
+        db.AddressRecords.Remove(currentAddress);
+        db.ClientPassports.Remove(passport);
+        db.Clients.Remove(client);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, admin.Id, admin.FullName);
+        var deletedResult = await controller.GetDeletedObjects("client", "555-01", CancellationToken.None);
+        var deletedOk = Assert.IsType<OkObjectResult>(deletedResult.Result);
+        var deleted = Assert.IsAssignableFrom<IReadOnlyCollection<DeletedObjectAuditItemDto>>(deletedOk.Value);
+        Assert.Equal(client.Id, Assert.Single(deleted).ObjectId);
+
+        var restoreResult = await controller.RestoreObject("client", client.Id, CancellationToken.None);
+
+        Assert.IsType<NoContentResult>(restoreResult);
+        Assert.Equal(1, await db.Clients.CountAsync(item => item.Id == client.Id));
+        Assert.Equal(new[] { "Текущий адрес", "Удалённый ранее адрес" }, await db.AddressRecords
+            .Where(item => item.ClientId == client.Id)
+            .OrderByDescending(item => item.IsPrimary)
+            .Select(item => item.Value)
+            .ToListAsync());
+        Assert.Equal(1, await db.ClientPassports.CountAsync(item => item.ClientId == client.Id));
+    }
+
+    [Fact]
+    public async Task RestoreLegalEntity_RestoresAddressesDeletedWithOrganization()
+    {
+        await using var db = await CreateContextAsync();
+        var admin = await CreateAdminAsync(db);
+        var entity = new LegalEntity
+        {
+            ShortName = "ООО Восстановление",
+            FullName = "Общество с ограниченной ответственностью Восстановление",
+        };
+        db.LegalEntities.Add(entity);
+        await db.SaveChangesAsync();
+        var address = new AddressRecord
+        {
+            LegalEntityId = entity.Id,
+            Type = AddressType.Legal,
+            Value = "630000, Новосибирск",
+            IsPrimary = true,
+        };
+        db.AddressRecords.Add(address);
+        await db.SaveChangesAsync();
+
+        db.AddressRecords.Remove(address);
+        db.LegalEntities.Remove(entity);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, admin.Id, admin.FullName);
+        var result = await controller.RestoreObject("legal-entity", entity.Id, CancellationToken.None);
+
+        Assert.IsType<NoContentResult>(result);
+        Assert.Equal(1, await db.LegalEntities.CountAsync(item => item.Id == entity.Id));
+        Assert.Equal(1, await db.AddressRecords.CountAsync(item => item.LegalEntityId == entity.Id));
+    }
+
+    [Fact]
+    public async Task DeletedObjects_RestoreIsDenyByDefaultForReadOnlyAuditor()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role
+        {
+            Name = "audit-reader",
+            Description = "Аудитор",
+            CreatedAt = DateTime.UtcNow,
+            PermissionsUpdatedAt = DateTime.UtcNow,
+        };
+        db.Roles.Add(role);
+        await db.SaveChangesAsync();
+        db.RolePermissions.Add(new RolePermission
+        {
+            RoleId = role.Id,
+            Section = RolePermissionCatalog.Audit,
+            CanView = true,
+            CanEdit = false,
+            ViewScope = DataVisibilityScope.All,
+        });
+        var user = new User
+        {
+            Email = "audit-reader@example.com",
+            PasswordHash = "hash",
+            FullName = "Аудитор без восстановления",
+            RoleId = role.Id,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        var contact = new ExternalContact { FullName = "Удалённый контакт" };
+        db.AddRange(user, contact);
+        await db.SaveChangesAsync();
+        db.ExternalContacts.Remove(contact);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, user.Id, user.FullName);
+        var listResult = await controller.GetDeletedObjects("contact", null, CancellationToken.None);
+        Assert.IsType<OkObjectResult>(listResult.Result);
+
+        var restoreResult = await controller.RestoreObject("contact", contact.Id, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(restoreResult);
+        Assert.Equal(0, await db.ExternalContacts.CountAsync(item => item.Id == contact.Id));
+    }
+
+    [Fact]
+    public async Task PostgreSqlRestoreClientProfileExecutesAgainstFreshDatabase()
+    {
+        var adminConnectionString = Environment.GetEnvironmentVariable(PostgreSqlEnvironmentVariable);
+        if (string.IsNullOrWhiteSpace(adminConnectionString))
+        {
+            Assert.False(
+                string.Equals(Environment.GetEnvironmentVariable("CI"), "true", StringComparison.OrdinalIgnoreCase),
+                $"{PostgreSqlEnvironmentVariable} must be configured in CI.");
+            return;
+        }
+
+        var databaseName = PostgreSqlDatabasePrefix + Guid.NewGuid().ToString("N");
+        Assert.StartsWith(PostgreSqlDatabasePrefix, databaseName, StringComparison.Ordinal);
+        var adminBuilder = new NpgsqlConnectionStringBuilder(adminConnectionString)
+        {
+            Database = "postgres",
+            Pooling = false,
+        };
+        await using var adminConnection = new NpgsqlConnection(adminBuilder.ConnectionString);
+        await adminConnection.OpenAsync();
+
+        try
+        {
+            await using (var create = adminConnection.CreateCommand())
+            {
+                create.CommandText = $"CREATE DATABASE \"{databaseName}\"";
+                await create.ExecuteNonQueryAsync();
+            }
+
+            var testBuilder = new NpgsqlConnectionStringBuilder(adminBuilder.ConnectionString)
+            {
+                Database = databaseName,
+                Pooling = false,
+            };
+            var options = new DbContextOptionsBuilder<PostgreSqlPaymentContext>()
+                .UseNpgsql(testBuilder.ConnectionString)
+                .ConfigureWarnings(warnings => warnings.Ignore(RelationalEventId.PendingModelChangesWarning))
+                .Options;
+            await using var db = new PostgreSqlPaymentContext(options);
+            await db.Database.MigrateAsync();
+            var admin = await CreateAdminAsync(db);
+            var client = new Client { Name = "PostgreSQL восстановление", IsActive = true };
+            db.Clients.Add(client);
+            await db.SaveChangesAsync();
+            db.AddRange(
+                new AddressRecord
+                {
+                    ClientId = client.Id,
+                    Type = AddressType.Registration,
+                    Value = "PostgreSQL адрес",
+                    IsPrimary = true,
+                },
+                new ClientPassport
+                {
+                    ClientId = client.Id,
+                    Series = "5400",
+                    Number = "123456",
+                    IsPrimary = true,
+                });
+            await db.SaveChangesAsync();
+            db.AddressRecords.RemoveRange(await db.AddressRecords.Where(item => item.ClientId == client.Id).ToListAsync());
+            db.ClientPassports.RemoveRange(await db.ClientPassports.Where(item => item.ClientId == client.Id).ToListAsync());
+            db.Clients.Remove(client);
+            await db.SaveChangesAsync();
+
+            var controller = CreateController(db, admin.Id, admin.FullName);
+            Assert.IsType<NoContentResult>(await controller.RestoreObject("client", client.Id, CancellationToken.None));
+            Assert.Equal(1, await db.Clients.CountAsync(item => item.Id == client.Id));
+            Assert.Equal(1, await db.AddressRecords.CountAsync(item => item.ClientId == client.Id));
+            Assert.Equal(1, await db.ClientPassports.CountAsync(item => item.ClientId == client.Id));
+        }
+        finally
+        {
+            await using var terminate = adminConnection.CreateCommand();
+            terminate.CommandText =
+                """
+                SELECT pg_terminate_backend(pid)
+                FROM pg_stat_activity
+                WHERE datname = @databaseName AND pid <> pg_backend_pid()
+                """;
+            terminate.Parameters.AddWithValue("databaseName", databaseName);
+            await terminate.ExecuteNonQueryAsync();
+            await using var drop = adminConnection.CreateCommand();
+            drop.CommandText = $"DROP DATABASE IF EXISTS \"{databaseName}\"";
+            await drop.ExecuteNonQueryAsync();
+            NpgsqlConnection.ClearAllPools();
+        }
+    }
+
+    private static async Task<User> CreateAdminAsync(PaymentContext db)
+    {
+        var role = new Role
+        {
+            Name = "admin",
+            Description = "Administrator",
+            CreatedAt = DateTime.UtcNow,
+            PermissionsUpdatedAt = DateTime.UtcNow,
+        };
+        db.Roles.Add(role);
+        await db.SaveChangesAsync();
+        var user = new User
+        {
+            Email = $"admin-{Guid.NewGuid():N}@example.com",
+            PasswordHash = "hash",
+            FullName = "Администратор",
+            RoleId = role.Id,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+        return user;
     }
 
     private static ObjectAuditController CreateController(PaymentContext db, int userId, string userName)
