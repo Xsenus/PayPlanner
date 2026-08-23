@@ -1,3 +1,4 @@
+using System.Data;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
@@ -158,26 +159,37 @@ public sealed class MessengerDocumentOutboxProcessor : IMessengerDocumentOutboxP
         var now = DateTime.UtcNow;
         var batchSize = Math.Clamp(_configuration.GetValue("MessengerDocumentDelivery:BatchSize", 20), 1, 100);
         var staleProcessingAt = now.AddMinutes(-10);
-        var items = await _db.MessengerDocumentDeliveries
-            .Include(item => item.RecipientBinding)
-            .Where(item =>
-                item.AttemptCount < MaxAttempts
-                && item.DownloadCount == 0
-                && item.LinkExpiresAt > now
-                && ((item.Status == MessengerDocumentDeliveryStatuses.Queued && item.NextAttemptAt <= now)
-                    || (item.Status == MessengerDocumentDeliveryStatuses.Failed && item.NextAttemptAt <= now)
-                    || (item.Status == MessengerDocumentDeliveryStatuses.Processing && item.UpdatedAt < staleProcessingAt)))
-            .OrderBy(item => item.NextAttemptAt)
-            .ThenBy(item => item.Id)
-            .Take(batchSize)
-            .ToListAsync(ct);
-
-        foreach (var item in items)
+        List<MessengerDocumentDelivery> items;
+        try
         {
-            item.Status = MessengerDocumentDeliveryStatuses.Processing;
-            item.UpdatedAt = now;
+            await using var leaseTransaction = await _db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
+            items = await _db.MessengerDocumentDeliveries
+                .Include(item => item.RecipientBinding)
+                .Where(item =>
+                    item.AttemptCount < MaxAttempts
+                    && item.DownloadCount == 0
+                    && item.LinkExpiresAt > now
+                    && ((item.Status == MessengerDocumentDeliveryStatuses.Queued && item.NextAttemptAt <= now)
+                        || (item.Status == MessengerDocumentDeliveryStatuses.Failed && item.NextAttemptAt <= now)
+                        || (item.Status == MessengerDocumentDeliveryStatuses.Processing && item.UpdatedAt < staleProcessingAt)))
+                .OrderBy(item => item.NextAttemptAt)
+                .ThenBy(item => item.Id)
+                .Take(batchSize)
+                .ToListAsync(ct);
+
+            foreach (var item in items)
+            {
+                item.Status = MessengerDocumentDeliveryStatuses.Processing;
+                item.UpdatedAt = now;
+            }
+            await _db.SaveChangesAsync(ct);
+            await leaseTransaction.CommitAsync(ct);
         }
-        await _db.SaveChangesAsync(ct);
+        catch (Exception exception) when (FinancialConcurrencyGuard.IsSerializationFailure(exception))
+        {
+            _db.ChangeTracker.Clear();
+            return 0;
+        }
 
         foreach (var item in items)
         {

@@ -1,9 +1,11 @@
+using System.Data;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Services;
 
 namespace PayPlanner.Api.Services.Notifications;
 
@@ -252,44 +254,55 @@ public sealed class MaxOutboxProcessor(
         if (!settings.Ready) return 0;
         var now = timeProvider.GetUtcNow().UtcDateTime;
         var stale = now.AddMinutes(-5);
-        var messages = await db.MaxOutboxMessages
-            .Include(item => item.RecipientLink)
-            .Where(item => item.AttemptCount < item.MaxAttempts
-                           && ((item.Status == MaxOutboxStatuses.Queued && item.NextAttemptAt <= now)
-                               || (item.Status == MaxOutboxStatuses.Failed && item.NextAttemptAt <= now)
-                               || (item.Status == MaxOutboxStatuses.Processing && item.UpdatedAt < stale)))
-            .OrderBy(item => item.NextAttemptAt)
-            .ThenBy(item => item.Id)
-            .Take(20)
-            .ToListAsync(ct);
+        List<MaxOutboxMessage> messages;
         var lastSendByRecipient = new Dictionary<long, DateTime>();
-        var processableMessages = new List<(MaxOutboxMessage Message, long RecipientId)>(messages.Count);
-        foreach (var message in messages)
+        var processableMessages = new List<(MaxOutboxMessage Message, long RecipientId)>();
+        try
         {
-            if (message.RecipientLink.Status != MaxRecipientLinkStatuses.Verified
-                || message.RecipientLink.MaxUserId is not long recipientId)
+            await using var leaseTransaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
+            messages = await db.MaxOutboxMessages
+                .Include(item => item.RecipientLink)
+                .Where(item => item.AttemptCount < item.MaxAttempts
+                               && ((item.Status == MaxOutboxStatuses.Queued && item.NextAttemptAt <= now)
+                                   || (item.Status == MaxOutboxStatuses.Failed && item.NextAttemptAt <= now)
+                                   || (item.Status == MaxOutboxStatuses.Processing && item.UpdatedAt < stale)))
+                .OrderBy(item => item.NextAttemptAt)
+                .ThenBy(item => item.Id)
+                .Take(20)
+                .ToListAsync(ct);
+            processableMessages.Capacity = messages.Count;
+            foreach (var message in messages)
             {
-                message.Status = MaxOutboxStatuses.Cancelled;
-                message.LastErrorCode = "recipient-unlinked";
+                if (message.RecipientLink.Status != MaxRecipientLinkStatuses.Verified
+                    || message.RecipientLink.MaxUserId is not long recipientId)
+                {
+                    message.Status = MaxOutboxStatuses.Cancelled;
+                    message.LastErrorCode = "recipient-unlinked";
+                    message.UpdatedAt = now;
+                    continue;
+                }
+
+                message.Status = MaxOutboxStatuses.Processing;
+                message.AttemptCount++;
                 message.UpdatedAt = now;
-                continue;
+                // Идентификатор фиксируется вместе с решением о допустимости отправки.
+                // Последующий цикл не перечитывает nullable-поле связи и работает
+                // только с уже проверенным значением получателя.
+                processableMessages.Add((message, recipientId));
             }
 
-            message.Status = MaxOutboxStatuses.Processing;
-            message.AttemptCount++;
-            message.UpdatedAt = now;
-            // Идентификатор фиксируется вместе с решением о допустимости отправки.
-            // Последующий цикл не перечитывает nullable-поле связи и работает
-            // только с уже проверенным значением получателя.
-            processableMessages.Add((message, recipientId));
+            if (messages.Count > 0)
+            {
+                // Захват порции и перевод в processing коммитятся атомарно. При
+                // параллельном worker второй экземпляр не сможет отправить ту же запись.
+                await db.SaveChangesAsync(ct);
+            }
+            await leaseTransaction.CommitAsync(ct);
         }
-
-        if (messages.Count > 0)
+        catch (Exception exception) when (FinancialConcurrencyGuard.IsSerializationFailure(exception))
         {
-            // Одним сохранением фиксируем и отменённые сообщения, и всю порцию,
-            // взятую в обработку. Это исключает вечный повтор неподтверждённых
-            // получателей и не создаёт отдельную транзакцию перед каждой отправкой.
-            await db.SaveChangesAsync(ct);
+            db.ChangeTracker.Clear();
+            return 0;
         }
 
         foreach (var (message, recipientId) in processableMessages)
