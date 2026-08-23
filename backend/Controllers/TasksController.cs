@@ -6756,6 +6756,11 @@ public class TasksController : ControllerBase
             return access.Permission?.CanCompleteOthers == true;
         }
 
+        if (CanExecutorResubmitReturnedTask(entity, access.UserId))
+        {
+            return true;
+        }
+
         if (CanFullyModifyTask(
                 entity,
                 access,
@@ -6904,6 +6909,12 @@ public class TasksController : ControllerBase
                 : access.Permission?.CanEditOthers == true;
         }
 
+        if (string.Equals(nextStatus, "onApproval", StringComparison.OrdinalIgnoreCase)
+            && CanExecutorResubmitReturnedTask(entity, access.UserId))
+        {
+            return true;
+        }
+
         if (CanFullyModifyTask(
                 entity,
                 access,
@@ -6933,8 +6944,23 @@ public class TasksController : ControllerBase
         }
 
         return IsTaskExecutor(entity, access.UserId)
-            && settings.ExecutorCompletionAllowedUserIds.Contains(access.UserId);
+            && (settings.ExecutorCompletionAllowedUserIds.Contains(access.UserId)
+                || CanExecutorResubmitReturnedTask(entity, access.UserId));
     }
+
+    /// <summary>
+    /// Возврат согласующим создаёт обязательный обратный путь: назначенный исполнитель
+    /// может повторно сдать исправленный результат, даже если ему запрещено самостоятельно
+    /// завершать остальные задачи. Одобренные ранее шаги очереди при этом сохраняются.
+    /// </summary>
+    private static bool CanExecutorResubmitReturnedTask(TaskJournalItem entity, int userId)
+        => IsTaskExecutor(entity, userId)
+           && (string.Equals(entity.Status, "revision", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(entity.Status, "inProgress", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(entity.Status, "waiting", StringComparison.OrdinalIgnoreCase))
+           && entity.Participants.Any(participant =>
+               string.Equals(participant.Role, "approver", StringComparison.OrdinalIgnoreCase)
+               && string.Equals(participant.ApprovalStatus, "revisionRequested", StringComparison.OrdinalIgnoreCase));
 
     private static bool CanAdminForceCompleteTask(
         TaskAccess access,

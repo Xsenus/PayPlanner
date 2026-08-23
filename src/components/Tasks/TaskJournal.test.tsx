@@ -4571,6 +4571,60 @@ describe('TaskJournal', () => {
     expect(apiMock.updateTaskJournalItem).not.toHaveBeenCalled();
   });
 
+  it.each(['legacy', 'modern'] as const)('allows executor to resubmit a returned task in the %s card without general completion access', async (taskCardWindowMode) => {
+    authState.isAdmin = false;
+    authState.user = { id: 7, fullName: 'Исполнитель', email: 'assignee@example.com' };
+    await renderJournal([
+      createTask({
+        status: 'inProgress',
+        assigneeUserId: 7,
+        assigneeName: 'Исполнитель',
+        authorUserId: 9,
+        authorName: 'Постановщик',
+        result: '',
+        participants: [
+          { userId: 7, role: 'assignee', displayName: 'Исполнитель', approvalStatus: 'pending' },
+          {
+            userId: 8,
+            role: 'approver',
+            displayName: 'Согласующий',
+            approvalStatus: 'revisionRequested',
+            resolution: 'Исправьте результат задачи.',
+          },
+        ],
+      }),
+    ], {
+      settings: {
+        taskCardWindowMode,
+        executorCompletionAllowedUserIds: [],
+      },
+    });
+
+    fireEvent.click(screen.getByTitle('Просмотр'));
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    expect(within(card).queryByRole('button', { name: 'Завершить' })).toBeNull();
+    if (taskCardWindowMode === 'modern') {
+      expect(within(card).queryByRole('button', { name: 'Запустить' })).toBeNull();
+    }
+
+    const submitButtons = within(card).getAllByRole('button', { name: 'На согласование' });
+    fireEvent.click(submitButtons[submitButtons.length - 1]);
+
+    expect(await screen.findByRole('heading', { name: 'Добавить результат по задаче' })).toBeTruthy();
+    fireEvent.change(document.getElementById('task-completion-result')!, {
+      target: { value: 'Замечания устранены, исправленный результат приложен.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Отправить на согласование' }));
+
+    await waitFor(() => expect(apiMock.updateTaskJournalStatus).toHaveBeenCalledWith(
+      101,
+      'onApproval',
+      'Замечания устранены, исправленный результат приложен.',
+    ));
+    expect(toastMock.success).toHaveBeenCalledWith('Задача отправлена на согласование.', 'Журнал задач');
+    expect(apiMock.updateTaskJournalItem).not.toHaveBeenCalled();
+  });
+
   it('opens observed own-scope task in view mode even when role can edit tasks', async () => {
     authState.isAdmin = false;
     authState.user = { id: 7, fullName: 'Observer', email: 'observer@example.com' };

@@ -1401,6 +1401,10 @@ function canCompleteTaskForCurrentUser(
     return taskPermissions.canCompleteOthers;
   }
 
+  if (canExecutorResubmitReturnedTask(task, currentUserId)) {
+    return true;
+  }
+
   if (!isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, settings, taskPermissions)) {
     return true;
   }
@@ -1411,6 +1415,14 @@ function canCompleteTaskForCurrentUser(
 
   return isTaskExecutorForUser(task, currentUserId)
     && settings.executorCompletionAllowedUserIds.includes(currentUserId);
+}
+
+function canExecutorResubmitReturnedTask(task: TaskJournalItem, currentUserId: number) {
+  return isTaskExecutorForUser(task, currentUserId)
+    && (task.status === 'revision' || task.status === 'inProgress' || task.status === 'waiting')
+    && getTaskParticipants(task, 'approver').some(
+      (participant) => participant.approvalStatus === 'revisionRequested',
+    );
 }
 
 function canDeleteTaskForCurrentUser(
@@ -3840,7 +3852,12 @@ export function TaskJournal({
 
     try {
       await apiService.updateTaskJournalStatus(task.id, status, normalizedResult);
-      toast.success('Результат по задаче сохранен.', 'Журнал задач');
+      toast.success(
+        status === 'onApproval' || status === 'overdueApproval'
+          ? 'Задача отправлена на согласование.'
+          : 'Результат по задаче сохранен.',
+        'Журнал задач',
+      );
       closeTaskModal();
       await refreshTasks();
       emitTaskChange();
@@ -8861,7 +8878,9 @@ function TaskModal({
     && !nextForm.result.trim();
 
   const openApprovalResultPrompt = (nextForm: TaskForm, taskId?: number) => {
-    setForm(nextForm);
+    if (!isReadOnly) {
+      setForm(nextForm);
+    }
     setResultError(null);
     setApprovalResultPrompt({ form: nextForm, taskId });
     setApprovalResultPromptResult(nextForm.result.trim());
@@ -9867,7 +9886,10 @@ function TaskModal({
               ) : null}
             </div>
             <div className="flex shrink-0 items-center gap-1">
-              {state?.task ? (
+              {state?.task
+                && isTaskJournalActive(state.task.status)
+                && state.task.status !== 'inProgress'
+                && !isTaskAwaitingApproval(state.task) ? (
                 <button
                   type="button"
                   onClick={() => void saveWithStatus('inProgress')}
@@ -9875,7 +9897,7 @@ function TaskModal({
                   className="inline-flex h-9 items-center gap-2 rounded-lg bg-blue-50 px-3 text-sm font-semibold text-blue-700 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <Play className="h-4 w-4" />
-                  Запустить
+                  {state.task.status === 'revision' ? 'Продолжить работу' : 'Запустить'}
                 </button>
               ) : null}
               {isLockedViewWithEditAccess ? (

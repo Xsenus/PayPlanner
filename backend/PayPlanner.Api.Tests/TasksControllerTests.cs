@@ -6511,6 +6511,42 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task UploadFile_AllowsExecutorToAttachCorrectedResultAfterRevision()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "revision-file-author@example.com", "Постановщик");
+        var assignee = await CreateTaskUserAsync(db, "revision-file-assignee@example.com", "Исполнитель", canEdit: false);
+        var approver = await CreateAdminUserAsync(db, "revision-file-approver@example.com", "Согласующий");
+        var client = await CreateClientAsync(db, "Клиент исправленного документа");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, assignee.Id, status: "revision");
+        task.Participants.Add(new TaskJournalParticipant
+        {
+            UserId = approver.Id,
+            Role = "approver",
+            DisplayName = approver.FullName,
+            Email = approver.Email,
+            ApprovalStatus = "revisionRequested",
+            Resolution = "Приложите исправленный документ.",
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), assignee);
+
+        var result = await controller.UploadFile(
+            task.Id,
+            CreateFormFile("Исправленный документ", "исправлено.txt"),
+            null,
+            CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(result.Result);
+        var file = Assert.IsType<TaskJournalFileDto>(created.Value);
+        Assert.Equal(assignee.Id, file.UploadedByUserId);
+        Assert.Equal("исправлено.txt", file.OriginalFileName);
+
+        var adminController = CreateController(db, new RecordingNotificationService(), author);
+        Assert.IsType<NoContentResult>(await adminController.DeleteFile(task.Id, file.Id, CancellationToken.None));
+    }
+
+    [Fact]
     public async Task UploadFile_ForbidsExecutorWithoutPersonalCompletionAccess()
     {
         await using var db = await CreateContextAsync();
@@ -7662,6 +7698,52 @@ public class TasksControllerTests
             && participant.ApprovalStatus == "pending"
             && string.IsNullOrEmpty(participant.Resolution)
             && participant.RespondedAt == null);
+    }
+
+    [Fact]
+    public async Task UpdateStatus_ReturnedTaskAllowsAssignedExecutorToResubmitWithoutCompletionAccess()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "returned-author@example.com", "Постановщик");
+        var assignee = await CreateTaskUserAsync(db, "returned-assignee@example.com", "Исполнитель", canEdit: false);
+        var approver = await CreateAdminUserAsync(db, "returned-approver@example.com", "Согласующий");
+        var client = await CreateClientAsync(db, "Клиент возвращённой задачи");
+        var task = await CreateTaskAsync(
+            db,
+            author.Id,
+            client.Id,
+            assignee.Id,
+            result: null,
+            status: "inProgress");
+        task.DueAt = DateTime.UtcNow.AddDays(-30);
+        task.Participants.Add(new TaskJournalParticipant
+        {
+            UserId = approver.Id,
+            Role = "approver",
+            DisplayName = approver.FullName,
+            Email = approver.Email,
+            ApprovalStatus = "revisionRequested",
+            Resolution = "Исправьте результат.",
+            RespondedAt = DateTime.UtcNow.AddDays(-1),
+            SortOrder = 0,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), assignee);
+
+        var result = await controller.UpdateStatus(task.Id, new UpdateTaskJournalStatusRequest
+        {
+            Status = "onApproval",
+            Result = "Исправленный результат приложен.",
+        }, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<TaskJournalItemDto>(ok.Value);
+        Assert.Equal("onApproval", dto.Status);
+        Assert.Equal("Исправленный результат приложен.", dto.Result);
+        var resetApprover = Assert.Single(dto.Participants, participant => participant.Role == "approver");
+        Assert.Equal("pending", resetApprover.ApprovalStatus);
+        Assert.True(string.IsNullOrEmpty(resetApprover.Resolution));
+        Assert.Null(resetApprover.RespondedAt);
     }
 
     [Fact]
