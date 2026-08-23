@@ -3020,9 +3020,9 @@ public class InvoicesController : ControllerBase
                 ? InvoiceOrderWordDocumentRenderer.Render(documentHtml)
                 : isOfferTemplate
                     ? InvoiceOfferWordDocumentRenderer.Render(documentHtml)
-                : Encoding.UTF8.GetBytes(documentHtml)
+                    : InvoiceStandardWordDocumentRenderer.Render(documentHtml)
             : Encoding.UTF8.GetBytes(documentHtml);
-        var isDocx = normalizedFormat == "word" && (isOrderTemplate || isOfferTemplate);
+        var isDocx = normalizedFormat == "word";
         var ext = normalizedFormat == "pdf" ? "pdf" : isDocx ? "docx" : "doc";
         var fileName = $"invoice-{SanitizeFilePart(payment.Invoice?.Number ?? payment.Account)}.{ext}";
 
@@ -3119,9 +3119,9 @@ public class InvoicesController : ControllerBase
         }
         else if (string.Equals(template.Key, InvoiceDocumentTemplateEngine.DefaultTemplateKey, StringComparison.OrdinalIgnoreCase))
         {
-            bytes = Encoding.UTF8.GetBytes(documentHtml);
-            fileName = $"invoice-{SanitizeFilePart(documentNumber)}.doc";
-            contentType = "application/msword";
+            bytes = InvoiceStandardWordDocumentRenderer.Render(documentHtml);
+            fileName = $"invoice-{SanitizeFilePart(documentNumber)}.docx";
+            contentType = PayPlanner.Api.Services.Documents.HtmlWordDocumentBuilder.ContentType;
         }
         else if (string.Equals(template.Key, InvoiceDocumentTemplateEngine.OfferTemplateKey, StringComparison.OrdinalIgnoreCase))
         {
@@ -3131,9 +3131,9 @@ public class InvoicesController : ControllerBase
         }
         else
         {
-            bytes = Encoding.UTF8.GetBytes(documentHtml);
-            fileName = $"invoice-{SanitizeFilePart(documentNumber)}.doc";
-            contentType = "application/msword";
+            bytes = InvoiceStandardWordDocumentRenderer.Render(documentHtml);
+            fileName = $"invoice-{SanitizeFilePart(documentNumber)}.docx";
+            contentType = PayPlanner.Api.Services.Documents.HtmlWordDocumentBuilder.ContentType;
         }
 
         await using var stream = new MemoryStream(bytes);
@@ -3267,9 +3267,9 @@ public class InvoicesController : ControllerBase
         }
         else if (string.Equals(template.Key, InvoiceDocumentTemplateEngine.DefaultTemplateKey, StringComparison.OrdinalIgnoreCase))
         {
-            bytes = Encoding.UTF8.GetBytes(documentHtml);
-            fileName = $"invoice-{SanitizeFilePart(payment.Invoice?.Number ?? payment.Account)}.doc";
-            contentType = "application/msword";
+            bytes = InvoiceStandardWordDocumentRenderer.Render(documentHtml);
+            fileName = $"invoice-{SanitizeFilePart(payment.Invoice?.Number ?? payment.Account)}.docx";
+            contentType = PayPlanner.Api.Services.Documents.HtmlWordDocumentBuilder.ContentType;
         }
         else if (string.Equals(template.Key, InvoiceDocumentTemplateEngine.OfferTemplateKey, StringComparison.OrdinalIgnoreCase))
         {
@@ -3279,9 +3279,9 @@ public class InvoicesController : ControllerBase
         }
         else
         {
-            bytes = Encoding.UTF8.GetBytes(documentHtml);
-            fileName = $"invoice-{SanitizeFilePart(payment.Invoice?.Number ?? payment.Account)}.doc";
-            contentType = "application/msword";
+            bytes = InvoiceStandardWordDocumentRenderer.Render(documentHtml);
+            fileName = $"invoice-{SanitizeFilePart(payment.Invoice?.Number ?? payment.Account)}.docx";
+            contentType = PayPlanner.Api.Services.Documents.HtmlWordDocumentBuilder.ContentType;
         }
         var subject = string.IsNullOrWhiteSpace(request.Subject)
             ? $"Счёт №{payment.Invoice?.Number ?? payment.Account} от {(payment.Invoice?.Date ?? payment.AccountDate)?.Date:dd.MM.yyyy}"

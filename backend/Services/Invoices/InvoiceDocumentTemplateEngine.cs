@@ -657,12 +657,16 @@ public static class InvoiceDocumentTemplateEngine
             .ThenByDescending(passport => passport.UpdatedAt ?? passport.CreatedAt)
             .FirstOrDefault();
 
+        var profileFullName = BuildBuyerProfileFullName(buyerProfile);
         var name = FirstNotEmpty(
             directClient?.Name,
+            profileFullName,
             payment.CounterpartyName,
             isExpense ? "Контрагент" : "Клиент");
         var company = directClient?.Company ?? string.Empty;
-        var address = ResolveBuyerAddress(directClient);
+        var address = FirstNotEmpty(
+            ResolveBuyerAddress(directClient),
+            ResolveBuyerProfileAddress(buyerProfile));
         var passport = BuildPassport(primaryPassport);
         if (string.IsNullOrWhiteSpace(passport))
         {
@@ -671,43 +675,29 @@ public static class InvoiceDocumentTemplateEngine
 
         var inn = buyerProfile?.Inn?.Trim() ?? string.Empty;
         var snils = buyerProfile?.Snils?.Trim() ?? string.Empty;
-        var phone = directClient?.Phone ?? string.Empty;
-        var email = directClient?.Email ?? string.Empty;
+        var phone = FirstNotEmpty(
+            directClient?.Phone,
+            buyerProfile?.Phones?.FirstOrDefault(static value => !string.IsNullOrWhiteSpace(value)));
+        var email = FirstNotEmpty(
+            directClient?.Email,
+            buyerProfile?.Emails?.FirstOrDefault(static value => !string.IsNullOrWhiteSpace(value)));
         var contractValue = BuildBuyerContractValue(payment.Contract);
         var contract = string.IsNullOrWhiteSpace(contractValue)
             ? string.Empty
             : $"Договор: {contractValue}";
         var foundation = contractValue;
         var clientCase = BuildBuyerCase(payment);
-        var headlineParts = new List<string> { name };
-        if (!string.IsNullOrWhiteSpace(inn))
-        {
-            headlineParts.Add($"ИНН {inn}");
-        }
-
-        if (!string.IsNullOrWhiteSpace(snils))
-        {
-            headlineParts.Add($"СНИЛС {snils}");
-        }
-
-        var requisitesLines = new List<string>
-        {
-            string.Join(", ", headlineParts.Where(static part => !string.IsNullOrWhiteSpace(part))),
-        };
+        var requisitesLines = new List<string>();
+        AddBuyerRequisiteLine(requisitesLines, "ФИО", name);
+        AddBuyerRequisiteLine(requisitesLines, "Адрес", address);
+        AddBuyerRequisiteLine(requisitesLines, "Паспорт", RemoveLeadingLabel(passport, "Паспорт"));
+        AddBuyerRequisiteLine(requisitesLines, "СНИЛС", snils);
+        AddBuyerRequisiteLine(requisitesLines, "ИНН", inn);
+        AddBuyerRequisiteLine(requisitesLines, "Телефон", phone);
 
         if (!string.IsNullOrWhiteSpace(company) && !string.Equals(company, name, StringComparison.OrdinalIgnoreCase))
         {
-            requisitesLines.Add(company);
-        }
-
-        if (!string.IsNullOrWhiteSpace(passport))
-        {
-            requisitesLines.Add(passport);
-        }
-
-        if (!string.IsNullOrWhiteSpace(address))
-        {
-            requisitesLines.Add(address);
+            AddBuyerRequisiteLine(requisitesLines, "Организация", company);
         }
 
         return new BuyerInfo
@@ -745,6 +735,48 @@ public static class InvoiceDocumentTemplateEngine
             .FirstOrDefault(address => !string.IsNullOrWhiteSpace(address));
 
         return FirstNotEmpty(normalizedAddress, client.Address);
+    }
+
+    private static string BuildBuyerProfileFullName(BuyerProfileInfo? profile)
+        => string.Join(
+            " ",
+            new[] { profile?.LastName, profile?.FirstName, profile?.MiddleName }
+                .Where(static part => !string.IsNullOrWhiteSpace(part))
+                .Select(static part => part!.Trim()));
+
+    private static string ResolveBuyerProfileAddress(BuyerProfileInfo? profile)
+    {
+        if (profile is null)
+        {
+            return string.Empty;
+        }
+
+        var normalizedAddress = profile.AddressEntries?
+            .OrderByDescending(static address => address.IsPrimary)
+            .Select(static address => address.FullAddress?.Trim())
+            .FirstOrDefault(static address => !string.IsNullOrWhiteSpace(address));
+
+        return FirstNotEmpty(
+            normalizedAddress,
+            profile.RegistrationAddress,
+            profile.ActualAddress,
+            profile.Addresses?.FirstOrDefault(static value => !string.IsNullOrWhiteSpace(value)));
+    }
+
+    private static void AddBuyerRequisiteLine(ICollection<string> lines, string label, string? value)
+    {
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            lines.Add($"{label}: {value.Trim()}");
+        }
+    }
+
+    private static string RemoveLeadingLabel(string value, string label)
+    {
+        var normalized = value.Trim();
+        return normalized.StartsWith(label, StringComparison.OrdinalIgnoreCase)
+            ? normalized[label.Length..].TrimStart(' ', ':')
+            : normalized;
     }
 
     private static string BuildBuyerContractValue(Contract? contract)
@@ -1547,14 +1579,29 @@ public static class InvoiceDocumentTemplateEngine
 
     private sealed class BuyerProfileInfo
     {
+        public string? LastName { get; init; }
+        public string? FirstName { get; init; }
+        public string? MiddleName { get; init; }
         public string? Inn { get; init; }
         public string? Snils { get; init; }
+        public string? RegistrationAddress { get; init; }
+        public string? ActualAddress { get; init; }
+        public List<string>? Addresses { get; init; }
+        public List<ClientAddressProfileInfo>? AddressEntries { get; init; }
+        public List<string>? Phones { get; init; }
+        public List<string>? Emails { get; init; }
         public string? PassportSeries { get; init; }
         public string? PassportNumber { get; init; }
         public string? PassportIssuedBy { get; init; }
         public DateTime? PassportIssueDate { get; init; }
         public string? PassportDepartmentCode { get; init; }
         public List<ClientPassportProfileInfo>? PassportEntries { get; init; }
+    }
+
+    private sealed class ClientAddressProfileInfo
+    {
+        public bool IsPrimary { get; init; }
+        public string? FullAddress { get; init; }
     }
 
     private sealed class ClientPassportProfileInfo

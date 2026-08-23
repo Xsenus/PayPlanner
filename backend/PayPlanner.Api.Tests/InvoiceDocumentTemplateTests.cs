@@ -588,11 +588,12 @@ public class InvoiceDocumentTemplateTests
 
         var content = Assert.IsType<ContentResult>(result);
         Assert.NotNull(content.Content);
-        Assert.Contains("Тестовый клиент, ИНН 123456789012, СНИЛС 123-456-789 00", content.Content);
-        Assert.Contains("Паспорт 1234 № 567890", content.Content);
-        Assert.Contains("ИНН 123456789012", content.Content);
-        Assert.Contains("СНИЛС 123-456-789 00", content.Content);
-        Assert.Contains("Самара, ул. Тестовая, д. 1", content.Content);
+        Assert.Contains("ФИО: Тестовый клиент", content.Content);
+        Assert.Contains("Адрес: Самара, ул. Тестовая, д. 1", content.Content);
+        Assert.Contains("Паспорт: 1234 № 567890", content.Content);
+        Assert.Contains("СНИЛС: 123-456-789 00", content.Content);
+        Assert.Contains("ИНН: 123456789012", content.Content);
+        Assert.Contains("Телефон: +7 999 123-45-67", content.Content);
         Assert.Contains(">Основание:</td>", content.Content);
         Assert.Contains("Договор № DOG-42 от 15.03.2026 Договор на сопровождение", content.Content);
         Assert.Contains("Комментарий для клиента:</strong> Тестовый счет", content.Content);
@@ -602,19 +603,20 @@ public class InvoiceDocumentTemplateTests
         Assert.Contains("<td class=\"invoice-qr-cell\" style=\"width: 150px; vertical-align: top;\">", content.Content);
         Assert.DoesNotContain("class=\"brand-column\" rowspan=\"2\"", content.Content);
         Assert.DoesNotContain("Дело:", content.Content);
-        Assert.DoesNotContain("Тел.:", content.Content);
         Assert.DoesNotContain("Email:", content.Content);
 
-        var buyerNameIndex = content.Content.IndexOf("Тестовый клиент", StringComparison.Ordinal);
-        var innIndex = content.Content.IndexOf("ИНН 123456789012", StringComparison.Ordinal);
-        var snilsIndex = content.Content.IndexOf("СНИЛС 123-456-789 00", StringComparison.Ordinal);
-        var passportIndex = content.Content.IndexOf("Паспорт 1234 № 567890", StringComparison.Ordinal);
-        var addressIndex = content.Content.IndexOf("Самара, ул. Тестовая, д. 1", StringComparison.Ordinal);
+        var buyerNameIndex = content.Content.IndexOf("ФИО: Тестовый клиент", StringComparison.Ordinal);
+        var addressIndex = content.Content.IndexOf("Адрес: Самара, ул. Тестовая, д. 1", StringComparison.Ordinal);
+        var passportIndex = content.Content.IndexOf("Паспорт: 1234 № 567890", StringComparison.Ordinal);
+        var snilsIndex = content.Content.IndexOf("СНИЛС: 123-456-789 00", StringComparison.Ordinal);
+        var innIndex = content.Content.IndexOf("ИНН: 123456789012", StringComparison.Ordinal);
+        var phoneIndex = content.Content.IndexOf("Телефон: +7 999 123-45-67", StringComparison.Ordinal);
         Assert.True(buyerNameIndex >= 0, "Buyer name should be present in the rendered document.");
-        Assert.True(innIndex > buyerNameIndex, "ИНН should be rendered after the buyer name.");
-        Assert.True(snilsIndex > innIndex, "СНИЛС should be rendered after ИНН.");
-        Assert.True(passportIndex > snilsIndex, "Passport details should be rendered after СНИЛС.");
-        Assert.True(addressIndex > passportIndex, "Address should be rendered after passport details.");
+        Assert.True(addressIndex > buyerNameIndex, "Address should be rendered after the buyer name.");
+        Assert.True(passportIndex > addressIndex, "Passport details should be rendered after the address.");
+        Assert.True(snilsIndex > passportIndex, "СНИЛС should be rendered after passport details.");
+        Assert.True(innIndex > snilsIndex, "ИНН should be rendered after СНИЛС.");
+        Assert.True(phoneIndex > innIndex, "Phone should be rendered after ИНН.");
     }
 
     [Fact]
@@ -628,11 +630,42 @@ public class InvoiceDocumentTemplateTests
 
         var content = Assert.IsType<ContentResult>(result);
         Assert.NotNull(content.Content);
-        Assert.Contains("<div class=\"counterparty-line\">Тестовый клиент, ИНН 123456789012, СНИЛС 123-456-789 00</div>", content.Content);
-        Assert.Contains("<div class=\"counterparty-line\">Паспорт 1234 № 567890", content.Content);
-        Assert.Contains("<div class=\"counterparty-line\">Самара, ул. Тестовая, д. 1</div>", content.Content);
-        Assert.DoesNotContain("<br/>Паспорт", content.Content);
-        Assert.DoesNotContain("<br/>Самара", content.Content);
+        Assert.Contains("<div class=\"counterparty-line\">ФИО: Тестовый клиент</div>", content.Content);
+        Assert.Contains("<div class=\"counterparty-line\">Адрес: Самара, ул. Тестовая, д. 1</div>", content.Content);
+        Assert.Contains("<div class=\"counterparty-line\">Паспорт: 1234 № 567890", content.Content);
+        Assert.Contains("<div class=\"counterparty-line\">СНИЛС: 123-456-789 00</div>", content.Content);
+        Assert.Contains("<div class=\"counterparty-line\">ИНН: 123456789012</div>", content.Content);
+        Assert.Contains("<div class=\"counterparty-line\">Телефон: +7 999 123-45-67</div>", content.Content);
+    }
+
+    [Fact]
+    public void RenderHtml_UsesExtendedClientProfile_WhenCanonicalBuyerFieldsAreEmpty()
+    {
+        var payment = new Payment
+        {
+            Account = "profile-only",
+            Date = new DateTime(2026, 8, 23),
+            Amount = 5_000m,
+            Type = PaymentType.Income,
+            Client = new Client
+            {
+                Notes = """__PP_CLIENT_PROFILE_V2__:{"lastName":"Петрова","firstName":"Анна","middleName":"Игоревна","inn":"632100000001","snils":"111-222-333 44","phones":["+7 927 000-11-22"],"emails":["anna@example.test"],"addressEntries":[{"isPrimary":true,"fullAddress":"446200, Самарская область, г. Новокуйбышевск"}],"passportEntries":[{"series":"3616","number":"123456","issuedBy":"ГУ МВД России","issueDate":"2021-05-10T00:00:00","departmentCode":"630-001"}]}""",
+            },
+        };
+
+        var html = InvoiceDocumentTemplateEngine.RenderHtml(
+            InvoiceDocumentTemplateEngine.DefaultTemplateHtml,
+            payment,
+            [new InvoiceLineItemDto { Name = "Консультация", Quantity = 1m, Unit = "усл.", Price = 5_000m }],
+            null,
+            false);
+
+        Assert.Contains("<div class=\"counterparty-line\">ФИО: Петрова Анна Игоревна</div>", html);
+        Assert.Contains("<div class=\"counterparty-line\">Адрес: 446200, Самарская область, г. Новокуйбышевск</div>", html);
+        Assert.Contains("<div class=\"counterparty-line\">Паспорт: 3616 № 123456", html);
+        Assert.Contains("<div class=\"counterparty-line\">СНИЛС: 111-222-333 44</div>", html);
+        Assert.Contains("<div class=\"counterparty-line\">ИНН: 632100000001</div>", html);
+        Assert.Contains("<div class=\"counterparty-line\">Телефон: +7 927 000-11-22</div>", html);
     }
 
     [Fact]
@@ -1051,24 +1084,26 @@ public class InvoiceDocumentTemplateTests
 
         var content = Assert.IsType<ContentResult>(result);
         Assert.NotNull(content.Content);
-        Assert.Contains("Паспорт 1234 № 567890", content.Content);
+        Assert.Contains("Паспорт: 1234 № 567890", content.Content);
         Assert.Contains("код подразделения 123-456", content.Content);
-        Assert.Contains("ИНН 123456789012", content.Content);
-        Assert.Contains("СНИЛС 123-456-789 00", content.Content);
-        Assert.DoesNotContain("ИНН: 123456789012", content.Content);
-        Assert.DoesNotContain("СНИЛС: 123-456-789 00", content.Content);
+        Assert.Contains("ИНН: 123456789012", content.Content);
+        Assert.Contains("СНИЛС: 123-456-789 00", content.Content);
         Assert.Contains(">Основание:</td>", content.Content);
         Assert.Contains("Договор № DOG-42 от 15.03.2026 Договор на сопровождение", content.Content);
         Assert.DoesNotContain("Дело:", content.Content);
 
-        var buyerNameIndex = content.Content.IndexOf("Тестовый клиент", StringComparison.Ordinal);
-        var innIndex = content.Content.IndexOf("ИНН 123456789012", StringComparison.Ordinal);
-        var snilsIndex = content.Content.IndexOf("СНИЛС 123-456-789 00", StringComparison.Ordinal);
-        var passportIndex = content.Content.IndexOf("Паспорт 1234 № 567890", StringComparison.Ordinal);
+        var buyerNameIndex = content.Content.IndexOf("ФИО: Тестовый клиент", StringComparison.Ordinal);
+        var addressIndex = content.Content.IndexOf("Адрес: Самара, ул. Тестовая, д. 1", StringComparison.Ordinal);
+        var passportIndex = content.Content.IndexOf("Паспорт: 1234 № 567890", StringComparison.Ordinal);
+        var snilsIndex = content.Content.IndexOf("СНИЛС: 123-456-789 00", StringComparison.Ordinal);
+        var innIndex = content.Content.IndexOf("ИНН: 123456789012", StringComparison.Ordinal);
+        var phoneIndex = content.Content.IndexOf("Телефон: +7 999 123-45-67", StringComparison.Ordinal);
         Assert.True(buyerNameIndex >= 0, "Buyer name should be present in the rendered document.");
-        Assert.True(innIndex > buyerNameIndex, "ИНН should be rendered after the buyer name.");
-        Assert.True(snilsIndex > innIndex, "СНИЛС should be rendered after ИНН.");
-        Assert.True(passportIndex > snilsIndex, "Passport details should be rendered after СНИЛС.");
+        Assert.True(addressIndex > buyerNameIndex, "Address should be rendered after the buyer name.");
+        Assert.True(passportIndex > addressIndex, "Passport details should be rendered after the address.");
+        Assert.True(snilsIndex > passportIndex, "СНИЛС should be rendered after passport details.");
+        Assert.True(innIndex > snilsIndex, "ИНН should be rendered after СНИЛС.");
+        Assert.True(phoneIndex > innIndex, "Phone should be rendered after ИНН.");
     }
 
     [Fact]
@@ -1486,8 +1521,8 @@ public class InvoiceDocumentTemplateTests
         var action = await controller.GetDocument(paymentId, "xlsx", null, null, CancellationToken.None);
 
         var file = Assert.IsType<FileContentResult>(action);
-        Assert.Equal("application/msword", file.ContentType);
-        Assert.Equal("invoice-25.doc", file.FileDownloadName);
+        Assert.Equal(PayPlanner.Api.Services.Documents.HtmlWordDocumentBuilder.ContentType, file.ContentType);
+        Assert.Equal("invoice-25.docx", file.FileDownloadName);
     }
 
     [Fact]
@@ -1579,8 +1614,8 @@ public class InvoiceDocumentTemplateTests
         Assert.Equal("custom@example.com", emailService.ToEmail);
         Assert.Equal("Custom subject", emailService.Subject);
         Assert.Equal("Custom body", emailService.Body);
-        Assert.Equal("invoice-25.doc", emailService.AttachmentFileName);
-        Assert.Equal("application/msword", emailService.AttachmentContentType);
+        Assert.Equal("invoice-25.docx", emailService.AttachmentFileName);
+        Assert.Equal(PayPlanner.Api.Services.Documents.HtmlWordDocumentBuilder.ContentType, emailService.AttachmentContentType);
     }
 
     [Fact]
@@ -1621,15 +1656,15 @@ public class InvoiceDocumentTemplateTests
 
         var result = Assert.IsType<YandexDiskOperationResultDto>(action.Value);
         Assert.True(result.Success);
-        Assert.Equal("/CRM/invoice-25.doc", result.Path);
+        Assert.Equal("/CRM/invoice-25.docx", result.Path);
         Assert.NotNull(yandexDiskService.Upload);
         Assert.Equal("invoice", yandexDiskService.Upload.DocumentKind);
         Assert.Equal("Счет", yandexDiskService.Upload.DocumentType);
         Assert.Equal("25", yandexDiskService.Upload.DocumentNumber);
         Assert.Equal("Тестовый счет", yandexDiskService.Upload.DocumentTitle);
         Assert.Equal("Тестовый клиент", yandexDiskService.Upload.ClientName);
-        Assert.Equal("invoice-25.doc", yandexDiskService.Upload.OriginalFileName);
-        Assert.Equal("application/msword", yandexDiskService.Upload.ContentType);
+        Assert.Equal("invoice-25.docx", yandexDiskService.Upload.OriginalFileName);
+        Assert.Equal(PayPlanner.Api.Services.Documents.HtmlWordDocumentBuilder.ContentType, yandexDiskService.Upload.ContentType);
         Assert.True(yandexDiskService.Upload.OverwriteExisting);
         Assert.NotEmpty(yandexDiskService.UploadBytes!);
 
@@ -1644,8 +1679,8 @@ public class InvoiceDocumentTemplateTests
             && item.ObjectType == "payment"
             && item.ObjectId == paymentId);
         Assert.Equal(YandexDiskCrmSyncStatus.Success, syncState.Status);
-        Assert.Equal("/CRM/invoice-25.doc", syncState.YandexDiskPath);
-        Assert.Equal("invoice-25.doc", syncState.FileName);
+        Assert.Equal("/CRM/invoice-25.docx", syncState.YandexDiskPath);
+        Assert.Equal("invoice-25.docx", syncState.FileName);
         Assert.Equal(1, syncState.AttemptCount);
     }
 

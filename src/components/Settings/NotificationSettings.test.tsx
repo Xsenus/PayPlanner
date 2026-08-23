@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import type { NotificationSenderDto } from '../../services/api';
+import type { NotificationPurposeDto, NotificationSenderDto } from '../../services/api';
 import {
   notificationPurposesForChannel,
   notificationDeliveryChannelLabel,
@@ -61,10 +61,10 @@ describe('адаптивная раскладка уведомлений', () =>
 });
 
 describe('сценарии отправителей', () => {
-  const purposes = [
-    { key: 'telegramAuth', label: 'Вход через Telegram', description: 'Авторизация', channels: ['telegram'] as const },
-    { key: 'contractClient', label: 'Письма клиентам', description: 'Договоры', channels: ['email'] as const },
-    { key: 'manualTest', label: 'Ручные сообщения', description: 'Тест', channels: ['email', 'telegram'] as const },
+  const purposes: NotificationPurposeDto[] = [
+    { key: 'telegramAuth', label: 'Вход через Telegram', description: 'Авторизация', channels: ['telegram'] },
+    { key: 'contractClient', label: 'Письма клиентам', description: 'Договоры', channels: ['email'] },
+    { key: 'manualTest', label: 'Ручные сообщения', description: 'Тест', channels: ['email', 'telegram'] },
   ];
 
   it('показывает Email-отправителю только применимые сценарии', () => {

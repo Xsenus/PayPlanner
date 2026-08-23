@@ -43,8 +43,8 @@ public static class InvoiceStandardWordDocumentRenderer
                 throw new InvalidOperationException("Не удалось распознать реквизиты сторон стандартного счета для Word.");
             }
 
-            var foundationRow = partyCells.Length > 4
-                ? $"<tr><td colspan=\"2\">{WordParagraph(partyCells[4], "12pt")}</td></tr>"
+            var foundationRow = partyCells.Length > 5
+                ? $"<tr><td width=\"102\" style=\"width:76pt;font-weight:700\">{WordParagraph(partyCells[4], "12pt")}</td><td width=\"573\" style=\"width:430pt\">{WordParagraph(partyCells[5], "12pt")}</td></tr>"
                 : string.Empty;
             parties = $$"""
 <tr><td width="102" style="width:76pt;font-weight:700">{{WordParagraph(partyCells[0], "12pt")}}</td><td width="573" style="width:430pt">{{WordParagraph(partyCells[1], "12pt")}}</td></tr>
@@ -97,16 +97,14 @@ public static class InvoiceStandardWordDocumentRenderer
     .bank-row-5 > td > p:first-child { position: relative; top: -14pt; }
     .bank-caption { margin-top: 7pt; }
     .title { width: 506pt; margin-top: -14pt; padding: 0 0 5pt; border-bottom: 1.5pt solid #000; text-align: center; font-size: 15pt; line-height: 17pt; font-weight: 700; }
-    .parties { width: 506pt; table-layout: fixed; margin-top: 24.5pt; }
+    .parties { width: 506pt; table-layout: fixed; margin-top: 7pt; }
     .parties td { padding: 0 2.8pt; vertical-align: top; line-height: 12pt; }
     .parties .counterparty-label { width: 76pt; font-weight: 700; }
     .parties .counterparty-value { width: 430pt; padding-left: 0; }
-    .parties tr:nth-child(1) td { padding-bottom: 23.7pt; }
-    .parties tr:nth-child(2) td { padding-bottom: 19.8pt; }
-    .items { width: 506pt; table-layout: fixed; margin-top: 22.8pt; }
+    .items { width: 506pt; table-layout: fixed; margin-top: 8pt; }
     .items th, .items td { border: .75pt solid #000; padding: 0 2.8pt; line-height: 10pt; }
     .items th { height: 17pt; text-align: center; vertical-align: middle; font-size: 9pt; }
-    .items td { height: 78pt; vertical-align: top; }
+    .items td { height: 26pt; vertical-align: top; }
     .items td.name { position: relative; top: -.5pt; }
     .items .num { width: 25.5pt; text-align: center; vertical-align: middle; }
     .items .name { width: 247pt; }
@@ -114,14 +112,14 @@ public static class InvoiceStandardWordDocumentRenderer
     .items .unit { width: 25.5pt; text-align: center; vertical-align: middle; }
     .items .price { width: 76pt; text-align: right; vertical-align: middle; }
     .items .sum { width: 91.5pt; text-align: right; vertical-align: middle; }
-    .totals { width: 177pt; margin: 23pt 0 0 318pt; }
+    .totals { width: 250pt; margin: 8pt 0 0 256pt; }
     .totals td { height: 12pt; padding: 0; line-height: 10pt; mso-line-height-rule: exactly; }
-    .totals .totals-label { width: 103pt; text-align: right; padding-right: 5.7pt; }
-    .totals .totals-value { width: 74pt; text-align: right; font-weight: 700; }
-    .summary { margin-top: 15.5pt; }
+    .totals .totals-label { width: 90pt; text-align: right; padding-right: 5.7pt; }
+    .totals .totals-value { width: 160pt; text-align: right; font-weight: 700; }
+    .summary { margin-top: 8pt; }
     .words { margin-top: -6pt; font-weight: 700; }
     .rule { margin-top: 4pt; border-bottom: 1.5pt solid #000; }
-    .signature { width: 506pt; table-layout: fixed; margin-top: 94pt; }
+    .signature { width: 506pt; table-layout: fixed; margin-top: 24pt; }
     .signature td { vertical-align: bottom; }
     .signature .signature-line { position: relative; overflow: visible; height: 18pt; border-bottom: .75pt solid #000; text-align: center; }
     .signature .signature-line .signature { width: 67.5pt; height: 37.5pt; position: absolute; left: 50%; bottom: 0; margin-left: 11pt; }
@@ -146,6 +144,7 @@ public static class InvoiceStandardWordDocumentRenderer
   <div class="rule"></div>
   {{Spacer("21.8pt")}}
   <table class="signature" width="675">{{signature}}</table>
+  {{Spacer("1pt")}}
 </body>
 </html>
 """;
@@ -172,10 +171,10 @@ public static class InvoiceStandardWordDocumentRenderer
     internal static IReadOnlyList<WordImageOverlay> BuildImageOverlays(string html, bool offer)
     {
         var overlays = new List<WordImageOverlay>(4);
-        AddImageOverlay(overlays, html, "logo", 415, 31.5, 132.8, 75, "Логотип", 4, beforeHtml: offer);
-        AddImageOverlay(overlays, html, "invoice-qr", 435.3, 117, 112.5, 112.5, "QR-код", 3, beforeHtml: offer);
-        AddImageOverlay(overlays, html, "seal", offer ? 142 : 300.5, offer ? 333 : 577.9, 112.4, 113.2, "Печать", 1, beforeHtml: false);
-        AddImageOverlay(overlays, html, "signature", offer ? 47.5 : 225.9, offer ? 290.8 : 586.9, offer ? 95.8 : 67.5, offer ? 53.2 : 37.5, "Подпись", 2, beforeHtml: false);
+        AddImageOverlay(overlays, html, "logo", 415, 31.5, 132.8, 75, "Логотип", 4, beforeHtml: true);
+        AddImageOverlay(overlays, html, "invoice-qr", 435.3, 117, 112.5, 112.5, "QR-код", 3, beforeHtml: true);
+        AddImageOverlay(overlays, html, "seal", offer ? 142 : 300.5, offer ? 333 : 735, offer ? 112.4 : 100, offer ? 113.2 : 100, "Печать", 1, beforeHtml: false);
+        AddImageOverlay(overlays, html, "signature", offer ? 47.5 : 225.9, offer ? 290.8 : 740, offer ? 95.8 : 67.5, offer ? 53.2 : 37.5, "Подпись", 2, beforeHtml: false);
         return overlays;
     }
 

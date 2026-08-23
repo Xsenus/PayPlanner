@@ -1527,7 +1527,7 @@ describe('MoneyOperations integration', () => {
     render(<MoneyOperations source="Cash" />);
 
     await screen.findByRole('heading', { name: 'Инвентаризация кассы' });
-    await user.click(screen.getByRole('button', { name: 'Провести', exact: true }));
+    await user.click(screen.getByRole('button', { name: 'Провести' }));
 
     expect(createCashInventoryMock).not.toHaveBeenCalled();
     expect(toastErrorMock).toHaveBeenCalledWith('Укажите фактический остаток кассы.', 'Касса');

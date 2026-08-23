@@ -20,7 +20,7 @@ public class InvoiceStandardWordDocumentRendererTests
 <table><tr><td class="doc-title">ИП Тестовый Т. Т.</td><td class="logo-wrap">{{imageTag}} class="logo" /></td></tr></table>
 <table><tr><td><table class="bank-grid"><tr>{{bankCells}}</tr></table></td><td class="invoice-qr-cell">{{imageTag}} class="invoice-qr" /></td></tr></table>
 <div class="doc-main-title text-c">Счет № 28 от 5 апреля 2026 г.</div>
-<table class="counterparty-table"><tr><td>Поставщик:</td><td>ИП Тестовый Т. Т.</td></tr><tr><td>Покупатель:</td><td>Тестовый клиент</td></tr></table>
+<table class="counterparty-table"><tr><td>Поставщик:</td><td>ИП Тестовый Т. Т.</td></tr><tr><td>Покупатель:</td><td>Тестовый клиент</td></tr><tr><td>Основание:</td><td>Договор № 42</td></tr></table>
 <table class="items-table"><tr><th class="num">№</th><th class="name">Товар</th><th class="qty">Кол-во</th><th class="unit">Ед.</th><th class="price">Цена</th><th class="vat">НДС</th><th class="sum">Сумма</th></tr><tr><td class="num">1</td><td class="name">Услуга</td><td class="qty">1</td><td class="unit">шт.</td><td class="price">100,00</td><td class="vat">-</td><td class="sum">100,00</td></tr></table>
 <table class="totals-table"><tr><td class="totals-label">Итого:</td><td class="totals-value">100,00</td></tr></table>
 <div class="summary-line">Всего наименований 1, на сумму 100,00 руб.</div><div class="words">Сто рублей 00 копеек</div>
@@ -36,6 +36,7 @@ public class InvoiceStandardWordDocumentRendererTests
 
         var chunk = ReadText(archive, "word/afchunk.html");
         Assert.DoesNotContain("data:image", chunk, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Договор № 42", chunk, StringComparison.Ordinal);
 
         var documentXml = ReadText(archive, "word/document.xml");
         Assert.Contains("<wp:posOffset>5270500</wp:posOffset>", documentXml, StringComparison.Ordinal);
