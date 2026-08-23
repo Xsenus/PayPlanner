@@ -1,3 +1,4 @@
+using System.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -129,29 +130,39 @@ public class ClientBalancesController : ControllerBase
             return Forbid();
         }
 
-        var result = await ClientBalanceService.ApplyCreditAsync(
-            _db,
-            clientId,
-            request.PaymentId,
-            request.Amount,
-            DateTime.UtcNow,
-            HttpContext,
-            ct,
-            description: request.Description,
-            sourcePaymentId: request.SourcePaymentId);
-
-        if (!result.Success)
+        try
         {
-            return BadRequest(new { message = result.Error });
+            await using var transaction = await _db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
+            var result = await ClientBalanceService.ApplyCreditAsync(
+                _db,
+                clientId,
+                request.PaymentId,
+                request.Amount,
+                DateTime.UtcNow,
+                HttpContext,
+                ct,
+                description: request.Description,
+                sourcePaymentId: request.SourcePaymentId);
+
+            if (!result.Success)
+            {
+                return BadRequest(new { message = result.Error });
+            }
+
+            await _db.SaveChangesAsync(ct);
+
+            var balance = await ClientBalanceService.GetBalanceAsync(_db, clientId, ct);
+            await transaction.CommitAsync(ct);
+            return Ok(new
+            {
+                appliedAmount = result.AppliedAmount,
+                balance = Math.Round(balance, 2, MidpointRounding.AwayFromZero),
+            });
         }
-
-        await _db.SaveChangesAsync(ct);
-
-        var balance = await ClientBalanceService.GetBalanceAsync(_db, clientId, ct);
-        return Ok(new
+        catch (Exception exception) when (FinancialConcurrencyGuard.IsSerializationFailure(exception))
         {
-            appliedAmount = result.AppliedAmount,
-            balance = Math.Round(balance, 2, MidpointRounding.AwayFromZero),
-        });
+            _db.ChangeTracker.Clear();
+            return Conflict(new { message = FinancialConcurrencyGuard.ConflictMessage });
+        }
     }
 }
