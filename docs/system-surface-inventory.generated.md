@@ -7,9 +7,9 @@
 
 - Разделов frontend: 49.
 - Backend-контроллеров: 67.
-- HTTP endpoints: 806; с прямой тестовой связью: 537.
+- HTTP endpoints: 806; с прямой тестовой связью: 539.
 - HTTP endpoints с точной ссылкой из документации: 185; критичных без такой ссылки: 482.
-- Критичных endpoints без прямой тестовой связи: 225.
+- Критичных endpoints без прямой тестовой связи: 224.
 - Реальных HTML-форм: 17; с найденной тестовой связью: 15.
 - Фоновых сервисов: 27; с найденной тестовой связью: 24.
 - Исходящих HTTP-интеграций: 12; с найденной тестовой связью: 12.
@@ -29,7 +29,7 @@
 | reports | (permissions) => permissions.reports.canView | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md, docs/full-project-audit-2026-06-10.md, docs/report-inventory-2026-08-09.md |
 | calculator | (permissions) => permissions.calculator.canView | да | docs/full-project-audit-2026-06-10.md |
 | legalEntities | (permissions) => permissions.legalEntities.canView | да | docs/full-project-audit-2026-06-10.md |
-| cases | (permissions) => permissions.cases.canView | да | docs/case-access-query-optimization.md, docs/case-conversation-current-state-2026-07-08.md, docs/case-detail-query-optimization.md, docs/case-registry-query-optimization.md, docs/crm-legal-module-acceptance-checklist.md, docs/full-project-audit-2026-06-10.md, docs/full-system-quality-roadmap-2026-08-04.md |
+| cases | (permissions) => permissions.cases.canView | да | docs/case-access-query-optimization.md, docs/case-conversation-current-state-2026-07-08.md, docs/case-detail-query-optimization.md, docs/case-registry-query-optimization.md, docs/crm-legal-module-acceptance-checklist.md, docs/full-project-audit-2026-06-10.md |
 | caseDetail | (permissions) => permissions.cases.canView | да | docs/full-project-audit-2026-06-10.md |
 | clients | (permissions) => permissions.clients.canView | да | docs/final-acceptance-2026-06-10.md, docs/full-project-audit-2026-06-10.md |
 | contacts | (permissions) => permissions.clients.canView \|\| permissions.legalEntities.canView | да | docs/contacts-directory-implementation-log.md, docs/full-project-audit-2026-06-10.md |
@@ -112,9 +112,9 @@
 | InvoicePaymentStateReconciliationService | backend/Services/InvoicePaymentStateReconciliationService.cs | 7 | да | docs/full-project-audit-2026-06-10.md, docs/hosted-service-lifecycle-coverage-2026-06-10.md, docs/invoice-payment-status-automation-note.md |
 | ClientCaseCourtSyncSchedulerService | backend/Services/LegalIntegrations/ClientCaseCourtSyncSchedulerService.cs | 14 | да | docs/full-project-audit-2026-06-10.md, docs/hosted-service-lifecycle-coverage-2026-06-10.md, docs/tz-crm-court-sync-roadmap-2026-07-08.md |
 | CourtSyncMetricsRollupService | backend/Services/LegalIntegrations/CourtSyncMetricsRollupService.cs | 8 | да | docs/hosted-service-lifecycle-coverage-2026-06-10.md |
-| MessengerDocumentOutboxWorker | backend/Services/MessengerDocumentOutboxService.cs | 276 | нет | нет |
+| MessengerDocumentOutboxWorker | backend/Services/MessengerDocumentOutboxService.cs | 288 | нет | нет |
 | MoneyBalanceReconciliationSchedulerService | backend/Services/MoneyBalanceReconciliationSchedulerService.cs | 10 | да | docs/date-time-inventory.md, docs/full-project-audit-2026-06-10.md, docs/hosted-service-lifecycle-coverage-2026-06-10.md |
-| MaxOutboxWorker | backend/Services/Notifications/MaxOutboxService.cs | 353 | нет | нет |
+| MaxOutboxWorker | backend/Services/Notifications/MaxOutboxService.cs | 366 | нет | нет |
 | NotificationDeliveryRetentionService | backend/Services/Notifications/NotificationDeliveryRetentionService.cs | 6 | да | docs/batch-operations-audit-coverage-2026-06-10.md, docs/full-project-audit-2026-06-10.md, docs/hosted-service-lifecycle-coverage-2026-06-10.md |
 | NotificationRetrySchedulerService | backend/Services/Notifications/NotificationRetrySchedulerService.cs | 8 | да | docs/full-project-audit-2026-06-10.md, docs/hosted-service-lifecycle-coverage-2026-06-10.md |
 | SmsChannelMonitoringService | backend/Services/Notifications/SmsChannelMonitoringService.cs | 122 | да | нет |
@@ -134,8 +134,8 @@
 | Сервис | Файл:строка | Документация |
 | --- | --- | --- |
 | ExternalCalendarTaskSyncOutboxWorker | backend/Services/ExternalCalendarTaskSyncOutboxService.cs:194 | нет |
-| MessengerDocumentOutboxWorker | backend/Services/MessengerDocumentOutboxService.cs:276 | нет |
-| MaxOutboxWorker | backend/Services/Notifications/MaxOutboxService.cs:353 | нет |
+| MessengerDocumentOutboxWorker | backend/Services/MessengerDocumentOutboxService.cs:288 | нет |
+| MaxOutboxWorker | backend/Services/Notifications/MaxOutboxService.cs:366 | нет |
 
 ## Контроллеры
 
@@ -245,7 +245,7 @@
 | DELETE | api/auth/admin/users/{id:int} | AdminUsersController.DeleteUser | изменение данных, чувствительные данные или операция | backend/Controllers/AdminUsersController.cs:116 |
 | POST | api/auth/admin/users/{id:int}/approve | AdminUsersController.ApproveUser | изменение данных, чувствительные данные или операция | backend/Controllers/AdminUsersController.cs:146 |
 | POST | api/auth/admin/users/{id:int}/reject | AdminUsersController.RejectUser | изменение данных, чувствительные данные или операция | backend/Controllers/AdminUsersController.cs:159 |
-| POST | api/contacts/imports/yealink | ContactsController.ImportYealinkXml | изменение данных, чувствительные данные или операция | backend/Controllers/ContactsController.cs:738 |
+| POST | api/contacts/imports/yealink | ContactsController.ImportYealinkXml | изменение данных, чувствительные данные или операция | backend/Controllers/ContactsController.cs:785 |
 | POST | api/database/backups | DatabaseAdminController.CreateBackupAsync | изменение данных, чувствительные данные или операция | backend/Controllers/DatabaseAdminController.cs:101 |
 | DELETE | api/database/backups/all | DatabaseAdminController.DeleteAllBackupsAsync | изменение данных, чувствительные данные или операция | backend/Controllers/DatabaseAdminController.cs:185 |
 | DELETE | api/database/backups/file | DatabaseAdminController.DeleteBackupAsync | изменение данных, чувствительные данные или операция | backend/Controllers/DatabaseAdminController.cs:163 |
@@ -426,7 +426,6 @@
 | GET | api/notifications/settings | NotificationsController.GetSettings | чувствительные данные или операция | backend/Controllers/NotificationsController.cs:42 |
 | PUT | api/notifications/templates/{key} | NotificationsController.UpdateTemplate | изменение данных | backend/Controllers/NotificationsController.cs:99 |
 | POST | api/notifications/templates/{key}/reset | NotificationsController.ResetTemplate | изменение данных | backend/Controllers/NotificationsController.cs:116 |
-| POST | api/object-audit/{objectType}/{objectId:int}/restore | ObjectAuditController.RestoreObject | изменение данных | backend/Controllers/ObjectAuditController.cs:267 |
 | POST | api/portal/admin/access | ClientPortalAdminController.SaveAccess | изменение данных | backend/Controllers/ClientPortalAdminController.cs:13 |
 | DELETE | api/portal/admin/accounts/{accountId:int} | ClientPortalAdminController.Revoke | изменение данных | backend/Controllers/ClientPortalAdminController.cs:91 |
 | DELETE | api/portal/admin/accounts/{accountId:int}/cases/{caseId:int} | ClientPortalAdminController.RevokeCaseAccess | изменение данных | backend/Controllers/ClientPortalAdminController.cs:119 |
@@ -550,9 +549,9 @@
 | GET | api/cash-orders/{id:int}/print | CashOrdersController | Print | backend/Controllers/CashOrdersController.cs:864 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
 | GET | api/cash-orders/{id:int}/pdf | CashOrdersController | DownloadPdf | backend/Controllers/CashOrdersController.cs:894 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
 | GET | api/cash-orders/{id:int}/word | CashOrdersController | DownloadWord | backend/Controllers/CashOrdersController.cs:932 | [Authorize] | нет | нет |
-| GET |  | ClientBalancesController | GetSummary | backend/Controllers/ClientBalancesController.cs:57 | не задано | да | нет |
-| GET | transactions | ClientBalancesController | GetTransactions | backend/Controllers/ClientBalancesController.cs:78 | не задано | да | docs/delete-behavior-contract-2026-06-10.md |
-| POST | apply | ClientBalancesController | ApplyCredit | backend/Controllers/ClientBalancesController.cs:116 | не задано | да | docs/file-upload-limits-2026-06-10.md, docs/full-project-audit-2026-06-10.md |
+| GET |  | ClientBalancesController | GetSummary | backend/Controllers/ClientBalancesController.cs:58 | не задано | да | нет |
+| GET | transactions | ClientBalancesController | GetTransactions | backend/Controllers/ClientBalancesController.cs:79 | не задано | да | docs/delete-behavior-contract-2026-06-10.md |
+| POST | apply | ClientBalancesController | ApplyCredit | backend/Controllers/ClientBalancesController.cs:117 | не задано | да | docs/file-upload-limits-2026-06-10.md, docs/full-project-audit-2026-06-10.md |
 | GET |  | ClientPassportController | Get | backend/Controllers/ClientPassportController.cs:30 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Clients)] | да | нет |
 | PUT |  | ClientPassportController | Upsert | backend/Controllers/ClientPassportController.cs:70 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Clients)]; [RequireSectionPermission(RolePermissionCatalog.Clients, RequireSectionPermissionOperations.Edit)] | да | нет |
 | POST | api/portal/admin/access | ClientPortalAdminController | SaveAccess | backend/Controllers/ClientPortalAdminController.cs:13 | [Authorize(Policy = "Admin")] | нет | нет |
@@ -588,14 +587,14 @@
 | POST | api/[controller]/bulk-delete | ClientsController | BulkDelete | backend/Controllers/ClientsController.cs:1393 | [Authorize] | да | нет |
 | POST | api/[controller]/change-responsible | ClientsController | ChangeResponsible | backend/Controllers/ClientsController.cs:1460 | [Authorize] | да | нет |
 | GET | api/contacts | ContactsController | GetAll | backend/Controllers/ContactsController.cs:53 | [Authorize] | да | docs/contacts-directory-implementation-log.md, docs/full-project-audit-2026-06-10.md |
-| PUT | api/contacts/clients/{id:int} | ContactsController | UpdateClientContact | backend/Controllers/ContactsController.cs:203 | [Authorize] | да | нет |
-| POST | api/contacts/external | ContactsController | CreateExternalContact | backend/Controllers/ContactsController.cs:274 | [Authorize] | да | нет |
-| PUT | api/contacts/external/{id:int} | ContactsController | UpdateExternalContact | backend/Controllers/ContactsController.cs:368 | [Authorize] | да | нет |
-| DELETE | api/contacts/external/{id:int} | ContactsController | DeleteExternalContact | backend/Controllers/ContactsController.cs:470 | [Authorize] | да | нет |
-| POST | api/contacts/external/{id:int}/promote | ContactsController | PromoteExternalContact | backend/Controllers/ContactsController.cs:496 | [Authorize] | да | нет |
-| GET | api/contacts/exports/yealink | ContactsController | DownloadYealinkXml | backend/Controllers/ContactsController.cs:637 | [Authorize] | да | docs/contacts-directory-implementation-log.md |
-| GET | api/contacts/phonebook/yealink/{token} | ContactsController | GetYealinkRemotePhonebook | backend/Controllers/ContactsController.cs:694 | публичный ([AllowAnonymous]) | да | docs/contacts-directory-implementation-log.md |
-| POST | api/contacts/imports/yealink | ContactsController | ImportYealinkXml | backend/Controllers/ContactsController.cs:738 | [Authorize] | нет | docs/contacts-directory-implementation-log.md |
+| PUT | api/contacts/clients/{id:int} | ContactsController | UpdateClientContact | backend/Controllers/ContactsController.cs:250 | [Authorize] | да | нет |
+| POST | api/contacts/external | ContactsController | CreateExternalContact | backend/Controllers/ContactsController.cs:321 | [Authorize] | да | нет |
+| PUT | api/contacts/external/{id:int} | ContactsController | UpdateExternalContact | backend/Controllers/ContactsController.cs:415 | [Authorize] | да | нет |
+| DELETE | api/contacts/external/{id:int} | ContactsController | DeleteExternalContact | backend/Controllers/ContactsController.cs:517 | [Authorize] | да | нет |
+| POST | api/contacts/external/{id:int}/promote | ContactsController | PromoteExternalContact | backend/Controllers/ContactsController.cs:543 | [Authorize] | да | нет |
+| GET | api/contacts/exports/yealink | ContactsController | DownloadYealinkXml | backend/Controllers/ContactsController.cs:684 | [Authorize] | да | docs/contacts-directory-implementation-log.md |
+| GET | api/contacts/phonebook/yealink/{token} | ContactsController | GetYealinkRemotePhonebook | backend/Controllers/ContactsController.cs:741 | публичный ([AllowAnonymous]) | да | docs/contacts-directory-implementation-log.md |
+| POST | api/contacts/imports/yealink | ContactsController | ImportYealinkXml | backend/Controllers/ContactsController.cs:785 | [Authorize] | нет | docs/contacts-directory-implementation-log.md |
 | GET | api/[controller] | ContractsController | Get | backend/Controllers/ContractsController.cs:309 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
 | GET | api/[controller]/{id:int} | ContractsController | GetById | backend/Controllers/ContractsController.cs:342 | [Authorize] | да | нет |
 | GET | api/[controller]/{id:int}/document | ContractsController | GetDocument | backend/Controllers/ContractsController.cs:363 | [Authorize] | да | нет |
@@ -811,9 +810,9 @@
 | POST | api/legal-entities/suggest | LegalEntitiesController | Suggest | backend/Controllers/LegalEntitiesController.cs:1951 | [Authorize] | да | нет |
 | PUT | api/legal-entities/{id:int} | LegalEntitiesController | Update | backend/Controllers/LegalEntitiesController.cs:1977 | [Authorize] | да | нет |
 | POST | api/legal-entities/migrate-legacy-addresses | LegalEntitiesController | MigrateLegacyAddresses | backend/Controllers/LegalEntitiesController.cs:2116 | [Authorize]; [Authorize(Policy = "Admin")] | да | нет |
-| GET |  | LegalEntityBalancesController | GetSummary | backend/Controllers/LegalEntityBalancesController.cs:57 | не задано | да | нет |
-| GET | transactions | LegalEntityBalancesController | GetTransactions | backend/Controllers/LegalEntityBalancesController.cs:78 | не задано | да | docs/delete-behavior-contract-2026-06-10.md |
-| POST | apply | LegalEntityBalancesController | ApplyCredit | backend/Controllers/LegalEntityBalancesController.cs:116 | не задано | да | docs/file-upload-limits-2026-06-10.md, docs/full-project-audit-2026-06-10.md |
+| GET |  | LegalEntityBalancesController | GetSummary | backend/Controllers/LegalEntityBalancesController.cs:58 | не задано | да | нет |
+| GET | transactions | LegalEntityBalancesController | GetTransactions | backend/Controllers/LegalEntityBalancesController.cs:79 | не задано | да | docs/delete-behavior-contract-2026-06-10.md |
+| POST | apply | LegalEntityBalancesController | ApplyCredit | backend/Controllers/LegalEntityBalancesController.cs:117 | не задано | да | docs/file-upload-limits-2026-06-10.md, docs/full-project-audit-2026-06-10.md |
 | POST | api/max/link | MaxMessengerController | CreateLink | backend/Controllers/MaxMessengerController.cs:22 | [Authorize] | нет | нет |
 | DELETE | api/max/link | MaxMessengerController | OptOut | backend/Controllers/MaxMessengerController.cs:29 | [Authorize] | нет | нет |
 | POST | api/max/messages | MaxMessengerController | QueueMessage | backend/Controllers/MaxMessengerController.cs:36 | [Authorize]; [Authorize(Roles = "admin")] | нет | нет |
@@ -903,8 +902,8 @@
 | POST | api/notifications/users/{id:int}/issue-password | NotificationsController | IssuePassword | backend/Controllers/NotificationsController.cs:569 | [Authorize] | нет | нет |
 | GET | api/object-audit | ObjectAuditController | GetEvents | backend/Controllers/ObjectAuditController.cs:37 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
 | GET | api/object-audit/{objectType}/{objectId:int} | ObjectAuditController | GetHistory | backend/Controllers/ObjectAuditController.cs:187 | [Authorize] | да | нет |
-| GET | api/object-audit/deleted/{objectType} | ObjectAuditController | GetDeletedObjects | backend/Controllers/ObjectAuditController.cs:233 | [Authorize] | нет | нет |
-| POST | api/object-audit/{objectType}/{objectId:int}/restore | ObjectAuditController | RestoreObject | backend/Controllers/ObjectAuditController.cs:267 | [Authorize] | нет | нет |
+| GET | api/object-audit/deleted/{objectType} | ObjectAuditController | GetDeletedObjects | backend/Controllers/ObjectAuditController.cs:233 | [Authorize] | да | нет |
+| POST | api/object-audit/{objectType}/{objectId:int}/restore | ObjectAuditController | RestoreObject | backend/Controllers/ObjectAuditController.cs:267 | [Authorize] | да | нет |
 | GET | api/[controller] | PaymentsController | Get | backend/Controllers/PaymentsController.cs:361 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |
 | GET | api/[controller]/{id:int} | PaymentsController | GetById | backend/Controllers/PaymentsController.cs:394 | [Authorize] | да | нет |
 | POST | api/[controller] | PaymentsController | Create | backend/Controllers/PaymentsController.cs:417 | [Authorize] | да | docs/full-project-audit-2026-06-10.md |

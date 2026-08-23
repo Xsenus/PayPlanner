@@ -160,10 +160,13 @@ public sealed class SmsProviderResilienceExecutorTests
 
         await executor.SendAsync(Request);
         timeProvider.Advance(TimeSpan.FromMinutes(1));
-        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(20));
+        using var cancellation = new CancellationTokenSource();
+        var probe = executor.SendAsync(Request, cancellation.Token);
+        await provider.ProbeStarted.WaitAsync(TimeSpan.FromSeconds(5));
+        await cancellation.CancelAsync();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
-            () => executor.SendAsync(Request, cancellation.Token));
+            () => probe);
 
         Assert.Equal(SmsProviderCircuitStates.Open, executor.GetCircuitSnapshot().State);
         var blocked = await executor.SendAsync(Request);
@@ -290,7 +293,11 @@ public sealed class SmsProviderResilienceExecutorTests
 
     private sealed class CancelledProbeSmsProvider : TestSmsProvider
     {
+        private readonly TaskCompletionSource _probeStarted =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
         public int Attempts { get; private set; }
+        public Task ProbeStarted => _probeStarted.Task;
 
         public override async Task<SmsProviderSendResult> SendAsync(
             SmsProviderSendRequest request,
@@ -302,6 +309,7 @@ public sealed class SmsProviderResilienceExecutorTests
                 return TransientFailure("temporary");
             }
 
+            _probeStarted.TrySetResult();
             await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
             throw new InvalidOperationException("Unreachable.");
         }

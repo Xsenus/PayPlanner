@@ -1,6 +1,6 @@
 # Инвентаризация дат и времени
 
-Сгенерировано: 2026-08-23T14:01:41.984Z
+Сгенерировано: 2026-08-23T14:25:01.406Z
 
 Этот отчет собирает места, где проект работает с датами, временем, периодами, экспортами и календарными интеграциями. Его задача - помочь переводить систему на единое правило: хранение в UTC плюс явный timezone ID пользователя или организации.
 
@@ -12,8 +12,8 @@ npm run audit:dates
 
 ## Сводка
 
-- Проверено файлов: 2035
-- Найдено совпадений: 11164
+- Проверено файлов: 2036
+- Найдено совпадений: 11165
 
 | Категория | Совпадений | Что проверить |
 | --- | ---: | --- |
@@ -23,7 +23,7 @@ npm run audit:dates
 | Ручные смещения времени | 941 | Жестко заданные часовые пояса и смещения, которые нельзя оставлять для пользователей из разных регионов. |
 | Frontend: работа с датами | 753 | JS/TS места, где браузер может применить локальную timezone пользователя автоматически. |
 | Фильтры и периоды | 1148 | Параметры диапазонов дат в API и UI, где важны границы дня в timezone пользователя. |
-| Экспорты, импорты и файлы | 1598 | Выгрузки и импорты, где дату надо отдавать в понятной timezone, а не в случайном серверном времени. |
+| Экспорты, импорты и файлы | 1599 | Выгрузки и импорты, где дату надо отдавать в понятной timezone, а не в случайном серверном времени. |
 | Интеграции календарей | 336 | Google/Yandex/ICS синхронизация, где надо хранить UTC и передавать timezone ID. |
 
 ## Файлы с наибольшим количеством совпадений
@@ -845,7 +845,7 @@ npm run audit:dates
 | --- | ---: | --- | --- |
 | `backend/AppReleases/releases.json` | 5 | `+07:00` | "releasedAt": "2026-08-23T21:00:00+07:00", |
 | `backend/AppReleases/releases.json` | 28 | `+07:00` | "releasedAt": "2026-08-23T20:42:00+07:00", |
-| `backend/AppReleases/releases.json` | 47 | `+07:00` | "releasedAt": "2026-08-23T20:22:00+07:00", |
+| `backend/AppReleases/releases.json` | 47 | `+07:00` | "releasedAt": "2026-08-23T20:37:00+07:00", |
 | `backend/AppReleases/releases.json` | 66 | `+07:00` | "releasedAt": "2026-08-23T20:35:00+07:00", |
 | `backend/AppReleases/releases.json` | 89 | `+07:00` | "releasedAt": "2026-08-23T09:25:00+07:00", |
 | `backend/AppReleases/releases.json` | 108 | `+07:00` | "releasedAt": "2026-08-23T02:05:00+07:00", |
@@ -1867,7 +1867,7 @@ JS/TS места, где браузер может применить локал
 | `backend/Controllers/InvoicesController.cs` | 3309 | `PDF` | "PDF-генератор не зарегистрирован на сервере. Проверьте настройки приложения."); |
 | `backend/Controllers/MessengerDocumentDeliveriesController.cs` | 181 | `PDF` | return BadRequest(new { message = "Сформированный PDF не передан." }); |
 | `backend/Controllers/MessengerDocumentDeliveriesController.cs` | 257 | `DownloadCount` | item.DownloadCount, |
-| Еще 1348 совпадений | - | - | Категория ограничена первыми 250 строками, полное количество указано в сводке. |
+| Еще 1349 совпадений | - | - | Категория ограничена первыми 250 строками, полное количество указано в сводке. |
 
 ### Интеграции календарей
 
@@ -2113,13 +2113,13 @@ Google/Yandex/ICS синхронизация, где надо хранить UTC
 | `docs/archive/roadmaps/calendar-specific-employee-access-roadmap-2026-06-17.md` | 213 | `Google Calendar` | - Выполнено: внешний сценарий реализован для Google Calendar и Яндекс.Календаря на базе фактической видимости календаря роли. |
 | `docs/archive/roadmaps/calendar-specific-employee-access-roadmap-2026-06-17.md` | 239 | `Google Calendar` | - [x] Проверить Google Calendar. |
 | `docs/archive/roadmaps/calendar-specific-employee-access-roadmap-2026-06-17.md` | 241 | `Google Calendar` | - Выполнено: покрыто unit-тестами Google Calendar sync; реальный аккаунт остается acceptance после деплоя. |
+| `docs/archive/roadmaps/full-system-quality-roadmap-2026-08-04.md` | 115 | `Google Calendar` | Оставшиеся анонимные маршруты Google Calendar, Яндекс.Календаря, Яндекс.Диска, Telegram, MAX, feature flags и health получили централизованные ограничения по IP и маршруту; тела webhook ограничены до разбора JSON. OAuth- |
+| `docs/archive/roadmaps/full-system-quality-roadmap-2026-08-04.md` | 135 | `Google Calendar` | Обе карточки задачи проверены в локальном браузере на одних и тех же данных: legacy и modern одинаково показывают основного и дополнительного исполнителя с полными ФИО и email, постановщика, согласующих, наблюдателей и р |
 | `docs/archive/roadmaps/remaining-roadmap.md` | 251 | `Google Calendar` | - `[x]` 2026-06-23: пользовательские действия Google Calendar и Яндекс.Календаря в режиме `adminManaged` больше не доверяют старому `admin` claim и проверяют актуальную роль пользователя в БД перед изменением личной синх |
 | `docs/batch-operations-audit-coverage-2026-06-10.md` | 22 | `Google Calendar` | \| `backend/Services/GoogleCalendarSyncService.cs:190` \| `ExecuteUpdateAsync` \| Один ожидающий OAuth-запрос подключения Google Calendar \| Персональный объектный аудит не создаётся: техническая строка хранит собственный ст |
 | `docs/crm-legal-module-gap-report-2026-05-25.md` | 117 | `Google Calendar` | - диагностика календарных провайдеров в настройках интеграций: ICS активен, Google Calendar и Яндекс Календарь явно показывают статус feature flag/OAuth до запуска двусторонней синхронизации; |
 | `docs/crm-legal-module-gap-report-2026-05-25.md` | 129 | `Google Calendar` | - Google Calendar и Яндекс Календарь; |
 | `docs/full-project-audit-2026-06-10.md` | 1601 | `Google Calendar` | \| Google Calendar \| services + background sync \| Есть OAuth/calendar sync/manual sync/webhook paths. \| |
-| `docs/full-system-quality-roadmap-2026-08-04.md` | 115 | `Google Calendar` | Оставшиеся анонимные маршруты Google Calendar, Яндекс.Календаря, Яндекс.Диска, Telegram, MAX, feature flags и health получили централизованные ограничения по IP и маршруту; тела webhook ограничены до разбора JSON. OAuth- |
-| `docs/full-system-quality-roadmap-2026-08-04.md` | 135 | `Google Calendar` | Обе карточки задачи проверены в локальном браузере на одних и тех же данных: legacy и modern одинаково показывают основного и дополнительного исполнителя с полными ФИО и email, постановщика, согласующих, наблюдателей и р |
 | `docs/google-calendar-sync-guide.md` | 1 | `Google Calendar` | # Google Calendar: подключение и синхронизация задач |
 | `docs/google-calendar-sync-guide.md` | 5 | `Google Calendar` | Подключение Google Calendar добавлено в профиль пользователя, а не в общие настройки CRM. |
 | `docs/google-calendar-sync-guide.md` | 7 | `Google Calendar` | Путь для пользователя: профиль пользователя -> блок "Google Calendar". |
