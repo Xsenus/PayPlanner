@@ -23,7 +23,6 @@ function safeTimeZone(timeZoneId?: string | null) {
 function getFormatter(timeZoneId?: string | null) {
   return new Intl.DateTimeFormat('en-US', {
     timeZone: safeTimeZone(timeZoneId),
-    hour12: false,
     hourCycle: 'h23',
     year: 'numeric',
     month: '2-digit',

@@ -28,6 +28,12 @@ describe('timeZoneDate', () => {
     expect(fromTimeZoneDateTimeInput('2026-06-05T19:00', 'Asia/Novosibirsk')).toBe('2026-06-05T12:00:00.000Z');
   });
 
+  it('converts midnight without shifting the calendar day on UTC hosts', () => {
+    expect(fromTimeZoneDateTimeInput('2026-08-16T00:00', 'Asia/Novosibirsk')).toBe(
+      '2026-08-15T17:00:00.000Z',
+    );
+  });
+
   it('builds calendar day keys in the selected user time zone around midnight', () => {
     const instant = '2026-06-04T20:30:00Z';
 
