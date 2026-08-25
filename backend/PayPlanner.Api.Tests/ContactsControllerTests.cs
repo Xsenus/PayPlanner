@@ -87,8 +87,8 @@ public class ContactsControllerTests
     {
         await using var db = await CreateContextAsync();
         var user = await CreateClientUserAsync(db, "contacts-remote-phonebook", true, true, true, true, true);
-        await CreateClientAsync(db, user.Id, "Телефонный клиент", "79990000001");
-        await CreateExternalContactAsync(db, user.Id, "Телефонный контакт", "79990000002");
+        await CreateClientAsync(db, user.Id, "Телефонный клиент", "8 (999) 000-00-01");
+        await CreateExternalContactAsync(db, user.Id, "Телефонный контакт", "+7 999 000-00-02");
         var organization = await CreateExternalContactAsync(db, user.Id, "ООО Не звонить", "79990000003");
         organization.ContactType = "Organization";
         await db.SaveChangesAsync();
@@ -104,6 +104,9 @@ public class ContactsControllerTests
         var content = Assert.IsType<ContentResult>(allowed);
         Assert.Contains("Телефонный клиент", content.Content);
         Assert.Contains("Телефонный контакт", content.Content);
+        Assert.Contains("Phone1=\"79990000001\"", content.Content);
+        Assert.Contains("Phone1=\"79990000002\"", content.Content);
+        Assert.DoesNotContain("Phone1=\"89990000001\"", content.Content);
         Assert.DoesNotContain("ООО Не звонить", content.Content);
         Assert.Equal("private, max-age=300", controller.Response.Headers.CacheControl);
     }

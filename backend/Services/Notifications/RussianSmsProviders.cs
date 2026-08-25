@@ -5,6 +5,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Services;
 
 namespace PayPlanner.Api.Services.Notifications;
 
@@ -155,17 +156,9 @@ public abstract class RussianSmsProviderBase(
 
     protected static string NormalizePhone(string phoneNumber)
     {
-        var digits = new string(phoneNumber.Where(char.IsDigit).ToArray());
-        if (digits.Length == 10)
-        {
-            digits = $"7{digits}";
-        }
-        else if (digits.Length == 11 && digits[0] == '8')
-        {
-            digits = $"7{digits[1..]}";
-        }
+        var digits = RussianPhoneNumberCanonicalizer.NormalizeDigits(phoneNumber);
 
-        if (digits.Length != 11 || digits[0] != '7')
+        if (digits?.Length != 11 || digits[0] != '7')
         {
             throw new ArgumentException(
                 "Номер должен быть указан в российском международном формате.",

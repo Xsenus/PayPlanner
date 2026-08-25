@@ -1657,15 +1657,20 @@ public class ContactsController : ControllerBase
         var menu = new XElement("Menu", new XAttribute("Name", name));
         foreach (var contact in contacts)
         {
-            var expandedPhones = ExpandPhoneVariants(contact.Phones).Take(6).ToList();
+            var exportedPhones = contact.Phones
+                .Select(RussianPhoneNumberCanonicalizer.NormalizeDigits)
+                .Where(phone => !string.IsNullOrWhiteSpace(phone))
+                .Distinct(StringComparer.Ordinal)
+                .Take(6)
+                .ToList();
             menu.Add(new XElement("Unit",
                 new XAttribute("Name", contact.FullName),
-                new XAttribute("Phone1", expandedPhones.ElementAtOrDefault(0) ?? string.Empty),
-                new XAttribute("Phone2", expandedPhones.ElementAtOrDefault(1) ?? string.Empty),
-                new XAttribute("Phone3", expandedPhones.ElementAtOrDefault(2) ?? string.Empty),
-                new XAttribute("Phone4", expandedPhones.ElementAtOrDefault(3) ?? string.Empty),
-                new XAttribute("Phone5", expandedPhones.ElementAtOrDefault(4) ?? string.Empty),
-                new XAttribute("Phone6", expandedPhones.ElementAtOrDefault(5) ?? string.Empty),
+                new XAttribute("Phone1", exportedPhones.ElementAtOrDefault(0) ?? string.Empty),
+                new XAttribute("Phone2", exportedPhones.ElementAtOrDefault(1) ?? string.Empty),
+                new XAttribute("Phone3", exportedPhones.ElementAtOrDefault(2) ?? string.Empty),
+                new XAttribute("Phone4", exportedPhones.ElementAtOrDefault(3) ?? string.Empty),
+                new XAttribute("Phone5", exportedPhones.ElementAtOrDefault(4) ?? string.Empty),
+                new XAttribute("Phone6", exportedPhones.ElementAtOrDefault(5) ?? string.Empty),
                 new XAttribute("default_photo", "Resource:")));
         }
 
@@ -1683,10 +1688,7 @@ public class ContactsController : ControllerBase
     }
 
     private static string? NormalizePhoneForStorage(string? value)
-    {
-        var digits = new string((value ?? string.Empty).Where(char.IsDigit).ToArray());
-        return string.IsNullOrWhiteSpace(digits) ? null : digits;
-    }
+        => RussianPhoneNumberCanonicalizer.NormalizeDigits(value);
 
     private static List<string> GetPhoneMatchKeys(IEnumerable<string> phones)
     {
@@ -1700,7 +1702,7 @@ public class ContactsController : ControllerBase
 
     private static string? NormalizePhoneMatchKey(string? value)
     {
-        var digits = new string((value ?? string.Empty).Where(char.IsDigit).ToArray());
+        var digits = RussianPhoneNumberCanonicalizer.NormalizeDigits(value);
         if (string.IsNullOrWhiteSpace(digits))
         {
             return null;
@@ -1712,49 +1714,5 @@ public class ContactsController : ControllerBase
         }
 
         return digits;
-    }
-
-    private static List<string> ExpandPhoneVariants(IEnumerable<string> phones)
-    {
-        var expanded = new List<string>();
-
-        foreach (var original in phones)
-        {
-            var digits = new string((original ?? string.Empty).Where(char.IsDigit).ToArray());
-            if (string.IsNullOrWhiteSpace(digits))
-            {
-                continue;
-            }
-
-            AddIfMissing(expanded, digits);
-
-            if (digits.Length == 10)
-            {
-                AddIfMissing(expanded, $"7{digits}");
-                AddIfMissing(expanded, $"8{digits}");
-                continue;
-            }
-
-            if (digits.Length == 11 && digits[0] == '7')
-            {
-                AddIfMissing(expanded, $"8{digits[1..]}");
-                continue;
-            }
-
-            if (digits.Length == 11 && digits[0] == '8')
-            {
-                AddIfMissing(expanded, $"7{digits[1..]}");
-            }
-        }
-
-        return expanded;
-    }
-
-    private static void AddIfMissing(ICollection<string> items, string value)
-    {
-        if (!items.Contains(value))
-        {
-            items.Add(value);
-        }
     }
 }

@@ -75,13 +75,8 @@ public sealed partial class SpreadsheetImportService
 
     private static string? NormalizePhone(string? value)
     {
-        var digits = new string((value ?? string.Empty).Where(char.IsDigit).ToArray());
-        if (digits.Length == 11 && digits.StartsWith('8'))
-        {
-            digits = $"7{digits[1..]}";
-        }
-
-        return digits.Length >= 6 ? digits : null;
+        var digits = RussianPhoneNumberCanonicalizer.NormalizeDigits(value);
+        return digits?.Length >= 6 ? digits : null;
     }
 
     private static string? NormalizeEmail(string? value)
