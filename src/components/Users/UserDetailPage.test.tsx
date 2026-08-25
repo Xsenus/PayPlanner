@@ -189,6 +189,21 @@ describe('UserDetailPage', () => {
     expect(screen.queryByRole('link', { name: 'Платеж #2069' })).toBeNull();
   });
 
+  it('opens the contractor balance immediately when returning from a payment', async () => {
+    render(
+      <UserDetailPage
+        userId={10}
+        onBack={vi.fn()}
+        onSaved={vi.fn()}
+        initialSection="contractorBalance"
+        canOpenContractorPaymentLinks
+      />,
+    );
+
+    expect(await screen.findByRole('link', { name: 'Платеж #2069' })).toBeTruthy();
+    expect(screen.getByText('Винокурова Нина Тариеловна')).toBeTruthy();
+  });
+
   it('explains why a contractor payment is absent from the calendar before task completion', async () => {
     vi.mocked(authService.getUserContractorBalance).mockResolvedValue({
       owedToMe: 3500,

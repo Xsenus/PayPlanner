@@ -23,12 +23,13 @@ import {
 import { normalizeUserTimeZoneId, USER_TIME_ZONE_OPTIONS, USER_TIME_ZONE_SETTING_KEY } from '../../utils/timeZoneOptions';
 import { TaskNotificationDefaultsPanel } from '../Tasks/TaskNotificationDefaultsPanel';
 
-type UserDetailSection = 'main' | 'contacts' | 'employment' | 'contractorBalance' | 'notifications' | 'access';
+export type UserDetailSection = 'main' | 'contacts' | 'employment' | 'contractorBalance' | 'notifications' | 'access';
 
 type UserDetailPageProps = {
   userId: number | null;
   onBack: () => void;
   onSaved: (user: User) => void;
+  initialSection?: UserDetailSection;
   canOpenContractorPaymentLinks?: boolean;
   onOpenContractorPayment?: (paymentId: number) => void;
 };
@@ -325,12 +326,12 @@ function TextField(props: {
   );
 }
 
-export function UserDetailPage({ userId, onBack, onSaved, canOpenContractorPaymentLinks = false, onOpenContractorPayment }: UserDetailPageProps) {
+export function UserDetailPage({ userId, onBack, onSaved, initialSection = 'main', canOpenContractorPaymentLinks = false, onOpenContractorPayment }: UserDetailPageProps) {
   const { user: currentUser } = useAuth();
   const toast = useToast();
   const isCreateMode = userId == null;
 
-  const [activeSection, setActiveSection] = useState<UserDetailSection>('main');
+  const [activeSection, setActiveSection] = useState<UserDetailSection>(initialSection);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [roles, setRoles] = useState<Role[]>([]);
   const [user, setUser] = useState<User | null>(null);
@@ -345,6 +346,10 @@ export function UserDetailPage({ userId, onBack, onSaved, canOpenContractorPayme
   const [saving, setSaving] = useState(false);
   const [savingTaskNotificationDefaults, setSavingTaskNotificationDefaults] = useState(false);
   const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
+
+  useEffect(() => {
+    setActiveSection(initialSection);
+  }, [initialSection, userId]);
 
   const loadData = useCallback(async () => {
     const [nextRoles, nextUser, nextContractorBalance, nextMainCompanySettings, nextDepartments, nextTaskNotificationDefaults, nextTimeZone] = await Promise.all([

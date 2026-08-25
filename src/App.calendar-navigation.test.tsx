@@ -212,17 +212,32 @@ vi.mock('./components/Accounts/Accounts', () => ({
   ),
 }));
 
+vi.mock('./components/Payments/Payments', () => ({
+  Payments: ({ routePaymentId, onRoutePaymentExit }: { routePaymentId?: number | null; onRoutePaymentExit?: () => void }) => (
+    <section data-testid="payments-view">
+      payment {routePaymentId ?? 'none'}
+      <button type="button" onClick={onRoutePaymentExit}>finish employee payment</button>
+    </section>
+  ),
+}));
+
 vi.mock('./components/Users/UserDetailPage', () => ({
   UserDetailPage: ({
     userId,
+    initialSection,
     canOpenContractorPaymentLinks,
+    onOpenContractorPayment,
   }: {
     userId: number | null;
+    initialSection?: string;
     canOpenContractorPaymentLinks?: boolean;
+    onOpenContractorPayment?: (paymentId: number) => void;
   }) => (
     <section data-testid="user-detail">
       user {userId}
+      <span data-testid="user-detail-section">{initialSection ?? 'main'}</span>
       <span data-testid="user-payment-link-access">{String(canOpenContractorPaymentLinks)}</span>
+      <button type="button" onClick={() => onOpenContractorPayment?.(2069)}>open employee payment</button>
     </section>
   ),
 }));
@@ -427,6 +442,28 @@ describe('App calendar client navigation', () => {
     expect(screen.getByTestId('user-payment-link-access').textContent).toBe('true');
     expect(screen.getByTestId('navigation').textContent).toBe('userDetail');
     expect(`${window.location.pathname}${window.location.search}`).toBe('/?ppTab=userDetail&userId=10');
+  });
+
+  it('returns to the employee contractor balance after completing a payment opened from the user card', async () => {
+    window.history.replaceState({}, '', '/?ppTab=userDetail&userId=10');
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'open employee payment' }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('navigation').textContent).toBe('paymentsExpense');
+      expect(screen.getByTestId('payments-view').textContent).toContain('payment 2069');
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'finish employee payment' }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('navigation').textContent).toBe('userDetail');
+      expect(screen.getByTestId('user-detail').textContent).toContain('user 10');
+      expect(screen.getByTestId('user-detail-section').textContent).toBe('contractorBalance');
+      expect(`${window.location.pathname}${window.location.search}`).toBe('/?ppTab=userDetail&userId=10');
+    });
   });
 
   it('clears stale settings section when opening the profile page', async () => {

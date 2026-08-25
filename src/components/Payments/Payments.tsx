@@ -47,6 +47,7 @@ interface PaymentsProps {
   onOpenPayment?: (paymentId: number, paymentType: Payment['type']) => void;
   routePaymentId?: number | null;
   onRoutePaymentChange?: (paymentId: number | null) => void;
+  onRoutePaymentExit?: () => void;
   initialCreatePayment?: PaymentCreatePrefill | null;
   onInitialCreatePaymentHandled?: (key: number) => void;
   defaultType?: TypeFilter;
@@ -366,6 +367,7 @@ export function Payments({
   onOpenPayment,
   routePaymentId,
   onRoutePaymentChange,
+  onRoutePaymentExit,
   initialCreatePayment,
   onInitialCreatePaymentHandled,
   defaultType,
@@ -418,6 +420,7 @@ export function Payments({
   const [routePaymentPreview, setRoutePaymentPreview] = useState<Payment | null>(null);
   const [routePaymentPreviewLoading, setRoutePaymentPreviewLoading] = useState(false);
   const [routePaymentPreviewError, setRoutePaymentPreviewError] = useState<string | null>(null);
+  const [returnAfterRoutePaymentEdit, setReturnAfterRoutePaymentEdit] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [loadTimeoutReached, setLoadTimeoutReached] = useState(false);
   const [remainderCandidatesOpen, setRemainderCandidatesOpen] = useState(false);
@@ -639,10 +642,24 @@ export function Payments({
     setRoutePaymentPreviewError(null);
   }, []);
 
-  const closeRoutePaymentPreview = useCallback(() => {
+  const dismissRoutePaymentPreview = useCallback(() => {
     resetRoutePaymentPreview();
     onRoutePaymentChange?.(null);
   }, [onRoutePaymentChange, resetRoutePaymentPreview]);
+
+  const closeRoutePaymentPreview = useCallback(() => {
+    dismissRoutePaymentPreview();
+    onRoutePaymentExit?.();
+  }, [dismissRoutePaymentPreview, onRoutePaymentExit]);
+
+  const finishRoutePaymentEdit = useCallback(() => {
+    if (!returnAfterRoutePaymentEdit) {
+      return;
+    }
+
+    setReturnAfterRoutePaymentEdit(false);
+    onRoutePaymentExit?.();
+  }, [onRoutePaymentExit, returnAfterRoutePaymentEdit]);
 
   useEffect(() => {
     if (!routePaymentId && routePaymentPreviewOpen) {
@@ -1611,13 +1628,14 @@ export function Payments({
         setIsModalOpen(false);
         setEditingPayment(null);
         setPaymentCreatePrefill(null);
+        finishRoutePaymentEdit();
       } catch (error) {
         const message = extractDisplayErrorMessage(error, t('paymentsSaveError') ?? 'Не удалось сохранить платёж.');
         toast.error(message, t('payments') ?? 'Платежи');
         throw new Error(message);
       }
     },
-    [editingPayment, page, refresh, t, toast],
+    [editingPayment, finishRoutePaymentEdit, page, refresh, t, toast],
   );
 
   const handleTransferRemainder = useCallback(
@@ -1628,13 +1646,14 @@ export function Payments({
         toast.success('Остаток платежа перенесён.', t('payments') ?? 'Платежи');
         setIsModalOpen(false);
         setEditingPayment(null);
+        finishRoutePaymentEdit();
       } catch (error) {
         const message = extractDisplayErrorMessage(error, 'Не удалось перенести остаток платежа.');
         toast.error(message, t('payments') ?? 'Платежи');
         throw new Error(message);
       }
     },
-    [refresh, t, toast],
+    [finishRoutePaymentEdit, refresh, t, toast],
   );
 
   const handleRollbackRemainderTransfer = useCallback(
@@ -1645,13 +1664,14 @@ export function Payments({
         toast.success('Перенос остатка отменен.', t('payments') ?? 'Платежи');
         setIsModalOpen(false);
         setEditingPayment(null);
+        finishRoutePaymentEdit();
       } catch (error) {
         const message = extractDisplayErrorMessage(error, 'Не удалось откатить перенос остатка.');
         toast.error(message, t('payments') ?? 'Платежи');
         throw new Error(message);
       }
     },
-    [refresh, t, toast],
+    [finishRoutePaymentEdit, refresh, t, toast],
   );
 
   const handleAdjustRemainderTransfer = useCallback(
@@ -1662,13 +1682,14 @@ export function Payments({
         toast.success('Разделение платежа обновлено.', t('payments') ?? 'Платежи');
         setIsModalOpen(false);
         setEditingPayment(null);
+        finishRoutePaymentEdit();
       } catch (error) {
         const message = extractDisplayErrorMessage(error, 'Не удалось изменить разделение платежа.');
         toast.error(message, t('payments') ?? 'Платежи');
         throw new Error(message);
       }
     },
-    [refresh, t, toast],
+    [finishRoutePaymentEdit, refresh, t, toast],
   );
 
   const loadRemainderCandidates = useCallback(async (options: { openPanel?: boolean; showError?: boolean } = {}) => {
@@ -1753,7 +1774,8 @@ export function Payments({
     setIsModalOpen(false);
     setEditingPayment(null);
     setPaymentCreatePrefill(null);
-  }, []);
+    finishRoutePaymentEdit();
+  }, [finishRoutePaymentEdit]);
 
   const handleRefresh = useCallback(async () => {
     await refresh();
@@ -2911,9 +2933,13 @@ export function Payments({
                 {routePaymentPreview && paymentsPermissions.canEdit ? (
                   <button
                     type="button"
-                    onClick={() => {
-                      handleEditPayment(routePaymentPreview);
-                      closeRoutePaymentPreview();
+                    onClick={async () => {
+                      const opened = await handleEditPayment(routePaymentPreview);
+                      if (!opened) {
+                        return;
+                      }
+                      setReturnAfterRoutePaymentEdit(Boolean(onRoutePaymentExit));
+                      dismissRoutePaymentPreview();
                     }}
                     className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-medium text-blue-700 transition hover:bg-blue-100"
                   >
@@ -3023,6 +3049,7 @@ export function Payments({
                   } else {
                     await refresh();
                   }
+                  finishRoutePaymentEdit();
                 } catch (error) {
                   const message = extractDisplayErrorMessage(error, t('paymentsDeleteError') ?? 'Не удалось удалить платёж.');
                   toast.error(message, t('payments') ?? 'Платежи');

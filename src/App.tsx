@@ -83,6 +83,8 @@ type CasePaymentCreateDraft = {
   clientCaseId: number;
   casesPrefetch: ClientCase[];
 };
+type PaymentReturnContext = { tab: 'userDetail'; userId: number };
+type UserDetailInitialSection = 'main' | 'contractorBalance';
 
 const TABS_WITH_QUERY_ROUTE = new Set<Tab>([
   'calendar',
@@ -304,6 +306,8 @@ function AppContent() {
   const [selectedUserId, setSelectedUserId] = useState<number | null>(getInitialUserId);
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<number | null>(getInitialInvoiceId);
   const [selectedPaymentId, setSelectedPaymentId] = useState<number | null>(getInitialPaymentId);
+  const [paymentReturnContext, setPaymentReturnContext] = useState<PaymentReturnContext | null>(null);
+  const [userDetailInitialSection, setUserDetailInitialSection] = useState<UserDetailInitialSection>('main');
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(getInitialTaskId);
   const paymentTypeByIdRef = useRef<Map<number, PaymentKind>>(new Map());
   const [overdueTaskFilterSignal, setOverdueTaskFilterSignal] = useState(0);
@@ -600,7 +604,7 @@ function AppContent() {
   }, []);
 
   const openPaymentPage = useCallback(
-    async (paymentId: number, type?: 'Income' | 'Expense') => {
+    async (paymentId: number, type?: 'Income' | 'Expense', options?: { returnTo?: PaymentReturnContext }) => {
       if (!permissions.payments.canView || !(paymentId > 0)) {
         return;
       }
@@ -610,6 +614,7 @@ function AppContent() {
       }
 
       const resolvedType = type ?? await resolvePaymentType(paymentId);
+      setPaymentReturnContext(options?.returnTo ?? null);
       setSelectedPaymentId(paymentId);
       setActiveTab(
         resolvedType === 'Expense'
@@ -623,6 +628,16 @@ function AppContent() {
     },
     [permissions.payments.canView, activeTab, resolvePaymentType],
   );
+
+  const handlePaymentRouteExit = useCallback(() => {
+    setSelectedPaymentId(null);
+    if (paymentReturnContext?.tab === 'userDetail') {
+      setSelectedUserId(paymentReturnContext.userId);
+      setUserDetailInitialSection('contractorBalance');
+      setActiveTab('userDetail');
+    }
+    setPaymentReturnContext(null);
+  }, [paymentReturnContext]);
 
   const openRelatedCase = useCallback(
     (caseId: number, clientId?: number | null) => {
@@ -777,11 +792,13 @@ function AppContent() {
 
   const handleCreateUser = useCallback(() => {
     setSelectedUserId(null);
+    setUserDetailInitialSection('main');
     setActiveTab('userDetail');
   }, []);
 
   const handleEditUser = useCallback((userId: number) => {
     setSelectedUserId(userId);
+    setUserDetailInitialSection('main');
     setActiveTab('userDetail');
   }, []);
 
@@ -1672,6 +1689,7 @@ function AppContent() {
                 onOpenPayment={openPaymentPage}
                 routePaymentId={selectedPaymentId}
                 onRoutePaymentChange={setSelectedPaymentId}
+                onRoutePaymentExit={paymentReturnContext ? handlePaymentRouteExit : undefined}
                 defaultType="Income"
                 lockType
                 initialCreatePayment={casePaymentCreateDraft}
@@ -1695,6 +1713,7 @@ function AppContent() {
                 onOpenPayment={openPaymentPage}
                 routePaymentId={selectedPaymentId}
                 onRoutePaymentChange={setSelectedPaymentId}
+                onRoutePaymentExit={paymentReturnContext ? handlePaymentRouteExit : undefined}
                 defaultType="Expense"
                 lockType
                 initialCreatePayment={casePaymentCreateDraft}
@@ -1716,6 +1735,7 @@ function AppContent() {
                 onOpenPayment={openPaymentPage}
                 routePaymentId={selectedPaymentId}
                 onRoutePaymentChange={setSelectedPaymentId}
+                onRoutePaymentExit={paymentReturnContext ? handlePaymentRouteExit : undefined}
                 initialCreatePayment={casePaymentCreateDraft}
                 onInitialCreatePaymentHandled={(key) => {
                   setCasePaymentCreateDraft((current) => (current?.key === key ? null : current));
@@ -1841,8 +1861,16 @@ function AppContent() {
                 userId={selectedUserId}
                 onBack={handleBackToUsers}
                 onSaved={handleUserSaved}
+                initialSection={userDetailInitialSection}
                 canOpenContractorPaymentLinks={permissions.payments.canView}
-                onOpenContractorPayment={(paymentId) => openPaymentPage(paymentId, 'Expense')}
+                onOpenContractorPayment={(paymentId) => {
+                  if (!selectedUserId) {
+                    return;
+                  }
+                  void openPaymentPage(paymentId, 'Expense', {
+                    returnTo: { tab: 'userDetail', userId: selectedUserId },
+                  });
+                }}
               />
             )
           : renderNoAccess('Нужны права администратора.');
