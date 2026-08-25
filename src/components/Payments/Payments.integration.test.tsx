@@ -139,7 +139,11 @@ vi.mock('../Calendar/PaymentModal', () => ({
         {props.payment?.id ?? 'new'}
         <button
           type="button"
-          onClick={() => void props.onSubmit({ id: props.payment?.id ?? 0, amount: 25_000, type: 'Expense', status: 'Completed' })}
+          onClick={() => {
+            void props
+              .onSubmit({ id: props.payment?.id ?? 0, amount: 25_000, type: 'Expense', status: 'Completed' })
+              .catch(() => undefined);
+          }}
         >
           submit payment edit
         </button>
@@ -1161,8 +1165,95 @@ describe('Payments integration', () => {
     });
   });
 
+  it('returns to the route origin when route-driven payment editing is cancelled', async () => {
+    const onRoutePaymentChange = vi.fn();
+    const onRoutePaymentExit = vi.fn();
+
+    vi.mocked(apiService.getPayment).mockResolvedValue({
+      id: 884,
+      amount: 8_500,
+      date: '2026-04-10',
+      plannedDate: '2026-04-10',
+      type: 'Expense',
+      status: 'Pending',
+      description: 'Оплата исполнителю',
+      notes: '',
+      systemNotes: '',
+      isPaid: false,
+      paidAmount: 0,
+      outstandingAmount: 8_500,
+      hasPartialPayment: false,
+      rescheduleCount: 0,
+      createdAt: '2026-04-10T00:00:00Z',
+      documentKind: 'Payment',
+    } as unknown as Payment);
+
+    render(
+      <Payments
+        routePaymentId={884}
+        onRoutePaymentChange={onRoutePaymentChange}
+        onRoutePaymentExit={onRoutePaymentExit}
+      />,
+    );
+
+    expect(await screen.findByTestId('payments-route-payment-preview')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Редактировать' }));
+    expect(await screen.findByTestId('payments-edit-modal')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'close payment edit' }));
+
+    expect(screen.queryByTestId('payments-edit-modal')).toBeNull();
+    expect(onRoutePaymentExit).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps route-driven payment editing open when saving fails', async () => {
+    const onRoutePaymentChange = vi.fn();
+    const onRoutePaymentExit = vi.fn();
+
+    vi.mocked(apiService.getPayment).mockResolvedValue({
+      id: 885,
+      amount: 9_500,
+      date: '2026-04-10',
+      plannedDate: '2026-04-10',
+      type: 'Expense',
+      status: 'Pending',
+      description: 'Оплата исполнителю',
+      notes: '',
+      systemNotes: '',
+      isPaid: false,
+      paidAmount: 0,
+      outstandingAmount: 9_500,
+      hasPartialPayment: false,
+      rescheduleCount: 0,
+      createdAt: '2026-04-10T00:00:00Z',
+      documentKind: 'Payment',
+    } as unknown as Payment);
+    vi.mocked(apiService.updatePayment).mockRejectedValue(new Error('database unavailable'));
+
+    render(
+      <Payments
+        routePaymentId={885}
+        onRoutePaymentChange={onRoutePaymentChange}
+        onRoutePaymentExit={onRoutePaymentExit}
+      />,
+    );
+
+    expect(await screen.findByTestId('payments-route-payment-preview')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Редактировать' }));
+    expect(await screen.findByTestId('payments-edit-modal')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'submit payment edit' }));
+
+    await waitFor(() => {
+      expect(apiService.updatePayment).toHaveBeenCalledWith(885, expect.objectContaining({ status: 'Completed' }));
+    });
+    expect(screen.getByTestId('payments-edit-modal')).toBeTruthy();
+    expect(onRoutePaymentExit).not.toHaveBeenCalled();
+  });
+
   it('annuls a route-driven payment preview and closes the preview after refresh', async () => {
     const onRoutePaymentChange = vi.fn();
+    const onRoutePaymentExit = vi.fn();
     const refresh = vi.fn().mockResolvedValue(undefined);
 
     usePaymentsPagedMock.mockReturnValue({
@@ -1197,6 +1288,7 @@ describe('Payments integration', () => {
       <Payments
         routePaymentId={881}
         onRoutePaymentChange={onRoutePaymentChange}
+        onRoutePaymentExit={onRoutePaymentExit}
       />,
     );
 
@@ -1221,10 +1313,12 @@ describe('Payments integration', () => {
     expect(confirmMock).toHaveBeenCalledWith(expect.objectContaining({ confirmLabel: 'Аннулировать' }));
     expect(refresh).toHaveBeenCalledTimes(1);
     expect(onRoutePaymentChange).toHaveBeenCalledWith(null);
+    expect(onRoutePaymentExit).toHaveBeenCalledTimes(1);
   });
 
   it('deletes a route-driven payment preview only after confirmation succeeds', async () => {
     const onRoutePaymentChange = vi.fn();
+    const onRoutePaymentExit = vi.fn();
     const refresh = vi.fn().mockResolvedValue(undefined);
 
     usePaymentsPagedMock.mockReturnValue({
@@ -1255,6 +1349,7 @@ describe('Payments integration', () => {
       <Payments
         routePaymentId={882}
         onRoutePaymentChange={onRoutePaymentChange}
+        onRoutePaymentExit={onRoutePaymentExit}
       />,
     );
 
@@ -1267,5 +1362,6 @@ describe('Payments integration', () => {
     });
     expect(refresh).toHaveBeenCalledTimes(1);
     expect(onRoutePaymentChange).toHaveBeenCalledWith(null);
+    expect(onRoutePaymentExit).toHaveBeenCalledTimes(1);
   });
 });
