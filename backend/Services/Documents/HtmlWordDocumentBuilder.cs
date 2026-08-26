@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.IO.Compression;
 using System.Reflection;
+using System.Security;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -10,13 +11,19 @@ public static class HtmlWordDocumentBuilder
 {
     public const string ContentType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
-    private const string RegularFontResource = "PayPlanner.Fonts.DejaVuSansCondensed.ttf";
-    private const string BoldFontResource = "PayPlanner.Fonts.DejaVuSansCondensed-Bold.ttf";
+    private const string DefaultFontName = "DejaVu Sans Condensed";
+    private const string DefaultRegularFontResource = "PayPlanner.Fonts.DejaVuSansCondensed.ttf";
+    private const string DefaultBoldFontResource = "PayPlanner.Fonts.DejaVuSansCondensed-Bold.ttf";
     private static readonly Regex EmbeddedFontFaceRegex = new(
         "@font-face\\s*\\{[^}]*\\}",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
-    public static byte[] Build(string html, IReadOnlyList<WordImageOverlay>? overlays = null)
+    public static byte[] Build(
+        string html,
+        IReadOnlyList<WordImageOverlay>? overlays = null,
+        string fontName = DefaultFontName,
+        string regularFontResource = DefaultRegularFontResource,
+        string boldFontResource = DefaultBoldFontResource)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(html);
         overlays ??= [];
@@ -36,10 +43,10 @@ public static class HtmlWordDocumentBuilder
             AddTextEntry(package, "word/_rels/document.xml.rels", BuildDocumentRelationshipsXml(overlays));
             AddTextEntry(package, "word/settings.xml", SettingsXml);
             AddTextEntry(package, "word/afchunk.html", normalizedHtml);
-            AddTextEntry(package, "word/fontTable.xml", BuildFontTableXml(regularKey, boldKey));
+            AddTextEntry(package, "word/fontTable.xml", BuildFontTableXml(regularKey, boldKey, fontName));
             AddTextEntry(package, "word/_rels/fontTable.xml.rels", BuildFontRelationshipsXml(regularName, boldName));
-            AddByteEntry(package, $"word/fonts/{regularName}", ObfuscateFont(ReadEmbeddedResource(RegularFontResource), regularKey));
-            AddByteEntry(package, $"word/fonts/{boldName}", ObfuscateFont(ReadEmbeddedResource(BoldFontResource), boldKey));
+            AddByteEntry(package, $"word/fonts/{regularName}", ObfuscateFont(ReadEmbeddedResource(regularFontResource), regularKey));
+            AddByteEntry(package, $"word/fonts/{boldName}", ObfuscateFont(ReadEmbeddedResource(boldFontResource), boldKey));
             for (var index = 0; index < overlays.Count; index++)
             {
                 AddByteEntry(package, $"word/media/image{index + 1}.{overlays[index].Extension}", overlays[index].Content);
@@ -91,11 +98,11 @@ public static class HtmlWordDocumentBuilder
         stream.Write(value);
     }
 
-    private static string BuildFontTableXml(Guid regularKey, Guid boldKey) => $$"""
+    private static string BuildFontTableXml(Guid regularKey, Guid boldKey, string fontName) => $$"""
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:fonts xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-  <w:font w:name="DejaVu Sans Condensed">
-    <w:altName w:val="DejaVu Sans Condensed"/>
+  <w:font w:name="{{SecurityElement.Escape(fontName)}}">
+    <w:altName w:val="{{SecurityElement.Escape(fontName)}}"/>
     <w:family w:val="swiss"/>
     <w:pitch w:val="variable"/>
     <w:embedRegular r:id="rIdRegular" w:fontKey="{{{regularKey.ToString().ToUpperInvariant()}}}"/>

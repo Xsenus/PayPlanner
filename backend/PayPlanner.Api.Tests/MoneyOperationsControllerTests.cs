@@ -2658,13 +2658,17 @@ public class MoneyOperationsControllerTests
         Assert.Contains("Линия отреза", content.Content);
         Assert.Contains("Форма по ОКУД", content.Content);
         Assert.Contains("@page { size: A4 portrait; margin: 0; }", content.Content);
-        Assert.Contains("grid-template-columns: 100mm 12mm 64mm", content.Content);
+        Assert.Contains("grid-template-columns: 101.75mm 11mm 63.25mm", content.Content);
         Assert.Contains("gap: 1mm", content.Content);
         Assert.Contains("width: 178mm", content.Content);
         Assert.Contains("margin: 27mm 0 0 16mm", content.Content);
-        Assert.Contains("min-height: 130mm", content.Content);
+        Assert.Contains("min-height: 132.6mm", content.Content);
         Assert.Contains("border-left: 1px dashed #111", content.Content);
-        Assert.Contains("25001", content.Content);
+        Assert.Contains("grid-template-columns: 1fr 20mm", content.Content);
+        Assert.Contains("font-size: 6pt; white-space: nowrap", content.Content);
+        Assert.Contains(".chief-sign { position: absolute; top: 305.05pt;", content.Content);
+        Assert.Contains(".cashier-sign { position: absolute; top: 325.15pt;", content.Content);
+        Assert.Contains("25001-25", content.Content);
         Assert.Contains("25</div><span>коп.", content.Content);
         Assert.Contains("двадцать пять тысяч один", content.Content);
         Assert.Contains("апреля", content.Content);
@@ -2713,11 +2717,73 @@ public class MoneyOperationsControllerTests
         Assert.Contains("0310002", content.Content);
         Assert.Contains("Выдать", content.Content);
         Assert.Contains("Поставщик", content.Content);
+        Assert.Contains("1 500.00", content.Content);
         Assert.Contains("Руководитель", content.Content);
         Assert.Contains("Главный бухгалтер", content.Content);
+        Assert.Contains("position: absolute; top: 5.55mm; right: -.25mm", content.Content);
+        Assert.Contains("position: absolute; top: 32.5mm; left: 35.4mm", content.Content);
+        Assert.Contains("position: absolute; top: 27.25mm; right: -.25mm", content.Content);
+        Assert.Contains("position: absolute; top: 42.75mm; left: 0", content.Content);
+        Assert.Contains(".rko-cashier { top: 142.3mm; grid-template-columns: 18.5mm 40mm 40mm; gap: 5.3mm; }", content.Content);
+        Assert.Contains("font-family: \"Cash Order Arial\", Arial, sans-serif", content.Content);
+        Assert.Contains(">29</div><span>»</span><div class=\"line\">апреля</div>", content.Content);
         Assert.DoesNotContain("Квитанция к", content.Content);
         AssertPrintHtmlHasNoGeneratedTimestamp(content.Content);
         AssertPrintHtmlUsesSharedDocumentStyle(content.Content);
+    }
+
+    [Fact]
+    public async Task CashOrder_Print_UsesCompactLayoutForLongValuesAndKeepsCancellationOutsideFlow()
+    {
+        await using var db = await CreateContextAsync();
+        const string longNumber = "ПКО-2026-ИСКЛЮЧИТЕЛЬНО-ДЛИННЫЙ-НОМЕР-000123";
+        db.CashOrders.AddRange(
+            new CashOrder
+            {
+                Number = longNumber,
+                Type = CashOrderType.Incoming,
+                Status = CashOrderStatus.Cancelled,
+                Date = new DateTime(2026, 12, 31),
+                Amount = 999_999_999_999.99m,
+                Currency = "RUB",
+                PayerName = "Общество с ограниченной ответственностью Международный центр юридической поддержки и финансового сопровождения",
+                Basis = "Оплата юридических услуг по договору оказания комплексной правовой помощи и представительства в нескольких судебных делах",
+                Appendix = "Договор, акт выполненных работ, доверенность представителя и кассовый чек",
+                CancelledAt = new DateTime(2026, 12, 31, 12, 30, 0, DateTimeKind.Utc),
+                CancelledReason = "Документ создан ошибочно",
+                CreatedAt = DateTime.UtcNow,
+            },
+            new CashOrder
+            {
+                Number = longNumber.Replace("ПКО", "РКО", StringComparison.Ordinal),
+                Type = CashOrderType.Outgoing,
+                Status = CashOrderStatus.Cancelled,
+                Date = new DateTime(2026, 12, 31),
+                Amount = 888_888_888_888.88m,
+                Currency = "RUB",
+                ReceiverName = "Александрова-Краснопольская Екатерина Константиновна",
+                Basis = "Выдача денежных средств на оплату государственной пошлины и нотариальных услуг",
+                CancelledAt = new DateTime(2026, 12, 31, 12, 30, 0, DateTimeKind.Utc),
+                CancelledReason = "Документ создан ошибочно",
+                CreatedAt = DateTime.UtcNow,
+            });
+        await db.SaveChangesAsync();
+
+        var controller = new CashOrdersController(db);
+        var incoming = await db.CashOrders.SingleAsync(order => order.Type == CashOrderType.Incoming);
+        var outgoing = await db.CashOrders.SingleAsync(order => order.Type == CashOrderType.Outgoing);
+
+        var incomingContent = Assert.IsType<ContentResult>(await controller.Print(incoming.Id, CancellationToken.None));
+        var outgoingContent = Assert.IsType<ContentResult>(await controller.Print(outgoing.Id, CancellationToken.None));
+
+        Assert.Contains("<main class=\"ko1 dense-content\">", incomingContent.Content);
+        Assert.Contains("class=\"value number-very-compact\"", incomingContent.Content);
+        Assert.Contains("class=\"sum amount-compact\"", incomingContent.Content);
+        Assert.Contains(".order > .cancelled { position: absolute;", incomingContent.Content);
+        Assert.Contains("grid-template-columns: 1fr 20mm", incomingContent.Content);
+        Assert.Contains("class=\"value number-very-compact\"", outgoingContent.Content);
+        Assert.Contains("class=\"sum amount-compact\"", outgoingContent.Content);
+        Assert.Contains(".ko2 > .cancelled { position: absolute;", outgoingContent.Content);
     }
 
     [Fact]
@@ -5547,7 +5613,11 @@ public class MoneyOperationsControllerTests
     {
         Assert.NotNull(html);
         Assert.Contains("* { box-sizing: border-box; }", html);
-        Assert.Contains("font-family: Arial, \"DejaVu Sans\", sans-serif;", html);
+        Assert.True(
+            html.Contains("font-family: Arial, \"DejaVu Sans\", sans-serif;", StringComparison.Ordinal) ||
+            html.Contains("font-family: \"DejaVu Sans Condensed\", sans-serif;", StringComparison.Ordinal) ||
+            html.Contains("font-family: \"Cash Order Arial\", Arial, sans-serif;", StringComparison.Ordinal),
+            "Print HTML should use one of the supported document font stacks.");
         Assert.Contains("-webkit-print-color-adjust: exact !important;", html);
         Assert.Contains("print-color-adjust: exact !important;", html);
     }

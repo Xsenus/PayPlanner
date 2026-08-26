@@ -362,6 +362,18 @@ public class CashOrdersControllerTests
             "BuildPrintHtml",
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         Assert.NotNull(method);
+        var contextType = typeof(CashOrdersController).GetNestedType(
+            "CashOrderPrintContext",
+            System.Reflection.BindingFlags.NonPublic);
+        Assert.NotNull(contextType);
+        var context = Activator.CreateInstance(
+            contextType!,
+            "ООО Тестовая организация",
+            "Генеральный директор",
+            "Петров П. П.",
+            "Иванова И. И.",
+            "Сидоров С. С.",
+            "Без налога (НДС) 0,00 руб.");
 
         var html = Assert.IsType<string>(method.Invoke(null, new object[]
         {
@@ -377,7 +389,7 @@ public class CashOrdersControllerTests
                 Basis = "Выдача под отчёт",
                 Appendix = "Заявление от 09.08.2026",
             },
-            "ООО Тестовая организация",
+            context!,
         }));
 
         Assert.Contains("Унифицированная форма № КО-2", html);
@@ -386,6 +398,8 @@ public class CashOrdersControllerTests
         Assert.Contains("РАСХОДНЫЙ КАССОВЫЙ ОРДЕР", html, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Иванов Иван Иванович", html);
         Assert.Contains("Выдал кассир", html);
+        Assert.Contains("Генеральный директор", html);
+        Assert.Contains("Подпись", html);
         Assert.Contains("удостоверяющего личность получателя", html);
         Assert.DoesNotContain("Документ сформирован в PayPlanner", html);
     }

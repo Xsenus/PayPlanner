@@ -9,25 +9,27 @@ public static partial class CashOrderWordDocumentRenderer
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceHtml);
 
         var organization = Extract(sourceHtml, "<div class=\"org-line\">(?<value>.*?)</div>");
-        var documentMeta = Match(sourceHtml, "<tr><td class=\"value\">(?<number>.*?)</td><td class=\"value\">(?<date>.*?)</td></tr>");
+        var documentMeta = Match(sourceHtml, "<tr><td class=\"[^\"]*\\bvalue\\b[^\"]*\">(?<number>.*?)</td><td class=\"[^\"]*\\bvalue\\b[^\"]*\">(?<date>.*?)</td></tr>");
         var payer = Extract(sourceHtml, "<div class=\"[^\"]*\\bline-field\\b[^\"]*\"><span>Принято от</span><div class=\"line\">(?<value>.*?)</div></div>");
         var basis = Extract(sourceHtml, "<div class=\"[^\"]*\\bline-field\\b[^\"]*\"><span>Основание:</span><div class=\"line\">(?<value>.*?)</div></div>");
         var appendix = Extract(sourceHtml, "<div class=\"[^\"]*\\bline-field\\b[^\"]*\"><span>Приложение</span><div class=\"line\">(?<value>.*?)</div></div>");
-        var amountRubKop = Extract(sourceHtml, "<td class=\"sum\">(?<value>.*?)</td>");
-        var amountWordsBlock = Match(sourceHtml, "<div class=\"[^\"]*\\bamount-words\\b[^\"]*\">\\s*<span>Сумма</span><div class=\"line\">(?<words>.*?)</div><span>руб\\.</span><div class=\"line kopecks\">(?<kopecks>.*?)</div>");
+        var amountRubKop = Extract(sourceHtml, "<td class=\"[^\"]*\\bsum\\b[^\"]*\">(?<value>.*?)</td>");
+        var amountWordsBlock = Match(sourceHtml, "<div class=\"[^\"]*\\bamount-words\\b[^\"]*\">.*?<div class=\"line\">(?<words>.*?)</div>.*?<div class=\"line kopecks\">(?<kopecks>.*?)</div>");
         var amountDigits = Match(sourceHtml, "<div class=\"[^\"]*\\bamount-digits\\b[^\"]*\"><span>Сумма</span><div class=\"line\">(?<rubles>.*?)</div><span>руб\\.</span><div class=\"line\">(?<kopecks>.*?)</div>");
         var receiptDate = Match(sourceHtml, "<div class=\"[^\"]*\\breceipt-date\\b[^\"]*\"><span>от</span><span>\"</span><div class=\"line\">(?<day>.*?)</div><span>\" (?<month>.*?)</span><div class=\"line\">(?<year>.*?)</div>");
-        var signer = Extract(sourceHtml, "<div class=\"sign-line\">(?<value>[^<]+)</div><div class=\"sign-label\">\\(расшифровка подписи\\)</div>");
-        var cancelNotice = OptionalExtract(sourceHtml, "(?<value><div class=\"cancelled\">.*?</div>)");
+        var chiefAccountant = Extract(sourceHtml, "<span class=\"word-chief\">(?<value>.*?)</span>");
+        var cashier = Extract(sourceHtml, "<span class=\"word-cashier\">(?<value>.*?)</span>");
+        var taxText = Extract(sourceHtml, "<span class=\"word-tax\">(?<value>.*?)</span>");
+        var cancelNotice = OptionalExtract(sourceHtml, "<div class=\"cancelled\">(?<value>.*?)</div>");
 
-        var number = documentMeta.Groups["number"].Value;
-        var date = documentMeta.Groups["date"].Value;
-        var amountWords = amountWordsBlock.Groups["words"].Value;
-        var kopecks = amountWordsBlock.Groups["kopecks"].Value;
-        var rubles = amountDigits.Groups["rubles"].Value;
-        var day = receiptDate.Groups["day"].Value;
-        var month = receiptDate.Groups["month"].Value;
-        var year = receiptDate.Groups["year"].Value;
+        var number = Plain(documentMeta.Groups["number"].Value);
+        var date = Plain(documentMeta.Groups["date"].Value);
+        var amountWords = Plain(amountWordsBlock.Groups["words"].Value);
+        var kopecks = Plain(amountWordsBlock.Groups["kopecks"].Value);
+        var rubles = Plain(amountDigits.Groups["rubles"].Value);
+        var day = Plain(receiptDate.Groups["day"].Value);
+        var month = Plain(receiptDate.Groups["month"].Value);
+        var year = Plain(receiptDate.Groups["year"].Value);
 
         var html = $$"""
 <!doctype html>
@@ -38,7 +40,7 @@ public static partial class CashOrderWordDocumentRenderer
   <style>
     @page { size: A4 portrait; margin: 0; }
     * { box-sizing: border-box; }
-    body { margin: 0; color: #111; background: #fff; font-family: "DejaVu Sans Condensed", sans-serif; font-size: 6pt; line-height: 6pt; }
+    body { margin: 0; color: #111; background: #fff; font-family: "Liberation Sans", Arial, sans-serif; font-size: 6pt; line-height: 6pt; }
     table { border-collapse: collapse; table-layout: fixed; }
     p { margin: 0; padding: 0; }
     td { line-height: 6pt; mso-line-height-rule: exactly; }
@@ -127,7 +129,7 @@ public static partial class CashOrderWordDocumentRenderer
       <table class="top-note" width="378"><tr height="28" style="height:21pt;mso-height-source:userset"><td>Унифицированная форма № КО-1<br>Утверждена постановлением Госкомстата<br>России от 18.08.98 № 88</td></tr></table>
       <table class="header" width="378"><tr height="72" style="height:54pt;mso-height-source:userset">
         <td class="header-org" width="283"><table width="265"><tr height="9" style="height:7pt;mso-height-source:userset"><td class="org-line"><p class="tight">{{organization}}</p></td></tr><tr height="5" style="height:4pt;mso-height-source:userset"><td class="hint"><p class="tight">(организация)</p></td></tr><tr height="11" style="height:8pt;mso-height-source:userset"><td class="subdivision"></td></tr><tr height="5" style="height:4pt;mso-height-source:userset"><td class="hint"><p class="tight">(структурное подразделение)</p></td></tr></table></td>
-        <td class="code-cell" width="95"><table class="code" width="95"><tr><td class="label code-row-1" width="38"><p class="tight">Код</p></td><td class="code-row-1" width="57"></td></tr><tr><td class="label code-row-2" width="38"><p class="tight">Форма по ОКУД</p></td><td class="value code-row-2" width="57"><p class="tight">0310002</p></td></tr><tr><td class="label code-row-3" width="38"><p class="tight">по ОКПО</p></td><td class="code-row-3" width="57"></td></tr></table></td>
+        <td class="code-cell" width="95"><table class="code" width="95"><tr><td class="label code-row-1" width="38"><p class="tight">Код</p></td><td class="code-row-1" width="57"></td></tr><tr><td class="label code-row-2" width="38"><p class="tight">Форма по ОКУД</p></td><td class="value code-row-2" width="57"><p class="tight">0310001</p></td></tr><tr><td class="label code-row-3" width="38"><p class="tight">по ОКПО</p></td><td class="code-row-3" width="57"></td></tr></table></td>
       </tr></table>
       <table class="title-meta" width="378"><tr height="43" style="height:32.5pt;mso-height-source:userset"><td class="title-cell" width="274"><p style="margin:0;line-height:10.5pt;mso-line-height-rule:exactly">ПРИХОДНЫЙ КАССОВЫЙ ОРДЕР</p></td><td class="meta-cell" width="104"><table class="meta" width="104"><tr><td class="meta-head"><p class="tight">Номер<br>документа</p></td><td class="meta-head"><p class="tight">Дата<br>составления</p></td></tr><tr><td class="meta-value"><p class="tight">{{number}}</p></td><td class="meta-value"><p class="tight">{{date}}</p></td></tr></table></td></tr></table>
       {{cancelNotice}}
@@ -142,8 +144,8 @@ public static partial class CashOrderWordDocumentRenderer
       <table class="amount" width="378"><tr><td class="amount-label"><p class="tight">Сумма</p></td><td class="amount-words"><p class="tight">{{amountWords}}</p></td><td class="amount-rub"><p class="tight">руб.</p></td><td class="amount-kop"><p class="tight">{{kopecks}}</p></td><td class="amount-kop-label"><p class="tight">коп.</p></td></tr></table>
       <table class="field" width="378"><tr><td class="field-label"><p class="tight">В том числе</p></td><td class="field-line"><p class="tight">Без налога (НДС) 0,00 руб.</p></td></tr></table>
       <table class="field" width="378"><tr><td class="field-label"><p class="tight">Приложение</p></td><td class="field-line"><p class="tight">{{appendix}}</p></td></tr></table>
-      {{SignatureRow("Главный бухгалтер", signer)}}
-      {{SignatureRow("Получил кассир", signer)}}
+      {{SignatureRow("Главный бухгалтер", chiefAccountant)}}
+      {{SignatureRow("Получил кассир", cashier)}}
     </td>
     <td class="page-cell cut-cell" width="53"><table class="cut-table" width="53"><tr><td class="cut-dashed"></td><td class="cut-label">Л и н и я&nbsp;&nbsp;о т р е з а</td></tr></table></td>
     <td class="page-cell receipt-cell" width="242" style="padding-top:11.5pt">
@@ -160,8 +162,8 @@ public static partial class CashOrderWordDocumentRenderer
       <table class="receipt-field" width="242"><tr><td width="45">В том числе</td><td class="receipt-line">Без налога (НДС) 0,00 руб.</td></tr></table>
       <table class="receipt-date" width="242"><tr><td width="10">&quot;</td><td class="center-line" width="29">{{day}}</td><td width="62">&quot; {{month}}</td><td class="center-line" width="44">{{year}}</td><td width="12">г.</td></tr></table>
       <div class="stamp">М.П. (штампа)</div>
-      {{ReceiptSignatureRow("Главный бухгалтер", signer)}}
-      {{ReceiptSignatureRow("Кассир", signer)}}
+      {{ReceiptSignatureRow("Главный бухгалтер", chiefAccountant)}}
+      {{ReceiptSignatureRow("Кассир", cashier)}}
     </td>
   </tr></table>
 </body>
@@ -182,7 +184,48 @@ public static partial class CashOrderWordDocumentRenderer
             day,
             month,
             year,
-            signer,
+            chiefAccountant,
+            cashier,
+            taxText,
+            cancelNotice));
+    }
+
+    public static byte[] RenderOutgoing(string sourceHtml)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceHtml);
+
+        var organization = Extract(sourceHtml, "<div class=\"org-line\">(?<value>.*?)</div>");
+        var documentMeta = Match(sourceHtml, "<tr><td class=\"[^\"]*\\bvalue\\b[^\"]*\">(?<number>.*?)</td><td class=\"[^\"]*\\bvalue\\b[^\"]*\">(?<date>.*?)</td></tr>");
+        var receiver = Extract(sourceHtml, "<div class=\"[^\"]*\\brko-receiver\\b[^\"]*\"><span>Выдать</span><div class=\"line\">(?<value>.*?)</div></div>");
+        var basis = Extract(sourceHtml, "<div class=\"[^\"]*\\brko-basis\\b[^\"]*\"><span>Основание</span><div class=\"line\">(?<value>.*?)</div></div>");
+        var appendix = Extract(sourceHtml, "<div class=\"[^\"]*\\brko-appendix\\b[^\"]*\"><span>Приложение</span><div class=\"line\">(?<value>.*?)</div></div>");
+        var amountRubKop = Extract(sourceHtml, "<td class=\"[^\"]*\\bsum\\b[^\"]*\">(?<value>.*?)</td>");
+        var amountWords = Extract(sourceHtml, "<div class=\"[^\"]*\\brko-amount-words\\b[^\"]*\"><span>Сумма</span><div class=\"line\">(?<value>.*?)</div></div>");
+        var kopecks = Extract(sourceHtml, "<div class=\"[^\"]*\\brko-amount-digits\\b[^\"]*\">.*?<div class=\"line kopecks\">(?<value>.*?)</div>");
+        var date = Match(sourceHtml, "<div class=\"[^\"]*\\breceived-date\\b[^\"]*\"><span>«</span><div class=\"line\">(?<day>.*?)</div><span>»</span><div class=\"line\">(?<month>.*?)</div><div class=\"line\">(?<year>.*?)</div>");
+        var leaderPosition = Extract(sourceHtml, "<span class=\"word-leader-position\">(?<value>.*?)</span>");
+        var leaderName = Extract(sourceHtml, "<span class=\"word-leader-name\">(?<value>.*?)</span>");
+        var chiefAccountant = Extract(sourceHtml, "<span class=\"word-chief\">(?<value>.*?)</span>");
+        var cashier = Extract(sourceHtml, "<span class=\"word-cashier\">(?<value>.*?)</span>");
+        var cancelNotice = OptionalExtract(sourceHtml, "<div class=\"cancelled\">(?<value>.*?)</div>");
+
+        return CashOrderOpenXmlDocumentBuilder.BuildOutgoing(new OutgoingCashOrderWordData(
+            organization,
+            Plain(documentMeta.Groups["number"].Value),
+            Plain(documentMeta.Groups["date"].Value),
+            receiver,
+            basis,
+            appendix,
+            amountRubKop,
+            amountWords,
+            kopecks,
+            Plain(date.Groups["day"].Value),
+            Plain(date.Groups["month"].Value),
+            Plain(date.Groups["year"].Value),
+            leaderPosition,
+            leaderName,
+            chiefAccountant,
+            cashier,
             cancelNotice));
     }
 
@@ -207,11 +250,15 @@ public static partial class CashOrderWordDocumentRenderer
     }
 
     private static string Extract(string html, string pattern)
-        => Match(html, pattern).Groups["value"].Value;
+        => Plain(Match(html, pattern).Groups["value"].Value);
 
     private static string OptionalExtract(string html, string pattern)
     {
         var match = Regex.Match(html, pattern, RegexOptions.Singleline | RegexOptions.CultureInvariant);
-        return match.Success ? match.Groups["value"].Value : string.Empty;
+        return match.Success ? Plain(match.Groups["value"].Value) : string.Empty;
     }
+
+    private static string Plain(string value)
+        => System.Net.WebUtility.HtmlDecode(Regex.Replace(value, "<[^>]+>", string.Empty));
+
 }

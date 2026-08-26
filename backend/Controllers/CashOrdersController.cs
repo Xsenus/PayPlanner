@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -887,8 +888,8 @@ public class CashOrdersController : ControllerBase
             return NotFound();
         }
 
-        var organizationName = await ResolveOrganizationNameAsync(order, ct);
-        return Content(BuildPrintHtml(order, organizationName), "text/html; charset=utf-8", Encoding.UTF8);
+        var printContext = await ResolvePrintContextAsync(order, ct);
+        return Content(BuildPrintHtml(order, printContext), "text/html; charset=utf-8", Encoding.UTF8);
     }
 
     [HttpGet("{id:int}/pdf")]
@@ -919,8 +920,8 @@ public class CashOrdersController : ControllerBase
 
         try
         {
-            var organizationName = await ResolveOrganizationNameAsync(order, ct);
-            var pdfBytes = await RenderPdfAsync(BuildPrintHtml(order, organizationName), ct);
+            var printContext = await ResolvePrintContextAsync(order, ct);
+            var pdfBytes = await RenderPdfAsync(BuildPrintHtml(order, printContext), ct);
             return File(pdfBytes, "application/pdf", $"cash-order-{SanitizeFilePart(order.Number)}.pdf");
         }
         catch (InvalidOperationException ex)
@@ -955,11 +956,11 @@ public class CashOrdersController : ControllerBase
             return NotFound();
         }
 
-        var organizationName = await ResolveOrganizationNameAsync(order, ct);
-        var html = BuildPrintHtml(order, organizationName);
+        var printContext = await ResolvePrintContextAsync(order, ct);
+        var html = BuildPrintHtml(order, printContext);
         var bytes = order.Type == CashOrderType.Incoming
             ? PayPlanner.Api.Services.Documents.CashOrderWordDocumentRenderer.RenderIncoming(html)
-            : PayPlanner.Api.Services.Documents.HtmlWordDocumentBuilder.Build(html);
+            : PayPlanner.Api.Services.Documents.CashOrderWordDocumentRenderer.RenderOutgoing(html);
         return File(
             bytes,
             PayPlanner.Api.Services.Documents.HtmlWordDocumentBuilder.ContentType,
@@ -1479,14 +1480,9 @@ public class CashOrdersController : ControllerBase
             UpdatedAt = inventory.UpdatedAt,
         };
 
-    private async Task<string> ResolveOrganizationNameAsync(CashOrder order, CancellationToken ct)
+    private async Task<CashOrderPrintContext> ResolvePrintContextAsync(CashOrder order, CancellationToken ct)
     {
         var configured = _configuration?["App:OrganizationName"]?.Trim();
-        if (!string.IsNullOrWhiteSpace(configured))
-        {
-            return configured;
-        }
-
         var rawId = await _db.SystemSettings.AsNoTracking()
             .Where(item => item.Key == "legalEntities.defaultMainCompanyId"
                 || item.Key == "legalEntities.mainCompanyId")
@@ -1495,33 +1491,75 @@ public class CashOrdersController : ControllerBase
             .FirstOrDefaultAsync(ct);
         if (int.TryParse(rawId, out var id) && id > 0)
         {
-            var legalEntityName = await _db.LegalEntities.AsNoTracking()
+            var legalEntity = await _db.LegalEntities.AsNoTracking()
                 .Where(item => item.Id == id)
-                .Select(item => item.ShortName ?? item.FullName)
+                .Select(item => new
+                {
+                    Name = item.ShortName ?? item.FullName,
+                    item.Director,
+                    item.DocumentDirectorJson,
+                    item.ChiefAccountantJson,
+                    item.VatWithoutVat,
+                })
                 .FirstOrDefaultAsync(ct);
-            if (!string.IsNullOrWhiteSpace(legalEntityName))
+            if (legalEntity is not null)
             {
-                return legalEntityName;
+                var director = ParseCashOrderPerson(legalEntity.DocumentDirectorJson);
+                var chiefAccountant = ParseCashOrderPerson(legalEntity.ChiefAccountantJson);
+                var fallbackSigner = ShortCashOrderSigner(order.CreatedByUserName);
+                return new CashOrderPrintContext(
+                    string.IsNullOrWhiteSpace(configured)
+                        ? (legalEntity.Name ?? order.CreatedByUserName ?? "Организация не указана")
+                        : configured,
+                    director?.Position ?? string.Empty,
+                    ShortCashOrderPerson(director, legalEntity.Director ?? order.CreatedByUserName),
+                    ShortCashOrderPerson(chiefAccountant, order.CreatedByUserName),
+                    fallbackSigner,
+                    BuildCashOrderTaxText(order, legalEntity.VatWithoutVat));
             }
         }
 
-        return order.CreatedByUserName ?? "Организация не указана";
+        var signer = ShortCashOrderSigner(order.CreatedByUserName);
+        return new CashOrderPrintContext(
+            string.IsNullOrWhiteSpace(configured) ? (order.CreatedByUserName ?? "Организация не указана") : configured,
+            string.Empty,
+            signer,
+            signer,
+            signer,
+            "Без налога (НДС) 0,00 руб.");
     }
 
-    private static string BuildIncomingCashOrderPrintHtml(CashOrder order, string organizationName)
+    private static string BuildIncomingCashOrderPrintHtml(CashOrder order, CashOrderPrintContext context)
     {
         var number = Html(order.Number);
-        var organization = Html(organizationName);
-        var payer = Html(order.PayerName ?? order.Client?.Name ?? "-");
-        var basis = Html(order.Basis ?? "-");
-        var appendix = Html(order.Appendix ?? string.Empty);
-        var signer = Html(ShortCashOrderSigner(order.CreatedByUserName));
+        var organization = Html(context.OrganizationName);
+        var payerText = order.PayerName ?? order.Client?.Name ?? string.Empty;
+        var basisText = order.Basis ?? string.Empty;
+        var appendixText = order.Appendix ?? string.Empty;
+        var payer = Html(payerText);
+        var basis = Html(basisText);
+        var appendix = Html(appendixText);
+        var chiefAccountant = Html(context.ChiefAccountantName);
+        var cashier = Html(context.CashierName);
+        var taxText = Html(context.TaxText);
         var fontCss = BuildCashOrderFontCss();
         var amountRubKop = Html(FormatCashOrderRubKop(order.Amount));
         var rubles = Html(FormatWholeRubles(order.Amount));
         var kopecks = Html(FormatKopecks(order.Amount));
-        var amountWords = Html(AmountRublesToWordsRu(order.Amount));
+        var amountWordsText = AmountRublesToWordsRu(order.Amount);
+        var amountWords = Html(amountWordsText);
         var month = GetRussianMonthGenitive(order.Date.Month);
+        var numberClass = order.Number.Length > 32
+            ? " number-very-compact"
+            : order.Number.Length > 16
+                ? " number-compact"
+                : string.Empty;
+        var amountClass = amountRubKop.Length > 10 ? " amount-compact" : string.Empty;
+        var denseLayout = payerText.Length > 55
+            || basisText.Length > 80
+            || appendixText.Length > 70
+            || amountWordsText.Length > 55;
+        var layoutClass = denseLayout ? " dense-content" : string.Empty;
         var cancelNotice = order.Status == CashOrderStatus.Cancelled
             ? $"""<div class="cancelled">Документ отменён{(order.CancelledAt.HasValue ? $" {order.CancelledAt:dd.MM.yyyy HH:mm}" : string.Empty)}{(string.IsNullOrWhiteSpace(order.CancelledReason) ? string.Empty : $": {Html(order.CancelledReason)}")}</div>"""
             : string.Empty;
@@ -1538,8 +1576,8 @@ public class CashOrdersController : ControllerBase
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      color: #111;
-      font-family: "DejaVu Sans Condensed", sans-serif;
+      color: #333;
+      font-family: "Cash Order Arial", Arial, sans-serif;
       font-size: 10px;
       line-height: 1.15;
       background: #fff;
@@ -1548,53 +1586,59 @@ public class CashOrdersController : ControllerBase
     }
     .ko1 {
       display: grid;
-      grid-template-columns: 100mm 12mm 64mm;
+      grid-template-columns: 101.75mm 11mm 63.25mm;
       gap: 1mm;
       width: 178mm;
       margin: 27mm 0 0 16mm;
     }
     .order, .receipt { min-width: 0; position: relative; }
-    .cut { position: relative; min-height: 130mm; border-left: 1px solid #111; border-right: 2px solid #111; }
-    .cut::before { content: ""; position: absolute; top: 0; bottom: 0; left: 6mm; border-left: 1px dashed #111; }
+    .receipt { left: 1.75mm; width: calc(100% + 1.85mm); }
+    .cut { position: relative; min-height: 132.6mm; border-left: 1px solid #111; border-right: 2px solid #111; }
+    .cut::before { content: ""; position: absolute; top: 0; bottom: 0; left: 7mm; border-left: 1px dashed #111; }
     .cut span { position: absolute; top: 42mm; left: 50%; transform: translateX(-50%); writing-mode: vertical-rl; letter-spacing: 5px; font-weight: 700; font-size: 8px; }
-    .top-note { margin-left: 56mm; margin-bottom: 3mm; font-size: 7px; line-height: 1.3; }
+    .top-note { position: relative; top: 3px; margin-left: 57.85mm; margin-bottom: 6.15mm; font-size: 6pt; line-height: 1.05; transform: scaleX(.957); transform-origin: left top; }
     .org-line { border-bottom: 2px solid #111; min-height: 18px; padding: 0 6px 2px; }
     .hint { color: #333; font-size: 6px; text-align: center; }
-    .header-row { display: block; padding-right: 38mm; margin-top: 8mm; }
-    .header-row > div { position: relative; top: 3.6mm; }
-    .order .org-line { padding-left: 0; }
+    .header-row { display: block; padding-right: 30.75mm; padding-bottom: 4.8mm; margin-top: 11.7mm; }
+    .header-row > div { position: relative; top: .5mm; }
+    .header-row .org-line { min-height: 16px; font-size: 8.75px; }
+    .header-row .org-line > span { position: relative; top: -5px; }
+    .order .header-row .org-line > span { left: 31px; }
+    .header-row > div > .org-line:first-child { min-height: 8.5px; height: 8.5px; }
+    .header-row > div > .org-line:nth-child(3) { min-height: 19px; height: 19px; }
+    .header-row .hint { line-height: .7; }
+    .order .org-line { padding-left: 5px; }
     .code-box, .doc-meta, .ledger { border-collapse: collapse; width: 100%; table-layout: fixed; }
     .code-box td, .doc-meta td, .ledger th, .ledger td { border: 1px solid #111; padding: 1.5mm 1mm; text-align: center; vertical-align: middle; }
-    .code-box { position: absolute; top: 7.93mm; right: .4mm; width: 32mm; font-size: 6pt; }
+    .code-box { position: absolute; top: 8.58mm; right: -.25mm; width: 32.5mm; font-size: 6pt; }
     .code-box td { padding: 0 1mm; }
-    .code-box td:first-child { width: 17mm; border-left: 0; text-align: right; }
-    .code-box td:last-child { width: 15mm; font-weight: 700; }
-    .code-box tr:nth-child(1) { height: 4.6mm; }
+    .code-box td:first-child { width: 17mm; border: 0; text-align: right; white-space: nowrap; }
+    .code-box td:last-child { width: 15.5mm; font-weight: 700; }
+    .code-box tr:nth-child(1), .code-box tr:nth-child(2), .code-box tr:nth-child(3) { height: 4mm; }
     .code-box tr:nth-child(1) td:first-child { font-size: 7pt; }
-    .code-box tr:nth-child(2) { height: 8.1mm; }
-    .code-box tr:nth-child(3) { height: 6mm; }
-    .title { width: 62mm; margin: 6mm 0 5mm 3.5mm; position: relative; top: .5mm; text-align: center; font-size: 9pt; line-height: 1.05; font-weight: 700; text-transform: uppercase; }
-    .doc-meta { position: absolute; top: 27.9mm; right: 0; width: 36mm; margin: 0; font-size: 6pt; }
-    .doc-meta td:nth-child(2) { padding-left: 6.8pt; }
-    .doc-meta .value { font-size: 7pt; font-weight: 700; }
+    .code-box tr:nth-child(4) { height: 6.55mm; }
+    .title { width: 62mm; margin: 3.5mm 0 5mm 4.55mm; position: relative; top: 1.42mm; text-align: center; font-size: 9pt; line-height: 1.05; font-weight: 700; transform: scaleX(.99); transform-origin: center top; text-transform: uppercase; }
+    .doc-meta { position: absolute; top: 30.2mm; right: 0; width: 30.7mm; margin: 0; font-size: 5.5pt; }
+    .doc-meta td { padding: 0 .2mm; line-height: 1; }
+    .doc-meta tr:nth-child(1) { height: 6.8mm; }
+    .doc-meta tr:nth-child(2) { height: 4.8mm; }
+    .doc-meta td:nth-child(2) { padding-left: .2mm; }
+    .doc-meta .value { font-size: 5pt; font-weight: 700; white-space: nowrap; }
+    .doc-meta .number-compact { font-size: 4.5pt !important; line-height: 1; white-space: nowrap; letter-spacing: -.1pt; }
+    .doc-meta .number-very-compact { font-size: 2.25pt !important; line-height: 1; white-space: nowrap; letter-spacing: -.2pt; }
     .ledger { font-size: 6pt; }
     .ledger th { font-weight: 400; }
     .ledger th, .ledger td { padding: 0 1pt; }
-    .ledger { position: relative; top: 4.5pt; margin-bottom: -8.4pt; }
-    .ledger th:first-child { width: 28.5pt !important; }
-    .ledger th[rowspan]:nth-last-child(2) { width: 39pt !important; }
-    .ledger th[rowspan]:last-child { width: 63pt !important; }
-    .ledger tr:nth-child(2) th:nth-child(1) { width: 37.5pt !important; }
-    .ledger tr:nth-child(2) th:nth-child(2) { width: 52.5pt !important; }
-    .ledger tr:nth-child(2) th:nth-child(3) { width: 63pt !important; }
+    .ledger { position: relative; top: 8.825pt; margin-bottom: -8.4pt; }
     .ledger tr:nth-child(1) { height: 11.5pt; }
-    .ledger tr:nth-child(2) { height: 30pt; }
-    .ledger tr:nth-child(3) { height: 10pt; }
+    .ledger tr:nth-child(2) { height: 33.75pt; }
+    .ledger tr:nth-child(3) { height: 12pt; }
     .ledger th[rowspan] { vertical-align: top; padding-top: 2pt; }
     .ledger tr:nth-child(2) th:nth-child(1) { padding-top: 0; }
     .ledger tr:nth-child(2) th:nth-child(2) { padding-top: 1.6pt; }
     .ledger tr:nth-child(2) th:nth-child(3) { padding-top: 3.5pt; }
     .ledger .sum { font-size: 6pt; white-space: nowrap; padding-top: .2pt; }
+    .ledger .sum.amount-compact { font-size: 4pt; letter-spacing: -.15pt; }
     .line-field { display: grid; grid-template-columns: auto 1fr; gap: 2mm; align-items: end; margin-top: 1.4mm; font-size: 6pt; }
     .line { min-height: 4mm; border-bottom: 1px solid #111; padding: 0 1.5mm .4mm; }
     .long-line { margin-top: 1.4mm; min-height: 4.2mm; border-bottom: 1px solid #111; }
@@ -1605,70 +1649,151 @@ public class CashOrdersController : ControllerBase
     .sign-line { border-bottom: 1px solid #111; min-height: 4.4mm; text-align: center; padding-bottom: .4mm; }
     .sign-label { font-size: 6px; text-align: center; color: #333; margin-top: .5mm; }
     .receipt { height: 370pt; }
-    .receipt .org-line { position: absolute; top: 8pt; left: 0; width: 100%; margin: 0; text-align: center; font-size: 6pt; }
-    .receipt > .hint { position: absolute; top: 17pt; left: 0; width: 100%; font-size: 5pt; }
-    .receipt-title { position: absolute; top: 24pt; left: 0; width: 100%; text-align: center; font-size: 10pt; font-weight: 700; margin: 0; text-transform: uppercase; }
+    .receipt .org-line { position: absolute; top: 8.75pt; left: 0; width: 100%; margin: 0; text-align: center; font-size: 6.3pt; }
+    .receipt .org-line > span { position: relative; top: 2.25pt; left: 3px; }
+    .receipt > .hint { position: absolute; top: 23pt; left: 0; width: 100%; font-size: 5pt; }
+    .receipt-title { position: absolute; top: 38pt; left: 2.5px; width: 100%; text-align: center; font-size: 10.3pt; font-weight: 700; margin: 0; text-transform: uppercase; }
     .receipt-subtitle { margin: 0; font-size: 6pt; }
-    .receipt-number { display: grid; grid-template-columns: 1fr 12mm; gap: 3mm; align-items: end; }
+    .receipt-number { display: grid; grid-template-columns: 1fr 20mm; gap: 1mm; align-items: end; }
+    .receipt-number .line { padding-left: 1mm; padding-right: 1mm; font-size: 6pt; white-space: nowrap; }
+    .receipt-number > span { white-space: nowrap; font-size: 6.5pt; }
+    .receipt-number .number-compact { font-size: 4pt !important; white-space: nowrap; }
+    .receipt-number .number-very-compact { font-size: 2.5pt !important; white-space: nowrap; }
     .receipt-date { display: grid; grid-template-columns: auto 7mm auto 18mm 13mm auto; gap: 2mm; align-items: end; margin: 0; font-size: 6pt; }
     .receipt .line-field { grid-template-columns: auto 1fr; margin: 0; }
     .receipt .amount-digits { display: grid; grid-template-columns: auto 1fr auto 10mm auto; gap: 2mm; align-items: end; margin: 0; font-size: 6pt; }
     .receipt .amount-digits .line { text-align: center; }
-    .receipt .amount-words { grid-template-columns: 1fr auto 45px auto; margin-top: 8px; }
-    .receipt .amount-words .line { grid-column: 1 / 5; }
+    .receipt .amount-words { display: block; margin-top: 0; }
+    .receipt .amount-words .line { width: 100%; }
+    .receipt-words-digits { position: absolute; top: 228pt; left: 0; width: 100%; height: 12pt; display: block; font-size: 6pt; }
+    .receipt-words-digits > * { position: absolute; bottom: 0; }
+    .receipt-words-digits > div:nth-child(1) { left: 0; width: 35.5mm; }
+    .receipt-words-digits > span:nth-child(2) { left: 37.8mm; }
+    .receipt-words-digits > div:nth-child(3) { left: 45.2mm; width: 10mm; }
+    .receipt-words-digits > span:nth-child(4) { left: 56.4mm; }
     .receipt .small-hint { text-align: center; font-size: 5pt; color: #333; margin: 0; }
     .receipt .stamp-row { display: grid; grid-template-columns: 1fr auto 18mm auto 13mm auto; gap: 2mm; align-items: end; margin: 0; font-size: 6pt; }
     .receipt .sign-row { grid-template-columns: 24mm 1fr 1fr; gap: 4mm; margin: 0; }
-    .receipt-number { position: absolute; top: 58pt; left: 0; width: 100%; }
-    .receipt-date-main { position: absolute; top: 70pt; left: 0; width: 100%; }
-    .payer-field { position: absolute; top: 81pt; left: 0; width: 100%; }
-    .basis-field { position: absolute; top: 102.5pt; left: 0; width: 100%; }
-    .receipt-lines { position: absolute; top: 119pt; left: 0; width: 100%; height: 21pt; border-top: 1px solid #111; border-bottom: 1px solid #111; }
-    .receipt-lines::after { content: ""; position: absolute; left: 0; right: 0; top: 10pt; border-top: 1px solid #111; }
-    .receipt-digits { position: absolute !important; top: 145pt; left: 0; width: 100%; }
-    .digits-hint { position: absolute; top: 157pt; left: 0; width: 100%; }
-    .receipt-words { position: absolute !important; top: 160pt; left: 0; width: 100%; }
-    .words-hint { position: absolute; top: 175pt; left: 0; width: 100%; }
-    .tax-field { position: absolute; top: 200pt; left: 0; width: 100%; }
-    .receipt-stamp-date { position: absolute; top: 215pt; left: 0; width: 100%; }
-    .stamp-label { position: absolute; top: 231pt; left: 0; margin: 0 !important; font-size: 6pt; }
-    .chief-sign { position: absolute; top: 232.8pt; left: 0; width: 100%; }
-    .cashier-sign { position: absolute; top: 249.5pt; left: 0; width: 100%; }
+    .receipt-number { position: absolute; top: 75.2pt; left: 0; width: 100%; }
+    .receipt-date-main { position: absolute; top: 86.4pt; left: 0; width: 100%; }
+    .payer-field { position: absolute; top: 103.35pt; left: 0; width: 100%; }
+    .basis-field { position: absolute; top: 129.7pt; left: 0; width: 100%; }
+    .receipt-lines { position: absolute; top: 148.9pt; left: 0; width: 100%; height: 25.3pt; border-top: 1px solid #111; border-bottom: 1px solid #111; }
+    .receipt-lines::after { content: ""; position: absolute; left: 0; right: 0; top: 11.55pt; border-top: 1px solid #111; }
+    .receipt-digits { position: absolute !important; top: 183pt; left: 0; width: 100%; height: 12pt; display: block !important; }
+    .receipt-digits > * { position: absolute; bottom: 0; }
+    .receipt-digits > span:nth-child(1) { left: 0; }
+    .receipt-digits > div:nth-child(2) { left: 11.5mm; width: 24.5mm; }
+    .receipt-digits > span:nth-child(3) { left: 38mm; }
+    .receipt-digits > div:nth-child(4) { left: 45.45mm; width: 9.25mm; }
+    .receipt-digits > span:nth-child(5) { left: 56.4mm; }
+    .digits-hint { position: absolute; top: 195pt; left: 0; width: 100%; }
+    .receipt-words { position: absolute !important; top: 202.45pt; left: 0; width: 100%; }
+    .words-hint { position: absolute; top: 217.5pt; left: 0; width: 100%; }
+    .tax-field { position: absolute; top: 244.95pt; left: 0; width: 100%; }
+    .receipt-stamp-date { position: absolute; top: 260.5pt; left: 0; width: 100%; }
+    .stamp-label { position: absolute; top: 287.5pt; left: 0; margin: 0 !important; font-size: 6pt; }
+    .chief-sign { position: absolute; top: 305.05pt; left: 0; width: 100%; }
+    .cashier-sign { position: absolute; top: 325.15pt; left: 0; width: 100%; }
     .order .line-field > span { position: relative; top: -4.3pt; }
-    .order-received { position: absolute; top: 187pt; left: 0; width: 100%; margin: 0; }
-    .order-basis { position: absolute; top: 197.9pt; left: 0; width: 100%; margin: 0; }
-    .order-blank { position: absolute; top: 209.5pt; left: 0; width: 100%; height: 14pt; margin: 0; }
-    .order-amount { position: absolute; top: 222.2pt; left: 0; width: 100%; height: 29pt; margin: 0; display: block !important; }
+    .order .line-field { font-size: 6.4pt; }
+    .order .line-field .line { padding-bottom: 0; }
+    .order .line-field > span { top: -3pt; }
+    .order .amount-words, .order .sign-row { font-size: 6.4pt; }
+    .order .amount-words .line, .order .sign-line { padding-bottom: 0; }
+    .order-tax > span, .order-tax .positioned-text { position: relative; top: 3pt; }
+    .order-appendix > span, .order-appendix .positioned-text { position: relative; top: 1.85pt; }
+    .order-received > span, .order-received .positioned-text { position: relative; top: .75pt; }
+    .order-amount .positioned-text { position: relative; top: 3pt; }
+    .order-chief > div:first-child, .order-chief .positioned-text { position: relative; top: 2.25pt; }
+    .order-cashier > div:first-child, .order-cashier .positioned-text { position: relative; top: 3pt; }
+    .order-received { position: absolute; top: 196.85pt; left: 0; width: 100%; margin: 0; }
+    .order-basis { position: absolute; top: 212pt; left: 0; width: 100%; margin: 0; }
+    .order-blank { position: absolute; top: 225.3pt; left: 0; width: 100%; height: 10pt; margin: 0; }
+    .order-amount { position: absolute; top: 234.25pt; left: 0; width: 100%; height: 29pt; margin: 0; display: block !important; }
     .order-amount > * { position: absolute; margin: 0; }
     .order-amount > span:nth-child(1) { left: 0; top: 0; }
-    .order-amount > div:nth-child(2) { left: 31.3pt; top: 0; width: 147pt; }
-    .order-amount > span:nth-child(3) { left: 195.1pt; top: 17.8pt; }
-    .order-amount > div:nth-child(4) { left: 232.8pt; top: 17.8pt; width: 48pt; }
-    .order-amount > span:nth-child(5) { left: 265.7pt; top: 17.8pt; }
-    .order-amount-hint { position: absolute; top: 231.3pt; left: 139.5pt; margin: 0; font-size: 5pt; }
-    .order-tax { position: absolute; top: 251.1pt; left: 0; width: 100%; margin: 0; }
-    .order-appendix { position: absolute; top: 261.9pt; left: 0; width: 100%; margin: 0; }
-    .order-chief { position: absolute; top: 273pt; left: 0; width: 100%; margin: 0; grid-template-columns: 76pt 88pt 96pt 23.5pt; gap: 0; align-items: start; }
-    .order-cashier { position: absolute; top: 289.9pt; left: 0; width: 100%; margin: 0; grid-template-columns: 76pt 88pt 96pt 23.5pt; gap: 0; align-items: start; }
+    .order-amount > div:nth-child(2) { left: 28.7pt; top: 3.75pt; width: 259.55pt; }
+    .order-amount > span:nth-child(3) { left: 193.7pt; top: 12.95pt; }
+    .order-amount > div:nth-child(4) { left: 217.1pt; top: 12.95pt; width: 49pt; }
+    .order-amount > span:nth-child(5) { left: 264.3pt; top: 12.95pt; }
+    .order-amount-hint { position: absolute; top: 254.5pt; left: 139.5pt; margin: 0; font-size: 5pt; }
+    .order-tax { position: absolute; top: 272.95pt; left: 0; width: 100%; margin: 0; }
+    .order-appendix { position: absolute; top: 287.75pt; left: 0; width: 100%; margin: 0; }
+    .order-chief { position: absolute; top: 303.7pt; left: 0; width: 100%; margin: 0; grid-template-columns: 76pt 88pt 96pt 23.5pt; gap: 0; align-items: start; }
+    .order-cashier { position: absolute; top: 323.15pt; left: 0; width: 100%; margin: 0; grid-template-columns: 76pt 88pt 96pt 23.5pt; gap: 0; align-items: start; }
     .order-chief > div:nth-child(3), .order-cashier > div:nth-child(3) { grid-column: 3; }
     .receipt-number, .receipt-date-main, .payer-field, .basis-field, .receipt-digits, .digits-hint, .receipt-words, .words-hint, .tax-field, .receipt-stamp-date { transform: translateY(-4.2pt); }
     .order-amount .line { position: relative; left: -4.6pt; }
+    .order-amount::after { content: ""; position: absolute; top: 34pt; left: 0; width: 194.5pt; border-top: 1px solid #111; }
     .receipt-words .line { padding-left: 3pt; }
-    .receipt-digits { transform: translateY(-3.6pt); }
     .receipt-words { transform: translateY(-3.55pt); }
+    .receipt-number { transform: translateY(-3.8pt); }
+    .receipt-number > span { position: relative; top: -3pt; }
+    .receipt-date-main { transform: translateY(-2.7pt); }
+    .payer-field { transform: translateY(-2pt); }
+    .payer-field > span { position: relative; top: -3.75pt; }
+    .receipt-payer-blank { position: absolute; top: 122.45pt; left: 0; width: 100%; border-top: 1px solid #111; }
+    .basis-field { transform: translateY(-2.65pt); }
+    .basis-field > span { position: relative; top: -3pt; }
+    .basis-field > span { font-size: 6.5pt; }
+    .receipt-digits { transform: translateY(-1.4pt); }
+    .digits-hint { top: 195pt; }
+    .receipt-words .positioned-text { position: relative; top: 1.5pt; }
+    .receipt-words { font-size: 6.4pt; }
+    .words-hint { top: 213.25pt; }
+    .stamp-label { top: 289pt; }
     .receipt .sign-row { align-items: start; }
-    .chief-sign { grid-template-columns: 63.6pt 38.3pt 79.6pt; gap: 0; }
-    .chief-sign > div:nth-child(3) { position: relative; left: 3.75pt; }
-    .cashier-sign { grid-template-columns: 32.5pt 32.2pt 27.8pt 54pt 35pt; gap: 0; }
-    .cashier-sign > div:nth-child(1) { grid-column: 1; }
-    .cashier-sign > div:nth-child(2) { grid-column: 2; }
-    .cashier-sign > div:nth-child(3) { grid-column: 4; }
-    .cashier-sign > div:nth-child(3) { position: relative; left: -3.15pt; }
-    .cancelled { margin: 0 0 10px; border: 1px solid #111; padding: 6px 8px; font-weight: 700; }
+    .receipt .sign-line { padding-bottom: 0; }
+    .tax-field > span, .tax-field .positioned-text, .receipt-stamp-date > * { position: relative; top: 1.5pt; }
+    .tax-field .line { font-size: 6.75pt; }
+    .chief-sign > div:first-child, .chief-sign .positioned-text { position: relative; top: 1.5pt; }
+    .cashier-sign > div:first-child, .cashier-sign .positioned-text { position: relative; top: 2.25pt; }
+    .chief-sign, .cashier-sign { display: block; }
+    .chief-sign > div:nth-child(2), .chief-sign > div:nth-child(3), .cashier-sign > div:nth-child(2), .cashier-sign > div:nth-child(3) { position: absolute; top: 0; }
+    .chief-sign > div:nth-child(2) { left: 24.25mm; width: 12.2mm; }
+    .chief-sign > div:nth-child(3) { left: 38.65mm; width: 26.95mm; }
+    .cashier-sign > div:nth-child(2) { left: 11.25mm; width: 12mm; }
+    .cashier-sign > div:nth-child(3) { left: 26.65mm; width: 30.1mm; }
+    .receipt .cashier-sign .sign-label { position: relative; top: .75pt; }
+    .order > .cancelled { position: absolute; top: 340pt; left: 0; width: 100%; margin: 0; border: 1px solid #111; padding: 3px 5px; font-size: 5.5pt; line-height: 1.15; font-weight: 700; }
+    .ko1.dense-content .order-received { align-items: start; }
+    .ko1.dense-content .order-received .line { min-height: 18pt; max-height: 18pt; padding-top: 0; font-size: 4.5pt; line-height: 1.12; overflow-wrap: anywhere; }
+    .ko1.dense-content .order-basis { top: 212pt; align-items: start; }
+    .ko1.dense-content .order-basis .line { min-height: 22pt; max-height: 22pt; padding-top: 0; font-size: 4.5pt; line-height: 1.12; overflow-wrap: anywhere; }
+    .ko1.dense-content .order-blank { display: none; }
+    .ko1.dense-content .order-amount { top: 242pt; height: 31pt; }
+    .ko1.dense-content .order-amount > div:nth-child(2) { width: 240pt; max-height: 14pt; padding: 0; font-size: 4.5pt; line-height: 1.08; overflow-wrap: anywhere; }
+    .ko1.dense-content .order-amount-hint { top: 257pt; }
+    .ko1.dense-content .order-tax { top: 279pt; }
+    .ko1.dense-content .order-appendix { top: 293pt; align-items: start; }
+    .ko1.dense-content .order-appendix .line { min-height: 17pt; max-height: 17pt; padding-top: 0; font-size: 4.5pt; line-height: 1.12; overflow-wrap: anywhere; }
+    .ko1.dense-content .order-chief { top: 314pt; }
+    .ko1.dense-content .order-cashier { top: 333pt; }
+    .ko1.dense-content .payer-field { align-items: start; }
+    .ko1.dense-content .payer-field .line { min-height: 20pt; max-height: 20pt; padding-top: 0; font-size: 4.5pt; line-height: 1.12; overflow-wrap: anywhere; }
+    .ko1.dense-content .basis-field { top: 126pt; align-items: start; z-index: 1; }
+    .ko1.dense-content .basis-field .line { min-height: 34pt; max-height: 34pt; padding-top: 0; font-size: 4.5pt; line-height: 1.12; overflow-wrap: anywhere; }
+    .ko1.dense-content .receipt-words .line { max-height: 14pt; font-size: 4.5pt; line-height: 1.08; overflow-wrap: anywhere; }
+    .ko1.dense-content .doc-meta { width: 45mm; }
+    .ko1.dense-content .doc-meta td:first-child { width: 29mm; }
+    .ko1.dense-content .doc-meta td:last-child { width: 16mm; }
+    .ko1.dense-content .doc-meta .number-very-compact { font-size: 2.25pt !important; line-height: 1; }
+    .ko1.dense-content .receipt-lines { top: 164pt; }
+    .ko1.dense-content .receipt-digits { top: 194pt; }
+    .ko1.dense-content .digits-hint { top: 206pt; }
+    .ko1.dense-content .receipt-words { top: 209pt; }
+    .ko1.dense-content .words-hint { top: 224pt; }
+    .ko1.dense-content .tax-field { top: 250pt; }
+    .ko1.dense-content .receipt-stamp-date { top: 273pt; }
+    .ko1.dense-content .stamp-label { top: 286pt; }
+    .ko1.dense-content .chief-sign { top: 308pt; }
+    .ko1.dense-content .cashier-sign { top: 333pt; }
   </style>
 </head>
 <body>
-  <main class="ko1">
+  <main class="ko1{{layoutClass}}">
+    <div hidden><span class="word-chief">{{chiefAccountant}}</span><span class="word-cashier">{{cashier}}</span><span class="word-tax">{{taxText}}</span></div>
     <section class="order">
       <div class="top-note">
         <div>Унифицированная форма № КО-1</div>
@@ -1677,24 +1802,26 @@ public class CashOrdersController : ControllerBase
       </div>
       <div class="header-row">
         <div>
-          <div class="org-line">{{organization}}</div>
+          <div class="org-line"><span>{{organization}}</span></div>
           <div class="hint">(организация)</div>
-          <div class="org-line" style="margin-top:10px;"></div>
+          <div class="org-line"></div>
           <div class="hint">(структурное подразделение)</div>
         </div>
         <table class="code-box">
           <tr><td>Код</td><td></td></tr>
           <tr><td>Форма по ОКУД</td><td>0310002</td></tr>
           <tr><td>по ОКПО</td><td></td></tr>
+          <tr><td></td><td></td></tr>
         </table>
       </div>
       <table class="doc-meta">
         <tr><td>Номер<br>документа</td><td>Дата<br>составления</td></tr>
-        <tr><td class="value">{{number}}</td><td class="value">{{order.Date:dd.MM.yyyy}}</td></tr>
+        <tr><td class="value{{numberClass}}">{{number}}</td><td class="value">{{order.Date:dd.MM.yyyy}}</td></tr>
       </table>
       <h1 class="title">Приходный кассовый ордер</h1>
       {{cancelNotice}}
       <table class="ledger">
+        <colgroup><col style="width:10mm"><col style="width:18mm"><col style="width:18mm"><col style="width:18mm"><col style="width:14mm"><col style="width:22mm"></colgroup>
         <tr>
           <th rowspan="2" style="width:58px;">Дебет</th>
           <th colspan="3">Кредит</th>
@@ -1707,55 +1834,57 @@ public class CashOrdersController : ControllerBase
           <th>код аналити-<br>ческого учета</th>
         </tr>
         <tr>
-          <td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td class="sum">{{amountRubKop}}</td><td>&nbsp;</td>
+          <td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td class="sum{{amountClass}}">{{amountRubKop}}</td><td>&nbsp;</td>
         </tr>
       </table>
-      <div class="line-field order-received"><span>Принято от</span><div class="line">{{payer}}</div></div>
+      <div class="line-field order-received"><span>Принято от</span><div class="line"><span class="positioned-text">{{payer}}</span></div></div>
       <div class="line-field order-basis"><span>Основание:</span><div class="line">{{basis}}</div></div>
       <div class="long-line order-blank"></div>
       <div class="amount-words order-amount">
-        <span>Сумма</span><div class="line">{{amountWords}}</div><span>руб.</span><div class="line kopecks">{{kopecks}}</div><span>коп.</span>
+        <span><span class="positioned-text">Сумма</span></span><div class="line"><span class="positioned-text">{{amountWords}}</span></div><span><span class="positioned-text">руб.</span></span><div class="line kopecks"><span class="positioned-text">{{kopecks}}</span></div><span><span class="positioned-text">коп.</span></span>
       </div>
       <div class="order-amount-hint">(прописью)</div>
-      <div class="line-field order-tax" style="grid-template-columns:auto 1fr;"><span>В том числе</span><div class="line">Без налога (НДС) 0,00 руб.</div></div>
-      <div class="line-field order-appendix"><span>Приложение</span><div class="line">{{appendix}}</div></div>
+      <div class="line-field order-tax" style="grid-template-columns:auto 1fr;"><span>В том числе</span><div class="line"><span class="positioned-text">{{taxText}}</span></div></div>
+      <div class="line-field order-appendix"><span>Приложение</span><div class="line"><span class="positioned-text">{{appendix}}</span></div></div>
       <div class="sign-row order-chief">
         <div>Главный бухгалтер</div>
         <div><div class="sign-line"></div><div class="sign-label">(подпись)</div></div>
-        <div><div class="sign-line">{{signer}}</div><div class="sign-label">(расшифровка подписи)</div></div>
+        <div><div class="sign-line"><span class="positioned-text">{{chiefAccountant}}</span></div><div class="sign-label">(расшифровка подписи)</div></div>
       </div>
       <div class="sign-row order-cashier">
         <div>Получил кассир</div>
         <div><div class="sign-line"></div><div class="sign-label">(подпись)</div></div>
-        <div><div class="sign-line">{{signer}}</div><div class="sign-label">(расшифровка подписи)</div></div>
+        <div><div class="sign-line"><span class="positioned-text">{{cashier}}</span></div><div class="sign-label">(расшифровка подписи)</div></div>
       </div>
     </section>
     <div class="cut"><span>Линия отреза</span></div>
     <section class="receipt">
-      <div class="org-line">{{organization}}</div>
+      <div class="org-line"><span>{{organization}}</span></div>
       <div class="hint">(организация)</div>
       <div class="receipt-title">Квитанция</div>
-      <div class="receipt-subtitle receipt-number"><span>к приходному кассовому ордеру №</span><div class="line">{{number}}</div></div>
+      <div class="receipt-subtitle receipt-number"><span>к приходному кассовому ордеру №</span><div class="line{{numberClass}}">{{number}}</div></div>
       <div class="receipt-date receipt-date-main"><span>от</span><span>"</span><div class="line">{{order.Date.Day}}</div><span>" {{month}}</span><div class="line">{{order.Date:yyyy}}</div><span>г.</span></div>
-      <div class="line-field payer-field"><span>Принято от</span><div class="line">{{payer}}</div></div>
+      <div class="line-field payer-field"><span>Принято от</span><div class="line"></div></div>
+      <div class="receipt-payer-blank"></div>
       <div class="line-field basis-field"><span>Основание:</span><div class="line">{{basis}}</div></div>
       <div class="receipt-lines"></div>
       <div class="amount-digits receipt-digits"><span>Сумма</span><div class="line">{{rubles}}</div><span>руб.</span><div class="line">{{kopecks}}</div><span>коп.</span></div>
       <div class="small-hint digits-hint">(цифрами)</div>
-      <div class="amount-words receipt-words"><div class="line">{{amountWords}}</div><span>руб.</span><div class="line kopecks">{{kopecks}}</div><span>коп.</span></div>
+      <div class="amount-words receipt-words"><div class="line"><span class="positioned-text">{{amountWords}}</span></div></div>
       <div class="small-hint words-hint">(прописью)</div>
-      <div class="line-field tax-field" style="grid-template-columns:auto 1fr;"><span>В том числе</span><div class="line">Без налога (НДС) 0,00 руб.</div></div>
+      <div class="receipt-words-digits"><div class="line"></div><span>руб.</span><div class="line kopecks">{{kopecks}}</div><span>коп.</span></div>
+      <div class="line-field tax-field" style="grid-template-columns:auto 1fr;"><span>В том числе</span><div class="line"><span class="positioned-text">{{taxText}}</span></div></div>
       <div class="stamp-row receipt-stamp-date"><span>"</span><div class="line">{{order.Date.Day}}</div><span>" {{month}}</span><div class="line">{{order.Date:yyyy}}</div><span>г.</span></div>
       <div class="stamp-label">М.П. (штампа)</div>
       <div class="sign-row chief-sign">
         <div>Главный бухгалтер</div>
         <div><div class="sign-line"></div><div class="sign-label">(подпись)</div></div>
-        <div><div class="sign-line">{{signer}}</div><div class="sign-label">(расшифровка подписи)</div></div>
+        <div><div class="sign-line"><span class="positioned-text">{{chiefAccountant}}</span></div><div class="sign-label">(расшифровка подписи)</div></div>
       </div>
       <div class="sign-row cashier-sign">
         <div>Кассир</div>
         <div><div class="sign-line"></div><div class="sign-label">(подпись)</div></div>
-        <div><div class="sign-line">{{signer}}</div><div class="sign-label">(расшифровка подписи)</div></div>
+        <div><div class="sign-line"><span class="positioned-text">{{cashier}}</span></div><div class="sign-label">(расшифровка подписи)</div></div>
       </div>
     </section>
   </main>
@@ -1764,16 +1893,16 @@ public class CashOrdersController : ControllerBase
 """;
     }
 
-    private static string BuildPrintHtml(CashOrder order, string organizationName)
+    private static string BuildPrintHtml(CashOrder order, CashOrderPrintContext context)
     {
         if (order.Type == CashOrderType.Incoming)
         {
-            return BuildIncomingCashOrderPrintHtml(order, organizationName);
+            return BuildIncomingCashOrderPrintHtml(order, context);
         }
 
         if (order.Type == CashOrderType.Outgoing)
         {
-            return BuildOutgoingCashOrderPrintHtml(order, organizationName);
+            return BuildOutgoingCashOrderPrintHtml(order, context);
         }
 
         var isIncoming = order.Type == CashOrderType.Incoming;
@@ -1896,17 +2025,28 @@ public class CashOrdersController : ControllerBase
 """;
     }
 
-    private static string BuildOutgoingCashOrderPrintHtml(CashOrder order, string organizationName)
+    private static string BuildOutgoingCashOrderPrintHtml(CashOrder order, CashOrderPrintContext context)
     {
         var number = Html(order.Number);
-        var organization = Html(organizationName);
-        var receiver = Html(order.ReceiverName ?? order.PayerName ?? order.Client?.Name ?? "-");
-        var basis = Html(order.Basis ?? "-");
+        var organization = Html(context.OrganizationName);
+        var receiver = Html(order.ReceiverName ?? order.PayerName ?? order.Client?.Name ?? string.Empty);
+        var basis = Html(order.Basis ?? string.Empty);
         var appendix = Html(order.Appendix ?? string.Empty);
-        var signer = Html(order.CreatedByUserName ?? string.Empty);
-        var amountRubKop = Html(FormatCashOrderRubKop(order.Amount));
+        var leaderPosition = Html(context.LeaderPosition);
+        var leaderName = Html(context.LeaderName);
+        var chiefAccountant = Html(context.ChiefAccountantName);
+        var cashier = Html(context.CashierName);
+        var fontCss = BuildCashOrderFontCss();
+        var amountRubKop = Html(FormatOutgoingCashOrderRubKop(order.Amount));
         var amountWords = Html(AmountRublesToWordsRu(order.Amount));
         var kopecks = Html(FormatKopecks(order.Amount));
+        var month = GetRussianMonthGenitive(order.Date.Month);
+        var numberClass = order.Number.Length > 32
+            ? " number-very-compact"
+            : order.Number.Length > 16
+                ? " number-compact"
+                : string.Empty;
+        var amountClass = amountRubKop.Length > 10 ? " amount-compact" : string.Empty;
         var cancelNotice = order.Status == CashOrderStatus.Cancelled
             ? $"""<div class="cancelled">Документ отменён{(order.CancelledAt.HasValue ? $" {order.CancelledAt:dd.MM.yyyy HH:mm}" : string.Empty)}{(string.IsNullOrWhiteSpace(order.CancelledReason) ? string.Empty : $": {Html(order.CancelledReason)}")}</div>"""
             : string.Empty;
@@ -1918,79 +2058,152 @@ public class CashOrdersController : ControllerBase
   <meta charset="utf-8" />
   <title>Расходный кассовый ордер {{number}}</title>
   <style>
+    {{fontCss}}
     @page { size: A4 portrait; margin: 0; }
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      color: #111;
-      font-family: Arial, "DejaVu Sans", sans-serif;
+      color: #333;
+      font-family: "Cash Order Arial", Arial, sans-serif;
       font-size: 10px;
       line-height: 1.15;
       background: #fff;
       -webkit-print-color-adjust: exact !important;
       print-color-adjust: exact !important;
     }
-    .ko2 { position: relative; width: 178mm; margin: 24mm 0 0 16mm; }
-    .top-note { margin-left: 116mm; margin-bottom: 3mm; font-size: 7px; line-height: 1.3; }
-    .header-row { display: block; padding-right: 42mm; }
+    .ko2 { position: relative; width: 195.5mm; min-height: 120mm; margin: 18mm 0 0 7mm; }
+    .top-note { margin-left: 123.45mm; margin-bottom: 8.45mm; font-size: 6pt; line-height: 1.05; transform: scaleX(.957); transform-origin: left top; }
+    .header-row { display: block; padding-right: 45.05mm; padding-bottom: 5.5mm; transform: translateY(-.73mm); }
+    .header-row .org-line { min-height: 18px; text-align: center; }
+    .header-row .org-line > span { position: relative; top: -1px; left: 2px; font-size: 9.3px; }
+    .header-row .hint { line-height: .5; }
     .org-line { border-bottom: 2px solid #111; min-height: 18px; padding: 0 6px 2px; }
     .hint { color: #333; font-size: 6px; text-align: center; }
     .code-box, .doc-meta, .ledger { border-collapse: collapse; width: 100%; table-layout: fixed; }
     .code-box td, .doc-meta td, .ledger th, .ledger td { border: 1px solid #111; padding: 1.5mm 1mm; text-align: center; vertical-align: middle; }
-    .code-box { position: absolute; top: 10mm; right: 0; width: 28mm; }
-    .code-box td:first-child { border-left: 0; text-align: right; padding-right: 8px; }
-    .code-box td:last-child { font-weight: 700; }
-    .title { width: 92mm; margin: 9mm auto 5mm; text-align: center; font-size: 13px; line-height: 1.05; font-weight: 800; letter-spacing: .02em; text-transform: uppercase; }
-    .doc-meta { width: 52mm; margin: 0 auto 4mm; font-size: 7px; }
-    .doc-meta .value { font-size: 10px; font-weight: 700; }
-    .ledger { font-size: 7px; }
+    .code-box { position: absolute; top: 5.55mm; right: -.25mm; width: 49.5mm; }
+    .code-box td { padding: 0 .75mm; }
+    .code-box td:first-child { width: 20mm; border: 0; text-align: right; padding-right: 6px; white-space: nowrap; }
+    .code-box td:last-child { width: 29.5mm; font-weight: 400; }
+    .code-box tr:nth-child(1), .code-box tr:nth-child(2), .code-box tr:nth-child(3) { height: 4.4mm; }
+    .code-box tr:nth-child(4) { height: 5.25mm; }
+    .title { position: absolute; top: 32.5mm; left: 35.4mm; width: 92mm; margin: 0; text-align: center; white-space: nowrap; font-size: 10pt; line-height: 1.05; font-weight: 400; transform: scaleX(.97); transform-origin: center top; text-transform: uppercase; }
+    .doc-meta { position: absolute; top: 27.25mm; right: -.25mm; width: 59.25mm; margin: 0; font-size: 7px; }
+    .doc-meta td { padding: 0 .75mm; line-height: 1; }
+    .doc-meta tr:nth-child(1) { height: 3.97mm; }
+    .doc-meta tr:nth-child(2) { height: 5.17mm; }
+    .doc-meta .value { font-size: 9px; font-weight: 700; white-space: nowrap; }
+    .doc-meta .number-compact { font-size: 6px; line-height: 1; white-space: nowrap; letter-spacing: -.1px; }
+    .doc-meta .number-very-compact { font-size: 3px; line-height: 1; white-space: nowrap; letter-spacing: -.25px; }
+    .ledger { position: absolute; top: 42.75mm; left: 0; margin: 0; font-size: 7px; }
+    .ledger th, .ledger td { padding: .6mm 1mm; }
     .ledger th { font-weight: 400; }
     .ledger .sum { font-size: 8px; white-space: nowrap; }
+    .ledger .sum.amount-compact { font-size: 5px; letter-spacing: -.15px; }
+    .ledger tr:nth-child(1) { height: 4.5mm; }
+    .ledger tr:nth-child(2) { height: 7.7mm; }
+    .ledger tr:nth-child(3) { height: 4.5mm; }
     .line-field { display: grid; grid-template-columns: auto 1fr; gap: 2mm; align-items: end; margin-top: 2mm; font-size: 8px; }
-    .line { min-height: 4.4mm; border-bottom: 1px solid #111; padding: 0 1.5mm .4mm; }
-    .long-line { margin-top: 1.5mm; min-height: 4.4mm; border-bottom: 1px solid #111; }
+    .line { min-height: 4mm; border-bottom: 1px solid #111; padding: 0 1.5mm .4mm; }
+    .long-line { margin-top: 1.5mm; min-height: 4mm; border-bottom: 1px solid #111; }
     .amount-words { display: grid; grid-template-columns: auto 1fr auto 15mm auto; gap: 2mm; align-items: end; margin-top: 2mm; font-size: 8px; }
     .kopecks { text-align: center; }
-    .sign-row { display: grid; grid-template-columns: 36mm 35mm 1fr; gap: 5mm; align-items: end; margin-top: 3mm; font-size: 8px; }
-    .leader-row { grid-template-columns: 38mm 35mm 35mm 1fr; }
+    .sign-row { display: grid; grid-template-columns: 25mm 40.5mm 40.5mm; gap: 5.8mm; align-items: end; margin-top: 3mm; font-size: 8px; }
+    .leader-row { display: block; }
+    .leader-row > div:nth-child(2), .leader-row > div:nth-child(3), .leader-row > div:nth-child(4) { position: absolute; top: 0; }
+    .leader-row > div:nth-child(2) { left: 37.8mm; width: 42.1mm; }
+    .leader-row > div:nth-child(3) { left: 86.1mm; width: 42.1mm; }
+    .leader-row > div:nth-child(4) { left: 134.45mm; width: 42.35mm; }
     .sign-line { border-bottom: 1px solid #111; min-height: 4.4mm; text-align: center; padding-bottom: .4mm; }
     .sign-label { font-size: 6px; text-align: center; color: #333; margin-top: .5mm; }
-    .received { display: grid; grid-template-columns: auto 1fr auto 15mm auto; gap: 2mm; align-items: end; margin-top: 6mm; font-size: 8px; }
-    .received-date { display: grid; grid-template-columns: auto 8mm auto 25mm 16mm auto 1fr; gap: 2mm; align-items: end; margin-top: 2mm; font-size: 8px; }
-    .identity-note { margin: .6mm 0 0 10mm; font-size: 6px; text-align: center; }
-    .cancelled { margin: 0 0 3mm; border: 1px solid #111; padding: 2mm; font-weight: 700; }
+    .rko-fixed { position: absolute; left: 0; width: 100%; margin: 0; }
+    .rko-receiver { top: 62mm; grid-template-columns: 8mm 1fr; }
+    .rko-receiver-hint { position: absolute; top: 66.1mm; left: 0; width: 100%; }
+    .rko-basis { top: 68.75mm; grid-template-columns: 12.5mm 1fr; }
+    .rko-amount-words { top: 74.8mm; grid-template-columns: 8mm 1fr; }
+    .rko-amount-hint { position: absolute; top: 79mm; left: 0; width: 100%; }
+    .rko-amount-digits { top: 81.85mm; display: grid; grid-template-columns: 1fr auto 33mm auto; gap: 2mm; align-items: end; padding-right: 4mm; font-size: 8px; }
+    .rko-appendix { top: 87.1mm; }
+    .rko-appendix-blank { top: 94.38mm; border-top: 1px solid #111; }
+    .rko-leader { top: 95.3mm; }
+    .rko-chief { top: 102.1mm; display: block; }
+    .rko-chief > div:nth-child(2), .rko-chief > div:nth-child(3) { position: absolute; top: 0; }
+    .rko-chief > div:nth-child(2) { left: 30.1mm; width: 40.4mm; }
+    .rko-chief > div:nth-child(3) { left: 76.35mm; width: 40.4mm; }
+    .rko-received-words { top: 110mm; display: grid; grid-template-columns: auto 1fr; gap: 2mm; align-items: end; font-size: 8px; }
+    .rko-received-hint { position: absolute; top: 116.6mm; left: 0; width: 100%; }
+    .rko-received-digits { top: 117.1mm; display: grid; grid-template-columns: 1fr auto 33mm auto; gap: 2mm; align-items: end; padding-right: 4mm; font-size: 8px; }
+    .received-date { top: 123.1mm; width: 160mm; height: 4mm; display: block; font-size: 8px; }
+    .received-date > * { position: absolute; bottom: 0; }
+    .received-date > span:nth-child(1) { left: 0; }
+    .received-date > div:nth-child(2) { left: 3.75mm; width: 10.25mm; }
+    .received-date > span:nth-child(3) { left: 15mm; }
+    .received-date > div:nth-child(4) { left: 20mm; width: 35.5mm; }
+    .received-date > div:nth-child(5) { left: 57.5mm; width: 13.5mm; }
+    .received-date > span:nth-child(6) { left: 72.5mm; }
+    .received-date > span:nth-child(7) { left: 109mm; }
+    .received-date > div:nth-child(8) { left: 120mm; width: 39.25mm; }
+    .rko-amount-digits > .line:first-child, .rko-received-digits > .line:first-child { margin-right: 1.8mm; }
+    .rko-identity { top: 128.2mm; }
+    .identity-note { position: absolute; left: 10mm; right: 0; margin: 0; font-size: 6px; text-align: center; }
+    .identity-note-primary { top: 132.45mm; }
+    .identity-note-secondary { top: 139.45mm; }
+    .rko-identity-blank { top: 135.25mm; min-height: 4mm; border-bottom: 1px solid #111; }
+    .rko-cashier { top: 142.3mm; grid-template-columns: 18.5mm 40mm 40mm; gap: 5.3mm; }
+    .rko-basis > span { position: relative; top: -3.75pt; }
+    .rko-receiver .line, .rko-amount-words .line { font-size: 9px; }
+    .rko-receiver-hint, .rko-amount-hint { font-size: 7px; }
+    .rko-appendix { font-size: 6px; }
+    .rko-appendix > span { position: relative; top: -1.5pt; }
+    .rko-identity > span { position: relative; top: -3pt; }
+    .rko-leader > div:first-child, .rko-chief > div:first-child { position: relative; top: 1.5pt; }
+    .rko-leader .sign-line, .rko-chief .sign-line { padding-bottom: 0; }
+    .rko-leader, .rko-chief, .rko-cashier { font-size: 9px; }
+    .rko-leader .positioned-text, .rko-chief .positioned-text { position: relative; top: 1.5pt; }
+    .rko-cashier > div:first-child, .rko-cashier .positioned-text { position: relative; top: 1.5pt; }
+    .rko-cashier > div:first-child { position: absolute; left: 0; top: 1.5pt; transform: translateY(-.5mm); }
+    .rko-cashier > div:nth-child(2) { grid-column: 2; }
+    .rko-cashier > div:nth-child(3) { grid-column: 3; }
+    .rko-cashier .sign-label { position: relative; top: -.4mm; }
+    .rko-received-words .line { text-align: center; font-size: 9px; }
+    .identity-note { font-size: 7px; }
+    .ko2 > .cancelled { position: absolute; top: 154mm; left: 0; width: 100%; margin: 0; border: 1px solid #111; padding: 1.5mm 2mm; font-size: 7px; line-height: 1.15; font-weight: 700; }
   </style>
 </head>
 <body>
   <main class="ko2">
+    <div hidden><span class="word-leader-position">{{leaderPosition}}</span><span class="word-leader-name">{{leaderName}}</span><span class="word-chief">{{chiefAccountant}}</span><span class="word-cashier">{{cashier}}</span></div>
     <div class="top-note">
       <div>Унифицированная форма № КО-2</div>
       <div>Утверждена постановлением Госкомстата</div>
       <div>России от 18.08.98 № 88</div>
     </div>
     <div class="header-row">
-      <div class="org-line">{{organization}}</div>
+      <div class="org-line"><span>{{organization}}</span></div>
       <div class="hint">(организация)</div>
-      <div class="org-line" style="margin-top:3mm;"></div>
+      <div class="org-line"></div>
       <div class="hint">(структурное подразделение)</div>
     </div>
     <table class="code-box">
       <tr><td>Код</td><td></td></tr>
       <tr><td>Форма по ОКУД</td><td>0310002</td></tr>
       <tr><td>по ОКПО</td><td></td></tr>
+      <tr><td></td><td></td></tr>
     </table>
     <h1 class="title">Расходный кассовый ордер</h1>
     <table class="doc-meta">
       <tr><td>Номер документа</td><td>Дата составления</td></tr>
-      <tr><td class="value">{{number}}</td><td class="value">{{order.Date:dd.MM.yyyy}}</td></tr>
+      <tr><td class="value{{numberClass}}">{{number}}</td><td class="value">{{order.Date:dd.MM.yyyy}}</td></tr>
     </table>
     {{cancelNotice}}
     <table class="ledger">
+      <colgroup><col style="width:12mm"><col style="width:29.5mm"><col style="width:41mm"><col style="width:39.5mm"><col style="width:14mm"><col style="width:23mm"><col style="width:23mm"><col style="width:13.75mm"></colgroup>
       <tr>
         <th colspan="4">Дебет</th>
-        <th rowspan="2" style="width:22mm;">Кредит</th>
-        <th rowspan="2" style="width:28mm;">Сумма,<br>руб. коп.</th>
-        <th rowspan="2" style="width:29mm;">Код целевого<br>назначения</th>
+        <th rowspan="2">Кредит</th>
+        <th rowspan="2">Сумма,<br>руб. коп.</th>
+        <th rowspan="2">Код целевого<br>назначения</th>
+        <th rowspan="2"></th>
       </tr>
       <tr>
         <th style="width:25mm;">код структурного<br>подразделения</th>
@@ -1998,35 +2211,39 @@ public class CashOrdersController : ControllerBase
         <th style="width:25mm;">код аналитического<br>учета</th>
         <th style="width:18mm;">&nbsp;</th>
       </tr>
-      <tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td class="sum">{{amountRubKop}}</td><td>&nbsp;</td></tr>
+      <tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td class="sum{{amountClass}}">{{amountRubKop}}</td><td>&nbsp;</td><td>&nbsp;</td></tr>
     </table>
-    <div class="line-field"><span>Выдать</span><div class="line">{{receiver}}</div></div>
-    <div class="hint">(фамилия, имя, отчество)</div>
-    <div class="line-field"><span>Основание</span><div class="line">{{basis}}</div></div>
-    <div class="long-line"></div>
-    <div class="amount-words"><span>Сумма</span><div class="line">{{amountWords}}</div><span>руб.</span><div class="line kopecks">{{kopecks}}</div><span>коп.</span></div>
-    <div class="hint">(прописью)</div>
-    <div class="line-field"><span>Приложение</span><div class="line">{{appendix}}</div></div>
-    <div class="sign-row leader-row">
+    <div class="line-field rko-fixed rko-receiver"><span>Выдать</span><div class="line">{{receiver}}</div></div>
+    <div class="hint rko-receiver-hint">(фамилия, имя, отчество)</div>
+    <div class="line-field rko-fixed rko-basis"><span>Основание</span><div class="line">{{basis}}</div></div>
+    <div class="line-field rko-fixed rko-amount-words"><span>Сумма</span><div class="line">{{amountWords}}</div></div>
+    <div class="hint rko-amount-hint">(прописью)</div>
+    <div class="rko-fixed rko-amount-digits"><div class="line"></div><span>руб.</span><div class="line kopecks">{{kopecks}}</div><span>коп.</span></div>
+    <div class="line-field rko-fixed rko-appendix"><span>Приложение</span><div class="line">{{appendix}}</div></div>
+    <div class="rko-fixed rko-appendix-blank"></div>
+    <div class="sign-row leader-row rko-fixed rko-leader">
       <div>Руководитель организации</div>
-      <div><div class="sign-line"></div><div class="sign-label">(должность)</div></div>
+      <div><div class="sign-line"><span class="positioned-text">{{leaderPosition}}</span></div><div class="sign-label">(должность)</div></div>
       <div><div class="sign-line"></div><div class="sign-label">(подпись)</div></div>
-      <div><div class="sign-line">{{signer}}</div><div class="sign-label">(расшифровка подписи)</div></div>
+      <div><div class="sign-line"><span class="positioned-text">{{leaderName}}</span></div><div class="sign-label">(расшифровка подписи)</div></div>
     </div>
-    <div class="sign-row">
+    <div class="sign-row rko-fixed rko-chief">
       <div>Главный бухгалтер</div>
       <div><div class="sign-line"></div><div class="sign-label">(подпись)</div></div>
-      <div><div class="sign-line">{{signer}}</div><div class="sign-label">(расшифровка подписи)</div></div>
+      <div><div class="sign-line"><span class="positioned-text">{{chiefAccountant}}</span></div><div class="sign-label">(расшифровка подписи)</div></div>
     </div>
-    <div class="received"><span>Получил</span><div class="line">{{amountWords}}</div><span>руб.</span><div class="line kopecks">{{kopecks}}</div><span>коп.</span></div>
-    <div class="received-date"><span>«</span><div class="line"></div><span>»</span><div class="line"></div><div class="line">{{order.Date:yyyy}}</div><span>г.</span><div class="line"></div></div>
-    <div class="sign-label" style="text-align:right;">(подпись)</div>
-    <div class="line-field"><span>По</span><div class="line"></div></div>
-    <div class="identity-note">(наименование, номер, дата и место выдачи документа, удостоверяющего личность получателя)</div>
-    <div class="sign-row">
+    <div class="rko-fixed rko-received-words"><span>Получил</span><div class="line">{{amountWords}}</div></div>
+    <div class="hint rko-received-hint">(сумма прописью)</div>
+    <div class="rko-fixed rko-received-digits"><div class="line"></div><span>руб.</span><div class="line kopecks">{{kopecks}}</div><span>коп.</span></div>
+    <div class="received-date rko-fixed"><span>«</span><div class="line">{{order.Date:dd}}</div><span>»</span><div class="line">{{month}}</div><div class="line">{{order.Date:yyyy}}</div><span>г.</span><span>Подпись</span><div class="line"></div></div>
+    <div class="line-field rko-fixed rko-identity"><span>По</span><div class="line"></div></div>
+    <div class="identity-note identity-note-primary">(наименование, номер, дата и место выдачи документа,</div>
+    <div class="rko-fixed rko-identity-blank"></div>
+    <div class="identity-note identity-note-secondary">удостоверяющего личность получателя)</div>
+    <div class="sign-row rko-fixed rko-cashier">
       <div>Выдал кассир</div>
       <div><div class="sign-line"></div><div class="sign-label">(подпись)</div></div>
-      <div><div class="sign-line">{{signer}}</div><div class="sign-label">(расшифровка подписи)</div></div>
+      <div><div class="sign-line"><span class="positioned-text">{{cashier}}</span></div><div class="sign-label">(расшифровка подписи)</div></div>
     </div>
   </main>
 </body>
@@ -2251,6 +2468,11 @@ public class CashOrdersController : ControllerBase
     private static string FormatCashOrderRubKop(decimal value)
         => $"{FormatWholeRubles(value)}-{FormatKopecks(value)}";
 
+    private static string FormatOutgoingCashOrderRubKop(decimal value)
+        => Math.Abs(value)
+            .ToString("#,##0.00", System.Globalization.CultureInfo.InvariantCulture)
+            .Replace(',', ' ');
+
     private static string FormatWholeRubles(decimal value)
         => Math.Truncate(Math.Round(Math.Abs(value), 2, MidpointRounding.AwayFromZero))
             .ToString("0", System.Globalization.CultureInfo.InvariantCulture);
@@ -2262,6 +2484,76 @@ public class CashOrdersController : ControllerBase
         return parts.Length >= 3
             ? $"{parts[0]} {parts[1][0]}.{parts[2][0]}."
             : string.Join(' ', parts);
+    }
+
+    private static CashOrderPerson? ParseCashOrderPerson(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<CashOrderPerson>(json, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true,
+            });
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static string ShortCashOrderPerson(CashOrderPerson? person, string? fallback)
+    {
+        if (person is null || string.IsNullOrWhiteSpace(person.LastName))
+        {
+            return ShortCashOrderSigner(fallback);
+        }
+
+        var initials = new[]
+        {
+            string.IsNullOrWhiteSpace(person.FirstName) ? null : $"{char.ToUpperInvariant(person.FirstName.Trim()[0])}.",
+            person.NoMiddleName || string.IsNullOrWhiteSpace(person.MiddleName)
+                ? null
+                : $"{char.ToUpperInvariant(person.MiddleName.Trim()[0])}.",
+        };
+        return $"{person.LastName.Trim()} {string.Join(' ', initials.Where(static item => item is not null))}".Trim();
+    }
+
+    private static string BuildCashOrderTaxText(CashOrder order, bool? vatWithoutVat)
+    {
+        if (vatWithoutVat != false)
+        {
+            return "Без налога (НДС) 0,00 руб.";
+        }
+
+        var explicitVat = order.MoneyOperation?.VatAmount;
+        var vatRate = order.MoneyOperation?.VatRate
+            ?? (order.Date.Date < new DateTime(2019, 1, 1) ? 18m : 20m);
+        var vatAmount = explicitVat.HasValue
+            ? Math.Abs(explicitVat.Value)
+            : Math.Round(Math.Abs(order.Amount) * vatRate / (100m + vatRate), 2, MidpointRounding.AwayFromZero);
+        return $"НДС {vatAmount.ToString("N2", System.Globalization.CultureInfo.GetCultureInfo("ru-RU"))} руб.";
+    }
+
+    private sealed record CashOrderPrintContext(
+        string OrganizationName,
+        string LeaderPosition,
+        string LeaderName,
+        string ChiefAccountantName,
+        string CashierName,
+        string TaxText);
+
+    private sealed class CashOrderPerson
+    {
+        public string? Position { get; set; }
+        public string? LastName { get; set; }
+        public string? FirstName { get; set; }
+        public string? MiddleName { get; set; }
+        public bool NoMiddleName { get; set; }
     }
 
     private static string BuildCashOrderFontCss()
@@ -2276,10 +2568,10 @@ public class CashOrdersController : ControllerBase
             return Convert.ToBase64String(memory.ToArray());
         }
 
-        var regular = ReadFont(assembly, "PayPlanner.Fonts.DejaVuSansCondensed.ttf");
-        var bold = ReadFont(assembly, "PayPlanner.Fonts.DejaVuSansCondensed-Bold.ttf");
-        return $"@font-face {{ font-family:'DejaVu Sans Condensed'; src:url(data:font/ttf;base64,{regular}) format('truetype'); font-weight:400; }} "
-            + $"@font-face {{ font-family:'DejaVu Sans Condensed'; src:url(data:font/ttf;base64,{bold}) format('truetype'); font-weight:700; }}";
+        var regular = ReadFont(assembly, "PayPlanner.Fonts.LiberationSans-Regular.ttf");
+        var bold = ReadFont(assembly, "PayPlanner.Fonts.LiberationSans-Bold.ttf");
+        return $"@font-face {{ font-family:'Cash Order Arial'; src:url(data:font/ttf;base64,{regular}) format('truetype'); font-weight:400; }} "
+            + $"@font-face {{ font-family:'Cash Order Arial'; src:url(data:font/ttf;base64,{bold}) format('truetype'); font-weight:700; }}";
     }
 
     private static string FormatKopecks(decimal value)

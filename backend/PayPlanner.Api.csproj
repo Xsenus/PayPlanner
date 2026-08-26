@@ -40,6 +40,12 @@
     <EmbeddedResource Include="Assets\Fonts\DejaVuSansCondensed-Bold.ttf">
       <LogicalName>PayPlanner.Fonts.DejaVuSansCondensed-Bold.ttf</LogicalName>
     </EmbeddedResource>
+    <EmbeddedResource Include="Assets\Fonts\LiberationSans-Regular.ttf">
+      <LogicalName>PayPlanner.Fonts.LiberationSans-Regular.ttf</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Assets\Fonts\LiberationSans-Bold.ttf">
+      <LogicalName>PayPlanner.Fonts.LiberationSans-Bold.ttf</LogicalName>
+    </EmbeddedResource>
 
     <Compile Remove="PayPlanner.Api.Tests\**\*.cs" />
     <Compile Remove=".codex-build\**\*.cs" />
