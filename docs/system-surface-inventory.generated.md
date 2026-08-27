@@ -7,8 +7,8 @@
 
 - Разделов frontend: 49.
 - Backend-контроллеров: 67.
-- HTTP endpoints: 806; с прямой тестовой связью: 539.
-- HTTP endpoints с точной ссылкой из документации: 185; критичных без такой ссылки: 482.
+- HTTP endpoints: 807; с прямой тестовой связью: 540.
+- HTTP endpoints с точной ссылкой из документации: 185; критичных без такой ссылки: 483.
 - Критичных endpoints без прямой тестовой связи: 224.
 - Реальных HTML-форм: 17; с найденной тестовой связью: 15.
 - Фоновых сервисов: 27; с найденной тестовой связью: 24.
@@ -76,7 +76,7 @@
 | ActModal | src/components/Acts/ActModal.tsx | 1505 | да | docs/date-time-inventory.md, docs/full-project-audit-2026-06-10.md |
 | Login | src/components/Auth/Login.tsx | 73 | да | docs/external-authentication-security-and-performance.md, docs/field-encryption-candidates.generated.md, docs/field-encryption-data-inventory-2026-07-30.md, docs/full-project-audit-2026-06-10.md |
 | Register | src/components/Auth/Register.tsx | 94 | да | docs/date-time-inventory.md |
-| PaymentModal | src/components/Calendar/PaymentModal.tsx | 2896 | да | docs/date-time-inventory.md, docs/full-project-audit-2026-06-10.md, docs/technical-stabilization-log.md |
+| PaymentModal | src/components/Calendar/PaymentModal.tsx | 2923 | да | docs/date-time-inventory.md, docs/full-project-audit-2026-06-10.md, docs/technical-stabilization-log.md |
 | ClientDetail | src/components/Clients/ClientDetail.tsx | 6352 | да | docs/date-time-inventory.md, docs/full-project-audit-2026-06-10.md, docs/unused-frontend-candidates-2026-06-10.md |
 | ClientModal | src/components/Clients/ClientModal.tsx | 240 | да | нет |
 | ContractCreatePage | src/components/Contracts/ContractCreatePage.tsx | 293 | нет | docs/date-time-inventory.md, docs/full-project-audit-2026-06-10.md, docs/unused-frontend-candidates-2026-06-10.md |
@@ -150,7 +150,7 @@
 | BanksController | backend/Controllers/BanksController.cs | 5 | [Authorize] | да |
 | CalendarSyncController | backend/Controllers/CalendarSyncController.cs | 5 | [Authorize] | да |
 | CasesController | backend/Controllers/CasesController.cs | 5 | [Authorize] | да |
-| CashOrdersController | backend/Controllers/CashOrdersController.cs | 20 | [Authorize] | да |
+| CashOrdersController | backend/Controllers/CashOrdersController.cs | 21 | [Authorize] | да |
 | ClientBalancesController | backend/Controllers/ClientBalancesController.cs | 3 | не задано | да |
 | ClientPassportController | backend/Controllers/ClientPassportController.cs | 2 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Clients)] | да |
 | ClientPortalAdminController | backend/Controllers/ClientPortalAdminController.cs | 7 | [Authorize(Policy = "Admin")] | нет |
@@ -547,8 +547,9 @@
 | POST | api/cash-orders/{id:int}/cancel | CashOrdersController | Cancel | backend/Controllers/CashOrdersController.cs:778 | [Authorize] | да | нет |
 | POST | api/cash-orders/{id:int}/copy | CashOrdersController | Copy | backend/Controllers/CashOrdersController.cs:814 | [Authorize] | да | нет |
 | GET | api/cash-orders/{id:int}/print | CashOrdersController | Print | backend/Controllers/CashOrdersController.cs:865 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
-| GET | api/cash-orders/{id:int}/pdf | CashOrdersController | DownloadPdf | backend/Controllers/CashOrdersController.cs:895 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
-| GET | api/cash-orders/{id:int}/word | CashOrdersController | DownloadWord | backend/Controllers/CashOrdersController.cs:933 | [Authorize] | нет | нет |
+| GET | api/cash-orders/payment/{paymentId:int}/print | CashOrdersController | PrintForPayment | backend/Controllers/CashOrdersController.cs:895 | [Authorize] | да | нет |
+| GET | api/cash-orders/{id:int}/pdf | CashOrdersController | DownloadPdf | backend/Controllers/CashOrdersController.cs:937 | [Authorize] | да | docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md |
+| GET | api/cash-orders/{id:int}/word | CashOrdersController | DownloadWord | backend/Controllers/CashOrdersController.cs:975 | [Authorize] | нет | нет |
 | GET |  | ClientBalancesController | GetSummary | backend/Controllers/ClientBalancesController.cs:58 | не задано | да | нет |
 | GET | transactions | ClientBalancesController | GetTransactions | backend/Controllers/ClientBalancesController.cs:79 | не задано | да | docs/delete-behavior-contract-2026-06-10.md |
 | POST | apply | ClientBalancesController | ApplyCredit | backend/Controllers/ClientBalancesController.cs:117 | не задано | да | docs/file-upload-limits-2026-06-10.md, docs/full-project-audit-2026-06-10.md |
