@@ -87,7 +87,7 @@ function resolvePaymentPrintTitle(type: PaymentKind, sourceName?: string | null,
     return 'Платежное поручение';
   }
 
-  return 'Платежный ордер';
+  return type === 'Expense' ? 'Расходный кассовый ордер' : 'Приходный кассовый ордер';
 }
 
 function escapeHtml(value: string | number | null | undefined): string {
@@ -110,12 +110,16 @@ function formatPrintDate(value?: string | null): string {
   return value ? toRuDate(value) || value : '—';
 }
 
-function openPaymentPrintWindow(html: string): void {
+function createPaymentPrintWindow(): Window {
   const printWindow = window.open('', '_blank', 'width=980,height=900');
   if (!printWindow) {
     throw new Error('Браузер заблокировал окно печати. Разрешите всплывающие окна и повторите.');
   }
 
+  return printWindow;
+}
+
+function renderPaymentPrintWindow(printWindow: Window, html: string): void {
   printWindow.document.open();
   printWindow.document.write(html);
   printWindow.document.close();
@@ -346,6 +350,7 @@ export function PaymentModal({
   const defaultDateRef = useRef(defaultDate);
 
   const [loading, setLoading] = useState(false);
+  const [paymentPrinting, setPaymentPrinting] = useState(false);
   const [balanceApplyLoading, setBalanceApplyLoading] = useState(false);
   const [balanceApplyAmount, setBalanceApplyAmount] = useState('');
   const [appliedClientBalanceAmount, setAppliedClientBalanceAmount] = useState(0);
@@ -2279,11 +2284,22 @@ export function PaymentModal({
 </html>`;
   };
 
-  const handlePrintPayment = () => {
+  const handlePrintPayment = async () => {
+    let printWindow: Window | null = null;
     try {
-      openPaymentPrintWindow(buildPaymentPrintHtml());
+      printWindow = createPaymentPrintWindow();
+      setPaymentPrinting(true);
+      const isCashOrderPrint = paymentPrintTitle === 'Приходный кассовый ордер'
+        || paymentPrintTitle === 'Расходный кассовый ордер';
+      const html = isCashOrderPrint && payment
+        ? await apiService.getCashOrderPrintHtmlForPayment(payment.id)
+        : buildPaymentPrintHtml();
+      renderPaymentPrintWindow(printWindow, html);
     } catch (error) {
+      printWindow?.close();
       toast.error(error instanceof Error ? error.message : 'Не удалось открыть печать платежа.', 'Платежи');
+    } finally {
+      setPaymentPrinting(false);
     }
   };
 
@@ -3901,12 +3917,12 @@ export function PaymentModal({
                   {canPrintPayment && (
                     <button
                       type="button"
-                      onClick={handlePrintPayment}
-                      disabled={loading}
+                      onClick={() => void handlePrintPayment()}
+                      disabled={loading || paymentPrinting}
                       title={`Печать: ${paymentPrintTitle}`}
                       className="inline-flex min-w-40 items-center justify-center gap-2 rounded-lg bg-slate-50 px-4 py-2 font-medium text-slate-700 transition-colors hover:bg-slate-100 disabled:opacity-60">
                       <Printer className="h-4 w-4" />
-                      Печать
+                      {paymentPrinting ? 'Подготовка печати...' : 'Печать'}
                     </button>
                   )}
                   {canMovePayment && (

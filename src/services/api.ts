@@ -8103,6 +8103,10 @@ export class ApiService {
     return this.request<string>(`/cash-orders/${id}/print`);
   }
 
+  async getCashOrderPrintHtmlForPayment(paymentId: number) {
+    return this.request<string>(`/cash-orders/payment/${paymentId}/print`);
+  }
+
   async downloadCashOrderPdf(id: number) {
     const token = getAuthToken();
     const response = await fetch(`${API_BASE_URL}/cash-orders/${id}/pdf`, {

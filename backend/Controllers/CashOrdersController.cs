@@ -892,6 +892,48 @@ public class CashOrdersController : ControllerBase
         return Content(BuildPrintHtml(order, printContext), "text/html; charset=utf-8", Encoding.UTF8);
     }
 
+    [HttpGet("payment/{paymentId:int}/print")]
+    public async Task<IActionResult> PrintForPayment(int paymentId, CancellationToken ct)
+    {
+        if (await RequirePaymentsPermissionAsync(static permission => permission.CanView, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var visibility = await ResolvePaymentsVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Forbid();
+        }
+
+        var payment = await _db.Payments
+            .Include(item => item.Client)
+            .Include(item => item.ExpenseClient)
+            .Include(item => item.LegalEntity)
+            .Include(item => item.ExpenseLegalEntity)
+            .AsNoTracking()
+            .ApplyPaymentVisibility(visibility)
+            .FirstOrDefaultAsync(item => item.Id == paymentId, ct);
+        if (payment is null)
+        {
+            return NotFound();
+        }
+
+        var order = await _db.CashOrders
+            .Include(item => item.Client)
+            .Include(item => item.Payment)
+            .Include(item => item.MoneyOperation)
+            .AsNoTracking()
+            .ApplyCashOrderVisibility(visibility)
+            .Where(item => item.PaymentId == paymentId && item.Status != CashOrderStatus.Cancelled)
+            .OrderByDescending(item => item.Id)
+            .FirstOrDefaultAsync(ct)
+            ?? BuildCashOrderPrintPreview(payment);
+
+        var printContext = await ResolvePrintContextAsync(order, ct);
+        return Content(BuildPrintHtml(order, printContext), "text/html; charset=utf-8", Encoding.UTF8);
+    }
+
     [HttpGet("{id:int}/pdf")]
     public async Task<IActionResult> DownloadPdf(int id, CancellationToken ct)
     {
@@ -970,6 +1012,67 @@ public class CashOrdersController : ControllerBase
     private static bool IsCashPayment(Payment payment)
         => payment.PaymentSource?.Name?.Contains(CashSourceToken, StringComparison.OrdinalIgnoreCase) == true ||
            payment.PaymentSource?.Name?.Contains(CashRegisterSourceToken, StringComparison.OrdinalIgnoreCase) == true;
+
+    private static CashOrder BuildCashOrderPrintPreview(Payment payment)
+    {
+        var type = payment.Type == PaymentType.Expense
+            ? CashOrderType.Outgoing
+            : CashOrderType.Incoming;
+        var date = (payment.PaymentDocumentDate
+            ?? payment.LastPaymentDate
+            ?? payment.PaidDate
+            ?? payment.Date).Date;
+        var amount = payment.PaidAmount > 0m ? payment.PaidAmount : payment.Amount;
+        var counterpartyName = type == CashOrderType.Outgoing
+            ? payment.ExpenseClient?.Name
+                ?? payment.ExpenseLegalEntity?.ShortName
+                ?? payment.ExpenseLegalEntity?.FullName
+                ?? payment.CounterpartyName
+                ?? payment.Client?.Name
+                ?? payment.LegalEntity?.ShortName
+                ?? payment.LegalEntity?.FullName
+            : payment.Client?.Name
+                ?? payment.LegalEntity?.ShortName
+                ?? payment.LegalEntity?.FullName
+                ?? payment.CounterpartyName;
+        var action = type == CashOrderType.Outgoing ? "Выдача наличных" : "Прием наличных";
+        var basis = string.Join(". ", new[]
+        {
+            action,
+            string.IsNullOrWhiteSpace(payment.Account) ? null : $"счет №{payment.Account.Trim()}",
+            Normalize(payment.Description),
+        }.Where(part => !string.IsNullOrWhiteSpace(part)));
+
+        return new CashOrder
+        {
+            Number = Normalize(payment.PaymentOrderNumber)
+                ?? payment.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            Type = type,
+            Status = payment.Status == PaymentStatus.Cancelled
+                ? CashOrderStatus.Cancelled
+                : payment.Status == PaymentStatus.Completed && payment.PaidAmount > 0m
+                    ? CashOrderStatus.Posted
+                    : CashOrderStatus.Draft,
+            Date = date,
+            Amount = amount,
+            Currency = "RUB",
+            ClientId = type == CashOrderType.Outgoing ? payment.ExpenseClientId ?? payment.ClientId : payment.ClientId,
+            Client = type == CashOrderType.Outgoing ? payment.ExpenseClient ?? payment.Client : payment.Client,
+            PaymentId = payment.Id,
+            Payment = payment,
+            InvoiceId = payment.InvoiceId,
+            Account = payment.Account,
+            PayerName = type == CashOrderType.Incoming ? counterpartyName : null,
+            ReceiverName = type == CashOrderType.Outgoing ? counterpartyName : null,
+            Basis = basis,
+            Comment = Normalize(payment.Notes),
+            CancelledAt = payment.Status == PaymentStatus.Cancelled ? payment.AuditUpdatedAt ?? DateTime.UtcNow : null,
+            CancelledReason = payment.Status == PaymentStatus.Cancelled ? "Платеж отменен." : null,
+            CreatedAt = payment.CreatedAt,
+            CreatedByUserId = payment.AuditCreatedByUserId,
+            CreatedByUserName = payment.AuditCreatedByUserName,
+        };
+    }
 
     private static bool ShouldCreateCashOrder(MoneyOperation operation)
         => operation.Source == MoneyOperationSource.Cash &&

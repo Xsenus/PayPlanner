@@ -20,6 +20,7 @@ const {
   applyClientBalanceMock,
   getPaymentsV2Mock,
   getNextCashOrderNumberMock,
+  getCashOrderPrintHtmlForPaymentMock,
   invoiceModalPropsSpy,
   toastErrorMock,
   toastSuccessMock,
@@ -40,6 +41,7 @@ const {
   applyClientBalanceMock: vi.fn(),
   getPaymentsV2Mock: vi.fn(),
   getNextCashOrderNumberMock: vi.fn(),
+  getCashOrderPrintHtmlForPaymentMock: vi.fn(),
   invoiceModalPropsSpy: vi.fn(),
   toastErrorMock: vi.fn(),
   toastSuccessMock: vi.fn(),
@@ -138,6 +140,7 @@ vi.mock('../../services/api', () => ({
     applyClientBalance: applyClientBalanceMock,
     getPaymentsV2: getPaymentsV2Mock,
     getNextCashOrderNumber: getNextCashOrderNumberMock,
+    getCashOrderPrintHtmlForPayment: getCashOrderPrintHtmlForPaymentMock,
   },
 }));
 
@@ -269,6 +272,7 @@ describe('PaymentModal integration', () => {
     applyClientBalanceMock.mockReset();
     getPaymentsV2Mock.mockReset();
     getNextCashOrderNumberMock.mockReset();
+    getCashOrderPrintHtmlForPaymentMock.mockReset();
     invoiceModalPropsSpy.mockReset();
     toastErrorMock.mockReset();
     toastSuccessMock.mockReset();
@@ -339,6 +343,9 @@ describe('PaymentModal integration', () => {
       type: 'Incoming',
       date: '2026-04-20',
     });
+    getCashOrderPrintHtmlForPaymentMock.mockResolvedValue(
+      '<!doctype html><html><body>Унифицированная форма № КО-1 Приходный кассовый ордер ПКО-2026-0002</body></html>',
+    );
   });
 
   afterEach(() => {
@@ -1561,10 +1568,51 @@ describe('PaymentModal integration', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Печать' }));
 
-    const html = getLastPrintHtml();
+    await waitFor(() => expect(getCashOrderPrintHtmlForPaymentMock).toHaveBeenCalledWith(993));
+    const html = await waitFor(() => getLastPrintHtml());
+    expect(html).toContain('Унифицированная форма № КО-1');
     expect(html).toContain('Приходный кассовый ордер');
     expect(html).toContain('ПКО-2026-0002');
-    expect(html).toContain('Рассрочка по счету №52');
+  });
+
+  it('prints an incoming payment without a source as a preliminary cash receipt order', async () => {
+    getCashOrderPrintHtmlForPaymentMock.mockResolvedValueOnce(
+      '<!doctype html><html><body>Унифицированная форма № КО-1 Приходный кассовый ордер № 2169</body></html>',
+    );
+    render(
+      <PaymentModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        payment={{
+          id: 2169,
+          date: '2026-08-28',
+          plannedDate: '2026-08-28',
+          amount: 5_000,
+          paidAmount: 0,
+          outstandingAmount: 5_000,
+          hasPartialPayment: false,
+          status: 'Pending',
+          description: '',
+          isPaid: false,
+          notes: '',
+          clientId: 77,
+          clientCaseId: 501,
+          type: 'Income',
+          documentKind: 'Payment',
+          createdAt: '2026-08-27T00:00:00Z',
+          systemNotes: '',
+          rescheduleCount: 0,
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Печать' }));
+
+    await waitFor(() => expect(getCashOrderPrintHtmlForPaymentMock).toHaveBeenCalledWith(2169));
+    const html = await waitFor(() => getLastPrintHtml());
+    expect(html).toContain('Унифицированная форма № КО-1');
+    expect(html).toContain('Приходный кассовый ордер');
   });
 
   it('prints a bank payment as a payment order', async () => {
@@ -1616,6 +1664,7 @@ describe('PaymentModal integration', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Печать' }));
 
     const html = getLastPrintHtml();
+    expect(getCashOrderPrintHtmlForPaymentMock).not.toHaveBeenCalled();
     expect(html).toContain('Платежное поручение');
     expect(html).toContain('ПП-778');
     expect(html).toContain('Расход');

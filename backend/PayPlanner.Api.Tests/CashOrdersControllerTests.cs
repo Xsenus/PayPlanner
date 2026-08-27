@@ -810,6 +810,83 @@ public class CashOrdersControllerTests
     }
 
     [Fact]
+    public async Task PrintForPayment_UsesOfficialIncomingFormWithoutCreatingCashOrder()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true);
+        var client = new Client { Name = "Игнатьев Борис Никифорович" };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+        var payment = new Payment
+        {
+            Date = new DateTime(2026, 8, 28),
+            PlannedDate = new DateTime(2026, 8, 28),
+            Amount = 5_000m,
+            PaidAmount = 0m,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Pending,
+            Description = "Оплата по счету №1556",
+            ClientId = client.Id,
+            Client = client,
+            Account = "1556",
+            CreatedAt = new DateTime(2026, 8, 27, 8, 0, 0, DateTimeKind.Utc),
+        };
+        db.Payments.Add(payment);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        var controller = CreateController(db, userId, isAdminClaim: false);
+
+        var action = await controller.PrintForPayment(payment.Id, CancellationToken.None);
+
+        var content = Assert.IsType<ContentResult>(action);
+        Assert.Contains("Унифицированная форма № КО-1", content.Content);
+        Assert.Contains("Приходный кассовый ордер", content.Content);
+        Assert.Contains("Игнатьев Борис Никифорович", content.Content);
+        Assert.Contains("Оплата по счету №1556", content.Content);
+        Assert.Contains($">{payment.Id}<", content.Content);
+        Assert.Empty(await db.CashOrders.ToListAsync());
+    }
+
+    [Fact]
+    public async Task PrintForPayment_UsesExistingLinkedCashOrder()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true);
+        var payment = new Payment
+        {
+            Date = new DateTime(2026, 8, 28),
+            PlannedDate = new DateTime(2026, 8, 28),
+            Amount = 5_000m,
+            PaidAmount = 5_000m,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Completed,
+            Description = "Оплата наличными",
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.Payments.Add(payment);
+        await db.SaveChangesAsync();
+        db.CashOrders.Add(new CashOrder
+        {
+            Number = "ПКО-2026-0042",
+            Type = CashOrderType.Incoming,
+            Status = CashOrderStatus.Posted,
+            Date = payment.Date,
+            Amount = payment.PaidAmount,
+            PaymentId = payment.Id,
+            PayerName = "Плательщик из ордера",
+        });
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        var controller = CreateController(db, userId, isAdminClaim: false);
+
+        var action = await controller.PrintForPayment(payment.Id, CancellationToken.None);
+
+        var content = Assert.IsType<ContentResult>(action);
+        Assert.Contains("ПКО-2026-0042", content.Content);
+        Assert.Contains("Плательщик из ордера", content.Content);
+    }
+
+    [Fact]
     public async Task Print_WithoutPaymentsViewPermission_ReturnsForbid()
     {
         await using var db = await CreateContextAsync();
@@ -817,8 +894,10 @@ public class CashOrdersControllerTests
         var controller = CreateController(db, userId, isAdminClaim: false);
 
         var action = await controller.Print(1, CancellationToken.None);
+        var paymentAction = await controller.PrintForPayment(1, CancellationToken.None);
 
         Assert.IsType<ForbidResult>(action);
+        Assert.IsType<ForbidResult>(paymentAction);
     }
 
     [Fact]
