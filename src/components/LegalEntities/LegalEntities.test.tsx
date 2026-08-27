@@ -18,6 +18,10 @@ const toastMocks = vi.hoisted(() => ({
   success: vi.fn(),
 }));
 
+const dialogMocks = vi.hoisted(() => ({
+  confirm: vi.fn(),
+}));
+
 vi.mock('../../services/api', () => ({
   apiService: {
     getLegalEntitiesPaged: apiMocks.getLegalEntitiesPaged,
@@ -47,7 +51,7 @@ vi.mock('../../hooks/useTranslation', () => ({
 }));
 
 vi.mock('../../hooks/useDialog', () => ({
-  useDialog: () => ({ confirm: vi.fn() }),
+  useDialog: () => dialogMocks,
 }));
 
 vi.mock('../../hooks/useToast', () => ({
@@ -113,6 +117,8 @@ describe('LegalEntities permissions', () => {
   beforeEach(() => {
     apiMocks.getLegalEntitiesPaged.mockReset();
     apiMocks.getLegalEntity.mockReset();
+    dialogMocks.confirm.mockReset();
+    dialogMocks.confirm.mockResolvedValue(false);
     apiMocks.getLegalEntity.mockResolvedValue(legalEntity);
     apiMocks.getLegalEntitiesPaged.mockResolvedValue({
       items: [legalEntity],
@@ -249,5 +255,16 @@ describe('LegalEntities permissions', () => {
       expect.objectContaining({ search: 'новое юрлицо', page: 1 }),
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
+  });
+
+  it('warns that linked client cards will be preserved when deleting an organization', async () => {
+    render(<LegalEntities />);
+    await waitFor(() => expect(apiMocks.getLegalEntitiesPaged).toHaveBeenCalled());
+
+    await userEvent.click(screen.getByRole('button', { name: `Удалить ${legalEntity.shortName}` }));
+
+    expect(dialogMocks.confirm).toHaveBeenCalledWith(expect.objectContaining({
+      description: expect.stringContaining('Карточки связанных клиентов (1) сохранятся'),
+    }));
   });
 });

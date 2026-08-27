@@ -353,9 +353,12 @@ export function LegalEntities({
   const handleDeleteDirect = async (entity: LegalEntitySummary) => {
     if (!canDelete) return;
 
+    const linkedClientsNotice = entity.clientsCount > 0
+      ? ` Карточки связанных клиентов (${entity.clientsCount}) сохранятся, связь с этой организацией будет снята.`
+      : '';
     const approved = await confirm({
       title: 'Подтверждение удаления',
-      description: `Удалить юридическое лицо "${entity.shortName}"?`,
+      description: `Удалить юридическое лицо "${entity.shortName}"?${linkedClientsNotice}`,
       confirmLabel: 'Удалить',
       cancelLabel: 'Отмена',
       variant: 'danger',
@@ -801,6 +804,7 @@ export function LegalEntities({
                     type="button"
                     onClick={() => void handleDeleteDirect(entity)}
                     disabled={!canDelete}
+                    aria-label={`Удалить ${entity.shortName}`}
                     className="ml-auto inline-flex items-center rounded-lg border border-red-200 bg-red-50 p-2 text-red-600 hover:border-red-300 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-100 disabled:text-gray-300"
                   >
                     <Trash2 size={14} />
@@ -911,6 +915,7 @@ export function LegalEntities({
                           type="button"
                           onClick={() => void handleDeleteDirect(entity)}
                           disabled={!canDelete}
+                          aria-label={`Удалить ${entity.shortName}`}
                           className="rounded-lg border border-red-200 px-3 py-1.5 text-xs text-red-600 hover:border-red-300 disabled:cursor-not-allowed disabled:border-gray-200 disabled:text-gray-300"
                         >
                           <Trash2 size={14} />

@@ -76,6 +76,7 @@ describe('Contacts phone directory', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.localStorage.removeItem('pp.contacts_view.v1');
+    window.sessionStorage.clear();
     vi.mocked(apiService.getLegalEntities).mockResolvedValue([]);
     vi.mocked(apiService.getActResponsibles).mockResolvedValue([]);
   });
@@ -188,5 +189,47 @@ describe('Contacts phone directory', () => {
 
     expect(signals[0]?.aborted).toBe(true);
     expect(signals[1]?.aborted).toBe(true);
+  });
+
+  it('restores search, filters and page after opening a card and returning to the directory', async () => {
+    vi.mocked(apiService.getLegalEntities).mockResolvedValue([{
+      id: 7,
+      shortName: 'ООО Тест',
+      clientsCount: 0,
+      createdAt: '2026-08-27T00:00:00Z',
+    }]);
+    vi.mocked(apiService.getContacts).mockResolvedValue(
+      Array.from({ length: 25 }, (_, index) => createContact(index + 1, `Контакт ${index + 1}`)),
+    );
+
+    const firstRender = render(<Contacts />);
+    const search = await screen.findByPlaceholderText('ФИО, телефон, email, организация');
+    fireEvent.change(search, { target: { value: 'салихов' } });
+    fireEvent.change(screen.getByText('Организация').closest('label')!.querySelector('select')!, {
+      target: { value: '7' },
+    });
+    fireEvent.change(screen.getByText('Телефония').closest('label')!.querySelector('select')!, {
+      target: { value: 'only-sync' },
+    });
+    fireEvent.click(screen.getByText('Показывать неактивные'));
+
+    await waitFor(() => {
+      expect(apiService.getContacts).toHaveBeenLastCalledWith(
+        expect.objectContaining({ search: 'салихов', legalEntityId: 7, includeInactive: true, syncOnly: true }),
+        expect.any(Object),
+      );
+    }, { timeout: 1500 });
+
+    fireEvent.click(screen.getByTestId('pagination-next'));
+    expect(screen.getByText('2 / 2')).toBeTruthy();
+    firstRender.unmount();
+
+    render(<Contacts />);
+
+    expect((await screen.findByPlaceholderText('ФИО, телефон, email, организация') as HTMLInputElement).value).toBe('салихов');
+    expect((screen.getByText('Организация').closest('label')!.querySelector('select') as HTMLSelectElement).value).toBe('7');
+    expect((screen.getByText('Телефония').closest('label')!.querySelector('select') as HTMLSelectElement).value).toBe('only-sync');
+    expect((screen.getByText('Показывать неактивные').closest('label')!.querySelector('input') as HTMLInputElement).checked).toBe(true);
+    expect(screen.getByText('2 / 2')).toBeTruthy();
   });
 });

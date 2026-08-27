@@ -2337,7 +2337,9 @@ export function LegalEntityModal({
       !(await confirm({
         title: "Подтверждение удаления",
         description:
-          t("deleteLegalEntityConfirm") || "Удалить юридическое лицо?",
+          initial.clientsCount > 0
+            ? `Удалить юридическое лицо? Карточки связанных клиентов (${initial.clientsCount}) сохранятся, связь с этой организацией будет снята.`
+            : t("deleteLegalEntityConfirm") || "Удалить юридическое лицо?",
         confirmLabel: "Удалить",
         cancelLabel: "Отмена",
         variant: "danger",

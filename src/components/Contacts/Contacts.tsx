@@ -32,6 +32,7 @@ import { useDialog } from '../../hooks/useDialog';
 import { useToast } from '../../hooks/useToast';
 import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import { readSessionViewState, writeSessionViewState } from '../../utils/sessionViewState';
 import { TableColumnSettings } from '../ui/TableColumnSettings';
 import { TablePagination } from '../ui/TablePagination';
 import { ContactEditorModal } from './ContactEditorModal';
@@ -46,6 +47,14 @@ type YealinkImportState = {
   file: File;
   preview: YealinkContactImportResultDto;
   decisions: Record<number, YealinkContactImportDecisionAction>;
+};
+
+type ContactsViewState = {
+  searchInput: string;
+  legalEntityId: string;
+  syncOnly: 'all' | 'only-sync' | 'excluded';
+  includeInactive: boolean;
+  page: number;
 };
 
 interface ContactsProps {
@@ -104,15 +113,27 @@ const ROLE_LABELS: Record<ContactRole, string> = {
 };
 
 export function Contacts({ initialScope = 'all', onScopeChange, onOpenClient, onOpenLegalEntity }: ContactsProps) {
-  const { isAdmin } = useAuth();
+  const { isAdmin, user } = useAuth();
   const { confirm } = useDialog();
   const toast = useToast();
+  const viewStateKey = useMemo(() => `pp.contacts.${user?.id ?? 'guest'}.viewState.v1`, [user?.id]);
+  const savedViewState = useMemo(
+    () => readSessionViewState<Partial<ContactsViewState> | null>(viewStateKey, null),
+    [viewStateKey],
+  );
   const [scope, setScope] = useState<ContactScope>(initialScope);
-  const [searchInput, setSearchInput] = useState('');
+  const [searchInput, setSearchInput] = useState(() => (
+    typeof savedViewState?.searchInput === 'string' ? savedViewState.searchInput : ''
+  ));
   const debouncedSearch = useDebouncedValue(searchInput, 450);
-  const [legalEntityId, setLegalEntityId] = useState('');
-  const [syncOnly, setSyncOnly] = useState<'all' | 'only-sync' | 'excluded'>('all');
-  const [includeInactive, setIncludeInactive] = useState(false);
+  const [legalEntityId, setLegalEntityId] = useState(() => (
+    typeof savedViewState?.legalEntityId === 'string' ? savedViewState.legalEntityId : ''
+  ));
+  const [syncOnly, setSyncOnly] = useState<'all' | 'only-sync' | 'excluded'>(() => {
+    const saved = savedViewState?.syncOnly;
+    return saved === 'only-sync' || saved === 'excluded' ? saved : 'all';
+  });
+  const [includeInactive, setIncludeInactive] = useState(() => savedViewState?.includeInactive === true);
   const [contacts, setContacts] = useState<ContactDirectoryItemDto[]>([]);
   const [summaryContacts, setSummaryContacts] = useState<ContactDirectoryItemDto[]>([]);
   const [legalEntities, setLegalEntities] = useState<LegalEntitySummary[]>([]);
@@ -124,7 +145,11 @@ export function Contacts({ initialScope = 'all', onScopeChange, onOpenClient, on
   const [error, setError] = useState<string | null>(null);
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [yealinkImport, setYealinkImport] = useState<YealinkImportState | null>(null);
-  const [page, setPage] = useState(1);
+  const [page, setPage] = useState(() => (
+    typeof savedViewState?.page === 'number' && Number.isInteger(savedViewState.page) && savedViewState.page > 0
+      ? savedViewState.page
+      : 1
+  ));
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [viewMode, setViewMode] = useState<'table' | 'cards'>(() => {
     if (typeof window === 'undefined') return 'table';
@@ -134,8 +159,14 @@ export function Contacts({ initialScope = 'all', onScopeChange, onOpenClient, on
   const activeRequestControllerRef = useRef<AbortController | null>(null);
   const hasLoadedRef = useRef(false);
   const importInputRef = useRef<HTMLInputElement | null>(null);
+  const initialScopeReadyRef = useRef(false);
+  const filtersResetReadyRef = useRef(false);
 
   useEffect(() => {
+    if (!initialScopeReadyRef.current) {
+      initialScopeReadyRef.current = true;
+      return;
+    }
     setScope(initialScope);
     setPage(1);
   }, [initialScope]);
@@ -248,8 +279,22 @@ export function Contacts({ initialScope = 'all', onScopeChange, onOpenClient, on
   }, [loadDirectory]);
 
   useEffect(() => {
+    if (!filtersResetReadyRef.current) {
+      filtersResetReadyRef.current = true;
+      return;
+    }
     setPage(1);
   }, [scope, debouncedSearch, legalEntityId, syncOnly, includeInactive]);
+
+  useEffect(() => {
+    writeSessionViewState<ContactsViewState>(viewStateKey, {
+      searchInput,
+      legalEntityId,
+      syncOnly,
+      includeInactive,
+      page,
+    });
+  }, [includeInactive, legalEntityId, page, searchInput, syncOnly, viewStateKey]);
 
   useEffect(() => {
     window.localStorage.setItem(CONTACT_VIEW_STORAGE_KEY, viewMode);
@@ -290,8 +335,9 @@ export function Contacts({ initialScope = 'all', onScopeChange, onOpenClient, on
   }, [contacts, page, pageSize]);
 
   useEffect(() => {
+    if (loading) return;
     setPage((current) => Math.min(current, totalPages));
-  }, [totalPages]);
+  }, [loading, totalPages]);
 
   const handleSaved = () => {
     void loadDirectory();

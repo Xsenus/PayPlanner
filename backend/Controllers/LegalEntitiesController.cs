@@ -1195,10 +1195,12 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
             return NotFound();
         }
 
-        var linkedClientsCount = entity.Clients.Count;
-        if (linkedClientsCount > 0)
+        // A legal entity is soft-deleted, so database ON DELETE SET NULL rules do
+        // not run. Preserve linked client cards and detach them explicitly before
+        // hiding an obsolete organization imported from an external system.
+        foreach (var client in entity.Clients)
         {
-            return Conflict($"Нельзя удалить юридическое лицо, пока к нему привязаны клиенты ({linkedClientsCount}). Сначала отвяжите клиентов.");
+            client.LegalEntityId = null;
         }
 
         var addresses = await _db.AddressRecords

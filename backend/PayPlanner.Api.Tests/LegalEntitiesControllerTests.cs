@@ -912,7 +912,7 @@ public class LegalEntitiesControllerTests
     }
 
     [Fact]
-    public async Task Delete_RejectsLegalEntity_WhenLinkedClientsExist()
+    public async Task Delete_DetachesLinkedClients_AndPreservesTheirCards()
     {
         await using var db = await CreateContextAsync();
         var clientId = await CreateClientAsync(db, "Клиент для конфликта");
@@ -927,9 +927,10 @@ public class LegalEntitiesControllerTests
 
         var deleteAction = await controller.Delete(dto.Id, CancellationToken.None);
 
-        var conflict = Assert.IsType<ConflictObjectResult>(deleteAction);
-        Assert.NotNull(conflict.Value);
-        Assert.NotNull(await db.LegalEntities.AsNoTracking().SingleOrDefaultAsync(item => item.Id == dto.Id));
+        Assert.IsType<NoContentResult>(deleteAction);
+        Assert.Null(await db.LegalEntities.AsNoTracking().SingleOrDefaultAsync(item => item.Id == dto.Id));
+        var preservedClient = await db.Clients.AsNoTracking().SingleAsync(item => item.Id == clientId);
+        Assert.Null(preservedClient.LegalEntityId);
     }
 
     [Fact]
