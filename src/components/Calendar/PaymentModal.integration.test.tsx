@@ -1567,6 +1567,7 @@ describe('PaymentModal integration', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'Печать' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: /ПКО \(форма КО-1\)/ }));
 
     await waitFor(() => expect(getCashOrderPrintHtmlForPaymentMock).toHaveBeenCalledWith(993));
     const html = await waitFor(() => getLastPrintHtml());
@@ -1608,11 +1609,93 @@ describe('PaymentModal integration', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'Печать' }));
+    expect(getCashOrderPrintHtmlForPaymentMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('menuitem', { name: /ПКО \(форма КО-1\)/ }));
 
     await waitFor(() => expect(getCashOrderPrintHtmlForPaymentMock).toHaveBeenCalledWith(2169));
     const html = await waitFor(() => getLastPrintHtml());
     expect(html).toContain('Унифицированная форма № КО-1');
     expect(html).toContain('Приходный кассовый ордер');
+  });
+
+  it('keeps the legacy print form available for a cash payment', async () => {
+    render(
+      <PaymentModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        payment={{
+          id: 2170,
+          date: '2026-08-28',
+          plannedDate: '2026-08-28',
+          amount: 5_000,
+          paidAmount: 0,
+          outstandingAmount: 5_000,
+          hasPartialPayment: false,
+          status: 'Pending',
+          description: 'Оплата юридических услуг',
+          isPaid: false,
+          notes: '',
+          clientId: 77,
+          clientCaseId: 501,
+          type: 'Income',
+          documentKind: 'Payment',
+          createdAt: '2026-08-27T00:00:00Z',
+          systemNotes: '',
+          rescheduleCount: 0,
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Печать' }));
+    expect(screen.getByRole('menu', { name: 'Выбор печатной формы' })).not.toBeNull();
+    fireEvent.click(screen.getByRole('menuitem', { name: /Старая форма платежа/ }));
+
+    const html = getLastPrintHtml();
+    expect(getCashOrderPrintHtmlForPaymentMock).not.toHaveBeenCalled();
+    expect(html).toContain('Печатная форма платежа');
+    expect(html).toContain('Приходный кассовый ордер');
+    expect(html).toContain('Оплата юридических услуг');
+  });
+
+  it('offers the official KO-2 form for an outgoing cash payment', async () => {
+    getCashOrderPrintHtmlForPaymentMock.mockResolvedValueOnce(
+      '<!doctype html><html><body>Унифицированная форма № КО-2 Расходный кассовый ордер № 2171</body></html>',
+    );
+    render(
+      <PaymentModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        payment={{
+          id: 2171,
+          date: '2026-08-28',
+          plannedDate: '2026-08-28',
+          amount: 3_000,
+          paidAmount: 0,
+          outstandingAmount: 3_000,
+          hasPartialPayment: false,
+          status: 'Pending',
+          description: 'Выдача наличных',
+          isPaid: false,
+          notes: '',
+          expenseClientId: 88,
+          type: 'Expense',
+          documentKind: 'Payment',
+          createdAt: '2026-08-27T00:00:00Z',
+          systemNotes: '',
+          rescheduleCount: 0,
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Печать' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: /РКО \(форма КО-2\)/ }));
+
+    await waitFor(() => expect(getCashOrderPrintHtmlForPaymentMock).toHaveBeenCalledWith(2171));
+    const html = await waitFor(() => getLastPrintHtml());
+    expect(html).toContain('Унифицированная форма № КО-2');
+    expect(html).toContain('Расходный кассовый ордер');
   });
 
   it('prints a bank payment as a payment order', async () => {
