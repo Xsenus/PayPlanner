@@ -30,6 +30,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
     private const string CalDavBaseUrl = "https://caldav.yandex.ru";
     private const string CalendarSyncSettingsKey = "calendarSync.settings";
     private const int DefaultPollIntervalMs = 2000;
+    private const int YandexReadRetryCount = 2;
 
     private static readonly TimeSpan AuthRequestLifetime = TimeSpan.FromMinutes(15);
     private static readonly TimeSpan AccessTokenRefreshSkew = TimeSpan.FromMinutes(2);
@@ -1733,7 +1734,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         string calendarHomeUrl,
         string name,
         CancellationToken cancellationToken)
-        => (await TryLoadYandexCalendarsAsync(accessToken, calendarHomeUrl, cancellationToken))?
+        => (await LoadYandexCalendarsAsync(accessToken, calendarHomeUrl, cancellationToken))
             .FirstOrDefault(item => string.Equals(item.Name, name, StringComparison.Ordinal));
 
     private async Task<IReadOnlyList<YandexCalendarCreateResult>> LoadYandexCalendarSnapshotAsync(
@@ -1747,12 +1748,12 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
             return cached;
         }
 
-        var calendars = await TryLoadYandexCalendarsAsync(accessToken, calendarHomeUrl, cancellationToken) ?? [];
+        var calendars = await LoadYandexCalendarsAsync(accessToken, calendarHomeUrl, cancellationToken);
         _calendarHomeSnapshots[snapshotKey] = calendars;
         return calendars;
     }
 
-    private async Task<IReadOnlyList<YandexCalendarCreateResult>?> TryLoadYandexCalendarsAsync(
+    private async Task<IReadOnlyList<YandexCalendarCreateResult>> LoadYandexCalendarsAsync(
         string accessToken,
         string calendarHomeUrl,
         CancellationToken cancellationToken)
@@ -1768,17 +1769,21 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
 </D:propfind>
 """;
 
-        using var request = BuildYandexRequest(new HttpMethod("PROPFIND"), calendarHomeUrl, accessToken, body, "application/xml; charset=utf-8");
-        request.Headers.Add("Depth", "1");
-        var client = _httpClientFactory.CreateClient();
-        using var response = await client.SendAsync(request, cancellationToken);
+        var response = await SendYandexReadWithRetryAsync(
+            () =>
+            {
+                var request = BuildYandexRequest(new HttpMethod("PROPFIND"), calendarHomeUrl, accessToken, body, "application/xml; charset=utf-8");
+                request.Headers.Add("Depth", "1");
+                return request;
+            },
+            "получение списка календарей",
+            cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
-            return null;
+            throw new InvalidOperationException(ReadProviderError(response.Payload, response.ReasonPhrase) ?? "Яндекс.Календарь не вернул список календарей.");
         }
 
-        var payload = await response.Content.ReadAsStringAsync(cancellationToken);
-        return ParseYandexCalendarHome(payload, calendarHomeUrl);
+        return ParseYandexCalendarHome(response.Payload, calendarHomeUrl);
     }
 
     private async Task<bool> DeleteYandexCalendarAsync(string accessToken, string calendarUrl, CancellationToken cancellationToken)
@@ -1877,17 +1882,97 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
 </C:calendar-query>
 """;
 
-        using var request = BuildYandexRequest(new HttpMethod("REPORT"), calendar.CalendarUrl, accessToken, body, "application/xml; charset=utf-8");
-        request.Headers.Add("Depth", "1");
-        var client = _httpClientFactory.CreateClient();
-        using var response = await client.SendAsync(request, cancellationToken);
-        var payload = await response.Content.ReadAsStringAsync(cancellationToken);
+        var response = await SendYandexReadWithRetryAsync(
+            () =>
+            {
+                var request = BuildYandexRequest(new HttpMethod("REPORT"), calendar.CalendarUrl, accessToken, body, "application/xml; charset=utf-8");
+                request.Headers.Add("Depth", "1");
+                return request;
+            },
+            "получение событий",
+            cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
-            throw new InvalidOperationException(ReadProviderError(payload, response.ReasonPhrase) ?? "Яндекс.Календарь не вернул список событий.");
+            throw new InvalidOperationException(ReadProviderError(response.Payload, response.ReasonPhrase) ?? "Яндекс.Календарь не вернул список событий.");
         }
 
-        return ParseYandexEvents(payload, calendar.CalendarUrl);
+        return ParseYandexEvents(response.Payload, calendar.CalendarUrl);
+    }
+
+    private async Task<YandexHttpResponse> SendYandexReadWithRetryAsync(
+        Func<HttpRequestMessage> createRequest,
+        string operation,
+        CancellationToken cancellationToken)
+    {
+        var client = _httpClientFactory.CreateClient();
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                using var request = createRequest();
+                using var response = await client.SendAsync(request, cancellationToken);
+                var payload = await response.Content.ReadAsStringAsync(cancellationToken);
+                var result = new YandexHttpResponse(response.StatusCode, response.ReasonPhrase, payload);
+                if (!IsYandexTransientStatus(response.StatusCode) || attempt >= YandexReadRetryCount)
+                {
+                    return result;
+                }
+
+                _logger.LogInformation(
+                    "Yandex Calendar transient response {StatusCode} during {Operation}; retry {RetryAttempt} of {RetryCount}.",
+                    (int)response.StatusCode,
+                    operation,
+                    attempt + 1,
+                    YandexReadRetryCount);
+                await Task.Delay(ResolveYandexRetryDelay(response, attempt), cancellationToken);
+            }
+            catch (HttpRequestException ex) when (attempt < YandexReadRetryCount)
+            {
+                _logger.LogInformation(
+                    ex,
+                    "Yandex Calendar transport error during {Operation}; retry {RetryAttempt} of {RetryCount}.",
+                    operation,
+                    attempt + 1,
+                    YandexReadRetryCount);
+                await Task.Delay(ResolveYandexRetryDelay(null, attempt), cancellationToken);
+            }
+            catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested && attempt < YandexReadRetryCount)
+            {
+                _logger.LogInformation(
+                    ex,
+                    "Yandex Calendar request timed out during {Operation}; retry {RetryAttempt} of {RetryCount}.",
+                    operation,
+                    attempt + 1,
+                    YandexReadRetryCount);
+                await Task.Delay(ResolveYandexRetryDelay(null, attempt), cancellationToken);
+            }
+        }
+    }
+
+    private static bool IsYandexTransientStatus(HttpStatusCode statusCode)
+        => statusCode is HttpStatusCode.RequestTimeout
+            or HttpStatusCode.TooManyRequests
+            or HttpStatusCode.InternalServerError
+            or HttpStatusCode.BadGateway
+            or HttpStatusCode.ServiceUnavailable
+            or HttpStatusCode.GatewayTimeout;
+
+    private static TimeSpan ResolveYandexRetryDelay(HttpResponseMessage? response, int attempt)
+    {
+        if (response?.Headers.RetryAfter?.Delta is { } delta)
+        {
+            return delta > TimeSpan.FromSeconds(5) ? TimeSpan.FromSeconds(5) : delta;
+        }
+
+        if (response?.Headers.RetryAfter?.Date is { } date)
+        {
+            var delay = date - DateTimeOffset.UtcNow;
+            return delay <= TimeSpan.Zero
+                ? TimeSpan.Zero
+                : delay > TimeSpan.FromSeconds(5) ? TimeSpan.FromSeconds(5) : delay;
+        }
+
+        return TimeSpan.FromMilliseconds(250 * (attempt + 1));
     }
 
     private static HttpRequestMessage BuildYandexRequest(
@@ -2843,6 +2928,10 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
     private sealed record YandexProfile(string Id, string? Email, string? DisplayName);
     private sealed record YandexCalendarCreateResult(string Id, string Url, string Name = "");
     private sealed record YandexEventWriteResult(string? Etag);
+    private sealed record YandexHttpResponse(HttpStatusCode StatusCode, string? ReasonPhrase, string Payload)
+    {
+        public bool IsSuccessStatusCode => (int)StatusCode is >= 200 and <= 299;
+    }
     private sealed record YandexEventItem(string Id, string EventUrl, string? Etag, bool Deleted, string? Summary, DateTime? StartAt, DateTime? EndAt, int? PayPlannerTaskId, string? PayPlannerHash);
     private sealed record ConnectionSyncResult(int ProcessedTasks, int ImportedEvents, int ErrorCount);
 }

@@ -423,6 +423,43 @@ public class YandexCalendarSyncServiceTests
     }
 
     [Fact]
+    public async Task SyncDueConnectionsAsync_WhenYandexReportTemporarilyTimesOut_RetriesWithoutSyncError()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "yandex-transient-report@example.com", "user");
+        var connection = await CreateConnectionAsync(db, user.Id);
+        await CreateCalendarAsync(db, connection.Id, "calendar-yandex-transient", "PayPlanner задачи");
+        var handler = new TransientReportYandexHandler();
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+
+        var result = await service.SyncDueConnectionsAsync(10, CancellationToken.None);
+
+        Assert.Equal(1, result.ProcessedConnections);
+        Assert.Equal(0, result.ErrorCount);
+        Assert.Equal(2, handler.ReportRequestCount);
+        Assert.Null((await db.YandexCalendarConnections.SingleAsync()).LastError);
+        Assert.DoesNotContain(await db.YandexCalendarSyncLogs.ToListAsync(), item => item.Status == "error");
+    }
+
+    [Fact]
+    public async Task SyncDueConnectionsAsync_WhenCalendarListTemporarilyTimesOut_DiscoversExistingCalendarWithoutDuplicate()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "yandex-transient-calendar-list@example.com", "user");
+        await CreateConnectionAsync(db, user.Id);
+        await CreateTaskAsync(db, user.Id, "Не создавать дубль календаря");
+        var handler = new TransientCalendarHomeYandexHandler();
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+
+        var result = await service.SyncDueConnectionsAsync(10, CancellationToken.None);
+
+        Assert.Equal(0, result.ErrorCount);
+        Assert.Equal(2, handler.CalendarListRequestCount);
+        Assert.Equal(0, handler.CreateCalendarRequestCount);
+        Assert.Equal("existing-calendar", (await db.YandexCalendarSyncCalendars.SingleAsync()).YandexCalendarId);
+    }
+
+    [Fact]
     public async Task SyncNowAsync_AdminConnectionCreatesCalendarForActiveApprovedUserWithoutTasks()
     {
         await using var db = await CreateContextAsync();
@@ -1505,5 +1542,76 @@ END:VCALENDAR
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
             => Task.FromException<HttpResponseMessage>(resolveException(request));
+    }
+
+    private sealed class TransientReportYandexHandler : HttpMessageHandler
+    {
+        public int ReportRequestCount { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (!string.Equals(request.Method.Method, "REPORT", StringComparison.Ordinal))
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NoContent)
+                {
+                    Content = new StringContent(string.Empty, Encoding.UTF8, "text/plain"),
+                });
+            }
+
+            ReportRequestCount++;
+            var statusCode = ReportRequestCount == 1
+                ? HttpStatusCode.GatewayTimeout
+                : (HttpStatusCode)207;
+            var payload = ReportRequestCount == 1 ? "Gateway time out" : string.Empty;
+            return Task.FromResult(new HttpResponseMessage(statusCode)
+            {
+                Content = new StringContent(payload, Encoding.UTF8, "text/plain"),
+            });
+        }
+    }
+
+    private sealed class TransientCalendarHomeYandexHandler : HttpMessageHandler
+    {
+        public int CalendarListRequestCount { get; private set; }
+        public int CreateCalendarRequestCount { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (string.Equals(request.Method.Method, "PROPFIND", StringComparison.Ordinal))
+            {
+                CalendarListRequestCount++;
+                if (CalendarListRequestCount == 1)
+                {
+                    return Task.FromResult(new HttpResponseMessage(HttpStatusCode.GatewayTimeout)
+                    {
+                        Content = new StringContent("Gateway time out", Encoding.UTF8, "text/plain"),
+                    });
+                }
+
+                return Task.FromResult(new HttpResponseMessage((HttpStatusCode)207)
+                {
+                    Content = new StringContent(
+                        BuildYandexCalendarHomeResponse(
+                            "/calendars/yandex%40example.com/existing-calendar/",
+                            "PayPlanner задачи"),
+                        Encoding.UTF8,
+                        "application/xml"),
+                });
+            }
+
+            if (string.Equals(request.Method.Method, "MKCALENDAR", StringComparison.Ordinal))
+            {
+                CreateCalendarRequestCount++;
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Created));
+            }
+
+            var statusCode = request.Method == HttpMethod.Put
+                ? HttpStatusCode.Created
+                : (HttpStatusCode)207;
+            return Task.FromResult(new HttpResponseMessage(statusCode)
+            {
+                Content = new StringContent(string.Empty, Encoding.UTF8, "text/plain"),
+            });
+        }
     }
 }
