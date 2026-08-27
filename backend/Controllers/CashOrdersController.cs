@@ -2634,11 +2634,17 @@ public class CashOrdersController : ControllerBase
         }
 
         var explicitVat = order.MoneyOperation?.VatAmount;
-        var vatRate = order.MoneyOperation?.VatRate
-            ?? (order.Date.Date < new DateTime(2019, 1, 1) ? 18m : 20m);
+        var vatRate = order.MoneyOperation?.VatRate;
+        if (!explicitVat.HasValue && !vatRate.HasValue)
+        {
+            return "Без налога (НДС) 0,00 руб.";
+        }
+
         var vatAmount = explicitVat.HasValue
             ? Math.Abs(explicitVat.Value)
-            : Math.Round(Math.Abs(order.Amount) * vatRate / (100m + vatRate), 2, MidpointRounding.AwayFromZero);
+            : vatRate > 0m
+                ? Math.Round(Math.Abs(order.Amount) * vatRate.Value / (100m + vatRate.Value), 2, MidpointRounding.AwayFromZero)
+                : 0m;
         return $"НДС {vatAmount.ToString("N2", System.Globalization.CultureInfo.GetCultureInfo("ru-RU"))} руб.";
     }
 

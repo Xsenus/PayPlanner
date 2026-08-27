@@ -814,9 +814,20 @@ public class CashOrdersControllerTests
     {
         await using var db = await CreateContextAsync();
         var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true);
+        var mainCompany = new LegalEntity
+        {
+            ShortName = "ИП Тестовый",
+            VatWithoutVat = false,
+        };
         var client = new Client { Name = "Игнатьев Борис Никифорович" };
+        db.LegalEntities.Add(mainCompany);
         db.Clients.Add(client);
         await db.SaveChangesAsync();
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = "legalEntities.defaultMainCompanyId",
+            Value = mainCompany.Id.ToString(),
+        });
         var payment = new Payment
         {
             Date = new DateTime(2026, 8, 28),
@@ -844,6 +855,8 @@ public class CashOrdersControllerTests
         Assert.Contains("Игнатьев Борис Никифорович", content.Content);
         Assert.Contains("Оплата по счету №1556", content.Content);
         Assert.Contains($">{payment.Id}<", content.Content);
+        Assert.Contains("Без налога (НДС) 0,00 руб.", content.Content);
+        Assert.DoesNotContain("НДС 833,33 руб.", content.Content);
         Assert.Empty(await db.CashOrders.ToListAsync());
     }
 
@@ -852,6 +865,18 @@ public class CashOrdersControllerTests
     {
         await using var db = await CreateContextAsync();
         var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true);
+        var mainCompany = new LegalEntity
+        {
+            ShortName = "ИП Тестовый",
+            VatWithoutVat = false,
+        };
+        db.LegalEntities.Add(mainCompany);
+        await db.SaveChangesAsync();
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = "legalEntities.defaultMainCompanyId",
+            Value = mainCompany.Id.ToString(),
+        });
         var payment = new Payment
         {
             Date = new DateTime(2026, 8, 28),
@@ -865,6 +890,19 @@ public class CashOrdersControllerTests
         };
         db.Payments.Add(payment);
         await db.SaveChangesAsync();
+        var operation = new MoneyOperation
+        {
+            Source = MoneyOperationSource.Cash,
+            Direction = MoneyOperationDirection.Income,
+            AccountingType = MoneyOperationAccountingType.Fact,
+            Amount = 5_000m,
+            VatRate = 20m,
+            VatAmount = 833.33m,
+            Date = payment.Date,
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.MoneyOperations.Add(operation);
+        await db.SaveChangesAsync();
         db.CashOrders.Add(new CashOrder
         {
             Number = "ПКО-2026-0042",
@@ -873,6 +911,7 @@ public class CashOrdersControllerTests
             Date = payment.Date,
             Amount = payment.PaidAmount,
             PaymentId = payment.Id,
+            MoneyOperationId = operation.Id,
             PayerName = "Плательщик из ордера",
         });
         await db.SaveChangesAsync();
@@ -884,6 +923,7 @@ public class CashOrdersControllerTests
         var content = Assert.IsType<ContentResult>(action);
         Assert.Contains("ПКО-2026-0042", content.Content);
         Assert.Contains("Плательщик из ордера", content.Content);
+        Assert.Contains("НДС 833,33 руб.", content.Content);
     }
 
     [Fact]
