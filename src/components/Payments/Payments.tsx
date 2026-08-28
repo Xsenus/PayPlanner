@@ -31,6 +31,7 @@ import { parseInstallmentPaymentMetadata } from '../../utils/installmentPlan';
 import { buildCancelledPaymentPayload } from '../../utils/paymentActions';
 import {
   notifyPaymentAdvanceReviewChanged,
+  PAYMENT_ADVANCE_REVIEW_FILTER_INTENT_EVENT,
   PAYMENT_ADVANCE_REVIEW_FILTER_INTENT_KEY,
 } from '../../utils/paymentAdvanceReview';
 
@@ -443,19 +444,31 @@ export function Payments({
   const [advanceDiagnosticsError, setAdvanceDiagnosticsError] = useState<string | null>(null);
 
   useEffect(() => {
-    const pendingFilter = window.sessionStorage.getItem(ADVANCE_REVIEW_FILTER_INTENT_KEY);
-    if (
-      pendingFilter === 'RequiresDecision' ||
-      pendingFilter === 'AcceptedAsAdvance' ||
-      pendingFilter === 'Allocated' ||
-      pendingFilter === 'Ignored' ||
-      pendingFilter === 'Refunded'
-    ) {
-      setAdvanceReviewFilter(pendingFilter);
-      setStatusFilter('all');
-      setPage(1);
-      window.sessionStorage.removeItem(ADVANCE_REVIEW_FILTER_INTENT_KEY);
-    }
+    const applyPendingFilter = () => {
+      const pendingFilter = window.sessionStorage.getItem(ADVANCE_REVIEW_FILTER_INTENT_KEY);
+      if (
+        pendingFilter === 'RequiresDecision' ||
+        pendingFilter === 'AcceptedAsAdvance' ||
+        pendingFilter === 'Allocated' ||
+        pendingFilter === 'Ignored' ||
+        pendingFilter === 'Refunded'
+      ) {
+        setAdvanceReviewFilter(pendingFilter);
+        setStatusFilter('all');
+        if (pendingFilter === 'RequiresDecision') {
+          setFromDate('');
+          setToDate('');
+        }
+        setPage(1);
+        window.sessionStorage.removeItem(ADVANCE_REVIEW_FILTER_INTENT_KEY);
+      }
+    };
+
+    applyPendingFilter();
+    window.addEventListener(PAYMENT_ADVANCE_REVIEW_FILTER_INTENT_EVENT, applyPendingFilter);
+    return () => {
+      window.removeEventListener(PAYMENT_ADVANCE_REVIEW_FILTER_INTENT_EVENT, applyPendingFilter);
+    };
   }, []);
 
   const initialFromRef = useRef(fromDate);

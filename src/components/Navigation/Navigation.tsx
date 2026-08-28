@@ -56,7 +56,7 @@ import { getTabHref } from '../../appRouting';
 import { apiService, type NavigationGroupDto } from '../../services/api';
 import {
   PAYMENT_ADVANCE_REVIEW_CHANGED_EVENT,
-  PAYMENT_ADVANCE_REVIEW_FILTER_INTENT_KEY,
+  requestPaymentAdvanceReviewFilter,
 } from '../../utils/paymentAdvanceReview';
 
 interface NavigationProps {
@@ -881,7 +881,7 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
             onClick={(event) => {
               if (item.tab) {
                 if (item.id === 'payments' && advanceDecisionCount > 0) {
-                  window.sessionStorage.setItem(PAYMENT_ADVANCE_REVIEW_FILTER_INTENT_KEY, 'RequiresDecision');
+                  requestPaymentAdvanceReviewFilter('RequiresDecision');
                 }
                 handleNavLinkClick(event, item.tab);
                 return;

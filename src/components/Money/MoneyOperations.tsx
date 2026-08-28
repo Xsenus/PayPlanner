@@ -73,6 +73,7 @@ import type {
   PaymentKind,
 } from '../../types';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import { requestPaymentAdvanceReviewFilter } from '../../utils/paymentAdvanceReview';
 
 type MoneyTab = MoneyOperationSource | 'Total';
 
@@ -176,8 +177,6 @@ const MONEY_JOURNAL_STATUS_LABELS: Record<MoneyOperationJournalStatus, string> =
   Processing: 'В обработке',
   Error: 'Ошибка',
 };
-
-const ADVANCE_REVIEW_FILTER_INTENT_KEY = 'pp.payments.advanceReviewFilter';
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 
@@ -2499,7 +2498,7 @@ export function MoneyOperations({
   }, [permissions.payments.canView]);
 
   const openAdvanceReviewPayments = () => {
-    window.sessionStorage.setItem(ADVANCE_REVIEW_FILTER_INTENT_KEY, 'RequiresDecision');
+    requestPaymentAdvanceReviewFilter('RequiresDecision');
     setActiveTab('payments');
   };
 

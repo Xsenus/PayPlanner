@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { Payment } from '../../types';
+import { requestPaymentAdvanceReviewFilter } from '../../utils/paymentAdvanceReview';
 import { Payments } from './Payments';
 
 const { confirmMock, rolePermissionsMock, usePaymentsPagedMock } = vi.hoisted(() => ({
@@ -474,6 +475,22 @@ describe('Payments integration', () => {
       const lastCall = usePaymentsPagedMock.mock.calls.at(-1)?.[0] as Record<string, unknown>;
       expect(lastCall.advanceReviewStatus).toBe('RequiresDecision');
       expect(lastCall.status).toBeUndefined();
+      expect(lastCall.from).toBeUndefined();
+      expect(lastCall.to).toBeUndefined();
+    });
+    expect(window.sessionStorage.getItem('pp.payments.advanceReviewFilter')).toBeNull();
+  });
+
+  it('applies the global advance review filter while the payments page is already open', async () => {
+    render(<Payments />);
+
+    requestPaymentAdvanceReviewFilter('RequiresDecision');
+
+    await waitFor(() => {
+      const lastCall = usePaymentsPagedMock.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+      expect(lastCall.advanceReviewStatus).toBe('RequiresDecision');
+      expect(lastCall.from).toBeUndefined();
+      expect(lastCall.to).toBeUndefined();
     });
     expect(window.sessionStorage.getItem('pp.payments.advanceReviewFilter')).toBeNull();
   });
