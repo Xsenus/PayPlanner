@@ -1947,6 +1947,11 @@ export interface TaskJournalListSummary {
   today: number;
   highPriority: number;
   unbilled: number;
+  invoicesToPrepare?: number;
+  fixed?: number;
+  invoiced?: number;
+  nonBillable?: number;
+  unclassified?: number;
 }
 
 export interface TaskJournalAutomationDiagnosticsDto {

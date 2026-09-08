@@ -436,6 +436,7 @@ using (var scope = app.Services.CreateScope())
         await RunStartupStepAsync(startupLogger, "SQLite SMS credential protection", async () => await SmsCredentialProtectionBackfillService.EnsureProtectedAsync(ctx, dataProtectionProvider));
         await RunStartupStepAsync(startupLogger, "SQLite payment remainder transfer backfill", async () => await PaymentRemainderTransferBackfillService.EnsureLegacyLinksAsync(ctx));
         await RunStartupStepAsync(startupLogger, "SQLite task contractor payment backfill", async () => await TaskContractorPaymentBackfillService.EnsureGeneratedPaymentDetailsAsync(ctx));
+        await RunStartupStepAsync(startupLogger, "SQLite task billing classification backfill", async () => await TaskBillingClassificationBackfillService.EnsureLegacyTasksClassifiedAsync(ctx));
         await RunStartupStepAsync(startupLogger, "SQLite legacy expense recipient backfill", async () => await LegacyExpensePaymentRecipientBackfillService.EnsureRecognizedRecipientsAsync(ctx));
     }
     else
@@ -449,6 +450,7 @@ using (var scope = app.Services.CreateScope())
         await RunStartupStepAsync(startupLogger, "PostgreSQL SMS credential protection", async () => await SmsCredentialProtectionBackfillService.EnsureProtectedAsync(pgContext, dataProtectionProvider));
         await RunStartupStepAsync(startupLogger, "PostgreSQL payment remainder transfer backfill", async () => await PaymentRemainderTransferBackfillService.EnsureLegacyLinksAsync(pgContext));
         await RunStartupStepAsync(startupLogger, "PostgreSQL task contractor payment backfill", async () => await TaskContractorPaymentBackfillService.EnsureGeneratedPaymentDetailsAsync(pgContext));
+        await RunStartupStepAsync(startupLogger, "PostgreSQL task billing classification backfill", async () => await TaskBillingClassificationBackfillService.EnsureLegacyTasksClassifiedAsync(pgContext));
         await RunStartupStepAsync(startupLogger, "PostgreSQL legacy expense recipient backfill", async () => await LegacyExpensePaymentRecipientBackfillService.EnsureRecognizedRecipientsAsync(pgContext));
     }
 }

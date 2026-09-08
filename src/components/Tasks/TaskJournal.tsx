@@ -3446,13 +3446,38 @@ export function TaskJournal({
     () => selectableTasks.filter((task) => selectedTaskIds.has(task.id)),
     [selectableTasks, selectedTaskIds],
   );
-  const unbilledClientTasks = useMemo(
-    () => tasks.filter((task) => task.billingStatus === 'unbilled'),
-    [tasks],
-  );
-  const unbilledClientTaskCount = viewMode === 'list'
-    ? taskListSummary?.unbilled ?? 0
-    : unbilledClientTasks.length;
+  const billingAnalysis = useMemo(() => {
+    if (viewMode === 'list' && taskListSummary) {
+      return {
+        unbilled: taskListSummary.unbilled ?? 0,
+        invoicesToPrepare: taskListSummary.invoicesToPrepare ?? 0,
+        fixed: taskListSummary.fixed ?? 0,
+        invoiced: taskListSummary.invoiced ?? 0,
+        nonBillable: taskListSummary.nonBillable ?? 0,
+        unclassified: taskListSummary.unclassified ?? 0,
+      };
+    }
+
+    const activeTasks = tasks.filter((task) => task.status !== 'done' && task.status !== 'cancelled');
+    const unbilledTasks = activeTasks.filter((task) => task.billingStatus === 'unbilled');
+    const invoiceOwners = new Set(unbilledTasks.map((task) => (
+      task.clientId ? `client:${task.clientId}` : task.legalEntityId ? `legal:${task.legalEntityId}` : `task:${task.id}`
+    )));
+    return {
+      unbilled: unbilledTasks.length,
+      invoicesToPrepare: invoiceOwners.size,
+      fixed: activeTasks.filter((task) => task.billingStatus === 'fixed').length,
+      invoiced: activeTasks.filter((task) => task.billingStatus === 'invoiced').length,
+      nonBillable: activeTasks.filter((task) => task.billingStatus === 'internal').length,
+      unclassified: activeTasks.filter((task) => task.billingStatus === 'legacy').length,
+    };
+  }, [taskListSummary, tasks, viewMode]);
+  const unbilledClientTaskCount = billingAnalysis.unbilled;
+  const categorizedBillingTaskCount = billingAnalysis.unbilled
+    + billingAnalysis.fixed
+    + billingAnalysis.invoiced
+    + billingAnalysis.nonBillable
+    + billingAnalysis.unclassified;
   const allVisibleBulkSelected = selectableTasks.length > 0 && selectableTasks.every((task) => selectedTaskIds.has(task.id));
 
   const shiftCalendarPeriod = (direction: -1 | 1) => {
@@ -5161,24 +5186,40 @@ export function TaskJournal({
           </div>
         </section>
 
-        {!isApprovalsMode && unbilledClientTaskCount > 0 ? (
+        {!isApprovalsMode && categorizedBillingTaskCount > 0 ? (
           <section className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-rose-200 bg-gradient-to-r from-rose-50 to-amber-50 p-3" data-testid="task-unbilled-reminder">
             <div className="flex items-center gap-3">
               <span className="rounded-xl bg-rose-600 p-2 text-white"><WalletCards className="h-5 w-5" /></span>
               <div>
-                <div className="font-semibold text-rose-950">Платные задачи без счёта: {unbilledClientTaskCount}</div>
-                <div className="text-sm text-rose-700">Отметьте задачи одного клиента в таблице и подготовьте по ним единый счёт.</div>
+                <div className="font-semibold text-rose-950">Анализ оплаты задач</div>
+                <div className="mt-1 flex flex-wrap gap-1.5 text-xs font-semibold">
+                  <span className="rounded-full bg-rose-100 px-2.5 py-1 text-rose-800">Счетов подготовить: {billingAnalysis.invoicesToPrepare}</span>
+                  <span className="rounded-full bg-white/80 px-2.5 py-1 text-rose-800">Платные задачи без счёта: {unbilledClientTaskCount}</span>
+                  <span className="rounded-full bg-violet-100 px-2.5 py-1 text-violet-800">По фиксированному договору: {billingAnalysis.fixed}</span>
+                  <span className="rounded-full bg-slate-100 px-2.5 py-1 text-slate-700">Неоплачиваемые: {billingAnalysis.nonBillable}</span>
+                  <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-emerald-800">Уже включены в счёт: {billingAnalysis.invoiced}</span>
+                  {billingAnalysis.unclassified > 0 ? (
+                    <span className="rounded-full bg-amber-100 px-2.5 py-1 text-amber-800">Нужно распределить: {billingAnalysis.unclassified}</span>
+                  ) : null}
+                </div>
+                <div className="mt-1 text-sm text-rose-700">
+                  {unbilledClientTaskCount > 0
+                    ? 'Отметьте задачи одного клиента в таблице и подготовьте по ним единый счёт.'
+                    : 'Все активные задачи распределены, новых счетов по ним готовить не требуется.'}
+                </div>
               </div>
             </div>
-            <button
-              type="button"
-              onClick={handleCreateInvoiceFromSelectedTasks}
-              disabled={selectedTasksForBulk.length === 0 || !onCreateInvoiceDraft}
-              className="inline-flex items-center gap-2 rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <WalletCards className="h-4 w-4" />
-              Подготовить счёт{selectedTasksForBulk.length > 0 ? ` (${selectedTasksForBulk.length})` : ''}
-            </button>
+            {unbilledClientTaskCount > 0 ? (
+              <button
+                type="button"
+                onClick={handleCreateInvoiceFromSelectedTasks}
+                disabled={selectedTasksForBulk.length === 0 || !onCreateInvoiceDraft}
+                className="inline-flex items-center gap-2 rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <WalletCards className="h-4 w-4" />
+                Подготовить счёт{selectedTasksForBulk.length > 0 ? ` (${selectedTasksForBulk.length})` : ''}
+              </button>
+            ) : null}
           </section>
         ) : null}
 
@@ -8559,6 +8600,7 @@ function TaskModal({
   const [filesLoading, setFilesLoading] = useState(false);
   const [uploadingDocumentKey, setUploadingDocumentKey] = useState<string | null>(null);
   const [sendingYandexFileId, setSendingYandexFileId] = useState<number | null>(null);
+  const [activeDetailsTab, setActiveDetailsTab] = useState<'comments' | 'files' | 'timer' | 'activity'>('comments');
   const [actionMenuOpen, setActionMenuOpen] = useState(false);
   const [quickPanel, setQuickPanel] = useState<'assignee' | 'observer' | null>(null);
   const [scheduleOpen, setScheduleOpen] = useState(false);
@@ -8642,6 +8684,18 @@ function TaskModal({
       })
       .sort((a, b) => new Date(b.latest.uploadedAt).getTime() - new Date(a.latest.uploadedAt).getTime());
   }, [files]);
+  const userComments = useMemo(
+    () => comments.filter((comment) => comment.kind !== 'system'),
+    [comments],
+  );
+  const activityComments = useMemo(
+    () => comments.filter((comment) => comment.kind === 'system'),
+    [comments],
+  );
+
+  useEffect(() => {
+    setActiveDetailsTab('comments');
+  }, [taskId]);
   const { cases: clientCases, loading: casesLoading } = useClientCases(form.clientId ?? undefined, {
     enabled: !form.isInternal && Boolean(form.clientId || form.legalEntityId),
     legalEntityId: form.legalEntityId ?? undefined,
@@ -10060,33 +10114,41 @@ function TaskModal({
               {deadlineChangeRequestsSection}
 
               <section className="rounded-xl border border-slate-200 bg-white">
-                <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 px-3 py-2 text-sm">
-                  <span className="rounded-lg bg-blue-50 px-3 py-1.5 font-semibold text-blue-700">Комментарии {comments.length}</span>
-                  <span className="rounded-lg px-3 py-1.5 font-semibold text-slate-500">Файлы {files.length}</span>
-                  <span className="rounded-lg px-3 py-1.5 font-semibold text-slate-500">Таймер</span>
-                  <span className="rounded-lg px-3 py-1.5 font-semibold text-slate-500">Активность</span>
+                <div className="flex flex-wrap items-center gap-1 border-b border-slate-200 px-3 py-2 text-sm" role="tablist" aria-label="Материалы задачи">
+                  <button type="button" role="tab" aria-selected={activeDetailsTab === 'comments'} onClick={() => setActiveDetailsTab('comments')} className={`rounded-lg px-3 py-1.5 font-semibold transition ${activeDetailsTab === 'comments' ? 'bg-blue-50 text-blue-700' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800'}`}>
+                    Комментарии {userComments.length}
+                  </button>
+                  <button type="button" role="tab" aria-selected={activeDetailsTab === 'files'} onClick={() => setActiveDetailsTab('files')} className={`rounded-lg px-3 py-1.5 font-semibold transition ${activeDetailsTab === 'files' ? 'bg-blue-50 text-blue-700' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800'}`}>
+                    Файлы {fileGroups.length}
+                  </button>
+                  <button type="button" role="tab" aria-selected={activeDetailsTab === 'timer'} onClick={() => setActiveDetailsTab('timer')} className={`rounded-lg px-3 py-1.5 font-semibold transition ${activeDetailsTab === 'timer' ? 'bg-blue-50 text-blue-700' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800'}`}>
+                    Таймер
+                  </button>
+                  <button type="button" role="tab" aria-selected={activeDetailsTab === 'activity'} onClick={() => setActiveDetailsTab('activity')} className={`rounded-lg px-3 py-1.5 font-semibold transition ${activeDetailsTab === 'activity' ? 'bg-blue-50 text-blue-700' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800'}`}>
+                    Активность {activityComments.length}
+                  </button>
                 </div>
-                <div className="min-h-[220px] space-y-3 p-3">
-                  {!taskId ? (
+                <div className="min-h-[220px] space-y-3 p-3" role="tabpanel">
+                  {activeDetailsTab === 'comments' && (!taskId ? (
                     <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">
-                      Комментарии и файлы появятся после сохранения задачи.
+                      Комментарии появятся после сохранения задачи.
                     </div>
                   ) : commentsLoading ? (
-                    <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500">Загружаем историю...</div>
-                  ) : comments.length === 0 ? (
-                    <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500">Здесь пока нет сообщений.</div>
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500">Загружаем комментарии...</div>
+                  ) : userComments.length === 0 ? (
+                    <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500">Комментариев пока нет. Системные изменения находятся во вкладке «Активность».</div>
                   ) : (
                     <div className="max-h-[260px] space-y-2 overflow-y-auto pr-1">
-                      {comments.map((comment) => (
-                        <article key={comment.id} className={`max-w-[82%] rounded-2xl px-3 py-2 text-sm shadow-sm ${comment.kind === 'system' ? 'bg-slate-100 text-slate-600' : 'ml-auto bg-blue-500 text-white'}`}>
+                      {userComments.map((comment) => (
+                        <article key={comment.id} className="ml-auto max-w-[82%] rounded-2xl bg-blue-500 px-3 py-2 text-sm text-white shadow-sm">
                           <div className="font-semibold">{comment.authorName}</div>
                           <div className="mt-1 whitespace-pre-wrap">{comment.text}</div>
-                          <div className={`mt-1 text-[11px] ${comment.kind === 'system' ? 'text-slate-400' : 'text-blue-100'}`}>{formatDateTime(comment.createdAt)}</div>
+                          <div className="mt-1 text-[11px] text-blue-100">{formatDateTime(comment.createdAt)}</div>
                         </article>
                       ))}
                     </div>
-                  )}
-                  {taskId && canPostComment ? (
+                  ))}
+                  {activeDetailsTab === 'comments' && taskId && canPostComment ? (
                     <div className="rounded-xl border border-slate-200 bg-slate-50 p-2">
                       <div className="flex items-end gap-2">
                         <button type="button" className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-white" title="Упомянуть" aria-label="Упомянуть">
@@ -10129,41 +10191,75 @@ function TaskModal({
                       </div>
                     </div>
                   ) : null}
+                  {activeDetailsTab === 'files' ? (
+                    !taskId ? (
+                      <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">Файлы появятся после сохранения задачи.</div>
+                    ) : filesLoading ? (
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500">Загружаем файлы...</div>
+                    ) : (
+                      <>
+                        <div className="flex justify-end">
+                          {canManageFiles ? (
+                            <button type="button" onClick={() => newFileInputRef.current?.click()} disabled={uploadingDocumentKey !== null} className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700 transition hover:bg-blue-100 disabled:opacity-50">
+                              <Plus className="h-4 w-4" />{uploadingDocumentKey === '__new' ? 'Загружаем...' : 'Добавить файл'}
+                            </button>
+                          ) : null}
+                        </div>
+                        {fileGroups.length === 0 ? (
+                          <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500">Файлов пока нет.</div>
+                        ) : (
+                          <div className="max-h-[300px] space-y-2 overflow-y-auto pr-1">
+                            {fileGroups.map((group) => (
+                              <article key={group.documentKey} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                                <div className="flex items-center gap-3">
+                                  <FileText className="h-5 w-5 shrink-0 text-indigo-600" />
+                                  <div className="min-w-0 flex-1">
+                                    <div className="truncate text-sm font-semibold text-slate-800">{group.latest.originalFileName}</div>
+                                    <div className="text-xs text-slate-500">{group.versions.length} {group.versions.length === 1 ? 'версия' : 'версии'} · {formatFileSize(group.latest.sizeBytes)}</div>
+                                  </div>
+                                  <button type="button" onClick={() => void handleDownloadFile(group.latest)} className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-white text-blue-600 ring-1 ring-slate-200" title="Скачать" aria-label="Скачать файл"><Download className="h-4 w-4" /></button>
+                                </div>
+                              </article>
+                            ))}
+                          </div>
+                        )}
+                      </>
+                    )
+                  ) : null}
+                  {activeDetailsTab === 'timer' ? (
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+                        <div className="flex items-center gap-2 text-sm font-semibold text-amber-900"><TimerReset className="h-4 w-4" />Плановая длительность</div>
+                        <div className="mt-2 text-2xl font-bold text-amber-950">{formatDuration(form.plannedDurationMinutes)}</div>
+                        <p className="mt-1 text-xs leading-5 text-amber-800">Используется календарём и расчётом нагрузки исполнителя.</p>
+                      </div>
+                      <label className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm font-semibold text-slate-700">
+                        Длительность, минут
+                        <input type="number" min={15} max={480} step={15} value={normalizeTaskDuration(form.plannedDurationMinutes)} onChange={(event) => update('plannedDurationMinutes', Number(event.target.value))} disabled={isReadOnly} className="mt-2 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 outline-none focus:border-blue-400 disabled:bg-slate-100" />
+                      </label>
+                    </div>
+                  ) : null}
+                  {activeDetailsTab === 'activity' ? (
+                    !taskId ? (
+                      <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">История изменений появится после сохранения задачи.</div>
+                    ) : commentsLoading ? (
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500">Загружаем активность...</div>
+                    ) : activityComments.length === 0 ? (
+                      <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500">Изменений пока нет.</div>
+                    ) : (
+                      <div className="max-h-[300px] space-y-2 overflow-y-auto pr-1">
+                        {activityComments.map((comment) => (
+                          <article key={comment.id} className="rounded-xl bg-slate-100 px-3 py-2 text-sm text-slate-600">
+                            <div className="font-semibold">{comment.authorName}</div>
+                            <div className="mt-1 whitespace-pre-wrap">{comment.text}</div>
+                            <div className="mt-1 text-[11px] text-slate-400">{formatDateTime(comment.createdAt)}</div>
+                          </article>
+                        ))}
+                      </div>
+                    )
+                  ) : null}
                 </div>
               </section>
-
-              {fileGroups.length > 0 ? (
-                <section className="rounded-xl border border-slate-200 bg-white p-3">
-                  <div className="mb-3 flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-                      <FileText className="h-4 w-4" />
-                      Файлы
-                    </div>
-                    {canManageFiles ? (
-                      <button type="button" onClick={() => newFileInputRef.current?.click()} className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 transition hover:bg-blue-100">
-                        <Plus className="h-4 w-4" />
-                        Добавить
-                      </button>
-                    ) : null}
-                  </div>
-                  <div className="space-y-2">
-                    {fileGroups.map((group) => (
-                      <div key={group.documentKey} className="flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                        <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white text-slate-600 ring-1 ring-slate-200">
-                          <FileText className="h-4 w-4" />
-                        </span>
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate text-sm font-semibold text-slate-800">{group.latest.originalFileName}</div>
-                          <div className="text-xs text-slate-500">v{group.latest.version} · {formatFileSize(group.latest.sizeBytes)}</div>
-                        </div>
-                        <button type="button" onClick={() => void handleDownloadFile(group.latest)} className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-blue-600 transition hover:bg-white" title="Скачать" aria-label="Скачать файл">
-                          <Download className="h-4 w-4" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </section>
-              ) : null}
 
               <input
                 ref={newFileInputRef}

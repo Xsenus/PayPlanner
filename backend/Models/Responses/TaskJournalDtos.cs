@@ -279,4 +279,9 @@ public class TaskJournalListSummaryDto
     public int Today { get; set; }
     public int HighPriority { get; set; }
     public int Unbilled { get; set; }
+    public int InvoicesToPrepare { get; set; }
+    public int Fixed { get; set; }
+    public int Invoiced { get; set; }
+    public int NonBillable { get; set; }
+    public int Unclassified { get; set; }
 }

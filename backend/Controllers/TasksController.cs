@@ -697,18 +697,47 @@ public class TasksController : ControllerBase
                     (task.Status == null || task.Status.ToLower() != "done") &&
                     (task.Status == null || task.Status.ToLower() != "cancelled") &&
                     (task.Priority == "high" || task.Priority == "urgent")),
+                Unbilled = group.Count(task =>
+                    task.ClientBillingClassification == TaskClientBillingClassification.Billable &&
+                    !task.BillingInvoiceId.HasValue &&
+                    (task.BillingModeSnapshot == null ||
+                     task.BillingModeSnapshot.ToLower() != ContractBillingMode.Fixed.ToLower()) &&
+                    (task.Status == null || task.Status.ToLower() != "done") &&
+                    (task.Status == null || task.Status.ToLower() != "cancelled")),
+                Fixed = group.Count(task =>
+                    task.ClientBillingClassification == TaskClientBillingClassification.Billable &&
+                    !task.BillingInvoiceId.HasValue &&
+                    task.BillingModeSnapshot != null &&
+                    task.BillingModeSnapshot.ToLower() == ContractBillingMode.Fixed.ToLower() &&
+                    (task.Status == null || task.Status.ToLower() != "done") &&
+                    (task.Status == null || task.Status.ToLower() != "cancelled")),
+                Invoiced = group.Count(task =>
+                    task.ClientBillingClassification == TaskClientBillingClassification.Billable &&
+                    task.BillingInvoiceId.HasValue &&
+                    (task.Status == null || task.Status.ToLower() != "done") &&
+                    (task.Status == null || task.Status.ToLower() != "cancelled")),
+                NonBillable = group.Count(task =>
+                    task.ClientBillingClassification == TaskClientBillingClassification.Internal &&
+                    (task.Status == null || task.Status.ToLower() != "done") &&
+                    (task.Status == null || task.Status.ToLower() != "cancelled")),
+                Unclassified = group.Count(task =>
+                    task.ClientBillingClassification == TaskClientBillingClassification.Legacy &&
+                    (task.Status == null || task.Status.ToLower() != "done") &&
+                    (task.Status == null || task.Status.ToLower() != "cancelled")),
             })
             .SingleOrDefaultAsync(ct);
 
-        var unbilledCount = await query
-            .CountAsync(task =>
+        var invoicesToPrepare = await query
+            .Where(task =>
                 task.ClientBillingClassification == TaskClientBillingClassification.Billable &&
                 !task.BillingInvoiceId.HasValue &&
                 (task.BillingModeSnapshot == null ||
                  task.BillingModeSnapshot.ToLower() != ContractBillingMode.Fixed.ToLower()) &&
                 (task.Status == null || task.Status.ToLower() != "done") &&
-                (task.Status == null || task.Status.ToLower() != "cancelled"),
-                ct);
+                (task.Status == null || task.Status.ToLower() != "cancelled"))
+            .Select(task => new { task.ClientId, task.LegalEntityId })
+            .Distinct()
+            .CountAsync(ct);
 
         return Ok(new TaskJournalListSummaryDto
         {
@@ -716,7 +745,12 @@ public class TasksController : ControllerBase
             Overdue = aggregate?.Overdue ?? 0,
             Today = aggregate?.Today ?? 0,
             HighPriority = aggregate?.HighPriority ?? 0,
-            Unbilled = unbilledCount,
+            Unbilled = aggregate?.Unbilled ?? 0,
+            InvoicesToPrepare = invoicesToPrepare,
+            Fixed = aggregate?.Fixed ?? 0,
+            Invoiced = aggregate?.Invoiced ?? 0,
+            NonBillable = aggregate?.NonBillable ?? 0,
+            Unclassified = aggregate?.Unclassified ?? 0,
         });
     }
 

@@ -375,12 +375,19 @@ async function renderJournal(
   apiMock.getTaskJournalSummary.mockReset();
   apiMock.getTaskJournalSummary.mockImplementation(async (params: Record<string, unknown> = {}) => {
     const filtered = filterTaskJournalMockItems(tasks, params);
+    const active = filtered.filter((task) => task.status !== 'done' && task.status !== 'cancelled');
+    const unbilled = active.filter((task) => task.billingStatus === 'unbilled');
     return {
-      active: filtered.filter((task) => task.status !== 'done' && task.status !== 'cancelled').length,
+      active: active.length,
       overdue: filtered.filter((task) => task.status !== 'done' && task.status !== 'cancelled' && new Date(task.dueAt).getTime() < Date.now()).length,
       today: filtered.filter((task) => task.status !== 'done' && task.status !== 'cancelled' && toTimeZoneDateKey(task.dueAt) === toTimeZoneDateKey(new Date())).length,
       highPriority: filtered.filter((task) => task.status !== 'done' && task.status !== 'cancelled' && (task.priority === 'high' || task.priority === 'urgent')).length,
-      unbilled: tasks.filter((task) => task.billingStatus === 'unbilled').length,
+      unbilled: unbilled.length,
+      invoicesToPrepare: new Set(unbilled.map((task) => task.clientId ? `client:${task.clientId}` : task.legalEntityId ? `legal:${task.legalEntityId}` : `task:${task.id}`)).size,
+      fixed: active.filter((task) => task.billingStatus === 'fixed').length,
+      invoiced: active.filter((task) => task.billingStatus === 'invoiced').length,
+      nonBillable: active.filter((task) => task.billingStatus === 'internal').length,
+      unclassified: active.filter((task) => task.billingStatus === 'legacy').length,
     };
   });
   apiMock.getTaskJournalAssignees.mockResolvedValue(options.assignees ?? [
@@ -959,6 +966,67 @@ describe('TaskJournal', () => {
     expect(screen.queryByTestId('task-legacy-card-window')).toBeNull();
   });
 
+  it('separates comments, files, timer and system activity in the modern task card', async () => {
+    apiMock.getTaskJournalComments.mockResolvedValueOnce([
+      {
+        id: 501,
+        taskJournalItemId: 101,
+        authorUserId: 7,
+        authorName: 'Администратор',
+        kind: 'comment',
+        text: 'Комментарий пользователя',
+        createdAt: todayAt(9),
+      },
+      {
+        id: 502,
+        taskJournalItemId: 101,
+        authorUserId: null,
+        authorName: 'Система',
+        kind: 'system',
+        text: 'Изменён срок задачи.',
+        createdAt: todayAt(10),
+      },
+    ]);
+    apiMock.getTaskJournalFiles.mockResolvedValueOnce([
+      {
+        id: 601,
+        taskJournalItemId: 101,
+        documentKey: 'doc-1',
+        version: 1,
+        originalFileName: 'доверенность.pdf',
+        contentType: 'application/pdf',
+        sizeBytes: 2048,
+        uploadedByUserId: 7,
+        uploadedByName: 'Администратор',
+        uploadedAt: todayAt(10),
+        isLatestVersion: true,
+      },
+    ]);
+
+    await renderJournal([createTask({ plannedDurationMinutes: 75 })], {
+      settings: { taskCardWindowMode: 'modern' },
+    });
+    await openFirstTaskForEdit();
+
+    const card = await screen.findByTestId('task-modern-card-window');
+    expect(await within(card).findByRole('tab', { name: 'Комментарии 1' })).toBeTruthy();
+    expect(within(card).getByRole('tab', { name: 'Файлы 1' })).toBeTruthy();
+    expect(within(card).getByRole('tab', { name: 'Активность 1' })).toBeTruthy();
+    expect(within(card).getByText('Комментарий пользователя')).toBeTruthy();
+    expect(within(card).queryByText('Изменён срок задачи.')).toBeNull();
+
+    fireEvent.click(within(card).getByRole('tab', { name: 'Активность 1' }));
+    expect(await within(card).findByText('Изменён срок задачи.')).toBeTruthy();
+    expect(within(card).queryByText('Комментарий пользователя')).toBeNull();
+
+    fireEvent.click(within(card).getByRole('tab', { name: 'Файлы 1' }));
+    expect(await within(card).findByText('доверенность.pdf')).toBeTruthy();
+
+    fireEvent.click(within(card).getByRole('tab', { name: 'Таймер' }));
+    expect(await within(card).findByText('Плановая длительность')).toBeTruthy();
+    expect(within(card).getByText('1 ч 15 мин')).toBeTruthy();
+  });
+
   it('keeps result disabled in the modern task card until completion', async () => {
     await renderJournal([createTask()], {
       settings: { taskCardWindowMode: 'modern' },
@@ -1208,6 +1276,26 @@ describe('TaskJournal', () => {
       title: 'Бесплатная работа по клиенту',
     }));
     expect(apiMock.createTaskJournalItem.mock.calls[0][0]).not.toHaveProperty('billingContractId');
+  });
+
+  it('shows how many invoices are needed and distributes active tasks by billing category', async () => {
+    await renderJournal([
+      createTask({ id: 301, clientId: 10, billingStatus: 'unbilled' }),
+      createTask({ id: 302, clientId: 10, billingStatus: 'unbilled' }),
+      createTask({ id: 303, clientId: null, legalEntityId: 20, billingStatus: 'unbilled' }),
+      createTask({ id: 304, billingStatus: 'fixed' }),
+      createTask({ id: 305, billingStatus: 'internal' }),
+      createTask({ id: 306, billingStatus: 'invoiced' }),
+      createTask({ id: 307, billingStatus: 'legacy' }),
+    ]);
+
+    const analysis = await screen.findByTestId('task-unbilled-reminder');
+    expect(within(analysis).getByText('Счетов подготовить: 2')).toBeTruthy();
+    expect(within(analysis).getByText('Платные задачи без счёта: 3')).toBeTruthy();
+    expect(within(analysis).getByText('По фиксированному договору: 1')).toBeTruthy();
+    expect(within(analysis).getByText('Неоплачиваемые: 1')).toBeTruthy();
+    expect(within(analysis).getByText('Уже включены в счёт: 1')).toBeTruthy();
+    expect(within(analysis).getByText('Нужно распределить: 1')).toBeTruthy();
   });
 
   it('prepares one invoice draft from selected unbilled client tasks', async () => {
@@ -5682,7 +5770,10 @@ describe('TaskJournal', () => {
 
     await openFirstTaskForEdit();
 
-    expect(await screen.findByTestId(`task-${taskCardWindowMode}-card-window`)).toBeTruthy();
+    const taskCard = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    if (taskCardWindowMode === 'modern') {
+      fireEvent.click(within(taskCard).getByRole('tab', { name: 'Файлы 1' }));
+    }
     expect((await screen.findAllByText('document.pdf')).length).toBeGreaterThan(0);
     expect(screen.getAllByRole('button', { name: 'Скачать файл' }).length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: 'Отправить файл на Я.Диск' })).toBeNull();

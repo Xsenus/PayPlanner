@@ -1128,13 +1128,23 @@ public class TasksControllerTests
     }
 
     [Fact]
-    public async Task GetTaskListSummary_CalculatesMetricsAndUnbilledCountInDatabase()
+    public async Task GetTaskListSummary_CalculatesMetricsAndBillingAnalysisInDatabase()
     {
         await using var db = await CreateContextAsync();
         var admin = await CreateAdminUserAsync(db, "server-summary@example.com", "Администратор сводки");
         var now = DateTime.UtcNow;
         var todayFrom = now.AddHours(-1);
         var todayTo = now.AddHours(1);
+        var invoice = new Payment
+        {
+            Date = now,
+            PlannedDate = now,
+            Amount = 1_000m,
+            Description = "Тестовый счёт по задачам",
+            DocumentKind = DocumentKind.Invoice,
+        };
+        db.Payments.Add(invoice);
+        await db.SaveChangesAsync();
         var activeToday = await CreateTaskAsync(db, admin.Id, null, admin.Id);
         activeToday.DueAt = now.AddMinutes(30);
         activeToday.ClientBillingClassification = TaskClientBillingClassification.Billable;
@@ -1156,6 +1166,14 @@ public class TasksControllerTests
         fixedTask.DueAt = now.AddMinutes(45);
         fixedTask.ClientBillingClassification = TaskClientBillingClassification.Billable;
         fixedTask.BillingModeSnapshot = ContractBillingMode.Fixed;
+        var invoicedTask = await CreateTaskAsync(db, admin.Id, null, admin.Id);
+        invoicedTask.DueAt = now.AddMinutes(50);
+        invoicedTask.ClientBillingClassification = TaskClientBillingClassification.Billable;
+        invoicedTask.BillingModeSnapshot = ContractBillingMode.Actual;
+        invoicedTask.BillingInvoiceId = invoice.Id;
+        var legacyTask = await CreateTaskAsync(db, admin.Id, null, admin.Id);
+        legacyTask.DueAt = now.AddMinutes(55);
+        legacyTask.ClientBillingClassification = TaskClientBillingClassification.Legacy;
         await db.SaveChangesAsync();
         var controller = CreateController(db, new RecordingNotificationService(), admin);
 
@@ -1172,11 +1190,55 @@ public class TasksControllerTests
 
         var summary = Assert.IsType<TaskJournalListSummaryDto>(
             Assert.IsType<OkObjectResult>(result.Result).Value);
-        Assert.Equal(3, summary.Active);
+        Assert.Equal(5, summary.Active);
         Assert.Equal(1, summary.Overdue);
-        Assert.Equal(2, summary.Today);
+        Assert.Equal(4, summary.Today);
         Assert.Equal(1, summary.HighPriority);
         Assert.Equal(1, summary.Unbilled);
+        Assert.Equal(1, summary.InvoicesToPrepare);
+        Assert.Equal(1, summary.Fixed);
+        Assert.Equal(1, summary.Invoiced);
+        Assert.Equal(1, summary.NonBillable);
+        Assert.Equal(1, summary.Unclassified);
+    }
+
+    [Fact]
+    public async Task TaskBillingClassificationBackfill_DistributesLegacyTasksByOwnerAndContract()
+    {
+        await using var db = await CreateContextAsync();
+        var admin = await CreateAdminUserAsync(db, "billing-backfill@example.com", "Администратор распределения");
+        var fixedClient = await CreateClientAsync(db, "Клиент фиксированного договора");
+        var actualClient = await CreateClientAsync(db, "Клиент без договора");
+        var otherActualClient = await CreateClientAsync(db, "Второй клиент без договора");
+        var contract = new Contract
+        {
+            Number = "ДОГ-ФИКС-1",
+            Date = DateTime.UtcNow.Date.AddDays(-10),
+            Status = ContractStatus.Concluded,
+            BillingMode = ContractBillingMode.Fixed,
+        };
+        contract.ClientContracts.Add(new ClientContract { ClientId = fixedClient.Id, Client = fixedClient });
+        db.Contracts.Add(contract);
+        await db.SaveChangesAsync();
+
+        var fixedTask = await CreateTaskAsync(db, admin.Id, fixedClient.Id, admin.Id);
+        var actualTask = await CreateTaskAsync(db, admin.Id, actualClient.Id, admin.Id);
+        await CreateTaskAsync(db, admin.Id, actualClient.Id, admin.Id);
+        await CreateTaskAsync(db, admin.Id, otherActualClient.Id, admin.Id);
+        var internalTask = await CreateTaskAsync(db, admin.Id, null, admin.Id);
+
+        var changed = await TaskBillingClassificationBackfillService.EnsureLegacyTasksClassifiedAsync(db);
+
+        Assert.Equal(5, changed);
+        Assert.Equal(TaskClientBillingClassification.Billable, fixedTask.ClientBillingClassification);
+        Assert.Equal(contract.Id, fixedTask.BillingContractId);
+        Assert.Equal(ContractBillingMode.Fixed, fixedTask.BillingModeSnapshot);
+        Assert.Equal(TaskClientBillingClassification.Billable, actualTask.ClientBillingClassification);
+        Assert.Null(actualTask.BillingContractId);
+        Assert.Null(actualTask.BillingModeSnapshot);
+        Assert.Equal(TaskClientBillingClassification.Internal, internalTask.ClientBillingClassification);
+        Assert.NotNull(fixedTask.BillingDecisionAt);
+        Assert.Equal(0, await TaskBillingClassificationBackfillService.EnsureLegacyTasksClassifiedAsync(db));
     }
 
     [Fact]
