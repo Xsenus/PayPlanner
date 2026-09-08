@@ -53,6 +53,52 @@ describe('SystemDateInput', () => {
     expect(screen.getByRole('button', { name: 'Выбрать: Срок' }).textContent).toContain('22.07.2026');
   });
 
+  it('allows selecting any month and entering a year from the calendar header', async () => {
+    const user = userEvent.setup();
+    render(<ControlledDate initial="2026-07-21" />);
+
+    await user.click(screen.getByRole('button', { name: 'Выбрать: Срок' }));
+    await user.click(screen.getByRole('button', { name: 'Выбрать месяц и год' }));
+
+    const yearInput = screen.getByRole('spinbutton', { name: 'Год' });
+    expect((screen.getByRole('button', { name: 'Применить' }) as HTMLButtonElement).disabled).toBe(true);
+    await user.clear(yearInput);
+    await user.type(yearInput, '1985');
+    await user.click(screen.getByRole('button', { name: 'Март' }));
+
+    expect(screen.getByRole('button', { name: 'Выбрать месяц и год' }).textContent).toContain('Март 1985');
+    await user.click(screen.getByRole('button', { name: '15.03.1985' }));
+    await user.click(screen.getByRole('button', { name: 'Применить' }));
+
+    expect(screen.getByRole('button', { name: 'Выбрать: Срок' }).textContent).toContain('15.03.1985');
+  });
+
+  it('uses the full navigation buttons in both day and year selection modes', async () => {
+    const user = userEvent.setup();
+    render(<SystemDateInput aria-label="Дата" type="date" value="2026-09-07" onChange={() => undefined} />);
+
+    await user.click(screen.getByRole('button', { name: 'Выбрать: Дата' }));
+    await user.click(screen.getByRole('button', { name: 'Предыдущий месяц' }));
+    expect(screen.getByRole('button', { name: 'Выбрать месяц и год' }).textContent).toContain('Август 2026');
+
+    await user.click(screen.getByRole('button', { name: 'Выбрать месяц и год' }));
+    await user.click(screen.getByRole('button', { name: 'Предыдущий год' }));
+    expect((screen.getByRole('spinbutton', { name: 'Год' }) as HTMLInputElement).value).toBe('2025');
+  });
+
+  it('keeps unavailable months disabled when the field has date limits', async () => {
+    const user = userEvent.setup();
+    render(<SystemDateInput aria-label="Период" type="date" value="2026-06-15" min="2026-05-10" max="2026-08-20" onChange={() => undefined} />);
+
+    await user.click(screen.getByRole('button', { name: 'Выбрать: Период' }));
+    await user.click(screen.getByRole('button', { name: 'Выбрать месяц и год' }));
+
+    expect((screen.getByRole('button', { name: 'Январь' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Май' }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole('button', { name: 'Август' }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole('button', { name: 'Сентябрь' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it('shows date and time without the browser datetime picker', async () => {
     const user = userEvent.setup();
     render(<SystemDateInput aria-label="Дата выполнения" type="datetime-local" value="2026-07-21T14:06" onChange={() => undefined} />);

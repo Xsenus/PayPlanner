@@ -27,6 +27,8 @@ type MenuPosition = {
   width: number;
 };
 
+type CalendarView = 'days' | 'monthYear';
+
 const MONTHS = [
   'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
   'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь',
@@ -34,6 +36,8 @@ const MONTHS = [
 const WEEKDAYS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
 const VIEWPORT_GAP = 8;
 const PANEL_WIDTH = 320;
+const MIN_CALENDAR_YEAR = 1000;
+const MAX_CALENDAR_YEAR = 9999;
 
 // eslint-disable-next-line react-refresh/only-export-components -- расчёт позиции экспортируется для граничных responsive-тестов.
 export function resolveDateMenuTop(
@@ -144,6 +148,8 @@ export const SystemDateInput = forwardRef<HTMLInputElement, SystemDateInputProps
   const [draftMinute, setDraftMinute] = useState(initialParts.minute);
   const [viewYear, setViewYear] = useState(initialDate?.year ?? today.getFullYear());
   const [viewMonth, setViewMonth] = useState((initialDate?.month ?? today.getMonth() + 1) - 1);
+  const [yearInputValue, setYearInputValue] = useState(String(initialDate?.year ?? today.getFullYear()));
+  const [calendarView, setCalendarView] = useState<CalendarView>('days');
   const [position, setPosition] = useState<MenuPosition | null>(null);
   const [inferredLabel, setInferredLabel] = useState('');
 
@@ -162,6 +168,8 @@ export const SystemDateInput = forwardRef<HTMLInputElement, SystemDateInputProps
     setDraftMinute(parts.minute);
     setViewYear(selectedDate?.year ?? today.getFullYear());
     setViewMonth((selectedDate?.month ?? today.getMonth() + 1) - 1);
+    setYearInputValue(String(selectedDate?.year ?? today.getFullYear()));
+    setCalendarView('days');
     setOpen(true);
   }, [currentValue, disabled, readOnly, today, type]);
 
@@ -272,6 +280,35 @@ export const SystemDateInput = forwardRef<HTMLInputElement, SystemDateInputProps
     setViewMonth(next.getMonth());
   };
 
+  const minimumDate = type === 'time' || min == null ? null : validDateParts(String(min).slice(0, 10));
+  const maximumDate = type === 'time' || max == null ? null : validDateParts(String(max).slice(0, 10));
+  const changeViewYear = (nextYear: number) => {
+    if (!Number.isInteger(nextYear)) return;
+    const minimumYear = minimumDate?.year ?? MIN_CALENDAR_YEAR;
+    const maximumYear = maximumDate?.year ?? MAX_CALENDAR_YEAR;
+    const clampedYear = Math.min(maximumYear, Math.max(minimumYear, nextYear));
+    setViewYear(clampedYear);
+    setYearInputValue(String(clampedYear));
+  };
+  const handleYearInputChange = (nextValue: string) => {
+    if (!/^\d{0,4}$/.test(nextValue)) return;
+    setYearInputValue(nextValue);
+    const nextYear = Number(nextValue);
+    if (nextValue && Number.isInteger(nextYear) && nextYear >= MIN_CALENDAR_YEAR) {
+      const minimumYear = minimumDate?.year ?? MIN_CALENDAR_YEAR;
+      const maximumYear = maximumDate?.year ?? MAX_CALENDAR_YEAR;
+      setViewYear(Math.min(maximumYear, Math.max(minimumYear, nextYear)));
+    }
+  };
+  const normalizeYearInput = () => changeViewYear(viewYear);
+  const isMonthUnavailable = (monthIndex: number) => {
+    const monthStart = `${pad(viewYear)}-${pad(monthIndex + 1)}-01`;
+    const monthEnd = `${pad(viewYear)}-${pad(monthIndex + 1)}-${pad(new Date(viewYear, monthIndex + 1, 0).getDate())}`;
+    const minimum = minimumDate ? `${pad(minimumDate.year)}-${pad(minimumDate.month)}-${pad(minimumDate.day)}` : '';
+    const maximum = maximumDate ? `${pad(maximumDate.year)}-${pad(maximumDate.month)}-${pad(maximumDate.day)}` : '';
+    return Boolean((minimum && monthEnd < minimum) || (maximum && monthStart > maximum));
+  };
+
   const nativeLabel = ariaLabel || inferredLabel || inputProps.title || name || 'Дата';
   const panel = open ? (
     <div
@@ -284,41 +321,106 @@ export const SystemDateInput = forwardRef<HTMLInputElement, SystemDateInputProps
       {type !== 'time' ? (
         <>
           <div className="mb-2 flex items-center justify-between gap-2">
-            <button type="button" onClick={() => changeMonth(-1)} className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100" aria-label="Предыдущий месяц">
+            <button
+              type="button"
+              onClick={() => calendarView === 'days' ? changeMonth(-1) : changeViewYear(viewYear - 1)}
+              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-200"
+              aria-label={calendarView === 'days' ? 'Предыдущий месяц' : 'Предыдущий год'}
+            >
               <ChevronLeft className="h-4 w-4" />
             </button>
-            <div className="text-sm font-semibold text-slate-800">{MONTHS[viewMonth]} {viewYear}</div>
-            <button type="button" onClick={() => changeMonth(1)} className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100" aria-label="Следующий месяц">
+            {calendarView === 'days' ? (
+              <button
+                type="button"
+                onClick={() => { setYearInputValue(String(viewYear)); setCalendarView('monthYear'); }}
+                className="inline-flex h-9 min-w-0 flex-1 items-center justify-center rounded-lg px-3 text-sm font-semibold text-slate-800 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                aria-label="Выбрать месяц и год"
+              >
+                {MONTHS[viewMonth]} {viewYear}
+              </button>
+            ) : (
+              <label className="flex h-9 min-w-0 flex-1 items-center justify-center gap-2 rounded-lg bg-slate-50 px-2 text-xs font-medium text-slate-500">
+                Год
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  aria-label="Год"
+                  min={minimumDate?.year ?? MIN_CALENDAR_YEAR}
+                  max={maximumDate?.year ?? MAX_CALENDAR_YEAR}
+                  value={yearInputValue}
+                  onChange={(event) => handleYearInputChange(event.target.value)}
+                  onBlur={normalizeYearInput}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      normalizeYearInput();
+                    }
+                  }}
+                  onFocus={(event) => event.currentTarget.select()}
+                  className="h-7 w-20 rounded-md border border-slate-200 bg-white px-2 text-center text-sm font-semibold text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                />
+              </label>
+            )}
+            <button
+              type="button"
+              onClick={() => calendarView === 'days' ? changeMonth(1) : changeViewYear(viewYear + 1)}
+              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-200"
+              aria-label={calendarView === 'days' ? 'Следующий месяц' : 'Следующий год'}
+            >
               <ChevronRight className="h-4 w-4" />
             </button>
           </div>
-          <div className="grid grid-cols-7 gap-1 text-center">
-            {WEEKDAYS.map((day) => <div key={day} className="py-1 text-[11px] font-medium text-slate-400">{day}</div>)}
-            {days.map((day) => {
-              const candidate = type === 'datetime-local'
-                ? `${day.key}T${pad(clampNumber(draftHour, 0, 23))}:${pad(clampNumber(draftMinute, 0, 59))}`
-                : day.key;
-              const unavailable = !isValueWithinBounds(candidate, min, max);
-              const selected = day.key === draftDate;
-              return (
-                <button
-                  key={day.key}
-                  type="button"
-                  aria-label={formatDisplayValue(day.key, 'date', day.key)}
-                  disabled={unavailable}
-                  onClick={() => setDraftDate(day.key)}
-                  className={[
-                    'relative h-8 rounded-lg text-xs transition focus:outline-none focus:ring-2 focus:ring-blue-200',
-                    selected ? 'bg-blue-600 font-semibold text-white' : day.inMonth ? 'text-slate-700 hover:bg-blue-50' : 'text-slate-300 hover:bg-slate-50',
-                    day.today && !selected ? 'ring-1 ring-inset ring-blue-300' : '',
-                    unavailable ? 'cursor-not-allowed opacity-30' : '',
-                  ].filter(Boolean).join(' ')}
-                >
-                  {day.day}
-                </button>
-              );
-            })}
-          </div>
+          {calendarView === 'days' ? (
+            <div className="grid grid-cols-7 gap-1 text-center">
+              {WEEKDAYS.map((day) => <div key={day} className="py-1 text-[11px] font-medium text-slate-400">{day}</div>)}
+              {days.map((day) => {
+                const candidate = type === 'datetime-local'
+                  ? `${day.key}T${pad(clampNumber(draftHour, 0, 23))}:${pad(clampNumber(draftMinute, 0, 59))}`
+                  : day.key;
+                const unavailable = !isValueWithinBounds(candidate, min, max);
+                const selected = day.key === draftDate;
+                return (
+                  <button
+                    key={day.key}
+                    type="button"
+                    aria-label={formatDisplayValue(day.key, 'date', day.key)}
+                    disabled={unavailable}
+                    onClick={() => setDraftDate(day.key)}
+                    className={[
+                      'relative h-8 rounded-lg text-xs transition focus:outline-none focus:ring-2 focus:ring-blue-200',
+                      selected ? 'bg-blue-600 font-semibold text-white' : day.inMonth ? 'text-slate-700 hover:bg-blue-50' : 'text-slate-300 hover:bg-slate-50',
+                      day.today && !selected ? 'ring-1 ring-inset ring-blue-300' : '',
+                      unavailable ? 'cursor-not-allowed opacity-30' : '',
+                    ].filter(Boolean).join(' ')}
+                  >
+                    {day.day}
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <div aria-label="Выбор месяца и года" className="grid grid-cols-3 gap-2 py-1">
+              {MONTHS.map((month, monthIndex) => {
+                const unavailable = isMonthUnavailable(monthIndex);
+                const selected = monthIndex === viewMonth;
+                return (
+                  <button
+                    key={month}
+                    type="button"
+                    disabled={unavailable}
+                    onClick={() => { setViewMonth(monthIndex); setCalendarView('days'); }}
+                    className={[
+                      'min-h-10 rounded-lg px-2 py-2 text-xs font-medium transition focus:outline-none focus:ring-2 focus:ring-blue-200',
+                      selected ? 'bg-blue-600 text-white' : 'bg-slate-50 text-slate-700 hover:bg-blue-50 hover:text-blue-700',
+                      unavailable ? 'cursor-not-allowed opacity-30' : '',
+                    ].filter(Boolean).join(' ')}
+                  >
+                    {month}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </>
       ) : null}
 
@@ -336,10 +438,10 @@ export const SystemDateInput = forwardRef<HTMLInputElement, SystemDateInputProps
         <div className="flex items-center gap-1">
           {!required ? <button type="button" onClick={clear} className="rounded-lg px-2 py-1.5 text-xs font-medium text-slate-500 hover:bg-slate-100">Очистить</button> : null}
           {type !== 'time' ? (
-            <button type="button" onClick={() => { const next = localDateValue(today); setDraftDate(next); setViewYear(today.getFullYear()); setViewMonth(today.getMonth()); }} className="rounded-lg px-2 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-50">Сегодня</button>
+            <button type="button" onClick={() => { const next = localDateValue(today); setDraftDate(next); setViewYear(today.getFullYear()); setViewMonth(today.getMonth()); setCalendarView('days'); }} className="rounded-lg px-2 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-50">Сегодня</button>
           ) : null}
         </div>
-        <button type="button" onClick={apply} disabled={type !== 'time' && !draftDate} className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-40">Применить</button>
+        <button type="button" onClick={apply} disabled={type !== 'time' && (!draftDate || calendarView === 'monthYear')} className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-40">Применить</button>
       </div>
     </div>
   ) : null;
