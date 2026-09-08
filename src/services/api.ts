@@ -122,6 +122,11 @@ export interface NavigationGroupDto {
   itemIds: string[];
 }
 
+export interface AppearanceSettingsDto {
+  themeKey: string;
+  updatedAt?: string | null;
+}
+
 export interface DadataIntegrationSettingsDto {
   apiKeyConfigured: boolean;
   secretConfigured: boolean;
@@ -3493,6 +3498,17 @@ export class ApiService {
     return this.request<NavigationSettingsDto>('/navigation-settings', {
       method: 'PUT',
       body: JSON.stringify({ order, labels, groups }),
+    });
+  }
+
+  async getAppearanceSettings() {
+    return this.request<AppearanceSettingsDto>('/appearance-settings');
+  }
+
+  async updateAppearanceSettings(themeKey: string) {
+    return this.request<AppearanceSettingsDto>('/appearance-settings', {
+      method: 'PUT',
+      body: JSON.stringify({ themeKey }),
     });
   }
 

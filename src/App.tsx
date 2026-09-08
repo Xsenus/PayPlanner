@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from 'react';
 import { AuthProvider } from './contexts/AuthContext';
+import { AppThemeProvider } from './contexts/AppThemeContext';
 import Navigation from './components/Navigation/Navigation';
 import { Login } from './components/Auth/Login';
 import { Register } from './components/Auth/Register';
@@ -1919,7 +1920,7 @@ function AppContent() {
 
   return (
     <TabProvider value={{ activeTab, setActiveTab: handleTabChange }}>
-      <div className="min-h-screen bg-gray-50">
+      <div className="pp-app-shell min-h-screen bg-gray-50">
         <RealtimeNotificationToasts
           userId={user.id}
           onOpenTask={permissions.tasks.canView ? (taskId) => openTaskDetail(taskId, { returnTo: activeTab }) : undefined}
@@ -1989,11 +1990,13 @@ function App() {
 
   return (
     <AuthProvider>
-      <ToastProvider>
-        <DialogProvider>
-          <AppContent />
-        </DialogProvider>
-      </ToastProvider>
+      <AppThemeProvider>
+        <ToastProvider>
+          <DialogProvider>
+            <AppContent />
+          </DialogProvider>
+        </ToastProvider>
+      </AppThemeProvider>
     </AuthProvider>
   );
 }

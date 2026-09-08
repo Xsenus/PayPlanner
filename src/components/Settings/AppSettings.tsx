@@ -1,7 +1,7 @@
 import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemSelect } from '../ui/SystemSelect';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
-import { Bell, CalendarDays, ClipboardList, Cloud, Database, Flag, History, KeyRound, Save, Scale, ShieldCheck, SlidersHorizontal, Users } from 'lucide-react';
+import { Bell, CalendarDays, ClipboardList, Cloud, Database, Flag, History, KeyRound, Palette, Save, Scale, ShieldCheck, SlidersHorizontal, Users } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { apiService } from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
@@ -28,6 +28,7 @@ import { ProceduralDeadlineCalendarSettings } from './ProceduralDeadlineCalendar
 import { TaskJournalSettings } from './TaskJournalSettings';
 import { UserOnlineSettings } from './UserOnlineSettings';
 import { UserMergeSettings } from './UserMergeSettings';
+import { AppearanceSettings } from './AppearanceSettings';
 import { S3Storage } from '../S3Storage/S3Storage';
 import { YandexDisk } from '../YandexDisk/YandexDisk';
 import type {
@@ -59,6 +60,7 @@ function SettingsPanelLoading() {
 type SettingsSection =
   | 'companies'
   | 'tasks'
+  | 'appearance'
   | 'general'
   | 'integrations'
   | 'notifications'
@@ -83,6 +85,7 @@ const NOTIFICATION_SENDER_PARAM = 'notificationSender';
 const SETTINGS_SECTIONS: SettingsSection[] = [
   'companies',
   'tasks',
+  'appearance',
   'general',
   'integrations',
   'notifications',
@@ -242,6 +245,7 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
   const activeSectionTitle = useMemo(() => {
     if (activeSection === 'companies') return 'Компании сервиса';
     if (activeSection === 'tasks') return 'Журнал задач';
+    if (activeSection === 'appearance') return 'Оформление CRM';
     if (activeSection === 'general') return 'Финансовые правила';
     if (activeSection === 'integrations') return 'Ключи и внешние сервисы';
     if (activeSection === 'notifications') return 'Уведомления';
@@ -858,6 +862,20 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
                   </button>
                   <button
                     type="button"
+                    onClick={() => selectSection('appearance')}
+                    className={`w-full rounded-xl border px-3 py-3 text-left text-sm font-semibold transition ${
+                      activeSection === 'appearance'
+                        ? 'border-sky-200 bg-sky-100 text-sky-900 shadow-sm'
+                        : 'border-transparent bg-white text-gray-700 hover:border-sky-100 hover:bg-sky-50/60'
+                    }`}
+                  >
+                    <span className="inline-flex items-center gap-2">
+                      <Palette className="h-4 w-4" />
+                      Оформление CRM
+                    </span>
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => selectSection('general')}
                     className={`w-full rounded-xl border px-3 py-3 text-left text-sm font-semibold transition ${
                       activeSection === 'general'
@@ -1077,6 +1095,8 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
                 <TaskJournalSettings />
               </div>
             )}
+
+            {activeSection === 'appearance' && !restrictedSettingsMode && <AppearanceSettings />}
 
             {activeSection === 'general' && (
               <div className="space-y-6">
