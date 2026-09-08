@@ -4630,7 +4630,7 @@ export class ApiService {
 
     return {
       blob: await response.blob(),
-      fileName: parseContentDispositionFileName(response.headers.get('content-disposition')) || `task-planning-report.${format === 'word' ? 'doc' : format}`,
+      fileName: parseContentDispositionFileName(response.headers.get('content-disposition')) || `task-planning-report.${format === 'word' ? 'docx' : format}`,
     };
   }
 

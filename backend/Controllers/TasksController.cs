@@ -12,6 +12,7 @@ using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Documents;
 using PayPlanner.Api.Services.Invoices;
 using PayPlanner.Api.Services.Notifications;
 
@@ -976,11 +977,7 @@ public class TasksController : ControllerBase
         var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
         var generatedAtUtc = NormalizeUtcInstant(DateTime.UtcNow);
         var generatedAtLocal = CalendarTimeZoneHelper.ToUserLocal(generatedAtUtc, timeZone);
-        var html = BuildTaskPlanningReportHtml(
-            tasks,
-            BuildTaskPlanningReportFilterText(status, type, priority, from, to),
-            generatedAtUtc,
-            timeZone);
+        var filterText = BuildTaskPlanningReportFilterText(status, type, priority, from, to);
         var fileStamp = generatedAtLocal.ToString("yyyyMMdd-HHmm", CultureInfo.InvariantCulture);
 
         if (normalizedFormat == "pdf")
@@ -990,19 +987,22 @@ public class TasksController : ControllerBase
                 return Problem("Сервис формирования PDF недоступен.");
             }
 
+            var html = BuildTaskPlanningReportHtml(tasks, filterText, generatedAtUtc, timeZone);
             var pdfBytes = await _pdfService.RenderAsync(html, ct);
             return File(pdfBytes, "application/pdf", $"task-planning-report-{fileStamp}.pdf");
         }
 
-        var bytes = normalizedFormat == "word"
-            ? Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(html)).ToArray()
-            : Encoding.UTF8.GetBytes(html);
-        var contentType = normalizedFormat == "word"
-            ? "application/msword"
-            : "text/html; charset=utf-8";
-        var extension = normalizedFormat == "word" ? "doc" : "html";
+        if (normalizedFormat == "word")
+        {
+            var document = BuildTaskPlanningWordDocument(tasks, filterText, generatedAtUtc, timeZone);
+            return File(
+                document,
+                HtmlWordDocumentBuilder.ContentType,
+                $"task-planning-report-{fileStamp}.docx");
+        }
 
-        return File(bytes, contentType, $"task-planning-report-{fileStamp}.{extension}");
+        var htmlBytes = Encoding.UTF8.GetBytes(BuildTaskPlanningReportHtml(tasks, filterText, generatedAtUtc, timeZone));
+        return File(htmlBytes, "text/html; charset=utf-8", $"task-planning-report-{fileStamp}.html");
     }
 
     [HttpGet("automation/case-candidates")]
@@ -4364,6 +4364,30 @@ public class TasksController : ControllerBase
         html.AppendLine("</body>");
         html.AppendLine("</html>");
         return html.ToString();
+    }
+
+    private static byte[] BuildTaskPlanningWordDocument(
+        IReadOnlyList<TaskJournalItem> tasks,
+        string filterText,
+        DateTime generatedAtUtc,
+        TimeZoneInfo timeZone)
+    {
+        var items = tasks.Select(task => new TaskPlanningWordItem(
+            GetPlanningClientName(task),
+            GetPlanningCaseTitle(task),
+            TaskTypeLabel(task.Type),
+            task.Title,
+            task.Description,
+            FormatPlanningDate(task.DueAt, timeZone),
+            TaskStatusLabel(ResolveTaskStatus(task)),
+            IsTaskDueOverdue(task, generatedAtUtc),
+            GetPlanningAssigneeName(task),
+            task.Result)).ToArray();
+
+        return TaskPlanningWordDocumentBuilder.Build(
+            items,
+            FormatPlanningDate(generatedAtUtc, timeZone),
+            filterText);
     }
 
     private static void AppendTaskPlanningHeader(StringBuilder html)

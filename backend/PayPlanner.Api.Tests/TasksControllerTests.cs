@@ -1,5 +1,6 @@
 using System.Data.Common;
 using System.Diagnostics;
+using System.IO.Compression;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
@@ -17,6 +18,7 @@ using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Documents;
 using PayPlanner.Api.Services.Invoices;
 using PayPlanner.Api.Services.Notifications;
 using Xunit;
@@ -5871,7 +5873,7 @@ public class TasksControllerTests
         await using var db = await CreateContextAsync();
         var author = await CreateAdminUserAsync(db, "author@example.com", "Автор");
         var client = await CreateClientAsync(db, "Иванов Иван Иванович");
-        await CreateTaskAsync(db, author.Id, client.Id);
+        await CreateTaskAsync(db, author.Id, client.Id, result: "Комментарий & проверка <готово>");
         var controller = CreateController(db, new RecordingNotificationService(), author);
 
         var result = await controller.ExportPlanningReport(
@@ -5889,10 +5891,23 @@ public class TasksControllerTests
 
         var file = Assert.IsType<FileContentResult>(result);
 
-        Assert.Equal("application/msword", file.ContentType);
-        Assert.EndsWith(".doc", file.FileDownloadName);
-        var preamble = Encoding.UTF8.GetPreamble();
-        Assert.True(file.FileContents.Take(preamble.Length).SequenceEqual(preamble));
+        Assert.Equal(HtmlWordDocumentBuilder.ContentType, file.ContentType);
+        Assert.EndsWith(".docx", file.FileDownloadName);
+        Assert.True(file.FileContents.Length > 1_000);
+        Assert.Equal((byte)'P', file.FileContents[0]);
+        Assert.Equal((byte)'K', file.FileContents[1]);
+
+        using var archive = new ZipArchive(new MemoryStream(file.FileContents), ZipArchiveMode.Read);
+        using var reader = new StreamReader(archive.GetEntry("word/document.xml")!.Open(), Encoding.UTF8);
+        var documentXml = reader.ReadToEnd();
+
+        Assert.Contains("<w:pgSz w:w=\"16838\" w:h=\"11906\" w:orient=\"landscape\"/>", documentXml, StringComparison.Ordinal);
+        Assert.Contains("<w:tblW w:w=\"15478\" w:type=\"dxa\"/>", documentXml, StringComparison.Ordinal);
+        Assert.Equal(7, System.Text.RegularExpressions.Regex.Matches(documentXml, "<w:gridCol ").Count);
+        Assert.Contains("КОММЕНТАРИЙ", documentXml, StringComparison.Ordinal);
+        Assert.Contains("Иванов Иван Иванович", documentXml, StringComparison.Ordinal);
+        Assert.Contains("Комментарий &amp; проверка &lt;готово&gt;", documentXml, StringComparison.Ordinal);
+        Assert.DoesNotContain("w:altChunk", documentXml, StringComparison.Ordinal);
     }
 
     [Fact]

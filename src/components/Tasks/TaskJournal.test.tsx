@@ -587,7 +587,7 @@ describe('TaskJournal', () => {
     });
     apiMock.downloadTaskJournalCalendar.mockResolvedValue({ blob: new Blob(['ics']), fileName: 'task-calendar.ics' });
     apiMock.downloadCaseCalendarIcs.mockResolvedValue({ blob: new Blob(['case-ics']), fileName: 'case-calendar.ics' });
-    apiMock.downloadTaskPlanningReport.mockResolvedValue({ blob: new Blob(['report']), fileName: 'task-planning-report.doc' });
+    apiMock.downloadTaskPlanningReport.mockResolvedValue({ blob: new Blob(['report']), fileName: 'task-planning-report.docx' });
     apiMock.getCaseCalendarEvents.mockResolvedValue([]);
     apiMock.getCaseCalendarSummary.mockResolvedValue({
       from: todayAt(0),
