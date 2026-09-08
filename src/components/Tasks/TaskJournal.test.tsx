@@ -2413,6 +2413,38 @@ describe('TaskJournal', () => {
     expect(within(prompt).getByText('Итог работы передан на проверку.')).toBeTruthy();
   });
 
+  it.each(['legacy', 'modern'] as const)('keeps save available while an editable task awaits approval in the %s task card', async (taskCardWindowMode) => {
+    authState.isAdmin = false;
+    authState.user = { id: 7, fullName: 'Согласующий', email: 'approver@example.com' };
+    permissionsState.taskCanEdit = true;
+    await renderJournal([
+      createTask({
+        status: 'onApproval',
+        assigneeUserId: 7,
+        assigneeName: 'Согласующий',
+        result: 'Готово к согласованию.',
+        participants: [
+          { id: 79, userId: 7, role: 'approver', displayName: 'Согласующий', sortOrder: 0, approvalStatus: 'pending' },
+        ],
+      }),
+    ], { settings: { taskCardWindowMode, approvalQuickActionMode: 'completionButton', restrictExecutorEditing: false } });
+
+    await openFirstTaskForEdit();
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    const description = within(card).getByTestId('task-description-field');
+    fireEvent.change(description, { target: { value: 'Исправленное описание перед решением.' } });
+
+    expect(within(card).getByRole('button', { name: 'Сохранить' })).toBeTruthy();
+    expect(within(card).getAllByRole('button', { name: 'Открыть окно согласования' }).length).toBeGreaterThan(0);
+    fireEvent.click(within(card).getByRole('button', { name: 'Сохранить' }));
+
+    await waitFor(() => expect(apiMock.updateTaskJournalItem).toHaveBeenCalledTimes(1));
+    expect(apiMock.updateTaskJournalItem.mock.calls[0][1]).toEqual(expect.objectContaining({
+      description: 'Исправленное описание перед решением.',
+      status: 'onApproval',
+    }));
+  });
+
   it('opens approval from the green action in completion-button mode', async () => {
     authState.isAdmin = false;
     authState.user = { id: 7, fullName: 'Согласующий', email: 'approver@example.com' };

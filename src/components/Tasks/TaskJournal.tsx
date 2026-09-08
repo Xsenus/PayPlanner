@@ -10755,22 +10755,27 @@ function TaskModal({
                 <button type="button" onClick={onEnableEdit} className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800">
                   Редактировать задачу
                 </button>
-              ) : canCompleteReadOnlyTask || isAwaitingApproval ? (
+              ) : (
                 <>
-                  {canSendToAuthorApproval ? (
-                    <button type="button" onClick={() => void saveWithStatus('onApproval')} className="rounded-lg border border-violet-200 bg-violet-50 px-4 py-2 text-sm font-semibold text-violet-700 transition hover:bg-violet-100">
-                      {sendToAuthorApprovalLabel}
+                  {!isReadOnly ? (
+                    <button type="button" onClick={() => void handleSaveForm()} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700">
+                      {state?.task ? 'Сохранить' : 'Создать задачу'}
                     </button>
                   ) : null}
-                  <button type="button" onClick={() => void handleCompletionAction()} disabled={approvalCompletionDisabled} title={completionButtonLabel} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500">
-                    {completionButtonLabel}
-                  </button>
+                  {canCompleteReadOnlyTask || isAwaitingApproval ? (
+                    <>
+                      {canSendToAuthorApproval ? (
+                        <button type="button" onClick={() => void saveWithStatus('onApproval')} className="rounded-lg border border-violet-200 bg-violet-50 px-4 py-2 text-sm font-semibold text-violet-700 transition hover:bg-violet-100">
+                          {sendToAuthorApprovalLabel}
+                        </button>
+                      ) : null}
+                      <button type="button" onClick={() => void handleCompletionAction()} disabled={approvalCompletionDisabled} title={completionButtonLabel} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500">
+                        {completionButtonLabel}
+                      </button>
+                    </>
+                  ) : null}
                 </>
-              ) : !isReadOnly ? (
-                <button type="button" onClick={() => void handleSaveForm()} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700">
-                  {state?.task ? 'Сохранить' : 'Создать задачу'}
-                </button>
-              ) : null}
+              )}
             </div>
           </div>
         </div>
@@ -11764,21 +11769,26 @@ function TaskModal({
             <button type="button" onClick={onEnableEdit} className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800">
               Редактировать задачу
             </button>
-          ) : canCompleteReadOnlyTask || isAwaitingApproval ? (
+          ) : (
             <>
-              {canSendToAuthorApproval ? (
-                <button type="button" onClick={() => void saveWithStatus('onApproval')} className="rounded-xl border border-violet-200 bg-violet-50 px-5 py-2.5 text-sm font-semibold text-violet-700 transition hover:bg-violet-100">
-                  {sendToAuthorApprovalLabel}
+              {!isReadOnly ? (
+                <button type="button" onClick={() => void handleSaveForm()} className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800">
+                  {state?.mode === 'edit' ? 'Сохранить' : 'Создать задачу'}
                 </button>
               ) : null}
-              <button type="button" onClick={() => void handleCompletionAction()} disabled={approvalCompletionDisabled} title={completionButtonLabel} className="rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500">
-                {completionButtonLabel}
-              </button>
+              {canCompleteReadOnlyTask || isAwaitingApproval ? (
+                <>
+                  {canSendToAuthorApproval ? (
+                    <button type="button" onClick={() => void saveWithStatus('onApproval')} className="rounded-xl border border-violet-200 bg-violet-50 px-5 py-2.5 text-sm font-semibold text-violet-700 transition hover:bg-violet-100">
+                      {sendToAuthorApprovalLabel}
+                    </button>
+                  ) : null}
+                  <button type="button" onClick={() => void handleCompletionAction()} disabled={approvalCompletionDisabled} title={completionButtonLabel} className="rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500">
+                    {completionButtonLabel}
+                  </button>
+                </>
+              ) : null}
             </>
-          ) : (
-            <button type="button" onClick={() => void handleSaveForm()} className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800">
-              {state?.mode === 'edit' ? 'Сохранить' : 'Создать задачу'}
-            </button>
           )}
         </div>
       </div>
