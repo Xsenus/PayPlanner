@@ -1567,7 +1567,6 @@ describe('PaymentModal integration', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'Печать' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: /ПКО \(форма КО-1\)/ }));
 
     await waitFor(() => expect(getCashOrderPrintHtmlForPaymentMock).toHaveBeenCalledWith(993));
     const html = await waitFor(() => getLastPrintHtml());
@@ -1609,8 +1608,6 @@ describe('PaymentModal integration', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'Печать' }));
-    expect(getCashOrderPrintHtmlForPaymentMock).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('menuitem', { name: /ПКО \(форма КО-1\)/ }));
 
     await waitFor(() => expect(getCashOrderPrintHtmlForPaymentMock).toHaveBeenCalledWith(2169));
     const html = await waitFor(() => getLastPrintHtml());
@@ -1647,7 +1644,7 @@ describe('PaymentModal integration', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Печать' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Выбрать другую печатную форму' }));
     expect(screen.getByRole('menu', { name: 'Выбор печатной формы' })).not.toBeNull();
     fireEvent.click(screen.getByRole('menuitem', { name: /Старая форма платежа/ }));
 
@@ -1690,7 +1687,6 @@ describe('PaymentModal integration', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'Печать' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: /РКО \(форма КО-2\)/ }));
 
     await waitFor(() => expect(getCashOrderPrintHtmlForPaymentMock).toHaveBeenCalledWith(2171));
     const html = await waitFor(() => getLastPrintHtml());

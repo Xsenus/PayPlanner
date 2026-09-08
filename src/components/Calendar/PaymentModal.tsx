@@ -3927,26 +3927,31 @@ export function PaymentModal({
                   <div className="flex flex-wrap items-center gap-2">
                   {canPrintPayment && (
                     <div className="relative">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (hasCashOrderPrintChoice) {
-                            setPrintMenuOpen((value) => !value);
-                            return;
-                          }
-
-                          void handlePrintPayment('legacy');
-                        }}
-                        disabled={loading || paymentPrinting}
-                        title={hasCashOrderPrintChoice ? 'Выбрать печатную форму' : `Печать: ${paymentPrintTitle}`}
-                        aria-haspopup={hasCashOrderPrintChoice ? 'menu' : undefined}
-                        aria-expanded={hasCashOrderPrintChoice ? printMenuOpen : undefined}
-                        aria-controls={hasCashOrderPrintChoice ? 'payment-print-menu' : undefined}
-                        className="inline-flex min-w-40 items-center justify-center gap-2 rounded-lg bg-slate-50 px-4 py-2 font-medium text-slate-700 transition-colors hover:bg-slate-100 disabled:opacity-60">
-                        <Printer className="h-4 w-4" />
-                        {paymentPrinting ? 'Подготовка печати...' : 'Печать'}
-                        {hasCashOrderPrintChoice && !paymentPrinting && <ChevronDown className="h-4 w-4" />}
-                      </button>
+                      <div className="inline-flex">
+                        <button
+                          type="button"
+                          onClick={() => void handlePrintPayment(hasCashOrderPrintChoice ? 'cashOrder' : 'legacy')}
+                          disabled={loading || paymentPrinting}
+                          title={`Печать: ${hasCashOrderPrintChoice ? cashOrderPrintOptionLabel : paymentPrintTitle}`}
+                          className={`inline-flex min-w-40 items-center justify-center gap-2 bg-slate-50 px-4 py-2 font-medium text-slate-700 transition-colors hover:bg-slate-100 disabled:opacity-60 ${hasCashOrderPrintChoice ? 'rounded-l-lg' : 'rounded-lg'}`}>
+                          <Printer className="h-4 w-4" />
+                          {paymentPrinting ? 'Подготовка печати...' : 'Печать'}
+                        </button>
+                        {hasCashOrderPrintChoice && (
+                          <button
+                            type="button"
+                            onClick={() => setPrintMenuOpen((value) => !value)}
+                            disabled={loading || paymentPrinting}
+                            title="Выбрать другую печатную форму"
+                            aria-label="Выбрать другую печатную форму"
+                            aria-haspopup="menu"
+                            aria-expanded={printMenuOpen}
+                            aria-controls="payment-print-menu"
+                            className="inline-flex items-center justify-center rounded-r-lg border-l border-slate-200 bg-slate-50 px-2.5 text-slate-700 transition-colors hover:bg-slate-100 disabled:opacity-60">
+                            <ChevronDown className="h-4 w-4" />
+                          </button>
+                        )}
+                      </div>
                       {hasCashOrderPrintChoice && printMenuOpen && (
                         <div
                           id="payment-print-menu"
@@ -3956,18 +3961,18 @@ export function PaymentModal({
                           <button
                             type="button"
                             role="menuitem"
-                            onClick={() => void handlePrintPayment('legacy')}
-                            className="w-full rounded-lg px-3 py-2 text-left transition hover:bg-slate-50">
-                            <span className="block text-sm font-semibold text-slate-800">Старая форма платежа</span>
-                            <span className="mt-0.5 block text-xs text-slate-500">Краткая форма платежного ордера</span>
+                            onClick={() => void handlePrintPayment('cashOrder')}
+                            className="w-full rounded-lg px-3 py-2 text-left transition hover:bg-blue-50">
+                            <span className="block text-sm font-semibold text-blue-700">{cashOrderPrintOptionLabel}</span>
+                            <span className="mt-0.5 block text-xs text-slate-500">Официальная кассовая форма с квитанцией · по умолчанию</span>
                           </button>
                           <button
                             type="button"
                             role="menuitem"
-                            onClick={() => void handlePrintPayment('cashOrder')}
-                            className="w-full rounded-lg px-3 py-2 text-left transition hover:bg-blue-50">
-                            <span className="block text-sm font-semibold text-blue-700">{cashOrderPrintOptionLabel}</span>
-                            <span className="mt-0.5 block text-xs text-slate-500">Официальная кассовая форма с квитанцией</span>
+                            onClick={() => void handlePrintPayment('legacy')}
+                            className="w-full rounded-lg px-3 py-2 text-left transition hover:bg-slate-50">
+                            <span className="block text-sm font-semibold text-slate-800">Старая форма платежа</span>
+                            <span className="mt-0.5 block text-xs text-slate-500">Краткая форма платежного ордера</span>
                           </button>
                         </div>
                       )}
