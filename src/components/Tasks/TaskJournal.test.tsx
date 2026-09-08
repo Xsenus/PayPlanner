@@ -3726,10 +3726,59 @@ describe('TaskJournal', () => {
     ]);
     await renderJournal();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Создать все' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Создать наступившие (1)' }));
 
     await waitFor(() => expect(apiMock.createTaskJournalCaseAutomationTasks).toHaveBeenCalledWith({ limit: 1 }));
     expect(toastMock.success).toHaveBeenCalledWith('Создано контрольных задач: 1.', 'Автоконтроль дел');
+  });
+
+  it('shows all cases without active tasks by automation state', async () => {
+    apiMock.getTaskJournalCaseAutomationCandidates.mockResolvedValue([
+      {
+        clientId: 10,
+        clientName: 'Иванов Иван Иванович',
+        clientCaseId: 100,
+        clientCaseTitle: 'ГОТОВО К КОНТРОЛЮ',
+        reason: 'Нет активной задачи уже 21 дн.',
+        activeTaskCount: 0,
+        completedTaskCount: 1,
+        daysWithoutActiveTask: 21,
+        isReadyForControl: true,
+        automationState: 'ready',
+        lastTaskAt: null,
+        nextControlAt: todayAt(9),
+        daysUntilControl: 0,
+        suggestedTitle: 'Проверить движение по делу',
+        suggestedDescription: 'Автоконтроль',
+        suggestedDueAt: todayAt(9),
+      },
+      {
+        clientId: 11,
+        clientName: 'Петров Петр Петрович',
+        clientCaseId: 101,
+        clientCaseTitle: 'ОЖИДАЕТ ПОРОГА',
+        reason: 'Первый контроль через 11 дн.',
+        activeTaskCount: 0,
+        completedTaskCount: 0,
+        daysWithoutActiveTask: 3,
+        isReadyForControl: false,
+        automationState: 'waiting',
+        lastTaskAt: null,
+        nextControlAt: todayAt(9),
+        daysUntilControl: 11,
+        suggestedTitle: 'Проверить движение по делу',
+        suggestedDescription: 'Автоконтроль',
+        suggestedDueAt: todayAt(9),
+      },
+    ]);
+
+    await renderJournal();
+
+    expect(screen.getByRole('heading', { name: 'Все дела без активных задач' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Пора создать: 1' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Ожидают срока: 1' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Создать наступившие (1)' })).toBeTruthy();
+    expect((screen.getByTestId('task-automation-create-101') as HTMLButtonElement).disabled).toBe(true);
   });
 
   it('completes an active task with an existing result from the quick action', async () => {

@@ -1045,6 +1045,7 @@ public class TasksController : ControllerBase
         [FromQuery] int? limit = null,
         [FromQuery] int? escalationDays = null,
         [FromQuery] string? search = null,
+        [FromQuery] bool includeWaiting = false,
         CancellationToken ct = default)
     {
         var access = await GetTaskAccessAsync(ct);
@@ -1078,11 +1079,7 @@ public class TasksController : ControllerBase
             .Where(clientCase =>
                 ((clientCase.ClientId.HasValue && clientCase.Client != null) ||
                  (clientCase.LegalEntityId.HasValue && clientCase.LegalEntity != null)) &&
-                !CaseInactivityControlCyclePolicy.ExcludedCaseStatuses.Contains(clientCase.Status) &&
-                !vacationUserIds.Contains(
-                    (clientCase.ResponsibleUserId ??
-                     (clientCase.Client != null ? clientCase.Client.ResponsibleUserId : null) ??
-                     (clientCase.LegalEntity != null ? clientCase.LegalEntity.ResponsibleUserId : null)) ?? 0))
+                !CaseInactivityControlCyclePolicy.ExcludedCaseStatuses.Contains(clientCase.Status))
             .Select(clientCase => new
             {
                 clientCase.Id,
@@ -1094,6 +1091,17 @@ public class TasksController : ControllerBase
                 clientCase.LastViewedAt,
                 clientCase.ActivityConfirmedAt,
                 clientCase.InactivityRemindersEnabled,
+                clientCase.InactivityRemindersDisabledReason,
+                ResponsibleUserId = clientCase.ResponsibleUserId ??
+                    (clientCase.Client != null ? clientCase.Client.ResponsibleUserId : null) ??
+                    (clientCase.LegalEntity != null ? clientCase.LegalEntity.ResponsibleUserId : null),
+                ResponsibleName = clientCase.ResponsibleUser != null
+                    ? clientCase.ResponsibleUser.FullName
+                    : clientCase.Client != null && clientCase.Client.ResponsibleUser != null
+                        ? clientCase.Client.ResponsibleUser.FullName
+                        : clientCase.LegalEntity != null && clientCase.LegalEntity.ResponsibleUser != null
+                            ? clientCase.LegalEntity.ResponsibleUser.FullName
+                            : string.Empty,
                 LegalEntityName = clientCase.LegalEntity != null
                     ? (clientCase.LegalEntity.ShortName != string.Empty
                         ? clientCase.LegalEntity.ShortName
@@ -1145,19 +1153,27 @@ public class TasksController : ControllerBase
                 item.ClientName.ToLower().Contains(term) ||
                 item.ClientName.Contains(rawTerm) ||
                 item.LegalEntityName.ToLower().Contains(term) ||
-                item.LegalEntityName.Contains(rawTerm));
+                item.LegalEntityName.Contains(rawTerm) ||
+                item.ResponsibleName.ToLower().Contains(term) ||
+                item.ResponsibleName.Contains(rawTerm));
         }
 
-        var filteredCandidates = await candidates
-            .Where(item => item.ActiveTaskCount == 0
-                && (item.LastTaskAt ?? item.CreatedAt) <= cutoff
-                && (item.LastTaskCommentAt ?? item.CreatedAt) <= cutoff
-                && (item.LastControlCycleEndedAt ?? item.CreatedAt) <= cutoff
-                && (item.LastDocumentAt ?? item.CreatedAt) <= cutoff
-                && (item.LastCourtEventAt ?? item.CreatedAt) <= cutoff
-                && (item.LastViewedAt ?? item.CreatedAt) <= cutoff
-                && (item.ActivityConfirmedAt ?? item.CreatedAt) <= cutoff
-                && item.InactivityRemindersEnabled)
+        var filteredQuery = candidates.Where(item => item.ActiveTaskCount == 0);
+        if (!includeWaiting)
+        {
+            filteredQuery = filteredQuery.Where(item =>
+                (item.LastTaskAt ?? item.CreatedAt) <= cutoff &&
+                (item.LastTaskCommentAt ?? item.CreatedAt) <= cutoff &&
+                (item.LastControlCycleEndedAt ?? item.CreatedAt) <= cutoff &&
+                (item.LastDocumentAt ?? item.CreatedAt) <= cutoff &&
+                (item.LastCourtEventAt ?? item.CreatedAt) <= cutoff &&
+                (item.LastViewedAt ?? item.CreatedAt) <= cutoff &&
+                (item.ActivityConfirmedAt ?? item.CreatedAt) <= cutoff &&
+                item.InactivityRemindersEnabled &&
+                !vacationUserIds.Contains(item.ResponsibleUserId ?? 0));
+        }
+
+        var filteredCandidates = await filteredQuery
             .OrderBy(item => item.LastControlCycleEndedAt ?? item.LastTaskAt ?? item.LastTaskCommentAt ?? item.LastDocumentAt ?? item.LastCourtEventAt ?? item.CreatedAt)
             .ThenBy(item => item.ClientName != string.Empty ? item.ClientName : item.LegalEntityName)
             .ThenBy(item => item.Title)
@@ -1181,8 +1197,24 @@ public class TasksController : ControllerBase
                 lastActivity,
                 item.LastControlCycleEndedAt,
                 effectiveInactiveDays);
-            var isEscalated = daysWithoutActiveTask >= effectiveEscalationDays;
-            var reason = nextCycle.WaitsAfterPreviousCycle
+            var isOnVacation = vacationUserIds.Contains(item.ResponsibleUserId ?? 0);
+            var isPaused = !item.InactivityRemindersEnabled || isOnVacation;
+            var isReadyForControl = !isPaused && nextCycle.IsEligible;
+            var isEscalated = isReadyForControl && daysWithoutActiveTask >= effectiveEscalationDays;
+            var daysUntilControl = isReadyForControl || isPaused
+                ? 0
+                : Math.Max(1, (int)Math.Ceiling((nextCycle.EligibleAt - now).TotalDays));
+            var reason = !item.InactivityRemindersEnabled
+                ? string.IsNullOrWhiteSpace(item.InactivityRemindersDisabledReason)
+                    ? "Автоконтроль по делу отключён"
+                    : $"Автоконтроль отключён: {item.InactivityRemindersDisabledReason}"
+                : isOnVacation
+                    ? "Автоконтроль приостановлен на время отсутствия ответственного"
+                : !nextCycle.IsEligible
+                    ? nextCycle.WaitsAfterPreviousCycle
+                        ? $"Новый контроль через {daysUntilControl} дн. после завершённого цикла"
+                        : $"Первый контроль через {daysUntilControl} дн."
+                : nextCycle.WaitsAfterPreviousCycle
                 ? $"Предыдущий цикл завершён {Math.Max(0, (int)Math.Floor((now - nextCycle.CooldownAnchorAt).TotalDays))} дн. назад, нового движения нет"
                 : item.LastTaskAt is null
                 ? "По делу еще не было задач"
@@ -1203,7 +1235,11 @@ public class TasksController : ControllerBase
                 CompletedTaskCount = item.CompletedTaskCount,
                 DaysWithoutActiveTask = daysWithoutActiveTask,
                 IsEscalated = isEscalated,
+                IsReadyForControl = isReadyForControl,
+                AutomationState = isPaused ? "paused" : isReadyForControl ? "ready" : "waiting",
                 LastTaskAt = item.LastTaskAt.HasValue ? ToIso(item.LastTaskAt.Value) : null,
+                NextControlAt = isPaused ? null : ToIso(nextCycle.EligibleAt),
+                DaysUntilControl = daysUntilControl,
                 SuggestedTitle = "Проверить движение по делу",
                 SuggestedDescription = BuildAutomationTaskDescription(isEscalated),
                 SuggestedDueAt = ToIso(now.Date.AddDays(1).AddHours(9)),

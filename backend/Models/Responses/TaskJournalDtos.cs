@@ -201,7 +201,11 @@ public class TaskJournalCaseAutomationCandidateDto
     public int CompletedTaskCount { get; set; }
     public int DaysWithoutActiveTask { get; set; }
     public bool IsEscalated { get; set; }
+    public bool IsReadyForControl { get; set; }
+    public string AutomationState { get; set; } = "ready";
     public string? LastTaskAt { get; set; }
+    public string? NextControlAt { get; set; }
+    public int DaysUntilControl { get; set; }
     public string SuggestedTitle { get; set; } = string.Empty;
     public string SuggestedDescription { get; set; } = string.Empty;
     public string SuggestedDueAt { get; set; } = string.Empty;

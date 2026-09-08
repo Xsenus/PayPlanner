@@ -3740,6 +3740,46 @@ public class TasksControllerTests
         Assert.Equal(1, candidate.CompletedTaskCount);
         Assert.True(candidate.DaysWithoutActiveTask >= 14);
         Assert.Contains("Нет активной задачи", candidate.Reason, StringComparison.OrdinalIgnoreCase);
+        Assert.True(candidate.IsReadyForControl);
+        Assert.Equal("ready", candidate.AutomationState);
+    }
+
+    [Fact]
+    public async Task GetAutomationCaseCandidates_OverviewIncludesCasesWaitingForThreshold()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "waiting-case-control@example.com", "Ответственный Юрист");
+        var client = await CreateClientAsync(db, "Клиент без активной задачи");
+        client.ResponsibleUserId = author.Id;
+        var clientCase = await CreateCaseAsync(db, client.Id, "СВЕЖЕЕ ДЕЛО");
+        clientCase.CreatedAt = DateTime.UtcNow.AddDays(-3);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var dueOnlyResult = await controller.GetAutomationCaseCandidates(
+            inactiveDays: 14,
+            limit: 100,
+            ct: CancellationToken.None);
+        var dueOnly = Assert.IsAssignableFrom<IReadOnlyList<TaskJournalCaseAutomationCandidateDto>>(
+            Assert.IsType<OkObjectResult>(dueOnlyResult.Result).Value);
+        Assert.Empty(dueOnly);
+
+        var overviewResult = await controller.GetAutomationCaseCandidates(
+            inactiveDays: 14,
+            limit: 100,
+            search: "Ответственный Юрист",
+            includeWaiting: true,
+            ct: CancellationToken.None);
+        var overview = Assert.IsAssignableFrom<IReadOnlyList<TaskJournalCaseAutomationCandidateDto>>(
+            Assert.IsType<OkObjectResult>(overviewResult.Result).Value);
+        var candidate = Assert.Single(overview);
+
+        Assert.Equal(clientCase.Id, candidate.ClientCaseId);
+        Assert.False(candidate.IsReadyForControl);
+        Assert.Equal("waiting", candidate.AutomationState);
+        Assert.True(candidate.DaysUntilControl >= 10);
+        Assert.NotNull(candidate.NextControlAt);
+        Assert.Contains("Первый контроль через", candidate.Reason, StringComparison.Ordinal);
     }
 
     [Fact]

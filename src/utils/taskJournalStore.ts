@@ -221,7 +221,11 @@ export interface TaskJournalCaseAutomationCandidate {
   completedTaskCount: number;
   daysWithoutActiveTask: number;
   isEscalated?: boolean;
+  isReadyForControl?: boolean;
+  automationState?: 'ready' | 'waiting' | 'paused';
   lastTaskAt?: string | null;
+  nextControlAt?: string | null;
+  daysUntilControl?: number;
   suggestedTitle: string;
   suggestedDescription: string;
   suggestedDueAt: string;

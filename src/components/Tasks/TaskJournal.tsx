@@ -267,7 +267,7 @@ const TASK_JOURNAL_TABLE_COLUMNS: Array<{ key: TaskTableColumnKey; defaultWidth:
 function buildAutomationCandidatesRequestKey(settings: TaskJournalSettingsDto, searchValue: string) {
   return [
     settings.caseInactivityDays,
-    Math.min(settings.caseInactivityLimit, 20),
+    100,
     settings.caseInactivityEscalationDays,
     searchValue.trim(),
   ].join('|');
@@ -2485,9 +2485,10 @@ export function TaskJournal({
 
     const params = {
       inactiveDays: settings.caseInactivityDays,
-      limit: Math.min(settings.caseInactivityLimit, 20),
+      limit: 100,
       escalationDays: settings.caseInactivityEscalationDays,
       search: searchValue.trim() || undefined,
+      includeWaiting: true,
     };
     return signal
       ? apiService.getTaskJournalCaseAutomationCandidates(params, { signal })
@@ -3006,6 +3007,7 @@ export function TaskJournal({
     setCreatingAutomationCaseId(candidate.clientCaseId);
     try {
       const created = await apiService.createTaskJournalCaseAutomationTask(candidate.clientCaseId);
+      setAutomationCandidates((current) => current.filter((item) => item.clientCaseId !== candidate.clientCaseId));
       toast.success('Контрольная задача создана.', 'Автоконтроль дел');
       await refreshTasks();
       openTaskEditor(created, { syncRoute: true });
@@ -3023,13 +3025,16 @@ export function TaskJournal({
       return;
     }
 
-    if (automationCandidates.length === 0) {
+    const readyCount = automationCandidates.filter((candidate) => candidate.isReadyForControl !== false).length;
+    if (readyCount === 0) {
       return;
     }
 
     setCreatingAutomationAll(true);
     try {
-      const result = await apiService.createTaskJournalCaseAutomationTasks({ limit: Math.min(automationCandidates.length, 100) });
+      const result = await apiService.createTaskJournalCaseAutomationTasks({ limit: Math.min(readyCount, 100) });
+      const createdCaseIds = new Set(result.createdTasks.map((task) => task.clientCaseId).filter((id): id is number => Boolean(id)));
+      setAutomationCandidates((current) => current.filter((candidate) => !createdCaseIds.has(candidate.clientCaseId)));
       toast.success(`Создано контрольных задач: ${result.createdTasks.length}.`, 'Автоконтроль дел');
       await refreshTasks();
       if (result.createdTasks[0]) {
@@ -3041,7 +3046,7 @@ export function TaskJournal({
     } finally {
       setCreatingAutomationAll(false);
     }
-  }, [automationCandidates.length, canCreateTasks, emitTaskChange, openTaskEditor, refreshTasks, toast]);
+  }, [automationCandidates, canCreateTasks, emitTaskChange, openTaskEditor, refreshTasks, toast]);
 
   useEffect(() => {
     if (!(routeTaskId && routeTaskId > 0)) {
@@ -5244,7 +5249,7 @@ export function TaskJournal({
           />
         ) : null}
 
-        {!embedded && !isApprovalsMode && automationCandidates.length > 0 ? (
+        {!embedded && !isApprovalsMode && canCreateTasks && canViewCases && taskSettings.caseInactivityAutomationEnabled ? (
           <TaskAutomationPanel
             candidates={automationCandidates}
             creatingCaseId={creatingAutomationCaseId}
@@ -6058,14 +6063,31 @@ function TaskAutomationPanel({
   onCreate: (candidate: TaskJournalCaseAutomationCandidate) => void;
   onCreateAll: () => void;
 }) {
-  const visibleCandidates = candidates.slice(0, 6);
+  const [activeState, setActiveState] = useState<'all' | 'ready' | 'waiting' | 'paused'>('all');
+  const [expanded, setExpanded] = useState(false);
+  const readyCount = candidates.filter((candidate) => candidate.automationState === 'ready' || candidate.isReadyForControl !== false).length;
+  const waitingCount = candidates.filter((candidate) => candidate.automationState === 'waiting').length;
+  const pausedCount = candidates.filter((candidate) => candidate.automationState === 'paused').length;
+  const orderedCandidates = [...candidates].sort((left, right) => {
+    const rank = (candidate: TaskJournalCaseAutomationCandidate) => candidate.automationState === 'ready'
+      ? 0
+      : candidate.automationState === 'waiting'
+        ? 1
+        : 2;
+    return rank(left) - rank(right) || (left.daysUntilControl ?? 0) - (right.daysUntilControl ?? 0);
+  });
+  const filteredCandidates = activeState === 'all'
+    ? orderedCandidates
+    : orderedCandidates.filter((candidate) => candidate.automationState === activeState);
+  const visibleCandidates = expanded ? filteredCandidates : filteredCandidates.slice(0, 6);
 
   return (
-    <section className="mb-6 rounded-2xl border border-amber-200 bg-amber-50/60 p-4 shadow-sm">
+    <section className="mb-4 rounded-2xl border border-amber-200 bg-amber-50/60 p-3 shadow-sm">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <div className="text-xs font-semibold uppercase tracking-[0.16em] text-amber-700">Автоконтроль дел</div>
-          <h2 className="mt-1 text-lg font-semibold text-slate-900">Дела без активных задач</h2>
+          <h2 className="mt-1 text-lg font-semibold text-slate-900">Все дела без активных задач</h2>
+          <p className="mt-1 text-sm text-slate-600">Система контролирует каждое дело и показывает, когда наступит срок создания задачи.</p>
         </div>
         <div className="inline-flex w-fit items-center gap-2 rounded-full border border-amber-200 bg-white px-3 py-1 text-sm font-semibold text-amber-700">
           <ClipboardList className="h-4 w-4" />
@@ -6074,15 +6096,35 @@ function TaskAutomationPanel({
         <button
           type="button"
           onClick={onCreateAll}
-          disabled={creatingAll}
+          disabled={creatingAll || readyCount === 0}
           className="inline-flex w-fit items-center gap-2 rounded-xl bg-amber-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-amber-700 disabled:cursor-wait disabled:opacity-60"
         >
           <Plus className="h-4 w-4" />
-          {creatingAll ? 'Создаем...' : 'Создать все'}
+          {creatingAll ? 'Создаем...' : `Создать наступившие (${readyCount})`}
         </button>
       </div>
 
-      <div className="mt-4 grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
+      <div className="mt-3 flex flex-wrap gap-2" aria-label="Состояния автоконтроля">
+        {([
+          ['all', 'Все', candidates.length],
+          ['ready', 'Пора создать', readyCount],
+          ['waiting', 'Ожидают срока', waitingCount],
+          ['paused', 'Приостановлены', pausedCount],
+        ] as const).map(([state, label, count]) => (
+          <button
+            key={state}
+            type="button"
+            onClick={() => { setActiveState(state); setExpanded(false); }}
+            className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${activeState === state
+              ? 'border-amber-500 bg-amber-600 text-white'
+              : 'border-amber-200 bg-white text-amber-800 hover:bg-amber-100'}`}
+          >
+            {label}: {count}
+          </button>
+        ))}
+      </div>
+
+      <div className="mt-3 grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
         {visibleCandidates.map((candidate) => (
           <article key={candidate.clientCaseId} className="min-w-0 rounded-xl border border-amber-200 bg-white p-4 shadow-sm">
             <div className="flex items-start justify-between gap-3">
@@ -6090,8 +6132,12 @@ function TaskAutomationPanel({
                 <div className="truncate text-sm font-semibold text-slate-900">{getAutomationCandidateOwnerName(candidate)}</div>
                 <div className="mt-1 truncate text-sm text-slate-600">{candidate.clientCaseTitle}</div>
               </div>
-              <span className="shrink-0 rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-700">
-                {candidate.daysWithoutActiveTask} дн.
+              <span className={`shrink-0 rounded-full px-2 py-1 text-xs font-semibold ${candidate.automationState === 'ready'
+                ? 'bg-rose-100 text-rose-700'
+                : candidate.automationState === 'paused'
+                  ? 'bg-slate-100 text-slate-600'
+                  : 'bg-amber-100 text-amber-700'}`}>
+                {candidate.automationState === 'waiting' ? `через ${candidate.daysUntilControl} дн.` : `${candidate.daysWithoutActiveTask} дн.`}
               </span>
             </div>
             {candidate.isEscalated ? (
@@ -6108,17 +6154,37 @@ function TaskAutomationPanel({
               <button
                 type="button"
                 data-testid={`task-automation-create-${candidate.clientCaseId}`}
-                disabled={creatingCaseId === candidate.clientCaseId}
+                disabled={creatingCaseId === candidate.clientCaseId || candidate.isReadyForControl === false}
                 onClick={() => onCreate(candidate)}
                 className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-amber-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-amber-700 disabled:cursor-wait disabled:opacity-60 sm:w-auto"
               >
                 <Plus className="h-4 w-4" />
-                {creatingCaseId === candidate.clientCaseId ? 'Создаем...' : 'Создать задачу'}
+                {creatingCaseId === candidate.clientCaseId
+                  ? 'Создаем...'
+                  : candidate.automationState === 'paused'
+                    ? 'Приостановлено'
+                    : candidate.isReadyForControl === false
+                      ? 'Ожидает срока'
+                      : 'Создать задачу'}
               </button>
             </div>
           </article>
         ))}
       </div>
+      {filteredCandidates.length === 0 ? (
+        <div className="mt-3 rounded-xl border border-dashed border-amber-200 bg-white/70 px-3 py-4 text-sm text-slate-600">
+          В этой категории дел без активных задач нет.
+        </div>
+      ) : null}
+      {filteredCandidates.length > 6 ? (
+        <button
+          type="button"
+          onClick={() => setExpanded((value) => !value)}
+          className="mt-3 text-sm font-semibold text-amber-800 hover:text-amber-950"
+        >
+          {expanded ? 'Свернуть список' : `Показать все (${filteredCandidates.length})`}
+        </button>
+      ) : null}
     </section>
   );
 }

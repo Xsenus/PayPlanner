@@ -4550,7 +4550,7 @@ export class ApiService {
   }
 
   async getTaskJournalCaseAutomationCandidates(
-    params?: { inactiveDays?: number; limit?: number; escalationDays?: number; search?: string },
+    params?: { inactiveDays?: number; limit?: number; escalationDays?: number; search?: string; includeWaiting?: boolean },
     options?: { signal?: AbortSignal },
   ) {
     const q = buildQuery({
@@ -4558,6 +4558,7 @@ export class ApiService {
       limit: params?.limit,
       escalationDays: params?.escalationDays,
       search: params?.search,
+      includeWaiting: params?.includeWaiting,
     });
     return this.request<TaskJournalCaseAutomationCandidate[]>(`/tasks/automation/case-candidates${q}`, {
       signal: options?.signal,
