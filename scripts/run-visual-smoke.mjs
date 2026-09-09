@@ -16,6 +16,17 @@ export const VIEWPORTS = {
   mobile: { width: 390, height: 844 },
 };
 
+export const APP_THEME_KEYS = [
+  'standard',
+  'business',
+  'ocean',
+  'emerald',
+  'warm',
+  'violet',
+  'graphite',
+  'midnight',
+];
+
 export const PUBLIC_ROUTES = [
   { name: 'login', path: '/' },
 ];
@@ -27,6 +38,55 @@ export const AUTHENTICATED_ROUTES = [
   { name: 'tasks-calendar', path: '/tasks/calendar' },
   { name: 'payments', path: '/payments' },
   { name: 'invoices', path: '/invoices' },
+];
+
+export const FULL_APP_ROUTES = [
+  { name: 'workspace', path: '/?ppTab=workspace' },
+  { name: 'calendar', path: '/?ppTab=calendar' },
+  { name: 'notifications', path: '/notifications' },
+  { name: 'tasks', path: '/tasks' },
+  { name: 'tasks-control', path: '/tasks/control' },
+  { name: 'tasks-approvals', path: '/tasks/approvals' },
+  { name: 'tasks-calendar', path: '/tasks/calendar' },
+  { name: 'notes', path: '/notes' },
+  { name: 'reports', path: '/?ppTab=reports' },
+  { name: 'calculator', path: '/?ppTab=calculator' },
+  { name: 'legal-entities', path: '/?ppTab=legalEntities' },
+  { name: 'cases', path: '/cases' },
+  { name: 'clients', path: '/clients' },
+  { name: 'contacts', path: '/?ppTab=contacts' },
+  { name: 'contacts-clients', path: '/?ppTab=contactsClients' },
+  { name: 'contacts-legal', path: '/?ppTab=contactsLegal' },
+  { name: 'contacts-external', path: '/?ppTab=contactsExternal' },
+  { name: 'invoices', path: '/invoices' },
+  { name: 'invoices-income', path: '/invoices?ppTab=accountsIncome' },
+  { name: 'invoices-expense', path: '/invoices?ppTab=accountsExpense' },
+  { name: 'installments', path: '/?ppTab=installments' },
+  { name: 'acts', path: '/acts' },
+  { name: 'acts-income', path: '/acts?ppTab=actsIncome' },
+  { name: 'acts-expense', path: '/acts?ppTab=actsExpense' },
+  { name: 'act-create', path: '/acts/new' },
+  { name: 'payments', path: '/payments' },
+  { name: 'payments-income', path: '/payments?ppTab=paymentsIncome' },
+  { name: 'payments-expense', path: '/payments?ppTab=paymentsExpense' },
+  { name: 'money-bank', path: '/?ppTab=moneyBank' },
+  { name: 'money-cash', path: '/?ppTab=moneyCash' },
+  { name: 'money-cards', path: '/?ppTab=moneyCards' },
+  { name: 'money-electronic', path: '/?ppTab=moneyEMoney' },
+  { name: 'money-total', path: '/?ppTab=moneyTotal' },
+  { name: 'payroll', path: '/?ppTab=payroll' },
+  { name: 'contracts', path: '/contracts' },
+  { name: 'contract-create', path: '/?ppTab=contractCreate' },
+  { name: 'company-profile', path: '/?ppTab=companyProfile' },
+  { name: 'profile', path: '/?ppTab=profile' },
+  { name: 'users', path: '/?ppTab=users' },
+  { name: 'roles', path: '/?ppTab=roles' },
+  { name: 'audit', path: '/?ppTab=audit' },
+  { name: 'user-activity', path: '/?ppTab=userActivity' },
+  { name: 'yandex-disk', path: '/?ppTab=yandexDisk' },
+  { name: 's3-storage', path: '/?ppTab=s3Storage' },
+  { name: 'dictionaries', path: '/?ppTab=dictionaries' },
+  { name: 'settings', path: '/?ppTab=settings' },
 ];
 
 const ignoredConsolePatterns = [
@@ -110,7 +170,7 @@ export function resolveViewportNames(value) {
   return names;
 }
 
-export function resolveRoutes(value, authenticated) {
+export function resolveRoutes(value, authenticated, fullApp = false) {
   const requested = splitCsv(value);
   if (requested.length > 0) {
     return requested.map((route, index) => ({
@@ -123,7 +183,23 @@ export function resolveRoutes(value, authenticated) {
     }));
   }
 
-  return authenticated ? AUTHENTICATED_ROUTES : PUBLIC_ROUTES;
+  if (!authenticated) return PUBLIC_ROUTES;
+  return fullApp ? FULL_APP_ROUTES : AUTHENTICATED_ROUTES;
+}
+
+export function resolveThemeNames(value) {
+  const requested = splitCsv(value);
+  if (requested.length === 0) return [null];
+  if (requested.includes('all')) {
+    if (requested.length > 1) throw new Error('Theme "all" cannot be combined with named themes.');
+    return APP_THEME_KEYS;
+  }
+
+  const unknown = requested.filter((name) => !APP_THEME_KEYS.includes(name));
+  if (unknown.length > 0) {
+    throw new Error(`Unknown theme(s): ${unknown.join(', ')}. Known: ${APP_THEME_KEYS.join(', ')}`);
+  }
+  return [...new Set(requested)];
 }
 
 export function isIgnoredConsoleMessage(message) {
@@ -203,7 +279,7 @@ async function prepareAuth(context, frontendUrl, token, email, password, timeout
   return false;
 }
 
-async function checkPage({ page, frontendUrl, route, viewportName, timeoutMs, artifactDir }) {
+async function checkPage({ page, frontendUrl, route, viewportName, themeName, timeoutMs, artifactDir }) {
   const consoleErrors = [];
   const pageErrors = [];
 
@@ -232,6 +308,23 @@ async function checkPage({ page, frontendUrl, route, viewportName, timeoutMs, ar
   await page.waitForLoadState('networkidle', { timeout: timeoutMs }).catch(() => undefined);
   await page.locator('body').waitFor({ state: 'visible', timeout: timeoutMs });
   await page.getByRole('button', { name: /Понятно|Закрыть/i }).first().click({ timeout: 1000 }).catch(() => undefined);
+
+  if (themeName) {
+    await page.evaluate((theme) => {
+      const motionGuard = document.createElement('style');
+      motionGuard.dataset.payplannerVisualMotionGuard = 'true';
+      motionGuard.textContent = '*, *::before, *::after { transition-duration: 0s !important; animation-duration: 0s !important; animation-delay: 0s !important; }';
+      document.head.appendChild(motionGuard);
+      document.documentElement.dataset.payplannerTheme = theme;
+      document.documentElement.style.colorScheme = theme === 'graphite' || theme === 'midnight' ? 'dark' : 'light';
+      try {
+        window.localStorage.setItem('payplanner.global-theme.v1', theme);
+      } catch {
+        // The forced theme still remains active for this visual check.
+      }
+    }, themeName);
+    await page.evaluate(() => new Promise((resolve) => window.requestAnimationFrame(() => resolve(undefined))));
+  }
 
   const metrics = await page.evaluate(() => {
     const viewportWidth = window.innerWidth;
@@ -290,6 +383,78 @@ async function checkPage({ page, frontendUrl, route, viewportName, timeoutMs, ar
       return `left=${Math.round(rect.left)},right=${Math.round(rect.right)},w=${Math.round(rect.width)},cw=${node.clientWidth},sw=${node.scrollWidth},display=${window.getComputedStyle(node).display}`;
     }) : [];
 
+    const parseColor = (value) => {
+      const normalized = String(value).trim();
+      if (!normalized.startsWith('rgb') && !normalized.startsWith('color(srgb')) return null;
+      const values = normalized.match(/[\d.]+/g)?.map(Number) ?? [];
+      if (values.length < 3) return null;
+      const srgbScale = normalized.startsWith('color(srgb') ? 255 : 1;
+      return {
+        r: values[0] * srgbScale,
+        g: values[1] * srgbScale,
+        b: values[2] * srgbScale,
+        a: values[3] ?? 1,
+      };
+    };
+    const composite = (front, back) => ({
+      r: (front.r * front.a) + (back.r * (1 - front.a)),
+      g: (front.g * front.a) + (back.g * (1 - front.a)),
+      b: (front.b * front.a) + (back.b * (1 - front.a)),
+      a: 1,
+    });
+    const luminance = (color) => {
+      const channel = (value) => {
+        const normalized = value / 255;
+        return normalized <= 0.04045 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
+      };
+      return (0.2126 * channel(color.r)) + (0.7152 * channel(color.g)) + (0.0722 * channel(color.b));
+    };
+    const contrast = (first, second) => {
+      const high = Math.max(luminance(first), luminance(second));
+      const low = Math.min(luminance(first), luminance(second));
+      return (high + 0.05) / (low + 0.05);
+    };
+    const effectiveBackground = (element) => {
+      const chain = [];
+      for (let current = element; current; current = current.parentElement) chain.push(current);
+      let result = { r: 255, g: 255, b: 255, a: 1 };
+      for (const current of chain.reverse()) {
+        const color = parseColor(window.getComputedStyle(current).backgroundColor);
+        if (color && color.a > 0) result = composite(color, result);
+      }
+      return result;
+    };
+    const isDarkTheme = ['graphite', 'midnight'].includes(document.documentElement.dataset.payplannerTheme ?? '');
+    const lowContrast = isDarkTheme ? Array.from(document.querySelectorAll('body *'))
+      .filter((element) => Array.from(element.childNodes).some((node) => node.nodeType === Node.TEXT_NODE && node.textContent?.trim()))
+      .map((element) => {
+        const node = /** @type {HTMLElement} */ (element);
+        const style = window.getComputedStyle(node);
+        const rect = node.getBoundingClientRect();
+        if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) < 0.55 || rect.width < 2 || rect.height < 2) return null;
+        const foreground = parseColor(style.color);
+        if (!foreground) return null;
+        const background = effectiveBackground(node);
+        const ratio = contrast(composite(foreground, background), background);
+        if (ratio >= 2.5) return null;
+        return {
+          ratio: ratio.toFixed(2),
+          foreground: style.color,
+          background: style.backgroundColor,
+          tag: node.tagName.toLowerCase(),
+          className: typeof node.className === 'string' ? node.className.slice(0, 120) : '',
+          text: Array.from(node.childNodes)
+            .filter((child) => child.nodeType === Node.TEXT_NODE)
+            .map((child) => child.textContent ?? '')
+            .join(' ')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .slice(0, 100),
+        };
+      })
+      .filter(Boolean)
+      .slice(0, 20) : [];
+
     return {
       title: document.title,
       bodyLength: bodyText.length,
@@ -300,16 +465,26 @@ async function checkPage({ page, frontendUrl, route, viewportName, timeoutMs, ar
       scrollWidthElements,
       topScrollbars,
       url: window.location.href,
+      theme: document.documentElement.dataset.payplannerTheme ?? '',
+      lowContrast,
     };
   });
 
   await mkdir(artifactDir, { recursive: true });
   await page.screenshot({
-    path: path.join(artifactDir, `${viewportName}-${route.name}.png`),
+    path: path.join(artifactDir, `${themeName ? `${themeName}-` : ''}${viewportName}-${route.name}.png`),
     fullPage: true,
   });
 
   const failures = [];
+
+  if (themeName && metrics.theme !== themeName) {
+    failures.push(`requested theme ${themeName} was replaced by ${metrics.theme || 'an empty value'}`);
+  }
+
+  if (metrics.lowContrast.length > 0) {
+    failures.push(`low-contrast text: ${metrics.lowContrast.map((item) => `${item.tag} ratio=${item.ratio} fg=${item.foreground} bg=${item.background} class="${item.className}" text="${item.text}"`).join('; ')}`);
+  }
 
   if (metrics.bodyLength < 20) {
     failures.push(`page rendered too little text (${metrics.bodyLength} chars)`);
@@ -340,6 +515,7 @@ async function checkPage({ page, frontendUrl, route, viewportName, timeoutMs, ar
     viewport: viewportName,
     url: metrics.url,
     title: metrics.title,
+    theme: themeName ?? (metrics.theme || 'server-default'),
     failures,
   };
 }
@@ -350,6 +526,8 @@ export function printHelp() {
 Options:
   --frontend-url <url>     Frontend base URL. Default: PAYPLANNER_VISUAL_FRONTEND_URL or ${DEFAULT_FRONTEND_URL}
   --routes <csv>           Routes to check. Default: public login page, or key app pages when auth is available.
+  --full-app <bool>        Check every top-level CRM section when authenticated.
+  --themes <csv|all>       Force visual themes without changing the setting on the server.
   --viewports <csv>        Viewports to check: desktop,tablet,mobile. Default: all.
   --artifact-dir <path>    Screenshot output directory. Default: ${DEFAULT_ARTIFACT_DIR}
   --timeout-ms <number>    Per-page timeout. Default: ${DEFAULT_TIMEOUT_MS}
@@ -383,7 +561,8 @@ export async function runVisualSmoke(options) {
       throw new Error('Visual smoke requires auth, but no token or email/password credentials were provided.');
     }
 
-    const routes = resolveRoutes(options.routes, authenticated);
+    const routes = resolveRoutes(options.routes, authenticated, options.fullApp);
+    const themeNames = resolveThemeNames(options.themes);
     const viewportNames = resolveViewportNames(options.viewports);
 
     console.log('PayPlanner visual smoke');
@@ -391,6 +570,7 @@ export async function runVisualSmoke(options) {
     console.log(`Browser: ${label}`);
     console.log(`Auth: ${authenticated ? 'enabled' : 'public-only'}`);
     console.log(`Viewports: ${viewportNames.join(', ')}`);
+    console.log(`Themes: ${themeNames.map((theme) => theme ?? 'server-default').join(', ')}`);
     console.log(`Routes: ${routes.map((route) => route.path).join(', ')}`);
     console.log(`Screenshots: ${artifactDir}`);
     console.log('');
@@ -403,13 +583,15 @@ export async function runVisualSmoke(options) {
       await page.setViewportSize(VIEWPORTS[viewportName]);
 
       try {
-        for (const route of routes) {
-          const result = await checkPage({ page, frontendUrl, route, viewportName, timeoutMs, artifactDir });
-          rows.push(result);
+        for (const themeName of themeNames) {
+          for (const route of routes) {
+            const result = await checkPage({ page, frontendUrl, route, viewportName, themeName, timeoutMs, artifactDir });
+            rows.push(result);
 
-          if (result.failures.length > 0) {
-            for (const failure of result.failures) {
-              failures.push(formatPageFailure(route.name, viewportName, failure));
+            if (result.failures.length > 0) {
+              for (const failure of result.failures) {
+                failures.push(formatPageFailure(route.name, `${viewportName}/${themeName ?? 'server-default'}`, failure));
+              }
             }
           }
         }
@@ -418,10 +600,10 @@ export async function runVisualSmoke(options) {
       }
     }
 
-    console.log('| viewport | route | url | title | status |');
-    console.log('| --- | --- | --- | --- | --- |');
+    console.log('| viewport | theme | route | url | title | status |');
+    console.log('| --- | --- | --- | --- | --- | --- |');
     for (const row of rows) {
-      console.log(`| ${row.viewport} | ${row.route} | ${row.url} | ${row.title.replaceAll('|', '\\|')} | ${row.failures.length === 0 ? 'ok' : 'failed'} |`);
+      console.log(`| ${row.viewport} | ${row.theme} | ${row.route} | ${row.url} | ${row.title.replaceAll('|', '\\|')} | ${row.failures.length === 0 ? 'ok' : 'failed'} |`);
     }
 
     if (failures.length > 0) {
@@ -451,6 +633,8 @@ async function main() {
   await runVisualSmoke({
     frontendUrl: args.frontendUrl ?? process.env.PAYPLANNER_VISUAL_FRONTEND_URL ?? process.env.PUBLIC_FRONTEND_URL ?? DEFAULT_FRONTEND_URL,
     routes: args.routes ?? process.env.PAYPLANNER_VISUAL_ROUTES,
+    fullApp: readBoolean(args.fullApp ?? process.env.PAYPLANNER_VISUAL_FULL_APP),
+    themes: args.themes ?? process.env.PAYPLANNER_VISUAL_THEMES,
     viewports: args.viewports ?? process.env.PAYPLANNER_VISUAL_VIEWPORTS,
     artifactDir: args.artifactDir ?? process.env.PAYPLANNER_VISUAL_ARTIFACT_DIR ?? DEFAULT_ARTIFACT_DIR,
     timeoutMs: readPositiveInt(args.timeoutMs ?? process.env.PAYPLANNER_VISUAL_TIMEOUT_MS, DEFAULT_TIMEOUT_MS),

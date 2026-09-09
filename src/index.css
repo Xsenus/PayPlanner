@@ -23,6 +23,34 @@
   --pp-row-selected: #dce9ff;
   --pp-input-bg: #ffffff;
   --pp-shadow: 0 1px 3px rgba(15, 23, 42, 0.12), 0 1px 2px rgba(15, 23, 42, 0.06);
+  --pp-overlay: rgba(15, 23, 42, 0.48);
+  --pp-scrollbar-track: #e2e8f0;
+  --pp-scrollbar-thumb: #94a3b8;
+  --pp-danger-soft: #fff1f2;
+  --pp-danger-soft-strong: #ffe4e6;
+  --pp-danger-border: #fecdd3;
+  --pp-danger-text: #be123c;
+  --pp-danger-solid: #e11d48;
+  --pp-warning-soft: #fffbeb;
+  --pp-warning-soft-strong: #fef3c7;
+  --pp-warning-border: #fde68a;
+  --pp-warning-text: #a16207;
+  --pp-warning-solid: #d97706;
+  --pp-success-soft: #ecfdf5;
+  --pp-success-soft-strong: #d1fae5;
+  --pp-success-border: #a7f3d0;
+  --pp-success-text: #047857;
+  --pp-success-solid: #059669;
+  --pp-info-soft: #f0f9ff;
+  --pp-info-soft-strong: #e0f2fe;
+  --pp-info-border: #bae6fd;
+  --pp-info-text: #0369a1;
+  --pp-info-solid: #0284c7;
+  --pp-special-soft: #f5f3ff;
+  --pp-special-soft-strong: #ede9fe;
+  --pp-special-border: #ddd6fe;
+  --pp-special-text: #6d28d9;
+  --pp-special-solid: #7c3aed;
 }
 
 :root[data-payplanner-theme='business'] {
@@ -148,6 +176,34 @@
   --pp-row-selected: #285849;
   --pp-input-bg: #111821;
   --pp-shadow: 0 1px 3px rgba(0, 0, 0, 0.42), 0 8px 22px rgba(0, 0, 0, 0.18);
+  --pp-overlay: rgba(2, 6, 12, 0.76);
+  --pp-scrollbar-track: #222b37;
+  --pp-scrollbar-thumb: #64748b;
+  --pp-danger-soft: #3f2028;
+  --pp-danger-soft-strong: #55242f;
+  --pp-danger-border: #8f3a4d;
+  --pp-danger-text: #fda4af;
+  --pp-danger-solid: #e11d48;
+  --pp-warning-soft: #3b301c;
+  --pp-warning-soft-strong: #4a3b20;
+  --pp-warning-border: #7c5b21;
+  --pp-warning-text: #fcd34d;
+  --pp-warning-solid: #d97706;
+  --pp-success-soft: #17382f;
+  --pp-success-soft-strong: #1d493d;
+  --pp-success-border: #26705d;
+  --pp-success-text: #6ee7b7;
+  --pp-success-solid: #059669;
+  --pp-info-soft: #172f43;
+  --pp-info-soft-strong: #1d405c;
+  --pp-info-border: #27678d;
+  --pp-info-text: #7dd3fc;
+  --pp-info-solid: #0284c7;
+  --pp-special-soft: #2d2746;
+  --pp-special-soft-strong: #3b315b;
+  --pp-special-border: #66529a;
+  --pp-special-text: #c4b5fd;
+  --pp-special-solid: #7c3aed;
 }
 
 :root[data-payplanner-theme='midnight'] {
@@ -171,6 +227,34 @@
   --pp-row-selected: #214b78;
   --pp-input-bg: #0b1626;
   --pp-shadow: 0 1px 3px rgba(0, 0, 0, 0.42), 0 8px 22px rgba(0, 0, 0, 0.2);
+  --pp-overlay: rgba(2, 6, 23, 0.8);
+  --pp-scrollbar-track: #17243a;
+  --pp-scrollbar-thumb: #526b8d;
+  --pp-danger-soft: #40202d;
+  --pp-danger-soft-strong: #56243a;
+  --pp-danger-border: #913b5c;
+  --pp-danger-text: #fda4af;
+  --pp-danger-solid: #e11d48;
+  --pp-warning-soft: #3a301e;
+  --pp-warning-soft-strong: #4b3d22;
+  --pp-warning-border: #7d5d25;
+  --pp-warning-text: #fcd34d;
+  --pp-warning-solid: #d97706;
+  --pp-success-soft: #14382f;
+  --pp-success-soft-strong: #194a3d;
+  --pp-success-border: #25725c;
+  --pp-success-text: #6ee7b7;
+  --pp-success-solid: #059669;
+  --pp-info-soft: #123653;
+  --pp-info-soft-strong: #17466c;
+  --pp-info-border: #286f9f;
+  --pp-info-text: #7dd3fc;
+  --pp-info-solid: #0284c7;
+  --pp-special-soft: #2d294f;
+  --pp-special-soft-strong: #3b3568;
+  --pp-special-border: #665ca5;
+  --pp-special-text: #c4b5fd;
+  --pp-special-solid: #7c3aed;
 }
 
 html[data-payplanner-theme] body,
@@ -185,15 +269,24 @@ html[data-payplanner-theme] .bg-white { background-color: var(--pp-surface) !imp
 html[data-payplanner-theme] [class*='bg-white/'] { background-color: color-mix(in srgb, var(--pp-surface) 92%, transparent) !important; }
 html[data-payplanner-theme] .bg-gray-50,
 html[data-payplanner-theme] .bg-slate-50 { background-color: var(--pp-surface-muted) !important; }
+html[data-payplanner-theme] [class*='bg-gray-50/'],
+html[data-payplanner-theme] [class*='bg-slate-50/'] { background-color: color-mix(in srgb, var(--pp-surface-muted) 88%, transparent) !important; }
 html[data-payplanner-theme] .bg-gray-100,
 html[data-payplanner-theme] .bg-slate-100 { background-color: var(--pp-surface-soft) !important; }
+html[data-payplanner-theme] [class*='bg-gray-100/'],
+html[data-payplanner-theme] [class*='bg-slate-100/'] { background-color: color-mix(in srgb, var(--pp-surface-soft) 88%, transparent) !important; }
 html[data-payplanner-theme] .bg-gray-200,
 html[data-payplanner-theme] .bg-slate-200 { background-color: var(--pp-border) !important; }
 html[data-payplanner-theme] .bg-blue-50 { background-color: var(--pp-primary-soft) !important; }
 html[data-payplanner-theme] .bg-blue-100 { background-color: var(--pp-primary-soft-strong) !important; }
+html[data-payplanner-theme] [class*='bg-blue-50/'] { background-color: color-mix(in srgb, var(--pp-primary-soft) 94%, transparent) !important; }
+html[data-payplanner-theme] [class*='bg-blue-100/'] { background-color: color-mix(in srgb, var(--pp-primary-soft-strong) 94%, transparent) !important; }
 html[data-payplanner-theme] .bg-blue-500,
 html[data-payplanner-theme] .bg-blue-600 { background-color: var(--pp-primary) !important; color: var(--pp-on-primary) !important; }
 html[data-payplanner-theme] .bg-blue-700 { background-color: var(--pp-primary-hover) !important; color: var(--pp-on-primary) !important; }
+html[data-payplanner-theme] :is(.bg-blue-500, .bg-blue-600, .bg-blue-700) .text-blue-100 {
+  color: color-mix(in srgb, var(--pp-on-primary) 82%, transparent) !important;
+}
 html[data-payplanner-theme] .hover\:bg-blue-700:hover { background-color: var(--pp-primary-hover) !important; }
 html[data-payplanner-theme] .hover\:bg-blue-50:hover,
 html[data-payplanner-theme] .hover\:bg-gray-50:hover,
@@ -203,6 +296,10 @@ html[data-payplanner-theme] .border-gray-100,
 html[data-payplanner-theme] .border-gray-200,
 html[data-payplanner-theme] .border-slate-100,
 html[data-payplanner-theme] .border-slate-200 { border-color: var(--pp-border) !important; }
+html[data-payplanner-theme] [class*='border-gray-100/'],
+html[data-payplanner-theme] [class*='border-gray-200/'],
+html[data-payplanner-theme] [class*='border-slate-100/'],
+html[data-payplanner-theme] [class*='border-slate-200/'] { border-color: color-mix(in srgb, var(--pp-border) 82%, transparent) !important; }
 html[data-payplanner-theme] .border-gray-300,
 html[data-payplanner-theme] .border-slate-300,
 html[data-payplanner-theme] .border-slate-400 { border-color: var(--pp-border-strong) !important; }
@@ -250,6 +347,142 @@ html[data-payplanner-theme] select {
 
 html[data-payplanner-theme] input::placeholder,
 html[data-payplanner-theme] textarea::placeholder { color: var(--pp-text-soft); }
+
+html[data-payplanner-theme] .divide-slate-100 > :not([hidden]) ~ :not([hidden]),
+html[data-payplanner-theme] .divide-slate-200 > :not([hidden]) ~ :not([hidden]),
+html[data-payplanner-theme] .divide-gray-100 > :not([hidden]) ~ :not([hidden]),
+html[data-payplanner-theme] .divide-gray-200 > :not([hidden]) ~ :not([hidden]) {
+  border-color: var(--pp-border) !important;
+}
+
+html[data-payplanner-theme] .border-white,
+html[data-payplanner-theme] [class~='border-white/70'],
+html[data-payplanner-theme] [class~='border-white/80'] {
+  border-color: color-mix(in srgb, var(--pp-border) 76%, transparent) !important;
+}
+
+html[data-payplanner-theme] .pp-top-horizontal-scroll {
+  border-color: var(--pp-border) !important;
+  background: var(--pp-surface-muted) !important;
+  box-shadow: var(--pp-shadow) !important;
+  color-scheme: inherit;
+  scrollbar-color: var(--pp-scrollbar-thumb) var(--pp-scrollbar-track);
+}
+
+html[data-payplanner-theme] .pp-reports-shell {
+  background:
+    radial-gradient(circle at top left, color-mix(in srgb, var(--pp-info-solid) 14%, transparent), transparent 28%),
+    radial-gradient(circle at top right, color-mix(in srgb, var(--pp-success-solid) 14%, transparent), transparent 24%),
+    linear-gradient(180deg, var(--pp-bg) 0%, var(--pp-bg-elevated) 45%, var(--pp-bg) 100%) !important;
+}
+
+html[data-payplanner-theme] .recharts-default-tooltip {
+  background: var(--pp-surface) !important;
+  border-color: var(--pp-border) !important;
+  color: var(--pp-text) !important;
+  box-shadow: var(--pp-shadow) !important;
+}
+
+html[data-payplanner-theme] .recharts-cartesian-grid line {
+  stroke: var(--pp-border) !important;
+}
+
+:root[data-payplanner-theme='graphite'] ::-webkit-scrollbar-track,
+:root[data-payplanner-theme='midnight'] ::-webkit-scrollbar-track { background: var(--pp-scrollbar-track); }
+:root[data-payplanner-theme='graphite'] ::-webkit-scrollbar-thumb,
+:root[data-payplanner-theme='midnight'] ::-webkit-scrollbar-thumb { background: var(--pp-scrollbar-thumb); }
+
+/* Semantic colors keep their meaning and remain legible in every palette. */
+:root[data-payplanner-theme='graphite'] .bg-red-50,
+:root[data-payplanner-theme='graphite'] .bg-red-100,
+:root[data-payplanner-theme='graphite'] .bg-rose-50,
+:root[data-payplanner-theme='graphite'] .bg-rose-100,
+:root[data-payplanner-theme='midnight'] .bg-red-50,
+:root[data-payplanner-theme='midnight'] .bg-red-100,
+:root[data-payplanner-theme='midnight'] .bg-rose-50,
+:root[data-payplanner-theme='midnight'] .bg-rose-100 { background-color: var(--pp-danger-soft) !important; }
+:root[data-payplanner-theme='graphite'] .border-red-100,
+:root[data-payplanner-theme='graphite'] .border-red-200,
+:root[data-payplanner-theme='graphite'] .border-red-300,
+:root[data-payplanner-theme='graphite'] .border-rose-100,
+:root[data-payplanner-theme='graphite'] .border-rose-200,
+:root[data-payplanner-theme='graphite'] .border-rose-300,
+:root[data-payplanner-theme='midnight'] .border-red-100,
+:root[data-payplanner-theme='midnight'] .border-red-200,
+:root[data-payplanner-theme='midnight'] .border-red-300,
+:root[data-payplanner-theme='midnight'] .border-rose-100,
+:root[data-payplanner-theme='midnight'] .border-rose-200,
+:root[data-payplanner-theme='midnight'] .border-rose-300 { border-color: var(--pp-danger-border) !important; }
+:root[data-payplanner-theme='graphite'] :is(.text-red-500, .text-red-600, .text-red-700, .text-red-800, .text-red-900, .text-rose-500, .text-rose-600, .text-rose-700, .text-rose-800, .text-rose-900),
+:root[data-payplanner-theme='midnight'] :is(.text-red-500, .text-red-600, .text-red-700, .text-red-800, .text-red-900, .text-rose-500, .text-rose-600, .text-rose-700, .text-rose-800, .text-rose-900) { color: var(--pp-danger-text) !important; }
+:root[data-payplanner-theme='graphite'] :is(.text-red-950, .text-rose-950, [class*='text-red-700/'], [class*='text-red-800/'], [class*='text-red-900/'], [class*='text-rose-700/'], [class*='text-rose-800/'], [class*='text-rose-900/']),
+:root[data-payplanner-theme='midnight'] :is(.text-red-950, .text-rose-950, [class*='text-red-700/'], [class*='text-red-800/'], [class*='text-red-900/'], [class*='text-rose-700/'], [class*='text-rose-800/'], [class*='text-rose-900/']) { color: var(--pp-danger-text) !important; }
+
+:root[data-payplanner-theme='graphite'] :is(.bg-amber-50, .bg-amber-100, .bg-orange-50, .bg-orange-100, .bg-yellow-50, .bg-yellow-100),
+:root[data-payplanner-theme='midnight'] :is(.bg-amber-50, .bg-amber-100, .bg-orange-50, .bg-orange-100, .bg-yellow-50, .bg-yellow-100) { background-color: var(--pp-warning-soft) !important; }
+:root[data-payplanner-theme='graphite'] :is(.border-amber-100, .border-amber-200, .border-amber-300, .border-orange-100, .border-orange-200, .border-orange-300, .border-yellow-100, .border-yellow-200, .border-yellow-300),
+:root[data-payplanner-theme='midnight'] :is(.border-amber-100, .border-amber-200, .border-amber-300, .border-orange-100, .border-orange-200, .border-orange-300, .border-yellow-100, .border-yellow-200, .border-yellow-300) { border-color: var(--pp-warning-border) !important; }
+:root[data-payplanner-theme='graphite'] :is(.text-amber-600, .text-amber-700, .text-amber-800, .text-amber-900, .text-amber-950, .text-orange-600, .text-orange-700, .text-orange-800, .text-orange-900, .text-yellow-600, .text-yellow-700, .text-yellow-800, .text-yellow-900),
+:root[data-payplanner-theme='midnight'] :is(.text-amber-600, .text-amber-700, .text-amber-800, .text-amber-900, .text-amber-950, .text-orange-600, .text-orange-700, .text-orange-800, .text-orange-900, .text-yellow-600, .text-yellow-700, .text-yellow-800, .text-yellow-900) { color: var(--pp-warning-text) !important; }
+
+:root[data-payplanner-theme='graphite'] :is(.bg-green-50, .bg-green-100, .bg-emerald-50, .bg-emerald-100, .bg-teal-50, .bg-teal-100),
+:root[data-payplanner-theme='midnight'] :is(.bg-green-50, .bg-green-100, .bg-emerald-50, .bg-emerald-100, .bg-teal-50, .bg-teal-100) { background-color: var(--pp-success-soft) !important; }
+:root[data-payplanner-theme='graphite'] :is(.border-green-100, .border-green-200, .border-green-300, .border-emerald-100, .border-emerald-200, .border-emerald-300, .border-teal-100, .border-teal-200, .border-teal-300),
+:root[data-payplanner-theme='midnight'] :is(.border-green-100, .border-green-200, .border-green-300, .border-emerald-100, .border-emerald-200, .border-emerald-300, .border-teal-100, .border-teal-200, .border-teal-300) { border-color: var(--pp-success-border) !important; }
+:root[data-payplanner-theme='graphite'] :is(.text-green-600, .text-green-700, .text-green-800, .text-green-900, .text-emerald-600, .text-emerald-700, .text-emerald-800, .text-emerald-900, .text-teal-600, .text-teal-700, .text-teal-800, .text-teal-900),
+:root[data-payplanner-theme='midnight'] :is(.text-green-600, .text-green-700, .text-green-800, .text-green-900, .text-emerald-600, .text-emerald-700, .text-emerald-800, .text-emerald-900, .text-teal-600, .text-teal-700, .text-teal-800, .text-teal-900) { color: var(--pp-success-text) !important; }
+:root[data-payplanner-theme='graphite'] :is(.text-green-950, .text-emerald-950, .text-teal-950, [class*='text-green-700/'], [class*='text-green-800/'], [class*='text-green-900/'], [class*='text-emerald-700/'], [class*='text-emerald-800/'], [class*='text-emerald-900/'], [class*='text-teal-700/'], [class*='text-teal-800/'], [class*='text-teal-900/']),
+:root[data-payplanner-theme='midnight'] :is(.text-green-950, .text-emerald-950, .text-teal-950, [class*='text-green-700/'], [class*='text-green-800/'], [class*='text-green-900/'], [class*='text-emerald-700/'], [class*='text-emerald-800/'], [class*='text-emerald-900/'], [class*='text-teal-700/'], [class*='text-teal-800/'], [class*='text-teal-900/']) { color: var(--pp-success-text) !important; }
+
+:root[data-payplanner-theme='graphite'] :is(.bg-sky-50, .bg-sky-100, .bg-cyan-50, .bg-cyan-100),
+:root[data-payplanner-theme='midnight'] :is(.bg-sky-50, .bg-sky-100, .bg-cyan-50, .bg-cyan-100) { background-color: var(--pp-info-soft) !important; }
+:root[data-payplanner-theme='graphite'] :is(.border-sky-100, .border-sky-200, .border-sky-300, .border-cyan-100, .border-cyan-200, .border-cyan-300),
+:root[data-payplanner-theme='midnight'] :is(.border-sky-100, .border-sky-200, .border-sky-300, .border-cyan-100, .border-cyan-200, .border-cyan-300) { border-color: var(--pp-info-border) !important; }
+:root[data-payplanner-theme='graphite'] :is(.text-sky-500, .text-sky-600, .text-sky-700, .text-sky-800, .text-sky-900, .text-cyan-500, .text-cyan-600, .text-cyan-700, .text-cyan-800, .text-cyan-900),
+:root[data-payplanner-theme='midnight'] :is(.text-sky-500, .text-sky-600, .text-sky-700, .text-sky-800, .text-sky-900, .text-cyan-500, .text-cyan-600, .text-cyan-700, .text-cyan-800, .text-cyan-900) { color: var(--pp-info-text) !important; }
+:root[data-payplanner-theme='graphite'] :is(.text-sky-950, .text-cyan-950, [class*='text-sky-700/'], [class*='text-sky-800/'], [class*='text-sky-900/'], [class*='text-cyan-700/'], [class*='text-cyan-800/'], [class*='text-cyan-900/']),
+:root[data-payplanner-theme='midnight'] :is(.text-sky-950, .text-cyan-950, [class*='text-sky-700/'], [class*='text-sky-800/'], [class*='text-sky-900/'], [class*='text-cyan-700/'], [class*='text-cyan-800/'], [class*='text-cyan-900/']) { color: var(--pp-info-text) !important; }
+
+:root[data-payplanner-theme='graphite'] :is(.bg-indigo-50, .bg-indigo-100, .bg-violet-50, .bg-violet-100, .bg-purple-50, .bg-purple-100),
+:root[data-payplanner-theme='midnight'] :is(.bg-indigo-50, .bg-indigo-100, .bg-violet-50, .bg-violet-100, .bg-purple-50, .bg-purple-100) { background-color: var(--pp-special-soft) !important; }
+:root[data-payplanner-theme='graphite'] :is(.border-indigo-100, .border-indigo-200, .border-indigo-300, .border-violet-100, .border-violet-200, .border-violet-300, .border-purple-100, .border-purple-200, .border-purple-300),
+:root[data-payplanner-theme='midnight'] :is(.border-indigo-100, .border-indigo-200, .border-indigo-300, .border-violet-100, .border-violet-200, .border-violet-300, .border-purple-100, .border-purple-200, .border-purple-300) { border-color: var(--pp-special-border) !important; }
+:root[data-payplanner-theme='graphite'] :is(.text-indigo-500, .text-indigo-600, .text-indigo-700, .text-indigo-800, .text-indigo-900, .text-violet-500, .text-violet-600, .text-violet-700, .text-violet-800, .text-violet-900, .text-purple-500, .text-purple-600, .text-purple-700, .text-purple-800, .text-purple-900),
+:root[data-payplanner-theme='midnight'] :is(.text-indigo-500, .text-indigo-600, .text-indigo-700, .text-indigo-800, .text-indigo-900, .text-violet-500, .text-violet-600, .text-violet-700, .text-violet-800, .text-violet-900, .text-purple-500, .text-purple-600, .text-purple-700, .text-purple-800, .text-purple-900) { color: var(--pp-special-text) !important; }
+:root[data-payplanner-theme='graphite'] :is(.text-indigo-950, .text-violet-950, .text-purple-950, [class*='text-indigo-700/'], [class*='text-indigo-800/'], [class*='text-indigo-900/'], [class*='text-violet-700/'], [class*='text-violet-800/'], [class*='text-violet-900/'], [class*='text-purple-700/'], [class*='text-purple-800/'], [class*='text-purple-900/']),
+:root[data-payplanner-theme='midnight'] :is(.text-indigo-950, .text-violet-950, .text-purple-950, [class*='text-indigo-700/'], [class*='text-indigo-800/'], [class*='text-indigo-900/'], [class*='text-violet-700/'], [class*='text-violet-800/'], [class*='text-violet-900/'], [class*='text-purple-700/'], [class*='text-purple-800/'], [class*='text-purple-900/']) { color: var(--pp-special-text) !important; }
+
+:root[data-payplanner-theme='graphite'] :is([class*='bg-red-50/'], [class*='bg-rose-50/']),
+:root[data-payplanner-theme='midnight'] :is([class*='bg-red-50/'], [class*='bg-rose-50/']) { background-color: color-mix(in srgb, var(--pp-danger-soft) 94%, transparent) !important; }
+:root[data-payplanner-theme='graphite'] :is([class*='bg-amber-50/'], [class*='bg-orange-50/'], [class*='bg-yellow-50/']),
+:root[data-payplanner-theme='midnight'] :is([class*='bg-amber-50/'], [class*='bg-orange-50/'], [class*='bg-yellow-50/']) { background-color: color-mix(in srgb, var(--pp-warning-soft) 94%, transparent) !important; }
+:root[data-payplanner-theme='graphite'] :is([class*='bg-green-50/'], [class*='bg-emerald-50/'], [class*='bg-teal-50/']),
+:root[data-payplanner-theme='midnight'] :is([class*='bg-green-50/'], [class*='bg-emerald-50/'], [class*='bg-teal-50/']) { background-color: color-mix(in srgb, var(--pp-success-soft) 94%, transparent) !important; }
+:root[data-payplanner-theme='graphite'] :is([class*='bg-sky-50/'], [class*='bg-cyan-50/']),
+:root[data-payplanner-theme='midnight'] :is([class*='bg-sky-50/'], [class*='bg-cyan-50/']) { background-color: color-mix(in srgb, var(--pp-info-soft) 94%, transparent) !important; }
+:root[data-payplanner-theme='graphite'] :is([class*='bg-indigo-50/'], [class*='bg-violet-50/'], [class*='bg-purple-50/']),
+:root[data-payplanner-theme='midnight'] :is([class*='bg-indigo-50/'], [class*='bg-violet-50/'], [class*='bg-purple-50/']) { background-color: color-mix(in srgb, var(--pp-special-soft) 94%, transparent) !important; }
+
+:root[data-payplanner-theme='graphite'] :is([class*='from-red-50'], [class*='from-rose-50']),
+:root[data-payplanner-theme='midnight'] :is([class*='from-red-50'], [class*='from-rose-50']) { --tw-gradient-from: var(--pp-danger-soft) var(--tw-gradient-from-position) !important; }
+:root[data-payplanner-theme='graphite'] :is([class*='from-amber-50'], [class*='from-orange-50'], [class*='from-yellow-50']),
+:root[data-payplanner-theme='midnight'] :is([class*='from-amber-50'], [class*='from-orange-50'], [class*='from-yellow-50']) { --tw-gradient-from: var(--pp-warning-soft) var(--tw-gradient-from-position) !important; }
+:root[data-payplanner-theme='graphite'] :is([class*='from-green-50'], [class*='from-emerald-50'], [class*='from-teal-50']),
+:root[data-payplanner-theme='midnight'] :is([class*='from-green-50'], [class*='from-emerald-50'], [class*='from-teal-50']) { --tw-gradient-from: var(--pp-success-soft) var(--tw-gradient-from-position) !important; }
+:root[data-payplanner-theme='graphite'] :is([class*='from-sky-50'], [class*='from-cyan-50']),
+:root[data-payplanner-theme='midnight'] :is([class*='from-sky-50'], [class*='from-cyan-50']) { --tw-gradient-from: var(--pp-info-soft) var(--tw-gradient-from-position) !important; }
+:root[data-payplanner-theme='graphite'] :is([class*='from-indigo-50'], [class*='from-violet-50'], [class*='from-purple-50']),
+:root[data-payplanner-theme='midnight'] :is([class*='from-indigo-50'], [class*='from-violet-50'], [class*='from-purple-50']) { --tw-gradient-from: var(--pp-special-soft) var(--tw-gradient-from-position) !important; }
+:root[data-payplanner-theme='graphite'] :is([class*='to-red-50'], [class*='to-rose-50']),
+:root[data-payplanner-theme='midnight'] :is([class*='to-red-50'], [class*='to-rose-50']) { --tw-gradient-to: var(--pp-danger-soft-strong) var(--tw-gradient-to-position) !important; }
+:root[data-payplanner-theme='graphite'] :is([class*='to-amber-50'], [class*='to-orange-50'], [class*='to-yellow-50']),
+:root[data-payplanner-theme='midnight'] :is([class*='to-amber-50'], [class*='to-orange-50'], [class*='to-yellow-50']) { --tw-gradient-to: var(--pp-warning-soft-strong) var(--tw-gradient-to-position) !important; }
+:root[data-payplanner-theme='graphite'] :is([class*='to-green-50'], [class*='to-emerald-50'], [class*='to-teal-50']),
+:root[data-payplanner-theme='midnight'] :is([class*='to-green-50'], [class*='to-emerald-50'], [class*='to-teal-50']) { --tw-gradient-to: var(--pp-success-soft-strong) var(--tw-gradient-to-position) !important; }
+:root[data-payplanner-theme='graphite'] :is([class*='to-sky-50'], [class*='to-cyan-50']),
+:root[data-payplanner-theme='midnight'] :is([class*='to-sky-50'], [class*='to-cyan-50']) { --tw-gradient-to: var(--pp-info-soft-strong) var(--tw-gradient-to-position) !important; }
+:root[data-payplanner-theme='graphite'] :is([class*='to-indigo-50'], [class*='to-violet-50'], [class*='to-purple-50']),
+:root[data-payplanner-theme='midnight'] :is([class*='to-indigo-50'], [class*='to-violet-50'], [class*='to-purple-50']) { --tw-gradient-to: var(--pp-special-soft-strong) var(--tw-gradient-to-position) !important; }
 
 :root[data-payplanner-theme='graphite'] .bg-slate-900,
 :root[data-payplanner-theme='midnight'] .bg-slate-900 { background-color: var(--pp-surface-soft) !important; }

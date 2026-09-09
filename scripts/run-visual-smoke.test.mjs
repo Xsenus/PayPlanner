@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  APP_THEME_KEYS,
   AUTHENTICATED_ROUTES,
+  FULL_APP_ROUTES,
   PUBLIC_ROUTES,
   formatPageFailure,
   isIgnoredConsoleMessage,
@@ -9,6 +11,7 @@ import {
   readBoolean,
   readPositiveInt,
   resolveRoutes,
+  resolveThemeNames,
   resolveViewportNames,
   trimTrailingSlash,
 } from './run-visual-smoke.mjs';
@@ -25,6 +28,16 @@ describe('run-visual-smoke configuration', () => {
     expect(resolveRoutes('', false)).toEqual(PUBLIC_ROUTES);
     expect(resolveRoutes('', true)).toEqual(AUTHENTICATED_ROUTES);
     expect(AUTHENTICATED_ROUTES[0]).toEqual({ name: 'calendar', path: '/?ppTab=calendar' });
+    expect(resolveRoutes('', true, true)).toEqual(FULL_APP_ROUTES);
+    expect(FULL_APP_ROUTES).toHaveLength(46);
+  });
+
+  it('resolves one, several and all visual themes', () => {
+    expect(resolveThemeNames('')).toEqual([null]);
+    expect(resolveThemeNames('warm,midnight,warm')).toEqual(['warm', 'midnight']);
+    expect(resolveThemeNames('all')).toEqual(APP_THEME_KEYS);
+    expect(() => resolveThemeNames('all,warm')).toThrow(/cannot be combined/);
+    expect(() => resolveThemeNames('unknown')).toThrow(/Unknown theme/);
   });
 
   it('normalizes custom routes', () => {

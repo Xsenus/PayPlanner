@@ -37,14 +37,12 @@ function createTopScroll(scrollElement: HTMLElement): EnhancedScroll {
   topScroll.style.overflowX = 'auto';
   topScroll.style.overflowY = 'hidden';
   topScroll.style.height = '14px';
-  topScroll.style.border = '1px solid rgba(203, 213, 225, 0.9)';
+  topScroll.style.border = '1px solid';
   topScroll.style.borderRadius = '6px';
   topScroll.style.scrollbarWidth = 'thin';
   topScroll.style.position = 'fixed';
   topScroll.style.top = '66px';
   topScroll.style.zIndex = '10';
-  topScroll.style.background = 'rgb(248, 250, 252)';
-  topScroll.style.boxShadow = '0 4px 14px rgba(15, 23, 42, 0.12)';
 
   spacer.style.height = '1px';
   spacer.style.pointerEvents = 'none';

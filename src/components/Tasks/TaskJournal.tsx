@@ -11801,32 +11801,32 @@ function TaskModal({
           height: 44px;
           width: 100%;
           border-radius: 12px;
-          border: 1px solid rgb(226 232 240);
-          background: white;
+          border: 1px solid var(--pp-border);
+          background: var(--pp-input-bg);
           padding: 0 12px;
           font-size: 14px;
-          color: rgb(51 65 85);
+          color: var(--pp-text);
           outline: none;
         }
         .form-input:focus,
         .form-textarea:focus {
-          border-color: rgb(96 165 250);
-          box-shadow: 0 0 0 2px rgb(219 234 254);
+          border-color: var(--pp-primary);
+          box-shadow: 0 0 0 2px color-mix(in srgb, var(--pp-primary) 24%, transparent);
         }
         .form-input:disabled,
         .form-textarea:disabled {
           cursor: not-allowed;
-          background: rgb(248 250 252);
-          color: rgb(100 116 139);
+          background: var(--pp-surface-muted);
+          color: var(--pp-text-muted);
         }
         .form-textarea {
           width: 100%;
           border-radius: 12px;
-          border: 1px solid rgb(226 232 240);
-          background: white;
+          border: 1px solid var(--pp-border);
+          background: var(--pp-input-bg);
           padding: 10px 12px;
           font-size: 14px;
-          color: rgb(51 65 85);
+          color: var(--pp-text);
           outline: none;
           resize: vertical;
         }
