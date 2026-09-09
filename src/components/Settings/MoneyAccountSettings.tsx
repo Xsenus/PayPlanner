@@ -257,7 +257,7 @@ export function MoneyAccountSettings() {
               </div>
               <div className="mt-3 text-sm text-gray-600">
                 Активных: <span className="font-semibold text-gray-900">{active}</span>
-                <span className="mx-2 text-gray-300">/</span>
+                <span className="mx-2 text-slate-500">/</span>
                 Всего: <span className="font-semibold text-gray-900">{total}</span>
               </div>
             </button>

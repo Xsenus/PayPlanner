@@ -327,8 +327,19 @@ async function checkPage({ page, frontendUrl, route, viewportName, themeName, ti
       motionGuard.dataset.payplannerVisualMotionGuard = 'true';
       motionGuard.textContent = '*, *::before, *::after { transition-duration: 0s !important; animation-duration: 0s !important; animation-delay: 0s !important; }';
       document.head.appendChild(motionGuard);
-      document.documentElement.dataset.payplannerTheme = theme;
-      document.documentElement.style.colorScheme = theme === 'graphite' || theme === 'midnight' ? 'dark' : 'light';
+      const root = document.documentElement;
+      const applyForcedTheme = () => {
+        root.dataset.payplannerTheme = theme;
+        root.style.colorScheme = theme === 'graphite' || theme === 'midnight' ? 'dark' : 'light';
+      };
+      applyForcedTheme();
+      const existingObserver = window.__payplannerVisualThemeObserver;
+      existingObserver?.disconnect?.();
+      const observer = new MutationObserver(() => {
+        if (root.dataset.payplannerTheme !== theme) applyForcedTheme();
+      });
+      observer.observe(root, { attributes: true, attributeFilter: ['data-payplanner-theme'] });
+      window.__payplannerVisualThemeObserver = observer;
       try {
         window.localStorage.setItem('payplanner.global-theme.v1', theme);
       } catch {
@@ -488,14 +499,14 @@ async function checkPage({ page, frontendUrl, route, viewportName, themeName, ti
       }
       return result;
     };
-    const isDarkTheme = ['graphite', 'midnight'].includes(document.documentElement.dataset.payplannerTheme ?? '');
-    const lowContrast = isDarkTheme ? Array.from(document.querySelectorAll('body *'))
+    const lowContrast = Array.from(document.querySelectorAll('body *'))
       .filter((element) => Array.from(element.childNodes).some((node) => node.nodeType === Node.TEXT_NODE && node.textContent?.trim()))
       .map((element) => {
         const node = /** @type {HTMLElement} */ (element);
         const style = window.getComputedStyle(node);
         const rect = node.getBoundingClientRect();
-        if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) < 0.55 || rect.width < 2 || rect.height < 2) return null;
+        const disabledControl = node.closest(':disabled, [aria-disabled="true"]');
+        if (disabledControl || style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) < 0.55 || rect.width < 2 || rect.height < 2) return null;
         const foreground = parseColor(style.color);
         if (!foreground) return null;
         const background = effectiveBackground(node);
@@ -517,6 +528,63 @@ async function checkPage({ page, frontendUrl, route, viewportName, themeName, ti
         };
       })
       .filter(Boolean)
+      .slice(0, 20);
+
+    const primaryColor = parseColor(window.getComputedStyle(document.documentElement).getPropertyValue('--pp-primary'));
+    const primaryActionTokens = new Set([
+      'bg-gray-800', 'bg-gray-900',
+      'bg-slate-800', 'bg-slate-900', 'bg-slate-950',
+      'bg-blue-500', 'bg-blue-600', 'bg-blue-700',
+      'bg-sky-500', 'bg-sky-600', 'bg-sky-700',
+      'bg-cyan-500', 'bg-cyan-600', 'bg-cyan-700',
+      'bg-indigo-500', 'bg-indigo-600', 'bg-indigo-700',
+      'bg-violet-500', 'bg-violet-600', 'bg-violet-700',
+      'bg-purple-500', 'bg-purple-600', 'bg-purple-700',
+    ]);
+    const colorDistance = (first, second) => Math.max(
+      Math.abs(first.r - second.r),
+      Math.abs(first.g - second.g),
+      Math.abs(first.b - second.b),
+    );
+    const visibleInteractive = Array.from(document.querySelectorAll('button, a[href], [role="button"], input[type="button"], input[type="submit"]'))
+      .filter((element) => {
+        const node = /** @type {HTMLElement} */ (element);
+        const style = window.getComputedStyle(node);
+        const rect = node.getBoundingClientRect();
+        return !node.matches(':disabled, [aria-disabled="true"]')
+          && style.display !== 'none'
+          && style.visibility !== 'hidden'
+          && Number(style.opacity) >= 0.55
+          && rect.width >= 2
+          && rect.height >= 2;
+      });
+    const controlThemeOutliers = primaryColor ? visibleInteractive
+      .map((element) => {
+        const node = /** @type {HTMLElement} */ (element);
+        const classTokens = typeof node.className === 'string' ? node.className.split(/\s+/) : [];
+        const expectsSolidPrimary = classTokens.some((token) => primaryActionTokens.has(token));
+        const expectsPrimaryGradient = classTokens.some((token) => token === 'from-blue-500' || token === 'from-blue-600');
+        if (!expectsSolidPrimary && !expectsPrimaryGradient) return null;
+
+        const style = window.getComputedStyle(node);
+        const background = parseColor(style.backgroundColor);
+        const gradientColors = (style.backgroundImage.match(/rgba?\([^)]+\)|color\(srgb[^)]+\)/g) ?? [])
+          .map(parseColor)
+          .filter(Boolean);
+        const matchesTheme = expectsSolidPrimary
+          ? Boolean(background && colorDistance(background, primaryColor) <= 3)
+          : gradientColors.some((color) => colorDistance(color, primaryColor) <= 3);
+        if (matchesTheme) return null;
+
+        return {
+          tag: node.tagName.toLowerCase(),
+          className: classTokens.join(' ').slice(0, 160),
+          text: (node.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 80),
+          background: style.backgroundColor,
+          backgroundImage: style.backgroundImage.slice(0, 180),
+        };
+      })
+      .filter(Boolean)
       .slice(0, 20) : [];
 
     return {
@@ -531,6 +599,7 @@ async function checkPage({ page, frontendUrl, route, viewportName, themeName, ti
       url: window.location.href,
       theme: document.documentElement.dataset.payplannerTheme ?? '',
       lowContrast,
+      controlThemeOutliers,
       loadingLines,
     };
   });
@@ -549,6 +618,10 @@ async function checkPage({ page, frontendUrl, route, viewportName, themeName, ti
 
   if (metrics.lowContrast.length > 0) {
     failures.push(`low-contrast text: ${metrics.lowContrast.map((item) => `${item.tag} ratio=${item.ratio} fg=${item.foreground} bg=${item.background} class="${item.className}" text="${item.text}"`).join('; ')}`);
+  }
+
+  if (metrics.controlThemeOutliers.length > 0) {
+    failures.push(`primary controls outside the selected theme: ${metrics.controlThemeOutliers.map((item) => `${item.tag} bg=${item.background} image=${item.backgroundImage} class="${item.className}" text="${item.text}"`).join('; ')}`);
   }
 
   if (metrics.bodyLength < 20) {

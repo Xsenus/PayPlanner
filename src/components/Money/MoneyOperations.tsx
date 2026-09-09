@@ -5032,13 +5032,13 @@ export function MoneyOperations({
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <div className="rounded-xl border border-slate-200 bg-white p-4">
             <div className="text-sm text-slate-500">Баланс на начало</div>
-            <div className="text-lg font-semibold text-amber-500">{formatMoney(summary.startBalance)} ₽</div>
+            <div className="text-lg font-semibold text-amber-700">{formatMoney(summary.startBalance)} ₽</div>
             <div className="mt-3 h-0.5 w-full rounded-full bg-amber-400"></div>
             <div className="mt-2 text-xs text-slate-400">{formatDate(from)}</div>
           </div>
           <div className="rounded-xl border border-slate-200 bg-white p-4">
             <div className="text-sm text-slate-500">Приход Факт</div>
-            <div className="text-lg font-semibold text-cyan-500">{formatMoney(summary.income)} ₽</div>
+            <div className="text-lg font-semibold text-cyan-700">{formatMoney(summary.income)} ₽</div>
             <div className="mt-3 h-0.5 w-full rounded-full bg-cyan-400"></div>
             <div className="mt-2 text-xs text-slate-400">Всего поступлений: {summary.incomeCount}</div>
           </div>
@@ -5050,7 +5050,7 @@ export function MoneyOperations({
           </div>
           <div className="rounded-xl border border-slate-200 bg-white p-4">
             <div className="text-sm text-slate-500">Баланс на конец</div>
-            <div className="text-lg font-semibold text-amber-500">{formatMoney(summary.endBalance)} ₽</div>
+            <div className="text-lg font-semibold text-amber-700">{formatMoney(summary.endBalance)} ₽</div>
             <div className="mt-3 h-0.5 w-full rounded-full bg-amber-400"></div>
             <div className="mt-2 text-xs text-slate-400">{formatDate(to)}</div>
           </div>

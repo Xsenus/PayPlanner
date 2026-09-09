@@ -806,6 +806,157 @@ html[data-payplanner-theme] .recharts-cartesian-grid line {
   opacity: 0.7;
 }
 
+/* Interactive controls follow the selected palette even when legacy screens use
+   slate, indigo, violet, cyan or sky utilities for their primary actions. */
+html[data-payplanner-theme] :is(button, a, [role='button'], input[type='button'], input[type='submit']):is(
+  .bg-gray-800, .bg-gray-900,
+  .bg-slate-800, .bg-slate-900, .bg-slate-950,
+  .bg-sky-500, .bg-sky-600, .bg-sky-700,
+  .bg-cyan-500, .bg-cyan-600, .bg-cyan-700,
+  .bg-indigo-500, .bg-indigo-600, .bg-indigo-700,
+  .bg-violet-500, .bg-violet-600, .bg-violet-700,
+  .bg-purple-500, .bg-purple-600, .bg-purple-700
+) {
+  border-color: var(--pp-primary) !important;
+  background: var(--pp-primary) !important;
+  color: var(--pp-on-primary) !important;
+}
+
+html[data-payplanner-theme] :is(button, a, [role='button'], input[type='button'], input[type='submit']):is(
+  .bg-sky-50, .bg-sky-100,
+  .bg-cyan-50, .bg-cyan-100,
+  .bg-indigo-50, .bg-indigo-100,
+  .bg-violet-50, .bg-violet-100,
+  .bg-purple-50, .bg-purple-100
+) {
+  background: var(--pp-primary-soft) !important;
+  color: var(--pp-primary) !important;
+}
+
+html[data-payplanner-theme] :is(button, a, [role='button']):is(
+  .border-sky-100, .border-sky-200, .border-sky-300,
+  .border-cyan-100, .border-cyan-200, .border-cyan-300,
+  .border-indigo-100, .border-indigo-200, .border-indigo-300,
+  .border-violet-100, .border-violet-200, .border-violet-300,
+  .border-purple-100, .border-purple-200, .border-purple-300
+) {
+  border-color: color-mix(in srgb, var(--pp-primary) 48%, var(--pp-border)) !important;
+}
+
+html[data-payplanner-theme] :is(button, a, [role='button']):is(
+  .text-sky-500, .text-sky-600, .text-sky-700, .text-sky-800, .text-sky-900,
+  .text-cyan-500, .text-cyan-600, .text-cyan-700, .text-cyan-800, .text-cyan-900,
+  .text-indigo-500, .text-indigo-600, .text-indigo-700, .text-indigo-800, .text-indigo-900,
+  .text-violet-500, .text-violet-600, .text-violet-700, .text-violet-800, .text-violet-900,
+  .text-purple-500, .text-purple-600, .text-purple-700, .text-purple-800, .text-purple-900
+) {
+  color: var(--pp-primary) !important;
+}
+
+html[data-payplanner-theme] :is(button, a, [role='button']) :is(
+  .text-sky-500, .text-sky-600, .text-sky-700,
+  .text-cyan-500, .text-cyan-600, .text-cyan-700,
+  .text-indigo-500, .text-indigo-600, .text-indigo-700,
+  .text-violet-500, .text-violet-600, .text-violet-700,
+  .text-purple-500, .text-purple-600, .text-purple-700
+) { color: currentColor !important; }
+
+html[data-payplanner-theme] :is(button, a, [role='button']):is(
+  .bg-gray-800, .bg-gray-900,
+  .bg-slate-800, .bg-slate-900, .bg-slate-950,
+  .bg-blue-500, .bg-blue-600, .bg-blue-700,
+  .bg-sky-500, .bg-sky-600, .bg-sky-700,
+  .bg-cyan-500, .bg-cyan-600, .bg-cyan-700,
+  .bg-indigo-500, .bg-indigo-600, .bg-indigo-700,
+  .bg-violet-500, .bg-violet-600, .bg-violet-700,
+  .bg-purple-500, .bg-purple-600, .bg-purple-700
+) :is(.text-white, .text-slate-100, .text-slate-200, .text-slate-300, .text-slate-400) {
+  color: currentColor !important;
+}
+
+html[data-payplanner-theme] :is(button, a, [role='button'], input[type='button'], input[type='submit']):is(
+  .bg-gray-800, .bg-gray-900,
+  .bg-slate-800, .bg-slate-900, .bg-slate-950,
+  .bg-sky-500, .bg-sky-600, .bg-sky-700,
+  .bg-cyan-500, .bg-cyan-600, .bg-cyan-700,
+  .bg-indigo-500, .bg-indigo-600, .bg-indigo-700,
+  .bg-violet-500, .bg-violet-600, .bg-violet-700,
+  .bg-purple-500, .bg-purple-600, .bg-purple-700
+):hover {
+  background: var(--pp-primary-hover) !important;
+  color: var(--pp-on-primary) !important;
+}
+
+html[data-payplanner-theme] :is(button, a, [role='button']):not(:is(
+  .bg-gray-800, .bg-gray-900,
+  .bg-slate-800, .bg-slate-900, .bg-slate-950,
+  .bg-sky-500, .bg-sky-600, .bg-sky-700,
+  .bg-cyan-500, .bg-cyan-600, .bg-cyan-700,
+  .bg-indigo-500, .bg-indigo-600, .bg-indigo-700,
+  .bg-violet-500, .bg-violet-600, .bg-violet-700,
+  .bg-purple-500, .bg-purple-600, .bg-purple-700
+)):is(
+  [class*='hover:bg-slate-800'], [class*='hover:bg-slate-900'],
+  [class*='hover:bg-sky-'], [class*='hover:bg-cyan-'],
+  [class*='hover:bg-indigo-'], [class*='hover:bg-violet-'], [class*='hover:bg-purple-']
+):hover {
+  background-color: var(--pp-row-hover) !important;
+}
+
+html[data-payplanner-theme] :is(input, textarea, select)[class*='focus:border-sky-']:focus,
+html[data-payplanner-theme] :is(input, textarea, select)[class*='focus:border-cyan-']:focus,
+html[data-payplanner-theme] :is(input, textarea, select)[class*='focus:border-indigo-']:focus,
+html[data-payplanner-theme] :is(input, textarea, select)[class*='focus:border-violet-']:focus,
+html[data-payplanner-theme] :is(input, textarea, select)[class*='focus:border-purple-']:focus {
+  border-color: var(--pp-primary) !important;
+}
+
+html[data-payplanner-theme] :is(input, textarea, select)[class*='focus:ring-sky-']:focus,
+html[data-payplanner-theme] :is(input, textarea, select)[class*='focus:ring-cyan-']:focus,
+html[data-payplanner-theme] :is(input, textarea, select)[class*='focus:ring-indigo-']:focus,
+html[data-payplanner-theme] :is(input, textarea, select)[class*='focus:ring-violet-']:focus,
+html[data-payplanner-theme] :is(input, textarea, select)[class*='focus:ring-purple-']:focus {
+  --tw-ring-color: color-mix(in srgb, var(--pp-primary) 24%, transparent) !important;
+}
+
+html[data-payplanner-theme] [class*='from-blue-500'],
+html[data-payplanner-theme] [class*='from-blue-600'] {
+  background-color: var(--pp-primary) !important;
+  --tw-gradient-from: var(--pp-primary) var(--tw-gradient-from-position) !important;
+  --tw-gradient-to: color-mix(in srgb, var(--pp-primary) 0%, transparent) var(--tw-gradient-to-position) !important;
+}
+html[data-payplanner-theme] :is([class*='from-blue-500'], [class*='from-blue-600'])[class*='text-white'] {
+  color: var(--pp-on-primary) !important;
+}
+html[data-payplanner-theme] [class*='to-blue-600'],
+html[data-payplanner-theme] [class*='to-blue-700'] {
+  --tw-gradient-to: var(--pp-primary-hover) var(--tw-gradient-to-position) !important;
+}
+html[data-payplanner-theme] [class*='bg-blue-500/'] {
+  background-color: color-mix(in srgb, var(--pp-primary) 25%, transparent) !important;
+}
+html[data-payplanner-theme] [class*='shadow-blue-'] {
+  --tw-shadow-color: color-mix(in srgb, var(--pp-primary) 30%, transparent) !important;
+  --tw-shadow: var(--tw-shadow-colored) !important;
+}
+
+html[data-payplanner-theme] .pp-navigation-shell {
+  border-color: rgba(51, 65, 85, 0.72) !important;
+  background-color: #0f172a !important;
+  color: #e2e8f0;
+}
+html[data-payplanner-theme] .pp-navigation-shell .text-slate-200 { color: #e2e8f0 !important; }
+html[data-payplanner-theme] .pp-navigation-shell .text-slate-300 { color: #cbd5e1 !important; }
+html[data-payplanner-theme] .pp-navigation-shell .text-slate-400 { color: #94a3b8 !important; }
+html[data-payplanner-theme] .pp-navigation-shell .text-white { color: #f8fafc !important; }
+html[data-payplanner-theme] .pp-navigation-shell :is([class*='from-blue-500'], [class*='from-blue-600'])[class*='text-white'] {
+  color: var(--pp-on-primary) !important;
+}
+html[data-payplanner-theme] .pp-navigation-shell [class*='border-slate-700'] { border-color: rgba(51, 65, 85, 0.72) !important; }
+html[data-payplanner-theme] .pp-navigation-shell :is(button, a, [role='button'])[class*='hover:bg-slate-800']:hover {
+  background-color: rgba(30, 41, 59, 0.72) !important;
+}
+
 @media (max-width: 1279.98px) {
   .pp-task-journal-table th:nth-child(5),
   .pp-task-journal-table td:nth-child(5),

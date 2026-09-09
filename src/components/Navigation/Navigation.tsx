@@ -1038,7 +1038,7 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
 
       <aside
         className={[
-          'fixed left-0 top-0 z-40 h-screen',
+          'pp-navigation-shell fixed left-0 top-0 z-40 h-screen',
           'flex flex-col transition-all duration-300 ease-in-out',
           'bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900',
           'border-r border-slate-700/50',
