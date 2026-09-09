@@ -149,6 +149,21 @@ describe('AppSettings', () => {
     expect(screen.getByTestId('settings-content').className).toContain('space-y-3');
   });
 
+  it('uses the selected CRM theme for every settings menu group', () => {
+    const { container } = render(<AppSettings initialSection="companies" />);
+
+    const sidebar = screen.getByTestId('settings-sidebar');
+    const groups = Array.from(sidebar.querySelectorAll('.pp-settings-group'));
+    const activeItem = screen.getByRole('button', { name: /Основные компании/i });
+
+    expect(sidebar.className).toContain('pp-settings-sidebar');
+    expect(groups).toHaveLength(3);
+    expect(groups.every((group) => group.querySelector('.pp-settings-group-header'))).toBe(true);
+    expect(groups.every((group) => group.querySelector('.pp-settings-group-icon'))).toBe(true);
+    expect(activeItem.className).toContain('pp-settings-nav-item-active');
+    expect(container.innerHTML).not.toMatch(/(?:border|bg|text)-(?:sky|violet|emerald)-(?:50|100|200|600|700|900)/);
+  });
+
   it('shows masked DaData credentials in password inputs', async () => {
     render(<AppSettings initialSection="integrations" />);
 

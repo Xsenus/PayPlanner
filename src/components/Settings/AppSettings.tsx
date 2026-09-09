@@ -82,6 +82,9 @@ const SHOW_LEGACY_SQLITE_IMPORT = false;
 const SETTINGS_SECTION_PARAM = 'settingsSection';
 const NOTIFICATION_CHANNEL_PARAM = 'notificationChannel';
 const NOTIFICATION_SENDER_PARAM = 'notificationSender';
+const SETTINGS_NAV_ITEM_CLASS = 'pp-settings-nav-item w-full rounded-xl border px-3 py-3 text-left text-sm font-semibold transition';
+const settingsNavItemClass = (isActive: boolean) =>
+  `${SETTINGS_NAV_ITEM_CLASS} ${isActive ? 'pp-settings-nav-item-active shadow-sm' : 'border-transparent'}`;
 const SETTINGS_SECTIONS: SettingsSection[] = [
   'companies',
   'tasks',
@@ -811,11 +814,11 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
         <div data-testid="settings-workspace" className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-[280px_minmax(0,1fr)]">
           <aside
             data-testid="settings-sidebar"
-            className="flex flex-col rounded-3xl border border-gray-200 bg-white p-3 shadow-sm lg:sticky lg:top-4 lg:max-h-[calc(100vh-8rem)] lg:self-start lg:overflow-hidden"
+            className="pp-settings-sidebar flex flex-col rounded-3xl border p-3 shadow-sm lg:sticky lg:top-4 lg:max-h-[calc(100vh-8rem)] lg:self-start lg:overflow-hidden"
           >
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3">
-              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Панель настроек</div>
-              <h2 className="mt-2 text-xl font-semibold text-slate-900">Структура разделов</h2>
+            <div className="pp-settings-sidebar-heading rounded-2xl border px-3 py-3">
+              <div className="pp-settings-sidebar-kicker text-xs font-semibold uppercase tracking-[0.18em]">Панель настроек</div>
+              <h2 className="pp-settings-sidebar-title mt-2 text-xl font-semibold">Структура разделов</h2>
             </div>
 
             <nav
@@ -824,36 +827,28 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
               className="mt-3 min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain pr-1"
             >
               {!restrictedSettingsMode && (
-              <div className="rounded-2xl border border-sky-200 bg-gradient-to-br from-sky-50 to-white p-3 shadow-sm">
-                <div className="flex items-center gap-3 rounded-xl border border-sky-100 bg-white/90 px-3 py-3 shadow-sm">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-100 text-sky-700">
+              <div className="pp-settings-group rounded-2xl border p-3 shadow-sm">
+                <div className="pp-settings-group-header flex items-center gap-3 rounded-xl border px-3 py-3 shadow-sm">
+                  <div className="pp-settings-group-icon flex h-10 w-10 items-center justify-center rounded-xl">
                     <SlidersHorizontal className="h-5 w-5" />
                   </div>
                   <div className="min-w-0">
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-sky-600">Раздел</div>
-                    <div className="text-sm font-semibold text-slate-900">Операционная модель</div>
+                    <div className="pp-settings-group-kicker text-[11px] font-semibold uppercase tracking-[0.18em]">Раздел</div>
+                    <div className="pp-settings-group-title text-sm font-semibold">Операционная модель</div>
                   </div>
                 </div>
                 <div className="mt-3 space-y-2">
                   <button
                     type="button"
                     onClick={() => selectSection('companies')}
-                    className={`w-full rounded-xl border px-3 py-3 text-left text-sm font-semibold transition ${
-                      activeSection === 'companies'
-                        ? 'border-sky-200 bg-sky-100 text-sky-900 shadow-sm'
-                        : 'border-transparent bg-white text-gray-700 hover:border-sky-100 hover:bg-sky-50/60'
-                    }`}
+                    className={settingsNavItemClass(activeSection === 'companies')}
                   >
                     Основные компании
                   </button>
                   <button
                     type="button"
                     onClick={() => selectSection('tasks')}
-                    className={`w-full rounded-xl border px-3 py-3 text-left text-sm font-semibold transition ${
-                      activeSection === 'tasks'
-                        ? 'border-sky-200 bg-sky-100 text-sky-900 shadow-sm'
-                        : 'border-transparent bg-white text-gray-700 hover:border-sky-100 hover:bg-sky-50/60'
-                    }`}
+                    className={settingsNavItemClass(activeSection === 'tasks')}
                   >
                     <span className="inline-flex items-center gap-2">
                       <ClipboardList className="h-4 w-4" />
@@ -863,11 +858,7 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
                   <button
                     type="button"
                     onClick={() => selectSection('appearance')}
-                    className={`w-full rounded-xl border px-3 py-3 text-left text-sm font-semibold transition ${
-                      activeSection === 'appearance'
-                        ? 'border-sky-200 bg-sky-100 text-sky-900 shadow-sm'
-                        : 'border-transparent bg-white text-gray-700 hover:border-sky-100 hover:bg-sky-50/60'
-                    }`}
+                    className={settingsNavItemClass(activeSection === 'appearance')}
                   >
                     <span className="inline-flex items-center gap-2">
                       <Palette className="h-4 w-4" />
@@ -877,22 +868,14 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
                   <button
                     type="button"
                     onClick={() => selectSection('general')}
-                    className={`w-full rounded-xl border px-3 py-3 text-left text-sm font-semibold transition ${
-                      activeSection === 'general'
-                        ? 'border-sky-200 bg-sky-100 text-sky-900 shadow-sm'
-                        : 'border-transparent bg-white text-gray-700 hover:border-sky-100 hover:bg-sky-50/60'
-                    }`}
+                    className={settingsNavItemClass(activeSection === 'general')}
                   >
                     Финансовые правила
                   </button>
                   <button
                     type="button"
                     onClick={() => selectSection('form-requirements')}
-                    className={`w-full rounded-xl border px-3 py-3 text-left text-sm font-semibold transition ${
-                      activeSection === 'form-requirements'
-                        ? 'border-sky-200 bg-sky-100 text-sky-900 shadow-sm'
-                        : 'border-transparent bg-white text-gray-700 hover:border-sky-100 hover:bg-sky-50/60'
-                    }`}
+                    className={settingsNavItemClass(activeSection === 'form-requirements')}
                   >
                     Правила заполнения форм
                   </button>
@@ -901,14 +884,14 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
               )}
 
               {(!restrictedSettingsMode || canViewIntegrationSettings || canViewNotificationSettings || canViewYandexDiskSettings || canViewS3StorageSettings) && (
-              <div className="rounded-2xl border border-violet-200 bg-gradient-to-br from-violet-50 to-white p-3 shadow-sm">
-                <div className="flex items-center gap-3 rounded-xl border border-violet-100 bg-white/90 px-3 py-3 shadow-sm">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-100 text-violet-700">
+              <div className="pp-settings-group rounded-2xl border p-3 shadow-sm">
+                <div className="pp-settings-group-header flex items-center gap-3 rounded-xl border px-3 py-3 shadow-sm">
+                  <div className="pp-settings-group-icon flex h-10 w-10 items-center justify-center rounded-xl">
                     <ShieldCheck className="h-5 w-5" />
                   </div>
                   <div className="min-w-0">
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-violet-600">Раздел</div>
-                    <div className="text-sm font-semibold text-slate-900">Интеграции и доступ</div>
+                    <div className="pp-settings-group-kicker text-[11px] font-semibold uppercase tracking-[0.18em]">Раздел</div>
+                    <div className="pp-settings-group-title text-sm font-semibold">Интеграции и доступ</div>
                   </div>
                 </div>
                 <div className="mt-3 space-y-2">
@@ -916,11 +899,7 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
                   <button
                     type="button"
                     onClick={() => selectSection('integrations')}
-                    className={`w-full rounded-xl border px-3 py-3 text-left text-sm font-semibold transition ${
-                      activeSection === 'integrations'
-                        ? 'border-violet-200 bg-violet-100 text-violet-900 shadow-sm'
-                        : 'border-transparent bg-white text-gray-700 hover:border-violet-100 hover:bg-violet-50/60'
-                    }`}
+                    className={settingsNavItemClass(activeSection === 'integrations')}
                   >
                     Ключи интеграций
                   </button>
@@ -929,11 +908,7 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
                   <button
                     type="button"
                     onClick={() => selectSection('notifications')}
-                    className={`w-full rounded-xl border px-3 py-3 text-left text-sm font-semibold transition ${
-                      activeSection === 'notifications'
-                        ? 'border-violet-200 bg-violet-100 text-violet-900 shadow-sm'
-                        : 'border-transparent bg-white text-gray-700 hover:border-violet-100 hover:bg-violet-50/60'
-                    }`}
+                    className={settingsNavItemClass(activeSection === 'notifications')}
                   >
                     <span className="inline-flex items-center gap-2">
                       <Bell className="h-4 w-4" />
@@ -945,11 +920,7 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
                   <button
                     type="button"
                     onClick={() => selectSection('yandex-disk')}
-                    className={`w-full rounded-xl border px-3 py-3 text-left text-sm font-semibold transition ${
-                      activeSection === 'yandex-disk'
-                        ? 'border-violet-200 bg-violet-100 text-violet-900 shadow-sm'
-                        : 'border-transparent bg-white text-gray-700 hover:border-violet-100 hover:bg-violet-50/60'
-                    }`}
+                    className={settingsNavItemClass(activeSection === 'yandex-disk')}
                   >
                     <span className="inline-flex items-center gap-2">
                       <Cloud className="h-4 w-4" />
@@ -961,11 +932,7 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
                   <button
                     type="button"
                     onClick={() => selectSection('s3-storage')}
-                    className={`w-full rounded-xl border px-3 py-3 text-left text-sm font-semibold transition ${
-                      activeSection === 's3-storage'
-                        ? 'border-violet-200 bg-violet-100 text-violet-900 shadow-sm'
-                        : 'border-transparent bg-white text-gray-700 hover:border-violet-100 hover:bg-violet-50/60'
-                    }`}
+                    className={settingsNavItemClass(activeSection === 's3-storage')}
                   >
                     <span className="inline-flex items-center gap-2">
                       <Cloud className="h-4 w-4" />
@@ -978,11 +945,7 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
                   <button
                     type="button"
                     onClick={() => selectSection('app-releases')}
-                    className={`w-full rounded-xl border px-3 py-3 text-left text-sm font-semibold transition ${
-                      activeSection === 'app-releases'
-                        ? 'border-violet-200 bg-violet-100 text-violet-900 shadow-sm'
-                        : 'border-transparent bg-white text-gray-700 hover:border-violet-100 hover:bg-violet-50/60'
-                    }`}
+                    className={settingsNavItemClass(activeSection === 'app-releases')}
                   >
                     <span className="inline-flex items-center gap-2">
                       <History className="h-4 w-4" />
@@ -992,11 +955,7 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
                   <button
                     type="button"
                     onClick={() => selectSection('auth-providers')}
-                    className={`w-full rounded-xl border px-3 py-3 text-left text-sm font-semibold transition ${
-                      activeSection === 'auth-providers'
-                        ? 'border-violet-200 bg-violet-100 text-violet-900 shadow-sm'
-                        : 'border-transparent bg-white text-gray-700 hover:border-violet-100 hover:bg-violet-50/60'
-                    }`}
+                    className={settingsNavItemClass(activeSection === 'auth-providers')}
                   >
                     Авторизация и вход
                   </button>
@@ -1006,11 +965,7 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
                     <button
                       type="button"
                       onClick={() => selectSection('users-online')}
-                      className={`w-full rounded-xl border px-3 py-3 text-left text-sm font-semibold transition ${
-                        activeSection === 'users-online'
-                          ? 'border-violet-200 bg-violet-100 text-violet-900 shadow-sm'
-                          : 'border-transparent bg-white text-gray-700 hover:border-violet-100 hover:bg-violet-50/60'
-                      }`}
+                      className={settingsNavItemClass(activeSection === 'users-online')}
                     >
                       <span className="inline-flex items-center gap-2">
                         <Users className="h-4 w-4" />
@@ -1023,25 +978,21 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
               )}
 
               {(!restrictedSettingsMode || canViewMaintenanceSettings) && (
-              <div className="rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white p-3 shadow-sm">
-                <div className="flex items-center gap-3 rounded-xl border border-emerald-100 bg-white/90 px-3 py-3 shadow-sm">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700">
+              <div className="pp-settings-group rounded-2xl border p-3 shadow-sm">
+                <div className="pp-settings-group-header flex items-center gap-3 rounded-xl border px-3 py-3 shadow-sm">
+                  <div className="pp-settings-group-icon flex h-10 w-10 items-center justify-center rounded-xl">
                     <Database className="h-5 w-5" />
                   </div>
                   <div className="min-w-0">
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-600">Раздел</div>
-                    <div className="text-sm font-semibold text-slate-900">База данных и обслуживание</div>
+                    <div className="pp-settings-group-kicker text-[11px] font-semibold uppercase tracking-[0.18em]">Раздел</div>
+                    <div className="pp-settings-group-title text-sm font-semibold">База данных и обслуживание</div>
                   </div>
                 </div>
                 <div className="mt-3 space-y-2">
                   <button
                     type="button"
                     onClick={() => selectSection('db-maintenance')}
-                    className={`w-full rounded-xl border px-3 py-3 text-left text-sm font-semibold transition ${
-                      activeSection === 'db-maintenance'
-                        ? 'border-emerald-200 bg-emerald-100 text-emerald-900 shadow-sm'
-                        : 'border-transparent bg-white text-gray-700 hover:border-emerald-100 hover:bg-emerald-50/60'
-                    }`}
+                    className={settingsNavItemClass(activeSection === 'db-maintenance')}
                   >
                     Обслуживание
                   </button>
@@ -1050,22 +1001,14 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
                   <button
                     type="button"
                     onClick={() => selectSection('db-operations')}
-                    className={`w-full rounded-xl border px-3 py-3 text-left text-sm font-semibold transition ${
-                      activeSection === 'db-operations'
-                        ? 'border-emerald-200 bg-emerald-100 text-emerald-900 shadow-sm'
-                        : 'border-transparent bg-white text-gray-700 hover:border-emerald-100 hover:bg-emerald-50/60'
-                    }`}
+                    className={settingsNavItemClass(activeSection === 'db-operations')}
                   >
                     Операции по разделам
                   </button>
                   <button
                     type="button"
                     onClick={() => selectSection('db-import')}
-                    className={`w-full rounded-xl border px-3 py-3 text-left text-sm font-semibold transition ${
-                      activeSection === 'db-import'
-                        ? 'border-emerald-200 bg-emerald-100 text-emerald-900 shadow-sm'
-                        : 'border-transparent bg-white text-gray-700 hover:border-emerald-100 hover:bg-emerald-50/60'
-                    }`}
+                    className={settingsNavItemClass(activeSection === 'db-import')}
                   >
                     Импорт данных
                   </button>
