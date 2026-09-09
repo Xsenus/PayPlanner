@@ -20,9 +20,9 @@ public sealed class NavigationSettingsController : ControllerBase
 
     private static readonly string[] DefaultOrder =
     [
-        "calendar", "notifications", "tasks", "notes", "reports", "calculator",
+        "workspace", "calendar", "notifications", "tasks", "notes", "reports", "calculator",
         "legalEntities", "clients", "cases", "contacts", "accounts", "installments",
-        "money", "payments", "acts", "contracts", "dictionaries", "users", "roles",
+        "money", "payments", "acts", "contracts", "payroll", "dictionaries", "users", "roles",
         "audit", "userActivity", "settings",
     ];
 
@@ -150,8 +150,21 @@ public sealed class NavigationSettingsController : ControllerBase
             .Where(knownRootIds.Contains)
             .Distinct(StringComparer.Ordinal)
             .ToList();
+        var requestedRootIds = normalizedOrder.ToHashSet(StringComparer.Ordinal);
         normalizedOrder.AddRange(DefaultOrder.Where(itemId => knownRootIds.Contains(itemId) && !normalizedOrder.Contains(itemId, StringComparer.Ordinal)));
         normalizedOrder.AddRange(normalizedGroups.Select(group => group.Id).Where(groupId => !normalizedOrder.Contains(groupId, StringComparer.Ordinal)));
+
+        if (knownRootIds.Contains("workspace") && !requestedRootIds.Contains("workspace"))
+        {
+            normalizedOrder.Remove("workspace");
+            normalizedOrder.Insert(0, "workspace");
+        }
+
+        if (knownRootIds.Contains("payroll") && !requestedRootIds.Contains("payroll"))
+        {
+            normalizedOrder.Remove("payroll");
+            InsertPayroll(normalizedOrder);
+        }
 
         var normalizedLabels = (labels ?? new Dictionary<string, string>())
             .Where(pair => KnownItemIds.Contains(pair.Key) && !string.IsNullOrWhiteSpace(pair.Value))
@@ -161,6 +174,20 @@ public sealed class NavigationSettingsController : ControllerBase
                 StringComparer.Ordinal);
 
         return new NavigationSettingsDto(normalizedOrder, normalizedLabels, normalizedGroups, updatedAt);
+    }
+
+    private static void InsertPayroll(List<string> order)
+    {
+        var accountingGroupIndex = order.IndexOf("group-accounting");
+        if (accountingGroupIndex >= 0)
+        {
+            order.Insert(accountingGroupIndex + 1, "payroll");
+            return;
+        }
+
+        var financeIds = new[] { "accounts", "installments", "money", "payments", "acts", "contracts" };
+        var financeIndex = order.FindLastIndex(financeIds.Contains);
+        order.Insert(financeIndex >= 0 ? financeIndex + 1 : order.Count, "payroll");
     }
 
     private static bool IsValidGroupId(string groupId)

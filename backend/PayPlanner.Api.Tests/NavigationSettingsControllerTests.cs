@@ -31,7 +31,9 @@ public sealed class NavigationSettingsControllerTests
         var dto = AssertOk(await controller.Get(CancellationToken.None));
 
         Assert.Empty(dto.Groups);
-        Assert.Equal("tasks", dto.Order[0]);
+        Assert.Equal("workspace", dto.Order[0]);
+        Assert.Equal("tasks", dto.Order[1]);
+        Assert.Contains("payroll", dto.Order);
         Assert.Equal("Рабочие задачи", dto.Labels["tasks"]);
     }
 
@@ -57,8 +59,9 @@ public sealed class NavigationSettingsControllerTests
             CancellationToken.None);
 
         var dto = AssertOk(result);
-        Assert.Equal("tasks", dto.Order[0]);
-        Assert.Equal("calendar", dto.Order[1]);
+        Assert.Equal("workspace", dto.Order[0]);
+        Assert.Equal("tasks", dto.Order[1]);
+        Assert.Equal("calendar", dto.Order[2]);
         Assert.Equal("Рабочие задачи", dto.Labels["tasks"]);
         Assert.DoesNotContain("unknown", dto.Order);
         Assert.False(dto.Labels.ContainsKey("unknown"));
@@ -68,6 +71,8 @@ public sealed class NavigationSettingsControllerTests
         Assert.Equal(["accounts", "acts"], group.ItemIds);
         Assert.DoesNotContain("accounts", dto.Order);
         Assert.Contains("group-accounting", dto.Order);
+        var persistedOrder = dto.Order.ToArray();
+        Assert.Equal(Array.IndexOf(persistedOrder, "group-accounting") + 1, Array.IndexOf(persistedOrder, "payroll"));
         Assert.Single(await db.SystemSettings.AsNoTracking().ToListAsync());
     }
 

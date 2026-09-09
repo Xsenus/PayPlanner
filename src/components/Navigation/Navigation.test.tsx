@@ -161,6 +161,8 @@ describe('Navigation links', () => {
 
     expect(screen.getByRole('complementary', { name: 'Навигация' })).toBeTruthy();
     expect(screen.getByRole('navigation', { name: 'Навигация' })).toBeTruthy();
+    expect(findLinkByHref(getTabHref('workspace'))).toBeTruthy();
+    expect(findLinkByHref(getTabHref('payroll'))).toBeTruthy();
     expect(findLinkByHref(getTabHref('calendar'))).toBeTruthy();
     expect(findLinkByHref(getTabHref('notifications'))).toBeTruthy();
     expect(findLinkByHref(getTabHref('tasksApprovals'))).toBeTruthy();
@@ -234,7 +236,8 @@ describe('Navigation links', () => {
 
     await waitFor(() => expect(apiMock.updateNavigationSettings).toHaveBeenCalled());
     const [order, labels, groups] = apiMock.updateNavigationSettings.mock.calls.at(-1)!;
-    expect(order[0]).toBe('notifications');
+    expect(order[0]).toBe('workspace');
+    expect(order[1]).toBe('notifications');
     expect(labels.calendar).toBe('Расписание');
     expect(groups).toEqual([]);
     expect(await screen.findByRole('link', { name: /Расписание/i })).toBeTruthy();
@@ -267,7 +270,8 @@ describe('Navigation links', () => {
     const [order, , groups] = apiMock.updateNavigationSettings.mock.calls.at(-1)!;
     const group = groups.find((candidate) => candidate.name === 'Бухгалтерия');
     expect(group?.itemIds).toEqual(['accounts', 'acts']);
-    expect(order[0]).toBe(group?.id);
+    expect(order[0]).toBe('workspace');
+    expect(order[1]).toBe(group?.id);
     expect(order).not.toContain('accounts');
     expect(order).not.toContain('acts');
     expect(await screen.findByRole('button', { name: /Бухгалтерия/i })).toBeTruthy();
@@ -325,6 +329,7 @@ describe('Navigation links', () => {
     await waitForNavigationPermissions();
 
     const visibleTabs: Tab[] = [
+      'workspace',
       'calendar',
       'notifications',
       'tasks',
@@ -337,6 +342,7 @@ describe('Navigation links', () => {
       'settings',
     ];
     const hiddenTabs: Tab[] = [
+      'payroll',
       'notes',
       'reports',
       'calculator',

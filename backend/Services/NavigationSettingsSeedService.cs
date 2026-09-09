@@ -11,9 +11,9 @@ public static class NavigationSettingsSeedService
 
     private static readonly string[] DefaultOrder =
     [
-        "calendar", "notifications", "tasks", "notes", "reports", "calculator",
+        "workspace", "calendar", "notifications", "tasks", "notes", "reports", "calculator",
         "legalEntities", "clients", "cases", "contacts", "accounts", "installments",
-        "money", "payments", "acts", "contracts", "dictionaries", "users", "roles",
+        "money", "payments", "acts", "contracts", "payroll", "dictionaries", "users", "roles",
         "audit", "userActivity", "settings",
     ];
 
@@ -43,7 +43,25 @@ public static class NavigationSettingsSeedService
 
             if (stored?.Groups is { Count: > 0 })
             {
-                return false;
+                var configuredOrder = (stored.Order ?? []).Distinct(StringComparer.Ordinal).ToList();
+                var assignedItemIds = stored.Groups
+                    .SelectMany(group => group.ItemIds)
+                    .ToHashSet(StringComparer.Ordinal);
+                var changed = EnsureRequiredSections(configuredOrder, assignedItemIds);
+                if (!changed)
+                {
+                    return false;
+                }
+
+                setting.Value = JsonSerializer.Serialize(
+                    new StoredNavigationSettings(
+                        configuredOrder,
+                        stored.Labels ?? new Dictionary<string, string>(),
+                        stored.Groups),
+                    JsonOptions);
+                setting.UpdatedAt = DateTime.UtcNow;
+                await db.SaveChangesAsync(ct);
+                return true;
             }
         }
 
@@ -71,6 +89,15 @@ public static class NavigationSettingsSeedService
             if (insertedGroups.Add(group.Id)) order.Add(group.Id);
         }
 
+        var sourceItems = sourceOrder.ToHashSet(StringComparer.Ordinal);
+        if (!sourceItems.Contains("workspace"))
+        {
+            order.Remove("workspace");
+            order.Insert(0, "workspace");
+        }
+        order.Remove("payroll");
+        InsertPayroll(order);
+
         var value = JsonSerializer.Serialize(
             new StoredNavigationSettings(order, stored?.Labels ?? new Dictionary<string, string>(), DefaultGroups),
             JsonOptions);
@@ -93,6 +120,38 @@ public static class NavigationSettingsSeedService
 
         await db.SaveChangesAsync(ct);
         return true;
+    }
+
+    private static bool EnsureRequiredSections(List<string> order, IReadOnlySet<string> assignedItemIds)
+    {
+        var changed = false;
+        if (!assignedItemIds.Contains("workspace") && !order.Contains("workspace", StringComparer.Ordinal))
+        {
+            order.Insert(0, "workspace");
+            changed = true;
+        }
+
+        if (!assignedItemIds.Contains("payroll") && !order.Contains("payroll", StringComparer.Ordinal))
+        {
+            InsertPayroll(order);
+            changed = true;
+        }
+
+        return changed;
+    }
+
+    private static void InsertPayroll(List<string> order)
+    {
+        var accountingGroupIndex = order.IndexOf("group-accounting");
+        if (accountingGroupIndex >= 0)
+        {
+            order.Insert(accountingGroupIndex + 1, "payroll");
+            return;
+        }
+
+        var financeIds = new[] { "accounts", "installments", "money", "payments", "acts", "contracts" };
+        var financeIndex = order.FindLastIndex(financeIds.Contains);
+        order.Insert(financeIndex >= 0 ? financeIndex + 1 : order.Count, "payroll");
     }
 
     private sealed record NavigationGroupSeed(string Id, string Name, IReadOnlyList<string> ItemIds);

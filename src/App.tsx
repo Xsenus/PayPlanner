@@ -88,6 +88,7 @@ type PaymentReturnContext = { tab: 'userDetail'; userId: number };
 type UserDetailInitialSection = 'main' | 'contractorBalance';
 
 const TABS_WITH_QUERY_ROUTE = new Set<Tab>([
+  'workspace',
   'calendar',
   'accountsIncome',
   'accountsExpense',
@@ -108,6 +109,7 @@ const TABS_WITH_QUERY_ROUTE = new Set<Tab>([
   'moneyCards',
   'moneyEMoney',
   'moneyTotal',
+  'payroll',
   'contractCreate',
   'companyProfile',
   'profile',
@@ -228,6 +230,8 @@ const CompanyProfile = lazy(() => import('./components/CompanyProfile/CompanyPro
 const AppSettings = lazy(() => import('./components/Settings/AppSettings').then((module) => ({ default: module.AppSettings })));
 const ProfilePage = lazy(() => import('./components/Profile/ProfilePage').then((module) => ({ default: module.ProfilePage })));
 const StickyNotes = lazy(() => import('./components/Notes/StickyNotes').then((module) => ({ default: module.StickyNotes })));
+const WorkspaceSection = lazy(() => import('./components/PlannedSections/PlannedSections').then((module) => ({ default: module.WorkspaceSection })));
+const PayrollSection = lazy(() => import('./components/PlannedSections/PlannedSections').then((module) => ({ default: module.PayrollSection })));
 
 function ActiveTabContent({ render }: { render: () => ReactNode }) {
   return <>{render()}</>;
@@ -249,6 +253,7 @@ function AppContent() {
 
   const tabNames: Record<string, string> = useMemo(
     () => ({
+      workspace: 'Рабочий стол',
       notifications: 'Центр уведомлений',
       calendar: 'Календарь',
       tasks: 'Журнал задач',
@@ -284,6 +289,7 @@ function AppContent() {
       moneyCards: 'Деньги: карты',
       moneyEMoney: 'Деньги: электронные деньги',
       moneyTotal: 'Деньги: итого',
+      payroll: 'Зарплата',
       contracts: 'Договоры',
       contractCreate: 'Новый договор',
       contractDetail: 'Договор',
@@ -350,6 +356,7 @@ function AppContent() {
   const accessibleMenuTabs = useMemo(
     () =>
       [
+        { tab: 'workspace' as Tab, allowed: true },
         { tab: 'calendar' as Tab, allowed: permissions.calendar.canView },
         { tab: 'tasks' as Tab, allowed: permissions.tasks.canView },
         { tab: 'tasksControl' as Tab, allowed: permissions.tasks.canView },
@@ -381,6 +388,7 @@ function AppContent() {
         { tab: 'moneyCards' as Tab, allowed: permissions.payments.canView },
         { tab: 'moneyEMoney' as Tab, allowed: permissions.payments.canView },
         { tab: 'moneyTotal' as Tab, allowed: permissions.payments.canView },
+        { tab: 'payroll' as Tab, allowed: isAdminRole },
         { tab: 'contracts' as Tab, allowed: permissions.contracts.canView },
         { tab: 'dictionaries' as Tab, allowed: permissions.dictionaries.canView },
         { tab: 'users' as Tab, allowed: isAdminRole },
@@ -1162,6 +1170,9 @@ function AppContent() {
 
   const renderContent = () => {
     switch (activeTab) {
+      case 'workspace':
+        return <WorkspaceSection />;
+
       case 'calendar':
         return permissions.calendar.canView
           ? <Calendar onOpenClient={handleOpenCalendarClient} onOpenUser={isAdminRole ? handleEditUser : undefined} />
@@ -1179,6 +1190,11 @@ function AppContent() {
             onOpenContract={permissions.contracts.canView ? (contractId) => openContractDetail(contractId, { returnTo: 'notifications' }) : undefined}
           />
         );
+
+      case 'payroll':
+        return isAdminRole
+          ? <PayrollSection />
+          : renderNoAccess('Раздел зарплаты доступен только администратору.');
 
       case 'tasks':
         return permissions.tasks.canView

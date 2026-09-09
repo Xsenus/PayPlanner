@@ -1,4 +1,5 @@
 export const ALL_TABS = [
+  'workspace',
   'calendar',
   'notifications',
   'tasks',
@@ -33,6 +34,7 @@ export const ALL_TABS = [
   'moneyCards',
   'moneyEMoney',
   'moneyTotal',
+  'payroll',
   'contracts',
   'contractCreate',
   'contractDetail',

@@ -5,10 +5,10 @@
 
 ## Сводка
 
-- Разделов frontend: 49.
-- Backend-контроллеров: 67.
-- HTTP endpoints: 807; с прямой тестовой связью: 540.
-- HTTP endpoints с точной ссылкой из документации: 185; критичных без такой ссылки: 483.
+- Разделов frontend: 51.
+- Backend-контроллеров: 68.
+- HTTP endpoints: 809; с прямой тестовой связью: 542.
+- HTTP endpoints с точной ссылкой из документации: 185; критичных без такой ссылки: 485.
 - Критичных endpoints без прямой тестовой связи: 224.
 - Реальных HTML-форм: 17; с найденной тестовой связью: 15.
 - Фоновых сервисов: 27; с найденной тестовой связью: 24.
@@ -18,6 +18,7 @@
 
 | Раздел | Правило доступа | Тестовая связь | Документация |
 | --- | --- | --- | --- |
+| workspace | () => true | да | docs/full-project-audit-2026-06-10.md, README.md |
 | notifications | () => true | да | docs/deploy-runbook.md, docs/full-project-audit-2026-06-10.md, docs/task-critical-events-matrix-2026-07-09.md, docs/task-critical-notifications-audit-2026-07-09.md, docs/tz-crm-acceptance-baseline-roadmap-2026-07-08.md, docs/tz-crm-release-stability-roadmap-2026-07-08.md |
 | profile | () => true | да | docs/full-project-audit-2026-06-10.md |
 | calendar | (permissions) => permissions.calendar.canView | да | docs/date-time-inventory.md, docs/final-acceptance-2026-06-10.md, docs/full-project-audit-2026-06-10.md, docs/legal-feature-flag-ci-gate-2026-06-10.md |
@@ -54,6 +55,7 @@
 | moneyCards | (permissions) => permissions.payments.canView | да | docs/full-project-audit-2026-06-10.md |
 | moneyEMoney | (permissions) => permissions.payments.canView | да | docs/full-project-audit-2026-06-10.md |
 | moneyTotal | (permissions) => permissions.payments.canView | да | docs/full-project-audit-2026-06-10.md |
+| payroll | (_permissions, options) => options.isAdminRole === true | да | нет |
 | contracts | (permissions) => permissions.contracts.canView | да | docs/final-acceptance-2026-06-10.md, docs/full-project-audit-2026-06-10.md |
 | contractCreate | (permissions) => permissions.contracts.canView && permissions.contracts.canCreate | да | docs/full-project-audit-2026-06-10.md |
 | contractDetail | (permissions) => permissions.contracts.canView | да | docs/full-project-audit-2026-06-10.md |
@@ -144,6 +146,7 @@
 | AccountsController | backend/Controllers/AccountsController.cs | 3 | [Authorize] | да |
 | ActsController | backend/Controllers/ActsController.cs | 21 | [Authorize] | да |
 | AdminUsersController | backend/Controllers/AdminUsersController.cs | 8 | [Authorize(Policy = "Admin")] | да |
+| AppearanceSettingsController | backend/Controllers/AppearanceSettingsController.cs | 2 | [Authorize] | да |
 | AppVersionController | backend/Controllers/AppVersionController.cs | 8 | [Authorize] | да |
 | AuthController | backend/Controllers/AuthController.cs | 5 | не задано | да |
 | AuthProvidersAdminController | backend/Controllers/AuthProvidersAdminController.cs | 8 | [Authorize(Policy = "Admin")] | да |
@@ -493,6 +496,8 @@
 | POST | api/auth/admin/users/{id:int}/approve | AdminUsersController | ApproveUser | backend/Controllers/AdminUsersController.cs:146 | [Authorize(Policy = "Admin")] | нет | нет |
 | POST | api/auth/admin/users/{id:int}/reject | AdminUsersController | RejectUser | backend/Controllers/AdminUsersController.cs:159 | [Authorize(Policy = "Admin")] | нет | нет |
 | GET | api/auth/admin/roles | AdminUsersController | GetRoles | backend/Controllers/AdminUsersController.cs:192 | [Authorize(Policy = "Admin")] | нет | нет |
+| GET | api/appearance-settings | AppearanceSettingsController | Get | backend/Controllers/AppearanceSettingsController.cs:39 | [Authorize] | да | нет |
+| PUT | api/appearance-settings | AppearanceSettingsController | Update | backend/Controllers/AppearanceSettingsController.cs:53 | [Authorize] | да | нет |
 | GET | api/app-version/latest | AppVersionController | GetLatest | backend/Controllers/AppVersionController.cs:49 | [Authorize] | да | нет |
 | GET | api/app-version/history | AppVersionController | GetHistory | backend/Controllers/AppVersionController.cs:82 | [Authorize] | да | нет |
 | POST | api/app-version/mark-seen | AppVersionController | MarkSeen | backend/Controllers/AppVersionController.cs:89 | [Authorize] | да | нет |
@@ -1028,47 +1033,47 @@
 | POST | api/sticky-notes/notes/{noteId:int}/restore | StickyNotesController | RestoreNote | backend/Controllers/StickyNotesController.cs:658 | [Authorize] | да | нет |
 | GET | api/system/jobs/diagnostics | SystemJobsController | GetDiagnostics | backend/Controllers/SystemJobsController.cs:110 | [Authorize(Policy = "Admin")] | да | нет |
 | POST | api/system/jobs/{jobKey}/run | SystemJobsController | RunJob | backend/Controllers/SystemJobsController.cs:189 | [Authorize(Policy = "Admin")] | да | нет |
-| GET | api/tasks | TasksController | GetTasks | backend/Controllers/TasksController.cs:138 | [Authorize] | да | docs/full-project-audit-2026-06-10.md, docs/task-deadline-change-current-state-2026-07-09.md, docs/task-deadline-change-model-design-2026-07-09.md, docs/task-journal-query-optimization.md, docs/task-result-approval-current-state-2026-07-09.md, docs/task-template-current-state-2026-07-09.md |
-| GET | api/tasks/notifications | TasksController | GetNotifications | backend/Controllers/TasksController.cs:220 | [Authorize] | да | нет |
-| GET | api/tasks/overdue-summary | TasksController | GetOverdueSummary | backend/Controllers/TasksController.cs:287 | [Authorize] | да | нет |
-| GET | api/tasks/assignees | TasksController | GetAssignees | backend/Controllers/TasksController.cs:313 | [Authorize] | да | нет |
-| GET | api/tasks/settings | TasksController | GetSettings | backend/Controllers/TasksController.cs:366 | [Authorize] | да | нет |
-| PUT | api/tasks/settings | TasksController | UpdateSettings | backend/Controllers/TasksController.cs:383 | [Authorize] | да | нет |
-| GET | api/tasks/automation/case-control/diagnostics | TasksController | GetCaseControlAutomationDiagnostics | backend/Controllers/TasksController.cs:477 | [Authorize] | да | нет |
-| GET | api/tasks/summary | TasksController | GetTaskListSummary | backend/Controllers/TasksController.cs:625 | [Authorize] | да | docs/task-journal-query-optimization.md |
-| GET | api/tasks/automation/case-control/preview | TasksController | PreviewCaseControlAutomation | backend/Controllers/TasksController.cs:722 | [Authorize] | да | нет |
-| GET | api/tasks/calendar.ics | TasksController | ExportCalendar | backend/Controllers/TasksController.cs:830 | [Authorize] | да | нет |
-| GET | api/tasks/planning-report.{format} | TasksController | ExportPlanningReport | backend/Controllers/TasksController.cs:920 | [Authorize] | да | нет |
-| GET | api/tasks/automation/case-candidates | TasksController | GetAutomationCaseCandidates | backend/Controllers/TasksController.cs:1008 | [Authorize] | да | docs/task-template-current-state-2026-07-09.md |
-| POST | api/tasks/automation/case-candidates/{clientCaseId:int}/task | TasksController | CreateAutomationTaskForCase | backend/Controllers/TasksController.cs:1181 | [Authorize] | да | docs/task-template-current-state-2026-07-09.md |
-| POST | api/tasks/automation/case-candidates/tasks | TasksController | CreateAutomationTasksForCandidates | backend/Controllers/TasksController.cs:1352 | [Authorize] | да | docs/task-template-current-state-2026-07-09.md |
-| GET | api/tasks/templates | TasksController | GetTemplates | backend/Controllers/TasksController.cs:1492 | [Authorize] | да | нет |
-| GET | api/tasks/templates/{id:int} | TasksController | GetTemplate | backend/Controllers/TasksController.cs:1577 | [Authorize] | да | нет |
-| POST | api/tasks/templates | TasksController | CreateTemplate | backend/Controllers/TasksController.cs:1598 | [Authorize] | да | нет |
-| PUT | api/tasks/templates/{id:int} | TasksController | UpdateTemplate | backend/Controllers/TasksController.cs:1663 | [Authorize] | да | нет |
-| PATCH | api/tasks/templates/{id:int}/active | TasksController | UpdateTemplateActive | backend/Controllers/TasksController.cs:1735 | [Authorize] | да | нет |
-| DELETE | api/tasks/templates/{id:int} | TasksController | DeleteTemplate | backend/Controllers/TasksController.cs:1766 | [Authorize] | да | нет |
-| GET | api/tasks/{id:int} | TasksController | GetTask | backend/Controllers/TasksController.cs:1791 | [Authorize] | да | docs/task-deadline-change-current-state-2026-07-09.md, docs/task-deadline-change-model-design-2026-07-09.md, docs/task-result-approval-current-state-2026-07-09.md |
-| GET | api/tasks/{id:int}/comments | TasksController | GetComments | backend/Controllers/TasksController.cs:1812 | [Authorize] | да | нет |
-| POST | api/tasks/{id:int}/comments | TasksController | CreateComment | backend/Controllers/TasksController.cs:1843 | [Authorize] | да | нет |
-| POST | api/tasks/{id:int}/deadline-change-requests | TasksController | CreateDeadlineChangeRequest | backend/Controllers/TasksController.cs:1895 | [Authorize] | да | docs/task-deadline-change-current-state-2026-07-09.md, docs/task-deadline-change-model-design-2026-07-09.md |
-| GET | api/tasks/{id:int}/deadline-change-requests | TasksController | GetDeadlineChangeRequests | backend/Controllers/TasksController.cs:1990 | [Authorize] | да | docs/task-deadline-change-current-state-2026-07-09.md, docs/task-deadline-change-model-design-2026-07-09.md |
-| GET | api/tasks/{id:int}/deadline-change-requests/{requestId:int} | TasksController | GetDeadlineChangeRequest | backend/Controllers/TasksController.cs:2021 | [Authorize] | да | нет |
-| POST | api/tasks/{id:int}/deadline-change-requests/{requestId:int}/approve | TasksController | ApproveDeadlineChangeRequest | backend/Controllers/TasksController.cs:2049 | [Authorize] | да | нет |
-| POST | api/tasks/{id:int}/deadline-change-requests/{requestId:int}/reject | TasksController | RejectDeadlineChangeRequest | backend/Controllers/TasksController.cs:2145 | [Authorize] | да | нет |
-| GET | api/tasks/{id:int}/files | TasksController | GetFiles | backend/Controllers/TasksController.cs:2234 | [Authorize] | да | нет |
-| POST | api/tasks/{id:int}/files | TasksController | UploadFile | backend/Controllers/TasksController.cs:2335 | [Authorize] | да | docs/file-upload-limits-2026-06-10.md |
-| GET | api/tasks/{id:int}/files/{fileId:int}/download | TasksController | DownloadFile | backend/Controllers/TasksController.cs:2498 | [Authorize] | да | нет |
-| DELETE | api/tasks/{id:int}/files/{fileId:int} | TasksController | DeleteFile | backend/Controllers/TasksController.cs:2535 | [Authorize] | да | нет |
-| GET | api/tasks/billing-context | TasksController | GetBillingContext | backend/Controllers/TasksController.cs:2586 | [Authorize] | да | нет |
-| POST | api/tasks | TasksController | CreateTask | backend/Controllers/TasksController.cs:2658 | [Authorize] | да | docs/full-project-audit-2026-06-10.md, docs/task-deadline-change-current-state-2026-07-09.md, docs/task-deadline-change-model-design-2026-07-09.md, docs/task-journal-query-optimization.md, docs/task-result-approval-current-state-2026-07-09.md, docs/task-template-current-state-2026-07-09.md |
-| PUT | api/tasks/{id:int} | TasksController | UpdateTask | backend/Controllers/TasksController.cs:2786 | [Authorize] | да | docs/task-deadline-change-current-state-2026-07-09.md, docs/task-deadline-change-model-design-2026-07-09.md, docs/task-result-approval-current-state-2026-07-09.md |
-| PATCH | api/tasks/{id:int}/status | TasksController | UpdateStatus | backend/Controllers/TasksController.cs:3032 | [Authorize] | да | docs/task-result-approval-current-state-2026-07-09.md |
-| PATCH | api/tasks/{id:int}/control | TasksController | UpdateControl | backend/Controllers/TasksController.cs:3178 | [Authorize] | да | нет |
-| POST | api/tasks/bulk | TasksController | BulkUpdateTasks | backend/Controllers/TasksController.cs:3243 | [Authorize] | да | нет |
-| POST | api/tasks/bulk/delete | TasksController | BulkDeleteTasks | backend/Controllers/TasksController.cs:3495 | [Authorize] | да | нет |
-| PATCH | api/tasks/{id:int}/approval | TasksController | UpdateApproval | backend/Controllers/TasksController.cs:3571 | [Authorize] | да | нет |
-| DELETE | api/tasks/{id:int} | TasksController | DeleteTask | backend/Controllers/TasksController.cs:3724 | [Authorize] | да | docs/task-deadline-change-current-state-2026-07-09.md, docs/task-deadline-change-model-design-2026-07-09.md, docs/task-result-approval-current-state-2026-07-09.md |
+| GET | api/tasks | TasksController | GetTasks | backend/Controllers/TasksController.cs:139 | [Authorize] | да | docs/full-project-audit-2026-06-10.md, docs/task-deadline-change-current-state-2026-07-09.md, docs/task-deadline-change-model-design-2026-07-09.md, docs/task-journal-query-optimization.md, docs/task-result-approval-current-state-2026-07-09.md, docs/task-template-current-state-2026-07-09.md |
+| GET | api/tasks/notifications | TasksController | GetNotifications | backend/Controllers/TasksController.cs:221 | [Authorize] | да | нет |
+| GET | api/tasks/overdue-summary | TasksController | GetOverdueSummary | backend/Controllers/TasksController.cs:288 | [Authorize] | да | нет |
+| GET | api/tasks/assignees | TasksController | GetAssignees | backend/Controllers/TasksController.cs:314 | [Authorize] | да | нет |
+| GET | api/tasks/settings | TasksController | GetSettings | backend/Controllers/TasksController.cs:367 | [Authorize] | да | нет |
+| PUT | api/tasks/settings | TasksController | UpdateSettings | backend/Controllers/TasksController.cs:384 | [Authorize] | да | нет |
+| GET | api/tasks/automation/case-control/diagnostics | TasksController | GetCaseControlAutomationDiagnostics | backend/Controllers/TasksController.cs:478 | [Authorize] | да | нет |
+| GET | api/tasks/summary | TasksController | GetTaskListSummary | backend/Controllers/TasksController.cs:626 | [Authorize] | да | docs/task-journal-query-optimization.md |
+| GET | api/tasks/automation/case-control/preview | TasksController | PreviewCaseControlAutomation | backend/Controllers/TasksController.cs:757 | [Authorize] | да | нет |
+| GET | api/tasks/calendar.ics | TasksController | ExportCalendar | backend/Controllers/TasksController.cs:865 | [Authorize] | да | нет |
+| GET | api/tasks/planning-report.{format} | TasksController | ExportPlanningReport | backend/Controllers/TasksController.cs:955 | [Authorize] | да | нет |
+| GET | api/tasks/automation/case-candidates | TasksController | GetAutomationCaseCandidates | backend/Controllers/TasksController.cs:1042 | [Authorize] | да | docs/task-template-current-state-2026-07-09.md |
+| POST | api/tasks/automation/case-candidates/{clientCaseId:int}/task | TasksController | CreateAutomationTaskForCase | backend/Controllers/TasksController.cs:1251 | [Authorize] | да | docs/task-template-current-state-2026-07-09.md |
+| POST | api/tasks/automation/case-candidates/tasks | TasksController | CreateAutomationTasksForCandidates | backend/Controllers/TasksController.cs:1422 | [Authorize] | да | docs/task-template-current-state-2026-07-09.md |
+| GET | api/tasks/templates | TasksController | GetTemplates | backend/Controllers/TasksController.cs:1562 | [Authorize] | да | нет |
+| GET | api/tasks/templates/{id:int} | TasksController | GetTemplate | backend/Controllers/TasksController.cs:1647 | [Authorize] | да | нет |
+| POST | api/tasks/templates | TasksController | CreateTemplate | backend/Controllers/TasksController.cs:1668 | [Authorize] | да | нет |
+| PUT | api/tasks/templates/{id:int} | TasksController | UpdateTemplate | backend/Controllers/TasksController.cs:1733 | [Authorize] | да | нет |
+| PATCH | api/tasks/templates/{id:int}/active | TasksController | UpdateTemplateActive | backend/Controllers/TasksController.cs:1805 | [Authorize] | да | нет |
+| DELETE | api/tasks/templates/{id:int} | TasksController | DeleteTemplate | backend/Controllers/TasksController.cs:1836 | [Authorize] | да | нет |
+| GET | api/tasks/{id:int} | TasksController | GetTask | backend/Controllers/TasksController.cs:1861 | [Authorize] | да | docs/task-deadline-change-current-state-2026-07-09.md, docs/task-deadline-change-model-design-2026-07-09.md, docs/task-result-approval-current-state-2026-07-09.md |
+| GET | api/tasks/{id:int}/comments | TasksController | GetComments | backend/Controllers/TasksController.cs:1882 | [Authorize] | да | нет |
+| POST | api/tasks/{id:int}/comments | TasksController | CreateComment | backend/Controllers/TasksController.cs:1913 | [Authorize] | да | нет |
+| POST | api/tasks/{id:int}/deadline-change-requests | TasksController | CreateDeadlineChangeRequest | backend/Controllers/TasksController.cs:1965 | [Authorize] | да | docs/task-deadline-change-current-state-2026-07-09.md, docs/task-deadline-change-model-design-2026-07-09.md |
+| GET | api/tasks/{id:int}/deadline-change-requests | TasksController | GetDeadlineChangeRequests | backend/Controllers/TasksController.cs:2060 | [Authorize] | да | docs/task-deadline-change-current-state-2026-07-09.md, docs/task-deadline-change-model-design-2026-07-09.md |
+| GET | api/tasks/{id:int}/deadline-change-requests/{requestId:int} | TasksController | GetDeadlineChangeRequest | backend/Controllers/TasksController.cs:2091 | [Authorize] | да | нет |
+| POST | api/tasks/{id:int}/deadline-change-requests/{requestId:int}/approve | TasksController | ApproveDeadlineChangeRequest | backend/Controllers/TasksController.cs:2119 | [Authorize] | да | нет |
+| POST | api/tasks/{id:int}/deadline-change-requests/{requestId:int}/reject | TasksController | RejectDeadlineChangeRequest | backend/Controllers/TasksController.cs:2215 | [Authorize] | да | нет |
+| GET | api/tasks/{id:int}/files | TasksController | GetFiles | backend/Controllers/TasksController.cs:2304 | [Authorize] | да | нет |
+| POST | api/tasks/{id:int}/files | TasksController | UploadFile | backend/Controllers/TasksController.cs:2405 | [Authorize] | да | docs/file-upload-limits-2026-06-10.md |
+| GET | api/tasks/{id:int}/files/{fileId:int}/download | TasksController | DownloadFile | backend/Controllers/TasksController.cs:2568 | [Authorize] | да | нет |
+| DELETE | api/tasks/{id:int}/files/{fileId:int} | TasksController | DeleteFile | backend/Controllers/TasksController.cs:2605 | [Authorize] | да | нет |
+| GET | api/tasks/billing-context | TasksController | GetBillingContext | backend/Controllers/TasksController.cs:2656 | [Authorize] | да | нет |
+| POST | api/tasks | TasksController | CreateTask | backend/Controllers/TasksController.cs:2728 | [Authorize] | да | docs/full-project-audit-2026-06-10.md, docs/task-deadline-change-current-state-2026-07-09.md, docs/task-deadline-change-model-design-2026-07-09.md, docs/task-journal-query-optimization.md, docs/task-result-approval-current-state-2026-07-09.md, docs/task-template-current-state-2026-07-09.md |
+| PUT | api/tasks/{id:int} | TasksController | UpdateTask | backend/Controllers/TasksController.cs:2856 | [Authorize] | да | docs/task-deadline-change-current-state-2026-07-09.md, docs/task-deadline-change-model-design-2026-07-09.md, docs/task-result-approval-current-state-2026-07-09.md |
+| PATCH | api/tasks/{id:int}/status | TasksController | UpdateStatus | backend/Controllers/TasksController.cs:3102 | [Authorize] | да | docs/task-result-approval-current-state-2026-07-09.md |
+| PATCH | api/tasks/{id:int}/control | TasksController | UpdateControl | backend/Controllers/TasksController.cs:3248 | [Authorize] | да | нет |
+| POST | api/tasks/bulk | TasksController | BulkUpdateTasks | backend/Controllers/TasksController.cs:3313 | [Authorize] | да | нет |
+| POST | api/tasks/bulk/delete | TasksController | BulkDeleteTasks | backend/Controllers/TasksController.cs:3565 | [Authorize] | да | нет |
+| PATCH | api/tasks/{id:int}/approval | TasksController | UpdateApproval | backend/Controllers/TasksController.cs:3641 | [Authorize] | да | нет |
+| DELETE | api/tasks/{id:int} | TasksController | DeleteTask | backend/Controllers/TasksController.cs:3794 | [Authorize] | да | docs/task-deadline-change-current-state-2026-07-09.md, docs/task-deadline-change-model-design-2026-07-09.md, docs/task-result-approval-current-state-2026-07-09.md |
 | GET | api/user-activity | UserActivityController | GetAsync | backend/Controllers/UserActivityController.cs:62 | [Authorize]; [Authorize(Policy = "Admin")] | да | docs/full-project-audit-2026-06-10.md |
 | GET | api/user-activity/online | UserActivityController | GetOnlineAsync | backend/Controllers/UserActivityController.cs:168 | [Authorize]; [Authorize(Policy = "Admin")] | да | нет |
 | GET | api/user-activity/filters | UserActivityController | GetFiltersAsync | backend/Controllers/UserActivityController.cs:302 | [Authorize]; [Authorize(Policy = "Admin")] | нет | нет |

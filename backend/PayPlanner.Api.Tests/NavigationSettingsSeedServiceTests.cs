@@ -23,7 +23,9 @@ public sealed class NavigationSettingsSeedServiceTests
         var groups = json.RootElement.GetProperty("groups").EnumerateArray().ToArray();
         Assert.Equal(["Работа с клиентами", "Бухгалтерия", "Управление"], groups.Select(group => group.GetProperty("name").GetString()));
         Assert.Equal(["legalEntities", "clients", "contacts"], groups[0].GetProperty("itemIds").EnumerateArray().Select(item => item.GetString()));
-        Assert.Contains("group-accounting", json.RootElement.GetProperty("order").EnumerateArray().Select(item => item.GetString()));
+        var order = json.RootElement.GetProperty("order").EnumerateArray().Select(item => item.GetString()).ToArray();
+        Assert.Equal("workspace", order[0]);
+        Assert.Equal(Array.IndexOf(order, "group-accounting") + 1, Array.IndexOf(order, "payroll"));
     }
 
     [Fact]
@@ -42,8 +44,13 @@ public sealed class NavigationSettingsSeedServiceTests
 
         var changed = await NavigationSettingsSeedService.EnsureDefaultGroupsAsync(db);
 
-        Assert.False(changed);
-        Assert.Equal(customValue, (await db.SystemSettings.SingleAsync()).Value);
+        Assert.True(changed);
+        using var json = JsonDocument.Parse((await db.SystemSettings.SingleAsync()).Value);
+        Assert.Equal("Моя группа", json.RootElement.GetProperty("groups")[0].GetProperty("name").GetString());
+        Assert.Equal("workspace", json.RootElement.GetProperty("order")[0].GetString());
+        Assert.Contains("payroll", json.RootElement.GetProperty("order").EnumerateArray().Select(item => item.GetString()));
+
+        Assert.False(await NavigationSettingsSeedService.EnsureDefaultGroupsAsync(db));
     }
 
     [Fact]
@@ -64,9 +71,11 @@ public sealed class NavigationSettingsSeedServiceTests
         using var json = JsonDocument.Parse((await db.SystemSettings.SingleAsync()).Value);
         Assert.Equal("Рабочие задачи", json.RootElement.GetProperty("labels").GetProperty("tasks").GetString());
         var order = json.RootElement.GetProperty("order").EnumerateArray().Select(item => item.GetString()).ToArray();
-        Assert.Equal("tasks", order[0]);
-        Assert.Equal("group-accounting", order[1]);
-        Assert.Equal("calendar", order[2]);
+        Assert.Equal("workspace", order[0]);
+        Assert.Equal("tasks", order[1]);
+        Assert.Equal("group-accounting", order[2]);
+        Assert.Equal("payroll", order[3]);
+        Assert.Equal("calendar", order[4]);
     }
 
     private static async Task<PaymentContext> CreateContextAsync()

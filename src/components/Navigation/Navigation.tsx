@@ -243,7 +243,9 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
     | { type: 'group'; id: string; label: string; items: SidebarItem[] };
 
   const mainItems = useMemo<SidebarItem[]>(() => {
-    const items: SidebarItem[] = [];
+    const items: SidebarItem[] = [
+      { id: 'workspace', tab: 'workspace' as Tab, label: 'Рабочий стол', icon: LayoutGrid },
+    ];
     if (permissions.calendar.canView) {
       items.push({ id: 'calendar', tab: 'calendar' as Tab, label: t('calendar') ?? 'Календарь', icon: Calendar });
     }
@@ -411,6 +413,9 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
     if (permissions.contracts.canView) {
       items.push({ id: 'contracts', tab: 'contracts' as Tab, label: t('contracts') ?? 'Договоры', icon: FileSignature });
     }
+    if (isAdmin()) {
+      items.push({ id: 'payroll', tab: 'payroll' as Tab, label: 'Зарплата', icon: CircleDollarSign });
+    }
     if (permissions.dictionaries.canView) {
       items.push({
         id: 'dictionaries',
@@ -421,7 +426,7 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
     }
 
     return items;
-  }, [permissions, t]);
+  }, [isAdmin, permissions, t]);
 
   const canManageRoles = isAdmin() || permissions.roles.canView;
   const canViewAudit = isAdmin() || permissions.audit.canView;

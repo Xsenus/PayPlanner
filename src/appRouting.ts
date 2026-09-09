@@ -34,6 +34,7 @@ type TabAccessOptions = {
 type TabAccessRule = (permissions: RolePermissions, options: TabAccessOptions) => boolean;
 
 export const TAB_ACCESS_RULES = {
+  workspace: () => true,
   notifications: () => true,
   profile: () => true,
   calendar: (permissions) => permissions.calendar.canView,
@@ -70,6 +71,7 @@ export const TAB_ACCESS_RULES = {
   moneyCards: (permissions) => permissions.payments.canView,
   moneyEMoney: (permissions) => permissions.payments.canView,
   moneyTotal: (permissions) => permissions.payments.canView,
+  payroll: (_permissions, options) => options.isAdminRole === true,
   contracts: (permissions) => permissions.contracts.canView,
   contractCreate: (permissions) => permissions.contracts.canView && permissions.contracts.canCreate,
   contractDetail: (permissions) => permissions.contracts.canView,
