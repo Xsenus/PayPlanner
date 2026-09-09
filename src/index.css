@@ -302,6 +302,7 @@ html[data-payplanner-theme] [class*='border-slate-100/'],
 html[data-payplanner-theme] [class*='border-slate-200/'] { border-color: color-mix(in srgb, var(--pp-border) 82%, transparent) !important; }
 html[data-payplanner-theme] .border-gray-300,
 html[data-payplanner-theme] .border-slate-300,
+html[data-payplanner-theme] .border-gray-400,
 html[data-payplanner-theme] .border-slate-400 { border-color: var(--pp-border-strong) !important; }
 html[data-payplanner-theme] .border-blue-100,
 html[data-payplanner-theme] .border-blue-200,
@@ -330,8 +331,18 @@ html[data-payplanner-theme] .text-blue-800,
 html[data-payplanner-theme] .text-blue-900,
 html[data-payplanner-theme] .text-blue-950 { color: var(--pp-primary) !important; }
 
-html[data-payplanner-theme] .shadow-sm { box-shadow: var(--pp-shadow) !important; }
+html[data-payplanner-theme] :is(.shadow-sm, .shadow, .shadow-md) { box-shadow: var(--pp-shadow) !important; }
+html[data-payplanner-theme] :is(.shadow-lg, .shadow-xl, .shadow-2xl) {
+  box-shadow: 0 18px 48px color-mix(in srgb, var(--pp-overlay) 42%, transparent), 0 3px 12px color-mix(in srgb, var(--pp-overlay) 20%, transparent) !important;
+}
 html[data-payplanner-theme] [class*='ring-blue-'] { --tw-ring-color: color-mix(in srgb, var(--pp-primary) 24%, transparent) !important; }
+html[data-payplanner-theme] [class*='ring-black/'] { --tw-ring-color: color-mix(in srgb, var(--pp-border-strong) 28%, transparent) !important; }
+html[data-payplanner-theme] :is(.bg-black\/20, .bg-black\/30, .bg-black\/40, .bg-black\/45, .bg-black\/50, .bg-black\/55) {
+  background-color: var(--pp-overlay) !important;
+}
+html[data-payplanner-theme] :is(.fixed, .absolute).inset-0:is(.bg-slate-900\/35, .bg-slate-900\/40, .bg-slate-900\/45, .bg-slate-900\/50, .bg-slate-900\/60) {
+  background-color: var(--pp-overlay) !important;
+}
 html[data-payplanner-theme] [class*='from-white'] { --tw-gradient-from: var(--pp-surface) var(--tw-gradient-from-position) !important; }
 html[data-payplanner-theme] [class*='to-white'] { --tw-gradient-to: var(--pp-surface) var(--tw-gradient-to-position) !important; }
 html[data-payplanner-theme] [class*='from-slate-50'],
@@ -350,14 +361,15 @@ html[data-payplanner-theme] textarea::placeholder { color: var(--pp-text-soft); 
 
 html[data-payplanner-theme] .divide-slate-100 > :not([hidden]) ~ :not([hidden]),
 html[data-payplanner-theme] .divide-slate-200 > :not([hidden]) ~ :not([hidden]),
+html[data-payplanner-theme] .divide-slate-300 > :not([hidden]) ~ :not([hidden]),
 html[data-payplanner-theme] .divide-gray-100 > :not([hidden]) ~ :not([hidden]),
-html[data-payplanner-theme] .divide-gray-200 > :not([hidden]) ~ :not([hidden]) {
+html[data-payplanner-theme] .divide-gray-200 > :not([hidden]) ~ :not([hidden]),
+html[data-payplanner-theme] .divide-gray-300 > :not([hidden]) ~ :not([hidden]) {
   border-color: var(--pp-border) !important;
 }
 
 html[data-payplanner-theme] .border-white,
-html[data-payplanner-theme] [class~='border-white/70'],
-html[data-payplanner-theme] [class~='border-white/80'] {
+html[data-payplanner-theme] [class*='border-white/'] {
   border-color: color-mix(in srgb, var(--pp-border) 76%, transparent) !important;
 }
 
@@ -519,6 +531,134 @@ html[data-payplanner-theme] .recharts-cartesian-grid line {
 :root[data-payplanner-theme='midnight'] .bg-blue-600.text-white,
 :root[data-payplanner-theme='midnight'] .bg-blue-700.text-white { color: var(--pp-on-primary) !important; }
 
+.pp-toast-card {
+  --pp-toast-accent: var(--pp-info-solid);
+  --pp-toast-foreground: var(--pp-info-text);
+  --pp-toast-soft: var(--pp-info-soft);
+  --pp-toast-action-text: #fff;
+  position: relative;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--pp-toast-accent) 44%, var(--pp-border));
+  border-left: 4px solid var(--pp-toast-accent);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--pp-surface) 88%, var(--pp-toast-soft));
+  color: var(--pp-text);
+  box-shadow: 0 20px 55px color-mix(in srgb, var(--pp-overlay) 48%, transparent), 0 4px 14px color-mix(in srgb, var(--pp-overlay) 22%, transparent);
+  backdrop-filter: blur(16px) saturate(1.12);
+  animation: pp-toast-enter 180ms ease-out both;
+}
+
+.pp-toast-card::before {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 1px;
+  background: color-mix(in srgb, var(--pp-toast-foreground) 28%, transparent);
+  content: '';
+  pointer-events: none;
+}
+
+.pp-toast-variant-success {
+  --pp-toast-accent: var(--pp-success-solid);
+  --pp-toast-foreground: var(--pp-success-text);
+  --pp-toast-soft: var(--pp-success-soft);
+}
+
+.pp-toast-variant-error {
+  --pp-toast-accent: var(--pp-danger-solid);
+  --pp-toast-foreground: var(--pp-danger-text);
+  --pp-toast-soft: var(--pp-danger-soft);
+}
+
+.pp-toast-variant-info.pp-toast-domain-task {
+  --pp-toast-accent: var(--pp-primary);
+  --pp-toast-foreground: var(--pp-primary);
+  --pp-toast-soft: var(--pp-primary-soft);
+  --pp-toast-action-text: var(--pp-on-primary);
+}
+
+.pp-toast-variant-info.pp-toast-domain-calendar {
+  --pp-toast-accent: var(--pp-info-solid);
+  --pp-toast-foreground: var(--pp-info-text);
+  --pp-toast-soft: var(--pp-info-soft);
+}
+
+.pp-toast-variant-info.pp-toast-domain-note {
+  --pp-toast-accent: var(--pp-warning-solid);
+  --pp-toast-foreground: var(--pp-warning-text);
+  --pp-toast-soft: var(--pp-warning-soft);
+}
+
+.pp-toast-variant-info.pp-toast-domain-payment {
+  --pp-toast-accent: var(--pp-success-solid);
+  --pp-toast-foreground: var(--pp-success-text);
+  --pp-toast-soft: var(--pp-success-soft);
+}
+
+.pp-toast-variant-info.pp-toast-domain-case {
+  --pp-toast-accent: var(--pp-special-solid);
+  --pp-toast-foreground: var(--pp-special-text);
+  --pp-toast-soft: var(--pp-special-soft);
+}
+
+.pp-toast-variant-info.pp-toast-domain-system {
+  --pp-toast-accent: var(--pp-border-strong);
+  --pp-toast-foreground: var(--pp-text);
+  --pp-toast-soft: var(--pp-surface-soft);
+  --pp-toast-action-text: var(--pp-heading);
+}
+
+.pp-toast-icon,
+.pp-toast-domain-pill {
+  border: 1px solid color-mix(in srgb, var(--pp-toast-accent) 38%, var(--pp-border));
+  background: color-mix(in srgb, var(--pp-toast-soft) 82%, var(--pp-surface));
+  color: var(--pp-toast-foreground);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--pp-heading) 9%, transparent);
+}
+
+.pp-toast-title { color: var(--pp-heading); }
+.pp-toast-description { color: var(--pp-text); }
+
+.pp-toast-action-primary {
+  border: 1px solid color-mix(in srgb, var(--pp-toast-accent) 74%, var(--pp-border));
+  background: var(--pp-toast-accent);
+  color: var(--pp-toast-action-text);
+  box-shadow: 0 3px 10px color-mix(in srgb, var(--pp-toast-accent) 28%, transparent);
+}
+
+.pp-toast-action-primary:hover {
+  filter: brightness(1.06) saturate(1.05);
+  transform: translateY(-1px);
+}
+
+.pp-toast-action-secondary {
+  border: 1px solid var(--pp-border);
+  background: color-mix(in srgb, var(--pp-surface) 86%, var(--pp-toast-soft));
+  color: var(--pp-text);
+}
+
+.pp-toast-action-secondary:hover {
+  border-color: var(--pp-border-strong);
+  background: var(--pp-surface-soft);
+  color: var(--pp-heading);
+}
+
+.pp-toast-close { color: var(--pp-text-soft); }
+.pp-toast-close:hover {
+  background: color-mix(in srgb, var(--pp-toast-soft) 72%, var(--pp-surface));
+  color: var(--pp-heading);
+}
+
+.pp-toast-progress-track { background: color-mix(in srgb, var(--pp-border) 48%, transparent); }
+.pp-toast-progress {
+  background: var(--pp-toast-accent);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--pp-toast-accent) 48%, transparent);
+}
+
+@keyframes pp-toast-enter {
+  from { opacity: 0; transform: translate3d(0, 10px, 0) scale(0.985); }
+  to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+}
+
 @keyframes toast-progress {
   from {
     transform: scaleX(1);
@@ -533,6 +673,11 @@ html[data-payplanner-theme] .recharts-cartesian-grid line {
 
 .pp-date-input {
   color-scheme: inherit;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pp-toast-card { animation: none; }
+  .pp-toast-action-primary:hover { transform: none; }
 }
 
 .pp-date-input::-webkit-datetime-edit,

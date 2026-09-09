@@ -210,9 +210,15 @@ export function formatPageFailure(routeName, viewportName, message) {
   return `[${viewportName}] ${routeName}: ${message}`;
 }
 
-function buildUrl(frontendUrl, routePath) {
-  if (/^https?:\/\//i.test(routePath)) return routePath;
-  return `${frontendUrl}${routePath.startsWith('/') ? routePath : `/${routePath}`}`;
+function buildUrl(frontendUrl, routePath, toastPreview = false) {
+  const resolvedUrl = /^https?:\/\//i.test(routePath)
+    ? routePath
+    : `${frontendUrl}${routePath.startsWith('/') ? routePath : `/${routePath}`}`;
+
+  if (!toastPreview) return resolvedUrl;
+  const url = new URL(resolvedUrl);
+  url.searchParams.set('ppVisualAudit', 'true');
+  return url.toString();
 }
 
 async function launchChromium() {
@@ -279,7 +285,7 @@ async function prepareAuth(context, frontendUrl, token, email, password, timeout
   return false;
 }
 
-async function checkPage({ page, frontendUrl, route, viewportName, themeName, timeoutMs, artifactDir }) {
+async function checkPage({ page, frontendUrl, route, viewportName, themeName, timeoutMs, artifactDir, toastPreview }) {
   const consoleErrors = [];
   const pageErrors = [];
 
@@ -304,9 +310,15 @@ async function checkPage({ page, frontendUrl, route, viewportName, themeName, ti
     }
   }).catch(() => undefined);
 
-  await page.goto(buildUrl(frontendUrl, route.path), { waitUntil: 'domcontentloaded', timeout: timeoutMs });
-  await page.waitForLoadState('networkidle', { timeout: timeoutMs }).catch(() => undefined);
+  await page.goto(buildUrl(frontendUrl, route.path, toastPreview), { waitUntil: 'domcontentloaded', timeout: timeoutMs });
+  await page.waitForLoadState('load', { timeout: Math.min(timeoutMs, 3_000) }).catch(() => undefined);
   await page.locator('body').waitFor({ state: 'visible', timeout: timeoutMs });
+  await page.waitForTimeout(500);
+  await page.waitForFunction(() => {
+    const lines = document.body.innerText.split('\n').map((line) => line.trim()).filter(Boolean);
+    return !lines.some((line) => /^(Загрузка|Загружаем).*\.\.\.$/i.test(line));
+  }, undefined, { timeout: timeoutMs }).catch(() => undefined);
+  await page.waitForTimeout(150);
   await page.getByRole('button', { name: /Понятно|Закрыть/i }).first().click({ timeout: 1000 }).catch(() => undefined);
 
   if (themeName) {
@@ -326,10 +338,46 @@ async function checkPage({ page, frontendUrl, route, viewportName, themeName, ti
     await page.evaluate(() => new Promise((resolve) => window.requestAnimationFrame(() => resolve(undefined))));
   }
 
+  if (toastPreview) {
+    await page.evaluate(() => {
+      const show = (detail) => window.dispatchEvent(new CustomEvent('payplanner:visual-toast', { detail }));
+      show({
+        title: 'Изменения сохранены',
+        description: 'Настройки применены и уже доступны пользователям.',
+        variant: 'success',
+        durationMs: 0,
+      });
+      show({
+        title: 'Проверьте обязательные поля',
+        description: 'Укажите дату исполнения, чтобы продолжить сохранение.',
+        variant: 'error',
+        durationMs: 0,
+      });
+      show({
+        title: 'Новая задача на согласовании',
+        description: 'Документ ожидает решения. Откройте карточку или отложите уведомление.',
+        variant: 'info',
+        domain: 'task',
+        durationMs: 0,
+        actions: [
+          { label: 'Открыть карточку', onClick: () => undefined },
+          { label: 'Позже', variant: 'secondary', onClick: () => undefined },
+        ],
+      });
+    });
+    await page.getByTestId('toast-card').nth(2).waitFor({ state: 'visible', timeout: timeoutMs });
+    await page.evaluate(() => new Promise((resolve) => window.requestAnimationFrame(() => resolve(undefined))));
+  }
+
   const metrics = await page.evaluate(() => {
     const viewportWidth = window.innerWidth;
     const documentWidth = Math.max(document.documentElement.scrollWidth, document.body.scrollWidth);
     const bodyText = document.body.innerText.trim();
+    const loadingLines = bodyText
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => /^(Загрузка|Загружаем).*\.\.\.$/i.test(line))
+      .slice(0, 8);
     const inspectOverflow = documentWidth > viewportWidth + 2;
     const overflowingElements = inspectOverflow ? Array.from(document.querySelectorAll('body *'))
       .map((element) => {
@@ -467,6 +515,7 @@ async function checkPage({ page, frontendUrl, route, viewportName, themeName, ti
       url: window.location.href,
       theme: document.documentElement.dataset.payplannerTheme ?? '',
       lowContrast,
+      loadingLines,
     };
   });
 
@@ -488,6 +537,10 @@ async function checkPage({ page, frontendUrl, route, viewportName, themeName, ti
 
   if (metrics.bodyLength < 20) {
     failures.push(`page rendered too little text (${metrics.bodyLength} chars)`);
+  }
+
+  if (metrics.loadingLines.length > 0) {
+    failures.push(`page was still loading when captured: ${metrics.loadingLines.join('; ')}`);
   }
 
   if (metrics.documentOverflowX > 2) {
@@ -528,6 +581,7 @@ Options:
   --routes <csv>           Routes to check. Default: public login page, or key app pages when auth is available.
   --full-app <bool>        Check every top-level CRM section when authenticated.
   --themes <csv|all>       Force visual themes without changing the setting on the server.
+  --toast-preview <bool>   Render a stable matrix of real application toasts for visual auditing (development only).
   --viewports <csv>        Viewports to check: desktop,tablet,mobile. Default: all.
   --artifact-dir <path>    Screenshot output directory. Default: ${DEFAULT_ARTIFACT_DIR}
   --timeout-ms <number>    Per-page timeout. Default: ${DEFAULT_TIMEOUT_MS}
@@ -544,6 +598,7 @@ export async function runVisualSmoke(options) {
   const timeoutMs = options.timeoutMs;
   const artifactDir = options.artifactDir;
   const requireAuth = options.requireAuth;
+  const toastPreview = options.toastPreview;
   const { browser, label } = await launchChromium();
 
   try {
@@ -571,6 +626,7 @@ export async function runVisualSmoke(options) {
     console.log(`Auth: ${authenticated ? 'enabled' : 'public-only'}`);
     console.log(`Viewports: ${viewportNames.join(', ')}`);
     console.log(`Themes: ${themeNames.map((theme) => theme ?? 'server-default').join(', ')}`);
+    console.log(`Toast preview: ${toastPreview ? 'enabled' : 'disabled'}`);
     console.log(`Routes: ${routes.map((route) => route.path).join(', ')}`);
     console.log(`Screenshots: ${artifactDir}`);
     console.log('');
@@ -585,7 +641,7 @@ export async function runVisualSmoke(options) {
       try {
         for (const themeName of themeNames) {
           for (const route of routes) {
-            const result = await checkPage({ page, frontendUrl, route, viewportName, themeName, timeoutMs, artifactDir });
+            const result = await checkPage({ page, frontendUrl, route, viewportName, themeName, timeoutMs, artifactDir, toastPreview });
             rows.push(result);
 
             if (result.failures.length > 0) {
@@ -639,6 +695,7 @@ async function main() {
     artifactDir: args.artifactDir ?? process.env.PAYPLANNER_VISUAL_ARTIFACT_DIR ?? DEFAULT_ARTIFACT_DIR,
     timeoutMs: readPositiveInt(args.timeoutMs ?? process.env.PAYPLANNER_VISUAL_TIMEOUT_MS, DEFAULT_TIMEOUT_MS),
     requireAuth: readBoolean(args.requireAuth ?? process.env.PAYPLANNER_VISUAL_REQUIRE_AUTH),
+    toastPreview: readBoolean(args.toastPreview ?? process.env.PAYPLANNER_VISUAL_TOAST_PREVIEW),
     token: args.token ?? process.env.PAYPLANNER_VISUAL_TOKEN ?? '',
     email: args.email ?? process.env.PAYPLANNER_VISUAL_EMAIL ?? '',
     password: args.password ?? process.env.PAYPLANNER_VISUAL_PASSWORD ?? '',

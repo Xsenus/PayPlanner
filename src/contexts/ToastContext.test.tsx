@@ -79,6 +79,12 @@ function ToastHarness({
       >
         MultiAction
       </button>
+      <button type="button" onClick={() => toast.success('Операция завершена.', 'Готово')}>
+        Success
+      </button>
+      <button type="button" onClick={() => toast.error('Проверьте заполнение формы.', 'Ошибка формы')}>
+        Error
+      </button>
     </div>
   );
 }
@@ -181,5 +187,25 @@ describe('ToastProvider', () => {
     expect(firstAction).not.toHaveBeenCalled();
     expect(secondAction).toHaveBeenCalledTimes(1);
     expect(thirdAction).not.toHaveBeenCalled();
+  });
+
+  it('uses theme-aware semantic classes for every toast variant', () => {
+    render(
+      <ToastProvider>
+        <ToastHarness />
+      </ToastProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Success' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Error' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Domain' }));
+
+    const cards = screen.getAllByTestId('toast-card');
+    expect(cards).toHaveLength(3);
+    expect(cards.map((card) => card.dataset.toastVariant)).toEqual(['success', 'error', 'info']);
+    expect(cards[0].className).toContain('pp-toast-variant-success');
+    expect(cards[1].className).toContain('pp-toast-variant-error');
+    expect(cards[2].className).toContain('pp-toast-domain-payment');
+    expect(cards.every((card) => card.className.includes('pp-toast-card'))).toBe(true);
   });
 });

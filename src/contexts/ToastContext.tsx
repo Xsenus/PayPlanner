@@ -26,6 +26,7 @@ type ToastRecord = Required<Pick<ToastOptions, 'description' | 'durationMs' | 'v
 };
 
 const MAX_VISIBLE_TOASTS = 3;
+const VISUAL_AUDIT_EVENT = 'payplanner:visual-toast';
 
 function toToastOptions(options: ToastOptions | string): ToastOptions {
   if (typeof options === 'string') {
@@ -49,28 +50,22 @@ function defaultTitle(variant: ToastVariant): string {
   }
 }
 
-function toastStyles(variant: ToastVariant): { icon: LucideIcon; wrapper: string; iconColor: string; progress: string } {
+function toastStyles(variant: ToastVariant): { icon: LucideIcon; className: string } {
   switch (variant) {
     case 'success':
       return {
         icon: CheckCircle2,
-        wrapper: 'border-emerald-200 bg-emerald-50/95',
-        iconColor: 'text-emerald-600',
-        progress: 'bg-emerald-500',
+        className: 'pp-toast-variant-success',
       };
     case 'error':
       return {
         icon: AlertCircle,
-        wrapper: 'border-rose-200 bg-rose-50/95',
-        iconColor: 'text-rose-600',
-        progress: 'bg-rose-500',
+        className: 'pp-toast-variant-error',
       };
     default:
       return {
         icon: Info,
-        wrapper: 'border-sky-200 bg-white/95',
-        iconColor: 'text-sky-600',
-        progress: 'bg-sky-500',
+        className: 'pp-toast-variant-info',
       };
   }
 }
@@ -78,65 +73,44 @@ function toastStyles(variant: ToastVariant): { icon: LucideIcon; wrapper: string
 function toastDomainStyles(domain?: ToastDomain): {
   icon?: LucideIcon;
   label?: string;
-  iconColor?: string;
-  borderColor?: string;
-  progress?: string;
-  badge?: string;
+  className?: string;
 } {
   switch (domain) {
     case 'task':
       return {
         icon: ClipboardList,
         label: 'Задача',
-        iconColor: 'text-blue-600',
-        borderColor: 'border-l-blue-500',
-        progress: 'bg-blue-500',
-        badge: 'bg-blue-50 text-blue-700 ring-blue-100',
+        className: 'pp-toast-domain-task',
       };
     case 'calendar':
       return {
         icon: CalendarDays,
         label: 'Календарь',
-        iconColor: 'text-cyan-600',
-        borderColor: 'border-l-cyan-500',
-        progress: 'bg-cyan-500',
-        badge: 'bg-cyan-50 text-cyan-700 ring-cyan-100',
+        className: 'pp-toast-domain-calendar',
       };
     case 'note':
       return {
         icon: StickyNote,
         label: 'Заметка',
-        iconColor: 'text-amber-600',
-        borderColor: 'border-l-amber-500',
-        progress: 'bg-amber-500',
-        badge: 'bg-amber-50 text-amber-700 ring-amber-100',
+        className: 'pp-toast-domain-note',
       };
     case 'payment':
       return {
         icon: CreditCard,
         label: 'Деньги',
-        iconColor: 'text-emerald-600',
-        borderColor: 'border-l-emerald-500',
-        progress: 'bg-emerald-500',
-        badge: 'bg-emerald-50 text-emerald-700 ring-emerald-100',
+        className: 'pp-toast-domain-payment',
       };
     case 'case':
       return {
         icon: Scale,
         label: 'Дело',
-        iconColor: 'text-violet-600',
-        borderColor: 'border-l-violet-500',
-        progress: 'bg-violet-500',
-        badge: 'bg-violet-50 text-violet-700 ring-violet-100',
+        className: 'pp-toast-domain-case',
       };
     case 'system':
       return {
         icon: ShieldAlert,
         label: 'Система',
-        iconColor: 'text-slate-600',
-        borderColor: 'border-l-slate-500',
-        progress: 'bg-slate-500',
-        badge: 'bg-slate-100 text-slate-700 ring-slate-200',
+        className: 'pp-toast-domain-system',
       };
     default:
       return {};
@@ -220,6 +194,21 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   }, [showToast]);
 
   useEffect(() => {
+    if (!import.meta.env.DEV || typeof window === 'undefined') return undefined;
+
+    const visualAuditEnabled = new URLSearchParams(window.location.search).get('ppVisualAudit') === 'true';
+    if (!visualAuditEnabled) return undefined;
+
+    const handleVisualAuditToast = (event: Event) => {
+      const detail = (event as CustomEvent<ToastOptions | string>).detail;
+      if (detail) showToast(detail);
+    };
+
+    window.addEventListener(VISUAL_AUDIT_EVENT, handleVisualAuditToast);
+    return () => window.removeEventListener(VISUAL_AUDIT_EVENT, handleVisualAuditToast);
+  }, [showToast]);
+
+  useEffect(() => {
     const timers = timersRef.current;
     return () => {
       for (const timer of timers.values()) {
@@ -244,35 +233,31 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                 const styles = toastStyles(toast.variant);
                 const domainStyles = toastDomainStyles(toast.domain);
                 const Icon = domainStyles.icon ?? styles.icon;
-                const iconColor = toast.variant === 'info' && domainStyles.iconColor
-                  ? domainStyles.iconColor
-                  : styles.iconColor;
-                const progress = toast.variant === 'info' && domainStyles.progress
-                  ? domainStyles.progress
-                  : styles.progress;
                 return (
                   <div
                     key={toast.id}
                     role={toast.variant === 'error' ? 'alert' : 'status'}
                     data-testid="toast-card"
-                    className={`pointer-events-auto overflow-hidden rounded-xl border border-l-4 shadow-xl backdrop-blur ${styles.wrapper} ${domainStyles.borderColor ?? 'border-l-sky-400'}`}
+                    data-toast-variant={toast.variant}
+                    data-toast-domain={toast.domain ?? 'general'}
+                    className={`pp-toast-card pointer-events-auto ${styles.className} ${toast.variant === 'info' ? domainStyles.className ?? '' : ''}`}
                   >
-                    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 px-3 py-3 sm:px-4">
+                    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 px-3.5 py-3.5 sm:px-4">
                       <div className="min-w-0">
                         <div data-testid="toast-header" className="flex min-w-0 flex-wrap items-center gap-2">
                           {domainStyles.label ? (
-                            <span data-testid="toast-domain-pill" className={`inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[11px] font-semibold leading-none ring-1 ${domainStyles.badge}`}>
+                            <span data-testid="toast-domain-pill" className="pp-toast-domain-pill inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[11px] font-semibold leading-none">
                               <Icon className="h-3.5 w-3.5" />
                               {domainStyles.label}
                             </span>
                           ) : (
-                            <span className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white/70 ring-1 ring-black/5 ${iconColor}`}>
+                            <span className="pp-toast-icon inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full">
                               <Icon className="h-4 w-4" />
                             </span>
                           )}
-                          <div className="min-w-0 flex-1 break-words text-sm font-semibold leading-5 text-slate-900 sm:truncate">{toast.title}</div>
+                          <div className="pp-toast-title min-w-0 flex-1 break-words text-sm font-semibold leading-5 sm:truncate">{toast.title}</div>
                         </div>
-                        <div className="mt-1 break-words text-sm leading-5 text-slate-700">{toast.description}</div>
+                        <div className="pp-toast-description mt-1.5 break-words text-sm leading-5">{toast.description}</div>
                         {toast.actions?.length ? (
                           <div data-testid="toast-actions" className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
                             {toast.actions.map((action, actionIndex) => (
@@ -285,8 +270,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                                 }}
                                 className={
                                   action.variant === 'secondary'
-                                    ? `${actionIndex === 0 || toast.actions?.length === 2 ? 'col-span-2' : 'col-span-1'} inline-flex min-h-8 w-full items-center justify-center rounded-lg border border-slate-200 bg-white/80 px-3 py-1.5 text-center text-xs font-semibold leading-4 text-slate-700 transition hover:bg-white hover:text-slate-900 sm:col-span-1 sm:w-auto`
-                                    : `${actionIndex === 0 ? 'col-span-2' : 'col-span-1'} inline-flex min-h-8 w-full items-center justify-center rounded-lg bg-slate-900 px-3 py-1.5 text-center text-xs font-semibold leading-4 text-white transition hover:bg-slate-800 sm:col-span-1`
+                                    ? `${actionIndex === 0 || toast.actions?.length === 2 ? 'col-span-2' : 'col-span-1'} pp-toast-action-secondary inline-flex min-h-8 w-full items-center justify-center rounded-lg px-3 py-1.5 text-center text-xs font-semibold leading-4 transition sm:col-span-1 sm:w-auto`
+                                    : `${actionIndex === 0 ? 'col-span-2' : 'col-span-1'} pp-toast-action-primary inline-flex min-h-8 w-full items-center justify-center rounded-lg px-3 py-1.5 text-center text-xs font-semibold leading-4 transition sm:col-span-1`
                                 }
                               >
                                 {action.label}
@@ -300,7 +285,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                               toast.onAction?.();
                               dismissToast(toast.id);
                             }}
-                            className="mt-3 inline-flex min-h-8 w-full items-center justify-center rounded-lg bg-slate-900 px-3 py-1.5 text-center text-xs font-semibold leading-4 text-white transition hover:bg-slate-800 sm:w-auto"
+                            className="pp-toast-action-primary mt-3 inline-flex min-h-8 w-full items-center justify-center rounded-lg px-3 py-1.5 text-center text-xs font-semibold leading-4 transition sm:w-auto"
                           >
                             {toast.actionLabel}
                           </button>
@@ -309,15 +294,15 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                       <button
                         type="button"
                         onClick={() => dismissToast(toast.id)}
-                        className="rounded-full p-1 text-slate-400 transition hover:bg-white/70 hover:text-slate-600"
+                        className="pp-toast-close rounded-full p-1 transition"
                         aria-label="Закрыть уведомление"
                       >
                         <X className="h-4 w-4" />
                       </button>
                     </div>
-                    <div className="h-1 w-full bg-black/5">
+                    <div className="pp-toast-progress-track h-1 w-full">
                       <div
-                        className={`h-full ${progress}`}
+                        className="pp-toast-progress h-full"
                         style={{
                           width: '100%',
                           animation: `toast-progress ${toast.durationMs}ms linear forwards`,
