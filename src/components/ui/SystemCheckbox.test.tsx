@@ -44,4 +44,27 @@ describe('SystemCheckbox', () => {
     expect(screen.getByRole('switch', { name: 'Автозагрузка' })).toBeTruthy();
     expect((container.querySelector('[data-system-checkbox="switch"]') as HTMLElement).style.width).toBe('36px');
   });
+
+  it('exposes stable visual layers for checked and indeterminate states', () => {
+    const { container, rerender } = render(
+      <SystemCheckbox aria-label="Выбрать строки" checked onChange={() => undefined} />,
+    );
+
+    const input = screen.getByRole('checkbox', { name: 'Выбрать строки' }) as HTMLInputElement;
+    expect(input.checked).toBe(true);
+    expect(container.querySelector('.pp-system-checkbox-box')).toBeTruthy();
+    expect(container.querySelector('.pp-system-checkbox-check')).toBeTruthy();
+
+    rerender(
+      <SystemCheckbox
+        aria-label="Выбрать строки"
+        checked={false}
+        indeterminate
+        onChange={() => undefined}
+      />,
+    );
+
+    expect(input.indeterminate).toBe(true);
+    expect(container.querySelector('.pp-system-checkbox-indeterminate')).toBeTruthy();
+  });
 });

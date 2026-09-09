@@ -5,6 +5,7 @@ import { apiService } from '../../services/api';
 import type { PublicWorkOrderApproval } from '../../types';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { getExternalWorkOrderApprovalPublicId } from '../../utils/externalWorkOrderApprovalRoute';
+import { SystemCheckbox } from '../ui/SystemCheckbox';
 
 function formatMoney(value: number, currency: string) {
   return new Intl.NumberFormat('ru-RU', {
@@ -250,7 +251,7 @@ export function ExternalWorkOrderApprovalPage() {
               </label>
             </div>
             <label className="mt-3 flex items-start gap-2 text-sm text-slate-700">
-              <input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} className="mt-0.5 h-4 w-4 rounded border-slate-300" />
+              <SystemCheckbox type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} className="mt-0.5 h-4 w-4 rounded border-slate-300" />
               Я проверил(а) состав услуг, сроки и итоговую сумму этой версии заказ-наряда.
             </label>
             {error ? <div role="alert" className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div> : null}

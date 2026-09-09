@@ -1,7 +1,7 @@
 import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Archive,
   CalendarDays,
@@ -264,7 +264,6 @@ export function NotificationCenter({
   const [doNotDisturb, setDoNotDisturb] = useState<UserNotificationDoNotDisturbSettings>(DEFAULT_USER_NOTIFICATION_DO_NOT_DISTURB);
   const [preferencesLoading, setPreferencesLoading] = useState(false);
   const [preferencesSaving, setPreferencesSaving] = useState(false);
-  const pageSelectionRef = useRef<HTMLInputElement | null>(null);
 
   const totalPages = Math.max(1, Math.ceil(itemsPage.total / itemsPage.pageSize));
   const unreadCount = useMemo(
@@ -459,12 +458,6 @@ export function NotificationCenter({
     window.addEventListener(USER_NOTIFICATIONS_EVENT, handleNotificationsChanged);
     return () => window.removeEventListener(USER_NOTIFICATIONS_EVENT, handleNotificationsChanged);
   }, [refresh]);
-
-  useEffect(() => {
-    if (pageSelectionRef.current) {
-      pageSelectionRef.current.indeterminate = somePageSelected && !allPageSelected;
-    }
-  }, [allPageSelected, somePageSelected]);
 
   useEffect(() => {
     setSelectedIds((previous) => {
@@ -1370,6 +1363,7 @@ export function NotificationCenter({
             <SystemCheckbox
               type="checkbox"
               checked={allPageSelected}
+              indeterminate={somePageSelected && !allPageSelected}
               disabled={loading || currentPageIds.length === 0}
               onChange={(event) => togglePageSelection(event.target.checked)}
               className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-40"
@@ -1381,9 +1375,9 @@ export function NotificationCenter({
         <div className="grid grid-cols-[3rem_minmax(0,1fr)_12rem_16rem] border-b border-slate-200 bg-slate-50 px-4 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500 max-xl:hidden">
           <div>
             <SystemCheckbox
-              ref={pageSelectionRef}
               type="checkbox"
               checked={allPageSelected}
+              indeterminate={somePageSelected && !allPageSelected}
               disabled={loading || currentPageIds.length === 0}
               onChange={(event) => togglePageSelection(event.target.checked)}
               aria-label="Выбрать все уведомления на странице"

@@ -531,6 +531,78 @@ html[data-payplanner-theme] .recharts-cartesian-grid line {
 :root[data-payplanner-theme='midnight'] .bg-blue-600.text-white,
 :root[data-payplanner-theme='midnight'] .bg-blue-700.text-white { color: var(--pp-on-primary) !important; }
 
+.pp-system-checkbox-box,
+.pp-system-switch-track,
+.pp-system-switch-thumb {
+  transition: background-color 150ms ease, border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease, opacity 150ms ease;
+}
+
+.pp-system-checkbox-box {
+  border: 1px solid var(--pp-border-strong);
+  background: var(--pp-surface);
+  box-shadow: inset 0 1px 1px color-mix(in srgb, var(--pp-overlay) 12%, transparent), var(--pp-shadow);
+}
+
+.pp-system-checkbox-check,
+.pp-system-checkbox-indeterminate {
+  color: var(--pp-on-primary);
+  transition: opacity 120ms ease;
+}
+
+.pp-system-checkbox > input:checked ~ .pp-system-checkbox-box,
+.pp-system-checkbox > input:indeterminate ~ .pp-system-checkbox-box {
+  border-color: var(--pp-primary);
+  background: var(--pp-primary);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--pp-primary) 16%, transparent), 0 2px 7px color-mix(in srgb, var(--pp-primary) 28%, transparent);
+}
+
+.pp-system-checkbox > input:checked ~ .pp-system-checkbox-check {
+  opacity: 1;
+}
+
+.pp-system-checkbox > input:indeterminate ~ .pp-system-checkbox-check {
+  opacity: 0;
+}
+
+.pp-system-checkbox > input:indeterminate ~ .pp-system-checkbox-indeterminate {
+  opacity: 1;
+}
+
+.pp-system-checkbox > input:focus-visible ~ .pp-system-checkbox-box,
+.pp-system-switch > input:focus-visible ~ .pp-system-switch-track {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--pp-primary) 28%, transparent);
+}
+
+.pp-system-checkbox > input:disabled ~ .pp-system-checkbox-box,
+.pp-system-checkbox > input:disabled ~ .pp-system-checkbox-check,
+.pp-system-checkbox > input:disabled ~ .pp-system-checkbox-indeterminate,
+.pp-system-switch > input:disabled ~ .pp-system-switch-track,
+.pp-system-switch > input:disabled ~ .pp-system-switch-thumb {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.pp-system-switch-track {
+  border: 1px solid var(--pp-border-strong);
+  background: var(--pp-surface-muted);
+  box-shadow: inset 0 1px 3px color-mix(in srgb, var(--pp-overlay) 20%, transparent);
+}
+
+.pp-system-switch-thumb {
+  background: var(--pp-surface);
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--pp-overlay) 32%, transparent);
+}
+
+.pp-system-switch > input:checked ~ .pp-system-switch-track {
+  border-color: var(--pp-primary);
+  background: var(--pp-primary);
+}
+
+.pp-system-switch > input:checked ~ .pp-system-switch-thumb {
+  background: var(--pp-on-primary);
+  transform: translateX(16px);
+}
+
 .pp-toast-card {
   --pp-toast-accent: var(--pp-info-solid);
   --pp-toast-foreground: var(--pp-info-text);

@@ -285,7 +285,7 @@ async function prepareAuth(context, frontendUrl, token, email, password, timeout
   return false;
 }
 
-async function checkPage({ page, frontendUrl, route, viewportName, themeName, timeoutMs, artifactDir, toastPreview }) {
+async function checkPage({ page, frontendUrl, route, viewportName, themeName, timeoutMs, artifactDir, toastPreview, selectionPreview }) {
   const consoleErrors = [];
   const pageErrors = [];
 
@@ -366,6 +366,22 @@ async function checkPage({ page, frontendUrl, route, viewportName, themeName, ti
       });
     });
     await page.getByTestId('toast-card').nth(2).waitFor({ state: 'visible', timeout: timeoutMs });
+    await page.evaluate(() => new Promise((resolve) => window.requestAnimationFrame(() => resolve(undefined))));
+  }
+
+  if (selectionPreview) {
+    await page.getByRole('dialog').getByRole('button', { name: /Понятно|Закрыть/i }).last().click({ timeout: 1_500 }).catch(() => undefined);
+    await page.getByRole('checkbox', { name: /Выбрать все/i }).click({ timeout: timeoutMs });
+    await page.waitForFunction(() => {
+      const visibleSelectionInputs = Array.from(document.querySelectorAll('[data-system-checkbox="checkbox"] > input'))
+        .filter((input) => input.getClientRects().length > 0 && input.getAttribute('aria-label')?.startsWith('Выбрать'));
+
+      return visibleSelectionInputs.length > 1 && visibleSelectionInputs.every((input) => {
+        const wrapper = input.closest('[data-system-checkbox="checkbox"]');
+        const mark = wrapper?.querySelector('.pp-system-checkbox-check');
+        return input.checked && mark && Number.parseFloat(getComputedStyle(mark).opacity) >= 0.99;
+      });
+    }, undefined, { timeout: timeoutMs });
     await page.evaluate(() => new Promise((resolve) => window.requestAnimationFrame(() => resolve(undefined))));
   }
 
@@ -582,6 +598,8 @@ Options:
   --full-app <bool>        Check every top-level CRM section when authenticated.
   --themes <csv|all>       Force visual themes without changing the setting on the server.
   --toast-preview <bool>   Render a stable matrix of real application toasts for visual auditing (development only).
+  --selection-preview <bool>
+                           Select all visible rows and verify their checkbox marks.
   --viewports <csv>        Viewports to check: desktop,tablet,mobile. Default: all.
   --artifact-dir <path>    Screenshot output directory. Default: ${DEFAULT_ARTIFACT_DIR}
   --timeout-ms <number>    Per-page timeout. Default: ${DEFAULT_TIMEOUT_MS}
@@ -599,6 +617,7 @@ export async function runVisualSmoke(options) {
   const artifactDir = options.artifactDir;
   const requireAuth = options.requireAuth;
   const toastPreview = options.toastPreview;
+  const selectionPreview = options.selectionPreview;
   const { browser, label } = await launchChromium();
 
   try {
@@ -627,6 +646,7 @@ export async function runVisualSmoke(options) {
     console.log(`Viewports: ${viewportNames.join(', ')}`);
     console.log(`Themes: ${themeNames.map((theme) => theme ?? 'server-default').join(', ')}`);
     console.log(`Toast preview: ${toastPreview ? 'enabled' : 'disabled'}`);
+    console.log(`Selection preview: ${selectionPreview ? 'enabled' : 'disabled'}`);
     console.log(`Routes: ${routes.map((route) => route.path).join(', ')}`);
     console.log(`Screenshots: ${artifactDir}`);
     console.log('');
@@ -641,7 +661,7 @@ export async function runVisualSmoke(options) {
       try {
         for (const themeName of themeNames) {
           for (const route of routes) {
-            const result = await checkPage({ page, frontendUrl, route, viewportName, themeName, timeoutMs, artifactDir, toastPreview });
+            const result = await checkPage({ page, frontendUrl, route, viewportName, themeName, timeoutMs, artifactDir, toastPreview, selectionPreview });
             rows.push(result);
 
             if (result.failures.length > 0) {
@@ -696,6 +716,7 @@ async function main() {
     timeoutMs: readPositiveInt(args.timeoutMs ?? process.env.PAYPLANNER_VISUAL_TIMEOUT_MS, DEFAULT_TIMEOUT_MS),
     requireAuth: readBoolean(args.requireAuth ?? process.env.PAYPLANNER_VISUAL_REQUIRE_AUTH),
     toastPreview: readBoolean(args.toastPreview ?? process.env.PAYPLANNER_VISUAL_TOAST_PREVIEW),
+    selectionPreview: readBoolean(args.selectionPreview ?? process.env.PAYPLANNER_VISUAL_SELECTION_PREVIEW),
     token: args.token ?? process.env.PAYPLANNER_VISUAL_TOKEN ?? '',
     email: args.email ?? process.env.PAYPLANNER_VISUAL_EMAIL ?? '',
     password: args.password ?? process.env.PAYPLANNER_VISUAL_PASSWORD ?? '',

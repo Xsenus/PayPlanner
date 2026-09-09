@@ -120,11 +120,35 @@ describe('NotificationCenter', () => {
 
     expect(await screen.findByText('Первое уведомление')).toBeTruthy();
 
-    fireEvent.click(screen.getByLabelText('Выбрать все уведомления на странице'));
+    const selectPage = screen.getByLabelText('Выбрать все уведомления на странице') as HTMLInputElement;
+    const selectFirst = screen.getByLabelText('Выбрать уведомление Первое уведомление') as HTMLInputElement;
+    const selectSecond = screen.getByLabelText('Выбрать уведомление Второе уведомление') as HTMLInputElement;
+
+    fireEvent.click(selectPage);
+    expect(selectPage.checked).toBe(true);
+    expect(selectFirst.checked).toBe(true);
+    expect(selectSecond.checked).toBe(true);
     fireEvent.click(screen.getByRole('button', { name: 'В архив выбранные уведомления: 2' }));
 
     await waitFor(() => expect(apiMock.archiveUserNotifications).toHaveBeenCalledWith([10, 11]));
     expect(toastMock.success).toHaveBeenCalledWith('Отправлено в архив: 2.');
+  });
+
+  it('shows an indeterminate page selector when only some notifications are selected', async () => {
+    apiMock.getUserNotifications.mockResolvedValue(createPage([
+      createNotification({ id: 14, title: 'Первое частичное' }),
+      createNotification({ id: 15, title: 'Второе частичное' }),
+    ]));
+
+    render(<NotificationCenter />);
+    await screen.findByText('Первое частичное');
+
+    const selectPage = screen.getByLabelText('Выбрать все уведомления на странице') as HTMLInputElement;
+    fireEvent.click(screen.getByLabelText('Выбрать уведомление Первое частичное'));
+
+    expect(selectPage.checked).toBe(false);
+    expect(selectPage.indeterminate).toBe(true);
+    expect(screen.getByText('Выбрано: 1')).toBeTruthy();
   });
 
   it('confirms case activity and snoozes inactivity notifications', async () => {

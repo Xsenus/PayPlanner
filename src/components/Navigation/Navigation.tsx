@@ -9,6 +9,7 @@ import {
   type MouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
+import { SystemCheckbox } from '../ui/SystemCheckbox';
 import {
   Calendar,
   CalendarDays,
@@ -1152,7 +1153,7 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
                         <label
                           key={item.id}
                           className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-slate-200 hover:bg-slate-800">
-                          <input
+                          <SystemCheckbox
                             type="checkbox"
                             checked={visible}
                             onChange={() => toggleItemVisibility(item.id)}

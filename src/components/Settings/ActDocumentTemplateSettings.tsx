@@ -6,6 +6,7 @@ import { useToast } from '../../hooks/useToast';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { DocumentTemplateHistoryPanel } from './DocumentTemplateHistoryPanel';
 import { SystemSelect } from '../ui/SystemSelect';
+import { SystemCheckbox } from '../ui/SystemCheckbox';
 
 const previewTokens: Record<string, string> = {
   'document.title': 'Акт № 48 от 9 августа 2026 г.',
@@ -150,7 +151,7 @@ export function ActDocumentTemplateSettings() {
           <div className="mt-3 grid gap-3 md:grid-cols-3">
             <label className="block"><span className="text-sm font-medium text-gray-700">Активный шаблон</span><SystemSelect value={selectedKey} onChange={(event) => { setSelectedKey(event.target.value); setSettings((current) => current ? { ...current, activeTemplateKey: event.target.value } : current); }} className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm">{settings.templates.map((template) => <option key={template.key} value={template.key}>{template.name}</option>)}</SystemSelect></label>
             <label className="block"><span className="text-sm font-medium text-gray-700">Название</span><input value={activeTemplate.name} onChange={(event) => updateTemplate({ name: event.target.value })} className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" /></label>
-            <label className="flex items-end"><span className="flex min-h-10 w-full items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-700"><input type="checkbox" checked={settings.printWithSignatureAndSealByDefault} onChange={(event) => setSettings((current) => current ? { ...current, printWithSignatureAndSealByDefault: event.target.checked } : current)} />Подпись и печать по умолчанию</span></label>
+            <label className="flex items-end"><span className="flex min-h-10 w-full items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-700"><SystemCheckbox type="checkbox" checked={settings.printWithSignatureAndSealByDefault} onChange={(event) => setSettings((current) => current ? { ...current, printWithSignatureAndSealByDefault: event.target.checked } : current)} />Подпись и печать по умолчанию</span></label>
           </div>
           <label className="mt-3 block"><span className="text-sm font-medium text-gray-700">Описание</span><input value={activeTemplate.description ?? ''} onChange={(event) => updateTemplate({ description: event.target.value })} className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" /></label>
 
