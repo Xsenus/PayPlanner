@@ -509,6 +509,10 @@ async function checkPage({ page, frontendUrl, route, viewportName, themeName, ti
         if (disabledControl || style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) < 0.55 || rect.width < 2 || rect.height < 2) return null;
         const foreground = parseColor(style.color);
         if (!foreground) return null;
+        const usesClippedBackgroundText = foreground.a === 0
+          && style.backgroundImage !== 'none'
+          && (style.backgroundClip === 'text' || style.webkitBackgroundClip === 'text');
+        if (usesClippedBackgroundText) return null;
         const background = effectiveBackground(node);
         const ratio = contrast(composite(foreground, background), background);
         if (ratio >= 2.5) return null;
