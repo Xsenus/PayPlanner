@@ -53,6 +53,11 @@
   --pp-special-solid: #7c3aed;
 }
 
+.pp-notification-date-separator {
+  background: var(--pp-primary);
+  color: var(--pp-on-primary);
+}
+
 :root[data-payplanner-theme='business'] {
   --pp-bg: #eaf0f6;
   --pp-bg-elevated: #dde7f1;

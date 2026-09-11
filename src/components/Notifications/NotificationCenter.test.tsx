@@ -151,6 +151,22 @@ describe('NotificationCenter', () => {
     expect(screen.getByText('Выбрано: 1')).toBeTruthy();
   });
 
+  it('separates notifications with solid date headings', async () => {
+    apiMock.getUserNotifications.mockResolvedValue(createPage([
+      createNotification({ id: 16, title: 'Первое за седьмое июня', createdAt: '2026-06-07T10:00:00Z' }),
+      createNotification({ id: 17, title: 'Второе за седьмое июня', createdAt: '2026-06-07T08:00:00Z' }),
+      createNotification({ id: 18, title: 'Уведомление за шестое июня', createdAt: '2026-06-06T12:00:00Z' }),
+    ]));
+
+    render(<NotificationCenter />);
+
+    expect(await screen.findByText('Первое за седьмое июня')).toBeTruthy();
+    expect(screen.getAllByRole('separator')).toHaveLength(2);
+    expect(screen.getByRole('separator', { name: 'Уведомления за 7 июня 2026 года' })).toBeTruthy();
+    expect(screen.getByRole('separator', { name: 'Уведомления за 6 июня 2026 года' })).toBeTruthy();
+    expect(screen.getAllByText('7 июня 2026 года')).toHaveLength(1);
+  });
+
   it('confirms case activity and snoozes inactivity notifications', async () => {
     const confirmNotification = createNotification({
       id: 12,

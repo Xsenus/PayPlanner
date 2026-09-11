@@ -1,7 +1,7 @@
 import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Archive,
   CalendarDays,
@@ -39,7 +39,9 @@ import {
 } from '../../services/api';
 import type { Client } from '../../types';
 import { useToast } from '../../hooks/useToast';
+import { useUserTimeZone } from '../../hooks/useUserTimeZone';
 import type { TaskJournalAssignee } from '../../utils/taskJournalStore';
+import { formatDateTimeInTimeZone, getZonedParts, toTimeZoneDateKey } from '../../utils/timeZoneDate';
 import { emitUserNotificationsChanged, USER_NOTIFICATIONS_EVENT, type UserNotificationsChangedDetail } from '../../utils/userNotifications';
 import {
   DEFAULT_USER_NOTIFICATION_TYPE_PREFERENCES,
@@ -209,23 +211,33 @@ function toneClasses(tone: string, isRead: boolean) {
   }
 }
 
-function formatDateTime(value?: string | null) {
+function formatDateTime(value?: string | null, timeZoneId?: string | null) {
   if (!value) {
     return '—';
   }
 
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
+  return formatDateTimeInTimeZone(value, timeZoneId) || value;
+}
+
+function formatNotificationDateHeading(value?: string | null, timeZoneId?: string | null) {
+  if (!value) {
+    return 'Дата не указана';
   }
 
-  return new Intl.DateTimeFormat('ru-RU', {
-    day: '2-digit',
-    month: '2-digit',
+  const parts = getZonedParts(value, timeZoneId);
+  if (!parts) {
+    return 'Дата не указана';
+  }
+
+  const formattedParts = new Intl.DateTimeFormat('ru-RU', {
+    day: 'numeric',
+    month: 'long',
     year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(date);
+    timeZone: 'UTC',
+  }).formatToParts(new Date(Date.UTC(parts.year, parts.month - 1, parts.day)));
+  const month = formattedParts.find((part) => part.type === 'month')?.value;
+
+  return month ? `${parts.day} ${month} ${parts.year} года` : 'Дата не указана';
 }
 
 export function NotificationCenter({
@@ -238,6 +250,7 @@ export function NotificationCenter({
   onOpenContract,
 }: NotificationCenterProps) {
   const toast = useToast();
+  const timeZoneId = useUserTimeZone();
   const [itemsPage, setItemsPage] = useState<PagedResult<UserNotificationDto>>(EMPTY_PAGE);
   const [types, setTypes] = useState<UserNotificationTypeDto[]>([]);
   const [status, setStatus] = useState<NotificationStatusFilter>('active');
@@ -281,6 +294,21 @@ export function NotificationCenter({
   const selectedTaskRole = taskRole === 'all' ? undefined : taskRole;
   const selectedDomain = domain === 'all' ? undefined : domain;
   const currentPageIds = useMemo(() => itemsPage.items.map((item) => item.id), [itemsPage.items]);
+  const notificationsWithDateGroups = useMemo(() => {
+    let previousDateKey: string | null = null;
+
+    return itemsPage.items.map((item) => {
+      const dateKey = toTimeZoneDateKey(item.createdAt, timeZoneId) || 'unknown';
+      const showDateSeparator = dateKey !== previousDateKey;
+      previousDateKey = dateKey;
+
+      return {
+        item,
+        showDateSeparator,
+        dateLabel: formatNotificationDateHeading(item.createdAt, timeZoneId),
+      };
+    });
+  }, [itemsPage.items, timeZoneId]);
   const selectedCount = selectedIds.size;
   const allPageSelected = currentPageIds.length > 0 && currentPageIds.every((id) => selectedIds.has(id));
   const somePageSelected = currentPageIds.some((id) => selectedIds.has(id));
@@ -1398,7 +1426,7 @@ export function NotificationCenter({
               <div className="px-4 py-12 text-center text-sm text-slate-500">По текущим фильтрам уведомлений нет.</div>
             ) : (
               <div className="divide-y divide-slate-100">
-                {itemsPage.items.map((item) => {
+                {notificationsWithDateGroups.map(({ item, showDateSeparator, dateLabel }) => {
                   const itemBusy = busyId === item.id;
                   const linkedObjectLabel = item.objectId ? openLinkedObjectLabels[item.objectType] : undefined;
                   const canOpenLinkedObject = Boolean(
@@ -1413,8 +1441,17 @@ export function NotificationCenter({
               const isCaseInactivity = CASE_INACTIVITY_NOTIFICATION_TYPES.has(item.type) && Boolean(caseId);
               const caseButtonLabel = caseDocumentId && onOpenCaseDocument ? 'К документам' : 'К делу';
               return (
-                <article
-                  key={item.id}
+                <Fragment key={item.id}>
+                  {showDateSeparator ? (
+                    <div
+                      role="separator"
+                      aria-label={`Уведомления за ${dateLabel}`}
+                      className="pp-notification-date-separator flex min-h-10 w-full items-center px-4 py-2 text-sm font-semibold"
+                    >
+                      {dateLabel}
+                    </div>
+                  ) : null}
+                  <article
                   role="button"
                   tabIndex={0}
                   onClick={() => void markRead(item)}
@@ -1457,7 +1494,7 @@ export function NotificationCenter({
                         </div>
                         <p className="mt-1 whitespace-pre-line text-sm leading-6 text-slate-600">{item.bodyPreview}</p>
                         <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-slate-500">
-                          <span>{formatDateTime(item.createdAt)}</span>
+                          <span>{formatDateTime(item.createdAt, timeZoneId)}</span>
                           {item.taskId ? <span>Задача #{item.taskId}</span> : null}
                           {item.objectType === 'case' && item.objectId ? <span>Дело #{item.objectId}</span> : null}
                           {caseDocumentId ? <span>Документ #{caseDocumentId}</span> : null}
@@ -1597,7 +1634,8 @@ export function NotificationCenter({
                       Удалить
                     </button>
                   </div>
-                </article>
+                  </article>
+                </Fragment>
               );
             })}
           </div>
