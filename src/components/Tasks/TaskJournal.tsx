@@ -3019,6 +3019,18 @@ export function TaskJournal({
     }
   }, [canCreateTasks, emitTaskChange, openTaskEditor, refreshTasks, toast]);
 
+  const openTaskCreateForAutomationCandidate = useCallback((candidate: TaskJournalCaseAutomationCandidate) => {
+    openTaskCreateFromTemplate({
+      isInternal: false,
+      clientId: candidate.clientId ?? null,
+      legalEntityId: candidate.legalEntityId ?? null,
+      clientCaseId: candidate.clientCaseId,
+      objectName: [getAutomationCandidateOwnerName(candidate), candidate.clientCaseTitle]
+        .filter(Boolean)
+        .join(' - '),
+    });
+  }, [openTaskCreateFromTemplate]);
+
   const createAllAutomationTasks = useCallback(async () => {
     if (!canCreateTasks) {
       toast.error('У роли нет права на создание задач.', 'Автоконтроль дел');
@@ -5255,6 +5267,7 @@ export function TaskJournal({
             creatingCaseId={creatingAutomationCaseId}
             creatingAll={creatingAutomationAll}
             onCreate={createAutomationTask}
+            onCreateManual={openTaskCreateForAutomationCandidate}
             onCreateAll={createAllAutomationTasks}
           />
         ) : null}
@@ -6055,12 +6068,14 @@ function TaskAutomationPanel({
   creatingCaseId,
   creatingAll,
   onCreate,
+  onCreateManual,
   onCreateAll,
 }: {
   candidates: TaskJournalCaseAutomationCandidate[];
   creatingCaseId: number | null;
   creatingAll: boolean;
   onCreate: (candidate: TaskJournalCaseAutomationCandidate) => void;
+  onCreateManual: (candidate: TaskJournalCaseAutomationCandidate) => void;
   onCreateAll: () => void;
 }) {
   const [activeState, setActiveState] = useState<'all' | 'ready' | 'waiting' | 'paused'>('all');
@@ -6125,7 +6140,11 @@ function TaskAutomationPanel({
       </div>
 
       <div className="mt-3 grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
-        {visibleCandidates.map((candidate) => (
+        {visibleCandidates.map((candidate) => {
+          const canCreateControlTask = candidate.automationState === 'ready' || candidate.isReadyForControl !== false;
+          const isCreatingControlTask = canCreateControlTask && creatingCaseId === candidate.clientCaseId;
+
+          return (
           <article key={candidate.clientCaseId} className="min-w-0 rounded-xl border border-amber-200 bg-white p-4 shadow-sm">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
@@ -6150,26 +6169,31 @@ function TaskAutomationPanel({
               {candidate.lastTaskAt ? `Последняя задача: ${formatDateTime(candidate.lastTaskAt)}` : 'Задач по делу еще не было'}
             </div>
             <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="text-xs text-slate-500">Закрытых задач: {candidate.completedTaskCount}</div>
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="text-xs text-slate-500">Закрытых задач: {candidate.completedTaskCount}</div>
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-rose-700 bg-rose-600 px-2.5 py-1 text-xs font-bold text-white shadow-sm">
+                  <XCircle className="h-3.5 w-3.5" />
+                  Нет активных задач
+                </span>
+              </div>
               <button
                 type="button"
                 data-testid={`task-automation-create-${candidate.clientCaseId}`}
-                disabled={creatingCaseId === candidate.clientCaseId || candidate.isReadyForControl === false}
-                onClick={() => onCreate(candidate)}
+                disabled={isCreatingControlTask}
+                onClick={() => canCreateControlTask ? onCreate(candidate) : onCreateManual(candidate)}
                 className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-amber-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-amber-700 disabled:cursor-wait disabled:opacity-60 sm:w-auto"
               >
                 <Plus className="h-4 w-4" />
-                {creatingCaseId === candidate.clientCaseId
+                {isCreatingControlTask
                   ? 'Создаем...'
-                  : candidate.automationState === 'paused'
-                    ? 'Приостановлено'
-                    : candidate.isReadyForControl === false
-                      ? 'Ожидает срока'
-                      : 'Создать задачу'}
+                  : canCreateControlTask
+                    ? 'Создать контрольную задачу'
+                    : 'Поставить задачу'}
               </button>
             </div>
           </article>
-        ))}
+          );
+        })}
       </div>
       {filteredCandidates.length === 0 ? (
         <div className="mt-3 rounded-xl border border-dashed border-amber-200 bg-white/70 px-3 py-4 text-sm text-slate-600">

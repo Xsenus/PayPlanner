@@ -3810,7 +3810,16 @@ describe('TaskJournal', () => {
     expect(screen.getByRole('button', { name: 'Пора создать: 1' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Ожидают срока: 1' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Создать наступившие (1)' })).toBeTruthy();
-    expect((screen.getByTestId('task-automation-create-101') as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getAllByText('Нет активных задач')).toHaveLength(2);
+
+    const waitingTaskButton = screen.getByTestId('task-automation-create-101') as HTMLButtonElement;
+    expect(waitingTaskButton.disabled).toBe(false);
+    expect(waitingTaskButton.textContent).toContain('Поставить задачу');
+
+    fireEvent.click(waitingTaskButton);
+
+    expect(await screen.findByRole('heading', { name: 'Выберите клиента и дело' })).toBeTruthy();
+    expect(apiMock.createTaskJournalCaseAutomationTask).not.toHaveBeenCalled();
   });
 
   it('completes an active task with an existing result from the quick action', async () => {
