@@ -250,7 +250,6 @@ const DEFAULT_TASK_JOURNAL_SETTINGS: TaskJournalSettingsDto = {
   stickerStyles: cloneDefaultTaskStickerStyles(),
 };
 
-const AUTOMATION_CANDIDATES_SEARCH_DELAY_MS = 300;
 const TASK_JOURNAL_TABLE_SETTINGS_KEY = 'task_journal_table_settings_v1';
 const TASK_JOURNAL_TABLE_COLUMNS: Array<{ key: TaskTableColumnKey; defaultWidth: number }> = [
   { key: 'counterparty', defaultWidth: 200 },
@@ -264,12 +263,11 @@ const TASK_JOURNAL_TABLE_COLUMNS: Array<{ key: TaskTableColumnKey; defaultWidth:
   { key: 'actions', defaultWidth: 156 },
 ];
 
-function buildAutomationCandidatesRequestKey(settings: TaskJournalSettingsDto, searchValue: string) {
+function buildAutomationCandidatesRequestKey(settings: TaskJournalSettingsDto) {
   return [
     settings.caseInactivityDays,
     100,
     settings.caseInactivityEscalationDays,
-    searchValue.trim(),
   ].join('|');
 }
 
@@ -2122,7 +2120,6 @@ export function TaskJournal({
   const [metricFilter, setMetricFilter] = useState<MetricFilter>(initialPreferences.metricFilter);
   const [search, setSearch] = useState(initialPreferences.search);
   const debouncedSearch = useDebouncedValue(search, 300);
-  const searchRef = useRef(initialPreferences.search);
   const [dateFromFilter, setDateFromFilter] = useState(initialPreferences.dateFrom);
   const [dateToFilter, setDateToFilter] = useState(initialPreferences.dateTo);
   const [viewMode, setViewMode] = useState<ViewMode>(initialPreferences.viewMode);
@@ -2476,7 +2473,6 @@ export function TaskJournal({
 
   const loadAutomationCandidates = useCallback(async (
     settings: TaskJournalSettingsDto,
-    searchValue: string,
     signal?: AbortSignal,
   ) => {
     if (embedded || underControlOnly || isApprovalsMode || !canCreateTasks || !canViewCases || !settings.caseInactivityAutomationEnabled) {
@@ -2487,7 +2483,6 @@ export function TaskJournal({
       inactiveDays: settings.caseInactivityDays,
       limit: 100,
       escalationDays: settings.caseInactivityEscalationDays,
-      search: searchValue.trim() || undefined,
       includeWaiting: true,
     };
     return signal
@@ -2597,11 +2592,7 @@ export function TaskJournal({
       const trustedDevicePromise = currentUserId
         ? getOfflineCalendarTrustedDevice(currentUserId).catch(() => false)
         : Promise.resolve(false);
-      let automationSearchValue = searchRef.current;
-      const automationPromise = settingsPromise.then((settingsResponse) => {
-        automationSearchValue = searchRef.current;
-        return loadAutomationCandidates(settingsResponse, automationSearchValue);
-      });
+      const automationPromise = settingsPromise.then((settingsResponse) => loadAutomationCandidates(settingsResponse));
       const [assigneeResponse, settingsResponse, notificationDefaultsResponse, timeZoneResponse, calendarSyncSettingsResponse, automationResponse, featureFlagsResponse, trustedDevice] = await Promise.all([
         apiService.getTaskJournalAssignees({ calendarView: shouldUseCalendarVisibility }),
         settingsPromise,
@@ -2620,7 +2611,7 @@ export function TaskJournal({
       }
       setAssignees(assigneeResponse);
       setAutomationCandidates(automationResponse);
-      automationCandidatesRequestKeyRef.current = buildAutomationCandidatesRequestKey(settingsResponse, automationSearchValue);
+      automationCandidatesRequestKeyRef.current = buildAutomationCandidatesRequestKey(settingsResponse);
       automationCandidatesInitializedRef.current = true;
       setTaskSettings({
         ...settingsResponse,
@@ -2789,12 +2780,11 @@ export function TaskJournal({
   }, [isApprovalsMode]);
 
   useEffect(() => {
-    searchRef.current = search;
     if (!automationCandidatesInitializedRef.current) {
       return;
     }
 
-    const requestKey = buildAutomationCandidatesRequestKey(taskSettings, search);
+    const requestKey = buildAutomationCandidatesRequestKey(taskSettings);
     if (automationCandidatesRequestKeyRef.current === requestKey) {
       return;
     }
@@ -2802,26 +2792,52 @@ export function TaskJournal({
     const requestId = automationCandidatesRequestRef.current + 1;
     automationCandidatesRequestRef.current = requestId;
     const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => {
-      void loadAutomationCandidates(taskSettings, search, controller.signal)
+    void loadAutomationCandidates(taskSettings, controller.signal)
+      .then((items) => {
+        if (!controller.signal.aborted && automationCandidatesRequestRef.current === requestId) {
+          automationCandidatesRequestKeyRef.current = requestKey;
+          setAutomationCandidates(items);
+        }
+      })
+      .catch(() => {
+        if (!controller.signal.aborted && automationCandidatesRequestRef.current === requestId) {
+          setAutomationCandidates([]);
+        }
+      });
+
+    return () => {
+      controller.abort();
+    };
+  }, [loadAutomationCandidates, taskSettings]);
+
+  useEffect(() => {
+    let controller: AbortController | null = null;
+    const refresh = () => {
+      if (!automationCandidatesInitializedRef.current) {
+        return;
+      }
+
+      controller?.abort();
+      const nextController = new AbortController();
+      controller = nextController;
+      const requestId = automationCandidatesRequestRef.current + 1;
+      automationCandidatesRequestRef.current = requestId;
+
+      void loadAutomationCandidates(taskSettings, nextController.signal)
         .then((items) => {
-          if (!controller.signal.aborted && automationCandidatesRequestRef.current === requestId) {
-            automationCandidatesRequestKeyRef.current = requestKey;
+          if (!nextController.signal.aborted && automationCandidatesRequestRef.current === requestId) {
             setAutomationCandidates(items);
           }
         })
-        .catch(() => {
-          if (!controller.signal.aborted && automationCandidatesRequestRef.current === requestId) {
-            setAutomationCandidates([]);
-          }
-        });
-    }, AUTOMATION_CANDIDATES_SEARCH_DELAY_MS);
-
-    return () => {
-      window.clearTimeout(timeoutId);
-      controller.abort();
+        .catch(() => undefined);
     };
-  }, [loadAutomationCandidates, search, taskSettings]);
+
+    window.addEventListener(TASK_JOURNAL_EVENT, refresh);
+    return () => {
+      controller?.abort();
+      window.removeEventListener(TASK_JOURNAL_EVENT, refresh);
+    };
+  }, [loadAutomationCandidates, taskSettings]);
 
   const assigneeById = useMemo(() => {
     const byId = new Map<number, TaskJournalAssignee>();

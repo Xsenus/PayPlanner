@@ -3653,90 +3653,34 @@ describe('TaskJournal', () => {
     expect(await screen.findByRole('heading', { name: 'Просмотр задачи' })).toBeTruthy();
   });
 
-  it('reloads case automation candidates for the current search', async () => {
-    apiMock.getTaskJournalCaseAutomationCandidates.mockImplementation(async (params?: { search?: string }) => (
-      params?.search === 'КОШЕЛЕВА'
-        ? [
-          {
-            clientId: 10,
-            clientName: 'Кошелева Елена Юрьевна',
-            clientCaseId: 100,
-            clientCaseTitle: 'КОШЕЛЕВА - уголовное дело',
-            reason: 'Нет активной задачи уже 21 дн.',
-            activeTaskCount: 0,
-            completedTaskCount: 2,
-            daysWithoutActiveTask: 21,
-            isEscalated: false,
-            lastTaskAt: todayAt(8),
-            suggestedTitle: 'Проверить движение по делу',
-            suggestedDescription: 'Автоконтроль: по делу нет активной задачи.',
-            suggestedDueAt: todayAt(9),
-            suggestedPriority: 'normal',
-          },
-        ]
-        : []
-    ));
+  it('keeps the complete case automation overview when the task search changes', async () => {
+    apiMock.getTaskJournalCaseAutomationCandidates.mockResolvedValue([
+      {
+        clientId: 10,
+        clientName: 'Кошелева Елена Юрьевна',
+        clientCaseId: 100,
+        clientCaseTitle: 'КОШЕЛЕВА - уголовное дело',
+        reason: 'Нет активной задачи уже 21 дн.',
+        activeTaskCount: 0,
+        completedTaskCount: 2,
+        daysWithoutActiveTask: 21,
+        isEscalated: false,
+        lastTaskAt: todayAt(8),
+        suggestedTitle: 'Проверить движение по делу',
+        suggestedDescription: 'Автоконтроль: по делу нет активной задачи.',
+        suggestedDueAt: todayAt(9),
+        suggestedPriority: 'normal',
+      },
+    ]);
     await renderJournal([], { waitForTitle: null });
     apiMock.getTaskJournalCaseAutomationCandidates.mockClear();
 
     const searchInput = screen.getByRole('textbox') as HTMLInputElement;
-    fireEvent.change(searchInput, { target: { value: 'КО' } });
-    fireEvent.change(searchInput, { target: { value: 'КОШЕЛ' } });
-    fireEvent.change(searchInput, { target: { value: 'КОШЕЛЕВА' } });
+    fireEvent.change(searchInput, { target: { value: 'ДРУГОЙ КЛИЕНТ' } });
 
     expect(apiMock.getTaskJournalCaseAutomationCandidates).not.toHaveBeenCalled();
-    await waitFor(() => expect(apiMock.getTaskJournalCaseAutomationCandidates).toHaveBeenCalledTimes(1));
-    expect(apiMock.getTaskJournalCaseAutomationCandidates).toHaveBeenCalledWith(
-      expect.objectContaining({ search: 'КОШЕЛЕВА' }),
-      expect.objectContaining({ signal: expect.any(AbortSignal) }),
-    );
     expect(await screen.findByText('Кошелева Елена Юрьевна')).toBeTruthy();
     expect(screen.getByText('КОШЕЛЕВА - уголовное дело')).toBeTruthy();
-  });
-
-  it('aborts an obsolete case automation search request', async () => {
-    await renderJournal([], { waitForTitle: null });
-    apiMock.getTaskJournalCaseAutomationCandidates.mockClear();
-    const signals: AbortSignal[] = [];
-    const resolvePending: Array<(items: []) => void> = [];
-    apiMock.getTaskJournalCaseAutomationCandidates.mockImplementation((
-      _params?: { search?: string },
-      options?: { signal?: AbortSignal },
-    ) => {
-      if (options?.signal) {
-        signals.push(options.signal);
-      }
-      return new Promise<[]>((resolve) => resolvePending.push(resolve));
-    });
-
-    const searchInput = screen.getByRole('textbox') as HTMLInputElement;
-    fireEvent.change(searchInput, { target: { value: 'ИВАН' } });
-    await waitFor(() => expect(apiMock.getTaskJournalCaseAutomationCandidates).toHaveBeenCalledTimes(1));
-    expect(signals[0]?.aborted).toBe(false);
-
-    fireEvent.change(searchInput, { target: { value: 'ИВАНОВ' } });
-
-    await waitFor(() => expect(signals[0]?.aborted).toBe(true));
-    resolvePending.forEach((resolve) => resolve([]));
-  });
-
-  it('requests a search value again after its previous request was aborted', async () => {
-    await renderJournal([], { waitForTitle: null });
-    apiMock.getTaskJournalCaseAutomationCandidates.mockClear();
-    const resolvePending: Array<(items: []) => void> = [];
-    apiMock.getTaskJournalCaseAutomationCandidates.mockImplementation(() => (
-      new Promise<[]>((resolve) => resolvePending.push(resolve))
-    ));
-
-    const searchInput = screen.getByRole('textbox') as HTMLInputElement;
-    fireEvent.change(searchInput, { target: { value: 'А' } });
-    await waitFor(() => expect(apiMock.getTaskJournalCaseAutomationCandidates).toHaveBeenCalledTimes(1));
-    fireEvent.change(searchInput, { target: { value: 'Б' } });
-    fireEvent.change(searchInput, { target: { value: 'А' } });
-
-    await waitFor(() => expect(apiMock.getTaskJournalCaseAutomationCandidates).toHaveBeenCalledTimes(2));
-    expect(apiMock.getTaskJournalCaseAutomationCandidates.mock.calls[1][0]).toEqual(expect.objectContaining({ search: 'А' }));
-    resolvePending.forEach((resolve) => resolve([]));
   });
 
   it('creates control tasks for all automation candidates', async () => {
@@ -3846,12 +3790,14 @@ describe('TaskJournal', () => {
   it('refreshes once when another task journal instance reports a change', async () => {
     await renderJournal();
     apiMock.getTaskJournalItems.mockClear();
+    apiMock.getTaskJournalCaseAutomationCandidates.mockClear();
 
     window.dispatchEvent(new CustomEvent(TASK_JOURNAL_EVENT, {
       detail: { source: {} },
     }));
 
     await waitFor(() => expect(apiMock.getTaskJournalItems).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(apiMock.getTaskJournalCaseAutomationCandidates).toHaveBeenCalledTimes(1));
   });
 
   it('asks for task result before quick completion sends a task to approval', async () => {
