@@ -1,7 +1,7 @@
 import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import {
   AlarmClock,
   ArrowDown,
@@ -85,6 +85,7 @@ import type { MenuSectionPermissions, TaskSectionPermissions } from '../../types
 import { extractDisplayErrorMessage, isHttpErrorStatus } from '../../utils/errorUtils';
 import { formatCurrencySmart } from '../../utils/formatters';
 import {
+  formatDateHeadingInTimeZone,
   formatDateTimeInTimeZone,
   fromTimeZoneDateTimeInput,
   getZonedParts,
@@ -5322,6 +5323,7 @@ export function TaskJournal({
               sortDir={sortDir}
               onSortChange={handleSortChange}
               layoutSettings={taskTableLayoutSettings}
+              timeZoneId={effectiveTaskJournalTimeZoneId}
             />
             <TablePagination
               page={taskPage}
@@ -6433,6 +6435,7 @@ function TaskTable({
   sortDir,
   onSortChange,
   layoutSettings,
+  timeZoneId,
 }: {
   tasks: TaskJournalItem[];
   highlightedTaskId: number | null;
@@ -6460,6 +6463,7 @@ function TaskTable({
   sortDir: 'asc' | 'desc';
   onSortChange: (sortBy: TaskJournalSortKey) => void;
   layoutSettings: TaskTableLayoutSettings;
+  timeZoneId: string;
 }) {
   const {
     handleResizeStart,
@@ -6558,7 +6562,7 @@ function TaskTable({
                   По текущим фильтрам задач нет.
                 </td>
               </tr>
-            ) : tasks.map((task) => {
+            ) : tasks.map((task, taskIndex) => {
               const TypeIcon = getTypeMeta(task.type).icon;
               const isOverdue = isTaskOverdue(task);
               const isHighlighted = highlightedTaskId === task.id;
@@ -6585,6 +6589,12 @@ function TaskTable({
                 (task.clientId && onOpenClient) || (task.legalEntityId && onOpenLegalEntity),
               );
               const canOpenCase = Boolean(task.clientCaseId && onOpenCase);
+              const taskDateKey = getTaskDateKey(task.dueAt, timeZoneId);
+              const previousTaskDateKey = taskIndex > 0
+                ? getTaskDateKey(tasks[taskIndex - 1].dueAt, timeZoneId)
+                : null;
+              const showDateSeparator = sortBy === 'dueAt' && taskDateKey !== previousTaskDateKey;
+              const dateLabel = formatDateHeadingInTimeZone(task.dueAt, timeZoneId);
               const openCounterparty = () => {
                 if (task.clientId && onOpenClient) {
                   void onOpenClient(task.clientId, task.clientCaseId ?? null);
@@ -6602,12 +6612,23 @@ function TaskTable({
               };
 
               return (
-                <tr
-                  key={task.id}
-                  className={`group align-top transition ${
-                    isHighlighted ? 'bg-blue-50/70 ring-1 ring-inset ring-blue-200' : 'hover:bg-slate-50'
-                  }`}
-                >
+                <Fragment key={task.id}>
+                  {showDateSeparator ? (
+                    <tr
+                      role="separator"
+                      aria-label={`Задачи на ${dateLabel}`}
+                      className="pp-date-group-separator"
+                    >
+                      <th colSpan={10} scope="rowgroup" className="px-4 py-2 text-left text-sm font-semibold">
+                        {dateLabel}
+                      </th>
+                    </tr>
+                  ) : null}
+                  <tr
+                    className={`group align-top transition ${
+                      isHighlighted ? 'bg-blue-50/70 ring-1 ring-inset ring-blue-200' : 'hover:bg-slate-50'
+                    }`}
+                  >
                   <td className="px-2 py-4 sm:px-3 xl:px-4">
                     <SystemCheckbox
                       type="checkbox"
@@ -6823,7 +6844,8 @@ function TaskTable({
                       ) : null}
                     </div>
                   </td>
-                </tr>
+                  </tr>
+                </Fragment>
               );
             })}
           </tbody>

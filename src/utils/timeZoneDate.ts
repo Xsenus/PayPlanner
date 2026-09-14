@@ -116,6 +116,23 @@ export function formatDateInTimeZone(value: string | Date, timeZoneId?: string |
   }).format(date);
 }
 
+export function formatDateHeadingInTimeZone(value: string | Date | null | undefined, timeZoneId?: string | null) {
+  if (!value) return 'Дата не указана';
+
+  const parts = getZonedParts(value, timeZoneId);
+  if (!parts) return 'Дата не указана';
+
+  const formattedParts = new Intl.DateTimeFormat('ru-RU', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  }).formatToParts(new Date(Date.UTC(parts.year, parts.month - 1, parts.day)));
+  const month = formattedParts.find((part) => part.type === 'month')?.value;
+
+  return month ? `${parts.day} ${month} ${parts.year} года` : 'Дата не указана';
+}
+
 export function toTimeZoneDateKey(value: string | Date, timeZoneId?: string | null) {
   const parts = getZonedParts(value, timeZoneId);
   if (!parts) return '';

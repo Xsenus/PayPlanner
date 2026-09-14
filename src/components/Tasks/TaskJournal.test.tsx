@@ -797,6 +797,24 @@ describe('TaskJournal', () => {
     expect(screen.getByTestId('task-column-header-result').className).toContain('2xl:table-cell');
   });
 
+  it('separates tasks by execution date when the journal is ordered by date', async () => {
+    await renderJournal([
+      createTask({ id: 301, title: 'Первая задача на 7 июня', dueAt: '2026-06-07T10:00:00Z' }),
+      createTask({ id: 302, title: 'Вторая задача на 7 июня', dueAt: '2026-06-07T12:00:00Z' }),
+      createTask({ id: 303, title: 'Задача на 8 июня', dueAt: '2026-06-08T10:00:00Z' }),
+    ]);
+
+    expect(screen.getByRole('separator', { name: 'Задачи на 7 июня 2026 года' })).toBeTruthy();
+    expect(screen.getByRole('separator', { name: 'Задачи на 8 июня 2026 года' })).toBeTruthy();
+    expect(screen.getAllByText('7 июня 2026 года')).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Сортировать по колонке Наименование задачи' }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('separator', { name: 'Задачи на 7 июня 2026 года' })).toBeNull();
+    });
+  });
+
   it('allows users to resize task columns and keeps the selected width', async () => {
     await renderJournal([createTask()]);
 

@@ -53,7 +53,7 @@
   --pp-special-solid: #7c3aed;
 }
 
-.pp-notification-date-separator {
+.pp-date-group-separator {
   background: var(--pp-primary);
   color: var(--pp-on-primary);
 }

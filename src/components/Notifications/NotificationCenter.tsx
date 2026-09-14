@@ -41,7 +41,7 @@ import type { Client } from '../../types';
 import { useToast } from '../../hooks/useToast';
 import { useUserTimeZone } from '../../hooks/useUserTimeZone';
 import type { TaskJournalAssignee } from '../../utils/taskJournalStore';
-import { formatDateTimeInTimeZone, getZonedParts, toTimeZoneDateKey } from '../../utils/timeZoneDate';
+import { formatDateHeadingInTimeZone, formatDateTimeInTimeZone, toTimeZoneDateKey } from '../../utils/timeZoneDate';
 import { emitUserNotificationsChanged, USER_NOTIFICATIONS_EVENT, type UserNotificationsChangedDetail } from '../../utils/userNotifications';
 import {
   DEFAULT_USER_NOTIFICATION_TYPE_PREFERENCES,
@@ -219,27 +219,6 @@ function formatDateTime(value?: string | null, timeZoneId?: string | null) {
   return formatDateTimeInTimeZone(value, timeZoneId) || value;
 }
 
-function formatNotificationDateHeading(value?: string | null, timeZoneId?: string | null) {
-  if (!value) {
-    return 'Дата не указана';
-  }
-
-  const parts = getZonedParts(value, timeZoneId);
-  if (!parts) {
-    return 'Дата не указана';
-  }
-
-  const formattedParts = new Intl.DateTimeFormat('ru-RU', {
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-    timeZone: 'UTC',
-  }).formatToParts(new Date(Date.UTC(parts.year, parts.month - 1, parts.day)));
-  const month = formattedParts.find((part) => part.type === 'month')?.value;
-
-  return month ? `${parts.day} ${month} ${parts.year} года` : 'Дата не указана';
-}
-
 export function NotificationCenter({
   onOpenTask,
   onOpenCase,
@@ -305,7 +284,7 @@ export function NotificationCenter({
       return {
         item,
         showDateSeparator,
-        dateLabel: formatNotificationDateHeading(item.createdAt, timeZoneId),
+        dateLabel: formatDateHeadingInTimeZone(item.createdAt, timeZoneId),
       };
     });
   }, [itemsPage.items, timeZoneId]);
@@ -1446,7 +1425,7 @@ export function NotificationCenter({
                     <div
                       role="separator"
                       aria-label={`Уведомления за ${dateLabel}`}
-                      className="pp-notification-date-separator flex min-h-10 w-full items-center px-4 py-2 text-sm font-semibold"
+                      className="pp-date-group-separator flex min-h-10 w-full items-center px-4 py-2 text-sm font-semibold"
                     >
                       {dateLabel}
                     </div>
