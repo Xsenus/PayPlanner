@@ -72,6 +72,7 @@ public class TasksController : ControllerBase
     private const string RequireCompletionResultSettingKey = "tasks.requireCompletionResult";
     private const string DailyOverdueReminderEnabledSettingKey = "tasks.dailyOverdueReminderEnabled";
     private const string AllowAdminCompleteAnyTaskSettingKey = "tasks.allowAdminCompleteAnyTask";
+    private const string FinancialDocumentsResponsibleUserSettingKey = "tasks.financialDocumentsResponsibleUserId";
     private const string ApprovalDueDaysSettingKey = "tasks.approvalDueDays";
     private const int DefaultApprovalDueDays = 5;
     private const string TaskCardWindowModeSettingKey = "tasks.taskCardWindowMode";
@@ -160,6 +161,7 @@ public class TasksController : ControllerBase
         [FromQuery] int pageSize = 50,
         [FromQuery] string? sortBy = null,
         [FromQuery] string? sortDir = null,
+        [FromQuery] string? billingStatus = null,
         CancellationToken ct = default)
     {
         var access = await GetTaskAccessAsync(ct, calendarView ? RolePermissionCatalog.Calendar : RolePermissionCatalog.Tasks);
@@ -190,7 +192,8 @@ public class TasksController : ControllerBase
             approvalScope,
             metric,
             todayFrom,
-            todayTo);
+            todayTo,
+            billingStatus);
 
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, 200);
@@ -422,6 +425,16 @@ public class TasksController : ControllerBase
         var taskCardWindowMode = NormalizeTaskCardWindowMode(request.TaskCardWindowMode);
         var approvalQuickActionMode = NormalizeApprovalQuickActionMode(request.ApprovalQuickActionMode);
         var approvalDueDays = Math.Clamp(request.ApprovalDueDays, 1, 365);
+        var financialDocumentsResponsibleUserId = request.FinancialDocumentsResponsibleUserId.GetValueOrDefault();
+        if (financialDocumentsResponsibleUserId > 0)
+        {
+            var responsibleUserExists = await _db.Users.AsNoTracking().AnyAsync(user =>
+                user.Id == financialDocumentsResponsibleUserId && user.IsActive && user.IsApproved, ct);
+            if (!responsibleUserExists)
+            {
+                return BadRequest(new { message = "Ответственный за финансовые документы недоступен." });
+            }
+        }
         var executorCompletionAllowedUserIds = request.ExecutorCompletionAllowedUserIds
             .Where(id => id > 0)
             .Distinct()
@@ -455,6 +468,7 @@ public class TasksController : ControllerBase
         await UpsertSystemSettingAsync(RequireCompletionResultSettingKey, request.RequireCompletionResult ? "true" : "false", now, ct);
         await UpsertSystemSettingAsync(DailyOverdueReminderEnabledSettingKey, request.DailyOverdueReminderEnabled ? "true" : "false", now, ct);
         await UpsertSystemSettingAsync(AllowAdminCompleteAnyTaskSettingKey, request.AllowAdminCompleteAnyTask ? "true" : "false", now, ct);
+        await UpsertSystemSettingAsync(FinancialDocumentsResponsibleUserSettingKey, financialDocumentsResponsibleUserId.ToString(), now, ct);
         await UpsertSystemSettingAsync(ApprovalDueDaysSettingKey, approvalDueDays.ToString(), now, ct);
         await UpsertSystemSettingAsync(TaskCardWindowModeSettingKey, taskCardWindowMode, now, ct);
         await UpsertSystemSettingAsync(ApprovalQuickActionModeSettingKey, approvalQuickActionMode, now, ct);
@@ -4010,7 +4024,8 @@ public class TasksController : ControllerBase
         bool approvalScope,
         string? metric,
         DateTime? todayFrom,
-        DateTime? todayTo)
+        DateTime? todayTo,
+        string? billingStatus = null)
     {
         var query = ApplyTaskJournalFilters(
             BuildVisibleTaskBaseQuery(access).AsNoTracking(),
@@ -4028,7 +4043,43 @@ public class TasksController : ControllerBase
             authorUserId);
 
         query = ApplyTaskApprovalScope(query, access, approvalScope);
-        return ApplyTaskMetricFilter(query, metric, todayFrom, todayTo);
+        query = ApplyTaskMetricFilter(query, metric, todayFrom, todayTo);
+        return ApplyTaskBillingFilter(query, billingStatus);
+    }
+
+    private static IQueryable<TaskJournalItem> ApplyTaskBillingFilter(
+        IQueryable<TaskJournalItem> query,
+        string? billingStatus)
+    {
+        var normalized = billingStatus?.Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return query;
+        }
+
+        if (normalized is not ("unbilled" or "fixed" or "invoiced" or "internal" or "legacy"))
+        {
+            return query;
+        }
+
+        query = query.Where(task => task.Status != "done" && task.Status != "cancelled");
+        return normalized switch
+        {
+            "unbilled" => query.Where(task =>
+                task.ClientBillingClassification == TaskClientBillingClassification.Billable &&
+                !task.BillingInvoiceId.HasValue &&
+                (task.BillingModeSnapshot == null || task.BillingModeSnapshot.ToLower() != ContractBillingMode.Fixed.ToLower())),
+            "fixed" => query.Where(task =>
+                task.ClientBillingClassification == TaskClientBillingClassification.Billable &&
+                !task.BillingInvoiceId.HasValue &&
+                task.BillingModeSnapshot != null &&
+                task.BillingModeSnapshot.ToLower() == ContractBillingMode.Fixed.ToLower()),
+            "invoiced" => query.Where(task =>
+                task.ClientBillingClassification == TaskClientBillingClassification.Billable && task.BillingInvoiceId.HasValue),
+            "internal" => query.Where(task => task.ClientBillingClassification == TaskClientBillingClassification.Internal),
+            "legacy" => query.Where(task => task.ClientBillingClassification == TaskClientBillingClassification.Legacy),
+            _ => query,
+        };
     }
 
     /// <summary>
@@ -4686,6 +4737,7 @@ public class TasksController : ControllerBase
                 item.Key == RequireCompletionResultSettingKey ||
                 item.Key == DailyOverdueReminderEnabledSettingKey ||
                 item.Key == AllowAdminCompleteAnyTaskSettingKey ||
+                item.Key == FinancialDocumentsResponsibleUserSettingKey ||
                 item.Key == ApprovalDueDaysSettingKey ||
                 item.Key == TaskCardWindowModeSettingKey ||
                 item.Key == ApprovalQuickActionModeSettingKey ||
@@ -4702,6 +4754,16 @@ public class TasksController : ControllerBase
 
         var defaultAssigneeUserId = ParseIntSetting(settings.GetValueOrDefault(CaseInactivityAutomationDefaultAssigneeSettingKey), 0);
         var escalationUserId = ParseIntSetting(settings.GetValueOrDefault(CaseInactivityAutomationEscalationUserSettingKey), 0);
+        var financialDocumentsResponsibleUserId = ParseIntSetting(settings.GetValueOrDefault(FinancialDocumentsResponsibleUserSettingKey), 0);
+        var financialDocumentsResponsibleUserName = financialDocumentsResponsibleUserId > 0
+            ? await _db.Users.AsNoTracking()
+                .Where(user => user.Id == financialDocumentsResponsibleUserId && user.IsActive && user.IsApproved)
+                .Select(user => user.FullName ?? user.Email)
+                .FirstOrDefaultAsync(ct) ?? string.Empty
+            : string.Empty;
+        var effectiveFinancialDocumentsResponsibleUserId = string.IsNullOrWhiteSpace(financialDocumentsResponsibleUserName)
+            ? 0
+            : financialDocumentsResponsibleUserId;
         var inactivityDays = Math.Clamp(ParseIntSetting(settings.GetValueOrDefault(CaseInactivityAutomationDaysSettingKey), 14), 1, 365);
         var stickerStyles = ParseTaskStickerStyles(settings.GetValueOrDefault(TaskStickerStylesSettingKey));
         return new TaskJournalSettingsDto
@@ -4712,6 +4774,8 @@ public class TasksController : ControllerBase
             RequireCompletionResult = ParseBoolSetting(settings.GetValueOrDefault(RequireCompletionResultSettingKey), true),
             DailyOverdueReminderEnabled = ParseBoolSetting(settings.GetValueOrDefault(DailyOverdueReminderEnabledSettingKey), true),
             AllowAdminCompleteAnyTask = ParseBoolSetting(settings.GetValueOrDefault(AllowAdminCompleteAnyTaskSettingKey), true),
+            FinancialDocumentsResponsibleUserId = effectiveFinancialDocumentsResponsibleUserId > 0 ? effectiveFinancialDocumentsResponsibleUserId : null,
+            FinancialDocumentsResponsibleUserName = financialDocumentsResponsibleUserName,
             ApprovalDueDays = Math.Clamp(ParseIntSetting(settings.GetValueOrDefault(ApprovalDueDaysSettingKey), DefaultApprovalDueDays), 1, 365),
             TaskCardWindowMode = NormalizeTaskCardWindowMode(settings.GetValueOrDefault(TaskCardWindowModeSettingKey)),
             ApprovalQuickActionMode = NormalizeApprovalQuickActionMode(settings.GetValueOrDefault(ApprovalQuickActionModeSettingKey)),

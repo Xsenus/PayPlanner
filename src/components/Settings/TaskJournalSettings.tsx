@@ -27,6 +27,8 @@ const DEFAULT_SETTINGS: TaskJournalSettingsDto = {
   requireCompletionResult: true,
   dailyOverdueReminderEnabled: true,
   allowAdminCompleteAnyTask: true,
+  financialDocumentsResponsibleUserId: null,
+  financialDocumentsResponsibleUserName: '',
   approvalDueDays: 5,
   taskCardWindowMode: 'legacy',
   approvalQuickActionMode: 'completionButton',
@@ -251,6 +253,29 @@ export function TaskJournalSettings() {
       </div>
 
       <div className="space-y-3">
+        <section className="rounded-2xl border border-rose-200 bg-rose-50/60 p-3 text-sm text-gray-700">
+          <h5 className="font-semibold text-gray-900">Ответственный за счета, акты и договоры</h5>
+          <p className="mt-1 text-gray-600">Этот сотрудник контролирует очередь платных задач без счёта и автоматически подставляется ответственным при подготовке счёта из журнала задач.</p>
+          <label className="mt-3 block max-w-xl">
+            <span className="text-sm font-medium text-gray-700">Ответственный сотрудник</span>
+            <SystemSelect
+              aria-label="Ответственный за счета, акты и договоры"
+              value={settings.financialDocumentsResponsibleUserId ?? ''}
+              onChange={(event) => setSettings((prev) => ({
+                ...prev,
+                financialDocumentsResponsibleUserId: event.target.value ? Number(event.target.value) : null,
+              }))}
+              disabled={loading || saving}
+              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm disabled:cursor-not-allowed disabled:bg-gray-100"
+            >
+              <option value="">Не назначен</option>
+              {assignees.map((assignee) => (
+                <option key={assignee.id} value={assignee.id}>{assignee.name}</option>
+              ))}
+            </SystemSelect>
+          </label>
+        </section>
+
         <div className="rounded-2xl border border-blue-100 bg-blue-50/60 p-3 text-sm text-gray-700">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>

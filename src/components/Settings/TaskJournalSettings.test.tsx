@@ -26,6 +26,8 @@ const settings: TaskJournalSettingsDto = {
   requireCompletionResult: true,
   dailyOverdueReminderEnabled: true,
   allowAdminCompleteAnyTask: true,
+  financialDocumentsResponsibleUserId: null,
+  financialDocumentsResponsibleUserName: '',
   approvalDueDays: 5,
   taskCardWindowMode: 'modern',
   approvalQuickActionMode: 'completionButton',
@@ -91,6 +93,18 @@ describe('TaskJournalSettings', () => {
 
     await waitFor(() => expect(apiMock.updateTaskJournalSettings).toHaveBeenCalledWith(
       expect.objectContaining({ approvalQuickActionMode: 'separateButton' }),
+    ));
+  });
+
+  it('lets an administrator appoint the employee responsible for financial documents', async () => {
+    render(<TaskJournalSettings />);
+
+    const responsible = await screen.findByLabelText('Ответственный за счета, акты и договоры');
+    fireEvent.change(responsible, { target: { value: '8' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    await waitFor(() => expect(apiMock.updateTaskJournalSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ financialDocumentsResponsibleUserId: 8 }),
     ));
   });
 

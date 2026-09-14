@@ -454,6 +454,7 @@ public class TasksControllerTests
             RequireCompletionResult = false,
             DailyOverdueReminderEnabled = false,
             AllowAdminCompleteAnyTask = true,
+            FinancialDocumentsResponsibleUserId = fallbackAssignee.Id,
             ApprovalDueDays = 400,
             TaskCardWindowMode = "modern",
             ApprovalQuickActionMode = "separateButton",
@@ -476,6 +477,8 @@ public class TasksControllerTests
         Assert.False(dto.RequireCompletionResult);
         Assert.False(dto.DailyOverdueReminderEnabled);
         Assert.True(dto.AllowAdminCompleteAnyTask);
+        Assert.Equal(fallbackAssignee.Id, dto.FinancialDocumentsResponsibleUserId);
+        Assert.Equal("Резервный исполнитель", dto.FinancialDocumentsResponsibleUserName);
         Assert.Equal(365, dto.ApprovalDueDays);
         Assert.Equal("modern", dto.TaskCardWindowMode);
         Assert.Equal("separateButton", dto.ApprovalQuickActionMode);
@@ -495,11 +498,13 @@ public class TasksControllerTests
             .Where(item => item.Key.StartsWith("tasks.automation.caseControl.")
                 || item.Key == "tasks.approvalDueDays"
                 || item.Key == "tasks.approvalQuickActionMode"
+                || item.Key == "tasks.financialDocumentsResponsibleUserId"
                 || item.Key == "tasks.executorCompletionAllowedUserIds")
             .ToDictionaryAsync(item => item.Key, item => item.Value);
 
         Assert.Equal("365", stored["tasks.approvalDueDays"]);
         Assert.Equal("separateButton", stored["tasks.approvalQuickActionMode"]);
+        Assert.Equal(fallbackAssignee.Id.ToString(), stored["tasks.financialDocumentsResponsibleUserId"]);
         Assert.Equal($"[{fallbackAssignee.Id}]", stored["tasks.executorCompletionAllowedUserIds"]);
         Assert.Equal("false", stored["tasks.automation.caseControl.enabled"]);
         Assert.Equal("365", stored["tasks.automation.caseControl.inactiveDays"]);
@@ -3498,6 +3503,43 @@ public class TasksControllerTests
 
         Assert.Equal(expectedTask.Id, dto.Id);
         Assert.Equal(firstCase.Id, dto.ClientCaseId);
+    }
+
+    [Fact]
+    public async Task GetTasks_FiltersActiveTasksByBillingQueueBeforePagination()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "billing-filter@example.com", "Автор");
+        var client = await CreateClientAsync(db, "Клиент для счёта");
+        var expected = await CreateTaskAsync(db, author.Id, client.Id);
+        expected.ClientBillingClassification = TaskClientBillingClassification.Billable;
+        expected.BillingModeSnapshot = ContractBillingMode.Actual;
+        var fixedTask = await CreateTaskAsync(db, author.Id, client.Id);
+        fixedTask.ClientBillingClassification = TaskClientBillingClassification.Billable;
+        fixedTask.BillingModeSnapshot = ContractBillingMode.Fixed;
+        var completedTask = await CreateTaskAsync(db, author.Id, client.Id);
+        completedTask.ClientBillingClassification = TaskClientBillingClassification.Billable;
+        completedTask.BillingModeSnapshot = ContractBillingMode.Actual;
+        completedTask.Status = "done";
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.GetTasks(
+            search: null,
+            status: null,
+            type: null,
+            assigneeUserId: null,
+            from: null,
+            to: null,
+            page: 1,
+            pageSize: 1,
+            billingStatus: "unbilled",
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var page = Assert.IsType<PagedResponse<TaskJournalItemDto>>(ok.Value);
+        Assert.Equal(1, page.Total);
+        Assert.Equal(expected.Id, Assert.Single(page.Items).Id);
     }
 
     [Fact]

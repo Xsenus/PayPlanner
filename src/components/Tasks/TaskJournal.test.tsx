@@ -317,6 +317,8 @@ function filterTaskJournalMockItems(tasks: TaskJournalItem[], params: Record<str
       || task.participants?.some((participant) => participant.role === 'assignee' && participant.userId === params.assigneeUserId);
     const searchMatches = !search || [task.objectName, task.clientName, task.legalEntityName, task.clientCaseTitle, task.title]
       .some((value) => value?.toLocaleLowerCase('ru').includes(search));
+    const billingMatches = typeof params.billingStatus !== 'string'
+      || (active && task.billingStatus === params.billingStatus);
 
     return statusMatches
       && metricMatches
@@ -330,7 +332,8 @@ function filterTaskJournalMockItems(tasks: TaskJournalItem[], params: Record<str
       && (params.underControl !== true || task.isUnderControl === true)
       && (from === null || dueAt >= from)
       && (to === null || dueAt <= to)
-      && searchMatches;
+      && searchMatches
+      && billingMatches;
   });
 }
 
@@ -1314,6 +1317,13 @@ describe('TaskJournal', () => {
     expect(within(analysis).getByText('Неоплачиваемые: 1')).toBeTruthy();
     expect(within(analysis).getByText('Уже включены в счёт: 1')).toBeTruthy();
     expect(within(analysis).getByText('Нужно распределить: 1')).toBeTruthy();
+
+    fireEvent.click(within(analysis).getByRole('button', { name: 'Платные задачи без счёта: 3' }));
+    await waitFor(() => expect(apiMock.getTaskJournalItems).toHaveBeenLastCalledWith(
+      expect.objectContaining({ billingStatus: 'unbilled', sortBy: 'counterparty', sortDir: 'asc' }),
+      expect.anything(),
+    ));
+    expect(within(analysis).getByText(/Категория открыта в таблице ниже/i)).toBeTruthy();
   });
 
   it('prepares one invoice draft from selected unbilled client tasks', async () => {
@@ -1327,7 +1337,13 @@ describe('TaskJournal', () => {
       billingMode: 'Actual',
       billingStatus: 'unbilled',
     });
-    await renderJournal([unbilledTask], { onCreateInvoiceDraft });
+    await renderJournal([unbilledTask], {
+      onCreateInvoiceDraft,
+      settings: {
+        financialDocumentsResponsibleUserId: 7,
+        financialDocumentsResponsibleUserName: 'Администратор',
+      },
+    });
 
     expect(screen.getByTestId('task-unbilled-reminder').textContent).toContain('Платные задачи без счёта: 1');
     const unbilledBadge = screen.getByText('БЕЗ СЧЁТА').closest('[data-testid="task-billing-badge-321"]');
@@ -1339,6 +1355,7 @@ describe('TaskJournal', () => {
     expect(onCreateInvoiceDraft).toHaveBeenCalledWith(expect.objectContaining({
       billingTaskIds: [321],
       selectedClientCaseIds: [100],
+      form: expect.objectContaining({ responsibleIds: ['7'] }),
       lineItems: [expect.objectContaining({ name: expect.stringMatching(/Подготовить иск \(задача №321 от/) })],
     }));
   });

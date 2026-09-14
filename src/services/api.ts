@@ -1903,6 +1903,8 @@ export interface TaskJournalSettingsDto {
   requireCompletionResult: boolean;
   dailyOverdueReminderEnabled: boolean;
   allowAdminCompleteAnyTask: boolean;
+  financialDocumentsResponsibleUserId?: number | null;
+  financialDocumentsResponsibleUserName?: string;
   approvalDueDays: number;
   taskCardWindowMode: 'legacy' | 'modern';
   approvalQuickActionMode: 'completionButton' | 'separateButton';
@@ -1930,6 +1932,7 @@ export interface TaskJournalListParams {
   authorUserId?: number;
   approvalScope?: boolean;
   metric?: 'active' | 'overdue' | 'today' | 'highPriority';
+  billingStatus?: 'unbilled' | 'fixed' | 'invoiced' | 'internal' | 'legacy';
   clientCaseId?: number;
   clientId?: number;
   legalEntityId?: number;
@@ -1989,6 +1992,7 @@ export interface UpdateTaskJournalSettingsRequest {
   requireCompletionResult: boolean;
   dailyOverdueReminderEnabled: boolean;
   allowAdminCompleteAnyTask: boolean;
+  financialDocumentsResponsibleUserId?: number | null;
   approvalDueDays: number;
   taskCardWindowMode: 'legacy' | 'modern';
   approvalQuickActionMode: 'completionButton' | 'separateButton';
@@ -4452,6 +4456,7 @@ export class ApiService {
       authorUserId: params?.authorUserId,
       approvalScope: params?.approvalScope,
       metric: params?.metric,
+      billingStatus: params?.billingStatus,
       clientCaseId: params?.clientCaseId,
       clientId: params?.clientId,
       legalEntityId: params?.legalEntityId,

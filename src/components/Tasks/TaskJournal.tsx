@@ -235,6 +235,8 @@ const DEFAULT_TASK_JOURNAL_SETTINGS: TaskJournalSettingsDto = {
   requireCompletionResult: true,
   dailyOverdueReminderEnabled: true,
   allowAdminCompleteAnyTask: true,
+  financialDocumentsResponsibleUserId: null,
+  financialDocumentsResponsibleUserName: '',
   approvalDueDays: 5,
   taskCardWindowMode: 'legacy',
   approvalQuickActionMode: 'completionButton',
@@ -2155,6 +2157,7 @@ export function TaskJournal({
   const [assigneeFilter, setAssigneeFilter] = useState(initialPreferences.assigneeFilter);
   const [typeFilter, setTypeFilter] = useState<TaskJournalType | 'all'>(initialPreferences.typeFilter);
   const [priorityFilter, setPriorityFilter] = useState<TaskJournalPriority | 'all'>(initialPreferences.priorityFilter);
+  const [billingFilter, setBillingFilter] = useState<TaskJournalListParams['billingStatus']>();
   const [sortBy, setSortBy] = useState<TaskJournalSortKey>(initialPreferences.sortBy);
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>(initialPreferences.sortDir);
   const [savedViews, setSavedViews] = useState<TaskJournalSavedView[]>(() => readTaskJournalSavedViews(currentUserId, mode, initialPreferences.viewMode));
@@ -2236,6 +2239,7 @@ export function TaskJournal({
     setAssigneeFilter('all');
     setTypeFilter('all');
     setPriorityFilter('all');
+    setBillingFilter(undefined);
     setPeriodMode('all');
     setSortBy('dueAt');
     setSortDir('asc');
@@ -2538,6 +2542,7 @@ export function TaskJournal({
       authorUserId: quickFilter === 'authoredByMe' && currentUserId ? currentUserId : undefined,
       approvalScope: isApprovalsMode || undefined,
       metric: metricFilter === 'none' ? undefined : metricFilter,
+      billingStatus: billingFilter,
       clientCaseId: selectedCaseId,
       clientId,
       legalEntityId,
@@ -2553,6 +2558,7 @@ export function TaskJournal({
     };
   }, [
     assigneeFilter,
+    billingFilter,
     caseFilter,
     contextFilter,
     currentUserId,
@@ -3618,6 +3624,22 @@ export function TaskJournal({
     }
   };
 
+  const handleBillingFilterClick = (nextFilter: NonNullable<TaskJournalListParams['billingStatus']>) => {
+    const resolvedFilter = billingFilter === nextFilter ? undefined : nextFilter;
+    setBillingFilter(resolvedFilter);
+    setViewMode('list');
+    clearBulkSelection();
+    if (resolvedFilter) {
+      setStatusFilter('active');
+      setMetricFilter('none');
+      setPeriodMode('all');
+      setDateFromFilter('');
+      setDateToFilter('');
+      setSortBy('counterparty');
+      setSortDir('asc');
+    }
+  };
+
   const toggleTaskSelection = (taskId: number, checked: boolean) => {
     setSelectedTaskIds((previous) => {
       const next = new Set(previous);
@@ -3695,7 +3717,9 @@ export function TaskJournal({
         isNotForAccounting: false,
         actReference: '',
         paidDate: '',
-        responsibleIds: [],
+        responsibleIds: taskSettings.financialDocumentsResponsibleUserId
+          ? [String(taskSettings.financialDocumentsResponsibleUserId)]
+          : [],
       },
       lineItems: selectedTasksForBulk.map((task) => ({
         id: `billing-task-${task.id}`,
@@ -5226,20 +5250,27 @@ export function TaskJournal({
               <span className="rounded-xl bg-rose-600 p-2 text-white"><WalletCards className="h-5 w-5" /></span>
               <div>
                 <div className="font-semibold text-rose-950">Анализ оплаты задач</div>
-                <div className="mt-1 flex flex-wrap gap-1.5 text-xs font-semibold">
-                  <span className="rounded-full bg-rose-100 px-2.5 py-1 text-rose-800">Счетов подготовить: {billingAnalysis.invoicesToPrepare}</span>
-                  <span className="rounded-full bg-white/80 px-2.5 py-1 text-rose-800">Платные задачи без счёта: {unbilledClientTaskCount}</span>
-                  <span className="rounded-full bg-violet-100 px-2.5 py-1 text-violet-800">По фиксированному договору: {billingAnalysis.fixed}</span>
-                  <span className="rounded-full bg-slate-100 px-2.5 py-1 text-slate-700">Неоплачиваемые: {billingAnalysis.nonBillable}</span>
-                  <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-emerald-800">Уже включены в счёт: {billingAnalysis.invoiced}</span>
+                <div className="mt-1 flex flex-wrap gap-2 text-xs font-bold">
+                  <button type="button" aria-pressed={billingFilter === 'unbilled'} onClick={() => handleBillingFilterClick('unbilled')} title="Показать активные платные задачи без счёта, сгруппированные по клиентам" className={`rounded-lg border px-3 py-1.5 shadow-sm transition hover:-translate-y-0.5 hover:shadow ${billingFilter === 'unbilled' ? 'border-rose-700 bg-rose-700 text-white ring-2 ring-rose-200' : 'border-rose-300 bg-rose-100 text-rose-900 hover:bg-rose-200'}`}>Счетов подготовить: {billingAnalysis.invoicesToPrepare}</button>
+                  <button type="button" aria-pressed={billingFilter === 'unbilled'} onClick={() => handleBillingFilterClick('unbilled')} title="Показать все активные платные задачи, ещё не включённые в счёт" className={`rounded-lg border px-3 py-1.5 shadow-sm transition hover:-translate-y-0.5 hover:shadow ${billingFilter === 'unbilled' ? 'border-rose-700 bg-rose-700 text-white ring-2 ring-rose-200' : 'border-rose-300 bg-white text-rose-900 hover:bg-rose-100'}`}>Платные задачи без счёта: {unbilledClientTaskCount}</button>
+                  <button type="button" aria-pressed={billingFilter === 'fixed'} onClick={() => handleBillingFilterClick('fixed')} className={`rounded-lg border px-3 py-1.5 shadow-sm transition hover:-translate-y-0.5 ${billingFilter === 'fixed' ? 'border-violet-700 bg-violet-700 text-white ring-2 ring-violet-200' : 'border-violet-300 bg-violet-100 text-violet-900 hover:bg-violet-200'}`}>По фиксированному договору: {billingAnalysis.fixed}</button>
+                  <button type="button" aria-pressed={billingFilter === 'internal'} onClick={() => handleBillingFilterClick('internal')} className={`rounded-lg border px-3 py-1.5 shadow-sm transition hover:-translate-y-0.5 ${billingFilter === 'internal' ? 'border-slate-700 bg-slate-700 text-white ring-2 ring-slate-200' : 'border-slate-300 bg-slate-100 text-slate-800 hover:bg-slate-200'}`}>Неоплачиваемые: {billingAnalysis.nonBillable}</button>
+                  <button type="button" aria-pressed={billingFilter === 'invoiced'} onClick={() => handleBillingFilterClick('invoiced')} className={`rounded-lg border px-3 py-1.5 shadow-sm transition hover:-translate-y-0.5 ${billingFilter === 'invoiced' ? 'border-emerald-700 bg-emerald-700 text-white ring-2 ring-emerald-200' : 'border-emerald-300 bg-emerald-100 text-emerald-900 hover:bg-emerald-200'}`}>Уже включены в счёт: {billingAnalysis.invoiced}</button>
                   {billingAnalysis.unclassified > 0 ? (
-                    <span className="rounded-full bg-amber-100 px-2.5 py-1 text-amber-800">Нужно распределить: {billingAnalysis.unclassified}</span>
+                    <button type="button" aria-pressed={billingFilter === 'legacy'} onClick={() => handleBillingFilterClick('legacy')} className={`rounded-lg border px-3 py-1.5 shadow-sm transition hover:-translate-y-0.5 ${billingFilter === 'legacy' ? 'border-amber-700 bg-amber-700 text-white ring-2 ring-amber-200' : 'border-amber-300 bg-amber-100 text-amber-900 hover:bg-amber-200'}`}>Нужно распределить: {billingAnalysis.unclassified}</button>
                   ) : null}
                 </div>
                 <div className="mt-1 text-sm text-rose-700">
-                  {unbilledClientTaskCount > 0
+                  {billingFilter
+                    ? 'Категория открыта в таблице ниже. Повторное нажатие вернёт полный журнал.'
+                    : unbilledClientTaskCount > 0
                     ? 'Отметьте задачи одного клиента в таблице и подготовьте по ним единый счёт.'
                     : 'Все активные задачи распределены, новых счетов по ним готовить не требуется.'}
+                </div>
+                <div className={`mt-1 text-xs font-semibold ${taskSettings.financialDocumentsResponsibleUserName ? 'text-slate-700' : 'text-amber-800'}`}>
+                  {taskSettings.financialDocumentsResponsibleUserName
+                    ? `Ответственный за счета, акты и договоры: ${taskSettings.financialDocumentsResponsibleUserName}`
+                    : 'Ответственный за счета, акты и договоры не назначен. Его может выбрать администратор в настройках журнала задач.'}
                 </div>
               </div>
             </div>

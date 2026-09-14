@@ -251,6 +251,8 @@ public class TaskJournalSettingsDto
     public bool RequireCompletionResult { get; set; } = true;
     public bool DailyOverdueReminderEnabled { get; set; } = true;
     public bool AllowAdminCompleteAnyTask { get; set; } = true;
+    public int? FinancialDocumentsResponsibleUserId { get; set; }
+    public string FinancialDocumentsResponsibleUserName { get; set; } = string.Empty;
     public int ApprovalDueDays { get; set; } = 5;
     public string TaskCardWindowMode { get; set; } = "legacy";
     public string ApprovalQuickActionMode { get; set; } = "completionButton";
