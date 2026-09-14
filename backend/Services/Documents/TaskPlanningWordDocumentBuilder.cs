@@ -138,8 +138,7 @@ internal static class TaskPlanningWordDocumentBuilder
                             Cell(ColumnWidths[3], Paragraph(TextOrDash(item.DueAt), 10)),
                             Cell(ColumnWidths[4], status.ToString()),
                             Cell(ColumnWidths[5], Paragraph(TextOrDash(item.Assignee), 10)),
-                            Cell(ColumnWidths[6], Paragraph(TextOrDash(item.Comment), 10))),
-                            cantSplit: true));
+                            Cell(ColumnWidths[6], Paragraph(TextOrDash(item.Comment), 10)))));
                         rowNumber++;
                     }
                 }

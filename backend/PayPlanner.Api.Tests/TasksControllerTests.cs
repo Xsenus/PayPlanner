@@ -4,6 +4,7 @@ using System.IO.Compression;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
+using System.Xml.Linq;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
@@ -6010,6 +6011,50 @@ public class TasksControllerTests
         Assert.Contains("Иванов Иван Иванович", documentXml, StringComparison.Ordinal);
         Assert.Contains("Комментарий &amp; проверка &lt;готово&gt;", documentXml, StringComparison.Ordinal);
         Assert.DoesNotContain("w:altChunk", documentXml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ExportPlanningReport_WordAllowsLongCompletedTaskRowsToContinueOnNextPage()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "planning-long-row@example.com", "Автор");
+        var client = await CreateClientAsync(db, "Клиент с длинным результатом");
+        var task = await CreateTaskAsync(
+            db,
+            author.Id,
+            client.Id,
+            result: string.Join(' ', Enumerable.Repeat("Подробный комментарий к завершённой задаче.", 600)),
+            status: "done");
+        task.Title = "Завершённая задача с длинным результатом";
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.ExportPlanningReport(
+            format: "word",
+            search: null,
+            status: "all",
+            type: null,
+            assigneeUserId: null,
+            from: null,
+            to: null,
+            clientCaseId: null,
+            clientId: null,
+            legalEntityId: null,
+            ct: CancellationToken.None);
+
+        var file = Assert.IsType<FileContentResult>(result);
+        using var archive = new ZipArchive(new MemoryStream(file.FileContents), ZipArchiveMode.Read);
+        using var reader = new StreamReader(archive.GetEntry("word/document.xml")!.Open(), Encoding.UTF8);
+        var document = XDocument.Parse(reader.ReadToEnd());
+        XNamespace word = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+        var taskRow = Assert.Single(
+            document.Descendants(word + "tr"),
+            row => row
+                .Descendants(word + "t")
+                .Any(text => text.Value == task.Title));
+
+        Assert.Null(taskRow.Element(word + "trPr")?.Element(word + "cantSplit"));
+        Assert.Contains("Все доступные задачи", document.Root!.Value, StringComparison.Ordinal);
     }
 
     [Fact]
