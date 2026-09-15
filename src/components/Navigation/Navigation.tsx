@@ -48,6 +48,7 @@ import {
   Folder,
   FolderPlus,
   Trash2,
+  Scale,
 } from 'lucide-react';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useAuth } from '../../contexts/AuthContext';
@@ -297,6 +298,7 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
     }
     if (permissions.cases.canView) {
       items.push({ id: 'cases', tab: 'cases' as Tab, label: 'Дела', icon: Briefcase });
+      items.push({ id: 'courtCases', tab: 'courtCases' as Tab, label: 'Судебные дела', icon: Scale });
     }
     if (permissions.clients.canView || permissions.legalEntities.canView) {
       const contactChildren: SidebarChild[] = [

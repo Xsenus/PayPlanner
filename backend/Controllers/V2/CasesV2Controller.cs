@@ -276,6 +276,8 @@ public class CasesV2Controller : ControllerBase
         [FromQuery] string? scope = null,
         [FromQuery] string? activity = null,
         [FromQuery] int? inactiveDays = null,
+        [FromQuery] bool courtOnly = false,
+        [FromQuery] string? courtState = null,
         CancellationToken ct = default)
     {
         var visibility = await ResolveCasesVisibilityAsync(ct);
@@ -307,6 +309,8 @@ public class CasesV2Controller : ControllerBase
             activity,
             inactiveDays);
 
+        q = ApplyCourtRegistryFilters(q, courtOnly, courtState, DateTime.UtcNow);
+
         var total = await q.CountAsync(ct);
         var items = await SelectRegistryCaseRows(q
                 .Skip((page - 1) * pageSize)
@@ -325,6 +329,67 @@ public class CasesV2Controller : ControllerBase
         PopulateResponsibleViewAliases(items);
 
         return Ok(new { items, total, page, pageSize });
+    }
+
+    [HttpGet("court-registry-summary")]
+    public async Task<IActionResult> GetCourtRegistrySummary(
+        [FromQuery] ClientCaseStatus? status,
+        [FromQuery] string? search,
+        [FromQuery] int? responsibleUserId,
+        [FromQuery] string? scope = null,
+        [FromQuery] string? courtState = null,
+        CancellationToken ct = default)
+    {
+        var visibility = await ResolveCasesVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return MissingCasesVisibilityResult();
+        }
+
+        var now = DateTime.UtcNow;
+        var soon = now.AddDays(14);
+        var query = BuildRegistryQuery(
+            visibility,
+            null,
+            null,
+            status,
+            search,
+            responsibleUserId,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            "nextHearingAt",
+            "asc",
+            scope,
+            null,
+            null);
+        query = ApplyCourtRegistryFilters(query, courtOnly: true, courtState, now);
+
+        var summary = await query
+            .GroupBy(_ => 1)
+            .Select(group => new
+            {
+                total = group.Count(),
+                active = group.Count(item => item.Status == ClientCaseStatus.Open || item.Status == ClientCaseStatus.OnHold),
+                upcoming = group.Count(item => item.NextHearingAt != null && item.NextHearingAt >= now),
+                soon = group.Count(item => item.NextHearingAt != null && item.NextHearingAt >= now && item.NextHearingAt <= soon),
+                withoutHearing = group.Count(item => item.NextHearingAt == null),
+                underControl = group.Count(item => item.IsUnderControl),
+            })
+            .SingleOrDefaultAsync(ct);
+
+        return Ok(summary ?? new
+        {
+            total = 0,
+            active = 0,
+            upcoming = 0,
+            soon = 0,
+            withoutHearing = 0,
+            underControl = 0,
+        });
     }
 
     [HttpGet("export.csv")]
@@ -617,6 +682,36 @@ public class CasesV2Controller : ControllerBase
             .ApplyCaseFilters(clientId, legalEntityId, status, search, responsibleUserId, caseType, priority, from, to, minFee, maxFee)
             .ApplyCaseActivityFilter(activity, inactiveDays, _db.TaskJournalItems.IgnoreQueryFilters())
             .ApplyCaseSort(sortBy, sortDir);
+
+    private static IQueryable<ClientCase> ApplyCourtRegistryFilters(
+        IQueryable<ClientCase> query,
+        bool courtOnly,
+        string? courtState,
+        DateTime now)
+    {
+        if (courtOnly)
+        {
+            query = query.Where(item =>
+                item.CourtName != string.Empty
+                || item.CourtCaseNumber != string.Empty
+                || item.JudicialUid != string.Empty
+                || item.CourtUrl != string.Empty
+                || item.NextHearingAt != null
+                || item.CourtInstances.Any()
+                || item.CourtEvents.Any()
+                || item.CourtParties.Any(courtParty => !courtParty.IsArchived));
+        }
+
+        return courtState?.Trim().ToLowerInvariant() switch
+        {
+            "upcoming" => query.Where(item => item.NextHearingAt != null && item.NextHearingAt >= now),
+            "soon" => query.Where(item => item.NextHearingAt != null && item.NextHearingAt >= now && item.NextHearingAt <= now.AddDays(14)),
+            "overdue" => query.Where(item => item.NextHearingAt != null && item.NextHearingAt < now),
+            "without-hearing" => query.Where(item => item.NextHearingAt == null),
+            "under-control" => query.Where(item => item.IsUnderControl),
+            _ => query,
+        };
+    }
 
     private static IQueryable<ClientCase> SelectRegistryCaseRows(IQueryable<ClientCase> query)
         => query.Select(item => new ClientCase

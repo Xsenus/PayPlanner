@@ -5704,6 +5704,8 @@ export class ApiService {
     scope?: 'all' | 'active' | 'archive' | 'mine' | string;
     activity?: 'all' | 'active' | 'inactive' | string;
     inactiveDays?: number;
+    courtOnly?: boolean;
+    courtState?: 'all' | 'upcoming' | 'soon' | 'overdue' | 'without-hearing' | 'under-control' | string;
     sortBy?:
       | 'createdAt'
       | 'title'
@@ -5730,6 +5732,19 @@ export class ApiService {
       pageSize: params?.pageSize ?? 50,
     });
     return this.request<PagedResult<ClientCase>>(`/v2/cases${q}`, {
+      signal: options?.signal,
+    });
+  }
+
+  async getCourtCasesRegistrySummary(params?: {
+    status?: string;
+    search?: string;
+    responsibleUserId?: number;
+    scope?: 'all' | 'active' | 'archive' | 'mine' | string;
+    courtState?: 'all' | 'upcoming' | 'soon' | 'overdue' | 'without-hearing' | 'under-control' | string;
+  }, options?: { signal?: AbortSignal }) {
+    const q = buildQuery(params ?? {});
+    return this.request<CourtCasesRegistrySummary>(`/v2/cases/court-registry-summary${q}`, {
       signal: options?.signal,
     });
   }
@@ -8316,6 +8331,7 @@ import type {
   ClientStatus,
   MonthlyStats,
   ClientCase,
+  CourtCasesRegistrySummary,
   ClientCaseAccessRequest,
   ClientCaseAccessRequestResolution,
   ClientCaseActivity,

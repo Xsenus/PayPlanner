@@ -206,6 +206,7 @@ const Reports = lazy(() => import('./components/Reports/Reports').then((module) 
 const Calculator = lazy(() => import('./components/Calculator/Calculator').then((module) => ({ default: module.Calculator })));
 const Clients = lazy(() => import('./components/Clients/Clients').then((module) => ({ default: module.Clients })));
 const CasesRegistry = lazy(() => import('./components/Cases/CasesRegistry').then((module) => ({ default: module.CasesRegistry })));
+const CourtCasesRegistry = lazy(() => import('./components/Cases/CourtCasesRegistry').then((module) => ({ default: module.CourtCasesRegistry })));
 const CaseDetailPage = lazy(() => import('./components/Cases/CaseDetailPage').then((module) => ({ default: module.CaseDetailPage })));
 const PhoneContacts = lazy(() => import('./components/Contacts/Contacts').then((module) => ({ default: module.Contacts })));
 const LegalEntities = lazy(() => import('./components/LegalEntities/LegalEntities').then((module) => ({ default: module.LegalEntities })));
@@ -265,6 +266,7 @@ function AppContent() {
       calculator: 'Калькулятор',
       legalEntities: 'Юр. лица',
       cases: 'Дела',
+      courtCases: 'Судебные дела',
       caseDetail: 'Карточка дела',
       clients: 'Клиенты',
       contacts: 'Контакты',
@@ -368,6 +370,7 @@ function AppContent() {
         { tab: 'calculator' as Tab, allowed: permissions.calculator.canView },
         { tab: 'legalEntities' as Tab, allowed: permissions.legalEntities.canView },
         { tab: 'cases' as Tab, allowed: permissions.cases.canView },
+        { tab: 'courtCases' as Tab, allowed: permissions.cases.canView },
         { tab: 'clients' as Tab, allowed: permissions.clients.canView },
         { tab: 'contacts' as Tab, allowed: permissions.clients.canView || permissions.legalEntities.canView },
         { tab: 'contactsClients' as Tab, allowed: permissions.clients.canView },
@@ -887,6 +890,8 @@ function AppContent() {
       url.pathname = '/clients';
     } else if (activeTab === 'cases') {
       url.pathname = '/cases';
+    } else if (activeTab === 'courtCases') {
+      url.pathname = '/court-cases';
     } else if (activeTab === 'caseDetail') {
       url.pathname = selectedCaseId ? `/cases/${selectedCaseId}` : '/cases';
     } else if (activeTab === 'notifications') {
@@ -920,6 +925,8 @@ function AppContent() {
     } else if (/^\/clients(?:\/\d+)?\/?$/i.test(url.pathname)) {
       url.pathname = '/';
     } else if (/^\/cases(?:\/\d+)?\/?$/i.test(url.pathname)) {
+      url.pathname = '/';
+    } else if (/^\/court-cases\/?$/i.test(url.pathname)) {
       url.pathname = '/';
     } else if (/^\/notifications\/?$/i.test(url.pathname)) {
       url.pathname = '/';
@@ -1339,6 +1346,24 @@ function AppContent() {
               />
             )
           : renderNoAccess('Реестр дел недоступен для вашей роли.');
+
+      case 'courtCases':
+        return permissions.cases.canView
+          ? (
+              <CourtCasesRegistry
+                onOpenCaseCourt={(caseId) => {
+                  try {
+                    window.sessionStorage.setItem(`pp.case-detail.${caseId}.view.v1`, JSON.stringify({ activeTab: 'court' }));
+                  } catch {
+                    /** */
+                  }
+                  setSelectedCaseId(caseId);
+                  setCaseReturnTab('courtCases');
+                  setActiveTab('caseDetail');
+                }}
+              />
+            )
+          : renderNoAccess('Раздел судебных дел недоступен для вашей роли.');
 
       case 'caseDetail':
         if (!permissions.cases.canView) {

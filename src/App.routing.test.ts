@@ -271,6 +271,12 @@ describe('App client routing helpers', () => {
     expect(getInitialTab()).toBe('cases');
   });
 
+  it('detects the court cases registry pathname', () => {
+    window.history.replaceState({}, '', '/court-cases');
+
+    expect(getInitialTab()).toBe('courtCases');
+  });
+
   it('parses a case id from the pathname', () => {
     window.history.replaceState({}, '', '/cases/15');
 
@@ -317,6 +323,7 @@ describe('App sidebar routing helpers', () => {
     expect(getTabHref('tasksCalendar')).toBe('/tasks/calendar');
     expect(getTabHref('clients')).toBe('/clients');
     expect(getTabHref('cases')).toBe('/cases');
+    expect(getTabHref('courtCases')).toBe('/court-cases');
     expect(getTabHref('accountsIncome')).toBe('/invoices?ppTab=accountsIncome');
     expect(getTabHref('paymentsExpense')).toBe('/payments?ppTab=paymentsExpense');
     expect(getTabHref('actsIncome')).toBe('/acts?ppTab=actsIncome');

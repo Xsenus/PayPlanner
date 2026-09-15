@@ -2302,6 +2302,110 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task CourtRegistry_ReturnsOnlyCourtCasesAndServerSummary()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "court-owner@example.com", "Судебный юрист", DataVisibilityScope.All);
+        var now = DateTime.UtcNow;
+        var client = new Client { Name = "Клиент суда", IsActive = true, ResponsibleUserId = owner.Id };
+        var soonCase = new ClientCase
+        {
+            Client = client,
+            Title = "Судебное дело с заседанием",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = owner.Id,
+            CourtName = "Тестовый районный суд",
+            CourtCaseNumber = "2-100/2026",
+            NextHearingAt = now.AddDays(5),
+            IsUnderControl = true,
+        };
+        var instanceOnlyCase = new ClientCase
+        {
+            Client = client,
+            Title = "Дело только с инстанцией",
+            Status = ClientCaseStatus.OnHold,
+            ResponsibleUserId = owner.Id,
+        };
+        var ordinaryCase = new ClientCase
+        {
+            Client = client,
+            Title = "Обычное внесудебное дело",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = owner.Id,
+        };
+        db.ClientCases.AddRange(soonCase, instanceOnlyCase, ordinaryCase);
+        db.ClientCaseCourtInstances.Add(new ClientCaseCourtInstance
+        {
+            ClientCase = instanceOnlyCase,
+            Instance = "appeal",
+            CourtName = "Апелляционный суд",
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, owner);
+
+        var soonResult = await controller.Get(
+            clientId: null,
+            legalEntityId: null,
+            status: null,
+            search: null,
+            responsibleUserId: null,
+            caseType: null,
+            priority: null,
+            from: null,
+            to: null,
+            minFee: null,
+            maxFee: null,
+            sortBy: "nextHearingAt",
+            sortDir: "asc",
+            page: 1,
+            pageSize: 50,
+            scope: "all",
+            courtOnly: true,
+            courtState: "soon",
+            ct: CancellationToken.None);
+
+        var soonItem = Assert.Single(GetAnonymousItems(Assert.IsType<OkObjectResult>(soonResult).Value));
+        Assert.Equal(soonCase.Id, soonItem.Id);
+
+        var allCourtResult = await controller.Get(
+            clientId: null,
+            legalEntityId: null,
+            status: null,
+            search: null,
+            responsibleUserId: null,
+            caseType: null,
+            priority: null,
+            from: null,
+            to: null,
+            minFee: null,
+            maxFee: null,
+            sortBy: "title",
+            sortDir: "asc",
+            page: 1,
+            pageSize: 50,
+            scope: "all",
+            courtOnly: true,
+            ct: CancellationToken.None);
+        var allCourtItems = GetAnonymousItems(Assert.IsType<OkObjectResult>(allCourtResult).Value);
+        Assert.Equal(2, allCourtItems.Count);
+        Assert.DoesNotContain(allCourtItems, item => item.Id == ordinaryCase.Id);
+
+        var summaryResult = await controller.GetCourtRegistrySummary(
+            status: null,
+            search: null,
+            responsibleUserId: null,
+            scope: "all",
+            courtState: null,
+            ct: CancellationToken.None);
+        var summary = Assert.IsType<OkObjectResult>(summaryResult).Value!;
+        Assert.Equal(2, summary.GetType().GetProperty("total")?.GetValue(summary));
+        Assert.Equal(2, summary.GetType().GetProperty("active")?.GetValue(summary));
+        Assert.Equal(1, summary.GetType().GetProperty("soon")?.GetValue(summary));
+        Assert.Equal(1, summary.GetType().GetProperty("withoutHearing")?.GetValue(summary));
+        Assert.Equal(1, summary.GetType().GetProperty("underControl")?.GetValue(summary));
+    }
+
+    [Fact]
     public async Task CreateAndUpdate_SyncsProcessDeadlinesToTaskCalendarWithoutDuplicates()
     {
         await using var db = await CreateContextAsync();

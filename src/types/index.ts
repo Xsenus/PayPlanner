@@ -592,6 +592,15 @@ export interface ClientCase {
   auditDeletedByUserName?: string | null;
 }
 
+export interface CourtCasesRegistrySummary {
+  total: number;
+  active: number;
+  upcoming: number;
+  soon: number;
+  withoutHearing: number;
+  underControl: number;
+}
+
 export interface CaseCalendarEvent {
   id: string;
   kind: 'task' | 'case-deadline' | 'procedural-deadline' | 'court' | string;

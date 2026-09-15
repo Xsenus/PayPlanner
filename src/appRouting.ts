@@ -47,6 +47,7 @@ export const TAB_ACCESS_RULES = {
   calculator: (permissions) => permissions.calculator.canView,
   legalEntities: (permissions) => permissions.legalEntities.canView,
   cases: (permissions) => permissions.cases.canView,
+  courtCases: (permissions) => permissions.cases.canView,
   caseDetail: (permissions) => permissions.cases.canView,
   clients: (permissions) => permissions.clients.canView,
   contacts: (permissions) => permissions.clients.canView || permissions.legalEntities.canView,
@@ -239,6 +240,14 @@ export function isCasesListPath(): boolean {
   return /^\/cases\/?$/i.test(window.location.pathname);
 }
 
+export function isCourtCasesListPath(): boolean {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  return /^\/court-cases\/?$/i.test(window.location.pathname);
+}
+
 export function getPathCaseId(): number | null {
   if (typeof window === 'undefined') {
     return null;
@@ -365,6 +374,10 @@ export function getInitialTab(): Tab {
     return 'cases';
   }
 
+  if (isCourtCasesListPath()) {
+    return 'courtCases';
+  }
+
   if (hasNotificationsPath && !hasStaleNotificationsPath) {
     return 'notifications';
   }
@@ -472,6 +485,10 @@ export function getTabHref(tab: Tab): string {
 
   if (tab === 'cases') {
     return '/cases';
+  }
+
+  if (tab === 'courtCases') {
+    return '/court-cases';
   }
 
   if (isAccountsTab(tab)) {
