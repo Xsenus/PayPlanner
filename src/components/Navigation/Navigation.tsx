@@ -51,6 +51,7 @@ import {
   Scale,
 } from 'lucide-react';
 import { useTranslation } from '../../hooks/useTranslation';
+import { useToast } from '../../hooks/useToast';
 import { useAuth } from '../../contexts/AuthContext';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { Tab } from '../../types/tabs';
@@ -124,6 +125,7 @@ function normalizeNavigationRootOrder(
 
 export default function Navigation({ activeTab, onTabChange }: NavigationProps) {
   const { t } = useTranslation();
+  const toast = useToast();
   const { user, isAdmin } = useAuth();
   const permissions = useRolePermissions(user?.role?.id);
   const orderStorageKey = `${ORDER_KEY}.${user?.id ?? 'guest'}`;
@@ -829,7 +831,9 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
     setNavigationSettingsError('');
     try {
       if (draftGroups.some((group) => !group.name.trim())) {
-        setNavigationSettingsError('Укажите название для каждой группы.');
+        const message = 'Укажите название для каждой группы.';
+        setNavigationSettingsError(message);
+        toast.error(message, 'Настройки меню не сохранены');
         return;
       }
       const saved = await apiService.updateNavigationSettings(draftOrderIds, draftLabels, draftGroups);
@@ -837,12 +841,15 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
       setCustomLabels(saved.labels);
       setNavigationGroups(saved.groups);
       setNavigationSettingsOpen(false);
+      toast.success('Порядок групп и разделов сохранён для всех пользователей.', 'Настройки меню сохранены');
     } catch {
-      setNavigationSettingsError('Не удалось сохранить порядок меню. Повторите попытку.');
+      const message = 'Не удалось сохранить порядок меню. Повторите попытку.';
+      setNavigationSettingsError(message);
+      toast.error(message, 'Настройки меню не сохранены');
     } finally {
       setNavigationSettingsSaving(false);
     }
-  }, [draftGroups, draftLabels, draftOrderIds]);
+  }, [draftGroups, draftLabels, draftOrderIds, toast]);
 
   useEffect(() => {
     setExpandedSections((prev) => {

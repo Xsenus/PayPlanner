@@ -128,6 +128,29 @@ public sealed class NavigationSettingsControllerTests
         Assert.Equal(["users"], dto.Groups[1].ItemIds);
     }
 
+    [Fact]
+    public async Task Update_PreservesCourtCasesBeforeMovedGroup()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "admin", canEditRoles: false);
+        var controller = CreateController(db, user.Id);
+
+        var result = await controller.Update(
+            new UpdateNavigationSettingsRequest(
+                ["courtCases", "group-management"],
+                new Dictionary<string, string>(),
+                [new NavigationGroupDto("group-management", "Управление", ["users", "roles"])]),
+            CancellationToken.None);
+
+        var dto = AssertOk(result);
+        var order = dto.Order.ToArray();
+        Assert.Contains("courtCases", order);
+        Assert.True(Array.IndexOf(order, "courtCases") < Array.IndexOf(order, "group-management"));
+
+        var reloaded = AssertOk(await CreateController(db, user.Id).Get(CancellationToken.None));
+        Assert.Equal(order, reloaded.Order);
+    }
+
     private static NavigationSettingsController CreateController(PaymentContext db, int userId)
         => new(db, new RoleManagementAccessService(db))
         {

@@ -9,10 +9,10 @@ public static class NavigationSettingsSeedService
 {
     public const string SettingKey = "navigation.sidebar.configuration.v1";
 
-    private static readonly string[] DefaultOrder =
+    internal static IReadOnlyList<string> DefaultOrder { get; } =
     [
         "workspace", "calendar", "notifications", "tasks", "notes", "reports", "calculator",
-        "legalEntities", "clients", "cases", "contacts", "accounts", "installments",
+        "legalEntities", "clients", "cases", "courtCases", "contacts", "accounts", "installments",
         "money", "payments", "acts", "contracts", "payroll", "dictionaries", "users", "roles",
         "audit", "userActivity", "settings",
     ];
@@ -134,6 +134,12 @@ public static class NavigationSettingsSeedService
         if (!assignedItemIds.Contains("payroll") && !order.Contains("payroll", StringComparer.Ordinal))
         {
             InsertPayroll(order);
+            changed = true;
+        }
+
+        if (!assignedItemIds.Contains("courtCases") && !order.Contains("courtCases", StringComparer.Ordinal))
+        {
+            order.Add("courtCases");
             changed = true;
         }
 

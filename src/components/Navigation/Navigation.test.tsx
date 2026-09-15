@@ -17,6 +17,12 @@ const authState = vi.hoisted(() => ({
   roleName: 'admin',
 }));
 
+const toastMocks = vi.hoisted(() => ({
+  success: vi.fn(),
+  error: vi.fn(),
+  info: vi.fn(),
+}));
+
 vi.mock('../../contexts/AuthContext', () => ({
   useAuth: () => ({
     user: { id: 1, role: { id: authState.roleId, name: authState.roleName } },
@@ -33,6 +39,10 @@ vi.mock('../../services/api', () => ({
     getUserSetting: vi.fn(),
     upsertUserSetting: vi.fn(),
   },
+}));
+
+vi.mock('../../hooks/useToast', () => ({
+  useToast: () => toastMocks,
 }));
 
 const apiMock = vi.mocked(apiService);
@@ -241,6 +251,26 @@ describe('Navigation links', () => {
     expect(labels.calendar).toBe('Расписание');
     expect(groups).toEqual([]);
     expect(await screen.findByRole('link', { name: /Расписание/i })).toBeTruthy();
+    expect(toastMocks.success).toHaveBeenCalledWith(
+      'Порядок групп и разделов сохранён для всех пользователей.',
+      'Настройки меню сохранены',
+    );
+  });
+
+  it('keeps the settings open and shows a toast when saving fails', async () => {
+    const user = userEvent.setup();
+    apiMock.updateNavigationSettings.mockRejectedValueOnce(new Error('network error'));
+    renderNavigation();
+    await waitForNavigationPermissions();
+
+    await user.click(screen.getByRole('button', { name: 'Ещё разделы' }));
+    await user.click(screen.getByRole('button', { name: 'Группы и порядок' }));
+    await user.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    const message = 'Не удалось сохранить порядок меню. Повторите попытку.';
+    expect(await screen.findByText(message)).toBeTruthy();
+    expect(screen.getByRole('dialog', { name: 'Группы, порядок и названия разделов' })).toBeTruthy();
+    expect(toastMocks.error).toHaveBeenCalledWith(message, 'Настройки меню не сохранены');
   });
 
   it('lets an administrator create, position and fill a menu group', async () => {

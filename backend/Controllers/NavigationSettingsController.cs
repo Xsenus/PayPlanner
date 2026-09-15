@@ -18,13 +18,7 @@ public sealed class NavigationSettingsController : ControllerBase
     private const int MaximumGroupCount = 30;
     private const string GroupIdPrefix = "group-";
 
-    private static readonly string[] DefaultOrder =
-    [
-        "workspace", "calendar", "notifications", "tasks", "notes", "reports", "calculator",
-        "legalEntities", "clients", "cases", "contacts", "accounts", "installments",
-        "money", "payments", "acts", "contracts", "payroll", "dictionaries", "users", "roles",
-        "audit", "userActivity", "settings",
-    ];
+    private static readonly string[] DefaultOrder = [.. NavigationSettingsSeedService.DefaultOrder];
 
     private static readonly HashSet<string> KnownItemIds = new(DefaultOrder, StringComparer.Ordinal);
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);

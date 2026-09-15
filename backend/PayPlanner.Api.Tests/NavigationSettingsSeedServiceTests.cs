@@ -25,6 +25,7 @@ public sealed class NavigationSettingsSeedServiceTests
         Assert.Equal(["legalEntities", "clients", "contacts"], groups[0].GetProperty("itemIds").EnumerateArray().Select(item => item.GetString()));
         var order = json.RootElement.GetProperty("order").EnumerateArray().Select(item => item.GetString()).ToArray();
         Assert.Equal("workspace", order[0]);
+        Assert.Contains("courtCases", order);
         Assert.Equal(Array.IndexOf(order, "group-accounting") + 1, Array.IndexOf(order, "payroll"));
     }
 
@@ -49,6 +50,7 @@ public sealed class NavigationSettingsSeedServiceTests
         Assert.Equal("Моя группа", json.RootElement.GetProperty("groups")[0].GetProperty("name").GetString());
         Assert.Equal("workspace", json.RootElement.GetProperty("order")[0].GetString());
         Assert.Contains("payroll", json.RootElement.GetProperty("order").EnumerateArray().Select(item => item.GetString()));
+        Assert.Contains("courtCases", json.RootElement.GetProperty("order").EnumerateArray().Select(item => item.GetString()));
 
         Assert.False(await NavigationSettingsSeedService.EnsureDefaultGroupsAsync(db));
     }
