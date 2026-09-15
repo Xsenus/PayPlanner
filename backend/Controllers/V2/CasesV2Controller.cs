@@ -278,6 +278,7 @@ public class CasesV2Controller : ControllerBase
         [FromQuery] int? inactiveDays = null,
         [FromQuery] bool courtOnly = false,
         [FromQuery] string? courtState = null,
+        [FromQuery] string? courtInstance = null,
         CancellationToken ct = default)
     {
         var visibility = await ResolveCasesVisibilityAsync(ct);
@@ -309,7 +310,7 @@ public class CasesV2Controller : ControllerBase
             activity,
             inactiveDays);
 
-        q = ApplyCourtRegistryFilters(q, courtOnly, courtState, DateTime.UtcNow);
+        q = ApplyCourtRegistryFilters(q, courtOnly, courtState, courtInstance, DateTime.UtcNow);
 
         var total = await q.CountAsync(ct);
         var items = await SelectRegistryCaseRows(q
@@ -317,6 +318,10 @@ public class CasesV2Controller : ControllerBase
                 .Take(pageSize)
                 .AsNoTracking())
             .ToListAsync(ct);
+        if (courtOnly || !string.IsNullOrWhiteSpace(courtInstance))
+        {
+            await PopulateCourtInstanceKeysAsync(items, ct);
+        }
         if (canViewFinance)
         {
             await ApplyFinanceSummaryAsync(items, ct);
@@ -366,7 +371,7 @@ public class CasesV2Controller : ControllerBase
             scope,
             null,
             null);
-        query = ApplyCourtRegistryFilters(query, courtOnly: true, courtState, now);
+        query = ApplyCourtRegistryFilters(query, courtOnly: true, courtState, courtInstance: null, now);
 
         var summary = await query
             .GroupBy(_ => 1)
@@ -381,14 +386,23 @@ public class CasesV2Controller : ControllerBase
             })
             .SingleOrDefaultAsync(ct);
 
-        return Ok(summary ?? new
+        var categories = await query
+            .GroupBy(item => item.CaseType == null || item.CaseType == string.Empty ? "Без категории" : item.CaseType)
+            .Select(group => new { name = group.Key, count = group.Count() })
+            .OrderByDescending(item => item.count)
+            .ThenBy(item => item.name)
+            .Take(30)
+            .ToListAsync(ct);
+
+        return Ok(new
         {
-            total = 0,
-            active = 0,
-            upcoming = 0,
-            soon = 0,
-            withoutHearing = 0,
-            underControl = 0,
+            total = summary?.total ?? 0,
+            active = summary?.active ?? 0,
+            upcoming = summary?.upcoming ?? 0,
+            soon = summary?.soon ?? 0,
+            withoutHearing = summary?.withoutHearing ?? 0,
+            underControl = summary?.underControl ?? 0,
+            categories,
         });
     }
 
@@ -687,6 +701,7 @@ public class CasesV2Controller : ControllerBase
         IQueryable<ClientCase> query,
         bool courtOnly,
         string? courtState,
+        string? courtInstance,
         DateTime now)
     {
         if (courtOnly)
@@ -702,6 +717,20 @@ public class CasesV2Controller : ControllerBase
                 || item.CourtParties.Any(courtParty => !courtParty.IsArchived));
         }
 
+        var normalizedInstance = courtInstance?.Trim().ToLowerInvariant();
+        if (normalizedInstance is "first" or "appeal" or "cassation" or "supervision" or "supreme")
+        {
+            query = normalizedInstance == "first"
+                ? query.Where(item =>
+                    item.CourtInstances.Any(instance => instance.Instance == "first")
+                    || (!item.CourtInstances.Any() && (
+                        item.CourtName != string.Empty
+                        || item.CourtCaseNumber != string.Empty
+                        || item.JudicialUid != string.Empty
+                        || item.CourtUrl != string.Empty)))
+                : query.Where(item => item.CourtInstances.Any(instance => instance.Instance == normalizedInstance));
+        }
+
         return courtState?.Trim().ToLowerInvariant() switch
         {
             "upcoming" => query.Where(item => item.NextHearingAt != null && item.NextHearingAt >= now),
@@ -711,6 +740,42 @@ public class CasesV2Controller : ControllerBase
             "under-control" => query.Where(item => item.IsUnderControl),
             _ => query,
         };
+    }
+
+    private async Task PopulateCourtInstanceKeysAsync(IReadOnlyList<ClientCase> items, CancellationToken ct)
+    {
+        if (items.Count == 0)
+        {
+            return;
+        }
+
+        var ids = items.Select(static item => item.Id).ToArray();
+        var instanceRows = await _db.ClientCaseCourtInstances
+            .AsNoTracking()
+            .Where(instance => ids.Contains(instance.ClientCaseId))
+            .Select(instance => new { instance.ClientCaseId, instance.Instance })
+            .ToListAsync(ct);
+        var byCase = instanceRows
+            .GroupBy(static instance => instance.ClientCaseId)
+            .ToDictionary(
+                static group => group.Key,
+                static group => group.Select(static instance => instance.Instance)
+                    .Where(static value => !string.IsNullOrWhiteSpace(value))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList());
+
+        foreach (var item in items)
+        {
+            item.CourtInstanceKeys = byCase.GetValueOrDefault(item.Id) ?? new List<string>();
+            if (item.CourtInstanceKeys.Count == 0
+                && (!string.IsNullOrWhiteSpace(item.CourtName)
+                    || !string.IsNullOrWhiteSpace(item.CourtCaseNumber)
+                    || !string.IsNullOrWhiteSpace(item.JudicialUid)
+                    || !string.IsNullOrWhiteSpace(item.CourtUrl)))
+            {
+                item.CourtInstanceKeys.Add("first");
+            }
+        }
     }
 
     private static IQueryable<ClientCase> SelectRegistryCaseRows(IQueryable<ClientCase> query)

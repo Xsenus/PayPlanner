@@ -2465,6 +2465,27 @@ describe('CaseDetailPage', () => {
     });
   });
 
+  it('opens the court card in a read-first overview from the court registry', async () => {
+    window.sessionStorage.setItem(
+      'pp.case-detail.15.view.v1',
+      JSON.stringify({ activeTab: 'court', courtOverview: true }),
+    );
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    expect(await screen.findByText('Сводка по судебному делу')).toBeTruthy();
+    expect(screen.getByText('Инстанции и судебные карточки')).toBeTruthy();
+    expect(screen.getByText('Заседания и движения')).toBeTruthy();
+    expect(screen.getByText('Лента процессуальной истории')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Редактировать данные' })).toBeTruthy();
+    expect(screen.queryByText('Режим редактирования судебных данных')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Редактировать данные' }));
+    expect(await screen.findByText('Режим редактирования судебных данных')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Вернуться к обзору' }));
+    expect(await screen.findByText('Сводка по судебному делу')).toBeTruthy();
+  });
+
   it('keeps the court tab in safe mode for pretrial cases without court data', async () => {
     vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({
       caseType: 'Внесудебное урегулирование',

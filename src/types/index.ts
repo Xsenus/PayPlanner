@@ -577,6 +577,7 @@ export interface ClientCase {
   accessRequestedByUserName?: string | null;
   accessRequestReason?: string | null;
   canRevealSensitiveData?: boolean;
+  courtInstanceKeys?: string[];
   title: string;
   description?: string;
   status: string;
@@ -599,6 +600,7 @@ export interface CourtCasesRegistrySummary {
   soon: number;
   withoutHearing: number;
   underControl: number;
+  categories?: Array<{ name: string; count: number }>;
 }
 
 export interface CaseCalendarEvent {

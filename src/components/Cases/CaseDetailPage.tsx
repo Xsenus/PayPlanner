@@ -317,6 +317,7 @@ const WORK_ORDER_STATUS_OPTIONS = [
 
 interface CaseDetailViewState {
   activeTab?: CaseDetailTab;
+  courtOverview?: boolean;
   taskFilter?: CaseTaskFilter;
   participantSourceType?: ParticipantSourceType;
   participantRole?: string;
@@ -378,6 +379,7 @@ function readCaseDetailViewState(caseId: number): CaseDetailViewState {
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     return {
       activeTab: isCaseDetailTab(parsed.activeTab) ? parsed.activeTab : undefined,
+      courtOverview: parsed.courtOverview === true,
       taskFilter: isCaseTaskFilter(parsed.taskFilter) ? parsed.taskFilter : undefined,
       participantSourceType: isParticipantSourceType(parsed.participantSourceType) ? parsed.participantSourceType : undefined,
       participantRole: typeof parsed.participantRole === 'string' ? parsed.participantRole : undefined,
@@ -1423,6 +1425,7 @@ export function CaseDetailPage({
   useEffect(() => {
     writeCaseDetailViewState(caseId, {
       activeTab,
+      courtOverview: initialViewState.courtOverview,
       taskFilter,
       participantSourceType,
       participantRole,
@@ -1439,6 +1442,7 @@ export function CaseDetailPage({
     participantRole,
     participantSourceType,
     taskFilter,
+    initialViewState.courtOverview,
   ]);
 
   useEffect(() => {
@@ -3740,6 +3744,7 @@ export function CaseDetailPage({
 
           {activeTab === 'court' ? (
             <CourtPanel
+              initialOverview={initialViewState.courtOverview === true}
               caseItem={caseItem}
               courtDirectory={courtDirectory}
               courtInstances={courtInstances}
@@ -6250,6 +6255,7 @@ export function CourtSourceProvenance({
 }
 
 function CourtPanel({
+  initialOverview,
   caseItem,
   courtDirectory,
   courtInstances,
@@ -6340,6 +6346,7 @@ function CourtPanel({
   onAddProceduralDeadline,
   onCloseProceduralDeadline,
 }: {
+  initialOverview: boolean;
   caseItem: ClientCase;
   courtDirectory: ClientCaseCourt[];
   courtInstances: ClientCaseCourtInstance[];
@@ -6449,6 +6456,7 @@ function CourtPanel({
   const selectedCourtEvents = courtEvents.filter((event) => event.courtInstance === activeCourtInstance);
   const courtDirectoryForInstance = courtDirectory.filter((court) => court.instance === activeCourtInstance || (activeCourtInstance === 'supreme' && court.instance === 'supervision'));
   const [courtSafeModeExpanded, setCourtSafeModeExpanded] = useState(false);
+  const [courtEditMode, setCourtEditMode] = useState(!initialOverview);
   const hasCourtInstanceData = courtInstances.some((instance) => Boolean(
     instance.courtName
     || instance.courtCaseNumber
@@ -6521,8 +6529,101 @@ function CourtPanel({
     );
   }
 
+  if (!courtEditMode) {
+    const overviewInstance = selectedCourtInstance;
+    const overviewEvents = selectedCourtEvents
+      .slice()
+      .sort((left, right) => new Date(right.scheduledAt).getTime() - new Date(left.scheduledAt).getTime());
+    const latestEvent = overviewEvents[0];
+    const processHistory = courtEvents
+      .slice()
+      .sort((left, right) => new Date(right.scheduledAt).getTime() - new Date(left.scheduledAt).getTime())
+      .slice(0, 20);
+    const populatedInstances = COURT_INSTANCE_TABS.filter((tab) => {
+      const instanceData = courtInstances.find((item) => item.instance === tab.value);
+      return Boolean(
+        instanceData?.courtName
+        || instanceData?.courtCaseNumber
+        || instanceData?.judicialUid
+        || instanceData?.courtUrl
+        || courtEvents.some((event) => event.courtInstance === tab.value),
+      );
+    });
+    const visibleInstances = populatedInstances.length > 0 ? populatedInstances : [selectedCourtInstanceMeta];
+    const ownerName = caseItem.client?.name || caseItem.legalEntity?.shortName || caseItem.legalEntity?.fullName || 'Владелец не указан';
+
+    return (
+      <div className="space-y-3">
+        <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">{CASE_STATUS_OPTIONS.find((option) => option.value === caseItem.status)?.label || caseItem.status}</span>
+                <span className="rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-xs font-semibold text-violet-700">{selectedCourtInstanceMeta.label}</span>
+                {caseItem.isUnderControl ? <span className="rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-700">На особом контроле</span> : null}
+              </div>
+              <h2 className="mt-2 text-lg font-bold text-slate-950">Сводка по судебному делу</h2>
+              <p className="mt-0.5 text-sm text-slate-500">Главные реквизиты, инстанции и движение дела без лишних полей.</p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" onClick={() => void onRunCourtSync()} disabled={syncingCourt} className="inline-flex items-center gap-2 rounded-lg border border-cyan-200 px-3 py-2 text-sm font-semibold text-cyan-700 hover:bg-cyan-50 disabled:opacity-50">{syncingCourt ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />} Проверить источник</button>
+              <button type="button" onClick={() => setCourtEditMode(true)} className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800"><Pencil className="h-4 w-4" /> Редактировать данные</button>
+            </div>
+          </div>
+        </section>
+
+        {lastCourtSyncResult?.message ? <div className={`rounded-xl border p-3 text-sm ${lastCourtSyncResult.status === 'external-sync-error' ? 'border-rose-200 bg-rose-50 text-rose-800' : 'border-emerald-200 bg-emerald-50 text-emerald-800'}`}>{lastCourtSyncResult.message}</div> : null}
+
+        <div className="grid gap-3 2xl:grid-cols-[minmax(0,1fr)_280px]">
+          <div className="min-w-0 space-y-3">
+            <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                {[
+                  ['Владелец', ownerName],
+                  ['Номер дела', overviewInstance?.courtCaseNumber || caseItem.courtCaseNumber || caseItem.caseNumber || '—'],
+                  ['UID', overviewInstance?.judicialUid || caseItem.judicialUid || '—'],
+                  ['Суд', overviewInstance?.courtName || caseItem.courtName || '—'],
+                  ['Судья', overviewInstance?.judgeName || caseItem.judgeName || '—'],
+                  ['Ближайшее заседание', formatRuDateTime(caseItem.nextHearingAt) || 'Не назначено'],
+                  ['Истец / заявитель', caseItem.claimant || '—'],
+                  ['Ответчик / должник', caseItem.defendant || '—'],
+                  ['Текущий результат', latestEvent?.resultSummary || latestEvent?.movementStatusLabel || latestEvent?.movementStatus || caseItem.stage || '—'],
+                ].map(([label, value]) => <div key={label} className="min-w-0 rounded-lg bg-slate-50 px-3 py-2"><div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-400">{label}</div><div className={`mt-1 break-words text-sm font-semibold text-slate-800 ${label === 'UID' ? 'font-mono text-xs text-cyan-800' : ''}`}>{value}</div></div>)}
+              </div>
+              {(overviewInstance?.courtUrl || caseItem.courtUrl) ? <a href={overviewInstance?.courtUrl || caseItem.courtUrl || '#'} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-blue-700 hover:underline"><ExternalLink className="h-4 w-4" /> Открыть официальную карточку суда</a> : null}
+            </section>
+
+            <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2"><div><h3 className="font-bold text-slate-900">Инстанции и судебные карточки</h3><p className="mt-0.5 text-xs text-slate-500">Карточки одного дела объединяются по UID. Выберите инстанцию, чтобы увидеть её движение.</p></div><span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">{populatedInstances.length} заполнено</span></div>
+              <div className="mt-3 flex gap-2 overflow-x-auto pb-1">{visibleInstances.map((tab) => {
+                const instanceData = courtInstances.find((item) => item.instance === tab.value);
+                return <button key={tab.value} type="button" onClick={() => onActiveCourtInstanceChange(tab.value)} className={`min-w-[170px] rounded-lg border px-3 py-2 text-left ${activeCourtInstance === tab.value ? 'border-blue-400 bg-blue-50 text-blue-800' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}><div className="text-sm font-bold">{tab.label}</div><div className="mt-0.5 truncate text-xs opacity-75">{instanceData?.courtCaseNumber || 'Номер не указан'}</div></button>;
+              })}</div>
+              <div className="mt-3 grid gap-2 rounded-lg border border-slate-200 bg-slate-50/60 p-3 sm:grid-cols-2"><div><div className="text-[11px] uppercase tracking-[0.1em] text-slate-400">Суд</div><div className="mt-1 text-sm font-semibold text-slate-800">{overviewInstance?.courtName || caseItem.courtName || 'Не указан'}</div></div><div><div className="text-[11px] uppercase tracking-[0.1em] text-slate-400">Номер карточки</div><div className="mt-1 text-sm font-semibold text-slate-800">{overviewInstance?.courtCaseNumber || caseItem.courtCaseNumber || 'Не указан'}</div></div><div><div className="text-[11px] uppercase tracking-[0.1em] text-slate-400">Судья</div><div className="mt-1 text-sm font-semibold text-slate-800">{overviewInstance?.judgeName || caseItem.judgeName || 'Не указан'}</div></div><div><div className="text-[11px] uppercase tracking-[0.1em] text-slate-400">Статус</div><div className="mt-1 text-sm font-semibold text-slate-800">{latestEvent?.movementStatusLabel || latestEvent?.movementStatus || caseItem.stage || 'Нет данных'}</div></div></div>
+            </section>
+
+            <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+              <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-3 py-2.5"><div><h3 className="font-bold text-slate-900">Заседания и движения</h3><p className="text-xs text-slate-500">История выбранной инстанции</p></div><span className="text-xs font-semibold text-slate-500">{overviewEvents.length}</span></div>
+              {courtEventsLoading ? <div className="flex items-center justify-center p-8"><Loader2 className="h-5 w-5 animate-spin text-blue-600" /></div> : overviewEvents.length === 0 ? <div className="p-6 text-center text-sm text-slate-500">По этой инстанции событий пока нет.</div> : <div className="overflow-x-auto"><table className="min-w-full text-left text-xs"><thead className="bg-slate-50 text-[11px] uppercase tracking-[0.08em] text-slate-500"><tr><th className="px-3 py-2">Дата и время</th><th className="px-3 py-2">Событие</th><th className="px-3 py-2">Статус</th><th className="px-3 py-2">Результат</th><th className="px-3 py-2">Зал</th></tr></thead><tbody className="divide-y divide-slate-100">{overviewEvents.map((event) => <tr key={event.id} className="align-top"><td className="whitespace-nowrap px-3 py-2.5 font-semibold text-slate-700">{formatRuDateTime(event.scheduledAt) || '—'}</td><td className="min-w-[220px] px-3 py-2.5 text-slate-800">{event.title}</td><td className="px-3 py-2.5 text-slate-600">{event.movementStatusLabel || event.movementStatus || '—'}</td><td className="min-w-[180px] px-3 py-2.5 text-slate-600">{event.resultSummary || event.description || '—'}</td><td className="px-3 py-2.5 text-slate-600">{event.courtroom || '—'}</td></tr>)}</tbody></table></div>}
+            </section>
+
+            <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm"><div className="flex items-center justify-between gap-2"><div><h3 className="font-bold text-slate-900">Лента процессуальной истории</h3><p className="text-xs text-slate-500">Изменения всех инстанций в обратном хронологическом порядке</p></div><span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">{courtEvents.length}</span></div>{processHistory.length === 0 ? <div className="mt-3 rounded-lg bg-slate-50 p-4 text-sm text-slate-500">Процессуальная история появится после синхронизации или добавления события.</div> : <ol className="mt-3 space-y-0">{processHistory.map((event, index) => <li key={event.id} className="relative grid grid-cols-[16px_minmax(0,1fr)] gap-3 pb-3"><div className="relative flex justify-center"><span className="mt-1.5 h-2.5 w-2.5 rounded-full bg-blue-500 ring-4 ring-blue-50" />{index < processHistory.length - 1 ? <span className="absolute bottom-[-4px] top-4 w-px bg-slate-200" /> : null}</div><div><div className="text-xs font-semibold text-blue-700">{formatRuDateTime(event.scheduledAt) || 'Дата не указана'} · {event.courtInstanceLabel}</div><div className="mt-0.5 text-sm font-semibold text-slate-800">{event.title}</div>{event.resultSummary || event.movementStatusLabel ? <div className="mt-0.5 text-xs text-slate-500">{event.resultSummary || event.movementStatusLabel}</div> : null}</div></li>)}</ol>}</section>
+          </div>
+
+          <aside className="space-y-3">
+            <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm"><div className="flex items-center justify-between"><h3 className="font-bold text-slate-900">Участники</h3><span className="text-xs font-semibold text-slate-500">{courtParties.filter((party) => !party.isArchived).length}</span></div>{courtPartiesLoading ? <Loader2 className="mt-3 h-4 w-4 animate-spin text-blue-600" /> : <div className="mt-2 space-y-2">{courtParties.filter((party) => !party.isArchived).slice(0, 6).map((party) => <div key={party.id} className="rounded-lg bg-slate-50 px-2.5 py-2"><div className="text-sm font-semibold text-slate-800">{party.displayName}</div><div className="text-xs text-slate-500">{party.sideLabel || party.processRole || 'Участник'}</div></div>)}{courtParties.filter((party) => !party.isArchived).length === 0 ? <div className="text-sm text-slate-500">Участники ещё не загружены.</div> : null}</div>}</section>
+            <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm"><div className="flex items-center justify-between"><h3 className="font-bold text-slate-900">Файлы</h3><span className="text-xs font-semibold text-slate-500">{documents.length}</span></div><div className="mt-2 space-y-2">{documents.slice(0, 5).map((document) => <div key={document.id} className="flex items-start gap-2 rounded-lg bg-slate-50 px-2.5 py-2"><FileText className="mt-0.5 h-4 w-4 shrink-0 text-blue-600" /><div className="min-w-0"><div className="truncate text-sm font-semibold text-slate-800">{document.fileName || document.title || 'Документ'}</div><div className="text-xs text-slate-500">{document.status || document.documentType || 'Файл дела'}</div></div></div>)}{documents.length === 0 ? <div className="text-sm text-slate-500">Файлов пока нет.</div> : null}</div></section>
+            <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm"><div className="flex items-center justify-between"><h3 className="font-bold text-slate-900">Процессуальные сроки</h3><span className="text-xs font-semibold text-slate-500">{activeProceduralDeadlines.length}</span></div>{proceduralDeadlinesLoading ? <Loader2 className="mt-3 h-4 w-4 animate-spin text-blue-600" /> : <div className="mt-2 space-y-2">{activeProceduralDeadlines.slice(0, 5).map((deadline) => <div key={deadline.id} className={`rounded-lg border px-2.5 py-2 ${deadline.isOverdue ? 'border-rose-200 bg-rose-50' : deadline.isWarning ? 'border-amber-200 bg-amber-50' : 'border-slate-200 bg-slate-50'}`}><div className="text-sm font-semibold text-slate-800">{deadline.title}</div><div className="mt-0.5 text-xs text-slate-500">до {formatRuDateTime(deadline.dueAt) || '—'}</div></div>)}{activeProceduralDeadlines.length === 0 ? <div className="text-sm text-slate-500">Активных сроков нет.</div> : null}</div>}</section>
+            <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm"><h3 className="font-bold text-slate-900">Работа по делу</h3><div className="mt-2 grid grid-cols-2 gap-2"><div className="rounded-lg bg-blue-50 p-2.5"><div className="text-[11px] text-blue-600">Активные задачи</div><div className="mt-1 text-xl font-bold text-blue-900">{caseItem.openTaskCount ?? 0}</div></div><div className="rounded-lg bg-rose-50 p-2.5"><div className="text-[11px] text-rose-600">Просрочено</div><div className="mt-1 text-xl font-bold text-rose-900">{caseItem.overdueTaskCount ?? 0}</div></div></div><p className="mt-2 text-xs text-slate-500">Файлы, задачи, участники, переписка и доступ клиента доступны в соседних вкладках карточки.</p></section>
+          </aside>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
+      <div className="flex items-center justify-between rounded-xl border border-blue-200 bg-blue-50 p-3"><div><div className="text-sm font-semibold text-blue-900">Режим редактирования судебных данных</div><div className="text-xs text-blue-700">Здесь доступны привязка источника, ручные события, стороны, жалобы и процессуальные сроки.</div></div><button type="button" onClick={() => setCourtEditMode(false)} className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100">Вернуться к обзору</button></div>
       <div className="flex flex-col gap-3 rounded-xl border border-slate-200 p-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Судебный блок</h2>

@@ -5706,6 +5706,7 @@ export class ApiService {
     inactiveDays?: number;
     courtOnly?: boolean;
     courtState?: 'all' | 'upcoming' | 'soon' | 'overdue' | 'without-hearing' | 'under-control' | string;
+    courtInstance?: 'first' | 'appeal' | 'cassation' | 'supervision' | 'supreme' | string;
     sortBy?:
       | 'createdAt'
       | 'title'

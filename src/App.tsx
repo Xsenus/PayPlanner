@@ -1351,9 +1351,14 @@ function AppContent() {
         return permissions.cases.canView
           ? (
               <CourtCasesRegistry
+                allowCreate={permissions.cases.canCreate}
+                ownerScopes={[
+                  ...(permissions.clients.canView ? ['client' as const] : []),
+                  ...(permissions.legalEntities.canView ? ['legalEntity' as const] : []),
+                ]}
                 onOpenCaseCourt={(caseId) => {
                   try {
-                    window.sessionStorage.setItem(`pp.case-detail.${caseId}.view.v1`, JSON.stringify({ activeTab: 'court' }));
+                    window.sessionStorage.setItem(`pp.case-detail.${caseId}.view.v1`, JSON.stringify({ activeTab: 'court', courtOverview: true }));
                   } catch {
                     /** */
                   }

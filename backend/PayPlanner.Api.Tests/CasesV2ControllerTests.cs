@@ -2312,6 +2312,7 @@ public class CasesV2ControllerTests
         {
             Client = client,
             Title = "Судебное дело с заседанием",
+            CaseType = "Гражданское дело",
             Status = ClientCaseStatus.Open,
             ResponsibleUserId = owner.Id,
             CourtName = "Тестовый районный суд",
@@ -2323,6 +2324,7 @@ public class CasesV2ControllerTests
         {
             Client = client,
             Title = "Дело только с инстанцией",
+            CaseType = "Арбитражное дело",
             Status = ClientCaseStatus.OnHold,
             ResponsibleUserId = owner.Id,
         };
@@ -2390,6 +2392,30 @@ public class CasesV2ControllerTests
         Assert.Equal(2, allCourtItems.Count);
         Assert.DoesNotContain(allCourtItems, item => item.Id == ordinaryCase.Id);
 
+        var appealResult = await controller.Get(
+            clientId: null,
+            legalEntityId: null,
+            status: null,
+            search: null,
+            responsibleUserId: null,
+            caseType: null,
+            priority: null,
+            from: null,
+            to: null,
+            minFee: null,
+            maxFee: null,
+            sortBy: "title",
+            sortDir: "asc",
+            page: 1,
+            pageSize: 50,
+            scope: "all",
+            courtOnly: true,
+            courtInstance: "appeal",
+            ct: CancellationToken.None);
+        var appealItem = Assert.Single(GetAnonymousItems(Assert.IsType<OkObjectResult>(appealResult).Value));
+        Assert.Equal(instanceOnlyCase.Id, appealItem.Id);
+        Assert.Contains("appeal", appealItem.CourtInstanceKeys);
+
         var summaryResult = await controller.GetCourtRegistrySummary(
             status: null,
             search: null,
@@ -2403,6 +2429,9 @@ public class CasesV2ControllerTests
         Assert.Equal(1, summary.GetType().GetProperty("soon")?.GetValue(summary));
         Assert.Equal(1, summary.GetType().GetProperty("withoutHearing")?.GetValue(summary));
         Assert.Equal(1, summary.GetType().GetProperty("underControl")?.GetValue(summary));
+        var categories = Assert.IsAssignableFrom<System.Collections.IEnumerable>(
+            summary.GetType().GetProperty("categories")?.GetValue(summary));
+        Assert.Equal(2, categories.Cast<object>().Count());
     }
 
     [Fact]

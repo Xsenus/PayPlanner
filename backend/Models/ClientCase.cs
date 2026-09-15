@@ -348,6 +348,12 @@ namespace PayPlanner.Api.Models
         public bool CanRevealSensitiveData { get; set; } = true;
 
         /// <summary>
+        /// Краткий перечень заполненных судебных инстанций для карточного реестра.
+        /// </summary>
+        [NotMapped]
+        public List<string> CourtInstanceKeys { get; set; } = new();
+
+        /// <summary>
         /// Описание или примечания по делу.
         /// </summary>
         public string Description { get; set; } = string.Empty;

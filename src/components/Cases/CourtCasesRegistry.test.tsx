@@ -10,6 +10,7 @@ vi.mock('../../services/api', () => ({
     getCasesV2: vi.fn(),
     getCourtCasesRegistrySummary: vi.fn(),
     getActResponsibles: vi.fn(),
+    getCourtSyncProviders: vi.fn(),
   },
 }));
 
@@ -47,7 +48,9 @@ describe('CourtCasesRegistry', () => {
     vi.mocked(apiService.getCasesV2).mockReset();
     vi.mocked(apiService.getCourtCasesRegistrySummary).mockReset();
     vi.mocked(apiService.getActResponsibles).mockReset();
+    vi.mocked(apiService.getCourtSyncProviders).mockReset();
     vi.mocked(apiService.getActResponsibles).mockResolvedValue([]);
+    vi.mocked(apiService.getCourtSyncProviders).mockResolvedValue([]);
     vi.mocked(apiService.getCasesV2).mockResolvedValue({ items: [courtCase], total: 1, page: 1, pageSize: 12 });
     vi.mocked(apiService.getCourtCasesRegistrySummary).mockResolvedValue({
       total: 1,
@@ -68,9 +71,9 @@ describe('CourtCasesRegistry', () => {
     expect(screen.getByText('Суд № 2-1502/2026')).toBeTruthy();
     expect(screen.getByText('UID UID-COURT-77')).toBeTruthy();
     expect(screen.getByText(/25\.09\.2026.*10:00/)).toBeTruthy();
-    expect(screen.getByText('Задачи: 2 · просрочено 1')).toBeTruthy();
+    expect(screen.getByText('Задачи 2 / !1')).toBeTruthy();
 
-    fireEvent.click(screen.getByRole('button', { name: /Открыть судебную карточку/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Открыть дело/i }));
     expect(onOpenCaseCourt).toHaveBeenCalledWith(77);
     expect(apiService.getCasesV2).toHaveBeenCalledWith(
       expect.objectContaining({ courtOnly: true, scope: 'active', sortBy: 'nextHearingAt' }),
@@ -82,11 +85,34 @@ describe('CourtCasesRegistry', () => {
     render(<CourtCasesRegistry onOpenCaseCourt={vi.fn()} />);
     await screen.findByText('ИВАНОВ — РАЗДЕЛ ИМУЩЕСТВА');
 
-    fireEvent.click(screen.getByRole('button', { name: /В ближайшие 14 дней/i }));
+    fireEvent.click(screen.getByRole('combobox', { name: /Состояние заседания/i }));
+    fireEvent.click(screen.getByRole('option', { name: 'Ближайшие 14 дней' }));
 
     await waitFor(() => {
       expect(apiService.getCasesV2).toHaveBeenLastCalledWith(
         expect.objectContaining({ courtOnly: true, courtState: 'soon' }),
+        expect.any(Object),
+      );
+    });
+  });
+
+  it('filters the registry by court instance and exposes quick tracking', async () => {
+    render(
+      <CourtCasesRegistry
+        onOpenCaseCourt={vi.fn()}
+        allowCreate
+        ownerScopes={['client']}
+      />,
+    );
+    await screen.findByText('ИВАНОВ — РАЗДЕЛ ИМУЩЕСТВА');
+
+    expect(screen.getByRole('button', { name: /Поставить дело на отслеживание/i })).toBeTruthy();
+    fireEvent.click(screen.getByRole('combobox', { name: /Инстанция/i }));
+    fireEvent.click(screen.getByRole('option', { name: 'Апелляция' }));
+
+    await waitFor(() => {
+      expect(apiService.getCasesV2).toHaveBeenLastCalledWith(
+        expect.objectContaining({ courtOnly: true, courtInstance: 'appeal' }),
         expect.any(Object),
       );
     });
