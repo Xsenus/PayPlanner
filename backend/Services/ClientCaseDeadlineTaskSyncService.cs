@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Services.LegalIntegrations;
 
 namespace PayPlanner.Api.Services;
 
@@ -25,6 +26,7 @@ public static class ClientCaseDeadlineTaskSyncService
             .Include(item => item.Client)
             .Include(item => item.LegalEntity)
             .Include(item => item.ProceduralDeadlines)
+            .Include(item => item.CourtEvents)
             .AsSplitQuery()
             .FirstOrDefaultAsync(item => item.Id == clientCaseId, ct);
         if (clientCase is null)
@@ -56,12 +58,7 @@ public static class ClientCaseDeadlineTaskSyncService
         var assigneeUserId = assignee?.Id ?? actorUserId;
         var assigneeName = assignee is null ? normalizedActorName : DisplayName(assignee);
         var assigneeEmail = assignee?.Email ?? string.Empty;
-        var hasSeparateHearing = clientCase.NextHearingAt.HasValue
-            && await db.ClientCaseCourtEvents
-                .AsNoTracking()
-                .AnyAsync(item => item.ClientCaseId == clientCase.Id && item.EventType == "hearing", ct);
-
-        foreach (var deadline in BuildDeadlines(clientCase, hasSeparateHearing))
+        foreach (var deadline in BuildDeadlines(clientCase))
         {
             var tag = BuildDeadlineTag(deadline.Key);
             var activeTask = existingTasks
@@ -74,10 +71,15 @@ public static class ClientCaseDeadlineTaskSyncService
             {
                 if (activeTask is not null && !ClosedTaskStatuses.Contains(activeTask.Status))
                 {
+                    var isCourtHearing = deadline.TaskType == "courtHearing";
                     activeTask.Status = "cancelled";
-                    activeTask.Result = "Срок удален из карточки дела.";
+                    activeTask.Result = isCourtHearing
+                        ? "Судебное заседание отменено, перенесено или больше не активно."
+                        : "Срок удален из карточки дела.";
                     activeTask.UpdatedAt = now;
-                    AddHistory(db, activeTask, actorUserId, normalizedActorName, "Срок удален из карточки дела, контрольная задача отменена.", now);
+                    AddHistory(db, activeTask, actorUserId, normalizedActorName, isCourtHearing
+                        ? "Судебное заседание отменено, перенесено или завершено, связанная задача отменена."
+                        : "Срок удален из карточки дела, контрольная задача отменена.", now);
                 }
 
                 continue;
@@ -106,12 +108,12 @@ public static class ClientCaseDeadlineTaskSyncService
             changed |= SetIfChanged(activeTask, static (task, value) => task.ObjectName = value, activeTask.ObjectName, BuildObjectName(owner.Value.Name, clientCase.Title));
             changed |= SetIfChanged(activeTask, static (task, value) => task.Title = value, activeTask.Title, deadline.Title);
             changed |= SetIfChanged(activeTask, static (task, value) => task.Description = value, activeTask.Description ?? string.Empty, BuildDescription(clientCase, deadline));
-            changed |= SetIfChanged(activeTask, static (task, value) => task.Type = value, activeTask.Type, "control");
+            changed |= SetIfChanged(activeTask, static (task, value) => task.Type = value, activeTask.Type, deadline.TaskType);
             changed |= SetIfChanged(activeTask, static (task, value) => task.Priority = value, activeTask.Priority, ResolvePriority(dueAt, now));
             changed |= SetIfChanged(activeTask, static (task, value) => task.Status = value, activeTask.Status, activeTask.Status == "cancelled" ? "new" : activeTask.Status);
             changed |= SetIfChanged(activeTask, static (task, value) => task.RemindersJson = value, activeTask.RemindersJson, SerializeList(["before7d", "before3d", "before1d", "atDue", "dailyOverdue"]));
             changed |= SetIfChanged(activeTask, static (task, value) => task.ChannelsJson = value, activeTask.ChannelsJson, SerializeList(["inApp", "email"]));
-            changed |= SetIfChanged(activeTask, static (task, value) => task.TagsJson = value, activeTask.TagsJson, SerializeList([DeadlineTag, tag, "процессуальный-срок"]));
+            changed |= SetIfChanged(activeTask, static (task, value) => task.TagsJson = value, activeTask.TagsJson, SerializeList([DeadlineTag, tag, deadline.CategoryTag]));
 
             if (activeTask.DueAt != dueAt)
             {
@@ -137,7 +139,9 @@ public static class ClientCaseDeadlineTaskSyncService
             if (changed)
             {
                 activeTask.UpdatedAt = now;
-                AddHistory(db, activeTask, actorUserId, normalizedActorName, "Контрольная задача синхронизирована со сроками карточки дела.", now);
+                AddHistory(db, activeTask, actorUserId, normalizedActorName, deadline.TaskType == "courtHearing"
+                    ? "Задача по судебному заседанию синхронизирована с карточкой суда."
+                    : "Контрольная задача синхронизирована со сроками карточки дела.", now);
             }
         }
 
@@ -171,29 +175,31 @@ public static class ClientCaseDeadlineTaskSyncService
             AuthorName = actorName,
             DueAt = dueAt,
             PlannedDurationMinutes = deadline.DateOnly ? 60 : Math.Max(30, deadline.DurationMinutes),
-            Type = "control",
+            Type = deadline.TaskType,
             Priority = ResolvePriority(dueAt, now),
             Status = "new",
             Result = null,
             RemindersJson = SerializeList(["before7d", "before3d", "before1d", "atDue", "dailyOverdue"]),
             ChannelsJson = SerializeList(["inApp", "email"]),
-            TagsJson = SerializeList([DeadlineTag, tag, "процессуальный-срок"]),
+            TagsJson = SerializeList([DeadlineTag, tag, deadline.CategoryTag]),
             CreatedAt = now,
             UpdatedAt = now,
         };
 
         UpsertPrimaryAssignee(task, assigneeUserId, assigneeName, assigneeEmail, now);
-        task.Comments.Add(CreateHistory(task.Id, actorUserId, actorName, "Контрольная задача создана из процессуального срока карточки дела.", now));
+        task.Comments.Add(CreateHistory(task.Id, actorUserId, actorName, deadline.TaskType == "courtHearing"
+            ? "Задача создана автоматически после назначения судебного заседания."
+            : "Контрольная задача создана из процессуального срока карточки дела.", now));
         return task;
     }
 
-    private static IReadOnlyList<CaseDeadline> BuildDeadlines(ClientCase clientCase, bool hasSeparateHearing)
+    private static IReadOnlyList<CaseDeadline> BuildDeadlines(ClientCase clientCase)
     {
         if (ClientCaseStageClassifier.IsPretrial(clientCase))
         {
             return
             [
-                new("due", "Крайний срок по делу", clientCase.DueDate, true, 60)
+                CreateDeadline("due", "Крайний срок по делу", clientCase.DueDate, true, 60)
             ];
         }
 
@@ -205,32 +211,72 @@ public static class ClientCaseDeadlineTaskSyncService
             var isClosed = string.Equals(deadline.Status, "closed", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(deadline.Status, "cancelled", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(deadline.Status, "archived", StringComparison.OrdinalIgnoreCase);
-            result.Add(new CaseDeadline(
+            result.Add(CreateDeadline(
                 $"entity-{deadline.Id}",
                 string.IsNullOrWhiteSpace(deadline.Title) ? ResolveDeadlineTitle(deadline.DeadlineType) : deadline.Title,
                 isClosed ? null : deadline.DueAt,
                 deadline.AllDay,
-                deadline.AllDay ? 60 : 90));
+                deadline.AllDay ? 60 : 90,
+                isHearing: string.Equals(deadline.DeadlineType, CourtSyncNormalization.EventTypes.Hearing, StringComparison.OrdinalIgnoreCase)));
         }
-        if (hasSeparateHearing)
+
+        var hearingEvents = clientCase.CourtEvents
+            .Where(item => string.Equals(item.EventType, CourtSyncNormalization.EventTypes.Hearing, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(item => item.ScheduledAt)
+            .ThenBy(item => item.Id)
+            .ToList();
+        foreach (var courtEvent in hearingEvents)
         {
-            separateDeadlineTypes.Add("hearing");
+            var isInactive = courtEvent.MovementStatus is CourtSyncNormalization.MovementStatuses.Held
+                or CourtSyncNormalization.MovementStatuses.Postponed
+                or CourtSyncNormalization.MovementStatuses.Cancelled
+                or CourtSyncNormalization.MovementStatuses.Completed
+                or CourtSyncNormalization.MovementStatuses.Suspended
+                or CourtSyncNormalization.MovementStatuses.Archived;
+            result.Add(CreateDeadline(
+                $"court-event-{courtEvent.Id}",
+                string.IsNullOrWhiteSpace(courtEvent.Title) ? "Судебное заседание" : courtEvent.Title.Trim(),
+                isInactive ? null : courtEvent.ScheduledAt,
+                courtEvent.AllDay,
+                courtEvent.AllDay ? 60 : 90,
+                isHearing: true,
+                courtEvent));
         }
+
+        if (hearingEvents.Count > 0) separateDeadlineTypes.Add("hearing");
 
         var legacyDeadlines = new CaseDeadline[]
         {
-            new("due", "Крайний срок по делу", clientCase.DueDate, true, 60),
-            new("claim", "Дата подачи иска", clientCase.ClaimFiledAt, true, 60),
-            new("appeal", "Срок апелляции", clientCase.AppealDeadlineAt, true, 60),
-            new("cassation", "Срок кассации", clientCase.CassationDeadlineAt, true, 60),
-            new("motion", "Срок подачи ходатайства", clientCase.MotionDeadlineAt, true, 60),
-            new("objection", "Срок подачи возражений", clientCase.ObjectionDeadlineAt, true, 60),
-            new("hearing", "Судебное заседание", clientCase.NextHearingAt, false, 90),
+            CreateDeadline("due", "Крайний срок по делу", clientCase.DueDate, true, 60),
+            CreateDeadline("claim", "Дата подачи иска", clientCase.ClaimFiledAt, true, 60),
+            CreateDeadline("appeal", "Срок апелляции", clientCase.AppealDeadlineAt, true, 60),
+            CreateDeadline("cassation", "Срок кассации", clientCase.CassationDeadlineAt, true, 60),
+            CreateDeadline("motion", "Срок подачи ходатайства", clientCase.MotionDeadlineAt, true, 60),
+            CreateDeadline("objection", "Срок подачи возражений", clientCase.ObjectionDeadlineAt, true, 60),
+            CreateDeadline("hearing", "Судебное заседание", clientCase.NextHearingAt, false, 90, isHearing: true),
         };
 
         result.AddRange(legacyDeadlines.Where(item => !separateDeadlineTypes.Contains(item.Key)));
         return result;
     }
+
+    private static CaseDeadline CreateDeadline(
+        string key,
+        string title,
+        DateTime? dueAt,
+        bool dateOnly,
+        int durationMinutes,
+        bool isHearing = false,
+        ClientCaseCourtEvent? courtEvent = null)
+        => new(
+            key,
+            title,
+            dueAt,
+            dateOnly,
+            durationMinutes,
+            isHearing ? "courtHearing" : "control",
+            isHearing ? "судебное-заседание" : "процессуальный-срок",
+            courtEvent);
 
     private static string ResolveDeadlineTitle(string deadlineType)
         => deadlineType.ToLowerInvariant() switch
@@ -248,7 +294,9 @@ public static class ClientCaseDeadlineTaskSyncService
     {
         var parts = new List<string>
         {
-            $"Автоконтроль процессуального срока по делу «{clientCase.Title}».",
+            deadline.TaskType == "courtHearing"
+                ? $"Судебное заседание по делу «{clientCase.Title}» назначено судом."
+                : $"Автоконтроль процессуального срока по делу «{clientCase.Title}».",
         };
 
         if (!string.IsNullOrWhiteSpace(clientCase.CaseNumber))
@@ -264,6 +312,24 @@ public static class ClientCaseDeadlineTaskSyncService
         if (!string.IsNullOrWhiteSpace(clientCase.CourtName))
         {
             parts.Add($"Суд: {clientCase.CourtName.Trim()}.");
+        }
+
+        if (deadline.CourtEvent is { } courtEvent)
+        {
+            if (!string.IsNullOrWhiteSpace(courtEvent.CourtCaseNumber))
+            {
+                parts.Add($"Номер в суде: {courtEvent.CourtCaseNumber.Trim()}.");
+            }
+
+            if (!string.IsNullOrWhiteSpace(courtEvent.Courtroom))
+            {
+                parts.Add($"Зал или место: {courtEvent.Courtroom.Trim()}.");
+            }
+
+            if (!string.IsNullOrWhiteSpace(courtEvent.JudgeName))
+            {
+                parts.Add($"Судья: {courtEvent.JudgeName.Trim()}.");
+            }
         }
 
         parts.Add($"Контроль: {deadline.Title}.");
@@ -417,6 +483,14 @@ public static class ClientCaseDeadlineTaskSyncService
         return true;
     }
 
-    private readonly record struct CaseDeadline(string Key, string Title, DateTime? DueAt, bool DateOnly, int DurationMinutes);
+    private readonly record struct CaseDeadline(
+        string Key,
+        string Title,
+        DateTime? DueAt,
+        bool DateOnly,
+        int DurationMinutes,
+        string TaskType,
+        string CategoryTag,
+        ClientCaseCourtEvent? CourtEvent);
     private readonly record struct CaseOwner(int? ClientId, int? LegalEntityId, string Name);
 }

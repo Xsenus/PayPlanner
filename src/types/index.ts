@@ -518,6 +518,7 @@ export interface ClientCase {
   priority?: string | null;
   courtName?: string | null;
   courtCaseNumber?: string | null;
+  judicialUid?: string | null;
   courtUrl?: string | null;
   nextHearingAt?: string | null;
   claimant?: string | null;
@@ -815,6 +816,7 @@ export interface ClientCaseCourtInstance {
   courtId?: number | null;
   courtName?: string | null;
   courtCaseNumber?: string | null;
+  judicialUid?: string | null;
   courtUrl?: string | null;
   judgeName?: string | null;
   courtroom?: string | null;
@@ -833,6 +835,7 @@ export interface UpsertClientCaseCourtInstancePayload {
   courtId?: number | null;
   courtName?: string;
   courtCaseNumber?: string;
+  judicialUid?: string;
   courtUrl?: string;
   judgeName?: string;
   courtroom?: string;
@@ -1225,6 +1228,7 @@ export interface ClientCaseCourtSyncRun {
   checkedByUserName?: string | null;
   courtName?: string | null;
   courtCaseNumber?: string | null;
+  judicialUid?: string | null;
   courtUrl?: string | null;
   syncedFromExternalSource?: boolean;
   updatedFields?: string[];

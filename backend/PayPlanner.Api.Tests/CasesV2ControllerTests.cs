@@ -3114,7 +3114,15 @@ public class CasesV2ControllerTests
         Assert.Equal(clientCase.Id, notification.ObjectId);
         Assert.Contains("CASE-HEARING-1", notification.Title);
         Assert.Contains("Судебное заседание", notification.BodyPreview);
+        Assert.Contains("Дата: 10.07.2026 12:30", notification.BodyPreview);
         Assert.Contains($"\"courtEventId\":{created.Id}", notification.MetadataJson, StringComparison.Ordinal);
+
+        var hearingTask = await db.TaskJournalItems.SingleAsync(item =>
+            item.ClientCaseId == clientCase.Id && item.TagsJson.Contains($"case-deadline:court-event-{created.Id}"));
+        Assert.Equal("courtHearing", hearingTask.Type);
+        Assert.Equal(responsible.Id, hearingTask.AssigneeUserId);
+        Assert.Equal(new DateTime(2026, 7, 10, 9, 30, 0, DateTimeKind.Utc), hearingTask.DueAt);
+        Assert.Contains("Судебное заседание", hearingTask.Title);
     }
 
     [Fact]
@@ -6417,6 +6425,7 @@ public class CasesV2ControllerTests
             SourceUrl = clientCase.CourtUrl,
             CourtName = "Хабаровский краевой суд",
             CaseNumber = "33а-3390/2026",
+            JudicialUid = "27RS0001-01-2026-000123-45",
             JudgeName = "Казарикова Оксана Витальевна",
             SecretaryName = "Иванова И.И.",
             Instance = "appeal",
@@ -6483,6 +6492,7 @@ public class CasesV2ControllerTests
         await db.Entry(clientCase).ReloadAsync();
         Assert.Equal("Хабаровский краевой суд", clientCase.CourtName);
         Assert.Equal("33а-3390/2026", clientCase.CourtCaseNumber);
+        Assert.Equal("27RS0001-01-2026-000123-45", clientCase.JudicialUid);
         Assert.Equal("Казарикова Оксана Витальевна", clientCase.JudgeName);
         Assert.Equal("Шафорост Антон Евгеньевич", clientCase.Claimant);
         Assert.Equal("Главное управление ФССП по Хабаровскому краю и ЕАО", clientCase.Defendant);
@@ -6503,6 +6513,17 @@ public class CasesV2ControllerTests
 
         var history = await db.ClientCaseCourtEventHistory.SingleAsync(item => item.ClientCaseCourtEventId == courtEvent.Id);
         Assert.Contains("ГАС «Правосудие»", history.Summary, StringComparison.Ordinal);
+
+        var hearingTask = await db.TaskJournalItems
+            .Include(item => item.Participants)
+            .SingleAsync(item => item.ClientCaseId == clientCase.Id
+                && item.TagsJson.Contains($"case-deadline:court-event-{courtEvent.Id}"));
+        Assert.Equal("courtHearing", hearingTask.Type);
+        Assert.Equal(responsible.Id, hearingTask.AssigneeUserId);
+        Assert.Equal(courtEvent.ScheduledAt, hearingTask.DueAt);
+        Assert.Contains("судебное-заседание", JsonSerializer.Deserialize<string[]>(hearingTask.TagsJson) ?? []);
+        Assert.Contains("зал 12", hearingTask.Description, StringComparison.Ordinal);
+        Assert.Contains(hearingTask.Participants, item => item.Role == "assignee" && item.UserId == responsible.Id);
 
         var courtParties = await db.ClientCaseCourtParties
             .Where(item => item.ClientCaseId == clientCase.Id)
@@ -6611,6 +6632,7 @@ public class CasesV2ControllerTests
         Assert.DoesNotContain(repeatedDto.RemovedItems, item => item.Contains("другой инстанции", StringComparison.Ordinal));
         Assert.Equal(2, await db.ClientCaseCourtEvents.CountAsync(item => item.ClientCaseId == clientCase.Id));
         Assert.Equal("archived", (await db.ClientCaseCourtEvents.SingleAsync(item => item.Id == courtEvent.Id)).MovementStatus);
+        Assert.Equal("cancelled", (await db.TaskJournalItems.SingleAsync(item => item.Id == hearingTask.Id)).Status);
         Assert.Equal(3, await db.ClientCaseCourtParties.CountAsync(item => item.ClientCaseId == clientCase.Id && item.IsArchived));
         Assert.Equal(1, await db.ClientCaseDocuments.CountAsync(item =>
             item.ClientCaseId == clientCase.Id
@@ -6663,6 +6685,10 @@ public class CasesV2ControllerTests
         Assert.Equal(3, await db.ClientCaseCourtParties.CountAsync(item => item.ClientCaseId == clientCase.Id && !item.IsArchived));
         Assert.Equal("received", (await db.ClientCaseDocuments.SingleAsync(item => item.Id == document.Id)).Status);
         Assert.Equal("active", (await db.ClientCaseProceduralDeadlines.SingleAsync(item => item.Id == deadline.Id)).Status);
+        Assert.Equal(1, await db.TaskJournalItems.CountAsync(item =>
+            item.ClientCaseId == clientCase.Id
+            && item.Status != "cancelled"
+            && item.TagsJson.Contains($"case-deadline:court-event-{courtEvent.Id}")));
         Assert.Equal(1, await db.TaskJournalItems.CountAsync(item =>
             item.ClientCaseId == clientCase.Id
             && item.Status != "cancelled"
@@ -6964,6 +6990,12 @@ public class CasesV2ControllerTests
         Assert.StartsWith("sudrf-event-", courtEvent.ExternalKey, StringComparison.Ordinal);
         Assert.Empty(await db.ClientCaseCourtEventHistory.Where(item => item.ClientCaseCourtEventId == courtEvent.Id).ToListAsync());
         Assert.Empty(await db.UserNotifications.ToListAsync());
+
+        var hearingTask = await db.TaskJournalItems.SingleAsync(item => item.ClientCaseId == clientCase.Id);
+        Assert.Equal("courtHearing", hearingTask.Type);
+        Assert.Equal(owner.Id, hearingTask.AssigneeUserId);
+        Assert.Equal(hearingAt, hearingTask.DueAt);
+        Assert.Contains($"case-deadline:court-event-{courtEvent.Id}", hearingTask.TagsJson, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -7359,8 +7391,17 @@ public class CasesV2ControllerTests
             Status = ClientCaseStatus.Open,
             ResponsibleUserId = responsible.Id,
         };
+        var firstInstance = new ClientCaseCourtInstance
+        {
+            ClientCase = clientCase,
+            Instance = "first",
+            JudicialUid = "УСТАРЕВШИЙ-UID",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
         db.Clients.Add(client);
         db.ClientCases.Add(clientCase);
+        db.ClientCaseCourtInstances.Add(firstInstance);
         await db.SaveChangesAsync();
 
         var courtData = new SudrfCourtCaseData
@@ -7415,16 +7456,20 @@ public class CasesV2ControllerTests
         await db.Entry(clientCase).ReloadAsync();
         Assert.Equal("Хабаровский краевой суд", clientCase.CourtName);
         Assert.Equal("33а-3390/2026", clientCase.CourtCaseNumber);
+        Assert.Equal("27RS0005-01-2025-002659-56", clientCase.JudicialUid);
         Assert.Equal("https://kraevoy--hbr.sudrf.ru/modules.php?name=sud_delo&name_op=case&delo_id=42", clientCase.CourtUrl);
         Assert.Contains("Привязана судебная карточка", clientCase.EventHistory);
         Assert.Contains("27RS0005-01-2025-002659-56", clientCase.EventHistory);
 
-        var courtInstance = await db.ClientCaseCourtInstances.SingleAsync(item => item.ClientCaseId == clientCase.Id);
+        var courtInstance = await db.ClientCaseCourtInstances.SingleAsync(item => item.ClientCaseId == clientCase.Id && item.Instance == "appeal");
         Assert.Equal("appeal", courtInstance.Instance);
         Assert.Equal("Хабаровский краевой суд", courtInstance.CourtName);
         Assert.Equal("33а-3390/2026", courtInstance.CourtCaseNumber);
+        Assert.Equal("27RS0005-01-2025-002659-56", courtInstance.JudicialUid);
         Assert.Equal(clientCase.CourtUrl, courtInstance.CourtUrl);
-        Assert.Contains("Внешний идентификатор: 27RS0005-01-2025-002659-56", courtInstance.Notes);
+        Assert.All(
+            await db.ClientCaseCourtInstances.Where(item => item.ClientCaseId == clientCase.Id).ToListAsync(),
+            item => Assert.Equal("27RS0005-01-2025-002659-56", item.JudicialUid));
 
         var courtEvent = await db.ClientCaseCourtEvents.SingleAsync(item => item.ClientCaseId == clientCase.Id);
         Assert.Equal("appeal", courtEvent.CourtInstance);

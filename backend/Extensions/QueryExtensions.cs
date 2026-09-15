@@ -458,6 +458,7 @@ namespace PayPlanner.Api.Extensions
                     (c.Stage != null && c.Stage.ToLower().Contains(search)) ||
                     (c.CourtName != null && c.CourtName.ToLower().Contains(search)) ||
                     (c.CourtCaseNumber != null && c.CourtCaseNumber.ToLower().Contains(search)) ||
+                    (c.JudicialUid != null && c.JudicialUid.ToLower().Contains(search)) ||
                     (c.Claimant != null && c.Claimant.ToLower().Contains(search)) ||
                     (c.Defendant != null && c.Defendant.ToLower().Contains(search)) ||
                     (c.ThirdParties != null && c.ThirdParties.ToLower().Contains(search)) ||

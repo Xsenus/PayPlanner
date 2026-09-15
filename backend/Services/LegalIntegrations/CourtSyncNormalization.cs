@@ -111,6 +111,11 @@ public static class CourtSyncNormalization
 
     public static string ResolveMovementStatusFromResult(string? result)
     {
+        if (Contains(result, "назнач") || Contains(result, "ожидает"))
+        {
+            return MovementStatuses.Scheduled;
+        }
+
         if (Contains(result, "отлож"))
         {
             return MovementStatuses.Postponed;

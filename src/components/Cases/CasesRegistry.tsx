@@ -377,6 +377,7 @@ function buildCaseUpdatePayload(base: ClientCase, patch: Partial<ClientCase>): O
     priority: patch.priority ?? base.priority ?? 'normal',
     courtName: patch.courtName ?? base.courtName ?? '',
     courtCaseNumber: patch.courtCaseNumber ?? base.courtCaseNumber ?? '',
+    judicialUid: patch.judicialUid ?? base.judicialUid ?? '',
     courtUrl: patch.courtUrl ?? base.courtUrl ?? '',
     nextHearingAt: patch.nextHearingAt ?? base.nextHearingAt ?? null,
     claimant: patch.claimant ?? base.claimant ?? '',
@@ -1217,6 +1218,7 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
           <div>
             <div>{item.courtName || '—'}</div>
             {item.courtCaseNumber ? <div className="mt-1 text-xs text-slate-500">№ {item.courtCaseNumber}</div> : null}
+            {item.judicialUid ? <div className="mt-1 text-xs font-semibold text-cyan-700">UID {item.judicialUid}</div> : null}
           </div>
         );
       case 'nextHearingAt':
@@ -1439,6 +1441,7 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
       priority: patch.priority ?? 'normal',
       courtName: patch.courtName ?? '',
       courtCaseNumber: patch.courtCaseNumber ?? '',
+      judicialUid: patch.judicialUid ?? '',
       courtUrl: patch.courtUrl ?? '',
       nextHearingAt: patch.nextHearingAt ?? null,
       claimant: patch.claimant ?? '',

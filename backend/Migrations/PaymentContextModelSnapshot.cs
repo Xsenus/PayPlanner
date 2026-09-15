@@ -1404,6 +1404,11 @@ namespace PayPlanner.Api.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("JudicialUid")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime?>("LastViewedAt")
                         .HasColumnType("TEXT");
 
@@ -1527,6 +1532,10 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasIndex("IsUnderControl")
                         .HasDatabaseName("IX_ClientCases_IsUnderControl");
+
+                    b.HasIndex("JudicialUid")
+                        .HasFilter("\"JudicialUid\" <> ''")
+                        .HasDatabaseName("IX_ClientCases_JudicialUid");
 
                     b.HasIndex("LastViewedAt")
                         .HasDatabaseName("IX_ClientCases_LastViewedAt");
@@ -2056,6 +2065,11 @@ namespace PayPlanner.Api.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("JudicialUid")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Notes")
                         .IsRequired()
                         .HasMaxLength(1000)
@@ -2087,6 +2101,10 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasIndex("Instance")
                         .HasDatabaseName("IX_ClientCaseCourtInstances_Instance");
+
+                    b.HasIndex("JudicialUid")
+                        .HasFilter("\"JudicialUid\" <> ''")
+                        .HasDatabaseName("IX_ClientCaseCourtInstances_JudicialUid");
 
                     b.HasIndex("ClientCaseId", "Instance")
                         .IsUnique()

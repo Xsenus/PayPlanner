@@ -1952,6 +1952,7 @@ function AppContent() {
         />
         <ForcedTaskRevisionModal
           onOpenTask={permissions.tasks.canView ? (taskId) => openTaskDetail(taskId, { returnTo: activeTab }) : undefined}
+          onOpenCaseTasks={permissions.cases.canView ? (caseId) => openCaseDetailSection(caseId, 'tasks') : undefined}
         />
         <DailyOverdueTaskReminder
           userId={user.id}

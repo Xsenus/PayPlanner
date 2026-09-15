@@ -1439,6 +1439,11 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
+                    b.Property<string>("JudicialUid")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
                     b.Property<DateTime?>("LastViewedAt")
                         .HasColumnType("timestamp without time zone");
 
@@ -1562,6 +1567,10 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.HasIndex("IsUnderControl")
                         .HasDatabaseName("IX_ClientCases_IsUnderControl");
+
+                    b.HasIndex("JudicialUid")
+                        .HasFilter("\"JudicialUid\" <> ''")
+                        .HasDatabaseName("IX_ClientCases_JudicialUid");
 
                     b.HasIndex("LastViewedAt")
                         .HasDatabaseName("IX_ClientCases_LastViewedAt");
@@ -2101,6 +2110,11 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
+                    b.Property<string>("JudicialUid")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
                     b.Property<string>("Notes")
                         .IsRequired()
                         .HasMaxLength(1000)
@@ -2132,6 +2146,10 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.HasIndex("Instance")
                         .HasDatabaseName("IX_ClientCaseCourtInstances_Instance");
+
+                    b.HasIndex("JudicialUid")
+                        .HasFilter("\"JudicialUid\" <> ''")
+                        .HasDatabaseName("IX_ClientCaseCourtInstances_JudicialUid");
 
                     b.HasIndex("ClientCaseId", "Instance")
                         .IsUnique()

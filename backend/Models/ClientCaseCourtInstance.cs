@@ -21,6 +21,9 @@ public class ClientCaseCourtInstance
     [MaxLength(100)]
     public string CourtCaseNumber { get; set; } = string.Empty;
 
+    [MaxLength(120)]
+    public string JudicialUid { get; set; } = string.Empty;
+
     [MaxLength(1000)]
     public string CourtUrl { get; set; } = string.Empty;
 

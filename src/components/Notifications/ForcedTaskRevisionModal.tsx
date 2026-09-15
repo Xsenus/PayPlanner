@@ -1,6 +1,6 @@
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CheckCircle2, Clock3, Download, ExternalLink, FileText, Loader2, TimerReset, XCircle } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Clock3, Download, ExternalLink, FileText, Loader2, TimerReset, XCircle } from 'lucide-react';
 import { apiService, type UserNotificationDto } from '../../services/api';
 import { emitUserNotificationsChanged, USER_NOTIFICATIONS_EVENT } from '../../utils/userNotifications';
 import { parseUserNotificationMetadata } from '../../utils/userNotificationMetadata';
@@ -25,9 +25,10 @@ import {
 
 type ForcedTaskRevisionModalProps = {
   onOpenTask?: (taskId: number) => void;
+  onOpenCaseTasks?: (caseId: number) => void;
 };
 
-type ForcedTaskDecisionKind = 'revision' | 'completedApproval' | 'deadlineChangeRequest' | 'approvalRequest';
+type ForcedTaskDecisionKind = 'revision' | 'completedApproval' | 'deadlineChangeRequest' | 'approvalRequest' | 'courtHearing';
 type ForcedTaskQueueAction = 'acknowledge' | 'deadlineChangeDecision' | 'approvalDecision';
 
 type ForcedTaskNotificationRule = {
@@ -141,6 +142,12 @@ function getApprovalParticipantId(notification: UserNotificationDto): number | n
 }
 
 function getDecisionKind(notification: UserNotificationDto): ForcedTaskDecisionKind | null {
+  if (notification.type === 'courtHearing') {
+    return notification.objectType === 'case' && (notification.objectId || readPositiveInteger(getNotificationMetadata(notification).clientCaseId))
+      ? 'courtHearing'
+      : null;
+  }
+
   if (notification.type === 'taskDeadlineChangeRequested') {
     return notification.taskId && getDeadlineChangeRequestId(notification) ? 'deadlineChangeRequest' : null;
   }
@@ -168,6 +175,11 @@ function getDecisionKind(notification: UserNotificationDto): ForcedTaskDecisionK
 }
 
 const FORCED_TASK_NOTIFICATION_RULES: ForcedTaskNotificationRule[] = [
+  {
+    type: 'courtHearing',
+    action: 'acknowledge',
+    resolveDecisionKind: getDecisionKind,
+  },
   {
     type: 'taskApprovalRequested',
     action: 'approvalDecision',
@@ -310,7 +322,7 @@ function sortQueueItems(left: ForcedTaskQueueItem, right: ForcedTaskQueueItem): 
   return leftTime - rightTime || left.notification.id - right.notification.id;
 }
 
-export function ForcedTaskRevisionModal({ onOpenTask }: ForcedTaskRevisionModalProps) {
+export function ForcedTaskRevisionModal({ onOpenTask, onOpenCaseTasks }: ForcedTaskRevisionModalProps) {
   const [items, setItems] = useState<ForcedTaskQueueItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [acknowledgingId, setAcknowledgingId] = useState<number | null>(null);
@@ -762,6 +774,74 @@ export function ForcedTaskRevisionModal({ onOpenTask }: ForcedTaskRevisionModalP
 
   if (!current || !decisionKind) {
     return null;
+  }
+
+  if (decisionKind === 'courtHearing') {
+    const caseId = current.objectId ?? readPositiveInteger(currentMetadata.clientCaseId);
+    const queueCountText = items.length > 1 ? `Еще обязательных уведомлений: ${items.length - 1}` : null;
+    const openCaseTasks = async () => {
+      if (!caseId || !onOpenCaseTasks || acknowledgingId) return;
+      setAcknowledgingId(current.id);
+      try {
+        await finishCurrentNotification('forced-court-hearing-read');
+        onOpenCaseTasks(caseId);
+      } catch (error) {
+        console.error('Failed to acknowledge court hearing message.', error);
+      } finally {
+        setAcknowledgingId(null);
+      }
+    };
+
+    return (
+      <div className="fixed inset-0 z-[80] flex items-start justify-center overflow-y-auto bg-slate-950/60 px-3 py-4 backdrop-blur-sm sm:items-center sm:px-4 sm:py-6" role="dialog" aria-modal="true" aria-labelledby="forced-court-hearing-title" data-testid="forced-court-hearing-prompt">
+        <div className="max-h-[calc(100vh-2rem)] w-full max-w-[min(44rem,calc(100vw-1.5rem))] overflow-y-auto rounded-2xl border-2 border-rose-500 bg-white p-4 shadow-2xl sm:p-6">
+          <div className="flex items-start gap-3">
+            <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-rose-600 text-white shadow-sm">
+              <AlertTriangle className="h-6 w-6" />
+            </span>
+            <div className="min-w-0">
+              <p className="text-xs font-bold uppercase tracking-[0.16em] text-rose-700">Обязательная проверка</p>
+              <h2 id="forced-court-hearing-title" className="mt-1 text-xl font-extrabold uppercase leading-snug text-slate-950">
+                Внимание — назначено судебное заседание по делу
+              </h2>
+              <p className="mt-2 text-base font-bold text-rose-700">Проверьте задачи для юриста</p>
+              {queueCountText ? <p className="mt-1 text-xs font-semibold text-slate-500">{queueCountText}</p> : null}
+            </div>
+          </div>
+
+          <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-3">
+            <p className="font-semibold text-slate-900">{getTaskTitle(current)}</p>
+            <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">{current.bodyPreview}</p>
+          </div>
+
+          <p className="mt-3 text-sm leading-6 text-slate-600">
+            CRM автоматически поставила ответственному задачу типа «Судебное заседание». Откройте задачи дела и проверьте подготовку юриста.
+          </p>
+
+          <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+            <button
+              type="button"
+              onClick={() => void acknowledge(false)}
+              disabled={acknowledgingId === current.id}
+              className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60 sm:w-auto"
+            >
+              Ознакомлен
+            </button>
+            {caseId && onOpenCaseTasks ? (
+              <button
+                type="button"
+                onClick={() => void openCaseTasks()}
+                disabled={acknowledgingId === current.id}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-rose-700 disabled:opacity-60 sm:w-auto"
+              >
+                {acknowledgingId === current.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <ExternalLink className="h-4 w-4" />}
+                Открыть задачи дела
+              </button>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    );
   }
 
   if (currentItem?.rule.action === 'approvalDecision') {

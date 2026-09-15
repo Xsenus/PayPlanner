@@ -93,6 +93,12 @@ namespace PayPlanner.Api.Models
         public string CourtCaseNumber { get; set; } = string.Empty;
 
         /// <summary>
+        /// Неизменяемый идентификатор судебного дела, объединяющий номера разных инстанций.
+        /// </summary>
+        [MaxLength(120)]
+        public string JudicialUid { get; set; } = string.Empty;
+
+        /// <summary>
         /// Ссылка на карточку дела на сайте суда.
         /// </summary>
         [MaxLength(1000)]

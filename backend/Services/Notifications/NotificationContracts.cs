@@ -261,7 +261,8 @@ public static class UserNotificationTypes
         TaskApprovalRequested,
         TaskApproved,
         TaskRevisionRequested,
-        TaskDeadlineChangeRequested
+        TaskDeadlineChangeRequested,
+        CourtHearing
     };
 
     public static readonly IReadOnlyList<UserNotificationTypeDefinition> All =

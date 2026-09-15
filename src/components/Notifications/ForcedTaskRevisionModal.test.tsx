@@ -146,8 +146,13 @@ function mockNotificationPages(
   approvals: UserNotificationDto[] = [],
   deadlineChanges: UserNotificationDto[] = [],
   approvalRequests: UserNotificationDto[] = [],
+  courtHearings: UserNotificationDto[] = [],
 ) {
   apiMock.getUserNotifications.mockImplementation(async (params?: { type?: string }) => {
+    if (params?.type === 'courtHearing') {
+      return createPage(courtHearings);
+    }
+
     if (params?.type === 'taskApprovalRequested') {
       return createPage(approvalRequests);
     }
@@ -219,6 +224,36 @@ describe('ForcedTaskRevisionModal', () => {
 
     await waitFor(() => expect(apiMock.markUserNotificationRead).toHaveBeenCalledWith(31));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+
+  it('shows a mandatory hearing warning and opens the case task section', async () => {
+    const onOpenCaseTasks = vi.fn();
+    const hearing = createNotification({
+      id: 71,
+      type: 'courtHearing',
+      typeLabel: 'Судебное заседание',
+      eventKey: 'case:55:court-event:91:courtHearing',
+      title: 'Судебное заседание: №2-100/2026 · Иванов - иск',
+      bodyPreview: 'Заседание назначено на 15.09.2026 10:00. Суд: Районный суд.',
+      tone: 'cyan',
+      forcedModalEnabled: true,
+      objectType: 'case',
+      objectId: 55,
+      taskId: null,
+      metadataJson: '{"clientCaseId":55,"courtEventId":91}',
+    });
+    mockNotificationPages([], [], [], [], [hearing]);
+
+    render(<ForcedTaskRevisionModal onOpenCaseTasks={onOpenCaseTasks} />);
+
+    const prompt = await screen.findByTestId('forced-court-hearing-prompt');
+    expect(within(prompt).getByText('Внимание — назначено судебное заседание по делу')).toBeTruthy();
+    expect(within(prompt).getByText('Проверьте задачи для юриста')).toBeTruthy();
+
+    fireEvent.click(within(prompt).getByRole('button', { name: 'Открыть задачи дела' }));
+
+    await waitFor(() => expect(apiMock.markUserNotificationRead).toHaveBeenCalledWith(71));
+    expect(onOpenCaseTasks).toHaveBeenCalledWith(55);
   });
 
   it('snoozes a mandatory modal without marking the notification read', async () => {

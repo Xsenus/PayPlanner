@@ -214,6 +214,7 @@ public class CasesController : ControllerBase
         target.Priority = string.IsNullOrWhiteSpace(source.Priority) ? "normal" : source.Priority.Trim();
         target.CourtName = source.CourtName?.Trim() ?? string.Empty;
         target.CourtCaseNumber = source.CourtCaseNumber?.Trim() ?? string.Empty;
+        target.JudicialUid = source.JudicialUid?.Trim() ?? string.Empty;
         target.CourtUrl = source.CourtUrl?.Trim() ?? string.Empty;
         target.NextHearingAt = source.NextHearingAt;
         target.Claimant = source.Claimant?.Trim() ?? string.Empty;

@@ -2641,6 +2641,9 @@ describe('CaseDetailPage', () => {
     fireEvent.change(screen.getByPlaceholderText('33а-3390/2026'), {
       target: { value: '33а-3390/2026' },
     });
+    fireEvent.change(screen.getByPlaceholderText('63RS0018-01-2025-003508-91'), {
+      target: { value: '27RS0005-01-2025-002659-56' },
+    });
     fireEvent.click(screen.getByRole('button', { name: /Найти/u }));
 
     expect((await screen.findAllByText('Хабаровский краевой суд')).length).toBeGreaterThan(0);
@@ -2657,6 +2660,7 @@ describe('CaseDetailPage', () => {
       expect(apiService.searchCaseCourtSyncCases).toHaveBeenCalledWith(15, {
         sourceUrl: 'https://kraevoy--hbr.sudrf.ru/modules.php?name=sud_delo&name_op=case&delo_id=42',
         courtCaseNumber: '33а-3390/2026',
+        judicialUid: '27RS0005-01-2025-002659-56',
         courtName: 'Арбитражный суд Самарской области',
         instance: 'first',
       });

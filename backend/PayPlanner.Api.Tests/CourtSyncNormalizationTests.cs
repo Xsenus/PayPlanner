@@ -27,6 +27,8 @@ public sealed class CourtSyncNormalizationTests
 
     [Theory]
     [InlineData("", "scheduled")]
+    [InlineData("Назначено судебное заседание", "scheduled")]
+    [InlineData("Ожидает рассмотрения", "scheduled")]
     [InlineData("Судебное заседание отложено", "postponed")]
     [InlineData("Заседание снято с рассмотрения", "cancelled")]
     [InlineData("Дело рассмотрено", "completed")]

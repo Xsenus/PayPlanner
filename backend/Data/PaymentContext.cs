@@ -1336,6 +1336,7 @@ public class PaymentContext : DbContext
             entity.Property(e => e.Priority).HasMaxLength(32).HasDefaultValue("normal");
             entity.Property(e => e.CourtName).HasMaxLength(200);
             entity.Property(e => e.CourtCaseNumber).HasMaxLength(100);
+            entity.Property(e => e.JudicialUid).HasMaxLength(120);
             entity.Property(e => e.CourtUrl).HasMaxLength(1000);
             entity.Property(e => e.Claimant).HasMaxLength(300);
             entity.Property(e => e.Defendant).HasMaxLength(300);
@@ -1388,6 +1389,7 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.DueDate).HasDatabaseName("IX_ClientCases_DueDate");
             entity.HasIndex(e => e.Priority).HasDatabaseName("IX_ClientCases_Priority");
             entity.HasIndex(e => e.CourtName).HasDatabaseName("IX_ClientCases_CourtName");
+            entity.HasIndex(e => e.JudicialUid).HasFilter("\"JudicialUid\" <> ''").HasDatabaseName("IX_ClientCases_JudicialUid");
             entity.HasIndex(e => e.LastViewedAt).HasDatabaseName("IX_ClientCases_LastViewedAt");
             entity.HasIndex(e => e.InactivityRemindersEnabled).HasDatabaseName("IX_ClientCases_InactivityRemindersEnabled");
             entity.HasIndex(e => e.IsUnderControl).HasDatabaseName("IX_ClientCases_IsUnderControl");
@@ -1789,6 +1791,7 @@ public class PaymentContext : DbContext
             entity.Property(e => e.Instance).HasMaxLength(64).IsRequired();
             entity.Property(e => e.CourtName).HasMaxLength(200);
             entity.Property(e => e.CourtCaseNumber).HasMaxLength(100);
+            entity.Property(e => e.JudicialUid).HasMaxLength(120);
             entity.Property(e => e.CourtUrl).HasMaxLength(1000);
             entity.Property(e => e.JudgeName).HasMaxLength(200);
             entity.Property(e => e.Courtroom).HasMaxLength(120);
@@ -1811,6 +1814,7 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.Instance).HasDatabaseName("IX_ClientCaseCourtInstances_Instance");
             entity.HasIndex(e => new { e.ClientCaseId, e.Instance }).IsUnique().HasDatabaseName("IX_ClientCaseCourtInstances_Case_Instance");
             entity.HasIndex(e => e.CourtId).HasDatabaseName("IX_ClientCaseCourtInstances_CourtId");
+            entity.HasIndex(e => e.JudicialUid).HasFilter("\"JudicialUid\" <> ''").HasDatabaseName("IX_ClientCaseCourtInstances_JudicialUid");
         });
 
         // ------------------ ClientCaseCourtComplaint ------------------

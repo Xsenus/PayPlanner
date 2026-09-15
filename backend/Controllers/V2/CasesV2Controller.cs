@@ -660,6 +660,7 @@ public class CasesV2Controller : ControllerBase
             Priority = item.Priority,
             CourtName = item.CourtName,
             CourtCaseNumber = item.CourtCaseNumber,
+            JudicialUid = item.JudicialUid,
             CourtUrl = item.CourtUrl,
             NextHearingAt = item.NextHearingAt,
             Claimant = item.Claimant,
@@ -2856,6 +2857,7 @@ public class CasesV2Controller : ControllerBase
         courtInstance.CourtId = court?.Id;
         courtInstance.CourtName = validation.CourtName;
         courtInstance.CourtCaseNumber = validation.CourtCaseNumber;
+        courtInstance.JudicialUid = validation.JudicialUid;
         courtInstance.CourtUrl = validation.CourtUrl;
         courtInstance.JudgeName = validation.JudgeName;
         courtInstance.Courtroom = validation.Courtroom;
@@ -2864,6 +2866,7 @@ public class CasesV2Controller : ControllerBase
         courtInstance.UpdatedAt = now;
         courtInstance.UpdatedByUserId = actorUserId;
         courtInstance.UpdatedByUserName = Truncate(actorName, 256);
+        await PropagateJudicialUidAsync(clientCase, validation.JudicialUid, now, actorUserId, actorName, ct, courtInstance);
 
         AppendCaseEvent(clientCase, $"Обновлена судебная инстанция «{ResolveCourtInstanceLabel(normalizedInstance)}». Автор: {actorName}.");
         _db.SetAuditReason($"Обновлена судебная инстанция дела: {ResolveCourtInstanceLabel(normalizedInstance)}");
@@ -3174,6 +3177,7 @@ public class CasesV2Controller : ControllerBase
         await SyncCourtEventDeadlineSourceAsync(courtEvent, null, actorUserId, actorName, ct);
         await AddCourtEventUserNotificationsAsync(clientCase, courtEvent, "created", actorUserId, actorName, ct);
         await _db.SaveChangesAsync(ct);
+        await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, clientCase.Id, actorUserId, actorName, ct);
 
         return Created($"/api/v2/cases/{id}/court-events/{courtEvent.Id}", MapCourtEvent(courtEvent, await ResolveCaseStatusClockAsync(ct)));
     }
@@ -3264,6 +3268,7 @@ public class CasesV2Controller : ControllerBase
         await SyncCourtEventDeadlineSourceAsync(courtEvent, oldProceduralDeadlineId, actorUserId, actorName, ct);
         await AddCourtEventUserNotificationsAsync(clientCase, courtEvent, "updated", actorUserId, actorName, ct);
         await _db.SaveChangesAsync(ct);
+        await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, clientCase.Id, actorUserId, actorName, ct);
 
         return Ok(MapCourtEvent(courtEvent, await ResolveCaseStatusClockAsync(ct)));
     }
@@ -7058,6 +7063,7 @@ public class CasesV2Controller : ControllerBase
                 || item.CaseNumber.ToLower().Contains(normalizedSearch)
                 || item.CourtName.ToLower().Contains(normalizedSearch)
                 || item.CourtCaseNumber.ToLower().Contains(normalizedSearch)
+                || item.JudicialUid.ToLower().Contains(normalizedSearch)
                 || item.CourtUrl.ToLower().Contains(normalizedSearch)
                 || item.EventHistory.ToLower().Contains(normalizedSearch)
                 || (item.Client != null && item.Client.Name.ToLower().Contains(normalizedSearch))
@@ -7305,6 +7311,7 @@ public class CasesV2Controller : ControllerBase
 
         clientCase.CourtName = courtName;
         clientCase.CourtCaseNumber = courtCaseNumber;
+        if (judicialUid is not null) clientCase.JudicialUid = Truncate(judicialUid, 120);
         clientCase.CourtUrl = Truncate(sourceUrl, 1000);
 
         if (courtInstance is null)
@@ -7322,17 +7329,8 @@ public class CasesV2Controller : ControllerBase
 
         courtInstance.CourtName = courtName;
         courtInstance.CourtCaseNumber = courtCaseNumber;
+        if (judicialUid is not null) courtInstance.JudicialUid = Truncate(judicialUid, 120);
         courtInstance.CourtUrl = clientCase.CourtUrl;
-        if (judicialUid is not null)
-        {
-            var externalIdNote = $"Внешний идентификатор: {Truncate(judicialUid, 120)}";
-            if (!courtInstance.Notes.Contains(externalIdNote, StringComparison.OrdinalIgnoreCase))
-            {
-                courtInstance.Notes = string.IsNullOrWhiteSpace(courtInstance.Notes)
-                    ? externalIdNote
-                    : Truncate($"{courtInstance.Notes.Trim()}{Environment.NewLine}{externalIdNote}", 1000);
-            }
-        }
         courtInstance.UpdatedAt = now;
         courtInstance.UpdatedByUserId = actorUserId;
         courtInstance.UpdatedByUserName = Truncate(actorName, 256);
@@ -7351,6 +7349,7 @@ public class CasesV2Controller : ControllerBase
                 ct);
             var sourceTimeZone = await ResolveCourtSyncSourceTimeZoneAsync(clientCase, ct);
             syncResult = await ApplySudrfCourtSyncAsync(clientCase, courtData, sourceTimeZone, actorName, now, ct);
+            await PropagateJudicialUidAsync(clientCase, clientCase.JudicialUid, now, actorUserId, actorName, ct, courtInstance);
         }
         catch (SudrfCourtSyncException ex)
         {
@@ -7375,7 +7374,9 @@ public class CasesV2Controller : ControllerBase
         AppendCaseEvent(clientCase, $"Привязана судебная карточка «{ResolveCourtInstanceLabel(normalizedInstance)}» через {provider.Label}. Суд: {FormatCaseTextValue(courtName)}; № в суде: {FormatCaseTextValue(courtCaseNumber)}.{externalIdSuffix} {syncMessage} Автор: {actorName}.");
         _db.SetAuditReason($"Привязана судебная карточка дела через {provider.Label}.");
         await _db.SaveChangesAsync(ct);
-        if (syncResult is { RequiresDeadlineTaskSync: true })
+        // Always run the idempotent task synchronizer after a successful read.
+        // This also backfills tasks for hearings imported before hearing-task automation existed.
+        if (syncResult.HasValue)
         {
             await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, clientCase.Id, actorUserId, actorName, ct);
         }
@@ -7389,7 +7390,7 @@ public class CasesV2Controller : ControllerBase
             CourtName = clientCase.CourtName,
             CourtCaseNumber = clientCase.CourtCaseNumber,
             CourtUrl = clientCase.CourtUrl,
-            JudicialUid = judicialUid ?? string.Empty,
+            JudicialUid = clientCase.JudicialUid,
             Message = syncResult.HasValue
                 ? $"Судебная карточка привязана к делу. {syncMessage}"
                 : $"Судебная карточка привязана к делу, но синхронизация не выполнена: {syncError}",
@@ -7462,6 +7463,7 @@ public class CasesV2Controller : ControllerBase
         var checkedAt = DateTime.UtcNow;
         var hasCourtBinding =
             !string.IsNullOrWhiteSpace(clientCase.CourtCaseNumber)
+            || !string.IsNullOrWhiteSpace(clientCase.JudicialUid)
             || !string.IsNullOrWhiteSpace(clientCase.CourtUrl);
         var manualOnly = request?.ManualOnly == true;
         var manualComment = NormalizeOptional(request?.Comment);
@@ -7487,6 +7489,7 @@ public class CasesV2Controller : ControllerBase
                 CheckedByUserName = actorName,
                 CourtName = clientCase.CourtName,
                 CourtCaseNumber = clientCase.CourtCaseNumber,
+                JudicialUid = clientCase.JudicialUid,
                 CourtUrl = clientCase.CourtUrl,
             });
         }
@@ -7496,9 +7499,12 @@ public class CasesV2Controller : ControllerBase
         {
             try
             {
-                var courtData = await caseReader.ReadCaseAsync(clientCase.CourtUrl, ct, clientCase.CourtCaseNumber);
+                var courtData = await caseReader.ReadCaseAsync(
+                    new CourtSyncCaseBinding(clientCase.CourtUrl, clientCase.CourtCaseNumber, clientCase.JudicialUid),
+                    ct);
                 var sourceTimeZone = await ResolveCourtSyncSourceTimeZoneAsync(clientCase, ct);
                 var syncResult = await ApplySudrfCourtSyncAsync(clientCase, courtData, sourceTimeZone, actorName, checkedAt, ct);
+                await PropagateJudicialUidAsync(clientCase, clientCase.JudicialUid, checkedAt, User.GetUserId(), actorName, ct);
                 var syncMessage = !syncResult.HasChanges
                     ? $"Судебный источник проверен: новых изменений не найдено. Суд: {FormatCaseTextValue(clientCase.CourtName)}; № в суде: {FormatCaseTextValue(clientCase.CourtCaseNumber)}."
                     : $"Судебный источник обновлен: {FormatCourtSyncResult(syncResult)}";
@@ -7506,10 +7512,7 @@ public class CasesV2Controller : ControllerBase
                 AppendCaseEvent(clientCase, $"{syncMessage} Инициатор: {actorName}.");
                 _db.SetAuditReason($"Обновление дела #{clientCase.Id} из судебного источника {courtSyncProvider.Label}.");
                 await _db.SaveChangesAsync(ct);
-                if (syncResult.RequiresDeadlineTaskSync)
-                {
-                    await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, clientCase.Id, User.GetUserId(), actorName, ct);
-                }
+                await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, clientCase.Id, User.GetUserId(), actorName, ct);
 
                 return Ok(new ClientCaseCourtSyncRunDto
                 {
@@ -7522,6 +7525,7 @@ public class CasesV2Controller : ControllerBase
                     CheckedByUserName = actorName,
                     CourtName = clientCase.CourtName,
                     CourtCaseNumber = clientCase.CourtCaseNumber,
+                    JudicialUid = clientCase.JudicialUid,
                     CourtUrl = clientCase.CourtUrl,
                     SyncedFromExternalSource = true,
                     UpdatedFields = syncResult.ChangedFields,
@@ -7561,6 +7565,7 @@ public class CasesV2Controller : ControllerBase
                     CheckedByUserName = actorName,
                     CourtName = clientCase.CourtName,
                     CourtCaseNumber = clientCase.CourtCaseNumber,
+                    JudicialUid = clientCase.JudicialUid,
                     CourtUrl = clientCase.CourtUrl,
                 });
             }
@@ -7587,6 +7592,7 @@ public class CasesV2Controller : ControllerBase
             CheckedByUserName = actorName,
             CourtName = clientCase.CourtName,
             CourtCaseNumber = clientCase.CourtCaseNumber,
+            JudicialUid = clientCase.JudicialUid,
             CourtUrl = clientCase.CourtUrl,
         });
     }
@@ -7669,10 +7675,12 @@ public class CasesV2Controller : ControllerBase
         var removedItems = new List<string>();
         var conflictItems = new List<string>();
         var requiresDeadlineTaskSync = false;
+        var courtEventTaskSyncChanged = false;
         var restoredDeadlineIds = new HashSet<int>();
 
         UpdateString("суд", clientCase.CourtName, courtData.CourtName, value => clientCase.CourtName = value, 200);
         UpdateString("номер дела в суде", clientCase.CourtCaseNumber, courtData.CaseNumber, value => clientCase.CourtCaseNumber = value, 100);
+        UpdateString("UID судебного дела", clientCase.JudicialUid, courtData.JudicialUid, value => clientCase.JudicialUid = value, 120);
         UpdateString("ссылка на источник", clientCase.CourtUrl, courtData.SourceUrl, value => clientCase.CourtUrl = value, 1000);
         UpdateString("судья", clientCase.JudgeName, courtData.JudgeName, value => clientCase.JudgeName = value, 200);
         UpdateString("зал/место заседания", clientCase.Courtroom, courtData.NextHearingPlace, value => clientCase.Courtroom = value, 120);
@@ -7751,6 +7759,7 @@ public class CasesV2Controller : ControllerBase
                 existingEvents.Add(courtEvent);
                 existingEventsByExternalKey[externalKey] = courtEvent;
                 createdEvents.Add(courtEvent);
+                courtEventTaskSyncChanged = true;
                 newItems.Add($"судебное событие «{title}»");
                 continue;
             }
@@ -7791,6 +7800,7 @@ public class CasesV2Controller : ControllerBase
                 existing.UpdatedByUserName = Truncate(actorName, 256);
                 AddCourtEventHistory(existing, "updated", $"Событие обновлено из ГАС «Правосудие»: {summary}.", actorUserId, actorName);
                 updatedEvents.Add(existing);
+                courtEventTaskSyncChanged = true;
                 updatedCourtEvents++;
                 changedItems.Add($"судебное событие «{existing.Title}»");
             }
@@ -7805,6 +7815,7 @@ public class CasesV2Controller : ControllerBase
         {
             removedItems.Add($"судебное событие «{missingEvent.Title}»");
             missingEvent.MovementStatus = "archived";
+            courtEventTaskSyncChanged = true;
             missingEvent.UpdatedAt = checkedAt;
             missingEvent.UpdatedByUserId = actorUserId;
             missingEvent.UpdatedByUserName = Truncate(actorName, 256);
@@ -8050,7 +8061,7 @@ public class CasesV2Controller : ControllerBase
             missingDeadline.UpdatedByUserName = Truncate(actorName, 256);
             requiresDeadlineTaskSync = true;
         }
-        requiresDeadlineTaskSync |= restoredDeadlineIds.Count > 0;
+        requiresDeadlineTaskSync |= restoredDeadlineIds.Count > 0 || courtEventTaskSyncChanged;
 
         if (createdCourtActDocuments > 0)
         {
@@ -8893,6 +8904,7 @@ public class CasesV2Controller : ControllerBase
         target.Priority = string.IsNullOrWhiteSpace(source.Priority) ? "normal" : source.Priority.Trim();
         target.CourtName = source.CourtName?.Trim() ?? string.Empty;
         target.CourtCaseNumber = source.CourtCaseNumber?.Trim() ?? string.Empty;
+        target.JudicialUid = source.JudicialUid?.Trim() ?? string.Empty;
         target.CourtUrl = source.CourtUrl?.Trim() ?? string.Empty;
         target.NextHearingAt = source.NextHearingAt;
         target.Claimant = source.Claimant?.Trim() ?? string.Empty;
@@ -11582,6 +11594,7 @@ public class CasesV2Controller : ControllerBase
             CourtId = item.CourtId,
             CourtName = item.CourtName,
             CourtCaseNumber = item.CourtCaseNumber,
+            JudicialUid = item.JudicialUid,
             CourtUrl = item.CourtUrl,
             JudgeName = item.JudgeName,
             Courtroom = item.Courtroom,
@@ -11636,12 +11649,46 @@ public class CasesV2Controller : ControllerBase
             Instance = normalizedInstance,
             CourtName = isFirstInstance ? clientCase.CourtName : string.Empty,
             CourtCaseNumber = isFirstInstance ? clientCase.CourtCaseNumber : string.Empty,
+            JudicialUid = clientCase.JudicialUid,
             CourtUrl = isFirstInstance ? clientCase.CourtUrl : string.Empty,
             JudgeName = isFirstInstance ? clientCase.JudgeName : string.Empty,
             Courtroom = isFirstInstance ? clientCase.Courtroom : string.Empty,
             SecretaryName = isFirstInstance ? clientCase.CourtSecretaryContacts : string.Empty,
             Complaints = [],
         };
+    }
+
+    private async Task PropagateJudicialUidAsync(
+        ClientCase clientCase,
+        string? judicialUid,
+        DateTime updatedAt,
+        int? actorUserId,
+        string actorName,
+        CancellationToken ct,
+        ClientCaseCourtInstance? currentInstance = null)
+    {
+        var normalizedUid = Truncate(NormalizeOptional(judicialUid) ?? string.Empty, 120);
+        if (string.IsNullOrWhiteSpace(normalizedUid))
+        {
+            return;
+        }
+
+        clientCase.JudicialUid = normalizedUid;
+        var instances = await _db.ClientCaseCourtInstances
+            .Where(item => item.ClientCaseId == clientCase.Id)
+            .ToListAsync(ct);
+        if (currentInstance is not null && !instances.Contains(currentInstance))
+        {
+            instances.Add(currentInstance);
+        }
+
+        foreach (var instance in instances.Where(item => !string.Equals(item.JudicialUid, normalizedUid, StringComparison.Ordinal)))
+        {
+            instance.JudicialUid = normalizedUid;
+            instance.UpdatedAt = updatedAt;
+            instance.UpdatedByUserId = actorUserId;
+            instance.UpdatedByUserName = Truncate(actorName, 256);
+        }
     }
 
     private async Task<ClientCaseCourtInstance> EnsureCourtInstanceAsync(
@@ -11667,6 +11714,7 @@ public class CasesV2Controller : ControllerBase
             Instance = normalizedInstance,
             CourtName = defaults.CourtName,
             CourtCaseNumber = defaults.CourtCaseNumber,
+            JudicialUid = defaults.JudicialUid,
             CourtUrl = defaults.CourtUrl,
             JudgeName = defaults.JudgeName,
             Courtroom = defaults.Courtroom,
@@ -11818,6 +11866,7 @@ public class CasesV2Controller : ControllerBase
             null,
             Truncate(NormalizeOptional(request.CourtName) ?? NormalizeOptional(court?.Name) ?? defaults.CourtName, 200),
             Truncate(NormalizeOptional(request.CourtCaseNumber) ?? defaults.CourtCaseNumber, 100),
+            Truncate(NormalizeOptional(request.JudicialUid) ?? defaults.JudicialUid, 120),
             Truncate(NormalizeOptional(request.CourtUrl) ?? NormalizeOptional(court?.Url) ?? defaults.CourtUrl, 1000),
             Truncate(NormalizeOptional(request.JudgeName) ?? defaults.JudgeName, 200),
             Truncate(NormalizeOptional(request.Courtroom) ?? defaults.Courtroom, 120),
@@ -13456,6 +13505,7 @@ public class CasesV2Controller : ControllerBase
         public int? CourtId { get; set; }
         public string CourtName { get; set; } = string.Empty;
         public string CourtCaseNumber { get; set; } = string.Empty;
+        public string JudicialUid { get; set; } = string.Empty;
         public string CourtUrl { get; set; } = string.Empty;
         public string JudgeName { get; set; } = string.Empty;
         public string Courtroom { get; set; } = string.Empty;
@@ -13475,6 +13525,7 @@ public class CasesV2Controller : ControllerBase
         public int? CourtId { get; set; }
         public string? CourtName { get; set; }
         public string? CourtCaseNumber { get; set; }
+        public string? JudicialUid { get; set; }
         public string? CourtUrl { get; set; }
         public string? JudgeName { get; set; }
         public string? Courtroom { get; set; }
@@ -13880,6 +13931,7 @@ public class CasesV2Controller : ControllerBase
         public string CheckedByUserName { get; set; } = string.Empty;
         public string CourtName { get; set; } = string.Empty;
         public string CourtCaseNumber { get; set; } = string.Empty;
+        public string JudicialUid { get; set; } = string.Empty;
         public string CourtUrl { get; set; } = string.Empty;
         public bool SyncedFromExternalSource { get; set; }
         public IReadOnlyList<string> UpdatedFields { get; set; } = [];
@@ -14172,6 +14224,7 @@ public class CasesV2Controller : ControllerBase
         string? Error,
         string CourtName = "",
         string CourtCaseNumber = "",
+        string JudicialUid = "",
         string CourtUrl = "",
         string JudgeName = "",
         string Courtroom = "",

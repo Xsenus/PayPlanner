@@ -2353,14 +2353,6 @@ public sealed class NotificationService : INotificationService
         var notificationType = ResolveCourtEventNotificationType(courtEvent);
         var templateKey = ResolveCourtEventTemplateKey(notificationType);
         var title = BuildCourtEventSubject(clientCase, courtEvent, notificationType);
-        var body = BuildCourtEventBody(clientCase, courtEvent, action, normalizedActorName, notificationType);
-        var message = await RenderTemplateAsync(
-            templateKey,
-            title,
-            body,
-            BuildCourtEventTemplateValues(clientCase, courtEvent, action, normalizedActorName),
-            purpose: NotificationPurposes.TaskReminder,
-            cancellationToken: cancellationToken);
 
         var version = (courtEvent.UpdatedAt ?? courtEvent.CreatedAt).Ticks.ToString(CultureInfo.InvariantCulture);
         var recipientNotificationChannels = await ResolveUserNotificationChannelsAsync(
@@ -2369,12 +2361,34 @@ public sealed class NotificationService : INotificationService
             [
                 NotificationChannels.InApp,
                 NotificationChannels.Toast,
+                NotificationChannels.ForcedModal,
                 NotificationChannels.WebPush,
             ],
+            cancellationToken);
+        var recipientTimeZones = await CalendarTimeZoneHelper.ResolveUserTimeZonesAsync(
+            _context,
+            visibleRecipientUserIds,
             cancellationToken);
 
         foreach (var recipientUserId in visibleRecipientUserIds)
         {
+            var recipientTimeZone = recipientTimeZones.GetValueOrDefault(
+                recipientUserId,
+                CalendarTimeZoneHelper.ResolveTimeZone(null));
+            var body = BuildCourtEventBody(
+                clientCase,
+                courtEvent,
+                action,
+                normalizedActorName,
+                notificationType,
+                recipientTimeZone);
+            var message = await RenderTemplateAsync(
+                templateKey,
+                title,
+                body,
+                BuildCourtEventTemplateValues(clientCase, courtEvent, action, normalizedActorName, recipientTimeZone),
+                purpose: NotificationPurposes.TaskReminder,
+                cancellationToken: cancellationToken);
             await CreateUserNotificationAsync(
                 recipientUserId,
                 notificationType,
@@ -6715,7 +6729,8 @@ public sealed class NotificationService : INotificationService
         ClientCase clientCase,
         ClientCaseCourtEvent courtEvent,
         string action,
-        string actorName)
+        string actorName,
+        TimeZoneInfo recipientTimeZone)
         => new()
         {
             ["actor.name"] = actorName,
@@ -6723,7 +6738,7 @@ public sealed class NotificationService : INotificationService
             ["case.number"] = NormalizeNotificationText(clientCase.CaseNumber, clientCase.Id.ToString(CultureInfo.InvariantCulture)),
             ["courtEvent.title"] = NormalizeNotificationText(courtEvent.Title, "Судебное событие"),
             ["courtEvent.action"] = ResolveCourtEventActionText(action),
-            ["courtEvent.scheduledAt"] = FormatCourtEventDate(courtEvent.ScheduledAt, courtEvent.AllDay),
+            ["courtEvent.scheduledAt"] = FormatCourtEventDate(courtEvent.ScheduledAt, courtEvent.AllDay, recipientTimeZone),
             ["courtEvent.courtName"] = NormalizeNotificationText(courtEvent.CourtName, "не указан"),
             ["courtEvent.courtCaseNumber"] = NormalizeNotificationText(courtEvent.CourtCaseNumber, "не указан"),
             ["courtEvent.courtroom"] = NormalizeNotificationText(courtEvent.Courtroom, "не указан"),
@@ -7034,7 +7049,8 @@ public sealed class NotificationService : INotificationService
         ClientCaseCourtEvent courtEvent,
         string action,
         string actorName,
-        string notificationType)
+        string notificationType,
+        TimeZoneInfo recipientTimeZone)
     {
         var actionText = ResolveCourtEventActionText(action);
         var intro = notificationType switch
@@ -7055,7 +7071,7 @@ public sealed class NotificationService : INotificationService
             .Append(NormalizeNotificationText(courtEvent.Title, "Судебное событие"))
             .AppendLine()
             .Append("Дата: ")
-            .Append(FormatCourtEventDate(courtEvent.ScheduledAt, courtEvent.AllDay))
+            .Append(FormatCourtEventDate(courtEvent.ScheduledAt, courtEvent.AllDay, recipientTimeZone))
             .AppendLine()
             .Append("Статус: ")
             .Append(FormatCourtMovementStatus(courtEvent.MovementStatus));
@@ -7216,6 +7232,13 @@ public sealed class NotificationService : INotificationService
         => allDay
             ? value.ToString("dd.MM.yyyy", RuCulture)
             : value.ToString("dd.MM.yyyy HH:mm", RuCulture);
+
+    private static string FormatCourtEventDate(DateTime value, bool allDay, TimeZoneInfo recipientTimeZone)
+        => allDay
+            ? DateTime.SpecifyKind(value.Date, DateTimeKind.Unspecified).ToString("dd.MM.yyyy", RuCulture)
+            : CalendarTimeZoneHelper
+                .ToUserLocal(value, recipientTimeZone)
+                .ToString("dd.MM.yyyy HH:mm", RuCulture);
 
     private static string FormatFileSize(long sizeBytes)
     {

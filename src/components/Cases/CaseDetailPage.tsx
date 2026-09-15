@@ -102,6 +102,7 @@ interface CourtInstanceDraft {
   courtId: string;
   courtName: string;
   courtCaseNumber: string;
+  judicialUid: string;
   courtUrl: string;
   judgeName: string;
   courtroom: string;
@@ -845,7 +846,7 @@ function getInactivitySummary(caseItem: ClientCase): { value: string; tone: Summ
 }
 
 function getCourtSyncSummary(caseItem: ClientCase): { value: string; tone: SummaryTone } {
-  const hasCourtBinding = Boolean(caseItem.courtName || caseItem.courtCaseNumber || caseItem.courtUrl);
+  const hasCourtBinding = Boolean(caseItem.courtName || caseItem.courtCaseNumber || caseItem.judicialUid || caseItem.courtUrl);
   if (!hasCourtBinding) {
     return { value: 'Нет привязки', tone: 'rose' };
   }
@@ -907,6 +908,7 @@ function buildCourtInstanceDraft(instance?: ClientCaseCourtInstance | null): Cou
     courtId: instance?.courtId ? String(instance.courtId) : '',
     courtName: instance?.courtName ?? '',
     courtCaseNumber: instance?.courtCaseNumber ?? '',
+    judicialUid: instance?.judicialUid ?? '',
     courtUrl: instance?.courtUrl ?? '',
     judgeName: instance?.judgeName ?? '',
     courtroom: instance?.courtroom ?? '',
@@ -1026,6 +1028,7 @@ function buildCaseUpdatePayload(base: ClientCase, patch: Partial<ClientCase>): O
     priority: patch.priority ?? base.priority ?? 'normal',
     courtName: patch.courtName ?? base.courtName ?? '',
     courtCaseNumber: patch.courtCaseNumber ?? base.courtCaseNumber ?? '',
+    judicialUid: patch.judicialUid ?? base.judicialUid ?? '',
     courtUrl: patch.courtUrl ?? base.courtUrl ?? '',
     nextHearingAt: patch.nextHearingAt ?? base.nextHearingAt ?? null,
     claimant: patch.claimant ?? base.claimant ?? '',
@@ -2493,6 +2496,7 @@ export function CaseDetailPage({
       const results = await apiService.searchCaseCourtSyncCases(caseItem.id, {
         sourceUrl: sourceUrl.trim(),
         courtCaseNumber: courtInstanceDraft.courtCaseNumber.trim() || caseItem.courtCaseNumber || null,
+        judicialUid: courtInstanceDraft.judicialUid.trim() || caseItem.judicialUid || null,
         courtName: courtInstanceDraft.courtName.trim() || caseItem.courtName || null,
         instance: activeCourtInstance,
       });
@@ -2550,6 +2554,7 @@ export function CaseDetailPage({
           ...current,
           courtName: binding.courtName,
           courtCaseNumber: binding.courtCaseNumber,
+          judicialUid: binding.judicialUid,
           courtUrl: binding.courtUrl,
         }
         : current);
@@ -2574,6 +2579,7 @@ export function CaseDetailPage({
         courtId: courtInstanceDraft.courtId ? Number(courtInstanceDraft.courtId) : null,
         courtName: courtInstanceDraft.courtName.trim(),
         courtCaseNumber: courtInstanceDraft.courtCaseNumber.trim(),
+        judicialUid: courtInstanceDraft.judicialUid.trim(),
         courtUrl: courtInstanceDraft.courtUrl.trim(),
         judgeName: courtInstanceDraft.judgeName.trim(),
         courtroom: courtInstanceDraft.courtroom.trim(),
@@ -3593,6 +3599,7 @@ export function CaseDetailPage({
                 ['Срок', toRuDate(caseItem.dueDate) || '—'],
                 ['Суд', caseItem.courtName || '—'],
                 ['№ в суде', caseItem.courtCaseNumber || '—'],
+                ['UID дела', caseItem.judicialUid || '—'],
                 ['Заседание', formatRuDateTime(caseItem.nextHearingAt) || '—'],
                 ['Просмотр ответственным', responsibleLastViewedAt ? `${formatRuDateTime(responsibleLastViewedAt)}${responsibleLastViewedByName ? ` · ${responsibleLastViewedByName}` : ''}` : '—'],
               ]} />
@@ -6423,7 +6430,7 @@ function CourtPanel({
   onAddProceduralDeadline: () => void;
   onCloseProceduralDeadline: (deadline: ClientCaseProceduralDeadline) => void;
 }) {
-  const hasCourtBinding = Boolean(caseItem.courtName || caseItem.courtCaseNumber || caseItem.courtUrl);
+  const hasCourtBinding = Boolean(caseItem.courtName || caseItem.courtCaseNumber || caseItem.judicialUid || caseItem.courtUrl);
   const isPretrialCase = isPretrialCaseStage(caseItem);
   const deadlines = [
     ['Подача заявления', caseItem.claimFiledAt],
@@ -6445,6 +6452,7 @@ function CourtPanel({
   const hasCourtInstanceData = courtInstances.some((instance) => Boolean(
     instance.courtName
     || instance.courtCaseNumber
+    || instance.judicialUid
     || instance.courtUrl
     || instance.judgeName
     || instance.courtroom
@@ -6521,6 +6529,13 @@ function CourtPanel({
           <div className="mt-1 text-sm text-slate-500">
             {hasCourtBinding ? 'Суд, номер дела, источник и процессуальные сроки по карточке.' : 'Судебная привязка пока не настроена.'}
           </div>
+          {caseItem.judicialUid ? (
+            <div className="mt-2 inline-flex flex-wrap items-center gap-2 rounded-lg border border-cyan-200 bg-cyan-50 px-3 py-2 text-sm text-cyan-950">
+              <span className="font-semibold uppercase tracking-[0.08em] text-cyan-700">UID дела</span>
+              <span className="font-mono font-bold">{caseItem.judicialUid}</span>
+              <span className="text-xs text-cyan-700">единый для всех инстанций</span>
+            </div>
+          ) : null}
         </div>
         <div className="flex flex-wrap gap-2">
           <button
@@ -6580,7 +6595,7 @@ function CourtPanel({
             {searchingCourtSync ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />} Найти
           </button>
         </div>
-        <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(0,1.4fr)_minmax(220px,0.6fr)]">
+        <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(0,1.2fr)_minmax(200px,0.5fr)_minmax(240px,0.6fr)]">
           <label className="text-sm font-medium text-slate-700">
             <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Ссылка на источник</span>
             <input
@@ -6597,6 +6612,15 @@ function CourtPanel({
               onChange={(event) => onCourtInstanceDraftChange({ ...courtInstanceDraft, courtCaseNumber: event.target.value })}
               placeholder="33а-3390/2026"
               className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+            />
+          </label>
+          <label className="text-sm font-medium text-slate-700">
+            <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">UID судебного дела</span>
+            <input
+              value={courtInstanceDraft.judicialUid}
+              onChange={(event) => onCourtInstanceDraftChange({ ...courtInstanceDraft, judicialUid: event.target.value })}
+              placeholder="63RS0018-01-2025-003508-91"
+              className="w-full rounded-lg border border-cyan-200 bg-cyan-50/40 px-3 py-2 font-mono text-sm"
             />
           </label>
         </div>
@@ -6669,6 +6693,7 @@ function CourtPanel({
                 className={`rounded-lg border px-3 py-2 text-left text-sm transition ${activeCourtInstance === tab.value ? 'border-blue-500 bg-blue-50 text-blue-800' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}>
                 <span className="block font-semibold">{tab.label}</span>
                 <span className="mt-1 block truncate text-xs text-slate-500">{item?.courtCaseNumber || item?.courtName || 'Не заполнено'}</span>
+                {item?.judicialUid ? <span className="mt-0.5 block truncate font-mono text-[11px] text-cyan-700">UID {item.judicialUid}</span> : null}
               </button>
             );
           })}
@@ -6696,6 +6721,10 @@ function CourtPanel({
               <label className="text-sm font-medium text-slate-700">
                 <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Номер дела</span>
                 <input value={courtInstanceDraft.courtCaseNumber} onChange={(event) => onCourtInstanceDraftChange({ ...courtInstanceDraft, courtCaseNumber: event.target.value })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+              </label>
+              <label className="text-sm font-medium text-slate-700">
+                <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">UID дела</span>
+                <input value={courtInstanceDraft.judicialUid} onChange={(event) => onCourtInstanceDraftChange({ ...courtInstanceDraft, judicialUid: event.target.value })} className="w-full rounded-lg border border-cyan-200 bg-cyan-50/40 px-3 py-2 font-mono text-sm" />
               </label>
               <label className="text-sm font-medium text-slate-700">
                 <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Судья</span>
