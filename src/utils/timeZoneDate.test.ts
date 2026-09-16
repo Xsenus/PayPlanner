@@ -6,6 +6,7 @@ import {
   formatDateTimeInTimeZone,
   formatDateTimeWithSecondsInTimeZone,
   fromTimeZoneDateTimeInput,
+  getEffectiveScheduleTime,
   toTimeZoneDateKey,
   toTimeZoneDateTimeInput,
 } from './timeZoneDate';
@@ -32,6 +33,15 @@ describe('timeZoneDate', () => {
     expect(fromTimeZoneDateTimeInput('2026-08-16T00:00', 'Asia/Novosibirsk')).toBe(
       '2026-08-15T17:00:00.000Z',
     );
+  });
+
+  it('treats an all-day schedule as the end of the selected user day', () => {
+    const allDayTime = getEffectiveScheduleTime('2026-06-05T00:00:00Z', true, 'Europe/Samara');
+    const exactTime = getEffectiveScheduleTime('2026-06-05T12:00:00Z', false, 'Europe/Samara');
+
+    expect(new Date(allDayTime!).toISOString()).toBe('2026-06-05T19:59:59.999Z');
+    expect(new Date(exactTime!).toISOString()).toBe('2026-06-05T12:00:00.000Z');
+    expect(getEffectiveScheduleTime('not-a-date', true, 'Europe/Samara')).toBeNull();
   });
 
   it('builds calendar day keys in the selected user time zone around midnight', () => {

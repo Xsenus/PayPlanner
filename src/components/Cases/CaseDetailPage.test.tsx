@@ -2779,7 +2779,36 @@ describe('CaseDetailPage', () => {
 
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
 
-    expect(await screen.findByText('10.06.2099 · Апелляция')).toBeTruthy();
+    expect(await screen.findByText('10.06.2099 · весь день · Апелляция')).toBeTruthy();
+  });
+
+  it('prioritizes an exact hearing time over all-day dates in the same day', async () => {
+    vi.mocked(apiService.getUserSetting).mockResolvedValue({ key: 'profile.timeZoneId', value: 'Europe/Samara' });
+    vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({
+      dueDate: '2099-06-20',
+      nextHearingAt: '2099-06-20T09:30:00Z',
+      overdueTaskCount: 0,
+    }));
+    vi.mocked(apiService.getCaseProceduralDeadlines).mockResolvedValue([{
+      id: 93,
+      clientCaseId: 15,
+      deadlineType: 'motion',
+      deadlineTypeLabel: 'Ходатайство',
+      title: 'Подать ходатайство до конца дня',
+      dueAt: '2099-06-20T00:00:00Z',
+      allDay: true,
+      status: 'active',
+      statusLabel: 'Активен',
+      warningDaysBefore: 7,
+      sourceType: 'sudrf',
+      createdAt: '2099-05-01T00:00:00Z',
+      isOverdue: false,
+      isWarning: false,
+    }]);
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    expect(await screen.findByText('20.06.2099, 13:30 · Заседание')).toBeTruthy();
   });
 
   it('keeps the court tab in safe mode for pretrial cases without court data', async () => {

@@ -4,7 +4,7 @@ import type {
   ClientCaseCourtInstance,
   ClientCaseProceduralDeadline,
 } from '../types';
-import { fromTimeZoneDateTimeInput } from './timeZoneDate';
+import { getEffectiveScheduleTime } from './timeZoneDate';
 
 export type CourtProcessSummaryTone = 'emerald' | 'amber' | 'rose' | 'slate' | 'blue';
 
@@ -89,21 +89,6 @@ function getTime(value?: string | null) {
   if (!value) return null;
   const time = Date.parse(value);
   return Number.isFinite(time) ? time : null;
-}
-
-function getEffectiveScheduleTime(
-  value: string | null | undefined,
-  allDay: boolean | undefined,
-  timeZoneId: string | null | undefined,
-) {
-  const time = getTime(value);
-  if (time === null || allDay !== true || !value) return time;
-
-  const dateKey = /^(\d{4}-\d{2}-\d{2})/.exec(value)?.[1];
-  if (!dateKey) return time;
-
-  const endOfDayMinute = getTime(fromTimeZoneDateTimeInput(`${dateKey}T23:59`, timeZoneId));
-  return endOfDayMinute === null ? time : endOfDayMinute + 59_999;
 }
 
 function isActiveDeadline(deadline: ClientCaseProceduralDeadline) {

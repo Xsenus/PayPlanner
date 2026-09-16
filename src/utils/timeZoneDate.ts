@@ -78,6 +78,24 @@ export function fromTimeZoneDateTimeInput(value: string, timeZoneId?: string | n
   return new Date(utcMs).toISOString();
 }
 
+export function getEffectiveScheduleTime(
+  value: string | null | undefined,
+  allDay: boolean | undefined,
+  timeZoneId?: string | null,
+) {
+  if (!value) return null;
+
+  const instant = parseInstant(value);
+  const time = instant.getTime();
+  if (!Number.isFinite(time) || allDay !== true) return Number.isFinite(time) ? time : null;
+
+  const dateKey = /^(\d{4}-\d{2}-\d{2})/.exec(value)?.[1];
+  if (!dateKey) return time;
+
+  const endOfDayMinute = parseInstant(fromTimeZoneDateTimeInput(`${dateKey}T23:59`, timeZoneId)).getTime();
+  return Number.isFinite(endOfDayMinute) ? endOfDayMinute + 59_999 : time;
+}
+
 export function formatDateTimeInTimeZone(value: string | Date, timeZoneId?: string | null) {
   const date = parseInstant(value);
   if (Number.isNaN(date.getTime())) return '';

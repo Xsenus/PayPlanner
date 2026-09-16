@@ -73,7 +73,7 @@ import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { formatCurrencySmart } from '../../utils/formatters';
 import { buildCaseTaskPayload, getCaseStageTaskTemplates, isPretrialCaseStage, type CaseStageTaskTemplate } from '../../utils/caseTaskPayload';
 import { buildCourtCaseProcessSummary, type CourtProcessSummaryTone } from '../../utils/courtCaseSummary';
-import { formatDateTimeInTimeZone, fromTimeZoneDateTimeInput, toTimeZoneDateKey, toTimeZoneDateTimeInput } from '../../utils/timeZoneDate';
+import { formatDateTimeInTimeZone, fromTimeZoneDateTimeInput, getEffectiveScheduleTime, toTimeZoneDateKey, toTimeZoneDateTimeInput } from '../../utils/timeZoneDate';
 import { normalizeUserTimeZoneId, USER_TIME_ZONE_SETTING_KEY } from '../../utils/timeZoneOptions';
 import type { TaskJournalItem } from '../../utils/taskJournalStore';
 
@@ -487,14 +487,14 @@ function formatFileSize(value?: number | null) {
   return `${(value / (1024 * 1024)).toFixed(1)} МБ`;
 }
 
-function formatRuDateTime(value?: string | null) {
+function formatRuDateTime(value?: string | null, timeZoneId = activeCaseTimeZoneId) {
   if (!value) return '';
-  return formatDateTimeInTimeZone(value, activeCaseTimeZoneId) || toRuDate(value);
+  return formatDateTimeInTimeZone(value, timeZoneId) || toRuDate(value);
 }
 
-function formatCourtSchedule(value?: string | null, allDay?: boolean) {
+function formatCourtSchedule(value?: string | null, allDay?: boolean, timeZoneId = activeCaseTimeZoneId) {
   if (!value) return '';
-  if (allDay === false) return formatRuDateTime(value);
+  if (allDay === false) return formatRuDateTime(value, timeZoneId);
 
   const date = toRuDate(value);
   return allDay === true && date ? `${date} · весь день` : date;
@@ -910,6 +910,7 @@ function getNearestCaseDateSummary(
     caseItem.dueDate ? {
       date: caseItem.dueDate,
       label: 'Срок дела',
+      allDay: true,
       overdue: Boolean(caseDueDateKey && caseDueDateKey < todayKey),
       warning: Boolean(caseDueDateKey && caseDueDateKey >= todayKey && caseDueDateKey <= warningDateKey),
       futureOnly: false,
@@ -917,6 +918,7 @@ function getNearestCaseDateSummary(
     caseItem.nextHearingAt ? {
       date: caseItem.nextHearingAt,
       label: 'Заседание',
+      allDay: false,
       overdue: false,
       warning: false,
       futureOnly: true,
@@ -926,13 +928,14 @@ function getNearestCaseDateSummary(
       .map((deadline) => ({
         date: deadline.dueAt,
         label: deadline.deadlineTypeLabel || deadline.title || 'Процессуальный срок',
+        allDay: deadline.allDay,
         overdue: deadline.isOverdue,
         warning: deadline.isWarning,
         futureOnly: false,
       })),
   ]
-    .filter((candidate): candidate is { date: string; label: string; overdue: boolean; warning: boolean; futureOnly: boolean } => Boolean(candidate))
-    .map((candidate) => ({ ...candidate, time: getDateTime(candidate.date) }))
+    .filter((candidate): candidate is { date: string; label: string; allDay: boolean; overdue: boolean; warning: boolean; futureOnly: boolean } => Boolean(candidate))
+    .map((candidate) => ({ ...candidate, time: getEffectiveScheduleTime(candidate.date, candidate.allDay, timeZoneId) }))
     .filter((candidate): candidate is typeof candidate & { time: number } => candidate.time !== null);
 
   const upcoming = candidates
@@ -945,7 +948,7 @@ function getNearestCaseDateSummary(
 
   if (!nearest) return { value: '—', tone: 'slate' };
 
-  const value = `${toRuDate(nearest.date)} · ${nearest.label}`;
+  const value = `${formatCourtSchedule(nearest.date, nearest.allDay, timeZoneId)} · ${nearest.label}`;
   if (nearest.overdue) return { value, tone: 'rose' };
   if (nearest.warning || (nearest.futureOnly && nearest.time - nowTime <= UPCOMING_DEADLINE_WARNING_MS)) {
     return { value, tone: 'amber' };
