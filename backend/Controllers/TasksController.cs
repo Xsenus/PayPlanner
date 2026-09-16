@@ -797,14 +797,14 @@ public class TasksController : ControllerBase
             .AsNoTracking()
             .Where(clientCase =>
                 ((clientCase.ClientId.HasValue && clientCase.Client != null) ||
-                 (clientCase.LegalEntityId.HasValue && clientCase.LegalEntity != null)) &&
-                !CaseInactivityControlCyclePolicy.ExcludedCaseStatuses.Contains(clientCase.Status) &&
-                !vacationUserIds.Contains(
-                    (clientCase.ResponsibleUserId ??
-                     (clientCase.Client != null ? clientCase.Client.ResponsibleUserId : null) ??
-                     (clientCase.LegalEntity != null ? clientCase.LegalEntity.ResponsibleUserId : null)) ?? 0))
+                 (clientCase.LegalEntityId.HasValue && clientCase.LegalEntity != null)))
             .Select(clientCase => new
             {
+                IsStatusExcluded = CaseInactivityControlCyclePolicy.ExcludedCaseStatuses.Contains(clientCase.Status),
+                IsResponsibleOnVacation = vacationUserIds.Contains(
+                    (clientCase.ResponsibleUserId ??
+                     (clientCase.Client != null ? clientCase.Client.ResponsibleUserId : null) ??
+                     (clientCase.LegalEntity != null ? clientCase.LegalEntity.ResponsibleUserId : null)) ?? 0),
                 clientCase.CreatedAt,
                 clientCase.LastViewedAt,
                 clientCase.ActivityConfirmedAt,
@@ -844,7 +844,35 @@ public class TasksController : ControllerBase
             .GroupBy(_ => 1)
             .Select(group => new
             {
+                TrackedCaseCount = group.Count(),
+                ExcludedByStatusCount = group.Count(item => item.IsStatusExcluded),
+                PausedByVacationCount = group.Count(item =>
+                    !item.IsStatusExcluded &&
+                    item.IsResponsibleOnVacation),
+                DisabledCount = group.Count(item =>
+                    !item.IsStatusExcluded &&
+                    !item.IsResponsibleOnVacation &&
+                    !item.InactivityRemindersEnabled),
+                ActiveTaskCount = group.Count(item =>
+                    !item.IsStatusExcluded &&
+                    !item.IsResponsibleOnVacation &&
+                    item.InactivityRemindersEnabled &&
+                    item.ActiveTaskCount > 0),
+                RecentlyActiveCount = group.Count(item =>
+                    !item.IsStatusExcluded &&
+                    !item.IsResponsibleOnVacation &&
+                    item.InactivityRemindersEnabled &&
+                    item.ActiveTaskCount == 0 &&
+                    ((item.LastTaskAt ?? item.CreatedAt) > inactivityCutoff ||
+                     (item.LastTaskCommentAt ?? item.CreatedAt) > inactivityCutoff ||
+                     (item.LastControlCycleEndedAt ?? item.CreatedAt) > inactivityCutoff ||
+                     (item.LastDocumentAt ?? item.CreatedAt) > inactivityCutoff ||
+                     (item.LastCourtEventAt ?? item.CreatedAt) > inactivityCutoff ||
+                     (item.LastViewedAt ?? item.CreatedAt) > inactivityCutoff ||
+                     (item.ActivityConfirmedAt ?? item.CreatedAt) > inactivityCutoff)),
                 CandidateCount = group.Count(item =>
+                    !item.IsStatusExcluded &&
+                    !item.IsResponsibleOnVacation &&
                     item.ActiveTaskCount == 0 &&
                     (item.LastTaskAt ?? item.CreatedAt) <= inactivityCutoff &&
                     (item.LastTaskCommentAt ?? item.CreatedAt) <= inactivityCutoff &&
@@ -855,6 +883,8 @@ public class TasksController : ControllerBase
                     (item.ActivityConfirmedAt ?? item.CreatedAt) <= inactivityCutoff &&
                     item.InactivityRemindersEnabled),
                 EscalationCandidateCount = group.Count(item =>
+                    !item.IsStatusExcluded &&
+                    !item.IsResponsibleOnVacation &&
                     item.ActiveTaskCount == 0 &&
                     (item.LastTaskAt ?? item.CreatedAt) <= escalationCutoff &&
                     (item.LastTaskCommentAt ?? item.CreatedAt) <= escalationCutoff &&
@@ -871,8 +901,14 @@ public class TasksController : ControllerBase
         {
             InactivityDays = normalizedInactivityDays,
             EscalationDays = normalizedEscalationDays,
+            TrackedCaseCount = statistics?.TrackedCaseCount ?? 0,
             CandidateCount = statistics?.CandidateCount ?? 0,
             EscalationCandidateCount = statistics?.EscalationCandidateCount ?? 0,
+            ExcludedByStatusCount = statistics?.ExcludedByStatusCount ?? 0,
+            PausedByVacationCount = statistics?.PausedByVacationCount ?? 0,
+            DisabledCount = statistics?.DisabledCount ?? 0,
+            ActiveTaskCount = statistics?.ActiveTaskCount ?? 0,
+            RecentlyActiveCount = statistics?.RecentlyActiveCount ?? 0,
         });
     }
 

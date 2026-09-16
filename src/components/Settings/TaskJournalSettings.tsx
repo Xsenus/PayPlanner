@@ -562,7 +562,7 @@ export function TaskJournalSettings() {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h5 className="text-base font-semibold text-gray-900">Автоконтроль дел</h5>
-            <p className="mt-1 text-sm text-gray-500">Система сама создает контрольную задачу, если по делу давно не было задач, просмотра или ручного подтверждения активности.</p>
+            <p className="mt-1 max-w-4xl text-sm text-gray-500">Система создаёт контрольную задачу, когда после последнего значимого движения проходит заданный срок. Учитываются задачи, комментарии, документы, судебные события, просмотр ответственным и ручное подтверждение активности.</p>
           </div>
           <label className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700">
             <SystemCheckbox
@@ -597,27 +597,54 @@ export function TaskJournalSettings() {
           </div>
         </div>
 
-        <div className="mt-3 flex flex-col gap-3 rounded-xl border border-indigo-100 bg-indigo-50/60 p-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="min-w-0 text-sm text-slate-700">
-            <div className="font-semibold text-slate-900">Предварительный расчёт</div>
-            {preview ? (
-              <div className="mt-1" data-testid="case-inactivity-preview-result">
-                При пороге {preview.inactivityDays} дн. под правило попадёт <strong>{preview.candidateCount}</strong> дел,
-                из них <strong>{preview.escalationCandidateCount}</strong> достигли критического порога {preview.escalationDays} дн.
-              </div>
-            ) : (
-              <div className="mt-1 text-slate-500">Покажет ожидаемое число дел до сохранения новых сроков.</div>
-            )}
+        <div className="mt-3 rounded-xl border border-indigo-100 bg-indigo-50/60 p-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0 text-sm text-slate-700">
+              <div className="font-semibold text-slate-900">Предварительный расчёт</div>
+              {preview ? (
+                <div className="mt-1" data-testid="case-inactivity-preview-result">
+                  При пороге {preview.inactivityDays} дн. под правило попадёт <strong>{preview.candidateCount}</strong> дел,
+                  из них <strong>{preview.escalationCandidateCount}</strong> достигли критического порога {preview.escalationDays} дн.
+                </div>
+              ) : (
+                <div className="mt-1 text-slate-500">Покажет ожидаемое число дел и объяснит, почему остальные не попадут под правило.</div>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => void previewAutomationImpact()}
+              disabled={loading || previewLoading}
+              className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-indigo-200 bg-white px-3 py-2 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-50 disabled:cursor-wait disabled:opacity-60"
+            >
+              <RefreshCcw className={`h-4 w-4 ${previewLoading ? 'animate-spin' : ''}`} />
+              {previewLoading ? 'Расчёт...' : 'Рассчитать влияние'}
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={() => void previewAutomationImpact()}
-            disabled={loading || previewLoading}
-            className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-indigo-200 bg-white px-3 py-2 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-50 disabled:cursor-wait disabled:opacity-60"
-          >
-            <RefreshCcw className={`h-4 w-4 ${previewLoading ? 'animate-spin' : ''}`} />
-            {previewLoading ? 'Расчёт...' : 'Рассчитать влияние'}
-          </button>
+
+          {preview ? (
+            <div className="mt-3" data-testid="case-inactivity-preview-breakdown">
+              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                {([
+                  ['Проверено дел', preview.trackedCaseCount ?? preview.candidateCount, 'Все дела с действующим клиентом или организацией'],
+                  ['Пора создать контроль', preview.candidateCount, `Критический срок: ${preview.escalationCandidateCount}`],
+                  ['Есть активная задача', preview.activeTaskCount ?? 0, 'Контроль пока не требуется'],
+                  ['Было недавнее движение', preview.recentlyActiveCount ?? 0, `Ещё не прошло ${preview.inactivityDays} дн.`],
+                  ['Исключены по статусу', preview.excludedByStatusCount ?? 0, 'Приостановленные, закрытые и проигранные'],
+                  ['Автоконтроль выключен', preview.disabledCount ?? 0, 'Индивидуальное исключение в карточке дела'],
+                  ['Ответственный в отпуске', preview.pausedByVacationCount ?? 0, 'Проверка продолжится после возвращения'],
+                ] as const).map(([label, value, hint]) => (
+                  <div key={label} className="rounded-lg border border-indigo-100 bg-white px-3 py-2 shadow-sm">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="text-xs font-medium text-slate-600">{label}</span>
+                      <strong className="text-lg text-slate-900">{value}</strong>
+                    </div>
+                    <div className="mt-0.5 text-[11px] leading-4 text-slate-500">{hint}</div>
+                  </div>
+                ))}
+              </div>
+              <p className="mt-2 text-xs text-slate-500">Причины показаны без пересечений: каждое проверенное дело учитывается только в одной категории.</p>
+            </div>
+          ) : null}
         </div>
 
         <div className="mt-4 grid gap-4 md:grid-cols-3">
@@ -628,14 +655,17 @@ export function TaskJournalSettings() {
               min={1}
               max={365}
               value={settings.caseInactivityDays}
-              onChange={(event) => setSettings((prev) => ({
-                ...prev,
-                caseInactivityDays: Math.min(365, Math.max(1, Number(event.target.value) || 1)),
-                caseInactivityEscalationDays: Math.max(
-                  prev.caseInactivityEscalationDays,
-                  Math.min(365, Math.max(1, Number(event.target.value) || 1)),
-                ),
-              }))}
+              onChange={(event) => {
+                setPreview(null);
+                setSettings((prev) => ({
+                  ...prev,
+                  caseInactivityDays: Math.min(365, Math.max(1, Number(event.target.value) || 1)),
+                  caseInactivityEscalationDays: Math.max(
+                    prev.caseInactivityEscalationDays,
+                    Math.min(365, Math.max(1, Number(event.target.value) || 1)),
+                  ),
+                }));
+              }}
               disabled={loading || saving || !settings.caseInactivityAutomationEnabled}
               className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm disabled:cursor-not-allowed disabled:bg-gray-100"
             />
@@ -719,10 +749,13 @@ export function TaskJournalSettings() {
               min={1}
               max={365}
               value={settings.caseInactivityEscalationDays}
-              onChange={(event) => setSettings((prev) => ({
-                ...prev,
-                caseInactivityEscalationDays: Math.min(365, Math.max(prev.caseInactivityDays, Number(event.target.value) || prev.caseInactivityDays)),
-              }))}
+              onChange={(event) => {
+                setPreview(null);
+                setSettings((prev) => ({
+                  ...prev,
+                  caseInactivityEscalationDays: Math.min(365, Math.max(prev.caseInactivityDays, Number(event.target.value) || prev.caseInactivityDays)),
+                }));
+              }}
               disabled={loading || saving || !settings.caseInactivityAutomationEnabled}
               className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm disabled:cursor-not-allowed disabled:bg-gray-100"
             />

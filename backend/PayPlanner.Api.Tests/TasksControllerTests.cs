@@ -744,10 +744,22 @@ public class TasksControllerTests
         var oldCase = await CreateCaseAsync(db, client.Id, "ДАВНО БЕЗ ДВИЖЕНИЯ");
         var recentCase = await CreateCaseAsync(db, client.Id, "НЕДАВНЕЕ ДЕЛО");
         var activeCase = await CreateCaseAsync(db, client.Id, "ДЕЛО С АКТИВНОЙ ЗАДАЧЕЙ");
+        var closedCase = await CreateCaseAsync(db, client.Id, "ЗАКРЫТОЕ ДЕЛО", ClientCaseStatus.Closed);
+        var disabledCase = await CreateCaseAsync(db, client.Id, "АВТОКОНТРОЛЬ ОТКЛЮЧЁН");
+        var vacationUser = await CreateAdminUserAsync(db, "preview-vacation@example.com", "Ответственный в отпуске");
+        var vacationClient = await CreateClientAsync(db, "Клиент ответственного в отпуске");
+        vacationClient.ResponsibleUserId = vacationUser.Id;
+        var vacationCase = await CreateCaseAsync(db, vacationClient.Id, "ДЕЛО НА ПАУЗЕ ИЗ-ЗА ОТПУСКА");
         var now = DateTime.UtcNow;
         oldCase.CreatedAt = now.AddDays(-45);
         recentCase.CreatedAt = now.AddDays(-5);
         activeCase.CreatedAt = now.AddDays(-45);
+        closedCase.CreatedAt = now.AddDays(-45);
+        disabledCase.CreatedAt = now.AddDays(-45);
+        disabledCase.InactivityRemindersEnabled = false;
+        disabledCase.InactivityRemindersDisabledReason = "Ручное исключение";
+        vacationCase.CreatedAt = now.AddDays(-45);
+        await SetVacationAsync(db, vacationUser.Id, now.AddDays(5));
         await CreateTaskAsync(
             db,
             admin.Id,
@@ -769,8 +781,18 @@ public class TasksControllerTests
         var dto = Assert.IsType<TaskJournalAutomationPreviewDto>(ok.Value);
         Assert.Equal(14, dto.InactivityDays);
         Assert.Equal(30, dto.EscalationDays);
+        Assert.Equal(6, dto.TrackedCaseCount);
         Assert.Equal(1, dto.CandidateCount);
         Assert.Equal(1, dto.EscalationCandidateCount);
+        Assert.Equal(1, dto.ExcludedByStatusCount);
+        Assert.Equal(1, dto.PausedByVacationCount);
+        Assert.Equal(1, dto.DisabledCount);
+        Assert.Equal(1, dto.ActiveTaskCount);
+        Assert.Equal(1, dto.RecentlyActiveCount);
+        Assert.Equal(
+            dto.TrackedCaseCount,
+            dto.CandidateCount + dto.ExcludedByStatusCount + dto.PausedByVacationCount +
+            dto.DisabledCount + dto.ActiveTaskCount + dto.RecentlyActiveCount);
         Assert.Single(interceptor.Commands, command =>
             command.Contains("FROM \"ClientCases\"", StringComparison.Ordinal));
     }

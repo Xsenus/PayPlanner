@@ -1981,8 +1981,14 @@ export interface TaskJournalAutomationDiagnosticsDto {
 export interface TaskJournalAutomationPreviewDto {
   inactivityDays: number;
   escalationDays: number;
+  trackedCaseCount: number;
   candidateCount: number;
   escalationCandidateCount: number;
+  excludedByStatusCount: number;
+  pausedByVacationCount: number;
+  disabledCount: number;
+  activeTaskCount: number;
+  recentlyActiveCount: number;
 }
 
 export interface UpdateTaskJournalSettingsRequest {

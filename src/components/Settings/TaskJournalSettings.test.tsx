@@ -56,8 +56,14 @@ describe('TaskJournalSettings', () => {
     apiMock.previewTaskJournalCaseAutomation.mockResolvedValue({
       inactivityDays: 14,
       escalationDays: 30,
+      trackedCaseCount: 40,
       candidateCount: 12,
       escalationCandidateCount: 3,
+      excludedByStatusCount: 8,
+      pausedByVacationCount: 2,
+      disabledCount: 4,
+      activeTaskCount: 9,
+      recentlyActiveCount: 5,
     });
     apiMock.updateTaskJournalSettings.mockImplementation(async (payload: TaskJournalSettingsDto) => payload);
   });
@@ -175,5 +181,22 @@ describe('TaskJournalSettings', () => {
     const result = await screen.findByTestId('case-inactivity-preview-result');
     expect(result.textContent).toContain('12');
     expect(result.textContent).toContain('3');
+
+    const breakdown = screen.getByTestId('case-inactivity-preview-breakdown');
+    expect(within(breakdown).getByText('Проверено дел')).toBeTruthy();
+    expect(within(breakdown).getByText('40')).toBeTruthy();
+    expect(within(breakdown).getByText('Есть активная задача')).toBeTruthy();
+    expect(within(breakdown).getByText('9')).toBeTruthy();
+    expect(within(breakdown).getByText('Было недавнее движение')).toBeTruthy();
+    expect(within(breakdown).getByText('5')).toBeTruthy();
+    expect(within(breakdown).getByText('Исключены по статусу')).toBeTruthy();
+    expect(within(breakdown).getByText('8')).toBeTruthy();
+    expect(within(breakdown).getByText('Автоконтроль выключен')).toBeTruthy();
+    expect(within(breakdown).getByText('4')).toBeTruthy();
+    expect(within(breakdown).getByText('Ответственный в отпуске')).toBeTruthy();
+    expect(within(breakdown).getByText('2')).toBeTruthy();
+
+    fireEvent.change(inactivityDays, { target: { value: '11' } });
+    expect(screen.queryByTestId('case-inactivity-preview-breakdown')).toBeNull();
   });
 });
