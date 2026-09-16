@@ -6794,8 +6794,17 @@ function CourtPanel({
               <h3 className="font-bold text-slate-900">Что происходит по делу</h3>
               <p className="mt-0.5 text-xs text-slate-500">CRM определяет состояние по официальному движению, жалобам и связанным инстанциям.</p>
             </div>
-            <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${processSummaryErrors.length > 0 ? 'bg-amber-100 text-amber-800' : processSummaryLoading ? 'bg-blue-50 text-blue-700' : 'bg-slate-100 text-slate-600'}`}>
-              {processSummaryErrors.length > 0 ? 'Требуется обновление' : processSummaryLoading ? 'Проверка данных' : 'Автоматическая оценка'}
+            <span
+              className={`rounded-full px-2.5 py-1 text-xs font-semibold ${processSummaryErrors.length > 0 ? 'bg-amber-100 text-amber-800' : processSummaryLoading ? 'bg-blue-50 text-blue-700' : processSummary.sourceCheckedAt ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}
+              title={processSummary.sourceCheckedAt ? 'Дата последней подтверждённой проверки судебного источника' : 'Сводка построена по сведениям, сохранённым в карточке дела'}
+            >
+              {processSummaryErrors.length > 0
+                ? 'Требуется обновление'
+                : processSummaryLoading
+                  ? 'Проверка данных'
+                  : processSummary.sourceCheckedAt
+                    ? `Источник проверен ${formatRuDateTime(processSummary.sourceCheckedAt)}`
+                    : 'По данным карточки'}
             </span>
           </div>
           {processSummaryLoading ? (

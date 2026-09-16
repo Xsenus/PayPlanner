@@ -22,6 +22,7 @@ export interface CourtCaseProcessSummary {
   appeal: CourtProcessSummaryItem;
   nextAction: CourtProcessSummaryItem;
   risk: CourtProcessSummaryItem;
+  sourceCheckedAt: string | null;
 }
 
 const TERMINAL_EVENT_STATUSES = new Set(['archived', 'cancelled', 'completed', 'held']);
@@ -99,6 +100,26 @@ function isUpcomingCourtEvent(event: ClientCaseCourtEvent, nowTime: number) {
   // полуночи простое сравнение дат ошибочно скрывает событие из сводки, хотя
   // backend ещё не считает его просроченным с учётом часового пояса пользователя.
   return event.allDay ? !event.isOverdue : scheduledAt >= nowTime;
+}
+
+function getLatestSourceCheckedAt(
+  events: ClientCaseCourtEvent[],
+  deadlines: ClientCaseProceduralDeadline[],
+) {
+  let latestValue: string | null = null;
+  let latestTime = Number.NEGATIVE_INFINITY;
+
+  for (const items of [events, deadlines]) {
+    for (const item of items) {
+      const time = getTime(item.sourceCheckedAt);
+      if (time !== null && time > latestTime) {
+        latestValue = item.sourceCheckedAt || null;
+        latestTime = time;
+      }
+    }
+  }
+
+  return latestValue;
 }
 
 export function buildCourtCaseProcessSummary(
@@ -192,6 +213,7 @@ export function buildCourtCaseProcessSummary(
   const activeDeadlines = proceduralDeadlines
     .filter(isActiveDeadline)
     .filter((deadline) => getTime(deadline.dueAt) !== null);
+  const sourceCheckedAt = getLatestSourceCheckedAt(activeEvents, activeDeadlines);
   const overdueDeadlines = activeDeadlines
     .filter((deadline) => deadline.isOverdue)
     .sort((left, right) => (getTime(left.dueAt) ?? 0) - (getTime(right.dueAt) ?? 0));
@@ -299,13 +321,21 @@ export function buildCourtCaseProcessSummary(
       tone: 'amber',
     };
   } else if (hasCourtMovement || activeDeadlines.length > 0) {
-    risk = {
-      status: 'confirmed',
-      label: 'Критичных рисков нет',
-      detail: 'Просроченных сроков и ближайших срочных событий не обнаружено.',
-      basis: 'актуальные движения и сроки',
-      tone: 'emerald',
-    };
+    risk = sourceCheckedAt
+      ? {
+          status: 'confirmed',
+          label: 'Критичных рисков не обнаружено',
+          detail: 'В проверенных данных нет просроченных сроков и ближайших срочных событий.',
+          basis: 'проверенные движения и сроки',
+          tone: 'emerald',
+        }
+      : {
+          status: 'pending',
+          label: 'Срочных рисков не обнаружено',
+          detail: 'Вывод сделан по данным карточки без подтверждённой даты проверки источника.',
+          basis: 'данные карточки и сроки',
+          tone: 'blue',
+        };
   } else {
     risk = {
       status: 'unknown',
@@ -316,5 +346,5 @@ export function buildCourtCaseProcessSummary(
     };
   }
 
-  return { decision, appeal, nextAction, risk };
+  return { decision, appeal, nextAction, risk, sourceCheckedAt };
 }

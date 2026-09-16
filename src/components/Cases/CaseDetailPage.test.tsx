@@ -1033,7 +1033,6 @@ describe('CaseDetailPage', () => {
         isLatestVersion: true,
       },
     ]);
-
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
     await screen.findByText('ЗЕМЦОВ - банкротство');
 
@@ -2493,6 +2492,28 @@ describe('CaseDetailPage', () => {
         complaints: [],
       },
     ]);
+    vi.mocked(apiService.getCaseCourtEvents).mockResolvedValue([
+      {
+        id: 41,
+        clientCaseId: 15,
+        eventType: 'hearing',
+        eventTypeLabel: 'Заседание',
+        title: 'Предварительное заседание',
+        scheduledAt: '2026-06-12T09:30:00Z',
+        allDay: false,
+        courtInstance: 'first',
+        courtInstanceLabel: 'Первая инстанция',
+        courtName: 'Арбитражный суд Самарской области',
+        courtCaseNumber: 'А55-12345/2026',
+        movementStatus: 'completed',
+        movementStatusLabel: 'Завершено',
+        sourceType: 'sudrf',
+        sourceCheckedAt: '2026-09-16T06:30:00Z',
+        sourceConfidence: 'official-source',
+        createdAt: '2026-05-21T00:00:00Z',
+        isOverdue: false,
+      },
+    ]);
 
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
 
@@ -2503,6 +2524,7 @@ describe('CaseDetailPage', () => {
     expect(screen.getByText('Решение не обнаружено')).toBeTruthy();
     expect(screen.getByText('Обжалование пока не определяется')).toBeTruthy();
     expect(screen.getAllByText('Основание: актуальное движение дела').length).toBeGreaterThan(0);
+    expect(screen.getByText(/Источник проверен 16\.09\.2026/u)).toBeTruthy();
     expect(screen.getByText('Инстанции и судебные карточки')).toBeTruthy();
     expect(screen.getByText('Заседания и движения')).toBeTruthy();
     expect(screen.getByText('Лента процессуальной истории')).toBeTruthy();

@@ -179,6 +179,31 @@ describe('buildCourtCaseProcessSummary', () => {
     expect(summary.nextAction.label).toBe('Следующее действие не определено');
     expect(summary.risk.label).toBe('Риск не определён');
     expect(summary.risk.basis).toBe('данных недостаточно');
+    expect(summary.sourceCheckedAt).toBeNull();
+  });
+
+  it('uses the latest active source check and avoids a green guarantee for unverified card data', () => {
+    const verified = buildCourtCaseProcessSummary(
+      { courtDecisionAt: null },
+      [courtEvent({ sourceCheckedAt: '2026-09-15T08:00:00Z' })],
+      [],
+      [proceduralDeadline({ sourceCheckedAt: '2026-09-16T10:30:00Z' })],
+      new Date('2026-09-16T09:00:00Z'),
+    );
+    const unverified = buildCourtCaseProcessSummary(
+      { courtDecisionAt: null },
+      [courtEvent({ sourceType: 'manual', sourceCheckedAt: null })],
+      [],
+      [],
+      new Date('2026-09-16T09:00:00Z'),
+    );
+
+    expect(verified.sourceCheckedAt).toBe('2026-09-16T10:30:00Z');
+    expect(verified.risk.label).toBe('Критичных рисков не обнаружено');
+    expect(verified.risk.tone).toBe('emerald');
+    expect(unverified.sourceCheckedAt).toBeNull();
+    expect(unverified.risk.label).toBe('Срочных рисков не обнаружено');
+    expect(unverified.risk.tone).toBe('blue');
   });
 
   it('does not use archived movements as evidence for a current decision or appeal', () => {
