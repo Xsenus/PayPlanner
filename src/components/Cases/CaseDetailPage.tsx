@@ -1324,7 +1324,8 @@ export function CaseDetailPage({
   const [courtInstancesLoading, setCourtInstancesLoading] = useState(false);
   const [courtDirectoryLoading, setCourtDirectoryLoading] = useState(false);
   const [courtPartiesLoading, setCourtPartiesLoading] = useState(false);
-  const [proceduralDeadlinesLoading, setProceduralDeadlinesLoading] = useState(false);
+  const [proceduralDeadlinesLoading, setProceduralDeadlinesLoading] = useState(true);
+  const [proceduralDeadlinesError, setProceduralDeadlinesError] = useState<string | null>(null);
   const [courtSyncLogsLoading, setCourtSyncLogsLoading] = useState(false);
   const [timelineLoading, setTimelineLoading] = useState(false);
   const [conversationLoading, setConversationLoading] = useState(false);
@@ -1955,12 +1956,16 @@ export function CaseDetailPage({
   useEffect(() => {
     let cancelled = false;
     setProceduralDeadlinesLoading(true);
+    setProceduralDeadlinesError(null);
     apiService.getCaseProceduralDeadlines(caseId)
       .then((items) => {
         if (!cancelled) setProceduralDeadlines(items ?? []);
       })
-      .catch(() => {
-        if (!cancelled) setProceduralDeadlines([]);
+      .catch((err) => {
+        if (!cancelled) {
+          setProceduralDeadlines([]);
+          setProceduralDeadlinesError(extractDisplayErrorMessage(err, 'Не удалось проверить процессуальные сроки.'));
+        }
       })
       .finally(() => {
         if (!cancelled) setProceduralDeadlinesLoading(false);
@@ -3502,8 +3507,16 @@ export function CaseDetailPage({
   }
 
   const progress = caseItem.taskProgressPercent ?? 0;
-  const riskSummary = getRiskSummary(caseItem, proceduralDeadlines);
-  const nearestCaseDateSummary = getNearestCaseDateSummary(caseItem, proceduralDeadlines, new Date(), caseTimeZoneId);
+  const riskSummary = proceduralDeadlinesLoading
+    ? { value: 'Проверяем сроки', tone: 'slate' as SummaryTone }
+    : proceduralDeadlinesError
+      ? { value: 'Сроки недоступны', tone: 'amber' as SummaryTone }
+      : getRiskSummary(caseItem, proceduralDeadlines);
+  const nearestCaseDateSummary = proceduralDeadlinesLoading
+    ? { value: 'Проверяем сроки', tone: 'slate' as SummaryTone }
+    : proceduralDeadlinesError
+      ? { value: 'Сроки недоступны', tone: 'amber' as SummaryTone }
+      : getNearestCaseDateSummary(caseItem, proceduralDeadlines, new Date(), caseTimeZoneId);
   const inactivitySummary = getInactivitySummary(caseItem);
   const responsibleLastViewedAt = getResponsibleLastViewedAt(caseItem);
   const responsibleLastViewedByName = caseItem.lastViewedByResponsibleUserName ?? caseItem.lastViewedByUserName ?? null;
@@ -3706,6 +3719,12 @@ export function CaseDetailPage({
           <SummaryCard label="Активность" value={inactivitySummary.value} tone={inactivitySummary.tone} />
           <SummaryCard label="Судебная проверка" value={courtSyncSummary.value} tone={courtSyncSummary.tone} />
         </div>
+
+        {proceduralDeadlinesError && !proceduralDeadlinesLoading ? (
+          <div role="alert" className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            {proceduralDeadlinesError} Нажмите «Обновить», чтобы повторить проверку.
+          </div>
+        ) : null}
 
         <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="grid gap-5 xl:grid-cols-[300px_minmax(0,1fr)]">
@@ -3911,6 +3930,7 @@ export function CaseDetailPage({
               courtPartyNotesDraft={courtPartyNotesDraft}
               proceduralDeadlines={proceduralDeadlines}
               proceduralDeadlinesLoading={proceduralDeadlinesLoading}
+              proceduralDeadlinesError={proceduralDeadlinesError}
               deadlineTypeDraft={deadlineTypeDraft}
               deadlineTitleDraft={deadlineTitleDraft}
               deadlineDueAtDraft={deadlineDueAtDraft}
@@ -5831,7 +5851,7 @@ function SummaryCard({ label, value, tone = 'slate' }: { label: string; value: s
               value: 'text-slate-900',
             };
   return (
-    <div className={`min-w-0 rounded-xl border border-l-4 p-3 shadow-sm ${toneClasses.surface}`}>
+    <div aria-label={`${label}: ${value}`} className={`min-w-0 rounded-xl border border-l-4 p-3 shadow-sm ${toneClasses.surface}`}>
       <div className={`text-[11px] font-semibold uppercase tracking-[0.12em] ${toneClasses.label}`}>{label}</div>
       <div className={`mt-1.5 break-words text-base font-bold leading-5 ${toneClasses.value}`}>{value}</div>
     </div>
@@ -6442,6 +6462,7 @@ function CourtPanel({
   courtPartyNotesDraft,
   proceduralDeadlines,
   proceduralDeadlinesLoading,
+  proceduralDeadlinesError,
   deadlineTypeDraft,
   deadlineTitleDraft,
   deadlineDueAtDraft,
@@ -6534,6 +6555,7 @@ function CourtPanel({
   courtPartyNotesDraft: string;
   proceduralDeadlines: ClientCaseProceduralDeadline[];
   proceduralDeadlinesLoading: boolean;
+  proceduralDeadlinesError: string | null;
   deadlineTypeDraft: string;
   deadlineTitleDraft: string;
   deadlineDueAtDraft: string;
@@ -7400,6 +7422,10 @@ function CourtPanel({
         ) : null}
         {proceduralDeadlinesLoading ? (
           <LoadingBlock label="Загрузка процессуальных сроков..." />
+        ) : proceduralDeadlinesError ? (
+          <div role="alert" className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+            {proceduralDeadlinesError} Нажмите «Обновить» в верхней части карточки.
+          </div>
         ) : activeProceduralDeadlines.length === 0 ? (
           <div className="mt-3 rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-500">
             Отдельные процессуальные сроки пока не добавлены.

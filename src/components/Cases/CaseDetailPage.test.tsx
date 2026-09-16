@@ -2543,6 +2543,29 @@ describe('CaseDetailPage', () => {
     expect(riskValue.parentElement?.className).toContain('bg-rose-50/50');
   });
 
+  it('does not show an unverified safe state while procedural deadlines are loading', async () => {
+    vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({ overdueTaskCount: 0 }));
+    vi.mocked(apiService.getCaseProceduralDeadlines).mockImplementation(() => new Promise(() => {}));
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    expect(await screen.findByText('ЗЕМЦОВ - банкротство')).toBeTruthy();
+    expect(screen.getByLabelText('Просрочки: Проверяем сроки')).toBeTruthy();
+    expect(screen.getByLabelText('Ближайший срок: Проверяем сроки')).toBeTruthy();
+    expect(screen.queryByText('Без риска')).toBeNull();
+  });
+
+  it('shows a visible warning when procedural deadlines cannot be checked', async () => {
+    vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({ overdueTaskCount: 0 }));
+    vi.mocked(apiService.getCaseProceduralDeadlines).mockRejectedValue(new Error('Failed to fetch'));
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    expect(await screen.findByLabelText('Просрочки: Сроки недоступны')).toBeTruthy();
+    expect(screen.getByRole('alert').textContent).toContain('Не удалось проверить процессуальные сроки.');
+    expect(screen.getByRole('alert').textContent).toContain('Нажмите «Обновить»');
+  });
+
   it('shows the earliest upcoming case date across the case, hearing and procedural deadlines', async () => {
     vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({
       dueDate: '2099-07-01',
