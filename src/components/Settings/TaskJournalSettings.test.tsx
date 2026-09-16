@@ -299,6 +299,27 @@ describe('TaskJournalSettings', () => {
           lastActivityAt: '2026-09-11T09:00:00Z',
           lastActivitySource: 'taskComment',
         }],
+      })
+      .mockRejectedValueOnce(new Error('Сервис временно недоступен'))
+      .mockResolvedValueOnce({
+        category: 'activeTask',
+        inactivityDays: 14,
+        escalationDays: 30,
+        totalCount: 1,
+        offset: 0,
+        limit: 20,
+        items: [{
+          clientCaseId: 603,
+          clientCaseTitle: 'Дело после восстановления запроса',
+          clientId: 53,
+          clientName: 'Третий клиент',
+          legalEntityId: null,
+          legalEntityName: '',
+          responsibleName: 'Иван Ответственный',
+          explanation: 'По делу есть активная задача после восстановления.',
+          lastActivityAt: '2026-09-12T10:00:00Z',
+          lastActivitySource: 'task',
+        }],
       });
     render(<TaskJournalSettings onOpenCase={onOpenCase} />);
 
@@ -350,5 +371,30 @@ describe('TaskJournalSettings', () => {
 
     fireEvent.click(within(details).getByRole('button', { name: 'Открыть дело' }));
     expect(onOpenCase).toHaveBeenCalledWith(602, 52);
+
+    fireEvent.change(within(details).getByRole('searchbox', { name: 'Поиск дел в выбранной категории' }), {
+      target: { value: 'Недоступный запрос' },
+    });
+    fireEvent.click(within(details).getByRole('button', { name: 'Найти' }));
+
+    const inlineError = await within(details).findByRole('alert');
+    expect(inlineError.textContent).toContain('Сервис временно недоступен');
+    expect(inlineError.classList.contains('pp-automation-preview-error')).toBe(true);
+    expect(within(details).getByText('Дело со второй активной задачей')).toBeTruthy();
+    expect(within(details).getByText('По запросу показано 1 из 1')).toBeTruthy();
+    expect(within(details).queryByText(/По запросу «Недоступный запрос»/)).toBeNull();
+
+    fireEvent.click(within(details).getByRole('button', { name: 'Повторить' }));
+    await waitFor(() => expect(apiMock.getTaskJournalAutomationPreviewDetails).toHaveBeenNthCalledWith(5, {
+      inactivityDays: 14,
+      escalationDays: 30,
+      category: 'activeTask',
+      search: 'Недоступный запрос',
+      offset: 0,
+      limit: 20,
+    }));
+    expect(await within(details).findByText('Дело после восстановления запроса')).toBeTruthy();
+    expect(within(details).queryByRole('alert')).toBeNull();
+    expect(within(details).queryByText('Дело со второй активной задачей')).toBeNull();
   });
 });

@@ -373,6 +373,22 @@ html[data-payplanner-theme] .pp-settings-nav-item-active:hover {
   color: var(--pp-danger-text);
 }
 
+.pp-automation-preview-error {
+  background: var(--pp-warning-soft);
+  border-color: var(--pp-warning-border);
+  color: var(--pp-warning-text);
+}
+
+.pp-automation-preview-error-action {
+  background: var(--pp-surface);
+  border-color: var(--pp-warning-border);
+  color: var(--pp-warning-text);
+}
+
+.pp-automation-preview-error-action:hover:not(:disabled) {
+  background: var(--pp-warning-soft-strong);
+}
+
 .pp-automation-preview-action {
   background: var(--pp-surface);
   border-color: color-mix(in srgb, var(--pp-primary) 45%, var(--pp-border));

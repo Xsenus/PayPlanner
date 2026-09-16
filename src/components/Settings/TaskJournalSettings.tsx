@@ -207,6 +207,12 @@ export function TaskJournalSettings({
   const [previewDetailsCategory, setPreviewDetailsCategory] = useState<TaskJournalAutomationPreviewCategory | null>(null);
   const [previewDetailsSearchDraft, setPreviewDetailsSearchDraft] = useState('');
   const [previewDetailsSearch, setPreviewDetailsSearch] = useState('');
+  const [previewDetailsError, setPreviewDetailsError] = useState<string | null>(null);
+  const [previewDetailsRetry, setPreviewDetailsRetry] = useState<{
+    category: TaskJournalAutomationPreviewCategory;
+    append: boolean;
+    search: string;
+  } | null>(null);
   const [previewDetailsLoading, setPreviewDetailsLoading] = useState(false);
   const [previewDetailsLoadingMore, setPreviewDetailsLoadingMore] = useState(false);
   const previewDetailsRequestRef = useRef(0);
@@ -281,6 +287,8 @@ export function TaskJournalSettings({
     setPreviewDetailsCategory(null);
     setPreviewDetailsSearchDraft('');
     setPreviewDetailsSearch('');
+    setPreviewDetailsError(null);
+    setPreviewDetailsRetry(null);
     setPreviewDetailsLoading(false);
     setPreviewDetailsLoadingMore(false);
     setPreviewLoading(true);
@@ -303,6 +311,8 @@ export function TaskJournalSettings({
     setPreviewDetailsCategory(null);
     setPreviewDetailsSearchDraft('');
     setPreviewDetailsSearch('');
+    setPreviewDetailsError(null);
+    setPreviewDetailsRetry(null);
     setPreviewDetailsLoading(false);
     setPreviewDetailsLoadingMore(false);
   };
@@ -318,17 +328,22 @@ export function TaskJournalSettings({
     }
 
     const normalizedSearch = (searchOverride ?? (append ? previewDetailsSearch : '')).trim();
+    const canPreserveCurrentDetails = previewDetailsCategory === category && previewDetails !== null;
     const requestId = previewDetailsRequestRef.current + 1;
     previewDetailsRequestRef.current = requestId;
     setPreviewDetailsCategory(category);
+    setPreviewDetailsError(null);
+    setPreviewDetailsRetry(null);
     if (append) {
       setPreviewDetailsLoadingMore(true);
     } else {
-      setPreviewDetailsSearch(normalizedSearch);
       if (searchOverride === undefined) {
         setPreviewDetailsSearchDraft('');
       }
-      setPreviewDetails(null);
+      if (!canPreserveCurrentDetails) {
+        setPreviewDetails(null);
+        setPreviewDetailsSearch('');
+      }
       setPreviewDetailsLoading(true);
     }
 
@@ -342,18 +357,18 @@ export function TaskJournalSettings({
         limit: AUTOMATION_PREVIEW_DETAILS_PAGE_SIZE,
       });
       if (previewDetailsRequestRef.current !== requestId) return;
+      if (!append) {
+        setPreviewDetailsSearch(normalizedSearch);
+      }
       setPreviewDetails((current) => append && current?.category === response.category
         ? { ...response, items: current.items.concat(response.items) }
         : response);
     } catch (error) {
       if (previewDetailsRequestRef.current !== requestId) return;
-      toast.error(
-        extractDisplayErrorMessage(error, 'Не удалось загрузить дела выбранной категории.'),
-        'Предварительный расчёт',
-      );
-      if (!append) {
-        setPreviewDetailsCategory(null);
-      }
+      const errorMessage = extractDisplayErrorMessage(error, 'Не удалось загрузить дела выбранной категории.');
+      setPreviewDetailsError(errorMessage);
+      setPreviewDetailsRetry({ category, append, search: normalizedSearch });
+      toast.error(errorMessage, 'Предварительный расчёт');
     } finally {
       if (previewDetailsRequestRef.current === requestId) {
         setPreviewDetailsLoading(false);
@@ -789,7 +804,9 @@ export function TaskJournalSettings({
                       <p className="mt-0.5 text-xs text-slate-500">
                         {previewDetails
                           ? `${previewDetailsSearch ? 'По запросу показано' : 'Показано'} ${previewDetails.items.length} из ${previewDetails.totalCount}`
-                          : 'Загружаем дела и точную причину для каждого...'}
+                          : previewDetailsError
+                            ? 'Список пока не загружен'
+                            : 'Загружаем дела и точную причину для каждого...'}
                         {previewDetails && ['candidate', 'criticalCandidate', 'recentActivity'].includes(previewDetailsCategory)
                           ? ' · Самые срочные выше'
                           : ''}
@@ -848,7 +865,33 @@ export function TaskJournalSettings({
                     ) : null}
                   </form>
 
-                  {previewDetailsLoading ? (
+                  {previewDetailsError && previewDetailsRetry ? (
+                    <div className="pp-automation-preview-error mt-3 flex flex-col gap-2 rounded-lg border px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between" role="alert">
+                      <span>{previewDetailsError}</span>
+                      <button
+                        type="button"
+                        onClick={() => void loadPreviewDetails(
+                          previewDetailsRetry.category,
+                          previewDetailsRetry.append,
+                          previewDetailsRetry.search,
+                        )}
+                        disabled={previewDetailsLoading || previewDetailsLoadingMore}
+                        className="pp-automation-preview-error-action inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition disabled:cursor-wait disabled:opacity-60"
+                      >
+                        <RefreshCcw className="h-3.5 w-3.5" />
+                        Повторить
+                      </button>
+                    </div>
+                  ) : null}
+
+                  {previewDetailsLoading && previewDetails ? (
+                    <div className="mt-3 flex items-center gap-2 text-xs font-medium text-slate-500" role="status">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      Обновляем список...
+                    </div>
+                  ) : null}
+
+                  {previewDetailsLoading && !previewDetails ? (
                     <div className="mt-3 flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-6 text-sm text-slate-500">
                       <Loader2 className="h-4 w-4 animate-spin" />
                       Загружаем дела...
@@ -906,7 +949,7 @@ export function TaskJournalSettings({
                         </button>
                       ) : null}
                     </div>
-                  ) : previewDetails ? (
+                  ) : previewDetails && !previewDetailsError ? (
                     <div className="mt-3 rounded-lg border border-slate-200 bg-white px-3 py-4 text-sm text-slate-500">
                       {previewDetailsSearch
                         ? `По запросу «${previewDetailsSearch}» дел в этой категории не найдено.`
