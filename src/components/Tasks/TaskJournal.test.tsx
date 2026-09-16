@@ -25,6 +25,7 @@ const apiMock = vi.hoisted(() => ({
   upsertUserSetting: vi.fn(),
   updateTaskJournalSettings: vi.fn(),
   getTaskJournalCaseAutomationCandidates: vi.fn(),
+  getTaskJournalCaseAutomationSummary: vi.fn(),
   createTaskJournalCaseAutomationTask: vi.fn(),
   createTaskJournalCaseAutomationTasks: vi.fn(),
   downloadTaskJournalCalendar: vi.fn(),
@@ -584,6 +585,12 @@ describe('TaskJournal', () => {
     apiMock.getTaskJournalItem.mockReset();
     apiMock.getTaskJournalItem.mockResolvedValue(createTask());
     apiMock.getTaskJournalCaseAutomationCandidates.mockResolvedValue([]);
+    apiMock.getTaskJournalCaseAutomationSummary.mockResolvedValue({
+      totalCount: 0,
+      readyCount: 0,
+      waitingCount: 0,
+      pausedCount: 0,
+    });
     apiMock.createTaskJournalCaseAutomationTask.mockResolvedValue(createTask({
       type: 'control',
       priority: 'high',
@@ -3807,6 +3814,15 @@ describe('TaskJournal', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Открыть дело ГОТОВО К КОНТРОЛЮ' }));
     expect(onOpenCase).toHaveBeenCalledWith(100, 10);
 
+    apiMock.getTaskJournalCaseAutomationCandidates.mockClear();
+    apiMock.getTaskJournalCaseAutomationSummary.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: 'Ожидают срока: 1' }));
+    await waitFor(() => expect(apiMock.getTaskJournalCaseAutomationCandidates).toHaveBeenCalledWith(
+      expect.objectContaining({ offset: 0, automationState: 'waiting' }),
+      expect.anything(),
+    ));
+    expect(apiMock.getTaskJournalCaseAutomationSummary).not.toHaveBeenCalled();
+
     const waitingTaskButton = screen.getByTestId('task-automation-create-101') as HTMLButtonElement;
     expect(waitingTaskButton.disabled).toBe(false);
     expect(waitingTaskButton.textContent).toContain('Поставить задачу');
@@ -3815,6 +3831,53 @@ describe('TaskJournal', () => {
 
     expect(await screen.findByRole('heading', { name: 'Выберите клиента и дело' })).toBeTruthy();
     expect(apiMock.createTaskJournalCaseAutomationTask).not.toHaveBeenCalled();
+  });
+
+  it('shows exact automation totals and loads the next bounded page', async () => {
+    const candidate = (id: number) => ({
+      clientId: 10,
+      clientName: `Клиент ${id}`,
+      clientCaseId: id,
+      clientCaseTitle: `ДЕЛО ${id}`,
+      reason: 'Нет активной задачи уже 20 дн.',
+      activeTaskCount: 0,
+      completedTaskCount: 0,
+      daysWithoutActiveTask: 20,
+      isReadyForControl: true,
+      automationState: 'ready' as const,
+      lastActivityAt: todayAt(8),
+      lastActivitySource: 'caseCreated',
+      lastTaskAt: null,
+      nextControlAt: todayAt(9),
+      daysUntilControl: 0,
+      suggestedTitle: 'Проверить движение по делу',
+      suggestedDescription: 'Автоконтроль',
+      suggestedDueAt: todayAt(9),
+    });
+    apiMock.getTaskJournalCaseAutomationCandidates
+      .mockResolvedValueOnce(Array.from({ length: 100 }, (_, index) => candidate(index + 1)))
+      .mockResolvedValueOnce([candidate(101)]);
+    apiMock.getTaskJournalCaseAutomationSummary.mockResolvedValue({
+      totalCount: 101,
+      readyCount: 101,
+      waitingCount: 0,
+      pausedCount: 0,
+    });
+
+    await renderJournal();
+
+    expect(await screen.findByText('Показано 100 из 101')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Показать загруженные (100)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Загрузить ещё (1)' }));
+
+    await waitFor(() => expect(apiMock.getTaskJournalCaseAutomationCandidates).toHaveBeenCalledTimes(2));
+    expect(apiMock.getTaskJournalCaseAutomationCandidates).toHaveBeenLastCalledWith(expect.objectContaining({
+      limit: 100,
+      offset: 100,
+      automationState: 'all',
+    }));
+    expect(await screen.findByText('Показано 101 из 101')).toBeTruthy();
+    expect(screen.getByText('ДЕЛО 101')).toBeTruthy();
   });
 
   it('completes an active task with an existing result from the quick action', async () => {

@@ -3906,6 +3906,69 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task AutomationCaseCandidates_SummaryAndPagingCoverTheWholeQueueByState()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "candidate-pages@example.com", "Администратор");
+        var client = await CreateClientAsync(db, "Клиент полной очереди");
+        var oldestReadyCase = await CreateCaseAsync(db, client.Id, "ГОТОВО ДАВНО");
+        var nextReadyCase = await CreateCaseAsync(db, client.Id, "ГОТОВО ПОЗЖЕ");
+        var waitingCase = await CreateCaseAsync(db, client.Id, "ОЖИДАЕТ СРОКА");
+        var pausedCase = await CreateCaseAsync(db, client.Id, "ПРИОСТАНОВЛЕНО");
+        var now = DateTime.UtcNow;
+        oldestReadyCase.CreatedAt = now.AddDays(-40);
+        nextReadyCase.CreatedAt = now.AddDays(-30);
+        waitingCase.CreatedAt = now.AddDays(-3);
+        pausedCase.CreatedAt = now.AddDays(-50);
+        oldestReadyCase.InactivityRemindersEnabled = true;
+        nextReadyCase.InactivityRemindersEnabled = true;
+        waitingCase.InactivityRemindersEnabled = true;
+        pausedCase.InactivityRemindersEnabled = false;
+        pausedCase.InactivityRemindersDisabledReason = "Ручная пауза";
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var summaryResult = await controller.GetAutomationCaseCandidatesSummary(
+            inactiveDays: 14,
+            ct: CancellationToken.None);
+        var summary = Assert.IsType<TaskJournalCaseAutomationSummaryDto>(
+            Assert.IsType<OkObjectResult>(summaryResult.Result).Value);
+
+        Assert.Equal(4, summary.TotalCount);
+        Assert.Equal(2, summary.ReadyCount);
+        Assert.Equal(1, summary.WaitingCount);
+        Assert.Equal(1, summary.PausedCount);
+
+        var readyPageResult = await controller.GetAutomationCaseCandidates(
+            inactiveDays: 14,
+            limit: 1,
+            offset: 1,
+            automationState: "ready",
+            ct: CancellationToken.None);
+        var readyPage = Assert.IsAssignableFrom<IReadOnlyList<TaskJournalCaseAutomationCandidateDto>>(
+            Assert.IsType<OkObjectResult>(readyPageResult.Result).Value);
+        Assert.Equal(nextReadyCase.Id, Assert.Single(readyPage).ClientCaseId);
+
+        var waitingPageResult = await controller.GetAutomationCaseCandidates(
+            inactiveDays: 14,
+            limit: 100,
+            automationState: "waiting",
+            ct: CancellationToken.None);
+        var waitingPage = Assert.IsAssignableFrom<IReadOnlyList<TaskJournalCaseAutomationCandidateDto>>(
+            Assert.IsType<OkObjectResult>(waitingPageResult.Result).Value);
+        Assert.Equal(waitingCase.Id, Assert.Single(waitingPage).ClientCaseId);
+
+        var pausedPageResult = await controller.GetAutomationCaseCandidates(
+            inactiveDays: 14,
+            limit: 100,
+            automationState: "paused",
+            ct: CancellationToken.None);
+        var pausedPage = Assert.IsAssignableFrom<IReadOnlyList<TaskJournalCaseAutomationCandidateDto>>(
+            Assert.IsType<OkObjectResult>(pausedPageResult.Result).Value);
+        Assert.Equal(pausedCase.Id, Assert.Single(pausedPage).ClientCaseId);
+    }
+
+    [Fact]
     public async Task GetAutomationCaseCandidates_AppliesCaseOwnerVisibility()
     {
         await using var db = await CreateContextAsync();

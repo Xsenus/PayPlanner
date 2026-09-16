@@ -98,6 +98,7 @@ import {
   TASK_JOURNAL_EVENT,
   type TaskJournalAssignee,
   type TaskJournalCaseAutomationCandidate,
+  type TaskJournalCaseAutomationSummary,
   type TaskBillingContext,
   type TaskJournalChannel,
   type TaskJournalComment,
@@ -266,12 +267,29 @@ const TASK_JOURNAL_TABLE_COLUMNS: Array<{ key: TaskTableColumnKey; defaultWidth:
   { key: 'actions', defaultWidth: 156 },
 ];
 
-function buildAutomationCandidatesRequestKey(settings: TaskJournalSettingsDto) {
+type AutomationCandidateStateFilter = 'all' | 'ready' | 'waiting' | 'paused';
+
+const EMPTY_AUTOMATION_SUMMARY: TaskJournalCaseAutomationSummary = {
+  totalCount: 0,
+  readyCount: 0,
+  waitingCount: 0,
+  pausedCount: 0,
+};
+
+function buildAutomationCandidatesRequestKey(
+  settings: TaskJournalSettingsDto,
+  automationState: AutomationCandidateStateFilter,
+) {
   return [
     settings.caseInactivityDays,
     100,
     settings.caseInactivityEscalationDays,
+    automationState,
   ].join('|');
+}
+
+function buildAutomationSummaryRequestKey(settings: TaskJournalSettingsDto) {
+  return [settings.caseInactivityAutomationEnabled, settings.caseInactivityDays].join('|');
 }
 
 const STATUS_OPTIONS: Array<{ value: TaskJournalStatus; label: string }> = [
@@ -1182,8 +1200,29 @@ function getAutomationCandidateState(candidate: TaskJournalCaseAutomationCandida
   return candidate.isReadyForControl === false ? 'waiting' : 'ready';
 }
 
-function isAutomationCandidateReady(candidate: TaskJournalCaseAutomationCandidate) {
-  return getAutomationCandidateState(candidate) === 'ready';
+function getAutomationCandidateStateCount(
+  summary: TaskJournalCaseAutomationSummary,
+  state: AutomationCandidateStateFilter,
+) {
+  switch (state) {
+    case 'ready':
+      return summary.readyCount;
+    case 'waiting':
+      return summary.waitingCount;
+    case 'paused':
+      return summary.pausedCount;
+    default:
+      return summary.totalCount;
+  }
+}
+
+function summarizeAutomationCandidates(candidates: TaskJournalCaseAutomationCandidate[]): TaskJournalCaseAutomationSummary {
+  return {
+    totalCount: candidates.length,
+    readyCount: candidates.filter((candidate) => getAutomationCandidateState(candidate) === 'ready').length,
+    waitingCount: candidates.filter((candidate) => getAutomationCandidateState(candidate) === 'waiting').length,
+    pausedCount: candidates.filter((candidate) => getAutomationCandidateState(candidate) === 'paused').length,
+  };
 }
 
 function getAutomationActivitySourceLabel(source?: string | null) {
@@ -2142,11 +2181,17 @@ export function TaskJournal({
   const [taskNotificationDefaults, setTaskNotificationDefaults] = useState<TaskNotificationDefaults>(DEFAULT_TASK_NOTIFICATION_DEFAULTS);
   const [assignees, setAssignees] = useState<TaskJournalAssignee[]>([]);
   const [automationCandidates, setAutomationCandidates] = useState<TaskJournalCaseAutomationCandidate[]>([]);
+  const [automationSummary, setAutomationSummary] = useState<TaskJournalCaseAutomationSummary>(EMPTY_AUTOMATION_SUMMARY);
+  const [automationStateFilter, setAutomationStateFilter] = useState<AutomationCandidateStateFilter>('all');
+  const [automationPageLoading, setAutomationPageLoading] = useState(false);
+  const [automationLoadingMore, setAutomationLoadingMore] = useState(false);
   const [creatingAutomationCaseId, setCreatingAutomationCaseId] = useState<number | null>(null);
   const [creatingAutomationAll, setCreatingAutomationAll] = useState(false);
   const automationCandidatesRequestRef = useRef(0);
   const automationCandidatesInitializedRef = useRef(false);
   const automationCandidatesRequestKeyRef = useRef<string | null>(null);
+  const automationSummaryRequestKeyRef = useRef<string | null>(null);
+  const automationLoadMoreRequestRef = useRef(0);
   const taskJournalEventSourceRef = useRef<object>({});
   const [loading, setLoading] = useState(true);
   const [filterOwnerKey, setFilterOwnerKey] = useState(() => getTaskJournalFilterStorageKey(currentUserId, mode));
@@ -2511,21 +2556,33 @@ export function TaskJournal({
 
   const loadAutomationCandidates = useCallback(async (
     settings: TaskJournalSettingsDto,
+    automationState: AutomationCandidateStateFilter,
     signal?: AbortSignal,
+    refreshSummary = true,
   ) => {
     if (embedded || underControlOnly || isApprovalsMode || !canCreateTasks || !canViewCases || !settings.caseInactivityAutomationEnabled) {
-      return [];
+      return { items: [], summary: EMPTY_AUTOMATION_SUMMARY };
     }
 
     const params = {
       inactiveDays: settings.caseInactivityDays,
       limit: 100,
+      offset: 0,
       escalationDays: settings.caseInactivityEscalationDays,
       includeWaiting: true,
+      automationState,
     };
-    return signal
-      ? apiService.getTaskJournalCaseAutomationCandidates(params, { signal })
-      : apiService.getTaskJournalCaseAutomationCandidates(params);
+    const options = signal ? { signal } : undefined;
+    const [items, summary] = await Promise.all([
+      apiService.getTaskJournalCaseAutomationCandidates(params, options),
+      refreshSummary
+        ? apiService.getTaskJournalCaseAutomationSummary(
+          { inactiveDays: settings.caseInactivityDays },
+          options,
+        ).catch(() => null)
+        : Promise.resolve(null),
+    ]);
+    return { items, summary };
   }, [canCreateTasks, canViewCases, embedded, isApprovalsMode, underControlOnly]);
 
   // Преобразует состояние панели фильтров в единый контракт API. Значения -1
@@ -2632,7 +2689,7 @@ export function TaskJournal({
       const trustedDevicePromise = currentUserId
         ? getOfflineCalendarTrustedDevice(currentUserId).catch(() => false)
         : Promise.resolve(false);
-      const automationPromise = settingsPromise.then((settingsResponse) => loadAutomationCandidates(settingsResponse));
+      const automationPromise = settingsPromise.then((settingsResponse) => loadAutomationCandidates(settingsResponse, 'all'));
       const [assigneeResponse, settingsResponse, notificationDefaultsResponse, timeZoneResponse, calendarSyncSettingsResponse, automationResponse, featureFlagsResponse, trustedDevice] = await Promise.all([
         apiService.getTaskJournalAssignees({ calendarView: shouldUseCalendarVisibility }),
         settingsPromise,
@@ -2650,8 +2707,14 @@ export function TaskJournal({
         await clearOfflineCalendarSnapshot(currentUserId).catch(() => undefined);
       }
       setAssignees(assigneeResponse);
-      setAutomationCandidates(automationResponse);
-      automationCandidatesRequestKeyRef.current = buildAutomationCandidatesRequestKey(settingsResponse);
+      setAutomationCandidates(automationResponse.items);
+      setAutomationSummary(automationResponse.summary ?? summarizeAutomationCandidates(automationResponse.items));
+      setAutomationStateFilter('all');
+      setAutomationPageLoading(false);
+      automationCandidatesRequestKeyRef.current = buildAutomationCandidatesRequestKey(settingsResponse, 'all');
+      automationSummaryRequestKeyRef.current = automationResponse.summary
+        ? buildAutomationSummaryRequestKey(settingsResponse)
+        : null;
       automationCandidatesInitializedRef.current = true;
       setTaskSettings({
         ...settingsResponse,
@@ -2824,31 +2887,49 @@ export function TaskJournal({
       return;
     }
 
-    const requestKey = buildAutomationCandidatesRequestKey(taskSettings);
-    if (automationCandidatesRequestKeyRef.current === requestKey) {
+    const requestKey = buildAutomationCandidatesRequestKey(taskSettings, automationStateFilter);
+    const summaryRequestKey = buildAutomationSummaryRequestKey(taskSettings);
+    if (
+      automationCandidatesRequestKeyRef.current === requestKey &&
+      automationSummaryRequestKeyRef.current === summaryRequestKey
+    ) {
       return;
     }
 
     const requestId = automationCandidatesRequestRef.current + 1;
     automationCandidatesRequestRef.current = requestId;
+    automationLoadMoreRequestRef.current += 1;
+    setAutomationPageLoading(true);
+    setAutomationLoadingMore(false);
     const controller = new AbortController();
-    void loadAutomationCandidates(taskSettings, controller.signal)
-      .then((items) => {
+    const shouldRefreshSummary = automationSummaryRequestKeyRef.current !== summaryRequestKey;
+    void loadAutomationCandidates(taskSettings, automationStateFilter, controller.signal, shouldRefreshSummary)
+      .then((response) => {
         if (!controller.signal.aborted && automationCandidatesRequestRef.current === requestId) {
           automationCandidatesRequestKeyRef.current = requestKey;
-          setAutomationCandidates(items);
+          setAutomationCandidates(response.items);
+          if (response.summary) {
+            setAutomationSummary(response.summary);
+            automationSummaryRequestKeyRef.current = summaryRequestKey;
+          }
+          setAutomationPageLoading(false);
         }
       })
       .catch(() => {
         if (!controller.signal.aborted && automationCandidatesRequestRef.current === requestId) {
           setAutomationCandidates([]);
+          if (shouldRefreshSummary) {
+            setAutomationSummary(EMPTY_AUTOMATION_SUMMARY);
+            automationSummaryRequestKeyRef.current = null;
+          }
+          setAutomationPageLoading(false);
         }
       });
 
     return () => {
       controller.abort();
     };
-  }, [loadAutomationCandidates, taskSettings]);
+  }, [automationStateFilter, loadAutomationCandidates, taskSettings]);
 
   useEffect(() => {
     let controller: AbortController | null = null;
@@ -2862,11 +2943,19 @@ export function TaskJournal({
       controller = nextController;
       const requestId = automationCandidatesRequestRef.current + 1;
       automationCandidatesRequestRef.current = requestId;
+      automationLoadMoreRequestRef.current += 1;
+      setAutomationLoadingMore(false);
 
-      void loadAutomationCandidates(taskSettings, nextController.signal)
-        .then((items) => {
+      void loadAutomationCandidates(taskSettings, automationStateFilter, nextController.signal, true)
+        .then((response) => {
           if (!nextController.signal.aborted && automationCandidatesRequestRef.current === requestId) {
-            setAutomationCandidates(items);
+            setAutomationCandidates(response.items);
+            if (response.summary) {
+              setAutomationSummary(response.summary);
+              automationSummaryRequestKeyRef.current = buildAutomationSummaryRequestKey(taskSettings);
+            } else {
+              automationSummaryRequestKeyRef.current = null;
+            }
           }
         })
         .catch(() => undefined);
@@ -2877,7 +2966,7 @@ export function TaskJournal({
       controller?.abort();
       window.removeEventListener(TASK_JOURNAL_EVENT, refresh);
     };
-  }, [loadAutomationCandidates, taskSettings]);
+  }, [automationStateFilter, loadAutomationCandidates, taskSettings]);
 
   const assigneeById = useMemo(() => {
     const byId = new Map<number, TaskJournalAssignee>();
@@ -3087,13 +3176,72 @@ export function TaskJournal({
     });
   }, [openTaskCreateFromTemplate]);
 
+  const changeAutomationStateFilter = useCallback((state: AutomationCandidateStateFilter) => {
+    if (automationStateFilter === state) {
+      return;
+    }
+
+    setAutomationCandidates([]);
+    automationLoadMoreRequestRef.current += 1;
+    setAutomationPageLoading(true);
+    setAutomationLoadingMore(false);
+    setAutomationStateFilter(state);
+  }, [automationStateFilter]);
+
+  const loadMoreAutomationCandidates = useCallback(async () => {
+    const stateTotal = getAutomationCandidateStateCount(automationSummary, automationStateFilter);
+    if (automationPageLoading || automationLoadingMore || automationCandidates.length >= stateTotal) {
+      return;
+    }
+
+    const requestId = automationLoadMoreRequestRef.current + 1;
+    automationLoadMoreRequestRef.current = requestId;
+    setAutomationLoadingMore(true);
+    try {
+      const nextItems = await apiService.getTaskJournalCaseAutomationCandidates({
+        inactiveDays: taskSettings.caseInactivityDays,
+        limit: 100,
+        offset: automationCandidates.length,
+        escalationDays: taskSettings.caseInactivityEscalationDays,
+        includeWaiting: true,
+        automationState: automationStateFilter,
+      });
+      if (automationLoadMoreRequestRef.current === requestId) {
+        setAutomationCandidates((current) => {
+          const existingIds = new Set(current.map((item) => item.clientCaseId));
+          return current.concat(nextItems.filter((item) => !existingIds.has(item.clientCaseId)));
+        });
+      }
+    } catch (error) {
+      if (automationLoadMoreRequestRef.current === requestId) {
+        toast.error(extractDisplayErrorMessage(error, 'Не удалось загрузить следующую часть очереди.'), 'Автоконтроль дел');
+      }
+    } finally {
+      if (automationLoadMoreRequestRef.current === requestId) {
+        setAutomationLoadingMore(false);
+      }
+    }
+  }, [
+    automationCandidates.length,
+    automationLoadingMore,
+    automationPageLoading,
+    automationStateFilter,
+    automationSummary,
+    taskSettings.caseInactivityDays,
+    taskSettings.caseInactivityEscalationDays,
+    toast,
+  ]);
+
   const createAllAutomationTasks = useCallback(async () => {
     if (!canCreateTasks) {
       toast.error('У роли нет права на создание задач.', 'Автоконтроль дел');
       return;
     }
 
-    const readyCount = automationCandidates.filter(isAutomationCandidateReady).length;
+    const readyCount = Math.max(
+      automationSummary.readyCount,
+      automationCandidates.filter((candidate) => getAutomationCandidateState(candidate) === 'ready').length,
+    );
     if (readyCount === 0) {
       return;
     }
@@ -3114,7 +3262,7 @@ export function TaskJournal({
     } finally {
       setCreatingAutomationAll(false);
     }
-  }, [automationCandidates, canCreateTasks, emitTaskChange, openTaskEditor, refreshTasks, toast]);
+  }, [automationCandidates, automationSummary.readyCount, canCreateTasks, emitTaskChange, openTaskEditor, refreshTasks, toast]);
 
   useEffect(() => {
     if (!(routeTaskId && routeTaskId > 0)) {
@@ -5345,11 +5493,18 @@ export function TaskJournal({
         {!embedded && !isApprovalsMode && canCreateTasks && canViewCases && taskSettings.caseInactivityAutomationEnabled ? (
           <TaskAutomationPanel
             candidates={automationCandidates}
+            summary={automationSummary}
+            activeState={automationStateFilter}
+            loadingPage={automationPageLoading}
+            loadingMore={automationLoadingMore}
             creatingCaseId={creatingAutomationCaseId}
             creatingAll={creatingAutomationAll}
+            creationLimit={taskSettings.caseInactivityLimit}
             onCreate={createAutomationTask}
             onCreateManual={openTaskCreateForAutomationCandidate}
             onCreateAll={createAllAutomationTasks}
+            onLoadMore={loadMoreAutomationCandidates}
+            onStateChange={changeAutomationStateFilter}
             onOpenCase={onOpenCase}
           />
         ) : null}
@@ -6148,26 +6303,41 @@ function TaskDeadlineChangeDecisionPrompt({
 
 function TaskAutomationPanel({
   candidates,
+  summary,
+  activeState,
+  loadingPage,
+  loadingMore,
   creatingCaseId,
   creatingAll,
+  creationLimit,
   onCreate,
   onCreateManual,
   onCreateAll,
+  onLoadMore,
+  onStateChange,
   onOpenCase,
 }: {
   candidates: TaskJournalCaseAutomationCandidate[];
+  summary: TaskJournalCaseAutomationSummary;
+  activeState: AutomationCandidateStateFilter;
+  loadingPage: boolean;
+  loadingMore: boolean;
   creatingCaseId: number | null;
   creatingAll: boolean;
+  creationLimit: number;
   onCreate: (candidate: TaskJournalCaseAutomationCandidate) => void;
   onCreateManual: (candidate: TaskJournalCaseAutomationCandidate) => void;
   onCreateAll: () => void;
+  onLoadMore: () => void;
+  onStateChange: (state: AutomationCandidateStateFilter) => void;
   onOpenCase?: (caseId: number, clientId?: number | null) => void | Promise<void>;
 }) {
-  const [activeState, setActiveState] = useState<'all' | 'ready' | 'waiting' | 'paused'>('all');
   const [expanded, setExpanded] = useState(false);
-  const readyCount = candidates.filter(isAutomationCandidateReady).length;
-  const waitingCount = candidates.filter((candidate) => getAutomationCandidateState(candidate) === 'waiting').length;
-  const pausedCount = candidates.filter((candidate) => getAutomationCandidateState(candidate) === 'paused').length;
+  const loadedSummary = summarizeAutomationCandidates(candidates);
+  const effectiveSummary = summary.totalCount >= candidates.length ? summary : loadedSummary;
+  const readyCount = effectiveSummary.readyCount;
+  const stateTotal = getAutomationCandidateStateCount(effectiveSummary, activeState);
+  const hasMore = candidates.length < stateTotal;
   const orderedCandidates = [...candidates].sort((left, right) => {
     const rank = (candidate: TaskJournalCaseAutomationCandidate) => getAutomationCandidateState(candidate) === 'ready'
       ? 0
@@ -6191,7 +6361,7 @@ function TaskAutomationPanel({
         </div>
         <div className="inline-flex w-fit items-center gap-2 rounded-full border border-amber-200 bg-white px-3 py-1 text-sm font-semibold text-amber-700">
           <ClipboardList className="h-4 w-4" />
-          {candidates.length}
+          {effectiveSummary.totalCount}
         </div>
         <button
           type="button"
@@ -6200,21 +6370,25 @@ function TaskAutomationPanel({
           className="inline-flex w-fit items-center gap-2 rounded-xl bg-amber-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-amber-700 disabled:cursor-wait disabled:opacity-60"
         >
           <Plus className="h-4 w-4" />
-          {creatingAll ? 'Создаем...' : `Создать наступившие (${readyCount})`}
+          {creatingAll
+            ? 'Создаем...'
+            : readyCount <= Math.max(1, creationLimit)
+              ? `Создать наступившие (${readyCount})`
+              : `Создать наступившие (${Math.max(1, creationLimit)} из ${readyCount})`}
         </button>
       </div>
 
       <div className="mt-3 flex flex-wrap gap-2" aria-label="Состояния автоконтроля">
         {([
-          ['all', 'Все', candidates.length],
+          ['all', 'Все', effectiveSummary.totalCount],
           ['ready', 'Пора создать', readyCount],
-          ['waiting', 'Ожидают срока', waitingCount],
-          ['paused', 'Приостановлены', pausedCount],
+          ['waiting', 'Ожидают срока', effectiveSummary.waitingCount],
+          ['paused', 'Приостановлены', effectiveSummary.pausedCount],
         ] as const).map(([state, label, count]) => (
           <button
             key={state}
             type="button"
-            onClick={() => { setActiveState(state); setExpanded(false); }}
+            onClick={() => { onStateChange(state); setExpanded(false); }}
             className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${activeState === state
               ? 'border-amber-500 bg-amber-600 text-white'
               : 'border-amber-200 bg-white text-amber-800 hover:bg-amber-100'}`}
@@ -6316,20 +6490,40 @@ function TaskAutomationPanel({
           );
         })}
       </div>
-      {filteredCandidates.length === 0 ? (
+      {loadingPage && filteredCandidates.length === 0 ? (
+        <div className="mt-3 rounded-xl border border-dashed border-amber-200 bg-white/70 px-3 py-4 text-sm text-slate-600">
+          Загружаем дела этой категории...
+        </div>
+      ) : filteredCandidates.length === 0 ? (
         <div className="mt-3 rounded-xl border border-dashed border-amber-200 bg-white/70 px-3 py-4 text-sm text-slate-600">
           В этой категории дел без активных задач нет.
         </div>
       ) : null}
+      <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
+        <span className="text-slate-600">
+          Показано {candidates.length} из {stateTotal}
+        </span>
       {filteredCandidates.length > 6 ? (
         <button
           type="button"
           onClick={() => setExpanded((value) => !value)}
-          className="mt-3 text-sm font-semibold text-amber-800 hover:text-amber-950"
+          className="font-semibold text-amber-800 hover:text-amber-950"
         >
-          {expanded ? 'Свернуть список' : `Показать все (${filteredCandidates.length})`}
+          {expanded ? 'Свернуть список' : `Показать загруженные (${filteredCandidates.length})`}
         </button>
       ) : null}
+        {!loadingPage && hasMore && (expanded || filteredCandidates.length <= 6) ? (
+          <button
+            type="button"
+            onClick={onLoadMore}
+            disabled={loadingMore}
+            className="inline-flex items-center gap-2 rounded-lg border border-amber-300 bg-white px-3 py-1.5 font-semibold text-amber-800 transition hover:bg-amber-100 disabled:cursor-wait disabled:opacity-60"
+          >
+            <Plus className="h-4 w-4" />
+            {loadingMore ? 'Загружаем...' : `Загрузить ещё (${Math.min(100, stateTotal - candidates.length)})`}
+          </button>
+        ) : null}
+      </div>
     </section>
   );
 }

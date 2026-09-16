@@ -2047,12 +2047,37 @@ describe('apiService case calendar', () => {
     const controller = new AbortController();
 
     await apiService.getTaskJournalCaseAutomationCandidates(
-      { search: 'ИВАНОВ' },
+      { search: 'ИВАНОВ', offset: 100, automationState: 'waiting' },
       { signal: controller.signal },
     );
 
     const [url, options] = fetchMock.mock.calls[0];
-    expect(String(url)).toContain('/tasks/automation/case-candidates?search=');
+    expect(String(url)).toContain('/tasks/automation/case-candidates?');
+    expect(String(url)).toContain('search=');
+    expect(String(url)).toContain('offset=100');
+    expect(String(url)).toContain('automationState=waiting');
+    expect(options?.signal).toBe(controller.signal);
+  });
+
+  it('passes an abort signal to the case automation summary request', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+      totalCount: 4,
+      readyCount: 2,
+      waitingCount: 1,
+      pausedCount: 1,
+    }), {
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
+
+    await apiService.getTaskJournalCaseAutomationSummary(
+      { inactiveDays: 14 },
+      { signal: controller.signal },
+    );
+
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/tasks/automation/case-candidates/summary?inactiveDays=14');
     expect(options?.signal).toBe(controller.signal);
   });
 

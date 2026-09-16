@@ -4555,17 +4555,37 @@ export class ApiService {
   }
 
   async getTaskJournalCaseAutomationCandidates(
-    params?: { inactiveDays?: number; limit?: number; escalationDays?: number; search?: string; includeWaiting?: boolean },
+    params?: {
+      inactiveDays?: number;
+      limit?: number;
+      offset?: number;
+      escalationDays?: number;
+      search?: string;
+      includeWaiting?: boolean;
+      automationState?: 'all' | 'ready' | 'waiting' | 'paused';
+    },
     options?: { signal?: AbortSignal },
   ) {
     const q = buildQuery({
       inactiveDays: params?.inactiveDays,
       limit: params?.limit,
+      offset: params?.offset,
       escalationDays: params?.escalationDays,
       search: params?.search,
       includeWaiting: params?.includeWaiting,
+      automationState: params?.automationState,
     });
     return this.request<TaskJournalCaseAutomationCandidate[]>(`/tasks/automation/case-candidates${q}`, {
+      signal: options?.signal,
+    });
+  }
+
+  async getTaskJournalCaseAutomationSummary(
+    params?: { inactiveDays?: number },
+    options?: { signal?: AbortSignal },
+  ) {
+    const q = buildQuery({ inactiveDays: params?.inactiveDays });
+    return this.request<TaskJournalCaseAutomationSummary>(`/tasks/automation/case-candidates/summary${q}`, {
       signal: options?.signal,
     });
   }
@@ -8446,6 +8466,7 @@ import type {
   TaskJournalAssignee,
   TaskJournalAutomationCreateResult,
   TaskJournalCaseAutomationCandidate,
+  TaskJournalCaseAutomationSummary,
   TaskBillingContext,
   TaskJournalComment,
   TaskJournalDeadlineChangeRequest,

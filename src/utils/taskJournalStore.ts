@@ -236,6 +236,13 @@ export interface TaskJournalCaseAutomationCandidate {
   suggestedPriority?: TaskJournalPriority;
 }
 
+export interface TaskJournalCaseAutomationSummary {
+  totalCount: number;
+  readyCount: number;
+  waitingCount: number;
+  pausedCount: number;
+}
+
 export interface TaskJournalAutomationCreateResult {
   createdTasks: TaskJournalItem[];
   skippedCount: number;
