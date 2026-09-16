@@ -3880,6 +3880,53 @@ describe('TaskJournal', () => {
     expect(screen.getByText('ДЕЛО 101')).toBeTruthy();
   });
 
+  it('searches the complete automation queue on the server', async () => {
+    const initialCandidate = {
+      clientId: 10,
+      clientName: 'Старый кандидат',
+      clientCaseId: 100,
+      clientCaseTitle: 'БАНКРОТСТВО',
+      reason: 'Нет активной задачи',
+      activeTaskCount: 0,
+      completedTaskCount: 0,
+      daysWithoutActiveTask: 20,
+      automationState: 'ready' as const,
+      suggestedTitle: 'Проверить движение по делу',
+      suggestedDescription: 'Автоконтроль',
+      suggestedDueAt: todayAt(9),
+    };
+    const searchedCandidate = {
+      ...initialCandidate,
+      clientId: 11,
+      clientName: 'Найденный Петров',
+      clientCaseId: 101,
+      clientCaseTitle: 'НАСЛЕДСТВО',
+    };
+    apiMock.getTaskJournalCaseAutomationCandidates
+      .mockResolvedValueOnce([initialCandidate])
+      .mockResolvedValueOnce([searchedCandidate]);
+    apiMock.getTaskJournalCaseAutomationSummary
+      .mockResolvedValueOnce({ totalCount: 1, readyCount: 1, waitingCount: 0, pausedCount: 0 })
+      .mockResolvedValueOnce({ totalCount: 1, readyCount: 1, waitingCount: 0, pausedCount: 0 });
+
+    await renderJournal();
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Поиск в автоконтроле' }), {
+      target: { value: 'Петров' },
+    });
+
+    await waitFor(() => expect(apiMock.getTaskJournalCaseAutomationCandidates).toHaveBeenCalledTimes(2));
+    expect(apiMock.getTaskJournalCaseAutomationCandidates).toHaveBeenLastCalledWith(
+      expect.objectContaining({ search: 'Петров', offset: 0, automationState: 'all' }),
+      expect.anything(),
+    );
+    expect(apiMock.getTaskJournalCaseAutomationSummary).toHaveBeenLastCalledWith(
+      expect.objectContaining({ inactiveDays: 14, search: 'Петров' }),
+      expect.anything(),
+    );
+    expect(await screen.findByText('Найденный Петров')).toBeTruthy();
+    expect(screen.queryByText('Старый кандидат')).toBeNull();
+  });
+
   it('completes an active task with an existing result from the quick action', async () => {
     await renderJournal([createTask({ result: 'Результат уже заполнен.' })]);
 

@@ -4581,10 +4581,10 @@ export class ApiService {
   }
 
   async getTaskJournalCaseAutomationSummary(
-    params?: { inactiveDays?: number },
+    params?: { inactiveDays?: number; search?: string },
     options?: { signal?: AbortSignal },
   ) {
-    const q = buildQuery({ inactiveDays: params?.inactiveDays });
+    const q = buildQuery({ inactiveDays: params?.inactiveDays, search: params?.search });
     return this.request<TaskJournalCaseAutomationSummary>(`/tasks/automation/case-candidates/summary${q}`, {
       signal: options?.signal,
     });

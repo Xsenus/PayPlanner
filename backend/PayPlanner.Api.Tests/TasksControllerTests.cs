@@ -3939,6 +3939,17 @@ public class TasksControllerTests
         Assert.Equal(1, summary.WaitingCount);
         Assert.Equal(1, summary.PausedCount);
 
+        var searchedSummaryResult = await controller.GetAutomationCaseCandidatesSummary(
+            inactiveDays: 14,
+            search: "ОЖИДАЕТ СРОКА",
+            ct: CancellationToken.None);
+        var searchedSummary = Assert.IsType<TaskJournalCaseAutomationSummaryDto>(
+            Assert.IsType<OkObjectResult>(searchedSummaryResult.Result).Value);
+        Assert.Equal(1, searchedSummary.TotalCount);
+        Assert.Equal(0, searchedSummary.ReadyCount);
+        Assert.Equal(1, searchedSummary.WaitingCount);
+        Assert.Equal(0, searchedSummary.PausedCount);
+
         var readyPageResult = await controller.GetAutomationCaseCandidates(
             inactiveDays: 14,
             limit: 1,

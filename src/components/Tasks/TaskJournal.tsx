@@ -279,17 +279,23 @@ const EMPTY_AUTOMATION_SUMMARY: TaskJournalCaseAutomationSummary = {
 function buildAutomationCandidatesRequestKey(
   settings: TaskJournalSettingsDto,
   automationState: AutomationCandidateStateFilter,
+  search: string,
 ) {
   return [
     settings.caseInactivityDays,
     100,
     settings.caseInactivityEscalationDays,
     automationState,
+    search.trim().toLowerCase(),
   ].join('|');
 }
 
-function buildAutomationSummaryRequestKey(settings: TaskJournalSettingsDto) {
-  return [settings.caseInactivityAutomationEnabled, settings.caseInactivityDays].join('|');
+function buildAutomationSummaryRequestKey(settings: TaskJournalSettingsDto, search: string) {
+  return [
+    settings.caseInactivityAutomationEnabled,
+    settings.caseInactivityDays,
+    search.trim().toLowerCase(),
+  ].join('|');
 }
 
 const STATUS_OPTIONS: Array<{ value: TaskJournalStatus; label: string }> = [
@@ -2183,6 +2189,8 @@ export function TaskJournal({
   const [automationCandidates, setAutomationCandidates] = useState<TaskJournalCaseAutomationCandidate[]>([]);
   const [automationSummary, setAutomationSummary] = useState<TaskJournalCaseAutomationSummary>(EMPTY_AUTOMATION_SUMMARY);
   const [automationStateFilter, setAutomationStateFilter] = useState<AutomationCandidateStateFilter>('all');
+  const [automationSearch, setAutomationSearch] = useState('');
+  const debouncedAutomationSearch = useDebouncedValue(automationSearch, 300);
   const [automationPageLoading, setAutomationPageLoading] = useState(false);
   const [automationLoadingMore, setAutomationLoadingMore] = useState(false);
   const [creatingAutomationCaseId, setCreatingAutomationCaseId] = useState<number | null>(null);
@@ -2557,6 +2565,7 @@ export function TaskJournal({
   const loadAutomationCandidates = useCallback(async (
     settings: TaskJournalSettingsDto,
     automationState: AutomationCandidateStateFilter,
+    search: string,
     signal?: AbortSignal,
     refreshSummary = true,
   ) => {
@@ -2571,13 +2580,14 @@ export function TaskJournal({
       escalationDays: settings.caseInactivityEscalationDays,
       includeWaiting: true,
       automationState,
+      search: search.trim() || undefined,
     };
     const options = signal ? { signal } : undefined;
     const [items, summary] = await Promise.all([
       apiService.getTaskJournalCaseAutomationCandidates(params, options),
       refreshSummary
         ? apiService.getTaskJournalCaseAutomationSummary(
-          { inactiveDays: settings.caseInactivityDays },
+          { inactiveDays: settings.caseInactivityDays, search: search.trim() || undefined },
           options,
         ).catch(() => null)
         : Promise.resolve(null),
@@ -2689,7 +2699,7 @@ export function TaskJournal({
       const trustedDevicePromise = currentUserId
         ? getOfflineCalendarTrustedDevice(currentUserId).catch(() => false)
         : Promise.resolve(false);
-      const automationPromise = settingsPromise.then((settingsResponse) => loadAutomationCandidates(settingsResponse, 'all'));
+      const automationPromise = settingsPromise.then((settingsResponse) => loadAutomationCandidates(settingsResponse, 'all', ''));
       const [assigneeResponse, settingsResponse, notificationDefaultsResponse, timeZoneResponse, calendarSyncSettingsResponse, automationResponse, featureFlagsResponse, trustedDevice] = await Promise.all([
         apiService.getTaskJournalAssignees({ calendarView: shouldUseCalendarVisibility }),
         settingsPromise,
@@ -2710,10 +2720,11 @@ export function TaskJournal({
       setAutomationCandidates(automationResponse.items);
       setAutomationSummary(automationResponse.summary ?? summarizeAutomationCandidates(automationResponse.items));
       setAutomationStateFilter('all');
+      setAutomationSearch('');
       setAutomationPageLoading(false);
-      automationCandidatesRequestKeyRef.current = buildAutomationCandidatesRequestKey(settingsResponse, 'all');
+      automationCandidatesRequestKeyRef.current = buildAutomationCandidatesRequestKey(settingsResponse, 'all', '');
       automationSummaryRequestKeyRef.current = automationResponse.summary
-        ? buildAutomationSummaryRequestKey(settingsResponse)
+        ? buildAutomationSummaryRequestKey(settingsResponse, '')
         : null;
       automationCandidatesInitializedRef.current = true;
       setTaskSettings({
@@ -2887,8 +2898,8 @@ export function TaskJournal({
       return;
     }
 
-    const requestKey = buildAutomationCandidatesRequestKey(taskSettings, automationStateFilter);
-    const summaryRequestKey = buildAutomationSummaryRequestKey(taskSettings);
+    const requestKey = buildAutomationCandidatesRequestKey(taskSettings, automationStateFilter, debouncedAutomationSearch);
+    const summaryRequestKey = buildAutomationSummaryRequestKey(taskSettings, debouncedAutomationSearch);
     if (
       automationCandidatesRequestKeyRef.current === requestKey &&
       automationSummaryRequestKeyRef.current === summaryRequestKey
@@ -2899,11 +2910,18 @@ export function TaskJournal({
     const requestId = automationCandidatesRequestRef.current + 1;
     automationCandidatesRequestRef.current = requestId;
     automationLoadMoreRequestRef.current += 1;
+    setAutomationCandidates([]);
     setAutomationPageLoading(true);
     setAutomationLoadingMore(false);
     const controller = new AbortController();
     const shouldRefreshSummary = automationSummaryRequestKeyRef.current !== summaryRequestKey;
-    void loadAutomationCandidates(taskSettings, automationStateFilter, controller.signal, shouldRefreshSummary)
+    void loadAutomationCandidates(
+      taskSettings,
+      automationStateFilter,
+      debouncedAutomationSearch,
+      controller.signal,
+      shouldRefreshSummary,
+    )
       .then((response) => {
         if (!controller.signal.aborted && automationCandidatesRequestRef.current === requestId) {
           automationCandidatesRequestKeyRef.current = requestKey;
@@ -2929,7 +2947,7 @@ export function TaskJournal({
     return () => {
       controller.abort();
     };
-  }, [automationStateFilter, loadAutomationCandidates, taskSettings]);
+  }, [automationStateFilter, debouncedAutomationSearch, loadAutomationCandidates, taskSettings]);
 
   useEffect(() => {
     let controller: AbortController | null = null;
@@ -2946,13 +2964,19 @@ export function TaskJournal({
       automationLoadMoreRequestRef.current += 1;
       setAutomationLoadingMore(false);
 
-      void loadAutomationCandidates(taskSettings, automationStateFilter, nextController.signal, true)
+      void loadAutomationCandidates(
+        taskSettings,
+        automationStateFilter,
+        debouncedAutomationSearch,
+        nextController.signal,
+        true,
+      )
         .then((response) => {
           if (!nextController.signal.aborted && automationCandidatesRequestRef.current === requestId) {
             setAutomationCandidates(response.items);
             if (response.summary) {
               setAutomationSummary(response.summary);
-              automationSummaryRequestKeyRef.current = buildAutomationSummaryRequestKey(taskSettings);
+              automationSummaryRequestKeyRef.current = buildAutomationSummaryRequestKey(taskSettings, debouncedAutomationSearch);
             } else {
               automationSummaryRequestKeyRef.current = null;
             }
@@ -2966,7 +2990,7 @@ export function TaskJournal({
       controller?.abort();
       window.removeEventListener(TASK_JOURNAL_EVENT, refresh);
     };
-  }, [automationStateFilter, loadAutomationCandidates, taskSettings]);
+  }, [automationStateFilter, debouncedAutomationSearch, loadAutomationCandidates, taskSettings]);
 
   const assigneeById = useMemo(() => {
     const byId = new Map<number, TaskJournalAssignee>();
@@ -3205,6 +3229,7 @@ export function TaskJournal({
         escalationDays: taskSettings.caseInactivityEscalationDays,
         includeWaiting: true,
         automationState: automationStateFilter,
+        search: debouncedAutomationSearch.trim() || undefined,
       });
       if (automationLoadMoreRequestRef.current === requestId) {
         setAutomationCandidates((current) => {
@@ -3225,6 +3250,7 @@ export function TaskJournal({
     automationCandidates.length,
     automationLoadingMore,
     automationPageLoading,
+    debouncedAutomationSearch,
     automationStateFilter,
     automationSummary,
     taskSettings.caseInactivityDays,
@@ -5495,6 +5521,7 @@ export function TaskJournal({
             candidates={automationCandidates}
             summary={automationSummary}
             activeState={automationStateFilter}
+            search={automationSearch}
             loadingPage={automationPageLoading}
             loadingMore={automationLoadingMore}
             creatingCaseId={creatingAutomationCaseId}
@@ -5504,6 +5531,7 @@ export function TaskJournal({
             onCreateManual={openTaskCreateForAutomationCandidate}
             onCreateAll={createAllAutomationTasks}
             onLoadMore={loadMoreAutomationCandidates}
+            onSearchChange={(value) => setAutomationSearch(value.slice(0, 120))}
             onStateChange={changeAutomationStateFilter}
             onOpenCase={onOpenCase}
           />
@@ -6305,6 +6333,7 @@ function TaskAutomationPanel({
   candidates,
   summary,
   activeState,
+  search,
   loadingPage,
   loadingMore,
   creatingCaseId,
@@ -6314,12 +6343,14 @@ function TaskAutomationPanel({
   onCreateManual,
   onCreateAll,
   onLoadMore,
+  onSearchChange,
   onStateChange,
   onOpenCase,
 }: {
   candidates: TaskJournalCaseAutomationCandidate[];
   summary: TaskJournalCaseAutomationSummary;
   activeState: AutomationCandidateStateFilter;
+  search: string;
   loadingPage: boolean;
   loadingMore: boolean;
   creatingCaseId: number | null;
@@ -6329,6 +6360,7 @@ function TaskAutomationPanel({
   onCreateManual: (candidate: TaskJournalCaseAutomationCandidate) => void;
   onCreateAll: () => void;
   onLoadMore: () => void;
+  onSearchChange: (value: string) => void;
   onStateChange: (state: AutomationCandidateStateFilter) => void;
   onOpenCase?: (caseId: number, clientId?: number | null) => void | Promise<void>;
 }) {
@@ -6377,6 +6409,18 @@ function TaskAutomationPanel({
               : `Создать наступившие (${Math.max(1, creationLimit)} из ${readyCount})`}
         </button>
       </div>
+
+      <label className="relative mt-3 block max-w-2xl">
+        <span className="sr-only">Поиск в автоконтроле</span>
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+        <input
+          type="search"
+          value={search}
+          onChange={(event) => onSearchChange(event.target.value)}
+          placeholder="Найти дело, контрагента или ответственного"
+          className="w-full rounded-xl border border-amber-200 bg-white py-2 pl-9 pr-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-amber-500 focus:ring-2 focus:ring-amber-100"
+        />
+      </label>
 
       <div className="mt-3 flex flex-wrap gap-2" aria-label="Состояния автоконтроля">
         {([

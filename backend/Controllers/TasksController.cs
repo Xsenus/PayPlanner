@@ -1338,6 +1338,7 @@ public class TasksController : ControllerBase
     [HttpGet("automation/case-candidates/summary")]
     public async Task<ActionResult<TaskJournalCaseAutomationSummaryDto>> GetAutomationCaseCandidatesSummary(
         [FromQuery] int? inactiveDays = null,
+        [FromQuery] string? search = null,
         CancellationToken ct = default)
     {
         var access = await GetTaskAccessAsync(ct);
@@ -1363,7 +1364,7 @@ public class TasksController : ControllerBase
         var vacationUserIds = await CaseInactivityResponsibleAvailabilityService
             .GetUsersOnVacationAsync(_db, now, ct);
 
-        var summary = await _db.ClientCases
+        var candidates = _db.ClientCases
             .AsNoTracking()
             .ApplyClientCaseVisibility(access.Visibility)
             .Where(clientCase =>
@@ -1372,13 +1373,27 @@ public class TasksController : ControllerBase
                 !CaseInactivityControlCyclePolicy.ExcludedCaseStatuses.Contains(clientCase.Status))
             .Select(clientCase => new
             {
+                clientCase.Title,
                 clientCase.CreatedAt,
+                ClientName = clientCase.Client != null ? clientCase.Client.Name : string.Empty,
+                LegalEntityName = clientCase.LegalEntity != null
+                    ? (clientCase.LegalEntity.ShortName != string.Empty
+                        ? clientCase.LegalEntity.ShortName
+                        : clientCase.LegalEntity.FullName ?? string.Empty)
+                    : string.Empty,
                 clientCase.LastViewedAt,
                 clientCase.ActivityConfirmedAt,
                 clientCase.InactivityRemindersEnabled,
                 ResponsibleUserId = clientCase.ResponsibleUserId ??
                     (clientCase.Client != null ? clientCase.Client.ResponsibleUserId : null) ??
                     (clientCase.LegalEntity != null ? clientCase.LegalEntity.ResponsibleUserId : null),
+                ResponsibleName = clientCase.ResponsibleUser != null
+                    ? clientCase.ResponsibleUser.FullName
+                    : clientCase.Client != null && clientCase.Client.ResponsibleUser != null
+                        ? clientCase.Client.ResponsibleUser.FullName
+                        : clientCase.LegalEntity != null && clientCase.LegalEntity.ResponsibleUser != null
+                            ? clientCase.LegalEntity.ResponsibleUser.FullName
+                            : string.Empty,
                 ActiveTaskCount = _db.TaskJournalItems.Count(task =>
                     task.ClientCaseId == clientCase.Id &&
                     ActiveTaskStatuses.Contains(task.Status)),
@@ -1410,7 +1425,24 @@ public class TasksController : ControllerBase
                 LastCourtEventAt = _db.ClientCaseCourtEvents
                     .Where(courtEvent => courtEvent.ClientCaseId == clientCase.Id)
                     .Max(courtEvent => (DateTime?)(courtEvent.UpdatedAt ?? courtEvent.CreatedAt)),
-            })
+            });
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var rawTerm = search.Trim();
+            var term = rawTerm.ToLower();
+            candidates = candidates.Where(item =>
+                item.Title.ToLower().Contains(term) ||
+                item.Title.Contains(rawTerm) ||
+                item.ClientName.ToLower().Contains(term) ||
+                item.ClientName.Contains(rawTerm) ||
+                item.LegalEntityName.ToLower().Contains(term) ||
+                item.LegalEntityName.Contains(rawTerm) ||
+                item.ResponsibleName.ToLower().Contains(term) ||
+                item.ResponsibleName.Contains(rawTerm));
+        }
+
+        var summary = await candidates
             .Where(item => item.ActiveTaskCount == 0)
             .Select(item => new
             {
