@@ -4228,6 +4228,32 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task GetAutomationCaseCandidates_OverviewShowsResponsibleVacationEndDate()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "vacation-overview@example.com", "Ответственный в отпуске");
+        var client = await CreateClientAsync(db, "Клиент с паузой автоконтроля");
+        client.ResponsibleUserId = author.Id;
+        var clientCase = await CreateCaseAsync(db, client.Id, "ДЕЛО ДО ВОЗВРАЩЕНИЯ ОТВЕТСТВЕННОГО");
+        clientCase.CreatedAt = DateTime.UtcNow.AddDays(-30);
+        var vacationUntil = DateTime.UtcNow.AddDays(5).Date;
+        await SetVacationAsync(db, author.Id, vacationUntil);
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.GetAutomationCaseCandidates(
+            inactiveDays: 14,
+            limit: 10,
+            automationState: "all",
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var candidates = Assert.IsAssignableFrom<IReadOnlyList<TaskJournalCaseAutomationCandidateDto>>(ok.Value);
+        var candidate = Assert.Single(candidates, item => item.ClientCaseId == clientCase.Id);
+        Assert.Equal("paused", candidate.AutomationState);
+        Assert.Equal($"{vacationUntil:yyyy-MM-dd}", candidate.ResponsibleVacationUntilDate);
+    }
+
+    [Fact]
     public async Task GetAutomationCaseCandidates_ResumesCaseAfterResponsibleVacationEnds()
     {
         await using var db = await CreateContextAsync();

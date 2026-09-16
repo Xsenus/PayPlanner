@@ -1092,8 +1092,9 @@ public class TasksController : ControllerBase
         }
         var now = DateTime.UtcNow;
         var cutoff = now.AddDays(-effectiveInactiveDays);
-        var vacationUserIds = await CaseInactivityResponsibleAvailabilityService
-            .GetUsersOnVacationAsync(_db, now, ct);
+        var responsibleAvailability = await CaseInactivityResponsibleAvailabilityService
+            .GetAvailabilityAsync(_db, now, ct);
+        var vacationUserIds = responsibleAvailability.UsersOnVacation;
 
         var candidates = _db.ClientCases
             .AsNoTracking()
@@ -1295,10 +1296,15 @@ public class TasksController : ControllerBase
                 availableUsers,
                 configuredDefaultAssignee,
                 access));
-        var suggestedTimeZonesByUserId = await CalendarTimeZoneHelper.ResolveUserTimeZonesAsync(
-            _db,
-            suggestedAssigneesByCaseId.Values.Select(assignee => assignee.UserId ?? 0),
-            ct);
+        var suggestedTimeZonesByUserId = suggestedAssigneesByCaseId.Values
+            .Select(assignee => assignee.UserId)
+            .Where(userId => userId.HasValue)
+            .Select(userId => userId!.Value)
+            .Distinct()
+            .ToDictionary(
+                userId => userId,
+                userId => CalendarTimeZoneHelper.ResolveTimeZone(
+                    responsibleAvailability.TimeZoneIds.GetValueOrDefault(userId)));
         var defaultTimeZone = CalendarTimeZoneHelper.ResolveTimeZone(null);
 
         return Ok(filteredCandidates.Select(item =>
@@ -1320,6 +1326,12 @@ public class TasksController : ControllerBase
                 item.LastControlCycleEndedAt,
                 effectiveInactiveDays);
             var isOnVacation = vacationUserIds.Contains(item.ResponsibleUserId ?? 0);
+            var responsibleVacationUntilDate = item.ResponsibleUserId is int responsibleUserId &&
+                                               responsibleAvailability.VacationUntilDates.TryGetValue(
+                                                   responsibleUserId,
+                                                   out var vacationUntilDate)
+                ? vacationUntilDate
+                : null;
             var isPaused = !item.InactivityRemindersEnabled || isOnVacation;
             var isReadyForControl = !isPaused && nextCycle.IsEligible;
             var isEscalated = isReadyForControl && daysWithoutActiveTask >= effectiveEscalationDays;
@@ -1384,6 +1396,7 @@ public class TasksController : ControllerBase
                 SuggestedAssigneeName = suggestedAssignee.DisplayName,
                 SuggestedAssigneeSource = suggestedAssigneeSource,
                 SuggestedAssigneeTimeZoneId = CalendarTimeZoneHelper.ResolveIanaTimeZoneId(suggestedTimeZone),
+                ResponsibleVacationUntilDate = responsibleVacationUntilDate,
             };
         }).ToList());
     }

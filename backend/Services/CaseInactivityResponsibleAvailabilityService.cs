@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Services.Notifications;
@@ -6,7 +7,8 @@ namespace PayPlanner.Api.Services;
 
 public sealed record CaseInactivityResponsibleAvailabilitySnapshot(
     HashSet<int> UsersOnVacation,
-    IReadOnlyDictionary<int, string> TimeZoneIds);
+    IReadOnlyDictionary<int, string> TimeZoneIds,
+    IReadOnlyDictionary<int, string> VacationUntilDates);
 
 public static class CaseInactivityResponsibleAvailabilityService
 {
@@ -55,10 +57,12 @@ public static class CaseInactivityResponsibleAvailabilityService
         {
             return new CaseInactivityResponsibleAvailabilitySnapshot(
                 [],
+                new Dictionary<int, string>(),
                 new Dictionary<int, string>());
         }
 
         var result = new HashSet<int>();
+        var vacationUntilDates = new Dictionary<int, string>();
         var timeZoneIds = settings
             .Where(item => item.Key == CalendarTimeZoneHelper.UserTimeZoneSettingKey)
             .GroupBy(item => item.UserId)
@@ -79,9 +83,18 @@ public static class CaseInactivityResponsibleAvailabilityService
             if (UserNotificationDoNotDisturbSettings.IsVacationActive(doNotDisturb, nowUtc, timeZone))
             {
                 result.Add(userSettings.Key);
+                if (DateOnly.TryParseExact(
+                        doNotDisturb.VacationUntil,
+                        "yyyy-MM-dd",
+                        CultureInfo.InvariantCulture,
+                        DateTimeStyles.None,
+                        out var vacationUntil))
+                {
+                    vacationUntilDates[userSettings.Key] = vacationUntil.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+                }
             }
         }
 
-        return new CaseInactivityResponsibleAvailabilitySnapshot(result, timeZoneIds);
+        return new CaseInactivityResponsibleAvailabilitySnapshot(result, timeZoneIds, vacationUntilDates);
     }
 }

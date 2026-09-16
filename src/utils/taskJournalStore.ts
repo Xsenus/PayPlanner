@@ -238,6 +238,7 @@ export interface TaskJournalCaseAutomationCandidate {
   suggestedAssigneeName?: string | null;
   suggestedAssigneeSource?: 'responsible' | 'configuredDefault' | 'currentUser';
   suggestedAssigneeTimeZoneId?: string | null;
+  responsibleVacationUntilDate?: string | null;
 }
 
 export interface TaskJournalCaseAutomationSummary {

@@ -218,6 +218,7 @@ public class TaskJournalCaseAutomationCandidateDto
     public string SuggestedAssigneeName { get; set; } = string.Empty;
     public string SuggestedAssigneeSource { get; set; } = "responsible";
     public string SuggestedAssigneeTimeZoneId { get; set; } = "Europe/Moscow";
+    public string? ResponsibleVacationUntilDate { get; set; }
 }
 
 public class TaskJournalCaseAutomationSummaryDto

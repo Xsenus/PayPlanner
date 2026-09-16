@@ -1024,6 +1024,11 @@ function getTaskDateLabel(value: string | Date, timeZoneId = activeTaskJournalTi
   }).format(new Date(Date.UTC(parts.year, parts.month - 1, parts.day)));
 }
 
+function formatIsoDateKey(value: string | null | undefined) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value?.trim() || '');
+  return match ? `${match[3]}.${match[2]}.${match[1]}` : '';
+}
+
 function formatDateOnly(value: Date) {
   return value.toLocaleDateString('ru-RU', {
     day: '2-digit',
@@ -6639,6 +6644,7 @@ function TaskAutomationPanel({
               ? formatDateTimeInTimeZone(candidate.suggestedDueAt, suggestedAssigneeTimeZoneId)
               : formatDateTime(candidate.suggestedDueAt)
             : '';
+          const responsibleVacationUntilLabel = formatIsoDateKey(candidate.responsibleVacationUntilDate);
 
           return (
           <article
@@ -6677,7 +6683,9 @@ function TaskAutomationPanel({
                 <CalendarClock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400" />
                 <span>
                   {automationState === 'paused'
-                    ? 'Следующий контроль появится после возобновления'
+                    ? responsibleVacationUntilLabel
+                      ? `Ответственный отсутствует до ${responsibleVacationUntilLabel} включительно`
+                      : 'Следующий контроль появится после возобновления'
                     : `${automationState === 'ready' ? 'Срок контроля' : 'Следующий контроль'}: ${candidate.nextControlAt ? formatDateTime(candidate.nextControlAt) : 'не определён'}`}
                 </span>
               </div>

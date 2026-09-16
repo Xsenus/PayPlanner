@@ -3849,6 +3849,7 @@ describe('TaskJournal', () => {
         lastTaskAt: null,
         nextControlAt: null,
         daysUntilControl: 0,
+        responsibleVacationUntilDate: '2026-09-21',
         suggestedTitle: 'Проверить движение по делу',
         suggestedDescription: 'Автоконтроль',
         suggestedDueAt: todayAt(9),
@@ -3873,6 +3874,7 @@ describe('TaskJournal', () => {
     expect(screen.getByText(/Последнее движение:.*задача/)).toBeTruthy();
     expect(screen.getByText(/Последнее движение:.*документ/)).toBeTruthy();
     expect(screen.getByText(/Следующий контроль:/)).toBeTruthy();
+    expect(screen.getByText('Ответственный отсутствует до 21.09.2026 включительно')).toBeTruthy();
     expect(screen.getByText('Ответственный: Администратор')).toBeTruthy();
     expect(screen.getByText('Ответственный: не назначен')).toBeTruthy();
     expect(screen.getByText(/При создании: Резервный исполнитель · резервный исполнитель · срок/)).toBeTruthy();
