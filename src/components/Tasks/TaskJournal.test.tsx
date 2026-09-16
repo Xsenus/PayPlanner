@@ -3941,6 +3941,78 @@ describe('TaskJournal', () => {
     expect(screen.getByText('ДЕЛО 101')).toBeTruthy();
   });
 
+  it.each(['legacy', 'modern'] as const)(
+    'prefills the %s task card from a waiting automation candidate',
+    async (taskCardWindowMode) => {
+      const suggestedDueAt = todayAt(9);
+      apiMock.getTaskJournalCaseAutomationCandidates.mockResolvedValue([{
+        clientId: 10,
+        clientName: 'Иванов Иван Иванович',
+        responsibleUserId: 7,
+        responsibleName: 'Администратор',
+        clientCaseId: 100,
+        clientCaseTitle: 'БАНКРОТСТВО',
+        reason: 'Первый контроль через 5 дн.',
+        activeTaskCount: 0,
+        completedTaskCount: 0,
+        daysWithoutActiveTask: 9,
+        automationState: 'waiting',
+        lastTaskAt: null,
+        suggestedTitle: 'Проверить движение по делу',
+        suggestedDescription: 'Уточнить текущее состояние дела и запланировать следующий шаг.',
+        suggestedDueAt,
+        suggestedPriority: 'high',
+      }]);
+      apiMock.getTaskJournalCaseAutomationSummary.mockResolvedValue({
+        totalCount: 1,
+        readyCount: 0,
+        waitingCount: 1,
+        pausedCount: 0,
+      });
+
+      await renderJournal([], {
+        waitForTitle: null,
+        settings: { taskCardWindowMode },
+      });
+
+      fireEvent.click(screen.getByTestId('task-automation-create-100'));
+      expect(await screen.findByRole('heading', { name: 'Выберите клиента и дело' })).toBeTruthy();
+      expect((screen.getByTestId('task-billing-wizard-case') as HTMLSelectElement).value).toBe('100');
+
+      const unpaidButton = screen.getByRole('button', { name: 'Неоплачиваемая задача' }) as HTMLButtonElement;
+      expect(unpaidButton.disabled).toBe(false);
+      fireEvent.click(unpaidButton);
+
+      const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+      expect((within(card).getByTestId('task-title-input') as HTMLInputElement).value).toBe('Проверить движение по делу');
+      expect((within(card).getByTestId('task-description-field') as HTMLTextAreaElement).value).toBe(
+        'Уточнить текущее состояние дела и запланировать следующий шаг.',
+      );
+      expect((within(card).getByTestId('task-due-at-input') as HTMLInputElement).value).toBe(
+        toDatetimeLocalInputValue(new Date(suggestedDueAt)),
+      );
+      expect((within(card).getByTestId('task-assignee-select') as HTMLSelectElement).value).toBe('7');
+
+      fireEvent.click(within(card).getByRole('button', { name: 'Создать задачу' }));
+
+      await waitFor(() => expect(apiMock.createTaskJournalItem).toHaveBeenCalledTimes(1));
+      expect(apiMock.createTaskJournalItem).toHaveBeenCalledWith(expect.objectContaining({
+        clientId: 10,
+        legalEntityId: null,
+        clientCaseId: 100,
+        title: 'Проверить движение по делу',
+        description: 'Уточнить текущее состояние дела и запланировать следующий шаг.',
+        dueAt: suggestedDueAt,
+        assigneeUserId: 7,
+        assigneeName: 'Администратор',
+        type: 'control',
+        priority: 'high',
+        status: 'new',
+        plannedDurationMinutes: 60,
+      }));
+    },
+  );
+
   it('searches the complete automation queue on the server', async () => {
     const initialCandidate = {
       clientId: 10,

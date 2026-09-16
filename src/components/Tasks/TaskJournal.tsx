@@ -3280,6 +3280,19 @@ export function TaskJournal({
       objectName: [getAutomationCandidateOwnerName(candidate), candidate.clientCaseTitle]
         .filter(Boolean)
         .join(' - '),
+      title: candidate.suggestedTitle,
+      description: candidate.suggestedDescription,
+      dueAt: candidate.suggestedDueAt,
+      type: 'control',
+      priority: candidate.suggestedPriority ?? 'normal',
+      status: 'new',
+      plannedDurationMinutes: 60,
+      ...(candidate.responsibleUserId
+        ? {
+          assigneeUserId: candidate.responsibleUserId,
+          assigneeName: candidate.responsibleName?.trim() || '',
+        }
+        : {}),
     });
   }, [openTaskCreateFromTemplate]);
 
