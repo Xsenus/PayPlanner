@@ -325,12 +325,14 @@ describe('CasesRegistry', () => {
   });
 
   it('shows the last activity, next control and exclusion reason in the registry', async () => {
+    const futureControlAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    const dueControlAt = new Date(Date.now() - 60 * 60 * 1000).toISOString();
     vi.mocked(apiService.getCasesV2).mockResolvedValue({
       items: [
         createCase({
           id: 1,
           lastMeaningfulActivityAt: '2026-05-12T10:20:00Z',
-          nextInactivityControlAt: '2026-05-26T10:20:00Z',
+          nextInactivityControlAt: futureControlAt,
         }),
         createCase({
           id: 2,
@@ -340,17 +342,52 @@ describe('CasesRegistry', () => {
           inactivityControlExclusionReason: 'Ожидаем решение клиента',
           nextInactivityControlAt: null,
         }),
+        createCase({
+          id: 3,
+          caseNumber: '2026-003',
+          title: 'Дело с активной задачей',
+          inactivityControlExclusionReason: 'Есть активная задача',
+          nextInactivityControlAt: null,
+        }),
+        createCase({
+          id: 4,
+          caseNumber: '2026-004',
+          title: 'Дело с наступившим контролем',
+          nextInactivityControlAt: dueControlAt,
+        }),
       ],
-      total: 2,
+      total: 4,
       page: 1,
       pageSize: 25,
     });
 
     render(<CasesRegistry />);
 
-    expect((await screen.findAllByText(/Последняя:/u)).length).toBe(2);
-    expect(screen.getByText(/Следующая:/u)).toBeTruthy();
-    expect(screen.getByText('Исключено: Ожидаем решение клиента')).toBeTruthy();
+    expect((await screen.findAllByText(/Последняя:/u)).length).toBe(4);
+    expect(screen.getByText('Проверка запланирована').className).toContain('bg-cyan-50');
+    expect(screen.getByText('Пора проверить').className).toContain('bg-amber-50');
+    expect(screen.getByText('Контроль выключен')).toBeTruthy();
+    expect(screen.getByText('Ожидаем решение клиента')).toBeTruthy();
+    expect(screen.getByText('Есть активная задача').className).toContain('bg-emerald-50');
+    expect(screen.getByText('Отдельная контрольная задача пока не требуется')).toBeTruthy();
+  });
+
+  it('lets the server use the configured inactivity period instead of sending a fixed threshold', async () => {
+    render(<CasesRegistry />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+
+    fireEvent.change(screen.getByDisplayValue('Любая активность'), {
+      target: { value: 'inactive' },
+    });
+
+    await waitFor(() => {
+      expect(apiService.getCasesV2).toHaveBeenLastCalledWith(
+        expect.objectContaining({ activity: 'inactive' }),
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      );
+    });
+    const lastParams = vi.mocked(apiService.getCasesV2).mock.calls.at(-1)?.[0];
+    expect(lastParams).not.toHaveProperty('inactiveDays');
   });
 
   it('keeps case owners closed when clients and legal entities are hidden', async () => {

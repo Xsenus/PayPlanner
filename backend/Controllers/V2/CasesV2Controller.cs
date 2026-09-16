@@ -291,6 +291,7 @@ public class CasesV2Controller : ControllerBase
         pageSize = Math.Clamp(pageSize, 1, MaxRegistryPageSize);
 
         var canViewFinance = await CanViewCaseFinanceAsync(ct);
+        var effectiveInactiveDays = await ResolveRegistryInactiveDaysAsync(activity, inactiveDays, ct);
         var q = BuildRegistryQuery(
             visibility,
             clientId,
@@ -308,7 +309,7 @@ public class CasesV2Controller : ControllerBase
             sortDir,
             scope,
             activity,
-            inactiveDays);
+            effectiveInactiveDays);
 
         q = ApplyCourtRegistryFilters(q, courtOnly, courtState, courtInstance, DateTime.UtcNow);
 
@@ -636,6 +637,7 @@ public class CasesV2Controller : ControllerBase
         }
 
         var canViewFinance = await CanViewCaseFinanceAsync(ct);
+        var effectiveInactiveDays = await ResolveRegistryInactiveDaysAsync(activity, inactiveDays, ct);
         var registryQuery = BuildRegistryQuery(
                 visibility,
                 clientId,
@@ -653,7 +655,7 @@ public class CasesV2Controller : ControllerBase
                 sortDir,
                 scope,
                 activity,
-                inactiveDays)
+                effectiveInactiveDays)
             .Take(MaxRegistryExportRows)
             .AsNoTracking();
         var items = await SelectRegistryCaseRows(registryQuery)
@@ -694,8 +696,42 @@ public class CasesV2Controller : ControllerBase
             .ApplyClientCaseVisibility(visibility)
             .ApplyCaseRegistryScope(scope, visibility.UserId)
             .ApplyCaseFilters(clientId, legalEntityId, status, search, responsibleUserId, caseType, priority, from, to, minFee, maxFee)
-            .ApplyCaseActivityFilter(activity, inactiveDays, _db.TaskJournalItems.IgnoreQueryFilters())
+            .ApplyCaseActivityFilter(
+                activity,
+                inactiveDays,
+                _db.TaskJournalItems.IgnoreQueryFilters(),
+                _db.TaskJournalComments,
+                _db.ClientCaseDocuments,
+                _db.ClientCaseCourtEvents,
+                CaseInactivityAutomationTag)
             .ApplyCaseSort(sortBy, sortDir);
+
+    private async Task<int?> ResolveRegistryInactiveDaysAsync(
+        string? activity,
+        int? inactiveDays,
+        CancellationToken ct)
+    {
+        var normalizedActivity = activity?.Trim().ToLowerInvariant();
+        if (normalizedActivity is not ("inactive" or "active"))
+        {
+            return inactiveDays;
+        }
+
+        if (inactiveDays.HasValue)
+        {
+            return Math.Clamp(inactiveDays.Value, 1, 365);
+        }
+
+        var configuredValue = await _db.SystemSettings
+            .AsNoTracking()
+            .Where(setting => setting.Key == CaseInactivityAutomationDaysSettingKey)
+            .Select(setting => setting.Value)
+            .SingleOrDefaultAsync(ct);
+
+        return int.TryParse(configuredValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out var configuredDays)
+            ? Math.Clamp(configuredDays, 1, 365)
+            : 14;
+    }
 
     private static IQueryable<ClientCase> ApplyCourtRegistryFilters(
         IQueryable<ClientCase> query,

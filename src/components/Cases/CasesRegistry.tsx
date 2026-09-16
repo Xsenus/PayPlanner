@@ -125,12 +125,10 @@ const CASE_SCOPE_OPTIONS: Array<{ value: CaseScope; label: string }> = [
 ];
 const CASE_ACTIVITY_FILTER_OPTIONS: Array<{ value: CaseActivityFilter; label: string }> = [
   { value: 'all', label: 'Любая активность' },
-  { value: 'active', label: 'Активные по движению' },
-  { value: 'inactive', label: 'Неактивные' },
+  { value: 'active', label: 'Есть движение или контроль не нужен' },
+  { value: 'inactive', label: 'Без движения по сроку' },
 ];
 const CASE_REGISTRY_VIEW_STORAGE_KEY = 'pp.cases_registry_views.v1';
-const INACTIVE_CASE_DAYS = 14;
-const DAY_MS = 24 * 60 * 60 * 1000;
 
 const CASE_COLUMN_CONFIGS: Array<{
   key: CaseColumnKey;
@@ -257,22 +255,14 @@ function getLatestCaseActivityAt(item: ClientCase) {
   return new Date(Math.max(...values.map((value) => value.getTime()))).toISOString();
 }
 
-function getCaseActivityAgeDays(item: ClientCase) {
-  const latestActivity = getLatestCaseActivityAt(item) || item.createdAt;
-  const date = new Date(latestActivity);
-  if (Number.isNaN(date.getTime())) {
-    return null;
-  }
-
-  return Math.max(0, Math.floor((Date.now() - date.getTime()) / DAY_MS));
-}
-
 function getCaseActivityBadge(item: ClientCase) {
+  const exclusionReason = item.inactivityControlExclusionReason?.trim();
+
   if (item.status === 'Closed' || item.status === 'Lost') {
     return {
-      label: 'Архив',
+      label: 'Дело завершено',
       className: 'border-slate-200 bg-slate-100 text-slate-600',
-      hint: 'Дело завершено',
+      hint: 'Автоконтроль не требуется',
     };
   }
 
@@ -280,43 +270,42 @@ function getCaseActivityBadge(item: ClientCase) {
     return {
       label: 'Контроль выключен',
       className: 'border-slate-200 bg-slate-100 text-slate-600',
-      hint: 'Индивидуальное исключение',
+      hint: item.inactivityRemindersDisabledReason?.trim() || exclusionReason || 'Индивидуальное исключение',
     };
   }
 
-  if (item.inactivityControlExclusionReason) {
+  if (exclusionReason === 'Есть активная задача') {
     return {
-      label: 'Исключено',
-      className: 'border-slate-200 bg-slate-100 text-slate-600',
-      hint: 'Контроль временно не выполняется',
+      label: exclusionReason,
+      className: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+      hint: 'Отдельная контрольная задача пока не требуется',
     };
   }
 
-  const days = getCaseActivityAgeDays(item);
+  if (exclusionReason) {
+    return {
+      label: 'Контроль приостановлен',
+      className: 'border-slate-200 bg-slate-100 text-slate-600',
+      hint: exclusionReason,
+    };
+  }
+
   if (item.nextInactivityControlAt) {
     const nextControlAt = new Date(item.nextInactivityControlAt);
     const isDue = !Number.isNaN(nextControlAt.getTime()) && nextControlAt.getTime() <= Date.now();
     return {
-      label: days === null ? 'Автоконтроль' : `Нет движения ${days} дн.`,
+      label: isDue ? 'Пора проверить' : 'Проверка запланирована',
       className: isDue
         ? 'border-amber-200 bg-amber-50 text-amber-700'
-        : 'border-blue-200 bg-blue-50 text-blue-700',
-      hint: isDue ? 'Срок контроля наступил' : 'Проверка запланирована',
-    };
-  }
-
-  if (days !== null && days >= INACTIVE_CASE_DAYS) {
-    return {
-      label: `Нет движения ${days} дн.`,
-      className: 'border-amber-200 bg-amber-50 text-amber-700',
-      hint: 'Дело попадает под автоконтроль',
+        : 'border-cyan-200 bg-cyan-50 text-cyan-700',
+      hint: isDue ? 'Срок автоконтроля наступил' : 'Система продолжает отсчёт',
     };
   }
 
   return {
-    label: 'Активно',
-    className: 'border-emerald-200 bg-emerald-50 text-emerald-700',
-    hint: days === null ? 'Активность не рассчитана' : `Последнее движение ${days} дн. назад`,
+    label: 'График не рассчитан',
+    className: 'border-amber-200 bg-amber-50 text-amber-700',
+    hint: 'Обновите данные дела или настройки автоконтроля',
   };
 }
 
@@ -583,7 +572,6 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
       maxFee: canViewFinance && maxFee ? Number(maxFee) : undefined,
       scope: caseScope === 'all' ? undefined : caseScope,
       activity: activityFilter === 'all' ? undefined : activityFilter,
-      inactiveDays: INACTIVE_CASE_DAYS,
       sortBy,
       sortDir,
       page,
@@ -787,7 +775,6 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
     maxFee: canViewFinance && maxFee ? Number(maxFee) : undefined,
     scope: caseScope === 'all' ? undefined : caseScope,
     activity: activityFilter === 'all' ? undefined : activityFilter,
-    inactiveDays: INACTIVE_CASE_DAYS,
     sortBy,
     sortDir,
   });
@@ -1238,23 +1225,20 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
         );
       case 'activity': {
         const activity = getCaseActivityBadge(item);
+        const nextControlTime = item.nextInactivityControlAt ? Date.parse(item.nextInactivityControlAt) : Number.NaN;
+        const nextControlIsDue = Number.isFinite(nextControlTime) && nextControlTime <= Date.now();
         return (
-          <div>
+          <div aria-label={`Автоконтроль: ${activity.label}. ${activity.hint}`} className="rounded-lg border border-slate-200 bg-white/80 p-2 shadow-sm">
             <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${activity.className}`}>
               {activity.label}
             </span>
-            <div className="mt-1 text-xs text-slate-500">{activity.hint}</div>
-            <div className="mt-1 text-xs text-slate-600">
+            <div className="mt-1.5 text-xs font-medium leading-4 text-slate-600">{activity.hint}</div>
+            <div className="mt-1 text-[11px] text-slate-500">
               Последняя: {formatProfileDateTime(getLatestCaseActivityAt(item), timeZoneId) || '—'}
             </div>
             {item.nextInactivityControlAt ? (
-              <div className="mt-1 text-xs font-medium text-blue-700">
+              <div className={`mt-1 text-[11px] font-semibold ${nextControlIsDue ? 'text-amber-700' : 'text-cyan-700'}`}>
                 Следующая: {formatProfileDateTime(item.nextInactivityControlAt, timeZoneId)}
-              </div>
-            ) : null}
-            {item.inactivityControlExclusionReason ? (
-              <div className="mt-1 break-words text-xs font-medium text-amber-700">
-                Исключено: {item.inactivityControlExclusionReason}
               </div>
             ) : null}
           </div>

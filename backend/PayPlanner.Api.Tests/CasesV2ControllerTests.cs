@@ -367,6 +367,153 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task Get_UsesConfiguredInactivityPeriodAndAllMeaningfulSignalsWhenFilterThresholdIsOmitted()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+        var owner = await CreateUserAsync(db, "configured-activity-owner@example.com", "Владелец");
+        var now = DateTime.UtcNow;
+        var client = new Client
+        {
+            Name = "Клиент настроенного контроля",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var inactiveCase = new ClientCase
+        {
+            Client = client,
+            Title = "Нет движения больше настроенного срока",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = owner.Id,
+            CreatedAt = now.AddDays(-5),
+            InactivityRemindersEnabled = true,
+        };
+        var commentCase = new ClientCase
+        {
+            Client = client,
+            Title = "Недавний комментарий",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = owner.Id,
+            CreatedAt = now.AddDays(-10),
+            InactivityRemindersEnabled = true,
+        };
+        var documentCase = new ClientCase
+        {
+            Client = client,
+            Title = "Недавний документ",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = owner.Id,
+            CreatedAt = now.AddDays(-10),
+            InactivityRemindersEnabled = true,
+        };
+        var courtEventCase = new ClientCase
+        {
+            Client = client,
+            Title = "Недавнее судебное событие",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = owner.Id,
+            CreatedAt = now.AddDays(-10),
+            InactivityRemindersEnabled = true,
+        };
+        var commentTask = new TaskJournalItem
+        {
+            ClientCase = commentCase,
+            ObjectName = "Дело",
+            Title = "Старая задача",
+            DueAt = now.AddDays(-8),
+            CreatedAt = now.AddDays(-9),
+            Status = "done",
+        };
+        commentTask.Comments.Add(new TaskJournalComment
+        {
+            AuthorName = "Владелец",
+            Text = "Новое движение по делу",
+            CreatedAt = now.AddDays(-1),
+        });
+        documentCase.Documents.Add(new ClientCaseDocument
+        {
+            DocumentKey = "configured-filter-document",
+            DocumentType = "Документ",
+            Status = "draft",
+            OriginalFileName = "document.pdf",
+            StoredFileName = "document.pdf",
+            StoragePath = "cases/document.pdf",
+            UploadedByName = "Владелец",
+            UploadedAt = now.AddDays(-1),
+        });
+        courtEventCase.CourtEvents.Add(new ClientCaseCourtEvent
+        {
+            Title = "Получено определение",
+            ScheduledAt = now.AddDays(5),
+            CreatedAt = now.AddDays(-1),
+            CreatedByUserName = "Владелец",
+        });
+        db.Clients.Add(client);
+        db.ClientCases.AddRange(inactiveCase, commentCase, documentCase, courtEventCase);
+        db.TaskJournalItems.Add(commentTask);
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = "tasks.automation.caseControl.inactiveDays",
+            Value = "3",
+        });
+        await db.SaveChangesAsync();
+        interceptor.Commands.Clear();
+
+        var result = await CreateController(db, owner).Get(
+            clientId: null,
+            legalEntityId: null,
+            status: null,
+            search: null,
+            responsibleUserId: null,
+            caseType: null,
+            priority: null,
+            from: null,
+            to: null,
+            minFee: null,
+            maxFee: null,
+            sortBy: "title",
+            sortDir: "asc",
+            page: 1,
+            pageSize: 50,
+            activity: "inactive",
+            inactiveDays: null,
+            ct: CancellationToken.None);
+
+        var item = Assert.Single(GetAnonymousItems(Assert.IsType<OkObjectResult>(result).Value));
+        Assert.Equal(inactiveCase.Id, item.Id);
+        Assert.Contains(interceptor.Commands, command =>
+            command.Contains("COUNT(*)", StringComparison.OrdinalIgnoreCase)
+            && command.Contains("TaskJournalComments", StringComparison.Ordinal)
+            && command.Contains("ClientCaseDocuments", StringComparison.Ordinal)
+            && command.Contains("ClientCaseCourtEvents", StringComparison.Ordinal)
+            && command.Contains("UNION ALL", StringComparison.OrdinalIgnoreCase));
+
+        var activeResult = await CreateController(db, owner).Get(
+            clientId: null,
+            legalEntityId: null,
+            status: null,
+            search: null,
+            responsibleUserId: null,
+            caseType: null,
+            priority: null,
+            from: null,
+            to: null,
+            minFee: null,
+            maxFee: null,
+            sortBy: "title",
+            sortDir: "asc",
+            page: 1,
+            pageSize: 50,
+            activity: "active",
+            inactiveDays: null,
+            ct: CancellationToken.None);
+
+        var activeItems = GetAnonymousItems(Assert.IsType<OkObjectResult>(activeResult).Value);
+        Assert.Equal(3, activeItems.Count);
+        Assert.DoesNotContain(activeItems, activeItem => activeItem.Id == inactiveCase.Id);
+    }
+
+    [Fact]
     public async Task UpdateControl_MarksCaseAndScopeReturnsOnlyControlledCases()
     {
         await using var db = await CreateContextAsync();

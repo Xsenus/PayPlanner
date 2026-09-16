@@ -479,7 +479,11 @@ namespace PayPlanner.Api.Extensions
             this IQueryable<ClientCase> q,
             string? activity,
             int? inactiveDays = null,
-            IQueryable<TaskJournalItem>? taskJournalItems = null)
+            IQueryable<TaskJournalItem>? taskJournalItems = null,
+            IQueryable<TaskJournalComment>? taskJournalComments = null,
+            IQueryable<ClientCaseDocument>? caseDocuments = null,
+            IQueryable<ClientCaseCourtEvent>? courtEvents = null,
+            string? excludedTaskTag = null)
         {
             var normalized = activity?.Trim().ToLowerInvariant();
             if (normalized is not ("inactive" or "active"))
@@ -512,27 +516,67 @@ namespace PayPlanner.Api.Extensions
                         || (c.ActivityConfirmedAt ?? c.CreatedAt) > cutoff);
             }
 
+            var meaningfulTaskActivities = taskJournalItems
+                .Where(task =>
+                    task.ClientCaseId.HasValue
+                    && (string.IsNullOrEmpty(excludedTaskTag) || !task.TagsJson.Contains(excludedTaskTag)))
+                .Select(task => new
+                {
+                    CaseId = task.ClientCaseId!.Value,
+                    At = (DateTime?)(task.UpdatedAt ?? task.CreatedAt),
+                });
+            var meaningfulActivities = meaningfulTaskActivities;
+            if (taskJournalComments is not null)
+            {
+                meaningfulActivities = meaningfulActivities.Concat(taskJournalComments
+                    .Where(comment =>
+                        comment.TaskJournalItem.ClientCaseId.HasValue
+                        && (string.IsNullOrEmpty(excludedTaskTag) || !comment.TaskJournalItem.TagsJson.Contains(excludedTaskTag)))
+                    .Select(comment => new
+                    {
+                        CaseId = comment.TaskJournalItem.ClientCaseId!.Value,
+                        At = (DateTime?)(comment.UpdatedAt ?? comment.CreatedAt),
+                    }));
+            }
+            if (caseDocuments is not null)
+            {
+                meaningfulActivities = meaningfulActivities.Concat(caseDocuments.Select(document => new
+                {
+                    CaseId = document.ClientCaseId,
+                    At = (DateTime?)document.UploadedAt,
+                }));
+            }
+            if (courtEvents is not null)
+            {
+                meaningfulActivities = meaningfulActivities.Concat(courtEvents.Select(courtEvent => new
+                {
+                    CaseId = courtEvent.ClientCaseId,
+                    At = (DateTime?)(courtEvent.UpdatedAt ?? courtEvent.CreatedAt),
+                }));
+            }
+
+            var latestMeaningfulActivityByCase = meaningfulActivities
+                .GroupBy(item => item.CaseId)
+                .Select(group => new
+                {
+                    CaseId = group.Key,
+                    At = group.Max(item => item.At),
+                });
+
             inactiveQuery = q.Where(c =>
                 c.InactivityRemindersEnabled
                 && c.Status != ClientCaseStatus.Closed
                 && c.Status != ClientCaseStatus.Lost
-                && (taskJournalItems
-                    .Where(task => task.ClientCaseId == c.Id)
-                    .Max(task => (DateTime?)(task.UpdatedAt ?? task.CreatedAt)) ?? c.CreatedAt) <= cutoff
+                && (latestMeaningfulActivityByCase
+                    .Where(activityItem => activityItem.CaseId == c.Id)
+                    .Select(activityItem => activityItem.At)
+                    .FirstOrDefault() ?? c.CreatedAt) <= cutoff
                 && (c.LastViewedAt ?? c.CreatedAt) <= cutoff
                 && (c.ActivityConfirmedAt ?? c.CreatedAt) <= cutoff);
 
             return normalized == "inactive"
                 ? inactiveQuery
-                : q.Where(c =>
-                    !c.InactivityRemindersEnabled
-                    || c.Status == ClientCaseStatus.Closed
-                    || c.Status == ClientCaseStatus.Lost
-                    || (taskJournalItems
-                        .Where(task => task.ClientCaseId == c.Id)
-                        .Max(task => (DateTime?)(task.UpdatedAt ?? task.CreatedAt)) ?? c.CreatedAt) > cutoff
-                    || (c.LastViewedAt ?? c.CreatedAt) > cutoff
-                    || (c.ActivityConfirmedAt ?? c.CreatedAt) > cutoff);
+                : q.Where(c => !inactiveQuery.Select(inactiveCase => inactiveCase.Id).Contains(c.Id));
         }
 
         public static IQueryable<ClientCase> ApplyCaseSort(this IQueryable<ClientCase> q, string? sortBy, string? sortDir)
