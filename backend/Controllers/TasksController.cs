@@ -977,10 +977,72 @@ public class TasksController : ControllerBase
         };
 
         var totalCount = await detailsQuery.CountAsync(ct);
-        var rows = await detailsQuery
-            .OrderBy(item => item.ClientName != string.Empty ? item.ClientName : item.LegalEntityName)
-            .ThenBy(item => item.Title)
-            .ThenBy(item => item.Id)
+        var sortableDetailsQuery = detailsQuery
+            .Select(item => new
+            {
+                Item = item,
+                LastMeaningfulActivityAt = item.LastTaskAt.HasValue && item.LastTaskAt.Value > item.CreatedAt
+                    ? item.LastTaskAt.Value
+                    : item.CreatedAt,
+            })
+            .Select(row => new
+            {
+                row.Item,
+                LastMeaningfulActivityAt = row.Item.LastTaskCommentAt.HasValue && row.Item.LastTaskCommentAt.Value > row.LastMeaningfulActivityAt
+                    ? row.Item.LastTaskCommentAt.Value
+                    : row.LastMeaningfulActivityAt,
+            })
+            .Select(row => new
+            {
+                row.Item,
+                LastMeaningfulActivityAt = row.Item.LastDocumentAt.HasValue && row.Item.LastDocumentAt.Value > row.LastMeaningfulActivityAt
+                    ? row.Item.LastDocumentAt.Value
+                    : row.LastMeaningfulActivityAt,
+            })
+            .Select(row => new
+            {
+                row.Item,
+                LastMeaningfulActivityAt = row.Item.LastCourtEventAt.HasValue && row.Item.LastCourtEventAt.Value > row.LastMeaningfulActivityAt
+                    ? row.Item.LastCourtEventAt.Value
+                    : row.LastMeaningfulActivityAt,
+            })
+            .Select(row => new
+            {
+                row.Item,
+                LastMeaningfulActivityAt = row.Item.LastViewedAt.HasValue && row.Item.LastViewedAt.Value > row.LastMeaningfulActivityAt
+                    ? row.Item.LastViewedAt.Value
+                    : row.LastMeaningfulActivityAt,
+            })
+            .Select(row => new
+            {
+                row.Item,
+                LastMeaningfulActivityAt = row.Item.ActivityConfirmedAt.HasValue && row.Item.ActivityConfirmedAt.Value > row.LastMeaningfulActivityAt
+                    ? row.Item.ActivityConfirmedAt.Value
+                    : row.LastMeaningfulActivityAt,
+            })
+            .Select(row => new
+            {
+                row.Item,
+                row.LastMeaningfulActivityAt,
+                LastControlAnchorAt = row.Item.LastControlCycleEndedAt.HasValue && row.Item.LastControlCycleEndedAt.Value > row.LastMeaningfulActivityAt
+                    ? row.Item.LastControlCycleEndedAt.Value
+                    : row.LastMeaningfulActivityAt,
+            });
+
+        var orderedDetailsQuery = normalizedCategory switch
+        {
+            "criticalCandidate" => sortableDetailsQuery.OrderBy(row => row.LastMeaningfulActivityAt),
+            "candidate" or "recentActivity" => sortableDetailsQuery.OrderBy(row => row.LastControlAnchorAt),
+            _ => sortableDetailsQuery.OrderBy(row => row.Item.ClientName != string.Empty
+                ? row.Item.ClientName
+                : row.Item.LegalEntityName),
+        };
+
+        var rows = await orderedDetailsQuery
+            .ThenBy(row => row.Item.ClientName != string.Empty ? row.Item.ClientName : row.Item.LegalEntityName)
+            .ThenBy(row => row.Item.Title)
+            .ThenBy(row => row.Item.Id)
+            .Select(row => row.Item)
             .Skip(normalizedOffset)
             .Take(normalizedLimit)
             .ToListAsync(ct);

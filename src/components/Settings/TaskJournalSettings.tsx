@@ -790,6 +790,9 @@ export function TaskJournalSettings({
                         {previewDetails
                           ? `${previewDetailsSearch ? 'По запросу показано' : 'Показано'} ${previewDetails.items.length} из ${previewDetails.totalCount}`
                           : 'Загружаем дела и точную причину для каждого...'}
+                        {previewDetails && ['candidate', 'criticalCandidate', 'recentActivity'].includes(previewDetailsCategory)
+                          ? ' · Самые срочные выше'
+                          : ''}
                       </p>
                     </div>
                     <button

@@ -804,8 +804,8 @@ public class TasksControllerTests
         await using var db = await CreateContextAsync(interceptor);
         var admin = await CreateAdminUserAsync(db, "preview-details@example.com", "Администратор");
         var client = await CreateClientAsync(db, "Клиент детализации");
-        var firstCandidate = await CreateCaseAsync(db, client.Id, "КАНДИДАТ А");
-        var secondCandidate = await CreateCaseAsync(db, client.Id, "КАНДИДАТ Б");
+        var firstCandidate = await CreateCaseAsync(db, client.Id, "ЯВНО СРОЧНЫЙ КАНДИДАТ");
+        var secondCandidate = await CreateCaseAsync(db, client.Id, "АЛФАВИТНЫЙ КАНДИДАТ");
         var recentCase = await CreateCaseAsync(db, client.Id, "НЕДАВНЕЕ ДЕЛО");
         var activeCase = await CreateCaseAsync(db, client.Id, "ДЕЛО С АКТИВНОЙ ЗАДАЧЕЙ");
         var closedCase = await CreateCaseAsync(db, client.Id, "ЗАКРЫТОЕ ДЕЛО", ClientCaseStatus.Closed);
@@ -857,6 +857,7 @@ public class TasksControllerTests
         var candidates = await LoadAsync("candidate", limit: 1);
         Assert.Equal(2, candidates.TotalCount);
         Assert.Single(candidates.Items);
+        Assert.Equal(firstCandidate.Id, candidates.Items[0].ClientCaseId);
         Assert.Contains("срок постановки контроля наступил", candidates.Items[0].Explanation);
         Assert.Equal(
             DateTime.SpecifyKind(firstCandidate.CreatedAt.AddDays(14), DateTimeKind.Utc).ToString("O"),
@@ -892,7 +893,7 @@ public class TasksControllerTests
         Assert.Equal(vacationCase.Id, Assert.Single(vacation.Items).ClientCaseId);
         Assert.Contains("проверка продолжится после возвращения", vacation.Items[0].Explanation);
 
-        var searched = await LoadAsync("candidate", "КАНДИДАТ Б");
+        var searched = await LoadAsync("candidate", "АЛФАВИТНЫЙ");
         Assert.Equal(1, searched.TotalCount);
         Assert.Equal(secondCandidate.Id, Assert.Single(searched.Items).ClientCaseId);
     }
