@@ -3292,10 +3292,10 @@ export function TaskJournal({
       priority: candidate.suggestedPriority ?? 'normal',
       status: 'new',
       plannedDurationMinutes: 60,
-      ...((candidate.suggestedAssigneeUserId ?? candidate.responsibleUserId)
+      ...(candidate.suggestedAssigneeUserId
         ? {
-          assigneeUserId: candidate.suggestedAssigneeUserId ?? candidate.responsibleUserId,
-          assigneeName: candidate.suggestedAssigneeName?.trim() || candidate.responsibleName?.trim() || '',
+          assigneeUserId: candidate.suggestedAssigneeUserId,
+          assigneeName: candidate.suggestedAssigneeName?.trim() || '',
         }
         : {}),
     });
@@ -6621,18 +6621,21 @@ function TaskAutomationPanel({
           const canCreateControlTask = automationState === 'ready';
           const isCreatingControlTask = canCreateControlTask && creatingCaseId === candidate.clientCaseId;
           const presentation = AUTOMATION_CANDIDATE_PRESENTATION[automationState];
-          const suggestedAssigneeName = candidate.suggestedAssigneeName?.trim()
-            || candidate.responsibleName?.trim()
-            || 'не определён';
+          const suggestedAssigneeName = candidate.suggestedAssigneeUserId
+            ? candidate.suggestedAssigneeName?.trim() || 'не определён'
+            : 'не определён';
           const inferredFallbackAssignee = Boolean(
             candidate.suggestedAssigneeUserId
             && candidate.suggestedAssigneeUserId !== candidate.responsibleUserId,
           );
+          const fallbackReason = candidate.responsibleUserId
+            ? 'ответственный недоступен'
+            : 'ответственный не назначен';
           const suggestedAssigneeHint = candidate.suggestedAssigneeSource === 'currentUser'
-            ? 'вы будете исполнителем'
+            ? `${fallbackReason} · вы будете исполнителем`
             : candidate.suggestedAssigneeSource === 'configuredDefault' ||
                 (!candidate.suggestedAssigneeSource && inferredFallbackAssignee)
-              ? 'резервный исполнитель'
+              ? `${fallbackReason} · резервный исполнитель`
               : '';
           const suggestedAssigneeTimeZoneId = candidate.suggestedAssigneeTimeZoneId?.trim() || '';
           const suggestedAssigneeTimeZoneLabel = suggestedAssigneeTimeZoneId

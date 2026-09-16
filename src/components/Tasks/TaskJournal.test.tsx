@@ -3884,11 +3884,11 @@ describe('TaskJournal', () => {
     const waitingSuggestion = screen.getByTestId('task-automation-suggestion-101');
     expect(within(waitingSuggestion).getByText('При создании задачи')).toBeTruthy();
     expect(within(waitingSuggestion).getByText('Резервный исполнитель')).toBeTruthy();
-    expect(within(waitingSuggestion).getByText('резервный исполнитель')).toBeTruthy();
+    expect(within(waitingSuggestion).getByText('ответственный не назначен · резервный исполнитель')).toBeTruthy();
     expect(within(waitingSuggestion).getByText(/Москва \(UTC\+3\).*время исполнителя/)).toBeTruthy();
     const pausedSuggestion = screen.getByTestId('task-automation-suggestion-102');
     expect(within(pausedSuggestion).getByText('Резервный исполнитель')).toBeTruthy();
-    expect(within(pausedSuggestion).getByText('резервный исполнитель')).toBeTruthy();
+    expect(within(pausedSuggestion).getByText('ответственный недоступен · резервный исполнитель')).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: 'Открыть дело ГОТОВО К КОНТРОЛЮ' }));
     expect(onOpenCase).toHaveBeenCalledWith(100, 10);
@@ -4000,7 +4000,7 @@ describe('TaskJournal', () => {
       const suggestion = screen.getByTestId('task-automation-suggestion-100');
       expect(within(suggestion).getByText('При создании задачи')).toBeTruthy();
       expect(within(suggestion).getByText('Администратор')).toBeTruthy();
-      expect(within(suggestion).getByText('вы будете исполнителем')).toBeTruthy();
+      expect(within(suggestion).getByText('ответственный не назначен · вы будете исполнителем')).toBeTruthy();
       expect(within(suggestion).getByText(/Новосибирск \(UTC\+7\).*время исполнителя/)).toBeTruthy();
       fireEvent.click(screen.getByTestId('task-automation-create-100'));
       expect(await screen.findByRole('heading', { name: 'Выберите клиента и дело' })).toBeTruthy();
@@ -4037,6 +4037,50 @@ describe('TaskJournal', () => {
         status: 'new',
         plannedDurationMinutes: 60,
       }));
+    },
+  );
+
+  it.each(['legacy', 'modern'] as const)(
+    'does not prefill the %s task card with an unverified responsible user',
+    async (taskCardWindowMode) => {
+      apiMock.getTaskJournalCaseAutomationCandidates.mockResolvedValue([{
+        clientId: 10,
+        clientName: 'Клиент с недоступным ответственным',
+        responsibleUserId: 8,
+        responsibleName: 'Неактивный ответственный',
+        clientCaseId: 100,
+        clientCaseTitle: 'ДЕЛО БЕЗ БЕЗОПАСНОЙ РЕКОМЕНДАЦИИ',
+        reason: 'Первый контроль через 5 дн.',
+        activeTaskCount: 0,
+        completedTaskCount: 0,
+        daysWithoutActiveTask: 9,
+        automationState: 'waiting',
+        lastTaskAt: null,
+        suggestedTitle: 'Проверить движение по делу',
+        suggestedDescription: 'Уточнить текущее состояние дела.',
+        suggestedDueAt: todayAt(9),
+        suggestedPriority: 'normal',
+      }]);
+      apiMock.getTaskJournalCaseAutomationSummary.mockResolvedValue({
+        totalCount: 1,
+        readyCount: 0,
+        waitingCount: 1,
+        pausedCount: 0,
+      });
+
+      await renderJournal([], {
+        waitForTitle: null,
+        settings: { taskCardWindowMode },
+      });
+
+      const suggestion = screen.getByTestId('task-automation-suggestion-100');
+      expect(within(suggestion).getByText('не определён')).toBeTruthy();
+      fireEvent.click(screen.getByTestId('task-automation-create-100'));
+      expect(await screen.findByRole('heading', { name: 'Выберите клиента и дело' })).toBeTruthy();
+      fireEvent.click(screen.getByRole('button', { name: 'Неоплачиваемая задача' }));
+
+      const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+      expect((within(card).getByTestId('task-assignee-select') as HTMLSelectElement).value).not.toBe('8');
     },
   );
 

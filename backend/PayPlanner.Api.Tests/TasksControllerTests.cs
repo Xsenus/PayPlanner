@@ -3898,6 +3898,43 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task GetAutomationCaseCandidates_SuggestsConfiguredDefaultWhenResponsibleIsInactive()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "candidate-inactive-author@example.com", "Автор просмотра");
+        var inactiveResponsible = await CreateAdminUserAsync(db, "candidate-inactive-responsible@example.com", "Неактивный ответственный");
+        var defaultAssignee = await CreateAdminUserAsync(db, "candidate-inactive-fallback@example.com", "Резервный исполнитель");
+        inactiveResponsible.IsActive = false;
+        var client = await CreateClientAsync(db, "Клиент с неактивным ответственным");
+        client.ResponsibleUserId = inactiveResponsible.Id;
+        var clientCase = await CreateCaseAsync(db, client.Id, "ДЕЛО С БЕЗОПАСНЫМ РЕЗЕРВОМ");
+        clientCase.CreatedAt = DateTime.UtcNow.AddDays(-20);
+        var now = DateTime.UtcNow;
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = "tasks.automation.caseControl.defaultAssigneeUserId",
+            Value = defaultAssignee.Id.ToString(),
+            CreatedAt = now,
+            UpdatedAt = now,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.GetAutomationCaseCandidates(
+            inactiveDays: 14,
+            limit: 10,
+            includeWaiting: true,
+            ct: CancellationToken.None);
+
+        var candidate = Assert.Single(Assert.IsAssignableFrom<IReadOnlyList<TaskJournalCaseAutomationCandidateDto>>(
+            Assert.IsType<OkObjectResult>(result.Result).Value));
+        Assert.Equal(inactiveResponsible.Id, candidate.ResponsibleUserId);
+        Assert.Equal(defaultAssignee.Id, candidate.SuggestedAssigneeUserId);
+        Assert.Equal(defaultAssignee.FullName, candidate.SuggestedAssigneeName);
+        Assert.Equal("configuredDefault", candidate.SuggestedAssigneeSource);
+    }
+
+    [Fact]
     public async Task GetAutomationCaseCandidates_DoesNotSuggestDefaultAssigneeWhoIsOnVacation()
     {
         await using var db = await CreateContextAsync();
