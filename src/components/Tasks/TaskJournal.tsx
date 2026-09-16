@@ -267,11 +267,12 @@ const TASK_JOURNAL_TABLE_COLUMNS: Array<{ key: TaskTableColumnKey; defaultWidth:
   { key: 'actions', defaultWidth: 156 },
 ];
 
-type AutomationCandidateStateFilter = 'all' | 'ready' | 'waiting' | 'paused';
+type AutomationCandidateStateFilter = 'all' | 'critical' | 'ready' | 'waiting' | 'paused';
 
 const EMPTY_AUTOMATION_SUMMARY: TaskJournalCaseAutomationSummary = {
   totalCount: 0,
   readyCount: 0,
+  criticalCount: 0,
   waitingCount: 0,
   pausedCount: 0,
 };
@@ -297,6 +298,7 @@ function buildAutomationSummaryRequestKey(settings: TaskJournalSettingsDto, sear
   return [
     settings.caseInactivityAutomationEnabled,
     settings.caseInactivityDays,
+    settings.caseInactivityEscalationDays,
     search.trim().toLowerCase(),
   ].join('|');
 }
@@ -1233,6 +1235,9 @@ function getAutomationCandidateStateLabel(
   state = getAutomationCandidateState(candidate),
 ) {
   if (state === 'ready') {
+    if (candidate.isEscalated) {
+      return `Критично · без движения ${formatAutomationDays(candidate.daysWithoutActiveTask)}`;
+    }
     return `Пора создать · без движения ${formatAutomationDays(candidate.daysWithoutActiveTask)}`;
   }
 
@@ -1250,6 +1255,10 @@ function getAutomationCandidateStateLabel(
 }
 
 const AUTOMATION_CANDIDATE_PRESENTATION = {
+  critical: {
+    card: 'pp-automation-critical-card border-l-4',
+    badge: 'pp-automation-critical-badge border',
+  },
   ready: {
     card: 'border-rose-300 border-l-4 border-l-rose-500 bg-rose-50',
     badge: 'border border-rose-200 bg-rose-100 text-rose-800',
@@ -1269,6 +1278,8 @@ function getAutomationCandidateStateCount(
   state: AutomationCandidateStateFilter,
 ) {
   switch (state) {
+    case 'critical':
+      return summary.criticalCount ?? 0;
     case 'ready':
       return summary.readyCount;
     case 'waiting':
@@ -1284,6 +1295,7 @@ function summarizeAutomationCandidates(candidates: TaskJournalCaseAutomationCand
   return {
     totalCount: candidates.length,
     readyCount: candidates.filter((candidate) => getAutomationCandidateState(candidate) === 'ready').length,
+    criticalCount: candidates.filter((candidate) => candidate.isEscalated).length,
     waitingCount: candidates.filter((candidate) => getAutomationCandidateState(candidate) === 'waiting').length,
     pausedCount: candidates.filter((candidate) => getAutomationCandidateState(candidate) === 'paused').length,
   };
@@ -1292,6 +1304,7 @@ function summarizeAutomationCandidates(candidates: TaskJournalCaseAutomationCand
 function removeCreatedAutomationCandidates(
   summary: TaskJournalCaseAutomationSummary,
   createdCount: number,
+  criticalCreatedCount = 0,
 ): TaskJournalCaseAutomationSummary {
   const safeCreatedCount = Math.max(0, Math.trunc(createdCount));
   if (safeCreatedCount === 0) {
@@ -1302,6 +1315,7 @@ function removeCreatedAutomationCandidates(
     ...summary,
     totalCount: Math.max(0, summary.totalCount - safeCreatedCount),
     readyCount: Math.max(0, summary.readyCount - safeCreatedCount),
+    criticalCount: Math.max(0, (summary.criticalCount ?? 0) - Math.max(0, Math.trunc(criticalCreatedCount))),
   };
 }
 
@@ -2665,7 +2679,11 @@ export function TaskJournal({
       apiService.getTaskJournalCaseAutomationCandidates(params, options),
       refreshSummary
         ? apiService.getTaskJournalCaseAutomationSummary(
-          { inactiveDays: settings.caseInactivityDays, search: search.trim() || undefined },
+          {
+            inactiveDays: settings.caseInactivityDays,
+            escalationDays: settings.caseInactivityEscalationDays,
+            search: search.trim() || undefined,
+          },
           options,
         )
           .then((summary) => ({ summary, error: null as string | null }))
@@ -3296,7 +3314,7 @@ export function TaskJournal({
     try {
       const created = await apiService.createTaskJournalCaseAutomationTask(candidate.clientCaseId);
       setAutomationCandidates((current) => current.filter((item) => item.clientCaseId !== candidate.clientCaseId));
-      setAutomationSummary((current) => removeCreatedAutomationCandidates(current, 1));
+      setAutomationSummary((current) => removeCreatedAutomationCandidates(current, 1, candidate.isEscalated ? 1 : 0));
       toast.success('Контрольная задача создана.', 'Автоконтроль дел');
       await refreshTasks();
       openTaskEditor(created, { syncRoute: true });
@@ -3442,8 +3460,14 @@ export function TaskJournal({
         ...(normalizedSearch ? { search: normalizedSearch } : {}),
       });
       const createdCaseIds = new Set(result.createdTasks.map((task) => task.clientCaseId).filter((id): id is number => Boolean(id)));
+      const criticalCreatedCount = automationCandidates.filter((candidate) =>
+        candidate.isEscalated && createdCaseIds.has(candidate.clientCaseId)).length;
       setAutomationCandidates((current) => current.filter((candidate) => !createdCaseIds.has(candidate.clientCaseId)));
-      setAutomationSummary((current) => removeCreatedAutomationCandidates(current, result.createdTasks.length));
+      setAutomationSummary((current) => removeCreatedAutomationCandidates(
+        current,
+        result.createdTasks.length,
+        criticalCreatedCount,
+      ));
       if (result.createdTasks.length > 0) {
         const skippedText = result.skippedCount > 0
           ? ` Пропущено дел: ${result.skippedCount}.`
@@ -6554,21 +6578,27 @@ function TaskAutomationPanel({
 }) {
   const [expanded, setExpanded] = useState(false);
   const loadedSummary = summarizeAutomationCandidates(candidates);
-  const effectiveSummary = summary.totalCount >= candidates.length ? summary : loadedSummary;
+  const effectiveSummary = summary.totalCount >= candidates.length
+    ? { ...summary, criticalCount: summary.criticalCount ?? loadedSummary.criticalCount ?? 0 }
+    : loadedSummary;
   const readyCount = effectiveSummary.readyCount;
   const stateTotal = getAutomationCandidateStateCount(effectiveSummary, activeState);
   const hasMore = candidates.length < stateTotal;
   const orderedCandidates = [...candidates].sort((left, right) => {
-    const rank = (candidate: TaskJournalCaseAutomationCandidate) => getAutomationCandidateState(candidate) === 'ready'
+    const rank = (candidate: TaskJournalCaseAutomationCandidate) => candidate.isEscalated
       ? 0
-      : getAutomationCandidateState(candidate) === 'waiting'
+      : getAutomationCandidateState(candidate) === 'ready'
         ? 1
-        : 2;
+        : getAutomationCandidateState(candidate) === 'waiting'
+          ? 2
+          : 3;
     return rank(left) - rank(right) || (left.daysUntilControl ?? 0) - (right.daysUntilControl ?? 0);
   });
   const filteredCandidates = activeState === 'all'
     ? orderedCandidates
-    : orderedCandidates.filter((candidate) => getAutomationCandidateState(candidate) === activeState);
+    : activeState === 'critical'
+      ? orderedCandidates.filter((candidate) => candidate.isEscalated)
+      : orderedCandidates.filter((candidate) => getAutomationCandidateState(candidate) === activeState);
   const visibleCandidates = expanded ? filteredCandidates : filteredCandidates.slice(0, 6);
 
   return (
@@ -6616,6 +6646,7 @@ function TaskAutomationPanel({
       <div className="mt-3 flex flex-wrap gap-2" aria-label="Состояния автоконтроля">
         {([
           ['all', 'Все', effectiveSummary.totalCount],
+          ['critical', 'Критические', effectiveSummary.criticalCount ?? 0],
           ['ready', 'Пора создать', readyCount],
           ['waiting', 'Ожидают срока', effectiveSummary.waitingCount],
           ['paused', 'Приостановлены', effectiveSummary.pausedCount],
@@ -6625,13 +6656,18 @@ function TaskAutomationPanel({
             type="button"
             onClick={() => { onStateChange(state); setExpanded(false); }}
             className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${activeState === state
-              ? 'border-amber-500 bg-amber-600 text-white'
-              : 'border-amber-200 bg-white text-amber-800 hover:bg-amber-100'}`}
+              ? state === 'critical'
+                ? 'pp-automation-critical-filter-active'
+                : 'border-amber-500 bg-amber-600 text-white'
+              : state === 'critical'
+                ? 'pp-automation-critical-filter'
+                : 'border-amber-200 bg-white text-amber-800 hover:bg-amber-100'}`}
           >
             {label}: {count}
           </button>
         ))}
       </div>
+      <p className="mt-1.5 text-xs text-slate-500">Критические дела уже входят в общий счётчик «Пора создать».</p>
 
       {loadError ? (
         <div role="alert" className="mt-3 flex flex-col gap-3 rounded-xl border border-rose-300 bg-rose-50 px-3 py-3 text-rose-900 sm:flex-row sm:items-center sm:justify-between">
@@ -6680,7 +6716,9 @@ function TaskAutomationPanel({
           const automationState = getAutomationCandidateState(candidate);
           const canCreateControlTask = automationState === 'ready';
           const isCreatingControlTask = canCreateControlTask && creatingCaseId === candidate.clientCaseId;
-          const presentation = AUTOMATION_CANDIDATE_PRESENTATION[automationState];
+          const presentation = candidate.isEscalated
+            ? AUTOMATION_CANDIDATE_PRESENTATION.critical
+            : AUTOMATION_CANDIDATE_PRESENTATION[automationState];
           const suggestedAssigneeName = candidate.suggestedAssigneeUserId
             ? candidate.suggestedAssigneeName?.trim() || 'не определён'
             : 'не определён';
@@ -6713,6 +6751,7 @@ function TaskAutomationPanel({
           <article
             key={candidate.clientCaseId}
             data-automation-state={automationState}
+            data-automation-critical={candidate.isEscalated ? 'true' : undefined}
             className={`min-w-0 rounded-xl border p-3 shadow-sm ${presentation.card}`}
           >
             <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
@@ -6725,8 +6764,8 @@ function TaskAutomationPanel({
               </span>
             </div>
             {candidate.isEscalated ? (
-              <div className="mt-3 inline-flex rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-700">
-                Эскалация
+              <div className="pp-automation-critical-marker mt-3 inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold">
+                Критический срок
               </div>
             ) : null}
             <div className="mt-3 text-sm text-slate-600">{candidate.reason}</div>

@@ -244,6 +244,8 @@ export interface TaskJournalCaseAutomationCandidate {
 export interface TaskJournalCaseAutomationSummary {
   totalCount: number;
   readyCount: number;
+  /** Подмножество readyCount, уже достигшее критического порога. */
+  criticalCount?: number;
   waitingCount: number;
   pausedCount: number;
 }

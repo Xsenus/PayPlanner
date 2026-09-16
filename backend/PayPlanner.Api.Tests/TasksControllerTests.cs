@@ -4202,7 +4202,7 @@ public class TasksControllerTests
         var pausedCase = await CreateCaseAsync(db, client.Id, "ПРИОСТАНОВЛЕНО");
         var now = DateTime.UtcNow;
         oldestReadyCase.CreatedAt = now.AddDays(-40);
-        nextReadyCase.CreatedAt = now.AddDays(-30);
+        nextReadyCase.CreatedAt = now.AddDays(-20);
         waitingCase.CreatedAt = now.AddDays(-3);
         pausedCase.CreatedAt = now.AddDays(-50);
         oldestReadyCase.InactivityRemindersEnabled = true;
@@ -4215,23 +4215,27 @@ public class TasksControllerTests
 
         var summaryResult = await controller.GetAutomationCaseCandidatesSummary(
             inactiveDays: 14,
+            escalationDays: 30,
             ct: CancellationToken.None);
         var summary = Assert.IsType<TaskJournalCaseAutomationSummaryDto>(
             Assert.IsType<OkObjectResult>(summaryResult.Result).Value);
 
         Assert.Equal(4, summary.TotalCount);
         Assert.Equal(2, summary.ReadyCount);
+        Assert.Equal(1, summary.CriticalCount);
         Assert.Equal(1, summary.WaitingCount);
         Assert.Equal(1, summary.PausedCount);
 
         var searchedSummaryResult = await controller.GetAutomationCaseCandidatesSummary(
             inactiveDays: 14,
+            escalationDays: 30,
             search: "ОЖИДАЕТ СРОКА",
             ct: CancellationToken.None);
         var searchedSummary = Assert.IsType<TaskJournalCaseAutomationSummaryDto>(
             Assert.IsType<OkObjectResult>(searchedSummaryResult.Result).Value);
         Assert.Equal(1, searchedSummary.TotalCount);
         Assert.Equal(0, searchedSummary.ReadyCount);
+        Assert.Equal(0, searchedSummary.CriticalCount);
         Assert.Equal(1, searchedSummary.WaitingCount);
         Assert.Equal(0, searchedSummary.PausedCount);
 
@@ -4267,6 +4271,18 @@ public class TasksControllerTests
         var readyPage = Assert.IsAssignableFrom<IReadOnlyList<TaskJournalCaseAutomationCandidateDto>>(
             Assert.IsType<OkObjectResult>(readyPageResult.Result).Value);
         Assert.Equal(nextReadyCase.Id, Assert.Single(readyPage).ClientCaseId);
+
+        var criticalPageResult = await controller.GetAutomationCaseCandidates(
+            inactiveDays: 14,
+            escalationDays: 30,
+            limit: 100,
+            automationState: "critical",
+            ct: CancellationToken.None);
+        var criticalPage = Assert.IsAssignableFrom<IReadOnlyList<TaskJournalCaseAutomationCandidateDto>>(
+            Assert.IsType<OkObjectResult>(criticalPageResult.Result).Value);
+        var criticalCandidate = Assert.Single(criticalPage);
+        Assert.Equal(oldestReadyCase.Id, criticalCandidate.ClientCaseId);
+        Assert.True(criticalCandidate.IsEscalated);
 
         var waitingPageResult = await controller.GetAutomationCaseCandidates(
             inactiveDays: 14,
@@ -5054,6 +5070,38 @@ public class TasksControllerTests
             Assert.IsType<OkObjectResult>(result.Result).Value);
         var created = Assert.Single(dto.CreatedTasks);
         Assert.Equal(olderActivityCase.Id, created.ClientCaseId);
+    }
+
+    [Fact]
+    public async Task CreateAutomationTasksForCandidates_PrioritizesCriticalCaseBeforeRegularReadyCase()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "bulk-critical-order@example.com", "Автор");
+        var client = await CreateClientAsync(db, "Клиент критического порядка");
+        var criticalCase = await CreateCaseAsync(db, client.Id, "КРИТИЧЕСКОЕ ДЕЛО");
+        var regularReadyCase = await CreateCaseAsync(db, client.Id, "ОБЫЧНЫЙ НАСТУПИВШИЙ КОНТРОЛЬ");
+        var now = DateTime.UtcNow;
+        criticalCase.CreatedAt = now.AddDays(-100);
+        regularReadyCase.CreatedAt = now.AddDays(-20);
+        await CreateTaskAsync(
+            db,
+            author.Id,
+            client.Id,
+            clientCaseId: criticalCase.Id,
+            status: "done",
+            createdAt: now.AddDays(-15),
+            tagsJson: "[\"автоконтроль\"]",
+            updatedAt: now.AddDays(-15));
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.CreateAutomationTasksForCandidates(limit: 1, ct: CancellationToken.None);
+
+        var dto = Assert.IsType<TaskJournalAutomationCreateResultDto>(
+            Assert.IsType<OkObjectResult>(result.Result).Value);
+        var created = Assert.Single(dto.CreatedTasks);
+        Assert.Equal(criticalCase.Id, created.ClientCaseId);
+        Assert.Equal("urgent", created.Priority);
     }
 
     [Theory]

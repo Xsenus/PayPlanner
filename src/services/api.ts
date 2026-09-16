@@ -4614,7 +4614,7 @@ export class ApiService {
       escalationDays?: number;
       search?: string;
       includeWaiting?: boolean;
-      automationState?: 'all' | 'ready' | 'waiting' | 'paused';
+      automationState?: 'all' | 'critical' | 'ready' | 'waiting' | 'paused';
     },
     options?: { signal?: AbortSignal },
   ) {
@@ -4633,10 +4633,14 @@ export class ApiService {
   }
 
   async getTaskJournalCaseAutomationSummary(
-    params?: { inactiveDays?: number; search?: string },
+    params?: { inactiveDays?: number; escalationDays?: number; search?: string },
     options?: { signal?: AbortSignal },
   ) {
-    const q = buildQuery({ inactiveDays: params?.inactiveDays, search: params?.search });
+    const q = buildQuery({
+      inactiveDays: params?.inactiveDays,
+      escalationDays: params?.escalationDays,
+      search: params?.search,
+    });
     return this.request<TaskJournalCaseAutomationSummary>(`/tasks/automation/case-candidates/summary${q}`, {
       signal: options?.signal,
     });

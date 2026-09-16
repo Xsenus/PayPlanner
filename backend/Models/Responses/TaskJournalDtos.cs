@@ -225,6 +225,7 @@ public class TaskJournalCaseAutomationSummaryDto
 {
     public int TotalCount { get; set; }
     public int ReadyCount { get; set; }
+    public int CriticalCount { get; set; }
     public int WaitingCount { get; set; }
     public int PausedCount { get; set; }
 }

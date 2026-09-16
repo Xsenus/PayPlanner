@@ -399,6 +399,31 @@ html[data-payplanner-theme] .pp-settings-nav-item-active:hover {
   background: var(--pp-row-hover);
 }
 
+.pp-automation-critical-card {
+  background: color-mix(in srgb, var(--pp-danger-soft) 88%, var(--pp-surface));
+  border-color: var(--pp-danger-border);
+  border-left-color: var(--pp-danger-solid) !important;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--pp-danger-solid) 12%, transparent);
+}
+
+.pp-automation-critical-badge,
+.pp-automation-critical-filter-active {
+  background: var(--pp-danger-solid);
+  border-color: var(--pp-danger-solid);
+  color: #fff;
+}
+
+.pp-automation-critical-filter,
+.pp-automation-critical-marker {
+  background: var(--pp-danger-soft);
+  border-color: var(--pp-danger-border);
+  color: var(--pp-danger-text);
+}
+
+.pp-automation-critical-filter:hover {
+  background: var(--pp-danger-soft-strong);
+}
+
 html[data-payplanner-theme] .bg-white { background-color: var(--pp-surface) !important; }
 html[data-payplanner-theme] [class*='bg-white/'] { background-color: color-mix(in srgb, var(--pp-surface) 92%, transparent) !important; }
 html[data-payplanner-theme] .bg-gray-50,

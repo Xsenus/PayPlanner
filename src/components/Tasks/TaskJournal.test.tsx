@@ -3682,12 +3682,12 @@ describe('TaskJournal', () => {
     ]);
     apiMock.getTaskJournalCaseAutomationSummary
       .mockReset()
-      .mockResolvedValueOnce({ totalCount: 1, readyCount: 1, waitingCount: 0, pausedCount: 0 })
+      .mockResolvedValueOnce({ totalCount: 1, readyCount: 1, criticalCount: 1, waitingCount: 0, pausedCount: 0 })
       .mockImplementation(() => new Promise(() => undefined));
     await renderJournal();
 
     expect(screen.getByText('Автоконтроль дел')).toBeTruthy();
-    expect(screen.getByText('Эскалация')).toBeTruthy();
+    expect(screen.getByText('Критический срок')).toBeTruthy();
     const createButton = screen.getByTestId('task-automation-create-100');
     expect(createButton.className).toContain('w-full');
     expect(createButton.closest('article')?.className).toContain('min-w-0');
@@ -3698,6 +3698,7 @@ describe('TaskJournal', () => {
     expect(toastMock.success).toHaveBeenCalledWith('Контрольная задача создана.', 'Автоконтроль дел');
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Все: 0' })).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Критические: 0' })).toBeTruthy();
       expect(screen.getByRole('button', { name: 'Пора создать: 0' })).toBeTruthy();
     });
     expect(await screen.findByRole('heading', { name: 'Просмотр задачи' })).toBeTruthy();
@@ -3808,10 +3809,11 @@ describe('TaskJournal', () => {
         responsibleName: 'Администратор',
         clientCaseId: 100,
         clientCaseTitle: 'ГОТОВО К КОНТРОЛЮ',
-        reason: 'Нет активной задачи уже 21 дн.',
+        reason: 'Нет активной задачи уже 35 дн.',
         activeTaskCount: 0,
         completedTaskCount: 1,
-        daysWithoutActiveTask: 21,
+        daysWithoutActiveTask: 35,
+        isEscalated: true,
         isReadyForControl: true,
         automationState: 'ready',
         lastActivityAt: todayAt(8),
@@ -3880,15 +3882,18 @@ describe('TaskJournal', () => {
     await renderJournal([createTask()], { onOpenCase });
 
     expect(screen.getByRole('heading', { name: 'Все дела без активных задач' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Критические: 1' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Пора создать: 1' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Ожидают срока: 1' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Приостановлены: 1' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Создать наступившие (1)' })).toBeTruthy();
     expect(screen.getAllByText('Нет активных задач')).toHaveLength(3);
-    expect(screen.getByText('Пора создать · без движения 21 день')).toBeTruthy();
+    expect(screen.getByText('Критично · без движения 35 дней')).toBeTruthy();
+    expect(screen.getByText('Критический срок')).toBeTruthy();
     expect(screen.getByText('Ожидает · через 11 дней')).toBeTruthy();
     expect(screen.getByText('Приостановлено')).toBeTruthy();
-    expect(document.querySelector('[data-automation-state="ready"]')?.className).toContain('border-l-rose-500');
+    expect(document.querySelector('[data-automation-state="ready"]')?.className).toContain('pp-automation-critical-card');
+    expect(document.querySelector('[data-automation-critical="true"]')?.className).toContain('pp-automation-critical-card');
     expect(document.querySelector('[data-automation-state="waiting"]')?.className).toContain('border-l-amber-400');
     expect(document.querySelector('[data-automation-state="paused"]')?.className).toContain('border-l-slate-400');
     expect(screen.getByText(/Последнее движение:.*задача/)).toBeTruthy();
@@ -3911,6 +3916,16 @@ describe('TaskJournal', () => {
 
     apiMock.getTaskJournalCaseAutomationCandidates.mockClear();
     apiMock.getTaskJournalCaseAutomationSummary.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: 'Критические: 1' }));
+    await waitFor(() => expect(apiMock.getTaskJournalCaseAutomationCandidates).toHaveBeenCalledWith(
+      expect.objectContaining({ offset: 0, automationState: 'critical', escalationDays: 30 }),
+      expect.anything(),
+    ));
+    expect(apiMock.getTaskJournalCaseAutomationSummary).not.toHaveBeenCalled();
+    expect(screen.getByText('ГОТОВО К КОНТРОЛЮ')).toBeTruthy();
+    expect(screen.queryByText('ОЖИДАЕТ ПОРОГА')).toBeNull();
+
+    apiMock.getTaskJournalCaseAutomationCandidates.mockClear();
     fireEvent.click(screen.getByRole('button', { name: 'Ожидают срока: 1' }));
     await waitFor(() => expect(apiMock.getTaskJournalCaseAutomationCandidates).toHaveBeenCalledWith(
       expect.objectContaining({ offset: 0, automationState: 'waiting' }),

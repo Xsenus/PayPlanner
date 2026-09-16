@@ -2072,12 +2072,13 @@ describe('apiService case calendar', () => {
     const controller = new AbortController();
 
     await apiService.getTaskJournalCaseAutomationSummary(
-      { inactiveDays: 14, search: 'ПЕТРОВ' },
+      { inactiveDays: 14, escalationDays: 30, search: 'ПЕТРОВ' },
       { signal: controller.signal },
     );
 
     const [url, options] = fetchMock.mock.calls[0];
     expect(String(url)).toContain('/tasks/automation/case-candidates/summary?inactiveDays=14');
+    expect(String(url)).toContain('escalationDays=30');
     expect(String(url)).toContain('search=');
     expect(options?.signal).toBe(controller.signal);
   });

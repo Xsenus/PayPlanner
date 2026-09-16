@@ -512,7 +512,10 @@ public class TasksController : ControllerBase
         var escalationUser = await ResolveConfiguredAutomationUserAsync(settings.CaseInactivityEscalationUserId, ct);
         var now = DateTime.UtcNow;
         var inactivityCutoff = now.AddDays(-settings.CaseInactivityDays);
-        var escalationCutoff = now.AddDays(-settings.CaseInactivityEscalationDays);
+        var escalationCutoff = now.AddDays(-Math.Clamp(
+            settings.CaseInactivityEscalationDays,
+            settings.CaseInactivityDays,
+            365));
         var vacationUserIds = await CaseInactivityResponsibleAvailabilityService
             .GetUsersOnVacationAsync(_db, now, ct);
 
@@ -1323,12 +1326,13 @@ public class TasksController : ControllerBase
         var effectiveOffset = Math.Clamp(offset, 0, 1_000_000);
         var effectiveEscalationDays = Math.Clamp(escalationDays ?? settings.CaseInactivityEscalationDays, effectiveInactiveDays, 365);
         var normalizedAutomationState = automationState?.Trim().ToLowerInvariant();
-        if (normalizedAutomationState is not null and not "all" and not "ready" and not "waiting" and not "paused")
+        if (normalizedAutomationState is not null and not "all" and not "critical" and not "ready" and not "waiting" and not "paused")
         {
             return BadRequest("Неизвестное состояние автоконтроля.");
         }
         var now = DateTime.UtcNow;
         var cutoff = now.AddDays(-effectiveInactiveDays);
+        var escalationCutoff = now.AddDays(-effectiveEscalationDays);
         var responsibleAvailability = await CaseInactivityResponsibleAvailabilityService
             .GetAvailabilityAsync(_db, now, ct);
         var vacationUserIds = responsibleAvailability.UsersOnVacation;
@@ -1424,54 +1428,63 @@ public class TasksController : ControllerBase
             .Select(item => new
             {
                 Item = item,
-                LastControlAnchorAt = item.LastTaskAt.HasValue && item.LastTaskAt.Value > item.CreatedAt
+                LastMeaningfulActivityAt = item.LastTaskAt.HasValue && item.LastTaskAt.Value > item.CreatedAt
                     ? item.LastTaskAt.Value
                     : item.CreatedAt,
             })
             .Select(row => new
             {
                 row.Item,
-                LastControlAnchorAt = row.Item.LastTaskCommentAt.HasValue && row.Item.LastTaskCommentAt.Value > row.LastControlAnchorAt
+                LastMeaningfulActivityAt = row.Item.LastTaskCommentAt.HasValue && row.Item.LastTaskCommentAt.Value > row.LastMeaningfulActivityAt
                     ? row.Item.LastTaskCommentAt.Value
-                    : row.LastControlAnchorAt,
+                    : row.LastMeaningfulActivityAt,
             })
             .Select(row => new
             {
                 row.Item,
-                LastControlAnchorAt = row.Item.LastDocumentAt.HasValue && row.Item.LastDocumentAt.Value > row.LastControlAnchorAt
+                LastMeaningfulActivityAt = row.Item.LastDocumentAt.HasValue && row.Item.LastDocumentAt.Value > row.LastMeaningfulActivityAt
                     ? row.Item.LastDocumentAt.Value
-                    : row.LastControlAnchorAt,
+                    : row.LastMeaningfulActivityAt,
             })
             .Select(row => new
             {
                 row.Item,
-                LastControlAnchorAt = row.Item.LastCourtEventAt.HasValue && row.Item.LastCourtEventAt.Value > row.LastControlAnchorAt
+                LastMeaningfulActivityAt = row.Item.LastCourtEventAt.HasValue && row.Item.LastCourtEventAt.Value > row.LastMeaningfulActivityAt
                     ? row.Item.LastCourtEventAt.Value
-                    : row.LastControlAnchorAt,
+                    : row.LastMeaningfulActivityAt,
             })
             .Select(row => new
             {
                 row.Item,
-                LastControlAnchorAt = row.Item.LastViewedAt.HasValue && row.Item.LastViewedAt.Value > row.LastControlAnchorAt
+                LastMeaningfulActivityAt = row.Item.LastViewedAt.HasValue && row.Item.LastViewedAt.Value > row.LastMeaningfulActivityAt
                     ? row.Item.LastViewedAt.Value
-                    : row.LastControlAnchorAt,
+                    : row.LastMeaningfulActivityAt,
             })
             .Select(row => new
             {
                 row.Item,
-                LastControlAnchorAt = row.Item.ActivityConfirmedAt.HasValue && row.Item.ActivityConfirmedAt.Value > row.LastControlAnchorAt
+                LastMeaningfulActivityAt = row.Item.ActivityConfirmedAt.HasValue && row.Item.ActivityConfirmedAt.Value > row.LastMeaningfulActivityAt
                     ? row.Item.ActivityConfirmedAt.Value
-                    : row.LastControlAnchorAt,
+                    : row.LastMeaningfulActivityAt,
             })
             .Select(row => new
             {
                 row.Item,
-                LastControlAnchorAt = row.Item.LastControlCycleEndedAt.HasValue && row.Item.LastControlCycleEndedAt.Value > row.LastControlAnchorAt
+                row.LastMeaningfulActivityAt,
+                LastControlAnchorAt = row.Item.LastControlCycleEndedAt.HasValue && row.Item.LastControlCycleEndedAt.Value > row.LastMeaningfulActivityAt
                     ? row.Item.LastControlCycleEndedAt.Value
-                    : row.LastControlAnchorAt,
+                    : row.LastMeaningfulActivityAt,
             });
 
-        if (normalizedAutomationState == "paused")
+        if (normalizedAutomationState == "critical")
+        {
+            stateQuery = stateQuery.Where(row =>
+                row.Item.InactivityRemindersEnabled &&
+                !vacationUserIds.Contains(row.Item.ResponsibleUserId ?? 0) &&
+                row.LastControlAnchorAt <= cutoff &&
+                row.LastMeaningfulActivityAt <= escalationCutoff);
+        }
+        else if (normalizedAutomationState == "paused")
         {
             stateQuery = stateQuery.Where(row =>
                 !row.Item.InactivityRemindersEnabled ||
@@ -1494,15 +1507,19 @@ public class TasksController : ControllerBase
 
         var includeAllStates = normalizedAutomationState == "all" ||
             (normalizedAutomationState is null && includeWaiting);
-        var orderedStateQuery = includeAllStates
+        var orderedStateQuery = normalizedAutomationState == "critical"
+            ? stateQuery.OrderBy(row => row.LastMeaningfulActivityAt)
+            : includeAllStates
             ? stateQuery
                 .OrderBy(row =>
                     !row.Item.InactivityRemindersEnabled ||
                     vacationUserIds.Contains(row.Item.ResponsibleUserId ?? 0)
-                        ? 2
+                        ? 3
                         : row.LastControlAnchorAt <= cutoff
-                            ? 0
-                            : 1)
+                            ? row.LastMeaningfulActivityAt <= escalationCutoff
+                                ? 0
+                                : 1
+                            : 2)
                 .ThenBy(row => row.LastControlAnchorAt)
             : stateQuery.OrderBy(row => row.LastControlAnchorAt);
 
@@ -1646,6 +1663,7 @@ public class TasksController : ControllerBase
     [HttpGet("automation/case-candidates/summary")]
     public async Task<ActionResult<TaskJournalCaseAutomationSummaryDto>> GetAutomationCaseCandidatesSummary(
         [FromQuery] int? inactiveDays = null,
+        [FromQuery] int? escalationDays = null,
         [FromQuery] string? search = null,
         CancellationToken ct = default)
     {
@@ -1667,8 +1685,13 @@ public class TasksController : ControllerBase
         }
 
         var effectiveInactiveDays = Math.Clamp(inactiveDays ?? settings.CaseInactivityDays, 1, 365);
+        var effectiveEscalationDays = Math.Clamp(
+            escalationDays ?? settings.CaseInactivityEscalationDays,
+            effectiveInactiveDays,
+            365);
         var now = DateTime.UtcNow;
         var cutoff = now.AddDays(-effectiveInactiveDays);
+        var escalationCutoff = now.AddDays(-effectiveEscalationDays);
         var vacationUserIds = await CaseInactivityResponsibleAvailabilityService
             .GetUsersOnVacationAsync(_db, now, ct);
 
@@ -1756,51 +1779,52 @@ public class TasksController : ControllerBase
             .Select(item => new
             {
                 Item = item,
-                LastControlAnchorAt = item.LastTaskAt.HasValue && item.LastTaskAt.Value > item.CreatedAt
+                LastMeaningfulActivityAt = item.LastTaskAt.HasValue && item.LastTaskAt.Value > item.CreatedAt
                     ? item.LastTaskAt.Value
                     : item.CreatedAt,
             })
             .Select(row => new
             {
                 row.Item,
-                LastControlAnchorAt = row.Item.LastTaskCommentAt.HasValue && row.Item.LastTaskCommentAt.Value > row.LastControlAnchorAt
+                LastMeaningfulActivityAt = row.Item.LastTaskCommentAt.HasValue && row.Item.LastTaskCommentAt.Value > row.LastMeaningfulActivityAt
                     ? row.Item.LastTaskCommentAt.Value
-                    : row.LastControlAnchorAt,
+                    : row.LastMeaningfulActivityAt,
             })
             .Select(row => new
             {
                 row.Item,
-                LastControlAnchorAt = row.Item.LastDocumentAt.HasValue && row.Item.LastDocumentAt.Value > row.LastControlAnchorAt
+                LastMeaningfulActivityAt = row.Item.LastDocumentAt.HasValue && row.Item.LastDocumentAt.Value > row.LastMeaningfulActivityAt
                     ? row.Item.LastDocumentAt.Value
-                    : row.LastControlAnchorAt,
+                    : row.LastMeaningfulActivityAt,
             })
             .Select(row => new
             {
                 row.Item,
-                LastControlAnchorAt = row.Item.LastCourtEventAt.HasValue && row.Item.LastCourtEventAt.Value > row.LastControlAnchorAt
+                LastMeaningfulActivityAt = row.Item.LastCourtEventAt.HasValue && row.Item.LastCourtEventAt.Value > row.LastMeaningfulActivityAt
                     ? row.Item.LastCourtEventAt.Value
-                    : row.LastControlAnchorAt,
+                    : row.LastMeaningfulActivityAt,
             })
             .Select(row => new
             {
                 row.Item,
-                LastControlAnchorAt = row.Item.LastViewedAt.HasValue && row.Item.LastViewedAt.Value > row.LastControlAnchorAt
+                LastMeaningfulActivityAt = row.Item.LastViewedAt.HasValue && row.Item.LastViewedAt.Value > row.LastMeaningfulActivityAt
                     ? row.Item.LastViewedAt.Value
-                    : row.LastControlAnchorAt,
+                    : row.LastMeaningfulActivityAt,
             })
             .Select(row => new
             {
                 row.Item,
-                LastControlAnchorAt = row.Item.ActivityConfirmedAt.HasValue && row.Item.ActivityConfirmedAt.Value > row.LastControlAnchorAt
+                LastMeaningfulActivityAt = row.Item.ActivityConfirmedAt.HasValue && row.Item.ActivityConfirmedAt.Value > row.LastMeaningfulActivityAt
                     ? row.Item.ActivityConfirmedAt.Value
-                    : row.LastControlAnchorAt,
+                    : row.LastMeaningfulActivityAt,
             })
             .Select(row => new
             {
                 row.Item,
-                LastControlAnchorAt = row.Item.LastControlCycleEndedAt.HasValue && row.Item.LastControlCycleEndedAt.Value > row.LastControlAnchorAt
+                row.LastMeaningfulActivityAt,
+                LastControlAnchorAt = row.Item.LastControlCycleEndedAt.HasValue && row.Item.LastControlCycleEndedAt.Value > row.LastMeaningfulActivityAt
                     ? row.Item.LastControlCycleEndedAt.Value
-                    : row.LastControlAnchorAt,
+                    : row.LastMeaningfulActivityAt,
             })
             .GroupBy(_ => 1)
             .Select(group => new TaskJournalCaseAutomationSummaryDto
@@ -1813,6 +1837,11 @@ public class TasksController : ControllerBase
                     row.Item.InactivityRemindersEnabled &&
                     !vacationUserIds.Contains(row.Item.ResponsibleUserId ?? 0) &&
                     row.LastControlAnchorAt <= cutoff),
+                CriticalCount = group.Count(row =>
+                    row.Item.InactivityRemindersEnabled &&
+                    !vacationUserIds.Contains(row.Item.ResponsibleUserId ?? 0) &&
+                    row.LastControlAnchorAt <= cutoff &&
+                    row.LastMeaningfulActivityAt <= escalationCutoff),
                 WaitingCount = group.Count(row =>
                     row.Item.InactivityRemindersEnabled &&
                     !vacationUserIds.Contains(row.Item.ResponsibleUserId ?? 0) &&
@@ -2044,6 +2073,10 @@ public class TasksController : ControllerBase
         var effectiveLimit = Math.Min(limit, settings.CaseInactivityLimit);
         var now = DateTime.UtcNow;
         var cutoff = now.AddDays(-settings.CaseInactivityDays);
+        var escalationCutoff = now.AddDays(-Math.Clamp(
+            settings.CaseInactivityEscalationDays,
+            settings.CaseInactivityDays,
+            365));
         var vacationUserIds = await CaseInactivityResponsibleAvailabilityService
             .GetUsersOnVacationAsync(_db, now, ct);
         var candidateQuery = _db.ClientCases
@@ -2136,53 +2169,57 @@ public class TasksController : ControllerBase
             .Select(item => new
             {
                 Item = item,
-                LastControlAnchorAt = item.LastTaskAt.HasValue && item.LastTaskAt.Value > item.Case.CreatedAt
+                LastMeaningfulActivityAt = item.LastTaskAt.HasValue && item.LastTaskAt.Value > item.Case.CreatedAt
                     ? item.LastTaskAt.Value
                     : item.Case.CreatedAt,
             })
             .Select(row => new
             {
                 row.Item,
-                LastControlAnchorAt = row.Item.LastTaskCommentAt.HasValue && row.Item.LastTaskCommentAt.Value > row.LastControlAnchorAt
+                LastMeaningfulActivityAt = row.Item.LastTaskCommentAt.HasValue && row.Item.LastTaskCommentAt.Value > row.LastMeaningfulActivityAt
                     ? row.Item.LastTaskCommentAt.Value
-                    : row.LastControlAnchorAt,
+                    : row.LastMeaningfulActivityAt,
             })
             .Select(row => new
             {
                 row.Item,
-                LastControlAnchorAt = row.Item.LastDocumentAt.HasValue && row.Item.LastDocumentAt.Value > row.LastControlAnchorAt
+                LastMeaningfulActivityAt = row.Item.LastDocumentAt.HasValue && row.Item.LastDocumentAt.Value > row.LastMeaningfulActivityAt
                     ? row.Item.LastDocumentAt.Value
-                    : row.LastControlAnchorAt,
+                    : row.LastMeaningfulActivityAt,
             })
             .Select(row => new
             {
                 row.Item,
-                LastControlAnchorAt = row.Item.LastCourtEventAt.HasValue && row.Item.LastCourtEventAt.Value > row.LastControlAnchorAt
+                LastMeaningfulActivityAt = row.Item.LastCourtEventAt.HasValue && row.Item.LastCourtEventAt.Value > row.LastMeaningfulActivityAt
                     ? row.Item.LastCourtEventAt.Value
-                    : row.LastControlAnchorAt,
+                    : row.LastMeaningfulActivityAt,
             })
             .Select(row => new
             {
                 row.Item,
-                LastControlAnchorAt = row.Item.Case.LastViewedAt.HasValue && row.Item.Case.LastViewedAt.Value > row.LastControlAnchorAt
+                LastMeaningfulActivityAt = row.Item.Case.LastViewedAt.HasValue && row.Item.Case.LastViewedAt.Value > row.LastMeaningfulActivityAt
                     ? row.Item.Case.LastViewedAt.Value
-                    : row.LastControlAnchorAt,
+                    : row.LastMeaningfulActivityAt,
             })
             .Select(row => new
             {
                 row.Item,
-                LastControlAnchorAt = row.Item.Case.ActivityConfirmedAt.HasValue && row.Item.Case.ActivityConfirmedAt.Value > row.LastControlAnchorAt
+                LastMeaningfulActivityAt = row.Item.Case.ActivityConfirmedAt.HasValue && row.Item.Case.ActivityConfirmedAt.Value > row.LastMeaningfulActivityAt
                     ? row.Item.Case.ActivityConfirmedAt.Value
-                    : row.LastControlAnchorAt,
+                    : row.LastMeaningfulActivityAt,
             })
             .Select(row => new
             {
                 row.Item,
-                LastControlAnchorAt = row.Item.LastControlCycleEndedAt.HasValue && row.Item.LastControlCycleEndedAt.Value > row.LastControlAnchorAt
+                row.LastMeaningfulActivityAt,
+                LastControlAnchorAt = row.Item.LastControlCycleEndedAt.HasValue && row.Item.LastControlCycleEndedAt.Value > row.LastMeaningfulActivityAt
                     ? row.Item.LastControlCycleEndedAt.Value
-                    : row.LastControlAnchorAt,
+                    : row.LastMeaningfulActivityAt,
             })
-            .OrderBy(row => row.LastControlAnchorAt)
+            .OrderBy(row => row.LastMeaningfulActivityAt <= escalationCutoff ? 0 : 1)
+            .ThenBy(row => row.LastMeaningfulActivityAt <= escalationCutoff
+                ? row.LastMeaningfulActivityAt
+                : row.LastControlAnchorAt)
             .ThenBy(row => row.Item.Case.Client != null
                 ? row.Item.Case.Client.Name
                 : row.Item.Case.LegalEntity != null
