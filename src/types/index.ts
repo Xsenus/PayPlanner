@@ -931,6 +931,9 @@ export interface ClientCaseActivity {
   activityConfirmedByUserName?: string | null;
   inactivityRemindersEnabled: boolean;
   inactivityRemindersDisabledReason?: string | null;
+  lastMeaningfulActivityAt?: string | null;
+  nextInactivityControlAt?: string | null;
+  inactivityControlExclusionReason?: string | null;
   eventHistory?: string | null;
 }
 

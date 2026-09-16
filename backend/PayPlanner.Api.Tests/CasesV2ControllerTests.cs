@@ -113,6 +113,8 @@ public class CasesV2ControllerTests
             EventHistory = "05.08.2026 10:15: Внутреннее сообщение: Проверить документы. Автор: Владелец карточки.",
             Status = ClientCaseStatus.Open,
             FeeAmount = 12500m,
+            CreatedAt = new DateTime(2026, 8, 1, 10, 0, 0, DateTimeKind.Utc),
+            ActivityConfirmedAt = new DateTime(2026, 8, 5, 10, 15, 0, DateTimeKind.Utc),
             CourtParties =
             [
                 new ClientCaseCourtParty
@@ -136,8 +138,12 @@ public class CasesV2ControllerTests
 
         interceptor.Commands.Clear();
         var details = await CreateController(db, owner).GetById(clientCase.Id, CancellationToken.None);
-        Assert.IsType<OkObjectResult>(details);
-        Assert.Equal(5, interceptor.Commands.Count);
+        var detailsOk = Assert.IsType<OkObjectResult>(details);
+        var detailsItem = Assert.IsType<ClientCase>(detailsOk.Value);
+        Assert.Equal(clientCase.ActivityConfirmedAt, detailsItem.LastMeaningfulActivityAt);
+        Assert.Equal(clientCase.ActivityConfirmedAt.Value.AddDays(14), detailsItem.NextInactivityControlAt);
+        Assert.Empty(detailsItem.InactivityControlExclusionReason);
+        Assert.Equal(8, interceptor.Commands.Count);
 
         interceptor.Commands.Clear();
         var summary = await CreateController(db, owner).GetSummary(clientCase.Id, CancellationToken.None);
@@ -5927,6 +5933,9 @@ public class CasesV2ControllerTests
         Assert.Equal(owner.Id, dto.LastViewedByResponsibleUserId);
         Assert.Equal("Владелец", dto.LastViewedByResponsibleUserName);
         Assert.Equal(owner.Id, dto.ActivityConfirmedByUserId);
+        Assert.Equal(dto.ActivityConfirmedAt, dto.LastMeaningfulActivityAt);
+        Assert.Equal(dto.LastMeaningfulActivityAt!.Value.AddDays(14), dto.NextInactivityControlAt);
+        Assert.Empty(dto.InactivityControlExclusionReason);
         Assert.Contains("Активность по делу подтверждена", dto.EventHistory, StringComparison.Ordinal);
 
         await db.Entry(clientCase).ReloadAsync();

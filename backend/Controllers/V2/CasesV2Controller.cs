@@ -2610,7 +2610,7 @@ public class CasesV2Controller : ControllerBase
             {
                 HideCaseFinanceData([entity]);
             }
-            await ApplyTaskSummaryAsync([entity], ct);
+            await ApplyTaskSummaryAsync([entity], ct, includeInactivityControlSummary: true);
             PopulateResponsibleViewAliases([entity]);
             var canRevealSensitiveData = await CanRevealCaseSensitiveDataAsync(ct);
             entity.CanRevealSensitiveData = canRevealSensitiveData;
@@ -5636,6 +5636,7 @@ public class CasesV2Controller : ControllerBase
         }
 
         await _db.SaveChangesAsync(ct);
+        await ApplyTaskSummaryAsync([clientCase], ct, includeInactivityControlSummary: true);
 
         return Ok(new ClientCaseActivityDto
         {
@@ -5650,6 +5651,9 @@ public class CasesV2Controller : ControllerBase
             ActivityConfirmedByUserName = clientCase.ActivityConfirmedByUserName,
             InactivityRemindersEnabled = clientCase.InactivityRemindersEnabled,
             InactivityRemindersDisabledReason = clientCase.InactivityRemindersDisabledReason,
+            LastMeaningfulActivityAt = clientCase.LastMeaningfulActivityAt,
+            NextInactivityControlAt = clientCase.NextInactivityControlAt,
+            InactivityControlExclusionReason = clientCase.InactivityControlExclusionReason,
             EventHistory = clientCase.EventHistory,
         });
     }
@@ -14040,6 +14044,9 @@ public class CasesV2Controller : ControllerBase
         public string ActivityConfirmedByUserName { get; set; } = string.Empty;
         public bool InactivityRemindersEnabled { get; set; }
         public string InactivityRemindersDisabledReason { get; set; } = string.Empty;
+        public DateTime? LastMeaningfulActivityAt { get; set; }
+        public DateTime? NextInactivityControlAt { get; set; }
+        public string InactivityControlExclusionReason { get; set; } = string.Empty;
         public string EventHistory { get; set; } = string.Empty;
     }
 

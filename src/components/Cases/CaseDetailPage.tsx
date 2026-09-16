@@ -956,8 +956,6 @@ function getNearestCaseDateSummary(
   return { value, tone: 'slate' };
 }
 
-const DAY_MS = 24 * 60 * 60 * 1000;
-
 function getDateTime(value?: string | null) {
   if (!value) return null;
   const time = Date.parse(value);
@@ -969,34 +967,71 @@ function getResponsibleLastViewedAt(caseItem: ClientCase) {
 }
 
 function getLatestCaseActivityTime(caseItem: ClientCase) {
+  const authoritativeActivityTime = getDateTime(caseItem.lastMeaningfulActivityAt);
+  if (authoritativeActivityTime !== null) return authoritativeActivityTime;
+
   const dates = [
     getDateTime(caseItem.activityConfirmedAt),
     getDateTime(caseItem.lastTaskAt),
     getDateTime(getResponsibleLastViewedAt(caseItem)),
-    getDateTime(caseItem.auditUpdatedAt),
     getDateTime(caseItem.createdAt),
   ].filter((value): value is number => value !== null);
 
   return dates.length > 0 ? Math.max(...dates) : null;
 }
 
-function getInactivitySummary(caseItem: ClientCase): { value: string; tone: SummaryTone } {
-  if (caseItem.inactivityRemindersEnabled === false) {
-    return { value: 'Контроль выключен', tone: 'slate' };
-  }
-
+function getInactivitySummary(
+  caseItem: ClientCase,
+  now = new Date(),
+  timeZoneId?: string | null,
+): { value: string; tone: SummaryTone; hint?: string } {
   const latestActivityTime = getLatestCaseActivityTime(caseItem);
-  if (latestActivityTime === null) {
-    return { value: 'Нет активности', tone: 'rose' };
+  const latestActivity = latestActivityTime === null
+    ? 'Последнее действие не определено'
+    : `Последнее действие: ${formatRuDateTime(new Date(latestActivityTime).toISOString(), timeZoneId ?? undefined)}`;
+
+  if (caseItem.inactivityRemindersEnabled === false) {
+    return {
+      value: 'Контроль выключен',
+      tone: 'slate',
+      hint: caseItem.inactivityRemindersDisabledReason?.trim() || latestActivity,
+    };
   }
 
-  const days = Math.max(0, Math.floor((Date.now() - latestActivityTime) / DAY_MS));
-  if (days === 0) {
-    return { value: 'Сегодня', tone: 'emerald' };
+  if (caseItem.status === 'Closed' || caseItem.status === 'Lost') {
+    return { value: 'Дело завершено', tone: 'slate', hint: 'Автоконтроль не требуется' };
   }
 
-  const tone: SummaryTone = days >= 14 ? 'rose' : days >= 7 ? 'amber' : 'emerald';
-  return { value: `${days} дн. без действий`, tone };
+  const exclusionReason = caseItem.inactivityControlExclusionReason?.trim();
+  if (exclusionReason) {
+    if (exclusionReason === 'Есть активная задача') {
+      return { value: exclusionReason, tone: 'emerald', hint: 'Отдельная контрольная задача пока не требуется' };
+    }
+    if (exclusionReason.toLocaleLowerCase('ru').includes('отключ')) {
+      return { value: 'Контроль выключен', tone: 'slate', hint: exclusionReason };
+    }
+    return { value: 'Контроль приостановлен', tone: 'slate', hint: exclusionReason };
+  }
+
+  const nextControlTime = getDateTime(caseItem.nextInactivityControlAt);
+  if (nextControlTime === null) {
+    return { value: 'График не рассчитан', tone: 'amber', hint: latestActivity };
+  }
+
+  const nextControlLabel = formatRuDateTime(new Date(nextControlTime).toISOString(), timeZoneId ?? undefined);
+  if (nextControlTime <= now.getTime()) {
+    return {
+      value: 'Пора проверить',
+      tone: 'amber',
+      hint: `Срок контроля: ${nextControlLabel || 'не определён'} · ${latestActivity}`,
+    };
+  }
+
+  return {
+    value: `Проверка ${nextControlLabel || 'запланирована'}`,
+    tone: 'cyan',
+    hint: latestActivity,
+  };
 }
 
 type CourtSyncSummaryRecord = {
@@ -1735,6 +1770,14 @@ export function CaseDetailPage({
             activityConfirmedByUserId: activity.activityConfirmedByUserId,
             activityConfirmedByUserName: activity.activityConfirmedByUserName,
             inactivityRemindersEnabled: activity.inactivityRemindersEnabled,
+            inactivityRemindersDisabledReason: activity.inactivityRemindersDisabledReason,
+            lastMeaningfulActivityAt: activity.lastMeaningfulActivityAt ?? current.lastMeaningfulActivityAt,
+            nextInactivityControlAt: activity.nextInactivityControlAt === undefined
+              ? current.nextInactivityControlAt
+              : activity.nextInactivityControlAt,
+            inactivityControlExclusionReason: activity.inactivityControlExclusionReason === undefined
+              ? current.inactivityControlExclusionReason
+              : activity.inactivityControlExclusionReason,
           }
           : current);
       })
@@ -3634,7 +3677,7 @@ export function CaseDetailPage({
     : proceduralDeadlinesError
       ? { value: 'Сроки недоступны', tone: 'amber' as SummaryTone }
       : getNearestCaseDateSummary(caseItem, proceduralDeadlines, new Date(), caseTimeZoneId);
-  const inactivitySummary = getInactivitySummary(caseItem);
+  const inactivitySummary = getInactivitySummary(caseItem, new Date(), caseTimeZoneId);
   const responsibleLastViewedAt = getResponsibleLastViewedAt(caseItem);
   const responsibleLastViewedByName = caseItem.lastViewedByResponsibleUserName ?? caseItem.lastViewedByUserName ?? null;
   const courtSyncSummary = getCourtSyncSummary(
@@ -3839,7 +3882,7 @@ export function CaseDetailPage({
           {canViewFinance ? (
             <SummaryCard label="Оплачено / долг" value={`${formatMoney(caseItem.incomePaid)} / ${formatMoney(caseItem.incomeOutstanding)}`} />
           ) : null}
-          <SummaryCard label="Активность" value={inactivitySummary.value} tone={inactivitySummary.tone} />
+          <SummaryCard label="Автоконтроль" value={inactivitySummary.value} tone={inactivitySummary.tone} hint={inactivitySummary.hint} />
           <SummaryCard label="Судебная проверка" value={courtSyncSummary.value} tone={courtSyncSummary.tone} />
         </div>
 
@@ -5948,7 +5991,7 @@ function StageTransitionActions({
   );
 }
 
-function SummaryCard({ label, value, tone = 'slate' }: { label: string; value: string; tone?: SummaryTone }) {
+function SummaryCard({ label, value, tone = 'slate', hint }: { label: string; value: string; tone?: SummaryTone; hint?: string }) {
   const toneClasses = tone === 'emerald'
     ? {
         surface: 'border-emerald-200 border-l-emerald-500 bg-emerald-50/40',
@@ -5979,9 +6022,10 @@ function SummaryCard({ label, value, tone = 'slate' }: { label: string; value: s
               value: 'text-slate-900',
             };
   return (
-    <div aria-label={`${label}: ${value}`} className={`min-w-0 rounded-xl border border-l-4 p-3 shadow-sm ${toneClasses.surface}`}>
+    <div aria-label={`${label}: ${value}${hint ? `. ${hint}` : ''}`} className={`min-w-0 rounded-xl border border-l-4 p-3 shadow-sm ${toneClasses.surface}`}>
       <div className={`text-[11px] font-semibold uppercase tracking-[0.12em] ${toneClasses.label}`}>{label}</div>
       <div className={`mt-1.5 break-words text-base font-bold leading-5 ${toneClasses.value}`}>{value}</div>
+      {hint ? <div className={`mt-1 break-words text-xs font-medium leading-4 ${toneClasses.value} opacity-75`}>{hint}</div> : null}
     </div>
   );
 }

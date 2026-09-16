@@ -606,6 +606,9 @@ describe('CaseDetailPage', () => {
       activityConfirmedByUserId: null,
       activityConfirmedByUserName: null,
       inactivityRemindersEnabled: true,
+      lastMeaningfulActivityAt: '2026-05-12T10:15:00Z',
+      nextInactivityControlAt: '2026-05-26T10:15:00Z',
+      inactivityControlExclusionReason: '',
       eventHistory: '',
     });
     vi.mocked(apiService.generateCaseDocumentTemplate).mockReset();
@@ -1255,16 +1258,98 @@ describe('CaseDetailPage', () => {
   });
 
   it('shows inactivity and court sync indicators in the summary panel', async () => {
+    const latestActivityAt = new Date();
+    const nextControlAt = new Date(latestActivityAt.getTime() + 14 * 24 * 60 * 60 * 1000);
     vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({
-      lastTaskAt: new Date().toISOString(),
+      lastTaskAt: latestActivityAt.toISOString(),
+      lastMeaningfulActivityAt: latestActivityAt.toISOString(),
+      nextInactivityControlAt: nextControlAt.toISOString(),
       eventHistory: '18.05.2026 10:30: Ручная проверка судебного источника зафиксирована.',
     }));
+    vi.mocked(apiService.markCaseActivity).mockResolvedValue({
+      lastViewedAt: latestActivityAt.toISOString(),
+      lastViewedByUserId: 7,
+      lastViewedByUserName: 'Кожеваткин Андрей Владимирович',
+      lastViewedByResponsibleAt: latestActivityAt.toISOString(),
+      lastViewedByResponsibleUserId: 7,
+      lastViewedByResponsibleUserName: 'Кожеваткин Андрей Владимирович',
+      activityConfirmedAt: null,
+      activityConfirmedByUserId: null,
+      activityConfirmedByUserName: null,
+      inactivityRemindersEnabled: true,
+      lastMeaningfulActivityAt: latestActivityAt.toISOString(),
+      nextInactivityControlAt: nextControlAt.toISOString(),
+      inactivityControlExclusionReason: '',
+      eventHistory: '',
+    });
 
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
 
-    expect(await screen.findByText('Сегодня')).toBeTruthy();
+    const activitySummary = await screen.findByLabelText(/Автоконтроль: Проверка .+ Последнее действие:/u);
+    expect(activitySummary.className).toContain('border-l-cyan-500');
     const manualSummary = await screen.findByLabelText('Судебная проверка: Отмечено 18.05.2026');
     expect(manualSummary.className).toContain('border-l-cyan-500');
+  });
+
+  it('shows why inactivity control is not needed instead of applying a local day threshold', async () => {
+    vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({
+      lastMeaningfulActivityAt: '2026-01-01T10:00:00Z',
+      nextInactivityControlAt: null,
+      inactivityControlExclusionReason: 'Есть активная задача',
+    }));
+    vi.mocked(apiService.markCaseActivity).mockResolvedValue({
+      lastViewedAt: '2026-01-01T10:00:00Z',
+      lastViewedByUserId: 7,
+      lastViewedByUserName: 'Кожеваткин Андрей Владимирович',
+      lastViewedByResponsibleAt: '2026-01-01T10:00:00Z',
+      lastViewedByResponsibleUserId: 7,
+      lastViewedByResponsibleUserName: 'Кожеваткин Андрей Владимирович',
+      activityConfirmedAt: null,
+      activityConfirmedByUserId: null,
+      activityConfirmedByUserName: null,
+      inactivityRemindersEnabled: true,
+      lastMeaningfulActivityAt: '2026-01-01T10:00:00Z',
+      nextInactivityControlAt: null,
+      inactivityControlExclusionReason: 'Есть активная задача',
+      eventHistory: '',
+    });
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    const activitySummary = await screen.findByLabelText(/Автоконтроль: Есть активная задача/u);
+    expect(activitySummary.className).toContain('border-l-emerald-500');
+    expect(screen.getByText('Отдельная контрольная задача пока не требуется')).toBeTruthy();
+  });
+
+  it('highlights an inactivity control whose server deadline has arrived', async () => {
+    const latestActivityAt = '2026-01-01T10:00:00Z';
+    const nextControlAt = '2026-01-15T10:00:00Z';
+    vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({
+      lastMeaningfulActivityAt: latestActivityAt,
+      nextInactivityControlAt: nextControlAt,
+      inactivityControlExclusionReason: '',
+    }));
+    vi.mocked(apiService.markCaseActivity).mockResolvedValue({
+      lastViewedAt: latestActivityAt,
+      lastViewedByUserId: 7,
+      lastViewedByUserName: 'Кожеваткин Андрей Владимирович',
+      lastViewedByResponsibleAt: latestActivityAt,
+      lastViewedByResponsibleUserId: 7,
+      lastViewedByResponsibleUserName: 'Кожеваткин Андрей Владимирович',
+      activityConfirmedAt: null,
+      activityConfirmedByUserId: null,
+      activityConfirmedByUserName: null,
+      inactivityRemindersEnabled: true,
+      lastMeaningfulActivityAt: latestActivityAt,
+      nextInactivityControlAt: nextControlAt,
+      inactivityControlExclusionReason: '',
+      eventHistory: '',
+    });
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    const activitySummary = await screen.findByLabelText(/Автоконтроль: Пора проверить\. Срок контроля:/u);
+    expect(activitySummary.className).toContain('border-l-amber-500');
   });
 
   it('shows the latest confirmed source check instead of a newer manual mark', async () => {
