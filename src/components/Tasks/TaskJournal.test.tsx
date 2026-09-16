@@ -1218,6 +1218,12 @@ describe('TaskJournal', () => {
 
     expect(await screen.findByText('Договор с фиксированной оплатой')).toBeTruthy();
     expect(screen.getByText(/следите за объёмом услуг/i)).toBeTruthy();
+    expect(screen.getByTestId('task-billing-create-wizard').classList.contains('pp-task-billing-wizard')).toBe(true);
+    expect(screen.getByTestId('task-billing-context').textContent).toContain('Иванов Иван Иванович');
+    expect(screen.getByTestId('task-billing-context').textContent).toContain('БАНКРОТСТВО');
+    expect(screen.getByTestId('task-billing-notice').classList.contains('pp-task-billing-notice-special')).toBe(true);
+    expect(screen.getByRole('button', { name: /Клиентская задача/ }).classList.contains('pp-task-billing-choice-special')).toBe(true);
+    expect(screen.getByRole('button', { name: /^Внутренняя задача/ }).classList.contains('pp-task-billing-choice-neutral')).toBe(true);
     fireEvent.click(screen.getByRole('button', { name: /Клиентская задача/ }));
 
     expect(await screen.findByText('Клиентская задача в рамках договора с фиксированной оплатой.')).toBeTruthy();

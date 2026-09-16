@@ -9193,16 +9193,24 @@ function TaskBillingCreateWizard({
       ? 'Работа выполняется в рамках фиксированной суммы. Внимание: следите за объёмом услуг по этому делу.'
       : 'Новая клиентская задача без договора учитывается как платная и попадёт в контроль выставления счёта. Если работа не должна оплачиваться клиентом, выберите внутреннюю задачу.';
   const isAutoLoadingBilling = step === 'binding' && autoLoadBilling && loading;
+  const billingContextLabel = [selectedCounterparty?.label, selectedCase?.title].filter(Boolean).join(' · ')
+    || initialDefaults.objectName
+    || 'Клиентская задача';
+  const billingNoticeTone = mode === 'Actual'
+    ? 'danger'
+    : mode === 'Fixed'
+      ? 'special'
+      : 'warning';
 
   return (
-    <div className="fixed inset-0 z-[2400] flex items-center justify-center bg-slate-950/45 p-3" role="dialog" aria-modal="true" aria-labelledby="task-create-wizard-title">
-      <div className="w-full max-w-2xl rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl sm:p-5">
+    <div className="pp-task-billing-overlay fixed inset-0 z-[2400] flex items-center justify-center p-3" role="dialog" aria-modal="true" aria-labelledby="task-create-wizard-title">
+      <div data-testid="task-billing-create-wizard" className="pp-task-billing-wizard w-full max-w-2xl rounded-2xl border p-4 shadow-2xl sm:p-5">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <div className="text-xs font-bold uppercase tracking-[0.16em] text-blue-600">
+            <div className="pp-task-billing-kicker text-xs font-bold uppercase tracking-[0.16em]">
               {isAutoLoadingBilling ? 'Новая задача · подготовка' : `Новая задача · шаг ${step === 'binding' ? '1 из 2' : '2 из 2'}`}
             </div>
-            <h2 id="task-create-wizard-title" className="mt-1 text-xl font-bold text-slate-950">
+            <h2 id="task-create-wizard-title" className="pp-task-billing-heading mt-1 text-xl font-bold">
               {isAutoLoadingBilling
                 ? 'Проверяем договор по делу'
                 : step === 'binding'
@@ -9210,14 +9218,20 @@ function TaskBillingCreateWizard({
                   : 'Определите учёт задачи'}
             </h2>
           </div>
-          <button type="button" onClick={onCancel} className="rounded-xl p-2 text-slate-400 hover:bg-slate-100" aria-label="Закрыть"><X className="h-5 w-5" /></button>
+          <button type="button" onClick={onCancel} className="pp-task-billing-quiet-action rounded-xl p-2" aria-label="Закрыть"><X className="h-5 w-5" /></button>
         </div>
 
         {step === 'binding' ? (
           isAutoLoadingBilling ? (
-            <div role="status" className="mt-5 flex items-center gap-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-5 text-sm font-semibold text-blue-900">
-              <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
-              Клиент и дело уже выбраны. Загружаем договор и правила оплаты…
+            <div role="status" className="pp-task-billing-loading mt-4 rounded-xl border px-4 py-4">
+              <div className="flex items-center gap-3 text-sm font-semibold">
+                <Loader2 className="h-5 w-5 shrink-0 animate-spin" />
+                Клиент и дело уже выбраны. Загружаем договор и правила оплаты…
+              </div>
+              <div className="pp-task-billing-context mt-3 flex items-start gap-2 rounded-lg border px-3 py-2 text-sm">
+                <ClipboardList className="mt-0.5 h-4 w-4 shrink-0" />
+                <span className="break-words">{billingContextLabel}</span>
+              </div>
             </div>
           ) : (
             <div className="mt-5 space-y-4">
@@ -9287,7 +9301,11 @@ function TaskBillingCreateWizard({
             </div>
           )
         ) : (
-          <div className="mt-5">
+          <div className="mt-4">
+            <div data-testid="task-billing-context" className="pp-task-billing-context mb-3 flex items-start gap-2 rounded-xl border px-3 py-2.5 text-sm font-semibold">
+              <ClipboardList className="mt-0.5 h-4 w-4 shrink-0" />
+              <span className="break-words">{billingContextLabel}</span>
+            </div>
             {billingContext && billingContext.contracts.length > 1 ? (
               <label className="mb-3 block text-sm font-semibold text-slate-700">
                 Договор
@@ -9296,24 +9314,24 @@ function TaskBillingCreateWizard({
                 </SystemSelect>
               </label>
             ) : null}
-            <div className={`rounded-xl border p-4 ${mode === 'Actual' ? 'border-rose-200 bg-rose-50' : mode === 'Fixed' ? 'border-violet-200 bg-violet-50' : 'border-amber-200 bg-amber-50'}`}>
-              <div className="font-bold text-slate-950">{warningTitle}</div>
-              {selectedContract ? <div className="mt-1 text-sm font-semibold text-slate-700">Договор №{selectedContract.number}{selectedContract.title ? ` · ${selectedContract.title}` : ''}</div> : null}
-              <p className="mt-2 text-sm leading-6 text-slate-700">{warningText}</p>
+            <div data-testid="task-billing-notice" className={`pp-task-billing-notice pp-task-billing-notice-${billingNoticeTone} rounded-xl border p-4`}>
+              <div className="font-bold">{warningTitle}</div>
+              {selectedContract ? <div className="mt-1 text-sm font-semibold">Договор №{selectedContract.number}{selectedContract.title ? ` · ${selectedContract.title}` : ''}</div> : null}
+              <p className="mt-2 text-sm leading-6">{warningText}</p>
             </div>
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              <button type="button" onClick={() => complete('billable')} className="min-h-36 rounded-2xl border-2 border-rose-300 bg-rose-50 p-5 text-left transition hover:bg-rose-100">
-                <WalletCards className="h-7 w-7 text-rose-600" />
-                <span className="mt-3 block text-base font-bold text-rose-950">{mode === 'Fixed' ? 'Клиентская задача' : mode === 'Actual' ? 'Платная задача' : 'Платная задача без договора'}</span>
-                <span className="mt-1 block text-sm text-rose-700">{mode === 'Fixed' ? 'Учесть объём в рамках фиксированного договора' : 'Добавить в контроль будущего счёта'}</span>
+              <button type="button" onClick={() => complete('billable')} className={`pp-task-billing-choice pp-task-billing-choice-${billingNoticeTone} min-h-32 rounded-2xl border-2 p-4 text-left transition`}>
+                <WalletCards className="h-7 w-7" />
+                <span className="mt-3 block text-base font-bold">{mode === 'Fixed' ? 'Клиентская задача' : mode === 'Actual' ? 'Платная задача' : 'Платная задача без договора'}</span>
+                <span className="mt-1 block text-sm">{mode === 'Fixed' ? 'Учесть объём в рамках фиксированного договора' : 'Добавить в контроль будущего счёта'}</span>
               </button>
-              <button type="button" onClick={() => complete('internal')} className="min-h-36 rounded-2xl border-2 border-slate-300 bg-slate-50 p-5 text-left transition hover:bg-slate-100">
-                <ShieldAlert className="h-7 w-7 text-slate-600" />
-                <span className="mt-3 block text-base font-bold text-slate-950">Внутренняя задача</span>
-                <span className="mt-1 block text-sm text-slate-600">Не учитывать в системе оплаты с клиентом</span>
+              <button type="button" onClick={() => complete('internal')} className="pp-task-billing-choice pp-task-billing-choice-neutral min-h-32 rounded-2xl border-2 p-4 text-left transition">
+                <ShieldAlert className="h-7 w-7" />
+                <span className="mt-3 block text-base font-bold">Внутренняя задача</span>
+                <span className="mt-1 block text-sm">Не учитывать в системе оплаты с клиентом</span>
               </button>
             </div>
-            <button type="button" onClick={() => setStep('binding')} className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-slate-600 hover:text-slate-900"><ArrowLeft className="h-4 w-4" /> Назад</button>
+            <button type="button" onClick={() => setStep('binding')} className="pp-task-billing-quiet-action mt-3 inline-flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm font-semibold"><ArrowLeft className="h-4 w-4" /> Назад</button>
           </div>
         )}
       </div>

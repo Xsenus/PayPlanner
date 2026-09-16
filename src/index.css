@@ -470,6 +470,86 @@ html[data-payplanner-theme] .pp-settings-nav-item-active:hover {
   background: var(--pp-danger-soft-strong);
 }
 
+.pp-task-billing-overlay {
+  background: var(--pp-overlay);
+}
+
+.pp-task-billing-wizard {
+  background: var(--pp-surface);
+  border-color: var(--pp-border);
+  color: var(--pp-text);
+}
+
+.pp-task-billing-kicker {
+  color: var(--pp-primary);
+}
+
+.pp-task-billing-heading {
+  color: var(--pp-heading);
+}
+
+.pp-task-billing-loading {
+  background: var(--pp-primary-soft);
+  border-color: color-mix(in srgb, var(--pp-primary) 42%, var(--pp-border));
+  color: var(--pp-primary);
+}
+
+.pp-task-billing-context {
+  background: color-mix(in srgb, var(--pp-surface-muted) 88%, var(--pp-primary-soft));
+  border-color: color-mix(in srgb, var(--pp-primary) 28%, var(--pp-border));
+  color: var(--pp-text);
+}
+
+.pp-task-billing-notice,
+.pp-task-billing-choice {
+  color: var(--pp-text);
+}
+
+.pp-task-billing-notice-danger,
+.pp-task-billing-choice-danger {
+  background: var(--pp-danger-soft);
+  border-color: var(--pp-danger-border);
+  color: var(--pp-danger-text);
+}
+
+.pp-task-billing-notice-special,
+.pp-task-billing-choice-special {
+  background: var(--pp-special-soft);
+  border-color: var(--pp-special-border);
+  color: var(--pp-special-text);
+}
+
+.pp-task-billing-notice-warning,
+.pp-task-billing-choice-warning {
+  background: var(--pp-warning-soft);
+  border-color: var(--pp-warning-border);
+  color: var(--pp-warning-text);
+}
+
+.pp-task-billing-choice-neutral {
+  background: var(--pp-surface-muted);
+  border-color: var(--pp-border-strong);
+  color: var(--pp-text);
+}
+
+.pp-task-billing-choice:hover {
+  box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.pp-task-billing-choice-danger:hover { background: var(--pp-danger-soft-strong); }
+.pp-task-billing-choice-special:hover { background: var(--pp-special-soft-strong); }
+.pp-task-billing-choice-warning:hover { background: var(--pp-warning-soft-strong); }
+.pp-task-billing-choice-neutral:hover { background: var(--pp-row-hover); }
+
+.pp-task-billing-quiet-action {
+  color: var(--pp-text-muted);
+}
+
+.pp-task-billing-quiet-action:hover {
+  background: var(--pp-row-hover);
+  color: var(--pp-heading);
+}
+
 html[data-payplanner-theme] .bg-white { background-color: var(--pp-surface) !important; }
 html[data-payplanner-theme] [class*='bg-white/'] { background-color: color-mix(in srgb, var(--pp-surface) 92%, transparent) !important; }
 html[data-payplanner-theme] .bg-gray-50,
