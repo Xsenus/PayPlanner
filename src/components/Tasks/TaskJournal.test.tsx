@@ -3925,6 +3925,7 @@ describe('TaskJournal', () => {
     await renderJournal([createTask()], { onOpenCase });
 
     expect(screen.getByRole('heading', { name: 'Все дела без активных задач' })).toBeTruthy();
+    expect(screen.getByLabelText('Всего дел без активных задач: 3')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Критические: 1' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Пора создать: 1' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Ожидают срока: 1' })).toBeTruthy();
@@ -3965,6 +3966,10 @@ describe('TaskJournal', () => {
       expect.anything(),
     ));
     expect(apiMock.getTaskJournalCaseAutomationSummary).not.toHaveBeenCalled();
+    expect(screen.getByRole('heading', { name: 'Критические дела без активных задач' })).toBeTruthy();
+    expect(screen.getByLabelText('Критических дел: 1')).toBeTruthy();
+    expect(document.querySelector('[data-automation-active-state="critical"]')?.className)
+      .toContain('pp-automation-panel-critical');
     expect(screen.getByText('ГОТОВО К КОНТРОЛЮ')).toBeTruthy();
     expect(screen.queryByText('ОЖИДАЕТ ПОРОГА')).toBeNull();
     expect(screen.getByRole('button', { name: 'Создать критические (1)' })).toBeTruthy();
@@ -3976,6 +3981,8 @@ describe('TaskJournal', () => {
       expect.anything(),
     ));
     expect(apiMock.getTaskJournalCaseAutomationSummary).not.toHaveBeenCalled();
+    expect(screen.getByRole('heading', { name: 'Дела, ожидающие срока' })).toBeTruthy();
+    expect(screen.getByLabelText('Дел, ожидающих срока: 1')).toBeTruthy();
     expect((screen.getByRole('button', { name: 'Срок ещё не наступил' }) as HTMLButtonElement).disabled).toBe(true);
 
     const waitingTaskButton = screen.getByTestId('task-automation-create-101') as HTMLButtonElement;

@@ -1273,6 +1273,38 @@ const AUTOMATION_CANDIDATE_PRESENTATION = {
   },
 } as const;
 
+const AUTOMATION_CANDIDATE_OVERVIEW: Record<AutomationCandidateStateFilter, {
+  title: string;
+  description: string;
+  countLabel: string;
+}> = {
+  all: {
+    title: 'Все дела без активных задач',
+    description: 'Система контролирует каждое дело и показывает, когда наступит срок создания задачи.',
+    countLabel: 'Всего дел без активных задач',
+  },
+  critical: {
+    title: 'Критические дела без активных задач',
+    description: 'Движения нет дольше критического порога. Эти дела обрабатываются в первую очередь.',
+    countLabel: 'Критических дел',
+  },
+  ready: {
+    title: 'Дела с наступившим контролем',
+    description: 'Срок создания контрольной задачи уже наступил.',
+    countLabel: 'Дел с наступившим контролем',
+  },
+  waiting: {
+    title: 'Дела, ожидающие срока',
+    description: 'Контроль рассчитан, но дата создания задачи ещё не наступила.',
+    countLabel: 'Дел, ожидающих срока',
+  },
+  paused: {
+    title: 'Приостановленные дела',
+    description: 'Автоконтроль временно не создаёт задачи по этим делам.',
+    countLabel: 'Приостановленных дел',
+  },
+};
+
 function getAutomationCandidateStateCount(
   summary: TaskJournalCaseAutomationSummary,
   state: AutomationCandidateStateFilter,
@@ -6603,6 +6635,7 @@ function TaskAutomationPanel({
     : activeState === 'waiting' || activeState === 'paused'
       ? 0
       : readyCount;
+  const overview = AUTOMATION_CANDIDATE_OVERVIEW[activeState];
   const stateTotal = getAutomationCandidateStateCount(effectiveSummary, activeState);
   const hasMore = candidates.length < stateTotal;
   const orderedCandidates = [...candidates].sort((left, right) => {
@@ -6623,22 +6656,28 @@ function TaskAutomationPanel({
   const visibleCandidates = expanded ? filteredCandidates : filteredCandidates.slice(0, 6);
 
   return (
-    <section className="mb-4 rounded-2xl border border-amber-200 bg-amber-50/60 p-3 shadow-sm">
+    <section
+      data-automation-active-state={activeState}
+      className={`pp-automation-panel mb-4 rounded-2xl border p-3 shadow-sm ${activeState === 'critical' ? 'pp-automation-panel-critical' : ''}`}
+    >
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <div className="text-xs font-semibold uppercase tracking-[0.16em] text-amber-700">Автоконтроль дел</div>
-          <h2 className="mt-1 text-lg font-semibold text-slate-900">Все дела без активных задач</h2>
-          <p className="mt-1 text-sm text-slate-600">Система контролирует каждое дело и показывает, когда наступит срок создания задачи.</p>
+          <div className="pp-automation-panel-kicker text-xs font-semibold uppercase tracking-[0.16em]">Автоконтроль дел</div>
+          <h2 className="mt-1 text-lg font-semibold text-slate-900">{overview.title}</h2>
+          <p className="mt-1 text-sm text-slate-600">{overview.description}</p>
         </div>
-        <div className="inline-flex w-fit items-center gap-2 rounded-full border border-amber-200 bg-white px-3 py-1 text-sm font-semibold text-amber-700">
+        <div
+          aria-label={`${overview.countLabel}: ${stateTotal}`}
+          className="pp-automation-panel-count inline-flex w-fit items-center gap-2 rounded-full border px-3 py-1 text-sm font-semibold"
+        >
           <ClipboardList className="h-4 w-4" />
-          {effectiveSummary.totalCount}
+          {stateTotal}
         </div>
         <button
           type="button"
           onClick={onCreateAll}
           disabled={creatingAll || loadingPage || Boolean(loadError) || actionableCount === 0}
-          className="inline-flex w-fit items-center gap-2 rounded-xl bg-amber-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-amber-700 disabled:cursor-wait disabled:opacity-60"
+          className="pp-automation-panel-action inline-flex w-fit items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60"
         >
           <Plus className="h-4 w-4" />
           {creatingAll

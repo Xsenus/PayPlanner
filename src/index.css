@@ -399,6 +399,52 @@ html[data-payplanner-theme] .pp-settings-nav-item-active:hover {
   background: var(--pp-row-hover);
 }
 
+.pp-automation-panel {
+  background: color-mix(in srgb, var(--pp-warning-soft) 88%, var(--pp-surface));
+  border-color: var(--pp-warning-border);
+}
+
+.pp-automation-panel-kicker,
+.pp-automation-panel-count {
+  color: var(--pp-warning-text);
+}
+
+.pp-automation-panel-count {
+  background: var(--pp-surface);
+  border-color: var(--pp-warning-border);
+}
+
+.pp-automation-panel-action {
+  background: var(--pp-warning-solid);
+  color: #fff;
+}
+
+.pp-automation-panel-action:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--pp-warning-solid) 84%, #000);
+}
+
+.pp-automation-panel-critical {
+  background: color-mix(in srgb, var(--pp-danger-soft) 88%, var(--pp-surface));
+  border-color: var(--pp-danger-border);
+}
+
+.pp-automation-panel-critical .pp-automation-panel-kicker,
+.pp-automation-panel-critical .pp-automation-panel-count {
+  color: var(--pp-danger-text);
+}
+
+.pp-automation-panel-critical .pp-automation-panel-count {
+  border-color: var(--pp-danger-border);
+}
+
+.pp-automation-panel-critical .pp-automation-panel-action {
+  background: var(--pp-danger-solid);
+}
+
+.pp-automation-panel-critical .pp-automation-panel-action:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--pp-danger-solid) 84%, #000);
+}
+
 .pp-automation-critical-card {
   background: color-mix(in srgb, var(--pp-danger-soft) 88%, var(--pp-surface));
   border-color: var(--pp-danger-border);
