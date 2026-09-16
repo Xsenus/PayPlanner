@@ -4541,6 +4541,10 @@ public class TasksControllerTests
             && command.Contains("FROM \"UserSettings\"", StringComparison.Ordinal));
         Assert.Single(interceptor.Commands, command =>
             command.Contains("SELECT \"u\".\"Id\", \"u\".\"FullName\", \"u\".\"Email\"", StringComparison.Ordinal));
+        Assert.Single(interceptor.Commands, command =>
+            command.Contains("SELECT DISTINCT", StringComparison.OrdinalIgnoreCase)
+            && command.Contains("FROM \"TaskJournalItems\"", StringComparison.Ordinal)
+            && command.Contains("\"ClientCaseId\"", StringComparison.Ordinal));
     }
 
     [Fact]

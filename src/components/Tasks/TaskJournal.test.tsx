@@ -3750,6 +3750,39 @@ describe('TaskJournal', () => {
     expect(toastMock.success).toHaveBeenCalledWith('Создано контрольных задач: 1.', 'Автоконтроль дел');
   });
 
+  it('explains when a stale automation candidate is skipped during bulk creation', async () => {
+    apiMock.getTaskJournalCaseAutomationCandidates.mockResolvedValue([
+      {
+        clientId: 10,
+        clientName: 'Иванов Иван Иванович',
+        clientCaseId: 100,
+        clientCaseTitle: 'БАНКРОТСТВО',
+        reason: 'Нет активной задачи',
+        activeTaskCount: 0,
+        completedTaskCount: 0,
+        daysWithoutActiveTask: 21,
+        isReadyForControl: true,
+        automationState: 'ready',
+        lastTaskAt: null,
+        suggestedTitle: 'Проверить движение по делу',
+        suggestedDescription: 'Автоконтроль',
+        suggestedDueAt: todayAt(9),
+      },
+    ]);
+    apiMock.createTaskJournalCaseAutomationTasks.mockResolvedValueOnce({
+      createdTasks: [],
+      skippedCount: 1,
+    });
+    await renderJournal();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Создать наступившие (1)' }));
+
+    await waitFor(() => expect(toastMock.info).toHaveBeenCalledWith(
+      'Новые задачи не созданы. Пропущено дел: 1 — их состояние или доступность изменились во время обработки.',
+      'Автоконтроль дел',
+    ));
+  });
+
   it('shows all cases without active tasks by automation state', async () => {
     apiMock.getTaskJournalCaseAutomationCandidates.mockResolvedValue([
       {

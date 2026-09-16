@@ -3294,7 +3294,19 @@ export function TaskJournal({
       });
       const createdCaseIds = new Set(result.createdTasks.map((task) => task.clientCaseId).filter((id): id is number => Boolean(id)));
       setAutomationCandidates((current) => current.filter((candidate) => !createdCaseIds.has(candidate.clientCaseId)));
-      toast.success(`Создано контрольных задач: ${result.createdTasks.length}.`, 'Автоконтроль дел');
+      if (result.createdTasks.length > 0) {
+        const skippedText = result.skippedCount > 0
+          ? ` Пропущено дел: ${result.skippedCount}.`
+          : '';
+        toast.success(`Создано контрольных задач: ${result.createdTasks.length}.${skippedText}`, 'Автоконтроль дел');
+      } else if (result.skippedCount > 0) {
+        toast.info(
+          `Новые задачи не созданы. Пропущено дел: ${result.skippedCount} — их состояние или доступность изменились во время обработки.`,
+          'Автоконтроль дел',
+        );
+      } else {
+        toast.info('Подходящих дел для создания контрольных задач больше нет.', 'Автоконтроль дел');
+      }
       await refreshTasks();
       if (result.createdTasks[0]) {
         openTaskEditor(result.createdTasks[0], { syncRoute: true });

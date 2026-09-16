@@ -1902,9 +1902,28 @@ public class TasksController : ControllerBase
             assigneesByCaseId.Values
                 .Select(assignee => assignee.UserId ?? 0),
             ct);
+        var candidateCaseIds = candidates
+            .Select(item => item.Case.Id)
+            .ToArray();
+        var activeTaskCaseIds = candidateCaseIds.Length == 0
+            ? []
+            : await _db.TaskJournalItems
+                .AsNoTracking()
+                .Where(task =>
+                    task.ClientCaseId.HasValue &&
+                    candidateCaseIds.Contains(task.ClientCaseId.Value) &&
+                    ActiveTaskStatuses.Contains(task.Status))
+                .Select(task => task.ClientCaseId!.Value)
+                .Distinct()
+                .ToHashSetAsync(ct);
 
         foreach (var item in candidates)
         {
+            if (activeTaskCaseIds.Contains(item.Case.Id))
+            {
+                continue;
+            }
+
             var binding = BuildCaseBinding(item.Case);
             if (binding.Error is not null)
             {
