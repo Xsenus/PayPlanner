@@ -5350,6 +5350,7 @@ export function TaskJournal({
             onCreate={createAutomationTask}
             onCreateManual={openTaskCreateForAutomationCandidate}
             onCreateAll={createAllAutomationTasks}
+            onOpenCase={onOpenCase}
           />
         ) : null}
 
@@ -6152,6 +6153,7 @@ function TaskAutomationPanel({
   onCreate,
   onCreateManual,
   onCreateAll,
+  onOpenCase,
 }: {
   candidates: TaskJournalCaseAutomationCandidate[];
   creatingCaseId: number | null;
@@ -6159,6 +6161,7 @@ function TaskAutomationPanel({
   onCreate: (candidate: TaskJournalCaseAutomationCandidate) => void;
   onCreateManual: (candidate: TaskJournalCaseAutomationCandidate) => void;
   onCreateAll: () => void;
+  onOpenCase?: (caseId: number, clientId?: number | null) => void | Promise<void>;
 }) {
   const [activeState, setActiveState] = useState<'all' | 'ready' | 'waiting' | 'paused'>('all');
   const [expanded, setExpanded] = useState(false);
@@ -6252,6 +6255,10 @@ function TaskAutomationPanel({
               </div>
             ) : null}
             <div className="mt-3 text-sm text-slate-600">{candidate.reason}</div>
+            <div className={`mt-2 flex items-center gap-2 text-xs font-medium ${candidate.responsibleName?.trim() ? 'text-slate-600' : 'text-amber-700'}`}>
+              <UsersRound className="h-3.5 w-3.5 shrink-0" />
+              Ответственный: {candidate.responsibleName?.trim() || 'не назначен'}
+            </div>
             <div className="mt-3 grid gap-2 rounded-lg bg-slate-50 px-3 py-2.5 text-xs text-slate-600">
               <div className="flex items-start gap-2">
                 <History className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400" />
@@ -6277,20 +6284,33 @@ function TaskAutomationPanel({
                   Нет активных задач
                 </span>
               </div>
-              <button
-                type="button"
-                data-testid={`task-automation-create-${candidate.clientCaseId}`}
-                disabled={isCreatingControlTask}
-                onClick={() => canCreateControlTask ? onCreate(candidate) : onCreateManual(candidate)}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-amber-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-amber-700 disabled:cursor-wait disabled:opacity-60 sm:w-auto"
-              >
-                <Plus className="h-4 w-4" />
-                {isCreatingControlTask
-                  ? 'Создаем...'
-                  : canCreateControlTask
-                    ? 'Создать контрольную задачу'
-                    : 'Поставить задачу'}
-              </button>
+              <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+                {onOpenCase ? (
+                  <button
+                    type="button"
+                    onClick={() => void onOpenCase(candidate.clientCaseId, candidate.clientId ?? null)}
+                    aria-label={`Открыть дело ${candidate.clientCaseTitle}`}
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 sm:w-auto"
+                  >
+                    <Eye className="h-4 w-4" />
+                    Открыть дело
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  data-testid={`task-automation-create-${candidate.clientCaseId}`}
+                  disabled={isCreatingControlTask}
+                  onClick={() => canCreateControlTask ? onCreate(candidate) : onCreateManual(candidate)}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-amber-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-amber-700 disabled:cursor-wait disabled:opacity-60 sm:w-auto"
+                >
+                  <Plus className="h-4 w-4" />
+                  {isCreatingControlTask
+                    ? 'Создаем...'
+                    : canCreateControlTask
+                      ? 'Создать контрольную задачу'
+                      : 'Поставить задачу'}
+                </button>
+              </div>
             </div>
           </article>
           );

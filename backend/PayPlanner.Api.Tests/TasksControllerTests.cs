@@ -3820,6 +3820,8 @@ public class TasksControllerTests
         var candidate = Assert.Single(overview);
 
         Assert.Equal(clientCase.Id, candidate.ClientCaseId);
+        Assert.Equal(author.Id, candidate.ResponsibleUserId);
+        Assert.Equal("Ответственный Юрист", candidate.ResponsibleName);
         Assert.False(candidate.IsReadyForControl);
         Assert.Equal("waiting", candidate.AutomationState);
         Assert.Equal(CaseMeaningfulActivitySources.CaseCreated, candidate.LastActivitySource);

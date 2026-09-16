@@ -3748,6 +3748,8 @@ describe('TaskJournal', () => {
       {
         clientId: 10,
         clientName: 'Иванов Иван Иванович',
+        responsibleUserId: 7,
+        responsibleName: 'Администратор',
         clientCaseId: 100,
         clientCaseTitle: 'ГОТОВО К КОНТРОЛЮ',
         reason: 'Нет активной задачи уже 21 дн.',
@@ -3768,6 +3770,8 @@ describe('TaskJournal', () => {
       {
         clientId: 11,
         clientName: 'Петров Петр Петрович',
+        responsibleUserId: null,
+        responsibleName: '',
         clientCaseId: 101,
         clientCaseTitle: 'ОЖИДАЕТ ПОРОГА',
         reason: 'Первый контроль через 11 дн.',
@@ -3786,7 +3790,8 @@ describe('TaskJournal', () => {
       },
     ]);
 
-    await renderJournal();
+    const onOpenCase = vi.fn();
+    await renderJournal([createTask()], { onOpenCase });
 
     expect(screen.getByRole('heading', { name: 'Все дела без активных задач' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Пора создать: 1' })).toBeTruthy();
@@ -3796,6 +3801,11 @@ describe('TaskJournal', () => {
     expect(screen.getByText(/Последнее движение:.*задача/)).toBeTruthy();
     expect(screen.getByText(/Последнее движение:.*документ/)).toBeTruthy();
     expect(screen.getByText(/Следующий контроль:/)).toBeTruthy();
+    expect(screen.getByText('Ответственный: Администратор')).toBeTruthy();
+    expect(screen.getByText('Ответственный: не назначен')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Открыть дело ГОТОВО К КОНТРОЛЮ' }));
+    expect(onOpenCase).toHaveBeenCalledWith(100, 10);
 
     const waitingTaskButton = screen.getByTestId('task-automation-create-101') as HTMLButtonElement;
     expect(waitingTaskButton.disabled).toBe(false);

@@ -1243,6 +1243,8 @@ public class TasksController : ControllerBase
                 ClientName = item.ClientName,
                 LegalEntityId = item.LegalEntityId,
                 LegalEntityName = item.LegalEntityName,
+                ResponsibleUserId = item.ResponsibleUserId,
+                ResponsibleName = item.ResponsibleName,
                 ClientCaseId = item.Id,
                 ClientCaseTitle = item.Title,
                 Reason = reason,

@@ -214,6 +214,8 @@ export interface TaskJournalCaseAutomationCandidate {
   clientName: string;
   legalEntityId?: number | null;
   legalEntityName?: string;
+  responsibleUserId?: number | null;
+  responsibleName?: string | null;
   clientCaseId: number;
   clientCaseTitle: string;
   reason: string;

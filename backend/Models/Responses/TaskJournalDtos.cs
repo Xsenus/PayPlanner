@@ -194,6 +194,8 @@ public class TaskJournalCaseAutomationCandidateDto
     public string ClientName { get; set; } = string.Empty;
     public int? LegalEntityId { get; set; }
     public string LegalEntityName { get; set; } = string.Empty;
+    public int? ResponsibleUserId { get; set; }
+    public string ResponsibleName { get; set; } = string.Empty;
     public int ClientCaseId { get; set; }
     public string ClientCaseTitle { get; set; } = string.Empty;
     public string Reason { get; set; } = string.Empty;
