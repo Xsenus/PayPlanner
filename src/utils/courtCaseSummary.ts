@@ -11,6 +11,7 @@ export interface CourtProcessSummaryItem {
   status: 'confirmed' | 'not-found' | 'pending' | 'unknown';
   label: string;
   detail: string;
+  basis: string;
   date?: string | null;
   dateLabel?: string;
   tone: CourtProcessSummaryTone;
@@ -85,6 +86,10 @@ function isActiveDeadline(deadline: ClientCaseProceduralDeadline) {
   return !INACTIVE_DEADLINE_STATUSES.has((deadline.status || '').trim().toLowerCase());
 }
 
+function isActiveCourtEvent(event: ClientCaseCourtEvent) {
+  return (event.movementStatus || '').trim().toLowerCase() !== 'archived';
+}
+
 function isUpcomingCourtEvent(event: ClientCaseCourtEvent, nowTime: number) {
   const scheduledAt = getTime(event.scheduledAt);
   return scheduledAt !== null
@@ -100,18 +105,21 @@ export function buildCourtCaseProcessSummary(
   now = new Date(),
 ): CourtCaseProcessSummary {
   const nowTime = now.getTime();
-  const decisionEvent = events
+  const activeEvents = events.filter(isActiveCourtEvent);
+  const decisionEvent = activeEvents
     .filter(isDecisionEvent)
-    .sort((left, right) => new Date(right.scheduledAt).getTime() - new Date(left.scheduledAt).getTime())[0];
+    .sort((left, right) => (getTime(right.scheduledAt) ?? Number.NEGATIVE_INFINITY) - (getTime(left.scheduledAt) ?? Number.NEGATIVE_INFINITY))[0];
   const decisionDate = caseItem.courtDecisionAt || decisionEvent?.scheduledAt || null;
   const hasDecision = Boolean(decisionDate || decisionEvent);
-  const hasCourtMovement = events.some((event) => event.movementStatus !== 'archived');
+  const hasCourtMovement = activeEvents.length > 0;
 
   const decision: CourtProcessSummaryItem = hasDecision
     ? {
         status: 'confirmed',
         label: 'Решение вынесено',
-        detail: decisionEvent?.resultSummary || 'В движении дела зафиксирован итог рассмотрения.',
+        detail: decisionEvent?.resultSummary
+          || (decisionEvent ? 'В движении дела зафиксирован итог рассмотрения.' : 'Дата решения указана в карточке дела.'),
+        basis: decisionEvent ? 'актуальное движение дела' : 'дата в карточке дела',
         date: decisionDate,
         tone: 'emerald',
       }
@@ -120,18 +128,20 @@ export function buildCourtCaseProcessSummary(
           status: 'not-found',
           label: 'Решение не обнаружено',
           detail: 'В загруженном движении дела итоговое решение пока не найдено.',
+          basis: 'актуальное движение дела',
           tone: 'amber',
         }
       : {
           status: 'unknown',
           label: 'Нет данных о решении',
           detail: 'Сначала проверьте официальный источник и загрузите движение дела.',
+          basis: 'данных недостаточно',
           tone: 'slate',
         };
 
-  const appealEvent = events
+  const appealEvent = activeEvents
     .filter(isAppealMovement)
-    .sort((left, right) => new Date(right.scheduledAt).getTime() - new Date(left.scheduledAt).getTime())[0];
+    .sort((left, right) => (getTime(right.scheduledAt) ?? Number.NEGATIVE_INFINITY) - (getTime(left.scheduledAt) ?? Number.NEGATIVE_INFINITY))[0];
   const laterInstance = instances.find(hasPopulatedLaterInstance);
   const activeComplaint = instances
     .flatMap((instance) => instance.complaints ?? [])
@@ -149,6 +159,7 @@ export function buildCourtCaseProcessSummary(
         detail: appealEvent?.resultSummary
           || activeComplaint?.title
           || (laterInstance ? `${laterInstance.instanceLabel}: ${laterInstance.courtCaseNumber || 'карточка связана'}` : 'В деле есть сведения об обжаловании.'),
+        basis: appealEvent ? 'актуальное движение дела' : activeComplaint ? 'активная жалоба' : 'связанная судебная инстанция',
         date: appealEvent?.scheduledAt || activeComplaint?.filedAt || null,
         tone: 'blue',
       }
@@ -161,6 +172,7 @@ export function buildCourtCaseProcessSummary(
               ? 'Жалоба не найдена, а контрольный срок обжалования уже истёк. Проверьте официальный источник.'
               : 'Жалоба не найдена. Срок обжалования ещё контролируется CRM.'
             : 'В загруженных движениях, жалобах и связанных инстанциях сведений об обжаловании нет.',
+          basis: appealDeadline ? 'судебные данные и процессуальный срок' : 'судебные данные дела',
           date: appealDeadline?.dueAt || null,
           dateLabel: appealDeadline ? 'Срок до' : undefined,
           tone: appealDeadline?.isOverdue ? 'rose' : appealDeadline ? 'amber' : 'slate',
@@ -169,6 +181,7 @@ export function buildCourtCaseProcessSummary(
           status: 'pending',
           label: 'Обжалование пока не определяется',
           detail: 'Статус обжалования станет понятен после появления решения или жалобы.',
+          basis: 'актуальные движения и жалобы',
           tone: 'amber',
         };
 
@@ -184,7 +197,7 @@ export function buildCourtCaseProcessSummary(
     // ошибочно исключало срок уже утром его последнего допустимого дня.
     .filter((deadline) => !deadline.isOverdue)
     .sort((left, right) => (getTime(left.dueAt) ?? 0) - (getTime(right.dueAt) ?? 0));
-  const upcomingEvents = events
+  const upcomingEvents = activeEvents
     .filter((event) => isUpcomingCourtEvent(event, nowTime))
     .sort((left, right) => (getTime(left.scheduledAt) ?? 0) - (getTime(right.scheduledAt) ?? 0));
   const nextDeadline = upcomingDeadlines[0];
@@ -202,6 +215,7 @@ export function buildCourtCaseProcessSummary(
       detail: nextDeadline.isWarning
         ? 'Процессуальный срок уже требует внимания.'
         : `Ближайший процессуальный срок: ${nextDeadline.deadlineTypeLabel || nextDeadline.deadlineType}.`,
+      basis: 'процессуальный срок',
       date: nextDeadline.dueAt,
       dateLabel: 'Срок до',
       tone: nextDeadline.isWarning ? 'amber' : 'blue',
@@ -211,6 +225,7 @@ export function buildCourtCaseProcessSummary(
       status: 'pending',
       label: nextEvent.title,
       detail: [nextEvent.courtName, nextEvent.movementStatusLabel].filter(Boolean).join(' · ') || 'Ближайшее судебное событие.',
+      basis: 'актуальное движение дела',
       date: nextEvent.scheduledAt,
       dateLabel: 'Дата',
       tone: nextEventTime !== null && nextEventTime - nowTime <= THREE_DAYS_MS ? 'amber' : 'blue',
@@ -220,6 +235,7 @@ export function buildCourtCaseProcessSummary(
       status: 'pending',
       label: 'Разобрать просроченный срок',
       detail: overdueDeadlines[0].title,
+      basis: 'просроченный процессуальный срок',
       date: overdueDeadlines[0].dueAt,
       dateLabel: 'Срок был',
       tone: 'rose',
@@ -229,6 +245,7 @@ export function buildCourtCaseProcessSummary(
       status: 'pending',
       label: 'Ожидается новое движение',
       detail: 'Будущих заседаний и активных сроков в загруженных данных нет.',
+      basis: 'актуальные движения и сроки',
       tone: 'slate',
     };
   } else {
@@ -236,6 +253,7 @@ export function buildCourtCaseProcessSummary(
       status: 'unknown',
       label: 'Следующее действие не определено',
       detail: 'Проверьте официальный источник или добавьте процессуальный срок.',
+      basis: 'данных недостаточно',
       tone: 'slate',
     };
   }
@@ -251,6 +269,7 @@ export function buildCourtCaseProcessSummary(
       status: 'pending',
       label: overdueDeadlines.length === 1 ? 'Просрочен процессуальный срок' : `Просрочено сроков: ${overdueDeadlines.length}`,
       detail: overdueDeadlines[0].title,
+      basis: 'активные процессуальные сроки',
       date: overdueDeadlines[0].dueAt,
       dateLabel: 'Срок был',
       tone: 'rose',
@@ -260,6 +279,7 @@ export function buildCourtCaseProcessSummary(
       status: 'pending',
       label: 'Срок требует внимания',
       detail: warningDeadline.title,
+      basis: 'активные процессуальные сроки',
       date: warningDeadline.dueAt,
       dateLabel: 'Срок до',
       tone: 'amber',
@@ -269,6 +289,7 @@ export function buildCourtCaseProcessSummary(
       status: 'pending',
       label: 'Скоро судебное событие',
       detail: imminentEvent.title,
+      basis: 'актуальное движение дела',
       date: imminentEvent.scheduledAt,
       dateLabel: 'Дата',
       tone: 'amber',
@@ -278,6 +299,7 @@ export function buildCourtCaseProcessSummary(
       status: 'confirmed',
       label: 'Критичных рисков нет',
       detail: 'Просроченных сроков и ближайших срочных событий не обнаружено.',
+      basis: 'актуальные движения и сроки',
       tone: 'emerald',
     };
   } else {
@@ -285,6 +307,7 @@ export function buildCourtCaseProcessSummary(
       status: 'unknown',
       label: 'Риск не определён',
       detail: 'Для оценки нужны движение дела или процессуальные сроки.',
+      basis: 'данных недостаточно',
       tone: 'slate',
     };
   }

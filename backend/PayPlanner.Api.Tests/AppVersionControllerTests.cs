@@ -429,6 +429,40 @@ public sealed class AppVersionControllerTests
     }
 
     [Fact]
+    public async Task SeedService_WhenReleaseItemExceedsDatabaseLimit_ThrowsBeforeSaving()
+    {
+        await using var scope = await CreateScopeAsync();
+        var oversizedText = new string('x', 1001);
+        var tempRoot = await CreateTempReleaseRootAsync(
+            $$"""
+            [
+              {
+                "releaseId": "2026-05-22-oversized",
+                "version": "1.13.1",
+                "releasedAt": "2026-05-22T00:00:00",
+                "title": "Oversized item",
+                "summary": "Validation test",
+                "isActive": true,
+                "items": [
+                  { "type": "improved", "text": "{{oversizedText}}" }
+                ]
+              }
+            ]
+            """);
+
+        try
+        {
+            var exception = await Assert.ThrowsAsync<InvalidDataException>(() => AppReleaseSeedService.SyncAsync(scope.Db, tempRoot));
+            Assert.Contains("longer than 1000 characters", exception.Message);
+            Assert.False(await scope.Db.AppReleases.AnyAsync(item => item.ReleaseId == "2026-05-22-oversized"));
+        }
+        finally
+        {
+            Directory.Delete(tempRoot, recursive: true);
+        }
+    }
+
+    [Fact]
     public void AgentReleaseFile_HasUniqueContinuousVersionsAndNewestFirst()
     {
         var releaseFilePath = FindReleaseFilePath();
@@ -436,6 +470,16 @@ public sealed class AppVersionControllerTests
         Assert.DoesNotContain("????", releaseFileText);
 
         using var document = JsonDocument.Parse(releaseFileText);
+        foreach (var release in document.RootElement.EnumerateArray())
+        {
+            var releaseId = release.GetProperty("releaseId").GetString() ?? string.Empty;
+            foreach (var item in release.GetProperty("items").EnumerateArray())
+            {
+                var text = item.GetProperty("text").GetString() ?? string.Empty;
+                Assert.InRange(text.Trim().Length, 1, 1000);
+            }
+        }
+
         var releases = document.RootElement
             .EnumerateArray()
             .Select(item => new ReleaseFileEntry(

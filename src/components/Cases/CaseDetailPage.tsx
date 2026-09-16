@@ -6655,6 +6655,8 @@ function CourtPanel({
   const selectedCourtInstance = courtInstances.find((item) => item.instance === activeCourtInstance);
   const selectedCourtInstanceMeta = COURT_INSTANCE_TABS.find((item) => item.value === activeCourtInstance) ?? COURT_INSTANCE_TABS[0];
   const selectedCourtEvents = courtEvents.filter((event) => event.courtInstance === activeCourtInstance);
+  const selectedActiveCourtEvents = selectedCourtEvents.filter((event) => (event.movementStatus || '').trim().toLowerCase() !== 'archived');
+  const selectedArchivedCourtEventsCount = selectedCourtEvents.length - selectedActiveCourtEvents.length;
   const courtDirectoryForInstance = courtDirectory.filter((court) => court.instance === activeCourtInstance || (activeCourtInstance === 'supreme' && court.instance === 'supervision'));
   const [courtSafeModeExpanded, setCourtSafeModeExpanded] = useState(false);
   const [courtEditMode, setCourtEditMode] = useState(!initialOverview);
@@ -6743,7 +6745,7 @@ function CourtPanel({
 
   if (!courtEditMode) {
     const overviewInstance = selectedCourtInstance;
-    const overviewEvents = selectedCourtEvents
+    const overviewEvents = selectedActiveCourtEvents
       .slice()
       .sort((left, right) => new Date(left.scheduledAt).getTime() - new Date(right.scheduledAt).getTime());
     const latestEvent = overviewEvents.at(-1);
@@ -6821,6 +6823,7 @@ function CourtPanel({
                     <div className="mt-1 text-sm font-bold">{summaryItem.label}</div>
                     <div className="mt-1 text-xs leading-5 opacity-80">{summaryItem.detail}</div>
                     {summaryItem.date ? <div className="mt-1 text-xs font-semibold">{summaryItem.dateLabel || 'Дата'}: {toRuDate(summaryItem.date)}</div> : null}
+                    <div className="mt-1.5 border-t border-current/10 pt-1.5 text-[11px] font-medium opacity-65">Основание: {summaryItem.basis}</div>
                   </div>
                 );
               })}
@@ -6857,7 +6860,7 @@ function CourtPanel({
             </section>
 
             <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-              <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-3 py-2.5"><div><h3 className="font-bold text-slate-900">Заседания и движения</h3><p className="text-xs text-slate-500">История выбранной инстанции</p></div><span className="text-xs font-semibold text-slate-500">{overviewEvents.length}</span></div>
+              <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-3 py-2.5"><div><h3 className="font-bold text-slate-900">Заседания и движения</h3><p className="text-xs text-slate-500">Только актуальные события выбранной инстанции</p></div><div className="flex flex-wrap items-center justify-end gap-2"><span className="text-xs font-semibold text-slate-500">Актуальных: {overviewEvents.length}</span>{selectedArchivedCourtEventsCount > 0 ? <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">В истории: {selectedArchivedCourtEventsCount}</span> : null}</div></div>
               {courtEventsLoading ? <div className="flex items-center justify-center p-8"><Loader2 className="h-5 w-5 animate-spin text-blue-600" /></div> : courtEventsError ? <div role="alert" className="m-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">{courtEventsError}</div> : overviewEvents.length === 0 ? <div className="p-6 text-center text-sm text-slate-500">По этой инстанции событий пока нет.</div> : <>
                 <div data-testid="court-event-cards" className="divide-y divide-slate-100 xl:hidden">
                   {overviewEvents.map((event) => (
@@ -6876,7 +6879,37 @@ function CourtPanel({
               </>}
             </section>
 
-            <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm"><div className="flex items-center justify-between gap-2"><div><h3 className="font-bold text-slate-900">Лента процессуальной истории</h3><p className="text-xs text-slate-500">Изменения всех инстанций в обратном хронологическом порядке</p></div><span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">{courtEvents.length}</span></div>{processHistory.length === 0 ? <div className="mt-3 rounded-lg bg-slate-50 p-4 text-sm text-slate-500">Процессуальная история появится после синхронизации или добавления события.</div> : <ol className="mt-3 space-y-0">{processHistory.map((event, index) => <li key={event.id} className="relative grid grid-cols-[16px_minmax(0,1fr)] gap-3 pb-3"><div className="relative flex justify-center"><span className="mt-1.5 h-2.5 w-2.5 rounded-full bg-blue-500 ring-4 ring-blue-50" />{index < processHistory.length - 1 ? <span className="absolute bottom-[-4px] top-4 w-px bg-slate-200" /> : null}</div><div><div className="text-xs font-semibold text-blue-700">{formatRuDateTime(event.scheduledAt) || 'Дата не указана'} · {event.courtInstanceLabel}</div><div className="mt-0.5 text-sm font-semibold text-slate-800">{event.title}</div>{event.resultSummary || event.movementStatusLabel ? <div className="mt-0.5 text-xs text-slate-500">{event.resultSummary || event.movementStatusLabel}</div> : null}</div></li>)}</ol>}</section>
+            <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+              <div className="flex items-center justify-between gap-2">
+                <div><h3 className="font-bold text-slate-900">Лента процессуальной истории</h3><p className="text-xs text-slate-500">Актуальные и архивные изменения всех инстанций в обратном хронологическом порядке</p></div>
+                <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">{courtEvents.length}</span>
+              </div>
+              {processHistory.length === 0 ? (
+                <div className="mt-3 rounded-lg bg-slate-50 p-4 text-sm text-slate-500">Процессуальная история появится после синхронизации или добавления события.</div>
+              ) : (
+                <ol className="mt-3 space-y-0">
+                  {processHistory.map((event, index) => {
+                    const isArchived = (event.movementStatus || '').trim().toLowerCase() === 'archived';
+                    return (
+                      <li key={event.id} className={`relative grid grid-cols-[16px_minmax(0,1fr)] gap-3 pb-3 ${isArchived ? 'opacity-65' : ''}`}>
+                        <div className="relative flex justify-center">
+                          <span className={`mt-1.5 h-2.5 w-2.5 rounded-full ring-4 ${isArchived ? 'bg-slate-400 ring-slate-100' : 'bg-blue-500 ring-blue-50'}`} />
+                          {index < processHistory.length - 1 ? <span className="absolute bottom-[-4px] top-4 w-px bg-slate-200" /> : null}
+                        </div>
+                        <div>
+                          <div className={`flex flex-wrap items-center gap-2 text-xs font-semibold ${isArchived ? 'text-slate-500' : 'text-blue-700'}`}>
+                            <span>{formatRuDateTime(event.scheduledAt) || 'Дата не указана'} · {event.courtInstanceLabel}</span>
+                            {isArchived ? <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] uppercase tracking-wide text-slate-600">Архив источника</span> : null}
+                          </div>
+                          <div className={`mt-0.5 text-sm font-semibold ${isArchived ? 'text-slate-600 line-through decoration-slate-300' : 'text-slate-800'}`}>{event.title}</div>
+                          {event.resultSummary || event.movementStatusLabel ? <div className="mt-0.5 text-xs text-slate-500">{event.resultSummary || event.movementStatusLabel}</div> : null}
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ol>
+              )}
+            </section>
           </div>
 
           <aside className="space-y-3">

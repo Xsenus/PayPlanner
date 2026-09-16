@@ -7,6 +7,8 @@ namespace PayPlanner.Api.Services;
 
 public static class AppReleaseSeedService
 {
+    private const int MaxReleaseItemTextLength = 1000;
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -190,6 +192,15 @@ public static class AppReleaseSeedService
         {
             throw new InvalidDataException(
                 $"App release seed contains suspicious replacement markers in release '{corruptedRelease.ReleaseId}'. Check release note encoding.");
+        }
+
+        var oversizedItem = releases
+            .SelectMany(release => release.Items.Select((item, index) => new { release.ReleaseId, Item = item, Index = index }))
+            .FirstOrDefault(entry => (entry.Item.Text?.Trim().Length ?? 0) > MaxReleaseItemTextLength);
+        if (oversizedItem is not null)
+        {
+            throw new InvalidDataException(
+                $"App release seed item {oversizedItem.Index + 1} in release '{oversizedItem.ReleaseId}' is longer than {MaxReleaseItemTextLength} characters.");
         }
 
         var ordered = releases

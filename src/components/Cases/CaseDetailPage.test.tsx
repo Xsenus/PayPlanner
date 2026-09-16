@@ -2502,6 +2502,7 @@ describe('CaseDetailPage', () => {
     expect(screen.getByText('Риск')).toBeTruthy();
     expect(screen.getByText('Решение не обнаружено')).toBeTruthy();
     expect(screen.getByText('Обжалование пока не определяется')).toBeTruthy();
+    expect(screen.getAllByText('Основание: актуальное движение дела').length).toBeGreaterThan(0);
     expect(screen.getByText('Инстанции и судебные карточки')).toBeTruthy();
     expect(screen.getByText('Заседания и движения')).toBeTruthy();
     expect(screen.getByText('Лента процессуальной истории')).toBeTruthy();
@@ -2514,6 +2515,61 @@ describe('CaseDetailPage', () => {
     expect(await screen.findByText('Режим редактирования судебных данных')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Вернуться к обзору' }));
     expect(await screen.findByText('Сводка по судебному делу')).toBeTruthy();
+  });
+
+  it('keeps archived source events in history without showing them as current movement', async () => {
+    window.sessionStorage.setItem(
+      'pp.case-detail.15.view.v1',
+      JSON.stringify({ activeTab: 'court', courtOverview: true }),
+    );
+    vi.mocked(apiService.getCaseCourtEvents).mockResolvedValue([
+      {
+        id: 41,
+        clientCaseId: 15,
+        eventType: 'movement',
+        eventTypeLabel: 'Движение дела',
+        title: 'Актуальная передача материалов судье',
+        scheduledAt: '2026-06-10T09:30:00Z',
+        allDay: false,
+        courtInstance: 'first',
+        courtInstanceLabel: 'Первая инстанция',
+        movementStatus: 'completed',
+        movementStatusLabel: 'Завершено',
+        sourceType: 'sudrf',
+        createdAt: '2026-05-21T00:00:00Z',
+        isOverdue: false,
+      },
+      {
+        id: 42,
+        clientCaseId: 15,
+        eventType: 'decision',
+        eventTypeLabel: 'Судебное решение',
+        title: 'Архивное решение суда',
+        scheduledAt: '2026-06-12T09:30:00Z',
+        allDay: false,
+        courtInstance: 'first',
+        courtInstanceLabel: 'Первая инстанция',
+        movementStatus: 'archived',
+        movementStatusLabel: 'В архиве',
+        sourceType: 'sudrf',
+        createdAt: '2026-05-21T00:00:00Z',
+        isOverdue: false,
+      },
+    ]);
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    expect(await screen.findByText('Сводка по судебному делу')).toBeTruthy();
+    expect(screen.getByText('Решение не обнаружено')).toBeTruthy();
+    const currentMovementSection = screen.getByText('Заседания и движения').closest('section');
+    expect(currentMovementSection).toBeTruthy();
+    expect(within(currentMovementSection!).getAllByText('Актуальная передача материалов судье').length).toBe(2);
+    expect(within(currentMovementSection!).queryByText('Архивное решение суда')).toBeNull();
+    expect(within(currentMovementSection!).getByText('В истории: 1')).toBeTruthy();
+    const historySection = screen.getByText('Лента процессуальной истории').closest('section');
+    expect(historySection).toBeTruthy();
+    expect(within(historySection!).getByText('Архивное решение суда')).toBeTruthy();
+    expect(within(historySection!).getByText('Архив источника')).toBeTruthy();
   });
 
   it('does not show court conclusions while source data is still loading', async () => {

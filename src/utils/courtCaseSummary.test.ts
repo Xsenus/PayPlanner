@@ -63,6 +63,7 @@ describe('buildCourtCaseProcessSummary', () => {
 
     expect(summary.decision.label).toBe('Решение вынесено');
     expect(summary.decision.detail).toBe('Иск удовлетворен частично');
+    expect(summary.decision.basis).toBe('актуальное движение дела');
     expect(summary.appeal.label).toBe('Обжалование не обнаружено');
   });
 
@@ -82,6 +83,7 @@ describe('buildCourtCaseProcessSummary', () => {
 
     expect(summary.appeal.label).toBe('Обжалование зафиксировано');
     expect(summary.appeal.detail).toContain('Апелляция');
+    expect(summary.appeal.basis).toBe('связанная судебная инстанция');
   });
 
   it('does not treat a shared judicial UID as a populated appeal instance', () => {
@@ -176,6 +178,35 @@ describe('buildCourtCaseProcessSummary', () => {
     expect(summary.appeal.label).toBe('Обжалование пока не определяется');
     expect(summary.nextAction.label).toBe('Следующее действие не определено');
     expect(summary.risk.label).toBe('Риск не определён');
+    expect(summary.risk.basis).toBe('данных недостаточно');
+  });
+
+  it('does not use archived movements as evidence for a current decision or appeal', () => {
+    const summary = buildCourtCaseProcessSummary(
+      { courtDecisionAt: null },
+      [
+        courtEvent({ id: 1, title: 'Передача материалов судье', movementStatus: 'completed' }),
+        courtEvent({ id: 2, eventType: 'decision', title: 'Решение суда', movementStatus: 'archived' }),
+        courtEvent({ id: 3, title: 'Поступила апелляционная жалоба', movementStatus: 'ARCHIVED' }),
+      ],
+      [],
+    );
+
+    expect(summary.decision.label).toBe('Решение не обнаружено');
+    expect(summary.decision.basis).toBe('актуальное движение дела');
+    expect(summary.appeal.label).toBe('Обжалование пока не определяется');
+  });
+
+  it('explains when a decision is based only on the date stored in the case card', () => {
+    const summary = buildCourtCaseProcessSummary(
+      { courtDecisionAt: '2026-08-21T00:00:00Z' },
+      [],
+      [],
+    );
+
+    expect(summary.decision.label).toBe('Решение вынесено');
+    expect(summary.decision.detail).toBe('Дата решения указана в карточке дела.');
+    expect(summary.decision.basis).toBe('дата в карточке дела');
   });
 
   it('selects the nearest upcoming court event and warns when it is imminent', () => {
