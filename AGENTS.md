@@ -29,6 +29,16 @@ Keep changes scoped to the requested behavior. Do not rewrite unrelated release 
 
 When the legacy task card and the new task card window both exist, any change to task business logic, saving rules, permissions, statuses, result handling, deadlines, reminders, files, comments, subtasks, labels, priorities, CRM links, or related API behavior must be applied to both forms unless the task explicitly says otherwise. Verify both the old and the new task card before considering the change complete, including the administrator setting that switches which card is shown to all users.
 
+## Local Email Safety
+
+Never allow a local, development, test, or preview environment to send email through production SMTP servers or to real recipients. This rule also applies when the local database is a copy of the production database and therefore contains working mail settings, credentials, sender addresses, notification rules, or queued deliveries.
+
+Before starting a local backend or running any workflow that can create users, notifications, reminders, approvals, calendar events, invoices, or other email-producing records, verify that outbound email is disabled or redirected to a local mail sink/dry-run transport. Do not rely only on the application environment name: inspect effective settings from configuration, environment variables, secrets, and the restored database.
+
+If safe email isolation cannot be confirmed, do not start the email-producing workflow. Disable the mail sender, replace the transport with a local catcher, or sanitize the copied database first. Test addresses with non-public domains such as `.local` are not sufficient protection because the production SMTP server will still attempt delivery and send bounce messages to the real sender mailbox.
+
+After importing or refreshing a production database locally, clear or override production SMTP credentials, sender configuration, queued email deliveries, and any background jobs capable of sending mail before launching the application. Starting the local application must not cause any external email, bounce, or delivery-status notification.
+
 ## Performance and Optimization
 
 Optimize every implementation as far as reasonably possible. Before completing a task, review database and API query counts, payload sizes, algorithmic complexity, repeated calculations, network requests, rendering work, memory use, and other relevant resource costs. Avoid N+1 queries, loading or processing data before it is needed, duplicate work, and unbounded full-list operations when a narrower indexed or demand-driven operation is available. Preserve correctness, readability, security, and maintainability while choosing the most efficient practical solution.
