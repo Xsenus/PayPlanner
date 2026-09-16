@@ -1289,10 +1289,15 @@ public class TasksController : ControllerBase
         {
             configuredDefaultAssignee = null;
         }
-        var suggestedAssigneesByCaseId = filteredCandidates.ToDictionary(
+        var availableResponsibleUsersByCaseId = filteredCandidates.ToDictionary(
             item => item.Id,
+            item => vacationUserIds.Contains(item.ResponsibleUserId ?? 0)
+                ? null
+                : GetAvailableAutomationUser(availableUsers, item.ResponsibleUserId));
+        var suggestedAssigneesByCaseId = availableResponsibleUsersByCaseId.ToDictionary(
+            item => item.Key,
             item => BuildAutomationAssignee(
-                item.ResponsibleUserId,
+                item.Value?.Id,
                 availableUsers,
                 configuredDefaultAssignee,
                 access));
@@ -1356,7 +1361,7 @@ public class TasksController : ControllerBase
                     ? $"Нет активной задачи уже {daysWithoutActiveTask} дн."
                     : "Нет активной задачи";
             var suggestedAssignee = suggestedAssigneesByCaseId[item.Id];
-            var suggestedAssigneeSource = GetAvailableAutomationUser(availableUsers, item.ResponsibleUserId) is not null
+            var suggestedAssigneeSource = availableResponsibleUsersByCaseId[item.Id] is not null
                 ? "responsible"
                 : configuredDefaultAssignee is not null
                     ? "configuredDefault"

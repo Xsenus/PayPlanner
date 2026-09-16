@@ -4228,15 +4228,24 @@ public class TasksControllerTests
     }
 
     [Fact]
-    public async Task GetAutomationCaseCandidates_OverviewShowsResponsibleVacationEndDate()
+    public async Task GetAutomationCaseCandidates_OverviewShowsVacationEndAndSuggestsAvailableFallback()
     {
         await using var db = await CreateContextAsync();
         var author = await CreateAdminUserAsync(db, "vacation-overview@example.com", "Ответственный в отпуске");
+        var fallbackAssignee = await CreateAdminUserAsync(db, "vacation-overview-fallback@example.com", "Резервный исполнитель");
         var client = await CreateClientAsync(db, "Клиент с паузой автоконтроля");
         client.ResponsibleUserId = author.Id;
         var clientCase = await CreateCaseAsync(db, client.Id, "ДЕЛО ДО ВОЗВРАЩЕНИЯ ОТВЕТСТВЕННОГО");
         clientCase.CreatedAt = DateTime.UtcNow.AddDays(-30);
         var vacationUntil = DateTime.UtcNow.AddDays(5).Date;
+        var now = DateTime.UtcNow;
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = "tasks.automation.caseControl.defaultAssigneeUserId",
+            Value = fallbackAssignee.Id.ToString(),
+            CreatedAt = now,
+            UpdatedAt = now,
+        });
         await SetVacationAsync(db, author.Id, vacationUntil);
         var controller = CreateController(db, new RecordingNotificationService(), author);
 
@@ -4251,6 +4260,9 @@ public class TasksControllerTests
         var candidate = Assert.Single(candidates, item => item.ClientCaseId == clientCase.Id);
         Assert.Equal("paused", candidate.AutomationState);
         Assert.Equal($"{vacationUntil:yyyy-MM-dd}", candidate.ResponsibleVacationUntilDate);
+        Assert.Equal(fallbackAssignee.Id, candidate.SuggestedAssigneeUserId);
+        Assert.Equal(fallbackAssignee.FullName, candidate.SuggestedAssigneeName);
+        Assert.Equal("configuredDefault", candidate.SuggestedAssigneeSource);
     }
 
     [Fact]

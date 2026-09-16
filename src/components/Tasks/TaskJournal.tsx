@@ -6689,16 +6689,37 @@ function TaskAutomationPanel({
                     : `${automationState === 'ready' ? 'Срок контроля' : 'Следующий контроль'}: ${candidate.nextControlAt ? formatDateTime(candidate.nextControlAt) : 'не определён'}`}
                 </span>
               </div>
-              <div className="flex items-start gap-2 border-t border-slate-200 pt-2 font-medium text-slate-700">
-                <UsersRound className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-500" />
-                <span>
-                  При создании: {suggestedAssigneeName}
-                  {suggestedAssigneeHint ? ` · ${suggestedAssigneeHint}` : ''}
-                  {suggestedDueAtLabel
-                    ? ` · ${suggestedAssigneeTimeZoneId ? 'срок у исполнителя' : 'срок'} ${suggestedDueAtLabel}`
-                    : ''}
-                  {suggestedAssigneeTimeZoneLabel ? ` · ${suggestedAssigneeTimeZoneLabel}` : ''}
-                </span>
+              <div
+                data-testid={`task-automation-suggestion-${candidate.clientCaseId}`}
+                className="border-t border-slate-200 pt-2"
+              >
+                <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                  При создании задачи
+                </div>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <div className="rounded-md border border-slate-200 bg-white px-2.5 py-2">
+                    <div className="flex items-center gap-1.5 text-[11px] font-medium text-slate-500">
+                      <UsersRound className="h-3.5 w-3.5 shrink-0" />
+                      Исполнитель
+                    </div>
+                    <div className="mt-1 font-semibold text-slate-800">{suggestedAssigneeName}</div>
+                    {suggestedAssigneeHint ? (
+                      <div className="mt-0.5 text-[11px] font-medium text-slate-500">{suggestedAssigneeHint}</div>
+                    ) : null}
+                  </div>
+                  <div className="rounded-md border border-slate-200 bg-white px-2.5 py-2">
+                    <div className="flex items-center gap-1.5 text-[11px] font-medium text-slate-500">
+                      <CalendarClock className="h-3.5 w-3.5 shrink-0" />
+                      Срок задачи
+                    </div>
+                    <div className="mt-1 font-semibold text-slate-800">{suggestedDueAtLabel || 'не определён'}</div>
+                    {suggestedAssigneeTimeZoneLabel ? (
+                      <div className="mt-0.5 text-[11px] font-medium text-slate-500">
+                        {suggestedAssigneeTimeZoneLabel}{suggestedAssigneeTimeZoneId ? ' · время исполнителя' : ''}
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
               </div>
             </div>
             <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

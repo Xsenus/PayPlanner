@@ -3837,6 +3837,10 @@ describe('TaskJournal', () => {
         clientName: 'Сидоров Сидор Сидорович',
         responsibleUserId: 8,
         responsibleName: 'Исполнитель',
+        suggestedAssigneeUserId: 9,
+        suggestedAssigneeName: 'Резервный исполнитель',
+        suggestedAssigneeSource: 'configuredDefault',
+        suggestedAssigneeTimeZoneId: 'Europe/Moscow',
         clientCaseId: 102,
         clientCaseTitle: 'ПРИОСТАНОВЛЕНО',
         reason: 'Дело приостановлено.',
@@ -3877,7 +3881,14 @@ describe('TaskJournal', () => {
     expect(screen.getByText('Ответственный отсутствует до 21.09.2026 включительно')).toBeTruthy();
     expect(screen.getByText('Ответственный: Администратор')).toBeTruthy();
     expect(screen.getByText('Ответственный: не назначен')).toBeTruthy();
-    expect(screen.getByText(/При создании: Резервный исполнитель · резервный исполнитель · срок/)).toBeTruthy();
+    const waitingSuggestion = screen.getByTestId('task-automation-suggestion-101');
+    expect(within(waitingSuggestion).getByText('При создании задачи')).toBeTruthy();
+    expect(within(waitingSuggestion).getByText('Резервный исполнитель')).toBeTruthy();
+    expect(within(waitingSuggestion).getByText('резервный исполнитель')).toBeTruthy();
+    expect(within(waitingSuggestion).getByText(/Москва \(UTC\+3\).*время исполнителя/)).toBeTruthy();
+    const pausedSuggestion = screen.getByTestId('task-automation-suggestion-102');
+    expect(within(pausedSuggestion).getByText('Резервный исполнитель')).toBeTruthy();
+    expect(within(pausedSuggestion).getByText('резервный исполнитель')).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: 'Открыть дело ГОТОВО К КОНТРОЛЮ' }));
     expect(onOpenCase).toHaveBeenCalledWith(100, 10);
@@ -3986,8 +3997,11 @@ describe('TaskJournal', () => {
         settings: { taskCardWindowMode },
       });
 
-      expect(screen.getByText(/При создании: Администратор · вы будете исполнителем · срок у исполнителя/)).toBeTruthy();
-      expect(screen.getByText(/Новосибирск \(UTC\+7\)/)).toBeTruthy();
+      const suggestion = screen.getByTestId('task-automation-suggestion-100');
+      expect(within(suggestion).getByText('При создании задачи')).toBeTruthy();
+      expect(within(suggestion).getByText('Администратор')).toBeTruthy();
+      expect(within(suggestion).getByText('вы будете исполнителем')).toBeTruthy();
+      expect(within(suggestion).getByText(/Новосибирск \(UTC\+7\).*время исполнителя/)).toBeTruthy();
       fireEvent.click(screen.getByTestId('task-automation-create-100'));
       expect(await screen.findByRole('heading', { name: 'Выберите клиента и дело' })).toBeTruthy();
       expect((screen.getByTestId('task-billing-wizard-case') as HTMLSelectElement).value).toBe('100');
