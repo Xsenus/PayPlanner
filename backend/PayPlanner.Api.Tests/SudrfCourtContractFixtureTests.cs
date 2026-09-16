@@ -56,6 +56,34 @@ public sealed class SudrfCourtContractFixtureTests
     }
 
     [Fact]
+    public void ShiftedLiveLayoutCaseCard_FindsSectionsByMeaningInsteadOfTabNumber()
+    {
+        var data = SudrfCourtSyncService.ParseCaseHtml(
+            ReadFixture("case-card-shifted-live-layout.html"),
+            new Uri("https://contract-fixture.sudrf.ru/modules.php?name=sud_delo&srv_num=1&name_op=case&case_id=100002&delo_id=1540005"),
+            new DateTime(2026, 9, 16, 0, 0, 0, DateTimeKind.Utc));
+
+        Assert.Equal("Тестовый городской суд", data.CourtName);
+        Assert.Equal("2-1500/2026", data.CaseNumber);
+        Assert.Equal("99TS0001-01-2026-000002-02", data.JudicialUid);
+        Assert.Equal("Судья Проверочный Петрович", data.JudgeName);
+        Assert.Equal(new DateTime(2026, 9, 4), data.DecisionAt);
+        Assert.Equal("Иск удовлетворен частично", data.CaseOutcome);
+        Assert.Equal(4, data.MovementEvents.Count);
+        Assert.Equal(3, data.Participants.Count);
+        Assert.Contains(data.MovementEvents, item =>
+            item.Title == "Судебное заседание"
+            && item.ScheduledAt == new DateTime(2026, 8, 21, 10, 0, 0)
+            && item.Result == "Иск удовлетворен частично");
+        Assert.Contains(data.Participants, item => item.Role == "ИСТЕЦ" && item.Name == "Истец Тестовый");
+        Assert.Contains(data.CourtActs, item =>
+            item.Title == "Решение суда"
+            && item.ActDate == new DateTime(2026, 9, 4)
+            && item.Result == "Иск удовлетворен частично");
+        Assert.Single(data.CourtActs, item => item.Title == "Решение суда");
+    }
+
+    [Fact]
     public async Task SearchFixtures_PreserveDiscoveryAndCardReadContract()
     {
         Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
@@ -92,6 +120,7 @@ public sealed class SudrfCourtContractFixtureTests
         {
             "case-card-standard.html",
             "case-card-live-layout.html",
+            "case-card-shifted-live-layout.html",
             "search-page.html",
             "search-results.html",
         };

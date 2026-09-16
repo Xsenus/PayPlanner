@@ -2474,6 +2474,9 @@ describe('CaseDetailPage', () => {
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
 
     expect(await screen.findByText('Сводка по судебному делу')).toBeTruthy();
+    expect(screen.getByText('Что происходит по делу')).toBeTruthy();
+    expect(screen.getByText('Решение не обнаружено')).toBeTruthy();
+    expect(screen.getByText('Обжалование пока не определяется')).toBeTruthy();
     expect(screen.getByText('Инстанции и судебные карточки')).toBeTruthy();
     expect(screen.getByText('Заседания и движения')).toBeTruthy();
     expect(screen.getByText('Лента процессуальной истории')).toBeTruthy();

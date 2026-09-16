@@ -16,7 +16,8 @@ public class SudrfCourtSyncServiceTests
     {
         var data = SudrfCourtSyncService.ParseCaseHtml(
             BuildCourtHtml(),
-            new Uri("https://kraevoy--hbr.sudrf.ru/modules.php?name=sud_delo&srv_num=1&name_op=case&case_id=43326936&case_uid=30d46dc6-6d6c-4514-8aa6-591c3bc63a1a&delo_id=42"));
+            new Uri("https://kraevoy--hbr.sudrf.ru/modules.php?name=sud_delo&srv_num=1&name_op=case&case_id=43326936&case_uid=30d46dc6-6d6c-4514-8aa6-591c3bc63a1a&delo_id=42"),
+            new DateTime(2026, 5, 1, 0, 0, 0, DateTimeKind.Utc));
 
         Assert.Equal("Хабаровский краевой суд", data.CourtName);
         Assert.Equal("33а-3390/2026", data.CaseNumber);
@@ -50,11 +51,29 @@ public class SudrfCourtSyncServiceTests
     }
 
     [Fact]
+    public void ParseCaseHtml_DoesNotTreatAppealReferenceAsCourtDecision()
+    {
+        var html = BuildCourtHtml().Replace(
+            "<tr><td>Вынесено решение</td><td>01.06.2026</td><td></td><td></td><td>Решение удовлетворено частично</td><td></td><td>02.06.2026</td></tr>",
+            "<tr><td>Направлена апелляционная жалоба на решение суда</td><td>01.06.2026</td><td></td><td></td><td></td><td></td><td>02.06.2026</td></tr>");
+
+        var data = SudrfCourtSyncService.ParseCaseHtml(
+            html,
+            new Uri("https://kraevoy--hbr.sudrf.ru/modules.php?name=sud_delo&srv_num=1&name_op=case&case_id=43326936&delo_id=42"),
+            new DateTime(2026, 5, 1, 0, 0, 0, DateTimeKind.Utc));
+
+        Assert.Null(data.DecisionAt);
+        Assert.DoesNotContain(data.CourtActs, item => item.Title == "Решение суда");
+        Assert.Contains(data.MovementEvents, item => item.Title.StartsWith("Направлена апелляционная жалоба", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void ParseCaseHtml_ExtractsLiveSudrfIdBlocks()
     {
         var data = SudrfCourtSyncService.ParseCaseHtml(
             BuildLiveStyleCourtHtml(),
-            new Uri("https://kraevoy--hbr.sudrf.ru/modules.php?name=sud_delo&srv_num=1&name_op=case&case_id=43326936&case_uid=30d46dc6-6d6c-4514-8aa6-591c3bc63a1a&delo_id=42"));
+            new Uri("https://kraevoy--hbr.sudrf.ru/modules.php?name=sud_delo&srv_num=1&name_op=case&case_id=43326936&case_uid=30d46dc6-6d6c-4514-8aa6-591c3bc63a1a&delo_id=42"),
+            new DateTime(2026, 5, 1, 0, 0, 0, DateTimeKind.Utc));
 
         Assert.Equal("Хабаровский краевой суд", data.CourtName);
         Assert.Equal("33а-3390/2026", data.CaseNumber);

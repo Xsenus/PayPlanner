@@ -7852,15 +7852,33 @@ public class CasesV2Controller : ControllerBase
         var nextHearingAt = courtData.NextHearingAt.HasValue
             ? NormalizeCourtSyncSourceDateTime(courtData.NextHearingAt.Value, sourceTimeZone, courtData.NextHearingAt.Value.TimeOfDay == TimeSpan.Zero)
             : (DateTime?)null;
-        if (nextHearingAt.HasValue && clientCase.NextHearingAt != nextHearingAt)
+        if (clientCase.NextHearingAt != nextHearingAt
+            && (nextHearingAt.HasValue || courtData.MovementEvents.Count > 0))
         {
-            (clientCase.NextHearingAt.HasValue ? changedItems : newItems).Add("ближайшее заседание");
+            if (nextHearingAt.HasValue)
+            {
+                (clientCase.NextHearingAt.HasValue ? changedItems : newItems).Add("ближайшее заседание");
+            }
+            else
+            {
+                removedItems.Add("прошедшее ближайшее заседание");
+            }
             clientCase.NextHearingAt = nextHearingAt;
             changedFields.Add("ближайшее заседание");
         }
 
-        var hearings = courtData.MovementEvents
-            .Where(static item => item.ScheduledAt.HasValue && item.Title.Contains("судебное заседание", StringComparison.OrdinalIgnoreCase))
+        var courtDecisionAt = courtData.DecisionAt.HasValue
+            ? NormalizeCourtSyncSourceDateTime(courtData.DecisionAt.Value, sourceTimeZone, dateOnly: true)
+            : (DateTime?)null;
+        if (courtDecisionAt.HasValue && clientCase.CourtDecisionAt != courtDecisionAt)
+        {
+            (clientCase.CourtDecisionAt.HasValue ? changedItems : newItems).Add("решение суда");
+            clientCase.CourtDecisionAt = courtDecisionAt;
+            changedFields.Add("решение суда");
+        }
+
+        var movements = courtData.MovementEvents
+            .Where(static item => item.ScheduledAt.HasValue && !string.IsNullOrWhiteSpace(item.Title))
             .OrderBy(static item => item.ScheduledAt)
             .ToList();
         var existingEvents = await _db.ClientCaseCourtEvents
@@ -7872,37 +7890,43 @@ public class CasesV2Controller : ControllerBase
             .ToDictionary(static group => group.Key, static group => group.First(), StringComparer.Ordinal);
         var currentEventExternalKeys = new HashSet<string>(StringComparer.Ordinal);
 
-        foreach (var hearing in hearings)
+        foreach (var movement in movements)
         {
-            var sourceScheduledAt = hearing.ScheduledAt!.Value;
+            var sourceScheduledAt = movement.ScheduledAt!.Value;
             var allDay = sourceScheduledAt.TimeOfDay == TimeSpan.Zero;
             var scheduledAt = NormalizeCourtSyncSourceDateTime(sourceScheduledAt, sourceTimeZone, allDay);
-            var title = Truncate(NormalizeOptional(hearing.Title) ?? "Судебное заседание", 200);
+            var title = Truncate(NormalizeOptional(movement.Title) ?? "Движение дела", 200);
             var externalKey = BuildSudrfCourtEventExternalKey(courtData, sourceScheduledAt, title);
             currentEventExternalKeys.Add(externalKey);
             var existing = existingEventsByExternalKey.GetValueOrDefault(externalKey)
                 ?? existingEvents.FirstOrDefault(item =>
-                    CourtEventMatchesSudrfHearing(item, scheduledAt, title, courtData, hearing));
-            var summary = Truncate(hearing.SourceSummary, 1000);
+                    CourtEventMatchesSudrfMovement(item, scheduledAt, title, courtData, movement));
+            var summary = Truncate(movement.SourceSummary, 1000);
+            var eventType = ResolveSudrfCourtEventType(movement);
+            var resultSummary = string.Equals(eventType, CourtSyncNormalization.EventTypes.Decision, StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(courtData.CaseOutcome)
+                    ? courtData.CaseOutcome
+                    : BuildSudrfCourtMovementResult(movement);
+            var movementStatus = ResolveSudrfCourtMovementStatus(movement, eventType);
 
             if (existing is null)
             {
                 var courtEvent = new ClientCaseCourtEvent
                 {
                     ClientCaseId = clientCase.Id,
-                    EventType = CourtSyncNormalization.EventTypes.Hearing,
+                    EventType = eventType,
                     Title = title,
-                    Description = Truncate(hearing.SourceSummary, 1000),
+                    Description = Truncate(movement.SourceSummary, 1000),
                     ScheduledAt = scheduledAt,
                     AllDay = allDay,
                     CourtInstance = courtData.Instance,
                     CourtName = Truncate(NormalizeOptional(courtData.CourtName) ?? clientCase.CourtName, 200),
                     CourtCaseNumber = Truncate(NormalizeOptional(courtData.CaseNumber) ?? clientCase.CourtCaseNumber, 100),
-                    Courtroom = Truncate(hearing.Place, 120),
+                    Courtroom = Truncate(movement.Place, 120),
                     JudgeName = Truncate(NormalizeOptional(courtData.JudgeName) ?? clientCase.JudgeName, 200),
-                    SecretaryName = Truncate(NormalizeOptional(hearing.SecretaryName) ?? courtData.SecretaryName, 200),
-                    MovementStatus = CourtSyncNormalization.ResolveMovementStatusFromResult(hearing.Result),
-                    ResultSummary = Truncate(hearing.Result, 1000),
+                    SecretaryName = Truncate(NormalizeOptional(movement.SecretaryName) ?? courtData.SecretaryName, 200),
+                    MovementStatus = movementStatus,
+                    ResultSummary = Truncate(resultSummary, 1000),
                     SourceType = "sudrf",
                     SourceUrl = Truncate(courtData.SourceUrl, 1000),
                     SourceCheckedAt = checkedAt,
@@ -7939,14 +7963,18 @@ public class CasesV2Controller : ControllerBase
             existing.SourceUrl = Truncate(courtData.SourceUrl, 1000);
             existing.SourceCheckedAt = checkedAt;
             existing.SourceConfidence = "official-source";
+            if (!string.Equals(existing.EventType, eventType, StringComparison.OrdinalIgnoreCase))
+            {
+                existing.EventType = eventType;
+                updated = true;
+            }
             updated |= UpdateCourtEventString(existing.CourtName, courtData.CourtName, value => existing.CourtName = value, 200);
             updated |= UpdateCourtEventString(existing.CourtCaseNumber, courtData.CaseNumber, value => existing.CourtCaseNumber = value, 100);
-            updated |= UpdateCourtEventString(existing.Courtroom, hearing.Place, value => existing.Courtroom = value, 120);
+            updated |= UpdateCourtEventString(existing.Courtroom, movement.Place, value => existing.Courtroom = value, 120);
             updated |= UpdateCourtEventString(existing.JudgeName, courtData.JudgeName, value => existing.JudgeName = value, 200);
-            updated |= UpdateCourtEventString(existing.SecretaryName, FirstNonEmpty(hearing.SecretaryName, courtData.SecretaryName), value => existing.SecretaryName = value, 200);
-            updated |= UpdateCourtEventString(existing.Description, hearing.SourceSummary, value => existing.Description = value, 1000);
-            updated |= UpdateCourtEventString(existing.ResultSummary, hearing.Result, value => existing.ResultSummary = value, 1000);
-            var movementStatus = CourtSyncNormalization.ResolveMovementStatusFromResult(hearing.Result);
+            updated |= UpdateCourtEventString(existing.SecretaryName, FirstNonEmpty(movement.SecretaryName, courtData.SecretaryName), value => existing.SecretaryName = value, 200);
+            updated |= UpdateCourtEventString(existing.Description, movement.SourceSummary, value => existing.Description = value, 1000);
+            updated |= UpdateCourtEventString(existing.ResultSummary, resultSummary, value => existing.ResultSummary = value, 1000);
             if (!existing.MovementStatus.Equals(movementStatus, StringComparison.OrdinalIgnoreCase))
             {
                 existing.MovementStatus = movementStatus;
@@ -7996,12 +8024,12 @@ public class CasesV2Controller : ControllerBase
             }
         }
 
-        foreach (var courtEvent in createdEvents)
+        foreach (var courtEvent in createdEvents.Where(ShouldNotifyAboutSyncedCourtEvent))
         {
             await AddCourtEventUserNotificationsAsync(clientCase, courtEvent, "created", actorUserId, actorName, ct);
         }
 
-        foreach (var courtEvent in updatedEvents)
+        foreach (var courtEvent in updatedEvents.Where(ShouldNotifyAboutSyncedCourtEvent))
         {
             await AddCourtEventUserNotificationsAsync(clientCase, courtEvent, "updated", actorUserId, actorName, ct);
         }
@@ -8298,12 +8326,12 @@ public class CasesV2Controller : ControllerBase
 
     }
 
-    private static bool CourtEventMatchesSudrfHearing(
+    private static bool CourtEventMatchesSudrfMovement(
         ClientCaseCourtEvent existing,
         DateTime scheduledAt,
         string title,
         SudrfCourtCaseData courtData,
-        SudrfCourtMovementEvent hearing)
+        SudrfCourtMovementEvent movement)
     {
         if (existing.ScheduledAt != scheduledAt)
         {
@@ -8317,10 +8345,11 @@ public class CasesV2Controller : ControllerBase
             return true;
         }
 
-        var isExistingHearing =
-            string.Equals(existing.EventType, "hearing", StringComparison.OrdinalIgnoreCase)
+        var sourceIsHearing = title.Contains("судебное заседание", StringComparison.OrdinalIgnoreCase);
+        var existingIsHearing =
+            string.Equals(existing.EventType, CourtSyncNormalization.EventTypes.Hearing, StringComparison.OrdinalIgnoreCase)
             || existingTitle.Contains("судебное заседание", StringComparison.OrdinalIgnoreCase);
-        if (!isExistingHearing)
+        if (!sourceIsHearing || !existingIsHearing)
         {
             return false;
         }
@@ -8331,9 +8360,97 @@ public class CasesV2Controller : ControllerBase
         }
 
         return SameNormalizedCourtSyncText(existing.CourtCaseNumber, courtData.CaseNumber)
-            || SameNormalizedCourtSyncText(existing.Courtroom, hearing.Place)
+            || SameNormalizedCourtSyncText(existing.Courtroom, movement.Place)
             || SameNormalizedCourtSyncText(existing.CourtName, courtData.CourtName);
     }
+
+    private static string ResolveSudrfCourtEventType(SudrfCourtMovementEvent movement)
+    {
+        var text = $"{movement.Title} {movement.Result} {movement.Reason}";
+        if (ContainsCourtSyncText(text, "приостанов"))
+        {
+            return CourtSyncNormalization.EventTypes.Suspension;
+        }
+
+        if (ContainsCourtSyncText(text, "отлож", "перенес"))
+        {
+            return CourtSyncNormalization.EventTypes.Postponement;
+        }
+
+        if (ContainsCourtSyncText(movement.Title, "регистрация иска", "принят к производству", "решение вопроса о принятии"))
+        {
+            return CourtSyncNormalization.EventTypes.Claim;
+        }
+
+        if (IsSudrfAppealMovement(text))
+        {
+            return CourtSyncNormalization.EventTypes.Movement;
+        }
+
+        if (ContainsCourtSyncText(
+                text,
+                "решение суда",
+                "решение по делу",
+                "вынесено решение",
+                "мотивированное решение",
+                "иск удовлетвор",
+                "заявление удовлетвор",
+                "жалоба удовлетвор",
+                "в удовлетворении отказ",
+                "производство прекращено",
+                "оставлено без рассмотрения"))
+        {
+            return CourtSyncNormalization.EventTypes.Decision;
+        }
+
+        return movement.Title.Contains("судебное заседание", StringComparison.OrdinalIgnoreCase)
+            ? CourtSyncNormalization.EventTypes.Hearing
+            : CourtSyncNormalization.EventTypes.Movement;
+    }
+
+    private static string ResolveSudrfCourtMovementStatus(SudrfCourtMovementEvent movement, string eventType)
+    {
+        var sourceText = $"{movement.Result} {movement.Reason}";
+        var status = CourtSyncNormalization.ResolveMovementStatusFromResult(sourceText);
+        if (status != CourtSyncNormalization.MovementStatuses.Scheduled)
+        {
+            return status;
+        }
+
+        return string.Equals(eventType, CourtSyncNormalization.EventTypes.Hearing, StringComparison.OrdinalIgnoreCase)
+            ? status
+            : CourtSyncNormalization.MovementStatuses.Completed;
+    }
+
+    private static string BuildSudrfCourtMovementResult(SudrfCourtMovementEvent movement)
+    {
+        if (string.IsNullOrWhiteSpace(movement.Result))
+        {
+            return movement.Reason;
+        }
+
+        return string.IsNullOrWhiteSpace(movement.Reason)
+            ? movement.Result
+            : $"{movement.Result}. Основание: {movement.Reason}";
+    }
+
+    private static bool ShouldNotifyAboutSyncedCourtEvent(ClientCaseCourtEvent courtEvent)
+        => !string.Equals(courtEvent.EventType, CourtSyncNormalization.EventTypes.Movement, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(courtEvent.EventType, CourtSyncNormalization.EventTypes.Claim, StringComparison.OrdinalIgnoreCase);
+
+    private static bool ContainsCourtSyncText(string value, params string[] fragments)
+        => fragments.Any(fragment => value.Contains(fragment, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsSudrfAppealMovement(string value)
+        => ContainsCourtSyncText(
+            value,
+            "апелляционная жалоба",
+            "апелляционное представление",
+            "кассационная жалоба",
+            "обжалование",
+            "обжалован",
+            "обжалуется",
+            "жалоба на решение");
 
     private async Task<int> SyncSudrfCourtActDeadlinesAsync(
         ClientCase clientCase,

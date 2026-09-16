@@ -306,12 +306,14 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
 
     public static SudrfCourtCaseData ParseCaseHtml(string html, Uri sourceUri, DateTime? nowUtc = null)
     {
-        var labelValues = ExtractLabelValues(html, "cont1")
-            .Concat(ExtractLabelValues(html, "cont2"))
-            .ToDictionary(item => NormalizeLabel(item.Key), item => item.Value, StringComparer.OrdinalIgnoreCase);
+        var labelValues = ExtractCaseLabelValues(html);
         var movements = ExtractMovementEvents(html);
         var participants = ExtractParticipants(html);
-        var courtActs = ExtractCourtActs(movements, sourceUri);
+        var caseOutcome = GetValue(labelValues, "результат рассмотрения");
+        var decisionAt = ResolveDecisionAt(
+            movements,
+            ParseDate(GetValue(labelValues, "дата рассмотрения")));
+        var courtActs = ExtractCourtActs(movements, sourceUri, caseOutcome, decisionAt);
         var nextHearing = ResolveNextHearing(movements, nowUtc ?? DateTime.UtcNow);
         var caseNumber = FirstNotEmpty(
             GetValue(labelValues, "номер дела"),
@@ -344,6 +346,8 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
             LowerCourtCaseNumber = lowerCourtCaseNumber,
             Instance = ResolveInstance(sourceUri, sourceText),
             ReceivedAt = ParseDate(GetValue(labelValues, "дата поступления")),
+            DecisionAt = decisionAt,
+            CaseOutcome = caseOutcome,
             NextHearingAt = nextHearing?.ScheduledAt,
             NextHearingPlace = nextHearing?.Place ?? string.Empty,
             MovementEvents = movements,
@@ -500,14 +504,16 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
         return Encoding.UTF8;
     }
 
-    private static Dictionary<string, string> ExtractLabelValues(string html, string className)
+    private static Dictionary<string, string> ExtractCaseLabelValues(string html)
     {
         var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var blockHtml in ExtractContentBlocks(html, className))
+        foreach (var blockHtml in ExtractAllContentBlocks(html))
         {
             foreach (var row in ExtractRows(blockHtml))
             {
-                if (row.Count < 2)
+                // Card attributes are rendered as label/value pairs. Restricting the
+                // row shape keeps movement and participant tables out of this map.
+                if (row.Count != 2)
                 {
                     continue;
                 }
@@ -516,7 +522,7 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
                 var value = NormalizeText(row[1]);
                 if (!string.IsNullOrWhiteSpace(label) && !string.IsNullOrWhiteSpace(value))
                 {
-                    values[label] = value;
+                    values.TryAdd(label, value);
                 }
             }
         }
@@ -527,7 +533,10 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
     private static IReadOnlyList<SudrfCourtMovementEvent> ExtractMovementEvents(string html)
     {
         var events = new List<SudrfCourtMovementEvent>();
-        foreach (var blockHtml in ExtractContentBlocks(html, "cont3"))
+        foreach (var blockHtml in ExtractSemanticContentBlocks(
+                     html,
+                     static text => text.Contains("наименование события", StringComparison.OrdinalIgnoreCase)
+                         && text.Contains("дата", StringComparison.OrdinalIgnoreCase)))
         {
             var rows = ExtractRows(blockHtml);
             var headers = Array.Empty<string>();
@@ -581,7 +590,11 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
         return events;
     }
 
-    private static IReadOnlyList<SudrfCourtAct> ExtractCourtActs(IReadOnlyList<SudrfCourtMovementEvent> movements, Uri sourceUri)
+    private static IReadOnlyList<SudrfCourtAct> ExtractCourtActs(
+        IReadOnlyList<SudrfCourtMovementEvent> movements,
+        Uri sourceUri,
+        string caseOutcome,
+        DateTime? decisionAt)
     {
         var acts = new List<SudrfCourtAct>();
         foreach (var movement in movements)
@@ -605,10 +618,67 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
             });
         }
 
+        var decisionActs = acts
+            .Where(static item => item.Title == "Решение суда")
+            .OrderByDescending(static item => item.Summary.Contains("мотивирован", StringComparison.OrdinalIgnoreCase))
+            .ThenByDescending(static item => item.ActDate)
+            .ToList();
+        if (decisionActs.Count > 1)
+        {
+            var retainedDecision = decisionActs[0];
+            acts.RemoveAll(static item => item.Title == "Решение суда");
+            acts.Add(retainedDecision);
+        }
+
+        if (!string.IsNullOrWhiteSpace(caseOutcome) && decisionAt.HasValue)
+        {
+            var existingDecision = acts.FirstOrDefault(static item => item.Title == "Решение суда");
+            if (existingDecision is not null)
+            {
+                acts.Remove(existingDecision);
+            }
+
+            acts.Add(new SudrfCourtAct
+            {
+                Title = "Решение суда",
+                ActDate = decisionAt.Value.Date,
+                PostedAt = existingDecision?.PostedAt,
+                Result = caseOutcome,
+                Summary = BuildCourtActSummary(
+                    "Решение суда",
+                    decisionAt.Value.Date,
+                    caseOutcome,
+                    existingDecision?.Summary ?? string.Empty),
+                SourceUrl = sourceUri.ToString(),
+            });
+        }
+
         return acts
             .GroupBy(static item => BuildCourtActKey(item.Title, item.ActDate, item.Result), StringComparer.OrdinalIgnoreCase)
             .Select(static group => group.First())
             .ToList();
+    }
+
+    private static DateTime? ResolveDecisionAt(
+        IReadOnlyList<SudrfCourtMovementEvent> movements,
+        DateTime? considerationAt)
+    {
+        var motivatedDecision = movements
+            .Where(static movement => movement.ScheduledAt.HasValue
+                && $"{movement.Title} {movement.Result} {movement.Reason}".Contains("мотивированное решение", StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(static movement => movement.ScheduledAt)
+            .FirstOrDefault();
+        if (motivatedDecision?.ScheduledAt is { } motivatedDecisionAt)
+        {
+            return motivatedDecisionAt.Date;
+        }
+
+        var finalDecision = movements
+            .Where(static movement => movement.ScheduledAt.HasValue
+                && ContainsFinalDecisionText($"{movement.Title} {movement.Result} {movement.Reason}"))
+            .OrderByDescending(static movement => movement.ScheduledAt)
+            .FirstOrDefault();
+        return finalDecision?.ScheduledAt?.Date ?? considerationAt?.Date;
     }
 
     private static string ResolveCourtActTitle(SudrfCourtMovementEvent movement)
@@ -625,7 +695,7 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
             return "Кассационный судебный акт";
         }
 
-        if (text.Contains("решение", StringComparison.OrdinalIgnoreCase))
+        if (ContainsFinalDecisionText(text))
         {
             return "Решение суда";
         }
@@ -641,6 +711,30 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
         }
 
         return string.Empty;
+    }
+
+    private static bool ContainsFinalDecisionText(string value)
+    {
+        var hasExplicitOutcome = value.Contains("вынесено решение", StringComparison.OrdinalIgnoreCase)
+            || value.Contains("мотивированное решение", StringComparison.OrdinalIgnoreCase)
+            || value.Contains("иск удовлетвор", StringComparison.OrdinalIgnoreCase)
+            || value.Contains("заявление удовлетвор", StringComparison.OrdinalIgnoreCase)
+            || value.Contains("жалоба удовлетвор", StringComparison.OrdinalIgnoreCase)
+            || value.Contains("в удовлетворении отказ", StringComparison.OrdinalIgnoreCase)
+            || value.Contains("производство прекращено", StringComparison.OrdinalIgnoreCase)
+            || value.Contains("оставлено без рассмотрения", StringComparison.OrdinalIgnoreCase);
+        if (hasExplicitOutcome)
+        {
+            return true;
+        }
+
+        var onlyReferencesDecisionForAppeal = value.Contains("обжал", StringComparison.OrdinalIgnoreCase)
+            || value.Contains("апелляцион", StringComparison.OrdinalIgnoreCase)
+            || value.Contains("кассацион", StringComparison.OrdinalIgnoreCase)
+            || value.Contains("жалоба на решение", StringComparison.OrdinalIgnoreCase);
+        return !onlyReferencesDecisionForAppeal
+            && (value.Contains("решение суда", StringComparison.OrdinalIgnoreCase)
+                || value.Contains("решение по делу", StringComparison.OrdinalIgnoreCase));
     }
 
     private static string BuildCourtActSummary(string title, DateTime? actDate, string result, string sourceSummary)
@@ -670,7 +764,12 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
     private static IReadOnlyList<SudrfCourtParticipant> ExtractParticipants(string html)
     {
         var participants = new List<SudrfCourtParticipant>();
-        foreach (var blockHtml in ExtractContentBlocks(html, "cont4"))
+        foreach (var blockHtml in ExtractSemanticContentBlocks(
+                     html,
+                     static text => (text.Contains("вид лица", StringComparison.OrdinalIgnoreCase)
+                             || text.Contains("лицо", StringComparison.OrdinalIgnoreCase))
+                         && (text.Contains("фамилия / наименование", StringComparison.OrdinalIgnoreCase)
+                             || text.Contains("фио / наименование", StringComparison.OrdinalIgnoreCase))))
         {
             foreach (var row in ExtractRows(blockHtml))
             {
@@ -696,6 +795,31 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
         }
 
         return participants;
+    }
+
+    private static IReadOnlyList<string> ExtractSemanticContentBlocks(
+        string html,
+        Func<string, bool> matchesSection)
+        => ExtractAllContentBlocks(html)
+            .Where(block => matchesSection(StripTags(block)))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+    private static IReadOnlyList<string> ExtractAllContentBlocks(string html)
+    {
+        var blockIds = Enumerable.Range(1, 16)
+            .Select(static index => $"cont{index}")
+            .Concat(ContentDivWithIdRegex()
+            .Matches(html)
+            .Select(static match => match.Groups["id"].Value)
+            .Where(static id => !string.IsNullOrWhiteSpace(id)))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        return blockIds
+            .SelectMany(id => ExtractContentBlocks(html, id))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
     }
 
     private static IReadOnlyList<string> ExtractContentBlocks(string html, string blockName)
@@ -804,7 +928,7 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
         }
 
         var todayUtc = CalendarTimeZoneHelper.NormalizeUtcInstant(nowUtc).Date;
-        return hearings.FirstOrDefault(item => item.ScheduledAt!.Value >= todayUtc) ?? hearings[^1];
+        return hearings.FirstOrDefault(item => item.ScheduledAt!.Value >= todayUtc);
     }
 
     private static DateTime? ParseDate(string? value)
@@ -965,6 +1089,9 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
 
     [GeneratedRegex(@"<div\b[^>]*id\s*=\s*[""']cont\d+[""'][^>]*>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant)]
     private static partial Regex NextContentDivRegex();
+
+    [GeneratedRegex(@"<div\b[^>]*id\s*=\s*[""'](?<id>cont\d+)[""'][^>]*>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant)]
+    private static partial Regex ContentDivWithIdRegex();
 
     [GeneratedRegex(@"charset\s*=\s*[""']?(?<charset>[a-z0-9_\-]+)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex CharsetRegex();

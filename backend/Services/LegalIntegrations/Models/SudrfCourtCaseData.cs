@@ -13,6 +13,8 @@ public sealed class SudrfCourtCaseData
     public string LowerCourtCaseNumber { get; init; } = string.Empty;
     public string Instance { get; init; } = "first";
     public DateTime? ReceivedAt { get; init; }
+    public DateTime? DecisionAt { get; init; }
+    public string CaseOutcome { get; init; } = string.Empty;
     public DateTime? NextHearingAt { get; init; }
     public string NextHearingPlace { get; init; } = string.Empty;
     public IReadOnlyList<SudrfCourtMovementEvent> MovementEvents { get; init; } = [];

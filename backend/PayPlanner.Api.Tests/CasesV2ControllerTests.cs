@@ -6829,6 +6829,89 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task RunCourtSync_ImportsFullMovementAndRecognizesDecisionOutcome()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "court-movement-owner@example.com", "Владелец");
+        var client = new Client { Name = "Клиент", IsActive = true, ResponsibleUserId = owner.Id };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Семейный спор",
+            Stage = "Судебное производство",
+            CourtUrl = "https://test--sam.sudrf.ru/modules.php?name=sud_delo&name_op=case&delo_id=1540005",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = owner.Id,
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+
+        var courtData = new SudrfCourtCaseData
+        {
+            SourceUrl = clientCase.CourtUrl,
+            CourtName = "Тестовый городской суд",
+            CaseNumber = "2-1500/2026",
+            Instance = "first",
+            DecisionAt = new DateTime(2026, 8, 21),
+            CaseOutcome = "Иск удовлетворен частично",
+            MovementEvents =
+            [
+                new()
+                {
+                    Title = "Регистрация иска (заявления, жалобы) в суде",
+                    ScheduledAt = new DateTime(2026, 4, 13, 19, 12, 0),
+                    SourceSummary = "Регистрация иска; 13.04.2026 19:12",
+                },
+                new()
+                {
+                    Title = "Судебное заседание",
+                    ScheduledAt = new DateTime(2026, 6, 4, 17, 0, 0),
+                    Result = "Заседание отложено",
+                    Reason = "Истребование доказательств",
+                    SourceSummary = "Судебное заседание; 04.06.2026 17:00; результат: Заседание отложено",
+                },
+                new()
+                {
+                    Title = "Судебное заседание",
+                    ScheduledAt = new DateTime(2026, 8, 21, 10, 0, 0),
+                    Result = "Иск удовлетворен частично",
+                    SourceSummary = "Судебное заседание; 21.08.2026 10:00; результат: Иск удовлетворен частично",
+                },
+                new()
+                {
+                    Title = "Направлена апелляционная жалоба на решение суда",
+                    ScheduledAt = new DateTime(2026, 9, 15),
+                    SourceSummary = "Направлена апелляционная жалоба на решение суда; 15.09.2026",
+                },
+            ],
+        };
+        var controller = CreateController(db, owner, sudrfCourtSyncService: new FixedSudrfCourtSyncService(courtData));
+
+        var result = await controller.RunCourtSync(clientCase.Id, null, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<CasesV2Controller.ClientCaseCourtSyncRunDto>(ok.Value);
+        Assert.Equal(4, dto.CreatedCourtEvents);
+
+        await db.Entry(clientCase).ReloadAsync();
+        Assert.Equal(new DateTime(2026, 8, 21), clientCase.CourtDecisionAt);
+
+        var events = await db.ClientCaseCourtEvents
+            .Where(item => item.ClientCaseId == clientCase.Id)
+            .OrderBy(item => item.ScheduledAt)
+            .ToListAsync();
+        Assert.Equal(4, events.Count);
+        Assert.Equal(CourtSyncNormalization.EventTypes.Claim, events[0].EventType);
+        Assert.Equal(CourtSyncNormalization.EventTypes.Postponement, events[1].EventType);
+        Assert.Equal(CourtSyncNormalization.MovementStatuses.Postponed, events[1].MovementStatus);
+        Assert.Equal(CourtSyncNormalization.EventTypes.Decision, events[2].EventType);
+        Assert.Equal("Иск удовлетворен частично", events[2].ResultSummary);
+        Assert.Equal(CourtSyncNormalization.EventTypes.Movement, events[3].EventType);
+        Assert.Contains("апелляционная жалоба", events[3].Title, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task RunCourtSync_ConvertsSudrfTimedHearingsFromUserTimeZone()
     {
         await using var db = await CreateContextAsync();
