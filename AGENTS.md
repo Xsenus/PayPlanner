@@ -35,6 +35,8 @@ Never allow a local, development, test, or preview environment to send email thr
 
 Before starting a local backend or running any workflow that can create users, notifications, reminders, approvals, calendar events, invoices, or other email-producing records, verify that outbound email is disabled or redirected to a local mail sink/dry-run transport. Do not rely only on the application environment name: inspect effective settings from configuration, environment variables, secrets, and the restored database.
 
+For this project, every local backend launch must explicitly set `BackgroundServices__Enabled=false` and `Email__Enabled=false`. When a production database copy is used, also set the database setting `notifications.email.enabled` to `false` (or remove the production SMTP settings), because database settings can take precedence over `Email__Enabled`. Treat these values as mandatory local safety controls, not optional developer preferences.
+
 If safe email isolation cannot be confirmed, do not start the email-producing workflow. Disable the mail sender, replace the transport with a local catcher, or sanitize the copied database first. Test addresses with non-public domains such as `.local` are not sufficient protection because the production SMTP server will still attempt delivery and send bounce messages to the real sender mailbox.
 
 After importing or refreshing a production database locally, clear or override production SMTP credentials, sender configuration, queued email deliveries, and any background jobs capable of sending mail before launching the application. Starting the local application must not cause any external email, bounce, or delivery-status notification.
