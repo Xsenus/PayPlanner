@@ -1206,6 +1206,56 @@ function getAutomationCandidateState(candidate: TaskJournalCaseAutomationCandida
   return candidate.isReadyForControl === false ? 'waiting' : 'ready';
 }
 
+function formatAutomationDays(value: number) {
+  const days = Math.max(0, Math.trunc(value));
+  const modulo100 = days % 100;
+  const modulo10 = days % 10;
+  const unit = modulo100 >= 11 && modulo100 <= 14
+    ? 'дней'
+    : modulo10 === 1
+      ? 'день'
+      : modulo10 >= 2 && modulo10 <= 4
+        ? 'дня'
+        : 'дней';
+  return `${days} ${unit}`;
+}
+
+function getAutomationCandidateStateLabel(
+  candidate: TaskJournalCaseAutomationCandidate,
+  state = getAutomationCandidateState(candidate),
+) {
+  if (state === 'ready') {
+    return `Пора создать · без движения ${formatAutomationDays(candidate.daysWithoutActiveTask)}`;
+  }
+
+  if (state === 'waiting') {
+    if (candidate.daysUntilControl == null) {
+      return 'Ожидает срока';
+    }
+
+    return candidate.daysUntilControl <= 0
+      ? 'Ожидает · срок сегодня'
+      : `Ожидает · через ${formatAutomationDays(candidate.daysUntilControl)}`;
+  }
+
+  return 'Приостановлено';
+}
+
+const AUTOMATION_CANDIDATE_PRESENTATION = {
+  ready: {
+    card: 'border-rose-300 border-l-4 border-l-rose-500 bg-rose-50',
+    badge: 'border border-rose-200 bg-rose-100 text-rose-800',
+  },
+  waiting: {
+    card: 'border-amber-200 border-l-4 border-l-amber-400 bg-white',
+    badge: 'border border-amber-200 bg-amber-100 text-amber-800',
+  },
+  paused: {
+    card: 'border-slate-300 border-l-4 border-l-slate-400 bg-slate-50',
+    badge: 'border border-slate-200 bg-slate-100 text-slate-700',
+  },
+} as const;
+
 function getAutomationCandidateStateCount(
   summary: TaskJournalCaseAutomationSummary,
   state: AutomationCandidateStateFilter,
@@ -6479,24 +6529,21 @@ function TaskAutomationPanel({
           const automationState = getAutomationCandidateState(candidate);
           const canCreateControlTask = automationState === 'ready';
           const isCreatingControlTask = canCreateControlTask && creatingCaseId === candidate.clientCaseId;
+          const presentation = AUTOMATION_CANDIDATE_PRESENTATION[automationState];
 
           return (
-          <article key={candidate.clientCaseId} className="min-w-0 rounded-xl border border-amber-200 bg-white p-4 shadow-sm">
-            <div className="flex items-start justify-between gap-3">
+          <article
+            key={candidate.clientCaseId}
+            data-automation-state={automationState}
+            className={`min-w-0 rounded-xl border p-4 shadow-sm ${presentation.card}`}
+          >
+            <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
               <div className="min-w-0">
                 <div className="truncate text-sm font-semibold text-slate-900">{getAutomationCandidateOwnerName(candidate)}</div>
                 <div className="mt-1 truncate text-sm text-slate-600">{candidate.clientCaseTitle}</div>
               </div>
-              <span className={`shrink-0 rounded-full px-2 py-1 text-xs font-semibold ${automationState === 'ready'
-                ? 'bg-rose-100 text-rose-700'
-                : automationState === 'paused'
-                  ? 'bg-slate-100 text-slate-600'
-                  : 'bg-amber-100 text-amber-700'}`}>
-                {automationState === 'ready'
-                  ? `без движения ${candidate.daysWithoutActiveTask} дн.`
-                  : automationState === 'waiting'
-                    ? `через ${candidate.daysUntilControl} дн.`
-                    : 'приостановлен'}
+              <span className={`max-w-full rounded-full px-2 py-1 text-xs font-semibold sm:shrink-0 ${presentation.badge}`}>
+                {getAutomationCandidateStateLabel(candidate, automationState)}
               </span>
             </div>
             {candidate.isEscalated ? (

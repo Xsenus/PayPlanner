@@ -3828,6 +3828,27 @@ describe('TaskJournal', () => {
         suggestedDescription: 'Автоконтроль',
         suggestedDueAt: todayAt(9),
       },
+      {
+        clientId: 12,
+        clientName: 'Сидоров Сидор Сидорович',
+        responsibleUserId: 8,
+        responsibleName: 'Исполнитель',
+        clientCaseId: 102,
+        clientCaseTitle: 'ПРИОСТАНОВЛЕНО',
+        reason: 'Дело приостановлено.',
+        activeTaskCount: 0,
+        completedTaskCount: 2,
+        daysWithoutActiveTask: 30,
+        automationState: 'paused',
+        lastActivityAt: todayAt(8),
+        lastActivitySource: 'courtEvent',
+        lastTaskAt: null,
+        nextControlAt: null,
+        daysUntilControl: 0,
+        suggestedTitle: 'Проверить движение по делу',
+        suggestedDescription: 'Автоконтроль',
+        suggestedDueAt: todayAt(9),
+      },
     ]);
 
     const onOpenCase = vi.fn();
@@ -3836,8 +3857,15 @@ describe('TaskJournal', () => {
     expect(screen.getByRole('heading', { name: 'Все дела без активных задач' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Пора создать: 1' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Ожидают срока: 1' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Приостановлены: 1' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Создать наступившие (1)' })).toBeTruthy();
-    expect(screen.getAllByText('Нет активных задач')).toHaveLength(2);
+    expect(screen.getAllByText('Нет активных задач')).toHaveLength(3);
+    expect(screen.getByText('Пора создать · без движения 21 день')).toBeTruthy();
+    expect(screen.getByText('Ожидает · через 11 дней')).toBeTruthy();
+    expect(screen.getByText('Приостановлено')).toBeTruthy();
+    expect(document.querySelector('[data-automation-state="ready"]')?.className).toContain('border-l-rose-500');
+    expect(document.querySelector('[data-automation-state="waiting"]')?.className).toContain('border-l-amber-400');
+    expect(document.querySelector('[data-automation-state="paused"]')?.className).toContain('border-l-slate-400');
     expect(screen.getByText(/Последнее движение:.*задача/)).toBeTruthy();
     expect(screen.getByText(/Последнее движение:.*документ/)).toBeTruthy();
     expect(screen.getByText(/Следующий контроль:/)).toBeTruthy();
