@@ -2011,6 +2011,8 @@ export interface TaskJournalAutomationPreviewCaseDto {
   explanation: string;
   lastActivityAt?: string | null;
   lastActivitySource?: string | null;
+  firstControlDueAt?: string | null;
+  criticalControlDueAt?: string | null;
 }
 
 export interface TaskJournalAutomationPreviewDetailsDto {

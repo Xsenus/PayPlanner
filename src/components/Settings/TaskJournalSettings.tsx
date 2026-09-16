@@ -864,6 +864,14 @@ export function TaskJournalSettings({
                                 <div className="text-sm font-semibold text-slate-900">{item.clientCaseTitle}</div>
                                 <div className="mt-0.5 text-xs text-slate-600">{ownerName}</div>
                                 <div className="mt-1 text-xs font-medium text-slate-700">{item.explanation}</div>
+                                <div className="mt-2 flex flex-wrap gap-1.5 text-[11px] font-medium">
+                                  <span className="pp-automation-preview-deadline rounded-full border px-2 py-1">
+                                    Порог первого контроля: {formatAutomationPreviewDate(item.firstControlDueAt)}
+                                  </span>
+                                  <span className="pp-automation-preview-deadline-critical rounded-full border px-2 py-1">
+                                    Критический порог: {formatAutomationPreviewDate(item.criticalControlDueAt)}
+                                  </span>
+                                </div>
                                 <div className="mt-1 text-[11px] text-slate-500">
                                   Последняя контрольная точка: {formatAutomationPreviewDate(item.lastActivityAt)} · {activitySource}
                                   {item.responsibleName ? ` · Ответственный: ${item.responsibleName}` : ''}

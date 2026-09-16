@@ -289,6 +289,8 @@ public class TaskJournalAutomationPreviewCaseDto
     public string Explanation { get; set; } = string.Empty;
     public string? LastActivityAt { get; set; }
     public string? LastActivitySource { get; set; }
+    public string? FirstControlDueAt { get; set; }
+    public string? CriticalControlDueAt { get; set; }
 }
 
 public class TaskJournalSettingsDto

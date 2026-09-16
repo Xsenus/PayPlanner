@@ -256,6 +256,8 @@ describe('TaskJournalSettings', () => {
           explanation: 'По делу есть активные задачи: 1.',
           lastActivityAt: '2026-09-10T08:00:00Z',
           lastActivitySource: 'task',
+          firstControlDueAt: '2026-09-24T08:00:00Z',
+          criticalControlDueAt: '2026-10-10T08:00:00Z',
         }],
       })
       .mockResolvedValueOnce({
@@ -308,6 +310,8 @@ describe('TaskJournalSettings', () => {
     const details = await screen.findByTestId('case-inactivity-preview-details');
     expect(within(details).getByText('Дело с первой активной задачей')).toBeTruthy();
     expect(within(details).getByText('По делу есть активные задачи: 1.')).toBeTruthy();
+    expect(within(details).getByText(/Порог первого контроля:/).textContent).not.toContain('—');
+    expect(within(details).getByText(/Критический порог:/).textContent).not.toContain('—');
     expect(within(details).getByText(/Последняя контрольная точка:.*задача/)).toBeTruthy();
     expect(apiMock.getTaskJournalAutomationPreviewDetails).toHaveBeenNthCalledWith(1, {
       inactivityDays: 14,

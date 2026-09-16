@@ -1034,6 +1034,8 @@ public class TasksController : ControllerBase
                 Explanation = explanation,
                 LastActivityAt = ToIso(lastControlAnchorAt),
                 LastActivitySource = lastControlAnchorSource,
+                FirstControlDueAt = ToIso(lastControlAnchorAt.AddDays(normalizedInactivityDays)),
+                CriticalControlDueAt = ToIso(lastActivity.At.AddDays(normalizedEscalationDays)),
             };
         }).ToList();
 

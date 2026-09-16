@@ -858,6 +858,12 @@ public class TasksControllerTests
         Assert.Equal(2, candidates.TotalCount);
         Assert.Single(candidates.Items);
         Assert.Contains("срок постановки контроля наступил", candidates.Items[0].Explanation);
+        Assert.Equal(
+            DateTime.SpecifyKind(firstCandidate.CreatedAt.AddDays(14), DateTimeKind.Utc).ToString("O"),
+            candidates.Items[0].FirstControlDueAt);
+        Assert.Equal(
+            DateTime.SpecifyKind(firstCandidate.CreatedAt.AddDays(30), DateTimeKind.Utc).ToString("O"),
+            candidates.Items[0].CriticalControlDueAt);
         Assert.Equal(2, interceptor.Commands.Count(command =>
             command.Contains("FROM \"ClientCases\"", StringComparison.Ordinal)));
 
