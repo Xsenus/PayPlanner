@@ -161,9 +161,10 @@ function pushSettingsSectionToUrl(section: SettingsSection) {
 
 type AppSettingsProps = {
   initialSection?: SettingsSection;
+  onOpenCase?: (caseId: number, clientId?: number | null) => void;
 };
 
-export function AppSettings({ initialSection }: AppSettingsProps = {}) {
+export function AppSettings({ initialSection, onOpenCase }: AppSettingsProps = {}) {
   const { user, isAdmin } = useAuth();
   const permissions = useRolePermissions(user?.role?.id);
   const { confirm } = useDialog();
@@ -1035,7 +1036,7 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
 
             {activeSection === 'tasks' && (
               <div className="space-y-6">
-                <TaskJournalSettings />
+                <TaskJournalSettings onOpenCase={onOpenCase} />
               </div>
             )}
 

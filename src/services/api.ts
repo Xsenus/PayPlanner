@@ -1991,6 +1991,36 @@ export interface TaskJournalAutomationPreviewDto {
   recentlyActiveCount: number;
 }
 
+export type TaskJournalAutomationPreviewCategory =
+  | 'candidate'
+  | 'activeTask'
+  | 'recentActivity'
+  | 'excludedStatus'
+  | 'disabled'
+  | 'vacation';
+
+export interface TaskJournalAutomationPreviewCaseDto {
+  clientCaseId: number;
+  clientCaseTitle: string;
+  clientId?: number | null;
+  clientName: string;
+  legalEntityId?: number | null;
+  legalEntityName: string;
+  responsibleName: string;
+  explanation: string;
+  lastActivityAt?: string | null;
+  lastActivitySource?: string | null;
+}
+
+export interface TaskJournalAutomationPreviewDetailsDto {
+  category: TaskJournalAutomationPreviewCategory;
+  inactivityDays: number;
+  totalCount: number;
+  offset: number;
+  limit: number;
+  items: TaskJournalAutomationPreviewCaseDto[];
+}
+
 export interface UpdateTaskJournalSettingsRequest {
   restrictExecutorEditing: boolean;
   allowExecutorDeadlineChangeRequests: boolean;
@@ -4558,6 +4588,17 @@ export class ApiService {
   async previewTaskJournalCaseAutomation(inactivityDays: number, escalationDays: number) {
     const q = buildQuery({ inactivityDays, escalationDays });
     return this.request<TaskJournalAutomationPreviewDto>(`/tasks/automation/case-control/preview${q}`);
+  }
+
+  async getTaskJournalAutomationPreviewDetails(params: {
+    inactivityDays: number;
+    category: TaskJournalAutomationPreviewCategory;
+    search?: string;
+    offset?: number;
+    limit?: number;
+  }) {
+    const q = buildQuery(params);
+    return this.request<TaskJournalAutomationPreviewDetailsDto>(`/tasks/automation/case-control/preview/details${q}`);
   }
 
   async getTaskJournalCaseAutomationCandidates(

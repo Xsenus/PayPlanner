@@ -1939,12 +1939,12 @@ function AppContent() {
 
       case 'yandexDisk':
         return canViewYandexDisk
-          ? <AppSettings initialSection="yandex-disk" />
+          ? <AppSettings initialSection="yandex-disk" onOpenCase={openRelatedCase} />
           : renderNoAccess('Недостаточно прав для доступа к разделу Я.Диск.');
 
       case 's3Storage':
         return canViewS3Storage
-          ? <AppSettings initialSection="s3-storage" />
+          ? <AppSettings initialSection="s3-storage" onOpenCase={openRelatedCase} />
           : renderNoAccess('Недостаточно прав для доступа к разделу S3-хранилищ.');
 
       case 'dictionaries':
@@ -1954,7 +1954,7 @@ function AppContent() {
 
       case 'settings':
         return canViewSettings
-          ? <AppSettings />
+          ? <AppSettings onOpenCase={openRelatedCase} />
           : renderNoAccess('Нужны права администратора.');
 
       default:

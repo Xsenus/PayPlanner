@@ -1,10 +1,12 @@
 import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemSelect } from '../ui/SystemSelect';
-import { useCallback, useEffect, useState } from 'react';
-import { RefreshCcw, RotateCcw, Save } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ChevronDown, ExternalLink, Loader2, RefreshCcw, RotateCcw, Save, X } from 'lucide-react';
 import {
   apiService,
   type TaskJournalAutomationDiagnosticsDto,
+  type TaskJournalAutomationPreviewCategory,
+  type TaskJournalAutomationPreviewDetailsDto,
   type TaskJournalAutomationPreviewDto,
   type TaskJournalSettingsDto,
 } from '../../services/api';
@@ -44,6 +46,36 @@ const DEFAULT_SETTINGS: TaskJournalSettingsDto = {
   caseInactivityScheduleTimeZone: 'Europe/Moscow',
   stickerStyles: cloneDefaultTaskStickerStyles(),
 };
+
+const AUTOMATION_PREVIEW_DETAILS_PAGE_SIZE = 20;
+
+const AUTOMATION_ACTIVITY_SOURCE_LABELS: Record<string, string> = {
+  caseCreated: 'создание дела',
+  task: 'задача',
+  taskComment: 'комментарий к задаче',
+  document: 'документ',
+  courtEvent: 'судебное событие',
+  responsibleView: 'просмотр ответственным',
+  activityConfirmation: 'ручное подтверждение',
+  controlCycleEnded: 'завершение предыдущего контроля',
+};
+
+const AUTOMATION_PREVIEW_CATEGORY_LABELS: Record<TaskJournalAutomationPreviewCategory, string> = {
+  candidate: 'Пора создать контроль',
+  activeTask: 'Есть активная задача',
+  recentActivity: 'Было недавнее движение',
+  excludedStatus: 'Исключены по статусу',
+  disabled: 'Автоконтроль выключен',
+  vacation: 'Ответственный в отпуске',
+};
+
+function formatAutomationPreviewDate(value?: string | null) {
+  if (!value) return '—';
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime())
+    ? value
+    : parsed.toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' });
+}
 
 function formatDiagnosticDate(value?: string | null) {
   if (!value) {
@@ -160,12 +192,21 @@ function TaskStickerStyleEditor({
   );
 }
 
-export function TaskJournalSettings() {
+export function TaskJournalSettings({
+  onOpenCase,
+}: {
+  onOpenCase?: (caseId: number, clientId?: number | null) => void;
+} = {}) {
   const toast = useToast();
   const [settings, setSettings] = useState<TaskJournalSettingsDto>(DEFAULT_SETTINGS);
   const [assignees, setAssignees] = useState<TaskJournalAssignee[]>([]);
   const [diagnostics, setDiagnostics] = useState<TaskJournalAutomationDiagnosticsDto | null>(null);
   const [preview, setPreview] = useState<TaskJournalAutomationPreviewDto | null>(null);
+  const [previewDetails, setPreviewDetails] = useState<TaskJournalAutomationPreviewDetailsDto | null>(null);
+  const [previewDetailsCategory, setPreviewDetailsCategory] = useState<TaskJournalAutomationPreviewCategory | null>(null);
+  const [previewDetailsLoading, setPreviewDetailsLoading] = useState(false);
+  const [previewDetailsLoadingMore, setPreviewDetailsLoadingMore] = useState(false);
+  const previewDetailsRequestRef = useRef(0);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
@@ -232,6 +273,11 @@ export function TaskJournalSettings() {
   };
 
   const previewAutomationImpact = async () => {
+    previewDetailsRequestRef.current += 1;
+    setPreviewDetails(null);
+    setPreviewDetailsCategory(null);
+    setPreviewDetailsLoading(false);
+    setPreviewDetailsLoadingMore(false);
     setPreviewLoading(true);
     try {
       const response = await apiService.previewTaskJournalCaseAutomation(
@@ -243,6 +289,61 @@ export function TaskJournalSettings() {
       toast.error(extractDisplayErrorMessage(error, 'Не удалось рассчитать влияние новых правил.'), 'Автоконтроль дел');
     } finally {
       setPreviewLoading(false);
+    }
+  };
+
+  const closePreviewDetails = () => {
+    previewDetailsRequestRef.current += 1;
+    setPreviewDetails(null);
+    setPreviewDetailsCategory(null);
+    setPreviewDetailsLoading(false);
+    setPreviewDetailsLoadingMore(false);
+  };
+
+  const loadPreviewDetails = async (
+    category: TaskJournalAutomationPreviewCategory,
+    append = false,
+  ) => {
+    if (!append && previewDetailsCategory === category && previewDetails) {
+      closePreviewDetails();
+      return;
+    }
+
+    const requestId = previewDetailsRequestRef.current + 1;
+    previewDetailsRequestRef.current = requestId;
+    setPreviewDetailsCategory(category);
+    if (append) {
+      setPreviewDetailsLoadingMore(true);
+    } else {
+      setPreviewDetails(null);
+      setPreviewDetailsLoading(true);
+    }
+
+    try {
+      const response = await apiService.getTaskJournalAutomationPreviewDetails({
+        inactivityDays: preview?.inactivityDays ?? settings.caseInactivityDays,
+        category,
+        offset: append ? previewDetails?.items.length ?? 0 : 0,
+        limit: AUTOMATION_PREVIEW_DETAILS_PAGE_SIZE,
+      });
+      if (previewDetailsRequestRef.current !== requestId) return;
+      setPreviewDetails((current) => append && current?.category === response.category
+        ? { ...response, items: current.items.concat(response.items) }
+        : response);
+    } catch (error) {
+      if (previewDetailsRequestRef.current !== requestId) return;
+      toast.error(
+        extractDisplayErrorMessage(error, 'Не удалось загрузить дела выбранной категории.'),
+        'Предварительный расчёт',
+      );
+      if (!append) {
+        setPreviewDetailsCategory(null);
+      }
+    } finally {
+      if (previewDetailsRequestRef.current === requestId) {
+        setPreviewDetailsLoading(false);
+        setPreviewDetailsLoadingMore(false);
+      }
     }
   };
 
@@ -624,25 +725,122 @@ export function TaskJournalSettings() {
           {preview ? (
             <div className="mt-3" data-testid="case-inactivity-preview-breakdown">
               <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                <div className="pp-automation-preview-card rounded-lg border px-3 py-2 shadow-sm">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="text-xs font-medium text-slate-600">Проверено дел</span>
+                    <strong className="text-lg text-slate-900">{preview.trackedCaseCount ?? preview.candidateCount}</strong>
+                  </div>
+                  <div className="mt-0.5 text-[11px] leading-4 text-slate-500">Все дела с действующим клиентом или организацией</div>
+                </div>
                 {([
-                  ['Проверено дел', preview.trackedCaseCount ?? preview.candidateCount, 'Все дела с действующим клиентом или организацией'],
-                  ['Пора создать контроль', preview.candidateCount, `Критический срок: ${preview.escalationCandidateCount}`],
-                  ['Есть активная задача', preview.activeTaskCount ?? 0, 'Контроль пока не требуется'],
-                  ['Было недавнее движение', preview.recentlyActiveCount ?? 0, `Ещё не прошло ${preview.inactivityDays} дн.`],
-                  ['Исключены по статусу', preview.excludedByStatusCount ?? 0, 'Приостановленные, закрытые и проигранные'],
-                  ['Автоконтроль выключен', preview.disabledCount ?? 0, 'Индивидуальное исключение в карточке дела'],
-                  ['Ответственный в отпуске', preview.pausedByVacationCount ?? 0, 'Проверка продолжится после возвращения'],
-                ] as const).map(([label, value, hint]) => (
-                  <div key={label} className="pp-automation-preview-card rounded-lg border px-3 py-2 shadow-sm">
+                  ['candidate', preview.candidateCount, `Критический срок: ${preview.escalationCandidateCount}`],
+                  ['activeTask', preview.activeTaskCount ?? 0, 'Контроль пока не требуется'],
+                  ['recentActivity', preview.recentlyActiveCount ?? 0, `Ещё не прошло ${preview.inactivityDays} дн.`],
+                  ['excludedStatus', preview.excludedByStatusCount ?? 0, 'Приостановленные, закрытые и проигранные'],
+                  ['disabled', preview.disabledCount ?? 0, 'Индивидуальное исключение в карточке дела'],
+                  ['vacation', preview.pausedByVacationCount ?? 0, 'Проверка продолжится после возвращения'],
+                ] as const).map(([category, value, hint]) => (
+                  <button
+                    key={category}
+                    type="button"
+                    aria-pressed={previewDetailsCategory === category}
+                    aria-label={`${AUTOMATION_PREVIEW_CATEGORY_LABELS[category]}: ${value}. Показать дела`}
+                    onClick={() => void loadPreviewDetails(category)}
+                    disabled={value === 0 || previewDetailsLoading || previewDetailsLoadingMore}
+                    className={`pp-automation-preview-card pp-automation-preview-card-interactive rounded-lg border px-3 py-2 text-left shadow-sm transition disabled:cursor-default disabled:opacity-60 ${previewDetailsCategory === category ? 'pp-automation-preview-card-active' : ''}`}
+                  >
                     <div className="flex items-baseline justify-between gap-2">
-                      <span className="text-xs font-medium text-slate-600">{label}</span>
+                      <span className="text-xs font-medium text-slate-600">{AUTOMATION_PREVIEW_CATEGORY_LABELS[category]}</span>
                       <strong className="text-lg text-slate-900">{value}</strong>
                     </div>
                     <div className="mt-0.5 text-[11px] leading-4 text-slate-500">{hint}</div>
-                  </div>
+                    <div className="mt-1 inline-flex items-center gap-1 text-[11px] font-semibold text-blue-700">
+                      {previewDetailsCategory === category && previewDetailsLoading
+                        ? <Loader2 className="h-3 w-3 animate-spin" />
+                        : <ChevronDown className={`h-3 w-3 transition ${previewDetailsCategory === category ? 'rotate-180' : ''}`} />}
+                      {previewDetailsCategory === category ? 'Скрыть список' : 'Показать дела'}
+                    </div>
+                  </button>
                 ))}
               </div>
               <p className="mt-2 text-xs text-slate-500">Причины показаны без пересечений: каждое проверенное дело учитывается только в одной категории.</p>
+
+              {previewDetailsCategory ? (
+                <section className="pp-automation-preview-details mt-3 rounded-xl border p-3" data-testid="case-inactivity-preview-details">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <h6 className="text-sm font-semibold text-slate-900">{AUTOMATION_PREVIEW_CATEGORY_LABELS[previewDetailsCategory]}</h6>
+                      <p className="mt-0.5 text-xs text-slate-500">
+                        {previewDetails
+                          ? `Показано ${previewDetails.items.length} из ${previewDetails.totalCount}`
+                          : 'Загружаем дела и точную причину для каждого...'}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={closePreviewDetails}
+                      className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-500 transition hover:bg-slate-50"
+                      aria-label="Закрыть детализацию"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+
+                  {previewDetailsLoading ? (
+                    <div className="mt-3 flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-6 text-sm text-slate-500">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Загружаем дела...
+                    </div>
+                  ) : previewDetails && previewDetails.items.length > 0 ? (
+                    <div className="mt-3 space-y-2">
+                      {previewDetails.items.map((item) => {
+                        const ownerName = item.clientName || item.legalEntityName || 'Контрагент не указан';
+                        const activitySource = item.lastActivitySource
+                          ? AUTOMATION_ACTIVITY_SOURCE_LABELS[item.lastActivitySource] ?? item.lastActivitySource
+                          : 'источник не указан';
+                        return (
+                          <article key={item.clientCaseId} className="pp-automation-preview-detail-row rounded-lg border px-3 py-2">
+                            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                              <div className="min-w-0">
+                                <div className="text-sm font-semibold text-slate-900">{item.clientCaseTitle}</div>
+                                <div className="mt-0.5 text-xs text-slate-600">{ownerName}</div>
+                                <div className="mt-1 text-xs font-medium text-slate-700">{item.explanation}</div>
+                                <div className="mt-1 text-[11px] text-slate-500">
+                                  Последняя контрольная точка: {formatAutomationPreviewDate(item.lastActivityAt)} · {activitySource}
+                                  {item.responsibleName ? ` · Ответственный: ${item.responsibleName}` : ''}
+                                </div>
+                              </div>
+                              {onOpenCase ? (
+                                <button
+                                  type="button"
+                                  onClick={() => onOpenCase(item.clientCaseId, item.clientId)}
+                                  className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-blue-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-blue-700 transition hover:bg-blue-50"
+                                >
+                                  <ExternalLink className="h-3.5 w-3.5" />
+                                  Открыть дело
+                                </button>
+                              ) : null}
+                            </div>
+                          </article>
+                        );
+                      })}
+                      {previewDetails.items.length < previewDetails.totalCount ? (
+                        <button
+                          type="button"
+                          onClick={() => void loadPreviewDetails(previewDetails.category, true)}
+                          disabled={previewDetailsLoadingMore}
+                          className="pp-automation-preview-action inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold transition disabled:cursor-wait disabled:opacity-60"
+                        >
+                          {previewDetailsLoadingMore ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                          {previewDetailsLoadingMore ? 'Загружаем...' : 'Показать ещё'}
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : previewDetails ? (
+                    <div className="mt-3 rounded-lg border border-slate-200 bg-white px-3 py-4 text-sm text-slate-500">В этой категории дел больше нет.</div>
+                  ) : null}
+                </section>
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -657,6 +855,7 @@ export function TaskJournalSettings() {
               value={settings.caseInactivityDays}
               onChange={(event) => {
                 setPreview(null);
+                closePreviewDetails();
                 setSettings((prev) => ({
                   ...prev,
                   caseInactivityDays: Math.min(365, Math.max(1, Number(event.target.value) || 1)),
@@ -751,6 +950,7 @@ export function TaskJournalSettings() {
               value={settings.caseInactivityEscalationDays}
               onChange={(event) => {
                 setPreview(null);
+                closePreviewDetails();
                 setSettings((prev) => ({
                   ...prev,
                   caseInactivityEscalationDays: Math.min(365, Math.max(prev.caseInactivityDays, Number(event.target.value) || prev.caseInactivityDays)),

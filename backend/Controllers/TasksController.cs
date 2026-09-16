@@ -66,6 +66,10 @@ public class TasksController : ControllerBase
     [
         "new", "inProgress", "waiting", "onApproval", "approved", "revision", "overdueApproval"
     ];
+    private static readonly HashSet<string> AllowedAutomationPreviewCategories = new(StringComparer.Ordinal)
+    {
+        "candidate", "activeTask", "recentActivity", "excludedStatus", "disabled", "vacation"
+    };
     private const string RestrictExecutorEditingSettingKey = "tasks.restrictExecutorEditing";
     private const string AllowExecutorDeadlineChangeRequestsSettingKey = "tasks.allowExecutorDeadlineChangeRequests";
     private const string ExecutorCompletionAllowedUserIdsSettingKey = "tasks.executorCompletionAllowedUserIds";
@@ -793,54 +797,7 @@ public class TasksController : ControllerBase
         var vacationUserIds = await CaseInactivityResponsibleAvailabilityService
             .GetUsersOnVacationAsync(_db, now, ct);
 
-        var statistics = await _db.ClientCases
-            .AsNoTracking()
-            .Where(clientCase =>
-                ((clientCase.ClientId.HasValue && clientCase.Client != null) ||
-                 (clientCase.LegalEntityId.HasValue && clientCase.LegalEntity != null)))
-            .Select(clientCase => new
-            {
-                IsStatusExcluded = CaseInactivityControlCyclePolicy.ExcludedCaseStatuses.Contains(clientCase.Status),
-                IsResponsibleOnVacation = vacationUserIds.Contains(
-                    (clientCase.ResponsibleUserId ??
-                     (clientCase.Client != null ? clientCase.Client.ResponsibleUserId : null) ??
-                     (clientCase.LegalEntity != null ? clientCase.LegalEntity.ResponsibleUserId : null)) ?? 0),
-                clientCase.CreatedAt,
-                clientCase.LastViewedAt,
-                clientCase.ActivityConfirmedAt,
-                clientCase.InactivityRemindersEnabled,
-                ActiveTaskCount = _db.TaskJournalItems.Count(task =>
-                    task.ClientCaseId == clientCase.Id &&
-                    ActiveTaskStatuses.Contains(task.Status)),
-                LastTaskAt = _db.TaskJournalItems
-                    .IgnoreQueryFilters()
-                    .Where(task =>
-                        task.ClientCaseId == clientCase.Id &&
-                        !task.TagsJson.Contains(CaseInactivityAutomationTag))
-                    .Max(task => (DateTime?)(task.UpdatedAt ?? task.CreatedAt)),
-                LastTaskCommentAt = _db.TaskJournalComments
-                    .Where(comment =>
-                        comment.TaskJournalItem.ClientCaseId == clientCase.Id &&
-                        !comment.TaskJournalItem.TagsJson.Contains(CaseInactivityAutomationTag))
-                    .Max(comment => (DateTime?)(comment.UpdatedAt ?? comment.CreatedAt)),
-                LastControlCycleEndedAt = _db.TaskJournalItems
-                    .IgnoreQueryFilters()
-                    .Where(task =>
-                        task.ClientCaseId == clientCase.Id &&
-                        task.TagsJson.Contains(CaseInactivityAutomationTag) &&
-                        ((task.Status == "done" || task.Status == "cancelled") ||
-                         EF.Property<bool>(task, "IsDeleted")))
-                    .Max(task =>
-                        EF.Property<DateTime?>(task, "DeletedAt") ??
-                        task.UpdatedAt ??
-                        (DateTime?)task.CreatedAt),
-                LastDocumentAt = _db.ClientCaseDocuments
-                    .Where(document => document.ClientCaseId == clientCase.Id)
-                    .Max(document => (DateTime?)document.UploadedAt),
-                LastCourtEventAt = _db.ClientCaseCourtEvents
-                    .Where(courtEvent => courtEvent.ClientCaseId == clientCase.Id)
-                    .Max(courtEvent => (DateTime?)(courtEvent.UpdatedAt ?? courtEvent.CreatedAt)),
-            })
+        var statistics = await BuildAutomationPreviewQuery(vacationUserIds)
             .GroupBy(_ => 1)
             .Select(group => new
             {
@@ -909,6 +866,168 @@ public class TasksController : ControllerBase
             DisabledCount = statistics?.DisabledCount ?? 0,
             ActiveTaskCount = statistics?.ActiveTaskCount ?? 0,
             RecentlyActiveCount = statistics?.RecentlyActiveCount ?? 0,
+        });
+    }
+
+    [HttpGet("automation/case-control/preview/details")]
+    public async Task<ActionResult<TaskJournalAutomationPreviewDetailsDto>> GetCaseControlAutomationPreviewDetails(
+        [FromQuery] int inactivityDays,
+        [FromQuery] string category,
+        [FromQuery] string? search = null,
+        [FromQuery] int offset = 0,
+        [FromQuery] int limit = 20,
+        CancellationToken ct = default)
+    {
+        var access = await GetTaskAccessAsync(ct);
+        if (access is null)
+        {
+            return Unauthorized();
+        }
+
+        if (!access.IsAdmin)
+        {
+            return Forbid();
+        }
+
+        var normalizedCategory = category?.Trim() ?? string.Empty;
+        if (!AllowedAutomationPreviewCategories.Contains(normalizedCategory))
+        {
+            return BadRequest("Неизвестная категория предварительного расчёта.");
+        }
+
+        var normalizedInactivityDays = Math.Clamp(inactivityDays, 1, 365);
+        var normalizedOffset = Math.Clamp(offset, 0, 1_000_000);
+        var normalizedLimit = Math.Clamp(limit, 1, 50);
+        var now = DateTime.UtcNow;
+        var inactivityCutoff = now.AddDays(-normalizedInactivityDays);
+        var responsibleAvailability = await CaseInactivityResponsibleAvailabilityService
+            .GetAvailabilityAsync(_db, now, ct);
+
+        var detailsQuery = BuildAutomationPreviewQuery(responsibleAvailability.UsersOnVacation);
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var rawTerm = search.Trim();
+            rawTerm = rawTerm.Length > 120 ? rawTerm[..120] : rawTerm;
+            var term = rawTerm.ToLower();
+            detailsQuery = detailsQuery.Where(item =>
+                item.Title.ToLower().Contains(term) ||
+                item.Title.Contains(rawTerm) ||
+                item.ClientName.ToLower().Contains(term) ||
+                item.ClientName.Contains(rawTerm) ||
+                item.LegalEntityName.ToLower().Contains(term) ||
+                item.LegalEntityName.Contains(rawTerm) ||
+                item.ResponsibleName.ToLower().Contains(term) ||
+                item.ResponsibleName.Contains(rawTerm));
+        }
+
+        detailsQuery = normalizedCategory switch
+        {
+            "excludedStatus" => detailsQuery.Where(item => item.IsStatusExcluded),
+            "vacation" => detailsQuery.Where(item =>
+                !item.IsStatusExcluded &&
+                item.IsResponsibleOnVacation),
+            "disabled" => detailsQuery.Where(item =>
+                !item.IsStatusExcluded &&
+                !item.IsResponsibleOnVacation &&
+                !item.InactivityRemindersEnabled),
+            "activeTask" => detailsQuery.Where(item =>
+                !item.IsStatusExcluded &&
+                !item.IsResponsibleOnVacation &&
+                item.InactivityRemindersEnabled &&
+                item.ActiveTaskCount > 0),
+            "recentActivity" => detailsQuery.Where(item =>
+                !item.IsStatusExcluded &&
+                !item.IsResponsibleOnVacation &&
+                item.InactivityRemindersEnabled &&
+                item.ActiveTaskCount == 0 &&
+                ((item.LastTaskAt ?? item.CreatedAt) > inactivityCutoff ||
+                 (item.LastTaskCommentAt ?? item.CreatedAt) > inactivityCutoff ||
+                 (item.LastControlCycleEndedAt ?? item.CreatedAt) > inactivityCutoff ||
+                 (item.LastDocumentAt ?? item.CreatedAt) > inactivityCutoff ||
+                 (item.LastCourtEventAt ?? item.CreatedAt) > inactivityCutoff ||
+                 (item.LastViewedAt ?? item.CreatedAt) > inactivityCutoff ||
+                 (item.ActivityConfirmedAt ?? item.CreatedAt) > inactivityCutoff)),
+            _ => detailsQuery.Where(item =>
+                !item.IsStatusExcluded &&
+                !item.IsResponsibleOnVacation &&
+                item.InactivityRemindersEnabled &&
+                item.ActiveTaskCount == 0 &&
+                (item.LastTaskAt ?? item.CreatedAt) <= inactivityCutoff &&
+                (item.LastTaskCommentAt ?? item.CreatedAt) <= inactivityCutoff &&
+                (item.LastControlCycleEndedAt ?? item.CreatedAt) <= inactivityCutoff &&
+                (item.LastDocumentAt ?? item.CreatedAt) <= inactivityCutoff &&
+                (item.LastCourtEventAt ?? item.CreatedAt) <= inactivityCutoff &&
+                (item.LastViewedAt ?? item.CreatedAt) <= inactivityCutoff &&
+                (item.ActivityConfirmedAt ?? item.CreatedAt) <= inactivityCutoff),
+        };
+
+        var totalCount = await detailsQuery.CountAsync(ct);
+        var rows = await detailsQuery
+            .OrderBy(item => item.ClientName != string.Empty ? item.ClientName : item.LegalEntityName)
+            .ThenBy(item => item.Title)
+            .ThenBy(item => item.Id)
+            .Skip(normalizedOffset)
+            .Take(normalizedLimit)
+            .ToListAsync(ct);
+
+        var items = rows.Select(item =>
+        {
+            var lastActivity = CaseMeaningfulActivityResolver.Resolve(
+                new CaseMeaningfulActivitySignals(
+                    item.CreatedAt,
+                    LastTaskAt: item.LastTaskAt,
+                    LastTaskCommentAt: item.LastTaskCommentAt,
+                    LastDocumentAt: item.LastDocumentAt,
+                    LastCourtEventAt: item.LastCourtEventAt,
+                    LastResponsibleViewAt: item.LastViewedAt,
+                    LastActivityConfirmationAt: item.ActivityConfirmedAt));
+            var controlAnchorIsLater = item.LastControlCycleEndedAt.HasValue &&
+                                       item.LastControlCycleEndedAt.Value > lastActivity.At;
+            var lastControlAnchorAt = controlAnchorIsLater
+                ? item.LastControlCycleEndedAt!.Value
+                : lastActivity.At;
+            var lastControlAnchorSource = controlAnchorIsLater
+                ? "controlCycleEnded"
+                : lastActivity.Source;
+            var daysSinceAnchor = Math.Max(0, (int)Math.Floor((now - lastControlAnchorAt).TotalDays));
+            var explanation = normalizedCategory switch
+            {
+                "excludedStatus" => $"Статус «{ClientCaseStatusLabel(item.Status)}» исключает дело из автоконтроля.",
+                "vacation" => item.ResponsibleUserId is int responsibleUserId &&
+                              responsibleAvailability.VacationUntilDates.TryGetValue(responsibleUserId, out var vacationUntil)
+                    ? $"Ответственный отсутствует по {vacationUntil}; проверка продолжится после возвращения."
+                    : "Ответственный временно отсутствует; проверка продолжится после возвращения.",
+                "disabled" => string.IsNullOrWhiteSpace(item.InactivityRemindersDisabledReason)
+                    ? "Автоконтроль индивидуально выключен в карточке дела."
+                    : $"Автоконтроль выключен: {item.InactivityRemindersDisabledReason}",
+                "activeTask" => $"По делу есть активные задачи: {item.ActiveTaskCount}.",
+                "recentActivity" => $"Последнее значимое движение было {daysSinceAnchor} дн. назад; порог ещё не наступил.",
+                _ => $"Значимого движения нет {daysSinceAnchor} дн.; срок постановки контроля наступил.",
+            };
+
+            return new TaskJournalAutomationPreviewCaseDto
+            {
+                ClientCaseId = item.Id,
+                ClientCaseTitle = item.Title,
+                ClientId = item.ClientId,
+                ClientName = item.ClientName,
+                LegalEntityId = item.LegalEntityId,
+                LegalEntityName = item.LegalEntityName,
+                ResponsibleName = item.ResponsibleName,
+                Explanation = explanation,
+                LastActivityAt = ToIso(lastControlAnchorAt),
+                LastActivitySource = lastControlAnchorSource,
+            };
+        }).ToList();
+
+        return Ok(new TaskJournalAutomationPreviewDetailsDto
+        {
+            Category = normalizedCategory,
+            InactivityDays = normalizedInactivityDays,
+            TotalCount = totalCount,
+            Offset = normalizedOffset,
+            Limit = normalizedLimit,
+            Items = items,
         });
     }
 
@@ -5918,6 +6037,78 @@ public class TasksController : ControllerBase
                 LastActivityConfirmationAt: activityConfirmedAt))
             .At;
 
+    private IQueryable<CaseAutomationPreviewRow> BuildAutomationPreviewQuery(HashSet<int> vacationUserIds)
+        => _db.ClientCases
+            .AsNoTracking()
+            .Where(clientCase =>
+                (clientCase.ClientId.HasValue && clientCase.Client != null) ||
+                (clientCase.LegalEntityId.HasValue && clientCase.LegalEntity != null))
+            .Select(clientCase => new CaseAutomationPreviewRow
+            {
+                Id = clientCase.Id,
+                Title = clientCase.Title,
+                Status = clientCase.Status,
+                IsStatusExcluded = CaseInactivityControlCyclePolicy.ExcludedCaseStatuses.Contains(clientCase.Status),
+                ClientId = clientCase.ClientId,
+                ClientName = clientCase.Client != null ? clientCase.Client.Name : string.Empty,
+                LegalEntityId = clientCase.LegalEntityId,
+                LegalEntityName = clientCase.LegalEntity != null
+                    ? (clientCase.LegalEntity.ShortName != string.Empty
+                        ? clientCase.LegalEntity.ShortName
+                        : clientCase.LegalEntity.FullName ?? string.Empty)
+                    : string.Empty,
+                ResponsibleUserId = clientCase.ResponsibleUserId ??
+                    (clientCase.Client != null ? clientCase.Client.ResponsibleUserId : null) ??
+                    (clientCase.LegalEntity != null ? clientCase.LegalEntity.ResponsibleUserId : null),
+                ResponsibleName = clientCase.ResponsibleUser != null
+                    ? clientCase.ResponsibleUser.FullName
+                    : clientCase.Client != null && clientCase.Client.ResponsibleUser != null
+                        ? clientCase.Client.ResponsibleUser.FullName
+                        : clientCase.LegalEntity != null && clientCase.LegalEntity.ResponsibleUser != null
+                            ? clientCase.LegalEntity.ResponsibleUser.FullName
+                            : string.Empty,
+                IsResponsibleOnVacation = vacationUserIds.Contains(
+                    (clientCase.ResponsibleUserId ??
+                     (clientCase.Client != null ? clientCase.Client.ResponsibleUserId : null) ??
+                     (clientCase.LegalEntity != null ? clientCase.LegalEntity.ResponsibleUserId : null)) ?? 0),
+                CreatedAt = clientCase.CreatedAt,
+                LastViewedAt = clientCase.LastViewedAt,
+                ActivityConfirmedAt = clientCase.ActivityConfirmedAt,
+                InactivityRemindersEnabled = clientCase.InactivityRemindersEnabled,
+                InactivityRemindersDisabledReason = clientCase.InactivityRemindersDisabledReason,
+                ActiveTaskCount = _db.TaskJournalItems.Count(task =>
+                    task.ClientCaseId == clientCase.Id &&
+                    ActiveTaskStatuses.Contains(task.Status)),
+                LastTaskAt = _db.TaskJournalItems
+                    .IgnoreQueryFilters()
+                    .Where(task =>
+                        task.ClientCaseId == clientCase.Id &&
+                        !task.TagsJson.Contains(CaseInactivityAutomationTag))
+                    .Max(task => (DateTime?)(task.UpdatedAt ?? task.CreatedAt)),
+                LastTaskCommentAt = _db.TaskJournalComments
+                    .Where(comment =>
+                        comment.TaskJournalItem.ClientCaseId == clientCase.Id &&
+                        !comment.TaskJournalItem.TagsJson.Contains(CaseInactivityAutomationTag))
+                    .Max(comment => (DateTime?)(comment.UpdatedAt ?? comment.CreatedAt)),
+                LastControlCycleEndedAt = _db.TaskJournalItems
+                    .IgnoreQueryFilters()
+                    .Where(task =>
+                        task.ClientCaseId == clientCase.Id &&
+                        task.TagsJson.Contains(CaseInactivityAutomationTag) &&
+                        ((task.Status == "done" || task.Status == "cancelled") ||
+                         EF.Property<bool>(task, "IsDeleted")))
+                    .Max(task =>
+                        EF.Property<DateTime?>(task, "DeletedAt") ??
+                        task.UpdatedAt ??
+                        (DateTime?)task.CreatedAt),
+                LastDocumentAt = _db.ClientCaseDocuments
+                    .Where(document => document.ClientCaseId == clientCase.Id)
+                    .Max(document => (DateTime?)document.UploadedAt),
+                LastCourtEventAt = _db.ClientCaseCourtEvents
+                    .Where(courtEvent => courtEvent.ClientCaseId == clientCase.Id)
+                    .Max(courtEvent => (DateTime?)(courtEvent.UpdatedAt ?? courtEvent.CreatedAt)),
+            });
+
     private static TaskClientBinding BuildCaseBinding(ClientCase clientCase)
     {
         if (clientCase.ClientId.HasValue && clientCase.Client is not null)
@@ -7999,6 +8190,16 @@ public class TasksController : ControllerBase
     private static string FormatHistoryDateTime(DateTime value)
         => DateTime.SpecifyKind(value, DateTimeKind.Utc).ToString("dd.MM.yyyy HH:mm");
 
+    private static string ClientCaseStatusLabel(ClientCaseStatus status)
+        => status switch
+        {
+            ClientCaseStatus.Open => "Открыто",
+            ClientCaseStatus.OnHold => "Приостановлено",
+            ClientCaseStatus.Closed => "Закрыто",
+            ClientCaseStatus.Lost => "Проиграно",
+            _ => status.ToString(),
+        };
+
     private static string TaskStatusLabel(string? status)
         => status switch
         {
@@ -8072,6 +8273,32 @@ public class TasksController : ControllerBase
             "observer" => 2,
             _ => 3,
         };
+
+    private sealed class CaseAutomationPreviewRow
+    {
+        public int Id { get; set; }
+        public string Title { get; set; } = string.Empty;
+        public ClientCaseStatus Status { get; set; }
+        public bool IsStatusExcluded { get; set; }
+        public int? ClientId { get; set; }
+        public string ClientName { get; set; } = string.Empty;
+        public int? LegalEntityId { get; set; }
+        public string LegalEntityName { get; set; } = string.Empty;
+        public int? ResponsibleUserId { get; set; }
+        public string ResponsibleName { get; set; } = string.Empty;
+        public bool IsResponsibleOnVacation { get; set; }
+        public DateTime CreatedAt { get; set; }
+        public DateTime? LastViewedAt { get; set; }
+        public DateTime? ActivityConfirmedAt { get; set; }
+        public bool InactivityRemindersEnabled { get; set; }
+        public string InactivityRemindersDisabledReason { get; set; } = string.Empty;
+        public int ActiveTaskCount { get; set; }
+        public DateTime? LastTaskAt { get; set; }
+        public DateTime? LastTaskCommentAt { get; set; }
+        public DateTime? LastControlCycleEndedAt { get; set; }
+        public DateTime? LastDocumentAt { get; set; }
+        public DateTime? LastCourtEventAt { get; set; }
+    }
 
     private sealed record TaskAccess(
         int UserId,

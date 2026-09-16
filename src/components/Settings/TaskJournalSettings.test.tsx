@@ -10,6 +10,7 @@ const apiMock = vi.hoisted(() => ({
   getTaskJournalAssignees: vi.fn(),
   getTaskJournalAutomationDiagnostics: vi.fn(),
   previewTaskJournalCaseAutomation: vi.fn(),
+  getTaskJournalAutomationPreviewDetails: vi.fn(),
   updateTaskJournalSettings: vi.fn(),
 }));
 const toastMock = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
@@ -65,6 +66,25 @@ describe('TaskJournalSettings', () => {
       activeTaskCount: 9,
       recentlyActiveCount: 5,
     });
+    apiMock.getTaskJournalAutomationPreviewDetails.mockImplementation(async ({ category, offset = 0 }) => ({
+      category,
+      inactivityDays: 14,
+      totalCount: 1,
+      offset,
+      limit: 20,
+      items: [{
+        clientCaseId: 501,
+        clientCaseTitle: 'Проверяемое дело',
+        clientId: 41,
+        clientName: 'Проверяемый клиент',
+        legalEntityId: null,
+        legalEntityName: '',
+        responsibleName: 'Ответственный сотрудник',
+        explanation: 'Точная причина попадания в категорию.',
+        lastActivityAt: '2026-09-01T08:00:00Z',
+        lastActivitySource: 'task',
+      }],
+    }));
     apiMock.updateTaskJournalSettings.mockImplementation(async (payload: TaskJournalSettingsDto) => payload);
   });
 
@@ -202,5 +222,77 @@ describe('TaskJournalSettings', () => {
 
     fireEvent.change(inactivityDays, { target: { value: '11' } });
     expect(screen.queryByTestId('case-inactivity-preview-breakdown')).toBeNull();
+  });
+
+  it('opens paged case explanations for a preview category and navigates to a case', async () => {
+    const onOpenCase = vi.fn();
+    apiMock.getTaskJournalAutomationPreviewDetails
+      .mockResolvedValueOnce({
+        category: 'activeTask',
+        inactivityDays: 14,
+        totalCount: 2,
+        offset: 0,
+        limit: 20,
+        items: [{
+          clientCaseId: 601,
+          clientCaseTitle: 'Дело с первой активной задачей',
+          clientId: 51,
+          clientName: 'Первый клиент',
+          legalEntityId: null,
+          legalEntityName: '',
+          responsibleName: 'Анна Ответственная',
+          explanation: 'По делу есть активные задачи: 1.',
+          lastActivityAt: '2026-09-10T08:00:00Z',
+          lastActivitySource: 'task',
+        }],
+      })
+      .mockResolvedValueOnce({
+        category: 'activeTask',
+        inactivityDays: 14,
+        totalCount: 2,
+        offset: 1,
+        limit: 20,
+        items: [{
+          clientCaseId: 602,
+          clientCaseTitle: 'Дело со второй активной задачей',
+          clientId: 52,
+          clientName: 'Второй клиент',
+          legalEntityId: null,
+          legalEntityName: '',
+          responsibleName: '',
+          explanation: 'По делу есть активные задачи: 2.',
+          lastActivityAt: '2026-09-11T09:00:00Z',
+          lastActivitySource: 'taskComment',
+        }],
+      });
+    render(<TaskJournalSettings onOpenCase={onOpenCase} />);
+
+    await screen.findByRole('button', { name: 'Рассчитать влияние' });
+    fireEvent.click(screen.getByRole('button', { name: 'Рассчитать влияние' }));
+    await screen.findByTestId('case-inactivity-preview-breakdown');
+    fireEvent.click(screen.getByRole('button', { name: 'Есть активная задача: 9. Показать дела' }));
+
+    const details = await screen.findByTestId('case-inactivity-preview-details');
+    expect(within(details).getByText('Дело с первой активной задачей')).toBeTruthy();
+    expect(within(details).getByText('По делу есть активные задачи: 1.')).toBeTruthy();
+    expect(within(details).getByText(/Последняя контрольная точка:.*задача/)).toBeTruthy();
+    expect(apiMock.getTaskJournalAutomationPreviewDetails).toHaveBeenNthCalledWith(1, {
+      inactivityDays: 14,
+      category: 'activeTask',
+      offset: 0,
+      limit: 20,
+    });
+
+    fireEvent.click(within(details).getByRole('button', { name: 'Показать ещё' }));
+    expect(await within(details).findByText('Дело со второй активной задачей')).toBeTruthy();
+    expect(apiMock.getTaskJournalAutomationPreviewDetails).toHaveBeenNthCalledWith(2, {
+      inactivityDays: 14,
+      category: 'activeTask',
+      offset: 1,
+      limit: 20,
+    });
+
+    fireEvent.click(within(details).getAllByRole('button', { name: 'Открыть дело' })[0]);
+    expect(onOpenCase).toHaveBeenCalledWith(601, 51);
   });
 });

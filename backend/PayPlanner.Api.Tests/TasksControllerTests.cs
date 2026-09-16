@@ -798,6 +798,118 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task GetCaseControlAutomationPreviewDetails_ExplainsEveryCategoryAndPaginatesOnDemand()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+        var admin = await CreateAdminUserAsync(db, "preview-details@example.com", "Администратор");
+        var client = await CreateClientAsync(db, "Клиент детализации");
+        var firstCandidate = await CreateCaseAsync(db, client.Id, "КАНДИДАТ А");
+        var secondCandidate = await CreateCaseAsync(db, client.Id, "КАНДИДАТ Б");
+        var recentCase = await CreateCaseAsync(db, client.Id, "НЕДАВНЕЕ ДЕЛО");
+        var activeCase = await CreateCaseAsync(db, client.Id, "ДЕЛО С АКТИВНОЙ ЗАДАЧЕЙ");
+        var closedCase = await CreateCaseAsync(db, client.Id, "ЗАКРЫТОЕ ДЕЛО", ClientCaseStatus.Closed);
+        var disabledCase = await CreateCaseAsync(db, client.Id, "АВТОКОНТРОЛЬ ОТКЛЮЧЁН");
+        var vacationUser = await CreateAdminUserAsync(db, "preview-details-vacation@example.com", "Ответственный в отпуске");
+        var vacationClient = await CreateClientAsync(db, "Клиент в отпуске");
+        vacationClient.ResponsibleUserId = vacationUser.Id;
+        var vacationCase = await CreateCaseAsync(db, vacationClient.Id, "ДЕЛО НА ПАУЗЕ");
+        var now = DateTime.UtcNow;
+        firstCandidate.CreatedAt = now.AddDays(-45);
+        secondCandidate.CreatedAt = now.AddDays(-40);
+        recentCase.CreatedAt = now.AddDays(-5);
+        activeCase.CreatedAt = now.AddDays(-45);
+        closedCase.CreatedAt = now.AddDays(-45);
+        disabledCase.CreatedAt = now.AddDays(-45);
+        disabledCase.InactivityRemindersEnabled = false;
+        disabledCase.InactivityRemindersDisabledReason = "Работа ведётся вне CRM";
+        vacationCase.CreatedAt = now.AddDays(-45);
+        await SetVacationAsync(db, vacationUser.Id, now.AddDays(5));
+        await CreateTaskAsync(
+            db,
+            admin.Id,
+            client.Id,
+            assigneeUserId: admin.Id,
+            clientCaseId: activeCase.Id,
+            status: "new",
+            createdAt: now.AddDays(-1));
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), admin);
+
+        async Task<TaskJournalAutomationPreviewDetailsDto> LoadAsync(
+            string category,
+            string? search = null,
+            int limit = 20)
+        {
+            var action = await controller.GetCaseControlAutomationPreviewDetails(
+                inactivityDays: 14,
+                category,
+                search,
+                offset: 0,
+                limit,
+                ct: CancellationToken.None);
+            var ok = Assert.IsType<OkObjectResult>(action.Result);
+            return Assert.IsType<TaskJournalAutomationPreviewDetailsDto>(ok.Value);
+        }
+
+        interceptor.Commands.Clear();
+        var candidates = await LoadAsync("candidate", limit: 1);
+        Assert.Equal(2, candidates.TotalCount);
+        Assert.Single(candidates.Items);
+        Assert.Contains("срок постановки контроля наступил", candidates.Items[0].Explanation);
+        Assert.Equal(2, interceptor.Commands.Count(command =>
+            command.Contains("FROM \"ClientCases\"", StringComparison.Ordinal)));
+
+        var recent = await LoadAsync("recentActivity");
+        Assert.Equal(recentCase.Id, Assert.Single(recent.Items).ClientCaseId);
+        Assert.Contains("порог ещё не наступил", recent.Items[0].Explanation);
+
+        var active = await LoadAsync("activeTask");
+        Assert.Equal(activeCase.Id, Assert.Single(active.Items).ClientCaseId);
+        Assert.Contains("активные задачи: 1", active.Items[0].Explanation);
+
+        var excluded = await LoadAsync("excludedStatus");
+        Assert.Equal(closedCase.Id, Assert.Single(excluded.Items).ClientCaseId);
+        Assert.Contains("Закрыто", excluded.Items[0].Explanation);
+
+        var disabled = await LoadAsync("disabled");
+        Assert.Equal(disabledCase.Id, Assert.Single(disabled.Items).ClientCaseId);
+        Assert.Contains("Работа ведётся вне CRM", disabled.Items[0].Explanation);
+
+        var vacation = await LoadAsync("vacation");
+        Assert.Equal(vacationCase.Id, Assert.Single(vacation.Items).ClientCaseId);
+        Assert.Contains("проверка продолжится после возвращения", vacation.Items[0].Explanation);
+
+        var searched = await LoadAsync("candidate", "КАНДИДАТ Б");
+        Assert.Equal(1, searched.TotalCount);
+        Assert.Equal(secondCandidate.Id, Assert.Single(searched.Items).ClientCaseId);
+    }
+
+    [Fact]
+    public async Task GetCaseControlAutomationPreviewDetails_RejectsNonAdmin()
+    {
+        await using var db = await CreateContextAsync();
+        var employee = await CreateTaskUserAsync(
+            db,
+            "preview-details-restricted@example.com",
+            "Обычный сотрудник",
+            canEdit: true,
+            canCreate: true,
+            viewScope: DataVisibilityScope.All);
+        var controller = CreateController(db, new RecordingNotificationService(), employee);
+
+        var result = await controller.GetCaseControlAutomationPreviewDetails(
+            inactivityDays: 14,
+            category: "candidate",
+            search: null,
+            offset: 0,
+            limit: 20,
+            ct: CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(result.Result);
+    }
+
+    [Fact]
     public async Task PreviewCaseControlAutomation_RejectsNonAdminWithTaskViewAccess()
     {
         await using var db = await CreateContextAsync();

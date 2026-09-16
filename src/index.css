@@ -319,6 +319,27 @@ html[data-payplanner-theme] .pp-settings-nav-item-active:hover {
   border-color: color-mix(in srgb, var(--pp-primary) 22%, var(--pp-border));
 }
 
+.pp-automation-preview-card-interactive:hover:not(:disabled) {
+  background: var(--pp-row-hover);
+  border-color: color-mix(in srgb, var(--pp-primary) 48%, var(--pp-border));
+}
+
+.pp-automation-preview-card-active {
+  background: var(--pp-primary-soft-strong);
+  border-color: color-mix(in srgb, var(--pp-primary) 62%, var(--pp-border));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--pp-primary) 14%, transparent);
+}
+
+.pp-automation-preview-details {
+  background: color-mix(in srgb, var(--pp-surface-muted) 94%, var(--pp-primary-soft));
+  border-color: color-mix(in srgb, var(--pp-primary) 30%, var(--pp-border));
+}
+
+.pp-automation-preview-detail-row {
+  background: var(--pp-surface);
+  border-color: var(--pp-border);
+}
+
 .pp-automation-preview-action {
   background: var(--pp-surface);
   border-color: color-mix(in srgb, var(--pp-primary) 45%, var(--pp-border));

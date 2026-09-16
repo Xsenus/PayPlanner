@@ -266,6 +266,30 @@ public class TaskJournalAutomationPreviewDto
     public int RecentlyActiveCount { get; set; }
 }
 
+public class TaskJournalAutomationPreviewDetailsDto
+{
+    public string Category { get; set; } = string.Empty;
+    public int InactivityDays { get; set; }
+    public int TotalCount { get; set; }
+    public int Offset { get; set; }
+    public int Limit { get; set; }
+    public List<TaskJournalAutomationPreviewCaseDto> Items { get; set; } = [];
+}
+
+public class TaskJournalAutomationPreviewCaseDto
+{
+    public int ClientCaseId { get; set; }
+    public string ClientCaseTitle { get; set; } = string.Empty;
+    public int? ClientId { get; set; }
+    public string ClientName { get; set; } = string.Empty;
+    public int? LegalEntityId { get; set; }
+    public string LegalEntityName { get; set; } = string.Empty;
+    public string ResponsibleName { get; set; } = string.Empty;
+    public string Explanation { get; set; } = string.Empty;
+    public string? LastActivityAt { get; set; }
+    public string? LastActivitySource { get; set; }
+}
+
 public class TaskJournalSettingsDto
 {
     public bool RestrictExecutorEditing { get; set; } = true;
