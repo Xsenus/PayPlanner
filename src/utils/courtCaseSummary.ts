@@ -92,9 +92,13 @@ function isActiveCourtEvent(event: ClientCaseCourtEvent) {
 
 function isUpcomingCourtEvent(event: ClientCaseCourtEvent, nowTime: number) {
   const scheduledAt = getTime(event.scheduledAt);
-  return scheduledAt !== null
-    && scheduledAt >= nowTime
-    && !TERMINAL_EVENT_STATUSES.has((event.movementStatus || '').trim().toLowerCase());
+  const isTerminal = TERMINAL_EVENT_STATUSES.has((event.movementStatus || '').trim().toLowerCase());
+  if (scheduledAt === null || isTerminal) return false;
+
+  // Для события «на весь день» scheduledAt хранится как начало суток. После
+  // полуночи простое сравнение дат ошибочно скрывает событие из сводки, хотя
+  // backend ещё не считает его просроченным с учётом часового пояса пользователя.
+  return event.allDay ? !event.isOverdue : scheduledAt >= nowTime;
 }
 
 export function buildCourtCaseProcessSummary(

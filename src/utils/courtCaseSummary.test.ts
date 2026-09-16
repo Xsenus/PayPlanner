@@ -280,6 +280,28 @@ describe('buildCourtCaseProcessSummary', () => {
     expect(summary.risk.label).toBe('Срок требует внимания');
   });
 
+  it('keeps an all-day court event due today visible after midnight', () => {
+    const summary = buildCourtCaseProcessSummary(
+      { courtDecisionAt: null },
+      [courtEvent({
+        title: 'Судебное заседание',
+        scheduledAt: '2026-09-16T00:00:00Z',
+        allDay: true,
+        isOverdue: false,
+        movementStatus: 'scheduled',
+        movementStatusLabel: 'Назначено',
+      })],
+      [],
+      [],
+      new Date('2026-09-16T12:00:00Z'),
+    );
+
+    expect(summary.nextAction.label).toBe('Судебное заседание');
+    expect(summary.nextAction.dateLabel).toBe('Дата');
+    expect(summary.nextAction.tone).toBe('amber');
+    expect(summary.risk.label).toBe('Скоро судебное событие');
+  });
+
   it('surfaces an overdue deadline as the highest risk while keeping a planned next event', () => {
     const summary = buildCourtCaseProcessSummary(
       { courtDecisionAt: null },
