@@ -3680,6 +3680,10 @@ describe('TaskJournal', () => {
         suggestedPriority: 'urgent',
       },
     ]);
+    apiMock.getTaskJournalCaseAutomationSummary
+      .mockReset()
+      .mockResolvedValueOnce({ totalCount: 1, readyCount: 1, waitingCount: 0, pausedCount: 0 })
+      .mockImplementation(() => new Promise(() => undefined));
     await renderJournal();
 
     expect(screen.getByText('Автоконтроль дел')).toBeTruthy();
@@ -3692,6 +3696,10 @@ describe('TaskJournal', () => {
     await waitFor(() => expect(apiMock.createTaskJournalCaseAutomationTask).toHaveBeenCalledWith(100));
     expect(apiMock.createTaskJournalItem).not.toHaveBeenCalled();
     expect(toastMock.success).toHaveBeenCalledWith('Контрольная задача создана.', 'Автоконтроль дел');
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Все: 0' })).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Пора создать: 0' })).toBeTruthy();
+    });
     expect(await screen.findByRole('heading', { name: 'Просмотр задачи' })).toBeTruthy();
   });
 
@@ -3742,12 +3750,20 @@ describe('TaskJournal', () => {
         suggestedDueAt: todayAt(9),
       },
     ]);
+    apiMock.getTaskJournalCaseAutomationSummary
+      .mockReset()
+      .mockResolvedValueOnce({ totalCount: 1, readyCount: 1, waitingCount: 0, pausedCount: 0 })
+      .mockImplementation(() => new Promise(() => undefined));
     await renderJournal();
 
     fireEvent.click(screen.getByRole('button', { name: 'Создать наступившие (1)' }));
 
     await waitFor(() => expect(apiMock.createTaskJournalCaseAutomationTasks).toHaveBeenCalledWith({ limit: 1 }));
     expect(toastMock.success).toHaveBeenCalledWith('Создано контрольных задач: 1.', 'Автоконтроль дел');
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Все: 0' })).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Пора создать: 0' })).toBeTruthy();
+    });
   });
 
   it('explains when a stale automation candidate is skipped during bulk creation', async () => {

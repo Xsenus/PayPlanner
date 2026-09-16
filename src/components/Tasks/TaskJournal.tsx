@@ -1288,6 +1288,22 @@ function summarizeAutomationCandidates(candidates: TaskJournalCaseAutomationCand
   };
 }
 
+function removeCreatedAutomationCandidates(
+  summary: TaskJournalCaseAutomationSummary,
+  createdCount: number,
+): TaskJournalCaseAutomationSummary {
+  const safeCreatedCount = Math.max(0, Math.trunc(createdCount));
+  if (safeCreatedCount === 0) {
+    return summary;
+  }
+
+  return {
+    ...summary,
+    totalCount: Math.max(0, summary.totalCount - safeCreatedCount),
+    readyCount: Math.max(0, summary.readyCount - safeCreatedCount),
+  };
+}
+
 function getAutomationActivitySourceLabel(source?: string | null) {
   switch (source) {
     case 'task':
@@ -3265,6 +3281,7 @@ export function TaskJournal({
     try {
       const created = await apiService.createTaskJournalCaseAutomationTask(candidate.clientCaseId);
       setAutomationCandidates((current) => current.filter((item) => item.clientCaseId !== candidate.clientCaseId));
+      setAutomationSummary((current) => removeCreatedAutomationCandidates(current, 1));
       toast.success('Контрольная задача создана.', 'Автоконтроль дел');
       await refreshTasks();
       openTaskEditor(created, { syncRoute: true });
@@ -3408,6 +3425,7 @@ export function TaskJournal({
       });
       const createdCaseIds = new Set(result.createdTasks.map((task) => task.clientCaseId).filter((id): id is number => Boolean(id)));
       setAutomationCandidates((current) => current.filter((candidate) => !createdCaseIds.has(candidate.clientCaseId)));
+      setAutomationSummary((current) => removeCreatedAutomationCandidates(current, result.createdTasks.length));
       if (result.createdTasks.length > 0) {
         const skippedText = result.skippedCount > 0
           ? ` Пропущено дел: ${result.skippedCount}.`
