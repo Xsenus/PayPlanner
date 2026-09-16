@@ -4893,6 +4893,58 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task TaskJournalAutomationScheduler_PrioritizesOldestMeaningfulActivityAcrossAllSources()
+    {
+        await using var db = await CreateContextAsync();
+        var assignee = await CreateAdminUserAsync(db, "scheduler-control-order@example.com", "Ответственный автоконтроля");
+        var client = await CreateClientAsync(db, "Клиент порядка фонового контроля");
+        client.ResponsibleUserId = assignee.Id;
+        var recentDocumentCase = await CreateCaseAsync(db, client.Id, "СВЕЖИЙ ДОКУМЕНТ");
+        var olderActivityCase = await CreateCaseAsync(db, client.Id, "ДАВНО БЕЗ ДВИЖЕНИЯ");
+        var now = DateTime.UtcNow;
+        recentDocumentCase.CreatedAt = now.AddDays(-100);
+        olderActivityCase.CreatedAt = now.AddDays(-100);
+        await CreateTaskAsync(
+            db,
+            assignee.Id,
+            client.Id,
+            clientCaseId: recentDocumentCase.Id,
+            status: "done",
+            createdAt: now.AddDays(-50),
+            updatedAt: now.AddDays(-50));
+        await CreateTaskAsync(
+            db,
+            assignee.Id,
+            client.Id,
+            clientCaseId: olderActivityCase.Id,
+            status: "done",
+            createdAt: now.AddDays(-20),
+            updatedAt: now.AddDays(-20));
+        db.ClientCaseDocuments.AddRange(
+            BuildCaseDocument(recentDocumentCase.Id, assignee, "recent-scheduler-document", now.AddDays(-15)),
+            BuildCaseDocument(olderActivityCase.Id, assignee, "older-scheduler-document", now.AddDays(-40)));
+        await db.SaveChangesAsync();
+        var (scheduler, provider) = CreateAutomationScheduler(db, new Dictionary<string, string?>
+        {
+            ["TaskJournal:Automation:Enabled"] = "true",
+            ["TaskJournal:Automation:InactiveDays"] = "14",
+            ["TaskJournal:Automation:Limit"] = "1",
+        });
+
+        using (provider)
+        {
+            var result = await scheduler.RunOnceAsync(CancellationToken.None);
+
+            Assert.Null(result.Error);
+            Assert.Equal(1, result.CreatedCount);
+        }
+
+        var automationTask = await db.TaskJournalItems
+            .SingleAsync(task => task.InactivityControlCycleNumber == 1);
+        Assert.Equal(olderActivityCase.Id, automationTask.ClientCaseId);
+    }
+
+    [Fact]
     public async Task TaskJournalAutomationScheduler_EscalatesLongInactiveCase()
     {
         await using var db = await CreateContextAsync();
