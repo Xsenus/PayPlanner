@@ -2516,6 +2516,31 @@ describe('CaseDetailPage', () => {
     expect(await screen.findByText('Сводка по судебному делу')).toBeTruthy();
   });
 
+  it('includes overdue procedural deadlines in the case-wide risk indicator', async () => {
+    vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({ overdueTaskCount: 0 }));
+    vi.mocked(apiService.getCaseProceduralDeadlines).mockResolvedValue([{
+      id: 91,
+      clientCaseId: 15,
+      deadlineType: 'appeal',
+      deadlineTypeLabel: 'Апелляция',
+      title: 'Срок апелляционного обжалования',
+      dueAt: '2026-05-19T00:00:00Z',
+      allDay: true,
+      status: 'active',
+      statusLabel: 'Просрочен',
+      warningDaysBefore: 7,
+      sourceType: 'sudrf',
+      createdAt: '2026-05-01T00:00:00Z',
+      isOverdue: true,
+      isWarning: true,
+    }]);
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    expect(await screen.findByText('ЗЕМЦОВ - банкротство')).toBeTruthy();
+    expect(await screen.findByText('Просрочено сроков: 1')).toBeTruthy();
+  });
+
   it('keeps the court tab in safe mode for pretrial cases without court data', async () => {
     vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({
       caseType: 'Внесудебное урегулирование',

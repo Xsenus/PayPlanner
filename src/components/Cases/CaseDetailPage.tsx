@@ -853,11 +853,27 @@ function maskSensitiveValue(value: string, visibleTail = 4) {
   return `${'•'.repeat(Math.min(8, normalized.length - tailLength))}${normalized.slice(-tailLength)}`;
 }
 
-function getRiskLabel(caseItem: ClientCase) {
-  const overdue = caseItem.overdueTaskCount ?? 0;
-  if (overdue > 0) return `${overdue} просроч.`;
-  if (caseItem.status === 'Closed') return 'Закрыто';
-  return 'Без риска';
+function getRiskSummary(caseItem: ClientCase, deadlines: ClientCaseProceduralDeadline[]): { value: string; tone: SummaryTone } {
+  const activeDeadlines = deadlines.filter((deadline) => !['closed', 'cancelled', 'archived'].includes((deadline.status || '').trim().toLowerCase()));
+  const overdueTasks = caseItem.overdueTaskCount ?? 0;
+  const overdueDeadlines = activeDeadlines.filter((deadline) => deadline.isOverdue).length;
+  const overdueTotal = overdueTasks + overdueDeadlines;
+
+  if (overdueTotal > 0) {
+    const parts = [
+      overdueTasks > 0 ? `задач: ${overdueTasks}` : '',
+      overdueDeadlines > 0 ? `сроков: ${overdueDeadlines}` : '',
+    ].filter(Boolean);
+    return { value: `Просрочено ${parts.join(', ')}`, tone: 'rose' };
+  }
+
+  const warningDeadlines = activeDeadlines.filter((deadline) => deadline.isWarning).length;
+  if (warningDeadlines > 0) {
+    return { value: `Скоро сроков: ${warningDeadlines}`, tone: 'amber' };
+  }
+
+  if (caseItem.status === 'Closed') return { value: 'Закрыто', tone: 'slate' };
+  return { value: 'Без риска', tone: 'emerald' };
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -1872,8 +1888,6 @@ export function CaseDetailPage({
   }, [activeTab, caseId, reloadToken]);
 
   useEffect(() => {
-    if (activeTab !== 'court') return;
-
     let cancelled = false;
     setProceduralDeadlinesLoading(true);
     apiService.getCaseProceduralDeadlines(caseId)
@@ -1890,7 +1904,7 @@ export function CaseDetailPage({
     return () => {
       cancelled = true;
     };
-  }, [activeTab, caseId, reloadToken]);
+  }, [caseId, reloadToken]);
 
   useEffect(() => {
     if (activeTab !== 'court') return;
@@ -3423,7 +3437,7 @@ export function CaseDetailPage({
   }
 
   const progress = caseItem.taskProgressPercent ?? 0;
-  const overdueTasks = caseItem.overdueTaskCount ?? 0;
+  const riskSummary = getRiskSummary(caseItem, proceduralDeadlines);
   const inactivitySummary = getInactivitySummary(caseItem);
   const responsibleLastViewedAt = getResponsibleLastViewedAt(caseItem);
   const responsibleLastViewedByName = caseItem.lastViewedByResponsibleUserName ?? caseItem.lastViewedByUserName ?? null;
@@ -3619,7 +3633,7 @@ export function CaseDetailPage({
           <SummaryCard label="Клиент" value={getOwnerName(caseItem)} />
           <SummaryCard label="Ответственный" value={getResponsibleName(caseItem)} />
           <SummaryCard label="Ближайший срок" value={toRuDate(caseItem.dueDate) || formatRuDateTime(caseItem.nextHearingAt) || '—'} />
-          <SummaryCard label="Просрочки" value={getRiskLabel(caseItem)} tone={overdueTasks > 0 ? 'rose' : 'emerald'} />
+          <SummaryCard label="Просрочки" value={riskSummary.value} tone={riskSummary.tone} />
           {canViewFinance ? (
             <SummaryCard label="Оплачено / долг" value={`${formatMoney(caseItem.incomePaid)} / ${formatMoney(caseItem.incomeOutstanding)}`} />
           ) : null}
