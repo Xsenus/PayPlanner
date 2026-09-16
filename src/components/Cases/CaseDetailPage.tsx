@@ -73,7 +73,7 @@ import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { formatCurrencySmart } from '../../utils/formatters';
 import { buildCaseTaskPayload, getCaseStageTaskTemplates, isPretrialCaseStage, type CaseStageTaskTemplate } from '../../utils/caseTaskPayload';
 import { buildCourtCaseProcessSummary, type CourtProcessSummaryTone } from '../../utils/courtCaseSummary';
-import { formatDateTimeInTimeZone, fromTimeZoneDateTimeInput, toTimeZoneDateTimeInput } from '../../utils/timeZoneDate';
+import { formatDateTimeInTimeZone, fromTimeZoneDateTimeInput, toTimeZoneDateKey, toTimeZoneDateTimeInput } from '../../utils/timeZoneDate';
 import { normalizeUserTimeZoneId, USER_TIME_ZONE_SETTING_KEY } from '../../utils/timeZoneOptions';
 import type { TaskJournalItem } from '../../utils/taskJournalStore';
 
@@ -887,35 +887,57 @@ function getNearestCaseDateSummary(
   caseItem: ClientCase,
   deadlines: ClientCaseProceduralDeadline[],
   now = new Date(),
+  timeZoneId?: string | null,
 ): { value: string; tone: SummaryTone } {
+  const nowTime = now.getTime();
+  const todayKey = toTimeZoneDateKey(now, timeZoneId) || toDateInputValue(now.toISOString());
+  const warningDateKey = toTimeZoneDateKey(new Date(nowTime + UPCOMING_DEADLINE_WARNING_MS), timeZoneId)
+    || toDateInputValue(new Date(nowTime + UPCOMING_DEADLINE_WARNING_MS).toISOString());
+  const caseDueDateKey = toDateInputValue(caseItem.dueDate);
   const candidates = [
-    caseItem.dueDate ? { date: caseItem.dueDate, label: 'Срок дела' } : null,
-    caseItem.nextHearingAt ? { date: caseItem.nextHearingAt, label: 'Заседание', futureOnly: true } : null,
+    caseItem.dueDate ? {
+      date: caseItem.dueDate,
+      label: 'Срок дела',
+      overdue: Boolean(caseDueDateKey && caseDueDateKey < todayKey),
+      warning: Boolean(caseDueDateKey && caseDueDateKey >= todayKey && caseDueDateKey <= warningDateKey),
+      futureOnly: false,
+    } : null,
+    caseItem.nextHearingAt ? {
+      date: caseItem.nextHearingAt,
+      label: 'Заседание',
+      overdue: false,
+      warning: false,
+      futureOnly: true,
+    } : null,
     ...deadlines
       .filter(isActiveProceduralDeadline)
       .map((deadline) => ({
         date: deadline.dueAt,
         label: deadline.deadlineTypeLabel || deadline.title || 'Процессуальный срок',
+        overdue: deadline.isOverdue,
+        warning: deadline.isWarning,
+        futureOnly: false,
       })),
   ]
-    .filter((candidate): candidate is { date: string; label: string; futureOnly?: boolean } => Boolean(candidate))
+    .filter((candidate): candidate is { date: string; label: string; overdue: boolean; warning: boolean; futureOnly: boolean } => Boolean(candidate))
     .map((candidate) => ({ ...candidate, time: getDateTime(candidate.date) }))
     .filter((candidate): candidate is typeof candidate & { time: number } => candidate.time !== null);
 
-  const nowTime = now.getTime();
   const upcoming = candidates
-    .filter((candidate) => candidate.time >= nowTime)
+    .filter((candidate) => !candidate.overdue && (!candidate.futureOnly || candidate.time >= nowTime))
     .sort((left, right) => left.time - right.time);
   const overdue = candidates
-    .filter((candidate) => !candidate.futureOnly && candidate.time < nowTime)
+    .filter((candidate) => candidate.overdue)
     .sort((left, right) => right.time - left.time);
   const nearest = upcoming[0] ?? overdue[0];
 
   if (!nearest) return { value: '—', tone: 'slate' };
 
   const value = `${toRuDate(nearest.date)} · ${nearest.label}`;
-  if (nearest.time < nowTime) return { value, tone: 'rose' };
-  if (nearest.time - nowTime <= UPCOMING_DEADLINE_WARNING_MS) return { value, tone: 'amber' };
+  if (nearest.overdue) return { value, tone: 'rose' };
+  if (nearest.warning || (nearest.futureOnly && nearest.time - nowTime <= UPCOMING_DEADLINE_WARNING_MS)) {
+    return { value, tone: 'amber' };
+  }
   return { value, tone: 'slate' };
 }
 
@@ -3481,7 +3503,7 @@ export function CaseDetailPage({
 
   const progress = caseItem.taskProgressPercent ?? 0;
   const riskSummary = getRiskSummary(caseItem, proceduralDeadlines);
-  const nearestCaseDateSummary = getNearestCaseDateSummary(caseItem, proceduralDeadlines);
+  const nearestCaseDateSummary = getNearestCaseDateSummary(caseItem, proceduralDeadlines, new Date(), caseTimeZoneId);
   const inactivitySummary = getInactivitySummary(caseItem);
   const responsibleLastViewedAt = getResponsibleLastViewedAt(caseItem);
   const responsibleLastViewedByName = caseItem.lastViewedByResponsibleUserName ?? caseItem.lastViewedByUserName ?? null;

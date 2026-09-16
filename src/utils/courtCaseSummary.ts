@@ -179,7 +179,10 @@ export function buildCourtCaseProcessSummary(
     .filter((deadline) => deadline.isOverdue)
     .sort((left, right) => (getTime(left.dueAt) ?? 0) - (getTime(right.dueAt) ?? 0));
   const upcomingDeadlines = activeDeadlines
-    .filter((deadline) => !deadline.isOverdue && (getTime(deadline.dueAt) ?? 0) >= nowTime)
+    // Статус просрочки рассчитывает backend с учётом признака «весь день» и
+    // часового пояса пользователя. Сравнение ISO-полуночи с текущим временем
+    // ошибочно исключало срок уже утром его последнего допустимого дня.
+    .filter((deadline) => !deadline.isOverdue)
     .sort((left, right) => (getTime(left.dueAt) ?? 0) - (getTime(right.dueAt) ?? 0));
   const upcomingEvents = events
     .filter((event) => isUpcomingCourtEvent(event, nowTime))
