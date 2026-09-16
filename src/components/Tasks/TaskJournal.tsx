@@ -92,7 +92,7 @@ import {
   toTimeZoneDateKey,
   toTimeZoneDateTimeInput,
 } from '../../utils/timeZoneDate';
-import { normalizeUserTimeZoneId, USER_TIME_ZONE_SETTING_KEY } from '../../utils/timeZoneOptions';
+import { normalizeUserTimeZoneId, USER_TIME_ZONE_OPTIONS, USER_TIME_ZONE_SETTING_KEY } from '../../utils/timeZoneOptions';
 import {
   isTaskJournalActive,
   TASK_JOURNAL_EVENT,
@@ -6629,6 +6629,16 @@ function TaskAutomationPanel({
                 (!candidate.suggestedAssigneeSource && inferredFallbackAssignee)
               ? 'резервный исполнитель'
               : '';
+          const suggestedAssigneeTimeZoneId = candidate.suggestedAssigneeTimeZoneId?.trim() || '';
+          const suggestedAssigneeTimeZoneLabel = suggestedAssigneeTimeZoneId
+            ? USER_TIME_ZONE_OPTIONS.find((option) => option.value === suggestedAssigneeTimeZoneId)?.label
+              || suggestedAssigneeTimeZoneId
+            : '';
+          const suggestedDueAtLabel = candidate.suggestedDueAt
+            ? suggestedAssigneeTimeZoneId
+              ? formatDateTimeInTimeZone(candidate.suggestedDueAt, suggestedAssigneeTimeZoneId)
+              : formatDateTime(candidate.suggestedDueAt)
+            : '';
 
           return (
           <article
@@ -6676,7 +6686,10 @@ function TaskAutomationPanel({
                 <span>
                   При создании: {suggestedAssigneeName}
                   {suggestedAssigneeHint ? ` · ${suggestedAssigneeHint}` : ''}
-                  {candidate.suggestedDueAt ? ` · срок ${formatDateTime(candidate.suggestedDueAt)}` : ''}
+                  {suggestedDueAtLabel
+                    ? ` · ${suggestedAssigneeTimeZoneId ? 'срок у исполнителя' : 'срок'} ${suggestedDueAtLabel}`
+                    : ''}
+                  {suggestedAssigneeTimeZoneLabel ? ` · ${suggestedAssigneeTimeZoneLabel}` : ''}
                 </span>
               </div>
             </div>

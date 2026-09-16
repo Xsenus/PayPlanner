@@ -217,6 +217,7 @@ public class TaskJournalCaseAutomationCandidateDto
     public int? SuggestedAssigneeUserId { get; set; }
     public string SuggestedAssigneeName { get; set; } = string.Empty;
     public string SuggestedAssigneeSource { get; set; } = "responsible";
+    public string SuggestedAssigneeTimeZoneId { get; set; } = "Europe/Moscow";
 }
 
 public class TaskJournalCaseAutomationSummaryDto

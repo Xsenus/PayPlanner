@@ -3815,6 +3815,7 @@ describe('TaskJournal', () => {
         suggestedAssigneeUserId: 9,
         suggestedAssigneeName: 'Резервный исполнитель',
         suggestedAssigneeSource: 'configuredDefault',
+        suggestedAssigneeTimeZoneId: 'Europe/Moscow',
         clientCaseId: 101,
         clientCaseTitle: 'ОЖИДАЕТ ПОРОГА',
         reason: 'Первый контроль через 11 дн.',
@@ -3957,6 +3958,7 @@ describe('TaskJournal', () => {
         suggestedAssigneeUserId: 7,
         suggestedAssigneeName: 'Администратор',
         suggestedAssigneeSource: 'currentUser',
+        suggestedAssigneeTimeZoneId: 'Asia/Novosibirsk',
         clientCaseId: 100,
         clientCaseTitle: 'БАНКРОТСТВО',
         reason: 'Первый контроль через 5 дн.',
@@ -3982,7 +3984,8 @@ describe('TaskJournal', () => {
         settings: { taskCardWindowMode },
       });
 
-      expect(screen.getByText(/При создании: Администратор · вы будете исполнителем · срок/)).toBeTruthy();
+      expect(screen.getByText(/При создании: Администратор · вы будете исполнителем · срок у исполнителя/)).toBeTruthy();
+      expect(screen.getByText(/Новосибирск \(UTC\+7\)/)).toBeTruthy();
       fireEvent.click(screen.getByTestId('task-automation-create-100'));
       expect(await screen.findByRole('heading', { name: 'Выберите клиента и дело' })).toBeTruthy();
       expect((screen.getByTestId('task-billing-wizard-case') as HTMLSelectElement).value).toBe('100');

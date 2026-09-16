@@ -3833,6 +3833,7 @@ public class TasksControllerTests
         Assert.Equal(author.Id, candidate.SuggestedAssigneeUserId);
         Assert.Equal("Ответственный Юрист", candidate.SuggestedAssigneeName);
         Assert.Equal("responsible", candidate.SuggestedAssigneeSource);
+        Assert.Equal("Asia/Novosibirsk", candidate.SuggestedAssigneeTimeZoneId);
         Assert.False(candidate.IsReadyForControl);
         Assert.Equal("waiting", candidate.AutomationState);
         Assert.Equal(CaseMeaningfulActivitySources.CaseCreated, candidate.LastActivitySource);
@@ -3888,6 +3889,7 @@ public class TasksControllerTests
         Assert.Equal(defaultAssignee.Id, candidate.SuggestedAssigneeUserId);
         Assert.Equal(defaultAssignee.FullName, candidate.SuggestedAssigneeName);
         Assert.Equal("configuredDefault", candidate.SuggestedAssigneeSource);
+        Assert.Equal("Asia/Novosibirsk", candidate.SuggestedAssigneeTimeZoneId);
         var suggestedDueAtLocal = CalendarTimeZoneHelper.ToUserLocal(
             DateTime.Parse(candidate.SuggestedDueAt).ToUniversalTime(),
             CalendarTimeZoneHelper.ResolveTimeZone("Asia/Novosibirsk"));
@@ -3926,6 +3928,7 @@ public class TasksControllerTests
         Assert.Equal(author.Id, candidate.SuggestedAssigneeUserId);
         Assert.Equal(author.FullName, candidate.SuggestedAssigneeName);
         Assert.Equal("currentUser", candidate.SuggestedAssigneeSource);
+        Assert.Equal(CalendarTimeZoneHelper.DefaultTimeZoneId, candidate.SuggestedAssigneeTimeZoneId);
     }
 
     [Fact]

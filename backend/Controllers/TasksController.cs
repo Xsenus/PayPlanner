@@ -1383,6 +1383,7 @@ public class TasksController : ControllerBase
                 SuggestedAssigneeUserId = suggestedAssignee.UserId,
                 SuggestedAssigneeName = suggestedAssignee.DisplayName,
                 SuggestedAssigneeSource = suggestedAssigneeSource,
+                SuggestedAssigneeTimeZoneId = CalendarTimeZoneHelper.ResolveIanaTimeZoneId(suggestedTimeZone),
             };
         }).ToList());
     }
