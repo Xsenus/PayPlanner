@@ -275,6 +275,8 @@ const EMPTY_AUTOMATION_SUMMARY: TaskJournalCaseAutomationSummary = {
   waitingCount: 0,
   pausedCount: 0,
 };
+const AUTOMATION_LOAD_ERROR_MESSAGE = 'Не удалось загрузить очередь автоконтроля. Проверьте соединение и повторите попытку.';
+const AUTOMATION_REFRESH_ERROR_MESSAGE = 'Не удалось обновить очередь автоконтроля. Показаны ранее загруженные данные.';
 
 function buildAutomationCandidatesRequestKey(
   settings: TaskJournalSettingsDto,
@@ -2243,6 +2245,8 @@ export function TaskJournal({
   const debouncedAutomationSearch = useDebouncedValue(automationSearch, 300);
   const [automationPageLoading, setAutomationPageLoading] = useState(false);
   const [automationLoadingMore, setAutomationLoadingMore] = useState(false);
+  const [automationLoadError, setAutomationLoadError] = useState<string | null>(null);
+  const [automationReloadVersion, setAutomationReloadVersion] = useState(0);
   const [creatingAutomationCaseId, setCreatingAutomationCaseId] = useState<number | null>(null);
   const [creatingAutomationAll, setCreatingAutomationAll] = useState(false);
   const automationCandidatesRequestRef = useRef(0);
@@ -2639,7 +2643,7 @@ export function TaskJournal({
         ? apiService.getTaskJournalCaseAutomationSummary(
           { inactiveDays: settings.caseInactivityDays, search: search.trim() || undefined },
           options,
-        ).catch(() => null)
+        )
         : Promise.resolve(null),
     ]);
     return { items, summary };
@@ -2749,7 +2753,20 @@ export function TaskJournal({
       const trustedDevicePromise = currentUserId
         ? getOfflineCalendarTrustedDevice(currentUserId).catch(() => false)
         : Promise.resolve(false);
-      const automationPromise = settingsPromise.then((settingsResponse) => loadAutomationCandidates(settingsResponse, 'all', ''));
+      const automationPromise = settingsPromise.then(async (settingsResponse) => {
+        try {
+          return {
+            ...await loadAutomationCandidates(settingsResponse, 'all', ''),
+            error: null,
+          };
+        } catch {
+          return {
+            items: [] as TaskJournalCaseAutomationCandidate[],
+            summary: null,
+            error: AUTOMATION_LOAD_ERROR_MESSAGE,
+          };
+        }
+      });
       const [assigneeResponse, settingsResponse, notificationDefaultsResponse, timeZoneResponse, calendarSyncSettingsResponse, automationResponse, featureFlagsResponse, trustedDevice] = await Promise.all([
         apiService.getTaskJournalAssignees({ calendarView: shouldUseCalendarVisibility }),
         settingsPromise,
@@ -2769,6 +2786,7 @@ export function TaskJournal({
       setAssignees(assigneeResponse);
       setAutomationCandidates(automationResponse.items);
       setAutomationSummary(automationResponse.summary ?? summarizeAutomationCandidates(automationResponse.items));
+      setAutomationLoadError(automationResponse.error);
       setAutomationStateFilter('all');
       setAutomationSearch('');
       setAutomationPageLoading(false);
@@ -2961,6 +2979,7 @@ export function TaskJournal({
     automationCandidatesRequestRef.current = requestId;
     automationLoadMoreRequestRef.current += 1;
     setAutomationCandidates([]);
+    setAutomationLoadError(null);
     setAutomationPageLoading(true);
     setAutomationLoadingMore(false);
     const controller = new AbortController();
@@ -2976,6 +2995,7 @@ export function TaskJournal({
         if (!controller.signal.aborted && automationCandidatesRequestRef.current === requestId) {
           automationCandidatesRequestKeyRef.current = requestKey;
           setAutomationCandidates(response.items);
+          setAutomationLoadError(null);
           if (response.summary) {
             setAutomationSummary(response.summary);
             automationSummaryRequestKeyRef.current = summaryRequestKey;
@@ -2986,6 +3006,7 @@ export function TaskJournal({
       .catch(() => {
         if (!controller.signal.aborted && automationCandidatesRequestRef.current === requestId) {
           setAutomationCandidates([]);
+          setAutomationLoadError(AUTOMATION_LOAD_ERROR_MESSAGE);
           if (shouldRefreshSummary) {
             setAutomationSummary(EMPTY_AUTOMATION_SUMMARY);
             automationSummaryRequestKeyRef.current = null;
@@ -2997,7 +3018,7 @@ export function TaskJournal({
     return () => {
       controller.abort();
     };
-  }, [automationStateFilter, debouncedAutomationSearch, loadAutomationCandidates, taskSettings]);
+  }, [automationReloadVersion, automationStateFilter, debouncedAutomationSearch, loadAutomationCandidates, taskSettings]);
 
   useEffect(() => {
     let controller: AbortController | null = null;
@@ -3024,6 +3045,7 @@ export function TaskJournal({
         .then((response) => {
           if (!nextController.signal.aborted && automationCandidatesRequestRef.current === requestId) {
             setAutomationCandidates(response.items);
+            setAutomationLoadError(null);
             if (response.summary) {
               setAutomationSummary(response.summary);
               automationSummaryRequestKeyRef.current = buildAutomationSummaryRequestKey(taskSettings, debouncedAutomationSearch);
@@ -3032,7 +3054,11 @@ export function TaskJournal({
             }
           }
         })
-        .catch(() => undefined);
+        .catch(() => {
+          if (!nextController.signal.aborted && automationCandidatesRequestRef.current === requestId) {
+            setAutomationLoadError(AUTOMATION_REFRESH_ERROR_MESSAGE);
+          }
+        });
     };
 
     window.addEventListener(TASK_JOURNAL_EVENT, refresh);
@@ -3256,6 +3282,7 @@ export function TaskJournal({
     }
 
     setAutomationCandidates([]);
+    setAutomationLoadError(null);
     automationLoadMoreRequestRef.current += 1;
     setAutomationPageLoading(true);
     setAutomationLoadingMore(false);
@@ -3270,10 +3297,19 @@ export function TaskJournal({
 
     setAutomationSearch(normalizedValue);
     setAutomationCandidates([]);
+    setAutomationLoadError(null);
     automationLoadMoreRequestRef.current += 1;
     setAutomationPageLoading(true);
     setAutomationLoadingMore(false);
   }, [automationSearch]);
+
+  const retryAutomationCandidates = useCallback(() => {
+    automationCandidatesRequestKeyRef.current = null;
+    automationSummaryRequestKeyRef.current = null;
+    setAutomationLoadError(null);
+    setAutomationPageLoading(true);
+    setAutomationReloadVersion((version) => version + 1);
+  }, []);
 
   const loadMoreAutomationCandidates = useCallback(async () => {
     const stateTotal = getAutomationCandidateStateCount(automationSummary, automationStateFilter);
@@ -5603,6 +5639,7 @@ export function TaskJournal({
             search={automationSearch}
             loadingPage={automationPageLoading}
             loadingMore={automationLoadingMore}
+            loadError={automationLoadError}
             creatingCaseId={creatingAutomationCaseId}
             creatingAll={creatingAutomationAll}
             creationLimit={taskSettings.caseInactivityLimit}
@@ -5610,6 +5647,7 @@ export function TaskJournal({
             onCreateManual={openTaskCreateForAutomationCandidate}
             onCreateAll={createAllAutomationTasks}
             onLoadMore={loadMoreAutomationCandidates}
+            onRetry={retryAutomationCandidates}
             onSearchChange={changeAutomationSearch}
             onStateChange={changeAutomationStateFilter}
             onOpenCase={onOpenCase}
@@ -6415,6 +6453,7 @@ function TaskAutomationPanel({
   search,
   loadingPage,
   loadingMore,
+  loadError,
   creatingCaseId,
   creatingAll,
   creationLimit,
@@ -6422,6 +6461,7 @@ function TaskAutomationPanel({
   onCreateManual,
   onCreateAll,
   onLoadMore,
+  onRetry,
   onSearchChange,
   onStateChange,
   onOpenCase,
@@ -6432,6 +6472,7 @@ function TaskAutomationPanel({
   search: string;
   loadingPage: boolean;
   loadingMore: boolean;
+  loadError: string | null;
   creatingCaseId: number | null;
   creatingAll: boolean;
   creationLimit: number;
@@ -6439,6 +6480,7 @@ function TaskAutomationPanel({
   onCreateManual: (candidate: TaskJournalCaseAutomationCandidate) => void;
   onCreateAll: () => void;
   onLoadMore: () => void;
+  onRetry: () => void;
   onSearchChange: (value: string) => void;
   onStateChange: (state: AutomationCandidateStateFilter) => void;
   onOpenCase?: (caseId: number, clientId?: number | null) => void | Promise<void>;
@@ -6477,7 +6519,7 @@ function TaskAutomationPanel({
         <button
           type="button"
           onClick={onCreateAll}
-          disabled={creatingAll || loadingPage || readyCount === 0}
+          disabled={creatingAll || loadingPage || Boolean(loadError) || readyCount === 0}
           className="inline-flex w-fit items-center gap-2 rounded-xl bg-amber-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-amber-700 disabled:cursor-wait disabled:opacity-60"
         >
           <Plus className="h-4 w-4" />
@@ -6523,6 +6565,27 @@ function TaskAutomationPanel({
           </button>
         ))}
       </div>
+
+      {loadError ? (
+        <div role="alert" className="mt-3 flex flex-col gap-3 rounded-xl border border-rose-300 bg-rose-50 px-3 py-3 text-rose-900 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 items-start gap-2">
+            <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-rose-600" />
+            <div>
+              <div className="text-sm font-semibold">Очередь автоконтроля временно недоступна</div>
+              <div className="mt-0.5 text-xs text-rose-800">{loadError}</div>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onRetry}
+            disabled={loadingPage}
+            className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-rose-300 bg-white px-3 py-2 text-sm font-semibold text-rose-800 transition hover:bg-rose-100 disabled:cursor-wait disabled:opacity-60"
+          >
+            <Loader2 className={`h-4 w-4 ${loadingPage ? 'animate-spin' : ''}`} />
+            {loadingPage ? 'Повторяем...' : 'Повторить загрузку'}
+          </button>
+        </div>
+      ) : null}
 
       <div className="mt-3 grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
         {visibleCandidates.map((candidate) => {
@@ -6613,19 +6676,21 @@ function TaskAutomationPanel({
           );
         })}
       </div>
-      {loadingPage && filteredCandidates.length === 0 ? (
+      {!loadError && loadingPage && filteredCandidates.length === 0 ? (
         <div className="mt-3 rounded-xl border border-dashed border-amber-200 bg-white/70 px-3 py-4 text-sm text-slate-600">
           Загружаем дела этой категории...
         </div>
-      ) : filteredCandidates.length === 0 ? (
+      ) : !loadError && filteredCandidates.length === 0 ? (
         <div className="mt-3 rounded-xl border border-dashed border-amber-200 bg-white/70 px-3 py-4 text-sm text-slate-600">
           В этой категории дел без активных задач нет.
         </div>
       ) : null}
       <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
-        <span className="text-slate-600">
-          Загружено {candidates.length} из {stateTotal}
-        </span>
+        {!loadError || candidates.length > 0 ? (
+          <span className="text-slate-600">
+            Загружено {candidates.length} из {stateTotal}
+          </span>
+        ) : null}
       {filteredCandidates.length > 6 ? (
         <button
           type="button"
@@ -6635,7 +6700,7 @@ function TaskAutomationPanel({
           {expanded ? 'Свернуть список' : `Показать загруженные (${filteredCandidates.length})`}
         </button>
       ) : null}
-        {!loadingPage && hasMore && (expanded || filteredCandidates.length <= 6) ? (
+        {!loadError && !loadingPage && hasMore && (expanded || filteredCandidates.length <= 6) ? (
           <button
             type="button"
             onClick={onLoadMore}

@@ -3996,6 +3996,106 @@ describe('TaskJournal', () => {
     }));
   });
 
+  it('shows an actionable error instead of an empty automation queue and retries loading', async () => {
+    const recoveredCandidate = {
+      clientId: 11,
+      clientName: 'Восстановленный клиент',
+      clientCaseId: 101,
+      clientCaseTitle: 'ДЕЛО ПОСЛЕ ПОВТОРА',
+      reason: 'Нет активной задачи уже 20 дн.',
+      activeTaskCount: 0,
+      completedTaskCount: 1,
+      daysWithoutActiveTask: 20,
+      isReadyForControl: true,
+      automationState: 'ready' as const,
+      lastTaskAt: null,
+      suggestedTitle: 'Проверить движение по делу',
+      suggestedDescription: 'Автоконтроль',
+      suggestedDueAt: todayAt(9),
+    };
+    apiMock.getTaskJournalCaseAutomationCandidates.mockRejectedValue(new Error('network unavailable'));
+
+    await renderJournal();
+
+    expect((await screen.findByRole('alert')).textContent).toContain('Очередь автоконтроля временно недоступна');
+    expect(screen.queryByText('В этой категории дел без активных задач нет.')).toBeNull();
+    expect(screen.getAllByText('Тестовая задача').length).toBeGreaterThan(0);
+
+    apiMock.getTaskJournalCaseAutomationCandidates.mockResolvedValue([recoveredCandidate]);
+    apiMock.getTaskJournalCaseAutomationSummary.mockResolvedValue({
+      totalCount: 1,
+      readyCount: 1,
+      waitingCount: 0,
+      pausedCount: 0,
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Повторить загрузку' }));
+
+    expect(await screen.findByText('Восстановленный клиент')).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('does not present a partial automation page as the complete queue when totals fail', async () => {
+    apiMock.getTaskJournalCaseAutomationCandidates.mockResolvedValue([{
+      clientId: 10,
+      clientName: 'Клиент из неполной очереди',
+      clientCaseId: 100,
+      clientCaseTitle: 'ДЕЛО ИЗ ПЕРВОЙ СТРАНИЦЫ',
+      reason: 'Нет активной задачи уже 20 дн.',
+      activeTaskCount: 0,
+      completedTaskCount: 1,
+      daysWithoutActiveTask: 20,
+      isReadyForControl: true,
+      automationState: 'ready',
+      lastTaskAt: null,
+      suggestedTitle: 'Проверить движение по делу',
+      suggestedDescription: 'Автоконтроль',
+      suggestedDueAt: todayAt(9),
+    }]);
+    apiMock.getTaskJournalCaseAutomationSummary.mockRejectedValue(new Error('summary unavailable'));
+
+    await renderJournal();
+
+    expect(await screen.findByRole('alert')).toBeTruthy();
+    expect(screen.queryByText('Клиент из неполной очереди')).toBeNull();
+    expect(screen.queryByText('Загружено 1 из 1')).toBeNull();
+    expect(screen.queryByText('В этой категории дел без активных задач нет.')).toBeNull();
+  });
+
+  it('keeps the last automation queue visible when background refresh fails', async () => {
+    const candidate = {
+      clientId: 10,
+      clientName: 'Клиент из сохраненной очереди',
+      clientCaseId: 100,
+      clientCaseTitle: 'ДЕЛО БЕЗ АКТИВНОЙ ЗАДАЧИ',
+      reason: 'Нет активной задачи уже 20 дн.',
+      activeTaskCount: 0,
+      completedTaskCount: 1,
+      daysWithoutActiveTask: 20,
+      isReadyForControl: true,
+      automationState: 'ready' as const,
+      lastTaskAt: null,
+      suggestedTitle: 'Проверить движение по делу',
+      suggestedDescription: 'Автоконтроль',
+      suggestedDueAt: todayAt(9),
+    };
+    apiMock.getTaskJournalCaseAutomationCandidates
+      .mockResolvedValueOnce([candidate])
+      .mockRejectedValueOnce(new Error('network unavailable'));
+    apiMock.getTaskJournalCaseAutomationSummary.mockResolvedValue({
+      totalCount: 1,
+      readyCount: 1,
+      waitingCount: 0,
+      pausedCount: 0,
+    });
+
+    await renderJournal();
+    window.dispatchEvent(new CustomEvent(TASK_JOURNAL_EVENT));
+
+    expect(await screen.findByText('Не удалось обновить очередь автоконтроля. Показаны ранее загруженные данные.')).toBeTruthy();
+    expect(screen.getByText('Клиент из сохраненной очереди')).toBeTruthy();
+    expect(screen.queryByText('В этой категории дел без активных задач нет.')).toBeNull();
+  });
+
   it('completes an active task with an existing result from the quick action', async () => {
     await renderJournal([createTask({ result: 'Результат уже заполнен.' })]);
 
