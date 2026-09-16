@@ -999,17 +999,84 @@ function getInactivitySummary(caseItem: ClientCase): { value: string; tone: Summ
   return { value: `${days} дн. без действий`, tone };
 }
 
-function getCourtSyncSummary(caseItem: ClientCase): { value: string; tone: SummaryTone } {
-  const hasCourtBinding = Boolean(caseItem.courtName || caseItem.courtCaseNumber || caseItem.judicialUid || caseItem.courtUrl);
+type CourtSyncSummaryRecord = {
+  status: ClientCaseCourtSyncLog['status'];
+  occurredAt?: string | null;
+};
+
+const COURT_SYNC_SUMMARY_STATUSES = new Set<ClientCaseCourtSyncLog['status']>([
+  'manual-check-recorded',
+  'binding-required',
+  'external-sync-completed',
+  'external-sync-error',
+]);
+
+function getLatestCourtSyncSummaryRecord(
+  caseItem: ClientCase,
+  logs: ClientCaseCourtSyncLog[],
+  lastResult: ClientCaseCourtSyncRun | null,
+): CourtSyncSummaryRecord | null {
+  const records: CourtSyncSummaryRecord[] = logs
+    .filter((entry) => COURT_SYNC_SUMMARY_STATUSES.has(entry.status))
+    .map((entry) => ({ status: entry.status, occurredAt: entry.occurredAt }));
+
+  if (lastResult?.clientCaseId === caseItem.id && COURT_SYNC_SUMMARY_STATUSES.has(lastResult.status)) {
+    records.push({ status: lastResult.status, occurredAt: lastResult.checkedAt });
+  }
+
+  const sortNewestFirst = (left: CourtSyncSummaryRecord, right: CourtSyncSummaryRecord) => {
+    const parseTime = (value?: string | null) => {
+      const parsed = value ? Date.parse(value) : Number.NaN;
+      return Number.isFinite(parsed) ? parsed : Number.NEGATIVE_INFINITY;
+    };
+    return parseTime(right.occurredAt) - parseTime(left.occurredAt);
+  };
+
+  // Ручная отметка не подтверждает работу внешнего источника и не должна
+  // подменять последний фактический результат автоматической проверки.
+  const latestSourceResult = records
+    .filter((entry) => entry.status !== 'manual-check-recorded')
+    .sort(sortNewestFirst)[0];
+  if (latestSourceResult) return latestSourceResult;
+
+  return records
+    .filter((entry) => entry.status === 'manual-check-recorded')
+    .sort(sortNewestFirst)[0] ?? null;
+}
+
+function getCourtSyncSummary(
+  caseItem: ClientCase,
+  logs: ClientCaseCourtSyncLog[],
+  loading: boolean,
+  loadError: string | null,
+  lastResult: ClientCaseCourtSyncRun | null,
+): { value: string; tone: SummaryTone } {
+  const hasCourtBinding = Boolean(caseItem.courtCaseNumber || caseItem.judicialUid || caseItem.courtUrl);
   if (!hasCourtBinding) {
-    return { value: 'Нет привязки', tone: 'rose' };
+    return isPretrialCaseStage(caseItem)
+      ? { value: 'Не требуется', tone: 'slate' }
+      : { value: 'Нет привязки', tone: 'rose' };
   }
 
-  const history = (caseItem.eventHistory ?? '').toLowerCase();
-  if (history.includes('проверка судебного источника') || history.includes('судебного источника')) {
-    return { value: 'Проверен вручную', tone: 'emerald' };
+  const latestRecord = getLatestCourtSyncSummaryRecord(caseItem, logs, lastResult);
+  if (latestRecord) {
+    const date = toRuDate(latestRecord.occurredAt);
+    switch (latestRecord.status) {
+      case 'external-sync-completed':
+        return { value: date ? `Проверен ${date}` : 'Источник проверен', tone: 'emerald' };
+      case 'manual-check-recorded':
+        return { value: date ? `Отмечено ${date}` : 'Отмечено вручную', tone: 'cyan' };
+      case 'binding-required':
+        return { value: 'Нет полной привязки', tone: 'rose' };
+      case 'external-sync-error':
+        return { value: date ? `Ошибка ${date}` : 'Ошибка проверки', tone: 'rose' };
+      default:
+        break;
+    }
   }
 
+  if (loading) return { value: 'Проверяем статус', tone: 'slate' };
+  if (loadError) return { value: 'Статус недоступен', tone: 'amber' };
   return { value: 'Нужна проверка', tone: 'amber' };
 }
 
@@ -1343,7 +1410,8 @@ export function CaseDetailPage({
   const [courtPartiesLoading, setCourtPartiesLoading] = useState(false);
   const [proceduralDeadlinesLoading, setProceduralDeadlinesLoading] = useState(true);
   const [proceduralDeadlinesError, setProceduralDeadlinesError] = useState<string | null>(null);
-  const [courtSyncLogsLoading, setCourtSyncLogsLoading] = useState(false);
+  const [courtSyncLogsLoading, setCourtSyncLogsLoading] = useState(true);
+  const [courtSyncLogsError, setCourtSyncLogsError] = useState<string | null>(null);
   const [timelineLoading, setTimelineLoading] = useState(false);
   const [conversationLoading, setConversationLoading] = useState(false);
   const [financeLoading, setFinanceLoading] = useState(false);
@@ -2006,16 +2074,28 @@ export function CaseDetailPage({
   }, [caseId, reloadToken]);
 
   useEffect(() => {
-    if (activeTab !== 'court') return;
+    if (caseItem?.id !== caseId) return;
+
+    const hasCourtBinding = Boolean(caseItem.courtCaseNumber || caseItem.judicialUid || caseItem.courtUrl);
+    if (!hasCourtBinding) {
+      setCourtSyncLogs([]);
+      setCourtSyncLogsError(null);
+      setCourtSyncLogsLoading(false);
+      return;
+    }
 
     let cancelled = false;
     setCourtSyncLogsLoading(true);
+    setCourtSyncLogsError(null);
     apiService.getCaseCourtSyncLogs(caseId)
       .then((items) => {
         if (!cancelled) setCourtSyncLogs(items ?? []);
       })
-      .catch(() => {
-        if (!cancelled) setCourtSyncLogs([]);
+      .catch((err) => {
+        if (!cancelled) {
+          setCourtSyncLogs([]);
+          setCourtSyncLogsError(extractDisplayErrorMessage(err, 'Не удалось получить состояние судебной проверки.'));
+        }
       })
       .finally(() => {
         if (!cancelled) setCourtSyncLogsLoading(false);
@@ -2024,7 +2104,15 @@ export function CaseDetailPage({
     return () => {
       cancelled = true;
     };
-  }, [activeTab, caseId, reloadToken]);
+  }, [
+    caseId,
+    caseItem?.courtCaseNumber,
+    caseItem?.courtName,
+    caseItem?.courtUrl,
+    caseItem?.id,
+    caseItem?.judicialUid,
+    reloadToken,
+  ]);
 
   useEffect(() => {
     if (!canViewFinance) {
@@ -3549,7 +3637,13 @@ export function CaseDetailPage({
   const inactivitySummary = getInactivitySummary(caseItem);
   const responsibleLastViewedAt = getResponsibleLastViewedAt(caseItem);
   const responsibleLastViewedByName = caseItem.lastViewedByResponsibleUserName ?? caseItem.lastViewedByUserName ?? null;
-  const courtSyncSummary = getCourtSyncSummary(caseItem);
+  const courtSyncSummary = getCourtSyncSummary(
+    caseItem,
+    courtSyncLogs,
+    courtSyncLogsLoading,
+    courtSyncLogsError,
+    lastCourtSyncResult,
+  );
   const canRevealCaseSensitiveData = canEdit && (caseItem.canRevealSensitiveData ?? true);
   const canManageDocuments = canEdit;
   const canDeleteDocuments = canManageDocuments && canDelete;
@@ -3973,6 +4067,7 @@ export function CaseDetailPage({
               deadlineCalculationPreview={deadlineCalculationPreview}
               logs={courtSyncLogs}
               logsLoading={courtSyncLogsLoading}
+              logsError={courtSyncLogsError}
               courtSyncSearchResults={courtSyncSearchResults}
               lastCourtSyncResult={lastCourtSyncResult}
               savingCourtInstance={savingCourtInstance}
@@ -3986,6 +4081,7 @@ export function CaseDetailPage({
               closingProceduralDeadlineId={closingProceduralDeadlineId}
               onRunCourtSync={runCourtSync}
               onRecordManualCourtCheck={recordManualCourtCheck}
+              onReloadLogs={() => setReloadToken((value) => value + 1)}
               syncingCourt={syncingCourt}
               searchingCourtSync={searchingCourtSync}
               bindingCourtSyncSource={bindingCourtSyncSource}
@@ -6508,6 +6604,7 @@ function CourtPanel({
   deadlineCalculationPreview,
   logs,
   logsLoading,
+  logsError,
   courtSyncSearchResults,
   lastCourtSyncResult,
   savingCourtInstance,
@@ -6521,6 +6618,7 @@ function CourtPanel({
   closingProceduralDeadlineId,
   onRunCourtSync,
   onRecordManualCourtCheck,
+  onReloadLogs,
   syncingCourt,
   searchingCourtSync,
   bindingCourtSyncSource,
@@ -6604,6 +6702,7 @@ function CourtPanel({
   deadlineCalculationPreview: ProceduralDeadlineCalculationResult | null;
   logs: ClientCaseCourtSyncLog[];
   logsLoading: boolean;
+  logsError: string | null;
   courtSyncSearchResults: ClientCaseCourtSyncSearchResult[];
   lastCourtSyncResult: ClientCaseCourtSyncRun | null;
   savingCourtInstance: boolean;
@@ -6617,6 +6716,7 @@ function CourtPanel({
   closingProceduralDeadlineId: number | null;
   onRunCourtSync: () => void;
   onRecordManualCourtCheck: () => void;
+  onReloadLogs: () => void;
   syncingCourt: boolean;
   searchingCourtSync: boolean;
   bindingCourtSyncSource: boolean;
@@ -7594,6 +7694,13 @@ function CourtPanel({
         <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Журнал судебных проверок</h2>
         {logsLoading ? (
           <LoadingBlock label="Загрузка журнала судебных проверок..." />
+        ) : logsError ? (
+          <div role="alert" className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            <span>{logsError}</span>
+            <button type="button" onClick={onReloadLogs} className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 font-semibold text-amber-800 hover:bg-amber-100">
+              Повторить
+            </button>
+          </div>
         ) : logs.length === 0 ? (
           <div className="mt-3 rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-500">
             Проверок судебного источника по делу пока не было.

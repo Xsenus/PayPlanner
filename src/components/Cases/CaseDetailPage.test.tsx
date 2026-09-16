@@ -1263,7 +1263,97 @@ describe('CaseDetailPage', () => {
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
 
     expect(await screen.findByText('Сегодня')).toBeTruthy();
-    expect(screen.getByText('Проверен вручную')).toBeTruthy();
+    const manualSummary = await screen.findByLabelText('Судебная проверка: Отмечено 18.05.2026');
+    expect(manualSummary.className).toContain('border-l-cyan-500');
+  });
+
+  it('shows the latest confirmed source check instead of a newer manual mark', async () => {
+    vi.mocked(apiService.getCaseCourtSyncLogs).mockResolvedValue([
+      {
+        id: 2,
+        clientCaseId: 15,
+        status: 'manual-check-recorded',
+        message: 'Ручная проверка судебного источника зафиксирована.',
+        occurredAt: '2026-05-19T10:30:00Z',
+      },
+      {
+        id: 1,
+        clientCaseId: 15,
+        status: 'external-sync-completed',
+        message: 'Судебный источник проверен, новых изменений не найдено.',
+        occurredAt: '2026-05-18T10:30:00Z',
+      },
+    ]);
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    const sourceSummary = await screen.findByLabelText('Судебная проверка: Проверен 18.05.2026');
+    expect(sourceSummary.className).toContain('border-l-emerald-500');
+  });
+
+  it('shows a later court sync error even when case history contains a successful phrase', async () => {
+    vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({
+      eventHistory: '18.05.2026 10:30: Ручная проверка судебного источника зафиксирована.',
+    }));
+    vi.mocked(apiService.getCaseCourtSyncLogs).mockResolvedValue([
+      {
+        id: 1,
+        clientCaseId: 15,
+        status: 'external-sync-completed',
+        message: 'Судебный источник проверен, новых изменений не найдено.',
+        occurredAt: '2026-05-18T10:30:00Z',
+      },
+      {
+        id: 2,
+        clientCaseId: 15,
+        status: 'external-sync-error',
+        message: 'Проверка судебного источника не выполнена.',
+        occurredAt: '2026-05-20T10:30:00Z',
+      },
+    ]);
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    const errorSummary = await screen.findByLabelText('Судебная проверка: Ошибка 20.05.2026');
+    expect(errorSummary.className).toContain('border-l-rose-500');
+    expect(screen.queryByLabelText(/Судебная проверка: Проверен/u)).toBeNull();
+  });
+
+  it('reports an unavailable court sync status when its journal cannot be loaded', async () => {
+    vi.mocked(apiService.getCaseCourtSyncLogs)
+      .mockRejectedValueOnce(new Error('network unavailable'))
+      .mockResolvedValue([]);
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    const unavailableSummary = await screen.findByLabelText('Судебная проверка: Статус недоступен');
+    expect(unavailableSummary.className).toContain('border-l-amber-500');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Суд' }));
+    expect(await screen.findByText('network unavailable')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Повторить' }));
+
+    await waitFor(() => {
+      expect(apiService.getCaseCourtSyncLogs).toHaveBeenCalledTimes(2);
+      expect(screen.getByText('Проверок судебного источника по делу пока не было.')).toBeTruthy();
+    });
+  });
+
+  it('does not require a court binding for a pretrial case', async () => {
+    vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({
+      stage: 'Досудебная работа',
+      caseType: 'Претензионная работа',
+      courtName: null,
+      courtCaseNumber: null,
+      courtUrl: null,
+      judicialUid: null,
+    }));
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    const notRequiredSummary = await screen.findByLabelText('Судебная проверка: Не требуется');
+    expect(notRequiredSummary.className).toContain('border-l-slate-300');
+    expect(apiService.getCaseCourtSyncLogs).not.toHaveBeenCalled();
   });
 
   it('loads linked finance documents for the finance tab', async () => {
