@@ -183,6 +183,10 @@ describe('TaskJournalSettings', () => {
     expect(result.textContent).toContain('3');
 
     const breakdown = screen.getByTestId('case-inactivity-preview-breakdown');
+    const panel = screen.getByTestId('case-inactivity-preview-panel');
+    expect(panel.classList.contains('pp-automation-preview')).toBe(true);
+    expect(panel.querySelectorAll('.pp-automation-preview-card')).toHaveLength(7);
+    expect(screen.getByRole('button', { name: 'Рассчитать влияние' }).classList.contains('pp-automation-preview-action')).toBe(true);
     expect(within(breakdown).getByText('Проверено дел')).toBeTruthy();
     expect(within(breakdown).getByText('40')).toBeTruthy();
     expect(within(breakdown).getByText('Есть активная задача')).toBeTruthy();

@@ -597,7 +597,7 @@ export function TaskJournalSettings() {
           </div>
         </div>
 
-        <div className="mt-3 rounded-xl border border-indigo-100 bg-indigo-50/60 p-3">
+        <div className="pp-automation-preview mt-3 rounded-xl border p-3" data-testid="case-inactivity-preview-panel">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0 text-sm text-slate-700">
               <div className="font-semibold text-slate-900">Предварительный расчёт</div>
@@ -614,7 +614,7 @@ export function TaskJournalSettings() {
               type="button"
               onClick={() => void previewAutomationImpact()}
               disabled={loading || previewLoading}
-              className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-indigo-200 bg-white px-3 py-2 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-50 disabled:cursor-wait disabled:opacity-60"
+              className="pp-automation-preview-action inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold transition disabled:cursor-wait disabled:opacity-60"
             >
               <RefreshCcw className={`h-4 w-4 ${previewLoading ? 'animate-spin' : ''}`} />
               {previewLoading ? 'Расчёт...' : 'Рассчитать влияние'}
@@ -633,7 +633,7 @@ export function TaskJournalSettings() {
                   ['Автоконтроль выключен', preview.disabledCount ?? 0, 'Индивидуальное исключение в карточке дела'],
                   ['Ответственный в отпуске', preview.pausedByVacationCount ?? 0, 'Проверка продолжится после возвращения'],
                 ] as const).map(([label, value, hint]) => (
-                  <div key={label} className="rounded-lg border border-indigo-100 bg-white px-3 py-2 shadow-sm">
+                  <div key={label} className="pp-automation-preview-card rounded-lg border px-3 py-2 shadow-sm">
                     <div className="flex items-baseline justify-between gap-2">
                       <span className="text-xs font-medium text-slate-600">{label}</span>
                       <strong className="text-lg text-slate-900">{value}</strong>
