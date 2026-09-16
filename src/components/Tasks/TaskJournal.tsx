@@ -1174,6 +1174,39 @@ function getAutomationCandidateOwnerName(candidate: TaskJournalCaseAutomationCan
   return candidate.clientName?.trim() || candidate.legalEntityName?.trim() || 'Контрагент';
 }
 
+function getAutomationCandidateState(candidate: TaskJournalCaseAutomationCandidate): 'ready' | 'waiting' | 'paused' {
+  if (candidate.automationState) {
+    return candidate.automationState;
+  }
+
+  return candidate.isReadyForControl === false ? 'waiting' : 'ready';
+}
+
+function isAutomationCandidateReady(candidate: TaskJournalCaseAutomationCandidate) {
+  return getAutomationCandidateState(candidate) === 'ready';
+}
+
+function getAutomationActivitySourceLabel(source?: string | null) {
+  switch (source) {
+    case 'task':
+      return 'задача';
+    case 'taskComment':
+      return 'комментарий к задаче';
+    case 'document':
+      return 'документ';
+    case 'courtEvent':
+      return 'судебное событие';
+    case 'responsibleView':
+      return 'просмотр ответственным';
+    case 'activityConfirmation':
+      return 'подтверждение активности';
+    case 'caseCreated':
+      return 'создание дела';
+    default:
+      return 'движение по делу';
+  }
+}
+
 function getTaskParticipants(task: TaskJournalItem, role: TaskJournalParticipantRole) {
   return (task.participants ?? []).filter((participant) => participant.role === role);
 }
@@ -3060,7 +3093,7 @@ export function TaskJournal({
       return;
     }
 
-    const readyCount = automationCandidates.filter((candidate) => candidate.isReadyForControl !== false).length;
+    const readyCount = automationCandidates.filter(isAutomationCandidateReady).length;
     if (readyCount === 0) {
       return;
     }
@@ -6129,20 +6162,20 @@ function TaskAutomationPanel({
 }) {
   const [activeState, setActiveState] = useState<'all' | 'ready' | 'waiting' | 'paused'>('all');
   const [expanded, setExpanded] = useState(false);
-  const readyCount = candidates.filter((candidate) => candidate.automationState === 'ready' || candidate.isReadyForControl !== false).length;
-  const waitingCount = candidates.filter((candidate) => candidate.automationState === 'waiting').length;
-  const pausedCount = candidates.filter((candidate) => candidate.automationState === 'paused').length;
+  const readyCount = candidates.filter(isAutomationCandidateReady).length;
+  const waitingCount = candidates.filter((candidate) => getAutomationCandidateState(candidate) === 'waiting').length;
+  const pausedCount = candidates.filter((candidate) => getAutomationCandidateState(candidate) === 'paused').length;
   const orderedCandidates = [...candidates].sort((left, right) => {
-    const rank = (candidate: TaskJournalCaseAutomationCandidate) => candidate.automationState === 'ready'
+    const rank = (candidate: TaskJournalCaseAutomationCandidate) => getAutomationCandidateState(candidate) === 'ready'
       ? 0
-      : candidate.automationState === 'waiting'
+      : getAutomationCandidateState(candidate) === 'waiting'
         ? 1
         : 2;
     return rank(left) - rank(right) || (left.daysUntilControl ?? 0) - (right.daysUntilControl ?? 0);
   });
   const filteredCandidates = activeState === 'all'
     ? orderedCandidates
-    : orderedCandidates.filter((candidate) => candidate.automationState === activeState);
+    : orderedCandidates.filter((candidate) => getAutomationCandidateState(candidate) === activeState);
   const visibleCandidates = expanded ? filteredCandidates : filteredCandidates.slice(0, 6);
 
   return (
@@ -6190,7 +6223,8 @@ function TaskAutomationPanel({
 
       <div className="mt-3 grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
         {visibleCandidates.map((candidate) => {
-          const canCreateControlTask = candidate.automationState === 'ready' || candidate.isReadyForControl !== false;
+          const automationState = getAutomationCandidateState(candidate);
+          const canCreateControlTask = automationState === 'ready';
           const isCreatingControlTask = canCreateControlTask && creatingCaseId === candidate.clientCaseId;
 
           return (
@@ -6200,12 +6234,16 @@ function TaskAutomationPanel({
                 <div className="truncate text-sm font-semibold text-slate-900">{getAutomationCandidateOwnerName(candidate)}</div>
                 <div className="mt-1 truncate text-sm text-slate-600">{candidate.clientCaseTitle}</div>
               </div>
-              <span className={`shrink-0 rounded-full px-2 py-1 text-xs font-semibold ${candidate.automationState === 'ready'
+              <span className={`shrink-0 rounded-full px-2 py-1 text-xs font-semibold ${automationState === 'ready'
                 ? 'bg-rose-100 text-rose-700'
-                : candidate.automationState === 'paused'
+                : automationState === 'paused'
                   ? 'bg-slate-100 text-slate-600'
                   : 'bg-amber-100 text-amber-700'}`}>
-                {candidate.automationState === 'waiting' ? `через ${candidate.daysUntilControl} дн.` : `${candidate.daysWithoutActiveTask} дн.`}
+                {automationState === 'ready'
+                  ? `без движения ${candidate.daysWithoutActiveTask} дн.`
+                  : automationState === 'waiting'
+                    ? `через ${candidate.daysUntilControl} дн.`
+                    : 'приостановлен'}
               </span>
             </div>
             {candidate.isEscalated ? (
@@ -6214,8 +6252,22 @@ function TaskAutomationPanel({
               </div>
             ) : null}
             <div className="mt-3 text-sm text-slate-600">{candidate.reason}</div>
-            <div className="mt-2 text-xs text-slate-500">
-              {candidate.lastTaskAt ? `Последняя задача: ${formatDateTime(candidate.lastTaskAt)}` : 'Задач по делу еще не было'}
+            <div className="mt-3 grid gap-2 rounded-lg bg-slate-50 px-3 py-2.5 text-xs text-slate-600">
+              <div className="flex items-start gap-2">
+                <History className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400" />
+                <span>
+                  Последнее движение: {candidate.lastActivityAt ? formatDateTime(candidate.lastActivityAt) : 'не определено'}
+                  {candidate.lastActivityAt ? ` · ${getAutomationActivitySourceLabel(candidate.lastActivitySource)}` : ''}
+                </span>
+              </div>
+              <div className="flex items-start gap-2">
+                <CalendarClock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400" />
+                <span>
+                  {automationState === 'paused'
+                    ? 'Следующий контроль появится после возобновления'
+                    : `${automationState === 'ready' ? 'Срок контроля' : 'Следующий контроль'}: ${candidate.nextControlAt ? formatDateTime(candidate.nextControlAt) : 'не определён'}`}
+                </span>
+              </div>
             </div>
             <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex flex-wrap items-center gap-2">

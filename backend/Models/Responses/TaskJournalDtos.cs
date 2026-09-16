@@ -203,6 +203,8 @@ public class TaskJournalCaseAutomationCandidateDto
     public bool IsEscalated { get; set; }
     public bool IsReadyForControl { get; set; }
     public string AutomationState { get; set; } = "ready";
+    public string LastActivityAt { get; set; } = string.Empty;
+    public string LastActivitySource { get; set; } = string.Empty;
     public string? LastTaskAt { get; set; }
     public string? NextControlAt { get; set; }
     public int DaysUntilControl { get; set; }

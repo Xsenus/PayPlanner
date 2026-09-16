@@ -3785,6 +3785,8 @@ public class TasksControllerTests
         Assert.Contains("Нет активной задачи", candidate.Reason, StringComparison.OrdinalIgnoreCase);
         Assert.True(candidate.IsReadyForControl);
         Assert.Equal("ready", candidate.AutomationState);
+        Assert.Equal(CaseMeaningfulActivitySources.Task, candidate.LastActivitySource);
+        Assert.False(string.IsNullOrWhiteSpace(candidate.LastActivityAt));
     }
 
     [Fact]
@@ -3820,6 +3822,8 @@ public class TasksControllerTests
         Assert.Equal(clientCase.Id, candidate.ClientCaseId);
         Assert.False(candidate.IsReadyForControl);
         Assert.Equal("waiting", candidate.AutomationState);
+        Assert.Equal(CaseMeaningfulActivitySources.CaseCreated, candidate.LastActivitySource);
+        Assert.False(string.IsNullOrWhiteSpace(candidate.LastActivityAt));
         Assert.True(candidate.DaysUntilControl >= 10);
         Assert.NotNull(candidate.NextControlAt);
         Assert.Contains("Первый контроль через", candidate.Reason, StringComparison.Ordinal);

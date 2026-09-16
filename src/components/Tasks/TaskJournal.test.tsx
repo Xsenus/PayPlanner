@@ -3756,6 +3756,8 @@ describe('TaskJournal', () => {
         daysWithoutActiveTask: 21,
         isReadyForControl: true,
         automationState: 'ready',
+        lastActivityAt: todayAt(8),
+        lastActivitySource: 'task',
         lastTaskAt: null,
         nextControlAt: todayAt(9),
         daysUntilControl: 0,
@@ -3772,8 +3774,9 @@ describe('TaskJournal', () => {
         activeTaskCount: 0,
         completedTaskCount: 0,
         daysWithoutActiveTask: 3,
-        isReadyForControl: false,
         automationState: 'waiting',
+        lastActivityAt: todayAt(8),
+        lastActivitySource: 'document',
         lastTaskAt: null,
         nextControlAt: todayAt(9),
         daysUntilControl: 11,
@@ -3790,6 +3793,9 @@ describe('TaskJournal', () => {
     expect(screen.getByRole('button', { name: 'Ожидают срока: 1' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Создать наступившие (1)' })).toBeTruthy();
     expect(screen.getAllByText('Нет активных задач')).toHaveLength(2);
+    expect(screen.getByText(/Последнее движение:.*задача/)).toBeTruthy();
+    expect(screen.getByText(/Последнее движение:.*документ/)).toBeTruthy();
+    expect(screen.getByText(/Следующий контроль:/)).toBeTruthy();
 
     const waitingTaskButton = screen.getByTestId('task-automation-create-101') as HTMLButtonElement;
     expect(waitingTaskButton.disabled).toBe(false);

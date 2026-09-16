@@ -223,6 +223,8 @@ export interface TaskJournalCaseAutomationCandidate {
   isEscalated?: boolean;
   isReadyForControl?: boolean;
   automationState?: 'ready' | 'waiting' | 'paused';
+  lastActivityAt?: string | null;
+  lastActivitySource?: 'caseCreated' | 'task' | 'taskComment' | 'document' | 'courtEvent' | 'responsibleView' | 'activityConfirmation' | string;
   lastTaskAt?: string | null;
   nextControlAt?: string | null;
   daysUntilControl?: number;

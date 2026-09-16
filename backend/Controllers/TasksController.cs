@@ -1196,19 +1196,20 @@ public class TasksController : ControllerBase
 
         return Ok(filteredCandidates.Select(item =>
         {
-            var lastActivity = ResolveLastCaseActivity(
-                item.CreatedAt,
-                item.LastViewedAt,
-                item.ActivityConfirmedAt,
-                item.LastTaskAt,
-                item.LastTaskCommentAt,
-                item.LastDocumentAt,
-                item.LastCourtEventAt);
+            var lastActivity = CaseMeaningfulActivityResolver.Resolve(
+                new CaseMeaningfulActivitySignals(
+                    item.CreatedAt,
+                    LastTaskAt: item.LastTaskAt,
+                    LastTaskCommentAt: item.LastTaskCommentAt,
+                    LastDocumentAt: item.LastDocumentAt,
+                    LastCourtEventAt: item.LastCourtEventAt,
+                    LastResponsibleViewAt: item.LastViewedAt,
+                    LastActivityConfirmationAt: item.ActivityConfirmedAt));
 
-            var daysWithoutActiveTask = Math.Max(0, (int)Math.Floor((now - lastActivity).TotalDays));
+            var daysWithoutActiveTask = Math.Max(0, (int)Math.Floor((now - lastActivity.At).TotalDays));
             var nextCycle = CaseInactivityControlCyclePolicy.EvaluateNextCycle(
                 now,
-                lastActivity,
+                lastActivity.At,
                 item.LastControlCycleEndedAt,
                 effectiveInactiveDays);
             var isOnVacation = vacationUserIds.Contains(item.ResponsibleUserId ?? 0);
@@ -1251,6 +1252,8 @@ public class TasksController : ControllerBase
                 IsEscalated = isEscalated,
                 IsReadyForControl = isReadyForControl,
                 AutomationState = isPaused ? "paused" : isReadyForControl ? "ready" : "waiting",
+                LastActivityAt = ToIso(lastActivity.At),
+                LastActivitySource = lastActivity.Source,
                 LastTaskAt = item.LastTaskAt.HasValue ? ToIso(item.LastTaskAt.Value) : null,
                 NextControlAt = isPaused ? null : ToIso(nextCycle.EligibleAt),
                 DaysUntilControl = daysUntilControl,
