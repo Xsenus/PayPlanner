@@ -99,6 +99,9 @@ type SummaryTone = 'slate' | 'emerald' | 'amber' | 'rose' | 'cyan';
 type ParticipantSourceType = 'client' | 'legalEntity' | 'externalContact';
 type DocumentSourceType = 'case' | 'task' | 'courtEvent' | 'workOrder' | 'invoice' | 'stage';
 
+const INACTIVE_PROCEDURAL_DEADLINE_STATUSES = new Set(['closed', 'cancelled', 'archived']);
+const UPCOMING_DEADLINE_WARNING_MS = 7 * 24 * 60 * 60 * 1000;
+
 function courtProcessSummaryClasses(tone: CourtProcessSummaryTone) {
   switch (tone) {
     case 'emerald':
@@ -853,8 +856,12 @@ function maskSensitiveValue(value: string, visibleTail = 4) {
   return `${'•'.repeat(Math.min(8, normalized.length - tailLength))}${normalized.slice(-tailLength)}`;
 }
 
+function isActiveProceduralDeadline(deadline: ClientCaseProceduralDeadline) {
+  return !INACTIVE_PROCEDURAL_DEADLINE_STATUSES.has((deadline.status || '').trim().toLowerCase());
+}
+
 function getRiskSummary(caseItem: ClientCase, deadlines: ClientCaseProceduralDeadline[]): { value: string; tone: SummaryTone } {
-  const activeDeadlines = deadlines.filter((deadline) => !['closed', 'cancelled', 'archived'].includes((deadline.status || '').trim().toLowerCase()));
+  const activeDeadlines = deadlines.filter(isActiveProceduralDeadline);
   const overdueTasks = caseItem.overdueTaskCount ?? 0;
   const overdueDeadlines = activeDeadlines.filter((deadline) => deadline.isOverdue).length;
   const overdueTotal = overdueTasks + overdueDeadlines;
@@ -874,6 +881,42 @@ function getRiskSummary(caseItem: ClientCase, deadlines: ClientCaseProceduralDea
 
   if (caseItem.status === 'Closed') return { value: 'Закрыто', tone: 'slate' };
   return { value: 'Без риска', tone: 'emerald' };
+}
+
+function getNearestCaseDateSummary(
+  caseItem: ClientCase,
+  deadlines: ClientCaseProceduralDeadline[],
+  now = new Date(),
+): { value: string; tone: SummaryTone } {
+  const candidates = [
+    caseItem.dueDate ? { date: caseItem.dueDate, label: 'Срок дела' } : null,
+    caseItem.nextHearingAt ? { date: caseItem.nextHearingAt, label: 'Заседание', futureOnly: true } : null,
+    ...deadlines
+      .filter(isActiveProceduralDeadline)
+      .map((deadline) => ({
+        date: deadline.dueAt,
+        label: deadline.deadlineTypeLabel || deadline.title || 'Процессуальный срок',
+      })),
+  ]
+    .filter((candidate): candidate is { date: string; label: string; futureOnly?: boolean } => Boolean(candidate))
+    .map((candidate) => ({ ...candidate, time: getDateTime(candidate.date) }))
+    .filter((candidate): candidate is typeof candidate & { time: number } => candidate.time !== null);
+
+  const nowTime = now.getTime();
+  const upcoming = candidates
+    .filter((candidate) => candidate.time >= nowTime)
+    .sort((left, right) => left.time - right.time);
+  const overdue = candidates
+    .filter((candidate) => !candidate.futureOnly && candidate.time < nowTime)
+    .sort((left, right) => right.time - left.time);
+  const nearest = upcoming[0] ?? overdue[0];
+
+  if (!nearest) return { value: '—', tone: 'slate' };
+
+  const value = `${toRuDate(nearest.date)} · ${nearest.label}`;
+  if (nearest.time < nowTime) return { value, tone: 'rose' };
+  if (nearest.time - nowTime <= UPCOMING_DEADLINE_WARNING_MS) return { value, tone: 'amber' };
+  return { value, tone: 'slate' };
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -3438,6 +3481,7 @@ export function CaseDetailPage({
 
   const progress = caseItem.taskProgressPercent ?? 0;
   const riskSummary = getRiskSummary(caseItem, proceduralDeadlines);
+  const nearestCaseDateSummary = getNearestCaseDateSummary(caseItem, proceduralDeadlines);
   const inactivitySummary = getInactivitySummary(caseItem);
   const responsibleLastViewedAt = getResponsibleLastViewedAt(caseItem);
   const responsibleLastViewedByName = caseItem.lastViewedByResponsibleUserName ?? caseItem.lastViewedByUserName ?? null;
@@ -3632,7 +3676,7 @@ export function CaseDetailPage({
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-7">
           <SummaryCard label="Клиент" value={getOwnerName(caseItem)} />
           <SummaryCard label="Ответственный" value={getResponsibleName(caseItem)} />
-          <SummaryCard label="Ближайший срок" value={toRuDate(caseItem.dueDate) || formatRuDateTime(caseItem.nextHearingAt) || '—'} />
+          <SummaryCard label="Ближайший срок" value={nearestCaseDateSummary.value} tone={nearestCaseDateSummary.tone} />
           <SummaryCard label="Просрочки" value={riskSummary.value} tone={riskSummary.tone} />
           {canViewFinance ? (
             <SummaryCard label="Оплачено / долг" value={`${formatMoney(caseItem.incomePaid)} / ${formatMoney(caseItem.incomeOutstanding)}`} />

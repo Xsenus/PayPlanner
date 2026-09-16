@@ -2541,6 +2541,34 @@ describe('CaseDetailPage', () => {
     expect(await screen.findByText('Просрочено сроков: 1')).toBeTruthy();
   });
 
+  it('shows the earliest upcoming case date across the case, hearing and procedural deadlines', async () => {
+    vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({
+      dueDate: '2099-07-01',
+      nextHearingAt: '2099-06-20T09:30:00Z',
+      overdueTaskCount: 0,
+    }));
+    vi.mocked(apiService.getCaseProceduralDeadlines).mockResolvedValue([{
+      id: 92,
+      clientCaseId: 15,
+      deadlineType: 'appeal',
+      deadlineTypeLabel: 'Апелляция',
+      title: 'Срок апелляционного обжалования',
+      dueAt: '2099-06-10T00:00:00Z',
+      allDay: true,
+      status: 'active',
+      statusLabel: 'Активен',
+      warningDaysBefore: 7,
+      sourceType: 'sudrf',
+      createdAt: '2099-05-01T00:00:00Z',
+      isOverdue: false,
+      isWarning: false,
+    }]);
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    expect(await screen.findByText('10.06.2099 · Апелляция')).toBeTruthy();
+  });
+
   it('keeps the court tab in safe mode for pretrial cases without court data', async () => {
     vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({
       caseType: 'Внесудебное урегулирование',
