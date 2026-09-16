@@ -3814,6 +3814,7 @@ describe('TaskJournal', () => {
         responsibleName: '',
         suggestedAssigneeUserId: 9,
         suggestedAssigneeName: 'Резервный исполнитель',
+        suggestedAssigneeSource: 'configuredDefault',
         clientCaseId: 101,
         clientCaseTitle: 'ОЖИДАЕТ ПОРОГА',
         reason: 'Первый контроль через 11 дн.',
@@ -3955,6 +3956,7 @@ describe('TaskJournal', () => {
         responsibleName: '',
         suggestedAssigneeUserId: 7,
         suggestedAssigneeName: 'Администратор',
+        suggestedAssigneeSource: 'currentUser',
         clientCaseId: 100,
         clientCaseTitle: 'БАНКРОТСТВО',
         reason: 'Первый контроль через 5 дн.',
@@ -3980,6 +3982,7 @@ describe('TaskJournal', () => {
         settings: { taskCardWindowMode },
       });
 
+      expect(screen.getByText(/При создании: Администратор · вы будете исполнителем · срок/)).toBeTruthy();
       fireEvent.click(screen.getByTestId('task-automation-create-100'));
       expect(await screen.findByRole('heading', { name: 'Выберите клиента и дело' })).toBeTruthy();
       expect((screen.getByTestId('task-billing-wizard-case') as HTMLSelectElement).value).toBe('100');

@@ -6619,10 +6619,16 @@ function TaskAutomationPanel({
           const suggestedAssigneeName = candidate.suggestedAssigneeName?.trim()
             || candidate.responsibleName?.trim()
             || 'не определён';
-          const usesFallbackAssignee = Boolean(
+          const inferredFallbackAssignee = Boolean(
             candidate.suggestedAssigneeUserId
             && candidate.suggestedAssigneeUserId !== candidate.responsibleUserId,
           );
+          const suggestedAssigneeHint = candidate.suggestedAssigneeSource === 'currentUser'
+            ? 'вы будете исполнителем'
+            : candidate.suggestedAssigneeSource === 'configuredDefault' ||
+                (!candidate.suggestedAssigneeSource && inferredFallbackAssignee)
+              ? 'резервный исполнитель'
+              : '';
 
           return (
           <article
@@ -6669,7 +6675,7 @@ function TaskAutomationPanel({
                 <UsersRound className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-500" />
                 <span>
                   При создании: {suggestedAssigneeName}
-                  {usesFallbackAssignee ? ' · резервный исполнитель' : ''}
+                  {suggestedAssigneeHint ? ` · ${suggestedAssigneeHint}` : ''}
                   {candidate.suggestedDueAt ? ` · срок ${formatDateTime(candidate.suggestedDueAt)}` : ''}
                 </span>
               </div>

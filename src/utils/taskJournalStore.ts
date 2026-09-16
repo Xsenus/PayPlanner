@@ -236,6 +236,7 @@ export interface TaskJournalCaseAutomationCandidate {
   suggestedPriority?: TaskJournalPriority;
   suggestedAssigneeUserId?: number | null;
   suggestedAssigneeName?: string | null;
+  suggestedAssigneeSource?: 'responsible' | 'configuredDefault' | 'currentUser';
 }
 
 export interface TaskJournalCaseAutomationSummary {

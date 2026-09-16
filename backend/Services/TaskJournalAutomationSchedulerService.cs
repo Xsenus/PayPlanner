@@ -177,6 +177,11 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
             var responsibleAvailability = await CaseInactivityResponsibleAvailabilityService
                 .GetAvailabilityAsync(context, now, cancellationToken);
             var vacationUserIds = responsibleAvailability.UsersOnVacation;
+            if (defaultAssignee is not null && vacationUserIds.Contains(defaultAssignee.Id))
+            {
+                defaultAssignee = null;
+            }
+            var hasDefaultAssignee = defaultAssignee is not null;
             var escalationResult = await EscalateExistingAutomationTasksAsync(
                 context,
                 settings,
@@ -196,7 +201,20 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
                     !vacationUserIds.Contains(
                         (clientCase.ResponsibleUserId ??
                          (clientCase.Client != null ? clientCase.Client.ResponsibleUserId : null) ??
-                         (clientCase.LegalEntity != null ? clientCase.LegalEntity.ResponsibleUserId : null)) ?? 0))
+                         (clientCase.LegalEntity != null ? clientCase.LegalEntity.ResponsibleUserId : null)) ?? 0) &&
+                    (hasDefaultAssignee ||
+                     (clientCase.ResponsibleUserId.HasValue
+                        ? clientCase.ResponsibleUser != null &&
+                          clientCase.ResponsibleUser.IsActive &&
+                          clientCase.ResponsibleUser.IsApproved
+                        : clientCase.Client != null && clientCase.Client.ResponsibleUserId.HasValue
+                            ? clientCase.Client.ResponsibleUser != null &&
+                              clientCase.Client.ResponsibleUser.IsActive &&
+                              clientCase.Client.ResponsibleUser.IsApproved
+                            : clientCase.LegalEntity != null &&
+                              clientCase.LegalEntity.ResponsibleUser != null &&
+                              clientCase.LegalEntity.ResponsibleUser.IsActive &&
+                              clientCase.LegalEntity.ResponsibleUser.IsApproved)))
                 .Select(clientCase => new
                 {
                     Case = clientCase,

@@ -3832,6 +3832,7 @@ public class TasksControllerTests
         Assert.Equal("Ответственный Юрист", candidate.ResponsibleName);
         Assert.Equal(author.Id, candidate.SuggestedAssigneeUserId);
         Assert.Equal("Ответственный Юрист", candidate.SuggestedAssigneeName);
+        Assert.Equal("responsible", candidate.SuggestedAssigneeSource);
         Assert.False(candidate.IsReadyForControl);
         Assert.Equal("waiting", candidate.AutomationState);
         Assert.Equal(CaseMeaningfulActivitySources.CaseCreated, candidate.LastActivitySource);
@@ -3886,11 +3887,45 @@ public class TasksControllerTests
         Assert.Null(candidate.ResponsibleUserId);
         Assert.Equal(defaultAssignee.Id, candidate.SuggestedAssigneeUserId);
         Assert.Equal(defaultAssignee.FullName, candidate.SuggestedAssigneeName);
+        Assert.Equal("configuredDefault", candidate.SuggestedAssigneeSource);
         var suggestedDueAtLocal = CalendarTimeZoneHelper.ToUserLocal(
             DateTime.Parse(candidate.SuggestedDueAt).ToUniversalTime(),
             CalendarTimeZoneHelper.ResolveTimeZone("Asia/Novosibirsk"));
         Assert.Equal(9, suggestedDueAtLocal.Hour);
         Assert.Equal(0, suggestedDueAtLocal.Minute);
+    }
+
+    [Fact]
+    public async Task GetAutomationCaseCandidates_DoesNotSuggestDefaultAssigneeWhoIsOnVacation()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "candidate-vacation-author@example.com", "Автор просмотра");
+        var defaultAssignee = await CreateAdminUserAsync(db, "candidate-vacation-default@example.com", "Резервный в отпуске");
+        var client = await CreateClientAsync(db, "Клиент без ответственного и с резервом в отпуске");
+        var clientCase = await CreateCaseAsync(db, client.Id, "ДЕЛО ДЛЯ РУЧНОГО FALLBACK");
+        clientCase.CreatedAt = DateTime.UtcNow.AddDays(-20);
+        var now = DateTime.UtcNow;
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = "tasks.automation.caseControl.defaultAssigneeUserId",
+            Value = defaultAssignee.Id.ToString(),
+            CreatedAt = now,
+            UpdatedAt = now,
+        });
+        await SetVacationAsync(db, defaultAssignee.Id, now.AddDays(5));
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.GetAutomationCaseCandidates(
+            inactiveDays: 14,
+            limit: 10,
+            ct: CancellationToken.None);
+
+        var candidate = Assert.Single(Assert.IsAssignableFrom<IReadOnlyList<TaskJournalCaseAutomationCandidateDto>>(
+            Assert.IsType<OkObjectResult>(result.Result).Value));
+        Assert.Equal(clientCase.Id, candidate.ClientCaseId);
+        Assert.Equal(author.Id, candidate.SuggestedAssigneeUserId);
+        Assert.Equal(author.FullName, candidate.SuggestedAssigneeName);
+        Assert.Equal("currentUser", candidate.SuggestedAssigneeSource);
     }
 
     [Fact]
@@ -4349,6 +4384,34 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task CreateAutomationTaskForCase_UsesCurrentAuthorWhenDefaultAssigneeIsOnVacation()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "manual-vacation-author@example.com", "Автор запуска");
+        var defaultAssignee = await CreateAdminUserAsync(db, "manual-vacation-default@example.com", "Резервный в отпуске");
+        var client = await CreateClientAsync(db, "Клиент ручного fallback");
+        var clientCase = await CreateCaseAsync(db, client.Id, "ДЕЛО БЕЗ ДОСТУПНОГО РЕЗЕРВА");
+        clientCase.CreatedAt = DateTime.UtcNow.AddDays(-20);
+        var now = DateTime.UtcNow;
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = "tasks.automation.caseControl.defaultAssigneeUserId",
+            Value = defaultAssignee.Id.ToString(),
+            CreatedAt = now,
+            UpdatedAt = now,
+        });
+        await SetVacationAsync(db, defaultAssignee.Id, now.AddDays(5));
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.CreateAutomationTaskForCase(clientCase.Id, CancellationToken.None);
+
+        var dto = Assert.IsType<TaskJournalItemDto>(Assert.IsType<CreatedResult>(result.Result).Value);
+        Assert.Equal(author.Id, dto.AssigneeUserId);
+        Assert.Equal(author.FullName, dto.AssigneeName);
+        Assert.DoesNotContain(dto.Participants, item => item.UserId == defaultAssignee.Id);
+    }
+
+    [Fact]
     public async Task CreateAutomationTaskForCase_PrefersCaseResponsibleOverOwnerAndFallback()
     {
         await using var db = await CreateContextAsync();
@@ -4626,6 +4689,36 @@ public class TasksControllerTests
             Assert.Equal(defaultAssignee.FullName, task.AssigneeName);
             Assert.Equal(author.Id, task.AuthorUserId);
         });
+    }
+
+    [Fact]
+    public async Task CreateAutomationTasksForCandidates_UsesCurrentAuthorWhenDefaultAssigneeIsOnVacation()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "bulk-vacation-author@example.com", "Автор массового запуска");
+        var defaultAssignee = await CreateAdminUserAsync(db, "bulk-vacation-default@example.com", "Резервный в отпуске");
+        var client = await CreateClientAsync(db, "Клиент массового fallback");
+        var clientCase = await CreateCaseAsync(db, client.Id, "ДЕЛО БЕЗ ДОСТУПНОГО РЕЗЕРВА");
+        clientCase.CreatedAt = DateTime.UtcNow.AddDays(-20);
+        var now = DateTime.UtcNow;
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = "tasks.automation.caseControl.defaultAssigneeUserId",
+            Value = defaultAssignee.Id.ToString(),
+            CreatedAt = now,
+            UpdatedAt = now,
+        });
+        await SetVacationAsync(db, defaultAssignee.Id, now.AddDays(5));
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.CreateAutomationTasksForCandidates(limit: 10, ct: CancellationToken.None);
+
+        var dto = Assert.IsType<TaskJournalAutomationCreateResultDto>(
+            Assert.IsType<OkObjectResult>(result.Result).Value);
+        var task = Assert.Single(dto.CreatedTasks);
+        Assert.Equal(clientCase.Id, task.ClientCaseId);
+        Assert.Equal(author.Id, task.AssigneeUserId);
+        Assert.Equal(author.FullName, task.AssigneeName);
     }
 
     [Fact]
@@ -5734,6 +5827,42 @@ public class TasksControllerTests
         }
 
         Assert.False(await db.TaskJournalItems.AnyAsync(item => item.ClientCaseId == clientCase.Id));
+    }
+
+    [Fact]
+    public async Task TaskJournalAutomationScheduler_SkipsUnavailableFallbackBeforeApplyingDailyLimit()
+    {
+        await using var db = await CreateContextAsync();
+        var defaultAssignee = await CreateAdminUserAsync(db, "scheduler-vacation-default@example.com", "Резервный в отпуске");
+        var availableResponsible = await CreateAdminUserAsync(db, "scheduler-available@example.com", "Доступный ответственный");
+        var unassignedClient = await CreateClientAsync(db, "Клиент без ответственного");
+        var assignedClient = await CreateClientAsync(db, "Клиент с ответственным");
+        assignedClient.ResponsibleUserId = availableResponsible.Id;
+        var unassignedCase = await CreateCaseAsync(db, unassignedClient.Id, "САМОЕ СТАРОЕ ДЕЛО БЕЗ ИСПОЛНИТЕЛЯ");
+        var assignedCase = await CreateCaseAsync(db, assignedClient.Id, "ДЕЛО С ДОСТУПНЫМ ИСПОЛНИТЕЛЕМ");
+        var now = DateTime.UtcNow;
+        unassignedCase.CreatedAt = now.AddDays(-40);
+        assignedCase.CreatedAt = now.AddDays(-30);
+        await SetVacationAsync(db, defaultAssignee.Id, now.AddDays(5));
+        var (scheduler, provider) = CreateAutomationScheduler(db, new Dictionary<string, string?>
+        {
+            ["TaskJournal:Automation:Enabled"] = "true",
+            ["TaskJournal:Automation:InactiveDays"] = "14",
+            ["TaskJournal:Automation:Limit"] = "1",
+            ["TaskJournal:Automation:DefaultAssigneeUserId"] = defaultAssignee.Id.ToString(),
+        });
+
+        using (provider)
+        {
+            var result = await scheduler.RunOnceAsync(CancellationToken.None);
+
+            Assert.Equal(1, result.CreatedCount);
+            Assert.Null(result.Error);
+        }
+
+        Assert.False(await db.TaskJournalItems.AnyAsync(item => item.ClientCaseId == unassignedCase.Id));
+        var task = await db.TaskJournalItems.SingleAsync(item => item.ClientCaseId == assignedCase.Id);
+        Assert.Equal(availableResponsible.Id, task.AssigneeUserId);
     }
 
     [Fact]

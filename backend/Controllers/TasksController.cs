@@ -1284,6 +1284,10 @@ public class TasksController : ControllerBase
         var configuredDefaultAssignee = GetAvailableAutomationUser(
             availableUsers,
             settings.CaseInactivityDefaultAssigneeUserId);
+        if (configuredDefaultAssignee is not null && vacationUserIds.Contains(configuredDefaultAssignee.Id))
+        {
+            configuredDefaultAssignee = null;
+        }
         var suggestedAssigneesByCaseId = filteredCandidates.ToDictionary(
             item => item.Id,
             item => BuildAutomationAssignee(
@@ -1340,6 +1344,11 @@ public class TasksController : ControllerBase
                     ? $"Нет активной задачи уже {daysWithoutActiveTask} дн."
                     : "Нет активной задачи";
             var suggestedAssignee = suggestedAssigneesByCaseId[item.Id];
+            var suggestedAssigneeSource = GetAvailableAutomationUser(availableUsers, item.ResponsibleUserId) is not null
+                ? "responsible"
+                : configuredDefaultAssignee is not null
+                    ? "configuredDefault"
+                    : "currentUser";
             var suggestedTimeZone = suggestedAssignee.UserId is int suggestedAssigneeUserId &&
                                     suggestedTimeZonesByUserId.TryGetValue(suggestedAssigneeUserId, out var resolvedTimeZone)
                 ? resolvedTimeZone
@@ -1373,6 +1382,7 @@ public class TasksController : ControllerBase
                 SuggestedPriority = ResolveAutomationPriority(daysWithoutActiveTask, effectiveInactiveDays, effectiveEscalationDays),
                 SuggestedAssigneeUserId = suggestedAssignee.UserId,
                 SuggestedAssigneeName = suggestedAssignee.DisplayName,
+                SuggestedAssigneeSource = suggestedAssigneeSource,
             };
         }).ToList());
     }
@@ -1693,6 +1703,10 @@ public class TasksController : ControllerBase
         var configuredDefaultAssignee = GetAvailableAutomationUser(
             availableUsers,
             settings.CaseInactivityDefaultAssigneeUserId);
+        if (configuredDefaultAssignee is not null && vacationUserIds.Contains(configuredDefaultAssignee.Id))
+        {
+            configuredDefaultAssignee = null;
+        }
         var assignee = BuildAutomationAssignee(
             responsibleUserId,
             availableUsers,
@@ -1936,6 +1950,10 @@ public class TasksController : ControllerBase
         var configuredDefaultAssignee = GetAvailableAutomationUser(
             availableUsers,
             settings.CaseInactivityDefaultAssigneeUserId);
+        if (configuredDefaultAssignee is not null && vacationUserIds.Contains(configuredDefaultAssignee.Id))
+        {
+            configuredDefaultAssignee = null;
+        }
         var escalationUser = GetAvailableAutomationUser(
             availableUsers,
             settings.CaseInactivityEscalationUserId);
