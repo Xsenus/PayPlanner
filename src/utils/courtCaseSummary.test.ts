@@ -304,6 +304,61 @@ describe('buildCourtCaseProcessSummary', () => {
     expect(summary.risk.allDay).toBe(true);
   });
 
+  it('orders all-day records by the end of the user day instead of midnight', () => {
+    const timedEventFirst = buildCourtCaseProcessSummary(
+      { courtDecisionAt: null },
+      [courtEvent({
+        title: 'Заседание утром',
+        scheduledAt: '2026-09-20T05:00:00Z',
+        allDay: false,
+        movementStatus: 'scheduled',
+        movementStatusLabel: 'Назначено',
+      })],
+      [],
+      [proceduralDeadline({
+        deadlineType: 'motion',
+        deadlineTypeLabel: 'Ходатайство',
+        title: 'Подать ходатайство до конца дня',
+        dueAt: '2026-09-20T00:00:00Z',
+        allDay: true,
+      })],
+      {
+        now: new Date('2026-09-19T00:00:00Z'),
+        timeZoneId: 'Europe/Samara',
+      },
+    );
+
+    const timedDeadlineFirst = buildCourtCaseProcessSummary(
+      { courtDecisionAt: null },
+      [courtEvent({
+        title: 'Событие на весь день',
+        scheduledAt: '2026-09-20T00:00:00Z',
+        allDay: true,
+        movementStatus: 'scheduled',
+        movementStatusLabel: 'Назначено',
+      })],
+      [],
+      [proceduralDeadline({
+        deadlineType: 'motion',
+        deadlineTypeLabel: 'Ходатайство',
+        title: 'Подать документ к 10:00',
+        dueAt: '2026-09-20T06:00:00Z',
+        allDay: false,
+      })],
+      {
+        now: new Date('2026-09-19T00:00:00Z'),
+        timeZoneId: 'Europe/Samara',
+      },
+    );
+
+    expect(timedEventFirst.nextAction.label).toBe('Заседание утром');
+    expect(timedEventFirst.nextAction.date).toBe('2026-09-20T05:00:00Z');
+    expect(timedEventFirst.nextAction.allDay).toBe(false);
+    expect(timedDeadlineFirst.nextAction.label).toBe('Подать документ к 10:00');
+    expect(timedDeadlineFirst.nextAction.date).toBe('2026-09-20T06:00:00Z');
+    expect(timedDeadlineFirst.nextAction.allDay).toBe(false);
+  });
+
   it('keeps an all-day deadline due today visible after midnight', () => {
     const summary = buildCourtCaseProcessSummary(
       { courtDecisionAt: null },

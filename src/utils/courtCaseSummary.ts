@@ -4,6 +4,7 @@ import type {
   ClientCaseCourtInstance,
   ClientCaseProceduralDeadline,
 } from '../types';
+import { fromTimeZoneDateTimeInput } from './timeZoneDate';
 
 export type CourtProcessSummaryTone = 'emerald' | 'amber' | 'rose' | 'slate' | 'blue';
 
@@ -29,6 +30,7 @@ export interface CourtCaseProcessSummary {
 export interface CourtCaseProcessSummaryOptions {
   now?: Date;
   successfulSourceChecks?: Array<string | null | undefined>;
+  timeZoneId?: string | null;
 }
 
 const TERMINAL_EVENT_STATUSES = new Set(['archived', 'cancelled', 'completed', 'held']);
@@ -89,6 +91,21 @@ function getTime(value?: string | null) {
   return Number.isFinite(time) ? time : null;
 }
 
+function getEffectiveScheduleTime(
+  value: string | null | undefined,
+  allDay: boolean | undefined,
+  timeZoneId: string | null | undefined,
+) {
+  const time = getTime(value);
+  if (time === null || allDay !== true || !value) return time;
+
+  const dateKey = /^(\d{4}-\d{2}-\d{2})/.exec(value)?.[1];
+  if (!dateKey) return time;
+
+  const endOfDayMinute = getTime(fromTimeZoneDateTimeInput(`${dateKey}T23:59`, timeZoneId));
+  return endOfDayMinute === null ? time : endOfDayMinute + 59_999;
+}
+
 function isActiveDeadline(deadline: ClientCaseProceduralDeadline) {
   return !INACTIVE_DEADLINE_STATUSES.has((deadline.status || '').trim().toLowerCase());
 }
@@ -146,10 +163,24 @@ export function buildCourtCaseProcessSummary(
 ): CourtCaseProcessSummary {
   const now = options.now ?? new Date();
   const nowTime = now.getTime();
+  const timeZoneId = options.timeZoneId;
+  const scheduleTimeCache = new Map<string, number | null>();
+  const getScheduleTime = (value?: string | null, allDay?: boolean) => {
+    const cacheKey = `${allDay === true ? 'all-day' : 'timed'}:${value || ''}`;
+    if (scheduleTimeCache.has(cacheKey)) return scheduleTimeCache.get(cacheKey) ?? null;
+
+    const time = getEffectiveScheduleTime(value, allDay, timeZoneId);
+    scheduleTimeCache.set(cacheKey, time);
+    return time;
+  };
   const activeEvents = events.filter(isActiveCourtEvent);
   const decisionEvent = activeEvents
     .filter(isDecisionEvent)
-    .sort((left, right) => (getTime(right.scheduledAt) ?? Number.NEGATIVE_INFINITY) - (getTime(left.scheduledAt) ?? Number.NEGATIVE_INFINITY))[0];
+    .sort((left, right) => (
+      getScheduleTime(right.scheduledAt, right.allDay) ?? Number.NEGATIVE_INFINITY
+    ) - (
+      getScheduleTime(left.scheduledAt, left.allDay) ?? Number.NEGATIVE_INFINITY
+    ))[0];
   const decisionDate = caseItem.courtDecisionAt || decisionEvent?.scheduledAt || null;
   const hasDecision = Boolean(decisionDate || decisionEvent);
   const hasCourtMovement = activeEvents.length > 0;
@@ -183,7 +214,11 @@ export function buildCourtCaseProcessSummary(
 
   const appealEvent = activeEvents
     .filter(isAppealMovement)
-    .sort((left, right) => (getTime(right.scheduledAt) ?? Number.NEGATIVE_INFINITY) - (getTime(left.scheduledAt) ?? Number.NEGATIVE_INFINITY))[0];
+    .sort((left, right) => (
+      getScheduleTime(right.scheduledAt, right.allDay) ?? Number.NEGATIVE_INFINITY
+    ) - (
+      getScheduleTime(left.scheduledAt, left.allDay) ?? Number.NEGATIVE_INFINITY
+    ))[0];
   const laterInstance = instances.find(hasPopulatedLaterInstance);
   const activeComplaint = instances
     .flatMap((instance) => instance.complaints ?? [])
@@ -192,7 +227,12 @@ export function buildCourtCaseProcessSummary(
   const appealDeadline = proceduralDeadlines
     .filter((deadline) => deadline.deadlineType === 'appeal')
     .filter(isActiveDeadline)
-    .sort((left, right) => new Date(left.dueAt).getTime() - new Date(right.dueAt).getTime())[0];
+    .filter((deadline) => getTime(deadline.dueAt) !== null)
+    .sort((left, right) => (
+      getScheduleTime(left.dueAt, left.allDay) ?? 0
+    ) - (
+      getScheduleTime(right.dueAt, right.allDay) ?? 0
+    ))[0];
 
   const appeal: CourtProcessSummaryItem = hasAppeal
     ? {
@@ -239,20 +279,32 @@ export function buildCourtCaseProcessSummary(
   );
   const overdueDeadlines = activeDeadlines
     .filter((deadline) => deadline.isOverdue)
-    .sort((left, right) => (getTime(left.dueAt) ?? 0) - (getTime(right.dueAt) ?? 0));
+    .sort((left, right) => (
+      getScheduleTime(left.dueAt, left.allDay) ?? 0
+    ) - (
+      getScheduleTime(right.dueAt, right.allDay) ?? 0
+    ));
   const upcomingDeadlines = activeDeadlines
     // Статус просрочки рассчитывает backend с учётом признака «весь день» и
     // часового пояса пользователя. Сравнение ISO-полуночи с текущим временем
     // ошибочно исключало срок уже утром его последнего допустимого дня.
     .filter((deadline) => !deadline.isOverdue)
-    .sort((left, right) => (getTime(left.dueAt) ?? 0) - (getTime(right.dueAt) ?? 0));
+    .sort((left, right) => (
+      getScheduleTime(left.dueAt, left.allDay) ?? 0
+    ) - (
+      getScheduleTime(right.dueAt, right.allDay) ?? 0
+    ));
   const upcomingEvents = activeEvents
     .filter((event) => isUpcomingCourtEvent(event, nowTime))
-    .sort((left, right) => (getTime(left.scheduledAt) ?? 0) - (getTime(right.scheduledAt) ?? 0));
+    .sort((left, right) => (
+      getScheduleTime(left.scheduledAt, left.allDay) ?? 0
+    ) - (
+      getScheduleTime(right.scheduledAt, right.allDay) ?? 0
+    ));
   const nextDeadline = upcomingDeadlines[0];
   const nextEvent = upcomingEvents[0];
-  const nextDeadlineTime = getTime(nextDeadline?.dueAt);
-  const nextEventTime = getTime(nextEvent?.scheduledAt);
+  const nextDeadlineTime = getScheduleTime(nextDeadline?.dueAt, nextDeadline?.allDay);
+  const nextEventTime = getScheduleTime(nextEvent?.scheduledAt, nextEvent?.allDay);
   const deadlineComesFirst = nextDeadlineTime !== null
     && (nextEventTime === null || nextDeadlineTime <= nextEventTime);
 
@@ -312,7 +364,7 @@ export function buildCourtCaseProcessSummary(
 
   const warningDeadline = upcomingDeadlines.find((deadline) => deadline.isWarning);
   const imminentEvent = upcomingEvents.find((event) => {
-    const scheduledAt = getTime(event.scheduledAt);
+    const scheduledAt = getScheduleTime(event.scheduledAt, event.allDay);
     return scheduledAt !== null && scheduledAt - nowTime <= THREE_DAYS_MS;
   });
   let risk: CourtProcessSummaryItem;

@@ -3929,6 +3929,7 @@ export function CaseDetailPage({
               initialOverview={courtOverview}
               onOverviewChange={setCourtOverview}
               caseItem={caseItem}
+              timeZoneId={caseTimeZoneId}
               courtDirectory={courtDirectory}
               courtInstances={courtInstances}
               courtInstancesLoading={courtInstancesLoading}
@@ -6463,6 +6464,7 @@ function CourtPanel({
   initialOverview,
   onOverviewChange,
   caseItem,
+  timeZoneId,
   courtDirectory,
   courtInstances,
   courtInstancesLoading,
@@ -6558,6 +6560,7 @@ function CourtPanel({
   initialOverview: boolean;
   onOverviewChange: (value: boolean) => void;
   caseItem: ClientCase;
+  timeZoneId: string;
   courtDirectory: ClientCaseCourt[];
   courtInstances: ClientCaseCourtInstance[];
   courtInstancesLoading: boolean;
@@ -6787,7 +6790,7 @@ function CourtPanel({
       courtEvents,
       courtInstances,
       activeProceduralDeadlines,
-      { successfulSourceChecks },
+      { successfulSourceChecks, timeZoneId },
     );
 
     return (

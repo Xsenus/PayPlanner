@@ -2470,7 +2470,23 @@ describe('CaseDetailPage', () => {
       JSON.stringify({ activeTab: 'court', courtOverview: true }),
     );
     vi.mocked(apiService.getUserSetting).mockResolvedValue({ key: 'profile.timeZoneId', value: 'Europe/Samara' });
-    vi.mocked(apiService.getCaseProceduralDeadlines).mockResolvedValue([]);
+    vi.mocked(apiService.getCaseProceduralDeadlines).mockResolvedValue([{
+      id: 91,
+      clientCaseId: 15,
+      deadlineType: 'motion',
+      deadlineTypeLabel: 'Ходатайство',
+      title: 'Подать ходатайство до конца дня',
+      dueAt: '2099-06-20T00:00:00Z',
+      allDay: true,
+      status: 'active',
+      statusLabel: 'Активен',
+      warningDaysBefore: 7,
+      sourceType: 'sudrf',
+      sourceConfidence: 'official-source',
+      createdAt: '2026-05-21T00:00:00Z',
+      isOverdue: false,
+      isWarning: false,
+    }]);
     vi.mocked(apiService.getCaseCourtInstances).mockResolvedValue([
       {
         id: 81,
@@ -2581,7 +2597,9 @@ describe('CaseDetailPage', () => {
     expect(screen.getByText('Решение не обнаружено')).toBeTruthy();
     expect(screen.getByText('Обжалование пока не определяется')).toBeTruthy();
     expect(screen.getAllByText('Основание: актуальное движение дела').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Будущее судебное заседание').length).toBeGreaterThan(0);
     expect(screen.getByText(/Дата: 20\.06\.2099, \d{2}:\d{2}/u)).toBeTruthy();
+    expect(screen.getByText('до 20.06.2099 · весь день')).toBeTruthy();
     expect(screen.getByText(/Источник проверен 15\.09\.2026/u)).toBeTruthy();
     expect(screen.getByText('Инстанции и судебные карточки')).toBeTruthy();
     expect(screen.getByText('Заседания и движения')).toBeTruthy();
