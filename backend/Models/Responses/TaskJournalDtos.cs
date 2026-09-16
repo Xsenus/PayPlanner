@@ -257,8 +257,11 @@ public class TaskJournalAutomationPreviewDto
 {
     public int InactivityDays { get; set; }
     public int EscalationDays { get; set; }
+    public int DailyLimit { get; set; }
     public int TrackedCaseCount { get; set; }
     public int CandidateCount { get; set; }
+    public int NextRunCandidateCount { get; set; }
+    public int DeferredByLimitCount { get; set; }
     public int EscalationCandidateCount { get; set; }
     public int ExcludedByStatusCount { get; set; }
     public int PausedByVacationCount { get; set; }

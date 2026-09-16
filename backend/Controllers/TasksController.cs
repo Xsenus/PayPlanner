@@ -784,7 +784,8 @@ public class TasksController : ControllerBase
         [FromQuery] int inactivityDays,
         [FromQuery] int escalationDays,
         CancellationToken ct,
-        [FromQuery] int defaultAssigneeUserId = 0)
+        [FromQuery] int defaultAssigneeUserId = 0,
+        [FromQuery] int dailyLimit = 25)
     {
         var access = await GetTaskAccessAsync(ct);
         if (access is null)
@@ -799,6 +800,7 @@ public class TasksController : ControllerBase
 
         var normalizedInactivityDays = Math.Clamp(inactivityDays, 1, 365);
         var normalizedEscalationDays = Math.Clamp(escalationDays, normalizedInactivityDays, 365);
+        var normalizedDailyLimit = Math.Clamp(dailyLimit, 1, 100);
         var now = DateTime.UtcNow;
         var inactivityCutoff = now.AddDays(-normalizedInactivityDays);
         var escalationCutoff = now.AddDays(-normalizedEscalationDays);
@@ -875,12 +877,18 @@ public class TasksController : ControllerBase
             })
             .SingleOrDefaultAsync(ct);
 
+        var candidateCount = statistics?.CandidateCount ?? 0;
+        var nextRunCandidateCount = Math.Min(candidateCount, normalizedDailyLimit);
+
         return Ok(new TaskJournalAutomationPreviewDto
         {
             InactivityDays = normalizedInactivityDays,
             EscalationDays = normalizedEscalationDays,
+            DailyLimit = normalizedDailyLimit,
             TrackedCaseCount = statistics?.TrackedCaseCount ?? 0,
-            CandidateCount = statistics?.CandidateCount ?? 0,
+            CandidateCount = candidateCount,
+            NextRunCandidateCount = nextRunCandidateCount,
+            DeferredByLimitCount = candidateCount - nextRunCandidateCount,
             EscalationCandidateCount = statistics?.EscalationCandidateCount ?? 0,
             ExcludedByStatusCount = statistics?.ExcludedByStatusCount ?? 0,
             PausedByVacationCount = statistics?.PausedByVacationCount ?? 0,

@@ -808,8 +808,12 @@ public class TasksControllerTests
         await using var db = await CreateContextAsync();
         var admin = await CreateAdminUserAsync(db, "preview-assignee@example.com", "Резервный исполнитель");
         var client = await CreateClientAsync(db, "Клиент без ответственного для preview");
-        var clientCase = await CreateCaseAsync(db, client.Id, "ДЕЛО БЕЗ ОТВЕТСТВЕННОГО");
-        clientCase.CreatedAt = DateTime.UtcNow.AddDays(-45);
+        var firstCase = await CreateCaseAsync(db, client.Id, "ПЕРВОЕ ДЕЛО БЕЗ ОТВЕТСТВЕННОГО");
+        var secondCase = await CreateCaseAsync(db, client.Id, "ВТОРОЕ ДЕЛО БЕЗ ОТВЕТСТВЕННОГО");
+        var thirdCase = await CreateCaseAsync(db, client.Id, "ТРЕТЬЕ ДЕЛО БЕЗ ОТВЕТСТВЕННОГО");
+        firstCase.CreatedAt = DateTime.UtcNow.AddDays(-45);
+        secondCase.CreatedAt = DateTime.UtcNow.AddDays(-44);
+        thirdCase.CreatedAt = DateTime.UtcNow.AddDays(-43);
         await db.SaveChangesAsync();
         var controller = CreateController(db, new RecordingNotificationService(), admin);
 
@@ -817,21 +821,28 @@ public class TasksControllerTests
             inactivityDays: 14,
             escalationDays: 30,
             ct: CancellationToken.None,
-            defaultAssigneeUserId: 0);
+            defaultAssigneeUserId: 0,
+            dailyLimit: 2);
         var withoutFallback = Assert.IsType<TaskJournalAutomationPreviewDto>(
             Assert.IsType<OkObjectResult>(withoutFallbackAction.Result).Value);
         Assert.Equal(0, withoutFallback.CandidateCount);
-        Assert.Equal(1, withoutFallback.UnassignedCount);
+        Assert.Equal(3, withoutFallback.UnassignedCount);
+        Assert.Equal(2, withoutFallback.DailyLimit);
+        Assert.Equal(0, withoutFallback.NextRunCandidateCount);
+        Assert.Equal(0, withoutFallback.DeferredByLimitCount);
 
         var withFallbackAction = await controller.PreviewCaseControlAutomation(
             inactivityDays: 14,
             escalationDays: 30,
             ct: CancellationToken.None,
-            defaultAssigneeUserId: admin.Id);
+            defaultAssigneeUserId: admin.Id,
+            dailyLimit: 2);
         var withFallback = Assert.IsType<TaskJournalAutomationPreviewDto>(
             Assert.IsType<OkObjectResult>(withFallbackAction.Result).Value);
-        Assert.Equal(1, withFallback.CandidateCount);
+        Assert.Equal(3, withFallback.CandidateCount);
         Assert.Equal(0, withFallback.UnassignedCount);
+        Assert.Equal(2, withFallback.NextRunCandidateCount);
+        Assert.Equal(1, withFallback.DeferredByLimitCount);
     }
 
     [Fact]

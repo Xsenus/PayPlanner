@@ -57,8 +57,11 @@ describe('TaskJournalSettings', () => {
     apiMock.previewTaskJournalCaseAutomation.mockResolvedValue({
       inactivityDays: 14,
       escalationDays: 30,
+      dailyLimit: 5,
       trackedCaseCount: 40,
       candidateCount: 12,
+      nextRunCandidateCount: 5,
+      deferredByLimitCount: 7,
       escalationCandidateCount: 3,
       excludedByStatusCount: 8,
       pausedByVacationCount: 2,
@@ -192,6 +195,7 @@ describe('TaskJournalSettings', () => {
     apiMock.getTaskJournalSettings.mockResolvedValue({
       ...settings,
       caseInactivityAutomationEnabled: true,
+      caseInactivityLimit: 5,
     });
     render(<TaskJournalSettings />);
 
@@ -199,12 +203,13 @@ describe('TaskJournalSettings', () => {
     fireEvent.change(inactivityDays, { target: { value: '10' } });
     fireEvent.click(screen.getByRole('button', { name: 'Рассчитать влияние' }));
 
-    await waitFor(() => expect(apiMock.previewTaskJournalCaseAutomation).toHaveBeenCalledWith(10, 30, 0));
+    await waitFor(() => expect(apiMock.previewTaskJournalCaseAutomation).toHaveBeenCalledWith(10, 30, 0, 5));
     const result = await screen.findByTestId('case-inactivity-preview-result');
     expect(result.textContent).toContain('12');
     expect(result.textContent).toContain('3');
 
     const breakdown = screen.getByTestId('case-inactivity-preview-breakdown');
+    const runPlan = screen.getByTestId('case-inactivity-preview-run-plan');
     const panel = screen.getByTestId('case-inactivity-preview-panel');
     expect(panel.classList.contains('pp-automation-preview')).toBe(true);
     expect(panel.querySelectorAll('.pp-automation-preview-card')).toHaveLength(9);
@@ -216,14 +221,18 @@ describe('TaskJournalSettings', () => {
     expect(within(breakdown).getByText('9')).toBeTruthy();
     const unassignedCard = within(breakdown).getByRole('button', { name: 'Нет исполнителя: 1. Показать дела' });
     expect(unassignedCard.classList.contains('pp-automation-preview-card-warning')).toBe(true);
-    expect(within(breakdown).getByText('Было недавнее движение')).toBeTruthy();
-    expect(within(breakdown).getByText('5')).toBeTruthy();
+    expect(within(breakdown).getByRole('button', { name: 'Было недавнее движение: 5. Показать дела' })).toBeTruthy();
     expect(within(breakdown).getByText('Исключены по статусу')).toBeTruthy();
     expect(within(breakdown).getByText('8')).toBeTruthy();
     expect(within(breakdown).getByText('Автоконтроль выключен')).toBeTruthy();
     expect(within(breakdown).getByText('4')).toBeTruthy();
     expect(within(breakdown).getByText('Ответственный в отпуске')).toBeTruthy();
     expect(within(breakdown).getByText('2')).toBeTruthy();
+    expect(within(runPlan).getByText('Ближайший запуск')).toBeTruthy();
+    expect(within(runPlan).getByText('5')).toBeTruthy();
+    expect(within(runPlan).getByText('Останется в очереди')).toBeTruthy();
+    expect(within(runPlan).getByText('7')).toBeTruthy();
+    expect(within(runPlan).getByText('Новых задач при дневном лимите 5')).toBeTruthy();
     const criticalCard = within(breakdown).getByRole('button', { name: 'Достигнут критический срок: 3. Показать дела' });
     expect(criticalCard.classList.contains('pp-automation-preview-card-critical')).toBe(true);
     fireEvent.click(criticalCard);
@@ -252,12 +261,28 @@ describe('TaskJournalSettings', () => {
     fireEvent.click(screen.getByRole('option', { name: 'Иван Петров' }));
     fireEvent.click(screen.getByRole('button', { name: 'Рассчитать влияние' }));
 
-    await waitFor(() => expect(apiMock.previewTaskJournalCaseAutomation).toHaveBeenCalledWith(14, 30, 8));
+    await waitFor(() => expect(apiMock.previewTaskJournalCaseAutomation).toHaveBeenCalledWith(14, 30, 8, 25));
     expect(await screen.findByTestId('case-inactivity-preview-breakdown')).toBeTruthy();
 
     fireEvent.click(fallbackAssignee);
     fireEvent.click(screen.getByRole('option', { name: 'Ответственный по делу' }));
     expect(screen.queryByTestId('case-inactivity-preview-breakdown')).toBeNull();
+  });
+
+  it('invalidates the preview when the unsaved daily limit changes', async () => {
+    apiMock.getTaskJournalSettings.mockResolvedValue({
+      ...settings,
+      caseInactivityAutomationEnabled: true,
+    });
+    render(<TaskJournalSettings />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Рассчитать влияние' }));
+    expect(await screen.findByTestId('case-inactivity-preview-run-plan')).toBeTruthy();
+
+    fireEvent.change(screen.getByRole('spinbutton', { name: /Дневной лимит новых задач/i }), {
+      target: { value: '10' },
+    });
+    expect(screen.queryByTestId('case-inactivity-preview-run-plan')).toBeNull();
   });
 
   it('pages and searches case explanations before navigating to a case', async () => {

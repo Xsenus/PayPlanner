@@ -325,6 +325,24 @@ html[data-payplanner-theme] .pp-settings-nav-item-active:hover {
   color: var(--pp-success-text);
 }
 
+.pp-automation-preview-run-plan-primary {
+  background: color-mix(in srgb, var(--pp-primary-soft) 88%, var(--pp-surface));
+  border-color: color-mix(in srgb, var(--pp-primary) 38%, var(--pp-border));
+  color: var(--pp-primary-strong);
+}
+
+.pp-automation-preview-run-plan-deferred {
+  background: color-mix(in srgb, var(--pp-warning-soft) 82%, var(--pp-surface));
+  border-color: var(--pp-warning-border);
+  color: var(--pp-warning-text);
+}
+
+.pp-automation-preview-run-plan-empty {
+  background: var(--pp-success-soft);
+  border-color: var(--pp-success-border);
+  color: var(--pp-success-text);
+}
+
 .pp-automation-preview-card-interactive:hover:not(:disabled) {
   background: var(--pp-row-hover);
   border-color: color-mix(in srgb, var(--pp-primary) 48%, var(--pp-border));

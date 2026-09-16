@@ -298,6 +298,7 @@ export function TaskJournalSettings({
         settings.caseInactivityDays,
         settings.caseInactivityEscalationDays,
         settings.caseInactivityDefaultAssigneeUserId ?? 0,
+        settings.caseInactivityLimit,
       );
       setPreview(response);
     } catch (error) {
@@ -379,6 +380,16 @@ export function TaskJournalSettings({
       }
     }
   };
+
+  const previewDailyLimit = preview?.dailyLimit ?? settings.caseInactivityLimit;
+  const previewNextRunCount = preview?.nextRunCandidateCount ?? Math.min(
+    preview?.candidateCount ?? 0,
+    previewDailyLimit,
+  );
+  const previewDeferredByLimitCount = preview?.deferredByLimitCount ?? Math.max(
+    0,
+    (preview?.candidateCount ?? 0) - previewDailyLimit,
+  );
 
   return (
     <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
@@ -737,7 +748,7 @@ export function TaskJournalSettings({
               <div className="font-semibold text-slate-900">Предварительный расчёт</div>
               {preview ? (
                 <div className="mt-1" data-testid="case-inactivity-preview-result">
-                  При пороге {preview.inactivityDays} дн. автоматический запуск сможет создать задачи по <strong>{preview.candidateCount}</strong> делам,
+                  При пороге {preview.inactivityDays} дн. готово <strong>{preview.candidateCount}</strong> дел,
                   из них <strong>{preview.escalationCandidateCount}</strong> достигли критического порога {preview.escalationDays} дн.
                 </div>
               ) : (
@@ -761,6 +772,28 @@ export function TaskJournalSettings({
 
           {preview ? (
             <div className="mt-3" data-testid="case-inactivity-preview-breakdown">
+              <div className="pp-automation-preview-run-plan mb-2 grid gap-2 sm:grid-cols-2" data-testid="case-inactivity-preview-run-plan">
+                <div className="pp-automation-preview-run-plan-primary rounded-lg border px-3 py-2">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="text-xs font-semibold">Ближайший запуск</span>
+                    <strong className="text-lg">{previewNextRunCount}</strong>
+                  </div>
+                  <div className="mt-0.5 text-[11px] leading-4">
+                    Новых задач при дневном лимите {previewDailyLimit}
+                  </div>
+                </div>
+                <div className={`rounded-lg border px-3 py-2 ${previewDeferredByLimitCount > 0 ? 'pp-automation-preview-run-plan-deferred' : 'pp-automation-preview-run-plan-empty'}`}>
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="text-xs font-semibold">Останется в очереди</span>
+                    <strong className="text-lg">{previewDeferredByLimitCount}</strong>
+                  </div>
+                  <div className="mt-0.5 text-[11px] leading-4">
+                    {previewDeferredByLimitCount > 0
+                      ? 'Будут обработаны следующими ежедневными запусками'
+                      : 'Вся очередь войдёт в ближайший ежедневный запуск'}
+                  </div>
+                </div>
+              </div>
               <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
                 <div className="pp-automation-preview-card rounded-lg border px-3 py-2 shadow-sm">
                   <div className="flex items-baseline justify-between gap-2">
@@ -1002,10 +1035,14 @@ export function TaskJournalSettings({
               min={1}
               max={100}
               value={settings.caseInactivityLimit}
-              onChange={(event) => setSettings((prev) => ({
-                ...prev,
-                caseInactivityLimit: Math.min(100, Math.max(1, Number(event.target.value) || 1)),
-              }))}
+              onChange={(event) => {
+                setPreview(null);
+                closePreviewDetails();
+                setSettings((prev) => ({
+                  ...prev,
+                  caseInactivityLimit: Math.min(100, Math.max(1, Number(event.target.value) || 1)),
+                }));
+              }}
               disabled={loading || saving || !settings.caseInactivityAutomationEnabled}
               className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm disabled:cursor-not-allowed disabled:bg-gray-100"
             />

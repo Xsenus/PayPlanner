@@ -1046,7 +1046,7 @@ export interface SmsNotificationSettingsDto {
   providerAccount: string;
   senderName: string;
   providers: SmsProviderOptionDto[];
-  dailyLimit: number;
+  dailyLimit?: number;
   recipientDailyLimit: number;
   burstLimitPerMinute: number;
   maxMessageLength: number;
@@ -1981,8 +1981,11 @@ export interface TaskJournalAutomationDiagnosticsDto {
 export interface TaskJournalAutomationPreviewDto {
   inactivityDays: number;
   escalationDays: number;
+  dailyLimit: number;
   trackedCaseCount: number;
   candidateCount: number;
+  nextRunCandidateCount?: number;
+  deferredByLimitCount?: number;
   escalationCandidateCount: number;
   excludedByStatusCount: number;
   pausedByVacationCount: number;
@@ -4591,8 +4594,13 @@ export class ApiService {
     return this.request<TaskJournalAutomationDiagnosticsDto>('/tasks/automation/case-control/diagnostics');
   }
 
-  async previewTaskJournalCaseAutomation(inactivityDays: number, escalationDays: number, defaultAssigneeUserId = 0) {
-    const q = buildQuery({ inactivityDays, escalationDays, defaultAssigneeUserId });
+  async previewTaskJournalCaseAutomation(
+    inactivityDays: number,
+    escalationDays: number,
+    defaultAssigneeUserId = 0,
+    dailyLimit = 25,
+  ) {
+    const q = buildQuery({ inactivityDays, escalationDays, defaultAssigneeUserId, dailyLimit });
     return this.request<TaskJournalAutomationPreviewDto>(`/tasks/automation/case-control/preview${q}`);
   }
 
