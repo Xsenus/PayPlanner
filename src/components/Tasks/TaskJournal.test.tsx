@@ -4094,6 +4094,31 @@ describe('TaskJournal', () => {
     expect(await screen.findByText('Не удалось обновить очередь автоконтроля. Показаны ранее загруженные данные.')).toBeTruthy();
     expect(screen.getByText('Клиент из сохраненной очереди')).toBeTruthy();
     expect(screen.queryByText('В этой категории дел без активных задач нет.')).toBeNull();
+
+    apiMock.getTaskJournalCaseAutomationCandidates.mockRejectedValueOnce(new Error('still unavailable'));
+    fireEvent.click(screen.getByRole('button', { name: 'Повторить загрузку' }));
+
+    expect(await screen.findByText('Не удалось обновить очередь автоконтроля. Показаны ранее загруженные данные.')).toBeTruthy();
+    expect(screen.getByText('Клиент из сохраненной очереди')).toBeTruthy();
+
+    const refreshedCandidate = {
+      ...candidate,
+      clientName: 'Клиент из обновленной очереди',
+      reason: 'Нет активной задачи уже 21 дн.',
+    };
+    let resolveRetry: ((value: typeof candidate[]) => void) | undefined;
+    apiMock.getTaskJournalCaseAutomationCandidates.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveRetry = resolve;
+    }));
+    fireEvent.click(screen.getByRole('button', { name: 'Повторить загрузку' }));
+
+    expect(screen.getByText('Клиент из сохраненной очереди')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Обновляем очередь...' })).toBeTruthy();
+
+    resolveRetry?.([refreshedCandidate]);
+    expect(await screen.findByText('Клиент из обновленной очереди')).toBeTruthy();
+    expect(screen.queryByText('Клиент из сохраненной очереди')).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 
   it('completes an active task with an existing result from the quick action', async () => {

@@ -2254,6 +2254,7 @@ export function TaskJournal({
   const automationCandidatesRequestKeyRef = useRef<string | null>(null);
   const automationSummaryRequestKeyRef = useRef<string | null>(null);
   const automationLoadMoreRequestRef = useRef(0);
+  const automationRetryPreserveCandidatesRef = useRef(false);
   const taskJournalEventSourceRef = useRef<object>({});
   const [loading, setLoading] = useState(true);
   const [filterOwnerKey, setFilterOwnerKey] = useState(() => getTaskJournalFilterStorageKey(currentUserId, mode));
@@ -2978,7 +2979,11 @@ export function TaskJournal({
     const requestId = automationCandidatesRequestRef.current + 1;
     automationCandidatesRequestRef.current = requestId;
     automationLoadMoreRequestRef.current += 1;
-    setAutomationCandidates([]);
+    const preserveCandidates = automationRetryPreserveCandidatesRef.current;
+    automationRetryPreserveCandidatesRef.current = false;
+    if (!preserveCandidates) {
+      setAutomationCandidates([]);
+    }
     setAutomationLoadError(null);
     setAutomationPageLoading(true);
     setAutomationLoadingMore(false);
@@ -3005,12 +3010,14 @@ export function TaskJournal({
       })
       .catch(() => {
         if (!controller.signal.aborted && automationCandidatesRequestRef.current === requestId) {
-          setAutomationCandidates([]);
-          setAutomationLoadError(AUTOMATION_LOAD_ERROR_MESSAGE);
-          if (shouldRefreshSummary) {
-            setAutomationSummary(EMPTY_AUTOMATION_SUMMARY);
-            automationSummaryRequestKeyRef.current = null;
+          if (!preserveCandidates) {
+            setAutomationCandidates([]);
+            if (shouldRefreshSummary) {
+              setAutomationSummary(EMPTY_AUTOMATION_SUMMARY);
+              automationSummaryRequestKeyRef.current = null;
+            }
           }
+          setAutomationLoadError(preserveCandidates ? AUTOMATION_REFRESH_ERROR_MESSAGE : AUTOMATION_LOAD_ERROR_MESSAGE);
           setAutomationPageLoading(false);
         }
       });
@@ -3282,6 +3289,7 @@ export function TaskJournal({
     }
 
     setAutomationCandidates([]);
+    automationRetryPreserveCandidatesRef.current = false;
     setAutomationLoadError(null);
     automationLoadMoreRequestRef.current += 1;
     setAutomationPageLoading(true);
@@ -3297,6 +3305,7 @@ export function TaskJournal({
 
     setAutomationSearch(normalizedValue);
     setAutomationCandidates([]);
+    automationRetryPreserveCandidatesRef.current = false;
     setAutomationLoadError(null);
     automationLoadMoreRequestRef.current += 1;
     setAutomationPageLoading(true);
@@ -3306,10 +3315,11 @@ export function TaskJournal({
   const retryAutomationCandidates = useCallback(() => {
     automationCandidatesRequestKeyRef.current = null;
     automationSummaryRequestKeyRef.current = null;
+    automationRetryPreserveCandidatesRef.current = automationCandidates.length > 0;
     setAutomationLoadError(null);
     setAutomationPageLoading(true);
     setAutomationReloadVersion((version) => version + 1);
-  }, []);
+  }, [automationCandidates.length]);
 
   const loadMoreAutomationCandidates = useCallback(async () => {
     const stateTotal = getAutomationCandidateStateCount(automationSummary, automationStateFilter);
