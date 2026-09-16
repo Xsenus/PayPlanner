@@ -68,7 +68,7 @@ public class TasksController : ControllerBase
     ];
     private static readonly HashSet<string> AllowedAutomationPreviewCategories = new(StringComparer.Ordinal)
     {
-        "candidate", "criticalCandidate", "activeTask", "recentActivity", "excludedStatus", "disabled", "vacation"
+        "candidate", "criticalCandidate", "activeTask", "unassigned", "recentActivity", "excludedStatus", "disabled", "vacation"
     };
     private const string RestrictExecutorEditingSettingKey = "tasks.restrictExecutorEditing";
     private const string AllowExecutorDeadlineChangeRequestsSettingKey = "tasks.allowExecutorDeadlineChangeRequests";
@@ -783,7 +783,8 @@ public class TasksController : ControllerBase
     public async Task<ActionResult<TaskJournalAutomationPreviewDto>> PreviewCaseControlAutomation(
         [FromQuery] int inactivityDays,
         [FromQuery] int escalationDays,
-        CancellationToken ct)
+        CancellationToken ct,
+        [FromQuery] int defaultAssigneeUserId = 0)
     {
         var access = await GetTaskAccessAsync(ct);
         if (access is null)
@@ -803,8 +804,12 @@ public class TasksController : ControllerBase
         var escalationCutoff = now.AddDays(-normalizedEscalationDays);
         var vacationUserIds = await CaseInactivityResponsibleAvailabilityService
             .GetUsersOnVacationAsync(_db, now, ct);
+        var hasAvailableDefaultAssignee = await HasAvailableAutomationUserAsync(
+            defaultAssigneeUserId,
+            vacationUserIds,
+            ct);
 
-        var statistics = await BuildAutomationPreviewQuery(vacationUserIds)
+        var statistics = await BuildAutomationPreviewQuery(vacationUserIds, hasAvailableDefaultAssignee)
             .GroupBy(_ => 1)
             .Select(group => new
             {
@@ -822,11 +827,18 @@ public class TasksController : ControllerBase
                     !item.IsResponsibleOnVacation &&
                     item.InactivityRemindersEnabled &&
                     item.ActiveTaskCount > 0),
+                UnassignedCount = group.Count(item =>
+                    !item.IsStatusExcluded &&
+                    !item.IsResponsibleOnVacation &&
+                    item.InactivityRemindersEnabled &&
+                    item.ActiveTaskCount == 0 &&
+                    !item.HasAvailableAssignee),
                 RecentlyActiveCount = group.Count(item =>
                     !item.IsStatusExcluded &&
                     !item.IsResponsibleOnVacation &&
                     item.InactivityRemindersEnabled &&
                     item.ActiveTaskCount == 0 &&
+                    item.HasAvailableAssignee &&
                     ((item.LastTaskAt ?? item.CreatedAt) > inactivityCutoff ||
                      (item.LastTaskCommentAt ?? item.CreatedAt) > inactivityCutoff ||
                      (item.LastControlCycleEndedAt ?? item.CreatedAt) > inactivityCutoff ||
@@ -838,6 +850,7 @@ public class TasksController : ControllerBase
                     !item.IsStatusExcluded &&
                     !item.IsResponsibleOnVacation &&
                     item.ActiveTaskCount == 0 &&
+                    item.HasAvailableAssignee &&
                     (item.LastTaskAt ?? item.CreatedAt) <= inactivityCutoff &&
                     (item.LastTaskCommentAt ?? item.CreatedAt) <= inactivityCutoff &&
                     (item.LastControlCycleEndedAt ?? item.CreatedAt) <= inactivityCutoff &&
@@ -850,6 +863,7 @@ public class TasksController : ControllerBase
                     !item.IsStatusExcluded &&
                     !item.IsResponsibleOnVacation &&
                     item.ActiveTaskCount == 0 &&
+                    item.HasAvailableAssignee &&
                     (item.LastTaskAt ?? item.CreatedAt) <= escalationCutoff &&
                     (item.LastTaskCommentAt ?? item.CreatedAt) <= escalationCutoff &&
                     (item.LastControlCycleEndedAt ?? item.CreatedAt) <= inactivityCutoff &&
@@ -872,6 +886,7 @@ public class TasksController : ControllerBase
             PausedByVacationCount = statistics?.PausedByVacationCount ?? 0,
             DisabledCount = statistics?.DisabledCount ?? 0,
             ActiveTaskCount = statistics?.ActiveTaskCount ?? 0,
+            UnassignedCount = statistics?.UnassignedCount ?? 0,
             RecentlyActiveCount = statistics?.RecentlyActiveCount ?? 0,
         });
     }
@@ -884,7 +899,8 @@ public class TasksController : ControllerBase
         [FromQuery] string? search = null,
         [FromQuery] int offset = 0,
         [FromQuery] int limit = 20,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        [FromQuery] int defaultAssigneeUserId = 0)
     {
         var access = await GetTaskAccessAsync(ct);
         if (access is null)
@@ -912,8 +928,14 @@ public class TasksController : ControllerBase
         var escalationCutoff = now.AddDays(-normalizedEscalationDays);
         var responsibleAvailability = await CaseInactivityResponsibleAvailabilityService
             .GetAvailabilityAsync(_db, now, ct);
+        var hasAvailableDefaultAssignee = await HasAvailableAutomationUserAsync(
+            defaultAssigneeUserId,
+            responsibleAvailability.UsersOnVacation,
+            ct);
 
-        var detailsQuery = BuildAutomationPreviewQuery(responsibleAvailability.UsersOnVacation);
+        var detailsQuery = BuildAutomationPreviewQuery(
+            responsibleAvailability.UsersOnVacation,
+            hasAvailableDefaultAssignee);
         if (!string.IsNullOrWhiteSpace(search))
         {
             var rawTerm = search.Trim();
@@ -937,6 +959,7 @@ public class TasksController : ControllerBase
                 !item.IsResponsibleOnVacation &&
                 item.InactivityRemindersEnabled &&
                 item.ActiveTaskCount == 0 &&
+                item.HasAvailableAssignee &&
                 (item.LastTaskAt ?? item.CreatedAt) <= escalationCutoff &&
                 (item.LastTaskCommentAt ?? item.CreatedAt) <= escalationCutoff &&
                 (item.LastControlCycleEndedAt ?? item.CreatedAt) <= inactivityCutoff &&
@@ -957,11 +980,18 @@ public class TasksController : ControllerBase
                 !item.IsResponsibleOnVacation &&
                 item.InactivityRemindersEnabled &&
                 item.ActiveTaskCount > 0),
+            "unassigned" => detailsQuery.Where(item =>
+                !item.IsStatusExcluded &&
+                !item.IsResponsibleOnVacation &&
+                item.InactivityRemindersEnabled &&
+                item.ActiveTaskCount == 0 &&
+                !item.HasAvailableAssignee),
             "recentActivity" => detailsQuery.Where(item =>
                 !item.IsStatusExcluded &&
                 !item.IsResponsibleOnVacation &&
                 item.InactivityRemindersEnabled &&
                 item.ActiveTaskCount == 0 &&
+                item.HasAvailableAssignee &&
                 ((item.LastTaskAt ?? item.CreatedAt) > inactivityCutoff ||
                  (item.LastTaskCommentAt ?? item.CreatedAt) > inactivityCutoff ||
                  (item.LastControlCycleEndedAt ?? item.CreatedAt) > inactivityCutoff ||
@@ -974,6 +1004,7 @@ public class TasksController : ControllerBase
                 !item.IsResponsibleOnVacation &&
                 item.InactivityRemindersEnabled &&
                 item.ActiveTaskCount == 0 &&
+                item.HasAvailableAssignee &&
                 (item.LastTaskAt ?? item.CreatedAt) <= inactivityCutoff &&
                 (item.LastTaskCommentAt ?? item.CreatedAt) <= inactivityCutoff &&
                 (item.LastControlCycleEndedAt ?? item.CreatedAt) <= inactivityCutoff &&
@@ -1086,6 +1117,7 @@ public class TasksController : ControllerBase
                     ? "Автоконтроль индивидуально выключен в карточке дела."
                     : $"Автоконтроль выключен: {item.InactivityRemindersDisabledReason}",
                 "activeTask" => $"По делу есть активные задачи: {item.ActiveTaskCount}.",
+                "unassigned" => "У дела нет активного ответственного, и резервный исполнитель автоконтроля не выбран.",
                 "recentActivity" => $"Последнее значимое движение было {daysSinceAnchor} дн. назад; порог ещё не наступил.",
                 "criticalCandidate" => $"Значимого движения нет {daysSinceMeaningfulActivity} дн.; достигнут критический порог {normalizedEscalationDays} дн.",
                 _ => $"Значимого движения нет {daysSinceAnchor} дн.; срок постановки контроля наступил.",
@@ -6178,7 +6210,24 @@ public class TasksController : ControllerBase
                 LastActivityConfirmationAt: activityConfirmedAt))
             .At;
 
-    private IQueryable<CaseAutomationPreviewRow> BuildAutomationPreviewQuery(HashSet<int> vacationUserIds)
+    private async Task<bool> HasAvailableAutomationUserAsync(
+        int userId,
+        HashSet<int> vacationUserIds,
+        CancellationToken ct)
+    {
+        if (userId <= 0 || vacationUserIds.Contains(userId))
+        {
+            return false;
+        }
+
+        return await _db.Users
+            .AsNoTracking()
+            .AnyAsync(user => user.Id == userId && user.IsActive && user.IsApproved, ct);
+    }
+
+    private IQueryable<CaseAutomationPreviewRow> BuildAutomationPreviewQuery(
+        HashSet<int> vacationUserIds,
+        bool hasAvailableDefaultAssignee)
         => _db.ClientCases
             .AsNoTracking()
             .Where(clientCase =>
@@ -6212,6 +6261,19 @@ public class TasksController : ControllerBase
                     (clientCase.ResponsibleUserId ??
                      (clientCase.Client != null ? clientCase.Client.ResponsibleUserId : null) ??
                      (clientCase.LegalEntity != null ? clientCase.LegalEntity.ResponsibleUserId : null)) ?? 0),
+                HasAvailableAssignee = hasAvailableDefaultAssignee ||
+                    (clientCase.ResponsibleUserId.HasValue
+                        ? clientCase.ResponsibleUser != null &&
+                          clientCase.ResponsibleUser.IsActive &&
+                          clientCase.ResponsibleUser.IsApproved
+                        : clientCase.Client != null && clientCase.Client.ResponsibleUserId.HasValue
+                            ? clientCase.Client.ResponsibleUser != null &&
+                              clientCase.Client.ResponsibleUser.IsActive &&
+                              clientCase.Client.ResponsibleUser.IsApproved
+                            : clientCase.LegalEntity != null &&
+                              clientCase.LegalEntity.ResponsibleUser != null &&
+                              clientCase.LegalEntity.ResponsibleUser.IsActive &&
+                              clientCase.LegalEntity.ResponsibleUser.IsApproved),
                 CreatedAt = clientCase.CreatedAt,
                 LastViewedAt = clientCase.LastViewedAt,
                 ActivityConfirmedAt = clientCase.ActivityConfirmedAt,
@@ -8428,6 +8490,7 @@ public class TasksController : ControllerBase
         public int? ResponsibleUserId { get; set; }
         public string ResponsibleName { get; set; } = string.Empty;
         public bool IsResponsibleOnVacation { get; set; }
+        public bool HasAvailableAssignee { get; set; }
         public DateTime CreatedAt { get; set; }
         public DateTime? LastViewedAt { get; set; }
         public DateTime? ActivityConfirmedAt { get; set; }

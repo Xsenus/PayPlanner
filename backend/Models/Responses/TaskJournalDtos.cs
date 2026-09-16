@@ -264,6 +264,7 @@ public class TaskJournalAutomationPreviewDto
     public int PausedByVacationCount { get; set; }
     public int DisabledCount { get; set; }
     public int ActiveTaskCount { get; set; }
+    public int UnassignedCount { get; set; }
     public int RecentlyActiveCount { get; set; }
 }
 

@@ -1988,6 +1988,7 @@ export interface TaskJournalAutomationPreviewDto {
   pausedByVacationCount: number;
   disabledCount: number;
   activeTaskCount: number;
+  unassignedCount: number;
   recentlyActiveCount: number;
 }
 
@@ -1995,6 +1996,7 @@ export type TaskJournalAutomationPreviewCategory =
   | 'candidate'
   | 'criticalCandidate'
   | 'activeTask'
+  | 'unassigned'
   | 'recentActivity'
   | 'excludedStatus'
   | 'disabled'
@@ -4589,14 +4591,15 @@ export class ApiService {
     return this.request<TaskJournalAutomationDiagnosticsDto>('/tasks/automation/case-control/diagnostics');
   }
 
-  async previewTaskJournalCaseAutomation(inactivityDays: number, escalationDays: number) {
-    const q = buildQuery({ inactivityDays, escalationDays });
+  async previewTaskJournalCaseAutomation(inactivityDays: number, escalationDays: number, defaultAssigneeUserId = 0) {
+    const q = buildQuery({ inactivityDays, escalationDays, defaultAssigneeUserId });
     return this.request<TaskJournalAutomationPreviewDto>(`/tasks/automation/case-control/preview${q}`);
   }
 
   async getTaskJournalAutomationPreviewDetails(params: {
     inactivityDays: number;
     escalationDays: number;
+    defaultAssigneeUserId?: number;
     category: TaskJournalAutomationPreviewCategory;
     search?: string;
     offset?: number;

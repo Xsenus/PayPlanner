@@ -741,6 +741,7 @@ public class TasksControllerTests
         await using var db = await CreateContextAsync(interceptor);
         var admin = await CreateAdminUserAsync(db, "preview-settings@example.com", "Администратор");
         var client = await CreateClientAsync(db, "Клиент предварительного расчёта");
+        client.ResponsibleUserId = admin.Id;
         var oldCase = await CreateCaseAsync(db, client.Id, "ДАВНО БЕЗ ДВИЖЕНИЯ");
         var recentCase = await CreateCaseAsync(db, client.Id, "НЕДАВНЕЕ ДЕЛО");
         var activeCase = await CreateCaseAsync(db, client.Id, "ДЕЛО С АКТИВНОЙ ЗАДАЧЕЙ");
@@ -750,6 +751,8 @@ public class TasksControllerTests
         var vacationClient = await CreateClientAsync(db, "Клиент ответственного в отпуске");
         vacationClient.ResponsibleUserId = vacationUser.Id;
         var vacationCase = await CreateCaseAsync(db, vacationClient.Id, "ДЕЛО НА ПАУЗЕ ИЗ-ЗА ОТПУСКА");
+        var unassignedClient = await CreateClientAsync(db, "Клиент без ответственного");
+        var unassignedCase = await CreateCaseAsync(db, unassignedClient.Id, "ДЕЛО БЕЗ ИСПОЛНИТЕЛЯ");
         var now = DateTime.UtcNow;
         oldCase.CreatedAt = now.AddDays(-45);
         recentCase.CreatedAt = now.AddDays(-5);
@@ -759,6 +762,7 @@ public class TasksControllerTests
         disabledCase.InactivityRemindersEnabled = false;
         disabledCase.InactivityRemindersDisabledReason = "Ручное исключение";
         vacationCase.CreatedAt = now.AddDays(-45);
+        unassignedCase.CreatedAt = now.AddDays(-45);
         await SetVacationAsync(db, vacationUser.Id, now.AddDays(5));
         await CreateTaskAsync(
             db,
@@ -781,20 +785,53 @@ public class TasksControllerTests
         var dto = Assert.IsType<TaskJournalAutomationPreviewDto>(ok.Value);
         Assert.Equal(14, dto.InactivityDays);
         Assert.Equal(30, dto.EscalationDays);
-        Assert.Equal(6, dto.TrackedCaseCount);
+        Assert.Equal(7, dto.TrackedCaseCount);
         Assert.Equal(1, dto.CandidateCount);
         Assert.Equal(1, dto.EscalationCandidateCount);
         Assert.Equal(1, dto.ExcludedByStatusCount);
         Assert.Equal(1, dto.PausedByVacationCount);
         Assert.Equal(1, dto.DisabledCount);
         Assert.Equal(1, dto.ActiveTaskCount);
+        Assert.Equal(1, dto.UnassignedCount);
         Assert.Equal(1, dto.RecentlyActiveCount);
         Assert.Equal(
             dto.TrackedCaseCount,
             dto.CandidateCount + dto.ExcludedByStatusCount + dto.PausedByVacationCount +
-            dto.DisabledCount + dto.ActiveTaskCount + dto.RecentlyActiveCount);
+            dto.DisabledCount + dto.ActiveTaskCount + dto.UnassignedCount + dto.RecentlyActiveCount);
         Assert.Single(interceptor.Commands, command =>
             command.Contains("FROM \"ClientCases\"", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task PreviewCaseControlAutomation_UsesUnsavedDefaultAssigneeAndExplainsMissingAssignee()
+    {
+        await using var db = await CreateContextAsync();
+        var admin = await CreateAdminUserAsync(db, "preview-assignee@example.com", "Резервный исполнитель");
+        var client = await CreateClientAsync(db, "Клиент без ответственного для preview");
+        var clientCase = await CreateCaseAsync(db, client.Id, "ДЕЛО БЕЗ ОТВЕТСТВЕННОГО");
+        clientCase.CreatedAt = DateTime.UtcNow.AddDays(-45);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), admin);
+
+        var withoutFallbackAction = await controller.PreviewCaseControlAutomation(
+            inactivityDays: 14,
+            escalationDays: 30,
+            ct: CancellationToken.None,
+            defaultAssigneeUserId: 0);
+        var withoutFallback = Assert.IsType<TaskJournalAutomationPreviewDto>(
+            Assert.IsType<OkObjectResult>(withoutFallbackAction.Result).Value);
+        Assert.Equal(0, withoutFallback.CandidateCount);
+        Assert.Equal(1, withoutFallback.UnassignedCount);
+
+        var withFallbackAction = await controller.PreviewCaseControlAutomation(
+            inactivityDays: 14,
+            escalationDays: 30,
+            ct: CancellationToken.None,
+            defaultAssigneeUserId: admin.Id);
+        var withFallback = Assert.IsType<TaskJournalAutomationPreviewDto>(
+            Assert.IsType<OkObjectResult>(withFallbackAction.Result).Value);
+        Assert.Equal(1, withFallback.CandidateCount);
+        Assert.Equal(0, withFallback.UnassignedCount);
     }
 
     [Fact]
@@ -804,6 +841,7 @@ public class TasksControllerTests
         await using var db = await CreateContextAsync(interceptor);
         var admin = await CreateAdminUserAsync(db, "preview-details@example.com", "Администратор");
         var client = await CreateClientAsync(db, "Клиент детализации");
+        client.ResponsibleUserId = admin.Id;
         var firstCandidate = await CreateCaseAsync(db, client.Id, "ЯВНО СРОЧНЫЙ КАНДИДАТ");
         var secondCandidate = await CreateCaseAsync(db, client.Id, "АЛФАВИТНЫЙ КАНДИДАТ");
         var recentCase = await CreateCaseAsync(db, client.Id, "НЕДАВНЕЕ ДЕЛО");
@@ -814,6 +852,8 @@ public class TasksControllerTests
         var vacationClient = await CreateClientAsync(db, "Клиент в отпуске");
         vacationClient.ResponsibleUserId = vacationUser.Id;
         var vacationCase = await CreateCaseAsync(db, vacationClient.Id, "ДЕЛО НА ПАУЗЕ");
+        var unassignedClient = await CreateClientAsync(db, "Клиент детализации без ответственного");
+        var unassignedCase = await CreateCaseAsync(db, unassignedClient.Id, "ДЕЛО БЕЗ ИСПОЛНИТЕЛЯ");
         var now = DateTime.UtcNow;
         firstCandidate.CreatedAt = now.AddDays(-45);
         secondCandidate.CreatedAt = now.AddDays(-20);
@@ -824,6 +864,7 @@ public class TasksControllerTests
         disabledCase.InactivityRemindersEnabled = false;
         disabledCase.InactivityRemindersDisabledReason = "Работа ведётся вне CRM";
         vacationCase.CreatedAt = now.AddDays(-45);
+        unassignedCase.CreatedAt = now.AddDays(-45);
         await SetVacationAsync(db, vacationUser.Id, now.AddDays(5));
         await CreateTaskAsync(
             db,
@@ -880,6 +921,10 @@ public class TasksControllerTests
         var active = await LoadAsync("activeTask");
         Assert.Equal(activeCase.Id, Assert.Single(active.Items).ClientCaseId);
         Assert.Contains("активные задачи: 1", active.Items[0].Explanation);
+
+        var unassigned = await LoadAsync("unassigned");
+        Assert.Equal(unassignedCase.Id, Assert.Single(unassigned.Items).ClientCaseId);
+        Assert.Contains("нет активного ответственного", unassigned.Items[0].Explanation);
 
         var excluded = await LoadAsync("excludedStatus");
         Assert.Equal(closedCase.Id, Assert.Single(excluded.Items).ClientCaseId);
@@ -951,6 +996,7 @@ public class TasksControllerTests
         await using var db = await CreateContextAsync(interceptor);
         var admin = await CreateAdminUserAsync(db, "preview-load@example.com", "Администратор");
         var client = await CreateClientAsync(db, "Клиент нагрузочной проверки");
+        client.ResponsibleUserId = admin.Id;
         var createdAt = DateTime.UtcNow.AddDays(-45);
         var cases = Enumerable.Range(1, 10_000)
             .Select(index => new ClientCase

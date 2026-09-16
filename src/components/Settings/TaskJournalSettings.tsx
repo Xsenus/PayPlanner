@@ -1,7 +1,7 @@
 import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemSelect } from '../ui/SystemSelect';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ChevronDown, ExternalLink, Loader2, RefreshCcw, RotateCcw, Save, Search, X } from 'lucide-react';
+import { ChevronDown, ExternalLink, Loader2, RefreshCcw, RotateCcw, Save, Search, ShieldCheck, X } from 'lucide-react';
 import {
   apiService,
   type TaskJournalAutomationDiagnosticsDto,
@@ -64,6 +64,7 @@ const AUTOMATION_PREVIEW_CATEGORY_LABELS: Record<TaskJournalAutomationPreviewCat
   candidate: 'Пора создать контроль',
   criticalCandidate: 'Достигнут критический срок',
   activeTask: 'Есть активная задача',
+  unassigned: 'Нет исполнителя',
   recentActivity: 'Было недавнее движение',
   excludedStatus: 'Исключены по статусу',
   disabled: 'Автоконтроль выключен',
@@ -296,6 +297,7 @@ export function TaskJournalSettings({
       const response = await apiService.previewTaskJournalCaseAutomation(
         settings.caseInactivityDays,
         settings.caseInactivityEscalationDays,
+        settings.caseInactivityDefaultAssigneeUserId ?? 0,
       );
       setPreview(response);
     } catch (error) {
@@ -351,6 +353,7 @@ export function TaskJournalSettings({
       const response = await apiService.getTaskJournalAutomationPreviewDetails({
         inactivityDays: preview?.inactivityDays ?? settings.caseInactivityDays,
         escalationDays: preview?.escalationDays ?? settings.caseInactivityEscalationDays,
+        defaultAssigneeUserId: settings.caseInactivityDefaultAssigneeUserId ?? 0,
         category,
         ...(normalizedSearch ? { search: normalizedSearch } : {}),
         offset: append ? previewDetails?.items.length ?? 0 : 0,
@@ -734,12 +737,16 @@ export function TaskJournalSettings({
               <div className="font-semibold text-slate-900">Предварительный расчёт</div>
               {preview ? (
                 <div className="mt-1" data-testid="case-inactivity-preview-result">
-                  При пороге {preview.inactivityDays} дн. под правило попадёт <strong>{preview.candidateCount}</strong> дел,
+                  При пороге {preview.inactivityDays} дн. автоматический запуск сможет создать задачи по <strong>{preview.candidateCount}</strong> делам,
                   из них <strong>{preview.escalationCandidateCount}</strong> достигли критического порога {preview.escalationDays} дн.
                 </div>
               ) : (
                 <div className="mt-1 text-slate-500">Покажет ожидаемое число дел и объяснит, почему остальные не попадут под правило.</div>
               )}
+              <div className="pp-automation-preview-safe mt-2 inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[11px] font-semibold">
+                <ShieldCheck className="h-3.5 w-3.5" />
+                Безопасный расчёт: задачи не создаются, настройки не сохраняются
+              </div>
             </div>
             <button
               type="button"
@@ -766,6 +773,7 @@ export function TaskJournalSettings({
                   ['candidate', preview.candidateCount, 'Все дела с наступившим сроком'],
                   ['criticalCandidate', preview.escalationCandidateCount, `Без движения не менее ${preview.escalationDays} дн.`],
                   ['activeTask', preview.activeTaskCount ?? 0, 'Контроль пока не требуется'],
+                  ['unassigned', preview.unassignedCount ?? 0, 'Нужен ответственный или резервный исполнитель'],
                   ['recentActivity', preview.recentlyActiveCount ?? 0, `Ещё не прошло ${preview.inactivityDays} дн.`],
                   ['excludedStatus', preview.excludedByStatusCount ?? 0, 'Приостановленные, закрытые и проигранные'],
                   ['disabled', preview.disabledCount ?? 0, 'Индивидуальное исключение в карточке дела'],
@@ -778,7 +786,7 @@ export function TaskJournalSettings({
                     aria-label={`${AUTOMATION_PREVIEW_CATEGORY_LABELS[category]}: ${value}. Показать дела`}
                     onClick={() => void loadPreviewDetails(category)}
                     disabled={value === 0 || previewDetailsLoading || previewDetailsLoadingMore}
-                    className={`pp-automation-preview-card pp-automation-preview-card-interactive rounded-lg border px-3 py-2 text-left shadow-sm transition disabled:cursor-default disabled:opacity-60 ${category === 'criticalCandidate' ? 'pp-automation-preview-card-critical' : ''} ${previewDetailsCategory === category ? 'pp-automation-preview-card-active' : ''}`}
+                    className={`pp-automation-preview-card pp-automation-preview-card-interactive rounded-lg border px-3 py-2 text-left shadow-sm transition disabled:cursor-default disabled:opacity-60 ${category === 'criticalCandidate' ? 'pp-automation-preview-card-critical' : ''} ${category === 'unassigned' ? 'pp-automation-preview-card-warning' : ''} ${previewDetailsCategory === category ? 'pp-automation-preview-card-active' : ''}`}
                   >
                     <div className="flex items-baseline justify-between gap-2">
                       <span className="text-xs font-medium text-slate-600">{AUTOMATION_PREVIEW_CATEGORY_LABELS[category]}</span>
@@ -1042,11 +1050,16 @@ export function TaskJournalSettings({
           <label className="block">
             <span className="text-sm font-medium text-gray-700">Резервный исполнитель</span>
             <SystemSelect
+              aria-label="Резервный исполнитель"
               value={settings.caseInactivityDefaultAssigneeUserId ?? ''}
-              onChange={(event) => setSettings((prev) => ({
-                ...prev,
-                caseInactivityDefaultAssigneeUserId: event.target.value ? Number(event.target.value) : null,
-              }))}
+              onChange={(event) => {
+                setPreview(null);
+                closePreviewDetails();
+                setSettings((prev) => ({
+                  ...prev,
+                  caseInactivityDefaultAssigneeUserId: event.target.value ? Number(event.target.value) : null,
+                }));
+              }}
               disabled={loading || saving || !settings.caseInactivityAutomationEnabled}
               className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm disabled:cursor-not-allowed disabled:bg-gray-100"
             >

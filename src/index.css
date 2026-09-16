@@ -319,6 +319,12 @@ html[data-payplanner-theme] .pp-settings-nav-item-active:hover {
   border-color: color-mix(in srgb, var(--pp-primary) 22%, var(--pp-border));
 }
 
+.pp-automation-preview-safe {
+  background: var(--pp-success-soft);
+  border-color: var(--pp-success-border);
+  color: var(--pp-success-text);
+}
+
 .pp-automation-preview-card-interactive:hover:not(:disabled) {
   background: var(--pp-row-hover);
   border-color: color-mix(in srgb, var(--pp-primary) 48%, var(--pp-border));
@@ -349,6 +355,22 @@ html[data-payplanner-theme] .pp-settings-nav-item-active:hover {
   background: var(--pp-danger-soft-strong);
   border-color: var(--pp-danger-border);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--pp-danger-solid) 16%, transparent);
+}
+
+.pp-automation-preview-card-warning {
+  background: color-mix(in srgb, var(--pp-warning-soft) 78%, var(--pp-surface));
+  border-color: color-mix(in srgb, var(--pp-warning-solid) 38%, var(--pp-border));
+}
+
+.pp-automation-preview-card-warning strong,
+.pp-automation-preview-card-warning .text-blue-700 {
+  color: var(--pp-warning-text) !important;
+}
+
+.pp-automation-preview-card-warning:hover:not(:disabled),
+.pp-automation-preview-card-warning.pp-automation-preview-card-active {
+  background: var(--pp-warning-soft-strong);
+  border-color: var(--pp-warning-border);
 }
 
 .pp-automation-preview-details {

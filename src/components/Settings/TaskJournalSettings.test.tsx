@@ -64,6 +64,7 @@ describe('TaskJournalSettings', () => {
       pausedByVacationCount: 2,
       disabledCount: 4,
       activeTaskCount: 9,
+      unassignedCount: 1,
       recentlyActiveCount: 5,
     });
     apiMock.getTaskJournalAutomationPreviewDetails.mockImplementation(async ({ category, offset = 0 }) => ({
@@ -198,7 +199,7 @@ describe('TaskJournalSettings', () => {
     fireEvent.change(inactivityDays, { target: { value: '10' } });
     fireEvent.click(screen.getByRole('button', { name: 'Рассчитать влияние' }));
 
-    await waitFor(() => expect(apiMock.previewTaskJournalCaseAutomation).toHaveBeenCalledWith(10, 30));
+    await waitFor(() => expect(apiMock.previewTaskJournalCaseAutomation).toHaveBeenCalledWith(10, 30, 0));
     const result = await screen.findByTestId('case-inactivity-preview-result');
     expect(result.textContent).toContain('12');
     expect(result.textContent).toContain('3');
@@ -206,12 +207,15 @@ describe('TaskJournalSettings', () => {
     const breakdown = screen.getByTestId('case-inactivity-preview-breakdown');
     const panel = screen.getByTestId('case-inactivity-preview-panel');
     expect(panel.classList.contains('pp-automation-preview')).toBe(true);
-    expect(panel.querySelectorAll('.pp-automation-preview-card')).toHaveLength(8);
+    expect(panel.querySelectorAll('.pp-automation-preview-card')).toHaveLength(9);
+    expect(within(panel).getByText('Безопасный расчёт: задачи не создаются, настройки не сохраняются')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Рассчитать влияние' }).classList.contains('pp-automation-preview-action')).toBe(true);
     expect(within(breakdown).getByText('Проверено дел')).toBeTruthy();
     expect(within(breakdown).getByText('40')).toBeTruthy();
     expect(within(breakdown).getByText('Есть активная задача')).toBeTruthy();
     expect(within(breakdown).getByText('9')).toBeTruthy();
+    const unassignedCard = within(breakdown).getByRole('button', { name: 'Нет исполнителя: 1. Показать дела' });
+    expect(unassignedCard.classList.contains('pp-automation-preview-card-warning')).toBe(true);
     expect(within(breakdown).getByText('Было недавнее движение')).toBeTruthy();
     expect(within(breakdown).getByText('5')).toBeTruthy();
     expect(within(breakdown).getByText('Исключены по статусу')).toBeTruthy();
@@ -226,12 +230,33 @@ describe('TaskJournalSettings', () => {
     await waitFor(() => expect(apiMock.getTaskJournalAutomationPreviewDetails).toHaveBeenCalledWith({
       inactivityDays: 14,
       escalationDays: 30,
+      defaultAssigneeUserId: 0,
       category: 'criticalCandidate',
       offset: 0,
       limit: 20,
     }));
 
     fireEvent.change(inactivityDays, { target: { value: '11' } });
+    expect(screen.queryByTestId('case-inactivity-preview-breakdown')).toBeNull();
+  });
+
+  it('includes the unsaved fallback assignee in preview and invalidates stale results', async () => {
+    apiMock.getTaskJournalSettings.mockResolvedValue({
+      ...settings,
+      caseInactivityAutomationEnabled: true,
+    });
+    render(<TaskJournalSettings />);
+
+    const fallbackAssignee = await screen.findByRole('combobox', { name: /Резервный исполнитель/i });
+    fireEvent.click(fallbackAssignee);
+    fireEvent.click(screen.getByRole('option', { name: 'Иван Петров' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Рассчитать влияние' }));
+
+    await waitFor(() => expect(apiMock.previewTaskJournalCaseAutomation).toHaveBeenCalledWith(14, 30, 8));
+    expect(await screen.findByTestId('case-inactivity-preview-breakdown')).toBeTruthy();
+
+    fireEvent.click(fallbackAssignee);
+    fireEvent.click(screen.getByRole('option', { name: 'Ответственный по делу' }));
     expect(screen.queryByTestId('case-inactivity-preview-breakdown')).toBeNull();
   });
 
@@ -337,6 +362,7 @@ describe('TaskJournalSettings', () => {
     expect(apiMock.getTaskJournalAutomationPreviewDetails).toHaveBeenNthCalledWith(1, {
       inactivityDays: 14,
       escalationDays: 30,
+      defaultAssigneeUserId: 0,
       category: 'activeTask',
       offset: 0,
       limit: 20,
@@ -347,6 +373,7 @@ describe('TaskJournalSettings', () => {
     expect(apiMock.getTaskJournalAutomationPreviewDetails).toHaveBeenNthCalledWith(2, {
       inactivityDays: 14,
       escalationDays: 30,
+      defaultAssigneeUserId: 0,
       category: 'activeTask',
       offset: 1,
       limit: 20,
@@ -360,6 +387,7 @@ describe('TaskJournalSettings', () => {
     await waitFor(() => expect(apiMock.getTaskJournalAutomationPreviewDetails).toHaveBeenNthCalledWith(3, {
       inactivityDays: 14,
       escalationDays: 30,
+      defaultAssigneeUserId: 0,
       category: 'activeTask',
       search: 'Второй клиент',
       offset: 0,
@@ -388,6 +416,7 @@ describe('TaskJournalSettings', () => {
     await waitFor(() => expect(apiMock.getTaskJournalAutomationPreviewDetails).toHaveBeenNthCalledWith(5, {
       inactivityDays: 14,
       escalationDays: 30,
+      defaultAssigneeUserId: 0,
       category: 'activeTask',
       search: 'Недоступный запрос',
       offset: 0,
