@@ -235,7 +235,7 @@ describe('TaskJournalSettings', () => {
     expect(screen.queryByTestId('case-inactivity-preview-breakdown')).toBeNull();
   });
 
-  it('opens paged case explanations for a preview category and navigates to a case', async () => {
+  it('pages and searches case explanations before navigating to a case', async () => {
     const onOpenCase = vi.fn();
     apiMock.getTaskJournalAutomationPreviewDetails
       .mockResolvedValueOnce({
@@ -264,6 +264,26 @@ describe('TaskJournalSettings', () => {
         escalationDays: 30,
         totalCount: 2,
         offset: 1,
+        limit: 20,
+        items: [{
+          clientCaseId: 602,
+          clientCaseTitle: 'Дело со второй активной задачей',
+          clientId: 52,
+          clientName: 'Второй клиент',
+          legalEntityId: null,
+          legalEntityName: '',
+          responsibleName: '',
+          explanation: 'По делу есть активные задачи: 2.',
+          lastActivityAt: '2026-09-11T09:00:00Z',
+          lastActivitySource: 'taskComment',
+        }],
+      })
+      .mockResolvedValueOnce({
+        category: 'activeTask',
+        inactivityDays: 14,
+        escalationDays: 30,
+        totalCount: 1,
+        offset: 0,
         limit: 20,
         items: [{
           clientCaseId: 602,
@@ -307,7 +327,24 @@ describe('TaskJournalSettings', () => {
       limit: 20,
     });
 
-    fireEvent.click(within(details).getAllByRole('button', { name: 'Открыть дело' })[0]);
-    expect(onOpenCase).toHaveBeenCalledWith(601, 51);
+    fireEvent.change(within(details).getByRole('searchbox', { name: 'Поиск дел в выбранной категории' }), {
+      target: { value: '  Второй клиент  ' },
+    });
+    fireEvent.click(within(details).getByRole('button', { name: 'Найти' }));
+
+    await waitFor(() => expect(apiMock.getTaskJournalAutomationPreviewDetails).toHaveBeenNthCalledWith(3, {
+      inactivityDays: 14,
+      escalationDays: 30,
+      category: 'activeTask',
+      search: 'Второй клиент',
+      offset: 0,
+      limit: 20,
+    }));
+    expect(await within(details).findByText('По запросу показано 1 из 1')).toBeTruthy();
+    expect(within(details).queryByText('Дело с первой активной задачей')).toBeNull();
+    expect(within(details).getByText('Дело со второй активной задачей')).toBeTruthy();
+
+    fireEvent.click(within(details).getByRole('button', { name: 'Открыть дело' }));
+    expect(onOpenCase).toHaveBeenCalledWith(602, 52);
   });
 });

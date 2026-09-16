@@ -1,7 +1,7 @@
 import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemSelect } from '../ui/SystemSelect';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ChevronDown, ExternalLink, Loader2, RefreshCcw, RotateCcw, Save, X } from 'lucide-react';
+import { ChevronDown, ExternalLink, Loader2, RefreshCcw, RotateCcw, Save, Search, X } from 'lucide-react';
 import {
   apiService,
   type TaskJournalAutomationDiagnosticsDto,
@@ -205,6 +205,8 @@ export function TaskJournalSettings({
   const [preview, setPreview] = useState<TaskJournalAutomationPreviewDto | null>(null);
   const [previewDetails, setPreviewDetails] = useState<TaskJournalAutomationPreviewDetailsDto | null>(null);
   const [previewDetailsCategory, setPreviewDetailsCategory] = useState<TaskJournalAutomationPreviewCategory | null>(null);
+  const [previewDetailsSearchDraft, setPreviewDetailsSearchDraft] = useState('');
+  const [previewDetailsSearch, setPreviewDetailsSearch] = useState('');
   const [previewDetailsLoading, setPreviewDetailsLoading] = useState(false);
   const [previewDetailsLoadingMore, setPreviewDetailsLoadingMore] = useState(false);
   const previewDetailsRequestRef = useRef(0);
@@ -277,6 +279,8 @@ export function TaskJournalSettings({
     previewDetailsRequestRef.current += 1;
     setPreviewDetails(null);
     setPreviewDetailsCategory(null);
+    setPreviewDetailsSearchDraft('');
+    setPreviewDetailsSearch('');
     setPreviewDetailsLoading(false);
     setPreviewDetailsLoadingMore(false);
     setPreviewLoading(true);
@@ -297,6 +301,8 @@ export function TaskJournalSettings({
     previewDetailsRequestRef.current += 1;
     setPreviewDetails(null);
     setPreviewDetailsCategory(null);
+    setPreviewDetailsSearchDraft('');
+    setPreviewDetailsSearch('');
     setPreviewDetailsLoading(false);
     setPreviewDetailsLoadingMore(false);
   };
@@ -304,18 +310,24 @@ export function TaskJournalSettings({
   const loadPreviewDetails = async (
     category: TaskJournalAutomationPreviewCategory,
     append = false,
+    searchOverride?: string,
   ) => {
-    if (!append && previewDetailsCategory === category && previewDetails) {
+    if (!append && searchOverride === undefined && previewDetailsCategory === category && previewDetails) {
       closePreviewDetails();
       return;
     }
 
+    const normalizedSearch = (searchOverride ?? (append ? previewDetailsSearch : '')).trim();
     const requestId = previewDetailsRequestRef.current + 1;
     previewDetailsRequestRef.current = requestId;
     setPreviewDetailsCategory(category);
     if (append) {
       setPreviewDetailsLoadingMore(true);
     } else {
+      setPreviewDetailsSearch(normalizedSearch);
+      if (searchOverride === undefined) {
+        setPreviewDetailsSearchDraft('');
+      }
       setPreviewDetails(null);
       setPreviewDetailsLoading(true);
     }
@@ -325,6 +337,7 @@ export function TaskJournalSettings({
         inactivityDays: preview?.inactivityDays ?? settings.caseInactivityDays,
         escalationDays: preview?.escalationDays ?? settings.caseInactivityEscalationDays,
         category,
+        ...(normalizedSearch ? { search: normalizedSearch } : {}),
         offset: append ? previewDetails?.items.length ?? 0 : 0,
         limit: AUTOMATION_PREVIEW_DETAILS_PAGE_SIZE,
       });
@@ -775,7 +788,7 @@ export function TaskJournalSettings({
                       <h6 className="text-sm font-semibold text-slate-900">{AUTOMATION_PREVIEW_CATEGORY_LABELS[previewDetailsCategory]}</h6>
                       <p className="mt-0.5 text-xs text-slate-500">
                         {previewDetails
-                          ? `Показано ${previewDetails.items.length} из ${previewDetails.totalCount}`
+                          ? `${previewDetailsSearch ? 'По запросу показано' : 'Показано'} ${previewDetails.items.length} из ${previewDetails.totalCount}`
                           : 'Загружаем дела и точную причину для каждого...'}
                       </p>
                     </div>
@@ -788,6 +801,49 @@ export function TaskJournalSettings({
                       <X className="h-4 w-4" />
                     </button>
                   </div>
+
+                  <form
+                    className="mt-3 flex flex-col gap-2 sm:flex-row"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void loadPreviewDetails(previewDetailsCategory, false, previewDetailsSearchDraft);
+                    }}
+                    role="search"
+                  >
+                    <label className="relative min-w-0 flex-1">
+                      <span className="sr-only">Поиск дел в выбранной категории</span>
+                      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                      <input
+                        type="search"
+                        value={previewDetailsSearchDraft}
+                        onChange={(event) => setPreviewDetailsSearchDraft(event.target.value)}
+                        placeholder="Дело, клиент или ответственный"
+                        disabled={previewDetailsLoading || previewDetailsLoadingMore}
+                        className="h-9 w-full rounded-lg border border-slate-200 bg-white pl-9 pr-3 text-sm text-slate-800 outline-none transition focus:border-blue-400 disabled:opacity-60"
+                      />
+                    </label>
+                    <button
+                      type="submit"
+                      disabled={previewDetailsLoading || previewDetailsLoadingMore}
+                      className="pp-automation-preview-action inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border px-3 text-xs font-semibold transition disabled:cursor-wait disabled:opacity-60"
+                    >
+                      <Search className="h-3.5 w-3.5" />
+                      Найти
+                    </button>
+                    {previewDetailsSearch ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPreviewDetailsSearchDraft('');
+                          void loadPreviewDetails(previewDetailsCategory, false, '');
+                        }}
+                        disabled={previewDetailsLoading || previewDetailsLoadingMore}
+                        className="inline-flex h-9 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-60"
+                      >
+                        Сбросить
+                      </button>
+                    ) : null}
+                  </form>
 
                   {previewDetailsLoading ? (
                     <div className="mt-3 flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-6 text-sm text-slate-500">
@@ -840,7 +896,11 @@ export function TaskJournalSettings({
                       ) : null}
                     </div>
                   ) : previewDetails ? (
-                    <div className="mt-3 rounded-lg border border-slate-200 bg-white px-3 py-4 text-sm text-slate-500">В этой категории дел больше нет.</div>
+                    <div className="mt-3 rounded-lg border border-slate-200 bg-white px-3 py-4 text-sm text-slate-500">
+                      {previewDetailsSearch
+                        ? `По запросу «${previewDetailsSearch}» дел в этой категории не найдено.`
+                        : 'В этой категории дел больше нет.'}
+                    </div>
                   ) : null}
                 </section>
               ) : null}
