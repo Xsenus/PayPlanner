@@ -2508,10 +2508,27 @@ describe('CaseDetailPage', () => {
         movementStatus: 'completed',
         movementStatusLabel: 'Завершено',
         sourceType: 'sudrf',
-        sourceCheckedAt: '2026-09-16T06:30:00Z',
         sourceConfidence: 'official-source',
         createdAt: '2026-05-21T00:00:00Z',
         isOverdue: false,
+      },
+    ]);
+    vi.mocked(apiService.getCaseCourtSyncLogs).mockResolvedValue([
+      {
+        id: 91,
+        clientCaseId: 15,
+        status: 'external-sync-completed',
+        message: 'Судебный источник успешно проверен, изменений нет.',
+        occurredAt: '2026-09-15T06:30:00Z',
+        actorName: 'Система',
+      },
+      {
+        id: 90,
+        clientCaseId: 15,
+        status: 'manual-check-recorded',
+        message: 'Ручная проверка зафиксирована.',
+        occurredAt: '2026-09-16T07:30:00Z',
+        actorName: 'Администратор',
       },
     ]);
 
@@ -2524,7 +2541,7 @@ describe('CaseDetailPage', () => {
     expect(screen.getByText('Решение не обнаружено')).toBeTruthy();
     expect(screen.getByText('Обжалование пока не определяется')).toBeTruthy();
     expect(screen.getAllByText('Основание: актуальное движение дела').length).toBeGreaterThan(0);
-    expect(screen.getByText(/Источник проверен 16\.09\.2026/u)).toBeTruthy();
+    expect(screen.getByText(/Источник проверен 15\.09\.2026/u)).toBeTruthy();
     expect(screen.getByText('Инстанции и судебные карточки')).toBeTruthy();
     expect(screen.getByText('Заседания и движения')).toBeTruthy();
     expect(screen.getByText('Лента процессуальной истории')).toBeTruthy();

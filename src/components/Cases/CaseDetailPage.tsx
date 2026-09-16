@@ -6764,7 +6764,19 @@ function CourtPanel({
     });
     const visibleInstances = populatedInstances.length > 0 ? populatedInstances : [selectedCourtInstanceMeta];
     const ownerName = caseItem.client?.name || caseItem.legalEntity?.shortName || caseItem.legalEntity?.fullName || 'Владелец не указан';
-    const processSummary = buildCourtCaseProcessSummary(caseItem, courtEvents, courtInstances, activeProceduralDeadlines);
+    const successfulSourceChecks = logs
+      .filter((log) => (log.status || '').trim().toLowerCase() === 'external-sync-completed')
+      .map((log) => log.occurredAt);
+    if (lastCourtSyncResult?.status === 'external-sync-completed') {
+      successfulSourceChecks.push(lastCourtSyncResult.checkedAt);
+    }
+    const processSummary = buildCourtCaseProcessSummary(
+      caseItem,
+      courtEvents,
+      courtInstances,
+      activeProceduralDeadlines,
+      { successfulSourceChecks },
+    );
 
     return (
       <div className="space-y-3">

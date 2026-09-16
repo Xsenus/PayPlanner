@@ -188,14 +188,14 @@ describe('buildCourtCaseProcessSummary', () => {
       [courtEvent({ sourceCheckedAt: '2026-09-15T08:00:00Z' })],
       [],
       [proceduralDeadline({ sourceCheckedAt: '2026-09-16T10:30:00Z' })],
-      new Date('2026-09-16T09:00:00Z'),
+      { now: new Date('2026-09-16T09:00:00Z') },
     );
     const unverified = buildCourtCaseProcessSummary(
       { courtDecisionAt: null },
       [courtEvent({ sourceType: 'manual', sourceCheckedAt: null })],
       [],
       [],
-      new Date('2026-09-16T09:00:00Z'),
+      { now: new Date('2026-09-16T09:00:00Z') },
     );
 
     expect(verified.sourceCheckedAt).toBe('2026-09-16T10:30:00Z');
@@ -204,6 +204,23 @@ describe('buildCourtCaseProcessSummary', () => {
     expect(unverified.sourceCheckedAt).toBeNull();
     expect(unverified.risk.label).toBe('Срочных рисков не обнаружено');
     expect(unverified.risk.tone).toBe('blue');
+  });
+
+  it('uses a successful source sync even when it created no events or deadlines', () => {
+    const summary = buildCourtCaseProcessSummary(
+      { courtDecisionAt: null },
+      [courtEvent({ sourceType: 'manual', sourceCheckedAt: null })],
+      [],
+      [],
+      {
+        now: new Date('2026-09-16T09:00:00Z'),
+        successfulSourceChecks: [null, 'invalid-date', '2026-09-16T08:30:00Z'],
+      },
+    );
+
+    expect(summary.sourceCheckedAt).toBe('2026-09-16T08:30:00Z');
+    expect(summary.risk.label).toBe('Критичных рисков не обнаружено');
+    expect(summary.risk.tone).toBe('emerald');
   });
 
   it('does not use archived movements as evidence for a current decision or appeal', () => {
@@ -246,7 +263,7 @@ describe('buildCourtCaseProcessSummary', () => {
       })],
       [],
       [],
-      new Date('2026-09-16T09:00:00Z'),
+      { now: new Date('2026-09-16T09:00:00Z') },
     );
 
     expect(summary.nextAction.label).toBe('Предварительное судебное заседание');
@@ -273,7 +290,7 @@ describe('buildCourtCaseProcessSummary', () => {
         dueAt: '2026-09-20T00:00:00Z',
         isWarning: true,
       })],
-      new Date('2026-09-16T09:00:00Z'),
+      { now: new Date('2026-09-16T09:00:00Z') },
     );
 
     expect(summary.nextAction.label).toBe('Подать ходатайство');
@@ -296,7 +313,7 @@ describe('buildCourtCaseProcessSummary', () => {
         isOverdue: false,
         isWarning: true,
       })],
-      new Date('2026-09-16T12:00:00Z'),
+      { now: new Date('2026-09-16T12:00:00Z') },
     );
 
     expect(summary.nextAction.label).toBe('Подать возражения');
@@ -318,7 +335,7 @@ describe('buildCourtCaseProcessSummary', () => {
       })],
       [],
       [],
-      new Date('2026-09-16T12:00:00Z'),
+      { now: new Date('2026-09-16T12:00:00Z') },
     );
 
     expect(summary.nextAction.label).toBe('Судебное заседание');
@@ -346,7 +363,7 @@ describe('buildCourtCaseProcessSummary', () => {
         isWarning: true,
         statusLabel: 'Просрочен',
       })],
-      new Date('2026-09-16T09:00:00Z'),
+      { now: new Date('2026-09-16T09:00:00Z') },
     );
 
     expect(summary.nextAction.label).toBe('Следующее заседание');

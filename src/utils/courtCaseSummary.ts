@@ -25,6 +25,11 @@ export interface CourtCaseProcessSummary {
   sourceCheckedAt: string | null;
 }
 
+export interface CourtCaseProcessSummaryOptions {
+  now?: Date;
+  successfulSourceChecks?: Array<string | null | undefined>;
+}
+
 const TERMINAL_EVENT_STATUSES = new Set(['archived', 'cancelled', 'completed', 'held']);
 const INACTIVE_DEADLINE_STATUSES = new Set(['closed', 'cancelled', 'archived']);
 const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
@@ -105,6 +110,7 @@ function isUpcomingCourtEvent(event: ClientCaseCourtEvent, nowTime: number) {
 function getLatestSourceCheckedAt(
   events: ClientCaseCourtEvent[],
   deadlines: ClientCaseProceduralDeadline[],
+  successfulSourceChecks: Array<string | null | undefined>,
 ) {
   let latestValue: string | null = null;
   let latestTime = Number.NEGATIVE_INFINITY;
@@ -119,6 +125,14 @@ function getLatestSourceCheckedAt(
     }
   }
 
+  for (const value of successfulSourceChecks) {
+    const time = getTime(value);
+    if (time !== null && time > latestTime) {
+      latestValue = value || null;
+      latestTime = time;
+    }
+  }
+
   return latestValue;
 }
 
@@ -127,8 +141,9 @@ export function buildCourtCaseProcessSummary(
   events: ClientCaseCourtEvent[],
   instances: ClientCaseCourtInstance[],
   proceduralDeadlines: ClientCaseProceduralDeadline[] = [],
-  now = new Date(),
+  options: CourtCaseProcessSummaryOptions = {},
 ): CourtCaseProcessSummary {
+  const now = options.now ?? new Date();
   const nowTime = now.getTime();
   const activeEvents = events.filter(isActiveCourtEvent);
   const decisionEvent = activeEvents
@@ -213,7 +228,11 @@ export function buildCourtCaseProcessSummary(
   const activeDeadlines = proceduralDeadlines
     .filter(isActiveDeadline)
     .filter((deadline) => getTime(deadline.dueAt) !== null);
-  const sourceCheckedAt = getLatestSourceCheckedAt(activeEvents, activeDeadlines);
+  const sourceCheckedAt = getLatestSourceCheckedAt(
+    activeEvents,
+    activeDeadlines,
+    options.successfulSourceChecks ?? [],
+  );
   const overdueDeadlines = activeDeadlines
     .filter((deadline) => deadline.isOverdue)
     .sort((left, right) => (getTime(left.dueAt) ?? 0) - (getTime(right.dueAt) ?? 0));
