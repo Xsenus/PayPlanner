@@ -191,6 +191,38 @@ describe('TaskJournalSettings', () => {
     expect(within(stages).getByText('Через 4 дн. или при 30 дн. тишины')).toBeTruthy();
   });
 
+  it('shows diagnostics that match the daily limit and unavailable assignees', async () => {
+    apiMock.getTaskJournalAutomationDiagnostics.mockResolvedValue({
+      enabled: true,
+      inactivityDays: 14,
+      escalationDays: 30,
+      limit: 10,
+      defaultAssigneeUserId: 8,
+      defaultAssigneeName: 'Иван Петров',
+      defaultAssigneeAvailable: false,
+      escalationUserId: null,
+      escalationUserName: '',
+      visibleCandidateCount: 12,
+      nextRunCandidateCount: 10,
+      deferredByLimitCount: 2,
+      visibleUnassignedCount: 3,
+      visibleEscalationCandidateCount: 4,
+      createdTaskCountLast7Days: 6,
+      lastCreatedAt: null,
+      lastCreatedDescription: null,
+    });
+    render(<TaskJournalSettings />);
+
+    const cards = await screen.findByTestId('case-inactivity-diagnostics-cards');
+    expect(within(cards).getByText('Готово сейчас').parentElement?.textContent).toContain('12');
+    expect(within(cards).getByText('Ближайший запуск').parentElement?.textContent).toContain('10');
+    expect(within(cards).getByText('Останется в очереди').parentElement?.textContent).toContain('2');
+    expect(within(cards).getByText('Без исполнителя').parentElement?.textContent).toContain('3');
+    expect(cards.querySelectorAll('.pp-automation-diagnostics-card-warning')).toHaveLength(2);
+    const unavailableAssignee = screen.getByText('Иван Петров — сейчас недоступен');
+    expect(unavailableAssignee.classList.contains('pp-automation-diagnostics-warning-text')).toBe(true);
+  });
+
   it('previews how many cases will match unsaved inactivity thresholds', async () => {
     apiMock.getTaskJournalSettings.mockResolvedValue({
       ...settings,

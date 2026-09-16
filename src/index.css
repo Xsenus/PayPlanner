@@ -343,6 +343,63 @@ html[data-payplanner-theme] .pp-settings-nav-item-active:hover {
   color: var(--pp-success-text);
 }
 
+.pp-automation-diagnostics {
+  background: color-mix(in srgb, var(--pp-surface) 97%, var(--pp-primary-soft));
+  border-color: color-mix(in srgb, var(--pp-primary) 24%, var(--pp-border));
+  color: var(--pp-text);
+}
+
+.pp-automation-diagnostics-card,
+.pp-automation-diagnostics-action {
+  background: var(--pp-surface);
+  border-color: var(--pp-border);
+  color: var(--pp-text);
+}
+
+.pp-automation-diagnostics-action:hover:not(:disabled) {
+  background: var(--pp-row-hover);
+  border-color: color-mix(in srgb, var(--pp-primary) 42%, var(--pp-border));
+}
+
+.pp-automation-diagnostics-card-primary {
+  background: color-mix(in srgb, var(--pp-primary-soft) 82%, var(--pp-surface));
+  border-color: color-mix(in srgb, var(--pp-primary) 38%, var(--pp-border));
+}
+
+.pp-automation-diagnostics-card-warning {
+  background: color-mix(in srgb, var(--pp-warning-soft) 80%, var(--pp-surface));
+  border-color: var(--pp-warning-border);
+}
+
+.pp-automation-diagnostics-card-success {
+  background: color-mix(in srgb, var(--pp-success-soft) 80%, var(--pp-surface));
+  border-color: var(--pp-success-border);
+}
+
+.pp-automation-diagnostics-warning-text {
+  color: var(--pp-warning-text) !important;
+}
+
+.pp-automation-diagnostics-last {
+  background: var(--pp-primary-soft);
+  border-color: color-mix(in srgb, var(--pp-primary) 28%, var(--pp-border));
+  color: var(--pp-primary-strong);
+}
+
+.pp-automation-diagnostics .text-slate-900 {
+  color: var(--pp-heading) !important;
+}
+
+.pp-automation-diagnostics .text-slate-500,
+.pp-automation-diagnostics .text-slate-600,
+.pp-automation-diagnostics .text-slate-700 {
+  color: var(--pp-text-muted) !important;
+}
+
+.pp-automation-diagnostics .pp-automation-diagnostics-warning-text {
+  color: var(--pp-warning-text) !important;
+}
+
 .pp-automation-preview-card-interactive:hover:not(:disabled) {
   background: var(--pp-row-hover);
   border-color: color-mix(in srgb, var(--pp-primary) 48%, var(--pp-border));

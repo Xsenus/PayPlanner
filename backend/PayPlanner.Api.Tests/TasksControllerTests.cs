@@ -721,9 +721,13 @@ public class TasksControllerTests
         Assert.Equal(10, dto.Limit);
         Assert.Equal(fallbackAssignee.Id, dto.DefaultAssigneeUserId);
         Assert.Equal("Резервный исполнитель", dto.DefaultAssigneeName);
+        Assert.True(dto.DefaultAssigneeAvailable);
         Assert.Equal(escalationUser.Id, dto.EscalationUserId);
         Assert.Equal("Руководитель", dto.EscalationUserName);
         Assert.Equal(1, dto.VisibleCandidateCount);
+        Assert.Equal(1, dto.NextRunCandidateCount);
+        Assert.Equal(0, dto.DeferredByLimitCount);
+        Assert.Equal(0, dto.VisibleUnassignedCount);
         Assert.Equal(1, dto.VisibleEscalationCandidateCount);
         Assert.Equal(1, dto.CreatedTaskCountLast7Days);
         Assert.NotNull(dto.LastCreatedAt);
@@ -732,6 +736,35 @@ public class TasksControllerTests
             command.Contains("FROM \"ClientCases\"", StringComparison.Ordinal));
         Assert.Single(interceptor.Commands, command =>
             command.Contains("FROM \"ObjectAuditEvents\"", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task GetCaseControlAutomationDiagnostics_SeparatesDueCasesWithoutAvailableAssignee()
+    {
+        await using var db = await CreateContextAsync();
+        var admin = await CreateAdminUserAsync(db, "admin-unassigned-diagnostics@example.com", "Администратор");
+        var client = await CreateClientAsync(db, "Клиент без исполнителя диагностики");
+        var clientCase = await CreateCaseAsync(db, client.Id, "ДЕЛО БЕЗ ИСПОЛНИТЕЛЯ ДИАГНОСТИКИ");
+        var now = DateTime.UtcNow;
+        clientCase.CreatedAt = now.AddDays(-45);
+        db.SystemSettings.AddRange(
+            new SystemSetting { Key = "tasks.automation.caseControl.enabled", Value = "true", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting { Key = "tasks.automation.caseControl.inactiveDays", Value = "14", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting { Key = "tasks.automation.caseControl.limit", Value = "10", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting { Key = "tasks.automation.caseControl.escalationDays", Value = "30", CreatedAt = now, UpdatedAt = now });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), admin);
+
+        var result = await controller.GetCaseControlAutomationDiagnostics(CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<TaskJournalAutomationDiagnosticsDto>(ok.Value);
+        Assert.Equal(0, dto.VisibleCandidateCount);
+        Assert.Equal(0, dto.NextRunCandidateCount);
+        Assert.Equal(0, dto.DeferredByLimitCount);
+        Assert.Equal(1, dto.VisibleUnassignedCount);
+        Assert.Equal(0, dto.VisibleEscalationCandidateCount);
+        Assert.False(dto.DefaultAssigneeAvailable);
     }
 
     [Fact]

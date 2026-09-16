@@ -1969,9 +1969,13 @@ export interface TaskJournalAutomationDiagnosticsDto {
   limit: number;
   defaultAssigneeUserId?: number | null;
   defaultAssigneeName: string;
+  defaultAssigneeAvailable?: boolean;
   escalationUserId?: number | null;
   escalationUserName: string;
   visibleCandidateCount: number;
+  nextRunCandidateCount?: number;
+  deferredByLimitCount?: number;
+  visibleUnassignedCount?: number;
   visibleEscalationCandidateCount: number;
   createdTaskCountLast7Days: number;
   lastCreatedAt?: string | null;

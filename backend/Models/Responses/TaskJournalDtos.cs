@@ -244,9 +244,13 @@ public class TaskJournalAutomationDiagnosticsDto
     public int Limit { get; set; }
     public int? DefaultAssigneeUserId { get; set; }
     public string DefaultAssigneeName { get; set; } = string.Empty;
+    public bool DefaultAssigneeAvailable { get; set; }
     public int? EscalationUserId { get; set; }
     public string EscalationUserName { get; set; } = string.Empty;
     public int VisibleCandidateCount { get; set; }
+    public int NextRunCandidateCount { get; set; }
+    public int DeferredByLimitCount { get; set; }
+    public int VisibleUnassignedCount { get; set; }
     public int VisibleEscalationCandidateCount { get; set; }
     public int CreatedTaskCountLast7Days { get; set; }
     public string? LastCreatedAt { get; set; }

@@ -390,6 +390,14 @@ export function TaskJournalSettings({
     0,
     (preview?.candidateCount ?? 0) - previewDailyLimit,
   );
+  const diagnosticNextRunCount = diagnostics
+    ? diagnostics.nextRunCandidateCount ?? Math.min(diagnostics.visibleCandidateCount, diagnostics.limit)
+    : null;
+  const diagnosticDeferredCount = diagnostics
+    ? diagnostics.deferredByLimitCount ?? Math.max(0, diagnostics.visibleCandidateCount - diagnostics.limit)
+    : null;
+  const defaultAssigneeUnavailable = diagnostics?.defaultAssigneeUserId != null &&
+    diagnostics.defaultAssigneeAvailable === false;
 
   return (
     <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
@@ -1149,41 +1157,53 @@ export function TaskJournalSettings({
           </label>
         </div>
 
-        <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
+        <div className="pp-automation-diagnostics mt-4 rounded-2xl border p-3">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
-              <h6 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Диагностика автоконтроля</h6>
+              <h6 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Текущая работа автоконтроля</h6>
               <p className="mt-1 text-sm text-slate-500">
-                Проверяет, сколько дел сейчас попадает под автоматическую постановку задач и когда автоматика срабатывала в последний раз.
+                Фактические сохранённые правила: доступный исполнитель, отпуск, сроки и дневной лимит.
               </p>
             </div>
             <button
               type="button"
               onClick={() => void refreshDiagnostics()}
               disabled={loading || diagnosticsLoading}
-              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+              className="pp-automation-diagnostics-action inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60"
             >
               <RefreshCcw className={`h-4 w-4 ${diagnosticsLoading ? 'animate-spin' : ''}`} />
               Обновить
             </button>
           </div>
 
-          <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+          <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4" data-testid="case-inactivity-diagnostics-cards">
+            <div className={`pp-automation-diagnostics-card rounded-xl border p-3 ${diagnostics?.enabled ? 'pp-automation-diagnostics-card-success' : ''}`}>
               <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Состояние</div>
               <div className="mt-1 text-lg font-semibold text-slate-900">
                 {diagnostics ? (diagnostics.enabled ? 'Включен' : 'Выключен') : '—'}
               </div>
             </div>
-            <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
-              <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Кандидаты</div>
+            <div className="pp-automation-diagnostics-card rounded-xl border p-3">
+              <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Готово сейчас</div>
               <div className="mt-1 text-lg font-semibold text-slate-900">{diagnostics?.visibleCandidateCount ?? '—'}</div>
             </div>
-            <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
-              <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Эскалации</div>
+            <div className="pp-automation-diagnostics-card pp-automation-diagnostics-card-primary rounded-xl border p-3">
+              <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Ближайший запуск</div>
+              <div className="mt-1 text-lg font-semibold text-slate-900">{diagnosticNextRunCount ?? '—'}</div>
+            </div>
+            <div className={`pp-automation-diagnostics-card rounded-xl border p-3 ${(diagnosticDeferredCount ?? 0) > 0 ? 'pp-automation-diagnostics-card-warning' : 'pp-automation-diagnostics-card-success'}`}>
+              <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Останется в очереди</div>
+              <div className="mt-1 text-lg font-semibold text-slate-900">{diagnosticDeferredCount ?? '—'}</div>
+            </div>
+            <div className="pp-automation-diagnostics-card rounded-xl border p-3">
+              <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Критический срок</div>
               <div className="mt-1 text-lg font-semibold text-slate-900">{diagnostics?.visibleEscalationCandidateCount ?? '—'}</div>
             </div>
-            <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+            <div className={`pp-automation-diagnostics-card rounded-xl border p-3 ${(diagnostics?.visibleUnassignedCount ?? 0) > 0 ? 'pp-automation-diagnostics-card-warning' : 'pp-automation-diagnostics-card-success'}`}>
+              <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Без исполнителя</div>
+              <div className="mt-1 text-lg font-semibold text-slate-900">{diagnostics?.visibleUnassignedCount ?? '—'}</div>
+            </div>
+            <div className="pp-automation-diagnostics-card rounded-xl border p-3">
               <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Создано за 7 дней</div>
               <div className="mt-1 text-lg font-semibold text-slate-900">{diagnostics?.createdTaskCountLast7Days ?? '—'}</div>
             </div>
@@ -1196,7 +1216,10 @@ export function TaskJournalSettings({
             </div>
             <div>
               <dt className="font-medium text-slate-500">Резервный исполнитель</dt>
-              <dd className="mt-1 text-slate-900">{diagnostics?.defaultAssigneeName || 'Ответственный по делу'}</dd>
+              <dd className={`mt-1 text-slate-900 ${defaultAssigneeUnavailable ? 'pp-automation-diagnostics-warning-text' : ''}`}>
+                {diagnostics?.defaultAssigneeName || 'Ответственный по делу'}
+                {defaultAssigneeUnavailable ? ' — сейчас недоступен' : ''}
+              </dd>
             </div>
             <div>
               <dt className="font-medium text-slate-500">Ответственный за эскалации</dt>
@@ -1211,7 +1234,7 @@ export function TaskJournalSettings({
           </dl>
 
           {diagnostics?.lastCreatedDescription ? (
-            <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50 p-3 text-sm text-blue-900">
+            <div className="pp-automation-diagnostics-last mt-3 rounded-xl border p-3 text-sm">
               {diagnostics.lastCreatedDescription}
             </div>
           ) : null}

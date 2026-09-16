@@ -522,6 +522,8 @@ public class TasksController : ControllerBase
             365));
         var vacationUserIds = await CaseInactivityResponsibleAvailabilityService
             .GetUsersOnVacationAsync(_db, now, ct);
+        var defaultAssigneeAvailable = defaultAssignee is not null &&
+            !vacationUserIds.Contains(defaultAssignee.Id);
 
         var visibleCases = _db.ClientCases
             .AsNoTracking()
@@ -541,6 +543,19 @@ public class TasksController : ControllerBase
                 clientCase.LastViewedAt,
                 clientCase.ActivityConfirmedAt,
                 clientCase.InactivityRemindersEnabled,
+                HasAvailableAssignee = defaultAssigneeAvailable ||
+                    (clientCase.ResponsibleUserId.HasValue
+                        ? clientCase.ResponsibleUser != null &&
+                          clientCase.ResponsibleUser.IsActive &&
+                          clientCase.ResponsibleUser.IsApproved
+                        : clientCase.Client != null && clientCase.Client.ResponsibleUserId.HasValue
+                            ? clientCase.Client.ResponsibleUser != null &&
+                              clientCase.Client.ResponsibleUser.IsActive &&
+                              clientCase.Client.ResponsibleUser.IsApproved
+                            : clientCase.LegalEntity != null &&
+                              clientCase.LegalEntity.ResponsibleUser != null &&
+                              clientCase.LegalEntity.ResponsibleUser.IsActive &&
+                              clientCase.LegalEntity.ResponsibleUser.IsApproved),
                 ActiveTaskCount = _db.TaskJournalItems.Count(task =>
                     task.ClientCaseId == clientCase.Id &&
                     ActiveTaskStatuses.Contains(task.Status)),
@@ -588,7 +603,19 @@ public class TasksController : ControllerBase
                         (item.LastCourtEventAt ?? item.CreatedAt) <= inactivityCutoff &&
                         (item.LastViewedAt ?? item.CreatedAt) <= inactivityCutoff &&
                         (item.ActivityConfirmedAt ?? item.CreatedAt) <= inactivityCutoff &&
-                        item.InactivityRemindersEnabled),
+                        item.InactivityRemindersEnabled &&
+                        item.HasAvailableAssignee),
+                    UnassignedCount = group.Count(item =>
+                        item.ActiveTaskCount == 0 &&
+                        (item.LastTaskAt ?? item.CreatedAt) <= inactivityCutoff &&
+                        (item.LastTaskCommentAt ?? item.CreatedAt) <= inactivityCutoff &&
+                        (item.LastControlCycleEndedAt ?? item.CreatedAt) <= inactivityCutoff &&
+                        (item.LastDocumentAt ?? item.CreatedAt) <= inactivityCutoff &&
+                        (item.LastCourtEventAt ?? item.CreatedAt) <= inactivityCutoff &&
+                        (item.LastViewedAt ?? item.CreatedAt) <= inactivityCutoff &&
+                        (item.ActivityConfirmedAt ?? item.CreatedAt) <= inactivityCutoff &&
+                        item.InactivityRemindersEnabled &&
+                        !item.HasAvailableAssignee),
                     EscalationCount = group.Count(item =>
                         item.ActiveTaskCount == 0 &&
                         (item.LastTaskAt ?? item.CreatedAt) <= escalationCutoff &&
@@ -598,7 +625,8 @@ public class TasksController : ControllerBase
                         (item.LastCourtEventAt ?? item.CreatedAt) <= escalationCutoff &&
                         (item.LastViewedAt ?? item.CreatedAt) <= escalationCutoff &&
                         (item.ActivityConfirmedAt ?? item.CreatedAt) <= escalationCutoff &&
-                        item.InactivityRemindersEnabled),
+                        item.InactivityRemindersEnabled &&
+                        item.HasAvailableAssignee),
                 })
                 .SingleOrDefaultAsync(ct)
             : null;
@@ -625,6 +653,9 @@ public class TasksController : ControllerBase
             })
             .SingleOrDefaultAsync(ct);
 
+        var visibleCandidateCount = candidateStatistics?.CandidateCount ?? 0;
+        var nextRunCandidateCount = Math.Min(visibleCandidateCount, settings.CaseInactivityLimit);
+
         return Ok(new TaskJournalAutomationDiagnosticsDto
         {
             Enabled = settings.CaseInactivityAutomationEnabled,
@@ -633,9 +664,13 @@ public class TasksController : ControllerBase
             Limit = settings.CaseInactivityLimit,
             DefaultAssigneeUserId = settings.CaseInactivityDefaultAssigneeUserId,
             DefaultAssigneeName = defaultAssignee is null ? string.Empty : BuildUserDisplayName(defaultAssignee.FullName, defaultAssignee.Email),
+            DefaultAssigneeAvailable = defaultAssigneeAvailable,
             EscalationUserId = settings.CaseInactivityEscalationUserId,
             EscalationUserName = escalationUser is null ? string.Empty : BuildUserDisplayName(escalationUser.FullName, escalationUser.Email),
-            VisibleCandidateCount = candidateStatistics?.CandidateCount ?? 0,
+            VisibleCandidateCount = visibleCandidateCount,
+            NextRunCandidateCount = nextRunCandidateCount,
+            DeferredByLimitCount = visibleCandidateCount - nextRunCandidateCount,
+            VisibleUnassignedCount = candidateStatistics?.UnassignedCount ?? 0,
             VisibleEscalationCandidateCount = candidateStatistics?.EscalationCount ?? 0,
             CreatedTaskCountLast7Days = auditStatistics?.CreatedCountLast7Days ?? 0,
             LastCreatedAt = auditStatistics?.LastCreatedAt is { } lastCreatedAt ? ToIso(lastCreatedAt) : null,
