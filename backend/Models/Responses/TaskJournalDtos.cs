@@ -214,6 +214,8 @@ public class TaskJournalCaseAutomationCandidateDto
     public string SuggestedDescription { get; set; } = string.Empty;
     public string SuggestedDueAt { get; set; } = string.Empty;
     public string SuggestedPriority { get; set; } = "high";
+    public int? SuggestedAssigneeUserId { get; set; }
+    public string SuggestedAssigneeName { get; set; } = string.Empty;
 }
 
 public class TaskJournalCaseAutomationSummaryDto

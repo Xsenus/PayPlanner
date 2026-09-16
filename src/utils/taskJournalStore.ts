@@ -234,6 +234,8 @@ export interface TaskJournalCaseAutomationCandidate {
   suggestedDescription: string;
   suggestedDueAt: string;
   suggestedPriority?: TaskJournalPriority;
+  suggestedAssigneeUserId?: number | null;
+  suggestedAssigneeName?: string | null;
 }
 
 export interface TaskJournalCaseAutomationSummary {

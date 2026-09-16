@@ -1276,6 +1276,27 @@ public class TasksController : ControllerBase
             .Take(effectiveLimit)
             .ToListAsync(ct);
 
+        var availableUsers = await LoadAvailableAutomationUsersAsync(
+            filteredCandidates
+                .Select(item => item.ResponsibleUserId)
+                .Append(settings.CaseInactivityDefaultAssigneeUserId),
+            ct);
+        var configuredDefaultAssignee = GetAvailableAutomationUser(
+            availableUsers,
+            settings.CaseInactivityDefaultAssigneeUserId);
+        var suggestedAssigneesByCaseId = filteredCandidates.ToDictionary(
+            item => item.Id,
+            item => BuildAutomationAssignee(
+                item.ResponsibleUserId,
+                availableUsers,
+                configuredDefaultAssignee,
+                access));
+        var suggestedTimeZonesByUserId = await CalendarTimeZoneHelper.ResolveUserTimeZonesAsync(
+            _db,
+            suggestedAssigneesByCaseId.Values.Select(assignee => assignee.UserId ?? 0),
+            ct);
+        var defaultTimeZone = CalendarTimeZoneHelper.ResolveTimeZone(null);
+
         return Ok(filteredCandidates.Select(item =>
         {
             var lastActivity = CaseMeaningfulActivityResolver.Resolve(
@@ -1318,6 +1339,11 @@ public class TasksController : ControllerBase
                 : daysWithoutActiveTask >= effectiveInactiveDays
                     ? $"Нет активной задачи уже {daysWithoutActiveTask} дн."
                     : "Нет активной задачи";
+            var suggestedAssignee = suggestedAssigneesByCaseId[item.Id];
+            var suggestedTimeZone = suggestedAssignee.UserId is int suggestedAssigneeUserId &&
+                                    suggestedTimeZonesByUserId.TryGetValue(suggestedAssigneeUserId, out var resolvedTimeZone)
+                ? resolvedTimeZone
+                : defaultTimeZone;
 
             return new TaskJournalCaseAutomationCandidateDto
             {
@@ -1343,8 +1369,10 @@ public class TasksController : ControllerBase
                 DaysUntilControl = daysUntilControl,
                 SuggestedTitle = "Проверить движение по делу",
                 SuggestedDescription = BuildAutomationTaskDescription(isEscalated),
-                SuggestedDueAt = ToIso(now.Date.AddDays(1).AddHours(9)),
+                SuggestedDueAt = ToIso(BuildDefaultTaskDueAtUtc(now, suggestedTimeZone)),
                 SuggestedPriority = ResolveAutomationPriority(daysWithoutActiveTask, effectiveInactiveDays, effectiveEscalationDays),
+                SuggestedAssigneeUserId = suggestedAssignee.UserId,
+                SuggestedAssigneeName = suggestedAssignee.DisplayName,
             };
         }).ToList());
     }
@@ -1654,9 +1682,24 @@ public class TasksController : ControllerBase
         }
 
         var isEscalated = daysWithoutActiveTask >= settings.CaseInactivityEscalationDays;
-        var assignee = await ResolveAutomationAssigneeAsync(clientCase, access, ct);
+        var availableUsers = await LoadAvailableAutomationUsersAsync(
+            new int?[]
+            {
+                responsibleUserId,
+                settings.CaseInactivityDefaultAssigneeUserId,
+                isEscalated ? settings.CaseInactivityEscalationUserId : null,
+            },
+            ct);
+        var configuredDefaultAssignee = GetAvailableAutomationUser(
+            availableUsers,
+            settings.CaseInactivityDefaultAssigneeUserId);
+        var assignee = BuildAutomationAssignee(
+            responsibleUserId,
+            availableUsers,
+            configuredDefaultAssignee,
+            access);
         var escalationUser = isEscalated
-            ? await ResolveConfiguredAutomationUserAsync(settings.CaseInactivityEscalationUserId, ct)
+            ? GetAvailableAutomationUser(availableUsers, settings.CaseInactivityEscalationUserId)
             : null;
         var binding = BuildCaseBinding(clientCase);
         if (binding.Error is not null)
@@ -1731,7 +1774,6 @@ public class TasksController : ControllerBase
         var effectiveLimit = Math.Min(limit, settings.CaseInactivityLimit);
         var now = DateTime.UtcNow;
         var cutoff = now.AddDays(-settings.CaseInactivityDays);
-        var escalationUser = await ResolveConfiguredAutomationUserAsync(settings.CaseInactivityEscalationUserId, ct);
         var vacationUserIds = await CaseInactivityResponsibleAvailabilityService
             .GetUsersOnVacationAsync(_db, now, ct);
         var candidateQuery = _db.ClientCases
@@ -1882,34 +1924,28 @@ public class TasksController : ControllerBase
             .ToListAsync(ct);
 
         var created = new List<(TaskJournalItem Entity, TaskClientBinding Binding)>();
-        var responsibleUserIds = candidates
-            .Select(item => ResolveAutomationResponsibleUserId(item.Case))
-            .Where(userId => userId.HasValue && userId.Value > 0)
-            .Select(userId => userId!.Value)
-            .Distinct()
-            .ToArray();
-        var responsibleUsers = await _db.Users
-            .AsNoTracking()
-            .Where(user => responsibleUserIds.Contains(user.Id) && user.IsActive && user.IsApproved)
-            .Select(user => new { user.Id, user.FullName, user.Email })
-            .ToListAsync(ct);
-        var responsibleAssignees = responsibleUsers.ToDictionary(
-            user => user.Id,
-            user => new TaskParticipantDraft(
-                user.Id,
-                BuildUserDisplayName(user.FullName, user.Email),
-                user.Email,
-                "assignee",
-                0,
-                "pending",
-                null));
-        var fallbackAssignee = BuildAutomationFallbackAssignee(access);
+        var availableUsers = await LoadAvailableAutomationUsersAsync(
+            candidates
+                .Select(item => ResolveAutomationResponsibleUserId(item.Case))
+                .Concat(new int?[]
+                {
+                    settings.CaseInactivityDefaultAssigneeUserId,
+                    settings.CaseInactivityEscalationUserId,
+                }),
+            ct);
+        var configuredDefaultAssignee = GetAvailableAutomationUser(
+            availableUsers,
+            settings.CaseInactivityDefaultAssigneeUserId);
+        var escalationUser = GetAvailableAutomationUser(
+            availableUsers,
+            settings.CaseInactivityEscalationUserId);
         var assigneesByCaseId = candidates.ToDictionary(
             item => item.Case.Id,
-            item => ResolveAutomationResponsibleUserId(item.Case) is int responsibleUserId &&
-                    responsibleAssignees.TryGetValue(responsibleUserId, out var responsibleAssignee)
-                ? responsibleAssignee
-                : fallbackAssignee);
+            item => BuildAutomationAssignee(
+                ResolveAutomationResponsibleUserId(item.Case),
+                availableUsers,
+                configuredDefaultAssignee,
+                access));
         var timeZonesByUserId = await CalendarTimeZoneHelper.ResolveUserTimeZonesAsync(
             _db,
             assigneesByCaseId.Values
@@ -6602,33 +6638,57 @@ public class TasksController : ControllerBase
             .Replace("\n", "\\n", StringComparison.Ordinal)
             .Replace("\r", "\\n", StringComparison.Ordinal);
 
-    private async Task<TaskParticipantDraft> ResolveAutomationAssigneeAsync(
-        ClientCase clientCase,
-        TaskAccess fallbackAccess,
+    private async Task<IReadOnlyDictionary<int, User>> LoadAvailableAutomationUsersAsync(
+        IEnumerable<int?> userIds,
         CancellationToken ct)
     {
-        var responsibleUserId = ResolveAutomationResponsibleUserId(clientCase);
-        if (responsibleUserId.HasValue)
+        var normalizedUserIds = userIds
+            .Where(userId => userId.HasValue && userId.Value > 0)
+            .Select(userId => userId!.Value)
+            .Distinct()
+            .ToArray();
+        if (normalizedUserIds.Length == 0)
         {
-            var responsible = await _db.Users
-                .AsNoTracking()
-                .Where(user => user.Id == responsibleUserId.Value && user.IsActive && user.IsApproved)
-                .Select(user => new { user.Id, user.FullName, user.Email })
-                .FirstOrDefaultAsync(ct);
-            if (responsible is not null)
-            {
-                return new TaskParticipantDraft(
-                    responsible.Id,
-                    BuildUserDisplayName(responsible.FullName, responsible.Email),
-                    responsible.Email,
-                    "assignee",
-                    0,
-                    "pending",
-                    null);
-            }
+            return new Dictionary<int, User>();
         }
 
-        return BuildAutomationFallbackAssignee(fallbackAccess);
+        return await _db.Users
+            .AsNoTracking()
+            .Where(user => normalizedUserIds.Contains(user.Id) && user.IsActive && user.IsApproved)
+            .Select(user => new User
+            {
+                Id = user.Id,
+                FullName = user.FullName,
+                Email = user.Email,
+            })
+            .ToDictionaryAsync(user => user.Id, ct);
+    }
+
+    private static User? GetAvailableAutomationUser(
+        IReadOnlyDictionary<int, User> availableUsers,
+        int? userId)
+        => userId.HasValue && availableUsers.TryGetValue(userId.Value, out var user)
+            ? user
+            : null;
+
+    private static TaskParticipantDraft BuildAutomationAssignee(
+        int? responsibleUserId,
+        IReadOnlyDictionary<int, User> availableUsers,
+        User? configuredDefaultAssignee,
+        TaskAccess fallbackAccess)
+    {
+        var user = GetAvailableAutomationUser(availableUsers, responsibleUserId)
+            ?? configuredDefaultAssignee;
+        return user is null
+            ? BuildAutomationFallbackAssignee(fallbackAccess)
+            : new TaskParticipantDraft(
+                user.Id,
+                BuildUserDisplayName(user.FullName, user.Email),
+                user.Email,
+                "assignee",
+                0,
+                "pending",
+                null);
     }
 
     private static int? ResolveAutomationResponsibleUserId(ClientCase clientCase)

@@ -3798,6 +3798,14 @@ public class TasksControllerTests
         client.ResponsibleUserId = author.Id;
         var clientCase = await CreateCaseAsync(db, client.Id, "СВЕЖЕЕ ДЕЛО");
         clientCase.CreatedAt = DateTime.UtcNow.AddDays(-3);
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = author.Id,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = "Asia/Novosibirsk",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
         await db.SaveChangesAsync();
         var controller = CreateController(db, new RecordingNotificationService(), author);
 
@@ -3822,6 +3830,8 @@ public class TasksControllerTests
         Assert.Equal(clientCase.Id, candidate.ClientCaseId);
         Assert.Equal(author.Id, candidate.ResponsibleUserId);
         Assert.Equal("Ответственный Юрист", candidate.ResponsibleName);
+        Assert.Equal(author.Id, candidate.SuggestedAssigneeUserId);
+        Assert.Equal("Ответственный Юрист", candidate.SuggestedAssigneeName);
         Assert.False(candidate.IsReadyForControl);
         Assert.Equal("waiting", candidate.AutomationState);
         Assert.Equal(CaseMeaningfulActivitySources.CaseCreated, candidate.LastActivitySource);
@@ -3829,6 +3839,58 @@ public class TasksControllerTests
         Assert.True(candidate.DaysUntilControl >= 10);
         Assert.NotNull(candidate.NextControlAt);
         Assert.Contains("Первый контроль через", candidate.Reason, StringComparison.Ordinal);
+        var suggestedDueAtUtc = DateTime.Parse(candidate.SuggestedDueAt).ToUniversalTime();
+        var suggestedDueAtLocal = CalendarTimeZoneHelper.ToUserLocal(
+            suggestedDueAtUtc,
+            CalendarTimeZoneHelper.ResolveTimeZone("Asia/Novosibirsk"));
+        Assert.Equal(9, suggestedDueAtLocal.Hour);
+        Assert.Equal(0, suggestedDueAtLocal.Minute);
+    }
+
+    [Fact]
+    public async Task GetAutomationCaseCandidates_SuggestsConfiguredDefaultAssigneeAndLocalDueTime()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "candidate-default-author@example.com", "Автор просмотра");
+        var defaultAssignee = await CreateAdminUserAsync(db, "candidate-default@example.com", "Резервный исполнитель");
+        var client = await CreateClientAsync(db, "Клиент без ответственного");
+        var clientCase = await CreateCaseAsync(db, client.Id, "ДЕЛО БЕЗ ОТВЕТСТВЕННОГО");
+        clientCase.CreatedAt = DateTime.UtcNow.AddDays(-3);
+        var now = DateTime.UtcNow;
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = "tasks.automation.caseControl.defaultAssigneeUserId",
+            Value = defaultAssignee.Id.ToString(),
+            CreatedAt = now,
+            UpdatedAt = now,
+        });
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = defaultAssignee.Id,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = "Asia/Novosibirsk",
+            CreatedAt = now,
+            UpdatedAt = now,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.GetAutomationCaseCandidates(
+            inactiveDays: 14,
+            limit: 100,
+            includeWaiting: true,
+            ct: CancellationToken.None);
+
+        var candidate = Assert.Single(Assert.IsAssignableFrom<IReadOnlyList<TaskJournalCaseAutomationCandidateDto>>(
+            Assert.IsType<OkObjectResult>(result.Result).Value));
+        Assert.Null(candidate.ResponsibleUserId);
+        Assert.Equal(defaultAssignee.Id, candidate.SuggestedAssigneeUserId);
+        Assert.Equal(defaultAssignee.FullName, candidate.SuggestedAssigneeName);
+        var suggestedDueAtLocal = CalendarTimeZoneHelper.ToUserLocal(
+            DateTime.Parse(candidate.SuggestedDueAt).ToUniversalTime(),
+            CalendarTimeZoneHelper.ResolveTimeZone("Asia/Novosibirsk"));
+        Assert.Equal(9, suggestedDueAtLocal.Hour);
+        Assert.Equal(0, suggestedDueAtLocal.Minute);
     }
 
     [Fact]
@@ -4258,6 +4320,35 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task CreateAutomationTaskForCase_UsesConfiguredDefaultWhenCaseHasNoResponsible()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "manual-default-author@example.com", "Автор запуска");
+        var defaultAssignee = await CreateAdminUserAsync(db, "manual-default@example.com", "Резервный исполнитель");
+        var client = await CreateClientAsync(db, "Клиент без ответственного");
+        var clientCase = await CreateCaseAsync(db, client.Id, "ДЕЛО БЕЗ ОТВЕТСТВЕННОГО");
+        clientCase.CreatedAt = DateTime.UtcNow.AddDays(-20);
+        var now = DateTime.UtcNow;
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = "tasks.automation.caseControl.defaultAssigneeUserId",
+            Value = defaultAssignee.Id.ToString(),
+            CreatedAt = now,
+            UpdatedAt = now,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.CreateAutomationTaskForCase(clientCase.Id, CancellationToken.None);
+
+        var dto = Assert.IsType<TaskJournalItemDto>(Assert.IsType<CreatedResult>(result.Result).Value);
+        Assert.Equal(defaultAssignee.Id, dto.AssigneeUserId);
+        Assert.Equal(defaultAssignee.FullName, dto.AssigneeName);
+        Assert.Equal(author.Id, dto.AuthorUserId);
+        Assert.Contains(dto.Participants, item => item.Role == "assignee" && item.UserId == defaultAssignee.Id);
+    }
+
+    [Fact]
     public async Task CreateAutomationTaskForCase_PrefersCaseResponsibleOverOwnerAndFallback()
     {
         await using var db = await CreateContextAsync();
@@ -4499,6 +4590,41 @@ public class TasksControllerTests
         {
             Assert.Equal(1, task.InactivityControlCycleNumber);
             Assert.Equal(task.CreatedAt.AddDays(2), task.InactivityControlNextCheckAt);
+        });
+    }
+
+    [Fact]
+    public async Task CreateAutomationTasksForCandidates_UsesConfiguredDefaultForCasesWithoutResponsible()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "bulk-default-author@example.com", "Автор запуска");
+        var defaultAssignee = await CreateAdminUserAsync(db, "bulk-default@example.com", "Резервный исполнитель");
+        var client = await CreateClientAsync(db, "Клиент массового контроля");
+        var firstCase = await CreateCaseAsync(db, client.Id, "ПЕРВОЕ ДЕЛО БЕЗ ОТВЕТСТВЕННОГО");
+        var secondCase = await CreateCaseAsync(db, client.Id, "ВТОРОЕ ДЕЛО БЕЗ ОТВЕТСТВЕННОГО");
+        firstCase.CreatedAt = DateTime.UtcNow.AddDays(-20);
+        secondCase.CreatedAt = DateTime.UtcNow.AddDays(-20);
+        var now = DateTime.UtcNow;
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = "tasks.automation.caseControl.defaultAssigneeUserId",
+            Value = defaultAssignee.Id.ToString(),
+            CreatedAt = now,
+            UpdatedAt = now,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.CreateAutomationTasksForCandidates(limit: 10, ct: CancellationToken.None);
+
+        var dto = Assert.IsType<TaskJournalAutomationCreateResultDto>(
+            Assert.IsType<OkObjectResult>(result.Result).Value);
+        Assert.Equal(2, dto.CreatedTasks.Count);
+        Assert.All(dto.CreatedTasks, task =>
+        {
+            Assert.Equal(defaultAssignee.Id, task.AssigneeUserId);
+            Assert.Equal(defaultAssignee.FullName, task.AssigneeName);
+            Assert.Equal(author.Id, task.AuthorUserId);
         });
     }
 

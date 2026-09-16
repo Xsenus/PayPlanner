@@ -3948,8 +3948,10 @@ describe('TaskJournal', () => {
       apiMock.getTaskJournalCaseAutomationCandidates.mockResolvedValue([{
         clientId: 10,
         clientName: 'Иванов Иван Иванович',
-        responsibleUserId: 7,
-        responsibleName: 'Администратор',
+        responsibleUserId: null,
+        responsibleName: '',
+        suggestedAssigneeUserId: 7,
+        suggestedAssigneeName: 'Администратор',
         clientCaseId: 100,
         clientCaseTitle: 'БАНКРОТСТВО',
         reason: 'Первый контроль через 5 дн.',

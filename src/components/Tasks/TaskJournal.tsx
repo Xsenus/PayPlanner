@@ -3287,10 +3287,10 @@ export function TaskJournal({
       priority: candidate.suggestedPriority ?? 'normal',
       status: 'new',
       plannedDurationMinutes: 60,
-      ...(candidate.responsibleUserId
+      ...((candidate.suggestedAssigneeUserId ?? candidate.responsibleUserId)
         ? {
-          assigneeUserId: candidate.responsibleUserId,
-          assigneeName: candidate.responsibleName?.trim() || '',
+          assigneeUserId: candidate.suggestedAssigneeUserId ?? candidate.responsibleUserId,
+          assigneeName: candidate.suggestedAssigneeName?.trim() || candidate.responsibleName?.trim() || '',
         }
         : {}),
     });
