@@ -4193,7 +4193,7 @@ describe('TaskJournal', () => {
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
-  it('does not present a partial automation page as the complete queue when totals fail', async () => {
+  it('keeps automation cards available and labels partial counters when totals fail', async () => {
     apiMock.getTaskJournalCaseAutomationCandidates.mockResolvedValue([{
       clientId: 10,
       clientName: 'Клиент из неполной очереди',
@@ -4214,10 +4214,22 @@ describe('TaskJournal', () => {
 
     await renderJournal();
 
-    expect(await screen.findByRole('alert')).toBeTruthy();
-    expect(screen.queryByText('Клиент из неполной очереди')).toBeNull();
-    expect(screen.queryByText('Загружено 1 из 1')).toBeNull();
-    expect(screen.queryByText('В этой категории дел без активных задач нет.')).toBeNull();
+    expect(await screen.findByText('Уточняем общие счётчики')).toBeTruthy();
+    expect(screen.getByText(/точные общие счётчики временно не получены/)).toBeTruthy();
+    expect(screen.getByText('Клиент из неполной очереди')).toBeTruthy();
+    expect(screen.getByText('Загружено 1 из 1')).toBeTruthy();
+    expect((screen.getByTestId('task-automation-create-100') as HTMLButtonElement).disabled).toBe(false);
+
+    apiMock.getTaskJournalCaseAutomationSummary.mockResolvedValue({
+      totalCount: 1,
+      readyCount: 1,
+      waitingCount: 0,
+      pausedCount: 0,
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Уточнить счётчики' }));
+
+    await waitFor(() => expect(screen.queryByText('Уточняем общие счётчики')).toBeNull());
+    expect(screen.getByText('Клиент из неполной очереди')).toBeTruthy();
   });
 
   it('keeps the last automation queue visible when background refresh fails', async () => {

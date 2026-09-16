@@ -277,6 +277,7 @@ const EMPTY_AUTOMATION_SUMMARY: TaskJournalCaseAutomationSummary = {
 };
 const AUTOMATION_LOAD_ERROR_MESSAGE = 'Не удалось загрузить очередь автоконтроля. Проверьте соединение и повторите попытку.';
 const AUTOMATION_REFRESH_ERROR_MESSAGE = 'Не удалось обновить очередь автоконтроля. Показаны ранее загруженные данные.';
+const AUTOMATION_SUMMARY_LOAD_ERROR_MESSAGE = 'Карточки доступны, но точные общие счётчики временно не получены. Показаны значения загруженной части очереди.';
 
 function buildAutomationCandidatesRequestKey(
   settings: TaskJournalSettingsDto,
@@ -2267,6 +2268,7 @@ export function TaskJournal({
   const [automationPageLoading, setAutomationPageLoading] = useState(false);
   const [automationLoadingMore, setAutomationLoadingMore] = useState(false);
   const [automationLoadError, setAutomationLoadError] = useState<string | null>(null);
+  const [automationSummaryLoadError, setAutomationSummaryLoadError] = useState<string | null>(null);
   const [automationReloadVersion, setAutomationReloadVersion] = useState(0);
   const [creatingAutomationCaseId, setCreatingAutomationCaseId] = useState<number | null>(null);
   const [creatingAutomationAll, setCreatingAutomationAll] = useState(false);
@@ -2646,7 +2648,7 @@ export function TaskJournal({
     refreshSummary = true,
   ) => {
     if (embedded || underControlOnly || isApprovalsMode || !canCreateTasks || !canViewCases || !settings.caseInactivityAutomationEnabled) {
-      return { items: [], summary: EMPTY_AUTOMATION_SUMMARY };
+      return { items: [], summary: EMPTY_AUTOMATION_SUMMARY, summaryError: null };
     }
 
     const params = {
@@ -2659,16 +2661,18 @@ export function TaskJournal({
       search: search.trim() || undefined,
     };
     const options = signal ? { signal } : undefined;
-    const [items, summary] = await Promise.all([
+    const [items, summaryResult] = await Promise.all([
       apiService.getTaskJournalCaseAutomationCandidates(params, options),
       refreshSummary
         ? apiService.getTaskJournalCaseAutomationSummary(
           { inactiveDays: settings.caseInactivityDays, search: search.trim() || undefined },
           options,
         )
-        : Promise.resolve(null),
+          .then((summary) => ({ summary, error: null as string | null }))
+          .catch(() => ({ summary: null, error: AUTOMATION_SUMMARY_LOAD_ERROR_MESSAGE }))
+        : Promise.resolve({ summary: null, error: null as string | null }),
     ]);
-    return { items, summary };
+    return { items, summary: summaryResult.summary, summaryError: summaryResult.error };
   }, [canCreateTasks, canViewCases, embedded, isApprovalsMode, underControlOnly]);
 
   // Преобразует состояние панели фильтров в единый контракт API. Значения -1
@@ -2785,6 +2789,7 @@ export function TaskJournal({
           return {
             items: [] as TaskJournalCaseAutomationCandidate[],
             summary: null,
+            summaryError: null,
             error: AUTOMATION_LOAD_ERROR_MESSAGE,
           };
         }
@@ -2809,6 +2814,7 @@ export function TaskJournal({
       setAutomationCandidates(automationResponse.items);
       setAutomationSummary(automationResponse.summary ?? summarizeAutomationCandidates(automationResponse.items));
       setAutomationLoadError(automationResponse.error);
+      setAutomationSummaryLoadError(automationResponse.summaryError);
       setAutomationStateFilter('all');
       setAutomationSearch('');
       setAutomationPageLoading(false);
@@ -3006,6 +3012,7 @@ export function TaskJournal({
       setAutomationCandidates([]);
     }
     setAutomationLoadError(null);
+    setAutomationSummaryLoadError(null);
     setAutomationPageLoading(true);
     setAutomationLoadingMore(false);
     const controller = new AbortController();
@@ -3025,7 +3032,11 @@ export function TaskJournal({
           if (response.summary) {
             setAutomationSummary(response.summary);
             automationSummaryRequestKeyRef.current = summaryRequestKey;
+          } else if (response.summaryError) {
+            setAutomationSummary(summarizeAutomationCandidates(response.items));
+            automationSummaryRequestKeyRef.current = null;
           }
+          setAutomationSummaryLoadError(response.summaryError);
           setAutomationPageLoading(false);
         }
       })
@@ -3038,6 +3049,7 @@ export function TaskJournal({
               automationSummaryRequestKeyRef.current = null;
             }
           }
+          setAutomationSummaryLoadError(null);
           setAutomationLoadError(preserveCandidates ? AUTOMATION_REFRESH_ERROR_MESSAGE : AUTOMATION_LOAD_ERROR_MESSAGE);
           setAutomationPageLoading(false);
         }
@@ -3078,13 +3090,16 @@ export function TaskJournal({
               setAutomationSummary(response.summary);
               automationSummaryRequestKeyRef.current = buildAutomationSummaryRequestKey(taskSettings, debouncedAutomationSearch);
             } else {
+              setAutomationSummary(summarizeAutomationCandidates(response.items));
               automationSummaryRequestKeyRef.current = null;
             }
+            setAutomationSummaryLoadError(response.summaryError);
           }
         })
         .catch(() => {
           if (!nextController.signal.aborted && automationCandidatesRequestRef.current === requestId) {
             setAutomationLoadError(AUTOMATION_REFRESH_ERROR_MESSAGE);
+            setAutomationSummaryLoadError(null);
           }
         });
     };
@@ -3326,6 +3341,7 @@ export function TaskJournal({
     setAutomationCandidates([]);
     automationRetryPreserveCandidatesRef.current = false;
     setAutomationLoadError(null);
+    setAutomationSummaryLoadError(null);
     automationLoadMoreRequestRef.current += 1;
     setAutomationPageLoading(true);
     setAutomationLoadingMore(false);
@@ -3342,6 +3358,7 @@ export function TaskJournal({
     setAutomationCandidates([]);
     automationRetryPreserveCandidatesRef.current = false;
     setAutomationLoadError(null);
+    setAutomationSummaryLoadError(null);
     automationLoadMoreRequestRef.current += 1;
     setAutomationPageLoading(true);
     setAutomationLoadingMore(false);
@@ -3352,6 +3369,7 @@ export function TaskJournal({
     automationSummaryRequestKeyRef.current = null;
     automationRetryPreserveCandidatesRef.current = automationCandidates.length > 0;
     setAutomationLoadError(null);
+    setAutomationSummaryLoadError(null);
     setAutomationPageLoading(true);
     setAutomationReloadVersion((version) => version + 1);
   }, [automationCandidates.length]);
@@ -5686,6 +5704,7 @@ export function TaskJournal({
             loadingPage={automationPageLoading}
             loadingMore={automationLoadingMore}
             loadError={automationLoadError}
+            summaryLoadError={automationSummaryLoadError}
             creatingCaseId={creatingAutomationCaseId}
             creatingAll={creatingAutomationAll}
             creationLimit={taskSettings.caseInactivityLimit}
@@ -6500,6 +6519,7 @@ function TaskAutomationPanel({
   loadingPage,
   loadingMore,
   loadError,
+  summaryLoadError,
   creatingCaseId,
   creatingAll,
   creationLimit,
@@ -6519,6 +6539,7 @@ function TaskAutomationPanel({
   loadingPage: boolean;
   loadingMore: boolean;
   loadError: string | null;
+  summaryLoadError: string | null;
   creatingCaseId: number | null;
   creatingAll: boolean;
   creationLimit: number;
@@ -6629,6 +6650,27 @@ function TaskAutomationPanel({
           >
             <Loader2 className={`h-4 w-4 ${loadingPage ? 'animate-spin' : ''}`} />
             {loadingPage ? 'Повторяем...' : 'Повторить загрузку'}
+          </button>
+        </div>
+      ) : null}
+
+      {!loadError && summaryLoadError ? (
+        <div role="status" className="mt-3 flex flex-col gap-3 rounded-xl border border-amber-300 bg-amber-100/70 px-3 py-3 text-amber-950 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 items-start gap-2">
+            <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-amber-700" />
+            <div>
+              <div className="text-sm font-semibold">Уточняем общие счётчики</div>
+              <div className="mt-0.5 text-xs text-amber-900">{summaryLoadError}</div>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onRetry}
+            disabled={loadingPage}
+            className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm font-semibold text-amber-900 transition hover:bg-amber-50 disabled:cursor-wait disabled:opacity-60"
+          >
+            <Loader2 className={`h-4 w-4 ${loadingPage ? 'animate-spin' : ''}`} />
+            {loadingPage ? 'Уточняем...' : 'Уточнить счётчики'}
           </button>
         </div>
       ) : null}
