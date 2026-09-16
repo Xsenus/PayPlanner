@@ -330,6 +330,27 @@ html[data-payplanner-theme] .pp-settings-nav-item-active:hover {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--pp-primary) 14%, transparent);
 }
 
+.pp-automation-preview-card-critical {
+  background: color-mix(in srgb, var(--pp-danger-soft) 72%, var(--pp-surface));
+  border-color: color-mix(in srgb, var(--pp-danger-solid) 42%, var(--pp-border));
+}
+
+.pp-automation-preview-card-critical strong,
+.pp-automation-preview-card-critical .text-blue-700 {
+  color: var(--pp-danger-text) !important;
+}
+
+.pp-automation-preview-card-critical:hover:not(:disabled) {
+  background: var(--pp-danger-soft-strong);
+  border-color: var(--pp-danger-border);
+}
+
+.pp-automation-preview-card-critical.pp-automation-preview-card-active {
+  background: var(--pp-danger-soft-strong);
+  border-color: var(--pp-danger-border);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--pp-danger-solid) 16%, transparent);
+}
+
 .pp-automation-preview-details {
   background: color-mix(in srgb, var(--pp-surface-muted) 94%, var(--pp-primary-soft));
   border-color: color-mix(in srgb, var(--pp-primary) 30%, var(--pp-border));

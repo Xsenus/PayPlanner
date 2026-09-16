@@ -270,6 +270,7 @@ public class TaskJournalAutomationPreviewDetailsDto
 {
     public string Category { get; set; } = string.Empty;
     public int InactivityDays { get; set; }
+    public int EscalationDays { get; set; }
     public int TotalCount { get; set; }
     public int Offset { get; set; }
     public int Limit { get; set; }

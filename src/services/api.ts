@@ -1993,6 +1993,7 @@ export interface TaskJournalAutomationPreviewDto {
 
 export type TaskJournalAutomationPreviewCategory =
   | 'candidate'
+  | 'criticalCandidate'
   | 'activeTask'
   | 'recentActivity'
   | 'excludedStatus'
@@ -2015,6 +2016,7 @@ export interface TaskJournalAutomationPreviewCaseDto {
 export interface TaskJournalAutomationPreviewDetailsDto {
   category: TaskJournalAutomationPreviewCategory;
   inactivityDays: number;
+  escalationDays: number;
   totalCount: number;
   offset: number;
   limit: number;
@@ -4592,6 +4594,7 @@ export class ApiService {
 
   async getTaskJournalAutomationPreviewDetails(params: {
     inactivityDays: number;
+    escalationDays: number;
     category: TaskJournalAutomationPreviewCategory;
     search?: string;
     offset?: number;

@@ -68,7 +68,7 @@ public class TasksController : ControllerBase
     ];
     private static readonly HashSet<string> AllowedAutomationPreviewCategories = new(StringComparer.Ordinal)
     {
-        "candidate", "activeTask", "recentActivity", "excludedStatus", "disabled", "vacation"
+        "candidate", "criticalCandidate", "activeTask", "recentActivity", "excludedStatus", "disabled", "vacation"
     };
     private const string RestrictExecutorEditingSettingKey = "tasks.restrictExecutorEditing";
     private const string AllowExecutorDeadlineChangeRequestsSettingKey = "tasks.allowExecutorDeadlineChangeRequests";
@@ -872,6 +872,7 @@ public class TasksController : ControllerBase
     [HttpGet("automation/case-control/preview/details")]
     public async Task<ActionResult<TaskJournalAutomationPreviewDetailsDto>> GetCaseControlAutomationPreviewDetails(
         [FromQuery] int inactivityDays,
+        [FromQuery] int escalationDays,
         [FromQuery] string category,
         [FromQuery] string? search = null,
         [FromQuery] int offset = 0,
@@ -896,10 +897,12 @@ public class TasksController : ControllerBase
         }
 
         var normalizedInactivityDays = Math.Clamp(inactivityDays, 1, 365);
+        var normalizedEscalationDays = Math.Clamp(escalationDays, normalizedInactivityDays, 365);
         var normalizedOffset = Math.Clamp(offset, 0, 1_000_000);
         var normalizedLimit = Math.Clamp(limit, 1, 50);
         var now = DateTime.UtcNow;
         var inactivityCutoff = now.AddDays(-normalizedInactivityDays);
+        var escalationCutoff = now.AddDays(-normalizedEscalationDays);
         var responsibleAvailability = await CaseInactivityResponsibleAvailabilityService
             .GetAvailabilityAsync(_db, now, ct);
 
@@ -922,6 +925,18 @@ public class TasksController : ControllerBase
 
         detailsQuery = normalizedCategory switch
         {
+            "criticalCandidate" => detailsQuery.Where(item =>
+                !item.IsStatusExcluded &&
+                !item.IsResponsibleOnVacation &&
+                item.InactivityRemindersEnabled &&
+                item.ActiveTaskCount == 0 &&
+                (item.LastTaskAt ?? item.CreatedAt) <= escalationCutoff &&
+                (item.LastTaskCommentAt ?? item.CreatedAt) <= escalationCutoff &&
+                (item.LastControlCycleEndedAt ?? item.CreatedAt) <= inactivityCutoff &&
+                (item.LastDocumentAt ?? item.CreatedAt) <= escalationCutoff &&
+                (item.LastCourtEventAt ?? item.CreatedAt) <= escalationCutoff &&
+                (item.LastViewedAt ?? item.CreatedAt) <= escalationCutoff &&
+                (item.ActivityConfirmedAt ?? item.CreatedAt) <= escalationCutoff),
             "excludedStatus" => detailsQuery.Where(item => item.IsStatusExcluded),
             "vacation" => detailsQuery.Where(item =>
                 !item.IsStatusExcluded &&
@@ -990,6 +1005,7 @@ public class TasksController : ControllerBase
                 ? "controlCycleEnded"
                 : lastActivity.Source;
             var daysSinceAnchor = Math.Max(0, (int)Math.Floor((now - lastControlAnchorAt).TotalDays));
+            var daysSinceMeaningfulActivity = Math.Max(0, (int)Math.Floor((now - lastActivity.At).TotalDays));
             var explanation = normalizedCategory switch
             {
                 "excludedStatus" => $"Статус «{ClientCaseStatusLabel(item.Status)}» исключает дело из автоконтроля.",
@@ -1002,6 +1018,7 @@ public class TasksController : ControllerBase
                     : $"Автоконтроль выключен: {item.InactivityRemindersDisabledReason}",
                 "activeTask" => $"По делу есть активные задачи: {item.ActiveTaskCount}.",
                 "recentActivity" => $"Последнее значимое движение было {daysSinceAnchor} дн. назад; порог ещё не наступил.",
+                "criticalCandidate" => $"Значимого движения нет {daysSinceMeaningfulActivity} дн.; достигнут критический порог {normalizedEscalationDays} дн.",
                 _ => $"Значимого движения нет {daysSinceAnchor} дн.; срок постановки контроля наступил.",
             };
 
@@ -1024,6 +1041,7 @@ public class TasksController : ControllerBase
         {
             Category = normalizedCategory,
             InactivityDays = normalizedInactivityDays,
+            EscalationDays = normalizedEscalationDays,
             TotalCount = totalCount,
             Offset = normalizedOffset,
             Limit = normalizedLimit,

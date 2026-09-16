@@ -62,6 +62,7 @@ const AUTOMATION_ACTIVITY_SOURCE_LABELS: Record<string, string> = {
 
 const AUTOMATION_PREVIEW_CATEGORY_LABELS: Record<TaskJournalAutomationPreviewCategory, string> = {
   candidate: 'Пора создать контроль',
+  criticalCandidate: 'Достигнут критический срок',
   activeTask: 'Есть активная задача',
   recentActivity: 'Было недавнее движение',
   excludedStatus: 'Исключены по статусу',
@@ -322,6 +323,7 @@ export function TaskJournalSettings({
     try {
       const response = await apiService.getTaskJournalAutomationPreviewDetails({
         inactivityDays: preview?.inactivityDays ?? settings.caseInactivityDays,
+        escalationDays: preview?.escalationDays ?? settings.caseInactivityEscalationDays,
         category,
         offset: append ? previewDetails?.items.length ?? 0 : 0,
         limit: AUTOMATION_PREVIEW_DETAILS_PAGE_SIZE,
@@ -733,7 +735,8 @@ export function TaskJournalSettings({
                   <div className="mt-0.5 text-[11px] leading-4 text-slate-500">Все дела с действующим клиентом или организацией</div>
                 </div>
                 {([
-                  ['candidate', preview.candidateCount, `Критический срок: ${preview.escalationCandidateCount}`],
+                  ['candidate', preview.candidateCount, 'Все дела с наступившим сроком'],
+                  ['criticalCandidate', preview.escalationCandidateCount, `Без движения не менее ${preview.escalationDays} дн.`],
                   ['activeTask', preview.activeTaskCount ?? 0, 'Контроль пока не требуется'],
                   ['recentActivity', preview.recentlyActiveCount ?? 0, `Ещё не прошло ${preview.inactivityDays} дн.`],
                   ['excludedStatus', preview.excludedByStatusCount ?? 0, 'Приостановленные, закрытые и проигранные'],
@@ -747,7 +750,7 @@ export function TaskJournalSettings({
                     aria-label={`${AUTOMATION_PREVIEW_CATEGORY_LABELS[category]}: ${value}. Показать дела`}
                     onClick={() => void loadPreviewDetails(category)}
                     disabled={value === 0 || previewDetailsLoading || previewDetailsLoadingMore}
-                    className={`pp-automation-preview-card pp-automation-preview-card-interactive rounded-lg border px-3 py-2 text-left shadow-sm transition disabled:cursor-default disabled:opacity-60 ${previewDetailsCategory === category ? 'pp-automation-preview-card-active' : ''}`}
+                    className={`pp-automation-preview-card pp-automation-preview-card-interactive rounded-lg border px-3 py-2 text-left shadow-sm transition disabled:cursor-default disabled:opacity-60 ${category === 'criticalCandidate' ? 'pp-automation-preview-card-critical' : ''} ${previewDetailsCategory === category ? 'pp-automation-preview-card-active' : ''}`}
                   >
                     <div className="flex items-baseline justify-between gap-2">
                       <span className="text-xs font-medium text-slate-600">{AUTOMATION_PREVIEW_CATEGORY_LABELS[category]}</span>
@@ -763,7 +766,7 @@ export function TaskJournalSettings({
                   </button>
                 ))}
               </div>
-              <p className="mt-2 text-xs text-slate-500">Причины показаны без пересечений: каждое проверенное дело учитывается только в одной категории.</p>
+              <p className="mt-2 text-xs text-slate-500">Основные причины показаны без пересечений. Критический срок — отдельная подгруппа дел, уже входящих в «Пора создать контроль».</p>
 
               {previewDetailsCategory ? (
                 <section className="pp-automation-preview-details mt-3 rounded-xl border p-3" data-testid="case-inactivity-preview-details">

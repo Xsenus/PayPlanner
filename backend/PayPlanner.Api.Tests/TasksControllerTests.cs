@@ -816,7 +816,7 @@ public class TasksControllerTests
         var vacationCase = await CreateCaseAsync(db, vacationClient.Id, "ДЕЛО НА ПАУЗЕ");
         var now = DateTime.UtcNow;
         firstCandidate.CreatedAt = now.AddDays(-45);
-        secondCandidate.CreatedAt = now.AddDays(-40);
+        secondCandidate.CreatedAt = now.AddDays(-20);
         recentCase.CreatedAt = now.AddDays(-5);
         activeCase.CreatedAt = now.AddDays(-45);
         closedCase.CreatedAt = now.AddDays(-45);
@@ -843,10 +843,11 @@ public class TasksControllerTests
         {
             var action = await controller.GetCaseControlAutomationPreviewDetails(
                 inactivityDays: 14,
-                category,
-                search,
+                escalationDays: 30,
+                category: category,
+                search: search,
                 offset: 0,
-                limit,
+                limit: limit,
                 ct: CancellationToken.None);
             var ok = Assert.IsType<OkObjectResult>(action.Result);
             return Assert.IsType<TaskJournalAutomationPreviewDetailsDto>(ok.Value);
@@ -859,6 +860,11 @@ public class TasksControllerTests
         Assert.Contains("срок постановки контроля наступил", candidates.Items[0].Explanation);
         Assert.Equal(2, interceptor.Commands.Count(command =>
             command.Contains("FROM \"ClientCases\"", StringComparison.Ordinal)));
+
+        var criticalCandidates = await LoadAsync("criticalCandidate");
+        Assert.Equal(30, criticalCandidates.EscalationDays);
+        Assert.Equal(firstCandidate.Id, Assert.Single(criticalCandidates.Items).ClientCaseId);
+        Assert.Contains("критический порог 30 дн.", criticalCandidates.Items[0].Explanation);
 
         var recent = await LoadAsync("recentActivity");
         Assert.Equal(recentCase.Id, Assert.Single(recent.Items).ClientCaseId);
@@ -900,6 +906,7 @@ public class TasksControllerTests
 
         var result = await controller.GetCaseControlAutomationPreviewDetails(
             inactivityDays: 14,
+            escalationDays: 30,
             category: "candidate",
             search: null,
             offset: 0,

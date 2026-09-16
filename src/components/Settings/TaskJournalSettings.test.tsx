@@ -69,6 +69,7 @@ describe('TaskJournalSettings', () => {
     apiMock.getTaskJournalAutomationPreviewDetails.mockImplementation(async ({ category, offset = 0 }) => ({
       category,
       inactivityDays: 14,
+      escalationDays: 30,
       totalCount: 1,
       offset,
       limit: 20,
@@ -205,7 +206,7 @@ describe('TaskJournalSettings', () => {
     const breakdown = screen.getByTestId('case-inactivity-preview-breakdown');
     const panel = screen.getByTestId('case-inactivity-preview-panel');
     expect(panel.classList.contains('pp-automation-preview')).toBe(true);
-    expect(panel.querySelectorAll('.pp-automation-preview-card')).toHaveLength(7);
+    expect(panel.querySelectorAll('.pp-automation-preview-card')).toHaveLength(8);
     expect(screen.getByRole('button', { name: 'Рассчитать влияние' }).classList.contains('pp-automation-preview-action')).toBe(true);
     expect(within(breakdown).getByText('Проверено дел')).toBeTruthy();
     expect(within(breakdown).getByText('40')).toBeTruthy();
@@ -219,6 +220,16 @@ describe('TaskJournalSettings', () => {
     expect(within(breakdown).getByText('4')).toBeTruthy();
     expect(within(breakdown).getByText('Ответственный в отпуске')).toBeTruthy();
     expect(within(breakdown).getByText('2')).toBeTruthy();
+    const criticalCard = within(breakdown).getByRole('button', { name: 'Достигнут критический срок: 3. Показать дела' });
+    expect(criticalCard.classList.contains('pp-automation-preview-card-critical')).toBe(true);
+    fireEvent.click(criticalCard);
+    await waitFor(() => expect(apiMock.getTaskJournalAutomationPreviewDetails).toHaveBeenCalledWith({
+      inactivityDays: 14,
+      escalationDays: 30,
+      category: 'criticalCandidate',
+      offset: 0,
+      limit: 20,
+    }));
 
     fireEvent.change(inactivityDays, { target: { value: '11' } });
     expect(screen.queryByTestId('case-inactivity-preview-breakdown')).toBeNull();
@@ -230,6 +241,7 @@ describe('TaskJournalSettings', () => {
       .mockResolvedValueOnce({
         category: 'activeTask',
         inactivityDays: 14,
+        escalationDays: 30,
         totalCount: 2,
         offset: 0,
         limit: 20,
@@ -249,6 +261,7 @@ describe('TaskJournalSettings', () => {
       .mockResolvedValueOnce({
         category: 'activeTask',
         inactivityDays: 14,
+        escalationDays: 30,
         totalCount: 2,
         offset: 1,
         limit: 20,
@@ -278,6 +291,7 @@ describe('TaskJournalSettings', () => {
     expect(within(details).getByText(/Последняя контрольная точка:.*задача/)).toBeTruthy();
     expect(apiMock.getTaskJournalAutomationPreviewDetails).toHaveBeenNthCalledWith(1, {
       inactivityDays: 14,
+      escalationDays: 30,
       category: 'activeTask',
       offset: 0,
       limit: 20,
@@ -287,6 +301,7 @@ describe('TaskJournalSettings', () => {
     expect(await within(details).findByText('Дело со второй активной задачей')).toBeTruthy();
     expect(apiMock.getTaskJournalAutomationPreviewDetails).toHaveBeenNthCalledWith(2, {
       inactivityDays: 14,
+      escalationDays: 30,
       category: 'activeTask',
       offset: 1,
       limit: 20,
