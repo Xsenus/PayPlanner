@@ -5889,6 +5889,39 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task TaskJournalAutomationScheduler_UsesDefaultAssigneeWhenResponsibleIsUnavailable()
+    {
+        await using var db = await CreateContextAsync();
+        var defaultAssignee = await CreateAdminUserAsync(db, "scheduler-default@example.com", "Резервный исполнитель");
+        var unavailableResponsible = await CreateAdminUserAsync(db, "scheduler-inactive@example.com", "Неактивный ответственный");
+        unavailableResponsible.IsActive = false;
+        var client = await CreateClientAsync(db, "Клиент с неактивным ответственным");
+        client.ResponsibleUserId = unavailableResponsible.Id;
+        var clientCase = await CreateCaseAsync(db, client.Id, "ДЕЛО С РЕЗЕРВНЫМ ИСПОЛНИТЕЛЕМ");
+        clientCase.CreatedAt = DateTime.UtcNow.AddDays(-20);
+        await db.SaveChangesAsync();
+        var (scheduler, provider) = CreateAutomationScheduler(db, new Dictionary<string, string?>
+        {
+            ["TaskJournal:Automation:Enabled"] = "true",
+            ["TaskJournal:Automation:InactiveDays"] = "14",
+            ["TaskJournal:Automation:Limit"] = "10",
+            ["TaskJournal:Automation:DefaultAssigneeUserId"] = defaultAssignee.Id.ToString(),
+        });
+
+        using (provider)
+        {
+            var result = await scheduler.RunOnceAsync(CancellationToken.None);
+
+            Assert.Equal(1, result.CreatedCount);
+            Assert.Null(result.Error);
+        }
+
+        var task = await db.TaskJournalItems.SingleAsync(item => item.ClientCaseId == clientCase.Id);
+        Assert.Equal(defaultAssignee.Id, task.AssigneeUserId);
+        Assert.Equal(defaultAssignee.FullName, task.AssigneeName);
+    }
+
+    [Fact]
     public async Task TaskJournalAutomationScheduler_UsesAssigneeTimeZoneForDueAt()
     {
         await using var db = await CreateContextAsync();

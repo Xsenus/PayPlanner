@@ -6616,12 +6616,19 @@ function TaskAutomationPanel({
           const canCreateControlTask = automationState === 'ready';
           const isCreatingControlTask = canCreateControlTask && creatingCaseId === candidate.clientCaseId;
           const presentation = AUTOMATION_CANDIDATE_PRESENTATION[automationState];
+          const suggestedAssigneeName = candidate.suggestedAssigneeName?.trim()
+            || candidate.responsibleName?.trim()
+            || 'не определён';
+          const usesFallbackAssignee = Boolean(
+            candidate.suggestedAssigneeUserId
+            && candidate.suggestedAssigneeUserId !== candidate.responsibleUserId,
+          );
 
           return (
           <article
             key={candidate.clientCaseId}
             data-automation-state={automationState}
-            className={`min-w-0 rounded-xl border p-4 shadow-sm ${presentation.card}`}
+            className={`min-w-0 rounded-xl border p-3 shadow-sm ${presentation.card}`}
           >
             <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
               <div className="min-w-0">
@@ -6656,6 +6663,14 @@ function TaskAutomationPanel({
                   {automationState === 'paused'
                     ? 'Следующий контроль появится после возобновления'
                     : `${automationState === 'ready' ? 'Срок контроля' : 'Следующий контроль'}: ${candidate.nextControlAt ? formatDateTime(candidate.nextControlAt) : 'не определён'}`}
+                </span>
+              </div>
+              <div className="flex items-start gap-2 border-t border-slate-200 pt-2 font-medium text-slate-700">
+                <UsersRound className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-500" />
+                <span>
+                  При создании: {suggestedAssigneeName}
+                  {usesFallbackAssignee ? ' · резервный исполнитель' : ''}
+                  {candidate.suggestedDueAt ? ` · срок ${formatDateTime(candidate.suggestedDueAt)}` : ''}
                 </span>
               </div>
             </div>

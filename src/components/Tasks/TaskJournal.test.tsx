@@ -3812,6 +3812,8 @@ describe('TaskJournal', () => {
         clientName: 'Петров Петр Петрович',
         responsibleUserId: null,
         responsibleName: '',
+        suggestedAssigneeUserId: 9,
+        suggestedAssigneeName: 'Резервный исполнитель',
         clientCaseId: 101,
         clientCaseTitle: 'ОЖИДАЕТ ПОРОГА',
         reason: 'Первый контроль через 11 дн.',
@@ -3871,6 +3873,7 @@ describe('TaskJournal', () => {
     expect(screen.getByText(/Следующий контроль:/)).toBeTruthy();
     expect(screen.getByText('Ответственный: Администратор')).toBeTruthy();
     expect(screen.getByText('Ответственный: не назначен')).toBeTruthy();
+    expect(screen.getByText(/При создании: Резервный исполнитель · резервный исполнитель · срок/)).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: 'Открыть дело ГОТОВО К КОНТРОЛЮ' }));
     expect(onOpenCase).toHaveBeenCalledWith(100, 10);

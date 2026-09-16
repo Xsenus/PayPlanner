@@ -528,7 +528,7 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
             return fallbackAssignee;
         }
 
-        return responsibleUsers.GetValueOrDefault(responsibleUserId.Value);
+        return responsibleUsers.GetValueOrDefault(responsibleUserId.Value) ?? fallbackAssignee;
     }
 
     private static string ResolveAutomationPriority(int daysWithoutActiveTask, int inactiveDays, int escalationDays)
