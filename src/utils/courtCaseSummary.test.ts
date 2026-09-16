@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { ClientCaseCourtEvent, ClientCaseCourtInstance } from '../types';
+import type { ClientCaseCourtEvent, ClientCaseCourtInstance, ClientCaseProceduralDeadline } from '../types';
 import { buildCourtCaseProcessSummary } from './courtCaseSummary';
 
 function courtEvent(overrides: Partial<ClientCaseCourtEvent> = {}): ClientCaseCourtEvent {
@@ -19,6 +19,26 @@ function courtEvent(overrides: Partial<ClientCaseCourtEvent> = {}): ClientCaseCo
     sourceType: 'sudrf',
     createdAt: '2026-09-16T00:00:00Z',
     isOverdue: false,
+    ...overrides,
+  };
+}
+
+function proceduralDeadline(overrides: Partial<ClientCaseProceduralDeadline> = {}): ClientCaseProceduralDeadline {
+  return {
+    id: 1,
+    clientCaseId: 10,
+    deadlineType: 'appeal',
+    deadlineTypeLabel: 'Апелляция',
+    title: 'Срок апелляционного обжалования',
+    dueAt: '2026-10-05T00:00:00Z',
+    allDay: true,
+    status: 'active',
+    statusLabel: 'Активен',
+    warningDaysBefore: 7,
+    sourceType: 'sudrf',
+    createdAt: '2026-09-04T00:00:00Z',
+    isOverdue: false,
+    isWarning: false,
     ...overrides,
   };
 }
@@ -154,5 +174,83 @@ describe('buildCourtCaseProcessSummary', () => {
 
     expect(summary.decision.label).toBe('Нет данных о решении');
     expect(summary.appeal.label).toBe('Обжалование пока не определяется');
+    expect(summary.nextAction.label).toBe('Следующее действие не определено');
+    expect(summary.risk.label).toBe('Риск не определён');
+  });
+
+  it('selects the nearest upcoming court event and warns when it is imminent', () => {
+    const summary = buildCourtCaseProcessSummary(
+      { courtDecisionAt: null },
+      [courtEvent({
+        title: 'Предварительное судебное заседание',
+        scheduledAt: '2026-09-18T09:00:00Z',
+        movementStatus: 'scheduled',
+        movementStatusLabel: 'Назначено',
+        courtName: 'Новокуйбышевский городской суд',
+      })],
+      [],
+      [],
+      new Date('2026-09-16T09:00:00Z'),
+    );
+
+    expect(summary.nextAction.label).toBe('Предварительное судебное заседание');
+    expect(summary.nextAction.detail).toContain('Новокуйбышевский городской суд');
+    expect(summary.nextAction.dateLabel).toBe('Дата');
+    expect(summary.risk.label).toBe('Скоро судебное событие');
+    expect(summary.risk.tone).toBe('amber');
+  });
+
+  it('prioritizes an earlier warning deadline over a later hearing', () => {
+    const summary = buildCourtCaseProcessSummary(
+      { courtDecisionAt: null },
+      [courtEvent({
+        title: 'Судебное заседание',
+        scheduledAt: '2026-09-25T09:00:00Z',
+        movementStatus: 'scheduled',
+        movementStatusLabel: 'Назначено',
+      })],
+      [],
+      [proceduralDeadline({
+        deadlineType: 'motion',
+        deadlineTypeLabel: 'Ходатайство',
+        title: 'Подать ходатайство',
+        dueAt: '2026-09-20T00:00:00Z',
+        isWarning: true,
+      })],
+      new Date('2026-09-16T09:00:00Z'),
+    );
+
+    expect(summary.nextAction.label).toBe('Подать ходатайство');
+    expect(summary.nextAction.dateLabel).toBe('Срок до');
+    expect(summary.nextAction.tone).toBe('amber');
+    expect(summary.risk.label).toBe('Срок требует внимания');
+  });
+
+  it('surfaces an overdue deadline as the highest risk while keeping a planned next event', () => {
+    const summary = buildCourtCaseProcessSummary(
+      { courtDecisionAt: null },
+      [courtEvent({
+        title: 'Следующее заседание',
+        scheduledAt: '2026-09-30T09:00:00Z',
+        movementStatus: 'scheduled',
+        movementStatusLabel: 'Назначено',
+      })],
+      [],
+      [proceduralDeadline({
+        title: 'Подать возражения',
+        deadlineType: 'objection',
+        deadlineTypeLabel: 'Возражения',
+        dueAt: '2026-09-15T00:00:00Z',
+        isOverdue: true,
+        isWarning: true,
+        statusLabel: 'Просрочен',
+      })],
+      new Date('2026-09-16T09:00:00Z'),
+    );
+
+    expect(summary.nextAction.label).toBe('Следующее заседание');
+    expect(summary.risk.label).toBe('Просрочен процессуальный срок');
+    expect(summary.risk.detail).toBe('Подать возражения');
+    expect(summary.risk.tone).toBe('rose');
   });
 });

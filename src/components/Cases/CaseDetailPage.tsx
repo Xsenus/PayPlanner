@@ -6650,6 +6650,8 @@ function CourtPanel({
             {[
               ['Решение', processSummary.decision],
               ['Обжалование', processSummary.appeal],
+              ['Следующее действие', processSummary.nextAction],
+              ['Риск', processSummary.risk],
             ].map(([title, item]) => {
               const summaryItem = item as typeof processSummary.decision;
               return (

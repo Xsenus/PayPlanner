@@ -2498,6 +2498,8 @@ describe('CaseDetailPage', () => {
 
     expect(await screen.findByText('Сводка по судебному делу')).toBeTruthy();
     expect(screen.getByText('Что происходит по делу')).toBeTruthy();
+    expect(screen.getByText('Следующее действие')).toBeTruthy();
+    expect(screen.getByText('Риск')).toBeTruthy();
     expect(screen.getByText('Решение не обнаружено')).toBeTruthy();
     expect(screen.getByText('Обжалование пока не определяется')).toBeTruthy();
     expect(screen.getByText('Инстанции и судебные карточки')).toBeTruthy();

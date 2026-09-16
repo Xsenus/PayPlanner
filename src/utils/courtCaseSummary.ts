@@ -19,7 +19,13 @@ export interface CourtProcessSummaryItem {
 export interface CourtCaseProcessSummary {
   decision: CourtProcessSummaryItem;
   appeal: CourtProcessSummaryItem;
+  nextAction: CourtProcessSummaryItem;
+  risk: CourtProcessSummaryItem;
 }
+
+const TERMINAL_EVENT_STATUSES = new Set(['archived', 'cancelled', 'completed', 'held']);
+const INACTIVE_DEADLINE_STATUSES = new Set(['closed', 'cancelled', 'archived']);
+const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
 
 function eventText(event: ClientCaseCourtEvent) {
   return `${event.title || ''} ${event.resultSummary || ''} ${event.description || ''}`.toLocaleLowerCase('ru');
@@ -69,12 +75,31 @@ function hasPopulatedLaterInstance(instance: ClientCaseCourtInstance) {
   );
 }
 
+function getTime(value?: string | null) {
+  if (!value) return null;
+  const time = Date.parse(value);
+  return Number.isFinite(time) ? time : null;
+}
+
+function isActiveDeadline(deadline: ClientCaseProceduralDeadline) {
+  return !INACTIVE_DEADLINE_STATUSES.has((deadline.status || '').trim().toLowerCase());
+}
+
+function isUpcomingCourtEvent(event: ClientCaseCourtEvent, nowTime: number) {
+  const scheduledAt = getTime(event.scheduledAt);
+  return scheduledAt !== null
+    && scheduledAt >= nowTime
+    && !TERMINAL_EVENT_STATUSES.has((event.movementStatus || '').trim().toLowerCase());
+}
+
 export function buildCourtCaseProcessSummary(
   caseItem: Pick<ClientCase, 'courtDecisionAt'>,
   events: ClientCaseCourtEvent[],
   instances: ClientCaseCourtInstance[],
   proceduralDeadlines: ClientCaseProceduralDeadline[] = [],
+  now = new Date(),
 ): CourtCaseProcessSummary {
+  const nowTime = now.getTime();
   const decisionEvent = events
     .filter(isDecisionEvent)
     .sort((left, right) => new Date(right.scheduledAt).getTime() - new Date(left.scheduledAt).getTime())[0];
@@ -114,7 +139,7 @@ export function buildCourtCaseProcessSummary(
   const hasAppeal = Boolean(appealEvent || laterInstance || activeComplaint);
   const appealDeadline = proceduralDeadlines
     .filter((deadline) => deadline.deadlineType === 'appeal')
-    .filter((deadline) => !['closed', 'cancelled', 'archived'].includes(deadline.status))
+    .filter(isActiveDeadline)
     .sort((left, right) => new Date(left.dueAt).getTime() - new Date(right.dueAt).getTime())[0];
 
   const appeal: CourtProcessSummaryItem = hasAppeal
@@ -147,5 +172,119 @@ export function buildCourtCaseProcessSummary(
           tone: 'amber',
         };
 
-  return { decision, appeal };
+  const activeDeadlines = proceduralDeadlines
+    .filter(isActiveDeadline)
+    .filter((deadline) => getTime(deadline.dueAt) !== null);
+  const overdueDeadlines = activeDeadlines
+    .filter((deadline) => deadline.isOverdue)
+    .sort((left, right) => (getTime(left.dueAt) ?? 0) - (getTime(right.dueAt) ?? 0));
+  const upcomingDeadlines = activeDeadlines
+    .filter((deadline) => !deadline.isOverdue && (getTime(deadline.dueAt) ?? 0) >= nowTime)
+    .sort((left, right) => (getTime(left.dueAt) ?? 0) - (getTime(right.dueAt) ?? 0));
+  const upcomingEvents = events
+    .filter((event) => isUpcomingCourtEvent(event, nowTime))
+    .sort((left, right) => (getTime(left.scheduledAt) ?? 0) - (getTime(right.scheduledAt) ?? 0));
+  const nextDeadline = upcomingDeadlines[0];
+  const nextEvent = upcomingEvents[0];
+  const nextDeadlineTime = getTime(nextDeadline?.dueAt);
+  const nextEventTime = getTime(nextEvent?.scheduledAt);
+  const deadlineComesFirst = nextDeadlineTime !== null
+    && (nextEventTime === null || nextDeadlineTime <= nextEventTime);
+
+  let nextAction: CourtProcessSummaryItem;
+  if (deadlineComesFirst && nextDeadline) {
+    nextAction = {
+      status: 'pending',
+      label: nextDeadline.title,
+      detail: nextDeadline.isWarning
+        ? 'Процессуальный срок уже требует внимания.'
+        : `Ближайший процессуальный срок: ${nextDeadline.deadlineTypeLabel || nextDeadline.deadlineType}.`,
+      date: nextDeadline.dueAt,
+      dateLabel: 'Срок до',
+      tone: nextDeadline.isWarning ? 'amber' : 'blue',
+    };
+  } else if (nextEvent) {
+    nextAction = {
+      status: 'pending',
+      label: nextEvent.title,
+      detail: [nextEvent.courtName, nextEvent.movementStatusLabel].filter(Boolean).join(' · ') || 'Ближайшее судебное событие.',
+      date: nextEvent.scheduledAt,
+      dateLabel: 'Дата',
+      tone: nextEventTime !== null && nextEventTime - nowTime <= THREE_DAYS_MS ? 'amber' : 'blue',
+    };
+  } else if (overdueDeadlines[0]) {
+    nextAction = {
+      status: 'pending',
+      label: 'Разобрать просроченный срок',
+      detail: overdueDeadlines[0].title,
+      date: overdueDeadlines[0].dueAt,
+      dateLabel: 'Срок был',
+      tone: 'rose',
+    };
+  } else if (hasCourtMovement || activeDeadlines.length > 0) {
+    nextAction = {
+      status: 'pending',
+      label: 'Ожидается новое движение',
+      detail: 'Будущих заседаний и активных сроков в загруженных данных нет.',
+      tone: 'slate',
+    };
+  } else {
+    nextAction = {
+      status: 'unknown',
+      label: 'Следующее действие не определено',
+      detail: 'Проверьте официальный источник или добавьте процессуальный срок.',
+      tone: 'slate',
+    };
+  }
+
+  const warningDeadline = upcomingDeadlines.find((deadline) => deadline.isWarning);
+  const imminentEvent = upcomingEvents.find((event) => {
+    const scheduledAt = getTime(event.scheduledAt);
+    return scheduledAt !== null && scheduledAt - nowTime <= THREE_DAYS_MS;
+  });
+  let risk: CourtProcessSummaryItem;
+  if (overdueDeadlines.length > 0) {
+    risk = {
+      status: 'pending',
+      label: overdueDeadlines.length === 1 ? 'Просрочен процессуальный срок' : `Просрочено сроков: ${overdueDeadlines.length}`,
+      detail: overdueDeadlines[0].title,
+      date: overdueDeadlines[0].dueAt,
+      dateLabel: 'Срок был',
+      tone: 'rose',
+    };
+  } else if (warningDeadline) {
+    risk = {
+      status: 'pending',
+      label: 'Срок требует внимания',
+      detail: warningDeadline.title,
+      date: warningDeadline.dueAt,
+      dateLabel: 'Срок до',
+      tone: 'amber',
+    };
+  } else if (imminentEvent) {
+    risk = {
+      status: 'pending',
+      label: 'Скоро судебное событие',
+      detail: imminentEvent.title,
+      date: imminentEvent.scheduledAt,
+      dateLabel: 'Дата',
+      tone: 'amber',
+    };
+  } else if (hasCourtMovement || activeDeadlines.length > 0) {
+    risk = {
+      status: 'confirmed',
+      label: 'Критичных рисков нет',
+      detail: 'Просроченных сроков и ближайших срочных событий не обнаружено.',
+      tone: 'emerald',
+    };
+  } else {
+    risk = {
+      status: 'unknown',
+      label: 'Риск не определён',
+      detail: 'Для оценки нужны движение дела или процессуальные сроки.',
+      tone: 'slate',
+    };
+  }
+
+  return { decision, appeal, nextAction, risk };
 }
