@@ -3444,11 +3444,15 @@ export function TaskJournal({
       return;
     }
 
-    const readyCount = Math.max(
-      automationSummary.readyCount,
-      automationCandidates.filter((candidate) => getAutomationCandidateState(candidate) === 'ready').length,
-    );
-    if (readyCount === 0) {
+    const loadedReadyCount = automationCandidates
+      .filter((candidate) => getAutomationCandidateState(candidate) === 'ready').length;
+    const loadedCriticalCount = automationCandidates.filter((candidate) => candidate.isEscalated).length;
+    const actionableCount = automationStateFilter === 'critical'
+      ? Math.max(automationSummary.criticalCount ?? 0, loadedCriticalCount)
+      : automationStateFilter === 'waiting' || automationStateFilter === 'paused'
+        ? 0
+        : Math.max(automationSummary.readyCount, loadedReadyCount);
+    if (actionableCount === 0) {
       return;
     }
 
@@ -3456,8 +3460,9 @@ export function TaskJournal({
     try {
       const normalizedSearch = debouncedAutomationSearch.trim();
       const result = await apiService.createTaskJournalCaseAutomationTasks({
-        limit: Math.min(readyCount, 100),
+        limit: Math.min(actionableCount, 100),
         ...(normalizedSearch ? { search: normalizedSearch } : {}),
+        ...(automationStateFilter === 'critical' ? { automationState: 'critical' as const } : {}),
       });
       const createdCaseIds = new Set(result.createdTasks.map((task) => task.clientCaseId).filter((id): id is number => Boolean(id)));
       const criticalCreatedCount = automationCandidates.filter((candidate) =>
@@ -3491,7 +3496,18 @@ export function TaskJournal({
     } finally {
       setCreatingAutomationAll(false);
     }
-  }, [automationCandidates, automationSummary.readyCount, canCreateTasks, debouncedAutomationSearch, emitTaskChange, openTaskEditor, refreshTasks, toast]);
+  }, [
+    automationCandidates,
+    automationStateFilter,
+    automationSummary.criticalCount,
+    automationSummary.readyCount,
+    canCreateTasks,
+    debouncedAutomationSearch,
+    emitTaskChange,
+    openTaskEditor,
+    refreshTasks,
+    toast,
+  ]);
 
   useEffect(() => {
     if (!(routeTaskId && routeTaskId > 0)) {
@@ -6582,6 +6598,11 @@ function TaskAutomationPanel({
     ? { ...summary, criticalCount: summary.criticalCount ?? loadedSummary.criticalCount ?? 0 }
     : loadedSummary;
   const readyCount = effectiveSummary.readyCount;
+  const actionableCount = activeState === 'critical'
+    ? effectiveSummary.criticalCount ?? 0
+    : activeState === 'waiting' || activeState === 'paused'
+      ? 0
+      : readyCount;
   const stateTotal = getAutomationCandidateStateCount(effectiveSummary, activeState);
   const hasMore = candidates.length < stateTotal;
   const orderedCandidates = [...candidates].sort((left, right) => {
@@ -6616,7 +6637,7 @@ function TaskAutomationPanel({
         <button
           type="button"
           onClick={onCreateAll}
-          disabled={creatingAll || loadingPage || Boolean(loadError) || readyCount === 0}
+          disabled={creatingAll || loadingPage || Boolean(loadError) || actionableCount === 0}
           className="inline-flex w-fit items-center gap-2 rounded-xl bg-amber-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-amber-700 disabled:cursor-wait disabled:opacity-60"
         >
           <Plus className="h-4 w-4" />
@@ -6624,9 +6645,13 @@ function TaskAutomationPanel({
             ? 'Создаем...'
             : loadingPage
               ? 'Обновляем очередь...'
-            : readyCount <= Math.max(1, creationLimit)
-              ? `Создать наступившие (${readyCount})`
-              : `Создать наступившие (${Math.max(1, creationLimit)} из ${readyCount})`}
+            : activeState === 'waiting'
+              ? 'Срок ещё не наступил'
+              : activeState === 'paused'
+                ? 'Создание приостановлено'
+                : actionableCount <= Math.max(1, creationLimit)
+                  ? `${activeState === 'critical' ? 'Создать критические' : 'Создать наступившие'} (${actionableCount})`
+                  : `${activeState === 'critical' ? 'Создать критические' : 'Создать наступившие'} (${Math.max(1, creationLimit)} из ${actionableCount})`}
         </button>
       </div>
 

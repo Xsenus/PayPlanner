@@ -2083,7 +2083,7 @@ describe('apiService case calendar', () => {
     expect(options?.signal).toBe(controller.signal);
   });
 
-  it('passes the active search to bulk case automation creation', async () => {
+  it('passes the active search and critical scope to bulk case automation creation', async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
       createdTasks: [],
       skippedCount: 0,
@@ -2092,11 +2092,16 @@ describe('apiService case calendar', () => {
     }));
     vi.stubGlobal('fetch', fetchMock);
 
-    await apiService.createTaskJournalCaseAutomationTasks({ limit: 25, search: 'КОШЕЛЕВА' });
+    await apiService.createTaskJournalCaseAutomationTasks({
+      limit: 25,
+      search: 'КОШЕЛЕВА',
+      automationState: 'critical',
+    });
 
     const [url, options] = fetchMock.mock.calls[0];
     expect(String(url)).toContain('/tasks/automation/case-candidates/tasks?limit=25');
     expect(String(url)).toContain('search=');
+    expect(String(url)).toContain('automationState=critical');
     expect(options?.method).toBe('POST');
   });
 

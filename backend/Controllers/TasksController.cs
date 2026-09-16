@@ -2046,6 +2046,7 @@ public class TasksController : ControllerBase
     public async Task<ActionResult<TaskJournalAutomationCreateResultDto>> CreateAutomationTasksForCandidates(
         [FromQuery] int limit = 20,
         [FromQuery] string? search = null,
+        [FromQuery] string? automationState = null,
         CancellationToken ct = default)
     {
         var access = await GetTaskAccessAsync(ct);
@@ -2060,6 +2061,11 @@ public class TasksController : ControllerBase
         }
 
         limit = Math.Clamp(limit, 1, 100);
+        var normalizedAutomationState = automationState?.Trim().ToLowerInvariant();
+        if (normalizedAutomationState is not null and not "all" and not "ready" and not "critical")
+        {
+            return BadRequest("Массовое создание доступно только для наступивших или критических дел.");
+        }
         var settings = await GetTaskJournalSettingsAsync(ct);
         if (!settings.CaseInactivityAutomationEnabled)
         {
@@ -2165,7 +2171,7 @@ public class TasksController : ControllerBase
                 item.ResponsibleName.Contains(rawTerm));
         }
 
-        var candidates = await candidateQuery
+        var prioritizedCandidateQuery = candidateQuery
             .Select(item => new
             {
                 Item = item,
@@ -2215,7 +2221,15 @@ public class TasksController : ControllerBase
                 LastControlAnchorAt = row.Item.LastControlCycleEndedAt.HasValue && row.Item.LastControlCycleEndedAt.Value > row.LastMeaningfulActivityAt
                     ? row.Item.LastControlCycleEndedAt.Value
                     : row.LastMeaningfulActivityAt,
-            })
+            });
+
+        if (normalizedAutomationState == "critical")
+        {
+            prioritizedCandidateQuery = prioritizedCandidateQuery.Where(row =>
+                row.LastMeaningfulActivityAt <= escalationCutoff);
+        }
+
+        var candidates = await prioritizedCandidateQuery
             .OrderBy(row => row.LastMeaningfulActivityAt <= escalationCutoff ? 0 : 1)
             .ThenBy(row => row.LastMeaningfulActivityAt <= escalationCutoff
                 ? row.LastMeaningfulActivityAt

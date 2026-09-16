@@ -5104,6 +5104,32 @@ public class TasksControllerTests
         Assert.Equal("urgent", created.Priority);
     }
 
+    [Fact]
+    public async Task CreateAutomationTasksForCandidates_CriticalScopeDoesNotCreateRegularReadyTasks()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "bulk-critical-scope@example.com", "Автор");
+        var client = await CreateClientAsync(db, "Клиент критической области");
+        var criticalCase = await CreateCaseAsync(db, client.Id, "КРИТИЧЕСКОЕ ДЕЛО");
+        var regularReadyCase = await CreateCaseAsync(db, client.Id, "ОБЫЧНЫЙ НАСТУПИВШИЙ КОНТРОЛЬ");
+        var now = DateTime.UtcNow;
+        criticalCase.CreatedAt = now.AddDays(-40);
+        regularReadyCase.CreatedAt = now.AddDays(-20);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.CreateAutomationTasksForCandidates(
+            limit: 10,
+            automationState: "critical",
+            ct: CancellationToken.None);
+
+        var dto = Assert.IsType<TaskJournalAutomationCreateResultDto>(
+            Assert.IsType<OkObjectResult>(result.Result).Value);
+        var created = Assert.Single(dto.CreatedTasks);
+        Assert.Equal(criticalCase.Id, created.ClientCaseId);
+        Assert.DoesNotContain(dto.CreatedTasks, item => item.ClientCaseId == regularReadyCase.Id);
+    }
+
     [Theory]
     [InlineData(ClientCaseStatus.OnHold)]
     [InlineData(ClientCaseStatus.Closed)]

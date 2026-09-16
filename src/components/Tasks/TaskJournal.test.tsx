@@ -3767,6 +3767,49 @@ describe('TaskJournal', () => {
     });
   });
 
+  it('limits bulk automation creation to the selected critical section', async () => {
+    apiMock.getTaskJournalCaseAutomationCandidates.mockResolvedValue([
+      {
+        clientId: 10,
+        clientName: 'Иванов Иван Иванович',
+        clientCaseId: 100,
+        clientCaseTitle: 'КРИТИЧЕСКОЕ ДЕЛО',
+        reason: 'Нет активной задачи уже 40 дн.',
+        activeTaskCount: 0,
+        completedTaskCount: 2,
+        daysWithoutActiveTask: 40,
+        isEscalated: true,
+        isReadyForControl: true,
+        automationState: 'ready',
+        lastTaskAt: todayAt(8),
+        suggestedTitle: 'Проверить движение по делу',
+        suggestedDescription: 'Автоконтроль',
+        suggestedDueAt: todayAt(9),
+      },
+    ]);
+    apiMock.getTaskJournalCaseAutomationSummary.mockResolvedValue({
+      totalCount: 1,
+      readyCount: 1,
+      criticalCount: 1,
+      waitingCount: 0,
+      pausedCount: 0,
+    });
+    apiMock.createTaskJournalCaseAutomationTasks.mockResolvedValueOnce({
+      createdTasks: [],
+      skippedCount: 0,
+    });
+    await renderJournal();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Критические: 1' }));
+    expect(await screen.findByRole('button', { name: 'Создать критические (1)' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Создать критические (1)' }));
+
+    await waitFor(() => expect(apiMock.createTaskJournalCaseAutomationTasks).toHaveBeenCalledWith({
+      limit: 1,
+      automationState: 'critical',
+    }));
+  });
+
   it('explains when a stale automation candidate is skipped during bulk creation', async () => {
     apiMock.getTaskJournalCaseAutomationCandidates.mockResolvedValue([
       {
@@ -3924,6 +3967,7 @@ describe('TaskJournal', () => {
     expect(apiMock.getTaskJournalCaseAutomationSummary).not.toHaveBeenCalled();
     expect(screen.getByText('ГОТОВО К КОНТРОЛЮ')).toBeTruthy();
     expect(screen.queryByText('ОЖИДАЕТ ПОРОГА')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Создать критические (1)' })).toBeTruthy();
 
     apiMock.getTaskJournalCaseAutomationCandidates.mockClear();
     fireEvent.click(screen.getByRole('button', { name: 'Ожидают срока: 1' }));
@@ -3932,6 +3976,7 @@ describe('TaskJournal', () => {
       expect.anything(),
     ));
     expect(apiMock.getTaskJournalCaseAutomationSummary).not.toHaveBeenCalled();
+    expect((screen.getByRole('button', { name: 'Срок ещё не наступил' }) as HTMLButtonElement).disabled).toBe(true);
 
     const waitingTaskButton = screen.getByTestId('task-automation-create-101') as HTMLButtonElement;
     expect(waitingTaskButton.disabled).toBe(false);
