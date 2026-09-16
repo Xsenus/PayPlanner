@@ -3927,7 +3927,7 @@ describe('TaskJournal', () => {
 
     await renderJournal();
 
-    expect(await screen.findByText('Показано 100 из 101')).toBeTruthy();
+    expect(await screen.findByText('Загружено 100 из 101')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Показать загруженные (100)' }));
     fireEvent.click(screen.getByRole('button', { name: 'Загрузить ещё (1)' }));
 
@@ -3937,7 +3937,7 @@ describe('TaskJournal', () => {
       offset: 100,
       automationState: 'all',
     }));
-    expect(await screen.findByText('Показано 101 из 101')).toBeTruthy();
+    expect(await screen.findByText('Загружено 101 из 101')).toBeTruthy();
     expect(screen.getByText('ДЕЛО 101')).toBeTruthy();
   });
 

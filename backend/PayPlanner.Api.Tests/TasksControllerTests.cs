@@ -3906,7 +3906,7 @@ public class TasksControllerTests
     }
 
     [Fact]
-    public async Task AutomationCaseCandidates_SummaryAndPagingCoverTheWholeQueueByState()
+    public async Task AutomationCaseCandidates_SummaryAndPagingPrioritizeActionableStatesAcrossTheWholeQueue()
     {
         await using var db = await CreateContextAsync();
         var author = await CreateAdminUserAsync(db, "candidate-pages@example.com", "Администратор");
@@ -3949,6 +3949,29 @@ public class TasksControllerTests
         Assert.Equal(0, searchedSummary.ReadyCount);
         Assert.Equal(1, searchedSummary.WaitingCount);
         Assert.Equal(0, searchedSummary.PausedCount);
+
+        var overviewFirstPageResult = await controller.GetAutomationCaseCandidates(
+            inactiveDays: 14,
+            limit: 2,
+            automationState: "all",
+            ct: CancellationToken.None);
+        var overviewFirstPage = Assert.IsAssignableFrom<IReadOnlyList<TaskJournalCaseAutomationCandidateDto>>(
+            Assert.IsType<OkObjectResult>(overviewFirstPageResult.Result).Value);
+        Assert.Equal(
+            [oldestReadyCase.Id, nextReadyCase.Id],
+            overviewFirstPage.Select(item => item.ClientCaseId));
+
+        var overviewSecondPageResult = await controller.GetAutomationCaseCandidates(
+            inactiveDays: 14,
+            limit: 2,
+            offset: 2,
+            automationState: "all",
+            ct: CancellationToken.None);
+        var overviewSecondPage = Assert.IsAssignableFrom<IReadOnlyList<TaskJournalCaseAutomationCandidateDto>>(
+            Assert.IsType<OkObjectResult>(overviewSecondPageResult.Result).Value);
+        Assert.Equal(
+            [waitingCase.Id, pausedCase.Id],
+            overviewSecondPage.Select(item => item.ClientCaseId));
 
         var readyPageResult = await controller.GetAutomationCaseCandidates(
             inactiveDays: 14,

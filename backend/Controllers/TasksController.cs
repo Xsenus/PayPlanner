@@ -1254,8 +1254,21 @@ public class TasksController : ControllerBase
                 row.LastControlAnchorAt > cutoff);
         }
 
-        var filteredCandidates = await stateQuery
-            .OrderBy(row => row.LastControlAnchorAt)
+        var includeAllStates = normalizedAutomationState == "all" ||
+            (normalizedAutomationState is null && includeWaiting);
+        var orderedStateQuery = includeAllStates
+            ? stateQuery
+                .OrderBy(row =>
+                    !row.Item.InactivityRemindersEnabled ||
+                    vacationUserIds.Contains(row.Item.ResponsibleUserId ?? 0)
+                        ? 2
+                        : row.LastControlAnchorAt <= cutoff
+                            ? 0
+                            : 1)
+                .ThenBy(row => row.LastControlAnchorAt)
+            : stateQuery.OrderBy(row => row.LastControlAnchorAt);
+
+        var filteredCandidates = await orderedStateQuery
             .ThenBy(row => row.Item.ClientName != string.Empty ? row.Item.ClientName : row.Item.LegalEntityName)
             .ThenBy(row => row.Item.Title)
             .Select(row => row.Item)

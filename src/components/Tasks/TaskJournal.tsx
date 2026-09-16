@@ -6624,7 +6624,7 @@ function TaskAutomationPanel({
       ) : null}
       <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
         <span className="text-slate-600">
-          Показано {candidates.length} из {stateTotal}
+          Загружено {candidates.length} из {stateTotal}
         </span>
       {filteredCandidates.length > 6 ? (
         <button
