@@ -130,6 +130,7 @@ describe('buildCourtCaseProcessSummary', () => {
     expect(summary.appeal.detail).toContain('Срок обжалования ещё контролируется');
     expect(summary.appeal.date).toBe('2026-10-05T00:00:00Z');
     expect(summary.appeal.dateLabel).toBe('Срок до');
+    expect(summary.appeal.allDay).toBe(true);
     expect(summary.appeal.tone).toBe('amber');
   });
 
@@ -269,7 +270,9 @@ describe('buildCourtCaseProcessSummary', () => {
     expect(summary.nextAction.label).toBe('Предварительное судебное заседание');
     expect(summary.nextAction.detail).toContain('Новокуйбышевский городской суд');
     expect(summary.nextAction.dateLabel).toBe('Дата');
+    expect(summary.nextAction.allDay).toBe(false);
     expect(summary.risk.label).toBe('Скоро судебное событие');
+    expect(summary.risk.allDay).toBe(false);
     expect(summary.risk.tone).toBe('amber');
   });
 
@@ -295,8 +298,10 @@ describe('buildCourtCaseProcessSummary', () => {
 
     expect(summary.nextAction.label).toBe('Подать ходатайство');
     expect(summary.nextAction.dateLabel).toBe('Срок до');
+    expect(summary.nextAction.allDay).toBe(true);
     expect(summary.nextAction.tone).toBe('amber');
     expect(summary.risk.label).toBe('Срок требует внимания');
+    expect(summary.risk.allDay).toBe(true);
   });
 
   it('keeps an all-day deadline due today visible after midnight', () => {
@@ -318,8 +323,10 @@ describe('buildCourtCaseProcessSummary', () => {
 
     expect(summary.nextAction.label).toBe('Подать возражения');
     expect(summary.nextAction.dateLabel).toBe('Срок до');
+    expect(summary.nextAction.allDay).toBe(true);
     expect(summary.nextAction.tone).toBe('amber');
     expect(summary.risk.label).toBe('Срок требует внимания');
+    expect(summary.risk.allDay).toBe(true);
   });
 
   it('keeps an all-day court event due today visible after midnight', () => {
@@ -340,8 +347,10 @@ describe('buildCourtCaseProcessSummary', () => {
 
     expect(summary.nextAction.label).toBe('Судебное заседание');
     expect(summary.nextAction.dateLabel).toBe('Дата');
+    expect(summary.nextAction.allDay).toBe(true);
     expect(summary.nextAction.tone).toBe('amber');
     expect(summary.risk.label).toBe('Скоро судебное событие');
+    expect(summary.risk.allDay).toBe(true);
   });
 
   it('surfaces an overdue deadline as the highest risk while keeping a planned next event', () => {
@@ -367,8 +376,10 @@ describe('buildCourtCaseProcessSummary', () => {
     );
 
     expect(summary.nextAction.label).toBe('Следующее заседание');
+    expect(summary.nextAction.allDay).toBe(false);
     expect(summary.risk.label).toBe('Просрочен процессуальный срок');
     expect(summary.risk.detail).toBe('Подать возражения');
+    expect(summary.risk.allDay).toBe(true);
     expect(summary.risk.tone).toBe('rose');
   });
 });

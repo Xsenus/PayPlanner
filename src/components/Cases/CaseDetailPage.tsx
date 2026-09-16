@@ -492,12 +492,16 @@ function formatRuDateTime(value?: string | null) {
   return formatDateTimeInTimeZone(value, activeCaseTimeZoneId) || toRuDate(value);
 }
 
-function formatCourtEventSchedule(event: Pick<ClientCaseCourtEvent, 'scheduledAt' | 'allDay'>) {
-  if (!event.scheduledAt) return '';
-  if (!event.allDay) return formatRuDateTime(event.scheduledAt);
+function formatCourtSchedule(value?: string | null, allDay?: boolean) {
+  if (!value) return '';
+  if (allDay === false) return formatRuDateTime(value);
 
-  const date = toRuDate(event.scheduledAt);
-  return date ? `${date} · весь день` : '';
+  const date = toRuDate(value);
+  return allDay === true && date ? `${date} · весь день` : date;
+}
+
+function formatCourtEventSchedule(event: Pick<ClientCaseCourtEvent, 'scheduledAt' | 'allDay'>) {
+  return formatCourtSchedule(event.scheduledAt, event.allDay);
 }
 
 function toDateInputValue(value?: string | null) {
@@ -6851,7 +6855,7 @@ function CourtPanel({
                     <div className="text-[11px] font-semibold uppercase tracking-[0.1em] opacity-70">{title as string}</div>
                     <div className="mt-1 text-sm font-bold">{summaryItem.label}</div>
                     <div className="mt-1 text-xs leading-5 opacity-80">{summaryItem.detail}</div>
-                    {summaryItem.date ? <div className="mt-1 text-xs font-semibold">{summaryItem.dateLabel || 'Дата'}: {toRuDate(summaryItem.date)}</div> : null}
+                    {summaryItem.date ? <div className="mt-1 text-xs font-semibold">{summaryItem.dateLabel || 'Дата'}: {formatCourtSchedule(summaryItem.date, summaryItem.allDay)}</div> : null}
                     <div className="mt-1.5 border-t border-current/10 pt-1.5 text-[11px] font-medium opacity-65">Основание: {summaryItem.basis}</div>
                   </div>
                 );
@@ -6944,7 +6948,7 @@ function CourtPanel({
           <aside className="space-y-3">
             <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm"><div className="flex items-center justify-between"><h3 className="font-bold text-slate-900">Участники</h3><span className="text-xs font-semibold text-slate-500">{courtParties.filter((party) => !party.isArchived).length}</span></div>{courtPartiesLoading ? <Loader2 className="mt-3 h-4 w-4 animate-spin text-blue-600" /> : <div className="mt-2 space-y-2">{courtParties.filter((party) => !party.isArchived).slice(0, 6).map((party) => <div key={party.id} className="rounded-lg bg-slate-50 px-2.5 py-2"><div className="text-sm font-semibold text-slate-800">{party.displayName}</div><div className="text-xs text-slate-500">{party.sideLabel || party.processRole || 'Участник'}</div></div>)}{courtParties.filter((party) => !party.isArchived).length === 0 ? <div className="text-sm text-slate-500">Участники ещё не загружены.</div> : null}</div>}</section>
             <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm"><div className="flex items-center justify-between"><h3 className="font-bold text-slate-900">Файлы</h3><span className="text-xs font-semibold text-slate-500">{documents.length}</span></div><div className="mt-2 space-y-2">{documents.slice(0, 5).map((document) => <div key={document.id} className="flex items-start gap-2 rounded-lg bg-slate-50 px-2.5 py-2"><FileText className="mt-0.5 h-4 w-4 shrink-0 text-blue-600" /><div className="min-w-0"><div className="truncate text-sm font-semibold text-slate-800">{document.originalFileName || 'Документ'}</div><div className="text-xs text-slate-500">{document.status || document.documentType || 'Файл дела'}</div></div></div>)}{documents.length === 0 ? <div className="text-sm text-slate-500">Файлов пока нет.</div> : null}</div></section>
-            <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm"><div className="flex items-center justify-between"><h3 className="font-bold text-slate-900">Процессуальные сроки</h3><span className="text-xs font-semibold text-slate-500">{activeProceduralDeadlines.length}</span></div>{proceduralDeadlinesLoading ? <Loader2 className="mt-3 h-4 w-4 animate-spin text-blue-600" /> : <div className="mt-2 space-y-2">{activeProceduralDeadlines.slice(0, 5).map((deadline) => <div key={deadline.id} className={`rounded-lg border px-2.5 py-2 ${deadline.isOverdue ? 'border-rose-200 bg-rose-50' : deadline.isWarning ? 'border-amber-200 bg-amber-50' : 'border-slate-200 bg-slate-50'}`}><div className="text-sm font-semibold text-slate-800">{deadline.title}</div><div className="mt-0.5 text-xs text-slate-500">до {formatRuDateTime(deadline.dueAt) || '—'}</div></div>)}{activeProceduralDeadlines.length === 0 ? <div className="text-sm text-slate-500">Активных сроков нет.</div> : null}</div>}</section>
+            <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm"><div className="flex items-center justify-between"><h3 className="font-bold text-slate-900">Процессуальные сроки</h3><span className="text-xs font-semibold text-slate-500">{activeProceduralDeadlines.length}</span></div>{proceduralDeadlinesLoading ? <Loader2 className="mt-3 h-4 w-4 animate-spin text-blue-600" /> : <div className="mt-2 space-y-2">{activeProceduralDeadlines.slice(0, 5).map((deadline) => <div key={deadline.id} className={`rounded-lg border px-2.5 py-2 ${deadline.isOverdue ? 'border-rose-200 bg-rose-50' : deadline.isWarning ? 'border-amber-200 bg-amber-50' : 'border-slate-200 bg-slate-50'}`}><div className="text-sm font-semibold text-slate-800">{deadline.title}</div><div className="mt-0.5 text-xs text-slate-500">до {formatCourtSchedule(deadline.dueAt, deadline.allDay) || '—'}</div></div>)}{activeProceduralDeadlines.length === 0 ? <div className="text-sm text-slate-500">Активных сроков нет.</div> : null}</div>}</section>
             <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm"><h3 className="font-bold text-slate-900">Работа по делу</h3><div className="mt-2 grid grid-cols-2 gap-2"><div className="rounded-lg bg-blue-50 p-2.5"><div className="text-[11px] text-blue-600">Активные задачи</div><div className="mt-1 text-xl font-bold text-blue-900">{caseItem.openTaskCount ?? 0}</div></div><div className="rounded-lg bg-rose-50 p-2.5"><div className="text-[11px] text-rose-600">Просрочено</div><div className="mt-1 text-xl font-bold text-rose-900">{caseItem.overdueTaskCount ?? 0}</div></div></div><p className="mt-2 text-xs text-slate-500">Файлы, задачи, участники, переписка и доступ клиента доступны в соседних вкладках карточки.</p></section>
           </aside>
         </div>
@@ -7548,7 +7552,7 @@ function CourtPanel({
                   </button>
                 </div>
                 <div className="mt-2 font-semibold text-slate-900">{deadline.title}</div>
-                <div className="mt-1 text-sm text-slate-600">{toRuDate(deadline.dueAt) || '—'} · {deadline.statusLabel}</div>
+                <div className="mt-1 text-sm text-slate-600">{formatCourtSchedule(deadline.dueAt, deadline.allDay) || '—'} · {deadline.statusLabel}</div>
                 {deadline.notes ? <div className="mt-2 text-sm text-slate-500">{deadline.notes}</div> : null}
                 <CourtSourceProvenance item={deadline} />
               </div>

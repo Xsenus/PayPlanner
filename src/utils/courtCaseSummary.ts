@@ -14,6 +14,7 @@ export interface CourtProcessSummaryItem {
   basis: string;
   date?: string | null;
   dateLabel?: string;
+  allDay?: boolean;
   tone: CourtProcessSummaryTone;
 }
 
@@ -161,6 +162,7 @@ export function buildCourtCaseProcessSummary(
           || (decisionEvent ? 'В движении дела зафиксирован итог рассмотрения.' : 'Дата решения указана в карточке дела.'),
         basis: decisionEvent ? 'актуальное движение дела' : 'дата в карточке дела',
         date: decisionDate,
+        allDay: caseItem.courtDecisionAt ? undefined : decisionEvent?.allDay,
         tone: 'emerald',
       }
     : hasCourtMovement
@@ -201,6 +203,7 @@ export function buildCourtCaseProcessSummary(
           || (laterInstance ? `${laterInstance.instanceLabel}: ${laterInstance.courtCaseNumber || 'карточка связана'}` : 'В деле есть сведения об обжаловании.'),
         basis: appealEvent ? 'актуальное движение дела' : activeComplaint ? 'активная жалоба' : 'связанная судебная инстанция',
         date: appealEvent?.scheduledAt || activeComplaint?.filedAt || null,
+        allDay: appealEvent?.scheduledAt ? appealEvent.allDay : undefined,
         tone: 'blue',
       }
     : hasDecision
@@ -215,6 +218,7 @@ export function buildCourtCaseProcessSummary(
           basis: appealDeadline ? 'судебные данные и процессуальный срок' : 'судебные данные дела',
           date: appealDeadline?.dueAt || null,
           dateLabel: appealDeadline ? 'Срок до' : undefined,
+          allDay: appealDeadline?.allDay,
           tone: appealDeadline?.isOverdue ? 'rose' : appealDeadline ? 'amber' : 'slate',
         }
       : {
@@ -263,6 +267,7 @@ export function buildCourtCaseProcessSummary(
       basis: 'процессуальный срок',
       date: nextDeadline.dueAt,
       dateLabel: 'Срок до',
+      allDay: nextDeadline.allDay,
       tone: nextDeadline.isWarning ? 'amber' : 'blue',
     };
   } else if (nextEvent) {
@@ -273,6 +278,7 @@ export function buildCourtCaseProcessSummary(
       basis: 'актуальное движение дела',
       date: nextEvent.scheduledAt,
       dateLabel: 'Дата',
+      allDay: nextEvent.allDay,
       tone: nextEventTime !== null && nextEventTime - nowTime <= THREE_DAYS_MS ? 'amber' : 'blue',
     };
   } else if (overdueDeadlines[0]) {
@@ -283,6 +289,7 @@ export function buildCourtCaseProcessSummary(
       basis: 'просроченный процессуальный срок',
       date: overdueDeadlines[0].dueAt,
       dateLabel: 'Срок был',
+      allDay: overdueDeadlines[0].allDay,
       tone: 'rose',
     };
   } else if (hasCourtMovement || activeDeadlines.length > 0) {
@@ -317,6 +324,7 @@ export function buildCourtCaseProcessSummary(
       basis: 'активные процессуальные сроки',
       date: overdueDeadlines[0].dueAt,
       dateLabel: 'Срок был',
+      allDay: overdueDeadlines[0].allDay,
       tone: 'rose',
     };
   } else if (warningDeadline) {
@@ -327,6 +335,7 @@ export function buildCourtCaseProcessSummary(
       basis: 'активные процессуальные сроки',
       date: warningDeadline.dueAt,
       dateLabel: 'Срок до',
+      allDay: warningDeadline.allDay,
       tone: 'amber',
     };
   } else if (imminentEvent) {
@@ -337,6 +346,7 @@ export function buildCourtCaseProcessSummary(
       basis: 'актуальное движение дела',
       date: imminentEvent.scheduledAt,
       dateLabel: 'Дата',
+      allDay: imminentEvent.allDay,
       tone: 'amber',
     };
   } else if (hasCourtMovement || activeDeadlines.length > 0) {

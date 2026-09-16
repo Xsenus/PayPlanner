@@ -2469,6 +2469,8 @@ describe('CaseDetailPage', () => {
       'pp.case-detail.15.view.v1',
       JSON.stringify({ activeTab: 'court', courtOverview: true }),
     );
+    vi.mocked(apiService.getUserSetting).mockResolvedValue({ key: 'profile.timeZoneId', value: 'Europe/Samara' });
+    vi.mocked(apiService.getCaseProceduralDeadlines).mockResolvedValue([]);
     vi.mocked(apiService.getCaseCourtInstances).mockResolvedValue([
       {
         id: 81,
@@ -2531,6 +2533,25 @@ describe('CaseDetailPage', () => {
         createdAt: '2026-05-21T00:00:00Z',
         isOverdue: false,
       },
+      {
+        id: 43,
+        clientCaseId: 15,
+        eventType: 'hearing',
+        eventTypeLabel: 'Заседание',
+        title: 'Будущее судебное заседание',
+        scheduledAt: '2099-06-20T09:30:00Z',
+        allDay: false,
+        courtInstance: 'first',
+        courtInstanceLabel: 'Первая инстанция',
+        courtName: 'Арбитражный суд Самарской области',
+        courtCaseNumber: 'А55-12345/2026',
+        movementStatus: 'scheduled',
+        movementStatusLabel: 'Назначено',
+        sourceType: 'sudrf',
+        sourceConfidence: 'official-source',
+        createdAt: '2026-05-21T00:00:00Z',
+        isOverdue: false,
+      },
     ]);
     vi.mocked(apiService.getCaseCourtSyncLogs).mockResolvedValue([
       {
@@ -2560,6 +2581,7 @@ describe('CaseDetailPage', () => {
     expect(screen.getByText('Решение не обнаружено')).toBeTruthy();
     expect(screen.getByText('Обжалование пока не определяется')).toBeTruthy();
     expect(screen.getAllByText('Основание: актуальное движение дела').length).toBeGreaterThan(0);
+    expect(screen.getByText(/Дата: 20\.06\.2099, \d{2}:\d{2}/u)).toBeTruthy();
     expect(screen.getByText(/Источник проверен 15\.09\.2026/u)).toBeTruthy();
     expect(screen.getByText('Инстанции и судебные карточки')).toBeTruthy();
     expect(screen.getByText('Заседания и движения')).toBeTruthy();
@@ -2685,6 +2707,10 @@ describe('CaseDetailPage', () => {
     const riskValue = await screen.findByText('Просрочено сроков: 1');
     expect(riskValue.parentElement?.className).toContain('border-l-rose-500');
     expect(riskValue.parentElement?.className).toContain('bg-rose-50/50');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Суд' }));
+    expect(await screen.findByText('19.05.2026 · весь день · Просрочен')).toBeTruthy();
+    expect(screen.queryByText(/19\.05\.2026, 00:00/u)).toBeNull();
   });
 
   it('does not show an unverified safe state while procedural deadlines are loading', async () => {
