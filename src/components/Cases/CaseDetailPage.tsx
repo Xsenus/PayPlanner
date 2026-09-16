@@ -1320,8 +1320,10 @@ export function CaseDetailPage({
   const [tasksLoading, setTasksLoading] = useState(false);
   const [participantsLoading, setParticipantsLoading] = useState(false);
   const [documentsLoading, setDocumentsLoading] = useState(false);
-  const [courtEventsLoading, setCourtEventsLoading] = useState(false);
-  const [courtInstancesLoading, setCourtInstancesLoading] = useState(false);
+  const [courtEventsLoading, setCourtEventsLoading] = useState(true);
+  const [courtEventsError, setCourtEventsError] = useState<string | null>(null);
+  const [courtInstancesLoading, setCourtInstancesLoading] = useState(true);
+  const [courtInstancesError, setCourtInstancesError] = useState<string | null>(null);
   const [courtDirectoryLoading, setCourtDirectoryLoading] = useState(false);
   const [courtPartiesLoading, setCourtPartiesLoading] = useState(false);
   const [proceduralDeadlinesLoading, setProceduralDeadlinesLoading] = useState(true);
@@ -1493,6 +1495,8 @@ export function CaseDetailPage({
     setDocumentSourceStage('');
     setWorkOrder(null);
     setCourtEvents([]);
+    setCourtEventsLoading(true);
+    setCourtEventsError(null);
     setCourtDirectory([]);
     setCourtParties([]);
     setProceduralDeadlines([]);
@@ -1500,6 +1504,8 @@ export function CaseDetailPage({
     setNewWorkOrderItemDraft(buildWorkOrderItemDraft(null));
     setWorkOrderItemDrafts({});
     setCourtInstances([]);
+    setCourtInstancesLoading(true);
+    setCourtInstancesError(null);
     setActiveCourtInstance('first');
     setCourtInstanceDraft(buildCourtInstanceDraft(null));
     setCourtComplaintDraft(buildCourtComplaintDraft('first'));
@@ -1904,12 +1910,16 @@ export function CaseDetailPage({
 
     let cancelled = false;
     setCourtInstancesLoading(true);
+    setCourtInstancesError(null);
     apiService.getCaseCourtInstances(caseId)
       .then((items) => {
         if (!cancelled) setCourtInstances(items ?? []);
       })
-      .catch(() => {
-        if (!cancelled) setCourtInstances([]);
+      .catch((err) => {
+        if (!cancelled) {
+          setCourtInstances([]);
+          setCourtInstancesError(extractDisplayErrorMessage(err, 'Не удалось загрузить судебные инстанции.'));
+        }
       })
       .finally(() => {
         if (!cancelled) setCourtInstancesLoading(false);
@@ -1937,12 +1947,16 @@ export function CaseDetailPage({
 
     let cancelled = false;
     setCourtEventsLoading(true);
+    setCourtEventsError(null);
     apiService.getCaseCourtEvents(caseId)
       .then((items) => {
         if (!cancelled) setCourtEvents(items ?? []);
       })
-      .catch(() => {
-        if (!cancelled) setCourtEvents([]);
+      .catch((err) => {
+        if (!cancelled) {
+          setCourtEvents([]);
+          setCourtEventsError(extractDisplayErrorMessage(err, 'Не удалось загрузить движение судебного дела.'));
+        }
       })
       .finally(() => {
         if (!cancelled) setCourtEventsLoading(false);
@@ -3906,6 +3920,7 @@ export function CaseDetailPage({
               courtDirectory={courtDirectory}
               courtInstances={courtInstances}
               courtInstancesLoading={courtInstancesLoading}
+              courtInstancesError={courtInstancesError}
               activeCourtInstance={activeCourtInstance}
               courtInstanceDraft={courtInstanceDraft}
               courtComplaintDraft={courtComplaintDraft}
@@ -3913,6 +3928,7 @@ export function CaseDetailPage({
               courtEvents={courtEvents}
               courtDirectoryLoading={courtDirectoryLoading}
               courtEventsLoading={courtEventsLoading}
+              courtEventsError={courtEventsError}
               documents={documents}
               courtParties={courtParties}
               courtPartiesLoading={courtPartiesLoading}
@@ -6438,6 +6454,7 @@ function CourtPanel({
   courtDirectory,
   courtInstances,
   courtInstancesLoading,
+  courtInstancesError,
   activeCourtInstance,
   courtInstanceDraft,
   courtComplaintDraft,
@@ -6445,6 +6462,7 @@ function CourtPanel({
   courtEvents,
   courtDirectoryLoading,
   courtEventsLoading,
+  courtEventsError,
   documents,
   courtParties,
   courtPartiesLoading,
@@ -6531,6 +6549,7 @@ function CourtPanel({
   courtDirectory: ClientCaseCourt[];
   courtInstances: ClientCaseCourtInstance[];
   courtInstancesLoading: boolean;
+  courtInstancesError: string | null;
   activeCourtInstance: string;
   courtInstanceDraft: CourtInstanceDraft;
   courtComplaintDraft: CourtComplaintDraft;
@@ -6538,6 +6557,7 @@ function CourtPanel({
   courtEvents: ClientCaseCourtEvent[];
   courtDirectoryLoading: boolean;
   courtEventsLoading: boolean;
+  courtEventsError: string | null;
   documents: ClientCaseDocument[];
   courtParties: ClientCaseCourtParty[];
   courtPartiesLoading: boolean;
@@ -6660,7 +6680,14 @@ function CourtPanel({
     || proceduralDeadlines.length > 0
     || logs.length > 0
     || courtParties.length > 0;
-  const showPretrialSafeMode = isPretrialCase && !hasStoredCourtData && !courtSafeModeExpanded;
+  const processSummaryLoading = courtEventsLoading || courtInstancesLoading || proceduralDeadlinesLoading;
+  const processSummaryErrors = [courtEventsError, courtInstancesError, proceduralDeadlinesError]
+    .filter((message): message is string => Boolean(message));
+  const showPretrialSafeMode = isPretrialCase
+    && !hasStoredCourtData
+    && !processSummaryLoading
+    && processSummaryErrors.length === 0
+    && !courtSafeModeExpanded;
   const courtSyncChangeGroups = [
     {
       key: 'new',
@@ -6765,26 +6792,40 @@ function CourtPanel({
               <h3 className="font-bold text-slate-900">Что происходит по делу</h3>
               <p className="mt-0.5 text-xs text-slate-500">CRM определяет состояние по официальному движению, жалобам и связанным инстанциям.</p>
             </div>
-            <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">Автоматическая оценка</span>
+            <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${processSummaryErrors.length > 0 ? 'bg-amber-100 text-amber-800' : processSummaryLoading ? 'bg-blue-50 text-blue-700' : 'bg-slate-100 text-slate-600'}`}>
+              {processSummaryErrors.length > 0 ? 'Требуется обновление' : processSummaryLoading ? 'Проверка данных' : 'Автоматическая оценка'}
+            </span>
           </div>
-          <div className="mt-3 grid gap-2 md:grid-cols-2">
-            {[
-              ['Решение', processSummary.decision],
-              ['Обжалование', processSummary.appeal],
-              ['Следующее действие', processSummary.nextAction],
-              ['Риск', processSummary.risk],
-            ].map(([title, item]) => {
-              const summaryItem = item as typeof processSummary.decision;
-              return (
-                <div key={title as string} className={`rounded-lg border px-3 py-2.5 ${courtProcessSummaryClasses(summaryItem.tone)}`}>
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.1em] opacity-70">{title as string}</div>
-                  <div className="mt-1 text-sm font-bold">{summaryItem.label}</div>
-                  <div className="mt-1 text-xs leading-5 opacity-80">{summaryItem.detail}</div>
-                  {summaryItem.date ? <div className="mt-1 text-xs font-semibold">{summaryItem.dateLabel || 'Дата'}: {toRuDate(summaryItem.date)}</div> : null}
-                </div>
-              );
-            })}
-          </div>
+          {processSummaryLoading ? (
+            <div aria-label="Проверяем судебные данные" className="mt-3 flex items-start gap-3 rounded-lg border border-blue-200 bg-blue-50 p-3 text-blue-900">
+              <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-blue-600" />
+              <div><div className="text-sm font-semibold">Проверяем судебные данные</div><p className="mt-0.5 text-xs text-blue-700">Выводы о решении, обжаловании и рисках появятся после загрузки движения, инстанций и сроков.</p></div>
+            </div>
+          ) : processSummaryErrors.length > 0 ? (
+            <div role="alert" className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-950">
+              <div className="text-sm font-semibold">Автоматическая оценка недоступна</div>
+              <div className="mt-1 text-xs leading-5 text-amber-800">{processSummaryErrors.join(' ')} Нажмите «Обновить» в верхней части карточки.</div>
+            </div>
+          ) : (
+            <div className="mt-3 grid gap-2 md:grid-cols-2">
+              {[
+                ['Решение', processSummary.decision],
+                ['Обжалование', processSummary.appeal],
+                ['Следующее действие', processSummary.nextAction],
+                ['Риск', processSummary.risk],
+              ].map(([title, item]) => {
+                const summaryItem = item as typeof processSummary.decision;
+                return (
+                  <div key={title as string} className={`rounded-lg border px-3 py-2.5 ${courtProcessSummaryClasses(summaryItem.tone)}`}>
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.1em] opacity-70">{title as string}</div>
+                    <div className="mt-1 text-sm font-bold">{summaryItem.label}</div>
+                    <div className="mt-1 text-xs leading-5 opacity-80">{summaryItem.detail}</div>
+                    {summaryItem.date ? <div className="mt-1 text-xs font-semibold">{summaryItem.dateLabel || 'Дата'}: {toRuDate(summaryItem.date)}</div> : null}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </section>
 
         <div className="grid gap-3 2xl:grid-cols-[minmax(0,1fr)_280px]">
@@ -6817,7 +6858,7 @@ function CourtPanel({
 
             <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
               <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-3 py-2.5"><div><h3 className="font-bold text-slate-900">Заседания и движения</h3><p className="text-xs text-slate-500">История выбранной инстанции</p></div><span className="text-xs font-semibold text-slate-500">{overviewEvents.length}</span></div>
-              {courtEventsLoading ? <div className="flex items-center justify-center p-8"><Loader2 className="h-5 w-5 animate-spin text-blue-600" /></div> : overviewEvents.length === 0 ? <div className="p-6 text-center text-sm text-slate-500">По этой инстанции событий пока нет.</div> : <>
+              {courtEventsLoading ? <div className="flex items-center justify-center p-8"><Loader2 className="h-5 w-5 animate-spin text-blue-600" /></div> : courtEventsError ? <div role="alert" className="m-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">{courtEventsError}</div> : overviewEvents.length === 0 ? <div className="p-6 text-center text-sm text-slate-500">По этой инстанции событий пока нет.</div> : <>
                 <div data-testid="court-event-cards" className="divide-y divide-slate-100 xl:hidden">
                   {overviewEvents.map((event) => (
                     <article key={event.id} className="p-3">
@@ -7009,7 +7050,7 @@ function CourtPanel({
             <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Инстанции судов</h2>
             <div className="mt-1 text-sm text-slate-500">{selectedCourtInstanceMeta.hint}</div>
           </div>
-          {courtInstancesLoading ? <span className="inline-flex items-center gap-2 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" /> Загрузка</span> : null}
+          {courtInstancesLoading ? <span className="inline-flex items-center gap-2 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" /> Загрузка</span> : courtInstancesError ? <span role="alert" className="text-sm font-semibold text-amber-700">{courtInstancesError}</span> : null}
         </div>
         <div className="mt-4 grid gap-2 md:grid-cols-4">
           {COURT_INSTANCE_TABS.map((tab) => {
@@ -7318,6 +7359,10 @@ function CourtPanel({
         </div>
         {courtEventsLoading ? (
           <LoadingBlock label="Загрузка судебных событий..." />
+        ) : courtEventsError ? (
+          <div role="alert" className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+            {courtEventsError}
+          </div>
         ) : selectedCourtEvents.length === 0 ? (
           <div className="mt-3 rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-500">
             Судебные события пока не добавлены.

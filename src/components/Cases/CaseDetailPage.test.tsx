@@ -2516,6 +2516,35 @@ describe('CaseDetailPage', () => {
     expect(await screen.findByText('Сводка по судебному делу')).toBeTruthy();
   });
 
+  it('does not show court conclusions while source data is still loading', async () => {
+    window.sessionStorage.setItem(
+      'pp.case-detail.15.view.v1',
+      JSON.stringify({ activeTab: 'court', courtOverview: true }),
+    );
+    vi.mocked(apiService.getCaseCourtEvents).mockImplementation(() => new Promise(() => {}));
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    expect(await screen.findByLabelText('Проверяем судебные данные')).toBeTruthy();
+    expect(screen.queryByText('Решение не обнаружено')).toBeNull();
+    expect(screen.queryByText('Обжалование пока не определяется')).toBeNull();
+  });
+
+  it('shows a source warning instead of unsupported court conclusions', async () => {
+    window.sessionStorage.setItem(
+      'pp.case-detail.15.view.v1',
+      JSON.stringify({ activeTab: 'court', courtOverview: true }),
+    );
+    vi.mocked(apiService.getCaseCourtEvents).mockRejectedValue(new Error('Failed to fetch'));
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    expect(await screen.findByText('Автоматическая оценка недоступна')).toBeTruthy();
+    expect(screen.getAllByText(/Не удалось загрузить движение судебного дела/u).length).toBeGreaterThan(0);
+    expect(screen.queryByText('Решение не обнаружено')).toBeNull();
+    expect(screen.queryByText('Обжалование пока не определяется')).toBeNull();
+  });
+
   it('includes overdue procedural deadlines in the case-wide risk indicator', async () => {
     vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({ overdueTaskCount: 0 }));
     vi.mocked(apiService.getCaseProceduralDeadlines).mockResolvedValue([{
