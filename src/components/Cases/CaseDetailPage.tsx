@@ -6558,7 +6558,6 @@ function CourtPanel({
       return Boolean(
         instanceData?.courtName
         || instanceData?.courtCaseNumber
-        || instanceData?.judicialUid
         || instanceData?.courtUrl
         || courtEvents.some((event) => event.courtInstance === tab.value),
       );

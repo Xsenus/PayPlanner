@@ -58,7 +58,6 @@ function hasPopulatedLaterInstance(instance: ClientCaseCourtInstance) {
   return instance.instance !== 'first' && Boolean(
     instance.courtName
     || instance.courtCaseNumber
-    || instance.judicialUid
     || instance.courtUrl
     || instance.complaints?.some((complaint) => !complaint.isArchived),
   );

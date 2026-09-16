@@ -64,6 +64,23 @@ describe('buildCourtCaseProcessSummary', () => {
     expect(summary.appeal.detail).toContain('Апелляция');
   });
 
+  it('does not treat a shared judicial UID as a populated appeal instance', () => {
+    const instance = {
+      instance: 'appeal',
+      instanceLabel: 'Апелляция',
+      judicialUid: '63RS0018-01-2026-001242-18',
+      complaints: [],
+    } as ClientCaseCourtInstance;
+
+    const summary = buildCourtCaseProcessSummary(
+      { courtDecisionAt: '2026-08-21T00:00:00Z' },
+      [],
+      [instance],
+    );
+
+    expect(summary.appeal.label).toBe('Обжалование не обнаружено');
+  });
+
   it('recognizes an appeal movement without mistaking its decision reference for a decision', () => {
     const summary = buildCourtCaseProcessSummary(
       { courtDecisionAt: null },

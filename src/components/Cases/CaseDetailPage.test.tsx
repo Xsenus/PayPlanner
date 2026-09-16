@@ -2470,6 +2470,29 @@ describe('CaseDetailPage', () => {
       'pp.case-detail.15.view.v1',
       JSON.stringify({ activeTab: 'court', courtOverview: true }),
     );
+    vi.mocked(apiService.getCaseCourtInstances).mockResolvedValue([
+      {
+        id: 81,
+        clientCaseId: 15,
+        instance: 'first',
+        instanceLabel: 'Первая инстанция',
+        courtName: 'Арбитражный суд Самарской области',
+        courtCaseNumber: 'А55-12345/2026',
+        judicialUid: '63RS0018-01-2026-001242-18',
+        courtUrl: 'https://kad.arbitr.ru/card',
+        createdAt: '2026-05-21T00:00:00Z',
+        complaints: [],
+      },
+      {
+        id: 0,
+        clientCaseId: 15,
+        instance: 'appeal',
+        instanceLabel: 'Апелляция',
+        judicialUid: '63RS0018-01-2026-001242-18',
+        createdAt: '2026-05-21T00:00:00Z',
+        complaints: [],
+      },
+    ]);
 
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
 
@@ -2480,6 +2503,7 @@ describe('CaseDetailPage', () => {
     expect(screen.getByText('Инстанции и судебные карточки')).toBeTruthy();
     expect(screen.getByText('Заседания и движения')).toBeTruthy();
     expect(screen.getByText('Лента процессуальной истории')).toBeTruthy();
+    expect(screen.getByText('1 заполнено')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Редактировать данные' })).toBeTruthy();
     expect(screen.queryByText('Режим редактирования судебных данных')).toBeNull();
 
