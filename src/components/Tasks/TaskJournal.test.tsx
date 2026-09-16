@@ -3710,6 +3710,47 @@ describe('TaskJournal', () => {
     expect(await screen.findByRole('heading', { name: 'Просмотр задачи' })).toBeTruthy();
   });
 
+  it('refreshes the automation queue when another user creates the task first', async () => {
+    const candidate = {
+      clientId: 10,
+      clientName: 'Иванов Иван Иванович',
+      clientCaseId: 100,
+      clientCaseTitle: 'БАНКРОТСТВО',
+      reason: 'Нет активной задачи уже 20 дн.',
+      activeTaskCount: 0,
+      completedTaskCount: 2,
+      daysWithoutActiveTask: 20,
+      isEscalated: false,
+      isReadyForControl: true,
+      automationState: 'ready' as const,
+      lastTaskAt: todayAt(8),
+      suggestedTitle: 'Проверить движение по делу',
+      suggestedDescription: 'Автоконтроль: по делу нет активной задачи.',
+      suggestedDueAt: todayAt(9),
+      suggestedPriority: 'normal' as const,
+    };
+    apiMock.getTaskJournalCaseAutomationCandidates
+      .mockResolvedValueOnce([candidate])
+      .mockResolvedValue([]);
+    apiMock.getTaskJournalCaseAutomationSummary
+      .mockResolvedValueOnce({ totalCount: 1, readyCount: 1, criticalCount: 0, waitingCount: 0, pausedCount: 0 })
+      .mockResolvedValue({ totalCount: 0, readyCount: 0, criticalCount: 0, waitingCount: 0, pausedCount: 0 });
+    apiMock.createTaskJournalCaseAutomationTask.mockRejectedValueOnce(
+      new Error('HTTP 409 - {"message":"По делу уже есть активная задача.","taskId":999}'),
+    );
+    await renderJournal();
+
+    fireEvent.click(screen.getByTestId('task-automation-create-100'));
+
+    await waitFor(() => expect(toastMock.info).toHaveBeenCalledWith(
+      'По делу уже есть активная задача. Очередь обновляется.',
+      'Автоконтроль дел',
+    ));
+    expect(screen.queryByTestId('task-automation-create-100')).toBeNull();
+    await waitFor(() => expect(apiMock.getTaskJournalCaseAutomationCandidates).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Все: 0' })).toBeTruthy());
+  });
+
   it('keeps the complete case automation overview when the task search changes', async () => {
     apiMock.getTaskJournalCaseAutomationCandidates.mockResolvedValue([
       {

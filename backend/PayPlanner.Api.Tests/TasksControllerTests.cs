@@ -4573,6 +4573,36 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task CreateAutomationTaskForCase_ConcurrentRequestsCreateSingleControlCycle()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "concurrent-manual-author@example.com", "Автор");
+        var client = await CreateClientAsync(db, "Клиент параллельной ручной постановки");
+        var clientCase = await CreateCaseAsync(db, client.Id, "ПАРАЛЛЕЛЬНАЯ РУЧНАЯ ПОСТАНОВКА");
+        clientCase.CreatedAt = DateTime.UtcNow.AddDays(-20);
+        await db.SaveChangesAsync();
+        var mutationGate = new CaseInactivityAutomationMutationGate();
+        var firstController = CreateController(
+            db,
+            new RecordingNotificationService(),
+            author,
+            caseInactivityAutomationMutationGate: mutationGate);
+        var secondController = CreateController(
+            db,
+            new RecordingNotificationService(),
+            author,
+            caseInactivityAutomationMutationGate: mutationGate);
+
+        var results = await Task.WhenAll(
+            firstController.CreateAutomationTaskForCase(clientCase.Id, CancellationToken.None),
+            secondController.CreateAutomationTaskForCase(clientCase.Id, CancellationToken.None));
+
+        Assert.Single(results, result => result.Result is CreatedResult);
+        Assert.Single(results, result => result.Result is ConflictObjectResult);
+        Assert.Equal(1, await db.TaskJournalItems.CountAsync(item => item.ClientCaseId == clientCase.Id));
+    }
+
+    [Fact]
     public async Task CreateAutomationTaskForCase_AssignsResponsibleUserOfCaseOwner()
     {
         await using var db = await CreateContextAsync();
@@ -5276,6 +5306,48 @@ public class TasksControllerTests
         var task = await db.TaskJournalItems.SingleAsync(item => item.ClientCaseId == clientCase.Id);
         Assert.Equal(1, task.InactivityControlCycleNumber);
         Assert.Equal(task.CreatedAt.AddDays(2), task.InactivityControlNextCheckAt);
+    }
+
+    [Fact]
+    public async Task SharedMutationGate_PreventsDuplicateBetweenManualAndScheduledRuns()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "manual-scheduler-race-author@example.com", "Автор");
+        var client = await CreateClientAsync(db, "Клиент ручного и фонового запуска");
+        client.ResponsibleUserId = author.Id;
+        var clientCase = await CreateCaseAsync(db, client.Id, "РУЧНОЙ И ФОНОВЫЙ ЗАПУСК");
+        clientCase.CreatedAt = DateTime.UtcNow.AddDays(-20);
+        await db.SaveChangesAsync();
+        var mutationGate = new CaseInactivityAutomationMutationGate();
+        var controller = CreateController(
+            db,
+            new RecordingNotificationService(),
+            author,
+            caseInactivityAutomationMutationGate: mutationGate);
+        var (scheduler, provider) = CreateAutomationScheduler(
+            db,
+            new Dictionary<string, string?>
+            {
+                ["TaskJournal:Automation:Enabled"] = "true",
+                ["TaskJournal:Automation:InactiveDays"] = "14",
+                ["TaskJournal:Automation:Limit"] = "10",
+            },
+            mutationGate: mutationGate);
+
+        using (provider)
+        {
+            var manualTask = controller.CreateAutomationTaskForCase(clientCase.Id, CancellationToken.None);
+            var schedulerTask = scheduler.RunOnceAsync(CancellationToken.None);
+            await Task.WhenAll(manualTask, schedulerTask);
+            var manualResult = await manualTask;
+            var schedulerResult = await schedulerTask;
+
+            var manualCreated = manualResult.Result is CreatedResult ? 1 : 0;
+            Assert.True(manualResult.Result is CreatedResult or ConflictObjectResult);
+            Assert.Equal(1, manualCreated + schedulerResult.CreatedCount);
+        }
+
+        Assert.Equal(1, await db.TaskJournalItems.CountAsync(item => item.ClientCaseId == clientCase.Id));
     }
 
     [Fact]
@@ -8926,13 +8998,15 @@ public class TasksControllerTests
         User user,
         IInvoiceDocumentPdfService? pdfService = null,
         IExternalCalendarSyncCoordinator? externalCalendarSyncCoordinator = null,
-        IExternalCalendarTaskSyncOutbox? externalCalendarTaskSyncOutbox = null)
+        IExternalCalendarTaskSyncOutbox? externalCalendarTaskSyncOutbox = null,
+        CaseInactivityAutomationMutationGate? caseInactivityAutomationMutationGate = null)
         => new(
             db,
             notificationService,
             pdfService: pdfService,
             externalCalendarSyncCoordinator: externalCalendarSyncCoordinator,
-            externalCalendarTaskSyncOutbox: externalCalendarTaskSyncOutbox)
+            externalCalendarTaskSyncOutbox: externalCalendarTaskSyncOutbox,
+            caseInactivityAutomationMutationGate: caseInactivityAutomationMutationGate)
         {
             ControllerContext = new ControllerContext
             {
@@ -9015,7 +9089,8 @@ public class TasksControllerTests
     private static (TaskJournalAutomationSchedulerService Scheduler, ServiceProvider Provider) CreateAutomationScheduler(
         PaymentContext db,
         IReadOnlyDictionary<string, string?> values,
-        INotificationService? notificationService = null)
+        INotificationService? notificationService = null,
+        CaseInactivityAutomationMutationGate? mutationGate = null)
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(values)
@@ -9032,7 +9107,8 @@ public class TasksControllerTests
             new TaskJournalAutomationSchedulerService(
                 provider.GetRequiredService<IServiceScopeFactory>(),
                 configuration,
-                NullLogger<TaskJournalAutomationSchedulerService>.Instance),
+                NullLogger<TaskJournalAutomationSchedulerService>.Instance,
+                mutationGate: mutationGate),
             provider);
     }
 

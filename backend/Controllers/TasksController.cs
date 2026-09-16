@@ -118,6 +118,7 @@ public class TasksController : ControllerBase
     private readonly IInvoiceDocumentPdfService? _pdfService;
     private readonly IExternalCalendarSyncCoordinator? _externalCalendarSyncCoordinator;
     private readonly IExternalCalendarTaskSyncOutbox? _externalCalendarTaskSyncOutbox;
+    private readonly CaseInactivityAutomationMutationGate _caseInactivityAutomationMutationGate;
     private readonly string _taskFilesRoot;
 
     public TasksController(
@@ -128,7 +129,8 @@ public class TasksController : ControllerBase
         IInvoiceDocumentPdfService? pdfService = null,
         IExternalCalendarSyncCoordinator? externalCalendarSyncCoordinator = null,
         IExternalCalendarTaskSyncOutbox? externalCalendarTaskSyncOutbox = null,
-        IConfiguration? configuration = null)
+        IConfiguration? configuration = null,
+        CaseInactivityAutomationMutationGate? caseInactivityAutomationMutationGate = null)
     {
         _db = db;
         _notificationService = notificationService;
@@ -136,6 +138,8 @@ public class TasksController : ControllerBase
         _pdfService = pdfService;
         _externalCalendarSyncCoordinator = externalCalendarSyncCoordinator;
         _externalCalendarTaskSyncOutbox = externalCalendarTaskSyncOutbox;
+        _caseInactivityAutomationMutationGate = caseInactivityAutomationMutationGate
+            ?? new CaseInactivityAutomationMutationGate();
         _taskFilesRoot = Path.Combine(
             ApplicationFileStoragePaths.ResolveRoot(environment, configuration, AppContext.BaseDirectory),
             "task-files");
@@ -1866,6 +1870,8 @@ public class TasksController : ControllerBase
             return Forbid();
         }
 
+        using var mutationLease = await _caseInactivityAutomationMutationGate.AcquireAsync(ct);
+
         var clientCase = await _db.ClientCases
             .Include(item => item.Client)
             .Include(item => item.LegalEntity)
@@ -2059,6 +2065,8 @@ public class TasksController : ControllerBase
         {
             return Forbid();
         }
+
+        using var mutationLease = await _caseInactivityAutomationMutationGate.AcquireAsync(ct);
 
         limit = Math.Clamp(limit, 1, 100);
         var normalizedAutomationState = automationState?.Trim().ToLowerInvariant();

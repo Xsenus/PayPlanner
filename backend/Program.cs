@@ -259,6 +259,7 @@ builder.Services.AddSingleton<CaseProceduralDeadlineReminderNotificationService>
 builder.Services.AddSingleton<CalendarSyncSchedulerService>();
 builder.Services.AddSingleton<GoogleCalendarBackgroundSyncService>();
 builder.Services.AddSingleton<YandexCalendarBackgroundSyncService>();
+builder.Services.AddSingleton<CaseInactivityAutomationMutationGate>();
 builder.Services.AddSingleton<TaskJournalAutomationSchedulerService>();
 builder.Services.AddSingleton<MoneyBalanceReconciliationSchedulerService>();
 builder.Services.AddSingleton<ClientCaseCourtSyncSchedulerService>();

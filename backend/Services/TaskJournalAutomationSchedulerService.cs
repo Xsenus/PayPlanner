@@ -30,18 +30,21 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
     private readonly IConfiguration _configuration;
     private readonly ILogger<TaskJournalAutomationSchedulerService> _logger;
     private readonly ISystemJobRunStateService? _jobRunState;
+    private readonly CaseInactivityAutomationMutationGate _mutationGate;
     private readonly SemaphoreSlim _runLock = new(1, 1);
 
     public TaskJournalAutomationSchedulerService(
         IServiceScopeFactory scopeFactory,
         IConfiguration configuration,
         ILogger<TaskJournalAutomationSchedulerService> logger,
-        ISystemJobRunStateService? jobRunState = null)
+        ISystemJobRunStateService? jobRunState = null,
+        CaseInactivityAutomationMutationGate? mutationGate = null)
     {
         _scopeFactory = scopeFactory;
         _configuration = configuration;
         _logger = logger;
         _jobRunState = jobRunState;
+        _mutationGate = mutationGate ?? new CaseInactivityAutomationMutationGate();
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -137,6 +140,7 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
         await _runLock.WaitAsync(cancellationToken);
         try
         {
+            using var mutationLease = await _mutationGate.AcquireAsync(cancellationToken);
             return await RunOnceCoreAsync(cancellationToken);
         }
         finally

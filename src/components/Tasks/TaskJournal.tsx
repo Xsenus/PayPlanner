@@ -3359,7 +3359,22 @@ export function TaskJournal({
       openTaskEditor(created, { syncRoute: true });
       emitTaskChange();
     } catch (error) {
-      toast.error(extractDisplayErrorMessage(error, 'Не удалось создать контрольную задачу.'), 'Автоконтроль дел');
+      if (isHttpErrorStatus(error, 409)) {
+        setAutomationCandidates((current) => current.filter((item) => item.clientCaseId !== candidate.clientCaseId));
+        automationCandidatesRequestKeyRef.current = null;
+        automationSummaryRequestKeyRef.current = null;
+        automationRetryPreserveCandidatesRef.current = true;
+        setAutomationLoadError(null);
+        setAutomationSummaryLoadError(null);
+        setAutomationPageLoading(true);
+        setAutomationReloadVersion((version) => version + 1);
+        toast.info(
+          `${extractDisplayErrorMessage(error, 'Состояние дела уже изменилось.')} Очередь обновляется.`,
+          'Автоконтроль дел',
+        );
+      } else {
+        toast.error(extractDisplayErrorMessage(error, 'Не удалось создать контрольную задачу.'), 'Автоконтроль дел');
+      }
     } finally {
       setCreatingAutomationCaseId(null);
     }
