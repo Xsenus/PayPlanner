@@ -1188,9 +1188,59 @@ public class TasksController : ControllerBase
         }
 
         var filteredCandidates = await filteredQuery
-            .OrderBy(item => item.LastControlCycleEndedAt ?? item.LastTaskAt ?? item.LastTaskCommentAt ?? item.LastDocumentAt ?? item.LastCourtEventAt ?? item.CreatedAt)
-            .ThenBy(item => item.ClientName != string.Empty ? item.ClientName : item.LegalEntityName)
-            .ThenBy(item => item.Title)
+            .Select(item => new
+            {
+                Item = item,
+                LastControlAnchorAt = item.LastTaskAt.HasValue && item.LastTaskAt.Value > item.CreatedAt
+                    ? item.LastTaskAt.Value
+                    : item.CreatedAt,
+            })
+            .Select(row => new
+            {
+                row.Item,
+                LastControlAnchorAt = row.Item.LastTaskCommentAt.HasValue && row.Item.LastTaskCommentAt.Value > row.LastControlAnchorAt
+                    ? row.Item.LastTaskCommentAt.Value
+                    : row.LastControlAnchorAt,
+            })
+            .Select(row => new
+            {
+                row.Item,
+                LastControlAnchorAt = row.Item.LastDocumentAt.HasValue && row.Item.LastDocumentAt.Value > row.LastControlAnchorAt
+                    ? row.Item.LastDocumentAt.Value
+                    : row.LastControlAnchorAt,
+            })
+            .Select(row => new
+            {
+                row.Item,
+                LastControlAnchorAt = row.Item.LastCourtEventAt.HasValue && row.Item.LastCourtEventAt.Value > row.LastControlAnchorAt
+                    ? row.Item.LastCourtEventAt.Value
+                    : row.LastControlAnchorAt,
+            })
+            .Select(row => new
+            {
+                row.Item,
+                LastControlAnchorAt = row.Item.LastViewedAt.HasValue && row.Item.LastViewedAt.Value > row.LastControlAnchorAt
+                    ? row.Item.LastViewedAt.Value
+                    : row.LastControlAnchorAt,
+            })
+            .Select(row => new
+            {
+                row.Item,
+                LastControlAnchorAt = row.Item.ActivityConfirmedAt.HasValue && row.Item.ActivityConfirmedAt.Value > row.LastControlAnchorAt
+                    ? row.Item.ActivityConfirmedAt.Value
+                    : row.LastControlAnchorAt,
+            })
+            .Select(row => new
+            {
+                row.Item,
+                LastControlAnchorAt = row.Item.LastControlCycleEndedAt.HasValue && row.Item.LastControlCycleEndedAt.Value > row.LastControlAnchorAt
+                    ? row.Item.LastControlCycleEndedAt.Value
+                    : row.LastControlAnchorAt,
+            })
+            .OrderBy(row => row.LastControlAnchorAt)
+            .ThenBy(row => row.Item.ClientName != string.Empty ? row.Item.ClientName : row.Item.LegalEntityName)
+            .ThenBy(row => row.Item.Title)
+            .Select(row => row.Item)
             .Take(effectiveLimit)
             .ToListAsync(ct);
 
@@ -1471,7 +1521,7 @@ public class TasksController : ControllerBase
         var escalationUser = await ResolveConfiguredAutomationUserAsync(settings.CaseInactivityEscalationUserId, ct);
         var vacationUserIds = await CaseInactivityResponsibleAvailabilityService
             .GetUsersOnVacationAsync(_db, now, ct);
-        var candidates = await _db.ClientCases
+        var candidateQuery = _db.ClientCases
             .Include(item => item.Client)
             .Include(item => item.LegalEntity)
             .ApplyClientCaseVisibility(access.Visibility)
@@ -1526,14 +1576,65 @@ public class TasksController : ControllerBase
                 && (item.LastCourtEventAt ?? item.Case.CreatedAt) <= cutoff
                 && (item.Case.LastViewedAt ?? item.Case.CreatedAt) <= cutoff
                 && (item.Case.ActivityConfirmedAt ?? item.Case.CreatedAt) <= cutoff
-                && item.Case.InactivityRemindersEnabled)
-            .OrderBy(item => item.LastControlCycleEndedAt ?? item.LastTaskAt ?? item.LastTaskCommentAt ?? item.LastDocumentAt ?? item.LastCourtEventAt ?? item.Case.CreatedAt)
-            .ThenBy(item => item.Case.Client != null
-                ? item.Case.Client.Name
-                : item.Case.LegalEntity != null
-                    ? item.Case.LegalEntity.ShortName
+                && item.Case.InactivityRemindersEnabled);
+        var candidates = await candidateQuery
+            .Select(item => new
+            {
+                Item = item,
+                LastControlAnchorAt = item.LastTaskAt.HasValue && item.LastTaskAt.Value > item.Case.CreatedAt
+                    ? item.LastTaskAt.Value
+                    : item.Case.CreatedAt,
+            })
+            .Select(row => new
+            {
+                row.Item,
+                LastControlAnchorAt = row.Item.LastTaskCommentAt.HasValue && row.Item.LastTaskCommentAt.Value > row.LastControlAnchorAt
+                    ? row.Item.LastTaskCommentAt.Value
+                    : row.LastControlAnchorAt,
+            })
+            .Select(row => new
+            {
+                row.Item,
+                LastControlAnchorAt = row.Item.LastDocumentAt.HasValue && row.Item.LastDocumentAt.Value > row.LastControlAnchorAt
+                    ? row.Item.LastDocumentAt.Value
+                    : row.LastControlAnchorAt,
+            })
+            .Select(row => new
+            {
+                row.Item,
+                LastControlAnchorAt = row.Item.LastCourtEventAt.HasValue && row.Item.LastCourtEventAt.Value > row.LastControlAnchorAt
+                    ? row.Item.LastCourtEventAt.Value
+                    : row.LastControlAnchorAt,
+            })
+            .Select(row => new
+            {
+                row.Item,
+                LastControlAnchorAt = row.Item.Case.LastViewedAt.HasValue && row.Item.Case.LastViewedAt.Value > row.LastControlAnchorAt
+                    ? row.Item.Case.LastViewedAt.Value
+                    : row.LastControlAnchorAt,
+            })
+            .Select(row => new
+            {
+                row.Item,
+                LastControlAnchorAt = row.Item.Case.ActivityConfirmedAt.HasValue && row.Item.Case.ActivityConfirmedAt.Value > row.LastControlAnchorAt
+                    ? row.Item.Case.ActivityConfirmedAt.Value
+                    : row.LastControlAnchorAt,
+            })
+            .Select(row => new
+            {
+                row.Item,
+                LastControlAnchorAt = row.Item.LastControlCycleEndedAt.HasValue && row.Item.LastControlCycleEndedAt.Value > row.LastControlAnchorAt
+                    ? row.Item.LastControlCycleEndedAt.Value
+                    : row.LastControlAnchorAt,
+            })
+            .OrderBy(row => row.LastControlAnchorAt)
+            .ThenBy(row => row.Item.Case.Client != null
+                ? row.Item.Case.Client.Name
+                : row.Item.Case.LegalEntity != null
+                    ? row.Item.Case.LegalEntity.ShortName
                     : string.Empty)
-            .ThenBy(item => item.Case.Title)
+            .ThenBy(row => row.Item.Case.Title)
+            .Select(row => row.Item)
             .Take(effectiveLimit)
             .ToListAsync(ct);
 

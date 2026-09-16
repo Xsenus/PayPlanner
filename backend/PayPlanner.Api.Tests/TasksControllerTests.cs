@@ -3862,6 +3862,50 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task GetAutomationCaseCandidates_OrdersByLatestMeaningfulActivityAcrossAllSources()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "candidate-order@example.com", "Автор");
+        var client = await CreateClientAsync(db, "Клиент порядка автоконтроля");
+        var recentDocumentCase = await CreateCaseAsync(db, client.Id, "СВЕЖИЙ ДОКУМЕНТ");
+        var olderActivityCase = await CreateCaseAsync(db, client.Id, "ДАВНО БЕЗ ДВИЖЕНИЯ");
+        var now = DateTime.UtcNow;
+        recentDocumentCase.CreatedAt = now.AddDays(-100);
+        olderActivityCase.CreatedAt = now.AddDays(-100);
+        await CreateTaskAsync(
+            db,
+            author.Id,
+            client.Id,
+            clientCaseId: recentDocumentCase.Id,
+            status: "done",
+            createdAt: now.AddDays(-50),
+            updatedAt: now.AddDays(-50));
+        await CreateTaskAsync(
+            db,
+            author.Id,
+            client.Id,
+            clientCaseId: olderActivityCase.Id,
+            status: "done",
+            createdAt: now.AddDays(-20),
+            updatedAt: now.AddDays(-20));
+        db.ClientCaseDocuments.AddRange(
+            BuildCaseDocument(recentDocumentCase.Id, author, "recent-document", now.AddDays(-15)),
+            BuildCaseDocument(olderActivityCase.Id, author, "older-document", now.AddDays(-40)));
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.GetAutomationCaseCandidates(
+            inactiveDays: 14,
+            limit: 1,
+            ct: CancellationToken.None);
+
+        var candidate = Assert.Single(Assert.IsAssignableFrom<IReadOnlyList<TaskJournalCaseAutomationCandidateDto>>(
+            Assert.IsType<OkObjectResult>(result.Result).Value));
+        Assert.Equal(olderActivityCase.Id, candidate.ClientCaseId);
+        Assert.Equal(CaseMeaningfulActivitySources.Task, candidate.LastActivitySource);
+    }
+
+    [Fact]
     public async Task GetAutomationCaseCandidates_AppliesCaseOwnerVisibility()
     {
         await using var db = await CreateContextAsync();
@@ -4397,6 +4441,47 @@ public class TasksControllerTests
             && command.Contains("FROM \"UserSettings\"", StringComparison.Ordinal));
         Assert.Single(interceptor.Commands, command =>
             command.Contains("SELECT \"u\".\"Id\", \"u\".\"FullName\", \"u\".\"Email\"", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task CreateAutomationTasksForCandidates_PrioritizesOldestMeaningfulActivityAcrossAllSources()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "bulk-control-order@example.com", "Автор");
+        var client = await CreateClientAsync(db, "Клиент порядка массового контроля");
+        var recentDocumentCase = await CreateCaseAsync(db, client.Id, "СВЕЖИЙ ДОКУМЕНТ");
+        var olderActivityCase = await CreateCaseAsync(db, client.Id, "ДАВНО БЕЗ ДВИЖЕНИЯ");
+        var now = DateTime.UtcNow;
+        recentDocumentCase.CreatedAt = now.AddDays(-100);
+        olderActivityCase.CreatedAt = now.AddDays(-100);
+        await CreateTaskAsync(
+            db,
+            author.Id,
+            client.Id,
+            clientCaseId: recentDocumentCase.Id,
+            status: "done",
+            createdAt: now.AddDays(-50),
+            updatedAt: now.AddDays(-50));
+        await CreateTaskAsync(
+            db,
+            author.Id,
+            client.Id,
+            clientCaseId: olderActivityCase.Id,
+            status: "done",
+            createdAt: now.AddDays(-20),
+            updatedAt: now.AddDays(-20));
+        db.ClientCaseDocuments.AddRange(
+            BuildCaseDocument(recentDocumentCase.Id, author, "recent-bulk-document", now.AddDays(-15)),
+            BuildCaseDocument(olderActivityCase.Id, author, "older-bulk-document", now.AddDays(-40)));
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.CreateAutomationTasksForCandidates(limit: 1, ct: CancellationToken.None);
+
+        var dto = Assert.IsType<TaskJournalAutomationCreateResultDto>(
+            Assert.IsType<OkObjectResult>(result.Result).Value);
+        var created = Assert.Single(dto.CreatedTasks);
+        Assert.Equal(olderActivityCase.Id, created.ClientCaseId);
     }
 
     [Theory]
@@ -8300,6 +8385,27 @@ public class TasksControllerTests
         await db.SaveChangesAsync();
         return clientCase;
     }
+
+    private static ClientCaseDocument BuildCaseDocument(
+        int clientCaseId,
+        User author,
+        string documentKey,
+        DateTime uploadedAt)
+        => new()
+        {
+            ClientCaseId = clientCaseId,
+            DocumentKey = documentKey,
+            DocumentType = "other",
+            Status = "draft",
+            OriginalFileName = $"{documentKey}.pdf",
+            StoredFileName = $"{documentKey}.pdf",
+            StoragePath = $"tests/{documentKey}.pdf",
+            ContentType = "application/pdf",
+            SizeBytes = 12,
+            UploadedByUserId = author.Id,
+            UploadedByName = author.FullName,
+            UploadedAt = uploadedAt,
+        };
 
     private static async Task<TaskJournalItem> CreateTaskAsync(
         PaymentContext db,
