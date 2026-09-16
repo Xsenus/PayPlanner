@@ -492,6 +492,14 @@ function formatRuDateTime(value?: string | null) {
   return formatDateTimeInTimeZone(value, activeCaseTimeZoneId) || toRuDate(value);
 }
 
+function formatCourtEventSchedule(event: Pick<ClientCaseCourtEvent, 'scheduledAt' | 'allDay'>) {
+  if (!event.scheduledAt) return '';
+  if (!event.allDay) return formatRuDateTime(event.scheduledAt);
+
+  const date = toRuDate(event.scheduledAt);
+  return date ? `${date} · весь день` : '';
+}
+
 function toDateInputValue(value?: string | null) {
   return value ? String(value).slice(0, 10) : '';
 }
@@ -723,7 +731,7 @@ function buildDocumentSourceOptions(
   if (sourceType === 'courtEvent') {
     return courtEvents.map((event) => ({
       value: String(event.id),
-      label: `${event.title || `Событие #${event.id}`} · ${formatRuDateTime(event.scheduledAt) || 'без даты'}`,
+      label: `${event.title || `Событие #${event.id}`} · ${formatCourtEventSchedule(event) || 'без даты'}`,
     }));
   }
 
@@ -6887,7 +6895,7 @@ function CourtPanel({
                   {overviewEvents.map((event) => (
                     <article key={event.id} className="p-3">
                       <div className="flex flex-wrap items-center justify-between gap-2">
-                        <time className="text-sm font-bold text-blue-700">{formatRuDateTime(event.scheduledAt) || 'Дата не указана'}</time>
+                        <time className="text-sm font-bold text-blue-700">{formatCourtEventSchedule(event) || 'Дата не указана'}</time>
                         <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${courtMovementStatusClasses(event.movementStatus)}`}>{event.movementStatusLabel || event.movementStatus || 'Без статуса'}</span>
                       </div>
                       <h4 className="mt-1.5 text-sm font-bold text-slate-900">{event.title}</h4>
@@ -6896,7 +6904,7 @@ function CourtPanel({
                     </article>
                   ))}
                 </div>
-                <div className="hidden overflow-x-auto xl:block"><table className="min-w-full text-left text-xs"><thead className="bg-slate-50 text-[11px] uppercase tracking-[0.08em] text-slate-500"><tr><th className="px-3 py-2">Дата и время</th><th className="px-3 py-2">Событие</th><th className="px-3 py-2">Статус</th><th className="px-3 py-2">Результат</th><th className="px-3 py-2">Зал</th></tr></thead><tbody className="divide-y divide-slate-100">{overviewEvents.map((event) => <tr key={event.id} className="align-top"><td className="whitespace-nowrap px-3 py-2.5 font-semibold text-slate-700">{formatRuDateTime(event.scheduledAt) || '—'}</td><td className="min-w-[220px] px-3 py-2.5 text-slate-800">{event.title}</td><td className="px-3 py-2.5 text-slate-600">{event.movementStatusLabel || event.movementStatus || '—'}</td><td className="min-w-[180px] px-3 py-2.5 text-slate-600">{event.resultSummary || event.description || '—'}</td><td className="px-3 py-2.5 text-slate-600">{event.courtroom || '—'}</td></tr>)}</tbody></table></div>
+                <div className="hidden overflow-x-auto xl:block"><table className="min-w-full text-left text-xs"><thead className="bg-slate-50 text-[11px] uppercase tracking-[0.08em] text-slate-500"><tr><th className="px-3 py-2">Дата и время</th><th className="px-3 py-2">Событие</th><th className="px-3 py-2">Статус</th><th className="px-3 py-2">Результат</th><th className="px-3 py-2">Зал</th></tr></thead><tbody className="divide-y divide-slate-100">{overviewEvents.map((event) => <tr key={event.id} className="align-top"><td className="whitespace-nowrap px-3 py-2.5 font-semibold text-slate-700">{formatCourtEventSchedule(event) || '—'}</td><td className="min-w-[220px] px-3 py-2.5 text-slate-800">{event.title}</td><td className="px-3 py-2.5 text-slate-600">{event.movementStatusLabel || event.movementStatus || '—'}</td><td className="min-w-[180px] px-3 py-2.5 text-slate-600">{event.resultSummary || event.description || '—'}</td><td className="px-3 py-2.5 text-slate-600">{event.courtroom || '—'}</td></tr>)}</tbody></table></div>
               </>}
             </section>
 
@@ -6919,7 +6927,7 @@ function CourtPanel({
                         </div>
                         <div>
                           <div className={`flex flex-wrap items-center gap-2 text-xs font-semibold ${isArchived ? 'text-slate-500' : 'text-blue-700'}`}>
-                            <span>{formatRuDateTime(event.scheduledAt) || 'Дата не указана'} · {event.courtInstanceLabel}</span>
+                            <span>{formatCourtEventSchedule(event) || 'Дата не указана'} · {event.courtInstanceLabel}</span>
                             {isArchived ? <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] uppercase tracking-wide text-slate-600">Архив источника</span> : null}
                           </div>
                           <div className={`mt-0.5 text-sm font-semibold ${isArchived ? 'text-slate-600 line-through decoration-slate-300' : 'text-slate-800'}`}>{event.title}</div>
@@ -7427,7 +7435,7 @@ function CourtPanel({
               <div key={event.id} className={`rounded-lg border p-3 ${event.isOverdue ? 'border-rose-200 bg-rose-50' : 'border-slate-100 bg-slate-50'}`}>
                 <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">{event.eventTypeLabel || event.eventType} · {event.movementStatusLabel || event.movementStatus}</div>
                 <div className="mt-2 font-semibold text-slate-900">{event.title}</div>
-                <div className="mt-1 text-sm text-slate-600">{formatRuDateTime(event.scheduledAt) || '—'} · {event.courtInstanceLabel}</div>
+                <div className="mt-1 text-sm text-slate-600">{formatCourtEventSchedule(event) || '—'} · {event.courtInstanceLabel}</div>
                 {event.courtName ? <div className="mt-2 text-sm text-slate-500">{event.courtName}{event.courtCaseNumber ? ` · ${event.courtCaseNumber}` : ''}</div> : null}
                 {event.clientCaseDocumentId ? <div className="mt-2 text-sm text-slate-500">Документ #{event.clientCaseDocumentId}</div> : null}
                 {event.resultSummary ? <div className="mt-2 text-sm text-slate-500">{event.resultSummary}</div> : null}

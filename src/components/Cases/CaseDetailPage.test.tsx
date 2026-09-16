@@ -2512,6 +2512,25 @@ describe('CaseDetailPage', () => {
         createdAt: '2026-05-21T00:00:00Z',
         isOverdue: false,
       },
+      {
+        id: 42,
+        clientCaseId: 15,
+        eventType: 'movement',
+        eventTypeLabel: 'Движение дела',
+        title: 'Срок для представления документов',
+        scheduledAt: '2026-06-13T00:00:00Z',
+        allDay: true,
+        courtInstance: 'first',
+        courtInstanceLabel: 'Первая инстанция',
+        courtName: 'Арбитражный суд Самарской области',
+        courtCaseNumber: 'А55-12345/2026',
+        movementStatus: 'completed',
+        movementStatusLabel: 'Завершено',
+        sourceType: 'sudrf',
+        sourceConfidence: 'official-source',
+        createdAt: '2026-05-21T00:00:00Z',
+        isOverdue: false,
+      },
     ]);
     vi.mocked(apiService.getCaseCourtSyncLogs).mockResolvedValue([
       {
@@ -2545,6 +2564,7 @@ describe('CaseDetailPage', () => {
     expect(screen.getByText('Инстанции и судебные карточки')).toBeTruthy();
     expect(screen.getByText('Заседания и движения')).toBeTruthy();
     expect(screen.getByText('Лента процессуальной истории')).toBeTruthy();
+    expect(screen.getAllByText('13.06.2026 · весь день').length).toBeGreaterThan(0);
     expect(screen.getByText('1 заполнено')).toBeTruthy();
     expect(screen.getByTestId('court-event-cards')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Редактировать данные' })).toBeTruthy();
