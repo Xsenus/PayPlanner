@@ -107,8 +107,28 @@ function courtProcessSummaryClasses(tone: CourtProcessSummaryTone) {
       return 'border-blue-200 bg-blue-50 text-blue-950';
     case 'amber':
       return 'border-amber-200 bg-amber-50 text-amber-950';
+    case 'rose':
+      return 'border-rose-200 bg-rose-50 text-rose-950';
     default:
       return 'border-slate-200 bg-slate-50 text-slate-900';
+  }
+}
+
+function courtMovementStatusClasses(status?: string | null) {
+  switch ((status || '').trim().toLowerCase()) {
+    case 'scheduled':
+      return 'border-blue-200 bg-blue-50 text-blue-800';
+    case 'postponed':
+      return 'border-amber-200 bg-amber-50 text-amber-800';
+    case 'held':
+    case 'completed':
+      return 'border-emerald-200 bg-emerald-50 text-emerald-800';
+    case 'suspended':
+      return 'border-violet-200 bg-violet-50 text-violet-800';
+    case 'cancelled':
+      return 'border-rose-200 bg-rose-50 text-rose-800';
+    default:
+      return 'border-slate-200 bg-slate-50 text-slate-700';
   }
 }
 
@@ -433,6 +453,28 @@ function formatRussianCount(value: number, forms: readonly [string, string, stri
         : forms[2];
 
   return `${value} ${form}`;
+}
+
+function buildCourtSyncOverviewMessage(result: ClientCaseCourtSyncRun) {
+  if (result.status !== 'external-sync-completed') {
+    return result.message;
+  }
+
+  const parts = [
+    [result.createdCourtEvents ?? 0, ['событие', 'события', 'событий'] as const],
+    [result.createdCourtParties ?? 0, ['участник', 'участника', 'участников'] as const],
+    [result.createdCourtActDocuments ?? 0, ['судебный акт', 'судебных акта', 'судебных актов'] as const],
+    [result.createdProceduralDeadlines ?? 0, ['процессуальный срок', 'процессуальных срока', 'процессуальных сроков'] as const],
+  ]
+    .filter(([count]) => Number(count) > 0)
+    .map(([count, forms]) => formatRussianCount(Number(count), forms as readonly [string, string, string]));
+  const checkedAt = formatRuDateTime(result.checkedAt);
+
+  if (parts.length === 0) {
+    return `Судебный источник проверен: новых изменений не найдено${checkedAt ? `. Проверено ${checkedAt}` : ''}.`;
+  }
+
+  return `Судебный источник обновлён: ${parts.join(', ')}${checkedAt ? `. Проверено ${checkedAt}` : ''}.`;
 }
 
 function formatFileSize(value?: number | null) {
@@ -1192,6 +1234,7 @@ export function CaseDetailPage({
       ? initialViewState.activeTab ?? 'overview'
       : 'overview',
   );
+  const [courtOverview, setCourtOverview] = useState(initialViewState.courtOverview === true);
   const [loading, setLoading] = useState(true);
   const [tasksLoading, setTasksLoading] = useState(false);
   const [participantsLoading, setParticipantsLoading] = useState(false);
@@ -1439,7 +1482,7 @@ export function CaseDetailPage({
   useEffect(() => {
     writeCaseDetailViewState(caseId, {
       activeTab,
-      courtOverview: initialViewState.courtOverview,
+      courtOverview,
       taskFilter,
       participantSourceType,
       participantRole,
@@ -1456,7 +1499,7 @@ export function CaseDetailPage({
     participantRole,
     participantSourceType,
     taskFilter,
-    initialViewState.courtOverview,
+    courtOverview,
   ]);
 
   useEffect(() => {
@@ -2475,7 +2518,7 @@ export function CaseDetailPage({
         ? await apiService.runCaseCourtSync(caseItem.id, payload)
         : await apiService.runCaseCourtSync(caseItem.id);
       setLastCourtSyncResult(result);
-      setNotice(result.message);
+      setNotice(result.status === 'external-sync-completed' ? null : result.message);
       setActiveTab(result.status === 'external-sync-completed' ? 'court' : 'history');
       setReloadToken((value) => value + 1);
     } catch (err) {
@@ -3758,7 +3801,8 @@ export function CaseDetailPage({
 
           {activeTab === 'court' ? (
             <CourtPanel
-              initialOverview={initialViewState.courtOverview === true}
+              initialOverview={courtOverview}
+              onOverviewChange={setCourtOverview}
               caseItem={caseItem}
               courtDirectory={courtDirectory}
               courtInstances={courtInstances}
@@ -6270,6 +6314,7 @@ export function CourtSourceProvenance({
 
 function CourtPanel({
   initialOverview,
+  onOverviewChange,
   caseItem,
   courtDirectory,
   courtInstances,
@@ -6361,6 +6406,7 @@ function CourtPanel({
   onCloseProceduralDeadline,
 }: {
   initialOverview: boolean;
+  onOverviewChange: (value: boolean) => void;
   caseItem: ClientCase;
   courtDirectory: ClientCaseCourt[];
   courtInstances: ClientCaseCourtInstance[];
@@ -6471,6 +6517,10 @@ function CourtPanel({
   const courtDirectoryForInstance = courtDirectory.filter((court) => court.instance === activeCourtInstance || (activeCourtInstance === 'supreme' && court.instance === 'supervision'));
   const [courtSafeModeExpanded, setCourtSafeModeExpanded] = useState(false);
   const [courtEditMode, setCourtEditMode] = useState(!initialOverview);
+  const changeCourtEditMode = (editing: boolean) => {
+    setCourtEditMode(editing);
+    onOverviewChange(!editing);
+  };
   const hasCourtInstanceData = courtInstances.some((instance) => Boolean(
     instance.courtName
     || instance.courtCaseNumber
@@ -6564,7 +6614,7 @@ function CourtPanel({
     });
     const visibleInstances = populatedInstances.length > 0 ? populatedInstances : [selectedCourtInstanceMeta];
     const ownerName = caseItem.client?.name || caseItem.legalEntity?.shortName || caseItem.legalEntity?.fullName || 'Владелец не указан';
-    const processSummary = buildCourtCaseProcessSummary(caseItem, courtEvents, courtInstances);
+    const processSummary = buildCourtCaseProcessSummary(caseItem, courtEvents, courtInstances, activeProceduralDeadlines);
 
     return (
       <div className="space-y-3">
@@ -6581,12 +6631,12 @@ function CourtPanel({
             </div>
             <div className="flex flex-wrap gap-2">
               <button type="button" onClick={() => void onRunCourtSync()} disabled={syncingCourt} className="inline-flex items-center gap-2 rounded-lg border border-cyan-200 px-3 py-2 text-sm font-semibold text-cyan-700 hover:bg-cyan-50 disabled:opacity-50">{syncingCourt ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />} Проверить источник</button>
-              <button type="button" onClick={() => setCourtEditMode(true)} className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800"><Pencil className="h-4 w-4" /> Редактировать данные</button>
+              <button type="button" onClick={() => changeCourtEditMode(true)} className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800"><Pencil className="h-4 w-4" /> Редактировать данные</button>
             </div>
           </div>
         </section>
 
-        {lastCourtSyncResult?.message ? <div className={`rounded-xl border p-3 text-sm ${lastCourtSyncResult.status === 'external-sync-error' ? 'border-rose-200 bg-rose-50 text-rose-800' : 'border-emerald-200 bg-emerald-50 text-emerald-800'}`}>{lastCourtSyncResult.message}</div> : null}
+        {lastCourtSyncResult?.message ? <div className={`flex items-start gap-2 rounded-xl border p-3 text-sm ${lastCourtSyncResult.status === 'external-sync-error' ? 'border-rose-200 bg-rose-50 text-rose-800' : 'border-emerald-200 bg-emerald-50 text-emerald-800'}`}><Check className="mt-0.5 h-4 w-4 shrink-0" /><span>{buildCourtSyncOverviewMessage(lastCourtSyncResult)}</span></div> : null}
 
         <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -6607,7 +6657,7 @@ function CourtPanel({
                   <div className="text-[11px] font-semibold uppercase tracking-[0.1em] opacity-70">{title as string}</div>
                   <div className="mt-1 text-sm font-bold">{summaryItem.label}</div>
                   <div className="mt-1 text-xs leading-5 opacity-80">{summaryItem.detail}</div>
-                  {summaryItem.date ? <div className="mt-1 text-xs font-semibold">Дата: {toRuDate(summaryItem.date)}</div> : null}
+                  {summaryItem.date ? <div className="mt-1 text-xs font-semibold">{summaryItem.dateLabel || 'Дата'}: {toRuDate(summaryItem.date)}</div> : null}
                 </div>
               );
             })}
@@ -6644,7 +6694,22 @@ function CourtPanel({
 
             <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
               <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-3 py-2.5"><div><h3 className="font-bold text-slate-900">Заседания и движения</h3><p className="text-xs text-slate-500">История выбранной инстанции</p></div><span className="text-xs font-semibold text-slate-500">{overviewEvents.length}</span></div>
-              {courtEventsLoading ? <div className="flex items-center justify-center p-8"><Loader2 className="h-5 w-5 animate-spin text-blue-600" /></div> : overviewEvents.length === 0 ? <div className="p-6 text-center text-sm text-slate-500">По этой инстанции событий пока нет.</div> : <div className="overflow-x-auto"><table className="min-w-full text-left text-xs"><thead className="bg-slate-50 text-[11px] uppercase tracking-[0.08em] text-slate-500"><tr><th className="px-3 py-2">Дата и время</th><th className="px-3 py-2">Событие</th><th className="px-3 py-2">Статус</th><th className="px-3 py-2">Результат</th><th className="px-3 py-2">Зал</th></tr></thead><tbody className="divide-y divide-slate-100">{overviewEvents.map((event) => <tr key={event.id} className="align-top"><td className="whitespace-nowrap px-3 py-2.5 font-semibold text-slate-700">{formatRuDateTime(event.scheduledAt) || '—'}</td><td className="min-w-[220px] px-3 py-2.5 text-slate-800">{event.title}</td><td className="px-3 py-2.5 text-slate-600">{event.movementStatusLabel || event.movementStatus || '—'}</td><td className="min-w-[180px] px-3 py-2.5 text-slate-600">{event.resultSummary || event.description || '—'}</td><td className="px-3 py-2.5 text-slate-600">{event.courtroom || '—'}</td></tr>)}</tbody></table></div>}
+              {courtEventsLoading ? <div className="flex items-center justify-center p-8"><Loader2 className="h-5 w-5 animate-spin text-blue-600" /></div> : overviewEvents.length === 0 ? <div className="p-6 text-center text-sm text-slate-500">По этой инстанции событий пока нет.</div> : <>
+                <div data-testid="court-event-cards" className="divide-y divide-slate-100 xl:hidden">
+                  {overviewEvents.map((event) => (
+                    <article key={event.id} className="p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <time className="text-sm font-bold text-blue-700">{formatRuDateTime(event.scheduledAt) || 'Дата не указана'}</time>
+                        <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${courtMovementStatusClasses(event.movementStatus)}`}>{event.movementStatusLabel || event.movementStatus || 'Без статуса'}</span>
+                      </div>
+                      <h4 className="mt-1.5 text-sm font-bold text-slate-900">{event.title}</h4>
+                      {event.resultSummary || event.description ? <p className="mt-1 text-xs leading-5 text-slate-600">{event.resultSummary || event.description}</p> : null}
+                      {event.courtroom ? <div className="mt-1.5 text-xs font-semibold text-slate-500">Зал: {event.courtroom}</div> : null}
+                    </article>
+                  ))}
+                </div>
+                <div className="hidden overflow-x-auto xl:block"><table className="min-w-full text-left text-xs"><thead className="bg-slate-50 text-[11px] uppercase tracking-[0.08em] text-slate-500"><tr><th className="px-3 py-2">Дата и время</th><th className="px-3 py-2">Событие</th><th className="px-3 py-2">Статус</th><th className="px-3 py-2">Результат</th><th className="px-3 py-2">Зал</th></tr></thead><tbody className="divide-y divide-slate-100">{overviewEvents.map((event) => <tr key={event.id} className="align-top"><td className="whitespace-nowrap px-3 py-2.5 font-semibold text-slate-700">{formatRuDateTime(event.scheduledAt) || '—'}</td><td className="min-w-[220px] px-3 py-2.5 text-slate-800">{event.title}</td><td className="px-3 py-2.5 text-slate-600">{event.movementStatusLabel || event.movementStatus || '—'}</td><td className="min-w-[180px] px-3 py-2.5 text-slate-600">{event.resultSummary || event.description || '—'}</td><td className="px-3 py-2.5 text-slate-600">{event.courtroom || '—'}</td></tr>)}</tbody></table></div>
+              </>}
             </section>
 
             <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm"><div className="flex items-center justify-between gap-2"><div><h3 className="font-bold text-slate-900">Лента процессуальной истории</h3><p className="text-xs text-slate-500">Изменения всех инстанций в обратном хронологическом порядке</p></div><span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">{courtEvents.length}</span></div>{processHistory.length === 0 ? <div className="mt-3 rounded-lg bg-slate-50 p-4 text-sm text-slate-500">Процессуальная история появится после синхронизации или добавления события.</div> : <ol className="mt-3 space-y-0">{processHistory.map((event, index) => <li key={event.id} className="relative grid grid-cols-[16px_minmax(0,1fr)] gap-3 pb-3"><div className="relative flex justify-center"><span className="mt-1.5 h-2.5 w-2.5 rounded-full bg-blue-500 ring-4 ring-blue-50" />{index < processHistory.length - 1 ? <span className="absolute bottom-[-4px] top-4 w-px bg-slate-200" /> : null}</div><div><div className="text-xs font-semibold text-blue-700">{formatRuDateTime(event.scheduledAt) || 'Дата не указана'} · {event.courtInstanceLabel}</div><div className="mt-0.5 text-sm font-semibold text-slate-800">{event.title}</div>{event.resultSummary || event.movementStatusLabel ? <div className="mt-0.5 text-xs text-slate-500">{event.resultSummary || event.movementStatusLabel}</div> : null}</div></li>)}</ol>}</section>
@@ -6663,7 +6728,7 @@ function CourtPanel({
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between rounded-xl border border-blue-200 bg-blue-50 p-3"><div><div className="text-sm font-semibold text-blue-900">Режим редактирования судебных данных</div><div className="text-xs text-blue-700">Здесь доступны привязка источника, ручные события, стороны, жалобы и процессуальные сроки.</div></div><button type="button" onClick={() => setCourtEditMode(false)} className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100">Вернуться к обзору</button></div>
+      <div className="flex items-center justify-between rounded-xl border border-blue-200 bg-blue-50 p-3"><div><div className="text-sm font-semibold text-blue-900">Режим редактирования судебных данных</div><div className="text-xs text-blue-700">Здесь доступны привязка источника, ручные события, стороны, жалобы и процессуальные сроки.</div></div><button type="button" onClick={() => changeCourtEditMode(false)} className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100">Вернуться к обзору</button></div>
       <div className="flex flex-col gap-3 rounded-xl border border-slate-200 p-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Судебный блок</h2>

@@ -1,12 +1,18 @@
-import type { ClientCase, ClientCaseCourtEvent, ClientCaseCourtInstance } from '../types';
+import type {
+  ClientCase,
+  ClientCaseCourtEvent,
+  ClientCaseCourtInstance,
+  ClientCaseProceduralDeadline,
+} from '../types';
 
-export type CourtProcessSummaryTone = 'emerald' | 'amber' | 'slate' | 'blue';
+export type CourtProcessSummaryTone = 'emerald' | 'amber' | 'rose' | 'slate' | 'blue';
 
 export interface CourtProcessSummaryItem {
   status: 'confirmed' | 'not-found' | 'pending' | 'unknown';
   label: string;
   detail: string;
   date?: string | null;
+  dateLabel?: string;
   tone: CourtProcessSummaryTone;
 }
 
@@ -67,6 +73,7 @@ export function buildCourtCaseProcessSummary(
   caseItem: Pick<ClientCase, 'courtDecisionAt'>,
   events: ClientCaseCourtEvent[],
   instances: ClientCaseCourtInstance[],
+  proceduralDeadlines: ClientCaseProceduralDeadline[] = [],
 ): CourtCaseProcessSummary {
   const decisionEvent = events
     .filter(isDecisionEvent)
@@ -105,6 +112,10 @@ export function buildCourtCaseProcessSummary(
     .flatMap((instance) => instance.complaints ?? [])
     .find((complaint) => !complaint.isArchived);
   const hasAppeal = Boolean(appealEvent || laterInstance || activeComplaint);
+  const appealDeadline = proceduralDeadlines
+    .filter((deadline) => deadline.deadlineType === 'appeal')
+    .filter((deadline) => !['closed', 'cancelled', 'archived'].includes(deadline.status))
+    .sort((left, right) => new Date(left.dueAt).getTime() - new Date(right.dueAt).getTime())[0];
 
   const appeal: CourtProcessSummaryItem = hasAppeal
     ? {
@@ -120,8 +131,14 @@ export function buildCourtCaseProcessSummary(
       ? {
           status: 'not-found',
           label: 'Обжалование не обнаружено',
-          detail: 'В загруженных движениях, жалобах и связанных инстанциях сведений об обжаловании нет.',
-          tone: 'slate',
+          detail: appealDeadline
+            ? appealDeadline.isOverdue
+              ? 'Жалоба не найдена, а контрольный срок обжалования уже истёк. Проверьте официальный источник.'
+              : 'Жалоба не найдена. Срок обжалования ещё контролируется CRM.'
+            : 'В загруженных движениях, жалобах и связанных инстанциях сведений об обжаловании нет.',
+          date: appealDeadline?.dueAt || null,
+          dateLabel: appealDeadline ? 'Срок до' : undefined,
+          tone: appealDeadline?.isOverdue ? 'rose' : appealDeadline ? 'amber' : 'slate',
         }
       : {
           status: 'pending',

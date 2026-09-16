@@ -81,6 +81,63 @@ describe('buildCourtCaseProcessSummary', () => {
     expect(summary.appeal.label).toBe('Обжалование не обнаружено');
   });
 
+  it('shows an active appeal deadline without inventing an appeal', () => {
+    const summary = buildCourtCaseProcessSummary(
+      { courtDecisionAt: '2026-09-04T00:00:00Z' },
+      [],
+      [],
+      [{
+        id: 1,
+        clientCaseId: 10,
+        deadlineType: 'appeal',
+        deadlineTypeLabel: 'Апелляция',
+        title: 'Срок апелляционного обжалования',
+        dueAt: '2026-10-05T00:00:00Z',
+        allDay: true,
+        status: 'active',
+        statusLabel: 'Активен',
+        warningDaysBefore: 7,
+        sourceType: 'sudrf',
+        createdAt: '2026-09-04T00:00:00Z',
+        isOverdue: false,
+        isWarning: false,
+      }],
+    );
+
+    expect(summary.appeal.label).toBe('Обжалование не обнаружено');
+    expect(summary.appeal.detail).toContain('Срок обжалования ещё контролируется');
+    expect(summary.appeal.date).toBe('2026-10-05T00:00:00Z');
+    expect(summary.appeal.dateLabel).toBe('Срок до');
+    expect(summary.appeal.tone).toBe('amber');
+  });
+
+  it('warns when the appeal deadline is overdue and no appeal was found', () => {
+    const summary = buildCourtCaseProcessSummary(
+      { courtDecisionAt: '2026-09-04T00:00:00Z' },
+      [],
+      [],
+      [{
+        id: 1,
+        clientCaseId: 10,
+        deadlineType: 'appeal',
+        deadlineTypeLabel: 'Апелляция',
+        title: 'Срок апелляционного обжалования',
+        dueAt: '2026-10-05T00:00:00Z',
+        allDay: true,
+        status: 'active',
+        statusLabel: 'Просрочен',
+        warningDaysBefore: 7,
+        sourceType: 'sudrf',
+        createdAt: '2026-09-04T00:00:00Z',
+        isOverdue: true,
+        isWarning: true,
+      }],
+    );
+
+    expect(summary.appeal.detail).toContain('срок обжалования уже истёк');
+    expect(summary.appeal.tone).toBe('rose');
+  });
+
   it('recognizes an appeal movement without mistaking its decision reference for a decision', () => {
     const summary = buildCourtCaseProcessSummary(
       { courtDecisionAt: null },

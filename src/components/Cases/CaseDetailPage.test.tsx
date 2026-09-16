@@ -2504,6 +2504,7 @@ describe('CaseDetailPage', () => {
     expect(screen.getByText('Заседания и движения')).toBeTruthy();
     expect(screen.getByText('Лента процессуальной истории')).toBeTruthy();
     expect(screen.getByText('1 заполнено')).toBeTruthy();
+    expect(screen.getByTestId('court-event-cards')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Редактировать данные' })).toBeTruthy();
     expect(screen.queryByText('Режим редактирования судебных данных')).toBeNull();
 
@@ -2615,6 +2616,39 @@ describe('CaseDetailPage', () => {
     expect(screen.getByText('Конфликты · 1')).toBeTruthy();
     expect(screen.getByText(/не удаляются и не перезаписываются автоматически/u)).toBeTruthy();
     expect(screen.getByRole('button', { name: /Проверить источник/u })).toBeTruthy();
+  });
+
+  it('shows a compact court sync summary in overview without duplicating the technical message', async () => {
+    window.sessionStorage.setItem('pp.case-detail.15.view.v1', JSON.stringify({ activeTab: 'court' }));
+    vi.mocked(apiService.runCaseCourtSync).mockResolvedValueOnce({
+      clientCaseId: 15,
+      status: 'external-sync-completed',
+      hasCourtBinding: true,
+      message: 'Технический подробный результат синхронизации, который не должен занимать место над карточкой.',
+      checkedAt: '2026-07-29T15:00:00Z',
+      syncedFromExternalSource: true,
+      createdCourtEvents: 13,
+      createdCourtParties: 3,
+      createdCourtActDocuments: 2,
+      createdProceduralDeadlines: 1,
+      newItems: [],
+      changedItems: [],
+      removedItems: [],
+      conflictItems: [],
+    });
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    expect(await screen.findByText('Режим редактирования судебных данных')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Вернуться к обзору' }));
+    expect(await screen.findByText('Сводка по судебному делу')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /Проверить источник/u }));
+
+    expect(await screen.findByText(/Судебный источник обновлён: 13 событий, 3 участника, 2 судебных акта, 1 процессуальный срок/u)).toBeTruthy();
+    expect(screen.queryByText(/Технический подробный результат синхронизации/u)).toBeNull();
+    expect(screen.getByText('Сводка по судебному делу')).toBeTruthy();
+    expect(screen.queryByText('Режим редактирования судебных данных')).toBeNull();
+    expect(JSON.parse(window.sessionStorage.getItem('pp.case-detail.15.view.v1') || '{}').courtOverview).toBe(true);
   });
 
   it('searches and binds an external court card from the court tab', async () => {
