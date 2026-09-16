@@ -3810,6 +3810,43 @@ describe('TaskJournal', () => {
     }));
   });
 
+  it('falls back to the binding step when automatic billing lookup fails', async () => {
+    apiMock.getTaskJournalCaseAutomationCandidates.mockResolvedValue([
+      {
+        clientId: 12,
+        clientName: 'Петров Пётр Петрович',
+        clientCaseId: 103,
+        clientCaseTitle: 'ДЕЛО В ОЖИДАНИИ',
+        reason: 'Первый контроль через 5 дн.',
+        activeTaskCount: 0,
+        completedTaskCount: 0,
+        daysWithoutActiveTask: 9,
+        isEscalated: false,
+        isReadyForControl: false,
+        automationState: 'waiting',
+        lastTaskAt: null,
+        suggestedTitle: 'Проверить движение по делу',
+        suggestedDescription: 'Автоконтроль',
+        suggestedDueAt: todayAt(9),
+      },
+    ]);
+    apiMock.getTaskJournalCaseAutomationSummary.mockResolvedValue({
+      totalCount: 1,
+      readyCount: 0,
+      criticalCount: 0,
+      waitingCount: 1,
+      pausedCount: 0,
+    });
+    apiMock.getTaskBillingContext.mockRejectedValueOnce(new Error('Нет связи с расчётом договора'));
+    await renderJournal();
+
+    fireEvent.click(screen.getByTestId('task-automation-create-103'));
+
+    expect(await screen.findByRole('heading', { name: 'Выберите клиента и дело' })).toBeTruthy();
+    expect(screen.getByText('Нет связи с расчётом договора')).toBeTruthy();
+    expect(apiMock.createTaskJournalCaseAutomationTask).not.toHaveBeenCalled();
+  });
+
   it('explains when a stale automation candidate is skipped during bulk creation', async () => {
     apiMock.getTaskJournalCaseAutomationCandidates.mockResolvedValue([
       {
@@ -3989,9 +4026,15 @@ describe('TaskJournal', () => {
     expect(waitingTaskButton.disabled).toBe(false);
     expect(waitingTaskButton.textContent).toContain('Поставить задачу');
 
+    apiMock.getTaskBillingContext.mockClear();
     fireEvent.click(waitingTaskButton);
 
-    expect(await screen.findByRole('heading', { name: 'Выберите клиента и дело' })).toBeTruthy();
+    await waitFor(() => expect(apiMock.getTaskBillingContext).toHaveBeenCalledWith({
+      clientId: 11,
+      legalEntityId: undefined,
+      clientCaseId: 101,
+    }));
+    expect(await screen.findByRole('heading', { name: 'Определите учёт задачи' })).toBeTruthy();
     expect(apiMock.createTaskJournalCaseAutomationTask).not.toHaveBeenCalled();
   });
 
@@ -4085,13 +4128,15 @@ describe('TaskJournal', () => {
       expect(within(suggestion).getByText('Администратор')).toBeTruthy();
       expect(within(suggestion).getByText('ответственный не назначен · вы будете исполнителем')).toBeTruthy();
       expect(within(suggestion).getByText(/Новосибирск \(UTC\+7\).*время исполнителя/)).toBeTruthy();
+      apiMock.getTaskBillingContext.mockClear();
       fireEvent.click(screen.getByTestId('task-automation-create-100'));
-      expect(await screen.findByRole('heading', { name: 'Выберите клиента и дело' })).toBeTruthy();
-      expect((screen.getByTestId('task-billing-wizard-case') as HTMLSelectElement).value).toBe('100');
-
-      const unpaidButton = screen.getByRole('button', { name: 'Неоплачиваемая задача' }) as HTMLButtonElement;
-      expect(unpaidButton.disabled).toBe(false);
-      fireEvent.click(unpaidButton);
+      await waitFor(() => expect(apiMock.getTaskBillingContext).toHaveBeenCalledWith({
+        clientId: 10,
+        legalEntityId: undefined,
+        clientCaseId: 100,
+      }));
+      expect(await screen.findByRole('heading', { name: 'Определите учёт задачи' })).toBeTruthy();
+      fireEvent.click(screen.getByRole('button', { name: /^Внутренняя задача/ }));
 
       const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
       expect((within(card).getByTestId('task-title-input') as HTMLInputElement).value).toBe('Проверить движение по делу');
@@ -4158,9 +4203,15 @@ describe('TaskJournal', () => {
 
       const suggestion = screen.getByTestId('task-automation-suggestion-100');
       expect(within(suggestion).getByText('не определён')).toBeTruthy();
+      apiMock.getTaskBillingContext.mockClear();
       fireEvent.click(screen.getByTestId('task-automation-create-100'));
-      expect(await screen.findByRole('heading', { name: 'Выберите клиента и дело' })).toBeTruthy();
-      fireEvent.click(screen.getByRole('button', { name: 'Неоплачиваемая задача' }));
+      await waitFor(() => expect(apiMock.getTaskBillingContext).toHaveBeenCalledWith({
+        clientId: 10,
+        legalEntityId: undefined,
+        clientCaseId: 100,
+      }));
+      expect(await screen.findByRole('heading', { name: 'Определите учёт задачи' })).toBeTruthy();
+      fireEvent.click(screen.getByRole('button', { name: /^Внутренняя задача/ }));
 
       const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
       expect((within(card).getByTestId('task-assignee-select') as HTMLSelectElement).value).not.toBe('8');

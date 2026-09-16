@@ -190,6 +190,7 @@ type TaskJournalProps = {
 type TaskCreationWizardState = {
   defaults: Partial<TaskJournalUpsertPayload>;
   dueAt?: string;
+  autoLoadBilling?: boolean;
 } | null;
 
 type TaskForm = TaskJournalUpsertPayload & { dueAt: string; approvalDueAt: string | null };
@@ -2649,13 +2650,19 @@ export function TaskJournal({
     onRouteTaskChange?.(null);
   }, [canCreateTasks, onRouteTaskChange, taskContextDefaults, toast]);
 
-  const openTaskCreateFromTemplate = useCallback((defaults: Partial<TaskJournalUpsertPayload>) => {
+  const openTaskCreateFromTemplate = useCallback((
+    defaults: Partial<TaskJournalUpsertPayload>,
+    options?: { autoLoadBilling?: boolean },
+  ) => {
     if (!canCreateTasks) {
       toast.error('У роли нет права на создание задач.', 'Журнал задач');
       return;
     }
 
-    setCreationWizard({ defaults: { ...taskContextDefaults, ...defaults } });
+    setCreationWizard({
+      defaults: { ...taskContextDefaults, ...defaults },
+      autoLoadBilling: options?.autoLoadBilling,
+    });
     setHighlightedTaskId(null);
     onRouteTaskChange?.(null);
   }, [canCreateTasks, onRouteTaskChange, taskContextDefaults, toast]);
@@ -3380,7 +3387,7 @@ export function TaskJournal({
           assigneeName: candidate.suggestedAssigneeName?.trim() || '',
         }
         : {}),
-    });
+    }, { autoLoadBilling: true });
   }, [openTaskCreateFromTemplate]);
 
   const changeAutomationStateFilter = useCallback((state: AutomationCandidateStateFilter) => {
@@ -5989,6 +5996,7 @@ export function TaskJournal({
         <TaskBillingCreateWizard
           counterpartyOptions={counterpartyOptions}
           initialDefaults={creationWizard.defaults}
+          autoLoadBilling={creationWizard.autoLoadBilling}
           canViewCases={canViewCases}
           onCancel={() => setCreationWizard(null)}
           onContinue={(defaults) => {
@@ -9081,12 +9089,14 @@ type TaskCardChrome = 'legacy' | 'modern';
 function TaskBillingCreateWizard({
   counterpartyOptions,
   initialDefaults,
+  autoLoadBilling = false,
   canViewCases,
   onCancel,
   onContinue,
 }: {
   counterpartyOptions: LookupSelectOption[];
   initialDefaults: Partial<TaskJournalUpsertPayload>;
+  autoLoadBilling?: boolean;
   canViewCases: boolean;
   onCancel: () => void;
   onContinue: (defaults: Partial<TaskJournalUpsertPayload>) => void;
@@ -9103,6 +9113,7 @@ function TaskBillingCreateWizard({
   const [selectedContractId, setSelectedContractId] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const autoLoadAttemptedRef = useRef(false);
   const [kind, rawId] = counterparty.split(':');
   const ownerId = Number(rawId) || null;
   const clientId = kind === 'client' ? ownerId : null;
@@ -9118,7 +9129,7 @@ function TaskBillingCreateWizard({
     ?? billingContext?.contracts[0]
     ?? null;
 
-  const loadBilling = async () => {
+  const loadBilling = useCallback(async () => {
     if (!ownerId || !clientCaseId) {
       setError('Сначала выберите клиента и дело.');
       return;
@@ -9140,17 +9151,29 @@ function TaskBillingCreateWizard({
     } finally {
       setLoading(false);
     }
-  };
+  }, [clientCaseId, clientId, legalEntityId, ownerId]);
+
+  useEffect(() => {
+    if (!autoLoadBilling || autoLoadAttemptedRef.current || !ownerId || !clientCaseId) {
+      return;
+    }
+
+    autoLoadAttemptedRef.current = true;
+    void loadBilling();
+  }, [autoLoadBilling, clientCaseId, loadBilling, ownerId]);
 
   const complete = (classification: 'billable' | 'internal') => {
     const contract = classification === 'billable' ? selectedContract : null;
-    const objectName = [selectedCounterparty?.label, selectedCase?.title].filter(Boolean).join(' - ');
+    const selectedCaseId = selectedCase?.id ?? (Number(clientCaseId) || null);
+    const objectName = [selectedCounterparty?.label, selectedCase?.title].filter(Boolean).join(' - ')
+      || initialDefaults.objectName
+      || '';
     onContinue({
       ...initialDefaults,
       isInternal: false,
       clientId,
       legalEntityId,
-      clientCaseId: selectedCase?.id ?? null,
+      clientCaseId: selectedCaseId,
       objectName,
       clientBillingClassification: classification,
       billingContractId: contract?.id ?? null,
@@ -9169,22 +9192,35 @@ function TaskBillingCreateWizard({
     : mode === 'Fixed'
       ? 'Работа выполняется в рамках фиксированной суммы. Внимание: следите за объёмом услуг по этому делу.'
       : 'Новая клиентская задача без договора учитывается как платная и попадёт в контроль выставления счёта. Если работа не должна оплачиваться клиентом, выберите внутреннюю задачу.';
+  const isAutoLoadingBilling = step === 'binding' && autoLoadBilling && loading;
 
   return (
     <div className="fixed inset-0 z-[2400] flex items-center justify-center bg-slate-950/45 p-3" role="dialog" aria-modal="true" aria-labelledby="task-create-wizard-title">
       <div className="w-full max-w-2xl rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl sm:p-5">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <div className="text-xs font-bold uppercase tracking-[0.16em] text-blue-600">Новая задача · шаг {step === 'binding' ? '1 из 2' : '2 из 2'}</div>
+            <div className="text-xs font-bold uppercase tracking-[0.16em] text-blue-600">
+              {isAutoLoadingBilling ? 'Новая задача · подготовка' : `Новая задача · шаг ${step === 'binding' ? '1 из 2' : '2 из 2'}`}
+            </div>
             <h2 id="task-create-wizard-title" className="mt-1 text-xl font-bold text-slate-950">
-              {step === 'binding' ? 'Выберите клиента и дело' : 'Определите учёт задачи'}
+              {isAutoLoadingBilling
+                ? 'Проверяем договор по делу'
+                : step === 'binding'
+                  ? 'Выберите клиента и дело'
+                  : 'Определите учёт задачи'}
             </h2>
           </div>
           <button type="button" onClick={onCancel} className="rounded-xl p-2 text-slate-400 hover:bg-slate-100" aria-label="Закрыть"><X className="h-5 w-5" /></button>
         </div>
 
         {step === 'binding' ? (
-          <div className="mt-5 space-y-4">
+          isAutoLoadingBilling ? (
+            <div role="status" className="mt-5 flex items-center gap-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-5 text-sm font-semibold text-blue-900">
+              <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
+              Клиент и дело уже выбраны. Загружаем договор и правила оплаты…
+            </div>
+          ) : (
+            <div className="mt-5 space-y-4">
             <LookupSelect
               label="Клиент"
               value={counterparty}
@@ -9248,7 +9284,8 @@ function TaskBillingCreateWizard({
                 </button>
               </div>
             </div>
-          </div>
+            </div>
+          )
         ) : (
           <div className="mt-5">
             {billingContext && billingContext.contracts.length > 1 ? (
