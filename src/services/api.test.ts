@@ -2082,6 +2082,23 @@ describe('apiService case calendar', () => {
     expect(options?.signal).toBe(controller.signal);
   });
 
+  it('passes the active search to bulk case automation creation', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+      createdTasks: [],
+      skippedCount: 0,
+    }), {
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await apiService.createTaskJournalCaseAutomationTasks({ limit: 25, search: 'КОШЕЛЕВА' });
+
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/tasks/automation/case-candidates/tasks?limit=25');
+    expect(String(url)).toContain('search=');
+    expect(options?.method).toBe('POST');
+  });
+
   it('passes an abort signal to the cases registry request', async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
       items: [], total: 0, page: 1, pageSize: 25,

@@ -3212,6 +3212,19 @@ export function TaskJournal({
     setAutomationStateFilter(state);
   }, [automationStateFilter]);
 
+  const changeAutomationSearch = useCallback((value: string) => {
+    const normalizedValue = value.slice(0, 120);
+    if (normalizedValue === automationSearch) {
+      return;
+    }
+
+    setAutomationSearch(normalizedValue);
+    setAutomationCandidates([]);
+    automationLoadMoreRequestRef.current += 1;
+    setAutomationPageLoading(true);
+    setAutomationLoadingMore(false);
+  }, [automationSearch]);
+
   const loadMoreAutomationCandidates = useCallback(async () => {
     const stateTotal = getAutomationCandidateStateCount(automationSummary, automationStateFilter);
     if (automationPageLoading || automationLoadingMore || automationCandidates.length >= stateTotal) {
@@ -3274,7 +3287,11 @@ export function TaskJournal({
 
     setCreatingAutomationAll(true);
     try {
-      const result = await apiService.createTaskJournalCaseAutomationTasks({ limit: Math.min(readyCount, 100) });
+      const normalizedSearch = debouncedAutomationSearch.trim();
+      const result = await apiService.createTaskJournalCaseAutomationTasks({
+        limit: Math.min(readyCount, 100),
+        ...(normalizedSearch ? { search: normalizedSearch } : {}),
+      });
       const createdCaseIds = new Set(result.createdTasks.map((task) => task.clientCaseId).filter((id): id is number => Boolean(id)));
       setAutomationCandidates((current) => current.filter((candidate) => !createdCaseIds.has(candidate.clientCaseId)));
       toast.success(`Создано контрольных задач: ${result.createdTasks.length}.`, 'Автоконтроль дел');
@@ -3288,7 +3305,7 @@ export function TaskJournal({
     } finally {
       setCreatingAutomationAll(false);
     }
-  }, [automationCandidates, automationSummary.readyCount, canCreateTasks, emitTaskChange, openTaskEditor, refreshTasks, toast]);
+  }, [automationCandidates, automationSummary.readyCount, canCreateTasks, debouncedAutomationSearch, emitTaskChange, openTaskEditor, refreshTasks, toast]);
 
   useEffect(() => {
     if (!(routeTaskId && routeTaskId > 0)) {
@@ -5531,7 +5548,7 @@ export function TaskJournal({
             onCreateManual={openTaskCreateForAutomationCandidate}
             onCreateAll={createAllAutomationTasks}
             onLoadMore={loadMoreAutomationCandidates}
-            onSearchChange={(value) => setAutomationSearch(value.slice(0, 120))}
+            onSearchChange={changeAutomationSearch}
             onStateChange={changeAutomationStateFilter}
             onOpenCase={onOpenCase}
           />
@@ -6398,12 +6415,14 @@ function TaskAutomationPanel({
         <button
           type="button"
           onClick={onCreateAll}
-          disabled={creatingAll || readyCount === 0}
+          disabled={creatingAll || loadingPage || readyCount === 0}
           className="inline-flex w-fit items-center gap-2 rounded-xl bg-amber-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-amber-700 disabled:cursor-wait disabled:opacity-60"
         >
           <Plus className="h-4 w-4" />
           {creatingAll
             ? 'Создаем...'
+            : loadingPage
+              ? 'Обновляем очередь...'
             : readyCount <= Math.max(1, creationLimit)
               ? `Создать наступившие (${readyCount})`
               : `Создать наступившие (${Math.max(1, creationLimit)} из ${readyCount})`}
@@ -6416,6 +6435,7 @@ function TaskAutomationPanel({
         <input
           type="search"
           value={search}
+          maxLength={120}
           onChange={(event) => onSearchChange(event.target.value)}
           placeholder="Найти дело, контрагента или ответственного"
           className="w-full rounded-xl border border-amber-200 bg-white py-2 pl-9 pr-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-amber-500 focus:ring-2 focus:ring-amber-100"

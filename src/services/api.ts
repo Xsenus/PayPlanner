@@ -4596,9 +4596,10 @@ export class ApiService {
     });
   }
 
-  async createTaskJournalCaseAutomationTasks(params?: { limit?: number }) {
+  async createTaskJournalCaseAutomationTasks(params?: { limit?: number; search?: string }) {
     const q = buildQuery({
       limit: params?.limit,
+      search: params?.search,
     });
     return this.request<TaskJournalAutomationCreateResult>(`/tasks/automation/case-candidates/tasks${q}`, {
       method: 'POST',

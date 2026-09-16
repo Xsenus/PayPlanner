@@ -3913,6 +3913,8 @@ describe('TaskJournal', () => {
     fireEvent.change(screen.getByRole('searchbox', { name: 'Поиск в автоконтроле' }), {
       target: { value: 'Петров' },
     });
+    expect(screen.queryByText('Старый кандидат')).toBeNull();
+    expect((screen.getByRole('button', { name: 'Обновляем очередь...' }) as HTMLButtonElement).disabled).toBe(true);
 
     await waitFor(() => expect(apiMock.getTaskJournalCaseAutomationCandidates).toHaveBeenCalledTimes(2));
     expect(apiMock.getTaskJournalCaseAutomationCandidates).toHaveBeenLastCalledWith(
@@ -3925,6 +3927,12 @@ describe('TaskJournal', () => {
     );
     expect(await screen.findByText('Найденный Петров')).toBeTruthy();
     expect(screen.queryByText('Старый кандидат')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Создать наступившие (1)' }));
+    await waitFor(() => expect(apiMock.createTaskJournalCaseAutomationTasks).toHaveBeenCalledWith({
+      limit: 1,
+      search: 'Петров',
+    }));
   });
 
   it('completes an active task with an existing result from the quick action', async () => {

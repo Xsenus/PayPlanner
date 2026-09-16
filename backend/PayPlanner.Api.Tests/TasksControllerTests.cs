@@ -4480,6 +4480,32 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task CreateAutomationTasksForCandidates_AppliesSearchBeforeLimit()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "bulk-control-search@example.com", "Автор");
+        var unrelatedClient = await CreateClientAsync(db, "Старый клиент");
+        var unrelatedCase = await CreateCaseAsync(db, unrelatedClient.Id, "ДАВНО БЕЗ ДВИЖЕНИЯ");
+        unrelatedCase.CreatedAt = DateTime.UtcNow.AddDays(-60);
+        var targetClient = await CreateClientAsync(db, "Кошелева Елена Юрьевна");
+        var targetCase = await CreateCaseAsync(db, targetClient.Id, "КОШЕЛЕВА - УГОЛОВНОЕ ДЕЛО");
+        targetCase.CreatedAt = DateTime.UtcNow.AddDays(-20);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.CreateAutomationTasksForCandidates(
+            limit: 1,
+            search: "КОШЕЛЕВА",
+            ct: CancellationToken.None);
+
+        var dto = Assert.IsType<TaskJournalAutomationCreateResultDto>(
+            Assert.IsType<OkObjectResult>(result.Result).Value);
+        var created = Assert.Single(dto.CreatedTasks);
+        Assert.Equal(targetCase.Id, created.ClientCaseId);
+        Assert.DoesNotContain(dto.CreatedTasks, item => item.ClientCaseId == unrelatedCase.Id);
+    }
+
+    [Fact]
     public async Task CreateAutomationTasksForCandidates_LoadsAssigneeTimeZonesInOneBatch()
     {
         var interceptor = new RecordingCommandInterceptor();

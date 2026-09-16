@@ -1168,6 +1168,7 @@ public class TasksController : ControllerBase
         if (!string.IsNullOrWhiteSpace(search))
         {
             var rawTerm = search.Trim();
+            rawTerm = rawTerm.Length > 120 ? rawTerm[..120] : rawTerm;
             var term = rawTerm.ToLower();
             candidates = candidates.Where(item =>
                 item.Title.ToLower().Contains(term) ||
@@ -1430,6 +1431,7 @@ public class TasksController : ControllerBase
         if (!string.IsNullOrWhiteSpace(search))
         {
             var rawTerm = search.Trim();
+            rawTerm = rawTerm.Length > 120 ? rawTerm[..120] : rawTerm;
             var term = rawTerm.ToLower();
             candidates = candidates.Where(item =>
                 item.Title.ToLower().Contains(term) ||
@@ -1688,6 +1690,7 @@ public class TasksController : ControllerBase
     [HttpPost("automation/case-candidates/tasks")]
     public async Task<ActionResult<TaskJournalAutomationCreateResultDto>> CreateAutomationTasksForCandidates(
         [FromQuery] int limit = 20,
+        [FromQuery] string? search = null,
         CancellationToken ct = default)
     {
         var access = await GetTaskAccessAsync(ct);
@@ -1733,6 +1736,19 @@ public class TasksController : ControllerBase
             .Select(clientCase => new
             {
                 Case = clientCase,
+                ClientName = clientCase.Client != null ? clientCase.Client.Name : string.Empty,
+                LegalEntityName = clientCase.LegalEntity != null
+                    ? (clientCase.LegalEntity.ShortName != string.Empty
+                        ? clientCase.LegalEntity.ShortName
+                        : clientCase.LegalEntity.FullName ?? string.Empty)
+                    : string.Empty,
+                ResponsibleName = clientCase.ResponsibleUser != null
+                    ? clientCase.ResponsibleUser.FullName
+                    : clientCase.Client != null && clientCase.Client.ResponsibleUser != null
+                        ? clientCase.Client.ResponsibleUser.FullName
+                        : clientCase.LegalEntity != null && clientCase.LegalEntity.ResponsibleUser != null
+                            ? clientCase.LegalEntity.ResponsibleUser.FullName
+                            : string.Empty,
                 ActiveTaskCount = _db.TaskJournalItems.Count(task =>
                     task.ClientCaseId == clientCase.Id &&
                     ActiveTaskStatuses.Contains(task.Status)),
@@ -1774,6 +1790,23 @@ public class TasksController : ControllerBase
                 && (item.Case.LastViewedAt ?? item.Case.CreatedAt) <= cutoff
                 && (item.Case.ActivityConfirmedAt ?? item.Case.CreatedAt) <= cutoff
                 && item.Case.InactivityRemindersEnabled);
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var rawTerm = search.Trim();
+            rawTerm = rawTerm.Length > 120 ? rawTerm[..120] : rawTerm;
+            var term = rawTerm.ToLower();
+            candidateQuery = candidateQuery.Where(item =>
+                item.Case.Title.ToLower().Contains(term) ||
+                item.Case.Title.Contains(rawTerm) ||
+                item.ClientName.ToLower().Contains(term) ||
+                item.ClientName.Contains(rawTerm) ||
+                item.LegalEntityName.ToLower().Contains(term) ||
+                item.LegalEntityName.Contains(rawTerm) ||
+                item.ResponsibleName.ToLower().Contains(term) ||
+                item.ResponsibleName.Contains(rawTerm));
+        }
+
         var candidates = await candidateQuery
             .Select(item => new
             {
