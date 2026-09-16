@@ -2538,7 +2538,9 @@ describe('CaseDetailPage', () => {
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
 
     expect(await screen.findByText('ЗЕМЦОВ - банкротство')).toBeTruthy();
-    expect(await screen.findByText('Просрочено сроков: 1')).toBeTruthy();
+    const riskValue = await screen.findByText('Просрочено сроков: 1');
+    expect(riskValue.parentElement?.className).toContain('border-l-rose-500');
+    expect(riskValue.parentElement?.className).toContain('bg-rose-50/50');
   });
 
   it('shows the earliest upcoming case date across the case, hearing and procedural deadlines', async () => {

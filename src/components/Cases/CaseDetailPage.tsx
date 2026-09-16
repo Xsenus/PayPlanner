@@ -3695,7 +3695,7 @@ export function CaseDetailPage({
           </div>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-7">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-7">
           <SummaryCard label="Клиент" value={getOwnerName(caseItem)} />
           <SummaryCard label="Ответственный" value={getResponsibleName(caseItem)} />
           <SummaryCard label="Ближайший срок" value={nearestCaseDateSummary.value} tone={nearestCaseDateSummary.tone} />
@@ -5801,20 +5801,39 @@ function StageTransitionActions({
 }
 
 function SummaryCard({ label, value, tone = 'slate' }: { label: string; value: string; tone?: SummaryTone }) {
-  const toneClass =
-    tone === 'emerald'
-      ? 'text-emerald-700'
-      : tone === 'rose'
-        ? 'text-rose-700'
-        : tone === 'amber'
-          ? 'text-amber-700'
-          : tone === 'cyan'
-            ? 'text-cyan-700'
-            : 'text-slate-900';
+  const toneClasses = tone === 'emerald'
+    ? {
+        surface: 'border-emerald-200 border-l-emerald-500 bg-emerald-50/40',
+        label: 'text-emerald-700',
+        value: 'text-emerald-900',
+      }
+    : tone === 'rose'
+      ? {
+          surface: 'border-rose-200 border-l-rose-500 bg-rose-50/50',
+          label: 'text-rose-700',
+          value: 'text-rose-900',
+        }
+      : tone === 'amber'
+        ? {
+            surface: 'border-amber-200 border-l-amber-500 bg-amber-50/50',
+            label: 'text-amber-700',
+            value: 'text-amber-950',
+          }
+        : tone === 'cyan'
+          ? {
+              surface: 'border-cyan-200 border-l-cyan-500 bg-cyan-50/40',
+              label: 'text-cyan-700',
+              value: 'text-cyan-950',
+            }
+          : {
+              surface: 'border-slate-200 border-l-slate-300 bg-white',
+              label: 'text-slate-500',
+              value: 'text-slate-900',
+            };
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">{label}</div>
-      <div className={`mt-2 text-lg font-bold ${toneClass}`}>{value}</div>
+    <div className={`min-w-0 rounded-xl border border-l-4 p-3 shadow-sm ${toneClasses.surface}`}>
+      <div className={`text-[11px] font-semibold uppercase tracking-[0.12em] ${toneClasses.label}`}>{label}</div>
+      <div className={`mt-1.5 break-words text-base font-bold leading-5 ${toneClasses.value}`}>{value}</div>
     </div>
   );
 }
