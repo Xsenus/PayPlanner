@@ -4361,6 +4361,44 @@ public class TasksControllerTests
         });
     }
 
+    [Fact]
+    public async Task CreateAutomationTasksForCandidates_LoadsAssigneeTimeZonesInOneBatch()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+        var author = await CreateAdminUserAsync(db, "bulk-control-batch@example.com", "Ответственный пакетного контроля");
+        var client = await CreateClientAsync(db, "Клиент пакетного контроля");
+        client.ResponsibleUserId = author.Id;
+        for (var index = 1; index <= 8; index++)
+        {
+            var clientCase = await CreateCaseAsync(db, client.Id, $"ПАКЕТНОЕ ДЕЛО {index}");
+            clientCase.CreatedAt = DateTime.UtcNow.AddDays(-20);
+        }
+
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = author.Id,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = "Asia/Novosibirsk",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        interceptor.Commands.Clear();
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.CreateAutomationTasksForCandidates(limit: 10, ct: CancellationToken.None);
+
+        var dto = Assert.IsType<TaskJournalAutomationCreateResultDto>(
+            Assert.IsType<OkObjectResult>(result.Result).Value);
+        Assert.Equal(8, dto.CreatedTasks.Count);
+        Assert.Single(interceptor.Commands, command =>
+            command.Contains("SELECT \"u\".\"UserId\", \"u\".\"Value\"", StringComparison.Ordinal)
+            && command.Contains("FROM \"UserSettings\"", StringComparison.Ordinal));
+        Assert.Single(interceptor.Commands, command =>
+            command.Contains("SELECT \"u\".\"Id\", \"u\".\"FullName\", \"u\".\"Email\"", StringComparison.Ordinal));
+    }
+
     [Theory]
     [InlineData(ClientCaseStatus.OnHold)]
     [InlineData(ClientCaseStatus.Closed)]

@@ -1538,6 +1538,40 @@ public class TasksController : ControllerBase
             .ToListAsync(ct);
 
         var created = new List<(TaskJournalItem Entity, TaskClientBinding Binding)>();
+        var responsibleUserIds = candidates
+            .Select(item => ResolveAutomationResponsibleUserId(item.Case))
+            .Where(userId => userId.HasValue && userId.Value > 0)
+            .Select(userId => userId!.Value)
+            .Distinct()
+            .ToArray();
+        var responsibleUsers = await _db.Users
+            .AsNoTracking()
+            .Where(user => responsibleUserIds.Contains(user.Id) && user.IsActive && user.IsApproved)
+            .Select(user => new { user.Id, user.FullName, user.Email })
+            .ToListAsync(ct);
+        var responsibleAssignees = responsibleUsers.ToDictionary(
+            user => user.Id,
+            user => new TaskParticipantDraft(
+                user.Id,
+                BuildUserDisplayName(user.FullName, user.Email),
+                user.Email,
+                "assignee",
+                0,
+                "pending",
+                null));
+        var fallbackAssignee = BuildAutomationFallbackAssignee(access);
+        var assigneesByCaseId = candidates.ToDictionary(
+            item => item.Case.Id,
+            item => ResolveAutomationResponsibleUserId(item.Case) is int responsibleUserId &&
+                    responsibleAssignees.TryGetValue(responsibleUserId, out var responsibleAssignee)
+                ? responsibleAssignee
+                : fallbackAssignee);
+        var timeZonesByUserId = await CalendarTimeZoneHelper.ResolveUserTimeZonesAsync(
+            _db,
+            assigneesByCaseId.Values
+                .Select(assignee => assignee.UserId ?? 0),
+            ct);
+
         foreach (var item in candidates)
         {
             var binding = BuildCaseBinding(item.Case);
@@ -1546,8 +1580,11 @@ public class TasksController : ControllerBase
                 continue;
             }
 
-            var assignee = await ResolveAutomationAssigneeAsync(item.Case, access, ct);
-            var dueAt = await BuildDefaultTaskDueAtUtcAsync(assignee.UserId, ct);
+            var assignee = assigneesByCaseId[item.Case.Id];
+            var timeZone = assignee.UserId is int assigneeUserId && timeZonesByUserId.TryGetValue(assigneeUserId, out var resolvedTimeZone)
+                ? resolvedTimeZone
+                : CalendarTimeZoneHelper.ResolveTimeZone(null);
+            var dueAt = BuildDefaultTaskDueAtUtc(now, timeZone);
             var entity = BuildAutomationTaskEntity(
                 item.Case,
                 binding,
@@ -6207,7 +6244,7 @@ public class TasksController : ControllerBase
         TaskAccess fallbackAccess,
         CancellationToken ct)
     {
-        var responsibleUserId = clientCase.ResponsibleUserId ?? clientCase.Client?.ResponsibleUserId ?? clientCase.LegalEntity?.ResponsibleUserId;
+        var responsibleUserId = ResolveAutomationResponsibleUserId(clientCase);
         if (responsibleUserId.HasValue)
         {
             var responsible = await _db.Users
@@ -6228,7 +6265,14 @@ public class TasksController : ControllerBase
             }
         }
 
-        return new TaskParticipantDraft(
+        return BuildAutomationFallbackAssignee(fallbackAccess);
+    }
+
+    private static int? ResolveAutomationResponsibleUserId(ClientCase clientCase)
+        => clientCase.ResponsibleUserId ?? clientCase.Client?.ResponsibleUserId ?? clientCase.LegalEntity?.ResponsibleUserId;
+
+    private static TaskParticipantDraft BuildAutomationFallbackAssignee(TaskAccess fallbackAccess)
+        => new(
             fallbackAccess.UserId,
             fallbackAccess.DisplayName,
             string.Empty,
@@ -6236,7 +6280,6 @@ public class TasksController : ControllerBase
             0,
             "pending",
             null);
-    }
 
     private async Task<User?> ResolveConfiguredAutomationUserAsync(int? configuredUserId, CancellationToken ct)
     {
@@ -6292,7 +6335,12 @@ public class TasksController : ControllerBase
     private async Task<DateTime> BuildDefaultTaskDueAtUtcAsync(int? userId, CancellationToken ct)
     {
         var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, userId, ct);
-        var localNow = CalendarTimeZoneHelper.ToUserLocal(DateTime.UtcNow, timeZone);
+        return BuildDefaultTaskDueAtUtc(DateTime.UtcNow, timeZone);
+    }
+
+    private static DateTime BuildDefaultTaskDueAtUtc(DateTime nowUtc, TimeZoneInfo timeZone)
+    {
+        var localNow = CalendarTimeZoneHelper.ToUserLocal(nowUtc, timeZone);
         var localDueAt = localNow.Date.AddDays(1).AddHours(9);
         return CalendarTimeZoneHelper.FromUserLocalToUtc(localDueAt, timeZone);
     }
