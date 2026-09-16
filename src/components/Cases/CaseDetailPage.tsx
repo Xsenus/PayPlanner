@@ -891,8 +891,8 @@ function getRiskSummary(caseItem: ClientCase, deadlines: ClientCaseProceduralDea
     return { value: `Скоро сроков: ${warningDeadlines}`, tone: 'amber' };
   }
 
-  if (caseItem.status === 'Closed') return { value: 'Закрыто', tone: 'slate' };
-  return { value: 'Без риска', tone: 'emerald' };
+  if (caseItem.status === 'Closed') return { value: 'Дело закрыто', tone: 'slate' };
+  return { value: 'Просрочек нет', tone: 'emerald' };
 }
 
 function getNearestCaseDateSummary(
@@ -3741,7 +3741,7 @@ export function CaseDetailPage({
           <SummaryCard label="Клиент" value={getOwnerName(caseItem)} />
           <SummaryCard label="Ответственный" value={getResponsibleName(caseItem)} />
           <SummaryCard label="Ближайший срок" value={nearestCaseDateSummary.value} tone={nearestCaseDateSummary.tone} />
-          <SummaryCard label="Просрочки" value={riskSummary.value} tone={riskSummary.tone} />
+          <SummaryCard label="Контроль сроков" value={riskSummary.value} tone={riskSummary.tone} />
           {canViewFinance ? (
             <SummaryCard label="Оплачено / долг" value={`${formatMoney(caseItem.incomePaid)} / ${formatMoney(caseItem.incomeOutstanding)}`} />
           ) : null}

@@ -2725,6 +2725,7 @@ describe('CaseDetailPage', () => {
     const riskValue = await screen.findByText('Просрочено сроков: 1');
     expect(riskValue.parentElement?.className).toContain('border-l-rose-500');
     expect(riskValue.parentElement?.className).toContain('bg-rose-50/50');
+    expect(screen.getByLabelText('Контроль сроков: Просрочено сроков: 1')).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: 'Суд' }));
     expect(await screen.findByText('19.05.2026 · весь день · Просрочен')).toBeTruthy();
@@ -2738,7 +2739,7 @@ describe('CaseDetailPage', () => {
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
 
     expect(await screen.findByText('ЗЕМЦОВ - банкротство')).toBeTruthy();
-    expect(screen.getByLabelText('Просрочки: Проверяем сроки')).toBeTruthy();
+    expect(screen.getByLabelText('Контроль сроков: Проверяем сроки')).toBeTruthy();
     expect(screen.getByLabelText('Ближайший срок: Проверяем сроки')).toBeTruthy();
     expect(screen.queryByText('Без риска')).toBeNull();
   });
@@ -2749,7 +2750,7 @@ describe('CaseDetailPage', () => {
 
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
 
-    expect(await screen.findByLabelText('Просрочки: Сроки недоступны')).toBeTruthy();
+    expect(await screen.findByLabelText('Контроль сроков: Сроки недоступны')).toBeTruthy();
     expect(screen.getByRole('alert').textContent).toContain('Не удалось проверить процессуальные сроки.');
     expect(screen.getByRole('alert').textContent).toContain('Нажмите «Обновить»');
   });
@@ -2809,6 +2810,7 @@ describe('CaseDetailPage', () => {
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
 
     expect(await screen.findByText('20.06.2099, 13:30 · Заседание')).toBeTruthy();
+    expect(screen.getByLabelText('Контроль сроков: Просрочек нет')).toBeTruthy();
   });
 
   it('keeps the court tab in safe mode for pretrial cases without court data', async () => {
