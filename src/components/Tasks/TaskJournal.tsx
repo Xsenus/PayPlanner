@@ -34,6 +34,7 @@ import {
   Phone,
   Play,
   Plus,
+  RefreshCw,
   Search,
   Send,
   ShieldAlert,
@@ -282,6 +283,7 @@ const AUTOMATION_REFRESH_ERROR_MESSAGE = 'Не удалось обновить �
 const AUTOMATION_SUMMARY_LOAD_ERROR_MESSAGE = 'Карточки доступны, но точные общие счётчики временно не получены. Показаны значения загруженной части очереди.';
 const AUTOMATION_STATE_REFRESH_GRACE_MS = 1_000;
 const MAX_BROWSER_TIMEOUT_MS = 2_000_000_000;
+const AUTOMATION_VISIBILITY_REFRESH_MIN_AGE_MS = 60_000;
 
 function buildAutomationCandidatesRequestKey(
   settings: TaskJournalSettingsDto,
@@ -2342,6 +2344,7 @@ export function TaskJournal({
   const [automationLoadError, setAutomationLoadError] = useState<string | null>(null);
   const [automationSummaryLoadError, setAutomationSummaryLoadError] = useState<string | null>(null);
   const [automationReloadVersion, setAutomationReloadVersion] = useState(0);
+  const [automationLastRefreshedAt, setAutomationLastRefreshedAt] = useState<string | null>(null);
   const [creatingAutomationCaseId, setCreatingAutomationCaseId] = useState<number | null>(null);
   const [creatingAutomationAll, setCreatingAutomationAll] = useState(false);
   const automationCandidatesRequestRef = useRef(0);
@@ -2350,6 +2353,8 @@ export function TaskJournal({
   const automationSummaryRequestKeyRef = useRef<string | null>(null);
   const automationLoadMoreRequestRef = useRef(0);
   const automationRetryPreserveCandidatesRef = useRef(false);
+  const automationLastRefreshedAtRef = useRef(0);
+  const automationRefreshRequestedAtRef = useRef(0);
   const taskJournalEventSourceRef = useRef<object>({});
   const [loading, setLoading] = useState(true);
   const [filterOwnerKey, setFilterOwnerKey] = useState(() => getTaskJournalFilterStorageKey(currentUserId, mode));
@@ -2718,7 +2723,14 @@ export function TaskJournal({
     }));
   }, []);
 
+  const markAutomationCandidatesRefreshed = useCallback(() => {
+    const refreshedAt = Date.now();
+    automationLastRefreshedAtRef.current = refreshedAt;
+    setAutomationLastRefreshedAt(new Date(refreshedAt).toISOString());
+  }, []);
+
   const requestAutomationCandidatesReload = useCallback((preserveCandidates: boolean) => {
+    automationRefreshRequestedAtRef.current = Date.now();
     automationCandidatesRequestKeyRef.current = null;
     automationSummaryRequestKeyRef.current = null;
     automationRetryPreserveCandidatesRef.current = preserveCandidates;
@@ -2907,6 +2919,9 @@ export function TaskJournal({
       setAutomationSummary(automationResponse.summary ?? summarizeAutomationCandidates(automationResponse.items));
       setAutomationLoadError(automationResponse.error);
       setAutomationSummaryLoadError(automationResponse.summaryError);
+      if (!automationResponse.error) {
+        markAutomationCandidatesRefreshed();
+      }
       setAutomationStateFilter('all');
       setAutomationSearch('');
       setAutomationPageLoading(false);
@@ -2925,7 +2940,7 @@ export function TaskJournal({
     } catch {
       toast.error('Не удалось загрузить настройки журнала задач.', 'Журнал задач');
     }
-  }, [currentUserId, loadAutomationCandidates, shouldUseCalendarVisibility, toast]);
+  }, [currentUserId, loadAutomationCandidates, markAutomationCandidatesRefreshed, shouldUseCalendarVisibility, toast]);
 
   useEffect(() => {
     void refreshTaskMetadata();
@@ -3129,6 +3144,7 @@ export function TaskJournal({
             automationSummaryRequestKeyRef.current = null;
           }
           setAutomationSummaryLoadError(response.summaryError);
+          markAutomationCandidatesRefreshed();
           setAutomationPageLoading(false);
         }
       })
@@ -3150,7 +3166,7 @@ export function TaskJournal({
     return () => {
       controller.abort();
     };
-  }, [automationReloadVersion, automationStateFilter, debouncedAutomationSearch, loadAutomationCandidates, taskSettings]);
+  }, [automationReloadVersion, automationStateFilter, debouncedAutomationSearch, loadAutomationCandidates, markAutomationCandidatesRefreshed, taskSettings]);
 
   useEffect(() => {
     let controller: AbortController | null = null;
@@ -3186,6 +3202,7 @@ export function TaskJournal({
               automationSummaryRequestKeyRef.current = null;
             }
             setAutomationSummaryLoadError(response.summaryError);
+            markAutomationCandidatesRefreshed();
           }
         })
         .catch(() => {
@@ -3201,7 +3218,7 @@ export function TaskJournal({
       controller?.abort();
       window.removeEventListener(TASK_JOURNAL_EVENT, refresh);
     };
-  }, [automationStateFilter, debouncedAutomationSearch, loadAutomationCandidates, taskSettings]);
+  }, [automationStateFilter, debouncedAutomationSearch, loadAutomationCandidates, markAutomationCandidatesRefreshed, taskSettings]);
 
   useEffect(() => {
     const nextStateChangeAt = automationSummary.nextStateChangeAt;
@@ -3232,6 +3249,41 @@ export function TaskJournal({
       }
     };
   }, [automationSummary.nextStateChangeAt, requestAutomationCandidatesReload]);
+
+  useEffect(() => {
+    if (embedded || underControlOnly || isApprovalsMode || !canCreateTasks || !canViewCases || !taskSettings.caseInactivityAutomationEnabled) {
+      return;
+    }
+
+    const refreshStaleQueue = () => {
+      if (document.visibilityState !== 'visible' || automationPageLoading || !automationCandidatesInitializedRef.current) {
+        return;
+      }
+
+      const latestRefreshAt = Math.max(
+        automationLastRefreshedAtRef.current,
+        automationRefreshRequestedAtRef.current,
+      );
+      if (latestRefreshAt > 0 && Date.now() - latestRefreshAt < AUTOMATION_VISIBILITY_REFRESH_MIN_AGE_MS) {
+        return;
+      }
+
+      requestAutomationCandidatesReload(automationCandidates.length > 0);
+    };
+
+    document.addEventListener('visibilitychange', refreshStaleQueue);
+    return () => document.removeEventListener('visibilitychange', refreshStaleQueue);
+  }, [
+    automationCandidates.length,
+    automationPageLoading,
+    canCreateTasks,
+    canViewCases,
+    embedded,
+    isApprovalsMode,
+    requestAutomationCandidatesReload,
+    taskSettings.caseInactivityAutomationEnabled,
+    underControlOnly,
+  ]);
 
   const assigneeById = useMemo(() => {
     const byId = new Map<number, TaskJournalAssignee>();
@@ -5852,6 +5904,7 @@ export function TaskJournal({
             loadingMore={automationLoadingMore}
             loadError={automationLoadError}
             summaryLoadError={automationSummaryLoadError}
+            lastRefreshedAt={automationLastRefreshedAt}
             creatingCaseId={creatingAutomationCaseId}
             creatingAll={creatingAutomationAll}
             creationLimit={taskSettings.caseInactivityLimit}
@@ -5860,6 +5913,7 @@ export function TaskJournal({
             onCreateAll={createAllAutomationTasks}
             onLoadMore={loadMoreAutomationCandidates}
             onRetry={retryAutomationCandidates}
+            onRefresh={() => requestAutomationCandidatesReload(automationCandidates.length > 0)}
             onSearchChange={changeAutomationSearch}
             onStateChange={changeAutomationStateFilter}
             onOpenCase={onOpenCase}
@@ -6668,6 +6722,7 @@ function TaskAutomationPanel({
   loadingMore,
   loadError,
   summaryLoadError,
+  lastRefreshedAt,
   creatingCaseId,
   creatingAll,
   creationLimit,
@@ -6676,6 +6731,7 @@ function TaskAutomationPanel({
   onCreateAll,
   onLoadMore,
   onRetry,
+  onRefresh,
   onSearchChange,
   onStateChange,
   onOpenCase,
@@ -6688,6 +6744,7 @@ function TaskAutomationPanel({
   loadingMore: boolean;
   loadError: string | null;
   summaryLoadError: string | null;
+  lastRefreshedAt: string | null;
   creatingCaseId: number | null;
   creatingAll: boolean;
   creationLimit: number;
@@ -6696,6 +6753,7 @@ function TaskAutomationPanel({
   onCreateAll: () => void;
   onLoadMore: () => void;
   onRetry: () => void;
+  onRefresh: () => void;
   onSearchChange: (value: string) => void;
   onStateChange: (state: AutomationCandidateStateFilter) => void;
   onOpenCase?: (caseId: number, clientId?: number | null) => void | Promise<void>;
@@ -6737,7 +6795,7 @@ function TaskAutomationPanel({
       className={`pp-automation-panel mb-4 rounded-2xl border p-3 shadow-sm ${activeState === 'critical' ? 'pp-automation-panel-critical' : ''}`}
     >
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div>
+        <div className="min-w-0 flex-1">
           <div className="pp-automation-panel-kicker text-xs font-semibold uppercase tracking-[0.16em]">Автоконтроль дел</div>
           <h2 className="mt-1 text-lg font-semibold text-slate-900">{overview.title}</h2>
           <p className="mt-1 text-sm text-slate-600">{overview.description}</p>
@@ -6747,33 +6805,50 @@ function TaskAutomationPanel({
               Ближайшее изменение состояния: {formatDateTime(effectiveSummary.nextStateChangeAt)}
             </div>
           ) : null}
+          {lastRefreshedAt ? (
+            <div className="mt-1.5 text-xs text-slate-500">
+              Данные обновлены: {formatDateTime(lastRefreshedAt)}
+            </div>
+          ) : null}
         </div>
-        <div
-          aria-label={`${overview.countLabel}: ${stateTotal}`}
-          className="pp-automation-panel-count inline-flex w-fit items-center gap-2 rounded-full border px-3 py-1 text-sm font-semibold"
-        >
-          <ClipboardList className="h-4 w-4" />
-          {stateTotal}
+        <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+          <div
+            aria-label={`${overview.countLabel}: ${stateTotal}`}
+            className="pp-automation-panel-count inline-flex w-fit items-center gap-2 rounded-full border px-3 py-1 text-sm font-semibold"
+          >
+            <ClipboardList className="h-4 w-4" />
+            {stateTotal}
+          </div>
+          <button
+            type="button"
+            onClick={onRefresh}
+            disabled={loadingPage}
+            aria-label="Обновить очередь автоконтроля"
+            className="inline-flex w-fit items-center gap-2 rounded-xl border border-amber-200 bg-white px-3 py-2 text-sm font-semibold text-amber-900 transition hover:border-amber-400 hover:bg-amber-50 disabled:cursor-wait disabled:opacity-60"
+          >
+            {loadingPage ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            {loadingPage ? 'Обновляем...' : 'Обновить'}
+          </button>
+          <button
+            type="button"
+            onClick={onCreateAll}
+            disabled={creatingAll || loadingPage || Boolean(loadError) || actionableCount === 0}
+            className="pp-automation-panel-action inline-flex w-fit items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <Plus className="h-4 w-4" />
+            {creatingAll
+              ? 'Создаем...'
+              : loadingPage
+                ? 'Обновляем очередь...'
+              : activeState === 'waiting'
+                ? 'Срок ещё не наступил'
+                : activeState === 'paused'
+                  ? 'Создание приостановлено'
+                  : actionableCount <= Math.max(1, creationLimit)
+                    ? `${activeState === 'critical' ? 'Создать критические' : 'Создать наступившие'} (${actionableCount})`
+                    : `${activeState === 'critical' ? 'Создать критические' : 'Создать наступившие'} (${Math.max(1, creationLimit)} из ${actionableCount})`}
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={onCreateAll}
-          disabled={creatingAll || loadingPage || Boolean(loadError) || actionableCount === 0}
-          className="pp-automation-panel-action inline-flex w-fit items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          <Plus className="h-4 w-4" />
-          {creatingAll
-            ? 'Создаем...'
-            : loadingPage
-              ? 'Обновляем очередь...'
-            : activeState === 'waiting'
-              ? 'Срок ещё не наступил'
-              : activeState === 'paused'
-                ? 'Создание приостановлено'
-                : actionableCount <= Math.max(1, creationLimit)
-                  ? `${activeState === 'critical' ? 'Создать критические' : 'Создать наступившие'} (${actionableCount})`
-                  : `${activeState === 'critical' ? 'Создать критические' : 'Создать наступившие'} (${Math.max(1, creationLimit)} из ${actionableCount})`}
-        </button>
       </div>
 
       <label className="relative mt-3 block max-w-2xl">

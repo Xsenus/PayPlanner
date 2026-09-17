@@ -4015,6 +4015,8 @@ describe('TaskJournal', () => {
     expect(screen.getByRole('button', { name: 'Ожидают срока: 1' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Приостановлены: 1' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Создать наступившие (1)' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Обновить очередь автоконтроля' })).toBeTruthy();
+    expect(screen.getByText(/Данные обновлены:/)).toBeTruthy();
     expect(screen.getAllByText('Нет активных задач')).toHaveLength(3);
     expect(screen.getByText('Критично · без движения 35 дней')).toBeTruthy();
     expect(screen.getByText('Критический срок')).toBeTruthy();
@@ -4157,6 +4159,33 @@ describe('TaskJournal', () => {
     expect(await screen.findByText('Срок первого контроля наступил.')).toBeTruthy();
     expect(screen.getByText('Пора создать · без движения 14 дней')).toBeTruthy();
     expect(screen.queryByText(/Ближайшее изменение состояния:/)).toBeNull();
+  });
+
+  it('refreshes a stale automation queue after returning to the tab and on manual request', async () => {
+    await renderJournal();
+
+    const refreshButton = await screen.findByRole('button', { name: 'Обновить очередь автоконтроля' });
+    await waitFor(() => expect(apiMock.getTaskJournalCaseAutomationCandidates).toHaveBeenCalledTimes(1));
+    expect(screen.getByText(/Данные обновлены:/)).toBeTruthy();
+
+    apiMock.getTaskJournalCaseAutomationCandidates.mockClear();
+    apiMock.getTaskJournalCaseAutomationSummary.mockClear();
+    const currentTime = Date.now();
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(currentTime + 61_000);
+    try {
+      document.dispatchEvent(new Event('visibilitychange'));
+      await waitFor(() => expect(apiMock.getTaskJournalCaseAutomationCandidates).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect((refreshButton as HTMLButtonElement).disabled).toBe(false));
+    } finally {
+      nowSpy.mockRestore();
+    }
+
+    apiMock.getTaskJournalCaseAutomationCandidates.mockClear();
+    apiMock.getTaskJournalCaseAutomationSummary.mockClear();
+    fireEvent.click(refreshButton);
+
+    await waitFor(() => expect(apiMock.getTaskJournalCaseAutomationCandidates).toHaveBeenCalledTimes(1));
+    expect(apiMock.getTaskJournalCaseAutomationSummary).toHaveBeenCalledTimes(1);
   });
 
   it('shows exact automation totals and loads the next bounded page', async () => {
