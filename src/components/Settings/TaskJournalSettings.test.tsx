@@ -208,6 +208,8 @@ describe('TaskJournalSettings', () => {
       visibleUnassignedCount: 3,
       visibleEscalationCandidateCount: 4,
       createdTaskCountLast7Days: 6,
+      scheduleDueNow: false,
+      nextScheduledRunAt: '2026-09-18T02:00:00.000Z',
       lastCreatedAt: null,
       lastCreatedDescription: null,
     });
@@ -215,12 +217,15 @@ describe('TaskJournalSettings', () => {
 
     const cards = await screen.findByTestId('case-inactivity-diagnostics-cards');
     expect(within(cards).getByText('Готово сейчас').parentElement?.textContent).toContain('12');
-    expect(within(cards).getByText('Ближайший запуск').parentElement?.textContent).toContain('10');
+    expect(within(cards).getByText('Создаст за запуск').parentElement?.textContent).toContain('10');
+    expect(within(cards).getByText('Создаст за запуск').parentElement?.textContent).toContain('С учётом дневного лимита');
     expect(within(cards).getByText('Останется в очереди').parentElement?.textContent).toContain('2');
     expect(within(cards).getByText('Без исполнителя').parentElement?.textContent).toContain('3');
     expect(cards.querySelectorAll('.pp-automation-diagnostics-card-warning')).toHaveLength(2);
     const unavailableAssignee = screen.getByText('Иван Петров — сейчас недоступен');
     expect(unavailableAssignee.classList.contains('pp-automation-diagnostics-warning-text')).toBe(true);
+    expect(screen.getByText('Следующий плановый запуск')).toBeTruthy();
+    expect(screen.getByText(/Europe\/Moscow/)).toBeTruthy();
   });
 
   it('previews how many cases will match unsaved inactivity thresholds', async () => {

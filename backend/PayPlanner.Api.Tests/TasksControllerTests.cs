@@ -730,6 +730,7 @@ public class TasksControllerTests
         Assert.Equal(0, dto.VisibleUnassignedCount);
         Assert.Equal(1, dto.VisibleEscalationCandidateCount);
         Assert.Equal(1, dto.CreatedTaskCountLast7Days);
+        Assert.NotNull(dto.NextScheduledRunAt);
         Assert.NotNull(dto.LastCreatedAt);
         Assert.Equal("Создана контрольная задача по делу БАНКРОТСТВО.", dto.LastCreatedDescription);
         Assert.Single(interceptor.Commands, command =>

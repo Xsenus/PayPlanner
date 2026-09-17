@@ -1978,6 +1978,8 @@ export interface TaskJournalAutomationDiagnosticsDto {
   visibleUnassignedCount?: number;
   visibleEscalationCandidateCount: number;
   createdTaskCountLast7Days: number;
+  scheduleDueNow?: boolean;
+  nextScheduledRunAt?: string | null;
   lastCreatedAt?: string | null;
   lastCreatedDescription?: string | null;
 }

@@ -253,6 +253,8 @@ public class TaskJournalAutomationDiagnosticsDto
     public int VisibleUnassignedCount { get; set; }
     public int VisibleEscalationCandidateCount { get; set; }
     public int CreatedTaskCountLast7Days { get; set; }
+    public bool ScheduleDueNow { get; set; }
+    public string? NextScheduledRunAt { get; set; }
     public string? LastCreatedAt { get; set; }
     public string? LastCreatedDescription { get; set; }
 }

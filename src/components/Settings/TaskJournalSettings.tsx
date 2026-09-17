@@ -1182,30 +1182,37 @@ export function TaskJournalSettings({
               <div className="mt-1 text-lg font-semibold text-slate-900">
                 {diagnostics ? (diagnostics.enabled ? 'Включен' : 'Выключен') : '—'}
               </div>
+              <div className="mt-1 text-xs text-slate-500">Ежедневный автоконтроль</div>
             </div>
             <div className="pp-automation-diagnostics-card rounded-xl border p-3">
               <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Готово сейчас</div>
               <div className="mt-1 text-lg font-semibold text-slate-900">{diagnostics?.visibleCandidateCount ?? '—'}</div>
+              <div className="mt-1 text-xs text-slate-500">Подходят под все правила</div>
             </div>
             <div className="pp-automation-diagnostics-card pp-automation-diagnostics-card-primary rounded-xl border p-3">
-              <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Ближайший запуск</div>
+              <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Создаст за запуск</div>
               <div className="mt-1 text-lg font-semibold text-slate-900">{diagnosticNextRunCount ?? '—'}</div>
+              <div className="mt-1 text-xs text-slate-500">С учётом дневного лимита</div>
             </div>
             <div className={`pp-automation-diagnostics-card rounded-xl border p-3 ${(diagnosticDeferredCount ?? 0) > 0 ? 'pp-automation-diagnostics-card-warning' : 'pp-automation-diagnostics-card-success'}`}>
               <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Останется в очереди</div>
               <div className="mt-1 text-lg font-semibold text-slate-900">{diagnosticDeferredCount ?? '—'}</div>
+              <div className="mt-1 text-xs text-slate-500">Перейдут на следующий день</div>
             </div>
             <div className="pp-automation-diagnostics-card rounded-xl border p-3">
               <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Критический срок</div>
               <div className="mt-1 text-lg font-semibold text-slate-900">{diagnostics?.visibleEscalationCandidateCount ?? '—'}</div>
+              <div className="mt-1 text-xs text-slate-500">Требуют эскалации</div>
             </div>
             <div className={`pp-automation-diagnostics-card rounded-xl border p-3 ${(diagnostics?.visibleUnassignedCount ?? 0) > 0 ? 'pp-automation-diagnostics-card-warning' : 'pp-automation-diagnostics-card-success'}`}>
               <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Без исполнителя</div>
               <div className="mt-1 text-lg font-semibold text-slate-900">{diagnostics?.visibleUnassignedCount ?? '—'}</div>
+              <div className="mt-1 text-xs text-slate-500">Задачу создать нельзя</div>
             </div>
             <div className="pp-automation-diagnostics-card rounded-xl border p-3">
               <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Создано за 7 дней</div>
               <div className="mt-1 text-lg font-semibold text-slate-900">{diagnostics?.createdTaskCountLast7Days ?? '—'}</div>
+              <div className="mt-1 text-xs text-slate-500">Результат работы системы</div>
             </div>
           </div>
 
@@ -1213,6 +1220,15 @@ export function TaskJournalSettings({
             <div>
               <dt className="font-medium text-slate-500">Последнее срабатывание</dt>
               <dd className="mt-1 text-slate-900">{formatDiagnosticDate(diagnostics?.lastCreatedAt)}</dd>
+            </div>
+            <div>
+              <dt className="font-medium text-slate-500">Следующий плановый запуск</dt>
+              <dd className="mt-1 text-slate-900">
+                {diagnostics?.scheduleDueNow
+                  ? 'Ожидается сейчас'
+                  : formatDiagnosticDate(diagnostics?.nextScheduledRunAt)}
+                {diagnostics?.enabled ? ` · ${settings.caseInactivityScheduleTimeZone}` : ''}
+              </dd>
             </div>
             <div>
               <dt className="font-medium text-slate-500">Резервный исполнитель</dt>

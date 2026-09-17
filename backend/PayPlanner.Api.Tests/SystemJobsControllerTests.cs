@@ -142,6 +142,7 @@ public class SystemJobsControllerTests
         scope.Db.Users.Add(user);
         scope.Db.Clients.Add(client);
         await scope.Db.SaveChangesAsync();
+        client.ResponsibleUserId = user.Id;
         scope.Db.Payments.AddRange(
             new Payment
             {
@@ -346,7 +347,11 @@ public class SystemJobsControllerTests
         Assert.Contains(dto.Items, item => item.Key == SystemJobKeys.CalendarSyncLogRetention && item.PendingCount == 2 && item.LastProcessedCount == 200 && item.ManualRunEnabled);
         Assert.Contains(dto.Items, item => item.Key == SystemJobKeys.PaymentAdvanceReviewMonitoring && item.Status == "warning" && item.PendingCount == 2 && item.LastProcessedCount == 15 && item.LastActivityDescription == "Advance review escalated" && item.ManualRunEnabled);
         Assert.Contains(dto.Items, item => item.Key == "external-calendar-sync" && item.Status == "warning" && item.LastProcessedCount == 50 && item.ManualRunEnabled);
-        Assert.Contains(dto.Items, item => item.Key == "case-inactivity-control" && item.PendingCount == 1 && item.LastProcessedCount == 7);
+        Assert.Contains(dto.Items, item =>
+            item.Key == "case-inactivity-control" &&
+            item.PendingCount == 1 &&
+            item.LastProcessedCount == 7 &&
+            item.IntervalText.StartsWith("Ежедневно в 09:00", StringComparison.Ordinal));
         Assert.Contains(dto.Items, item => item.Key == "court-sync" && item.Status == "active" && item.PendingCount == 1 && item.LastProcessedCount == 12);
         Assert.Contains(dto.Items, item => item.Key == "court-sync" && item.LastRunStatus == "success" && item.LastRunStatusText == "Успешно");
         Assert.Contains(dto.Items, item => item.Key == "court-sync" && item.LastSuccessAt == now.AddMinutes(-4) && item.LastRunDurationMs == 60000);
@@ -602,6 +607,55 @@ public class SystemJobsControllerTests
         Assert.Single(interceptor.Commands, command =>
             command.Contains("YandexDiskCrmSyncStates", StringComparison.Ordinal) &&
             command.Contains("EligibleCount", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task GetDiagnostics_CaseControlCountsOnlyCasesWithAvailableAssignee()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var now = DateTime.UtcNow;
+        var responsible = await CreateUserAsync(scope.Db, $"case-control-responsible-{Guid.NewGuid():N}");
+        var assignedClient = new Client
+        {
+            Name = "Assigned client",
+            ResponsibleUserId = responsible.Id,
+        };
+        var unassignedClient = new Client { Name = "Unassigned client" };
+        scope.Db.Clients.AddRange(assignedClient, unassignedClient);
+        scope.Db.SystemSettings.AddRange(
+            new SystemSetting { Key = "tasks.automation.caseControl.enabled", Value = "true", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting { Key = "tasks.automation.caseControl.inactiveDays", Value = "14", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting { Key = "tasks.automation.caseControl.limit", Value = "25", CreatedAt = now, UpdatedAt = now });
+        scope.Db.ClientCases.AddRange(
+            new ClientCase
+            {
+                Client = assignedClient,
+                Title = "Assigned inactive case",
+                Status = ClientCaseStatus.Open,
+                CreatedAt = now.AddDays(-30),
+                LastViewedAt = now.AddDays(-30),
+                ActivityConfirmedAt = now.AddDays(-30),
+                InactivityRemindersEnabled = true,
+            },
+            new ClientCase
+            {
+                Client = unassignedClient,
+                Title = "Unassigned inactive case",
+                Status = ClientCaseStatus.Open,
+                CreatedAt = now.AddDays(-30),
+                LastViewedAt = now.AddDays(-30),
+                ActivityConfirmedAt = now.AddDays(-30),
+                InactivityRemindersEnabled = true,
+            });
+        await scope.Db.SaveChangesAsync();
+
+        var result = await CreateController(scope.Db).GetDiagnostics(CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<SystemJobDiagnosticsDto>(ok.Value);
+        var caseControl = Assert.Single(dto.Items, item => item.Key == SystemJobKeys.CaseInactivityControl);
+        Assert.Equal(1, caseControl.PendingCount);
+        Assert.Contains("готовы 1 дел", caseControl.NextRunHint, StringComparison.Ordinal);
     }
 
     [Fact]

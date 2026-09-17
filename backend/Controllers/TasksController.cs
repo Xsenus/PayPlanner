@@ -119,6 +119,7 @@ public class TasksController : ControllerBase
     private readonly IExternalCalendarSyncCoordinator? _externalCalendarSyncCoordinator;
     private readonly IExternalCalendarTaskSyncOutbox? _externalCalendarTaskSyncOutbox;
     private readonly CaseInactivityAutomationMutationGate _caseInactivityAutomationMutationGate;
+    private readonly ISystemJobRunStateService? _systemJobRunState;
     private readonly string _taskFilesRoot;
 
     public TasksController(
@@ -130,7 +131,8 @@ public class TasksController : ControllerBase
         IExternalCalendarSyncCoordinator? externalCalendarSyncCoordinator = null,
         IExternalCalendarTaskSyncOutbox? externalCalendarTaskSyncOutbox = null,
         IConfiguration? configuration = null,
-        CaseInactivityAutomationMutationGate? caseInactivityAutomationMutationGate = null)
+        CaseInactivityAutomationMutationGate? caseInactivityAutomationMutationGate = null,
+        ISystemJobRunStateService? systemJobRunState = null)
     {
         _db = db;
         _notificationService = notificationService;
@@ -140,6 +142,7 @@ public class TasksController : ControllerBase
         _externalCalendarTaskSyncOutbox = externalCalendarTaskSyncOutbox;
         _caseInactivityAutomationMutationGate = caseInactivityAutomationMutationGate
             ?? new CaseInactivityAutomationMutationGate();
+        _systemJobRunState = systemJobRunState;
         _taskFilesRoot = Path.Combine(
             ApplicationFileStoragePaths.ResolveRoot(environment, configuration, AppContext.BaseDirectory),
             "task-files");
@@ -515,6 +518,33 @@ public class TasksController : ControllerBase
         var defaultAssignee = await ResolveConfiguredAutomationUserAsync(settings.CaseInactivityDefaultAssigneeUserId, ct);
         var escalationUser = await ResolveConfiguredAutomationUserAsync(settings.CaseInactivityEscalationUserId, ct);
         var now = DateTime.UtcNow;
+        var scheduleTimeZone = CalendarTimeZoneHelper.ResolveTimeZone(settings.CaseInactivityScheduleTimeZone);
+        var runLocalTime = TimeOnly.TryParseExact(
+            settings.CaseInactivityRunLocalTime,
+            "HH:mm",
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.None,
+            out var parsedRunLocalTime)
+            ? parsedRunLocalTime
+            : CaseInactivityAutomationSchedulePolicy.DefaultRunLocalTime;
+        DateOnly? lastRunLocalDate = null;
+        if (_systemJobRunState is not null)
+        {
+            var runStates = await _systemJobRunState.GetLastRunsAsync(
+                [SystemJobKeys.CaseInactivityControl],
+                ct);
+            if (runStates.TryGetValue(SystemJobKeys.CaseInactivityControl, out var runState))
+            {
+                lastRunLocalDate = CaseInactivityAutomationSchedulePolicy.ResolveLastRunLocalDate(
+                    runState.LastSuccessAt,
+                    scheduleTimeZone);
+            }
+        }
+        var schedule = CaseInactivityAutomationSchedulePolicy.Evaluate(
+            now,
+            runLocalTime,
+            scheduleTimeZone,
+            lastRunLocalDate);
         var inactivityCutoff = now.AddDays(-settings.CaseInactivityDays);
         var escalationCutoff = now.AddDays(-Math.Clamp(
             settings.CaseInactivityEscalationDays,
@@ -673,6 +703,10 @@ public class TasksController : ControllerBase
             VisibleUnassignedCount = candidateStatistics?.UnassignedCount ?? 0,
             VisibleEscalationCandidateCount = candidateStatistics?.EscalationCount ?? 0,
             CreatedTaskCountLast7Days = auditStatistics?.CreatedCountLast7Days ?? 0,
+            ScheduleDueNow = settings.CaseInactivityAutomationEnabled && schedule.ShouldRun,
+            NextScheduledRunAt = settings.CaseInactivityAutomationEnabled
+                ? ToIso(schedule.NextRunAtUtc)
+                : null,
             LastCreatedAt = auditStatistics?.LastCreatedAt is { } lastCreatedAt ? ToIso(lastCreatedAt) : null,
             LastCreatedDescription = auditStatistics?.LastCreatedDescription,
         });

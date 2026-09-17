@@ -32,6 +32,10 @@ public sealed class SystemJobsController : ControllerBase, IAsyncActionFilter
     private const string CaseControlEnabledKey = "tasks.automation.caseControl.enabled";
     private const string CaseControlInactiveDaysKey = "tasks.automation.caseControl.inactiveDays";
     private const string CaseControlLimitKey = "tasks.automation.caseControl.limit";
+    private const string CaseControlDefaultAssigneeKey = "tasks.automation.caseControl.defaultAssigneeUserId";
+    private const string CaseControlRunLocalTimeKey = "tasks.automation.caseControl.runLocalTime";
+    private const string CaseControlScheduleTimeZoneKey = "tasks.automation.caseControl.scheduleTimeZone";
+    private const string CaseControlAutomationTag = "автоконтроль";
     private const string UserActivityRetentionDaysKey = "user-activity.retention-days";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly HashSet<string> CaseControlActiveTaskStatuses = new(StringComparer.OrdinalIgnoreCase)
@@ -153,6 +157,9 @@ public sealed class SystemJobsController : ControllerBase, IAsyncActionFilter
                 item.Key == CaseControlEnabledKey ||
                 item.Key == CaseControlInactiveDaysKey ||
                 item.Key == CaseControlLimitKey ||
+                item.Key == CaseControlDefaultAssigneeKey ||
+                item.Key == CaseControlRunLocalTimeKey ||
+                item.Key == CaseControlScheduleTimeZoneKey ||
                 item.Key == ClientCaseCourtSyncSchedulerService.EnabledSettingKey ||
                 item.Key == ClientCaseCourtSyncSchedulerService.IntervalMinutesSettingKey ||
                 item.Key == ClientCaseCourtSyncSchedulerService.BatchSizeSettingKey ||
@@ -953,26 +960,109 @@ public sealed class SystemJobsController : ControllerBase, IAsyncActionFilter
         var enabled = ParseBool(settings.GetValueOrDefault(CaseControlEnabledKey), true);
         var inactivityDays = Math.Clamp(ParseInt(settings.GetValueOrDefault(CaseControlInactiveDaysKey), 14), 1, 365);
         var limit = Math.Clamp(ParseInt(settings.GetValueOrDefault(CaseControlLimitKey), 25), 1, 100);
+        var defaultAssigneeUserId = ParseInt(settings.GetValueOrDefault(CaseControlDefaultAssigneeKey), 0);
+        var runLocalTime = TimeOnly.TryParseExact(
+            settings.GetValueOrDefault(CaseControlRunLocalTimeKey),
+            "HH:mm",
+            out var parsedRunLocalTime)
+            ? parsedRunLocalTime
+            : CaseInactivityAutomationSchedulePolicy.DefaultRunLocalTime;
+        var scheduleTimeZone = CalendarTimeZoneHelper.ResolveTimeZone(
+            settings.GetValueOrDefault(CaseControlScheduleTimeZoneKey));
+        var scheduleTimeZoneId = CalendarTimeZoneHelper.ResolveIanaTimeZoneId(scheduleTimeZone);
         var cutoff = now.AddDays(-inactivityDays);
+        var vacationUserIds = enabled
+            ? await CaseInactivityResponsibleAvailabilityService.GetUsersOnVacationAsync(_db, now, ct)
+            : [];
+        var hasAvailableDefaultAssignee = enabled &&
+            defaultAssigneeUserId > 0 &&
+            !vacationUserIds.Contains(defaultAssigneeUserId) &&
+            await _db.Users
+                .AsNoTracking()
+                .AnyAsync(user =>
+                    user.Id == defaultAssigneeUserId &&
+                    user.IsActive &&
+                    user.IsApproved,
+                    ct);
         var candidates = _db.ClientCases
             .AsNoTracking()
             .Where(clientCase =>
-                clientCase.Status == ClientCaseStatus.Open &&
-                clientCase.InactivityRemindersEnabled &&
-                (clientCase.LastViewedAt ?? clientCase.CreatedAt) <= cutoff &&
-                (clientCase.ActivityConfirmedAt ?? clientCase.CreatedAt) <= cutoff &&
-                (_db.TaskJournalComments
-                    .Where(comment => comment.TaskJournalItem.ClientCaseId == clientCase.Id)
-                    .Max(comment => (DateTime?)(comment.UpdatedAt ?? comment.CreatedAt)) ?? clientCase.CreatedAt) <= cutoff &&
-                (_db.ClientCaseDocuments
-                    .Where(document => document.ClientCaseId == clientCase.Id)
-                    .Max(document => (DateTime?)document.UploadedAt) ?? clientCase.CreatedAt) <= cutoff &&
-                (_db.ClientCaseCourtEvents
-                    .Where(courtEvent => courtEvent.ClientCaseId == clientCase.Id)
-                    .Max(courtEvent => (DateTime?)(courtEvent.UpdatedAt ?? courtEvent.CreatedAt)) ?? clientCase.CreatedAt) <= cutoff &&
-                !_db.TaskJournalItems.Any(task =>
+                ((clientCase.ClientId.HasValue && clientCase.Client != null) ||
+                 (clientCase.LegalEntityId.HasValue && clientCase.LegalEntity != null)) &&
+                !CaseInactivityControlCyclePolicy.ExcludedCaseStatuses.Contains(clientCase.Status) &&
+                !vacationUserIds.Contains(
+                    (clientCase.ResponsibleUserId ??
+                     (clientCase.Client != null ? clientCase.Client.ResponsibleUserId : null) ??
+                     (clientCase.LegalEntity != null ? clientCase.LegalEntity.ResponsibleUserId : null)) ?? 0) &&
+                (hasAvailableDefaultAssignee ||
+                 (clientCase.ResponsibleUserId.HasValue
+                    ? clientCase.ResponsibleUser != null &&
+                      clientCase.ResponsibleUser.IsActive &&
+                      clientCase.ResponsibleUser.IsApproved
+                    : clientCase.Client != null && clientCase.Client.ResponsibleUserId.HasValue
+                        ? clientCase.Client.ResponsibleUser != null &&
+                          clientCase.Client.ResponsibleUser.IsActive &&
+                          clientCase.Client.ResponsibleUser.IsApproved
+                        : clientCase.LegalEntity != null &&
+                          clientCase.LegalEntity.ResponsibleUser != null &&
+                          clientCase.LegalEntity.ResponsibleUser.IsActive &&
+                          clientCase.LegalEntity.ResponsibleUser.IsApproved)))
+            .Select(clientCase => new
+            {
+                clientCase.CreatedAt,
+                clientCase.LastViewedAt,
+                clientCase.ActivityConfirmedAt,
+                clientCase.InactivityRemindersEnabled,
+                ActiveTaskCount = _db.TaskJournalItems.Count(task =>
                     task.ClientCaseId == clientCase.Id &&
-                    CaseControlActiveTaskStatuses.Contains(task.Status)));
+                    CaseControlActiveTaskStatuses.Contains(task.Status)),
+                LastTaskAt = _db.TaskJournalItems
+                    .IgnoreQueryFilters()
+                    .Where(task =>
+                        task.ClientCaseId == clientCase.Id &&
+                        !task.TagsJson.Contains(CaseControlAutomationTag))
+                    .Max(task => (DateTime?)(task.UpdatedAt ?? task.CreatedAt)),
+                LastTaskCommentAt = _db.TaskJournalComments
+                    .Where(comment =>
+                        comment.TaskJournalItem.ClientCaseId == clientCase.Id &&
+                        !comment.TaskJournalItem.TagsJson.Contains(CaseControlAutomationTag))
+                    .Max(comment => (DateTime?)(comment.UpdatedAt ?? comment.CreatedAt)),
+                LastControlCycleEndedAt = _db.UseObjectAuditModel
+                    ? _db.TaskJournalItems
+                        .IgnoreQueryFilters()
+                        .Where(task =>
+                            task.ClientCaseId == clientCase.Id &&
+                            task.TagsJson.Contains(CaseControlAutomationTag) &&
+                            ((task.Status == "done" || task.Status == "cancelled") ||
+                             EF.Property<bool>(task, "IsDeleted")))
+                        .Max(task =>
+                            EF.Property<DateTime?>(task, "DeletedAt") ??
+                            task.UpdatedAt ??
+                            (DateTime?)task.CreatedAt)
+                    : _db.TaskJournalItems
+                        .IgnoreQueryFilters()
+                        .Where(task =>
+                            task.ClientCaseId == clientCase.Id &&
+                            task.TagsJson.Contains(CaseControlAutomationTag) &&
+                            (task.Status == "done" || task.Status == "cancelled"))
+                        .Max(task => (DateTime?)(task.UpdatedAt ?? task.CreatedAt)),
+                LastDocumentAt = _db.ClientCaseDocuments
+                    .Where(document => document.ClientCaseId == clientCase.Id)
+                    .Max(document => (DateTime?)document.UploadedAt),
+                LastCourtEventAt = _db.ClientCaseCourtEvents
+                    .Where(courtEvent => courtEvent.ClientCaseId == clientCase.Id)
+                    .Max(courtEvent => (DateTime?)(courtEvent.UpdatedAt ?? courtEvent.CreatedAt)),
+            })
+            .Where(item =>
+                item.ActiveTaskCount == 0 &&
+                (item.LastTaskAt ?? item.CreatedAt) <= cutoff &&
+                (item.LastTaskCommentAt ?? item.CreatedAt) <= cutoff &&
+                (item.LastControlCycleEndedAt ?? item.CreatedAt) <= cutoff &&
+                (item.LastDocumentAt ?? item.CreatedAt) <= cutoff &&
+                (item.LastCourtEventAt ?? item.CreatedAt) <= cutoff &&
+                (item.LastViewedAt ?? item.CreatedAt) <= cutoff &&
+                (item.ActivityConfirmedAt ?? item.CreatedAt) <= cutoff &&
+                item.InactivityRemindersEnabled);
         var singleton = _db.Database.SqlQuery<int>($"SELECT 1 AS \"Value\"");
         var statistics = await (
                 from _ in singleton
@@ -1002,12 +1092,14 @@ public sealed class SystemJobsController : ControllerBase, IAsyncActionFilter
             Enabled = enabled,
             Status = enabled ? "active" : "disabled",
             StatusText = enabled ? "Включено" : "Выключено",
-            IntervalText = "Проверка каждые 5 минут",
+            IntervalText = $"Ежедневно в {runLocalTime:HH\\:mm} ({scheduleTimeZoneId})",
             PendingCount = statistics.EligibleCount,
             LastProcessedCount = limit,
             LastActivityAt = statistics.CreatedAt,
             LastActivityDescription = statistics.Description,
-            NextRunHint = enabled ? $"Порог неактивности: {inactivityDays} дн., лимит за запуск: {limit}." : "Автоматическое создание контрольных задач выключено.",
+            NextRunHint = enabled
+                ? $"По текущим правилам готовы {statistics.EligibleCount} дел; за запуск будет обработано не более {limit}."
+                : "Автоматическое создание контрольных задач выключено.",
             ManualRunEnabled = enabled,
             ManualRunHint = enabled ? "Можно вручную проверить неактивные дела и создать контрольные задачи." : "Ручной запуск недоступен, пока автоконтроль неактивных дел выключен.",
         };
@@ -1214,6 +1306,9 @@ public sealed class SystemJobsController : ControllerBase, IAsyncActionFilter
                 item.Key == CaseControlEnabledKey ||
                 item.Key == CaseControlInactiveDaysKey ||
                 item.Key == CaseControlLimitKey ||
+                item.Key == CaseControlDefaultAssigneeKey ||
+                item.Key == CaseControlRunLocalTimeKey ||
+                item.Key == CaseControlScheduleTimeZoneKey ||
                 item.Key == ClientCaseCourtSyncSchedulerService.EnabledSettingKey ||
                 item.Key == ClientCaseCourtSyncSchedulerService.IntervalMinutesSettingKey ||
                 item.Key == ClientCaseCourtSyncSchedulerService.BatchSizeSettingKey ||
