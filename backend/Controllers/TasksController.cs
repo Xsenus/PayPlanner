@@ -1457,12 +1457,12 @@ public class TasksController : ControllerBase
         var now = DateTime.UtcNow;
         var cutoff = now.AddDays(-effectiveInactiveDays);
         var escalationCutoff = now.AddDays(-effectiveEscalationDays);
-        var vacationUserIds = await CaseInactivityResponsibleAvailabilityService
-            .GetUsersOnVacationAsync(_db, now, ct);
+        var responsibleAvailability = await CaseInactivityResponsibleAvailabilityService
+            .GetAvailabilityAsync(_db, now, ct);
 
         var candidates = CaseInactivityAutomationQuery.Build(
                 _db,
-                vacationUserIds,
+                responsibleAvailability.UsersOnVacation,
                 hasAvailableDefaultAssignee: true,
                 cutoff,
                 escalationCutoff,
@@ -1511,9 +1511,32 @@ public class TasksController : ControllerBase
 
         var nextWaitingAt = summaryData.NextWaitingAnchorAt?.AddDays(effectiveInactiveDays);
         var nextCriticalAt = summaryData.NextCriticalActivityAt?.AddDays(effectiveEscalationDays);
-        var nextStateChangeAt = nextWaitingAt.HasValue && nextCriticalAt.HasValue
-            ? (nextWaitingAt.Value <= nextCriticalAt.Value ? nextWaitingAt : nextCriticalAt)
-            : nextWaitingAt ?? nextCriticalAt;
+        DateTime? nextVacationResumeAt = null;
+        if (summaryData.PausedCount > 0 && responsibleAvailability.VacationResumeAtUtc.Count > 0)
+        {
+            var pausedResponsibleUserIds = await candidates
+                .Where(item =>
+                    item.ActiveTaskCount == 0 &&
+                    item.IsPausedByVacation &&
+                    item.InactivityRemindersEnabled &&
+                    item.ResponsibleUserId.HasValue)
+                .Select(item => item.ResponsibleUserId!.Value)
+                .Distinct()
+                .ToListAsync(ct);
+            nextVacationResumeAt = pausedResponsibleUserIds
+                .Select(userId => responsibleAvailability.VacationResumeAtUtc.TryGetValue(userId, out var resumeAt)
+                    ? (DateTime?)resumeAt
+                    : null)
+                .Where(resumeAt => resumeAt.HasValue)
+                .OrderBy(resumeAt => resumeAt)
+                .FirstOrDefault();
+        }
+
+        DateTime? nextStateChangeAt = null;
+        string? nextStateChangeKind = null;
+        ConsiderNextStateChange(nextWaitingAt, "ready");
+        ConsiderNextStateChange(nextCriticalAt, "critical");
+        ConsiderNextStateChange(nextVacationResumeAt, "vacationResume");
 
         return Ok(new TaskJournalCaseAutomationSummaryDto
         {
@@ -1523,7 +1546,20 @@ public class TasksController : ControllerBase
             CriticalCount = summaryData.CriticalCount,
             WaitingCount = summaryData.WaitingCount,
             NextStateChangeAt = nextStateChangeAt.HasValue ? ToIso(nextStateChangeAt.Value) : null,
+            NextStateChangeKind = nextStateChangeKind,
         });
+
+        void ConsiderNextStateChange(DateTime? candidateAt, string candidateKind)
+        {
+            if (!candidateAt.HasValue ||
+                (nextStateChangeAt.HasValue && candidateAt.Value >= nextStateChangeAt.Value))
+            {
+                return;
+            }
+
+            nextStateChangeAt = candidateAt.Value;
+            nextStateChangeKind = candidateKind;
+        }
     }
 
     [HttpPost("automation/case-candidates/{clientCaseId:int}/task")]

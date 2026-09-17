@@ -4319,6 +4319,7 @@ public class TasksControllerTests
         Assert.Equal(1, summary.WaitingCount);
         Assert.Equal(1, summary.PausedCount);
         Assert.NotNull(summary.NextStateChangeAt);
+        Assert.Equal("critical", summary.NextStateChangeKind);
         var nextStateChangeAt = DateTimeOffset.Parse(summary.NextStateChangeAt).UtcDateTime;
         var expectedCriticalAt = nextReadyCase.CreatedAt.AddDays(30);
         Assert.InRange(nextStateChangeAt, expectedCriticalAt.AddSeconds(-1), expectedCriticalAt.AddSeconds(1));
@@ -4336,6 +4337,7 @@ public class TasksControllerTests
         Assert.Equal(1, searchedSummary.WaitingCount);
         Assert.Equal(0, searchedSummary.PausedCount);
         Assert.NotNull(searchedSummary.NextStateChangeAt);
+        Assert.Equal("ready", searchedSummary.NextStateChangeKind);
         var searchedNextStateChangeAt = DateTimeOffset.Parse(searchedSummary.NextStateChangeAt).UtcDateTime;
         var expectedWaitingAt = waitingCase.CreatedAt.AddDays(14);
         Assert.InRange(searchedNextStateChangeAt, expectedWaitingAt.AddSeconds(-1), expectedWaitingAt.AddSeconds(1));
@@ -4539,6 +4541,10 @@ public class TasksControllerTests
         client.ResponsibleUserId = author.Id;
         var clientCase = await CreateCaseAsync(db, client.Id, "ДЕЛО ДО ВОЗВРАЩЕНИЯ ОТВЕТСТВЕННОГО");
         clientCase.CreatedAt = DateTime.UtcNow.AddDays(-30);
+        var manuallyPausedCase = await CreateCaseAsync(db, client.Id, "ПАУЗА ПОЛЬЗОВАТЕЛЯ ВО ВРЕМЯ ОТПУСКА");
+        manuallyPausedCase.CreatedAt = DateTime.UtcNow.AddDays(-30);
+        manuallyPausedCase.InactivityRemindersEnabled = false;
+        manuallyPausedCase.InactivityRemindersDisabledReason = "Контроль не требуется";
         var vacationUntil = DateTime.UtcNow.AddDays(5).Date;
         var now = DateTime.UtcNow;
         db.SystemSettings.Add(new SystemSetting
@@ -4565,6 +4571,33 @@ public class TasksControllerTests
         Assert.Equal(fallbackAssignee.Id, candidate.SuggestedAssigneeUserId);
         Assert.Equal(fallbackAssignee.FullName, candidate.SuggestedAssigneeName);
         Assert.Equal("configuredDefault", candidate.SuggestedAssigneeSource);
+
+        var summaryResult = await controller.GetAutomationCaseCandidatesSummary(
+            inactiveDays: 14,
+            escalationDays: 30,
+            search: "ДЕЛО ДО ВОЗВРАЩЕНИЯ",
+            ct: CancellationToken.None);
+        var summary = Assert.IsType<TaskJournalCaseAutomationSummaryDto>(
+            Assert.IsType<OkObjectResult>(summaryResult.Result).Value);
+        Assert.Equal(1, summary.PausedCount);
+        Assert.Equal("vacationResume", summary.NextStateChangeKind);
+        Assert.NotNull(summary.NextStateChangeAt);
+        var expectedResumeAt = CalendarTimeZoneHelper.FromUserLocalToUtc(
+            vacationUntil.AddDays(1),
+            CalendarTimeZoneHelper.ResolveTimeZone("Asia/Novosibirsk"));
+        var actualResumeAt = DateTimeOffset.Parse(summary.NextStateChangeAt).UtcDateTime;
+        Assert.InRange(actualResumeAt, expectedResumeAt.AddSeconds(-1), expectedResumeAt.AddSeconds(1));
+
+        var manuallyPausedSummaryResult = await controller.GetAutomationCaseCandidatesSummary(
+            inactiveDays: 14,
+            escalationDays: 30,
+            search: "ПАУЗА ПОЛЬЗОВАТЕЛЯ",
+            ct: CancellationToken.None);
+        var manuallyPausedSummary = Assert.IsType<TaskJournalCaseAutomationSummaryDto>(
+            Assert.IsType<OkObjectResult>(manuallyPausedSummaryResult.Result).Value);
+        Assert.Equal(1, manuallyPausedSummary.PausedCount);
+        Assert.Null(manuallyPausedSummary.NextStateChangeAt);
+        Assert.Null(manuallyPausedSummary.NextStateChangeKind);
     }
 
     [Fact]

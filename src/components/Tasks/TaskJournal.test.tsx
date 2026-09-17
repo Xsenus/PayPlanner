@@ -4004,6 +4004,15 @@ describe('TaskJournal', () => {
         suggestedDueAt: todayAt(9),
       },
     ]);
+    apiMock.getTaskJournalCaseAutomationSummary.mockResolvedValue({
+      totalCount: 3,
+      readyCount: 1,
+      criticalCount: 1,
+      waitingCount: 1,
+      pausedCount: 1,
+      nextStateChangeAt: new Date(Date.now() + 86_400_000).toISOString(),
+      nextStateChangeKind: 'vacationResume',
+    });
 
     const onOpenCase = vi.fn();
     await renderJournal([createTask()], { onOpenCase });
@@ -4017,6 +4026,7 @@ describe('TaskJournal', () => {
     expect(screen.getByRole('button', { name: 'Создать наступившие (1)' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Обновить очередь автоконтроля' })).toBeTruthy();
     expect(screen.getByText(/Данные обновлены:/)).toBeTruthy();
+    expect(screen.getByText(/возобновление после отпуска/)).toBeTruthy();
     expect(screen.getAllByText('Нет активных задач')).toHaveLength(3);
     expect(screen.getByText('Критично · без движения 35 дней')).toBeTruthy();
     expect(screen.getByText('Критический срок')).toBeTruthy();
@@ -4138,6 +4148,7 @@ describe('TaskJournal', () => {
         waitingCount: 1,
         pausedCount: 0,
         nextStateChangeAt,
+        nextStateChangeKind: 'ready',
       })
       .mockResolvedValueOnce({
         totalCount: 1,
@@ -4146,12 +4157,14 @@ describe('TaskJournal', () => {
         waitingCount: 0,
         pausedCount: 0,
         nextStateChangeAt: null,
+        nextStateChangeKind: null,
       });
 
     await renderJournal();
 
     expect(await screen.findByText('Клиент ожидающего дела')).toBeTruthy();
     expect(screen.getByText(/Ближайшее изменение состояния:/)).toBeTruthy();
+    expect(screen.getByText(/переход в «Пора создать»/)).toBeTruthy();
     await waitFor(
       () => expect(apiMock.getTaskJournalCaseAutomationCandidates).toHaveBeenCalledTimes(2),
       { timeout: 3_000 },

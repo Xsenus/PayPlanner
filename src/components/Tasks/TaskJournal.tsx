@@ -1361,6 +1361,19 @@ function summarizeAutomationCandidates(candidates: TaskJournalCaseAutomationCand
   };
 }
 
+function getAutomationNextStateChangeLabel(kind?: TaskJournalCaseAutomationSummary['nextStateChangeKind']) {
+  switch (kind) {
+    case 'ready':
+      return 'переход в «Пора создать»';
+    case 'critical':
+      return 'переход в «Критические»';
+    case 'vacationResume':
+      return 'возобновление после отпуска';
+    default:
+      return 'пересчёт очереди';
+  }
+}
+
 function removeCreatedAutomationCandidates(
   summary: TaskJournalCaseAutomationSummary,
   createdCount: number,
@@ -6802,7 +6815,7 @@ function TaskAutomationPanel({
           {effectiveSummary.nextStateChangeAt ? (
             <div className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-white/80 px-2.5 py-1.5 text-xs font-medium text-amber-900">
               <CalendarClock className="h-3.5 w-3.5 shrink-0" />
-              Ближайшее изменение состояния: {formatDateTime(effectiveSummary.nextStateChangeAt)}
+              Ближайшее изменение состояния: {getAutomationNextStateChangeLabel(effectiveSummary.nextStateChangeKind)} — {formatDateTime(effectiveSummary.nextStateChangeAt)}
             </div>
           ) : null}
           {lastRefreshedAt ? (

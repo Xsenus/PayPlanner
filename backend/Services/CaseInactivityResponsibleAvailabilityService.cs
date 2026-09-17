@@ -8,7 +8,8 @@ namespace PayPlanner.Api.Services;
 public sealed record CaseInactivityResponsibleAvailabilitySnapshot(
     HashSet<int> UsersOnVacation,
     IReadOnlyDictionary<int, string> TimeZoneIds,
-    IReadOnlyDictionary<int, string> VacationUntilDates);
+    IReadOnlyDictionary<int, string> VacationUntilDates,
+    IReadOnlyDictionary<int, DateTime> VacationResumeAtUtc);
 
 public static class CaseInactivityResponsibleAvailabilityService
 {
@@ -58,11 +59,13 @@ public static class CaseInactivityResponsibleAvailabilityService
             return new CaseInactivityResponsibleAvailabilitySnapshot(
                 [],
                 new Dictionary<int, string>(),
-                new Dictionary<int, string>());
+                new Dictionary<int, string>(),
+                new Dictionary<int, DateTime>());
         }
 
         var result = new HashSet<int>();
         var vacationUntilDates = new Dictionary<int, string>();
+        var vacationResumeAtUtc = new Dictionary<int, DateTime>();
         var timeZoneIds = settings
             .Where(item => item.Key == CalendarTimeZoneHelper.UserTimeZoneSettingKey)
             .GroupBy(item => item.UserId)
@@ -91,10 +94,18 @@ public static class CaseInactivityResponsibleAvailabilityService
                         out var vacationUntil))
                 {
                     vacationUntilDates[userSettings.Key] = vacationUntil.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+                    var resumeAtLocal = vacationUntil.AddDays(1).ToDateTime(TimeOnly.MinValue);
+                    vacationResumeAtUtc[userSettings.Key] = CalendarTimeZoneHelper.FromUserLocalToUtc(
+                        resumeAtLocal,
+                        timeZone);
                 }
             }
         }
 
-        return new CaseInactivityResponsibleAvailabilitySnapshot(result, timeZoneIds, vacationUntilDates);
+        return new CaseInactivityResponsibleAvailabilitySnapshot(
+            result,
+            timeZoneIds,
+            vacationUntilDates,
+            vacationResumeAtUtc);
     }
 }
