@@ -29,6 +29,33 @@ Keep changes scoped to the requested behavior. Do not rewrite unrelated release 
 
 When the legacy task card and the new task card window both exist, any change to task business logic, saving rules, permissions, statuses, result handling, deadlines, reminders, files, comments, subtasks, labels, priorities, CRM links, or related API behavior must be applied to both forms unless the task explicitly says otherwise. Verify both the old and the new task card before considering the change complete, including the administrator setting that switches which card is shown to all users.
 
+## Risk-Based Testing
+
+Choose checks in proportion to the files, behavior, contracts, and risks changed. During implementation, run the smallest sufficient set that directly covers the work. Do not automatically run every frontend, backend, integration, end-to-end, migration, or Docker check after each small edit. Combine full verification and run it once after the related changes are complete, immediately before push, publication, deployment, pull-request handoff, or delivery of a result that the user asked to be final. Do not repeat a successful full suite unless relevant code, configuration, dependencies, or test data changed afterward.
+
+Before starting a long-running check, inspect the changed files and decide whether the change affects only presentation, component or service behavior, a public frontend/backend contract, data, security, financial logic, infrastructure, or a shared dependency. Briefly tell the user which checks were selected and why.
+
+Classify changes as follows:
+
+- Low risk: copy, labels, icons, static assets, documentation, CSS, colors, dimensions, spacing, alignment, button placement without handler changes, and small responsive layout changes. Run the relevant component test when one exists, lint or formatting for changed files, type checking for typed code, and a visual check at the affected resolution when layout matters. Do not run backend tests for a purely visual frontend change or the full frontend suite after every visual adjustment.
+- Medium risk: component state, event handlers, form validation, filtering, sorting, pagination, use of an existing API without a contract change, or an isolated backend service change without a public contract change. Run the related unit, component, controller, or service tests and the applicable build or static checks for that area. Reserve the full applicable suite for the final gate.
+- High risk: financial or other critical calculations; payments, balances, tariffs, or accruals; authentication, roles, permissions, personal or protected data; API contracts; database schema or migrations; imports, exports, and integrations; background jobs; concurrency, transactions, and caching; dependency updates; and shared components or infrastructure used across many sections. Run the relevant expanded success, failure, permission, boundary, and regression tests immediately. Before push or publication, run every full gate applicable to the affected areas.
+
+Apply area-specific scope:
+
+- Frontend-only without an API contract change: use related frontend tests during development. Before push, run the full frontend unit suite, lint, type checking, and production build. Do not run backend tests solely because presentation code changed.
+- Backend-only without a frontend contract change: use related backend tests during development. Before push, run the full backend suite and any specialized checks required by the changed backend area. Do not run frontend tests unless shared behavior or a user-facing contract could be affected.
+- API contract or frontend/backend interaction: verify both sides during development and run the full applicable frontend and backend gates before push.
+- Documentation or `AGENTS.md` only: do not run application tests. Inspect the final diff and run only existing documentation, link, formatting, or instruction-specific checks when applicable.
+- Database or migration changes: run the relevant migration and model-consistency checks, create or update a disposable local/test database as appropriate, and verify both upgrade and clean-database paths before push. Never use production data for destructive verification.
+- Integration, Docker, browser, or end-to-end checks: run them when the changed behavior crosses those boundaries or when the final release workflow explicitly requires them; do not run unrelated specialized suites by habit.
+
+For this repository, prefer targeted commands such as filtered `dotnet test` runs and `vitest` on the affected test files while developing. The final applicable gate normally includes the full backend test project for backend changes, `npm run test:unit` for frontend changes, `npm run lint`, `npx tsc --noEmit`, `npm run audit:encoding`, and `npm run build`, plus only the existing migration, integration, security, Docker, or end-to-end commands relevant to the change. Do not invent tools or commands that the project does not provide.
+
+If the user explicitly asks to defer tests during a series of small edits, postpone the full suite until the user requests final verification, commit, push, publication, or deployment. Still run or clearly flag any immediate high-risk check that cannot safely be deferred.
+
+Full CI checks remain a mandatory release barrier. Do not weaken coverage thresholds, security checks, migration checks, tests, or build gates and do not delete or skip tests merely to save time. If CI fails, inspect the exact failing step, reproduce it locally where practical, fix the cause, and rerun only the failed or affected checks before the next complete release gate.
+
 ## Local Email Safety
 
 Never allow a local, development, test, or preview environment to send email through production SMTP servers or to real recipients. This rule also applies when the local database is a copy of the production database and therefore contains working mail settings, credentials, sender addresses, notification rules, or queued deliveries.
