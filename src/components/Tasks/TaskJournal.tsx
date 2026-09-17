@@ -1255,6 +1255,29 @@ function getAutomationCandidateStateLabel(
   return 'Приостановлено';
 }
 
+function getAutomationCandidateNextStep(
+  candidate: TaskJournalCaseAutomationCandidate,
+  state = getAutomationCandidateState(candidate),
+) {
+  if (state === 'ready') {
+    return candidate.isEscalated
+      ? 'Срок уже наступил и стал критическим. Создайте контрольную задачу в первую очередь; при массовом действии это дело входит в «Пора создать».'
+      : 'Срок уже наступил. Можно создать контрольную задачу сейчас; массовое действие обработает её в пределах дневного лимита.';
+  }
+
+  if (state === 'waiting') {
+    const controlAt = candidate.nextControlAt ? formatDateTime(candidate.nextControlAt) : '';
+    return controlAt
+      ? `До ${controlAt} контрольная задача автоматически не создаётся. Затем дело перейдёт в «Пора создать». Обычную задачу можно поставить вручную уже сейчас.`
+      : 'Срок контроля ещё не наступил. После его наступления дело перейдёт в «Пора создать». Обычную задачу можно поставить вручную уже сейчас.';
+  }
+
+  const vacationUntil = formatIsoDateKey(candidate.responsibleVacationUntilDate);
+  return vacationUntil
+    ? `Автоконтроль приостановлен до ${vacationUntil} включительно. После возвращения ответственного система пересчитает следующий срок.`
+    : 'Автоконтроль временно приостановлен. После возобновления система пересчитает следующий срок.';
+}
+
 const AUTOMATION_CANDIDATE_PRESENTATION = {
   critical: {
     card: 'pp-automation-critical-card border-l-4',
@@ -6855,7 +6878,21 @@ function TaskAutomationPanel({
                 Критический срок
               </div>
             ) : null}
-            <div className="mt-3 text-sm text-slate-600">{candidate.reason}</div>
+            <div
+              data-testid={`task-automation-explanation-${candidate.clientCaseId}`}
+              className="mt-3 grid gap-2 rounded-lg border border-slate-200 bg-white/80 px-3 py-2.5 text-sm"
+            >
+              <div>
+                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Почему дело здесь</div>
+                <div className="mt-0.5 font-medium text-slate-800">{candidate.reason}</div>
+              </div>
+              <div className="border-t border-slate-200 pt-2">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Что произойдёт дальше</div>
+                <div className="mt-0.5 text-xs leading-5 text-slate-600">
+                  {getAutomationCandidateNextStep(candidate, automationState)}
+                </div>
+              </div>
+            </div>
             <div className={`mt-2 flex items-center gap-2 text-xs font-medium ${candidate.responsibleName?.trim() ? 'text-slate-600' : 'text-amber-700'}`}>
               <UsersRound className="h-3.5 w-3.5 shrink-0" />
               Ответственный: {candidate.responsibleName?.trim() || 'не назначен'}

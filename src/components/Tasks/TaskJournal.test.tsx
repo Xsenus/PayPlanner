@@ -4020,6 +4020,17 @@ describe('TaskJournal', () => {
     expect(screen.getByText('Критический срок')).toBeTruthy();
     expect(screen.getByText('Ожидает · через 11 дней')).toBeTruthy();
     expect(screen.getByText('Приостановлено')).toBeTruthy();
+    expect(screen.getAllByText('Почему дело здесь')).toHaveLength(3);
+    expect(screen.getAllByText('Что произойдёт дальше')).toHaveLength(3);
+    expect(within(screen.getByTestId('task-automation-explanation-100')).getByText(
+      'Срок уже наступил и стал критическим. Создайте контрольную задачу в первую очередь; при массовом действии это дело входит в «Пора создать».',
+    )).toBeTruthy();
+    expect(within(screen.getByTestId('task-automation-explanation-101')).getByText(
+      /контрольная задача автоматически не создаётся\. Затем дело перейдёт в «Пора создать»\. Обычную задачу можно поставить вручную уже сейчас\./,
+    )).toBeTruthy();
+    expect(within(screen.getByTestId('task-automation-explanation-102')).getByText(
+      'Автоконтроль приостановлен до 21.09.2026 включительно. После возвращения ответственного система пересчитает следующий срок.',
+    )).toBeTruthy();
     expect(document.querySelector('[data-automation-state="ready"]')?.className).toContain('pp-automation-critical-card');
     expect(document.querySelector('[data-automation-critical="true"]')?.className).toContain('pp-automation-critical-card');
     expect(document.querySelector('[data-automation-state="waiting"]')?.className).toContain('border-l-amber-400');
