@@ -25,7 +25,7 @@
 | 8 | Документы | [Отправка в мессенджеры](tz-gap-messenger-document-delivery-roadmap-2026-07-29.md) | 33/36, 92% | Credentials MAX/других провайдеров и production-приёмка |
 | 9 | Документы | [Электронная подпись](tz-gap-qualified-esign-roadmap-2026-07-29.md) | 25/43, 58% | Sandbox, credentials и контракт провайдера |
 | 10 | Безопасность | [Шифрование персональных данных](tz-gap-field-encryption-roadmap-2026-07-29.md) | 29/44, 66% | Production KMS/Vault, provider annex и dry run |
-| 11 | Автоматизация | [Неактивность дела](tz-gap-case-inactivity-reminders-roadmap-2026-07-29.md) | 37/39, 95% | Ограниченная production-приёмка |
+| 11 | Автоматизация | [Неактивность дела](tz-gap-case-inactivity-reminders-roadmap-2026-07-29.md) | 39/40, 98% | Ограниченная production-приёмка |
 
 ## Рекомендуемый порядок решений
 

@@ -28,101 +28,146 @@ public static class CaseInactivityAutomationQuery
         bool includeCompletedTaskCount = false)
     {
         var cases = (source ?? context.ClientCases).AsNoTracking();
-        var signals = cases
-            .Where(clientCase =>
+        var taskCounts = context.TaskJournalItems
+            .Where(task => task.ClientCaseId.HasValue)
+            .GroupBy(task => task.ClientCaseId)
+            .Select(group => new CaseTaskCountStats
+            {
+                ClientCaseId = group.Key,
+                ActiveTaskCount = group.Count(task => ActiveTaskStatuses.Contains(task.Status)),
+                CompletedTaskCount = includeCompletedTaskCount
+                    ? group.Count(task => task.Status == "done" || task.Status == "cancelled")
+                    : 0,
+            });
+
+        var taskActivity = context.TaskJournalItems
+            .IgnoreQueryFilters()
+            .Where(task => task.ClientCaseId.HasValue)
+            .GroupBy(task => task.ClientCaseId)
+            .Select(group => new CaseTaskActivityStats
+            {
+                ClientCaseId = group.Key,
+                LastTaskAt = group.Max(task =>
+                    !task.TagsJson.Contains(AutomationTag)
+                        ? (DateTime?)(task.UpdatedAt ?? task.CreatedAt)
+                        : null),
+                LastControlCycleEndedAt = context.UseObjectAuditModel
+                    ? group.Max(task =>
+                        task.TagsJson.Contains(AutomationTag) &&
+                        ((task.Status == "done" || task.Status == "cancelled") ||
+                         EF.Property<bool>(task, "IsDeleted"))
+                            ? (DateTime?)(EF.Property<DateTime?>(task, "DeletedAt") ??
+                              task.UpdatedAt ??
+                              task.CreatedAt)
+                            : (DateTime?)null)
+                    : group.Max(task =>
+                        task.TagsJson.Contains(AutomationTag) &&
+                        (task.Status == "done" || task.Status == "cancelled")
+                            ? (DateTime?)(task.UpdatedAt ?? task.CreatedAt)
+                            : null),
+            });
+
+        var taskComments = context.TaskJournalComments
+            .Where(comment =>
+                comment.TaskJournalItem.ClientCaseId.HasValue &&
+                !comment.TaskJournalItem.TagsJson.Contains(AutomationTag))
+            .GroupBy(comment => comment.TaskJournalItem.ClientCaseId)
+            .Select(group => new CaseActivityStats
+            {
+                ClientCaseId = group.Key,
+                LastActivityAt = group.Max(comment => (DateTime?)(comment.UpdatedAt ?? comment.CreatedAt)),
+            });
+
+        var documents = context.ClientCaseDocuments
+            .GroupBy(document => document.ClientCaseId)
+            .Select(group => new CaseActivityStats
+            {
+                ClientCaseId = group.Key,
+                LastActivityAt = group.Max(document => (DateTime?)document.UploadedAt),
+            });
+
+        var courtEvents = context.ClientCaseCourtEvents
+            .GroupBy(courtEvent => courtEvent.ClientCaseId)
+            .Select(group => new CaseActivityStats
+            {
+                ClientCaseId = group.Key,
+                LastActivityAt = group.Max(courtEvent => (DateTime?)(courtEvent.UpdatedAt ?? courtEvent.CreatedAt)),
+            });
+
+        var signals =
+            from clientCase in cases
+            where
                 (clientCase.ClientId.HasValue && clientCase.Client != null) ||
-                (clientCase.LegalEntityId.HasValue && clientCase.LegalEntity != null))
-            .Select(clientCase => new CaseInactivityAutomationCaseRow
+                (clientCase.LegalEntityId.HasValue && clientCase.LegalEntity != null)
+            join taskCount in taskCounts
+                on (int?)clientCase.Id equals taskCount.ClientCaseId into taskCountGroup
+            from taskCount in taskCountGroup.DefaultIfEmpty()
+            join taskActivityItem in taskActivity
+                on (int?)clientCase.Id equals taskActivityItem.ClientCaseId into taskActivityGroup
+            from taskActivityItem in taskActivityGroup.DefaultIfEmpty()
+            join taskComment in taskComments
+                on (int?)clientCase.Id equals taskComment.ClientCaseId into taskCommentGroup
+            from taskComment in taskCommentGroup.DefaultIfEmpty()
+            join document in documents
+                on (int?)clientCase.Id equals document.ClientCaseId into documentGroup
+            from document in documentGroup.DefaultIfEmpty()
+            join courtEvent in courtEvents
+                on (int?)clientCase.Id equals courtEvent.ClientCaseId into courtEventGroup
+            from courtEvent in courtEventGroup.DefaultIfEmpty()
+            select new CaseInactivityAutomationCaseRow
             {
                 Id = clientCase.Id,
                 Title = clientCase.Title,
                 Status = clientCase.Status,
                 IsExcludedStatus = CaseInactivityControlCyclePolicy.ExcludedCaseStatuses.Contains(clientCase.Status),
                 ClientId = clientCase.ClientId,
-                ClientName = clientCase.Client != null ? clientCase.Client.Name : string.Empty,
+                ClientName = clientCase.Client != null ? clientCase.Client!.Name : string.Empty,
                 LegalEntityId = clientCase.LegalEntityId,
                 LegalEntityName = clientCase.LegalEntity != null
-                    ? (clientCase.LegalEntity.ShortName != string.Empty
-                        ? clientCase.LegalEntity.ShortName
-                        : clientCase.LegalEntity.FullName ?? string.Empty)
+                    ? (clientCase.LegalEntity!.ShortName != string.Empty
+                        ? clientCase.LegalEntity!.ShortName
+                        : clientCase.LegalEntity!.FullName ?? string.Empty)
                     : string.Empty,
                 ResponsibleUserId = clientCase.ResponsibleUserId ??
-                    (clientCase.Client != null ? clientCase.Client.ResponsibleUserId : null) ??
-                    (clientCase.LegalEntity != null ? clientCase.LegalEntity.ResponsibleUserId : null),
+                    (clientCase.Client != null ? clientCase.Client!.ResponsibleUserId : null) ??
+                    (clientCase.LegalEntity != null ? clientCase.LegalEntity!.ResponsibleUserId : null),
                 ResponsibleName = clientCase.ResponsibleUser != null
-                    ? clientCase.ResponsibleUser.FullName
-                    : clientCase.Client != null && clientCase.Client.ResponsibleUser != null
-                        ? clientCase.Client.ResponsibleUser.FullName
-                        : clientCase.LegalEntity != null && clientCase.LegalEntity.ResponsibleUser != null
-                            ? clientCase.LegalEntity.ResponsibleUser.FullName
+                    ? clientCase.ResponsibleUser!.FullName
+                    : clientCase.Client != null && clientCase.Client!.ResponsibleUser != null
+                        ? clientCase.Client!.ResponsibleUser!.FullName
+                        : clientCase.LegalEntity != null && clientCase.LegalEntity!.ResponsibleUser != null
+                            ? clientCase.LegalEntity!.ResponsibleUser!.FullName
                             : string.Empty,
                 IsResponsibleOnVacation = vacationUserIds.Contains(
                     (clientCase.ResponsibleUserId ??
-                     (clientCase.Client != null ? clientCase.Client.ResponsibleUserId : null) ??
-                     (clientCase.LegalEntity != null ? clientCase.LegalEntity.ResponsibleUserId : null)) ?? 0),
+                     (clientCase.Client != null ? clientCase.Client!.ResponsibleUserId : null) ??
+                     (clientCase.LegalEntity != null ? clientCase.LegalEntity!.ResponsibleUserId : null)) ?? 0),
                 HasAvailableAssignee = hasAvailableDefaultAssignee ||
                     (clientCase.ResponsibleUserId.HasValue
                         ? clientCase.ResponsibleUser != null &&
-                          clientCase.ResponsibleUser.IsActive &&
-                          clientCase.ResponsibleUser.IsApproved
-                        : clientCase.Client != null && clientCase.Client.ResponsibleUserId.HasValue
-                            ? clientCase.Client.ResponsibleUser != null &&
-                              clientCase.Client.ResponsibleUser.IsActive &&
-                              clientCase.Client.ResponsibleUser.IsApproved
+                          clientCase.ResponsibleUser!.IsActive &&
+                          clientCase.ResponsibleUser!.IsApproved
+                        : clientCase.Client != null && clientCase.Client!.ResponsibleUserId.HasValue
+                            ? clientCase.Client!.ResponsibleUser != null &&
+                              clientCase.Client!.ResponsibleUser!.IsActive &&
+                              clientCase.Client!.ResponsibleUser!.IsApproved
                             : clientCase.LegalEntity != null &&
-                              clientCase.LegalEntity.ResponsibleUser != null &&
-                              clientCase.LegalEntity.ResponsibleUser.IsActive &&
-                              clientCase.LegalEntity.ResponsibleUser.IsApproved),
+                              clientCase.LegalEntity!.ResponsibleUser != null &&
+                              clientCase.LegalEntity!.ResponsibleUser!.IsActive &&
+                              clientCase.LegalEntity!.ResponsibleUser!.IsApproved),
                 CreatedAt = clientCase.CreatedAt,
                 LastViewedAt = clientCase.LastViewedAt,
                 ActivityConfirmedAt = clientCase.ActivityConfirmedAt,
                 InactivityRemindersEnabled = clientCase.InactivityRemindersEnabled,
                 InactivityRemindersDisabledReason = clientCase.InactivityRemindersDisabledReason,
-                ActiveTaskCount = context.TaskJournalItems.Count(task =>
-                    task.ClientCaseId == clientCase.Id &&
-                    ActiveTaskStatuses.Contains(task.Status)),
-                CompletedTaskCount = includeCompletedTaskCount
-                    ? context.TaskJournalItems.Count(task =>
-                        task.ClientCaseId == clientCase.Id &&
-                        (task.Status == "done" || task.Status == "cancelled"))
-                    : 0,
-                LastTaskAt = context.TaskJournalItems
-                    .IgnoreQueryFilters()
-                    .Where(task =>
-                        task.ClientCaseId == clientCase.Id &&
-                        !task.TagsJson.Contains(AutomationTag))
-                    .Max(task => (DateTime?)(task.UpdatedAt ?? task.CreatedAt)),
-                LastTaskCommentAt = context.TaskJournalComments
-                    .Where(comment =>
-                        comment.TaskJournalItem.ClientCaseId == clientCase.Id &&
-                        !comment.TaskJournalItem.TagsJson.Contains(AutomationTag))
-                    .Max(comment => (DateTime?)(comment.UpdatedAt ?? comment.CreatedAt)),
-                LastControlCycleEndedAt = context.UseObjectAuditModel
-                    ? context.TaskJournalItems
-                        .IgnoreQueryFilters()
-                        .Where(task =>
-                            task.ClientCaseId == clientCase.Id &&
-                            task.TagsJson.Contains(AutomationTag) &&
-                            ((task.Status == "done" || task.Status == "cancelled") ||
-                             EF.Property<bool>(task, "IsDeleted")))
-                        .Max(task =>
-                            EF.Property<DateTime?>(task, "DeletedAt") ??
-                            task.UpdatedAt ??
-                            (DateTime?)task.CreatedAt)
-                    : context.TaskJournalItems
-                        .IgnoreQueryFilters()
-                        .Where(task =>
-                            task.ClientCaseId == clientCase.Id &&
-                            task.TagsJson.Contains(AutomationTag) &&
-                            (task.Status == "done" || task.Status == "cancelled"))
-                        .Max(task => (DateTime?)(task.UpdatedAt ?? task.CreatedAt)),
-                LastDocumentAt = context.ClientCaseDocuments
-                    .Where(document => document.ClientCaseId == clientCase.Id)
-                    .Max(document => (DateTime?)document.UploadedAt),
-                LastCourtEventAt = context.ClientCaseCourtEvents
-                    .Where(courtEvent => courtEvent.ClientCaseId == clientCase.Id)
-                    .Max(courtEvent => (DateTime?)(courtEvent.UpdatedAt ?? courtEvent.CreatedAt)),
-            });
+                ActiveTaskCount = (int?)taskCount!.ActiveTaskCount ?? 0,
+                CompletedTaskCount = (int?)taskCount!.CompletedTaskCount ?? 0,
+                LastTaskAt = taskActivityItem!.LastTaskAt,
+                LastTaskCommentAt = taskComment!.LastActivityAt,
+                LastControlCycleEndedAt = taskActivityItem.LastControlCycleEndedAt,
+                LastDocumentAt = document!.LastActivityAt,
+                LastCourtEventAt = courtEvent!.LastActivityAt,
+            };
 
         var withMeaningfulActivity = signals
             .Select(item => new
@@ -283,4 +328,24 @@ public sealed class CaseInactivityAutomationCaseRow
     public bool IsRecentlyActive { get; set; }
     public bool IsCandidate { get; set; }
     public bool IsCriticalCandidate { get; set; }
+}
+
+internal sealed class CaseTaskCountStats
+{
+    public int? ClientCaseId { get; set; }
+    public int ActiveTaskCount { get; set; }
+    public int CompletedTaskCount { get; set; }
+}
+
+internal sealed class CaseTaskActivityStats
+{
+    public int? ClientCaseId { get; set; }
+    public DateTime? LastTaskAt { get; set; }
+    public DateTime? LastControlCycleEndedAt { get; set; }
+}
+
+internal sealed class CaseActivityStats
+{
+    public int? ClientCaseId { get; set; }
+    public DateTime? LastActivityAt { get; set; }
 }

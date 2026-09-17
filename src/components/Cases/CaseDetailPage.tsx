@@ -487,12 +487,19 @@ function formatFileSize(value?: number | null) {
   return `${(value / (1024 * 1024)).toFixed(1)} МБ`;
 }
 
-function formatRuDateTime(value?: string | null, timeZoneId = activeCaseTimeZoneId) {
+function formatRuDateTime(
+  value?: string | null,
+  timeZoneId: string | null | undefined = activeCaseTimeZoneId,
+) {
   if (!value) return '';
   return formatDateTimeInTimeZone(value, timeZoneId) || toRuDate(value);
 }
 
-function formatCourtSchedule(value?: string | null, allDay?: boolean, timeZoneId = activeCaseTimeZoneId) {
+function formatCourtSchedule(
+  value?: string | null,
+  allDay?: boolean,
+  timeZoneId: string | null | undefined = activeCaseTimeZoneId,
+) {
   if (!value) return '';
   if (allDay === false) return formatRuDateTime(value, timeZoneId);
 

@@ -69,9 +69,12 @@ describe('buildCourtCaseProcessSummary', () => {
 
   it('recognizes an appeal from a linked later instance', () => {
     const instance = {
+      id: 1,
+      clientCaseId: 10,
       instance: 'appeal',
       instanceLabel: 'Апелляция',
       courtCaseNumber: '33-1000/2026',
+      createdAt: '2026-09-16T00:00:00Z',
       complaints: [],
     } as ClientCaseCourtInstance;
 
@@ -88,9 +91,12 @@ describe('buildCourtCaseProcessSummary', () => {
 
   it('does not treat a shared judicial UID as a populated appeal instance', () => {
     const instance = {
+      id: 1,
+      clientCaseId: 10,
       instance: 'appeal',
       instanceLabel: 'Апелляция',
       judicialUid: '63RS0018-01-2026-001242-18',
+      createdAt: '2026-09-16T00:00:00Z',
       complaints: [],
     } as ClientCaseCourtInstance;
 
