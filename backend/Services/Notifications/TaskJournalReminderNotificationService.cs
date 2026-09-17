@@ -98,7 +98,13 @@ public sealed class TaskJournalReminderNotificationService : BackgroundService
             using var scope = _scopeFactory.CreateScope();
             var context = scope.ServiceProvider.GetRequiredService<PaymentContext>();
             var nowUtc = DateTime.UtcNow;
-            await SyncUpcomingCaseDeadlineTasksAsync(context, nowUtc, cancellationToken);
+            var taskJournalChanged = await SyncUpcomingCaseDeadlineTasksAsync(context, nowUtc, cancellationToken);
+            if (taskJournalChanged)
+            {
+                var realtimePublisher = scope.ServiceProvider.GetService<IRealtimeNotificationPublisher>()
+                    ?? NoOpRealtimeNotificationPublisher.Instance;
+                await realtimePublisher.PublishTaskJournalChangedAsync(cancellationToken);
+            }
 
             var tasks = await context.TaskJournalItems
                 .AsNoTracking()
@@ -185,7 +191,7 @@ public sealed class TaskJournalReminderNotificationService : BackgroundService
         return -1;
     }
 
-    private async Task<int> SyncUpcomingCaseDeadlineTasksAsync(
+    private async Task<bool> SyncUpcomingCaseDeadlineTasksAsync(
         PaymentContext context,
         DateTime nowUtc,
         CancellationToken cancellationToken)
@@ -222,9 +228,10 @@ public sealed class TaskJournalReminderNotificationService : BackgroundService
             .Take(batchSize)
             .ToListAsync(cancellationToken);
 
+        var taskJournalChanged = false;
         foreach (var caseId in caseIds)
         {
-            await ClientCaseDeadlineTaskSyncService.SyncAsync(
+            taskJournalChanged |= await ClientCaseDeadlineTaskSyncService.SyncAsync(
                 context,
                 caseId,
                 actorUserId: null,
@@ -233,7 +240,7 @@ public sealed class TaskJournalReminderNotificationService : BackgroundService
             context.ChangeTracker.Clear();
         }
 
-        return caseIds.Count;
+        return taskJournalChanged;
     }
 
     private static bool IsReminderDue(

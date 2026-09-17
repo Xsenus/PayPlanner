@@ -95,6 +95,9 @@ import {
 } from '../../utils/timeZoneDate';
 import { normalizeUserTimeZoneId, USER_TIME_ZONE_OPTIONS, USER_TIME_ZONE_SETTING_KEY } from '../../utils/timeZoneOptions';
 import {
+  TASK_JOURNAL_REALTIME_EVENT,
+} from '../../services/realtimeNotifications';
+import {
   isTaskJournalRealtimeChange,
   USER_NOTIFICATIONS_EVENT,
   type UserNotificationsChangedDetail,
@@ -3066,7 +3069,16 @@ export function TaskJournal({
         return;
       }
 
-      void refreshTasks();
+      scheduleRealtimeRefresh();
+    };
+    const scheduleRealtimeRefresh = () => {
+      if (realtimeRefreshTimer !== null) {
+        window.clearTimeout(realtimeRefreshTimer);
+      }
+      realtimeRefreshTimer = window.setTimeout(() => {
+        realtimeRefreshTimer = null;
+        void refreshTasks();
+      }, REALTIME_TASK_REFRESH_DEBOUNCE_MS);
     };
     const refreshFromRealtime = (event: Event) => {
       const detail = event instanceof CustomEvent
@@ -3076,16 +3088,11 @@ export function TaskJournal({
         return;
       }
 
-      if (realtimeRefreshTimer !== null) {
-        window.clearTimeout(realtimeRefreshTimer);
-      }
-      realtimeRefreshTimer = window.setTimeout(() => {
-        realtimeRefreshTimer = null;
-        void refreshTasks();
-      }, REALTIME_TASK_REFRESH_DEBOUNCE_MS);
+      scheduleRealtimeRefresh();
     };
     window.addEventListener(TASK_JOURNAL_EVENT, refresh);
     window.addEventListener(USER_NOTIFICATIONS_EVENT, refreshFromRealtime);
+    window.addEventListener(TASK_JOURNAL_REALTIME_EVENT, scheduleRealtimeRefresh);
     return () => {
       taskListRequestRef.current?.abort();
       if (realtimeRefreshTimer !== null) {
@@ -3093,6 +3100,7 @@ export function TaskJournal({
       }
       window.removeEventListener(TASK_JOURNAL_EVENT, refresh);
       window.removeEventListener(USER_NOTIFICATIONS_EVENT, refreshFromRealtime);
+      window.removeEventListener(TASK_JOURNAL_REALTIME_EVENT, scheduleRealtimeRefresh);
     };
   }, [refreshTasks]);
 
@@ -3212,7 +3220,7 @@ export function TaskJournal({
   useEffect(() => {
     let controller: AbortController | null = null;
     let realtimeRefreshTimer: number | null = null;
-    const refresh = () => {
+    const refreshCandidates = () => {
       if (!automationCandidatesInitializedRef.current) {
         return;
       }
@@ -3254,6 +3262,18 @@ export function TaskJournal({
           }
         });
     };
+    const scheduleRealtimeRefresh = () => {
+      if (realtimeRefreshTimer !== null) {
+        window.clearTimeout(realtimeRefreshTimer);
+      }
+      realtimeRefreshTimer = window.setTimeout(() => {
+        realtimeRefreshTimer = null;
+        refreshCandidates();
+      }, REALTIME_TASK_REFRESH_DEBOUNCE_MS);
+    };
+    const refreshFromTaskJournalChange = () => {
+      scheduleRealtimeRefresh();
+    };
     const refreshFromRealtime = (event: Event) => {
       const detail = event instanceof CustomEvent
         ? (event.detail as UserNotificationsChangedDetail | null)
@@ -3262,24 +3282,20 @@ export function TaskJournal({
         return;
       }
 
-      if (realtimeRefreshTimer !== null) {
-        window.clearTimeout(realtimeRefreshTimer);
-      }
-      realtimeRefreshTimer = window.setTimeout(() => {
-        realtimeRefreshTimer = null;
-        refresh();
-      }, REALTIME_TASK_REFRESH_DEBOUNCE_MS);
+      scheduleRealtimeRefresh();
     };
 
-    window.addEventListener(TASK_JOURNAL_EVENT, refresh);
+    window.addEventListener(TASK_JOURNAL_EVENT, refreshFromTaskJournalChange);
     window.addEventListener(USER_NOTIFICATIONS_EVENT, refreshFromRealtime);
+    window.addEventListener(TASK_JOURNAL_REALTIME_EVENT, scheduleRealtimeRefresh);
     return () => {
       controller?.abort();
       if (realtimeRefreshTimer !== null) {
         window.clearTimeout(realtimeRefreshTimer);
       }
-      window.removeEventListener(TASK_JOURNAL_EVENT, refresh);
+      window.removeEventListener(TASK_JOURNAL_EVENT, refreshFromTaskJournalChange);
       window.removeEventListener(USER_NOTIFICATIONS_EVENT, refreshFromRealtime);
+      window.removeEventListener(TASK_JOURNAL_REALTIME_EVENT, scheduleRealtimeRefresh);
     };
   }, [automationStateFilter, debouncedAutomationSearch, loadAutomationCandidates, markAutomationCandidatesRefreshed, taskSettings]);
 

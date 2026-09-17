@@ -8,6 +8,7 @@ using PayPlanner.Api.Controllers.V2;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Notifications;
 
 namespace PayPlanner.Api.Services.LegalIntegrations;
 
@@ -144,6 +145,7 @@ public sealed class ClientCaseCourtSyncSchedulerService : BackgroundService
 
         var registry = scope.ServiceProvider.GetService<ICourtSyncProviderRegistry>();
         var metrics = scope.ServiceProvider.GetService<CourtSyncMetrics>();
+        var realtimePublisher = scope.ServiceProvider.GetService<IRealtimeNotificationPublisher>();
         var normalizedBatchSize = NormalizeBatchSize(batchSize);
         var candidateLimit = normalizedBatchSize * 5;
         var cursorCaseId = await db.SystemSettings
@@ -195,7 +197,8 @@ public sealed class ClientCaseCourtSyncSchedulerService : BackgroundService
             storage,
             sudrf,
             courtSyncProviderRegistry: registry,
-            courtSyncMetrics: metrics)
+            courtSyncMetrics: metrics,
+            realtimePublisher: realtimePublisher)
         {
             ControllerContext = new ControllerContext
             {

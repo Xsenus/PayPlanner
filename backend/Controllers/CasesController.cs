@@ -5,6 +5,7 @@ using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Notifications;
 
 namespace PayPlanner.Api.Controllers;
 
@@ -14,7 +15,15 @@ namespace PayPlanner.Api.Controllers;
 public class CasesController : ControllerBase
 {
     private readonly PaymentContext _db;
-    public CasesController(PaymentContext db) => _db = db;
+    private readonly IRealtimeNotificationPublisher _realtimePublisher;
+
+    public CasesController(
+        PaymentContext db,
+        IRealtimeNotificationPublisher? realtimePublisher = null)
+    {
+        _db = db;
+        _realtimePublisher = realtimePublisher ?? NoOpRealtimeNotificationPublisher.Instance;
+    }
 
     private Task<DataVisibilityAccess?> ResolveCasesVisibilityAsync(CancellationToken ct)
         => _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
@@ -99,6 +108,7 @@ public class CasesController : ControllerBase
         _db.ClientCases.Add(model);
         await _db.SaveChangesAsync(ct);
         await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, model.Id, User.GetUserId(), User.GetDisplayName(), ct);
+        await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
         return Created($"/api/cases/{model.Id}", model);
     }
 
@@ -138,6 +148,7 @@ public class CasesController : ControllerBase
 
         await _db.SaveChangesAsync(ct);
         await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, e.Id, User.GetUserId(), User.GetDisplayName(), ct);
+        await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
         return Ok(e);
     }
 
@@ -167,6 +178,7 @@ public class CasesController : ControllerBase
 
         _db.ClientCases.Remove(e);
         await _db.SaveChangesAsync(ct);
+        await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
         return NoContent();
     }
 

@@ -120,6 +120,7 @@ public class TasksController : ControllerBase
     private readonly IExternalCalendarTaskSyncOutbox? _externalCalendarTaskSyncOutbox;
     private readonly CaseInactivityAutomationMutationGate _caseInactivityAutomationMutationGate;
     private readonly ISystemJobRunStateService? _systemJobRunState;
+    private readonly IRealtimeNotificationPublisher _realtimePublisher;
     private readonly string _taskFilesRoot;
 
     public TasksController(
@@ -132,7 +133,8 @@ public class TasksController : ControllerBase
         IExternalCalendarTaskSyncOutbox? externalCalendarTaskSyncOutbox = null,
         IConfiguration? configuration = null,
         CaseInactivityAutomationMutationGate? caseInactivityAutomationMutationGate = null,
-        ISystemJobRunStateService? systemJobRunState = null)
+        ISystemJobRunStateService? systemJobRunState = null,
+        IRealtimeNotificationPublisher? realtimePublisher = null)
     {
         _db = db;
         _notificationService = notificationService;
@@ -143,6 +145,7 @@ public class TasksController : ControllerBase
         _caseInactivityAutomationMutationGate = caseInactivityAutomationMutationGate
             ?? new CaseInactivityAutomationMutationGate();
         _systemJobRunState = systemJobRunState;
+        _realtimePublisher = realtimePublisher ?? NoOpRealtimeNotificationPublisher.Instance;
         _taskFilesRoot = Path.Combine(
             ApplicationFileStoragePaths.ResolveRoot(environment, configuration, AppContext.BaseDirectory),
             "task-files");
@@ -496,6 +499,7 @@ public class TasksController : ControllerBase
             await UpsertSystemSettingAsync(TaskStickerStylesSettingKey, JsonSerializer.Serialize(normalizedStickerStyles, JsonOptions), now, ct);
         }
         await _db.SaveChangesAsync(ct);
+        await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
 
         return Ok(await GetTaskJournalSettingsAsync(ct));
     }
@@ -1725,6 +1729,7 @@ public class TasksController : ControllerBase
         AddTaskHistory(entity, access, "Задача создана автоматически из автоконтроля дела.");
         _db.TaskJournalItems.Add(entity);
         await _db.SaveChangesAsync(ct);
+        await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
         return Created($"/api/tasks/{entity.Id}", Map(entity, binding));
     }
 
@@ -1901,6 +1906,7 @@ public class TasksController : ControllerBase
         if (created.Count > 0)
         {
             await _db.SaveChangesAsync(ct);
+            await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
         }
 
         return Ok(new TaskJournalAutomationCreateResultDto
@@ -2309,6 +2315,7 @@ public class TasksController : ControllerBase
         {
             await SafeSyncExternalCalendarTaskAsync(entity.Id, ct);
         }
+        await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
 
         return Created($"/api/tasks/{entity.Id}/comments/{comment.Id}", MapComment(comment));
     }
@@ -2404,6 +2411,7 @@ public class TasksController : ControllerBase
         entity.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
         await _notificationService.NotifyTaskDeadlineChangeRequestedAsync(entity, deadlineRequest, ct);
+        await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
 
         return Created($"/api/tasks/{entity.Id}/comments/{comment.Id}", MapComment(comment));
     }
@@ -2559,6 +2567,7 @@ public class TasksController : ControllerBase
         await _notificationService.NotifyTaskDeadlineChangeApprovedAsync(entity, deadlineRequest, ct);
         await NotifyTaskScheduleConflictIfNeededAsync(entity, access, ct);
         await SafeSyncExternalCalendarTaskAsync(entity.Id, ct);
+        await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
 
         return Ok(Map(entity));
     }
@@ -2648,6 +2657,7 @@ public class TasksController : ControllerBase
 
         await _db.SaveChangesAsync(ct);
         await _notificationService.NotifyTaskDeadlineChangeRejectedAsync(entity, deadlineRequest, ct);
+        await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
 
         return Ok(Map(entity));
     }
@@ -2897,6 +2907,7 @@ public class TasksController : ControllerBase
                 new { fileName = safeFileName, documentKey = normalizedDocumentKey, version });
 
             await _db.SaveChangesAsync(ct);
+            await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
 
             var caseDocumentIds = await ResolveTaskCaseDocumentIdsAsync(entity.ClientCaseId, [taskFile], ct);
             return Created($"/api/tasks/{entity.Id}/files/{taskFile.Id}", MapFile(
@@ -3000,6 +3011,7 @@ public class TasksController : ControllerBase
             new { fileName = taskFile.OriginalFileName, taskFile.DocumentKey, taskFile.Version });
         await _db.SaveChangesAsync(ct);
         TryDeletePhysicalFile(fullPath);
+        await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
 
         return NoContent();
     }
@@ -3201,6 +3213,7 @@ public class TasksController : ControllerBase
         }
         await NotifyTaskScheduleConflictIfNeededAsync(entity, access, ct);
         await SafeSyncExternalCalendarTaskAsync(entity.Id, ct);
+        await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
         return Created($"/api/tasks/{entity.Id}", Map(entity, binding));
     }
 
@@ -3447,6 +3460,7 @@ public class TasksController : ControllerBase
         }
         await NotifyTaskScheduleConflictIfNeededAsync(entity, access, ct);
         await SafeSyncExternalCalendarTaskAsync(entity.Id, ct);
+        await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
         return Ok(Map(entity, binding));
     }
 
@@ -3593,6 +3607,7 @@ public class TasksController : ControllerBase
             await _notificationService.NotifyTaskCompletedAsync(entity, ct);
         }
         await SafeSyncExternalCalendarTaskAsync(entity.Id, ct);
+        await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
         return Ok(Map(entity));
     }
 
@@ -3658,6 +3673,7 @@ public class TasksController : ControllerBase
             access.UserId,
             null,
             ct);
+        await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
         return Ok(Map(entity));
     }
 
@@ -3904,6 +3920,10 @@ public class TasksController : ControllerBase
             await NotifyTaskScheduleConflictIfNeededAsync(notification.Task, access, ct);
             await SafeSyncExternalCalendarTaskAsync(notification.Task.Id, ct);
         }
+        if (updated > 0)
+        {
+            await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
+        }
 
         return Ok(new
         {
@@ -3979,6 +3999,7 @@ public class TasksController : ControllerBase
         if (toDelete.Count > 0)
         {
             await _db.SaveChangesAsync(ct);
+            await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
         }
 
         return Ok(new
@@ -4139,6 +4160,7 @@ public class TasksController : ControllerBase
             await _notificationService.NotifyTaskCompletedAsync(entity, ct);
         }
         await SafeSyncExternalCalendarTaskAsync(entity.Id, ct);
+        await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
         return Ok(Map(entity));
     }
 
@@ -4187,6 +4209,7 @@ public class TasksController : ControllerBase
         await _notificationService.NotifyTaskCancelledAsync(entity, access.DisplayName, access.UserId, "Удалена", ct);
         _db.TaskJournalItems.Remove(entity);
         await _db.SaveChangesAsync(ct);
+        await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
         return NoContent();
     }
 

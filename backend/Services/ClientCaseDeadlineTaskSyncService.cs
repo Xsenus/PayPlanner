@@ -15,7 +15,7 @@ public static class ClientCaseDeadlineTaskSyncService
         "done", "cancelled"
     };
 
-    public static async Task SyncAsync(
+    public static async Task<bool> SyncAsync(
         PaymentContext db,
         int clientCaseId,
         int? actorUserId,
@@ -31,7 +31,7 @@ public static class ClientCaseDeadlineTaskSyncService
             .FirstOrDefaultAsync(item => item.Id == clientCaseId, ct);
         if (clientCase is null)
         {
-            return;
+            return false;
         }
 
         var now = DateTime.UtcNow;
@@ -43,17 +43,23 @@ public static class ClientCaseDeadlineTaskSyncService
 
         if (IsFinishedCaseStatus(clientCase.Status))
         {
-            await ClientCaseTaskSyncService.CloseActiveTasksForClosedCaseAsync(db, clientCase.Id, actorUserId, normalizedActorName, ct);
+            var closedTaskCount = await ClientCaseTaskSyncService.CloseActiveTasksForClosedCaseAsync(
+                db,
+                clientCase.Id,
+                actorUserId,
+                normalizedActorName,
+                ct);
             await db.SaveChangesAsync(ct);
-            return;
+            return closedTaskCount > 0;
         }
 
         var owner = ResolveOwner(clientCase);
         if (owner is null)
         {
-            return;
+            return false;
         }
 
+        var taskJournalChanged = false;
         var assignee = await ResolveAssigneeAsync(db, clientCase, actorUserId, ct);
         var assigneeUserId = assignee?.Id ?? actorUserId;
         var assigneeName = assignee is null ? normalizedActorName : DisplayName(assignee);
@@ -80,6 +86,7 @@ public static class ClientCaseDeadlineTaskSyncService
                     AddHistory(db, activeTask, actorUserId, normalizedActorName, isCourtHearing
                         ? "Судебное заседание отменено, перенесено или завершено, связанная задача отменена."
                         : "Срок удален из карточки дела, контрольная задача отменена.", now);
+                    taskJournalChanged = true;
                 }
 
                 continue;
@@ -101,6 +108,7 @@ public static class ClientCaseDeadlineTaskSyncService
                     now);
                 db.TaskJournalItems.Add(task);
                 existingTasks.Add(task);
+                taskJournalChanged = true;
                 continue;
             }
 
@@ -142,10 +150,12 @@ public static class ClientCaseDeadlineTaskSyncService
                 AddHistory(db, activeTask, actorUserId, normalizedActorName, deadline.TaskType == "courtHearing"
                     ? "Задача по судебному заседанию синхронизирована с карточкой суда."
                     : "Контрольная задача синхронизирована со сроками карточки дела.", now);
+                taskJournalChanged = true;
             }
         }
 
         await db.SaveChangesAsync(ct);
+        return taskJournalChanged;
     }
 
     private static TaskJournalItem BuildTask(

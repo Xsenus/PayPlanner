@@ -6,8 +6,10 @@ import {
   canStartNotificationsHubConnection,
   createNotificationsHubConnection,
   isExpectedRealtimeStartupError,
+  REALTIME_TASK_JOURNAL_CHANGED_EVENT,
   REALTIME_USER_NOTIFICATION_CREATED_EVENT,
   stopNotificationsHubConnection,
+  TASK_JOURNAL_REALTIME_EVENT,
   type RealtimeUserNotification,
 } from '../../services/realtimeNotifications';
 import type { ToastDomain } from '../../contexts/toastContextCore';
@@ -814,6 +816,9 @@ export function RealtimeNotificationToasts({
 
     connection.on(REALTIME_USER_NOTIFICATION_CREATED_EVENT, (notification: RealtimeUserNotification) => {
       showIncomingNotification(notification, 'created');
+    });
+    connection.on(REALTIME_TASK_JOURNAL_CHANGED_EVENT, () => {
+      window.dispatchEvent(new CustomEvent(TASK_JOURNAL_REALTIME_EVENT));
     });
 
     const handleVisibilityChange = () => {

@@ -8,6 +8,8 @@ import {
 import { getApiBaseUrl, getAuthToken } from './api';
 
 export const REALTIME_USER_NOTIFICATION_CREATED_EVENT = 'userNotificationCreated';
+export const REALTIME_TASK_JOURNAL_CHANGED_EVENT = 'taskJournalChanged';
+export const TASK_JOURNAL_REALTIME_EVENT = 'payplanner:task-journal-realtime-changed';
 
 export interface RealtimeUserNotification {
   id: number;

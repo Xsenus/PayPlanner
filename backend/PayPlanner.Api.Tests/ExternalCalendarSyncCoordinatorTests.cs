@@ -444,6 +444,9 @@ public sealed class ExternalCalendarSyncCoordinatorTests
             Notifications.Add(notification);
             return Task.CompletedTask;
         }
+
+        public Task PublishTaskJournalChangedAsync(CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
     }
 
     private sealed class NoOpEmailService : IEmailService

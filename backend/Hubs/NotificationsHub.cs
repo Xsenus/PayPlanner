@@ -9,6 +9,7 @@ public sealed class NotificationsHub : Hub
 {
     public const string Path = "/hubs/notifications";
     public const string UserNotificationCreatedEvent = "userNotificationCreated";
+    public const string TaskJournalChangedEvent = "taskJournalChanged";
 
     public static string UserGroup(int userId) => $"user:{userId}";
 

@@ -7,6 +7,7 @@ using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Notifications;
 using Xunit;
 
 namespace PayPlanner.Api.Tests;
@@ -112,8 +113,38 @@ public class CasesControllerTests
         Assert.IsType<NotFoundResult>(hiddenDeleteResult);
     }
 
-    private static CasesController CreateController(PaymentContext db, User user)
-        => new(db)
+    [Fact]
+    public async Task LegacyCases_PublishesJournalChangeAfterSuccessfulCreate()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "legacy-cases-realtime@example.com");
+        var client = new Client
+        {
+            Name = "Клиент realtime legacy дела",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+        var realtimePublisher = new RecordingRealtimeNotificationPublisher();
+        var controller = CreateController(db, owner, realtimePublisher);
+
+        var result = await controller.Create(new ClientCase
+        {
+            ClientId = client.Id,
+            Title = "Новое legacy дело",
+            Status = ClientCaseStatus.Open,
+        }, CancellationToken.None);
+
+        Assert.IsType<CreatedResult>(result);
+        Assert.Equal(1, realtimePublisher.TaskJournalChangedCount);
+    }
+
+    private static CasesController CreateController(
+        PaymentContext db,
+        User user,
+        IRealtimeNotificationPublisher? realtimePublisher = null)
+        => new(db, realtimePublisher)
         {
             ControllerContext = new ControllerContext
             {
@@ -128,6 +159,23 @@ public class CasesControllerTests
                 },
             },
         };
+
+    private sealed class RecordingRealtimeNotificationPublisher : IRealtimeNotificationPublisher
+    {
+        public int TaskJournalChangedCount { get; private set; }
+
+        public Task PublishUserNotificationAsync(
+            UserNotification notification,
+            bool toastEnabled = true,
+            CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
+        public Task PublishTaskJournalChangedAsync(CancellationToken cancellationToken = default)
+        {
+            TaskJournalChangedCount++;
+            return Task.CompletedTask;
+        }
+    }
 
     private static async Task<ClientCase> CreateCaseAsync(PaymentContext db, int responsibleUserId, string title)
     {

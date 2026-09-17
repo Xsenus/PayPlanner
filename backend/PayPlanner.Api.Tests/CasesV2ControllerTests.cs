@@ -6065,7 +6065,8 @@ public class CasesV2ControllerTests
         db.Clients.Add(client);
         db.ClientCases.Add(clientCase);
         await db.SaveChangesAsync();
-        var controller = CreateController(db, owner);
+        var realtimePublisher = new RecordingRealtimeNotificationPublisher();
+        var controller = CreateController(db, owner, realtimePublisher: realtimePublisher);
 
         var result = await controller.MarkActivity(clientCase.Id, new CasesV2Controller.MarkClientCaseActivityRequest
         {
@@ -6089,6 +6090,7 @@ public class CasesV2ControllerTests
         Assert.NotNull(clientCase.LastViewedAt);
         Assert.NotNull(clientCase.ActivityConfirmedAt);
         Assert.Contains("Подтвердил: Владелец", clientCase.EventHistory, StringComparison.Ordinal);
+        Assert.Equal(1, realtimePublisher.TaskJournalChangedCount);
     }
 
     [Fact]
@@ -6340,7 +6342,8 @@ public class CasesV2ControllerTests
         db.Clients.Add(client);
         db.ClientCases.Add(clientCase);
         await db.SaveChangesAsync();
-        var controller = CreateController(db, viewer);
+        var realtimePublisher = new RecordingRealtimeNotificationPublisher();
+        var controller = CreateController(db, viewer, realtimePublisher: realtimePublisher);
 
         var result = await controller.MarkActivity(clientCase.Id, new CasesV2Controller.MarkClientCaseActivityRequest
         {
@@ -6357,6 +6360,7 @@ public class CasesV2ControllerTests
         await db.Entry(clientCase).ReloadAsync();
         Assert.Equal(viewedAt, clientCase.LastViewedAt);
         Assert.Equal(owner.Id, clientCase.LastViewedByUserId);
+        Assert.Equal(0, realtimePublisher.TaskJournalChangedCount);
     }
 
     [Fact]
@@ -9977,11 +9981,12 @@ public class CasesV2ControllerTests
         INotificationService? notificationService = null,
         bool includeAdminRoleClaim = false,
         CourtSyncMetrics? courtSyncMetrics = null,
-        IExternalWorkOrderApprovalService? externalWorkOrderApprovalService = null)
+        IExternalWorkOrderApprovalService? externalWorkOrderApprovalService = null,
+        IRealtimeNotificationPublisher? realtimePublisher = null)
         => new(db, new TestWebHostEnvironment
         {
             ContentRootPath = contentRootPath ?? Path.Combine(Path.GetTempPath(), "payplanner-case-documents", Guid.NewGuid().ToString("N")),
-        }, sudrfCourtSyncService: sudrfCourtSyncService, pdfService: pdfService, courtSyncProviderRegistry: courtSyncProviderRegistry, configuration: configuration, featureFlags: featureFlags, notificationService: notificationService, courtSyncMetrics: courtSyncMetrics, externalWorkOrderApprovalService: externalWorkOrderApprovalService)
+        }, sudrfCourtSyncService: sudrfCourtSyncService, pdfService: pdfService, courtSyncProviderRegistry: courtSyncProviderRegistry, configuration: configuration, featureFlags: featureFlags, notificationService: notificationService, courtSyncMetrics: courtSyncMetrics, externalWorkOrderApprovalService: externalWorkOrderApprovalService, realtimePublisher: realtimePublisher)
         {
             ControllerContext = new ControllerContext
             {
@@ -10054,6 +10059,23 @@ public class CasesV2ControllerTests
 
         public Task<TelegramNotificationSettingsDto> GetSettingsAsync(CancellationToken cancellationToken = default)
             => Task.FromResult(new TelegramNotificationSettingsDto());
+    }
+
+    private sealed class RecordingRealtimeNotificationPublisher : IRealtimeNotificationPublisher
+    {
+        public int TaskJournalChangedCount { get; private set; }
+
+        public Task PublishUserNotificationAsync(
+            UserNotification notification,
+            bool toastEnabled = true,
+            CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
+        public Task PublishTaskJournalChangedAsync(CancellationToken cancellationToken = default)
+        {
+            TaskJournalChangedCount++;
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class RecordingExternalWorkOrderApprovalService : IExternalWorkOrderApprovalService

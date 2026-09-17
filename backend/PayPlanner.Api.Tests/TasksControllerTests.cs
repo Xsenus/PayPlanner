@@ -1114,7 +1114,12 @@ public class TasksControllerTests
     {
         await using var db = await CreateContextAsync();
         var author = await CreateAdminUserAsync(db, "author@example.com", "Автор");
-        var controller = CreateController(db, new RecordingNotificationService(), author);
+        var realtimePublisher = new RecordingRealtimeNotificationPublisher();
+        var controller = CreateController(
+            db,
+            new RecordingNotificationService(),
+            author,
+            realtimePublisher: realtimePublisher);
 
         var result = await controller.CreateTask(new UpsertTaskJournalItemRequest
         {
@@ -1131,6 +1136,7 @@ public class TasksControllerTests
         Assert.Null(dto.LegalEntityId);
         Assert.Null(dto.ClientCaseId);
         Assert.Equal("Внутренняя задача", dto.ObjectName);
+        Assert.Equal(1, realtimePublisher.TaskJournalChangeCount);
     }
 
     [Fact]
@@ -5707,6 +5713,7 @@ public class TasksControllerTests
         var clientCase = await CreateCaseAsync(db, client.Id, "БАНКРОТСТВО");
         clientCase.CreatedAt = DateTime.UtcNow.AddDays(-45);
         await db.SaveChangesAsync();
+        var realtimePublisher = new RecordingRealtimeNotificationPublisher();
         var (scheduler, provider) = CreateAutomationScheduler(db, new Dictionary<string, string?>
         {
             ["TaskJournal:Automation:Enabled"] = "true",
@@ -5714,7 +5721,7 @@ public class TasksControllerTests
             ["TaskJournal:Automation:EscalationDays"] = "30",
             ["TaskJournal:Automation:EscalationUserId"] = escalationUser.Id.ToString(),
             ["TaskJournal:Automation:Limit"] = "10",
-        });
+        }, realtimePublisher: realtimePublisher);
 
         using (provider)
         {
@@ -5723,6 +5730,7 @@ public class TasksControllerTests
             Assert.True(result.Enabled);
             Assert.Null(result.Error);
             Assert.Equal(1, result.CreatedCount);
+            Assert.Equal(1, realtimePublisher.TaskJournalChangeCount);
         }
 
         var task = await db.TaskJournalItems
@@ -9133,14 +9141,16 @@ public class TasksControllerTests
         IInvoiceDocumentPdfService? pdfService = null,
         IExternalCalendarSyncCoordinator? externalCalendarSyncCoordinator = null,
         IExternalCalendarTaskSyncOutbox? externalCalendarTaskSyncOutbox = null,
-        CaseInactivityAutomationMutationGate? caseInactivityAutomationMutationGate = null)
+        CaseInactivityAutomationMutationGate? caseInactivityAutomationMutationGate = null,
+        IRealtimeNotificationPublisher? realtimePublisher = null)
         => new(
             db,
             notificationService,
             pdfService: pdfService,
             externalCalendarSyncCoordinator: externalCalendarSyncCoordinator,
             externalCalendarTaskSyncOutbox: externalCalendarTaskSyncOutbox,
-            caseInactivityAutomationMutationGate: caseInactivityAutomationMutationGate)
+            caseInactivityAutomationMutationGate: caseInactivityAutomationMutationGate,
+            realtimePublisher: realtimePublisher)
         {
             ControllerContext = new ControllerContext
             {
@@ -9224,7 +9234,8 @@ public class TasksControllerTests
         PaymentContext db,
         IReadOnlyDictionary<string, string?> values,
         INotificationService? notificationService = null,
-        CaseInactivityAutomationMutationGate? mutationGate = null)
+        CaseInactivityAutomationMutationGate? mutationGate = null,
+        IRealtimeNotificationPublisher? realtimePublisher = null)
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(values)
@@ -9234,6 +9245,10 @@ public class TasksControllerTests
         if (notificationService is not null)
         {
             services.AddSingleton(notificationService);
+        }
+        if (realtimePublisher is not null)
+        {
+            services.AddSingleton(realtimePublisher);
         }
         var provider = services.BuildServiceProvider();
 
@@ -9573,6 +9588,23 @@ public class TasksControllerTests
 
         public Task HandleUserAccessRevokedAsync(int userId, int actorUserId, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
+    }
+
+    private sealed class RecordingRealtimeNotificationPublisher : IRealtimeNotificationPublisher
+    {
+        public int TaskJournalChangeCount { get; private set; }
+
+        public Task PublishUserNotificationAsync(
+            UserNotification notification,
+            bool toastEnabled = true,
+            CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
+        public Task PublishTaskJournalChangedAsync(CancellationToken cancellationToken = default)
+        {
+            TaskJournalChangeCount++;
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class RecordingNotificationService : INotificationService

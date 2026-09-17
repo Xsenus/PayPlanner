@@ -57,4 +57,18 @@ public sealed class SignalRRealtimeNotificationPublisher : IRealtimeNotification
                 notification.RecipientUserId);
         }
     }
+
+    public async Task PublishTaskJournalChangedAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await _hubContext.Clients.All.SendAsync(
+                NotificationsHub.TaskJournalChangedEvent,
+                cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to publish task journal realtime change signal.");
+        }
+    }
 }

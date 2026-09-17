@@ -157,6 +157,7 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
             using var scope = _scopeFactory.CreateScope();
             var context = scope.ServiceProvider.GetRequiredService<PaymentContext>();
             var notificationService = scope.ServiceProvider.GetService<INotificationService>();
+            var realtimePublisher = scope.ServiceProvider.GetService<IRealtimeNotificationPublisher>();
             var settings = await LoadSettingsAsync(context, cancellationToken);
             if (!settings.Enabled)
             {
@@ -331,6 +332,11 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
             if (escalatedTasks.Count > 0)
             {
                 await NotifyEscalatedAutomationTasksAsync(notificationService, escalatedTasks, cancellationToken);
+            }
+            if (created > 0 || escalationResult.StateChangedCount > 0)
+            {
+                await (realtimePublisher ?? NoOpRealtimeNotificationPublisher.Instance)
+                    .PublishTaskJournalChangedAsync(cancellationToken);
             }
 
             var processed = created + escalatedTasks.Count;

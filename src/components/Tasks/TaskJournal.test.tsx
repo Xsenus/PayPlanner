@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { TaskJournal } from './TaskJournal';
 import type { TaskJournalSettingsDto } from '../../services/api';
+import { TASK_JOURNAL_REALTIME_EVENT } from '../../services/realtimeNotifications';
 import type { Client, ClientCase, LegalEntitySummary } from '../../types';
 import { fromTimeZoneDateTimeInput, getZonedParts, toTimeZoneDateKey } from '../../utils/timeZoneDate';
 import { TASK_JOURNAL_EVENT, type TaskJournalAssignee, type TaskJournalItem } from '../../utils/taskJournalStore';
@@ -4622,6 +4623,7 @@ describe('TaskJournal', () => {
       taskJournalItemId: 101,
     };
     window.dispatchEvent(new CustomEvent(USER_NOTIFICATIONS_EVENT, { detail }));
+    window.dispatchEvent(new CustomEvent(TASK_JOURNAL_REALTIME_EVENT));
     window.dispatchEvent(new CustomEvent(USER_NOTIFICATIONS_EVENT, { detail }));
 
     await waitFor(() => expect(apiMock.getTaskJournalItems).toHaveBeenCalledTimes(1));

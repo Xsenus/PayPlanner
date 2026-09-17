@@ -127,6 +127,7 @@ public class CasesV2Controller : ControllerBase
     private readonly INotificationService? _notificationService;
     private readonly CourtSyncMetrics? _courtSyncMetrics;
     private readonly IExternalWorkOrderApprovalService? _externalWorkOrderApprovalService;
+    private readonly IRealtimeNotificationPublisher _realtimePublisher;
     private Task<SectionAccessContext?>? _casesAccessTask;
     private Task<bool>? _canViewCaseFinanceTask;
     private CaseStatusClock? _caseStatusClock;
@@ -142,7 +143,8 @@ public class CasesV2Controller : ControllerBase
         IOptionsMonitor<AppFeatureFlagsOptions>? featureFlags = null,
         INotificationService? notificationService = null,
         CourtSyncMetrics? courtSyncMetrics = null,
-        IExternalWorkOrderApprovalService? externalWorkOrderApprovalService = null)
+        IExternalWorkOrderApprovalService? externalWorkOrderApprovalService = null,
+        IRealtimeNotificationPublisher? realtimePublisher = null)
     {
         _db = db;
         _caseDocumentStorage = caseDocumentStorage ?? new LocalCaseDocumentStorage(environment, configuration);
@@ -154,6 +156,7 @@ public class CasesV2Controller : ControllerBase
         _notificationService = notificationService;
         _courtSyncMetrics = courtSyncMetrics;
         _externalWorkOrderApprovalService = externalWorkOrderApprovalService;
+        _realtimePublisher = realtimePublisher ?? NoOpRealtimeNotificationPublisher.Instance;
     }
 
     /// <summary>
@@ -2779,11 +2782,15 @@ public class CasesV2Controller : ControllerBase
         _db.SetAuditReason($"Добавлен процессуальный срок дела: {deadline.Title}");
         await _db.SaveChangesAsync(ct);
 
-        await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, id, actorUserId, actorName, ct);
+        var taskJournalChanged = await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, id, actorUserId, actorName, ct);
         await LinkProceduralDeadlineTaskAsync(deadline.Id, ct);
         await SyncDeadlineCourtEventLinkAsync(deadline, null, null, actorUserId, actorName, ct);
         await AddProceduralDeadlineUserNotificationsAsync(clientCase, deadline, "created", actorUserId, actorName, ct);
         await _db.SaveChangesAsync(ct);
+        if (taskJournalChanged)
+        {
+            await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
+        }
 
         return Created($"/api/v2/cases/{id}/procedural-deadlines/{deadline.Id}", MapProceduralDeadline(deadline, await ResolveCaseStatusClockAsync(ct)));
     }
@@ -2886,11 +2893,15 @@ public class CasesV2Controller : ControllerBase
         _db.SetAuditReason($"Обновлен процессуальный срок дела: {deadline.Title}");
         await _db.SaveChangesAsync(ct);
 
-        await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, id, actorUserId, actorName, ct);
+        var taskJournalChanged = await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, id, actorUserId, actorName, ct);
         await LinkProceduralDeadlineTaskAsync(deadline.Id, ct);
         await SyncDeadlineCourtEventLinkAsync(deadline, oldSourceType, oldSourceId, actorUserId, actorName, ct);
         await AddProceduralDeadlineUserNotificationsAsync(clientCase, deadline, "updated", actorUserId, actorName, ct);
         await _db.SaveChangesAsync(ct);
+        if (taskJournalChanged)
+        {
+            await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
+        }
 
         return Ok(MapProceduralDeadline(deadline, await ResolveCaseStatusClockAsync(ct)));
     }
@@ -2943,9 +2954,13 @@ public class CasesV2Controller : ControllerBase
         _db.SetAuditReason($"Закрыт процессуальный срок дела: {deadline.Title}");
         await _db.SaveChangesAsync(ct);
 
-        await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, id, actorUserId, actorName, ct);
+        var taskJournalChanged = await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, id, actorUserId, actorName, ct);
         await AddProceduralDeadlineUserNotificationsAsync(clientCase, deadline, "closed", actorUserId, actorName, ct);
         await _db.SaveChangesAsync(ct);
+        if (taskJournalChanged)
+        {
+            await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
+        }
         return Ok(MapProceduralDeadline(deadline, await ResolveCaseStatusClockAsync(ct)));
     }
 
@@ -3374,6 +3389,7 @@ public class CasesV2Controller : ControllerBase
         await AddCourtEventUserNotificationsAsync(clientCase, courtEvent, "created", actorUserId, actorName, ct);
         await _db.SaveChangesAsync(ct);
         await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, clientCase.Id, actorUserId, actorName, ct);
+        await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
 
         return Created($"/api/v2/cases/{id}/court-events/{courtEvent.Id}", MapCourtEvent(courtEvent, await ResolveCaseStatusClockAsync(ct)));
     }
@@ -3465,6 +3481,7 @@ public class CasesV2Controller : ControllerBase
         await AddCourtEventUserNotificationsAsync(clientCase, courtEvent, "updated", actorUserId, actorName, ct);
         await _db.SaveChangesAsync(ct);
         await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, clientCase.Id, actorUserId, actorName, ct);
+        await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
 
         return Ok(MapCourtEvent(courtEvent, await ResolveCaseStatusClockAsync(ct)));
     }
@@ -4497,6 +4514,7 @@ public class CasesV2Controller : ControllerBase
                 User.GetDisplayName(),
                 ct);
             await _db.SaveChangesAsync(ct);
+            await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
 
             return Created($"/api/v2/cases/{id}/documents/{document.Id}", MapDocument(document, true, [templateDefinitionResult.Template]));
         }
@@ -4757,6 +4775,7 @@ public class CasesV2Controller : ControllerBase
                 User.GetDisplayName(),
                 ct);
             await _db.SaveChangesAsync(ct);
+            await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
 
             return Created($"/api/case-documents/{document.Id}", MapDocument(document, true));
         }
@@ -4836,6 +4855,10 @@ public class CasesV2Controller : ControllerBase
 
             await _db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
+            if (documents.Count > 0)
+            {
+                await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
+            }
         }
         catch
         {
@@ -4898,7 +4921,8 @@ public class CasesV2Controller : ControllerBase
         string auditAction,
         string auditDescription,
         string caseEventText,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool publishTaskJournalChanged = true)
     {
         var latestVersion = await _db.ClientCaseDocuments
             .Where(item => item.ClientCaseId == clientCase.Id && item.DocumentKey == documentKey)
@@ -4942,6 +4966,10 @@ public class CasesV2Controller : ControllerBase
                 User.GetDisplayName(),
                 ct);
             await _db.SaveChangesAsync(ct);
+            if (publishTaskJournalChanged)
+            {
+                await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
+            }
 
             return document;
         }
@@ -5045,6 +5073,7 @@ public class CasesV2Controller : ControllerBase
             ct);
         await _db.SaveChangesAsync(ct);
         _caseDocumentStorage.DeleteIfExists(storagePath);
+        await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
 
         return NoContent();
     }
@@ -5673,6 +5702,10 @@ public class CasesV2Controller : ControllerBase
 
         await _db.SaveChangesAsync(ct);
         await ApplyTaskSummaryAsync([clientCase], ct, includeInactivityControlSummary: true);
+        if (resetsInactivityTimer || request?.Confirmed == true)
+        {
+            await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
+        }
 
         return Ok(new ClientCaseActivityDto
         {
@@ -7580,6 +7613,10 @@ public class CasesV2Controller : ControllerBase
         {
             await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, clientCase.Id, actorUserId, actorName, ct);
         }
+        if (syncResult is { HasChanges: true })
+        {
+            await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
+        }
 
         return Ok(new ClientCaseCourtSyncBindingDto
         {
@@ -7713,6 +7750,10 @@ public class CasesV2Controller : ControllerBase
                 _db.SetAuditReason($"Обновление дела #{clientCase.Id} из судебного источника {courtSyncProvider.Label}.");
                 await _db.SaveChangesAsync(ct);
                 await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, clientCase.Id, User.GetUserId(), actorName, ct);
+                if (syncResult.HasChanges)
+                {
+                    await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
+                }
 
                 return Ok(new ClientCaseCourtSyncRunDto
                 {
@@ -8215,7 +8256,8 @@ public class CasesV2Controller : ControllerBase
                     "Created",
                     $"Судебный акт «{courtAct.Title}» добавлен из ГАС «Правосудие».",
                     $"Судебный акт «{courtAct.Title}» добавлен из ГАС «Правосудие».",
-                    ct);
+                    ct,
+                    publishTaskJournalChanged: false);
                 createdCourtActDocuments++;
                 _courtSyncMetrics?.RecordDocument(document.SizeBytes);
                 newItems.Add($"судебный акт «{courtAct.Title}»");
@@ -8857,6 +8899,7 @@ public class CasesV2Controller : ControllerBase
         _db.ClientCases.Add(model);
         await _db.SaveChangesAsync(ct);
         await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, model.Id, User.GetUserId(), User.GetDisplayName(), ct);
+        await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
         return Created($"/api/v2/cases/{model.Id}", model);
     }
 
@@ -8928,6 +8971,7 @@ public class CasesV2Controller : ControllerBase
 
         await _db.SaveChangesAsync(ct);
         await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, e.Id, User.GetUserId(), User.GetDisplayName(), ct);
+        await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
         return Ok(e);
     }
 
@@ -8995,6 +9039,7 @@ public class CasesV2Controller : ControllerBase
 
         _db.ClientCases.Remove(e);
         await _db.SaveChangesAsync(ct);
+        await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
         return NoContent();
     }
 
@@ -9170,6 +9215,10 @@ public class CasesV2Controller : ControllerBase
         }
 
         await _db.SaveChangesAsync(ct);
+        if (changedCasesCount > 0)
+        {
+            await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
+        }
         return Ok(new { updated = cases.Count, requested = ids.Length });
     }
 

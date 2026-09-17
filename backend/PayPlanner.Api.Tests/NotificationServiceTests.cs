@@ -10954,6 +10954,9 @@ public class NotificationServiceTests
             ToastEnabledValues.Add(toastEnabled);
             return Task.CompletedTask;
         }
+
+        public Task PublishTaskJournalChangedAsync(CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
     }
 
     private sealed class RecordingWebPushNotificationService : IWebPushNotificationService

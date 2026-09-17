@@ -1,7 +1,12 @@
 import { act, render, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { RealtimeNotificationToasts } from './RealtimeNotificationToasts';
-import { REALTIME_USER_NOTIFICATION_CREATED_EVENT, type RealtimeUserNotification } from '../../services/realtimeNotifications';
+import {
+  REALTIME_TASK_JOURNAL_CHANGED_EVENT,
+  REALTIME_USER_NOTIFICATION_CREATED_EVENT,
+  TASK_JOURNAL_REALTIME_EVENT,
+  type RealtimeUserNotification,
+} from '../../services/realtimeNotifications';
 import { USER_NOTIFICATIONS_EVENT, type UserNotificationsChangedDetail } from '../../utils/userNotifications';
 import {
   getRealtimeNotificationDiagnostics,
@@ -1230,6 +1235,21 @@ describe('RealtimeNotificationToasts', () => {
     });
 
     window.removeEventListener(USER_NOTIFICATIONS_EVENT, handleChanged);
+  });
+
+  it('forwards the global task journal signal without notification data', async () => {
+    const listener = vi.fn();
+    window.addEventListener(TASK_JOURNAL_REALTIME_EVENT, listener);
+    render(<RealtimeNotificationToasts userId={5} onOpenTask={vi.fn()} />);
+
+    await waitFor(() => expect(connectionState.start).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      connectionState.handlers.get(REALTIME_TASK_JOURNAL_CHANGED_EVENT)?.({} as RealtimeUserNotification);
+    });
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    window.removeEventListener(TASK_JOURNAL_REALTIME_EVENT, listener);
   });
 
   it('requests notification refresh after realtime reconnect', async () => {
