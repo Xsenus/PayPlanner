@@ -95,6 +95,11 @@ import {
 } from '../../utils/timeZoneDate';
 import { normalizeUserTimeZoneId, USER_TIME_ZONE_OPTIONS, USER_TIME_ZONE_SETTING_KEY } from '../../utils/timeZoneOptions';
 import {
+  isTaskJournalRealtimeChange,
+  USER_NOTIFICATIONS_EVENT,
+  type UserNotificationsChangedDetail,
+} from '../../utils/userNotifications';
+import {
   isTaskJournalActive,
   TASK_JOURNAL_EVENT,
   type TaskJournalAssignee,
@@ -282,6 +287,7 @@ const AUTOMATION_LOAD_ERROR_MESSAGE = 'Не удалось загрузить о
 const AUTOMATION_REFRESH_ERROR_MESSAGE = 'Не удалось обновить очередь автоконтроля. Показаны ранее загруженные данные.';
 const AUTOMATION_SUMMARY_LOAD_ERROR_MESSAGE = 'Карточки доступны, но точные общие счётчики временно не получены. Показаны значения загруженной части очереди.';
 const AUTOMATION_STATE_REFRESH_GRACE_MS = 1_000;
+const REALTIME_TASK_REFRESH_DEBOUNCE_MS = 200;
 const MAX_BROWSER_TIMEOUT_MS = 2_000_000_000;
 const AUTOMATION_VISIBILITY_REFRESH_MIN_AGE_MS = 60_000;
 
@@ -3051,6 +3057,7 @@ export function TaskJournal({
 
   useEffect(() => {
     void refreshTasks();
+    let realtimeRefreshTimer: number | null = null;
     const refresh = (event: Event) => {
       const source = event instanceof CustomEvent
         ? (event.detail as { source?: object } | null)?.source
@@ -3061,10 +3068,31 @@ export function TaskJournal({
 
       void refreshTasks();
     };
+    const refreshFromRealtime = (event: Event) => {
+      const detail = event instanceof CustomEvent
+        ? (event.detail as UserNotificationsChangedDetail | null)
+        : null;
+      if (!isTaskJournalRealtimeChange(detail)) {
+        return;
+      }
+
+      if (realtimeRefreshTimer !== null) {
+        window.clearTimeout(realtimeRefreshTimer);
+      }
+      realtimeRefreshTimer = window.setTimeout(() => {
+        realtimeRefreshTimer = null;
+        void refreshTasks();
+      }, REALTIME_TASK_REFRESH_DEBOUNCE_MS);
+    };
     window.addEventListener(TASK_JOURNAL_EVENT, refresh);
+    window.addEventListener(USER_NOTIFICATIONS_EVENT, refreshFromRealtime);
     return () => {
       taskListRequestRef.current?.abort();
+      if (realtimeRefreshTimer !== null) {
+        window.clearTimeout(realtimeRefreshTimer);
+      }
       window.removeEventListener(TASK_JOURNAL_EVENT, refresh);
+      window.removeEventListener(USER_NOTIFICATIONS_EVENT, refreshFromRealtime);
     };
   }, [refreshTasks]);
 
@@ -3183,6 +3211,7 @@ export function TaskJournal({
 
   useEffect(() => {
     let controller: AbortController | null = null;
+    let realtimeRefreshTimer: number | null = null;
     const refresh = () => {
       if (!automationCandidatesInitializedRef.current) {
         return;
@@ -3225,11 +3254,32 @@ export function TaskJournal({
           }
         });
     };
+    const refreshFromRealtime = (event: Event) => {
+      const detail = event instanceof CustomEvent
+        ? (event.detail as UserNotificationsChangedDetail | null)
+        : null;
+      if (!isTaskJournalRealtimeChange(detail)) {
+        return;
+      }
+
+      if (realtimeRefreshTimer !== null) {
+        window.clearTimeout(realtimeRefreshTimer);
+      }
+      realtimeRefreshTimer = window.setTimeout(() => {
+        realtimeRefreshTimer = null;
+        refresh();
+      }, REALTIME_TASK_REFRESH_DEBOUNCE_MS);
+    };
 
     window.addEventListener(TASK_JOURNAL_EVENT, refresh);
+    window.addEventListener(USER_NOTIFICATIONS_EVENT, refreshFromRealtime);
     return () => {
       controller?.abort();
+      if (realtimeRefreshTimer !== null) {
+        window.clearTimeout(realtimeRefreshTimer);
+      }
       window.removeEventListener(TASK_JOURNAL_EVENT, refresh);
+      window.removeEventListener(USER_NOTIFICATIONS_EVENT, refreshFromRealtime);
     };
   }, [automationStateFilter, debouncedAutomationSearch, loadAutomationCandidates, markAutomationCandidatesRefreshed, taskSettings]);
 

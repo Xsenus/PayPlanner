@@ -646,6 +646,11 @@ export function RealtimeNotificationToasts({
         reason,
         unreadDelta: reason === 'created' || reason === 'fallback-poll' ? 1 : undefined,
         notificationId: notification.id,
+        notificationType: notification.type,
+        objectType: notification.objectType,
+        objectId: notification.objectId,
+        taskJournalItemId: notification.taskJournalItemId,
+        clientCaseId: getClientCaseIdFromNotification(notification),
       });
 
       if (shownNotificationIdsRef.current.has(notification.id)) {

@@ -8,6 +8,7 @@ import type { Client, ClientCase, LegalEntitySummary } from '../../types';
 import { fromTimeZoneDateTimeInput, getZonedParts, toTimeZoneDateKey } from '../../utils/timeZoneDate';
 import { TASK_JOURNAL_EVENT, type TaskJournalAssignee, type TaskJournalItem } from '../../utils/taskJournalStore';
 import { cloneDefaultTaskStickerStyles } from '../../utils/taskStickerStyles';
+import { USER_NOTIFICATIONS_EVENT } from '../../utils/userNotifications';
 import {
   FORCED_TASK_SNOOZE_STORAGE_KEY,
   getForcedTaskApprovalSnoozeKey,
@@ -4602,6 +4603,26 @@ describe('TaskJournal', () => {
     window.dispatchEvent(new CustomEvent(TASK_JOURNAL_EVENT, {
       detail: { source: {} },
     }));
+
+    await waitFor(() => expect(apiMock.getTaskJournalItems).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(apiMock.getTaskJournalCaseAutomationCandidates).toHaveBeenCalledTimes(1));
+  });
+
+  it('coalesces realtime task notifications into one journal and automation refresh', async () => {
+    await renderJournal();
+    apiMock.getTaskJournalItems.mockClear();
+    apiMock.getTaskJournalCaseAutomationCandidates.mockClear();
+
+    const detail = {
+      source: 'realtime',
+      reason: 'created',
+      notificationType: 'taskChanged',
+      objectType: 'task',
+      objectId: 101,
+      taskJournalItemId: 101,
+    };
+    window.dispatchEvent(new CustomEvent(USER_NOTIFICATIONS_EVENT, { detail }));
+    window.dispatchEvent(new CustomEvent(USER_NOTIFICATIONS_EVENT, { detail }));
 
     await waitFor(() => expect(apiMock.getTaskJournalItems).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(apiMock.getTaskJournalCaseAutomationCandidates).toHaveBeenCalledTimes(1));

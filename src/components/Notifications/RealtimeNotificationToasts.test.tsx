@@ -1223,6 +1223,10 @@ describe('RealtimeNotificationToasts', () => {
       reason: 'created',
       unreadDelta: 1,
       notificationId: 501,
+      notificationType: 'taskAssigned',
+      objectType: 'task',
+      objectId: 501,
+      taskJournalItemId: 501,
     });
 
     window.removeEventListener(USER_NOTIFICATIONS_EVENT, handleChanged);
