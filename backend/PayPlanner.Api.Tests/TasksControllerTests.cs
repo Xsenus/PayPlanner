@@ -746,8 +746,10 @@ public class TasksControllerTests
         var admin = await CreateAdminUserAsync(db, "admin-unassigned-diagnostics@example.com", "Администратор");
         var client = await CreateClientAsync(db, "Клиент без исполнителя диагностики");
         var clientCase = await CreateCaseAsync(db, client.Id, "ДЕЛО БЕЗ ИСПОЛНИТЕЛЯ ДИАГНОСТИКИ");
+        var recentCase = await CreateCaseAsync(db, client.Id, "СВЕЖЕЕ ДЕЛО БЕЗ ИСПОЛНИТЕЛЯ ДИАГНОСТИКИ");
         var now = DateTime.UtcNow;
         clientCase.CreatedAt = now.AddDays(-45);
+        recentCase.CreatedAt = now.AddDays(-2);
         db.SystemSettings.AddRange(
             new SystemSetting { Key = "tasks.automation.caseControl.enabled", Value = "true", CreatedAt = now, UpdatedAt = now },
             new SystemSetting { Key = "tasks.automation.caseControl.inactiveDays", Value = "14", CreatedAt = now, UpdatedAt = now },

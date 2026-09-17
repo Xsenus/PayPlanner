@@ -35,14 +35,8 @@ public sealed class SystemJobsController : ControllerBase, IAsyncActionFilter
     private const string CaseControlDefaultAssigneeKey = "tasks.automation.caseControl.defaultAssigneeUserId";
     private const string CaseControlRunLocalTimeKey = "tasks.automation.caseControl.runLocalTime";
     private const string CaseControlScheduleTimeZoneKey = "tasks.automation.caseControl.scheduleTimeZone";
-    private const string CaseControlAutomationTag = "автоконтроль";
     private const string UserActivityRetentionDaysKey = "user-activity.retention-days";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
-    private static readonly HashSet<string> CaseControlActiveTaskStatuses = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "new", "inProgress", "waiting", "onApproval", "approved", "revision", "overdueApproval"
-    };
-
     private readonly PaymentContext _db;
     private readonly IConfiguration _configuration;
     private readonly IOptionsMonitor<AppFeatureFlagsOptions> _featureFlags;
@@ -984,85 +978,13 @@ public sealed class SystemJobsController : ControllerBase, IAsyncActionFilter
                     user.IsActive &&
                     user.IsApproved,
                     ct);
-        var candidates = _db.ClientCases
-            .AsNoTracking()
-            .Where(clientCase =>
-                ((clientCase.ClientId.HasValue && clientCase.Client != null) ||
-                 (clientCase.LegalEntityId.HasValue && clientCase.LegalEntity != null)) &&
-                !CaseInactivityControlCyclePolicy.ExcludedCaseStatuses.Contains(clientCase.Status) &&
-                !vacationUserIds.Contains(
-                    (clientCase.ResponsibleUserId ??
-                     (clientCase.Client != null ? clientCase.Client.ResponsibleUserId : null) ??
-                     (clientCase.LegalEntity != null ? clientCase.LegalEntity.ResponsibleUserId : null)) ?? 0) &&
-                (hasAvailableDefaultAssignee ||
-                 (clientCase.ResponsibleUserId.HasValue
-                    ? clientCase.ResponsibleUser != null &&
-                      clientCase.ResponsibleUser.IsActive &&
-                      clientCase.ResponsibleUser.IsApproved
-                    : clientCase.Client != null && clientCase.Client.ResponsibleUserId.HasValue
-                        ? clientCase.Client.ResponsibleUser != null &&
-                          clientCase.Client.ResponsibleUser.IsActive &&
-                          clientCase.Client.ResponsibleUser.IsApproved
-                        : clientCase.LegalEntity != null &&
-                          clientCase.LegalEntity.ResponsibleUser != null &&
-                          clientCase.LegalEntity.ResponsibleUser.IsActive &&
-                          clientCase.LegalEntity.ResponsibleUser.IsApproved)))
-            .Select(clientCase => new
-            {
-                clientCase.CreatedAt,
-                clientCase.LastViewedAt,
-                clientCase.ActivityConfirmedAt,
-                clientCase.InactivityRemindersEnabled,
-                ActiveTaskCount = _db.TaskJournalItems.Count(task =>
-                    task.ClientCaseId == clientCase.Id &&
-                    CaseControlActiveTaskStatuses.Contains(task.Status)),
-                LastTaskAt = _db.TaskJournalItems
-                    .IgnoreQueryFilters()
-                    .Where(task =>
-                        task.ClientCaseId == clientCase.Id &&
-                        !task.TagsJson.Contains(CaseControlAutomationTag))
-                    .Max(task => (DateTime?)(task.UpdatedAt ?? task.CreatedAt)),
-                LastTaskCommentAt = _db.TaskJournalComments
-                    .Where(comment =>
-                        comment.TaskJournalItem.ClientCaseId == clientCase.Id &&
-                        !comment.TaskJournalItem.TagsJson.Contains(CaseControlAutomationTag))
-                    .Max(comment => (DateTime?)(comment.UpdatedAt ?? comment.CreatedAt)),
-                LastControlCycleEndedAt = _db.UseObjectAuditModel
-                    ? _db.TaskJournalItems
-                        .IgnoreQueryFilters()
-                        .Where(task =>
-                            task.ClientCaseId == clientCase.Id &&
-                            task.TagsJson.Contains(CaseControlAutomationTag) &&
-                            ((task.Status == "done" || task.Status == "cancelled") ||
-                             EF.Property<bool>(task, "IsDeleted")))
-                        .Max(task =>
-                            EF.Property<DateTime?>(task, "DeletedAt") ??
-                            task.UpdatedAt ??
-                            (DateTime?)task.CreatedAt)
-                    : _db.TaskJournalItems
-                        .IgnoreQueryFilters()
-                        .Where(task =>
-                            task.ClientCaseId == clientCase.Id &&
-                            task.TagsJson.Contains(CaseControlAutomationTag) &&
-                            (task.Status == "done" || task.Status == "cancelled"))
-                        .Max(task => (DateTime?)(task.UpdatedAt ?? task.CreatedAt)),
-                LastDocumentAt = _db.ClientCaseDocuments
-                    .Where(document => document.ClientCaseId == clientCase.Id)
-                    .Max(document => (DateTime?)document.UploadedAt),
-                LastCourtEventAt = _db.ClientCaseCourtEvents
-                    .Where(courtEvent => courtEvent.ClientCaseId == clientCase.Id)
-                    .Max(courtEvent => (DateTime?)(courtEvent.UpdatedAt ?? courtEvent.CreatedAt)),
-            })
-            .Where(item =>
-                item.ActiveTaskCount == 0 &&
-                (item.LastTaskAt ?? item.CreatedAt) <= cutoff &&
-                (item.LastTaskCommentAt ?? item.CreatedAt) <= cutoff &&
-                (item.LastControlCycleEndedAt ?? item.CreatedAt) <= cutoff &&
-                (item.LastDocumentAt ?? item.CreatedAt) <= cutoff &&
-                (item.LastCourtEventAt ?? item.CreatedAt) <= cutoff &&
-                (item.LastViewedAt ?? item.CreatedAt) <= cutoff &&
-                (item.ActivityConfirmedAt ?? item.CreatedAt) <= cutoff &&
-                item.InactivityRemindersEnabled);
+        var candidates = CaseInactivityAutomationQuery.Build(
+                _db,
+                vacationUserIds,
+                hasAvailableDefaultAssignee,
+                cutoff,
+                cutoff)
+            .Where(item => item.IsCandidate);
         var singleton = _db.Database.SqlQuery<int>($"SELECT 1 AS \"Value\"");
         var statistics = await (
                 from _ in singleton

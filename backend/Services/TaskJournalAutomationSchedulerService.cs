@@ -22,7 +22,7 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
     private const string EscalationUserSettingKey = "tasks.automation.caseControl.escalationUserId";
     private const string RunLocalTimeSettingKey = "tasks.automation.caseControl.runLocalTime";
     private const string ScheduleTimeZoneSettingKey = "tasks.automation.caseControl.scheduleTimeZone";
-    private const string AutomationTag = "автоконтроль";
+    private const string AutomationTag = CaseInactivityAutomationQuery.AutomationTag;
     private const string AutomationActorName = "Автоконтроль дел";
     private const string InactivityEscalationEventType = "caseInactivityControlEscalation";
 
@@ -194,137 +194,23 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
                 now,
                 cancellationToken);
             var escalatedTasks = escalationResult.EscalatedTasks;
-            var cutoff = now.AddDays(-settings.InactiveDays);
-            var candidates = await context.ClientCases
-                .Include(item => item.Client)
-                .Include(item => item.LegalEntity)
-                .Where(clientCase =>
-                    ((clientCase.ClientId.HasValue && clientCase.Client != null) ||
-                     (clientCase.LegalEntityId.HasValue && clientCase.LegalEntity != null)) &&
-                    !CaseInactivityControlCyclePolicy.ExcludedCaseStatuses.Contains(clientCase.Status) &&
-                    !vacationUserIds.Contains(
-                        (clientCase.ResponsibleUserId ??
-                         (clientCase.Client != null ? clientCase.Client.ResponsibleUserId : null) ??
-                         (clientCase.LegalEntity != null ? clientCase.LegalEntity.ResponsibleUserId : null)) ?? 0) &&
-                    (hasDefaultAssignee ||
-                     (clientCase.ResponsibleUserId.HasValue
-                        ? clientCase.ResponsibleUser != null &&
-                          clientCase.ResponsibleUser.IsActive &&
-                          clientCase.ResponsibleUser.IsApproved
-                        : clientCase.Client != null && clientCase.Client.ResponsibleUserId.HasValue
-                            ? clientCase.Client.ResponsibleUser != null &&
-                              clientCase.Client.ResponsibleUser.IsActive &&
-                              clientCase.Client.ResponsibleUser.IsApproved
-                            : clientCase.LegalEntity != null &&
-                              clientCase.LegalEntity.ResponsibleUser != null &&
-                              clientCase.LegalEntity.ResponsibleUser.IsActive &&
-                              clientCase.LegalEntity.ResponsibleUser.IsApproved)))
-                .Select(clientCase => new
-                {
-                    Case = clientCase,
-                    ActiveTaskCount = context.TaskJournalItems.Count(task =>
-                        task.ClientCaseId == clientCase.Id &&
-                        ActiveTaskStatuses.Contains(task.Status)),
-                    LastTaskAt = context.TaskJournalItems
-                        .IgnoreQueryFilters()
-                        .Where(task =>
-                            task.ClientCaseId == clientCase.Id &&
-                            !task.TagsJson.Contains(AutomationTag))
-                        .Max(task => (DateTime?)(task.UpdatedAt ?? task.CreatedAt)),
-                    LastTaskCommentAt = context.TaskJournalComments
-                        .Where(comment =>
-                            comment.TaskJournalItem.ClientCaseId == clientCase.Id &&
-                            !comment.TaskJournalItem.TagsJson.Contains(AutomationTag))
-                        .Max(comment => (DateTime?)(comment.UpdatedAt ?? comment.CreatedAt)),
-                    LastControlCycleEndedAt = context.TaskJournalItems
-                        .IgnoreQueryFilters()
-                        .Where(task =>
-                            task.ClientCaseId == clientCase.Id &&
-                            task.TagsJson.Contains(AutomationTag) &&
-                            ((task.Status == "done" || task.Status == "cancelled") ||
-                             EF.Property<bool>(task, "IsDeleted")))
-                        .Max(task =>
-                            EF.Property<DateTime?>(task, "DeletedAt") ??
-                            task.UpdatedAt ??
-                            (DateTime?)task.CreatedAt),
-                    LastDocumentAt = context.ClientCaseDocuments
-                        .Where(document => document.ClientCaseId == clientCase.Id)
-                        .Max(document => (DateTime?)document.UploadedAt),
-                    LastCourtEventAt = context.ClientCaseCourtEvents
-                        .Where(courtEvent => courtEvent.ClientCaseId == clientCase.Id)
-                        .Max(courtEvent => (DateTime?)(courtEvent.UpdatedAt ?? courtEvent.CreatedAt)),
-                })
-                .Where(item => item.ActiveTaskCount == 0
-                    && (item.LastTaskAt ?? item.Case.CreatedAt) <= cutoff
-                    && (item.LastTaskCommentAt ?? item.Case.CreatedAt) <= cutoff
-                    && (item.LastControlCycleEndedAt ?? item.Case.CreatedAt) <= cutoff
-                    && (item.LastDocumentAt ?? item.Case.CreatedAt) <= cutoff
-                    && (item.LastCourtEventAt ?? item.Case.CreatedAt) <= cutoff
-                    && (item.Case.LastViewedAt ?? item.Case.CreatedAt) <= cutoff
-                    && (item.Case.ActivityConfirmedAt ?? item.Case.CreatedAt) <= cutoff
-                    && item.Case.InactivityRemindersEnabled)
-                .Select(item => new
-                {
-                    Item = item,
-                    LastControlAnchorAt = item.LastTaskAt.HasValue && item.LastTaskAt.Value > item.Case.CreatedAt
-                        ? item.LastTaskAt.Value
-                        : item.Case.CreatedAt,
-                })
-                .Select(row => new
-                {
-                    row.Item,
-                    LastControlAnchorAt = row.Item.LastTaskCommentAt.HasValue && row.Item.LastTaskCommentAt.Value > row.LastControlAnchorAt
-                        ? row.Item.LastTaskCommentAt.Value
-                        : row.LastControlAnchorAt,
-                })
-                .Select(row => new
-                {
-                    row.Item,
-                    LastControlAnchorAt = row.Item.LastDocumentAt.HasValue && row.Item.LastDocumentAt.Value > row.LastControlAnchorAt
-                        ? row.Item.LastDocumentAt.Value
-                        : row.LastControlAnchorAt,
-                })
-                .Select(row => new
-                {
-                    row.Item,
-                    LastControlAnchorAt = row.Item.LastCourtEventAt.HasValue && row.Item.LastCourtEventAt.Value > row.LastControlAnchorAt
-                        ? row.Item.LastCourtEventAt.Value
-                        : row.LastControlAnchorAt,
-                })
-                .Select(row => new
-                {
-                    row.Item,
-                    LastControlAnchorAt = row.Item.Case.LastViewedAt.HasValue && row.Item.Case.LastViewedAt.Value > row.LastControlAnchorAt
-                        ? row.Item.Case.LastViewedAt.Value
-                        : row.LastControlAnchorAt,
-                })
-                .Select(row => new
-                {
-                    row.Item,
-                    LastControlAnchorAt = row.Item.Case.ActivityConfirmedAt.HasValue && row.Item.Case.ActivityConfirmedAt.Value > row.LastControlAnchorAt
-                        ? row.Item.Case.ActivityConfirmedAt.Value
-                        : row.LastControlAnchorAt,
-                })
-                .Select(row => new
-                {
-                    row.Item,
-                    LastControlAnchorAt = row.Item.LastControlCycleEndedAt.HasValue && row.Item.LastControlCycleEndedAt.Value > row.LastControlAnchorAt
-                        ? row.Item.LastControlCycleEndedAt.Value
-                        : row.LastControlAnchorAt,
-                })
-                .OrderBy(row => row.LastControlAnchorAt)
-                .ThenBy(row => row.Item.Case.Client != null
-                    ? row.Item.Case.Client.Name
-                    : row.Item.Case.LegalEntity != null
-                        ? row.Item.Case.LegalEntity.ShortName
-                        : string.Empty)
-                .ThenBy(row => row.Item.Case.Title)
-                .Select(row => row.Item)
+            var inactivityCutoff = now.AddDays(-settings.InactiveDays);
+            var escalationCutoff = now.AddDays(-settings.EscalationDays);
+            var candidates = await CaseInactivityAutomationQuery.Build(
+                    context,
+                    vacationUserIds,
+                    hasDefaultAssignee,
+                    inactivityCutoff,
+                    escalationCutoff)
+                .Where(item => item.IsCandidate)
+                .OrderBy(item => item.LastControlAnchorAt)
+                .ThenBy(item => item.ClientName != string.Empty ? item.ClientName : item.LegalEntityName)
+                .ThenBy(item => item.Title)
                 .Take(settings.Limit)
                 .ToListAsync(cancellationToken);
 
             var candidateCaseIds = candidates
-                .Select(candidate => candidate.Case.Id)
+                .Select(candidate => candidate.Id)
                 .ToArray();
             var activeTaskCaseIds = candidateCaseIds.Length == 0
                 ? []
@@ -339,7 +225,7 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
                     .ToHashSetAsync(cancellationToken);
 
             var responsibleUserIds = candidates
-                .Select(candidate => ResolveCaseResponsibleUserId(candidate.Case))
+                .Select(candidate => candidate.ResponsibleUserId)
                 .Where(userId =>
                     userId.HasValue &&
                     userId.Value > 0 &&
@@ -373,18 +259,18 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
             var createdTasks = new List<CreatedAutomationTask>();
             foreach (var candidate in candidates)
             {
-                var owner = ResolveCaseOwner(candidate.Case);
+                var owner = ResolveCaseOwner(candidate);
                 if (owner is null)
                 {
                     continue;
                 }
 
-                if (activeTaskCaseIds.Contains(candidate.Case.Id))
+                if (activeTaskCaseIds.Contains(candidate.Id))
                 {
                     continue;
                 }
 
-                var assignee = ResolveAutomationAssignee(candidate.Case, responsibleUsers, defaultAssignee);
+                var assignee = ResolveAutomationAssignee(candidate, responsibleUsers, defaultAssignee);
                 if (assignee is null)
                 {
                     continue;
@@ -394,7 +280,7 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
                     ? CalendarTimeZoneHelper.ResolveTimeZone(assigneeTimeZoneId)
                     : defaultTimeZone;
                 var lastActivity = ResolveLastCaseActivity(
-                    candidate.Case,
+                    candidate,
                     candidate.LastTaskAt,
                     candidate.LastTaskCommentAt,
                     candidate.LastDocumentAt,
@@ -413,7 +299,7 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
 
                 var daysWithoutActiveTask = transition.DaysWithoutActivity;
                 var task = BuildAutomationTask(
-                    candidate.Case,
+                    candidate,
                     owner,
                     assignee,
                     assigneeTimeZone,
@@ -531,15 +417,12 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
                 cancellationToken);
     }
 
-    private static int? ResolveCaseResponsibleUserId(ClientCase clientCase)
-        => clientCase.ResponsibleUserId ?? clientCase.Client?.ResponsibleUserId ?? clientCase.LegalEntity?.ResponsibleUserId;
-
     private static User? ResolveAutomationAssignee(
-        ClientCase clientCase,
+        CaseInactivityAutomationCaseRow clientCase,
         IReadOnlyDictionary<int, User> responsibleUsers,
         User? fallbackAssignee)
     {
-        var responsibleUserId = ResolveCaseResponsibleUserId(clientCase);
+        var responsibleUserId = clientCase.ResponsibleUserId;
         if (!responsibleUserId.HasValue)
         {
             return fallbackAssignee;
@@ -597,7 +480,7 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
     }
 
     private static TaskJournalItem BuildAutomationTask(
-        ClientCase clientCase,
+        CaseInactivityAutomationCaseRow clientCase,
         CaseOwnerBinding owner,
         User assignee,
         TimeZoneInfo assigneeTimeZone,
@@ -1010,30 +893,40 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
     private static string DisplayName(User user)
         => string.IsNullOrWhiteSpace(user.FullName) ? user.Email : user.FullName.Trim();
 
-    private static CaseOwnerBinding? ResolveCaseOwner(ClientCase clientCase)
+    private static CaseOwnerBinding? ResolveCaseOwner(CaseInactivityAutomationCaseRow clientCase)
     {
-        if (clientCase.ClientId.HasValue && clientCase.Client is not null)
+        if (clientCase.ClientId.HasValue)
         {
-            return new CaseOwnerBinding(clientCase.ClientId.Value, null, clientCase.Client.Name);
+            return new CaseOwnerBinding(clientCase.ClientId.Value, null, clientCase.ClientName);
         }
 
-        if (clientCase.LegalEntityId.HasValue && clientCase.LegalEntity is not null)
+        if (clientCase.LegalEntityId.HasValue)
         {
-            return new CaseOwnerBinding(null, clientCase.LegalEntityId.Value, GetLegalEntityName(clientCase.LegalEntity));
+            return new CaseOwnerBinding(null, clientCase.LegalEntityId.Value, clientCase.LegalEntityName);
         }
 
         return null;
     }
 
-    private static string GetLegalEntityName(LegalEntity entity)
-        => !string.IsNullOrWhiteSpace(entity.ShortName)
-            ? entity.ShortName.Trim()
-            : !string.IsNullOrWhiteSpace(entity.FullName)
-                ? entity.FullName.Trim()
-                : $"Юрлицо #{entity.Id}";
-
     private static string BuildObjectName(string clientName, string? caseTitle)
         => string.IsNullOrWhiteSpace(caseTitle) ? clientName.Trim() : $"{clientName.Trim()} - {caseTitle.Trim()}";
+
+    private static DateTime ResolveLastCaseActivity(
+        CaseInactivityAutomationCaseRow clientCase,
+        DateTime? lastTaskAt,
+        DateTime? lastTaskCommentAt,
+        DateTime? lastDocumentAt,
+        DateTime? lastCourtEventAt)
+        => CaseMeaningfulActivityResolver.Resolve(
+            new CaseMeaningfulActivitySignals(
+                clientCase.CreatedAt,
+                LastTaskAt: lastTaskAt,
+                LastTaskCommentAt: lastTaskCommentAt,
+                LastDocumentAt: lastDocumentAt,
+                LastCourtEventAt: lastCourtEventAt,
+                LastResponsibleViewAt: clientCase.LastViewedAt,
+                LastActivityConfirmationAt: clientCase.ActivityConfirmedAt))
+            .At;
 
     private static DateTime ResolveLastCaseActivity(
         ClientCase clientCase,
