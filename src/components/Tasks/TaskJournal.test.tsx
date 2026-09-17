@@ -4096,6 +4096,69 @@ describe('TaskJournal', () => {
     expect(apiMock.createTaskJournalCaseAutomationTask).not.toHaveBeenCalled();
   });
 
+  it('refreshes the automation queue when the next state change becomes due', async () => {
+    const nextStateChangeAt = new Date(Date.now() + 100).toISOString();
+    const waitingCandidate = {
+      clientId: 10,
+      clientName: 'Клиент ожидающего дела',
+      clientCaseId: 100,
+      clientCaseTitle: 'ОЖИДАЕТ АВТООБНОВЛЕНИЯ',
+      reason: 'Первый контроль наступит совсем скоро.',
+      activeTaskCount: 0,
+      completedTaskCount: 0,
+      daysWithoutActiveTask: 13,
+      isReadyForControl: false,
+      automationState: 'waiting' as const,
+      lastActivityAt: todayAt(8),
+      lastActivitySource: 'caseCreated',
+      nextControlAt: nextStateChangeAt,
+      daysUntilControl: 1,
+      suggestedTitle: 'Проверить движение по делу',
+      suggestedDescription: 'Автоконтроль',
+      suggestedDueAt: todayAt(9),
+    };
+    const readyCandidate = {
+      ...waitingCandidate,
+      reason: 'Срок первого контроля наступил.',
+      daysWithoutActiveTask: 14,
+      isReadyForControl: true,
+      automationState: 'ready' as const,
+      daysUntilControl: 0,
+    };
+    apiMock.getTaskJournalCaseAutomationCandidates
+      .mockResolvedValueOnce([waitingCandidate])
+      .mockResolvedValueOnce([readyCandidate]);
+    apiMock.getTaskJournalCaseAutomationSummary
+      .mockResolvedValueOnce({
+        totalCount: 1,
+        readyCount: 0,
+        criticalCount: 0,
+        waitingCount: 1,
+        pausedCount: 0,
+        nextStateChangeAt,
+      })
+      .mockResolvedValueOnce({
+        totalCount: 1,
+        readyCount: 1,
+        criticalCount: 0,
+        waitingCount: 0,
+        pausedCount: 0,
+        nextStateChangeAt: null,
+      });
+
+    await renderJournal();
+
+    expect(await screen.findByText('Клиент ожидающего дела')).toBeTruthy();
+    expect(screen.getByText(/Ближайшее изменение состояния:/)).toBeTruthy();
+    await waitFor(
+      () => expect(apiMock.getTaskJournalCaseAutomationCandidates).toHaveBeenCalledTimes(2),
+      { timeout: 3_000 },
+    );
+    expect(await screen.findByText('Срок первого контроля наступил.')).toBeTruthy();
+    expect(screen.getByText('Пора создать · без движения 14 дней')).toBeTruthy();
+    expect(screen.queryByText(/Ближайшее изменение состояния:/)).toBeNull();
+  });
+
   it('shows exact automation totals and loads the next bounded page', async () => {
     const candidate = (id: number) => ({
       clientId: 10,

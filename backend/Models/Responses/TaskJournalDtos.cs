@@ -228,6 +228,7 @@ public class TaskJournalCaseAutomationSummaryDto
     public int CriticalCount { get; set; }
     public int WaitingCount { get; set; }
     public int PausedCount { get; set; }
+    public string? NextStateChangeAt { get; set; }
 }
 
 public class TaskJournalAutomationCreateResultDto

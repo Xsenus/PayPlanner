@@ -1485,20 +1485,45 @@ public class TasksController : ControllerBase
                 item.ResponsibleName.Contains(rawTerm));
         }
 
-        var summary = await candidates
+        var summaryData = await candidates
             .Where(item => item.ActiveTaskCount == 0)
             .GroupBy(_ => 1)
-            .Select(group => new TaskJournalCaseAutomationSummaryDto
+            .Select(group => new
             {
                 TotalCount = group.Count(),
                 PausedCount = group.Count(item => item.IsDisabled || item.IsPausedByVacation),
                 ReadyCount = group.Count(item => item.IsCandidate),
                 CriticalCount = group.Count(item => item.IsCriticalCandidate),
                 WaitingCount = group.Count(item => item.IsRecentlyActive),
+                NextWaitingAnchorAt = group
+                    .Where(item => item.IsRecentlyActive)
+                    .Min(item => (DateTime?)item.LastControlAnchorAt),
+                NextCriticalActivityAt = group
+                    .Where(item => item.IsCandidate && !item.IsCriticalCandidate)
+                    .Min(item => (DateTime?)item.LastMeaningfulActivityAt),
             })
             .SingleOrDefaultAsync(ct);
 
-        return Ok(summary ?? new TaskJournalCaseAutomationSummaryDto());
+        if (summaryData is null)
+        {
+            return Ok(new TaskJournalCaseAutomationSummaryDto());
+        }
+
+        var nextWaitingAt = summaryData.NextWaitingAnchorAt?.AddDays(effectiveInactiveDays);
+        var nextCriticalAt = summaryData.NextCriticalActivityAt?.AddDays(effectiveEscalationDays);
+        var nextStateChangeAt = nextWaitingAt.HasValue && nextCriticalAt.HasValue
+            ? (nextWaitingAt.Value <= nextCriticalAt.Value ? nextWaitingAt : nextCriticalAt)
+            : nextWaitingAt ?? nextCriticalAt;
+
+        return Ok(new TaskJournalCaseAutomationSummaryDto
+        {
+            TotalCount = summaryData.TotalCount,
+            PausedCount = summaryData.PausedCount,
+            ReadyCount = summaryData.ReadyCount,
+            CriticalCount = summaryData.CriticalCount,
+            WaitingCount = summaryData.WaitingCount,
+            NextStateChangeAt = nextStateChangeAt.HasValue ? ToIso(nextStateChangeAt.Value) : null,
+        });
     }
 
     [HttpPost("automation/case-candidates/{clientCaseId:int}/task")]

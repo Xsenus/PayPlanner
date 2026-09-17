@@ -4318,6 +4318,10 @@ public class TasksControllerTests
         Assert.Equal(1, summary.CriticalCount);
         Assert.Equal(1, summary.WaitingCount);
         Assert.Equal(1, summary.PausedCount);
+        Assert.NotNull(summary.NextStateChangeAt);
+        var nextStateChangeAt = DateTimeOffset.Parse(summary.NextStateChangeAt).UtcDateTime;
+        var expectedCriticalAt = nextReadyCase.CreatedAt.AddDays(30);
+        Assert.InRange(nextStateChangeAt, expectedCriticalAt.AddSeconds(-1), expectedCriticalAt.AddSeconds(1));
 
         var searchedSummaryResult = await controller.GetAutomationCaseCandidatesSummary(
             inactiveDays: 14,
@@ -4331,6 +4335,10 @@ public class TasksControllerTests
         Assert.Equal(0, searchedSummary.CriticalCount);
         Assert.Equal(1, searchedSummary.WaitingCount);
         Assert.Equal(0, searchedSummary.PausedCount);
+        Assert.NotNull(searchedSummary.NextStateChangeAt);
+        var searchedNextStateChangeAt = DateTimeOffset.Parse(searchedSummary.NextStateChangeAt).UtcDateTime;
+        var expectedWaitingAt = waitingCase.CreatedAt.AddDays(14);
+        Assert.InRange(searchedNextStateChangeAt, expectedWaitingAt.AddSeconds(-1), expectedWaitingAt.AddSeconds(1));
 
         var overviewFirstPageResult = await controller.GetAutomationCaseCandidates(
             inactiveDays: 14,

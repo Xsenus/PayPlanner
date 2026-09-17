@@ -248,6 +248,8 @@ export interface TaskJournalCaseAutomationSummary {
   criticalCount?: number;
   waitingCount: number;
   pausedCount: number;
+  /** Ближайший момент перехода ожидающего дела в готовое или готового в критическое. */
+  nextStateChangeAt?: string | null;
 }
 
 export interface TaskJournalAutomationCreateResult {

@@ -280,6 +280,8 @@ const EMPTY_AUTOMATION_SUMMARY: TaskJournalCaseAutomationSummary = {
 const AUTOMATION_LOAD_ERROR_MESSAGE = 'Не удалось загрузить очередь автоконтроля. Проверьте соединение и повторите попытку.';
 const AUTOMATION_REFRESH_ERROR_MESSAGE = 'Не удалось обновить очередь автоконтроля. Показаны ранее загруженные данные.';
 const AUTOMATION_SUMMARY_LOAD_ERROR_MESSAGE = 'Карточки доступны, но точные общие счётчики временно не получены. Показаны значения загруженной части очереди.';
+const AUTOMATION_STATE_REFRESH_GRACE_MS = 1_000;
+const MAX_BROWSER_TIMEOUT_MS = 2_000_000_000;
 
 function buildAutomationCandidatesRequestKey(
   settings: TaskJournalSettingsDto,
@@ -2716,6 +2718,16 @@ export function TaskJournal({
     }));
   }, []);
 
+  const requestAutomationCandidatesReload = useCallback((preserveCandidates: boolean) => {
+    automationCandidatesRequestKeyRef.current = null;
+    automationSummaryRequestKeyRef.current = null;
+    automationRetryPreserveCandidatesRef.current = preserveCandidates;
+    setAutomationLoadError(null);
+    setAutomationSummaryLoadError(null);
+    setAutomationPageLoading(true);
+    setAutomationReloadVersion((version) => version + 1);
+  }, []);
+
   const loadAutomationCandidates = useCallback(async (
     settings: TaskJournalSettingsDto,
     automationState: AutomationCandidateStateFilter,
@@ -3191,6 +3203,36 @@ export function TaskJournal({
     };
   }, [automationStateFilter, debouncedAutomationSearch, loadAutomationCandidates, taskSettings]);
 
+  useEffect(() => {
+    const nextStateChangeAt = automationSummary.nextStateChangeAt;
+    if (!nextStateChangeAt) {
+      return;
+    }
+
+    const targetTime = Date.parse(nextStateChangeAt);
+    if (!Number.isFinite(targetTime)) {
+      return;
+    }
+
+    let timeoutId: number | null = null;
+    const scheduleRefresh = () => {
+      const remaining = targetTime - Date.now() + AUTOMATION_STATE_REFRESH_GRACE_MS;
+      if (remaining <= 0) {
+        requestAutomationCandidatesReload(true);
+        return;
+      }
+
+      timeoutId = window.setTimeout(scheduleRefresh, Math.min(remaining, MAX_BROWSER_TIMEOUT_MS));
+    };
+
+    scheduleRefresh();
+    return () => {
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, [automationSummary.nextStateChangeAt, requestAutomationCandidatesReload]);
+
   const assigneeById = useMemo(() => {
     const byId = new Map<number, TaskJournalAssignee>();
     assignees.forEach((assignee) => byId.set(assignee.id, assignee));
@@ -3384,13 +3426,7 @@ export function TaskJournal({
     } catch (error) {
       if (isHttpErrorStatus(error, 409)) {
         setAutomationCandidates((current) => current.filter((item) => item.clientCaseId !== candidate.clientCaseId));
-        automationCandidatesRequestKeyRef.current = null;
-        automationSummaryRequestKeyRef.current = null;
-        automationRetryPreserveCandidatesRef.current = true;
-        setAutomationLoadError(null);
-        setAutomationSummaryLoadError(null);
-        setAutomationPageLoading(true);
-        setAutomationReloadVersion((version) => version + 1);
+        requestAutomationCandidatesReload(true);
         toast.info(
           `${extractDisplayErrorMessage(error, 'Состояние дела уже изменилось.')} Очередь обновляется.`,
           'Автоконтроль дел',
@@ -3401,7 +3437,7 @@ export function TaskJournal({
     } finally {
       setCreatingAutomationCaseId(null);
     }
-  }, [canCreateTasks, emitTaskChange, openTaskEditor, refreshTasks, toast]);
+  }, [canCreateTasks, emitTaskChange, openTaskEditor, refreshTasks, requestAutomationCandidatesReload, toast]);
 
   const openTaskCreateForAutomationCandidate = useCallback((candidate: TaskJournalCaseAutomationCandidate) => {
     openTaskCreateFromTemplate({
@@ -3460,14 +3496,8 @@ export function TaskJournal({
   }, [automationSearch]);
 
   const retryAutomationCandidates = useCallback(() => {
-    automationCandidatesRequestKeyRef.current = null;
-    automationSummaryRequestKeyRef.current = null;
-    automationRetryPreserveCandidatesRef.current = automationCandidates.length > 0;
-    setAutomationLoadError(null);
-    setAutomationSummaryLoadError(null);
-    setAutomationPageLoading(true);
-    setAutomationReloadVersion((version) => version + 1);
-  }, [automationCandidates.length]);
+    requestAutomationCandidatesReload(automationCandidates.length > 0);
+  }, [automationCandidates.length, requestAutomationCandidatesReload]);
 
   const loadMoreAutomationCandidates = useCallback(async () => {
     const stateTotal = getAutomationCandidateStateCount(automationSummary, automationStateFilter);
@@ -6711,6 +6741,12 @@ function TaskAutomationPanel({
           <div className="pp-automation-panel-kicker text-xs font-semibold uppercase tracking-[0.16em]">Автоконтроль дел</div>
           <h2 className="mt-1 text-lg font-semibold text-slate-900">{overview.title}</h2>
           <p className="mt-1 text-sm text-slate-600">{overview.description}</p>
+          {effectiveSummary.nextStateChangeAt ? (
+            <div className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-white/80 px-2.5 py-1.5 text-xs font-medium text-amber-900">
+              <CalendarClock className="h-3.5 w-3.5 shrink-0" />
+              Ближайшее изменение состояния: {formatDateTime(effectiveSummary.nextStateChangeAt)}
+            </div>
+          ) : null}
         </div>
         <div
           aria-label={`${overview.countLabel}: ${stateTotal}`}
