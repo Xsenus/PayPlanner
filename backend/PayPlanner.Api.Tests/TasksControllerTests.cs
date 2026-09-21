@@ -214,6 +214,67 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task CreateTask_PersistsRecurrenceAndReturnsNextOccurrence()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "recurrence-create@example.com", "Автор повторения");
+        var client = await CreateClientAsync(db, "Клиент нового повторения");
+        var dueAt = DateTime.SpecifyKind(DateTime.UtcNow.AddDays(2).Date.AddHours(9), DateTimeKind.Utc);
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.CreateTask(new UpsertTaskJournalItemRequest
+        {
+            ClientId = client.Id,
+            Title = "Регулярно проверять документы",
+            DueAt = dueAt,
+            RecurrenceEnabled = true,
+            RecurrenceFrequency = "monthly",
+            RecurrenceInterval = 1,
+            RecurrenceDayOfMonth = dueAt.Day,
+            RecurrenceTimeMinutes = 9 * 60,
+            RecurrenceSkipWeekends = true,
+            RecurrenceTimeZoneId = "UTC",
+        }, CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(result.Result);
+        var dto = Assert.IsType<TaskJournalItemDto>(created.Value);
+        Assert.True(dto.RecurrenceEnabled);
+        Assert.Equal("monthly", dto.RecurrenceFrequency);
+        Assert.Equal(dueAt.Day, dto.RecurrenceDayOfMonth);
+        Assert.True(DateTime.Parse(dto.RecurrenceNextAt!).ToUniversalTime() > dueAt);
+
+        var stored = await db.TaskJournalItems.AsNoTracking().SingleAsync(item => item.Id == dto.Id);
+        Assert.True(stored.RecurrenceEnabled);
+        Assert.NotNull(stored.RecurrenceNextAt);
+        Assert.Equal("UTC", stored.RecurrenceTimeZoneId);
+    }
+
+    [Fact]
+    public async Task CreateTask_RejectsWeeklyRecurrenceWithoutDayOfWeek()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "recurrence-invalid@example.com", "Автор повторения");
+        var client = await CreateClientAsync(db, "Клиент ошибочного повторения");
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.CreateTask(new UpsertTaskJournalItemRequest
+        {
+            ClientId = client.Id,
+            Title = "Некорректное повторение",
+            DueAt = DateTime.UtcNow.AddDays(1),
+            RecurrenceEnabled = true,
+            RecurrenceFrequency = "weekly",
+            RecurrenceInterval = 1,
+            RecurrenceTimeMinutes = 9 * 60,
+            RecurrenceTimeZoneId = "UTC",
+        }, CancellationToken.None);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(result.Result);
+        Assert.Contains("день недели", badRequest.Value?.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(db.TaskJournalItems);
+    }
+
+    [Fact]
     public async Task GetAssignees_ReturnsProfileTimeZone()
     {
         await using var db = await CreateContextAsync();
@@ -2083,6 +2144,106 @@ public class TasksControllerTests
         var stored = await db.TaskJournalItems.SingleAsync(item => item.Id == task.Id);
         Assert.Equal("new", stored.Status);
         Assert.Null(stored.Result);
+    }
+
+    [Fact]
+    public async Task UpdateStatus_DoneCreatesExactlyOneRecurringTaskWithoutResultCommentsFilesOrPayment()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "recurrence-author@example.com", "Постановщик повторения");
+        var assignee = await CreateAdminUserAsync(db, "recurrence-assignee@example.com", "Исполнитель повторения");
+        var approver = await CreateAdminUserAsync(db, "recurrence-approver@example.com", "Согласующий повторения");
+        var client = await CreateClientAsync(db, "Клиент повторяющейся задачи");
+        var nextDueAt = DateTime.UtcNow.AddDays(20);
+        var task = await CreateTaskAsync(db, author.Id, client.Id, assignee.Id, result: null);
+        task.Title = "Ежемесячно проверить документы";
+        task.Description = "Рабочее описание должно перейти в следующее повторение.";
+        task.ContractorPaymentEnabled = true;
+        task.ContractorPaymentAmount = 12_500m;
+        task.ContractorPaymentDueDate = DateTime.UtcNow.AddDays(10).Date;
+        task.RecurrenceEnabled = true;
+        task.RecurrenceFrequency = "monthly";
+        task.RecurrenceInterval = 1;
+        task.RecurrenceDayOfMonth = nextDueAt.Day;
+        task.RecurrenceTimeMinutes = nextDueAt.Hour * 60 + nextDueAt.Minute;
+        task.RecurrenceSkipWeekends = false;
+        task.RecurrenceTimeZoneId = "UTC";
+        task.RecurrenceNextAt = nextDueAt;
+        task.Participants.Add(new TaskJournalParticipant
+        {
+            UserId = approver.Id,
+            Role = "approver",
+            DisplayName = approver.FullName,
+            Email = approver.Email,
+            ApprovalStatus = "approved",
+            Resolution = "Согласовано в текущем цикле.",
+            RespondedAt = DateTime.UtcNow,
+        });
+        db.TaskJournalComments.Add(new TaskJournalComment
+        {
+            TaskJournalItemId = task.Id,
+            Kind = "comment",
+            Text = "Комментарий текущего цикла не должен копироваться.",
+            AuthorUserId = author.Id,
+            AuthorName = author.FullName,
+            CreatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var notifications = new RecordingNotificationService();
+        var controller = CreateController(db, notifications, assignee);
+
+        var completed = await controller.UpdateStatus(task.Id, new UpdateTaskJournalStatusRequest
+        {
+            Status = "done",
+            Result = "Документы проверены.",
+        }, CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(completed.Result);
+        var nextTask = await db.TaskJournalItems
+            .AsNoTracking()
+            .Include(item => item.Participants)
+            .Include(item => item.Comments)
+            .SingleAsync(item => item.RecurrencePreviousTaskId == task.Id);
+        Assert.Equal("new", nextTask.Status);
+        Assert.Equal(task.Title, nextTask.Title);
+        Assert.Equal(task.Description, nextTask.Description);
+        Assert.Equal(nextDueAt, nextTask.DueAt);
+        Assert.Null(nextTask.Result);
+        Assert.True(nextTask.RecurrenceEnabled);
+        Assert.Equal(1, nextTask.RecurrenceSequence);
+        Assert.False(nextTask.ContractorPaymentEnabled);
+        Assert.Null(nextTask.ContractorPaymentAmount);
+        Assert.Null(nextTask.ContractorPaymentDueDate);
+        Assert.DoesNotContain(nextTask.Comments, item => item.Text.Contains("Комментарий текущего цикла", StringComparison.Ordinal));
+        var nextApprover = Assert.Single(nextTask.Participants, item => item.Role == "approver");
+        Assert.Equal("pending", nextApprover.ApprovalStatus);
+        Assert.Null(nextApprover.Resolution);
+        Assert.Null(nextApprover.RespondedAt);
+        Assert.Contains(nextTask.Id, notifications.AssignedTaskIds);
+
+        var repeatedCompletion = await controller.UpdateStatus(task.Id, new UpdateTaskJournalStatusRequest
+        {
+            Status = "done",
+            Result = "Документы проверены.",
+        }, CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(repeatedCompletion.Result);
+        Assert.Equal(1, await db.TaskJournalItems.CountAsync(item => item.RecurrencePreviousTaskId == task.Id));
+
+        Assert.IsType<NoContentResult>(await controller.DeleteTask(nextTask.Id, CancellationToken.None));
+        Assert.IsType<OkObjectResult>((await controller.UpdateStatus(task.Id, new UpdateTaskJournalStatusRequest
+        {
+            Status = "inProgress",
+        }, CancellationToken.None)).Result);
+        Assert.IsType<OkObjectResult>((await controller.UpdateStatus(task.Id, new UpdateTaskJournalStatusRequest
+        {
+            Status = "done",
+            Result = "Документы проверены повторно.",
+        }, CancellationToken.None)).Result);
+        Assert.Equal(1, await db.TaskJournalItems
+            .IgnoreQueryFilters()
+            .CountAsync(item => item.RecurrencePreviousTaskId == task.Id));
+        Assert.Equal(0, await db.TaskJournalItems.CountAsync(item => item.RecurrencePreviousTaskId == task.Id));
     }
 
     [Fact]

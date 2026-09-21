@@ -5509,6 +5509,38 @@ describe('TaskJournal', () => {
       title: 'Тестовая задача (копия)',
       status: 'new',
       result: '',
+      recurrenceEnabled: false,
+    }));
+  });
+
+  it.each(['legacy', 'modern'] as const)('configures and saves monthly recurrence in the %s task card', async (taskCardWindowMode) => {
+    await renderJournal([createTask({ recurrenceTimeZoneId: 'Europe/Moscow' })], {
+      settings: { taskCardWindowMode },
+    });
+
+    await openFirstTaskForEdit();
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    if (taskCardWindowMode === 'modern') {
+      fireEvent.click(within(card).getByRole('button', { name: 'Повторение задачи' }));
+    }
+
+    const editor = await within(card).findByTestId('task-recurrence-editor');
+    fireEvent.click(within(editor).getByRole('checkbox', { name: 'Повторять задачу' }));
+    fireEvent.change(within(editor).getByRole('spinbutton', { name: 'Число месяца повторения' }), { target: { value: '21' } });
+    fireEvent.change(within(editor).getByLabelText('Время повторения'), { target: { value: '09:30' } });
+    expect(within(editor).getByText(/Новая копия появится только после завершения текущей задачи/)).toBeTruthy();
+
+    fireEvent.click(within(card).getByRole('button', { name: 'Сохранить' }));
+
+    await waitFor(() => expect(apiMock.updateTaskJournalItem).toHaveBeenCalledTimes(1));
+    expect(apiMock.updateTaskJournalItem).toHaveBeenCalledWith(101, expect.objectContaining({
+      recurrenceEnabled: true,
+      recurrenceFrequency: 'monthly',
+      recurrenceInterval: 1,
+      recurrenceDayOfMonth: 21,
+      recurrenceTimeMinutes: 570,
+      recurrenceSkipWeekends: true,
+      recurrenceTimeZoneId: 'Europe/Moscow',
     }));
   });
 

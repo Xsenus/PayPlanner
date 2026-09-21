@@ -1569,8 +1569,8 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasDatabaseName("IX_ClientCases_IsUnderControl");
 
                     b.HasIndex("JudicialUid")
-                        .HasFilter("\"JudicialUid\" <> ''")
-                        .HasDatabaseName("IX_ClientCases_JudicialUid");
+                        .HasDatabaseName("IX_ClientCases_JudicialUid")
+                        .HasFilter("\"JudicialUid\" <> ''");
 
                     b.HasIndex("LastViewedAt")
                         .HasDatabaseName("IX_ClientCases_LastViewedAt");
@@ -2148,8 +2148,8 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasDatabaseName("IX_ClientCaseCourtInstances_Instance");
 
                     b.HasIndex("JudicialUid")
-                        .HasFilter("\"JudicialUid\" <> ''")
-                        .HasDatabaseName("IX_ClientCaseCourtInstances_JudicialUid");
+                        .HasDatabaseName("IX_ClientCaseCourtInstances_JudicialUid")
+                        .HasFilter("\"JudicialUid\" <> ''");
 
                     b.HasIndex("ClientCaseId", "Instance")
                         .IsUnique()
@@ -8857,6 +8857,52 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasColumnType("character varying(32)")
                         .HasDefaultValue("normal");
 
+                    b.Property<int?>("RecurrenceDayOfMonth")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("RecurrenceDayOfWeek")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("RecurrenceEnabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<string>("RecurrenceFrequency")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<int>("RecurrenceInterval")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(1);
+
+                    b.Property<int?>("RecurrenceMonth")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("RecurrenceNextAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("RecurrencePreviousTaskId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("RecurrenceSequence")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<bool>("RecurrenceSkipWeekends")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<int?>("RecurrenceTimeMinutes")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("RecurrenceTimeZoneId")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
                     b.Property<string>("RemindersJson")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
@@ -8957,6 +9003,14 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.HasIndex("Priority")
                         .HasDatabaseName("IX_TaskJournalItems_Priority");
+
+                    b.HasIndex("RecurrenceNextAt")
+                        .HasDatabaseName("IX_TaskJournalItems_RecurrenceNextAt");
+
+                    b.HasIndex("RecurrencePreviousTaskId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_TaskJournalItems_RecurrencePreviousTaskId")
+                        .HasFilter("\"RecurrencePreviousTaskId\" IS NOT NULL");
 
                     b.HasIndex("Status")
                         .HasDatabaseName("IX_TaskJournalItems_Status");

@@ -1534,8 +1534,8 @@ namespace PayPlanner.Api.Migrations
                         .HasDatabaseName("IX_ClientCases_IsUnderControl");
 
                     b.HasIndex("JudicialUid")
-                        .HasFilter("\"JudicialUid\" <> ''")
-                        .HasDatabaseName("IX_ClientCases_JudicialUid");
+                        .HasDatabaseName("IX_ClientCases_JudicialUid")
+                        .HasFilter("\"JudicialUid\" <> ''");
 
                     b.HasIndex("LastViewedAt")
                         .HasDatabaseName("IX_ClientCases_LastViewedAt");
@@ -2103,8 +2103,8 @@ namespace PayPlanner.Api.Migrations
                         .HasDatabaseName("IX_ClientCaseCourtInstances_Instance");
 
                     b.HasIndex("JudicialUid")
-                        .HasFilter("\"JudicialUid\" <> ''")
-                        .HasDatabaseName("IX_ClientCaseCourtInstances_JudicialUid");
+                        .HasDatabaseName("IX_ClientCaseCourtInstances_JudicialUid")
+                        .HasFilter("\"JudicialUid\" <> ''");
 
                     b.HasIndex("ClientCaseId", "Instance")
                         .IsUnique()
@@ -8654,6 +8654,52 @@ namespace PayPlanner.Api.Migrations
                         .HasColumnType("TEXT")
                         .HasDefaultValue("normal");
 
+                    b.Property<int?>("RecurrenceDayOfMonth")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("RecurrenceDayOfWeek")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("RecurrenceEnabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
+
+                    b.Property<string>("RecurrenceFrequency")
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("RecurrenceInterval")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(1);
+
+                    b.Property<int?>("RecurrenceMonth")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("RecurrenceNextAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("RecurrencePreviousTaskId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("RecurrenceSequence")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(0);
+
+                    b.Property<bool>("RecurrenceSkipWeekends")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
+
+                    b.Property<int?>("RecurrenceTimeMinutes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("RecurrenceTimeZoneId")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("RemindersJson")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
@@ -8754,6 +8800,14 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasIndex("Priority")
                         .HasDatabaseName("IX_TaskJournalItems_Priority");
+
+                    b.HasIndex("RecurrenceNextAt")
+                        .HasDatabaseName("IX_TaskJournalItems_RecurrenceNextAt");
+
+                    b.HasIndex("RecurrencePreviousTaskId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_TaskJournalItems_RecurrencePreviousTaskId")
+                        .HasFilter("\"RecurrencePreviousTaskId\" IS NOT NULL");
 
                     b.HasIndex("Status")
                         .HasDatabaseName("IX_TaskJournalItems_Status");

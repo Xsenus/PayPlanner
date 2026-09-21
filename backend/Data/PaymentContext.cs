@@ -2868,6 +2868,12 @@ public class PaymentContext : DbContext
             entity.Property(e => e.RemindersJson).HasColumnType("text").HasDefaultValue("[]").IsRequired();
             entity.Property(e => e.ChannelsJson).HasColumnType("text").HasDefaultValue("[]").IsRequired();
             entity.Property(e => e.TagsJson).HasColumnType("text").HasDefaultValue("[]").IsRequired();
+            entity.Property(e => e.RecurrenceEnabled).HasDefaultValue(false);
+            entity.Property(e => e.RecurrenceFrequency).HasMaxLength(16);
+            entity.Property(e => e.RecurrenceInterval).HasDefaultValue(1);
+            entity.Property(e => e.RecurrenceSkipWeekends).HasDefaultValue(false);
+            entity.Property(e => e.RecurrenceTimeZoneId).HasMaxLength(100);
+            entity.Property(e => e.RecurrenceSequence).HasDefaultValue(0);
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
 
             entity.HasOne(e => e.AssigneeUser)
@@ -2903,6 +2909,11 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.ClientId).HasDatabaseName("IX_TaskJournalItems_ClientId");
             entity.HasIndex(e => e.LegalEntityId).HasDatabaseName("IX_TaskJournalItems_LegalEntityId");
             entity.HasIndex(e => e.ClientCaseId).HasDatabaseName("IX_TaskJournalItems_ClientCaseId");
+            entity.HasIndex(e => e.RecurrenceNextAt).HasDatabaseName("IX_TaskJournalItems_RecurrenceNextAt");
+            entity.HasIndex(e => e.RecurrencePreviousTaskId)
+                .IsUnique()
+                .HasFilter("\"RecurrencePreviousTaskId\" IS NOT NULL")
+                .HasDatabaseName("IX_TaskJournalItems_RecurrencePreviousTaskId");
             entity.HasIndex(e => e.ClientBillingClassification).HasDatabaseName("IX_TaskJournalItems_ClientBillingClassification");
             entity.HasIndex(e => e.BillingContractId).HasDatabaseName("IX_TaskJournalItems_BillingContractId");
             entity.HasIndex(e => e.BillingInvoiceId).HasDatabaseName("IX_TaskJournalItems_BillingInvoiceId");

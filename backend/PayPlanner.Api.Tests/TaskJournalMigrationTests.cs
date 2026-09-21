@@ -21,6 +21,18 @@ public sealed class TaskJournalMigrationTests
             typeof(PostgreSqlPaymentContext));
     }
 
+    [Fact]
+    public void TaskRecurrenceMigrations_AreDiscoverableByEfCore()
+    {
+        AssertMigration<AddTaskRecurrence>(
+            "20260921101627_AddTaskRecurrence",
+            typeof(PaymentContext));
+
+        AssertMigration<AddTaskRecurrencePostgres>(
+            "20260921101641_AddTaskRecurrencePostgres",
+            typeof(PostgreSqlPaymentContext));
+    }
+
     private static void AssertMigration<TMigration>(string expectedId, Type expectedContext)
     {
         var migration = Assert.Single(typeof(TMigration).GetCustomAttributes(typeof(MigrationAttribute), inherit: false));

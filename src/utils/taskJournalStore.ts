@@ -25,6 +25,7 @@ export type TaskJournalApprovalStatus = 'pending' | 'approved' | 'revisionReques
 export type TaskJournalCommentKind = 'comment' | 'system';
 export type TaskClientBillingClassification = 'legacy' | 'billable' | 'internal';
 export type TaskClientBillingStatus = 'legacy' | 'internal' | 'fixed' | 'unbilled' | 'invoiced';
+export type TaskRecurrenceFrequency = 'daily' | 'weekly' | 'monthly' | 'yearly';
 
 export interface TaskJournalParticipant {
   id?: number;
@@ -130,6 +131,18 @@ export interface TaskJournalItem {
   reminders: TaskJournalReminder[];
   channels: TaskJournalChannel[];
   tags: string[];
+  recurrenceEnabled?: boolean;
+  recurrenceFrequency?: TaskRecurrenceFrequency | null;
+  recurrenceInterval?: number;
+  recurrenceDayOfWeek?: number | null;
+  recurrenceDayOfMonth?: number | null;
+  recurrenceMonth?: number | null;
+  recurrenceTimeMinutes?: number | null;
+  recurrenceSkipWeekends?: boolean;
+  recurrenceTimeZoneId?: string | null;
+  recurrenceNextAt?: string | null;
+  recurrencePreviousTaskId?: number | null;
+  recurrenceSequence?: number;
   participants?: TaskJournalParticipant[];
   activeDeadlineChangeRequests?: TaskJournalDeadlineChangeRequest[];
   createdAt: string;
@@ -276,7 +289,9 @@ export interface TaskBillingContext {
   contracts: TaskBillingContractOption[];
 }
 
-export type TaskJournalUpsertPayload = Omit<TaskJournalItem, 'id' | 'createdAt' | 'updatedAt' | 'authorUserId' | 'authorName'> & {
+export type TaskJournalUpsertPayload = Omit<TaskJournalItem,
+  'id' | 'createdAt' | 'updatedAt' | 'authorUserId' | 'authorName'
+  | 'recurrenceNextAt' | 'recurrencePreviousTaskId' | 'recurrenceSequence'> & {
   changeComment?: string | null;
   isInternal?: boolean;
   authorUserId?: number | null;

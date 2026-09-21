@@ -47,6 +47,18 @@ public class TaskJournalItemDto
     public IReadOnlyList<string> Reminders { get; set; } = Array.Empty<string>();
     public IReadOnlyList<string> Channels { get; set; } = Array.Empty<string>();
     public IReadOnlyList<string> Tags { get; set; } = Array.Empty<string>();
+    public bool RecurrenceEnabled { get; set; }
+    public string? RecurrenceFrequency { get; set; }
+    public int RecurrenceInterval { get; set; } = 1;
+    public int? RecurrenceDayOfWeek { get; set; }
+    public int? RecurrenceDayOfMonth { get; set; }
+    public int? RecurrenceMonth { get; set; }
+    public int? RecurrenceTimeMinutes { get; set; }
+    public bool RecurrenceSkipWeekends { get; set; }
+    public string? RecurrenceTimeZoneId { get; set; }
+    public string? RecurrenceNextAt { get; set; }
+    public int? RecurrencePreviousTaskId { get; set; }
+    public int RecurrenceSequence { get; set; }
     public IReadOnlyList<TaskJournalParticipantDto> Participants { get; set; } = Array.Empty<TaskJournalParticipantDto>();
     public IReadOnlyList<TaskJournalDeadlineChangeRequestDto> ActiveDeadlineChangeRequests { get; set; } = Array.Empty<TaskJournalDeadlineChangeRequestDto>();
     public string CreatedAt { get; set; } = string.Empty;

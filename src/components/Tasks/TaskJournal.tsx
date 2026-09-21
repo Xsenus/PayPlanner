@@ -36,6 +36,7 @@ import {
   Play,
   Plus,
   RefreshCw,
+  Repeat2,
   Search,
   Send,
   ShieldAlert,
@@ -119,6 +120,7 @@ import {
   type TaskJournalParticipantRole,
   type TaskJournalPriority,
   type TaskJournalReminder,
+  type TaskRecurrenceFrequency,
   type TaskJournalStatus,
   type TaskJournalType,
   type TaskJournalUpsertPayload,
@@ -719,6 +721,15 @@ const emptyForm = (
     reminders: defaults.reminders,
     channels: defaults.channels,
     tags: [],
+    recurrenceEnabled: false,
+    recurrenceFrequency: 'monthly',
+    recurrenceInterval: 1,
+    recurrenceDayOfWeek: dueAt.getDay(),
+    recurrenceDayOfMonth: dueAt.getDate(),
+    recurrenceMonth: dueAt.getMonth() + 1,
+    recurrenceTimeMinutes: dueAt.getHours() * 60 + dueAt.getMinutes(),
+    recurrenceSkipWeekends: true,
+    recurrenceTimeZoneId: activeTaskJournalTimeZoneId,
     participants: assigneeName
       ? [{
           userId: assigneeUserId ?? null,
@@ -855,6 +866,60 @@ function formatDuration(minutes: number | null | undefined) {
   return `${rest} мин`;
 }
 
+function formatRecurrenceTime(minutes: number | null | undefined) {
+  const normalized = Math.min(24 * 60 - 1, Math.max(0, Number(minutes) || 0));
+  return `${String(Math.floor(normalized / 60)).padStart(2, '0')}:${String(normalized % 60).padStart(2, '0')}`;
+}
+
+function parseRecurrenceTime(value: string) {
+  const [hours, minutes] = value.split(':').map(Number);
+  return Math.min(24 * 60 - 1, Math.max(0, (hours || 0) * 60 + (minutes || 0)));
+}
+
+function calculateRecurrencePreview(form: TaskForm) {
+  if (!form.recurrenceEnabled) return null;
+  const frequency = form.recurrenceFrequency ?? 'monthly';
+  const interval = Math.min(365, Math.max(1, Number(form.recurrenceInterval) || 1));
+  const timeMinutes = form.recurrenceTimeMinutes ?? 9 * 60;
+  const recurrenceTimeZoneId = normalizeUserTimeZoneId(form.recurrenceTimeZoneId ?? activeTaskJournalTimeZoneId);
+  const nowLocal = toTimeZoneDateTimeInput(new Date().toISOString(), recurrenceTimeZoneId);
+  const afterLocal = form.dueAt > nowLocal ? form.dueAt : nowLocal;
+  const [datePart] = afterLocal.split('T');
+  const [year, month, day] = datePart.split('-').map(Number);
+  const base = new Date(Date.UTC(year, month - 1, day));
+
+  for (let attempt = 0; attempt < 3700; attempt += 1) {
+    let candidate: Date;
+    if (frequency === 'daily') {
+      candidate = new Date(base);
+      candidate.setUTCDate(candidate.getUTCDate() + attempt * interval);
+    } else if (frequency === 'weekly') {
+      candidate = new Date(base);
+      const targetDay = form.recurrenceDayOfWeek ?? candidate.getUTCDay();
+      const delta = (targetDay - candidate.getUTCDay() + 7) % 7;
+      candidate.setUTCDate(candidate.getUTCDate() + delta + attempt * 7 * interval);
+    } else if (frequency === 'yearly') {
+      const candidateYear = year + attempt * interval;
+      const candidateMonth = form.recurrenceMonth ?? month;
+      const lastDay = new Date(Date.UTC(candidateYear, candidateMonth, 0)).getUTCDate();
+      candidate = new Date(Date.UTC(candidateYear, candidateMonth - 1, Math.min(form.recurrenceDayOfMonth ?? day, lastDay)));
+    } else {
+      const monthStart = new Date(Date.UTC(year, month - 1 + attempt * interval, 1));
+      const lastDay = new Date(Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth() + 1, 0)).getUTCDate();
+      candidate = new Date(Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth(), Math.min(form.recurrenceDayOfMonth ?? day, lastDay)));
+    }
+
+    if (form.recurrenceSkipWeekends && candidate.getUTCDay() === 6) candidate.setUTCDate(candidate.getUTCDate() + 2);
+    if (form.recurrenceSkipWeekends && candidate.getUTCDay() === 0) candidate.setUTCDate(candidate.getUTCDate() + 1);
+    const localInput = `${candidate.getUTCFullYear()}-${String(candidate.getUTCMonth() + 1).padStart(2, '0')}-${String(candidate.getUTCDate()).padStart(2, '0')}T${formatRecurrenceTime(timeMinutes)}`;
+    if (localInput > afterLocal) {
+      return fromTimeZoneDateTimeInput(localInput, recurrenceTimeZoneId);
+    }
+  }
+
+  return null;
+}
+
 function intervalsOverlap(aStart: number, aEnd: number, bStart: number, bEnd: number) {
   return aStart < bEnd && bStart < aEnd;
 }
@@ -894,6 +959,15 @@ function taskToPayload(task: TaskJournalItem, overrides: Partial<TaskJournalUpse
     reminders: task.reminders,
     channels: task.channels,
     tags: task.tags,
+    recurrenceEnabled: Boolean(task.recurrenceEnabled),
+    recurrenceFrequency: task.recurrenceFrequency ?? 'monthly',
+    recurrenceInterval: task.recurrenceInterval ?? 1,
+    recurrenceDayOfWeek: task.recurrenceDayOfWeek ?? null,
+    recurrenceDayOfMonth: task.recurrenceDayOfMonth ?? null,
+    recurrenceMonth: task.recurrenceMonth ?? null,
+    recurrenceTimeMinutes: task.recurrenceTimeMinutes ?? null,
+    recurrenceSkipWeekends: Boolean(task.recurrenceSkipWeekends),
+    recurrenceTimeZoneId: task.recurrenceTimeZoneId ?? activeTaskJournalTimeZoneId,
     participants: task.participants ?? [],
     ...overrides,
   };
@@ -4605,6 +4679,17 @@ export function TaskJournal({
       reminders: form.reminders.length ? form.reminders : ['atDue'],
       channels: form.channels.length ? form.channels : ['inApp'],
       participants: normalizeParticipants(form, assignees),
+      recurrenceEnabled: Boolean(form.recurrenceEnabled),
+      recurrenceFrequency: form.recurrenceEnabled ? form.recurrenceFrequency ?? 'monthly' : null,
+      recurrenceInterval: form.recurrenceEnabled ? Math.min(365, Math.max(1, Number(form.recurrenceInterval) || 1)) : 1,
+      recurrenceDayOfWeek: form.recurrenceEnabled ? form.recurrenceDayOfWeek ?? null : null,
+      recurrenceDayOfMonth: form.recurrenceEnabled ? form.recurrenceDayOfMonth ?? null : null,
+      recurrenceMonth: form.recurrenceEnabled ? form.recurrenceMonth ?? null : null,
+      recurrenceTimeMinutes: form.recurrenceEnabled ? form.recurrenceTimeMinutes ?? 9 * 60 : null,
+      recurrenceSkipWeekends: Boolean(form.recurrenceEnabled && form.recurrenceSkipWeekends),
+      recurrenceTimeZoneId: form.recurrenceEnabled
+        ? normalizeUserTimeZoneId(form.recurrenceTimeZoneId ?? activeTaskJournalTimeZoneId)
+        : null,
     };
 
     if (normalized.status === 'revision' && !isFutureDateTime(normalized.dueAt)) {
@@ -4909,6 +4994,14 @@ export function TaskJournal({
         clientBillingClassification: undefined,
         billingContractId: null,
         billingMode: '',
+        recurrenceEnabled: false,
+        recurrenceFrequency: null,
+        recurrenceDayOfWeek: null,
+        recurrenceDayOfMonth: null,
+        recurrenceMonth: null,
+        recurrenceTimeMinutes: null,
+        recurrenceSkipWeekends: false,
+        recurrenceTimeZoneId: null,
       }),
     });
     return true;
@@ -9771,6 +9864,15 @@ function TaskModal({
         reminders: state.task.reminders,
         channels: state.task.channels,
         tags: state.task.tags,
+        recurrenceEnabled: Boolean(state.task.recurrenceEnabled),
+        recurrenceFrequency: state.task.recurrenceFrequency ?? 'monthly',
+        recurrenceInterval: state.task.recurrenceInterval ?? 1,
+        recurrenceDayOfWeek: state.task.recurrenceDayOfWeek ?? null,
+        recurrenceDayOfMonth: state.task.recurrenceDayOfMonth ?? null,
+        recurrenceMonth: state.task.recurrenceMonth ?? null,
+        recurrenceTimeMinutes: state.task.recurrenceTimeMinutes ?? null,
+        recurrenceSkipWeekends: Boolean(state.task.recurrenceSkipWeekends),
+        recurrenceTimeZoneId: state.task.recurrenceTimeZoneId ?? activeTaskJournalTimeZoneId,
         participants: state.task.participants ?? [],
       };
       return {
@@ -9849,6 +9951,7 @@ function TaskModal({
   const [actionMenuOpen, setActionMenuOpen] = useState(false);
   const [quickPanel, setQuickPanel] = useState<'assignee' | 'observer' | null>(null);
   const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [recurrencePanelOpen, setRecurrencePanelOpen] = useState(false);
   const [approvalChoice, setApprovalChoice] = useState<{
     taskId: number;
     participantId?: number;
@@ -11264,7 +11367,7 @@ function TaskModal({
                 </>
               ) : null}
             </div>
-            <div className="flex shrink-0 items-center gap-1">
+            <div className="relative flex shrink-0 items-center gap-1">
               {state?.task
                 && isTaskJournalActive(state.task.status)
                 && state.task.status !== 'inProgress'
@@ -11297,6 +11400,25 @@ function TaskModal({
               <button type="button" className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-amber-600 transition hover:bg-amber-50" title="Напоминание" aria-label="Напоминание">
                 <Bell className="h-4 w-4" />
               </button>
+              <button
+                type="button"
+                onClick={() => setRecurrencePanelOpen((open) => !open)}
+                className={`inline-flex h-9 w-9 items-center justify-center rounded-lg transition ${form.recurrenceEnabled ? 'bg-amber-50 text-amber-700' : 'text-slate-500 hover:bg-amber-50 hover:text-amber-700'}`}
+                title="Повторение задачи"
+                aria-label="Повторение задачи"
+                aria-expanded={recurrencePanelOpen}
+              >
+                <Repeat2 className="h-4 w-4" />
+              </button>
+              {recurrencePanelOpen ? (
+                <div className="absolute right-0 top-11 z-40 w-[min(360px,calc(100vw-24px))] rounded-xl border border-amber-200 bg-white p-4 text-left shadow-2xl">
+                  <TaskRecurrenceEditor
+                    form={form}
+                    disabled={isReadOnly}
+                    onChange={(patch) => setForm((previous) => ({ ...previous, ...patch }))}
+                  />
+                </div>
+              ) : null}
               {state?.task && !isReadOnly && canDuplicateTask ? (
                 <button
                   type="button"
@@ -12796,6 +12918,14 @@ function TaskModal({
             />
           </Field>
 
+          <section className="mt-5 rounded-2xl border border-amber-200 bg-amber-50/40 p-4">
+            <TaskRecurrenceEditor
+              form={form}
+              disabled={isReadOnly}
+              onChange={(patch) => setForm((previous) => ({ ...previous, ...patch }))}
+            />
+          </section>
+
           {canRequestDeadlineChange ? (
             <section className="mt-5 rounded-2xl border border-amber-200 bg-amber-50/60 p-4">
               <div className="grid gap-4 lg:grid-cols-[220px_auto] lg:items-end">
@@ -13184,6 +13314,140 @@ function Field({ label, children, className = '' }: { label: string; children: R
     <div className={`block ${className}`}>
       <span className="mb-2 block text-sm font-semibold text-slate-700">{label}</span>
       {children}
+    </div>
+  );
+}
+
+function TaskRecurrenceEditor({
+  form,
+  disabled,
+  onChange,
+}: {
+  form: TaskForm;
+  disabled: boolean;
+  onChange: (patch: Partial<TaskForm>) => void;
+}) {
+  const frequency = form.recurrenceFrequency ?? 'monthly';
+  const nextAt = calculateRecurrencePreview(form);
+  const dueAtMatch = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(form.dueAt);
+  const fallbackDueAt = new Date();
+  const dueDefaults = dueAtMatch
+    ? {
+        dayOfWeek: new Date(Date.UTC(Number(dueAtMatch[1]), Number(dueAtMatch[2]) - 1, Number(dueAtMatch[3]))).getUTCDay(),
+        dayOfMonth: Number(dueAtMatch[3]),
+        month: Number(dueAtMatch[2]),
+        timeMinutes: Number(dueAtMatch[4]) * 60 + Number(dueAtMatch[5]),
+      }
+    : {
+        dayOfWeek: fallbackDueAt.getDay(),
+        dayOfMonth: fallbackDueAt.getDate(),
+        month: fallbackDueAt.getMonth() + 1,
+        timeMinutes: fallbackDueAt.getHours() * 60 + fallbackDueAt.getMinutes(),
+      };
+  const enableRecurrence = (enabled: boolean) => {
+    const wasEnabled = Boolean(form.recurrenceEnabled);
+    onChange({
+      recurrenceEnabled: enabled,
+      recurrenceFrequency: form.recurrenceFrequency ?? 'monthly',
+      recurrenceInterval: form.recurrenceInterval ?? 1,
+      recurrenceDayOfWeek: form.recurrenceDayOfWeek ?? dueDefaults.dayOfWeek,
+      recurrenceDayOfMonth: form.recurrenceDayOfMonth ?? dueDefaults.dayOfMonth,
+      recurrenceMonth: form.recurrenceMonth ?? dueDefaults.month,
+      recurrenceTimeMinutes: form.recurrenceTimeMinutes ?? dueDefaults.timeMinutes,
+      recurrenceSkipWeekends: enabled && !wasEnabled ? true : Boolean(form.recurrenceSkipWeekends),
+      recurrenceTimeZoneId: normalizeUserTimeZoneId(form.recurrenceTimeZoneId ?? activeTaskJournalTimeZoneId),
+    });
+  };
+
+  return (
+    <div className="space-y-3" data-testid="task-recurrence-editor">
+      <label className="flex items-center justify-between gap-3 text-sm font-semibold text-slate-800">
+        <span className="inline-flex items-center gap-2"><Repeat2 className="h-4 w-4 text-amber-600" />Повторять задачу</span>
+        <SystemCheckbox
+          type="checkbox"
+          checked={Boolean(form.recurrenceEnabled)}
+          disabled={disabled}
+          onChange={(event) => enableRecurrence(event.target.checked)}
+          aria-label="Повторять задачу"
+          className="h-4 w-4 rounded border-slate-300 text-amber-600 focus:ring-amber-500"
+        />
+      </label>
+
+      {form.recurrenceEnabled ? (
+        <>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="text-xs font-semibold text-slate-600">
+              Периодичность
+              <SystemSelect
+                value={frequency}
+                disabled={disabled}
+                onChange={(event) => onChange({ recurrenceFrequency: event.target.value as TaskRecurrenceFrequency })}
+                className="mt-1 form-input bg-white"
+                aria-label="Периодичность повторения"
+              >
+                <option value="daily">Каждый день</option>
+                <option value="weekly">Каждую неделю</option>
+                <option value="monthly">Каждый месяц</option>
+                <option value="yearly">Каждый год</option>
+              </SystemSelect>
+            </label>
+            <label className="text-xs font-semibold text-slate-600">
+              Интервал
+              <input
+                type="number"
+                min={1}
+                max={365}
+                value={form.recurrenceInterval ?? 1}
+                disabled={disabled}
+                onChange={(event) => onChange({ recurrenceInterval: Number(event.target.value) || 1 })}
+                className="mt-1 form-input bg-white"
+                aria-label="Интервал повторения"
+              />
+            </label>
+          </div>
+
+          {frequency === 'weekly' ? (
+            <label className="block text-xs font-semibold text-slate-600">
+              День недели
+              <SystemSelect value={form.recurrenceDayOfWeek ?? 1} disabled={disabled} onChange={(event) => onChange({ recurrenceDayOfWeek: Number(event.target.value) })} className="mt-1 form-input bg-white" aria-label="День недели повторения">
+                {['Воскресенье', 'Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота'].map((label, index) => <option key={label} value={index}>{label}</option>)}
+              </SystemSelect>
+            </label>
+          ) : null}
+
+          {frequency === 'monthly' || frequency === 'yearly' ? (
+            <div className={`grid gap-3 ${frequency === 'yearly' ? 'sm:grid-cols-2' : ''}`}>
+              {frequency === 'yearly' ? (
+                <label className="text-xs font-semibold text-slate-600">
+                  Месяц
+                  <SystemSelect value={form.recurrenceMonth ?? 1} disabled={disabled} onChange={(event) => onChange({ recurrenceMonth: Number(event.target.value) })} className="mt-1 form-input bg-white" aria-label="Месяц повторения">
+                    {['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'].map((label, index) => <option key={label} value={index + 1}>{label}</option>)}
+                  </SystemSelect>
+                </label>
+              ) : null}
+              <label className="text-xs font-semibold text-slate-600">
+                Число месяца
+                <input type="number" min={1} max={31} value={form.recurrenceDayOfMonth ?? 1} disabled={disabled} onChange={(event) => onChange({ recurrenceDayOfMonth: Number(event.target.value) || 1 })} className="mt-1 form-input bg-white" aria-label="Число месяца повторения" />
+              </label>
+            </div>
+          ) : null}
+
+          <label className="block text-xs font-semibold text-slate-600">
+            Время
+            <input type="time" value={formatRecurrenceTime(form.recurrenceTimeMinutes)} disabled={disabled} onChange={(event) => onChange({ recurrenceTimeMinutes: parseRecurrenceTime(event.target.value) })} className="mt-1 form-input bg-white" aria-label="Время повторения" />
+          </label>
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            <SystemCheckbox type="checkbox" checked={Boolean(form.recurrenceSkipWeekends)} disabled={disabled} onChange={(event) => onChange({ recurrenceSkipWeekends: event.target.checked })} aria-label="Переносить повторение с выходных" className="h-4 w-4 rounded border-slate-300 text-amber-600" />
+            Переносить с выходных на понедельник
+          </label>
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">
+            <div className="font-semibold">Следующее повторение: {nextAt ? formatDateTime(nextAt) : 'после сохранения'}</div>
+            <div className="mt-1">Новая копия появится только после завершения текущей задачи. Результат, комментарии и файлы не копируются.</div>
+          </div>
+        </>
+      ) : (
+        <p className="text-xs leading-5 text-slate-500">После завершения можно автоматически создавать следующую задачу с теми же рабочими параметрами.</p>
+      )}
     </div>
   );
 }

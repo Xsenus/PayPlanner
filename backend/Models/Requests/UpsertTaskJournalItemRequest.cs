@@ -32,6 +32,15 @@ public class UpsertTaskJournalItemRequest
     public List<string> Channels { get; set; } = [];
     public List<string> Tags { get; set; } = [];
     public List<TaskJournalParticipantRequest> Participants { get; set; } = [];
+    public bool RecurrenceEnabled { get; set; }
+    public string? RecurrenceFrequency { get; set; }
+    public int? RecurrenceInterval { get; set; }
+    public int? RecurrenceDayOfWeek { get; set; }
+    public int? RecurrenceDayOfMonth { get; set; }
+    public int? RecurrenceMonth { get; set; }
+    public int? RecurrenceTimeMinutes { get; set; }
+    public bool RecurrenceSkipWeekends { get; set; }
+    public string? RecurrenceTimeZoneId { get; set; }
 }
 
 public class TaskJournalParticipantRequest

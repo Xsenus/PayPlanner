@@ -3192,10 +3192,12 @@ public class TasksController : ControllerBase
             RemindersJson = SerializeList(request.Reminders, AllowedReminders, ["atDue"]),
             ChannelsJson = SerializeList(request.Channels, AllowedChannels, ["inApp"]),
             TagsJson = SerializeFreeList(request.Tags),
+            RecurrenceSequence = 0,
             CreatedAt = createdAt,
             UpdatedAt = createdAt,
             Participants = participants.Items.Select(ToParticipantEntity).ToList(),
         };
+        ApplyRecurrenceConfiguration(entity, request, normalizedDueAt > createdAt ? normalizedDueAt : createdAt);
 
         AddTaskHistory(entity, access, "Задача создана.");
         if (authorApproverFallback.Added)
@@ -3381,6 +3383,7 @@ public class TasksController : ControllerBase
         entity.ChannelsJson = SerializeList(request.Channels, AllowedChannels, ["inApp"]);
         entity.TagsJson = SerializeFreeList(request.Tags);
         entity.UpdatedAt = updatedAt;
+        ApplyRecurrenceConfiguration(entity, request, requestDueAt > updatedAt ? requestDueAt : updatedAt);
 
         _db.TaskJournalParticipants.RemoveRange(entity.Participants);
         entity.Participants.Clear();
@@ -3427,8 +3430,12 @@ public class TasksController : ControllerBase
             _db.TaskJournalComments.Add(userComment);
         }
 
+        var nextRecurringTask = becameDone
+            ? await CreateNextRecurringTaskIfNeededAsync(entity, access, ct)
+            : null;
         await SyncContractorPaymentAsync(entity, await ResolveContractorPaymentResultBaseDateAsync(previousStatus, nextStatus, entity.UpdatedAt, ct), ct);
         await _db.SaveChangesAsync(ct);
+        await NotifyRecurringTaskCreatedAsync(nextRecurringTask, access, ct);
         if (changeLabels.Count > 0)
         {
             if (becameCancelled)
@@ -3565,8 +3572,12 @@ public class TasksController : ControllerBase
             AddTaskHistory(entity, access, $"Изменено: {string.Join(", ", parts)}.");
         }
 
+        var nextRecurringTask = becameDone
+            ? await CreateNextRecurringTaskIfNeededAsync(entity, access, ct)
+            : null;
         await SyncContractorPaymentAsync(entity, await ResolveContractorPaymentResultBaseDateAsync(oldStatus, entity.Status, entity.UpdatedAt, ct), ct);
         await _db.SaveChangesAsync(ct);
+        await NotifyRecurringTaskCreatedAsync(nextRecurringTask, access, ct);
         if (statusChanged || resultChanged || dueAtChanged)
         {
             var changeLabels = new List<string>();
@@ -4145,8 +4156,13 @@ public class TasksController : ControllerBase
                 approvalDueAt = entity.ApprovalDueAt,
                 respondedAt = participant.RespondedAt
             });
+        var nextRecurringTask = !string.Equals(oldStatus, "done", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(entity.Status, "done", StringComparison.OrdinalIgnoreCase)
+            ? await CreateNextRecurringTaskIfNeededAsync(entity, access, ct)
+            : null;
         await SyncContractorPaymentAsync(entity, await ResolveContractorPaymentResultBaseDateAsync(oldStatus, entity.Status, entity.UpdatedAt, ct), ct);
         await _db.SaveChangesAsync(ct);
+        await NotifyRecurringTaskCreatedAsync(nextRecurringTask, access, ct);
         await _notificationService.NotifyTaskApprovalDecisionAsync(
             entity,
             participant,
@@ -5908,7 +5924,185 @@ public class TasksController : ControllerBase
             return "Комментарий к изменению не должен превышать 4000 символов.";
         }
 
+        if (request.RecurrenceEnabled)
+        {
+            var recurrenceValidation = TaskRecurrencePolicy.Validate(BuildRecurrenceRule(request));
+            if (recurrenceValidation is not null)
+            {
+                return recurrenceValidation;
+            }
+        }
+
         return null;
+    }
+
+    private static TaskRecurrenceRule? BuildRecurrenceRule(UpsertTaskJournalItemRequest request)
+    {
+        if (!request.RecurrenceEnabled)
+        {
+            return null;
+        }
+
+        return new TaskRecurrenceRule(
+            request.RecurrenceFrequency?.Trim().ToLowerInvariant() ?? string.Empty,
+            request.RecurrenceInterval ?? 1,
+            request.RecurrenceDayOfWeek,
+            request.RecurrenceDayOfMonth,
+            request.RecurrenceMonth,
+            request.RecurrenceTimeMinutes ?? 9 * 60,
+            request.RecurrenceSkipWeekends,
+            string.IsNullOrWhiteSpace(request.RecurrenceTimeZoneId)
+                ? CalendarTimeZoneHelper.DefaultTimeZoneId
+                : request.RecurrenceTimeZoneId.Trim());
+    }
+
+    private static TaskRecurrenceRule? BuildRecurrenceRule(TaskJournalItem entity)
+    {
+        if (!entity.RecurrenceEnabled)
+        {
+            return null;
+        }
+
+        return new TaskRecurrenceRule(
+            entity.RecurrenceFrequency ?? string.Empty,
+            entity.RecurrenceInterval,
+            entity.RecurrenceDayOfWeek,
+            entity.RecurrenceDayOfMonth,
+            entity.RecurrenceMonth,
+            entity.RecurrenceTimeMinutes ?? 9 * 60,
+            entity.RecurrenceSkipWeekends,
+            string.IsNullOrWhiteSpace(entity.RecurrenceTimeZoneId)
+                ? CalendarTimeZoneHelper.DefaultTimeZoneId
+                : entity.RecurrenceTimeZoneId.Trim());
+    }
+
+    private static void ApplyRecurrenceConfiguration(
+        TaskJournalItem entity,
+        UpsertTaskJournalItemRequest request,
+        DateTime afterUtc)
+    {
+        var rule = BuildRecurrenceRule(request);
+        entity.RecurrenceEnabled = rule is not null;
+        entity.RecurrenceFrequency = rule?.Frequency;
+        entity.RecurrenceInterval = rule?.Interval ?? 1;
+        entity.RecurrenceDayOfWeek = rule?.DayOfWeek;
+        entity.RecurrenceDayOfMonth = rule?.DayOfMonth;
+        entity.RecurrenceMonth = rule?.Month;
+        entity.RecurrenceTimeMinutes = rule?.TimeMinutes;
+        entity.RecurrenceSkipWeekends = rule?.SkipWeekends ?? false;
+        entity.RecurrenceTimeZoneId = rule?.TimeZoneId;
+        entity.RecurrenceNextAt = rule is null ? null : TaskRecurrencePolicy.CalculateNextUtc(rule, afterUtc);
+    }
+
+    private async Task<TaskJournalItem?> CreateNextRecurringTaskIfNeededAsync(
+        TaskJournalItem source,
+        TaskAccess access,
+        CancellationToken ct)
+    {
+        var rule = BuildRecurrenceRule(source);
+        if (rule is null || TaskRecurrencePolicy.Validate(rule) is not null)
+        {
+            return null;
+        }
+
+        var alreadyCreated = await _db.TaskJournalItems
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .AnyAsync(item => item.RecurrencePreviousTaskId == source.Id, ct);
+        if (alreadyCreated)
+        {
+            return null;
+        }
+
+        var now = DateTime.UtcNow;
+        var scheduledAt = source.RecurrenceNextAt.HasValue && source.RecurrenceNextAt.Value > now
+            ? CalendarTimeZoneHelper.NormalizeUtcInstant(source.RecurrenceNextAt.Value)
+            : TaskRecurrencePolicy.CalculateNextUtc(rule, now);
+        var nextTask = new TaskJournalItem
+        {
+            ClientId = source.ClientId,
+            LegalEntityId = source.LegalEntityId,
+            ClientCaseId = source.ClientCaseId,
+            ClientBillingClassification = source.ClientBillingClassification,
+            BillingContractId = source.BillingContractId,
+            BillingModeSnapshot = source.BillingModeSnapshot,
+            BillingDecisionAt = now,
+            ObjectName = source.ObjectName,
+            Title = source.Title,
+            Description = source.Description,
+            AssigneeUserId = source.AssigneeUserId,
+            AssigneeName = source.AssigneeName,
+            AuthorUserId = source.AuthorUserId,
+            AuthorName = source.AuthorName,
+            DueAt = scheduledAt,
+            ApprovalDueAt = null,
+            PlannedDurationMinutes = source.PlannedDurationMinutes,
+            // Повторение создает рабочую задачу, но не должно автоматически создавать
+            // новое финансовое обязательство перед исполнителем.
+            ContractorPaymentEnabled = false,
+            ContractorPaymentAmount = null,
+            ContractorPaymentDueDate = null,
+            ContractorPaymentOnResult = false,
+            ContractorPaymentResultDelayDays = null,
+            Type = source.Type,
+            Priority = source.Priority,
+            Status = "new",
+            IsUnderControl = source.IsUnderControl,
+            ControlMarkedAt = source.IsUnderControl ? now : null,
+            ControlMarkedByUserId = source.IsUnderControl ? access.UserId : null,
+            ControlMarkedByUserName = source.IsUnderControl ? access.DisplayName : string.Empty,
+            Result = null,
+            RemindersJson = source.RemindersJson,
+            ChannelsJson = source.ChannelsJson,
+            TagsJson = source.TagsJson,
+            RecurrenceEnabled = true,
+            RecurrenceFrequency = rule.Frequency,
+            RecurrenceInterval = rule.Interval,
+            RecurrenceDayOfWeek = rule.DayOfWeek,
+            RecurrenceDayOfMonth = rule.DayOfMonth,
+            RecurrenceMonth = rule.Month,
+            RecurrenceTimeMinutes = rule.TimeMinutes,
+            RecurrenceSkipWeekends = rule.SkipWeekends,
+            RecurrenceTimeZoneId = rule.TimeZoneId,
+            RecurrenceNextAt = TaskRecurrencePolicy.CalculateNextUtc(rule, scheduledAt),
+            RecurrencePreviousTaskId = source.Id,
+            RecurrenceSequence = source.RecurrenceSequence + 1,
+            CreatedAt = now,
+            UpdatedAt = now,
+            Participants = source.Participants.Select(participant => new TaskJournalParticipant
+            {
+                UserId = participant.UserId,
+                Role = participant.Role,
+                DisplayName = participant.DisplayName,
+                Email = participant.Email,
+                SortOrder = participant.SortOrder,
+                ApprovalStatus = "pending",
+                Resolution = null,
+                RespondedAt = null,
+                CreatedAt = now,
+                UpdatedAt = now,
+            }).ToList(),
+        };
+
+        AddTaskHistory(nextTask, access, $"Задача создана автоматически как повторение задачи #{source.Id}.");
+        AddTaskHistory(source, access, $"После завершения создано следующее повторение со сроком {FormatHistoryDateTime(scheduledAt)}.");
+        _db.TaskJournalItems.Add(nextTask);
+        return nextTask;
+    }
+
+    private async Task NotifyRecurringTaskCreatedAsync(
+        TaskJournalItem? task,
+        TaskAccess access,
+        CancellationToken ct)
+    {
+        if (task is null)
+        {
+            return;
+        }
+
+        await _notificationService.NotifyTaskAssignedAsync(task, access.DisplayName, access.UserId, ct);
+        await NotifyTaskScheduleConflictIfNeededAsync(task, access, ct);
+        await SafeSyncExternalCalendarTaskAsync(task.Id, ct);
     }
 
     private static string? ValidateTemplateRequest(UpsertTaskJournalTemplateRequest request)
@@ -6030,6 +6224,18 @@ public class TasksController : ControllerBase
             Reminders = DeserializeList(entity.RemindersJson),
             Channels = DeserializeList(entity.ChannelsJson),
             Tags = DeserializeList(entity.TagsJson),
+            RecurrenceEnabled = entity.RecurrenceEnabled,
+            RecurrenceFrequency = entity.RecurrenceFrequency,
+            RecurrenceInterval = entity.RecurrenceInterval,
+            RecurrenceDayOfWeek = entity.RecurrenceDayOfWeek,
+            RecurrenceDayOfMonth = entity.RecurrenceDayOfMonth,
+            RecurrenceMonth = entity.RecurrenceMonth,
+            RecurrenceTimeMinutes = entity.RecurrenceTimeMinutes,
+            RecurrenceSkipWeekends = entity.RecurrenceSkipWeekends,
+            RecurrenceTimeZoneId = entity.RecurrenceTimeZoneId,
+            RecurrenceNextAt = entity.RecurrenceNextAt.HasValue ? ToIso(entity.RecurrenceNextAt.Value) : null,
+            RecurrencePreviousTaskId = entity.RecurrencePreviousTaskId,
+            RecurrenceSequence = entity.RecurrenceSequence,
             Participants = entity.Participants
                 .OrderBy(ParticipantRoleOrder)
                 .ThenBy(participant => participant.SortOrder)
@@ -7789,7 +7995,86 @@ public class TasksController : ControllerBase
         AddIfChanged(changes, "Оплата по результату", FormatYesNo(entity.ContractorPaymentOnResult), FormatYesNo(request.ContractorPaymentOnResult));
         AddIfChanged(changes, "Срок оплаты по результату", FormatOptionalNumber(entity.ContractorPaymentResultDelayDays), FormatOptionalNumber(NormalizeContractorPaymentResultDelayDays(request.ContractorPaymentResultDelayDays)));
 
+        var currentRecurrence = FormatRecurrence(entity);
+        var nextRecurrence = FormatRecurrence(request);
+        AddIfChanged(changes, "Повторение", currentRecurrence, nextRecurrence);
+
         return changes;
+    }
+
+    private static string FormatRecurrence(TaskJournalItem entity)
+        => entity.RecurrenceEnabled
+            ? FormatRecurrence(
+                entity.RecurrenceFrequency,
+                entity.RecurrenceInterval,
+                entity.RecurrenceDayOfWeek,
+                entity.RecurrenceDayOfMonth,
+                entity.RecurrenceMonth,
+                entity.RecurrenceTimeMinutes,
+                entity.RecurrenceSkipWeekends,
+                entity.RecurrenceTimeZoneId)
+            : "выключено";
+
+    private static string FormatRecurrence(UpsertTaskJournalItemRequest request)
+        => request.RecurrenceEnabled
+            ? FormatRecurrence(
+                request.RecurrenceFrequency,
+                request.RecurrenceInterval ?? 1,
+                request.RecurrenceDayOfWeek,
+                request.RecurrenceDayOfMonth,
+                request.RecurrenceMonth,
+                request.RecurrenceTimeMinutes ?? 9 * 60,
+                request.RecurrenceSkipWeekends,
+                request.RecurrenceTimeZoneId)
+            : "выключено";
+
+    private static string FormatRecurrence(
+        string? frequency,
+        int interval,
+        int? dayOfWeek,
+        int? dayOfMonth,
+        int? month,
+        int? timeMinutes,
+        bool skipWeekends,
+        string? timeZoneId)
+    {
+        var normalizedFrequency = frequency?.Trim().ToLowerInvariant();
+        var frequencyLabel = normalizedFrequency switch
+        {
+            "daily" => "ежедневно",
+            "weekly" => "еженедельно",
+            "monthly" => "ежемесячно",
+            "yearly" => "ежегодно",
+            _ => "по расписанию",
+        };
+        var details = new List<string> { frequencyLabel };
+        if (interval > 1)
+        {
+            details.Add($"интервал {interval}");
+        }
+        if (normalizedFrequency == "weekly" && dayOfWeek.HasValue)
+        {
+            var weekDays = new[] { "воскресенье", "понедельник", "вторник", "среда", "четверг", "пятница", "суббота" };
+            details.Add(weekDays[Math.Clamp(dayOfWeek.Value, 0, 6)]);
+        }
+        if ((normalizedFrequency == "monthly" || normalizedFrequency == "yearly") && dayOfMonth.HasValue)
+        {
+            details.Add($"число {dayOfMonth.Value}");
+        }
+        if (normalizedFrequency == "yearly" && month.HasValue)
+        {
+            details.Add($"месяц {month.Value}");
+        }
+        if (timeMinutes.HasValue)
+        {
+            details.Add($"время {timeMinutes.Value / 60:00}:{timeMinutes.Value % 60:00}");
+        }
+        if (skipWeekends)
+        {
+            details.Add("выходные переносятся на понедельник");
+        }
+        details.Add($"часовой пояс {timeZoneId?.Trim() ?? "UTC"}");
+        return string.Join(", ", details);
     }
 
     private static void AddIfChanged<T>(ICollection<string> changes, string label, T current, T next)

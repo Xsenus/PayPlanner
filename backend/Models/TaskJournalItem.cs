@@ -101,6 +101,32 @@ public class TaskJournalItem
     public string ChannelsJson { get; set; } = "[]";
     public string TagsJson { get; set; } = "[]";
 
+    public bool RecurrenceEnabled { get; set; }
+
+    [MaxLength(16)]
+    public string? RecurrenceFrequency { get; set; }
+
+    public int RecurrenceInterval { get; set; } = 1;
+
+    public int? RecurrenceDayOfWeek { get; set; }
+
+    public int? RecurrenceDayOfMonth { get; set; }
+
+    public int? RecurrenceMonth { get; set; }
+
+    public int? RecurrenceTimeMinutes { get; set; }
+
+    public bool RecurrenceSkipWeekends { get; set; }
+
+    [MaxLength(100)]
+    public string? RecurrenceTimeZoneId { get; set; }
+
+    public DateTime? RecurrenceNextAt { get; set; }
+
+    public int? RecurrencePreviousTaskId { get; set; }
+
+    public int RecurrenceSequence { get; set; }
+
     public ICollection<TaskJournalParticipant> Participants { get; set; } = new List<TaskJournalParticipant>();
     public ICollection<TaskJournalComment> Comments { get; set; } = new List<TaskJournalComment>();
     public ICollection<TaskJournalFile> Files { get; set; } = new List<TaskJournalFile>();
