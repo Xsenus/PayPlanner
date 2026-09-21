@@ -318,6 +318,8 @@ function filterTaskJournalMockItems(tasks: TaskJournalItem[], params: Record<str
     const assigneeMatches = typeof params.assigneeUserId !== 'number'
       || task.assigneeUserId === params.assigneeUserId
       || task.participants?.some((participant) => participant.role === 'assignee' && participant.userId === params.assigneeUserId);
+    const participantRoleMatches = typeof params.participantRole !== 'string'
+      || task.participants?.some((participant) => participant.role === params.participantRole && participant.userId === 7);
     const searchMatches = !search || [task.objectName, task.clientName, task.legalEntityName, task.clientCaseTitle, task.title]
       .some((value) => value?.toLocaleLowerCase('ru').includes(search));
     const billingMatches = typeof params.billingStatus !== 'string'
@@ -327,6 +329,7 @@ function filterTaskJournalMockItems(tasks: TaskJournalItem[], params: Record<str
     return statusMatches
       && metricMatches
       && assigneeMatches
+      && participantRoleMatches
       && (typeof params.authorUserId !== 'number' || task.authorUserId === params.authorUserId)
       && (typeof params.clientId !== 'number' || task.clientId === params.clientId)
       && (typeof params.legalEntityId !== 'number' || task.legalEntityId === params.legalEntityId)
@@ -1407,6 +1410,8 @@ describe('TaskJournal', () => {
     expect(within(analysis).getByText('Неоплачиваемые: 1')).toBeTruthy();
     expect(within(analysis).getByText('Уже включены в счёт: 1')).toBeTruthy();
     expect(within(analysis).getByText('Нужно распределить: 1')).toBeTruthy();
+    expect(within(analysis).getByTestId('task-billing-counter-help').textContent).toContain('количество клиентов');
+    expect(within(analysis).getByTestId('task-billing-counter-help').textContent).toContain('количество отдельных работ');
 
     fireEvent.click(within(analysis).getByRole('button', { name: 'Платные задачи без счёта: 3' }));
     await waitFor(() => expect(apiMock.getTaskJournalItems).toHaveBeenLastCalledWith(
@@ -3438,6 +3443,52 @@ describe('TaskJournal', () => {
 
     expect(await screen.findByText('Поставленная мной задача')).toBeTruthy();
     await waitFor(() => expect(screen.queryByText('Тестовая задача')).toBeNull());
+  });
+
+  it('filters tasks where the current user observes, approves, or controls work', async () => {
+    await renderJournal([
+      createTask({
+        id: 201,
+        title: 'Задача наблюдателя',
+        assigneeUserId: 8,
+        participants: [{ userId: 7, role: 'observer', displayName: 'Администратор', approvalStatus: 'pending' }],
+      }),
+      createTask({
+        id: 202,
+        title: 'Задача согласующего',
+        assigneeUserId: 8,
+        participants: [{ userId: 7, role: 'approver', displayName: 'Администратор', approvalStatus: 'pending' }],
+      }),
+      createTask({
+        id: 203,
+        title: 'Задача на контроле',
+        assigneeUserId: 8,
+        isUnderControl: true,
+      }),
+    ]);
+
+    const observerButton = screen.getByTestId('task-quick-filter-observer');
+    expect(observerButton.getAttribute('title')).toContain('не принимаете решение');
+    fireEvent.click(observerButton);
+    expect(await screen.findByText('Задача наблюдателя')).toBeTruthy();
+    await waitFor(() => expect(apiMock.getTaskJournalItems).toHaveBeenLastCalledWith(
+      expect.objectContaining({ participantRole: 'observer' }),
+      expect.anything(),
+    ));
+
+    fireEvent.click(screen.getByTestId('task-quick-filter-approver'));
+    expect(await screen.findByText('Задача согласующего')).toBeTruthy();
+    await waitFor(() => expect(apiMock.getTaskJournalItems).toHaveBeenLastCalledWith(
+      expect.objectContaining({ participantRole: 'approver' }),
+      expect.anything(),
+    ));
+
+    fireEvent.click(screen.getByTestId('task-quick-filter-underControl'));
+    expect(await screen.findByText('Задача на контроле')).toBeTruthy();
+    await waitFor(() => expect(apiMock.getTaskJournalItems).toHaveBeenLastCalledWith(
+      expect.objectContaining({ underControl: true }),
+      expect.anything(),
+    ));
   });
 
   it('uses metric cards as task filters', async () => {

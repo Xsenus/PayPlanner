@@ -148,6 +148,47 @@ describe('RealtimeNotificationToasts', () => {
     expect(openTask).toHaveBeenCalledWith(123);
   });
 
+  it('keeps task completion visible until the author acknowledges it or opens the task', async () => {
+    const openTask = vi.fn();
+    render(<RealtimeNotificationToasts userId={5} onOpenTask={openTask} />);
+
+    await waitFor(() => expect(connectionState.start).toHaveBeenCalledTimes(1));
+    act(() => {
+      connectionState.handlers.get(REALTIME_USER_NOTIFICATION_CREATED_EVENT)?.({
+        id: 142,
+        recipientUserId: 5,
+        type: 'taskCompleted',
+        eventKey: 'task:223:completed',
+        title: 'Задача выполнена',
+        bodyPreview: 'Исполнитель отметил задачу выполненной.',
+        tone: 'blue',
+        objectType: 'task',
+        objectId: 223,
+        taskJournalItemId: 223,
+        createdAt: '2026-09-21T10:00:00Z',
+      });
+    });
+
+    const toastOptions = toastMock.showToast.mock.calls[0][0] as {
+      durationMs: number;
+      actionLabel: string;
+      actions: Array<{ label: string; onClick: () => void | Promise<void>; variant?: string }>;
+    };
+    expect(toastOptions.durationMs).toBe(0);
+    expect(toastOptions.actionLabel).toBe('К задаче');
+    expect(toastOptions.actions.map((item) => item.label)).toEqual(['Всё понятно', 'К задаче']);
+
+    await act(async () => {
+      await toastOptions.actions[0].onClick();
+    });
+    expect(apiMock.markUserNotificationRead).toHaveBeenCalledWith(142);
+
+    act(() => {
+      toastOptions.actions[1].onClick();
+    });
+    expect(openTask).toHaveBeenCalledWith(223);
+  });
+
   it('opens case document toast actions on the documents tab', async () => {
     const openCase = vi.fn();
     const openCaseDocument = vi.fn();

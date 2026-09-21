@@ -1992,6 +1992,7 @@ describe('apiService case calendar', () => {
       status: 'active',
       assigneeUserId: 7,
       authorUserId: 8,
+      participantRole: 'observer',
       approvalScope: true,
       metric: 'highPriority',
       clientId: 10,
@@ -2011,6 +2012,7 @@ describe('apiService case calendar', () => {
     expect(itemsQuery.get('status')).toBe('active');
     expect(itemsQuery.get('assigneeUserId')).toBe('7');
     expect(itemsQuery.get('authorUserId')).toBe('8');
+    expect(itemsQuery.get('participantRole')).toBe('observer');
     expect(itemsQuery.get('approvalScope')).toBe('true');
     expect(itemsQuery.get('metric')).toBe('highPriority');
     expect(itemsQuery.get('clientCaseId')).toBe('100');
@@ -2025,6 +2027,7 @@ describe('apiService case calendar', () => {
     }), { headers: { 'Content-Type': 'application/json' } }));
     await apiService.getTaskJournalSummary({
       status: 'all',
+      participantRole: 'approver',
       todayFrom: '2026-08-05T00:00:00.000Z',
       todayTo: '2026-08-06T00:00:00.000Z',
     }, { signal: controller.signal });
@@ -2033,6 +2036,7 @@ describe('apiService case calendar', () => {
     const summaryQuery = new URL(String(summaryUrl)).searchParams;
     expect(String(summaryUrl)).toContain('/tasks/summary?');
     expect(summaryQuery.get('status')).toBe('all');
+    expect(summaryQuery.get('participantRole')).toBe('approver');
     expect(summaryQuery.get('todayFrom')).toBe('2026-08-05T00:00:00.000Z');
     expect(summaryQuery.get('todayTo')).toBe('2026-08-06T00:00:00.000Z');
     expect(summaryQuery.has('page')).toBe(false);

@@ -540,6 +540,7 @@ export function RealtimeNotificationToasts({
         void markRead();
         return action.run();
       };
+      const isTaskCompleted = notification.type === 'taskCompleted';
       const confirmCaseActivity = async () => {
         if (!caseId) return;
         try {
@@ -572,35 +573,48 @@ export function RealtimeNotificationToasts({
           );
         }
       };
-      const actions: RealtimeToastAction[] = [
-        {
-          label: action.label,
-          run: openAction,
-        },
-        ...(isCaseInactivity
-          ? [{
-              label: 'Подтвердить активность',
-              run: confirmCaseActivity,
-              variant: 'primary' as const,
-            }]
-          : []),
-        {
-          label: 'Прочитано',
-          run: markRead,
-          variant: 'secondary',
-        },
-        {
-          label: 'Отложить',
-          run: snoozeAction,
-          variant: 'secondary',
-        },
-      ];
+      const actions: RealtimeToastAction[] = isTaskCompleted
+        ? [
+            {
+              label: 'Всё понятно',
+              run: markRead,
+              variant: 'secondary',
+            },
+            {
+              label: 'К задаче',
+              run: openAction,
+              variant: 'primary',
+            },
+          ]
+        : [
+            {
+              label: action.label,
+              run: openAction,
+            },
+            ...(isCaseInactivity
+              ? [{
+                  label: 'Подтвердить активность',
+                  run: confirmCaseActivity,
+                  variant: 'primary' as const,
+                }]
+              : []),
+            {
+              label: 'Прочитано',
+              run: markRead,
+              variant: 'secondary',
+            },
+            {
+              label: 'Отложить',
+              run: snoozeAction,
+              variant: 'secondary',
+            },
+          ];
       toast.showToast({
         title: notification.title || 'Уведомление',
         description: buildToastDescription(notification),
         variant: resolveToastVariant(notification),
-        durationMs: resolveToastDuration(notification),
-        actionLabel: action.label,
+        durationMs: isTaskCompleted ? 0 : resolveToastDuration(notification),
+        actionLabel: isTaskCompleted ? 'К задаче' : action.label,
         onAction: openAction,
         actions: actions.map((item) => ({
           label: item.label,

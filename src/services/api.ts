@@ -1931,6 +1931,7 @@ export interface TaskJournalListParams {
   underControl?: boolean;
   assigneeUserId?: number;
   authorUserId?: number;
+  participantRole?: 'observer' | 'approver';
   approvalScope?: boolean;
   metric?: 'active' | 'overdue' | 'today' | 'highPriority';
   billingStatus?: 'unbilled' | 'fixed' | 'invoiced' | 'internal' | 'legacy';
@@ -4506,6 +4507,7 @@ export class ApiService {
       underControl: params?.underControl,
       assigneeUserId: params?.assigneeUserId,
       authorUserId: params?.authorUserId,
+      participantRole: params?.participantRole,
       approvalScope: params?.approvalScope,
       metric: params?.metric,
       billingStatus: params?.billingStatus,
@@ -4539,6 +4541,7 @@ export class ApiService {
       underControl: params?.underControl,
       assigneeUserId: params?.assigneeUserId,
       authorUserId: params?.authorUserId,
+      participantRole: params?.participantRole,
       approvalScope: params?.approvalScope,
       clientCaseId: params?.clientCaseId,
       clientId: params?.clientId,

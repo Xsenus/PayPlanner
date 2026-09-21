@@ -1446,6 +1446,51 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task GetTasks_FiltersTasksByCurrentUserParticipantRoleBeforePagination()
+    {
+        await using var db = await CreateContextAsync();
+        var currentUser = await CreateAdminUserAsync(db, "participant-filter@example.com", "Участник задачи");
+        var author = await CreateAdminUserAsync(db, "participant-filter-author@example.com", "Постановщик");
+        var observerTask = await CreateTaskAsync(db, author.Id, null, author.Id);
+        observerTask.Title = "Задача наблюдателя";
+        observerTask.Participants.Add(new TaskJournalParticipant
+        {
+            UserId = currentUser.Id,
+            Role = "observer",
+            DisplayName = currentUser.FullName,
+            SortOrder = 1,
+        });
+        var approverTask = await CreateTaskAsync(db, author.Id, null, author.Id);
+        approverTask.Title = "Задача согласующего";
+        approverTask.Participants.Add(new TaskJournalParticipant
+        {
+            UserId = currentUser.Id,
+            Role = "approver",
+            DisplayName = currentUser.FullName,
+            SortOrder = 1,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), currentUser);
+
+        var result = await controller.GetTasks(
+            search: null,
+            status: "all",
+            type: null,
+            assigneeUserId: null,
+            from: null,
+            to: null,
+            participantRole: "observer",
+            page: 1,
+            pageSize: 1,
+            ct: CancellationToken.None);
+
+        var page = Assert.IsType<PagedResponse<TaskJournalItemDto>>(
+            Assert.IsType<OkObjectResult>(result.Result).Value);
+        Assert.Equal(1, page.Total);
+        Assert.Equal(observerTask.Id, Assert.Single(page.Items).Id);
+    }
+
+    [Fact]
     public async Task GetTaskListSummary_CalculatesMetricsAndBillingAnalysisInDatabase()
     {
         await using var db = await CreateContextAsync();

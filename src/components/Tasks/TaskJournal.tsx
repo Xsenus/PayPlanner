@@ -151,7 +151,7 @@ import { TaskTemplatesPanel } from './TaskTemplatesPanel';
 type ViewMode = 'list' | 'board' | 'calendar' | 'timeline';
 type TaskCardLayoutMode = 'compact' | 'expanded';
 type PeriodMode = 'day' | 'week' | 'month' | 'all';
-type QuickFilter = 'all' | 'assignedToMe' | 'authoredByMe';
+type QuickFilter = 'all' | 'assignedToMe' | 'authoredByMe' | 'observer' | 'approver' | 'underControl';
 type MetricFilter = 'none' | 'active' | 'overdue' | 'today' | 'highPriority';
 type TaskStatusFilter = TaskJournalStatus | 'active' | 'all' | 'overdue';
 type TaskCalendarColorMode = 'smart' | 'priority' | 'status';
@@ -398,10 +398,13 @@ const TASK_JOURNAL_SAVED_VIEWS_STORAGE_PREFIX = 'pp.task_journal.views.v1';
 const TASK_CARD_LAYOUT_STORAGE_PREFIX = 'pp.task_journal.card_layout.v1';
 const TASK_AUTOMATION_PANEL_STORAGE_PREFIX = 'pp.task_journal.automation_panel.v1';
 
-const QUICK_FILTER_OPTIONS: Array<{ value: QuickFilter; label: string; icon: typeof ClipboardList }> = [
-  { value: 'all', label: 'Все', icon: ListFilter },
-  { value: 'assignedToMe', label: 'Поручено мне', icon: CheckCircle2 },
-  { value: 'authoredByMe', label: 'Я поручил', icon: Send },
+const QUICK_FILTER_OPTIONS: Array<{ value: QuickFilter; label: string; description: string; icon: typeof ClipboardList }> = [
+  { value: 'all', label: 'Все', description: 'Все доступные вам задачи.', icon: ListFilter },
+  { value: 'assignedToMe', label: 'Поручено мне', description: 'Задачи, где вы основной или дополнительный исполнитель.', icon: CheckCircle2 },
+  { value: 'authoredByMe', label: 'Я поручил', description: 'Задачи, которые вы создали или поручили другим сотрудникам.', icon: Send },
+  { value: 'observer', label: 'Я наблюдатель', description: 'Задачи, где вы следите за ходом работы и получаете общие уведомления, но не принимаете решение по согласованию.', icon: Eye },
+  { value: 'approver', label: 'Я согласую', description: 'Задачи, где вы включены в маршрут согласования. Когда наступит ваша очередь, CRM попросит принять решение.', icon: Scale },
+  { value: 'underControl', label: 'На контроле', description: 'Все задачи, отмеченные для дополнительного контроля.', icon: ShieldAlert },
 ];
 
 const METRIC_FILTER_LABELS: Record<MetricFilter, string> = {
@@ -515,7 +518,12 @@ function createDefaultFilterPreferences(userId: number | null, mode: TaskJournal
 }
 
 function isQuickFilter(value: unknown): value is QuickFilter {
-  return value === 'all' || value === 'assignedToMe' || value === 'authoredByMe';
+  return value === 'all'
+    || value === 'assignedToMe'
+    || value === 'authoredByMe'
+    || value === 'observer'
+    || value === 'approver'
+    || value === 'underControl';
 }
 
 function isViewMode(value: unknown): value is ViewMode {
@@ -1745,6 +1753,14 @@ function matchesQuickFilter(task: TaskJournalItem, quickFilter: QuickFilter, use
 
   if (quickFilter === 'authoredByMe') {
     return isTaskAuthoredByUser(task, userId, userName);
+  }
+
+  if (quickFilter === 'observer' || quickFilter === 'approver') {
+    return getTaskParticipants(task, quickFilter).some((participant) => participant.userId === userId);
+  }
+
+  if (quickFilter === 'underControl') {
+    return task.isUnderControl;
   }
 
   return true;
@@ -3040,9 +3056,10 @@ export function TaskJournal({
       status: statusFilter,
       type: typeFilter === 'all' ? undefined : typeFilter,
       priority: priorityFilter === 'all' ? undefined : priorityFilter,
-      underControl: underControlOnly || undefined,
+      underControl: underControlOnly || quickFilter === 'underControl' || undefined,
       assigneeUserId,
       authorUserId: quickFilter === 'authoredByMe' && currentUserId ? currentUserId : undefined,
+      participantRole: quickFilter === 'observer' || quickFilter === 'approver' ? quickFilter : undefined,
       approvalScope: isApprovalsMode || undefined,
       metric: metricFilter === 'none' ? undefined : metricFilter,
       billingStatus: billingFilter,
@@ -5800,12 +5817,13 @@ export function TaskJournal({
 
         <section className="mb-4 flex min-w-0 max-w-full flex-wrap items-center justify-between gap-3">
           <div className="flex max-w-full flex-wrap overflow-x-auto rounded-xl bg-slate-100 p-1" data-testid="task-quick-filter-row">
-            {QUICK_FILTER_OPTIONS.map(({ value, label, icon: Icon }) => (
+            {QUICK_FILTER_OPTIONS.map(({ value, label, description, icon: Icon }) => (
               <button
                 key={value}
                 type="button"
                 data-testid={`task-quick-filter-${value}`}
                 aria-pressed={quickFilter === value}
+                title={description}
                 onClick={() => handleQuickFilterChange(value)}
                 className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition ${
                   quickFilter === value
@@ -6187,6 +6205,9 @@ export function TaskJournal({
                   {billingAnalysis.unclassified > 0 ? (
                     <button type="button" aria-pressed={billingFilter === 'legacy'} onClick={() => handleBillingFilterClick('legacy')} className={`rounded-lg border px-3 py-1.5 shadow-sm transition hover:-translate-y-0.5 ${billingFilter === 'legacy' ? 'border-amber-700 bg-amber-700 text-white ring-2 ring-amber-200' : 'border-amber-300 bg-amber-100 text-amber-900 hover:bg-amber-200'}`}>Нужно распределить: {billingAnalysis.unclassified}</button>
                   ) : null}
+                </div>
+                <div className="mt-1.5 text-xs leading-5 text-rose-800" data-testid="task-billing-counter-help">
+                  «Счетов подготовить» — количество клиентов, для которых можно сформировать объединённый счёт. «Платные задачи без счёта» — общее количество отдельных работ, ещё не включённых в счета.
                 </div>
                 <div className="mt-1 text-sm text-rose-700">
                   {billingFilter

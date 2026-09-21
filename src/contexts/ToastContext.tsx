@@ -300,15 +300,17 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                         <X className="h-4 w-4" />
                       </button>
                     </div>
-                    <div className="pp-toast-progress-track h-1 w-full">
-                      <div
-                        className="pp-toast-progress h-full"
-                        style={{
-                          width: '100%',
-                          animation: `toast-progress ${toast.durationMs}ms linear forwards`,
-                        }}
-                      />
-                    </div>
+                    {toast.durationMs > 0 ? (
+                      <div className="pp-toast-progress-track h-1 w-full">
+                        <div
+                          className="pp-toast-progress h-full"
+                          style={{
+                            width: '100%',
+                            animation: `toast-progress ${toast.durationMs}ms linear forwards`,
+                          }}
+                        />
+                      </div>
+                    ) : null}
                   </div>
                 );
               })}

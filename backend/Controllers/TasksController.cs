@@ -166,6 +166,7 @@ public class TasksController : ControllerBase
         [FromQuery] string? priority = null,
         [FromQuery] bool? underControl = null,
         [FromQuery] int? authorUserId = null,
+        [FromQuery] string? participantRole = null,
         [FromQuery] bool approvalScope = false,
         [FromQuery] string? metric = null,
         [FromQuery] DateTime? todayFrom = null,
@@ -204,6 +205,7 @@ public class TasksController : ControllerBase
             priority,
             underControl,
             authorUserId,
+            participantRole,
             approvalScope,
             metric,
             todayFrom,
@@ -651,6 +653,7 @@ public class TasksController : ControllerBase
         [FromQuery] string? priority = null,
         [FromQuery] bool? underControl = null,
         [FromQuery] int? authorUserId = null,
+        [FromQuery] string? participantRole = null,
         [FromQuery] bool approvalScope = false,
         [FromQuery] DateTime? todayFrom = null,
         [FromQuery] DateTime? todayTo = null,
@@ -686,6 +689,7 @@ public class TasksController : ControllerBase
             priority,
             underControl,
             authorUserId,
+            participantRole,
             approvalScope,
             metric: null,
             todayFrom: normalizedTodayFrom,
@@ -704,6 +708,7 @@ public class TasksController : ControllerBase
             priority,
             underControl,
             authorUserId,
+            participantRole,
             approvalScope,
             metric: null,
             todayFrom: normalizedTodayFrom,
@@ -4406,6 +4411,7 @@ public class TasksController : ControllerBase
         string? priority,
         bool? underControl,
         int? authorUserId,
+        string? participantRole,
         bool approvalScope,
         string? metric,
         DateTime? todayFrom,
@@ -4427,7 +4433,9 @@ public class TasksController : ControllerBase
             legalEntityId,
             priority,
             underControl,
-            authorUserId);
+            authorUserId,
+            participantRole,
+            access.UserId);
 
         query = ApplyTaskApprovalScope(query, access, approvalScope);
         query = ApplyTaskMetricFilter(query, metric, todayFrom, todayTo);
@@ -4580,7 +4588,9 @@ public class TasksController : ControllerBase
         int? legalEntityId,
         string? priority = null,
         bool? underControl = null,
-        int? authorUserId = null)
+        int? authorUserId = null,
+        string? participantRole = null,
+        int? participantUserId = null)
     {
         if (!string.IsNullOrWhiteSpace(status) && !string.Equals(status, "all", StringComparison.OrdinalIgnoreCase))
         {
@@ -4639,6 +4649,14 @@ public class TasksController : ControllerBase
         if (authorUserId.HasValue)
         {
             query = query.Where(task => task.AuthorUserId == authorUserId.Value);
+        }
+
+        var normalizedParticipantRole = participantRole?.Trim().ToLowerInvariant();
+        if (participantUserId.HasValue && normalizedParticipantRole is "observer" or "approver")
+        {
+            query = query.Where(task => task.Participants.Any(participant =>
+                participant.Role == normalizedParticipantRole &&
+                participant.UserId == participantUserId.Value));
         }
 
         if (clientCaseId.HasValue)
