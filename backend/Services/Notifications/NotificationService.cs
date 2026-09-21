@@ -798,11 +798,16 @@ public sealed class NotificationService : INotificationService
         string actorName,
         int actorUserId,
         string? comment = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IReadOnlyCollection<int>? additionalRecipientUserIds = null)
     {
         var channels = ResolveTaskMessageChannels(task);
         var currentAssigneeUserId = task.AssigneeUserId;
-        var allRecipients = ResolveTaskNotificationUserIds(task, actorUserId);
+        var allRecipients = ResolveTaskNotificationUserIds(task, actorUserId)
+            .Concat(additionalRecipientUserIds ?? Array.Empty<int>())
+            .Where(userId => userId > 0 && userId != actorUserId)
+            .Distinct()
+            .ToList();
         var timeZoneRecipientIds = allRecipients.ToHashSet();
         if (currentAssigneeUserId.HasValue && currentAssigneeUserId.Value != actorUserId)
         {
@@ -3754,10 +3759,15 @@ public sealed class NotificationService : INotificationService
         string actorName,
         int actorUserId,
         string? comment = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IReadOnlyCollection<int>? additionalRecipientUserIds = null)
     {
         var channels = ResolveTaskMessageChannels(task);
-        var recipients = ResolveTaskNotificationUserIds(task, actorUserId);
+        var recipients = ResolveTaskNotificationUserIds(task, actorUserId)
+            .Concat(additionalRecipientUserIds ?? Array.Empty<int>())
+            .Where(userId => userId > 0 && userId != actorUserId)
+            .Distinct()
+            .ToList();
         if (recipients.Count == 0)
         {
             return Array.Empty<NotificationDelivery>();

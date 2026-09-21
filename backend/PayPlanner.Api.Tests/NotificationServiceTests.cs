@@ -2322,6 +2322,72 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyTaskChangedAsync_NotifiesPreviousAuthorAfterAuthorReplacement()
+    {
+        await using var db = await CreateContextAsync();
+        var previousAuthor = await CreateUserAsync(db, "previous-author@example.com");
+        var newAuthor = new User
+        {
+            Email = "new-author@example.com",
+            FullName = "Новый постановщик",
+            PasswordHash = "hash",
+            RoleId = previousAuthor.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        var assignee = new User
+        {
+            Email = "author-replacement-assignee@example.com",
+            FullName = "Исполнитель",
+            PasswordHash = "hash",
+            RoleId = previousAuthor.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        db.Users.AddRange(newAuthor, assignee);
+        await db.SaveChangesAsync();
+        var task = new TaskJournalItem
+        {
+            ObjectName = "Дело клиента",
+            Title = "Уточнить срок",
+            AuthorUserId = newAuthor.Id,
+            AuthorName = newAuthor.FullName,
+            AssigneeUserId = assignee.Id,
+            AssigneeName = assignee.FullName,
+            DueAt = DateTime.UtcNow.AddHours(3),
+            RemindersJson = "[]",
+            ChannelsJson = "[\"inApp\"]",
+            Status = "inProgress"
+        };
+        db.TaskJournalItems.Add(task);
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService());
+
+        await service.NotifyTaskChangedAsync(
+            task,
+            ["Постановщик: Старый постановщик -> Новый постановщик", "Срок: 21.09.2026 10:00 -> 22.09.2026 10:00"],
+            newAuthor.FullName,
+            newAuthor.Id,
+            additionalRecipientUserIds: [previousAuthor.Id]);
+
+        var notifications = await db.UserNotifications.OrderBy(item => item.RecipientUserId).ToListAsync();
+        Assert.Equal(2, notifications.Count);
+        Assert.Contains(notifications, item => item.RecipientUserId == previousAuthor.Id);
+        Assert.Contains(notifications, item => item.RecipientUserId == assignee.Id);
+        Assert.All(notifications, item =>
+        {
+            Assert.Equal(UserNotificationTypes.TaskChanged, item.Type);
+            Assert.Contains("Постановщик", item.BodyPreview, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Срок", item.BodyPreview, StringComparison.OrdinalIgnoreCase);
+        });
+    }
+
+    [Fact]
     public async Task NotifyTaskChangedAsync_HighlightsDueAtChange()
     {
         await using var db = await CreateContextAsync();

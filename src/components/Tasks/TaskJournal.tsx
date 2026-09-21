@@ -2640,6 +2640,8 @@ export function TaskJournal({
   const [selectedSavedViewId, setSelectedSavedViewId] = useState('');
   const [modal, setModal] = useState<ModalState>(null);
   const [creationWizard, setCreationWizard] = useState<TaskCreationWizardState>(null);
+  const [quickCreateOpen, setQuickCreateOpen] = useState(false);
+  const [quickCreateSaving, setQuickCreateSaving] = useState(false);
   const [completionPromptTask, setCompletionPromptTask] = useState<TaskJournalItem | null>(null);
   const [completionPromptResult, setCompletionPromptResult] = useState('');
   const [completionPromptError, setCompletionPromptError] = useState<string | null>(null);
@@ -2910,10 +2912,23 @@ export function TaskJournal({
       return;
     }
 
+    setQuickCreateOpen(false);
     setCreationWizard({ defaults: taskContextDefaults });
     setHighlightedTaskId(null);
     onRouteTaskChange?.(null);
   }, [canCreateTasks, onRouteTaskChange, taskContextDefaults, toast]);
+
+  const openQuickTaskCreate = useCallback(() => {
+    if (!canCreateTasks) {
+      toast.error('У роли нет права на создание задач.', 'Журнал задач');
+      return;
+    }
+
+    setCreationWizard(null);
+    setQuickCreateOpen(true);
+    setHighlightedTaskId(null);
+    onRouteTaskChange?.(null);
+  }, [canCreateTasks, onRouteTaskChange, toast]);
 
   const openTaskCreateFromTemplate = useCallback((
     defaults: Partial<TaskJournalUpsertPayload>,
@@ -4860,6 +4875,54 @@ export function TaskJournal({
     }
   };
 
+  const handleQuickTaskCreate = async ({
+    title,
+    description,
+    dueAt,
+  }: {
+    title: string;
+    description: string;
+    dueAt: string;
+  }) => {
+    if (!canCreateTasks) {
+      toast.error('У роли нет права на создание задач.', 'Журнал задач');
+      return;
+    }
+
+    const normalizedTitle = title.trim();
+    if (!normalizedTitle) {
+      toast.error('Укажите наименование задачи.', 'Журнал задач');
+      return;
+    }
+
+    setQuickCreateSaving(true);
+    try {
+      const form = emptyForm(currentUserName, currentUserId, taskNotificationDefaults);
+      await apiService.createTaskJournalItem({
+        ...form,
+        isInternal: true,
+        clientId: null,
+        legalEntityId: null,
+        clientCaseId: null,
+        objectName: INTERNAL_TASK_OBJECT_NAME,
+        clientBillingClassification: 'internal',
+        billingContractId: null,
+        billingMode: '',
+        title: normalizedTitle,
+        description: description.trim(),
+        dueAt: fromLocalInputValue(dueAt),
+      });
+      setQuickCreateOpen(false);
+      toast.success('Быстрая задача создана. Её можно дополнить и привязать к клиенту или делу.', 'Журнал задач');
+      await refreshTasks();
+      emitTaskChange();
+    } catch (error) {
+      toast.error(extractDisplayErrorMessage(error, 'Не удалось создать быструю задачу.'), 'Журнал задач');
+    } finally {
+      setQuickCreateSaving(false);
+    }
+  };
+
   const handleResultSave = async (task: TaskJournalItem, status: TaskJournalStatus, result: string) => {
     const normalizedResult = result.trim();
     if (status === 'done' && requireCompletionResult && !normalizedResult) {
@@ -5721,6 +5784,15 @@ export function TaskJournal({
                   </button>
                   <button
                     type="button"
+                    onClick={openQuickTaskCreate}
+                    className="inline-flex items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2.5 text-sm font-semibold text-amber-900 transition hover:bg-amber-100"
+                    title="Создать внутреннюю задачу без выбора клиента и дела"
+                  >
+                    <Clock3 className="h-4 w-4" />
+                    Быстрая задача
+                  </button>
+                  <button
+                    type="button"
                     onClick={openTaskCreate}
                     className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800"
                   >
@@ -6495,6 +6567,13 @@ export function TaskJournal({
             setHighlightedTaskId(null);
             onRouteTaskChange?.(null);
           }}
+        />
+      ) : null}
+      {quickCreateOpen ? (
+        <QuickTaskCreateModal
+          saving={quickCreateSaving}
+          onCancel={() => setQuickCreateOpen(false)}
+          onSubmit={(values) => void handleQuickTaskCreate(values)}
         />
       ) : null}
       {completionPromptTask ? (
@@ -9883,6 +9962,99 @@ function TaskWeekScheduleDialog({
 }
 
 type TaskCardChrome = 'legacy' | 'modern';
+
+function QuickTaskCreateModal({
+  saving,
+  onCancel,
+  onSubmit,
+}: {
+  saving: boolean;
+  onCancel: () => void;
+  onSubmit: (values: { title: string; description: string; dueAt: string }) => void;
+}) {
+  const defaultDueAt = useMemo(() => {
+    const value = new Date();
+    value.setHours(value.getHours() + 2);
+    value.setSeconds(0, 0);
+    return toLocalInputValue(value.toISOString());
+  }, []);
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [dueAt, setDueAt] = useState(defaultDueAt);
+  const canSubmit = Boolean(title.trim() && dueAt && !saving);
+
+  return (
+    <div className="fixed inset-0 z-[2400] flex items-center justify-center bg-slate-950/45 p-3" role="dialog" aria-modal="true" aria-labelledby="quick-task-title">
+      <form
+        className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl sm:p-5"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (canSubmit) {
+            onSubmit({ title, description, dueAt });
+          }
+        }}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="text-xs font-bold uppercase tracking-[0.16em] text-amber-700">Создание без привязки</div>
+            <h2 id="quick-task-title" className="mt-1 text-xl font-bold text-slate-900">Быстрая задача</h2>
+          </div>
+          <button type="button" onClick={onCancel} disabled={saving} className="rounded-xl p-2 text-slate-500 hover:bg-slate-100" aria-label="Закрыть">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="mt-4 space-y-3">
+          <label className="block text-sm font-semibold text-slate-700">
+            Наименование задачи
+            <input
+              autoFocus
+              data-testid="quick-task-title-input"
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
+              placeholder="Что нужно сделать"
+              className="mt-1.5 h-11 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none transition focus:border-amber-400 focus:ring-2 focus:ring-amber-100"
+            />
+          </label>
+          <label className="block text-sm font-semibold text-slate-700">
+            Краткое описание
+            <textarea
+              data-testid="quick-task-description-input"
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              placeholder="Добавьте детали, если они уже известны"
+              rows={3}
+              className="mt-1.5 w-full resize-y rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-amber-400 focus:ring-2 focus:ring-amber-100"
+            />
+          </label>
+          <label className="block text-sm font-semibold text-slate-700">
+            Срок
+            <SystemDateInput
+              type="datetime-local"
+              data-testid="quick-task-due-at-input"
+              value={dueAt}
+              onChange={(event) => setDueAt(event.target.value)}
+              className="mt-1.5 h-11 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none transition focus:border-amber-400 focus:ring-2 focus:ring-amber-100"
+            />
+          </label>
+          <div className="rounded-xl border border-sky-100 bg-sky-50 px-3 py-2 text-xs leading-5 text-sky-800">
+            После сохранения задачу можно открыть, дополнить и привязать к клиенту или делу.
+          </div>
+        </div>
+
+        <div className="mt-4 flex justify-end gap-2">
+          <button type="button" onClick={onCancel} disabled={saving} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600 disabled:opacity-50">
+            Отмена
+          </button>
+          <button type="submit" disabled={!canSubmit} className="inline-flex items-center gap-2 rounded-xl bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-amber-700 disabled:cursor-not-allowed disabled:bg-slate-300">
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+            Сохранить
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
 
 function TaskBillingCreateWizard({
   counterpartyOptions,

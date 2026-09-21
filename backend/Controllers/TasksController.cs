@@ -3277,6 +3277,7 @@ public class TasksController : ControllerBase
             return BadRequest(new { message = participants.Error });
         }
 
+        var previousAuthorUserId = entity.AuthorUserId;
         var nextAuthorUserId = entity.AuthorUserId;
         var nextAuthorName = entity.AuthorName;
         var authorChanged = request.AuthorUserId.HasValue && request.AuthorUserId != entity.AuthorUserId;
@@ -3364,6 +3365,9 @@ public class TasksController : ControllerBase
         var changeLabels = BuildTaskChangeLabels(entity, request, binding, participants, nextStatus).ToList();
         AddIfChanged(changeLabels, "Постановщик", entity.AuthorName, nextAuthorName);
         var assigneeChanged = HasTaskAssigneeChange(changeLabels);
+        IReadOnlyCollection<int>? formerAuthorRecipientIds = authorChanged && previousAuthorUserId.HasValue
+            ? [previousAuthorUserId.Value]
+            : null;
         var changeComment = NormalizeOptional(request.ChangeComment);
         var updatedAt = DateTime.UtcNow;
         var approvalDueAt = approvalEndedBecauseNoApprovers
@@ -3458,11 +3462,11 @@ public class TasksController : ControllerBase
             }
             else if (assigneeChanged)
             {
-                await _notificationService.NotifyTaskReassignedAsync(entity, previousAssigneeUserId, previousAssigneeName, changeLabels, access.DisplayName, access.UserId, changeComment, ct);
+                await _notificationService.NotifyTaskReassignedAsync(entity, previousAssigneeUserId, previousAssigneeName, changeLabels, access.DisplayName, access.UserId, changeComment, ct, formerAuthorRecipientIds);
             }
             else
             {
-                await _notificationService.NotifyTaskChangedAsync(entity, changeLabels, access.DisplayName, access.UserId, changeComment, ct);
+                await _notificationService.NotifyTaskChangedAsync(entity, changeLabels, access.DisplayName, access.UserId, changeComment, ct, formerAuthorRecipientIds);
             }
         }
         else if (userComment is not null)

@@ -685,6 +685,33 @@ describe('TaskJournal', () => {
     expect(screen.getByText('БАНКРОТСТВО')).toBeTruthy();
   });
 
+  it('creates a quick internal task without choosing a client or case', async () => {
+    await renderJournal([], { waitForTitle: null });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Быстрая задача' }));
+    expect(await screen.findByRole('heading', { name: 'Быстрая задача' })).toBeTruthy();
+    fireEvent.change(screen.getByTestId('quick-task-title-input'), { target: { value: 'Срочно проверить документ' } });
+    fireEvent.change(screen.getByTestId('quick-task-description-input'), { target: { value: 'Кратко сверить реквизиты' } });
+    fireEvent.change(screen.getByTestId('quick-task-due-at-input'), { target: { value: '2026-09-22T11:30' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    await waitFor(() => expect(apiMock.createTaskJournalItem).toHaveBeenCalledTimes(1));
+    expect(apiMock.createTaskJournalItem).toHaveBeenCalledWith(expect.objectContaining({
+      isInternal: true,
+      clientId: null,
+      legalEntityId: null,
+      clientCaseId: null,
+      objectName: 'Внутренняя задача',
+      clientBillingClassification: 'internal',
+      billingContractId: null,
+      title: 'Срочно проверить документ',
+      description: 'Кратко сверить реквизиты',
+      dueAt: expect.any(String),
+    }));
+    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Быстрая задача' })).toBeNull());
+    expect(toastMock.success).toHaveBeenCalledWith(expect.stringContaining('Быстрая задача создана'), 'Журнал задач');
+  });
+
   it('shows a valid cached calendar as read-only when the task API is unavailable', async () => {
     const cachedTask = createTask({ title: 'Сохранённая задача' });
     apiMock.getFeatureFlags.mockResolvedValue({

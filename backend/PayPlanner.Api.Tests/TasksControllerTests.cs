@@ -2695,7 +2695,8 @@ public class TasksControllerTests
             UpdatedAt = DateTime.UtcNow,
         });
         await db.SaveChangesAsync();
-        var controller = CreateController(db, new RecordingNotificationService(), admin);
+        var notificationService = new RecordingNotificationService();
+        var controller = CreateController(db, notificationService, admin);
 
         var result = await controller.UpdateTask(task.Id, new UpsertTaskJournalItemRequest
         {
@@ -2722,6 +2723,8 @@ public class TasksControllerTests
             item.Kind == "system"
             && item.Text.Contains("Постановщик", StringComparison.OrdinalIgnoreCase)
             && item.Text.Contains("Новый постановщик", StringComparison.OrdinalIgnoreCase));
+        var notification = Assert.Single(notificationService.ChangedTasks);
+        Assert.Contains(oldAuthor.Id, notification.AdditionalRecipientUserIds);
     }
 
     [Fact]
@@ -9860,8 +9863,8 @@ public class TasksControllerTests
         public List<int> DeadlineChangeRequestedTaskIds { get; } = [];
         public List<int> DeadlineChangeApprovedTaskIds { get; } = [];
         public List<int> DeadlineChangeRejectedTaskIds { get; } = [];
-        public List<(int TaskId, IReadOnlyList<string> ChangeLabels, string? Comment)> ChangedTasks { get; } = [];
-        public List<(int TaskId, int? PreviousAssigneeUserId, string? PreviousAssigneeName, IReadOnlyList<string> ChangeLabels, string? Comment)> ReassignedTasks { get; } = [];
+        public List<(int TaskId, IReadOnlyList<string> ChangeLabels, string? Comment, IReadOnlyCollection<int> AdditionalRecipientUserIds)> ChangedTasks { get; } = [];
+        public List<(int TaskId, int? PreviousAssigneeUserId, string? PreviousAssigneeName, IReadOnlyList<string> ChangeLabels, string? Comment, IReadOnlyCollection<int> AdditionalRecipientUserIds)> ReassignedTasks { get; } = [];
         public List<int> CommentTaskIds { get; } = [];
         public List<(int TaskId, IReadOnlyList<int> ConflictIds)> ScheduleConflictTasks { get; } = [];
         public List<(int TaskId, int DaysWithoutActiveTask)> CaseInactivityControls { get; } = [];
@@ -9986,15 +9989,15 @@ public class TasksControllerTests
             return Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
         }
 
-        public Task<IReadOnlyList<NotificationDelivery>> NotifyTaskChangedAsync(TaskJournalItem task, IReadOnlyList<string> changeLabels, string actorName, int actorUserId, string? comment = null, CancellationToken cancellationToken = default)
+        public Task<IReadOnlyList<NotificationDelivery>> NotifyTaskChangedAsync(TaskJournalItem task, IReadOnlyList<string> changeLabels, string actorName, int actorUserId, string? comment = null, CancellationToken cancellationToken = default, IReadOnlyCollection<int>? additionalRecipientUserIds = null)
         {
-            ChangedTasks.Add((task.Id, changeLabels, comment));
+            ChangedTasks.Add((task.Id, changeLabels, comment, additionalRecipientUserIds ?? Array.Empty<int>()));
             return Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
         }
 
-        public Task<IReadOnlyList<NotificationDelivery>> NotifyTaskReassignedAsync(TaskJournalItem task, int? previousAssigneeUserId, string? previousAssigneeName, IReadOnlyList<string> changeLabels, string actorName, int actorUserId, string? comment = null, CancellationToken cancellationToken = default)
+        public Task<IReadOnlyList<NotificationDelivery>> NotifyTaskReassignedAsync(TaskJournalItem task, int? previousAssigneeUserId, string? previousAssigneeName, IReadOnlyList<string> changeLabels, string actorName, int actorUserId, string? comment = null, CancellationToken cancellationToken = default, IReadOnlyCollection<int>? additionalRecipientUserIds = null)
         {
-            ReassignedTasks.Add((task.Id, previousAssigneeUserId, previousAssigneeName, changeLabels, comment));
+            ReassignedTasks.Add((task.Id, previousAssigneeUserId, previousAssigneeName, changeLabels, comment, additionalRecipientUserIds ?? Array.Empty<int>()));
             return Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
         }
 
