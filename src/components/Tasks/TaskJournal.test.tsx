@@ -1421,6 +1421,10 @@ describe('TaskJournal', () => {
     const unbilledTask = createTask({
       id: 321,
       title: 'Подготовить иск',
+      status: 'done',
+      result: 'Иск подготовлен\nи направлен клиенту',
+      createdAt: '2026-09-10T09:00:00Z',
+      updatedAt: '2026-09-20T14:30:00Z',
       clientBillingClassification: 'billable',
       billingContractId: 501,
       billingContractNumber: '15/26',
@@ -1429,6 +1433,7 @@ describe('TaskJournal', () => {
     });
     await renderJournal([unbilledTask], {
       onCreateInvoiceDraft,
+      waitForTitle: null,
       settings: {
         financialDocumentsResponsibleUserId: 7,
         financialDocumentsResponsibleUserName: 'Администратор',
@@ -1436,6 +1441,8 @@ describe('TaskJournal', () => {
     });
 
     expect(screen.getByTestId('task-unbilled-reminder').textContent).toContain('Платные задачи без счёта: 1');
+    fireEvent.click(within(screen.getByTestId('task-unbilled-reminder')).getByRole('button', { name: 'Платные задачи без счёта: 1' }));
+    expect(await screen.findByText('Подготовить иск')).toBeTruthy();
     const unbilledBadge = screen.getByText('БЕЗ СЧЁТА').closest('[data-testid="task-billing-badge-321"]');
     expect(unbilledBadge).toBeTruthy();
     expect(unbilledBadge?.getAttribute('title')).toBe('ПЛАТНАЯ · НЕ ВЫСТАВЛЕН СЧЁТ');
@@ -1448,6 +1455,13 @@ describe('TaskJournal', () => {
       form: expect.objectContaining({ responsibleIds: ['7'] }),
       lineItems: [expect.objectContaining({ name: expect.stringMatching(/Подготовить иск \(задача №321 от/) })],
     }));
+
+    const draft = onCreateInvoiceDraft.mock.calls[0][0];
+    expect(draft.form.description).toContain('Счёт подготовлен на основе фактически выполненных услуг по задачам:');
+    expect(draft.form.description).toContain('1. Задача №321 от 10.09.2026 — выполнена 20.09.2026. Подготовить иск.');
+    expect(draft.form.description).toContain('Результат: Иск подготовлен и направлен клиенту');
+    expect(draft.form.description).toContain(`${window.location.origin}/tasks/321`);
+    expect(draft.form.description).toContain('Задачи созданы по поручению клиента и хранятся в электронном виде в CRM-системе исполнителя.');
   });
 
   it('keeps a completed paid task in the unbilled queue until an invoice is prepared', async () => {

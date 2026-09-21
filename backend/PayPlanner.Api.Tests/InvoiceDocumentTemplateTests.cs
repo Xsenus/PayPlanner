@@ -19,6 +19,29 @@ namespace PayPlanner.Api.Tests;
 public class InvoiceDocumentTemplateTests
 {
     [Fact]
+    public void RenderHtml_PreservesTaskCommentLines_AndMakesCrmLinksClickable()
+    {
+        var payment = new Payment
+        {
+            Account = "TASK-LINKS",
+            Date = new DateTime(2026, 9, 21),
+            Amount = 15_000m,
+            Type = PaymentType.Income,
+            Description = "Счёт подготовлен по задачам:\n1. Задача №321 — выполнена.\nhttps://crm.elitpravo.com/tasks/321",
+        };
+
+        var html = InvoiceDocumentTemplateEngine.RenderHtml(
+            InvoiceDocumentTemplateEngine.DefaultTemplateHtml,
+            payment,
+            [new InvoiceLineItemDto { Name = "Юридическая услуга", Quantity = 1m, Unit = "усл.", Price = 15_000m }],
+            null,
+            false);
+
+        Assert.Contains("Счёт подготовлен по задачам:<br/>1. Задача №321 — выполнена.<br/>", html);
+        Assert.Contains("<a href=\"https://crm.elitpravo.com/tasks/321\">https://crm.elitpravo.com/tasks/321</a>", html);
+    }
+
+    [Fact]
     public async Task DocumentTemplateHistory_StoresBaseline_Deduplicates_AndRestores()
     {
         await using var db = await CreateContextAsync();

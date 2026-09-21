@@ -1163,6 +1163,44 @@ function formatDateOnly(value: Date) {
   });
 }
 
+function formatInvoiceTaskDate(value: string) {
+  const parts = getZonedParts(value, activeTaskJournalTimeZoneId);
+  if (!parts) {
+    return 'дата не указана';
+  }
+
+  return `${String(parts.day).padStart(2, '0')}.${String(parts.month).padStart(2, '0')}.${parts.year}`;
+}
+
+function buildInvoiceTaskUrl(taskId: number) {
+  return new URL(`/tasks/${taskId}`, window.location.origin).toString();
+}
+
+function buildPaidTasksInvoiceDescription(tasks: TaskJournalItem[]) {
+  const taskLines = tasks.map((task, index) => {
+    const createdAt = formatInvoiceTaskDate(task.createdAt);
+    const completedAt = formatInvoiceTaskDate(task.updatedAt);
+    const completionText = task.status === 'done'
+      ? `выполнена ${completedAt}`
+      : task.status === 'approved'
+        ? `выполнена и согласована ${completedAt}`
+        : task.status === 'onApproval' || task.status === 'overdueApproval'
+          ? `выполнена и направлена на согласование ${completedAt}`
+          : `работа учтена ${completedAt}`;
+    const normalizedResult = task.result.replace(/\s+/g, ' ').trim();
+    const resultText = normalizedResult ? ` Результат: ${normalizedResult}` : '';
+
+    return `${index + 1}. Задача №${task.id} от ${createdAt} — ${completionText}. ${task.title}.${resultText}\n${buildInvoiceTaskUrl(task.id)}`;
+  });
+
+  return [
+    'Счёт подготовлен на основе фактически выполненных услуг по задачам:',
+    '',
+    ...taskLines.flatMap((line) => [line, '']),
+    'Задачи созданы по поручению клиента и хранятся в электронном виде в CRM-системе исполнителя.',
+  ].join('\n');
+}
+
 function formatPeriodTitle(date: Date, mode: PeriodMode) {
   if (mode === 'all') {
     return 'Весь период';
@@ -4530,7 +4568,7 @@ export function TaskJournal({
         expenseLegalEntityId: '',
         contractId: contractIds.length === 1 ? contractIds[0] : '',
         clientCaseReference: caseIds.length === 1 ? `Дело: ${first.clientCaseTitle || first.objectName}` : `${caseIds.length} дел(а) по платным задачам`,
-        description: `Счёт по платным задачам: ${selectedTasksForInvoice.length}`,
+        description: buildPaidTasksInvoiceDescription(selectedTasksForInvoice),
         isNotForAccounting: false,
         actReference: '',
         paidDate: '',

@@ -737,7 +737,7 @@ public class PaymentContext : DbContext
             entity.Property(e => e.InvoiceCancelledAt);
             entity.Property(e => e.InvoiceCancelledByUserId);
             entity.Property(e => e.InvoiceCancelledReason).HasMaxLength(1000);
-            entity.Property(e => e.Description).HasMaxLength(500);
+            entity.Property(e => e.Description);
             entity.Property(e => e.CounterpartyName).HasMaxLength(200);
             entity.Property(e => e.ClientCaseReference).HasMaxLength(300);
             entity.Property(e => e.Notes).HasMaxLength(1000);

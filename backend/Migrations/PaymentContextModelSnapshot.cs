@@ -6916,7 +6916,6 @@ namespace PayPlanner.Api.Migrations
 
                     b.Property<string>("Description")
                         .IsRequired()
-                        .HasMaxLength(500)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("DocumentKind")

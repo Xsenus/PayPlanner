@@ -7077,8 +7077,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.Property<string>("Description")
                         .IsRequired()
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)");
+                        .HasColumnType("text");
 
                     b.Property<string>("DocumentKind")
                         .IsRequired()

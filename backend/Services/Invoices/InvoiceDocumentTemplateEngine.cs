@@ -34,6 +34,7 @@ public static class InvoiceDocumentTemplateEngine
     private static readonly JsonSerializerOptions ClientProfileJsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly Regex LoopRegex = new("""\{\{#lineItems\}\}(.*?)\{\{\/lineItems\}\}""", RegexOptions.Singleline | RegexOptions.Compiled);
     private static readonly Regex TokenRegex = new("""\{\{\s*([a-zA-Z0-9\._]+)\s*\}\}""", RegexOptions.Compiled);
+    private static readonly Regex WebUrlRegex = new(@"https?://[^\s<>]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     public static InvoiceDocumentTemplateSettingsDto CreateDefaultSettings()
     {
@@ -282,9 +283,10 @@ public static class InvoiceDocumentTemplateEngine
         var dueDateHtml = !hasInstallmentSchedule && dueDate != invoiceDate
             ? $"<div class=\"invoice-meta-line\"><strong>Срок оплаты:</strong> {Encode(FormatDate(dueDate))}</div>"
             : string.Empty;
+        var clientCommentContentHtml = BuildMultilineTextWithLinksHtml(payment.Description);
         var clientCommentHtml = string.IsNullOrWhiteSpace(payment.Description)
             ? string.Empty
-            : $"<div class=\"invoice-meta-line\"><strong>Комментарий для клиента:</strong> {Encode(payment.Description)}</div>";
+            : $"<div class=\"invoice-meta-line\"><strong>Комментарий для клиента:</strong> {clientCommentContentHtml}</div>";
         var notForAccountingHtml = payment.IsNotForAccounting
             ? "<div class=\"invoice-meta-line invoice-flag\">Счет не для бухгалтерии</div>"
             : string.Empty;
@@ -300,7 +302,7 @@ public static class InvoiceDocumentTemplateEngine
                 ["invoice.dueDate"] = Encode(FormatDate(dueDate)),
                 ["invoice.amount"] = Encode(FormatMoney(payment.Amount)),
                 ["invoice.amountWords"] = Encode(SpellMoney(payment.Amount)),
-                ["invoice.description"] = Encode(payment.Description),
+                ["invoice.description"] = clientCommentContentHtml,
                 ["invoice.clientCommentHtml"] = clientCommentHtml,
                 ["invoice.dueDateHtml"] = dueDateHtml,
                 ["invoice.notForAccountingHtml"] = notForAccountingHtml,
@@ -1501,6 +1503,29 @@ public static class InvoiceDocumentTemplateEngine
 
     private static string Encode(string? value)
         => WebUtility.HtmlEncode(value ?? string.Empty);
+
+    private static string BuildMultilineTextWithLinksHtml(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var normalized = value.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
+        var builder = new StringBuilder();
+        var previousIndex = 0;
+
+        foreach (Match match in WebUrlRegex.Matches(normalized))
+        {
+            builder.Append(Encode(normalized[previousIndex..match.Index]));
+            var encodedUrl = Encode(match.Value);
+            builder.Append($"<a href=\"{encodedUrl}\">{encodedUrl}</a>");
+            previousIndex = match.Index + match.Length;
+        }
+
+        builder.Append(Encode(normalized[previousIndex..]));
+        return builder.ToString().Replace("\n", "<br/>", StringComparison.Ordinal);
+    }
 
     private static string BuildCounterpartyLinesHtml(IEnumerable<string> lines)
         => string.Join(
