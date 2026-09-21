@@ -4192,6 +4192,12 @@ describe('TaskJournal', () => {
     expect(screen.getByText('Приостановлено')).toBeTruthy();
     expect(screen.getAllByText('Почему дело здесь')).toHaveLength(3);
     expect(screen.getAllByText('Что произойдёт дальше')).toHaveLength(3);
+    expect(screen.getByTestId('task-automation-reason-100').className).toContain('bg-rose-50/80');
+    expect(screen.getByTestId('task-automation-next-step-100').className).toContain('bg-stone-50/90');
+    expect(screen.getByTestId('task-automation-responsible-100').className).toContain('bg-blue-50');
+    expect(screen.getByTestId('task-automation-responsible-101').className).toContain('bg-amber-50');
+    expect(screen.getByTestId('task-automation-activity-100').className).toContain('bg-slate-50/90');
+    expect(screen.getByTestId('task-automation-suggestion-100').className).toContain('bg-amber-50/50');
     expect(within(screen.getByTestId('task-automation-explanation-100')).getByText(
       'Срок уже наступил и стал критическим. Создайте контрольную задачу в первую очередь; при массовом действии это дело входит в «Пора создать».',
     )).toBeTruthy();
