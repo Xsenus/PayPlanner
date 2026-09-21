@@ -3,7 +3,7 @@
 Файл сформирован командой `npm run audit:encryption-inventory:update`.
 Он дополняет ручную карту и не является утверждённой бизнес-классификацией.
 
-Всего кандидатов вне ручной карты: 285.
+Всего кандидатов вне ручной карты: 293.
 
 - `Act`: `Act.Comment`, `Act.CounterpartyInn`
 - `ActLineItem`: `ActLineItem.Name`
@@ -51,6 +51,9 @@
 - `GoogleCalendarConnection`: `GoogleCalendarConnection.AccessTokenExpiresAt`, `GoogleCalendarConnection.DefaultCalendarName`, `GoogleCalendarConnection.DisplayName`
 - `GoogleCalendarSyncCalendar`: `GoogleCalendarSyncCalendar.Name`, `GoogleCalendarSyncCalendar.SyncToken`, `GoogleCalendarSyncCalendar.WatchToken`
 - `IncomeType`: `IncomeType.Description`, `IncomeType.Name`
+- `InternalChatAttachment`: `InternalChatAttachment.FileName`, `InternalChatAttachment.StoredFileName`
+- `InternalChatMessage`: `InternalChatMessage.IsPinned`, `InternalChatMessage.PinnedAt`, `InternalChatMessage.PinnedByUser`, `InternalChatMessage.PinnedByUserId`, `InternalChatMessage.Text`
+- `InternalChatThread`: `InternalChatThread.Name`
 - `InvoiceItemNameDictionaryItem`: `InvoiceItemNameDictionaryItem.Description`, `InvoiceItemNameDictionaryItem.Name`
 - `InvoiceLineItem`: `InvoiceLineItem.Name`
 - `InvoiceUnitDictionaryItem`: `InvoiceUnitDictionaryItem.Description`, `InvoiceUnitDictionaryItem.Name`
