@@ -14,6 +14,7 @@ public static class SystemJobKeys
     public const string CalendarSyncLogRetention = "calendar-sync-log-retention";
     public const string ExternalCalendarSync = "external-calendar-sync";
     public const string CaseInactivityControl = "case-inactivity-control";
+    public const string ClientBirthdayTasks = "client-birthday-tasks";
     public const string CourtSync = "court-sync";
     public const string MoneyBalanceReconciliation = "money-balance-reconciliation";
     public const string UserActivityRetention = "user-activity-retention";

@@ -28,6 +28,7 @@ const DEFAULT_SETTINGS: TaskJournalSettingsDto = {
   executorCompletionAllowedUserIds: [],
   requireCompletionResult: true,
   dailyOverdueReminderEnabled: true,
+  birthdayTaskAutomationEnabled: false,
   allowAdminCompleteAnyTask: true,
   financialDocumentsResponsibleUserId: null,
   financialDocumentsResponsibleUserName: '',
@@ -582,6 +583,20 @@ export function TaskJournalSettings({
           <span>
             <span className="block font-semibold text-gray-900">Ежедневно напоминать сотрудникам о просроченных задачах</span>
             <span className="mt-1 block text-gray-500">Один раз в день после входа CRM покажет сотруднику количество его просроченных задач и предложит сразу открыть их список.</span>
+          </span>
+        </label>
+
+        <label className="flex items-start gap-3 rounded-2xl border border-fuchsia-200 bg-fuchsia-50/70 p-3 text-sm text-gray-700">
+          <SystemCheckbox
+            type="checkbox"
+            checked={settings.birthdayTaskAutomationEnabled}
+            onChange={(event) => setSettings((prev) => ({ ...prev, birthdayTaskAutomationEnabled: event.target.checked }))}
+            disabled={loading || saving}
+            className="mt-0.5 h-4 w-4 rounded border-gray-300 text-fuchsia-600 focus:ring-fuchsia-500"
+          />
+          <span>
+            <span className="block font-semibold text-gray-900">Создавать задачи для поздравления клиентов с днём рождения</span>
+            <span className="mt-1 block text-gray-500">За 7 дней до даты рождения CRM создаст задачу ответственному сотруднику. Для одного клиента создаётся только одна задача в год; нужен активный клиент, заполненная дата рождения и активный ответственный.</span>
           </span>
         </label>
 

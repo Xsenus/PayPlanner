@@ -55,6 +55,7 @@ public class PaymentContext : DbContext
         (typeof(Client), nameof(Client.Phone)),
         (typeof(Client), nameof(Client.Address)),
         (typeof(Client), nameof(Client.Notes)),
+        (typeof(Client), nameof(Client.BirthDate)),
         (typeof(ClientPassport), nameof(ClientPassport.Series)),
         (typeof(ClientPassport), nameof(ClientPassport.Number)),
         (typeof(ClientPassport), nameof(ClientPassport.IssuedBy)),
@@ -1294,6 +1295,7 @@ public class PaymentContext : DbContext
             entity.Property(e => e.Company).HasMaxLength(200);
             entity.Property(e => e.Address).HasMaxLength(500);
             entity.Property(e => e.Notes).HasMaxLength(2000);
+            entity.Property(e => e.BirthDate).HasColumnType("date");
             entity.Property(e => e.IsClientAndSupplier).HasDefaultValue(false);
 
             entity.HasOne(e => e.LegalEntity)
@@ -1321,6 +1323,7 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.ClientStatusId).HasDatabaseName("IX_Clients_ClientStatusId");
             entity.HasIndex(e => e.IsClientAndSupplier).HasDatabaseName("IX_Clients_IsClientAndSupplier");
             entity.HasIndex(e => e.ResponsibleUserId).HasDatabaseName("IX_Clients_ResponsibleUserId");
+            entity.HasIndex(e => e.BirthDate).HasDatabaseName("IX_Clients_BirthDate");
         });
 
         // ------------------ ClientCase ------------------

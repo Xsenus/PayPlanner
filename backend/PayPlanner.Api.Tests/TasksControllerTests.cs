@@ -514,6 +514,7 @@ public class TasksControllerTests
             ExecutorCompletionAllowedUserIds = [fallbackAssignee.Id],
             RequireCompletionResult = false,
             DailyOverdueReminderEnabled = false,
+            BirthdayTaskAutomationEnabled = true,
             AllowAdminCompleteAnyTask = true,
             FinancialDocumentsResponsibleUserId = fallbackAssignee.Id,
             ApprovalDueDays = 400,
@@ -537,6 +538,7 @@ public class TasksControllerTests
         Assert.Equal([fallbackAssignee.Id], dto.ExecutorCompletionAllowedUserIds);
         Assert.False(dto.RequireCompletionResult);
         Assert.False(dto.DailyOverdueReminderEnabled);
+        Assert.True(dto.BirthdayTaskAutomationEnabled);
         Assert.True(dto.AllowAdminCompleteAnyTask);
         Assert.Equal(fallbackAssignee.Id, dto.FinancialDocumentsResponsibleUserId);
         Assert.Equal("Резервный исполнитель", dto.FinancialDocumentsResponsibleUserName);
@@ -560,7 +562,8 @@ public class TasksControllerTests
                 || item.Key == "tasks.approvalDueDays"
                 || item.Key == "tasks.approvalQuickActionMode"
                 || item.Key == "tasks.financialDocumentsResponsibleUserId"
-                || item.Key == "tasks.executorCompletionAllowedUserIds")
+                || item.Key == "tasks.executorCompletionAllowedUserIds"
+                || item.Key == "tasks.automation.birthdays.enabled")
             .ToDictionaryAsync(item => item.Key, item => item.Value);
 
         Assert.Equal("365", stored["tasks.approvalDueDays"]);
@@ -575,6 +578,7 @@ public class TasksControllerTests
         Assert.Equal(fallbackAssignee.Id.ToString(), stored["tasks.automation.caseControl.escalationUserId"]);
         Assert.Equal("16:45", stored["tasks.automation.caseControl.runLocalTime"]);
         Assert.Equal("Asia/Novosibirsk", stored["tasks.automation.caseControl.scheduleTimeZone"]);
+        Assert.Equal("true", stored["tasks.automation.birthdays.enabled"]);
 
         var requireCompletionResult = await db.SystemSettings
             .AsNoTracking()

@@ -75,6 +75,7 @@ public class TasksController : ControllerBase
     private const string ExecutorCompletionAllowedUserIdsSettingKey = "tasks.executorCompletionAllowedUserIds";
     private const string RequireCompletionResultSettingKey = "tasks.requireCompletionResult";
     private const string DailyOverdueReminderEnabledSettingKey = "tasks.dailyOverdueReminderEnabled";
+    private const string BirthdayTaskAutomationEnabledSettingKey = "tasks.automation.birthdays.enabled";
     private const string AllowAdminCompleteAnyTaskSettingKey = "tasks.allowAdminCompleteAnyTask";
     private const string FinancialDocumentsResponsibleUserSettingKey = "tasks.financialDocumentsResponsibleUserId";
     private const string ApprovalDueDaysSettingKey = "tasks.approvalDueDays";
@@ -481,6 +482,7 @@ public class TasksController : ControllerBase
         await UpsertSystemSettingAsync(ExecutorCompletionAllowedUserIdsSettingKey, JsonSerializer.Serialize(executorCompletionAllowedUserIds, JsonOptions), now, ct);
         await UpsertSystemSettingAsync(RequireCompletionResultSettingKey, request.RequireCompletionResult ? "true" : "false", now, ct);
         await UpsertSystemSettingAsync(DailyOverdueReminderEnabledSettingKey, request.DailyOverdueReminderEnabled ? "true" : "false", now, ct);
+        await UpsertSystemSettingAsync(BirthdayTaskAutomationEnabledSettingKey, request.BirthdayTaskAutomationEnabled ? "true" : "false", now, ct);
         await UpsertSystemSettingAsync(AllowAdminCompleteAnyTaskSettingKey, request.AllowAdminCompleteAnyTask ? "true" : "false", now, ct);
         await UpsertSystemSettingAsync(FinancialDocumentsResponsibleUserSettingKey, financialDocumentsResponsibleUserId.ToString(), now, ct);
         await UpsertSystemSettingAsync(ApprovalDueDaysSettingKey, approvalDueDays.ToString(), now, ct);
@@ -5112,6 +5114,7 @@ public class TasksController : ControllerBase
                 item.Key == ExecutorCompletionAllowedUserIdsSettingKey ||
                 item.Key == RequireCompletionResultSettingKey ||
                 item.Key == DailyOverdueReminderEnabledSettingKey ||
+                item.Key == BirthdayTaskAutomationEnabledSettingKey ||
                 item.Key == AllowAdminCompleteAnyTaskSettingKey ||
                 item.Key == FinancialDocumentsResponsibleUserSettingKey ||
                 item.Key == ApprovalDueDaysSettingKey ||
@@ -5149,6 +5152,7 @@ public class TasksController : ControllerBase
             ExecutorCompletionAllowedUserIds = ParseUserIdListSetting(settings.GetValueOrDefault(ExecutorCompletionAllowedUserIdsSettingKey)),
             RequireCompletionResult = ParseBoolSetting(settings.GetValueOrDefault(RequireCompletionResultSettingKey), true),
             DailyOverdueReminderEnabled = ParseBoolSetting(settings.GetValueOrDefault(DailyOverdueReminderEnabledSettingKey), true),
+            BirthdayTaskAutomationEnabled = ParseBoolSetting(settings.GetValueOrDefault(BirthdayTaskAutomationEnabledSettingKey), false),
             AllowAdminCompleteAnyTask = ParseBoolSetting(settings.GetValueOrDefault(AllowAdminCompleteAnyTaskSettingKey), true),
             FinancialDocumentsResponsibleUserId = effectiveFinancialDocumentsResponsibleUserId > 0 ? effectiveFinancialDocumentsResponsibleUserId : null,
             FinancialDocumentsResponsibleUserName = financialDocumentsResponsibleUserName,

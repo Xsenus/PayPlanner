@@ -1026,6 +1026,9 @@ namespace PayPlanner.Api.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTime?>("BirthDate")
+                        .HasColumnType("date");
+
                     b.Property<int?>("ClientStatusId")
                         .HasColumnType("INTEGER");
 
@@ -1104,6 +1107,9 @@ namespace PayPlanner.Api.Migrations
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("BirthDate")
+                        .HasDatabaseName("IX_Clients_BirthDate");
 
                     b.HasIndex("ClientStatusId")
                         .HasDatabaseName("IX_Clients_ClientStatusId");

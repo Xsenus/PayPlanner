@@ -29,20 +29,20 @@ public sealed class ClientPassportEncryptionMigrationTests
                 .ConfigureWarnings(warnings => warnings.Ignore(RelationalEventId.PendingModelChangesWarning))
                 .Options;
 
-            int clientId;
+            long clientId;
             await using (var legacyContext = new PaymentContext(options))
             {
                 await legacyContext.Database.MigrateAsync(PreviousMigration);
-                var client = new Client
-                {
-                    Name = "Тест шифрования паспорта",
-                    Email = "passport-encryption@example.test",
-                    Phone = "+79990000000",
-                    CreatedAt = DateTime.UtcNow,
-                };
-                legacyContext.Clients.Add(client);
-                await legacyContext.SaveChangesAsync();
-                clientId = client.Id;
+                await legacyContext.Database.ExecuteSqlRawAsync(
+                    """
+                    INSERT INTO Clients
+                        (Address, Company, CreatedAt, Email, IsActive, IsClientAndSupplier, Name, Notes, Phone)
+                    VALUES
+                        ('', '', CURRENT_TIMESTAMP, 'passport-encryption@example.test', 1, 0, 'Тест шифрования паспорта', '', '+79990000000');
+                    """);
+                await using var idCommand = connection.CreateCommand();
+                idCommand.CommandText = "SELECT last_insert_rowid();";
+                clientId = (long)(await idCommand.ExecuteScalarAsync())!;
             }
 
             await using (var insert = connection.CreateCommand())

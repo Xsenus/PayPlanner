@@ -1902,6 +1902,7 @@ export interface TaskJournalSettingsDto {
   executorCompletionAllowedUserIds: number[];
   requireCompletionResult: boolean;
   dailyOverdueReminderEnabled: boolean;
+  birthdayTaskAutomationEnabled: boolean;
   allowAdminCompleteAnyTask: boolean;
   financialDocumentsResponsibleUserId?: number | null;
   financialDocumentsResponsibleUserName?: string;

@@ -19,6 +19,7 @@ public class HostedServiceLifecycleCoverageTests
         "GoogleCalendarBackgroundSyncService",
         "YandexCalendarBackgroundSyncService",
         "TaskJournalAutomationSchedulerService",
+        "ClientBirthdayTaskSchedulerService",
         "TelegramBotPollingService",
         "MoneyBalanceReconciliationSchedulerService",
         "ClientCaseCourtSyncSchedulerService",

@@ -254,6 +254,7 @@ const DEFAULT_TASK_JOURNAL_SETTINGS: TaskJournalSettingsDto = {
   executorCompletionAllowedUserIds: [],
   requireCompletionResult: true,
   dailyOverdueReminderEnabled: true,
+  birthdayTaskAutomationEnabled: false,
   allowAdminCompleteAnyTask: true,
   financialDocumentsResponsibleUserId: null,
   financialDocumentsResponsibleUserName: '',

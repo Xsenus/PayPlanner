@@ -1029,6 +1029,7 @@ public class ClientsController : ControllerBase
             Company = model.Company,
             Address = model.Address,
             Notes = model.Notes,
+            BirthDate = ParseClientBirthDate(model.Notes),
             IsActive = model.IsActive,
             LegalEntityId = model.LegalEntityId,
             ResponsibleUserId = responsibleUserId,
@@ -1101,6 +1102,7 @@ public class ClientsController : ControllerBase
         e.Company = model.Company;
         e.Address = model.Address;
         e.Notes = model.Notes;
+        e.BirthDate = ParseClientBirthDate(model.Notes);
         var profilePayload = ExtractProfilePayloadFromNotes(model.Notes);
         await SyncClientAddressesAsync(e, profilePayload);
         await SyncClientPassportAsync(e, profilePayload);
@@ -1139,6 +1141,19 @@ public class ClientsController : ControllerBase
         var raw = notes.Trim();
         if (!raw.StartsWith(CLIENT_PROFILE_NOTES_PREFIX, StringComparison.Ordinal)) return null;
         return raw[CLIENT_PROFILE_NOTES_PREFIX.Length..].Trim();
+    }
+
+    private static DateTime? ParseClientBirthDate(string? notes)
+    {
+        var profile = DeserializeClientProfile<ClientRequirementsProfile>(ExtractProfilePayloadFromNotes(notes));
+        return DateTime.TryParseExact(
+            profile?.BirthDate,
+            "yyyy-MM-dd",
+            System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.None,
+            out var birthDate)
+            ? birthDate.Date
+            : null;
     }
 
     private async Task SyncClientAddressesAsync(Client client, string? profilePayload)

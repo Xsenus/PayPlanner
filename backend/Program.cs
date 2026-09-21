@@ -261,6 +261,7 @@ builder.Services.AddSingleton<GoogleCalendarBackgroundSyncService>();
 builder.Services.AddSingleton<YandexCalendarBackgroundSyncService>();
 builder.Services.AddSingleton<CaseInactivityAutomationMutationGate>();
 builder.Services.AddSingleton<TaskJournalAutomationSchedulerService>();
+builder.Services.AddSingleton<ClientBirthdayTaskSchedulerService>();
 builder.Services.AddSingleton<MoneyBalanceReconciliationSchedulerService>();
 builder.Services.AddSingleton<ClientCaseCourtSyncSchedulerService>();
 builder.Services.AddSingleton<UserActivityRetentionService>();
@@ -289,6 +290,7 @@ if (builder.Configuration.GetValue("BackgroundServices:Enabled", true))
     builder.Services.AddHostedService(sp => sp.GetRequiredService<GoogleCalendarBackgroundSyncService>());
     builder.Services.AddHostedService(sp => sp.GetRequiredService<YandexCalendarBackgroundSyncService>());
     builder.Services.AddHostedService(sp => sp.GetRequiredService<TaskJournalAutomationSchedulerService>());
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<ClientBirthdayTaskSchedulerService>());
     builder.Services.AddHostedService<TelegramBotPollingService>();
     builder.Services.AddHostedService(sp => sp.GetRequiredService<MoneyBalanceReconciliationSchedulerService>());
     builder.Services.AddHostedService(sp => sp.GetRequiredService<ClientCaseCourtSyncSchedulerService>());

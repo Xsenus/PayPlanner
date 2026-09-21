@@ -10,7 +10,7 @@
 
 | Семейство | Поля-кандидаты | Почему требует отдельной защиты |
 | --- | --- | --- |
-| Клиент | `Client.Name`, `Client.Email`, `Client.Phone`, `Client.Address`, `Client.Notes` | ФИО/контакты, адрес и свободный текст |
+| Клиент | `Client.Name`, `Client.Email`, `Client.Phone`, `Client.Address`, `Client.Notes`, `Client.BirthDate` | ФИО/контакты, адрес, дата рождения и свободный текст |
 | Паспорт | `ClientPassport.Series`, `ClientPassport.Number`, `ClientPassport.IssuedBy`, `ClientPassport.IssuedAt`, `ClientPassport.DepartmentCode`, `ClientPassport.BirthPlacePassport`, `ClientPassport.BirthPlaceFias` | Реквизиты документа и место рождения; высший приоритет |
 | Адреса | `AddressRecord.Value`, `AddressRecord.UnrestrictedValue`, `AddressRecord.PostalCode`, `AddressRecord.House`, `AddressRecord.Flat`, `AddressRecord.GeoLat`, `AddressRecord.GeoLon` | Точный адрес и географические координаты |
 | Внешние контакты | `ExternalContact.FullName`, `ExternalContact.Phone`, `ExternalContact.Email`, `ExternalContact.PhonesJson`, `ExternalContact.EmailsJson`, `ExternalContact.Notes` | Контакты представителей и свободный текст |

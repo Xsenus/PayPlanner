@@ -1057,6 +1057,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)");
 
+                    b.Property<DateTime?>("BirthDate")
+                        .HasColumnType("date");
+
                     b.Property<int?>("ClientStatusId")
                         .HasColumnType("integer");
 
@@ -1135,6 +1138,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasColumnType("character varying(256)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("BirthDate")
+                        .HasDatabaseName("IX_Clients_BirthDate");
 
                     b.HasIndex("ClientStatusId")
                         .HasDatabaseName("IX_Clients_ClientStatusId");

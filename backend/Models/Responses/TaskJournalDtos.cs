@@ -325,6 +325,7 @@ public class TaskJournalSettingsDto
     public List<int> ExecutorCompletionAllowedUserIds { get; set; } = [];
     public bool RequireCompletionResult { get; set; } = true;
     public bool DailyOverdueReminderEnabled { get; set; } = true;
+    public bool BirthdayTaskAutomationEnabled { get; set; }
     public bool AllowAdminCompleteAnyTask { get; set; } = true;
     public int? FinancialDocumentsResponsibleUserId { get; set; }
     public string FinancialDocumentsResponsibleUserName { get; set; } = string.Empty;

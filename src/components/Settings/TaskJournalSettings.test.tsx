@@ -26,6 +26,7 @@ const settings: TaskJournalSettingsDto = {
   executorCompletionAllowedUserIds: [7],
   requireCompletionResult: true,
   dailyOverdueReminderEnabled: true,
+  birthdayTaskAutomationEnabled: false,
   allowAdminCompleteAnyTask: true,
   financialDocumentsResponsibleUserId: null,
   financialDocumentsResponsibleUserName: '',
@@ -138,6 +139,19 @@ describe('TaskJournalSettings', () => {
 
     await waitFor(() => expect(apiMock.updateTaskJournalSettings).toHaveBeenCalledWith(
       expect.objectContaining({ financialDocumentsResponsibleUserId: 8 }),
+    ));
+  });
+
+  it('lets an administrator enable birthday greeting tasks', async () => {
+    render(<TaskJournalSettings />);
+
+    const toggle = await screen.findByRole('checkbox', { name: /Создавать задачи для поздравления клиентов/i });
+    expect((toggle as HTMLInputElement).checked).toBe(false);
+    fireEvent.click(toggle);
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    await waitFor(() => expect(apiMock.updateTaskJournalSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ birthdayTaskAutomationEnabled: true }),
     ));
   });
 

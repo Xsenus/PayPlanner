@@ -7,7 +7,7 @@ const inventoryPath = join(repositoryRoot, 'docs', 'field-encryption-data-invent
 const generatedInventoryPath = join(repositoryRoot, 'docs', 'field-encryption-candidates.generated.md');
 
 const requiredFields = {
-  Client: ['Name', 'Email', 'Phone', 'Address', 'Notes'],
+  Client: ['Name', 'Email', 'Phone', 'Address', 'Notes', 'BirthDate'],
   ClientPassport: ['Series', 'Number', 'IssuedBy', 'DepartmentCode', 'BirthPlacePassport', 'BirthPlaceFias'],
   AddressRecord: ['Value', 'UnrestrictedValue', 'PostalCode', 'House', 'Flat', 'GeoLat', 'GeoLon'],
   ExternalContact: ['FullName', 'Phone', 'Email', 'PhonesJson', 'EmailsJson', 'Notes'],
