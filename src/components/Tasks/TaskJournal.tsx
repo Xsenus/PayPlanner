@@ -147,6 +147,7 @@ import { LookupSelect, type LookupSelectOption } from '../ui/LookupSelect';
 import { TaskTemplatesPanel } from './TaskTemplatesPanel';
 
 type ViewMode = 'list' | 'board' | 'calendar' | 'timeline';
+type TaskCardLayoutMode = 'compact' | 'expanded';
 type PeriodMode = 'day' | 'week' | 'month' | 'all';
 type QuickFilter = 'all' | 'assignedToMe' | 'authoredByMe';
 type MetricFilter = 'none' | 'active' | 'overdue' | 'today' | 'highPriority';
@@ -391,6 +392,7 @@ const CHANNEL_OPTIONS: Array<{ value: TaskJournalChannel; label: string; icon: t
 
 const TASK_JOURNAL_FILTERS_STORAGE_PREFIX = 'pp.task_journal.filters.v1';
 const TASK_JOURNAL_SAVED_VIEWS_STORAGE_PREFIX = 'pp.task_journal.views.v1';
+const TASK_CARD_LAYOUT_STORAGE_PREFIX = 'pp.task_journal.card_layout.v1';
 
 const QUICK_FILTER_OPTIONS: Array<{ value: QuickFilter; label: string; icon: typeof ClipboardList }> = [
   { value: 'all', label: 'Все', icon: ListFilter },
@@ -424,6 +426,32 @@ function getTaskJournalSavedViewsStorageKey(userId: number | null, mode: TaskJou
   return mode === 'journal'
     ? `${TASK_JOURNAL_SAVED_VIEWS_STORAGE_PREFIX}.${ownerKey}`
     : `${TASK_JOURNAL_SAVED_VIEWS_STORAGE_PREFIX}.${mode}.${ownerKey}`;
+}
+
+function getTaskCardLayoutStorageKey(userId: number | null) {
+  return `${TASK_CARD_LAYOUT_STORAGE_PREFIX}.${userId ? `user:${userId}` : 'guest'}`;
+}
+
+function readTaskCardLayoutMode(userId: number | null): TaskCardLayoutMode {
+  if (typeof window === 'undefined') return 'compact';
+
+  try {
+    return window.localStorage.getItem(getTaskCardLayoutStorageKey(userId)) === 'expanded'
+      ? 'expanded'
+      : 'compact';
+  } catch {
+    return 'compact';
+  }
+}
+
+function writeTaskCardLayoutMode(userId: number | null, mode: TaskCardLayoutMode) {
+  if (typeof window === 'undefined') return;
+
+  try {
+    window.localStorage.setItem(getTaskCardLayoutStorageKey(userId), mode);
+  } catch {
+    // The layout still switches for the current card when browser storage is unavailable.
+  }
 }
 
 function getDefaultQuickFilter(_userId: number | null, mode: TaskJournalMode = 'journal'): QuickFilter {
@@ -9949,6 +9977,7 @@ function TaskModal({
   const [sendingYandexFileId, setSendingYandexFileId] = useState<number | null>(null);
   const [activeDetailsTab, setActiveDetailsTab] = useState<'comments' | 'files' | 'timer' | 'activity'>('comments');
   const [actionMenuOpen, setActionMenuOpen] = useState(false);
+  const [cardLayoutMode, setCardLayoutMode] = useState<TaskCardLayoutMode>(() => readTaskCardLayoutMode(currentUserId));
   const [quickPanel, setQuickPanel] = useState<'assignee' | 'observer' | null>(null);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [recurrencePanelOpen, setRecurrencePanelOpen] = useState(false);
@@ -9966,6 +9995,11 @@ function TaskModal({
   const [revisionReviewDueAt, setRevisionReviewDueAt] = useState('');
   const [revisionReviewError, setRevisionReviewError] = useState<string | null>(null);
   const [revisionReviewSaving, setRevisionReviewSaving] = useState(false);
+  const selectCardLayoutMode = (mode: TaskCardLayoutMode) => {
+    setCardLayoutMode(mode);
+    writeTaskCardLayoutMode(currentUserId, mode);
+    setActionMenuOpen(false);
+  };
   const selectedClient = useMemo(
     () => clients.find((client) => client.id === form.clientId) ?? null,
     [clients, form.clientId],
@@ -11402,7 +11436,10 @@ function TaskModal({
               </button>
               <button
                 type="button"
-                onClick={() => setRecurrencePanelOpen((open) => !open)}
+                onClick={() => {
+                  setActionMenuOpen(false);
+                  setRecurrencePanelOpen((open) => !open);
+                }}
                 className={`inline-flex h-9 w-9 items-center justify-center rounded-lg transition ${form.recurrenceEnabled ? 'bg-amber-50 text-amber-700' : 'text-slate-500 hover:bg-amber-50 hover:text-amber-700'}`}
                 title="Повторение задачи"
                 aria-label="Повторение задачи"
@@ -11419,44 +11456,79 @@ function TaskModal({
                   />
                 </div>
               ) : null}
-              {state?.task && !isReadOnly && canDuplicateTask ? (
+              <div className="relative">
                 <button
                   type="button"
-                  onClick={() => void handleDuplicateTask()}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition hover:bg-blue-50 hover:text-blue-700"
-                  title="Дублировать задачу — создать отдельную копию"
-                  aria-label="Дублировать задачу"
+                  onClick={() => {
+                    setRecurrencePanelOpen(false);
+                    setActionMenuOpen((open) => !open);
+                  }}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100"
+                  title="Еще"
+                  aria-label="Еще"
+                  aria-expanded={actionMenuOpen}
                 >
-                  <Copy className="h-4 w-4" data-testid="task-duplicate-icon" />
+                  <MoreHorizontal className="h-4 w-4" />
                 </button>
-              ) : null}
-              {canCancelTask ? (
-                <button
-                  type="button"
-                  onClick={() => void handleCancelTask()}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition hover:bg-rose-50 hover:text-rose-700"
-                  title="Отменить задачу — оставить в журнале со статусом «Отменена»"
-                  aria-label="Отменить задачу"
-                >
-                  <XCircle className="h-4 w-4" data-testid="task-cancel-icon" />
-                </button>
-              ) : null}
-              {state?.task && canDeleteTask ? (
-                <div className="relative">
-                  <button
-                    type="button"
-                    onClick={() => setActionMenuOpen((open) => !open)}
-                    className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100"
-                    title="Еще"
-                    aria-label="Еще"
-                  >
-                    <MoreHorizontal className="h-4 w-4" />
-                  </button>
-                  {actionMenuOpen ? (
-                    <div className="absolute right-0 z-20 mt-2 w-56 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 text-sm shadow-xl">
+                {actionMenuOpen ? (
+                  <div className="absolute right-0 z-30 mt-2 w-64 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 text-sm shadow-xl" data-testid="task-modern-actions-menu">
+                    <div className="px-2 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Представление карточки</div>
+                    <button
+                      type="button"
+                      onClick={() => selectCardLayoutMode('expanded')}
+                      aria-pressed={cardLayoutMode === 'expanded'}
+                      className="flex w-full items-center gap-3 px-3 py-2 text-left text-slate-700 transition hover:bg-slate-50"
+                    >
+                      <LayoutGrid className="h-4 w-4 shrink-0 text-slate-500" />
+                      <span className="flex-1 font-medium">Расширенный вид</span>
+                      {cardLayoutMode === 'expanded' ? <CheckCircle2 className="h-4 w-4 text-emerald-600" /> : null}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => selectCardLayoutMode('compact')}
+                      aria-pressed={cardLayoutMode === 'compact'}
+                      className="flex w-full items-center gap-3 px-3 py-2 text-left text-slate-700 transition hover:bg-slate-50"
+                    >
+                      <ListFilter className="h-4 w-4 shrink-0 text-slate-500" />
+                      <span className="flex-1 font-medium">Компактный вид</span>
+                      {cardLayoutMode === 'compact' ? <CheckCircle2 className="h-4 w-4 text-emerald-600" /> : null}
+                    </button>
+                    {state?.task && ((!isReadOnly && canDuplicateTask) || canCancelTask || canDeleteTask) ? <div className="my-1 border-t border-slate-100" /> : null}
+                    {state?.task && !isReadOnly && canDuplicateTask ? (
                       <button
                         type="button"
-                        onClick={() => void handleDeleteTask()}
+                        onClick={() => {
+                          setActionMenuOpen(false);
+                          void handleDuplicateTask();
+                        }}
+                        className="flex w-full items-center gap-3 px-3 py-2 text-left text-slate-700 transition hover:bg-blue-50 hover:text-blue-700"
+                        title="Создать отдельную копию задачи"
+                      >
+                        <Copy className="h-4 w-4 shrink-0" data-testid="task-duplicate-icon" />
+                        <span className="font-medium">Дублировать задачу</span>
+                      </button>
+                    ) : null}
+                    {canCancelTask ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActionMenuOpen(false);
+                          void handleCancelTask();
+                        }}
+                        className="flex w-full items-center gap-3 px-3 py-2 text-left text-slate-700 transition hover:bg-rose-50 hover:text-rose-700"
+                        title="Оставить в журнале со статусом «Отменена»"
+                      >
+                        <XCircle className="h-4 w-4 shrink-0" data-testid="task-cancel-icon" />
+                        <span className="font-medium">Отменить задачу</span>
+                      </button>
+                    ) : null}
+                    {state?.task && canDeleteTask ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActionMenuOpen(false);
+                          void handleDeleteTask();
+                        }}
                         className="flex w-full items-start gap-3 px-3 py-2.5 text-left text-rose-600 transition hover:bg-rose-50"
                         title="Удалить задачу безвозвратно"
                       >
@@ -11466,10 +11538,10 @@ function TaskModal({
                           <span className="mt-0.5 block text-xs font-normal text-rose-400">Безвозвратно удалить запись из журнала</span>
                         </span>
                       </button>
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
               {!isPage ? (
                 <button type="button" onClick={onClose} className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700" aria-label="Закрыть">
                   <X className="h-5 w-5" />
@@ -11483,7 +11555,13 @@ function TaskModal({
             </div>
           </div>
 
-          <div className={isPage ? 'grid gap-4 p-4 xl:grid-cols-[minmax(0,1fr)_380px]' : 'grid min-h-0 gap-4 overflow-y-auto p-4 xl:grid-cols-[minmax(0,1fr)_380px]'}>
+          <div
+            className={`${isPage ? 'grid' : 'grid min-h-0 overflow-y-auto'} ${cardLayoutMode === 'compact'
+              ? 'gap-3 p-3 xl:grid-cols-[minmax(0,1fr)_320px]'
+              : 'gap-4 p-4 xl:grid-cols-[minmax(0,1fr)_minmax(420px,1fr)]'}`}
+            data-testid="task-modern-layout"
+            data-layout-mode={cardLayoutMode}
+          >
             <main className="min-w-0 space-y-4">
               <section className="space-y-3">
                 <div className="flex flex-wrap items-center gap-2">
@@ -11752,7 +11830,7 @@ function TaskModal({
               />
             </main>
 
-            <aside className="space-y-3 xl:sticky xl:top-0 xl:self-start">
+            <aside className={`${cardLayoutMode === 'compact' ? 'space-y-2' : 'space-y-3'} xl:sticky xl:top-0 xl:self-start`}>
               <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
                 <SystemSelect
                   value={form.status}

@@ -996,6 +996,30 @@ describe('TaskJournal', () => {
     expect(screen.queryByTestId('task-legacy-card-window')).toBeNull();
   });
 
+  it('switches between compact and expanded modern card layouts and remembers the choice', async () => {
+    await renderJournal([createTask()], {
+      settings: { taskCardWindowMode: 'modern' },
+    });
+
+    await openFirstTaskForEdit();
+
+    let card = await screen.findByTestId('task-modern-card-window');
+    expect(within(card).getByTestId('task-modern-layout').getAttribute('data-layout-mode')).toBe('compact');
+
+    fireEvent.click(within(card).getByRole('button', { name: 'Еще' }));
+    const expandedLayoutButton = within(card).getByRole('button', { name: 'Расширенный вид' });
+    expect(expandedLayoutButton.getAttribute('aria-pressed')).toBe('false');
+    fireEvent.click(expandedLayoutButton);
+
+    expect(within(card).getByTestId('task-modern-layout').getAttribute('data-layout-mode')).toBe('expanded');
+    expect(window.localStorage.getItem('pp.task_journal.card_layout.v1.user:7')).toBe('expanded');
+
+    fireEvent.click(within(card).getByRole('button', { name: 'Отмена' }));
+    await openFirstTaskForEdit();
+    card = await screen.findByTestId('task-modern-card-window');
+    expect(within(card).getByTestId('task-modern-layout').getAttribute('data-layout-mode')).toBe('expanded');
+  });
+
   it('separates comments, files, timer and system activity in the modern task card', async () => {
     apiMock.getTaskJournalComments.mockResolvedValueOnce([
       {
@@ -5564,16 +5588,20 @@ describe('TaskJournal', () => {
     expect(apiMock.deleteTaskJournalItem).not.toHaveBeenCalled();
   });
 
-  it('shows duplicate and cancel as direct icon actions in the modern task card', async () => {
+  it('keeps duplicate and cancel actions in the compact modern card menu', async () => {
     await renderJournal([createTask({ status: 'new' })], {
       settings: { taskCardWindowMode: 'modern' },
     });
 
     await openFirstTaskForEdit();
 
+    const card = await screen.findByTestId('task-modern-card-window');
+    expect(within(card).queryByRole('button', { name: 'Дублировать задачу' })).toBeNull();
+    fireEvent.click(within(card).getByRole('button', { name: 'Еще' }));
+
     const duplicateButton = screen.getByRole('button', { name: 'Дублировать задачу' });
     const cancelButton = screen.getByRole('button', { name: 'Отменить задачу' });
-    expect(duplicateButton.getAttribute('title')).toContain('создать отдельную копию');
+    expect(duplicateButton.getAttribute('title')).toContain('Создать отдельную копию');
     expect(cancelButton.getAttribute('title')).toContain('статусом «Отменена»');
     expect(within(duplicateButton).getByTestId('task-duplicate-icon')).toBeTruthy();
     expect(within(cancelButton).getByTestId('task-cancel-icon')).toBeTruthy();
