@@ -49,6 +49,7 @@ import {
   FolderPlus,
   Trash2,
   Scale,
+  MessageCircle,
 } from 'lucide-react';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useToast } from '../../hooks/useToast';
@@ -258,6 +259,12 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
       tab: 'notifications' as Tab,
       label: 'Уведомления',
       icon: Bell,
+    });
+    items.push({
+      id: 'messenger',
+      tab: 'messenger' as Tab,
+      label: 'Мессенджер',
+      icon: MessageCircle,
     });
     if (permissions.tasks.canView) {
       items.push({

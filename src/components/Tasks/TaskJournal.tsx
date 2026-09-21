@@ -147,6 +147,7 @@ import {
 } from '../../utils/forcedTaskActionSnoozes';
 import { LookupSelect, type LookupSelectOption } from '../ui/LookupSelect';
 import { TaskTemplatesPanel } from './TaskTemplatesPanel';
+import { TaskChatPanel } from '../Messenger/InternalMessenger';
 
 type ViewMode = 'list' | 'board' | 'calendar' | 'timeline';
 type TaskCardLayoutMode = 'compact' | 'expanded';
@@ -10510,7 +10511,8 @@ function TaskModal({
   const [filesLoading, setFilesLoading] = useState(false);
   const [uploadingDocumentKey, setUploadingDocumentKey] = useState<string | null>(null);
   const [sendingYandexFileId, setSendingYandexFileId] = useState<number | null>(null);
-  const [activeDetailsTab, setActiveDetailsTab] = useState<'comments' | 'files' | 'timer' | 'activity'>('comments');
+  const [activeDetailsTab, setActiveDetailsTab] = useState<'comments' | 'chat' | 'files' | 'timer' | 'activity'>('comments');
+  const [legacyChatOpen, setLegacyChatOpen] = useState(false);
   const [actionMenuOpen, setActionMenuOpen] = useState(false);
   const [cardLayoutMode, setCardLayoutMode] = useState<TaskCardLayoutMode>(() => readTaskCardLayoutMode(currentUserId));
   const [quickPanel, setQuickPanel] = useState<'assignee' | 'observer' | null>(null);
@@ -10612,6 +10614,7 @@ function TaskModal({
 
   useEffect(() => {
     setActiveDetailsTab('comments');
+    setLegacyChatOpen(false);
     setExecutorWorkflowGuideOpen(true);
   }, [taskId]);
   const { cases: clientCases, loading: casesLoading } = useClientCases(form.clientId ?? undefined, {
@@ -12298,6 +12301,11 @@ function TaskModal({
                   <button type="button" role="tab" aria-selected={activeDetailsTab === 'comments'} onClick={() => setActiveDetailsTab('comments')} className={`rounded-lg px-3 py-1.5 font-semibold transition ${activeDetailsTab === 'comments' ? 'bg-blue-50 text-blue-700' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800'}`}>
                     Комментарии {userComments.length}
                   </button>
+                  {taskId ? (
+                    <button type="button" role="tab" aria-selected={activeDetailsTab === 'chat'} onClick={() => setActiveDetailsTab('chat')} className={`rounded-lg px-3 py-1.5 font-semibold transition ${activeDetailsTab === 'chat' ? 'bg-blue-50 text-blue-700' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800'}`}>
+                      Чат
+                    </button>
+                  ) : null}
                   <button type="button" role="tab" aria-selected={activeDetailsTab === 'files'} onClick={() => setActiveDetailsTab('files')} className={`rounded-lg px-3 py-1.5 font-semibold transition ${activeDetailsTab === 'files' ? 'bg-blue-50 text-blue-700' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800'}`}>
                     Файлы {fileGroups.length}
                   </button>
@@ -12309,6 +12317,9 @@ function TaskModal({
                   </button>
                 </div>
                 <div className="min-h-[220px] space-y-3 p-3" role="tabpanel">
+                  {activeDetailsTab === 'chat' && taskId ? (
+                    <TaskChatPanel taskId={taskId} onOpenTask={(linkedTaskId) => window.location.assign(`/tasks/${linkedTaskId}`)} />
+                  ) : null}
                   {activeDetailsTab === 'comments' && (taskId && commentsLoading ? (
                     <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500">Загружаем комментарии...</div>
                   ) : userComments.length === 0 ? (
@@ -13593,6 +13604,22 @@ function TaskModal({
               {resultError ? <p className="mt-1 text-xs font-semibold text-rose-600">{resultError}</p> : null}
             </Field>
           </div>
+
+          {taskId ? (
+            <section className="mt-5 rounded-2xl border border-blue-200 bg-white p-4">
+              <button type="button" onClick={() => setLegacyChatOpen((open) => !open)} className="flex w-full items-start justify-between gap-3 text-left" aria-expanded={legacyChatOpen}>
+                <span>
+                  <span className="flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">
+                  <MessageSquare className="h-4 w-4 text-blue-500" />
+                  Чат задачи
+                  </span>
+                  <span className="mt-1 block text-sm text-slate-500">Рабочая переписка, ответы, файлы, упоминания и связанные задачи.</span>
+                </span>
+                <ChevronDown className={`mt-1 h-5 w-5 shrink-0 text-slate-400 transition ${legacyChatOpen ? 'rotate-180' : ''}`} />
+              </button>
+              {legacyChatOpen ? <div className="mt-3"><TaskChatPanel taskId={taskId} onOpenTask={(linkedTaskId) => window.location.assign(`/tasks/${linkedTaskId}`)} /></div> : null}
+            </section>
+          ) : null}
 
           <section className="mt-5 rounded-2xl border border-slate-200 bg-white p-4">
             <h3 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Изменения и уведомления</h3>

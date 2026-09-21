@@ -514,6 +514,7 @@ describe('App real role route access matrix', () => {
     const allowedTabs = new Set<Tab>([
       'workspace',
       'notifications',
+      'messenger',
       'profile',
       'calendar',
       'tasks',

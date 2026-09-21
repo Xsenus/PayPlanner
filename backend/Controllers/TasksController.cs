@@ -3453,6 +3453,8 @@ public class TasksController : ControllerBase
             : null;
         await SyncContractorPaymentAsync(entity, await ResolveContractorPaymentResultBaseDateAsync(previousStatus, nextStatus, entity.UpdatedAt, ct), ct);
         await _db.SaveChangesAsync(ct);
+        await SynchronizeExistingTaskChatMembersAsync([entity], ct);
+        await AppendTaskChatSystemMessagesAsync([(entity.Id, (IReadOnlyList<string>)changeLabels)], access, ct);
         await NotifyRecurringTaskCreatedAsync(nextRecurringTask, access, ct);
         if (changeLabels.Count > 0)
         {
@@ -3595,6 +3597,7 @@ public class TasksController : ControllerBase
             : null;
         await SyncContractorPaymentAsync(entity, await ResolveContractorPaymentResultBaseDateAsync(oldStatus, entity.Status, entity.UpdatedAt, ct), ct);
         await _db.SaveChangesAsync(ct);
+        await SynchronizeExistingTaskChatMembersAsync([entity], ct);
         await NotifyRecurringTaskCreatedAsync(nextRecurringTask, access, ct);
         if (statusChanged || resultChanged || dueAtChanged)
         {
@@ -3613,6 +3616,8 @@ public class TasksController : ControllerBase
             {
                 changeLabels.Add($"Срок: {FormatHistoryDateTime(oldDueAt)} -> {FormatHistoryDateTime(entity.DueAt)}");
             }
+
+            await AppendTaskChatSystemMessagesAsync([(entity.Id, (IReadOnlyList<string>)changeLabels)], access, ct);
 
             if (approvalQueueRestarted || (!IsApprovalActiveStatus(oldStatus) && IsApprovalActiveStatus(entity.Status)))
             {
@@ -3902,6 +3907,11 @@ public class TasksController : ControllerBase
         }
 
         await _db.SaveChangesAsync(ct);
+        await SynchronizeExistingTaskChatMembersAsync(notifications.Select(item => item.Task).ToList(), ct);
+        await AppendTaskChatSystemMessagesAsync(
+            notifications.Select(item => (item.Task.Id, item.ChangeLabels)).ToList(),
+            access,
+            ct);
         foreach (var notification in notifications)
         {
             if (notification.BecameCancelled)
@@ -7329,6 +7339,80 @@ public class TasksController : ControllerBase
         {
             _db.TaskJournalComments.Add(comment);
         }
+    }
+
+    private async Task AppendTaskChatSystemMessagesAsync(
+        IReadOnlyCollection<(int TaskId, IReadOnlyList<string> ChangeLabels)> changes,
+        TaskAccess access,
+        CancellationToken ct)
+    {
+        var relevant = changes
+            .Select(item => (item.TaskId, Labels: item.ChangeLabels
+                .Where(label => label.StartsWith("Статус", StringComparison.OrdinalIgnoreCase)
+                    || label.StartsWith("Исполнитель", StringComparison.OrdinalIgnoreCase))
+                .ToList()))
+            .Where(item => item.TaskId > 0 && item.Labels.Count > 0)
+            .ToList();
+        if (relevant.Count == 0) return;
+
+        var taskIds = relevant.Select(item => item.TaskId).Distinct().ToList();
+        var threads = await _db.InternalChatThreads
+            .Where(thread => thread.TaskJournalItemId.HasValue && taskIds.Contains(thread.TaskJournalItemId.Value))
+            .ToDictionaryAsync(thread => thread.TaskJournalItemId!.Value, ct);
+        if (threads.Count == 0) return;
+
+        var now = DateTime.UtcNow;
+        foreach (var item in relevant)
+        {
+            if (!threads.TryGetValue(item.TaskId, out var thread)) continue;
+            _db.InternalChatMessages.Add(new InternalChatMessage
+            {
+                ThreadId = thread.Id,
+                AuthorUserId = access.UserId,
+                Kind = InternalChatMessageKinds.System,
+                Text = $"{access.DisplayName}: {string.Join("; ", item.Labels)}",
+                CreatedAt = now
+            });
+            thread.LastMessageAt = now;
+            thread.UpdatedAt = now;
+        }
+        await _db.SaveChangesAsync(ct);
+    }
+
+    private async Task SynchronizeExistingTaskChatMembersAsync(
+        IReadOnlyCollection<TaskJournalItem> tasks,
+        CancellationToken ct)
+    {
+        if (tasks.Count == 0) return;
+        var taskIds = tasks.Select(task => task.Id).Where(id => id > 0).Distinct().ToList();
+        var threads = await _db.InternalChatThreads
+            .Include(thread => thread.Members)
+            .Where(thread => thread.TaskJournalItemId.HasValue && taskIds.Contains(thread.TaskJournalItemId.Value))
+            .ToListAsync(ct);
+        if (threads.Count == 0) return;
+
+        var tasksById = tasks.ToDictionary(task => task.Id);
+        var now = DateTime.UtcNow;
+        foreach (var thread in threads)
+        {
+            if (!thread.TaskJournalItemId.HasValue || !tasksById.TryGetValue(thread.TaskJournalItemId.Value, out var task)) continue;
+            var desiredIds = task.Participants
+                .Where(participant => participant.UserId.HasValue)
+                .Select(participant => participant.UserId!.Value)
+                .ToHashSet();
+            if (task.AuthorUserId.HasValue) desiredIds.Add(task.AuthorUserId.Value);
+            if (task.AssigneeUserId.HasValue) desiredIds.Add(task.AssigneeUserId.Value);
+            foreach (var member in thread.Members)
+            {
+                member.IsActive = desiredIds.Contains(member.UserId);
+                member.UpdatedAt = now;
+            }
+            foreach (var userId in desiredIds.Where(id => thread.Members.All(member => member.UserId != id)))
+                thread.Members.Add(new InternalChatMember { UserId = userId, Role = "member", JoinedAt = now });
+            thread.Name = task.Title;
+            thread.UpdatedAt = now;
+        }
+        await _db.SaveChangesAsync(ct);
     }
 
     private static TaskJournalComment CreateTaskComment(

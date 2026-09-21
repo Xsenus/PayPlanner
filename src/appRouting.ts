@@ -36,6 +36,7 @@ type TabAccessRule = (permissions: RolePermissions, options: TabAccessOptions) =
 export const TAB_ACCESS_RULES = {
   workspace: () => true,
   notifications: () => true,
+  messenger: () => true,
   profile: () => true,
   calendar: (permissions) => permissions.calendar.canView,
   tasks: (permissions) => permissions.tasks.canView,

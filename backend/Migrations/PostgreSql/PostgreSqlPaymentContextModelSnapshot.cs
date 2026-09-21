@@ -5055,6 +5055,305 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.ToTable("IncomeTypes");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.InternalChatAttachment", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(260)
+                        .HasColumnType("character varying(260)");
+
+                    b.Property<int>("MessageId")
+                        .HasColumnType("integer");
+
+                    b.Property<long>("Size")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("StoredFileName")
+                        .IsRequired()
+                        .HasMaxLength(260)
+                        .HasColumnType("character varying(260)");
+
+                    b.Property<int>("UploadedByUserId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MessageId")
+                        .HasDatabaseName("IX_InternalChatAttachments_MessageId");
+
+                    b.HasIndex("UploadedByUserId");
+
+                    b.ToTable("InternalChatAttachments");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.InternalChatMember", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<DateTime>("JoinedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<int?>("LastReadMessageId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("NotificationMode")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)")
+                        .HasDefaultValue("all");
+
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)")
+                        .HasDefaultValue("member");
+
+                    b.Property<int>("ThreadId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ThreadId", "UserId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_InternalChatMembers_Thread_User");
+
+                    b.HasIndex("UserId", "IsActive", "ThreadId")
+                        .HasDatabaseName("IX_InternalChatMembers_User_Active_Thread");
+
+                    b.ToTable("InternalChatMembers");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.InternalChatMention", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("MessageId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MessageId", "UserId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_InternalChatMentions_Message_User");
+
+                    b.HasIndex("UserId", "MessageId")
+                        .HasDatabaseName("IX_InternalChatMentions_User_Message");
+
+                    b.ToTable("InternalChatMentions");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.InternalChatMessage", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int?>("AuthorUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<int?>("CreatedTaskJournalItemId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<DateTime?>("EditedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<bool>("IsPinned")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)")
+                        .HasDefaultValue("user");
+
+                    b.Property<DateTime?>("PinnedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("PinnedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("ReplyToMessageId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasMaxLength(8000)
+                        .HasColumnType("character varying(8000)");
+
+                    b.Property<int>("ThreadId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AuthorUserId")
+                        .HasDatabaseName("IX_InternalChatMessages_AuthorUserId");
+
+                    b.HasIndex("CreatedTaskJournalItemId")
+                        .HasDatabaseName("IX_InternalChatMessages_CreatedTaskJournalItemId");
+
+                    b.HasIndex("PinnedByUserId");
+
+                    b.HasIndex("ReplyToMessageId");
+
+                    b.HasIndex("ThreadId", "Id")
+                        .HasDatabaseName("IX_InternalChatMessages_Thread_Id");
+
+                    b.HasIndex("ThreadId", "IsPinned", "PinnedAt")
+                        .HasDatabaseName("IX_InternalChatMessages_Thread_Pinned");
+
+                    b.ToTable("InternalChatMessages");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.InternalChatReaction", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("Emoji")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<int>("MessageId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("MessageId", "UserId", "Emoji")
+                        .IsUnique()
+                        .HasDatabaseName("IX_InternalChatReactions_Message_User_Emoji");
+
+                    b.ToTable("InternalChatReactions");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.InternalChatThread", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("DirectKey")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<bool>("IsArchived")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)");
+
+                    b.Property<DateTime?>("LastMessageAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<int?>("TaskJournalItemId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("DirectKey")
+                        .IsUnique()
+                        .HasDatabaseName("IX_InternalChatThreads_DirectKey")
+                        .HasFilter("\"DirectKey\" IS NOT NULL");
+
+                    b.HasIndex("TaskJournalItemId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_InternalChatThreads_TaskJournalItemId")
+                        .HasFilter("\"TaskJournalItemId\" IS NOT NULL");
+
+                    b.HasIndex("IsArchived", "LastMessageAt")
+                        .HasDatabaseName("IX_InternalChatThreads_Archived_LastMessageAt");
+
+                    b.ToTable("InternalChatThreads");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.Invoice", b =>
                 {
                     b.Property<int>("Id")
@@ -11500,6 +11799,138 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("TaskJournalItem");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.InternalChatAttachment", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.InternalChatMessage", "Message")
+                        .WithMany("Attachments")
+                        .HasForeignKey("MessageId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.User", "UploadedByUser")
+                        .WithMany()
+                        .HasForeignKey("UploadedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Message");
+
+                    b.Navigation("UploadedByUser");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.InternalChatMember", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.InternalChatThread", "Thread")
+                        .WithMany("Members")
+                        .HasForeignKey("ThreadId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Thread");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.InternalChatMention", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.InternalChatMessage", "Message")
+                        .WithMany("Mentions")
+                        .HasForeignKey("MessageId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Message");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.InternalChatMessage", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.User", "AuthorUser")
+                        .WithMany()
+                        .HasForeignKey("AuthorUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("PayPlanner.Api.Models.TaskJournalItem", "CreatedTaskJournalItem")
+                        .WithMany()
+                        .HasForeignKey("CreatedTaskJournalItemId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("PayPlanner.Api.Models.User", "PinnedByUser")
+                        .WithMany()
+                        .HasForeignKey("PinnedByUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("PayPlanner.Api.Models.InternalChatMessage", "ReplyToMessage")
+                        .WithMany()
+                        .HasForeignKey("ReplyToMessageId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("PayPlanner.Api.Models.InternalChatThread", "Thread")
+                        .WithMany("Messages")
+                        .HasForeignKey("ThreadId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("AuthorUser");
+
+                    b.Navigation("CreatedTaskJournalItem");
+
+                    b.Navigation("PinnedByUser");
+
+                    b.Navigation("ReplyToMessage");
+
+                    b.Navigation("Thread");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.InternalChatReaction", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.InternalChatMessage", "Message")
+                        .WithMany("Reactions")
+                        .HasForeignKey("MessageId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Message");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.InternalChatThread", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.User", "CreatedByUser")
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("PayPlanner.Api.Models.TaskJournalItem", "TaskJournalItem")
+                        .WithMany()
+                        .HasForeignKey("TaskJournalItemId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.Navigation("CreatedByUser");
+
+                    b.Navigation("TaskJournalItem");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.InvoiceClientCase", b =>
                 {
                     b.HasOne("PayPlanner.Api.Models.ClientCase", "ClientCase")
@@ -12594,6 +13025,22 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("MoneyOperations");
 
                     b.Navigation("Payments");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.InternalChatMessage", b =>
+                {
+                    b.Navigation("Attachments");
+
+                    b.Navigation("Mentions");
+
+                    b.Navigation("Reactions");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.InternalChatThread", b =>
+                {
+                    b.Navigation("Members");
+
+                    b.Navigation("Messages");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.Invoice", b =>

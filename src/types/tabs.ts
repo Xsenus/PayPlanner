@@ -2,6 +2,7 @@ export const ALL_TABS = [
   'workspace',
   'calendar',
   'notifications',
+  'messenger',
   'tasks',
   'tasksControl',
   'tasksApprovals',

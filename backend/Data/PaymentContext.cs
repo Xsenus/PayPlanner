@@ -3047,6 +3047,81 @@ public class PaymentContext : DbContext
                 .HasDatabaseName("IX_TaskJournalComments_ExternalSource_CommentId");
         });
 
+        modelBuilder.Entity<InternalChatThread>(entity =>
+        {
+            entity.HasKey(item => item.Id);
+            entity.Property(item => item.Kind).HasMaxLength(24).IsRequired();
+            entity.Property(item => item.Name).HasMaxLength(200).IsRequired();
+            entity.Property(item => item.DirectKey).HasMaxLength(64);
+            entity.Property(item => item.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.HasOne(item => item.TaskJournalItem).WithMany().HasForeignKey(item => item.TaskJournalItemId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(item => item.CreatedByUser).WithMany().HasForeignKey(item => item.CreatedByUserId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasIndex(item => item.TaskJournalItemId).IsUnique().HasFilter("\"TaskJournalItemId\" IS NOT NULL").HasDatabaseName("IX_InternalChatThreads_TaskJournalItemId");
+            entity.HasIndex(item => item.DirectKey).IsUnique().HasFilter("\"DirectKey\" IS NOT NULL").HasDatabaseName("IX_InternalChatThreads_DirectKey");
+            entity.HasIndex(item => new { item.IsArchived, item.LastMessageAt }).HasDatabaseName("IX_InternalChatThreads_Archived_LastMessageAt");
+        });
+
+        modelBuilder.Entity<InternalChatMember>(entity =>
+        {
+            entity.HasKey(item => item.Id);
+            entity.Property(item => item.Role).HasMaxLength(24).HasDefaultValue("member").IsRequired();
+            entity.Property(item => item.NotificationMode).HasMaxLength(24).HasDefaultValue(InternalChatNotificationModes.All).IsRequired();
+            entity.Property(item => item.IsActive).HasDefaultValue(true);
+            entity.Property(item => item.JoinedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.HasOne(item => item.Thread).WithMany(thread => thread.Members).HasForeignKey(item => item.ThreadId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(item => item.User).WithMany().HasForeignKey(item => item.UserId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(item => new { item.ThreadId, item.UserId }).IsUnique().HasDatabaseName("IX_InternalChatMembers_Thread_User");
+            entity.HasIndex(item => new { item.UserId, item.IsActive, item.ThreadId }).HasDatabaseName("IX_InternalChatMembers_User_Active_Thread");
+        });
+
+        modelBuilder.Entity<InternalChatMessage>(entity =>
+        {
+            entity.HasKey(item => item.Id);
+            entity.Property(item => item.Kind).HasMaxLength(24).HasDefaultValue(InternalChatMessageKinds.User).IsRequired();
+            entity.Property(item => item.Text).HasMaxLength(8000);
+            entity.Property(item => item.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.HasOne(item => item.Thread).WithMany(thread => thread.Messages).HasForeignKey(item => item.ThreadId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(item => item.AuthorUser).WithMany().HasForeignKey(item => item.AuthorUserId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne(item => item.ReplyToMessage).WithMany().HasForeignKey(item => item.ReplyToMessageId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne(item => item.CreatedTaskJournalItem).WithMany().HasForeignKey(item => item.CreatedTaskJournalItemId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne(item => item.PinnedByUser).WithMany().HasForeignKey(item => item.PinnedByUserId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasIndex(item => new { item.ThreadId, item.Id }).HasDatabaseName("IX_InternalChatMessages_Thread_Id");
+            entity.HasIndex(item => new { item.ThreadId, item.IsPinned, item.PinnedAt }).HasDatabaseName("IX_InternalChatMessages_Thread_Pinned");
+            entity.HasIndex(item => item.AuthorUserId).HasDatabaseName("IX_InternalChatMessages_AuthorUserId");
+            entity.HasIndex(item => item.CreatedTaskJournalItemId).HasDatabaseName("IX_InternalChatMessages_CreatedTaskJournalItemId");
+        });
+
+        modelBuilder.Entity<InternalChatAttachment>(entity =>
+        {
+            entity.HasKey(item => item.Id);
+            entity.Property(item => item.FileName).HasMaxLength(260).IsRequired();
+            entity.Property(item => item.StoredFileName).HasMaxLength(260).IsRequired();
+            entity.Property(item => item.ContentType).HasMaxLength(160).IsRequired();
+            entity.Property(item => item.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.HasOne(item => item.Message).WithMany(message => message.Attachments).HasForeignKey(item => item.MessageId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(item => item.UploadedByUser).WithMany().HasForeignKey(item => item.UploadedByUserId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(item => item.MessageId).HasDatabaseName("IX_InternalChatAttachments_MessageId");
+        });
+
+        modelBuilder.Entity<InternalChatReaction>(entity =>
+        {
+            entity.HasKey(item => item.Id);
+            entity.Property(item => item.Emoji).HasMaxLength(32).IsRequired();
+            entity.Property(item => item.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.HasOne(item => item.Message).WithMany(message => message.Reactions).HasForeignKey(item => item.MessageId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(item => item.User).WithMany().HasForeignKey(item => item.UserId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(item => new { item.MessageId, item.UserId, item.Emoji }).IsUnique().HasDatabaseName("IX_InternalChatReactions_Message_User_Emoji");
+        });
+
+        modelBuilder.Entity<InternalChatMention>(entity =>
+        {
+            entity.HasKey(item => item.Id);
+            entity.HasOne(item => item.Message).WithMany(message => message.Mentions).HasForeignKey(item => item.MessageId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(item => item.User).WithMany().HasForeignKey(item => item.UserId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(item => new { item.MessageId, item.UserId }).IsUnique().HasDatabaseName("IX_InternalChatMentions_Message_User");
+            entity.HasIndex(item => new { item.UserId, item.MessageId }).HasDatabaseName("IX_InternalChatMentions_User_Message");
+        });
+
         modelBuilder.Entity<MessengerRecipientBinding>(entity =>
         {
             entity.HasKey(item => item.Id);
@@ -4400,6 +4475,12 @@ public class PaymentContext : DbContext
     public DbSet<TaskJournalItem> TaskJournalItems { get; set; }
     public DbSet<TaskJournalParticipant> TaskJournalParticipants { get; set; }
     public DbSet<TaskJournalComment> TaskJournalComments { get; set; }
+    public DbSet<InternalChatThread> InternalChatThreads { get; set; }
+    public DbSet<InternalChatMember> InternalChatMembers { get; set; }
+    public DbSet<InternalChatMessage> InternalChatMessages { get; set; }
+    public DbSet<InternalChatAttachment> InternalChatAttachments { get; set; }
+    public DbSet<InternalChatReaction> InternalChatReactions { get; set; }
+    public DbSet<InternalChatMention> InternalChatMentions { get; set; }
     public DbSet<MessengerRecipientBinding> MessengerRecipientBindings { get; set; }
     public DbSet<MessengerDocumentDelivery> MessengerDocumentDeliveries { get; set; }
     public DbSet<ElectronicSignatureEnvelope> ElectronicSignatureEnvelopes { get; set; }

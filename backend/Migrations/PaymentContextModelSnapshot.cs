@@ -4940,6 +4940,293 @@ namespace PayPlanner.Api.Migrations
                     b.ToTable("IncomeTypes");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.InternalChatAttachment", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(260)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("MessageId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Size")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("StoredFileName")
+                        .IsRequired()
+                        .HasMaxLength(260)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("UploadedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MessageId")
+                        .HasDatabaseName("IX_InternalChatAttachments_MessageId");
+
+                    b.HasIndex("UploadedByUserId");
+
+                    b.ToTable("InternalChatAttachments");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.InternalChatMember", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(true);
+
+                    b.Property<DateTime>("JoinedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<int?>("LastReadMessageId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("NotificationMode")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(24)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("all");
+
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(24)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("member");
+
+                    b.Property<int>("ThreadId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ThreadId", "UserId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_InternalChatMembers_Thread_User");
+
+                    b.HasIndex("UserId", "IsActive", "ThreadId")
+                        .HasDatabaseName("IX_InternalChatMembers_User_Active_Thread");
+
+                    b.ToTable("InternalChatMembers");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.InternalChatMention", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("MessageId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MessageId", "UserId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_InternalChatMentions_Message_User");
+
+                    b.HasIndex("UserId", "MessageId")
+                        .HasDatabaseName("IX_InternalChatMentions_User_Message");
+
+                    b.ToTable("InternalChatMentions");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.InternalChatMessage", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("AuthorUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<int?>("CreatedTaskJournalItemId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("EditedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsPinned")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(24)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("user");
+
+                    b.Property<DateTime?>("PinnedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("PinnedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("ReplyToMessageId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasMaxLength(8000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ThreadId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AuthorUserId")
+                        .HasDatabaseName("IX_InternalChatMessages_AuthorUserId");
+
+                    b.HasIndex("CreatedTaskJournalItemId")
+                        .HasDatabaseName("IX_InternalChatMessages_CreatedTaskJournalItemId");
+
+                    b.HasIndex("PinnedByUserId");
+
+                    b.HasIndex("ReplyToMessageId");
+
+                    b.HasIndex("ThreadId", "Id")
+                        .HasDatabaseName("IX_InternalChatMessages_Thread_Id");
+
+                    b.HasIndex("ThreadId", "IsPinned", "PinnedAt")
+                        .HasDatabaseName("IX_InternalChatMessages_Thread_Pinned");
+
+                    b.ToTable("InternalChatMessages");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.InternalChatReaction", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("Emoji")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("MessageId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("MessageId", "UserId", "Emoji")
+                        .IsUnique()
+                        .HasDatabaseName("IX_InternalChatReactions_Message_User_Emoji");
+
+                    b.ToTable("InternalChatReactions");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.InternalChatThread", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("DirectKey")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsArchived")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("LastMessageAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("TaskJournalItemId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("DirectKey")
+                        .IsUnique()
+                        .HasDatabaseName("IX_InternalChatThreads_DirectKey")
+                        .HasFilter("\"DirectKey\" IS NOT NULL");
+
+                    b.HasIndex("TaskJournalItemId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_InternalChatThreads_TaskJournalItemId")
+                        .HasFilter("\"TaskJournalItemId\" IS NOT NULL");
+
+                    b.HasIndex("IsArchived", "LastMessageAt")
+                        .HasDatabaseName("IX_InternalChatThreads_Archived_LastMessageAt");
+
+                    b.ToTable("InternalChatThreads");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.Invoice", b =>
                 {
                     b.Property<int>("Id")
@@ -11260,6 +11547,138 @@ namespace PayPlanner.Api.Migrations
                     b.Navigation("TaskJournalItem");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.InternalChatAttachment", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.InternalChatMessage", "Message")
+                        .WithMany("Attachments")
+                        .HasForeignKey("MessageId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.User", "UploadedByUser")
+                        .WithMany()
+                        .HasForeignKey("UploadedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Message");
+
+                    b.Navigation("UploadedByUser");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.InternalChatMember", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.InternalChatThread", "Thread")
+                        .WithMany("Members")
+                        .HasForeignKey("ThreadId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Thread");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.InternalChatMention", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.InternalChatMessage", "Message")
+                        .WithMany("Mentions")
+                        .HasForeignKey("MessageId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Message");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.InternalChatMessage", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.User", "AuthorUser")
+                        .WithMany()
+                        .HasForeignKey("AuthorUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("PayPlanner.Api.Models.TaskJournalItem", "CreatedTaskJournalItem")
+                        .WithMany()
+                        .HasForeignKey("CreatedTaskJournalItemId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("PayPlanner.Api.Models.User", "PinnedByUser")
+                        .WithMany()
+                        .HasForeignKey("PinnedByUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("PayPlanner.Api.Models.InternalChatMessage", "ReplyToMessage")
+                        .WithMany()
+                        .HasForeignKey("ReplyToMessageId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("PayPlanner.Api.Models.InternalChatThread", "Thread")
+                        .WithMany("Messages")
+                        .HasForeignKey("ThreadId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("AuthorUser");
+
+                    b.Navigation("CreatedTaskJournalItem");
+
+                    b.Navigation("PinnedByUser");
+
+                    b.Navigation("ReplyToMessage");
+
+                    b.Navigation("Thread");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.InternalChatReaction", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.InternalChatMessage", "Message")
+                        .WithMany("Reactions")
+                        .HasForeignKey("MessageId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Message");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.InternalChatThread", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.User", "CreatedByUser")
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("PayPlanner.Api.Models.TaskJournalItem", "TaskJournalItem")
+                        .WithMany()
+                        .HasForeignKey("TaskJournalItemId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.Navigation("CreatedByUser");
+
+                    b.Navigation("TaskJournalItem");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.InvoiceClientCase", b =>
                 {
                     b.HasOne("PayPlanner.Api.Models.ClientCase", "ClientCase")
@@ -12354,6 +12773,22 @@ namespace PayPlanner.Api.Migrations
                     b.Navigation("MoneyOperations");
 
                     b.Navigation("Payments");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.InternalChatMessage", b =>
+                {
+                    b.Navigation("Attachments");
+
+                    b.Navigation("Mentions");
+
+                    b.Navigation("Reactions");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.InternalChatThread", b =>
+                {
+                    b.Navigation("Members");
+
+                    b.Navigation("Messages");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.Invoice", b =>

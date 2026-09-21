@@ -75,6 +75,7 @@ public static class UserNotificationDomains
     public const string Contract = "contract";
     public const string Case = "case";
     public const string Court = "court";
+    public const string Chat = "chat";
     public const string System = "system";
 
     public static string Resolve(string? type)
@@ -119,6 +120,10 @@ public static class UserNotificationDomains
                 or UserNotificationTypes.CaseConversation
                 or UserNotificationTypes.CaseDocument
                 or UserNotificationTypes.CaseInactivityReminder => Case,
+            UserNotificationTypes.ChatMessage
+                or UserNotificationTypes.ChatMention
+                or UserNotificationTypes.ChatReply
+                or UserNotificationTypes.ChatTaskCreated => Chat,
             UserNotificationTypes.CaseCourtEvent
                 or UserNotificationTypes.CourtHearing
                 or UserNotificationTypes.CourtStatusChanged
@@ -139,6 +144,7 @@ public static class UserNotificationDomains
             Contract => "Договоры",
             Case => "Дела",
             Court => "Суды",
+            Chat => "Мессенджер",
             _ => "Система"
         };
 }
@@ -235,6 +241,10 @@ public static class UserNotificationTypes
     public const string NoteReminder = "noteReminder";
     public const string NoteImportantChanged = "noteImportantChanged";
     public const string SystemAdminWarning = "systemAdminWarning";
+    public const string ChatMessage = "chatMessage";
+    public const string ChatMention = "chatMention";
+    public const string ChatReply = "chatReply";
+    public const string ChatTaskCreated = "chatTaskCreated";
 
     private static readonly IReadOnlySet<string> SmsPreferenceTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
@@ -311,6 +321,10 @@ public static class UserNotificationTypes
         new(NoteAssigned, "Назначена заметка", "Сотрудника назначили ответственным по заметке.", "violet", "high", NotificationChannels.All, true, false),
         new(NoteReminder, "Напоминание по заметке", "Наступил срок напоминания по назначенной заметке.", "amber", "high", NotificationChannels.All, true, false),
         new(NoteImportantChanged, "Важная заметка", "На общей доске закрепили, изменили или удалили важную заметку.", "orange", "high", NotificationChannels.All, true, false),
+        new(ChatMessage, "Новое сообщение", "Новое сообщение в командном, личном или связанном с задачей чате.", "emerald", "normal", NotificationChannels.All, true, true),
+        new(ChatMention, "Упоминание в чате", "Сотрудника упомянули в сообщении.", "cyan", "high", NotificationChannels.All, true, false),
+        new(ChatReply, "Ответ в чате", "Сотруднику ответили на его сообщение.", "violet", "high", NotificationChannels.All, true, false),
+        new(ChatTaskCreated, "Задача из сообщения", "Из сообщения чата создали связанную задачу.", "blue", "high", NotificationChannels.All, true, false),
         new(SystemAdminWarning, "Системное предупреждение", "Администраторам требуется обратить внимание на фоновый процесс, интеграцию или настройку.", "rose", NotificationPriorities.Critical, NotificationChannels.All, true, false)
     ];
 

@@ -90,6 +90,7 @@ type UserDetailInitialSection = 'main' | 'contractorBalance';
 const TABS_WITH_QUERY_ROUTE = new Set<Tab>([
   'workspace',
   'calendar',
+  'messenger',
   'accountsIncome',
   'accountsExpense',
   'actsIncome',
@@ -202,6 +203,7 @@ function buildCasePaymentCreateDraft(caseItem: ClientCase, type: PaymentKind): C
 const Calendar = lazy(() => import('./components/Calendar/Calendar').then((module) => ({ default: module.Calendar })));
 const TaskJournal = lazy(() => import('./components/Tasks/TaskJournal').then((module) => ({ default: module.TaskJournal })));
 const NotificationCenter = lazy(() => import('./components/Notifications/NotificationCenter').then((module) => ({ default: module.NotificationCenter })));
+const InternalMessenger = lazy(() => import('./components/Messenger/InternalMessenger').then((module) => ({ default: module.InternalMessenger })));
 const Reports = lazy(() => import('./components/Reports/Reports').then((module) => ({ default: module.Reports })));
 const Calculator = lazy(() => import('./components/Calculator/Calculator').then((module) => ({ default: module.Calculator })));
 const Clients = lazy(() => import('./components/Clients/Clients').then((module) => ({ default: module.Clients })));
@@ -256,6 +258,7 @@ function AppContent() {
     () => ({
       workspace: 'Рабочий стол',
       notifications: 'Центр уведомлений',
+      messenger: 'Мессенджер',
       calendar: 'Календарь',
       tasks: 'Журнал задач',
       tasksControl: 'Задачи на контроле',
@@ -1197,6 +1200,9 @@ function AppContent() {
             onOpenContract={permissions.contracts.canView ? (contractId) => openContractDetail(contractId, { returnTo: 'notifications' }) : undefined}
           />
         );
+
+      case 'messenger':
+        return <InternalMessenger onOpenTask={(taskId) => openTaskDetail(taskId, { returnTo: 'messenger' })} />;
 
       case 'payroll':
         return isAdminRole
