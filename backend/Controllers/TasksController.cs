@@ -690,6 +690,25 @@ public class TasksController : ControllerBase
             metric: null,
             todayFrom: normalizedTodayFrom,
             todayTo: normalizedTodayTo);
+        var unbilledQuery = BuildTaskJournalListQuery(
+            access,
+            search,
+            status: null,
+            type,
+            assigneeUserId,
+            from,
+            to,
+            clientCaseId,
+            clientId,
+            legalEntityId,
+            priority,
+            underControl,
+            authorUserId,
+            approvalScope,
+            metric: null,
+            todayFrom: normalizedTodayFrom,
+            todayTo: normalizedTodayTo,
+            billingStatus: "unbilled");
 
         var aggregate = await query
             .GroupBy(_ => 1)
@@ -711,13 +730,6 @@ public class TasksController : ControllerBase
                     (task.Status == null || task.Status.ToLower() != "done") &&
                     (task.Status == null || task.Status.ToLower() != "cancelled") &&
                     (task.Priority == "high" || task.Priority == "urgent")),
-                Unbilled = group.Count(task =>
-                    task.ClientBillingClassification == TaskClientBillingClassification.Billable &&
-                    !task.BillingInvoiceId.HasValue &&
-                    (task.BillingModeSnapshot == null ||
-                     task.BillingModeSnapshot.ToLower() != ContractBillingMode.Fixed.ToLower()) &&
-                    (task.Status == null || task.Status.ToLower() != "done") &&
-                    (task.Status == null || task.Status.ToLower() != "cancelled")),
                 Fixed = group.Count(task =>
                     task.ClientBillingClassification == TaskClientBillingClassification.Billable &&
                     !task.BillingInvoiceId.HasValue &&
@@ -741,17 +753,12 @@ public class TasksController : ControllerBase
             })
             .SingleOrDefaultAsync(ct);
 
-        var invoicesToPrepare = await query
-            .Where(task =>
-                task.ClientBillingClassification == TaskClientBillingClassification.Billable &&
-                !task.BillingInvoiceId.HasValue &&
-                (task.BillingModeSnapshot == null ||
-                 task.BillingModeSnapshot.ToLower() != ContractBillingMode.Fixed.ToLower()) &&
-                (task.Status == null || task.Status.ToLower() != "done") &&
-                (task.Status == null || task.Status.ToLower() != "cancelled"))
-            .Select(task => new { task.ClientId, task.LegalEntityId })
-            .Distinct()
-            .CountAsync(ct);
+        var unbilledOwnerCounts = await unbilledQuery
+            .GroupBy(task => new { task.ClientId, task.LegalEntityId })
+            .Select(group => group.Count())
+            .ToListAsync(ct);
+        var unbilledCount = unbilledOwnerCounts.Sum();
+        var invoicesToPrepare = unbilledOwnerCounts.Count;
 
         return Ok(new TaskJournalListSummaryDto
         {
@@ -759,7 +766,7 @@ public class TasksController : ControllerBase
             Overdue = aggregate?.Overdue ?? 0,
             Today = aggregate?.Today ?? 0,
             HighPriority = aggregate?.HighPriority ?? 0,
-            Unbilled = aggregate?.Unbilled ?? 0,
+            Unbilled = unbilledCount,
             InvoicesToPrepare = invoicesToPrepare,
             Fixed = aggregate?.Fixed ?? 0,
             Invoiced = aggregate?.Invoiced ?? 0,
@@ -4405,10 +4412,12 @@ public class TasksController : ControllerBase
         DateTime? todayTo,
         string? billingStatus = null)
     {
+        var normalizedBillingStatus = billingStatus?.Trim().ToLowerInvariant();
+        var effectiveStatus = normalizedBillingStatus == "unbilled" ? null : status;
         var query = ApplyTaskJournalFilters(
             BuildVisibleTaskBaseQuery(access).AsNoTracking(),
             search,
-            status,
+            effectiveStatus,
             type,
             assigneeUserId,
             from,
@@ -4440,22 +4449,28 @@ public class TasksController : ControllerBase
             return query;
         }
 
-        query = query.Where(task => task.Status != "done" && task.Status != "cancelled");
         return normalized switch
         {
             "unbilled" => query.Where(task =>
+                task.Status != "cancelled" &&
                 task.ClientBillingClassification == TaskClientBillingClassification.Billable &&
                 !task.BillingInvoiceId.HasValue &&
                 (task.BillingModeSnapshot == null || task.BillingModeSnapshot.ToLower() != ContractBillingMode.Fixed.ToLower())),
             "fixed" => query.Where(task =>
+                task.Status != "done" && task.Status != "cancelled" &&
                 task.ClientBillingClassification == TaskClientBillingClassification.Billable &&
                 !task.BillingInvoiceId.HasValue &&
                 task.BillingModeSnapshot != null &&
                 task.BillingModeSnapshot.ToLower() == ContractBillingMode.Fixed.ToLower()),
             "invoiced" => query.Where(task =>
+                task.Status != "done" && task.Status != "cancelled" &&
                 task.ClientBillingClassification == TaskClientBillingClassification.Billable && task.BillingInvoiceId.HasValue),
-            "internal" => query.Where(task => task.ClientBillingClassification == TaskClientBillingClassification.Internal),
-            "legacy" => query.Where(task => task.ClientBillingClassification == TaskClientBillingClassification.Legacy),
+            "internal" => query.Where(task =>
+                task.Status != "done" && task.Status != "cancelled" &&
+                task.ClientBillingClassification == TaskClientBillingClassification.Internal),
+            "legacy" => query.Where(task =>
+                task.Status != "done" && task.Status != "cancelled" &&
+                task.ClientBillingClassification == TaskClientBillingClassification.Legacy),
             _ => query,
         };
     }

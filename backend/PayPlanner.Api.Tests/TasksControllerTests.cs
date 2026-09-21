@@ -1512,7 +1512,7 @@ public class TasksControllerTests
         Assert.Equal(1, summary.Overdue);
         Assert.Equal(4, summary.Today);
         Assert.Equal(1, summary.HighPriority);
-        Assert.Equal(1, summary.Unbilled);
+        Assert.Equal(2, summary.Unbilled);
         Assert.Equal(1, summary.InvoicesToPrepare);
         Assert.Equal(1, summary.Fixed);
         Assert.Equal(1, summary.Invoiced);
@@ -3912,7 +3912,7 @@ public class TasksControllerTests
     }
 
     [Fact]
-    public async Task GetTasks_FiltersActiveTasksByBillingQueueBeforePagination()
+    public async Task GetTasks_KeepsCompletedUnbilledTasksInBillingQueueBeforePagination()
     {
         await using var db = await CreateContextAsync();
         var author = await CreateAdminUserAsync(db, "billing-filter@example.com", "Автор");
@@ -3932,20 +3932,21 @@ public class TasksControllerTests
 
         var result = await controller.GetTasks(
             search: null,
-            status: null,
+            status: "active",
             type: null,
             assigneeUserId: null,
             from: null,
             to: null,
             page: 1,
-            pageSize: 1,
+            pageSize: 50,
             billingStatus: "unbilled",
             ct: CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(result.Result);
         var page = Assert.IsType<PagedResponse<TaskJournalItemDto>>(ok.Value);
-        Assert.Equal(1, page.Total);
-        Assert.Equal(expected.Id, Assert.Single(page.Items).Id);
+        Assert.Equal(2, page.Total);
+        Assert.Contains(page.Items, item => item.Id == expected.Id);
+        Assert.Contains(page.Items, item => item.Id == completedTask.Id && item.Status == "done");
     }
 
     [Fact]

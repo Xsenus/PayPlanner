@@ -321,7 +321,8 @@ function filterTaskJournalMockItems(tasks: TaskJournalItem[], params: Record<str
     const searchMatches = !search || [task.objectName, task.clientName, task.legalEntityName, task.clientCaseTitle, task.title]
       .some((value) => value?.toLocaleLowerCase('ru').includes(search));
     const billingMatches = typeof params.billingStatus !== 'string'
-      || (active && task.billingStatus === params.billingStatus);
+      || (task.billingStatus === params.billingStatus
+        && (params.billingStatus === 'unbilled' ? task.status !== 'cancelled' : active));
 
     return statusMatches
       && metricMatches
@@ -381,8 +382,9 @@ async function renderJournal(
   apiMock.getTaskJournalSummary.mockReset();
   apiMock.getTaskJournalSummary.mockImplementation(async (params: Record<string, unknown> = {}) => {
     const filtered = filterTaskJournalMockItems(tasks, params);
+    const billingFiltered = filterTaskJournalMockItems(tasks, { ...params, status: 'all' });
     const active = filtered.filter((task) => task.status !== 'done' && task.status !== 'cancelled');
-    const unbilled = active.filter((task) => task.billingStatus === 'unbilled');
+    const unbilled = billingFiltered.filter((task) => task.status !== 'cancelled' && task.billingStatus === 'unbilled');
     return {
       active: active.length,
       overdue: filtered.filter((task) => task.status !== 'done' && task.status !== 'cancelled' && new Date(task.dueAt).getTime() < Date.now()).length,
@@ -1448,6 +1450,39 @@ describe('TaskJournal', () => {
     }));
   });
 
+  it('keeps a completed paid task in the unbilled queue until an invoice is prepared', async () => {
+    const activeTask = createTask({
+      id: 331,
+      title: 'Текущая платная работа',
+      clientBillingClassification: 'billable',
+      billingMode: 'Actual',
+      billingStatus: 'unbilled',
+    });
+    const completedTask = createTask({
+      id: 332,
+      title: 'Выполненная платная работа',
+      status: 'done',
+      result: 'Работа выполнена',
+      clientBillingClassification: 'billable',
+      billingMode: 'Actual',
+      billingStatus: 'unbilled',
+    });
+
+    await renderJournal([activeTask, completedTask], { onCreateInvoiceDraft: vi.fn() });
+
+    const analysis = await screen.findByTestId('task-unbilled-reminder');
+    expect(within(analysis).getByText('Платные задачи без счёта: 2')).toBeTruthy();
+    expect(screen.queryByText('Выполненная платная работа')).toBeNull();
+
+    fireEvent.click(within(analysis).getByRole('button', { name: 'Платные задачи без счёта: 2' }));
+
+    expect(await screen.findByText('Выполненная платная работа')).toBeTruthy();
+    expect(apiMock.getTaskJournalItems).toHaveBeenLastCalledWith(
+      expect.objectContaining({ billingStatus: 'unbilled', status: 'all' }),
+      expect.anything(),
+    );
+  });
+
   it('allows an invoice creator to select a read-only task from the unbilled list', async () => {
     authState.isAdmin = false;
     authState.user = { id: 7, fullName: 'Бухгалтер', email: 'accountant@example.com' };
@@ -1895,13 +1930,21 @@ describe('TaskJournal', () => {
   });
 
   it('asks for task result before quick completion', async () => {
-    const task = createTask({ id: 101, title: 'Закрыть с результатом', result: '' });
+    const task = createTask({
+      id: 101,
+      title: 'Закрыть с результатом',
+      result: '',
+      clientBillingClassification: 'billable',
+      billingMode: 'Actual',
+      billingStatus: 'unbilled',
+    });
 
     await renderJournal([task], { waitForTitle: 'Закрыть с результатом' });
 
     fireEvent.click(screen.getByTitle('Завершить'));
 
     expect(await screen.findByRole('heading', { name: 'Добавить результат по задаче' })).toBeTruthy();
+    expect(screen.getByTestId('task-completion-billing-notice').textContent).toContain('останется в очереди «Платные задачи без счёта»');
     expect(apiMock.updateTaskJournalStatus).not.toHaveBeenCalled();
 
     const resultInput = screen.getByPlaceholderText('Опишите подробно, что было сделано и какой результат был достигнут.') as HTMLTextAreaElement;

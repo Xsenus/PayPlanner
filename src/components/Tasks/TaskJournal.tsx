@@ -4310,7 +4310,7 @@ export function TaskJournal({
     }
 
     const activeTasks = tasks.filter((task) => task.status !== 'done' && task.status !== 'cancelled');
-    const unbilledTasks = activeTasks.filter((task) => task.billingStatus === 'unbilled');
+    const unbilledTasks = tasks.filter((task) => task.status !== 'cancelled' && task.billingStatus === 'unbilled');
     const invoiceOwners = new Set(unbilledTasks.map((task) => (
       task.clientId ? `client:${task.clientId}` : task.legalEntityId ? `legal:${task.legalEntityId}` : `task:${task.id}`
     )));
@@ -4441,7 +4441,7 @@ export function TaskJournal({
     setViewMode('list');
     clearBulkSelection();
     if (resolvedFilter) {
-      setStatusFilter('active');
+      setStatusFilter(resolvedFilter === 'unbilled' ? 'all' : 'active');
       setMetricFilter('none');
       setPeriodMode('all');
       setDateFromFilter('');
@@ -6108,8 +6108,8 @@ export function TaskJournal({
               <div>
                 <div className="font-semibold text-rose-950">Анализ оплаты задач</div>
                 <div className="mt-1 flex flex-wrap gap-2 text-xs font-bold">
-                  <button type="button" aria-pressed={billingFilter === 'unbilled'} onClick={() => handleBillingFilterClick('unbilled')} title="Показать активные платные задачи без счёта, сгруппированные по клиентам" className={`rounded-lg border px-3 py-1.5 shadow-sm transition hover:-translate-y-0.5 hover:shadow ${billingFilter === 'unbilled' ? 'border-rose-700 bg-rose-700 text-white ring-2 ring-rose-200' : 'border-rose-300 bg-rose-100 text-rose-900 hover:bg-rose-200'}`}>Счетов подготовить: {billingAnalysis.invoicesToPrepare}</button>
-                  <button type="button" aria-pressed={billingFilter === 'unbilled'} onClick={() => handleBillingFilterClick('unbilled')} title="Показать все активные платные задачи, ещё не включённые в счёт" className={`rounded-lg border px-3 py-1.5 shadow-sm transition hover:-translate-y-0.5 hover:shadow ${billingFilter === 'unbilled' ? 'border-rose-700 bg-rose-700 text-white ring-2 ring-rose-200' : 'border-rose-300 bg-white text-rose-900 hover:bg-rose-100'}`}>Платные задачи без счёта: {unbilledClientTaskCount}</button>
+                  <button type="button" aria-pressed={billingFilter === 'unbilled'} onClick={() => handleBillingFilterClick('unbilled')} title="Показать все платные задачи без счёта, включая уже выполненные, сгруппированные по клиентам" className={`rounded-lg border px-3 py-1.5 shadow-sm transition hover:-translate-y-0.5 hover:shadow ${billingFilter === 'unbilled' ? 'border-rose-700 bg-rose-700 text-white ring-2 ring-rose-200' : 'border-rose-300 bg-rose-100 text-rose-900 hover:bg-rose-200'}`}>Счетов подготовить: {billingAnalysis.invoicesToPrepare}</button>
+                  <button type="button" aria-pressed={billingFilter === 'unbilled'} onClick={() => handleBillingFilterClick('unbilled')} title="Показать все платные задачи, ещё не включённые в счёт, в том числе выполненные" className={`rounded-lg border px-3 py-1.5 shadow-sm transition hover:-translate-y-0.5 hover:shadow ${billingFilter === 'unbilled' ? 'border-rose-700 bg-rose-700 text-white ring-2 ring-rose-200' : 'border-rose-300 bg-white text-rose-900 hover:bg-rose-100'}`}>Платные задачи без счёта: {unbilledClientTaskCount}</button>
                   <button type="button" aria-pressed={billingFilter === 'fixed'} onClick={() => handleBillingFilterClick('fixed')} className={`rounded-lg border px-3 py-1.5 shadow-sm transition hover:-translate-y-0.5 ${billingFilter === 'fixed' ? 'border-violet-700 bg-violet-700 text-white ring-2 ring-violet-200' : 'border-violet-300 bg-violet-100 text-violet-900 hover:bg-violet-200'}`}>По фиксированному договору: {billingAnalysis.fixed}</button>
                   <button type="button" aria-pressed={billingFilter === 'internal'} onClick={() => handleBillingFilterClick('internal')} className={`rounded-lg border px-3 py-1.5 shadow-sm transition hover:-translate-y-0.5 ${billingFilter === 'internal' ? 'border-slate-700 bg-slate-700 text-white ring-2 ring-slate-200' : 'border-slate-300 bg-slate-100 text-slate-800 hover:bg-slate-200'}`}>Неоплачиваемые: {billingAnalysis.nonBillable}</button>
                   <button type="button" aria-pressed={billingFilter === 'invoiced'} onClick={() => handleBillingFilterClick('invoiced')} className={`rounded-lg border px-3 py-1.5 shadow-sm transition hover:-translate-y-0.5 ${billingFilter === 'invoiced' ? 'border-emerald-700 bg-emerald-700 text-white ring-2 ring-emerald-200' : 'border-emerald-300 bg-emerald-100 text-emerald-900 hover:bg-emerald-200'}`}>Уже включены в счёт: {billingAnalysis.invoiced}</button>
@@ -6121,7 +6121,7 @@ export function TaskJournal({
                   {billingFilter
                     ? 'Категория открыта в таблице ниже. Повторное нажатие вернёт полный журнал.'
                     : unbilledClientTaskCount > 0
-                    ? 'Отметьте задачи одного клиента в таблице и подготовьте по ним единый счёт.'
+                    ? 'В очереди остаются и выполненные задачи: отметьте работы одного клиента и подготовьте по ним единый счёт.'
                     : 'Все активные задачи распределены, новых счетов по ним готовить не требуется.'}
                 </div>
                 <div className={`mt-1 text-xs font-semibold ${taskSettings.financialDocumentsResponsibleUserName ? 'text-slate-700' : 'text-amber-800'}`}>
@@ -6523,6 +6523,7 @@ function TaskCompletionResultPrompt({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [fileError, setFileError] = useState<string | null>(null);
+  const keepsInBillingQueue = task?.billingStatus === 'unbilled' && eyebrow === 'Завершение задачи';
 
   const selectFiles = (files: FileList | null) => {
     if (!files?.length) return;
@@ -6567,6 +6568,16 @@ function TaskCompletionResultPrompt({
             <X className="h-4 w-4" />
           </button>
         </div>
+
+        {keepsInBillingQueue ? (
+          <div className="mt-4 flex items-start gap-3 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-900" data-testid="task-completion-billing-notice">
+            <WalletCards className="mt-0.5 h-5 w-5 shrink-0 text-rose-600" />
+            <div>
+              <div className="font-semibold">Завершение не уберёт задачу из контроля оплаты</div>
+              <p className="mt-1 leading-5 text-rose-800">Работа перейдёт в завершённые, но останется в очереди «Платные задачи без счёта», пока бухгалтер или ответственный не включит её в счёт.</p>
+            </div>
+          </div>
+        ) : null}
 
         <label className="mt-5 block text-sm font-semibold text-slate-700" htmlFor="task-completion-result">
           Результат
