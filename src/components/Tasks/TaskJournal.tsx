@@ -12,8 +12,10 @@ import {
   Bookmark,
   CalendarDays,
   CalendarClock,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   CheckCircle2,
   ClipboardList,
   Clock3,
@@ -394,6 +396,7 @@ const CHANNEL_OPTIONS: Array<{ value: TaskJournalChannel; label: string; icon: t
 const TASK_JOURNAL_FILTERS_STORAGE_PREFIX = 'pp.task_journal.filters.v1';
 const TASK_JOURNAL_SAVED_VIEWS_STORAGE_PREFIX = 'pp.task_journal.views.v1';
 const TASK_CARD_LAYOUT_STORAGE_PREFIX = 'pp.task_journal.card_layout.v1';
+const TASK_AUTOMATION_PANEL_STORAGE_PREFIX = 'pp.task_journal.automation_panel.v1';
 
 const QUICK_FILTER_OPTIONS: Array<{ value: QuickFilter; label: string; icon: typeof ClipboardList }> = [
   { value: 'all', label: 'Все', icon: ListFilter },
@@ -431,6 +434,30 @@ function getTaskJournalSavedViewsStorageKey(userId: number | null, mode: TaskJou
 
 function getTaskCardLayoutStorageKey(userId: number | null) {
   return `${TASK_CARD_LAYOUT_STORAGE_PREFIX}.${userId ? `user:${userId}` : 'guest'}`;
+}
+
+function getTaskAutomationPanelStorageKey(userId: number | null) {
+  return `${TASK_AUTOMATION_PANEL_STORAGE_PREFIX}.${userId ? `user:${userId}` : 'guest'}`;
+}
+
+function readTaskAutomationPanelCollapsed(userId: number | null) {
+  if (typeof window === 'undefined') return false;
+
+  try {
+    return window.localStorage.getItem(getTaskAutomationPanelStorageKey(userId)) === 'collapsed';
+  } catch {
+    return false;
+  }
+}
+
+function writeTaskAutomationPanelCollapsed(userId: number | null, collapsed: boolean) {
+  if (typeof window === 'undefined') return;
+
+  try {
+    window.localStorage.setItem(getTaskAutomationPanelStorageKey(userId), collapsed ? 'collapsed' : 'expanded');
+  } catch {
+    // The panel still collapses for the current session when browser storage is unavailable.
+  }
 }
 
 function readTaskCardLayoutMode(userId: number | null): TaskCardLayoutMode {
@@ -6212,6 +6239,7 @@ export function TaskJournal({
 
         {!embedded && !isApprovalsMode && canCreateTasks && canViewCases && taskSettings.caseInactivityAutomationEnabled ? (
           <TaskAutomationPanel
+            currentUserId={currentUserId}
             candidates={automationCandidates}
             summary={automationSummary}
             activeState={automationStateFilter}
@@ -7044,6 +7072,7 @@ function TaskDeadlineChangeDecisionPrompt({
 }
 
 function TaskAutomationPanel({
+  currentUserId,
   candidates,
   summary,
   activeState,
@@ -7066,6 +7095,7 @@ function TaskAutomationPanel({
   onStateChange,
   onOpenCase,
 }: {
+  currentUserId: number | null;
   candidates: TaskJournalCaseAutomationCandidate[];
   summary: TaskJournalCaseAutomationSummary;
   activeState: AutomationCandidateStateFilter;
@@ -7089,6 +7119,7 @@ function TaskAutomationPanel({
   onOpenCase?: (caseId: number, clientId?: number | null) => void | Promise<void>;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => readTaskAutomationPanelCollapsed(currentUserId));
   const loadedSummary = summarizeAutomationCandidates(candidates);
   const effectiveSummary = summary.totalCount >= candidates.length
     ? { ...summary, criticalCount: summary.criticalCount ?? loadedSummary.criticalCount ?? 0 }
@@ -7118,24 +7149,32 @@ function TaskAutomationPanel({
       ? orderedCandidates.filter((candidate) => candidate.isEscalated)
       : orderedCandidates.filter((candidate) => getAutomationCandidateState(candidate) === activeState);
   const visibleCandidates = expanded ? filteredCandidates : filteredCandidates.slice(0, 6);
+  const toggleCollapsed = () => {
+    setCollapsed((value) => {
+      const next = !value;
+      writeTaskAutomationPanelCollapsed(currentUserId, next);
+      return next;
+    });
+  };
 
   return (
     <section
       data-automation-active-state={activeState}
+      data-automation-collapsed={collapsed ? 'true' : 'false'}
       className={`pp-automation-panel mb-4 rounded-2xl border p-3 shadow-sm ${activeState === 'critical' ? 'pp-automation-panel-critical' : ''}`}
     >
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="min-w-0 flex-1">
           <div className="pp-automation-panel-kicker text-xs font-semibold uppercase tracking-[0.16em]">Автоконтроль дел</div>
           <h2 className="mt-1 text-lg font-semibold text-slate-900">{overview.title}</h2>
-          <p className="mt-1 text-sm text-slate-600">{overview.description}</p>
-          {effectiveSummary.nextStateChangeAt ? (
+          {!collapsed ? <p className="mt-1 text-sm text-slate-600">{overview.description}</p> : null}
+          {!collapsed && effectiveSummary.nextStateChangeAt ? (
             <div className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-white/80 px-2.5 py-1.5 text-xs font-medium text-amber-900">
               <CalendarClock className="h-3.5 w-3.5 shrink-0" />
               Ближайшее изменение состояния: {getAutomationNextStateChangeLabel(effectiveSummary.nextStateChangeKind)} — {formatDateTime(effectiveSummary.nextStateChangeAt)}
             </div>
           ) : null}
-          {lastRefreshedAt ? (
+          {!collapsed && lastRefreshedAt ? (
             <div className="mt-1.5 text-xs text-slate-500">
               Данные обновлены: {formatDateTime(lastRefreshedAt)}
             </div>
@@ -7149,38 +7188,55 @@ function TaskAutomationPanel({
             <ClipboardList className="h-4 w-4" />
             {stateTotal}
           </div>
+          {!collapsed ? (
+            <>
+              <button
+                type="button"
+                onClick={onRefresh}
+                disabled={loadingPage}
+                aria-label="Обновить очередь автоконтроля"
+                className="inline-flex w-fit items-center gap-2 rounded-xl border border-amber-200 bg-white px-3 py-2 text-sm font-semibold text-amber-900 transition hover:border-amber-400 hover:bg-amber-50 disabled:cursor-wait disabled:opacity-60"
+              >
+                {loadingPage ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                {loadingPage ? 'Обновляем...' : 'Обновить'}
+              </button>
+              <button
+                type="button"
+                onClick={onCreateAll}
+                disabled={creatingAll || loadingPage || Boolean(loadError) || actionableCount === 0}
+                className="pp-automation-panel-action inline-flex w-fit items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <Plus className="h-4 w-4" />
+                {creatingAll
+                  ? 'Создаем...'
+                  : loadingPage
+                    ? 'Обновляем очередь...'
+                  : activeState === 'waiting'
+                    ? 'Срок ещё не наступил'
+                    : activeState === 'paused'
+                      ? 'Создание приостановлено'
+                      : actionableCount <= Math.max(1, creationLimit)
+                        ? `${activeState === 'critical' ? 'Создать критические' : 'Создать наступившие'} (${actionableCount})`
+                        : `${activeState === 'critical' ? 'Создать критические' : 'Создать наступившие'} (${Math.max(1, creationLimit)} из ${actionableCount})`}
+              </button>
+            </>
+          ) : null}
           <button
             type="button"
-            onClick={onRefresh}
-            disabled={loadingPage}
-            aria-label="Обновить очередь автоконтроля"
-            className="inline-flex w-fit items-center gap-2 rounded-xl border border-amber-200 bg-white px-3 py-2 text-sm font-semibold text-amber-900 transition hover:border-amber-400 hover:bg-amber-50 disabled:cursor-wait disabled:opacity-60"
+            onClick={toggleCollapsed}
+            aria-expanded={!collapsed}
+            aria-controls="task-automation-panel-content"
+            className="inline-flex w-fit items-center gap-2 rounded-xl border border-amber-300 bg-white px-3 py-2 text-sm font-semibold text-amber-900 transition hover:border-amber-500 hover:bg-amber-50"
           >
-            {loadingPage ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-            {loadingPage ? 'Обновляем...' : 'Обновить'}
-          </button>
-          <button
-            type="button"
-            onClick={onCreateAll}
-            disabled={creatingAll || loadingPage || Boolean(loadError) || actionableCount === 0}
-            className="pp-automation-panel-action inline-flex w-fit items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            <Plus className="h-4 w-4" />
-            {creatingAll
-              ? 'Создаем...'
-              : loadingPage
-                ? 'Обновляем очередь...'
-              : activeState === 'waiting'
-                ? 'Срок ещё не наступил'
-                : activeState === 'paused'
-                  ? 'Создание приостановлено'
-                  : actionableCount <= Math.max(1, creationLimit)
-                    ? `${activeState === 'critical' ? 'Создать критические' : 'Создать наступившие'} (${actionableCount})`
-                    : `${activeState === 'critical' ? 'Создать критические' : 'Создать наступившие'} (${Math.max(1, creationLimit)} из ${actionableCount})`}
+            {collapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+            {collapsed ? 'Развернуть' : 'Свернуть'}
           </button>
         </div>
       </div>
 
+      <div id="task-automation-panel-content">
+      {!collapsed ? (
+        <>
       <label className="relative mt-3 block max-w-2xl">
         <span className="sr-only">Поиск в автоконтроле</span>
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -7480,6 +7536,9 @@ function TaskAutomationPanel({
             {loadingMore ? 'Загружаем...' : `Загрузить ещё (${Math.min(100, stateTotal - candidates.length)})`}
           </button>
         ) : null}
+        </div>
+        </>
+      ) : null}
       </div>
     </section>
   );

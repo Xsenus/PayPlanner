@@ -3882,6 +3882,54 @@ describe('TaskJournal', () => {
     expect(await screen.findByRole('heading', { name: 'Просмотр задачи' })).toBeTruthy();
   });
 
+  it('collapses the case automation panel and remembers the user preference', async () => {
+    const candidate = {
+      clientId: 10,
+      clientName: 'Иванов Иван Иванович',
+      clientCaseId: 100,
+      clientCaseTitle: 'БАНКРОТСТВО',
+      reason: 'Нет активной задачи уже 20 дн.',
+      activeTaskCount: 0,
+      completedTaskCount: 2,
+      daysWithoutActiveTask: 20,
+      isEscalated: false,
+      isReadyForControl: true,
+      automationState: 'ready' as const,
+      lastTaskAt: todayAt(8),
+      suggestedTitle: 'Проверить движение по делу',
+      suggestedDescription: 'Автоконтроль: по делу нет активной задачи.',
+      suggestedDueAt: todayAt(9),
+      suggestedPriority: 'normal' as const,
+    };
+    apiMock.getTaskJournalCaseAutomationCandidates.mockResolvedValue([candidate]);
+    apiMock.getTaskJournalCaseAutomationSummary.mockResolvedValue({
+      totalCount: 1,
+      readyCount: 1,
+      criticalCount: 0,
+      waitingCount: 0,
+      pausedCount: 0,
+    });
+
+    await renderJournal();
+
+    const collapseButton = screen.getByRole('button', { name: 'Свернуть' });
+    expect(collapseButton.getAttribute('aria-expanded')).toBe('true');
+    fireEvent.click(collapseButton);
+
+    expect(screen.getByRole('button', { name: 'Развернуть' }).getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByTestId('task-automation-create-100')).toBeNull();
+    expect(window.localStorage.getItem('pp.task_journal.automation_panel.v1.user:7')).toBe('collapsed');
+
+    cleanup();
+    await renderJournal();
+
+    expect(screen.getByRole('button', { name: 'Развернуть' })).toBeTruthy();
+    expect(screen.queryByTestId('task-automation-create-100')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Развернуть' }));
+    expect(await screen.findByTestId('task-automation-create-100')).toBeTruthy();
+    expect(window.localStorage.getItem('pp.task_journal.automation_panel.v1.user:7')).toBe('expanded');
+  });
+
   it('refreshes the automation queue when another user creates the task first', async () => {
     const candidate = {
       clientId: 10,
