@@ -7419,6 +7419,12 @@ public class TasksController : ControllerBase
         => string.Equals(status, "done", StringComparison.OrdinalIgnoreCase)
            || string.Equals(status, "onApproval", StringComparison.OrdinalIgnoreCase);
 
+    private static bool CanExecutorSubmitTaskForApproval(TaskJournalItem entity, int userId)
+        => IsTaskExecutor(entity, userId)
+           && !string.Equals(entity.Status, "done", StringComparison.OrdinalIgnoreCase)
+           && !string.Equals(entity.Status, "cancelled", StringComparison.OrdinalIgnoreCase)
+           && !IsApprovalActiveStatus(entity.Status);
+
     private async Task<(TaskParticipantsResolution Participants, bool Added)> AddAuthorAsApproverIfMissingAsync(
         TaskParticipantsResolution participants,
         int? authorUserId,
@@ -7539,7 +7545,7 @@ public class TasksController : ControllerBase
         }
 
         if (string.Equals(nextStatus, "onApproval", StringComparison.OrdinalIgnoreCase)
-            && CanExecutorResubmitReturnedTask(entity, access.UserId))
+            && CanExecutorSubmitTaskForApproval(entity, access.UserId))
         {
             return true;
         }
@@ -7572,9 +7578,7 @@ public class TasksController : ControllerBase
             return true;
         }
 
-        return IsTaskExecutor(entity, access.UserId)
-            && (settings.ExecutorCompletionAllowedUserIds.Contains(access.UserId)
-                || CanExecutorResubmitReturnedTask(entity, access.UserId));
+        return IsTaskExecutor(entity, access.UserId);
     }
 
     /// <summary>

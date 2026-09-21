@@ -2636,8 +2636,10 @@ public class TasksControllerTests
         Assert.Equal(task.DueAt, stored.DueAt);
     }
 
-    [Fact]
-    public async Task UpdateStatus_ForbidsObserverWithOwnScopeEvenWhenRoleCanEdit()
+    [Theory]
+    [InlineData("done")]
+    [InlineData("onApproval")]
+    public async Task UpdateStatus_ForbidsObserverCompletionAndApprovalSubmissionEvenWhenRoleCanEdit(string nextStatus)
     {
         await using var db = await CreateContextAsync();
         var author = await CreateAdminUserAsync(db, "author@example.com", "Author");
@@ -2657,7 +2659,7 @@ public class TasksControllerTests
 
         var result = await controller.UpdateStatus(task.Id, new UpdateTaskJournalStatusRequest
         {
-            Status = "done",
+            Status = nextStatus,
             Result = "Observer result",
         }, CancellationToken.None);
 
@@ -2861,14 +2863,6 @@ public class TasksControllerTests
         var assignee = await CreateTaskUserAsync(db, "assignee-fallback-approval@example.com", "Исполнитель", canEdit: false);
         var client = await CreateClientAsync(db, "Клиент согласования с постановщиком");
         var task = await CreateTaskAsync(db, author.Id, client.Id, assignee.Id, status: "inProgress");
-        db.SystemSettings.Add(new SystemSetting
-        {
-            Key = "tasks.executorCompletionAllowedUserIds",
-            Value = $"[{assignee.Id}]",
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow,
-        });
-        await db.SaveChangesAsync();
         var notifications = new RecordingNotificationService();
         var controller = CreateController(db, notifications, assignee);
 
@@ -7861,7 +7855,7 @@ public class TasksControllerTests
     }
 
     [Fact]
-    public async Task UploadFile_ForbidsExecutorWithoutPersonalCompletionAccess()
+    public async Task UploadFile_AllowsAssignedExecutorWithoutPersonalCompletionAccess()
     {
         await using var db = await CreateContextAsync();
         var author = await CreateAdminUserAsync(db, "upload-forbidden-author@example.com", "Постановщик");
@@ -7872,7 +7866,44 @@ public class TasksControllerTests
 
         var result = await controller.UploadFile(
             task.Id,
-            CreateFormFile("Попытка загрузки", "результат.txt"),
+            CreateFormFile("Рабочий документ", "результат.txt"),
+            null,
+            CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(result.Result);
+        var file = Assert.IsType<TaskJournalFileDto>(created.Value);
+        Assert.Equal(assignee.Id, file.UploadedByUserId);
+        Assert.Single(await db.TaskJournalFiles.Where(item => item.TaskJournalItemId == task.Id).ToListAsync());
+
+        Assert.IsType<ForbidResult>(await controller.DeleteFile(task.Id, file.Id, CancellationToken.None));
+        Assert.Single(await db.TaskJournalFiles.Where(item => item.TaskJournalItemId == task.Id).ToListAsync());
+
+        var adminController = CreateController(db, new RecordingNotificationService(), author);
+        Assert.IsType<NoContentResult>(await adminController.DeleteFile(task.Id, file.Id, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task UploadFile_ForbidsObserverEvenWhenTaskIsVisible()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "upload-observer-author@example.com", "Постановщик");
+        var assignee = await CreateTaskUserAsync(db, "upload-observer-assignee@example.com", "Исполнитель", canEdit: false);
+        var observer = await CreateTaskUserAsync(db, "upload-observer@example.com", "Наблюдатель", canEdit: true);
+        var client = await CreateClientAsync(db, "Клиент задачи с наблюдателем");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, assignee.Id);
+        task.Participants.Add(new TaskJournalParticipant
+        {
+            UserId = observer.Id,
+            Role = "observer",
+            DisplayName = observer.FullName,
+            Email = observer.Email,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), observer);
+
+        var result = await controller.UploadFile(
+            task.Id,
+            CreateFormFile("Недопустимая загрузка", "observer.txt"),
             null,
             CancellationToken.None);
 

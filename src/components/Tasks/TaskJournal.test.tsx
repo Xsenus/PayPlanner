@@ -1375,6 +1375,37 @@ describe('TaskJournal', () => {
     }));
   });
 
+  it('allows an invoice creator to select a read-only task from the unbilled list', async () => {
+    authState.isAdmin = false;
+    authState.user = { id: 7, fullName: 'Бухгалтер', email: 'accountant@example.com' };
+    permissionsState.taskCanEdit = false;
+    permissionsState.taskCanEditOthers = false;
+    permissionsState.taskViewScope = 'all';
+    const onCreateInvoiceDraft = vi.fn();
+    const task = createTask({
+      id: 322,
+      title: 'Платная задача Анны',
+      assigneeUserId: 9,
+      authorUserId: 8,
+      clientBillingClassification: 'billable',
+      billingMode: 'Actual',
+      billingStatus: 'unbilled',
+    });
+    await renderJournal([task], { onCreateInvoiceDraft });
+
+    const analysis = await screen.findByTestId('task-unbilled-reminder');
+    fireEvent.click(within(analysis).getByRole('button', { name: 'Платные задачи без счёта: 1' }));
+
+    const checkbox = await screen.findByRole('checkbox', { name: 'Выбрать задачу Платная задача Анны' }) as HTMLInputElement;
+    await waitFor(() => expect(checkbox.disabled).toBe(false));
+    fireEvent.click(checkbox);
+    fireEvent.click(screen.getByRole('button', { name: 'Подготовить счёт (1)' }));
+
+    expect(onCreateInvoiceDraft).toHaveBeenCalledWith(expect.objectContaining({
+      billingTaskIds: [322],
+    }));
+  });
+
   it('keeps priority and billing badges in one compact metadata row', async () => {
     await renderJournal([
       createTask({
@@ -4650,14 +4681,14 @@ describe('TaskJournal', () => {
     expect(screen.getByText('Отправка на согласование')).toBeTruthy();
     expect(apiMock.updateTaskJournalStatus).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Отправить на согласование' }));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Отправить на согласование' }).at(-1)!);
     expect(screen.getByText('Добавьте результат по задаче перед отправкой на согласование.')).toBeTruthy();
     expect(apiMock.updateTaskJournalStatus).not.toHaveBeenCalled();
 
     fireEvent.change(screen.getByPlaceholderText('Опишите подробно, что было сделано и какой результат был достигнут.'), {
       target: { value: 'Работа выполнена, результат готов к проверке.' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Отправить на согласование' }));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Отправить на согласование' }).at(-1)!);
 
     await waitFor(() => expect(apiMock.updateTaskJournalStatus).toHaveBeenCalledWith(
       101,
@@ -4689,19 +4720,19 @@ describe('TaskJournal', () => {
 
     await openFirstTaskForEdit();
 
-    fireEvent.click(screen.getByRole('button', { name: 'На согласование' }));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Отправить на согласование' }).at(-1)!);
 
     expect(await screen.findByRole('heading', { name: 'Добавить результат по задаче' })).toBeTruthy();
     expect(apiMock.updateTaskJournalItem).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Отправить на согласование' }));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Отправить на согласование' }).at(-1)!);
     expect(screen.getByText('Добавьте результат по задаче перед отправкой на согласование.')).toBeTruthy();
     expect(apiMock.updateTaskJournalItem).not.toHaveBeenCalled();
 
     fireEvent.change(screen.getByPlaceholderText('Опишите подробно, что было сделано и какой результат был достигнут.'), {
       target: { value: 'Документы подготовлены, проверены и приложены к задаче.' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Отправить на согласование' }));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Отправить на согласование' }).at(-1)!);
 
     await waitFor(() => expect(apiMock.updateTaskJournalItem).toHaveBeenCalledTimes(1));
     const payload = apiMock.updateTaskJournalItem.mock.calls[0][1];
@@ -4742,7 +4773,7 @@ describe('TaskJournal', () => {
 
     await openFirstTaskForEdit();
     const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
-    const sendButtons = within(card).getAllByRole('button', { name: 'Отправить постановщику на согласование' });
+    const sendButtons = within(card).getAllByRole('button', { name: 'Отправить на согласование' });
     expect(sendButtons.length).toBeGreaterThan(0);
     fireEvent.click(sendButtons[0]);
 
@@ -4750,7 +4781,7 @@ describe('TaskJournal', () => {
     fireEvent.change(screen.getByPlaceholderText('Опишите подробно, что было сделано и какой результат был достигнут.'), {
       target: { value: 'Результат отправлен постановщику.' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Отправить на согласование' }));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Отправить на согласование' }).at(-1)!);
 
     await waitFor(() => expect(apiMock.updateTaskJournalItem).toHaveBeenCalledTimes(1));
     expect(apiMock.updateTaskJournalItem).toHaveBeenCalledWith(101, expect.objectContaining({
@@ -4761,6 +4792,27 @@ describe('TaskJournal', () => {
         expect.objectContaining({ role: 'approver' }),
       ]),
     }));
+  });
+
+  it.each(['legacy', 'modern'] as const)('keeps the approval action visible beside editing in the %s view card', async (taskCardWindowMode) => {
+    await renderJournal([
+      createTask({
+        status: 'inProgress',
+        authorUserId: 8,
+        authorName: 'Постановщик',
+        assigneeUserId: 7,
+        assigneeName: 'Администратор',
+        participants: [
+          { userId: 7, role: 'assignee', displayName: 'Администратор', approvalStatus: 'pending' },
+        ],
+      }),
+    ], { settings: { taskCardWindowMode } });
+
+    fireEvent.click(screen.getByTitle('Просмотр'));
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+
+    expect(within(card).getAllByRole('button', { name: 'Редактировать задачу' }).length).toBeGreaterThan(0);
+    expect(within(card).getAllByRole('button', { name: 'Отправить на согласование' }).length).toBeGreaterThan(0);
   });
 
   it('asks for a result before sending a task to approval in the modern task card', async () => {
@@ -4782,19 +4834,19 @@ describe('TaskJournal', () => {
     await openFirstTaskForEdit();
     const modernCard = await screen.findByTestId('task-modern-card-window');
 
-    fireEvent.click(within(modernCard).getByRole('button', { name: 'На согласование' }));
+    fireEvent.click(within(modernCard).getAllByRole('button', { name: 'Отправить на согласование' }).at(-1)!);
 
     expect(await screen.findByRole('heading', { name: 'Добавить результат по задаче' })).toBeTruthy();
     expect(apiMock.updateTaskJournalItem).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Отправить на согласование' }));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Отправить на согласование' }).at(-1)!);
     expect(screen.getByText('Добавьте результат по задаче перед отправкой на согласование.')).toBeTruthy();
     expect(apiMock.updateTaskJournalItem).not.toHaveBeenCalled();
 
     fireEvent.change(screen.getByPlaceholderText('Опишите подробно, что было сделано и какой результат был достигнут.'), {
       target: { value: 'В новом окне результат заполнен перед согласованием.' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Отправить на согласование' }));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Отправить на согласование' }).at(-1)!);
 
     await waitFor(() => expect(apiMock.updateTaskJournalItem).toHaveBeenCalledTimes(1));
     expect(apiMock.updateTaskJournalItem).toHaveBeenCalledWith(101, expect.objectContaining({
@@ -5499,14 +5551,14 @@ describe('TaskJournal', () => {
       }),
     ], {
       settings: {
-        executorCompletionAllowedUserIds: [7],
+        executorCompletionAllowedUserIds: [],
         taskCardWindowMode,
       },
     });
 
     fireEvent.click(screen.getByTitle('Просмотр'));
     const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
-    const sendButtons = within(card).getAllByRole('button', { name: 'Отправить постановщику на согласование' });
+    const sendButtons = within(card).getAllByRole('button', { name: 'Отправить на согласование' });
     expect(sendButtons.length).toBeGreaterThan(0);
     fireEvent.click(sendButtons[0]);
 
@@ -5515,7 +5567,7 @@ describe('TaskJournal', () => {
     fireEvent.change(document.getElementById('task-completion-result')!, {
       target: { value: 'Заявление подготовлено и приложено к задаче.' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Отправить на согласование' }));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Отправить на согласование' }).at(-1)!);
 
     await waitFor(() => expect(apiMock.updateTaskJournalStatus).toHaveBeenCalledWith(
       101,
@@ -5561,14 +5613,14 @@ describe('TaskJournal', () => {
       expect(within(card).queryByRole('button', { name: 'Запустить' })).toBeNull();
     }
 
-    const submitButtons = within(card).getAllByRole('button', { name: 'На согласование' });
+    const submitButtons = within(card).getAllByRole('button', { name: 'Отправить на согласование' });
     fireEvent.click(submitButtons[submitButtons.length - 1]);
 
     expect(await screen.findByRole('heading', { name: 'Добавить результат по задаче' })).toBeTruthy();
     fireEvent.change(document.getElementById('task-completion-result')!, {
       target: { value: 'Замечания устранены, исправленный результат приложен.' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Отправить на согласование' }));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Отправить на согласование' }).at(-1)!);
 
     await waitFor(() => expect(apiMock.updateTaskJournalStatus).toHaveBeenCalledWith(
       101,
@@ -5630,6 +5682,71 @@ describe('TaskJournal', () => {
     await waitFor(() => expect(apiMock.createTaskJournalComment).toHaveBeenCalledWith(101, 'Комментарий исполнителя', true));
   });
 
+  it.each(['legacy', 'modern'] as const)('allows executor to upload a file in the %s read-only task card', async (taskCardWindowMode) => {
+    authState.isAdmin = false;
+    authState.user = { id: 7, fullName: 'Исполнитель', email: 'assignee@example.com' };
+    await renderJournal([
+      createTask({
+        status: 'inProgress',
+        assigneeUserId: 7,
+        assigneeName: 'Исполнитель',
+        authorUserId: 8,
+        authorName: 'Постановщик',
+        participants: [
+          { userId: 7, role: 'assignee', displayName: 'Исполнитель', approvalStatus: 'pending' },
+        ],
+      }),
+    ], { settings: { taskCardWindowMode, executorCompletionAllowedUserIds: [] } });
+
+    fireEvent.click(screen.getByTitle('Просмотр'));
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    const fileInput = card.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(['Рабочий документ'], 'документ.pdf', { type: 'application/pdf' });
+    fireEvent.change(fileInput, { target: { files: [file] } });
+
+    await waitFor(() => expect(apiMock.uploadTaskJournalFile).toHaveBeenCalledWith(101, file, undefined));
+    expect(within(card).queryByRole('button', { name: 'Удалить файл' })).toBeNull();
+  });
+
+  it('allows executor to upload a new file version in the modern read-only task card', async () => {
+    authState.isAdmin = false;
+    authState.user = { id: 7, fullName: 'Исполнитель', email: 'assignee@example.com' };
+    apiMock.getTaskJournalFiles.mockResolvedValueOnce([{
+      id: 600,
+      taskJournalItemId: 101,
+      documentKey: 'doc-1',
+      version: 1,
+      originalFileName: 'document.pdf',
+      contentType: 'application/pdf',
+      sizeBytes: 1024,
+      uploadedByUserId: 8,
+      uploadedByName: 'Постановщик',
+      uploadedAt: todayAt(10),
+      isLatestVersion: true,
+      clientCaseDocumentId: null,
+    }]);
+    await renderJournal([
+      createTask({
+        status: 'inProgress',
+        assigneeUserId: 7,
+        authorUserId: 8,
+        participants: [
+          { userId: 7, role: 'assignee', displayName: 'Исполнитель', approvalStatus: 'pending' },
+        ],
+      }),
+    ], { settings: { taskCardWindowMode: 'modern', executorCompletionAllowedUserIds: [] } });
+
+    fireEvent.click(screen.getByTitle('Просмотр'));
+    const card = await screen.findByTestId('task-modern-card-window');
+    fireEvent.click(within(card).getByRole('tab', { name: 'Файлы 1' }));
+    const versionButton = await within(card).findByRole('button', { name: 'Загрузить новую версию document.pdf' });
+    const versionInput = versionButton.previousElementSibling as HTMLInputElement;
+    const file = new File(['Исправленная версия'], 'document-v2.pdf', { type: 'application/pdf' });
+    fireEvent.change(versionInput, { target: { files: [file] } });
+
+    await waitFor(() => expect(apiMock.uploadTaskJournalFile).toHaveBeenCalledWith(101, file, 'doc-1'));
+  });
+
   it.each(['legacy', 'modern'] as const)('explains external calendar comment visibility in the %s task card', async (taskCardWindowMode) => {
     await renderJournal([createTask()], { settings: { taskCardWindowMode } });
 
@@ -5642,7 +5759,7 @@ describe('TaskJournal', () => {
     )).toBeTruthy();
   });
 
-  it.each(['legacy', 'modern'] as const)('allows executor to complete a read-only task from the %s task card', async (taskCardWindowMode) => {
+  it.each(['legacy', 'modern'] as const)('sends an executor result to approval from the %s read-only task card', async (taskCardWindowMode) => {
     authState.isAdmin = false;
     authState.user = { id: 7, fullName: 'Исполнитель', email: 'assignee@example.com' };
     await renderJournal([
@@ -5656,12 +5773,12 @@ describe('TaskJournal', () => {
           { userId: 7, role: 'assignee', displayName: 'Исполнитель', approvalStatus: 'pending' },
         ],
       }),
-    ], { settings: { taskCardWindowMode, executorCompletionAllowedUserIds: [7] } });
+    ], { settings: { taskCardWindowMode, executorCompletionAllowedUserIds: [] } });
 
     fireEvent.click(screen.getByTitle('Просмотр'));
     const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
-    const completeButtons = within(card).getAllByRole('button', { name: 'Завершить' });
-    fireEvent.click(completeButtons[completeButtons.length - 1]);
+    const submitButtons = within(card).getAllByRole('button', { name: 'Отправить на согласование' });
+    fireEvent.click(submitButtons[submitButtons.length - 1]);
 
     expect(await screen.findByRole('heading', { name: 'Добавить результат по задаче' })).toBeTruthy();
     const resultFile = new File(['Итоговый документ'], 'результат.pdf', { type: 'application/pdf' });
@@ -5672,12 +5789,12 @@ describe('TaskJournal', () => {
     fireEvent.change(document.getElementById('task-completion-result')!, {
       target: { value: 'Работа выполнена, результат передан постановщику.' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Завершить задачу' }));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Отправить на согласование' }).at(-1)!);
 
     await waitFor(() => expect(apiMock.uploadTaskJournalFile).toHaveBeenCalledWith(101, resultFile));
     await waitFor(() => expect(apiMock.updateTaskJournalStatus).toHaveBeenCalledWith(
       101,
-      'done',
+      'onApproval',
       'Работа выполнена, результат передан постановщику.',
     ));
     expect(apiMock.uploadTaskJournalFile.mock.invocationCallOrder[0])
@@ -5686,7 +5803,7 @@ describe('TaskJournal', () => {
     expect(apiMock.createTaskJournalDeadlineChangeRequest).not.toHaveBeenCalled();
   });
 
-  it.each(['legacy', 'modern'] as const)('hides completion from an executor without personal access in the %s task card', async (taskCardWindowMode) => {
+  it.each(['legacy', 'modern'] as const)('offers approval submission instead of direct completion without personal access in the %s task card', async (taskCardWindowMode) => {
     authState.isAdmin = false;
     authState.user = { id: 7, fullName: 'Исполнитель', email: 'assignee@example.com' };
     await renderJournal([
@@ -5705,6 +5822,8 @@ describe('TaskJournal', () => {
     const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
 
     expect(within(card).queryByRole('button', { name: 'Завершить' })).toBeNull();
+    expect(within(card).getAllByRole('button', { name: 'Отправить на согласование' }).length).toBeGreaterThan(0);
+    expect(within(card).getByText('Как закончить работу')).toBeTruthy();
     expect(within(card).getAllByPlaceholderText(/комментарий/i).length).toBeGreaterThan(0);
   });
 

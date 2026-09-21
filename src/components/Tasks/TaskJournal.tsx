@@ -1666,6 +1666,23 @@ function canCompleteTaskForCurrentUser(
     && settings.executorCompletionAllowedUserIds.includes(currentUserId);
 }
 
+function canSubmitTaskForApprovalForCurrentUser(
+  task: TaskJournalItem,
+  currentUserId: number | null,
+) {
+  if (!currentUserId
+    || task.status === 'done'
+    || task.status === 'cancelled'
+    || isTaskAwaitingApproval(task)
+    || !isTaskExecutorForUser(task, currentUserId)) {
+    return false;
+  }
+
+  const hasPendingApprover = getTaskParticipants(task, 'approver')
+    .some((participant) => participant.approvalStatus !== 'approved');
+  return hasPendingApprover || Boolean(task.authorUserId && task.authorUserId !== currentUserId);
+}
+
 function canExecutorResubmitReturnedTask(task: TaskJournalItem, currentUserId: number) {
   return isTaskExecutorForUser(task, currentUserId)
     && (task.status === 'revision' || task.status === 'inProgress' || task.status === 'waiting')
@@ -4120,10 +4137,21 @@ export function TaskJournal({
     });
   }, [tasks]);
 
-  const selectableTasks = useMemo(
+  const editableTasks = useMemo(
     () => filteredTasks.filter((task) => !isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings, permissions.tasks)),
     [currentUserId, filteredTasks, isAdminUser, permissions.tasks, taskSettings],
   );
+  const selectableTasks = useMemo(() => {
+    if (billingFilter !== 'unbilled' || !onCreateInvoiceDraft) {
+      return editableTasks;
+    }
+
+    const selectableById = new Map(editableTasks.map((task) => [task.id, task]));
+    filteredTasks
+      .filter((task) => task.billingStatus === 'unbilled')
+      .forEach((task) => selectableById.set(task.id, task));
+    return Array.from(selectableById.values());
+  }, [billingFilter, editableTasks, filteredTasks, onCreateInvoiceDraft]);
   const canEditModalTask = useMemo(
     () => Boolean(
       modal?.task &&
@@ -4146,10 +4174,20 @@ export function TaskJournal({
     [currentUserId, isAdminUser, modal?.task, permissions.tasks, taskSettings],
   );
   const selectableTaskIds = useMemo(() => new Set(selectableTasks.map((task) => task.id)), [selectableTasks]);
+  const editableTaskIds = useMemo(() => new Set(editableTasks.map((task) => task.id)), [editableTasks]);
   const selectedTasksForBulk = useMemo(
+    () => editableTasks.filter((task) => selectedTaskIds.has(task.id)),
+    [editableTasks, selectedTaskIds],
+  );
+  const selectedTasks = useMemo(
     () => selectableTasks.filter((task) => selectedTaskIds.has(task.id)),
     [selectableTasks, selectedTaskIds],
   );
+  const selectedTasksForInvoice = useMemo(
+    () => selectedTasks.filter((task) => task.billingStatus === 'unbilled'),
+    [selectedTasks],
+  );
+  const hasInvoiceOnlySelection = selectedTasksForInvoice.some((task) => !editableTaskIds.has(task.id));
   const billingAnalysis = useMemo(() => {
     if (viewMode === 'list' && taskListSummary) {
       return {
@@ -4340,21 +4378,21 @@ export function TaskJournal({
       return;
     }
 
-    if (selectedTasksForBulk.length === 0 || selectedTasksForBulk.some((task) => task.billingStatus !== 'unbilled')) {
+    if (selectedTasks.length === 0 || selectedTasks.some((task) => task.billingStatus !== 'unbilled')) {
       toast.error('Выберите только платные задачи с меткой «Не выставлен счёт».', 'Платные задачи');
       return;
     }
 
-    const first = selectedTasksForBulk[0];
-    if (selectedTasksForBulk.some((task) => task.clientId !== first.clientId || task.legalEntityId !== first.legalEntityId)) {
+    const first = selectedTasksForInvoice[0];
+    if (selectedTasksForInvoice.some((task) => task.clientId !== first.clientId || task.legalEntityId !== first.legalEntityId)) {
       toast.error('В один счёт можно собрать задачи только одного клиента.', 'Платные задачи');
       return;
     }
 
-    const contractIds = unique(selectedTasksForBulk
+    const contractIds = unique(selectedTasksForInvoice
       .map((task) => task.billingContractId ? String(task.billingContractId) : '')
       .filter(Boolean));
-    const caseIds = Array.from(new Set(selectedTasksForBulk
+    const caseIds = Array.from(new Set(selectedTasksForInvoice
       .map((task) => task.clientCaseId)
       .filter((id): id is number => typeof id === 'number' && id > 0)));
     const today = toLocalDateKey(new Date());
@@ -4377,7 +4415,7 @@ export function TaskJournal({
         expenseLegalEntityId: '',
         contractId: contractIds.length === 1 ? contractIds[0] : '',
         clientCaseReference: caseIds.length === 1 ? `Дело: ${first.clientCaseTitle || first.objectName}` : `${caseIds.length} дел(а) по платным задачам`,
-        description: `Счёт по платным задачам: ${selectedTasksForBulk.length}`,
+        description: `Счёт по платным задачам: ${selectedTasksForInvoice.length}`,
         isNotForAccounting: false,
         actReference: '',
         paidDate: '',
@@ -4385,7 +4423,7 @@ export function TaskJournal({
           ? [String(taskSettings.financialDocumentsResponsibleUserId)]
           : [],
       },
-      lineItems: selectedTasksForBulk.map((task) => ({
+      lineItems: selectedTasksForInvoice.map((task) => ({
         id: `billing-task-${task.id}`,
         name: `${task.title} (задача №${task.id} от ${new Date(task.createdAt).toLocaleDateString('ru-RU')})`,
         quantity: '1',
@@ -4396,7 +4434,7 @@ export function TaskJournal({
       })),
       selectedActs: [],
       selectedClientCaseIds: caseIds,
-      billingTaskIds: selectedTasksForBulk.map((task) => task.id),
+      billingTaskIds: selectedTasksForInvoice.map((task) => task.id),
       installmentPlan: null,
     });
   };
@@ -5942,17 +5980,17 @@ export function TaskJournal({
               <button
                 type="button"
                 onClick={handleCreateInvoiceFromSelectedTasks}
-                disabled={selectedTasksForBulk.length === 0 || !onCreateInvoiceDraft}
+                disabled={selectedTasksForInvoice.length === 0 || !onCreateInvoiceDraft}
                 className="inline-flex items-center gap-2 rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <WalletCards className="h-4 w-4" />
-                Подготовить счёт{selectedTasksForBulk.length > 0 ? ` (${selectedTasksForBulk.length})` : ''}
+                Подготовить счёт{selectedTasksForInvoice.length > 0 ? ` (${selectedTasksForInvoice.length})` : ''}
               </button>
             ) : null}
           </section>
         ) : null}
 
-        {viewMode === 'list' && !isApprovalsMode && selectedTasksForBulk.length > 0 ? (
+        {viewMode === 'list' && !isApprovalsMode && selectedTasksForBulk.length > 0 && !hasInvoiceOnlySelection ? (
           <TaskBulkActionsPanel
             selectedCount={selectedTasksForBulk.length}
             assignees={assigneeOptions}
@@ -9870,14 +9908,21 @@ function TaskModal({
   const isLockedViewWithEditAccess = Boolean(isReadOnly && canSwitchToEdit);
   const canRequestDeadlineChange = Boolean(taskId && isReadOnly && !canSwitchToEdit && taskSettings.allowExecutorDeadlineChangeRequests);
   const canPostComment = Boolean(taskId && canPostTaskCommentForCurrentUser(state?.task, currentUserId, canSwitchToEdit));
-  const canCompleteReadOnlyTask = Boolean(
-    taskId
-      && isReadOnly
-      && !canSwitchToEdit
-      && state?.task
-      && canCompleteTask,
+  const canSubmitForApproval = Boolean(
+    state?.task && canSubmitTaskForApprovalForCurrentUser(state.task, currentUserId),
   );
-  const canManageFiles = Boolean(taskId && !isReadOnly);
+  const hasPendingApprover = approverParticipants.some(
+    (participant) => participant.approvalStatus !== 'approved',
+  );
+  const shouldSubmitForApproval = hasPendingApprover
+    || (!canCompleteTask && canSubmitForApproval);
+  const canUseWorkflowAction = Boolean(
+    taskId
+      && state?.task
+      && (canCompleteTask || canSubmitForApproval),
+  );
+  const canUploadFiles = Boolean(taskId && canPostComment);
+  const canDeleteFiles = Boolean(taskId && !isReadOnly);
   const isCreationBillingBindingLocked = !taskId
     && (form.clientBillingClassification === 'billable' || form.clientBillingClassification === 'internal');
   const selectedTaskAuthor = assignees.find((assignee) => assignee.id === form.authorUserId);
@@ -10215,7 +10260,7 @@ function TaskModal({
       return;
     }
 
-    const nextStatus: TaskJournalStatus = approverParticipants.some((participant) => participant.approvalStatus !== 'approved')
+    const nextStatus: TaskJournalStatus = shouldSubmitForApproval
       ? 'onApproval'
       : 'done';
     await saveWithStatus(nextStatus);
@@ -10319,19 +10364,19 @@ function TaskModal({
     ? approvalCompletionDisabled
       ? 'Задача находится на согласовании'
       : 'Открыть окно согласования'
-    : approverParticipants.some((participant) => participant.approvalStatus !== 'approved')
-      ? 'На согласование'
+    : shouldSubmitForApproval
+      ? 'Отправить на согласование'
       : 'Завершить';
   const compactCompletionButtonLabel = isAwaitingApproval ? 'Согласование' : completionButtonLabel;
-  const canSendToAuthorApproval = Boolean(
-    state?.task
-      && !isAwaitingApproval
-      && canCompleteTask
-      && approverParticipants.length === 0
-      && state.task.authorUserId
-      && state.task.authorUserId !== currentUserId,
-  );
-  const sendToAuthorApprovalLabel = 'Отправить постановщику на согласование';
+  const canChooseApprovalSubmission = canSubmitForApproval && !shouldSubmitForApproval;
+  const executorWorkflowHint = canSubmitForApproval && shouldSubmitForApproval ? (
+    <div className="rounded-xl border border-violet-200 bg-violet-50 p-3 text-sm text-violet-900" data-testid="task-executor-workflow-hint">
+      <div className="font-semibold">Как закончить работу</div>
+      <div className="mt-1 leading-5">
+        Добавьте нужные файлы или комментарий, затем нажмите «Отправить на согласование». В открывшемся окне опишите результат — постановщик или выбранный согласующий получит задачу на проверку.
+      </div>
+    </div>
+  ) : null;
 
   useEffect(() => {
     if (!taskId) {
@@ -10502,7 +10547,7 @@ function TaskModal({
 
   const handleUploadFile = async (fileList: FileList | null | undefined, documentKey?: string) => {
     const file = fileList?.[0];
-    if (!taskId || !file || isReadOnly) return;
+    if (!taskId || !file || !canUploadFiles) return;
 
     const uploadKey = documentKey ?? '__new';
     setUploadingDocumentKey(uploadKey);
@@ -11324,7 +11369,7 @@ function TaskModal({
                           maxLength={4000}
                           placeholder="Напишите комментарий..."
                         />
-                        {canManageFiles ? (
+                        {canUploadFiles ? (
                           <button type="button" onClick={() => newFileInputRef.current?.click()} className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-white" title="Прикрепить файл" aria-label="Прикрепить файл">
                             <UploadCloud className="h-4 w-4" />
                           </button>
@@ -11361,7 +11406,7 @@ function TaskModal({
                     ) : (
                       <>
                         <div className="flex justify-end">
-                          {canManageFiles ? (
+                          {canUploadFiles ? (
                             <button type="button" onClick={() => newFileInputRef.current?.click()} disabled={uploadingDocumentKey !== null} className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700 transition hover:bg-blue-100 disabled:opacity-50">
                               <Plus className="h-4 w-4" />{uploadingDocumentKey === '__new' ? 'Загружаем...' : 'Добавить файл'}
                             </button>
@@ -11379,6 +11424,29 @@ function TaskModal({
                                     <div className="truncate text-sm font-semibold text-slate-800">{group.latest.originalFileName}</div>
                                     <div className="text-xs text-slate-500">{group.versions.length} {group.versions.length === 1 ? 'версия' : 'версии'} · {formatFileSize(group.latest.sizeBytes)}</div>
                                   </div>
+                                  <input
+                                    ref={(node) => {
+                                      versionInputRefs.current[group.documentKey] = node;
+                                    }}
+                                    type="file"
+                                    className="hidden"
+                                    onChange={(event) => {
+                                      void handleUploadFile(event.currentTarget.files, group.documentKey);
+                                      event.currentTarget.value = '';
+                                    }}
+                                  />
+                                  {canUploadFiles ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => versionInputRefs.current[group.documentKey]?.click()}
+                                      disabled={uploadingDocumentKey !== null}
+                                      className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-white text-slate-600 ring-1 ring-slate-200 transition hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                      title="Загрузить новую версию"
+                                      aria-label={`Загрузить новую версию ${group.latest.originalFileName}`}
+                                    >
+                                      <Plus className="h-4 w-4" />
+                                    </button>
+                                  ) : null}
                                   <button type="button" onClick={() => void handleDownloadFile(group.latest)} className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-white text-blue-600 ring-1 ring-slate-200" title="Скачать" aria-label="Скачать файл"><Download className="h-4 w-4" /></button>
                                 </div>
                               </article>
@@ -11445,7 +11513,7 @@ function TaskModal({
                 >
                   {STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                 </SystemSelect>
-                {!isReadOnly || canCompleteReadOnlyTask || isAwaitingApproval ? (
+                {canUseWorkflowAction || isAwaitingApproval ? (
                   <button
                     type="button"
                     onClick={() => void handleCompletionAction()}
@@ -11459,16 +11527,16 @@ function TaskModal({
                   </button>
                 ) : <span aria-hidden="true" />}
               </div>
-              {canSendToAuthorApproval ? (
+              {canChooseApprovalSubmission ? (
                 <button
                   type="button"
                   onClick={() => void saveWithStatus('onApproval')}
                   className="inline-flex w-full items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
                 >
-                  {sendToAuthorApprovalLabel}
+                  Отправить на согласование
                 </button>
               ) : null}
-
+              {executorWorkflowHint}
               <section className="space-y-2 rounded-xl border border-slate-200 bg-white p-2">
                 <ModernTaskQuickField icon={<UsersRound className="h-4 w-4" />} label="Исполнители">
                   {renderAssigneeControl(true)}
@@ -11635,7 +11703,7 @@ function TaskModal({
                   <button
                     type="button"
                     onClick={() => newFileInputRef.current?.click()}
-                    disabled={!canManageFiles || uploadingDocumentKey !== null}
+                    disabled={!canUploadFiles || uploadingDocumentKey !== null}
                     className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-2 py-2 text-sm font-semibold text-slate-600 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     <UploadCloud className="h-4 w-4" />
@@ -11851,27 +11919,22 @@ function TaskModal({
                 <button type="button" onClick={onEnableEdit} className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800">
                   Редактировать задачу
                 </button>
-              ) : (
-                <>
-                  {!isReadOnly ? (
-                    <button type="button" onClick={() => void handleSaveForm()} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700">
-                      {state?.task ? 'Сохранить' : 'Создать задачу'}
-                    </button>
-                  ) : null}
-                  {canCompleteReadOnlyTask || isAwaitingApproval ? (
-                    <>
-                      {canSendToAuthorApproval ? (
-                        <button type="button" onClick={() => void saveWithStatus('onApproval')} className="rounded-lg border border-violet-200 bg-violet-50 px-4 py-2 text-sm font-semibold text-violet-700 transition hover:bg-violet-100">
-                          {sendToAuthorApprovalLabel}
-                        </button>
-                      ) : null}
-                      <button type="button" onClick={() => void handleCompletionAction()} disabled={approvalCompletionDisabled} title={completionButtonLabel} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500">
-                        {completionButtonLabel}
-                      </button>
-                    </>
-                  ) : null}
-                </>
-              )}
+              ) : null}
+              {!isReadOnly ? (
+                <button type="button" onClick={() => void handleSaveForm()} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700">
+                  {state?.task ? 'Сохранить' : 'Создать задачу'}
+                </button>
+              ) : null}
+              {canChooseApprovalSubmission ? (
+                <button type="button" onClick={() => void saveWithStatus('onApproval')} className="rounded-lg border border-violet-200 bg-violet-50 px-4 py-2 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100">
+                  Отправить на согласование
+                </button>
+              ) : null}
+              {canUseWorkflowAction || isAwaitingApproval ? (
+                <button type="button" onClick={() => void handleCompletionAction()} disabled={approvalCompletionDisabled} title={completionButtonLabel} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500">
+                  {completionButtonLabel}
+                </button>
+              ) : null}
             </div>
           </div>
         </div>
@@ -11904,6 +11967,18 @@ function TaskModal({
           <div className="flex shrink-0 flex-wrap items-start justify-end gap-2">
             {state?.task ? (
               <>
+                {state.task.status !== 'inProgress'
+                  && isTaskJournalActive(state.task.status)
+                  && !isTaskAwaitingApproval(state.task) ? (
+                  <button
+                    type="button"
+                    onClick={() => void saveWithStatus('inProgress')}
+                    disabled={isReadOnly && !canPostComment}
+                    className="inline-flex items-center justify-center rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {state.task.status === 'revision' ? 'Продолжить работу' : 'В работу'}
+                  </button>
+                ) : null}
                 {isLockedViewWithEditAccess ? (
                   <button
                     type="button"
@@ -11912,39 +11987,27 @@ function TaskModal({
                   >
                     Редактировать задачу
                   </button>
-                ) : (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => void saveWithStatus('inProgress')}
-                      className="inline-flex items-center justify-center rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-100"
-                    >
-                      В работу
-                    </button>
-                    {!isReadOnly || canCompleteReadOnlyTask || isAwaitingApproval ? (
-                      <>
-                        {canSendToAuthorApproval ? (
-                          <button
-                            type="button"
-                            onClick={() => void saveWithStatus('onApproval')}
-                            className="inline-flex items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2 text-sm font-semibold text-violet-700 transition hover:bg-violet-100"
-                          >
-                            {sendToAuthorApprovalLabel}
-                          </button>
-                        ) : null}
-                        <button
-                          type="button"
-                          onClick={() => void handleCompletionAction()}
-                          disabled={approvalCompletionDisabled}
-                          title={completionButtonLabel}
-                          className="inline-flex items-center justify-center rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500"
-                        >
-                          {completionButtonLabel}
-                        </button>
-                      </>
-                    ) : null}
-                  </>
-                )}
+                ) : null}
+                {canChooseApprovalSubmission ? (
+                  <button
+                    type="button"
+                    onClick={() => void saveWithStatus('onApproval')}
+                    className="inline-flex items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
+                  >
+                    Отправить на согласование
+                  </button>
+                ) : null}
+                {canUseWorkflowAction || isAwaitingApproval ? (
+                  <button
+                    type="button"
+                    onClick={() => void handleCompletionAction()}
+                    disabled={approvalCompletionDisabled}
+                    title={completionButtonLabel}
+                    className="inline-flex items-center justify-center rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500"
+                  >
+                    {completionButtonLabel}
+                  </button>
+                ) : null}
                 {!isReadOnly ? (
                   <div className="relative">
                     <button
@@ -12053,6 +12116,7 @@ function TaskModal({
         ) : null}
 
         <div className={bodyClassName}>
+          {executorWorkflowHint ? <div className="mb-4">{executorWorkflowHint}</div> : null}
           {quickPanel === 'assignee' ? (
             <section className="mb-5 rounded-2xl border border-blue-100 bg-blue-50/70 p-4">
               <Field label="Новый исполнитель">
@@ -12610,7 +12674,7 @@ function TaskModal({
                 </h3>
                 <p className="mt-1 text-sm text-slate-500">Документы по задаче с версиями и историей загрузок.</p>
               </div>
-              {canManageFiles ? (
+              {canUploadFiles ? (
                 <button
                   type="button"
                   onClick={() => newFileInputRef.current?.click()}
@@ -12671,7 +12735,7 @@ function TaskModal({
                             event.currentTarget.value = '';
                           }}
                         />
-                        {canManageFiles ? (
+                        {canUploadFiles ? (
                         <button
                           type="button"
                           onClick={() => versionInputRefs.current[group.documentKey]?.click()}
@@ -12724,7 +12788,7 @@ function TaskModal({
                                 {sendingYandexFileId === file.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
                               </button>
                             ) : null}
-                            {canManageFiles ? (
+                            {canDeleteFiles ? (
                             <button
                               type="button"
                               onClick={() => void handleDeleteFile(file)}
@@ -12865,27 +12929,22 @@ function TaskModal({
             <button type="button" onClick={onEnableEdit} className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800">
               Редактировать задачу
             </button>
-          ) : (
-            <>
-              {!isReadOnly ? (
-                <button type="button" onClick={() => void handleSaveForm()} className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800">
-                  {state?.mode === 'edit' ? 'Сохранить' : 'Создать задачу'}
-                </button>
-              ) : null}
-              {canCompleteReadOnlyTask || isAwaitingApproval ? (
-                <>
-                  {canSendToAuthorApproval ? (
-                    <button type="button" onClick={() => void saveWithStatus('onApproval')} className="rounded-xl border border-violet-200 bg-violet-50 px-5 py-2.5 text-sm font-semibold text-violet-700 transition hover:bg-violet-100">
-                      {sendToAuthorApprovalLabel}
-                    </button>
-                  ) : null}
-                  <button type="button" onClick={() => void handleCompletionAction()} disabled={approvalCompletionDisabled} title={completionButtonLabel} className="rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500">
-                    {completionButtonLabel}
-                  </button>
-                </>
-              ) : null}
-            </>
-          )}
+          ) : null}
+          {!isReadOnly ? (
+            <button type="button" onClick={() => void handleSaveForm()} className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800">
+              {state?.mode === 'edit' ? 'Сохранить' : 'Создать задачу'}
+            </button>
+          ) : null}
+          {canChooseApprovalSubmission ? (
+            <button type="button" onClick={() => void saveWithStatus('onApproval')} className="rounded-xl border border-violet-200 bg-violet-50 px-5 py-2.5 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100">
+              Отправить на согласование
+            </button>
+          ) : null}
+          {canUseWorkflowAction || isAwaitingApproval ? (
+            <button type="button" onClick={() => void handleCompletionAction()} disabled={approvalCompletionDisabled} title={completionButtonLabel} className="rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500">
+              {completionButtonLabel}
+            </button>
+          ) : null}
         </div>
       </div>
       {approvalChoiceDialog}
