@@ -5932,7 +5932,11 @@ describe('TaskJournal', () => {
 
     expect(within(card).queryByRole('button', { name: 'Завершить' })).toBeNull();
     expect(within(card).getAllByRole('button', { name: 'Отправить на согласование' }).length).toBeGreaterThan(0);
-    expect(within(card).getByText('Как закончить работу')).toBeTruthy();
+    expect(within(card).getByText('Что делать с задачей')).toBeTruthy();
+    expect(within(card).getByTestId('task-executor-attach-file')).toBeTruthy();
+    expect(within(card).getByRole('button', { name: 'Работа выполнена — отправить на согласование' })).toBeTruthy();
+    fireEvent.click(within(card).getByRole('button', { name: 'Написать комментарий' }));
+    await waitFor(() => expect(document.activeElement?.tagName).toBe('TEXTAREA'));
     expect(within(card).getAllByPlaceholderText(/комментарий/i).length).toBeGreaterThan(0);
   });
 

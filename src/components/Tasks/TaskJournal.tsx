@@ -9961,6 +9961,8 @@ function TaskModal({
   const [commentSaving, setCommentSaving] = useState(false);
   const [commentText, setCommentText] = useState('');
   const [commentExternalCalendarVisible, setCommentExternalCalendarVisible] = useState(false);
+  const [executorWorkflowGuideOpen, setExecutorWorkflowGuideOpen] = useState(true);
+  const commentInputRef = useRef<HTMLTextAreaElement | null>(null);
   const [taskSaving, setTaskSaving] = useState(false);
   const taskSavingRef = useRef(false);
   const [deadlineChangeRequests, setDeadlineChangeRequests] = useState<TaskJournalDeadlineChangeRequest[]>([]);
@@ -10078,6 +10080,7 @@ function TaskModal({
 
   useEffect(() => {
     setActiveDetailsTab('comments');
+    setExecutorWorkflowGuideOpen(true);
   }, [taskId]);
   const { cases: clientCases, loading: casesLoading } = useClientCases(form.clientId ?? undefined, {
     enabled: !form.isInternal && Boolean(form.clientId || form.legalEntityId),
@@ -10587,13 +10590,103 @@ function TaskModal({
       : 'Завершить';
   const compactCompletionButtonLabel = isAwaitingApproval ? 'Согласование' : completionButtonLabel;
   const canChooseApprovalSubmission = canSubmitForApproval && !shouldSubmitForApproval;
+  const executorTaskInProgress = state?.task?.status === 'inProgress';
+  const focusExecutorComment = () => {
+    setActiveDetailsTab('comments');
+    window.setTimeout(() => {
+      const input = commentInputRef.current;
+      if (!input) return;
+      if (typeof input.scrollIntoView === 'function') {
+        input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+      input.focus();
+    }, 0);
+  };
   const executorWorkflowHint = canSubmitForApproval && shouldSubmitForApproval ? (
-    <div className="rounded-xl border border-violet-200 bg-violet-50 p-3 text-sm text-violet-900" data-testid="task-executor-workflow-hint">
-      <div className="font-semibold">Как закончить работу</div>
-      <div className="mt-1 leading-5">
-        Добавьте нужные файлы или комментарий, затем нажмите «Отправить на согласование». В открывшемся окне опишите результат — постановщик или выбранный согласующий получит задачу на проверку.
+    <section className="rounded-xl border border-violet-200 bg-violet-50 p-3 text-sm text-violet-950 shadow-sm" data-testid="task-executor-workflow-hint">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="font-semibold">Что делать с задачей</div>
+          <div className="mt-1 text-xs leading-5 text-violet-800">
+            Редактирование карточки не требуется: рабочие материалы и сдача результата доступны прямо здесь.
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => setExecutorWorkflowGuideOpen((open) => !open)}
+          className="shrink-0 rounded-lg border border-violet-200 bg-white px-2.5 py-1 text-xs font-semibold text-violet-700 transition hover:bg-violet-100"
+          aria-expanded={executorWorkflowGuideOpen}
+        >
+          {executorWorkflowGuideOpen ? 'Скрыть подсказку' : 'Как работать?'}
+        </button>
       </div>
-    </div>
+      {executorWorkflowGuideOpen ? (
+        <div className="mt-3 space-y-2">
+          <div className="flex items-center gap-2 rounded-lg bg-white/80 p-2 ring-1 ring-violet-100">
+            <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-violet-100 text-xs font-bold text-violet-700">1</span>
+            <span className="min-w-0 flex-1 text-xs font-medium text-violet-900">Покажите, что приступили к задаче</span>
+            {executorTaskInProgress ? (
+              <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700">В работе</span>
+            ) : (
+              <button
+                type="button"
+                onClick={() => void saveWithStatus('inProgress')}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-blue-700"
+              >
+                <Play className="h-3.5 w-3.5" />
+                {state?.task?.status === 'revision' ? 'Продолжить работу' : 'В работу'}
+              </button>
+            )}
+          </div>
+          <div className="rounded-lg bg-white/80 p-2 ring-1 ring-violet-100">
+            <div className="mb-2 flex items-center gap-2">
+              <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-violet-100 text-xs font-bold text-violet-700">2</span>
+              <span className="text-xs font-medium text-violet-900">Ведите работу: задавайте вопросы и прикладывайте документы</span>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
+              <button
+                type="button"
+                onClick={focusExecutorComment}
+                className="inline-flex items-center justify-center gap-2 rounded-lg border border-blue-200 bg-white px-3 py-2 font-semibold text-blue-700 transition hover:bg-blue-50"
+                title="Открыть поле комментария, чтобы задать вопрос или сообщить о ходе работы"
+              >
+                <MessageSquare className="h-4 w-4" />
+                Написать комментарий
+              </button>
+              <button
+                type="button"
+                onClick={() => newFileInputRef.current?.click()}
+                disabled={!canUploadFiles || uploadingDocumentKey !== null}
+                data-testid="task-executor-attach-file"
+                className="inline-flex items-center justify-center gap-2 rounded-lg border border-indigo-200 bg-white px-3 py-2 font-semibold text-indigo-700 transition hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-50"
+                title="Добавить рабочий документ без перехода в режим редактирования"
+              >
+                <Paperclip className="h-4 w-4" />
+                {uploadingDocumentKey === '__new' ? 'Загружаем файл...' : 'Прикрепить файл'}
+              </button>
+            </div>
+          </div>
+          <div className="rounded-lg bg-white/80 p-2 ring-1 ring-violet-100">
+            <div className="mb-2 flex items-center gap-2">
+              <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-violet-100 text-xs font-bold text-violet-700">3</span>
+              <span className="text-xs font-medium text-violet-900">Сдайте готовый результат на проверку</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => void saveWithStatus('onApproval')}
+              className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-violet-600 px-3 py-2.5 font-semibold text-white transition hover:bg-violet-700"
+              title="Описать выполненный результат и передать его постановщику или выбранному согласующему"
+            >
+              <Send className="h-4 w-4" />
+              Работа выполнена — отправить на согласование
+            </button>
+          </div>
+          <p className="text-xs leading-5 text-violet-800">
+            Если отдельный согласующий не выбран, результат автоматически получит постановщик задачи. Он завершит задачу или вернёт её с замечанием.
+          </p>
+        </div>
+      ) : null}
+    </section>
   ) : null;
 
   useEffect(() => {
@@ -11681,6 +11774,7 @@ function TaskModal({
                           @
                         </button>
                         <textarea
+                          ref={commentInputRef}
                           value={commentText}
                           onChange={(event) => setCommentText(event.target.value)}
                           className="min-h-[40px] flex-1 resize-none border-0 bg-transparent px-2 py-2 text-sm outline-none placeholder:text-slate-400 focus:ring-0"
@@ -13203,6 +13297,7 @@ function TaskModal({
             {!taskId ? (
               <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50/40 p-3">
                 <textarea
+                  ref={commentInputRef}
                   value={commentText}
                   onChange={(event) => setCommentText(event.target.value)}
                   className="form-textarea min-h-[84px] bg-white"
@@ -13232,6 +13327,7 @@ function TaskModal({
                 {canPostComment ? (
                   <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
                     <textarea
+                      ref={commentInputRef}
                       value={commentText}
                       onChange={(event) => setCommentText(event.target.value)}
                       className="form-textarea min-h-[84px] bg-white"
