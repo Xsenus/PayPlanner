@@ -1071,6 +1071,55 @@ describe('TaskJournal', () => {
     expect(resultInput.disabled).toBe(false);
   });
 
+  it.each(['legacy', 'modern'] as const)('creates a task together with its first comment and files in the %s card', async (taskCardWindowMode) => {
+    await renderJournal([], {
+      waitForTitle: null,
+      settings: { taskCardWindowMode },
+    });
+    await openNewTaskFormAsGlobalInternal();
+
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    fireEvent.change(within(card).getByTestId('task-title-input'), { target: { value: 'Задача с материалами' } });
+    fireEvent.change(within(card).getByPlaceholderText(taskCardWindowMode === 'modern'
+      ? 'Напишите комментарий...'
+      : 'Введите первый комментарий'), { target: { value: 'Первый комментарий' } });
+    fireEvent.click(within(card).getByRole('checkbox', { name: 'Показать комментарий во внешнем календаре' }));
+
+    const files = [
+      new File(['one'], 'первый.pdf', { type: 'application/pdf' }),
+      new File(['two'], 'второй.docx', { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }),
+    ];
+    const fileInput = card.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(fileInput, { target: { files } });
+
+    expect(await within(card).findByText('первый.pdf')).toBeTruthy();
+    expect(within(card).getByText('второй.docx')).toBeTruthy();
+    fireEvent.click(within(card).getByRole('button', { name: 'Создать задачу' }));
+
+    await waitFor(() => expect(apiMock.createTaskJournalComment).toHaveBeenCalledWith(101, 'Первый комментарий', true));
+    expect(apiMock.uploadTaskJournalFile).toHaveBeenCalledTimes(2);
+    expect(apiMock.uploadTaskJournalFile).toHaveBeenNthCalledWith(1, 101, files[0]);
+    expect(apiMock.uploadTaskJournalFile).toHaveBeenNthCalledWith(2, 101, files[1]);
+  });
+
+  it.each(['legacy', 'modern'] as const)('opens linked client and case profiles from the %s task card', async (taskCardWindowMode) => {
+    const onOpenClient = vi.fn();
+    const onOpenCase = vi.fn();
+    await renderJournal([createTask()], {
+      settings: { taskCardWindowMode },
+      onOpenClient,
+      onOpenCase,
+    });
+
+    fireEvent.click(screen.getAllByTitle('Просмотр')[0]);
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    fireEvent.click(within(card).getByRole('button', { name: 'Открыть карточку контрагента' }));
+    fireEvent.click(within(card).getByRole('button', { name: 'Открыть карточку дела' }));
+
+    expect(onOpenClient).toHaveBeenCalledWith(10, 100);
+    expect(onOpenCase).toHaveBeenCalledWith(100, 10);
+  });
+
   it('shows contractor payment controls in the modern task card for an external assignee', async () => {
     await renderJournal([createTask()], {
       waitForTitle: null,

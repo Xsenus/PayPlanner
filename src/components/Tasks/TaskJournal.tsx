@@ -20,6 +20,7 @@ import {
   Copy,
   Download,
   Eye,
+  ExternalLink,
   FileText,
   History,
   LayoutGrid,
@@ -203,6 +204,11 @@ type TaskCreationWizardState = {
 } | null;
 
 type TaskForm = TaskJournalUpsertPayload & { dueAt: string; approvalDueAt: string | null };
+type TaskCreationMaterials = {
+  commentText: string;
+  commentExternalCalendarVisible: boolean;
+  files: File[];
+};
 
 const EXTERNAL_CALENDAR_COMMENT_HELP =
   'Если календарь подключён, этот комментарий появится в описании события Google или Яндекс Календаря. Без отметки он останется только в CRM.';
@@ -4532,7 +4538,7 @@ export function TaskJournal({
     }
   };
 
-  const handleSave = async (form: TaskForm, taskId?: number) => {
+  const handleSave = async (form: TaskForm, taskId?: number, creationMaterials?: TaskCreationMaterials) => {
     if (!taskId && !canCreateTasks) {
       toast.error('У роли нет права на создание задач.', 'Журнал задач');
       return;
@@ -4617,8 +4623,32 @@ export function TaskJournal({
           closeTaskModal();
         }
       } else {
-        await apiService.createTaskJournalItem(normalized);
-        toast.success('Задача создана.', 'Журнал задач');
+        const created = await apiService.createTaskJournalItem(normalized);
+        const materialOperations: Promise<unknown>[] = [];
+        const initialComment = creationMaterials?.commentText.trim();
+        if (initialComment) {
+          materialOperations.push(apiService.createTaskJournalComment(
+            created.id,
+            initialComment,
+            creationMaterials?.commentExternalCalendarVisible ?? false,
+          ));
+        }
+        for (const file of creationMaterials?.files ?? []) {
+          materialOperations.push(apiService.uploadTaskJournalFile(created.id, file));
+        }
+
+        const materialResults = await Promise.allSettled(materialOperations);
+        const failedMaterials = materialResults.filter((result) => result.status === 'rejected').length;
+        if (failedMaterials > 0) {
+          toast.error(
+            `Задача создана, но не удалось добавить материалов: ${failedMaterials}. Откройте задачу и повторите загрузку.`,
+            'Журнал задач',
+          );
+        } else if (materialOperations.length > 0) {
+          toast.success('Задача создана вместе с комментарием и файлами.', 'Журнал задач');
+        } else {
+          toast.success('Задача создана.', 'Журнал задач');
+        }
         closeTaskModal();
       }
       await refreshTasks();
@@ -5358,6 +5388,9 @@ export function TaskJournal({
             canDeleteTask={canDeleteModalTask}
             canDuplicateTask={canCreateTasks}
             canSendFilesToYandexDisk={canSendTaskFilesToYandexDisk}
+            onOpenClient={onOpenClient}
+            onOpenCase={onOpenCase}
+            onOpenLegalEntity={onOpenLegalEntity}
             onClose={closeTaskModal}
             onEnableEdit={() => setModal((current) => current?.task ? { ...current, mode: 'edit' } : current)}
             onSave={handleSave}
@@ -6213,6 +6246,9 @@ export function TaskJournal({
           canDeleteTask={canDeleteModalTask}
           canDuplicateTask={canCreateTasks}
           canSendFilesToYandexDisk={canSendTaskFilesToYandexDisk}
+          onOpenClient={onOpenClient}
+          onOpenCase={onOpenCase}
+          onOpenLegalEntity={onOpenLegalEntity}
           onClose={closeTaskModal}
           onEnableEdit={() => setModal((current) => current?.task ? { ...current, mode: 'edit' } : current)}
           onSave={handleSave}
@@ -9640,7 +9676,10 @@ type TaskModalProps = {
   canSendFilesToYandexDisk: boolean;
   onClose: () => void;
   onEnableEdit: () => void;
-  onSave: (form: TaskForm, taskId?: number) => void | Promise<void>;
+  onSave: (form: TaskForm, taskId?: number, creationMaterials?: TaskCreationMaterials) => void | Promise<void>;
+  onOpenClient?: (clientId: number, caseId?: number | null) => void | Promise<void>;
+  onOpenCase?: (caseId: number, clientId?: number | null) => void | Promise<void>;
+  onOpenLegalEntity?: (legalEntityId: number) => void | Promise<void>;
   onResultSave: (task: TaskJournalItem, status: TaskJournalStatus, result: string) => void | Promise<void>;
   onApprovalDecision: (
     taskId: number,
@@ -9682,6 +9721,9 @@ function TaskModal({
   onClose,
   onEnableEdit,
   onSave,
+  onOpenClient,
+  onOpenCase,
+  onOpenLegalEntity,
   onResultSave,
   onApprovalDecision,
   onReviewDeadlineChange,
@@ -9788,6 +9830,8 @@ function TaskModal({
   const [commentSaving, setCommentSaving] = useState(false);
   const [commentText, setCommentText] = useState('');
   const [commentExternalCalendarVisible, setCommentExternalCalendarVisible] = useState(false);
+  const [taskSaving, setTaskSaving] = useState(false);
+  const taskSavingRef = useRef(false);
   const [deadlineChangeRequests, setDeadlineChangeRequests] = useState<TaskJournalDeadlineChangeRequest[]>([]);
   const [deadlineChangeRequestsLoading, setDeadlineChangeRequestsLoading] = useState(false);
   const [changeComment, setChangeComment] = useState('');
@@ -9797,6 +9841,7 @@ function TaskModal({
   const [deadlineRequestReasonError, setDeadlineRequestReasonError] = useState<string | null>(null);
   const [deadlineRequestSaving, setDeadlineRequestSaving] = useState(false);
   const [files, setFiles] = useState<TaskJournalFile[]>([]);
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [filesLoading, setFilesLoading] = useState(false);
   const [uploadingDocumentKey, setUploadingDocumentKey] = useState<string | null>(null);
   const [sendingYandexFileId, setSendingYandexFileId] = useState<number | null>(null);
@@ -9907,6 +9952,7 @@ function TaskModal({
   const isReadOnly = state?.mode === 'view';
   const isLockedViewWithEditAccess = Boolean(isReadOnly && canSwitchToEdit);
   const canRequestDeadlineChange = Boolean(taskId && isReadOnly && !canSwitchToEdit && taskSettings.allowExecutorDeadlineChangeRequests);
+  const canPrepareCreationMaterials = Boolean(!taskId && !isReadOnly);
   const canPostComment = Boolean(taskId && canPostTaskCommentForCurrentUser(state?.task, currentUserId, canSwitchToEdit));
   const canSubmitForApproval = Boolean(
     state?.task && canSubmitTaskForApprovalForCurrentUser(state.task, currentUserId),
@@ -9921,7 +9967,7 @@ function TaskModal({
       && state?.task
       && (canCompleteTask || canSubmitForApproval),
   );
-  const canUploadFiles = Boolean(taskId && canPostComment);
+  const canUploadFiles = Boolean(canPrepareCreationMaterials || (taskId && canPostComment));
   const canDeleteFiles = Boolean(taskId && !isReadOnly);
   const isCreationBillingBindingLocked = !taskId
     && (form.clientBillingClassification === 'billable' || form.clientBillingClassification === 'internal');
@@ -9997,6 +10043,22 @@ function TaskModal({
         ? `${selectedOwnerName || prev.objectName} - ${clientCase.title}`
         : selectedOwnerName || prev.objectName,
     }));
+  };
+
+  const openSelectedCounterparty = () => {
+    if (form.clientId && onOpenClient) {
+      void onOpenClient(form.clientId, form.clientCaseId ?? null);
+      return;
+    }
+    if (form.legalEntityId && onOpenLegalEntity) {
+      void onOpenLegalEntity(form.legalEntityId);
+    }
+  };
+
+  const openSelectedCase = () => {
+    if (form.clientCaseId && onOpenCase) {
+      void onOpenCase(form.clientCaseId, form.clientId ?? null);
+    }
   };
 
   const toggleArray = <T extends string>(key: 'reminders' | 'channels', value: T) => {
@@ -10096,6 +10158,24 @@ function TaskModal({
     });
   };
 
+  const getCreationMaterials = (): TaskCreationMaterials | undefined => taskId ? undefined : {
+    commentText,
+    commentExternalCalendarVisible,
+    files: pendingFiles,
+  };
+
+  const saveTask = async (nextForm: TaskForm, existingTaskId?: number) => {
+    if (taskSavingRef.current) return;
+    taskSavingRef.current = true;
+    setTaskSaving(true);
+    try {
+      await onSave(nextForm, existingTaskId, getCreationMaterials());
+    } finally {
+      taskSavingRef.current = false;
+      setTaskSaving(false);
+    }
+  };
+
   const saveWithStatus = async (status: TaskJournalStatus) => {
     const task = state?.task;
     let nextForm = withChangeComment({ ...form, status });
@@ -10125,7 +10205,7 @@ function TaskModal({
       return;
     }
 
-    await onSave(nextForm, task?.id);
+    await saveTask(nextForm, task?.id);
   };
 
   const withChangeComment = (nextForm: TaskForm = form): TaskForm => ({
@@ -10188,7 +10268,7 @@ function TaskModal({
       if (isReadOnly && state?.task) {
         await onResultSave(state.task, nextForm.status, nextForm.result);
       } else {
-        await onSave(nextForm, approvalResultPrompt.taskId);
+        await onSave(nextForm, approvalResultPrompt.taskId, getCreationMaterials());
       }
       setApprovalResultPrompt(null);
       setApprovalResultPromptResult('');
@@ -10231,7 +10311,7 @@ function TaskModal({
     }
 
     setResultError(null);
-    await onSave(nextForm, state?.task?.id);
+    await saveTask(nextForm, state?.task?.id);
   };
 
   const handleApproveParticipant = (participant: TaskJournalParticipant) => {
@@ -10473,7 +10553,11 @@ function TaskModal({
 
   const handleAddComment = async () => {
     const text = commentText.trim();
-    if (!taskId || !text) return;
+    if (!text) return;
+    if (!taskId) {
+      toast.info('Комментарий будет добавлен вместе с задачей.', 'Журнал задач');
+      return;
+    }
     if (!canPostComment) {
       toast.error('У вас нет права добавить комментарий к этой задаче.', 'Журнал задач');
       return;
@@ -10546,8 +10630,20 @@ function TaskModal({
   };
 
   const handleUploadFile = async (fileList: FileList | null | undefined, documentKey?: string) => {
-    const file = fileList?.[0];
-    if (!taskId || !file || !canUploadFiles) return;
+    const selectedFiles = Array.from(fileList ?? []);
+    if (selectedFiles.length === 0 || !canUploadFiles) return;
+    if (!taskId) {
+      setPendingFiles((previous) => [...previous, ...selectedFiles]);
+      toast.info(
+        selectedFiles.length === 1
+          ? 'Файл будет загружен вместе с задачей.'
+          : `Файлы будут загружены вместе с задачей: ${selectedFiles.length}.`,
+        'Журнал задач',
+      );
+      return;
+    }
+
+    const file = selectedFiles[0];
 
     const uploadKey = documentKey ?? '__new';
     setUploadingDocumentKey(uploadKey);
@@ -11123,6 +11219,28 @@ function TaskModal({
     </section>
   ) : null;
 
+  const pendingFilesPanel = pendingFiles.length > 0 ? (
+    <div className="space-y-2" data-testid="task-pending-files">
+      {pendingFiles.map((file, index) => (
+        <div key={`${file.name}-${file.size}-${file.lastModified}-${index}`} className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm">
+          <FileText className="h-4 w-4 shrink-0 text-indigo-600" />
+          <span className="min-w-0 flex-1 truncate font-medium text-slate-700">{file.name}</span>
+          <span className="shrink-0 text-xs text-slate-500">{formatFileSize(file.size)}</span>
+          <button
+            type="button"
+            onClick={() => setPendingFiles((previous) => previous.filter((_, fileIndex) => fileIndex !== index))}
+            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400 transition hover:bg-white hover:text-rose-600"
+            aria-label={`Убрать файл ${file.name}`}
+            title="Убрать файл"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      ))}
+      <p className="text-xs leading-5 text-indigo-700">Файлы загрузятся автоматически после создания задачи.</p>
+    </div>
+  ) : null;
+
   if (isModernChrome) {
     const TypeIcon = typeOption.icon;
     const titleText = state?.mode === 'view'
@@ -11320,7 +11438,7 @@ function TaskModal({
 
               {deadlineChangeRequestsSection}
 
-              <section className="rounded-xl border border-slate-200 bg-white">
+              <section className="rounded-xl border border-blue-200 bg-white shadow-sm">
                 <div className="flex flex-wrap items-center gap-1 border-b border-slate-200 px-3 py-2 text-sm" role="tablist" aria-label="Материалы задачи">
                   <button type="button" role="tab" aria-selected={activeDetailsTab === 'comments'} onClick={() => setActiveDetailsTab('comments')} className={`rounded-lg px-3 py-1.5 font-semibold transition ${activeDetailsTab === 'comments' ? 'bg-blue-50 text-blue-700' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800'}`}>
                     Комментарии {userComments.length}
@@ -11336,14 +11454,14 @@ function TaskModal({
                   </button>
                 </div>
                 <div className="min-h-[220px] space-y-3 p-3" role="tabpanel">
-                  {activeDetailsTab === 'comments' && (!taskId ? (
-                    <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">
-                      Комментарии появятся после сохранения задачи.
-                    </div>
-                  ) : commentsLoading ? (
+                  {activeDetailsTab === 'comments' && (taskId && commentsLoading ? (
                     <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500">Загружаем комментарии...</div>
                   ) : userComments.length === 0 ? (
-                    <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500">Комментариев пока нет. Системные изменения находятся во вкладке «Активность».</div>
+                    <div className="rounded-lg border border-dashed border-blue-200 bg-blue-50/50 px-4 py-5 text-sm text-slate-500">
+                      {taskId
+                        ? 'Комментариев пока нет. Системные изменения находятся во вкладке «Активность».'
+                        : 'Напишите первый комментарий — он сохранится вместе с новой задачей.'}
+                    </div>
                   ) : (
                     <div className="max-h-[260px] space-y-2 overflow-y-auto pr-1">
                       {userComments.map((comment) => (
@@ -11355,8 +11473,8 @@ function TaskModal({
                       ))}
                     </div>
                   ))}
-                  {activeDetailsTab === 'comments' && taskId && canPostComment ? (
-                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-2">
+                  {activeDetailsTab === 'comments' && (canPostComment || canPrepareCreationMaterials) ? (
+                    <div className="rounded-xl border border-blue-200 bg-blue-50/40 p-2">
                       <div className="flex items-end gap-2">
                         <button type="button" className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-white" title="Упомянуть" aria-label="Упомянуть">
                           @
@@ -11400,7 +11518,16 @@ function TaskModal({
                   ) : null}
                   {activeDetailsTab === 'files' ? (
                     !taskId ? (
-                      <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">Файлы появятся после сохранения задачи.</div>
+                      <div className="space-y-3">
+                        <div className="flex justify-end">
+                          <button type="button" onClick={() => newFileInputRef.current?.click()} className="inline-flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-100">
+                            <Plus className="h-4 w-4" />Добавить файл
+                          </button>
+                        </div>
+                        {pendingFilesPanel ?? (
+                          <div className="rounded-lg border border-dashed border-indigo-200 bg-indigo-50/40 px-4 py-6 text-sm text-slate-500">Выберите файлы — они загрузятся после создания задачи.</div>
+                        )}
+                      </div>
                     ) : filesLoading ? (
                       <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500">Загружаем файлы...</div>
                     ) : (
@@ -11494,6 +11621,7 @@ function TaskModal({
               <input
                 ref={newFileInputRef}
                 type="file"
+                multiple
                 className="hidden"
                 onChange={(event) => {
                   void handleUploadFile(event.currentTarget.files);
@@ -11704,18 +11832,19 @@ function TaskModal({
                     type="button"
                     onClick={() => newFileInputRef.current?.click()}
                     disabled={!canUploadFiles || uploadingDocumentKey !== null}
-                    className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-2 py-2 text-sm font-semibold text-slate-600 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-indigo-300 bg-indigo-50 px-2 py-2 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     <UploadCloud className="h-4 w-4" />
-                    {files.length ? `${files.length} файлов` : 'Добавить файл'}
+                    {files.length + pendingFiles.length ? `${files.length + pendingFiles.length} файлов` : 'Добавить файл'}
                   </button>
+                  {!taskId && pendingFiles.length > 0 ? <div className="mt-2">{pendingFilesPanel}</div> : null}
                 </ModernTaskQuickField>
                 <ModernTaskQuickField icon={<ClipboardList className="h-4 w-4" />} label="Подзадачи">
                   <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-2 py-2 text-sm text-slate-500">0/0</div>
                 </ModernTaskQuickField>
               </section>
 
-              <section className="rounded-xl border border-slate-200 bg-white p-3">
+              <section className="rounded-xl border border-amber-200 bg-amber-50/30 p-3 shadow-sm">
                 <div className="mb-2 text-sm font-semibold text-slate-700">Связи</div>
                 <label className="mb-2 flex items-center gap-2 text-sm text-slate-600">
                   <SystemCheckbox
@@ -11728,30 +11857,46 @@ function TaskModal({
                   />
                   Общая задача без контрагента
                 </label>
-                <LookupSelect
-                  value={selectedCounterpartyValue}
-                  options={counterpartyOptions}
-                  onChange={handleCounterpartyChange}
-                  placeholder="Контрагент"
-                  title="Выбор контрагента"
-                  dictionaryLabel="Открыть справочник"
-                  searchPlaceholder="Поиск"
-                  emptyOptionLabel="Контрагент не выбран"
-                  buttonClassName="h-10 border-slate-200 text-sm"
-                  disabled={isReadOnly || form.isInternal || isCreationBillingBindingLocked}
-                />
-                <SystemSelect
-                  aria-label="Дело"
-                  value={form.clientCaseId ?? ''}
-                  onChange={(event) => handleCaseChange(event.target.value)}
-                  disabled={isReadOnly || form.isInternal || isCreationBillingBindingLocked || (!form.clientId && !form.legalEntityId) || casesLoading}
-                  className="mt-2 w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-sm outline-none focus:border-blue-400 focus:bg-white disabled:text-slate-400"
-                >
-                  <option value="">Без дела</option>
-                  {selectableClientCases.map((clientCase) => (
-                    <option key={clientCase.id} value={clientCase.id}>{clientCase.title}</option>
-                  ))}
-                </SystemSelect>
+                <div className="flex items-center gap-2">
+                  <div className="min-w-0 flex-1">
+                    <LookupSelect
+                      value={selectedCounterpartyValue}
+                      options={counterpartyOptions}
+                      onChange={handleCounterpartyChange}
+                      placeholder="Контрагент"
+                      title="Выбор контрагента"
+                      dictionaryLabel="Открыть справочник"
+                      searchPlaceholder="Поиск"
+                      emptyOptionLabel="Контрагент не выбран"
+                      buttonClassName="h-10 border-amber-200 bg-white text-sm"
+                      disabled={isReadOnly || form.isInternal || isCreationBillingBindingLocked}
+                    />
+                  </div>
+                  {selectedCounterpartyValue && ((form.clientId && onOpenClient) || (form.legalEntityId && onOpenLegalEntity)) ? (
+                    <button type="button" onClick={openSelectedCounterparty} className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-amber-200 bg-white text-amber-700 transition hover:bg-amber-100" aria-label="Открыть карточку контрагента" title="Открыть карточку контрагента">
+                      <ExternalLink className="h-4 w-4" />
+                    </button>
+                  ) : null}
+                </div>
+                <div className="mt-2 flex items-center gap-2">
+                  <SystemSelect
+                    aria-label="Дело"
+                    value={form.clientCaseId ?? ''}
+                    onChange={(event) => handleCaseChange(event.target.value)}
+                    disabled={isReadOnly || form.isInternal || isCreationBillingBindingLocked || (!form.clientId && !form.legalEntityId) || casesLoading}
+                    className="min-w-0 flex-1 rounded-lg border border-amber-200 bg-white px-2 py-2 text-sm outline-none focus:border-amber-400 disabled:text-slate-400"
+                  >
+                    <option value="">Без дела</option>
+                    {selectableClientCases.map((clientCase) => (
+                      <option key={clientCase.id} value={clientCase.id}>{clientCase.title}</option>
+                    ))}
+                  </SystemSelect>
+                  {form.clientCaseId && onOpenCase ? (
+                    <button type="button" onClick={openSelectedCase} className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-amber-200 bg-white text-amber-700 transition hover:bg-amber-100" aria-label="Открыть карточку дела" title="Открыть карточку дела">
+                      <ExternalLink className="h-4 w-4" />
+                    </button>
+                  ) : null}
+                </div>
               </section>
 
               <section className="rounded-xl border border-slate-200 bg-white p-3">
@@ -11921,8 +12066,8 @@ function TaskModal({
                 </button>
               ) : null}
               {!isReadOnly ? (
-                <button type="button" onClick={() => void handleSaveForm()} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700">
-                  {state?.task ? 'Сохранить' : 'Создать задачу'}
+                <button type="button" onClick={() => void handleSaveForm()} disabled={taskSaving} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60">
+                  {taskSaving ? 'Сохраняем...' : state?.task ? 'Сохранить' : 'Создать задачу'}
                 </button>
               ) : null}
               {canChooseApprovalSubmission ? (
@@ -12177,20 +12322,29 @@ function TaskModal({
 
           <div className="grid gap-5 lg:grid-cols-2">
             <Field label="Контрагент">
-              <LookupSelect
-                value={selectedCounterpartyValue}
-                options={counterpartyOptions}
-                onChange={handleCounterpartyChange}
-                placeholder="Выберите контрагента"
-                title="Выбор контрагента"
-                dictionaryLabel="Открыть справочник"
-                searchPlaceholder="Поиск по ФИО, названию, ИНН, телефону или email"
-                emptyOptionLabel="Контрагент не выбран"
-                emptyOptionDescription="Контрагент обязателен для задачи"
-                buttonClassName="h-11 border-slate-200 focus:border-blue-400"
-                noOptionsText="Контрагенты не найдены"
-                disabled={isReadOnly || form.isInternal || isCreationBillingBindingLocked}
-              />
+              <div className="flex items-center gap-2">
+                <div className="min-w-0 flex-1">
+                  <LookupSelect
+                    value={selectedCounterpartyValue}
+                    options={counterpartyOptions}
+                    onChange={handleCounterpartyChange}
+                    placeholder="Выберите контрагента"
+                    title="Выбор контрагента"
+                    dictionaryLabel="Открыть справочник"
+                    searchPlaceholder="Поиск по ФИО, названию, ИНН, телефону или email"
+                    emptyOptionLabel="Контрагент не выбран"
+                    emptyOptionDescription="Контрагент обязателен для задачи"
+                    buttonClassName="h-11 border-slate-200 focus:border-blue-400"
+                    noOptionsText="Контрагенты не найдены"
+                    disabled={isReadOnly || form.isInternal || isCreationBillingBindingLocked}
+                  />
+                </div>
+                {selectedCounterpartyValue && ((form.clientId && onOpenClient) || (form.legalEntityId && onOpenLegalEntity)) ? (
+                  <button type="button" onClick={openSelectedCounterparty} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-amber-200 bg-amber-50 text-amber-700 transition hover:bg-amber-100" aria-label="Открыть карточку контрагента" title="Открыть карточку контрагента">
+                    <ExternalLink className="h-4 w-4" />
+                  </button>
+                ) : null}
+              </div>
             </Field>
             <Field label="Исполнители">
               {renderAssigneeControl()}
@@ -12232,18 +12386,25 @@ function TaskModal({
               <input ref={titleInputRef} value={form.title} onChange={(event) => update('title', event.target.value)} disabled={isReadOnly} data-testid="task-title-input" className="form-input" placeholder="Что нужно сделать" />
             </Field>
             <Field label="Дело">
-              <SystemSelect
-                aria-label="Дело"
-                value={form.clientCaseId ?? ''}
-                onChange={(event) => handleCaseChange(event.target.value)}
-                disabled={isReadOnly || form.isInternal || isCreationBillingBindingLocked || (!form.clientId && !form.legalEntityId) || casesLoading}
-                className="form-input disabled:bg-slate-50 disabled:text-slate-400"
-              >
-                <option value="">Без дела</option>
-                {selectableClientCases.map((clientCase) => (
-                  <option key={clientCase.id} value={clientCase.id}>{clientCase.title}</option>
-                ))}
-              </SystemSelect>
+              <div className="flex items-center gap-2">
+                <SystemSelect
+                  aria-label="Дело"
+                  value={form.clientCaseId ?? ''}
+                  onChange={(event) => handleCaseChange(event.target.value)}
+                  disabled={isReadOnly || form.isInternal || isCreationBillingBindingLocked || (!form.clientId && !form.legalEntityId) || casesLoading}
+                  className="form-input min-w-0 flex-1 disabled:bg-slate-50 disabled:text-slate-400"
+                >
+                  <option value="">Без дела</option>
+                  {selectableClientCases.map((clientCase) => (
+                    <option key={clientCase.id} value={clientCase.id}>{clientCase.title}</option>
+                  ))}
+                </SystemSelect>
+                {form.clientCaseId && onOpenCase ? (
+                  <button type="button" onClick={openSelectedCase} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-amber-200 bg-amber-50 text-amber-700 transition hover:bg-amber-100" aria-label="Открыть карточку дела" title="Открыть карточку дела">
+                    <ExternalLink className="h-4 w-4" />
+                  </button>
+                ) : null}
+              </div>
             </Field>
             <Field label="Дата и время исполнения">
               <div className="flex gap-2">
@@ -12690,6 +12851,7 @@ function TaskModal({
             <input
               ref={newFileInputRef}
               type="file"
+              multiple
               className="hidden"
               onChange={(event) => {
                 void handleUploadFile(event.currentTarget.files);
@@ -12698,8 +12860,12 @@ function TaskModal({
             />
 
             {!taskId ? (
-              <div className="mt-4 rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">
-                Файлы можно будет добавить после сохранения задачи.
+              <div className="mt-4">
+                {pendingFilesPanel ?? (
+                  <div className="rounded-xl border border-dashed border-indigo-200 bg-indigo-50/40 px-4 py-6 text-sm text-slate-500">
+                    Выберите файлы — они загрузятся автоматически после создания задачи.
+                  </div>
+                )}
               </div>
             ) : filesLoading ? (
               <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500">Загружаем файлы...</div>
@@ -12826,8 +12992,31 @@ function TaskModal({
             </div>
 
             {!taskId ? (
-              <div className="mt-4 rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">
-                Комментарии и история появятся после сохранения задачи.
+              <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50/40 p-3">
+                <textarea
+                  value={commentText}
+                  onChange={(event) => setCommentText(event.target.value)}
+                  className="form-textarea min-h-[84px] bg-white"
+                  rows={3}
+                  placeholder="Введите первый комментарий"
+                  maxLength={4000}
+                />
+                <div className="mt-3">
+                  <label className="inline-flex cursor-pointer items-center gap-2 text-xs font-medium text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={commentExternalCalendarVisible}
+                      onChange={(event) => setCommentExternalCalendarVisible(event.target.checked)}
+                      className="form-checkbox"
+                    />
+                    Показать комментарий во внешнем календаре
+                  </label>
+                  <p className="mt-1 max-w-2xl text-xs leading-5 text-slate-500">{EXTERNAL_CALENDAR_COMMENT_HELP}</p>
+                </div>
+                <div className="mt-3 flex items-center justify-between gap-3">
+                  <span className="text-xs text-slate-400">{commentText.trim().length}/4000</span>
+                  <span className="text-xs font-semibold text-blue-700">Комментарий добавится при создании задачи</span>
+                </div>
               </div>
             ) : (
               <>
@@ -12931,8 +13120,8 @@ function TaskModal({
             </button>
           ) : null}
           {!isReadOnly ? (
-            <button type="button" onClick={() => void handleSaveForm()} className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800">
-              {state?.mode === 'edit' ? 'Сохранить' : 'Создать задачу'}
+            <button type="button" onClick={() => void handleSaveForm()} disabled={taskSaving} className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-wait disabled:opacity-60">
+              {taskSaving ? 'Сохраняем...' : state?.mode === 'edit' ? 'Сохранить' : 'Создать задачу'}
             </button>
           ) : null}
           {canChooseApprovalSubmission ? (
