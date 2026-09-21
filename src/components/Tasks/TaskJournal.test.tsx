@@ -3510,7 +3510,7 @@ describe('TaskJournal', () => {
     }));
   });
 
-  it('shows the selected day schedule from the task date field', async () => {
+  it.each(['legacy', 'modern'] as const)('opens the weekly schedule, blocks overlaps and applies a free slot in the %s card', async (taskCardWindowMode) => {
     const busySlot = new Date();
     busySlot.setDate(busySlot.getDate() + 3);
     busySlot.setHours(14, 0, 0, 0);
@@ -3549,21 +3549,30 @@ describe('TaskJournal', () => {
           { userId: 8, role: 'assignee', displayName: 'Другой исполнитель', approvalStatus: 'pending' },
         ],
       }),
-    ], { waitForTitle: null });
+    ], { waitForTitle: null, settings: { taskCardWindowMode } });
 
     await openNewTaskFormAsGlobalInternal();
 
     fireEvent.change(screen.getByTestId('task-due-at-input'), {
       target: { value: toDatetimeLocalInputValue(selectedSlot) },
     });
-    fireEvent.click(screen.getByTestId('task-day-schedule-toggle'));
+    fireEvent.click(screen.getByTestId(taskCardWindowMode === 'modern' ? 'task-week-schedule-toggle' : 'task-day-schedule-toggle'));
 
-    const panel = screen.getByTestId('task-day-schedule-panel');
-    expect(within(panel).getByText('Busy slot')).toBeTruthy();
-    expect(within(panel).queryByText('Other assignee same day task')).toBeNull();
-    expect(within(panel).queryByText('Other day task')).toBeNull();
-    expect(within(panel).getByText('Всего: 1')).toBeTruthy();
-    expect(within(panel).getByText(/Пересечения: 1/)).toBeTruthy();
+    const dialog = screen.getByTestId('task-week-schedule-dialog');
+    expect(within(dialog).getByText('Busy slot')).toBeTruthy();
+    expect(within(dialog).queryByText('Other assignee same day task')).toBeNull();
+    expect(within(dialog).getByText('Other day task')).toBeTruthy();
+    expect(within(dialog).getByText(/Найдено пересечений: 1/)).toBeTruthy();
+    expect((within(dialog).getByRole('button', { name: 'Применить расписание' }) as HTMLButtonElement).disabled).toBe(true);
+
+    const selectedDateKey = dateKey(selectedSlot);
+    fireEvent.click(within(dialog).getByTestId(`task-week-schedule-day-${selectedDateKey}`), { clientY: 64 });
+    expect(within(dialog).getByText('Время свободно')).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole('button', { name: '− 15 мин' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Применить расписание' }));
+
+    const dueInput = screen.getByTestId('task-due-at-input') as HTMLInputElement;
+    expect(dueInput.value).toContain('T09:00');
   });
 
   it('stacks description and result fields vertically in the task form', async () => {

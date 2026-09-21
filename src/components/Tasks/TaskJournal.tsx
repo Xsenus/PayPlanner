@@ -9370,7 +9370,7 @@ function TaskCalendar({
   );
 }
 
-function TaskDaySchedulePanel({
+export function TaskDaySchedulePanel({
   tasks,
   selectedDueAt,
   plannedDurationMinutes,
@@ -9519,6 +9519,215 @@ function TaskDaySchedulePanel({
         </div>
       )}
     </section>
+  );
+}
+
+function TaskWeekScheduleDialog({
+  open,
+  tasks,
+  selectedDueAt,
+  plannedDurationMinutes,
+  assigneeUserId,
+  assigneeName,
+  assigneeConflictKeys,
+  currentTaskId,
+  taskTitle,
+  readOnly,
+  onClose,
+  onApply,
+}: {
+  open: boolean;
+  tasks: TaskJournalItem[];
+  selectedDueAt: string;
+  plannedDurationMinutes: number | null | undefined;
+  assigneeUserId?: number | null;
+  assigneeName?: string;
+  assigneeConflictKeys: string[];
+  currentTaskId: number | null;
+  taskTitle: string;
+  readOnly: boolean;
+  onClose: () => void;
+  onApply: (dueAt: string, durationMinutes: number) => void;
+}) {
+  const initialDate = parseLocalInputDate(selectedDueAt) ?? new Date();
+  const [draftDate, setDraftDate] = useState(initialDate);
+  const [draftDuration, setDraftDuration] = useState(normalizeTaskDuration(plannedDurationMinutes));
+  const [weekAnchor, setWeekAnchor] = useState(initialDate);
+  const resizeStateRef = useRef<{ startY: number; duration: number } | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const nextDate = parseLocalInputDate(selectedDueAt) ?? new Date();
+    setDraftDate(nextDate);
+    setDraftDuration(normalizeTaskDuration(plannedDurationMinutes));
+    setWeekAnchor(nextDate);
+  }, [open, plannedDurationMinutes, selectedDueAt]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const handlePointerMove = (event: PointerEvent) => {
+      const resizeState = resizeStateRef.current;
+      if (!resizeState) return;
+      const minuteDelta = Math.round(((event.clientY - resizeState.startY) / TIMELINE_MINUTE_HEIGHT) / TIMELINE_SNAP_MINUTES) * TIMELINE_SNAP_MINUTES;
+      setDraftDuration(Math.min(8 * 60, Math.max(TIMELINE_SNAP_MINUTES, resizeState.duration + minuteDelta)));
+    };
+    const handlePointerUp = () => {
+      resizeStateRef.current = null;
+    };
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+    };
+  }, [open]);
+
+  if (!open) return null;
+
+  const visibleDays = Array.from({ length: 7 }, (_, index) => addDays(startOfWeek(weekAnchor), index));
+  const visibleKeys = new Set(visibleDays.map(toLocalDateKey));
+  const scheduleTasks = tasks
+    .filter((task) => task.id !== currentTaskId)
+    .filter((task) => isTaskJournalActive(task.status))
+    .filter((task) => {
+      if (assigneeConflictKeys.length > 0) {
+        const taskKeys = getTaskAssigneeConflictKeys(task);
+        return taskKeys.some((key) => assigneeConflictKeys.includes(key));
+      }
+      return taskMatchesAssignee(task, assigneeUserId, assigneeName);
+    })
+    .filter((task) => visibleKeys.has(getTaskDateKey(task.dueAt)));
+  const draftStartMinute = getMinuteOfDay(draftDate);
+  const draftEndMinute = draftStartMinute + draftDuration;
+  const conflicts = scheduleTasks.filter((task) => (
+    isSameTaskDay(task.dueAt, draftDate)
+    && intervalsOverlap(draftStartMinute, draftEndMinute, getTaskStartMinute(task), getTaskEndMinute(task))
+  ));
+  const timelineHeight = (TIMELINE_END_HOUR - TIMELINE_START_HOUR) * TIMELINE_HOUR_HEIGHT;
+  const draftTop = Math.max(0, (draftStartMinute - TIMELINE_START_MINUTE) * TIMELINE_MINUTE_HEIGHT);
+  const draftHeight = Math.max(36, Math.min(timelineHeight - draftTop, draftDuration * TIMELINE_MINUTE_HEIGHT));
+  const draftDayKey = getTaskDateKey(draftDate);
+  const assigneeLabel = assigneeName?.trim() || 'исполнителя';
+
+  const moveDraft = (day: Date, relativeY: number) => {
+    if (readOnly) return;
+    setDraftDate(buildTimelineDropDate(day, relativeY));
+  };
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/50 p-3 backdrop-blur-sm" data-testid="task-week-schedule-dialog">
+      <div className="flex max-h-[96vh] w-full max-w-7xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 px-4 py-3">
+          <div>
+            <div className="flex items-center gap-2 text-lg font-semibold text-slate-950">
+              <CalendarClock className="h-5 w-5 text-blue-600" />
+              Расписание задачи на неделю
+            </div>
+            <p className="mt-1 text-sm text-slate-500">Перетащите задачу на свободное время. Потяните за нижний край, чтобы изменить длительность.</p>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700" aria-label="Закрыть расписание"><X className="h-5 w-5" /></button>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-slate-50 px-4 py-3">
+          <div className="flex items-center gap-2">
+            <button type="button" onClick={() => setWeekAnchor(addDays(weekAnchor, -7))} className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white" aria-label="Предыдущая неделя"><ChevronLeft className="h-4 w-4" /></button>
+            <button type="button" onClick={() => setWeekAnchor(new Date())} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700">Сегодня</button>
+            <button type="button" onClick={() => setWeekAnchor(addDays(weekAnchor, 7))} className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white" aria-label="Следующая неделя"><ChevronRight className="h-4 w-4" /></button>
+            <span className="ml-2 text-sm font-semibold text-slate-700">{formatPeriodTitle(weekAnchor, 'week')}</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
+            <span className="rounded-full bg-white px-3 py-1.5 text-slate-600 ring-1 ring-slate-200">{assigneeLabel}</span>
+            <span className="rounded-full bg-blue-50 px-3 py-1.5 text-blue-700 ring-1 ring-blue-200">{formatTimeRange(draftDate, draftDuration)} · {formatDuration(draftDuration)}</span>
+            <span className={`rounded-full px-3 py-1.5 ring-1 ${conflicts.length > 0 ? 'bg-rose-50 text-rose-700 ring-rose-200' : 'bg-emerald-50 text-emerald-700 ring-emerald-200'}`}>
+              {conflicts.length > 0 ? `Найдено пересечений: ${conflicts.length}` : 'Время свободно'}
+            </span>
+          </div>
+        </div>
+
+        {conflicts.length > 0 ? (
+          <div role="alert" className="border-b border-rose-200 bg-rose-50 px-4 py-2 text-sm font-medium text-rose-800">
+            Выберите свободный слот: задача пересекается с «{conflicts[0].title}» ({formatTimeRange(new Date(conflicts[0].dueAt), normalizeTaskDuration(conflicts[0].plannedDurationMinutes))}).
+          </div>
+        ) : null}
+
+        <div className="min-h-0 flex-1 overflow-auto p-3">
+          <div className="min-w-[980px] overflow-hidden rounded-xl border border-slate-200">
+            <div className="grid grid-cols-[72px_repeat(7,minmax(128px,1fr))] border-b border-slate-200 bg-slate-50">
+              <div className="px-2 py-3 text-center text-xs font-semibold text-slate-400">Время</div>
+              {visibleDays.map((day, index) => (
+                <div key={toLocalDateKey(day)} className={`border-l border-slate-200 px-2 py-2 text-center ${isSameDay(day, draftDate) ? 'bg-blue-50' : ''}`}>
+                  <div className="text-xs font-semibold uppercase text-slate-400">{WEEKDAY_LABELS[index]}</div>
+                  <div className="text-lg font-bold text-slate-800">{day.getDate()}</div>
+                </div>
+              ))}
+            </div>
+            <div className="grid grid-cols-[72px_repeat(7,minmax(128px,1fr))]">
+              <div className="relative bg-slate-50" style={{ height: timelineHeight }}>
+                {getTimelineHourLabels().map((hour, index) => <div key={hour} className="absolute right-2 -translate-y-2 text-xs font-semibold text-slate-500" style={{ top: index * TIMELINE_HOUR_HEIGHT }}>{String(hour).padStart(2, '0')}:00</div>)}
+              </div>
+              {visibleDays.map((day) => {
+                const key = toLocalDateKey(day);
+                const dayTasks = scheduleTasks.filter((task) => getTaskDateKey(task.dueAt) === key);
+                return (
+                  <div
+                    key={key}
+                    data-testid={`task-week-schedule-day-${key}`}
+                    className={`relative border-l border-slate-200 ${key === draftDayKey ? 'bg-blue-50/30' : 'bg-white'}`}
+                    style={{ height: timelineHeight }}
+                    onClick={(event) => {
+                      if (event.target !== event.currentTarget) return;
+                      const rect = event.currentTarget.getBoundingClientRect();
+                      moveDraft(day, event.clientY - rect.top);
+                    }}
+                    onDragOver={(event) => { if (!readOnly) event.preventDefault(); }}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      const rect = event.currentTarget.getBoundingClientRect();
+                      moveDraft(day, event.clientY - rect.top);
+                    }}
+                  >
+                    {getTimelineHourLabels().slice(0, -1).map((hour, index) => <div key={hour} className="pointer-events-none absolute left-0 right-0 border-t border-slate-200" style={{ top: index * TIMELINE_HOUR_HEIGHT }} />)}
+                    {dayTasks.map((task) => {
+                      const start = getTaskStartMinute(task);
+                      const duration = normalizeTaskDuration(task.plannedDurationMinutes);
+                      return (
+                        <div key={task.id} className="absolute left-1 right-1 overflow-hidden rounded-md border border-slate-300 bg-slate-100 px-1.5 py-1 text-[11px] text-slate-700 shadow-sm" style={{ top: Math.max(0, (start - TIMELINE_START_MINUTE) * TIMELINE_MINUTE_HEIGHT), height: Math.max(28, duration * TIMELINE_MINUTE_HEIGHT) }} title={`${task.title} · ${formatTimeRange(new Date(task.dueAt), duration)}`}>
+                          <div className="truncate font-semibold">{task.title}</div><div className="truncate">{formatTimeRange(new Date(task.dueAt), duration)}</div>
+                        </div>
+                      );
+                    })}
+                    {key === draftDayKey ? (
+                      <div
+                        draggable={!readOnly}
+                        data-testid="task-week-schedule-current"
+                        onDragStart={(event) => { event.dataTransfer.setData('text/plain', 'current-task'); event.dataTransfer.effectAllowed = 'move'; }}
+                        className={`absolute left-1 right-1 z-20 overflow-hidden rounded-lg border-2 px-2 py-1 text-xs text-white shadow-lg ${conflicts.length > 0 ? 'border-rose-800 bg-rose-600' : 'border-blue-800 bg-blue-600'} ${readOnly ? 'cursor-default' : 'cursor-grab'}`}
+                        style={{ top: draftTop, height: draftHeight }}
+                      >
+                        <div className="truncate font-bold">{taskTitle.trim() || 'Текущая задача'}</div>
+                        <div className="truncate font-semibold">{formatTimeRange(draftDate, draftDuration)}</div>
+                        {!readOnly ? <button type="button" aria-label="Изменить длительность задачи" title="Потяните, чтобы изменить длительность" onPointerDown={(event) => { event.preventDefault(); event.stopPropagation(); resizeStateRef.current = { startY: event.clientY, duration: draftDuration }; }} className="absolute bottom-0 left-0 right-0 h-3 cursor-ns-resize border-t border-white/60 bg-white/20" /> : null}
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 px-4 py-3">
+          <div className="flex items-center gap-2">
+            <button type="button" disabled={readOnly || draftDuration <= 15} onClick={() => setDraftDuration((value) => Math.max(15, value - 15))} className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold disabled:opacity-40">− 15 мин</button>
+            <button type="button" disabled={readOnly || draftDuration >= 480} onClick={() => setDraftDuration((value) => Math.min(480, value + 15))} className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold disabled:opacity-40">+ 15 мин</button>
+          </div>
+          <div className="flex gap-2">
+            <button type="button" onClick={onClose} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600">Отмена</button>
+            <button type="button" disabled={readOnly || conflicts.length > 0} onClick={() => onApply(toTimeZoneDateTimeInput(draftDate, activeTaskJournalTimeZoneId), draftDuration)} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-300" title={conflicts.length > 0 ? 'Сначала выберите свободное время' : 'Применить дату и длительность'}>Применить расписание</button>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -11472,6 +11681,34 @@ function TaskModal({
     </div>
   ) : null;
 
+  const weekScheduleDialog = (
+    <TaskWeekScheduleDialog
+      open={scheduleOpen}
+      tasks={tasks}
+      selectedDueAt={form.dueAt}
+      plannedDurationMinutes={form.plannedDurationMinutes}
+      assigneeUserId={form.assigneeUserId}
+      assigneeName={selectedAssignee?.name || form.assigneeName}
+      assigneeConflictKeys={unique([
+        ...(form.assigneeUserId ? [`user:${form.assigneeUserId}`] : []),
+        ...form.participants
+          .filter((participant) => participant.role === 'assignee')
+          .map((participant) => participant.userId
+            ? `user:${participant.userId}`
+            : `name:${getParticipantDisplayName(participant).trim().toLowerCase()}`),
+        ...(!form.assigneeUserId && form.assigneeName.trim() ? [`name:${form.assigneeName.trim().toLowerCase()}`] : []),
+      ].filter((key) => !key.endsWith(':')))}
+      currentTaskId={taskId}
+      taskTitle={form.title}
+      readOnly={isReadOnly}
+      onClose={() => setScheduleOpen(false)}
+      onApply={(dueAt, durationMinutes) => {
+        setForm((previous) => ({ ...previous, dueAt, plannedDurationMinutes: durationMinutes }));
+        setScheduleOpen(false);
+      }}
+    />
+  );
+
   if (isModernChrome) {
     const TypeIcon = typeOption.icon;
     const titleText = state?.mode === 'view'
@@ -11482,6 +11719,7 @@ function TaskModal({
 
     return (
       <div className={shellClassName} data-testid="task-modern-card-window">
+        {weekScheduleDialog}
         <div className={panelClassName}>
           <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-5 py-3">
             <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm text-slate-500">
@@ -12008,6 +12246,16 @@ function TaskModal({
                     </SystemSelect>
                   </ModernTaskQuickField>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setScheduleOpen(true)}
+                  data-testid="task-week-schedule-toggle"
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700 transition hover:border-blue-300 hover:bg-blue-100"
+                  title="Открыть недельное расписание и выбрать свободное время"
+                >
+                  <CalendarClock className="h-4 w-4" />
+                  Расписание на неделю
+                </button>
                 <div className="grid grid-cols-2 items-start gap-3 rounded-xl bg-slate-50 p-2.5" data-testid="task-classification-fields-row">
                   <ModernTaskQuickField icon={<TypeIcon className="h-4 w-4" />} label="Тип задачи" embedded>
                     <SystemSelect value={form.type} onChange={(event) => update('type', event.target.value as TaskJournalType)} disabled={isReadOnly} className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-sm outline-none focus:border-blue-400 focus:bg-white">
@@ -12388,6 +12636,7 @@ function TaskModal({
 
   return (
     <div className={shellClassName} data-testid={isModernChrome ? 'task-modern-card-window' : 'task-legacy-card-window'}>
+      {weekScheduleDialog}
       <div className={panelClassName}>
         <div className={headerClassName}>
           <div className="min-w-0">
@@ -12713,10 +12962,10 @@ function TaskModal({
                 />
                 <button
                   type="button"
-                  onClick={() => setScheduleOpen((value) => !value)}
+                  onClick={() => setScheduleOpen(true)}
                   data-testid="task-day-schedule-toggle"
                   aria-expanded={scheduleOpen}
-                  title="Расписание на выбранный день"
+                  title="Открыть недельное расписание и выбрать свободное время"
                   className={`inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-xl border px-3 text-sm font-semibold transition ${
                     scheduleOpen
                       ? 'border-blue-300 bg-blue-50 text-blue-700'
@@ -12724,7 +12973,7 @@ function TaskModal({
                   }`}
                 >
                   <CalendarClock className="h-4 w-4" />
-                  <span className="hidden sm:inline">Расписание</span>
+                  <span className="hidden sm:inline">Неделя</span>
                 </button>
               </div>
             </Field>
@@ -12738,18 +12987,6 @@ function TaskModal({
                 className="form-input"
               />
             </Field>
-            {scheduleOpen ? (
-              <div className="lg:col-span-2">
-                <TaskDaySchedulePanel
-                  tasks={tasks}
-                  selectedDueAt={form.dueAt}
-                  plannedDurationMinutes={form.plannedDurationMinutes}
-                  assigneeUserId={form.assigneeUserId}
-                  assigneeName={form.assigneeName}
-                  currentTaskId={taskId}
-                />
-              </div>
-            ) : null}
             <Field label="Длительность">
               <SystemSelect
                 value={normalizeTaskDuration(form.plannedDurationMinutes)}
