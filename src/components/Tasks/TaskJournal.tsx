@@ -12017,7 +12017,7 @@ function TaskModal({
       assigneeName={selectedAssignee?.name || form.assigneeName}
       assigneeConflictKeys={unique([
         ...(form.assigneeUserId ? [`user:${form.assigneeUserId}`] : []),
-        ...form.participants
+        ...(form.participants ?? [])
           .filter((participant) => participant.role === 'assignee')
           .map((participant) => participant.userId
             ? `user:${participant.userId}`

@@ -6,12 +6,12 @@
 ## Сводка
 
 - Разделов frontend: 53.
-- Backend-контроллеров: 69.
-- HTTP endpoints: 828; с прямой тестовой связью: 552.
-- HTTP endpoints с точной ссылкой из документации: 185; критичных без такой ссылки: 497.
-- Критичных endpoints без прямой тестовой связи: 230.
+- Backend-контроллеров: 70.
+- HTTP endpoints: 840; с прямой тестовой связью: 552.
+- HTTP endpoints с точной ссылкой из документации: 187; критичных без такой ссылки: 502.
+- Критичных endpoints без прямой тестовой связи: 236.
 - Реальных HTML-форм: 19; с найденной тестовой связью: 17.
-- Фоновых сервисов: 28; с найденной тестовой связью: 25.
+- Фоновых сервисов: 29; с найденной тестовой связью: 25.
 - Исходящих HTTP-интеграций: 12; с найденной тестовой связью: 12.
 
 ## Разделы frontend
@@ -20,8 +20,8 @@
 | --- | --- | --- | --- |
 | workspace | () => true | да | docs/full-project-audit-2026-06-10.md, README.md |
 | notifications | () => true | да | docs/deploy-runbook.md, docs/full-project-audit-2026-06-10.md, docs/task-critical-events-matrix-2026-07-09.md, docs/task-critical-notifications-audit-2026-07-09.md, docs/tz-crm-acceptance-baseline-roadmap-2026-07-08.md, docs/tz-crm-release-stability-roadmap-2026-07-08.md |
-| messenger | () => true | да | docs/public-access-link-security.md |
-| profile | () => true | да | docs/full-project-audit-2026-06-10.md |
+| messenger | () => true | да | docs/public-access-link-security.md, docs/storage-s3-backup-audit-2026-09-22.md |
+| profile | () => true | да | docs/full-project-audit-2026-06-10.md, docs/storage-s3-backup-audit-2026-09-22.md |
 | calendar | (permissions) => permissions.calendar.canView | да | docs/date-time-inventory.md, docs/final-acceptance-2026-06-10.md, docs/full-project-audit-2026-06-10.md, docs/legal-feature-flag-ci-gate-2026-06-10.md |
 | tasks | (permissions) => permissions.tasks.canView | да | docs/crm-legal-module-gap-report-2026-05-25.md, docs/final-acceptance-2026-06-10.md, docs/full-project-audit-2026-06-10.md, docs/report-inventory-2026-08-09.md, docs/task-critical-events-matrix-2026-07-09.md, docs/task-deadline-change-current-state-2026-07-09.md, docs/task-deadline-change-model-design-2026-07-09.md, docs/task-journal-query-optimization.md, docs/task-result-approval-current-state-2026-07-09.md, docs/task-template-current-state-2026-07-09.md |
 | tasksControl | (permissions) => permissions.tasks.canView | да | нет |
@@ -79,7 +79,7 @@
 | InvoiceModal | src/components/Accounts/InvoiceModal.tsx | 4391 | да | docs/date-time-inventory.md, docs/final-acceptance-2026-06-10.md, docs/financial-invoice-cancellation-current-state-2026-07-08.md, docs/full-project-audit-2026-06-10.md, docs/tz-crm-release-stability-roadmap-2026-07-08.md |
 | ActModal | src/components/Acts/ActModal.tsx | 1505 | да | docs/date-time-inventory.md, docs/full-project-audit-2026-06-10.md |
 | Login | src/components/Auth/Login.tsx | 73 | да | docs/external-authentication-security-and-performance.md, docs/field-encryption-candidates.generated.md, docs/field-encryption-data-inventory-2026-07-30.md, docs/full-project-audit-2026-06-10.md |
-| Register | src/components/Auth/Register.tsx | 94 | да | docs/date-time-inventory.md |
+| Register | src/components/Auth/Register.tsx | 94 | да | docs/date-time-inventory.md, docs/storage-s3-backup-audit-2026-09-22.md |
 | PaymentModal | src/components/Calendar/PaymentModal.tsx | 2923 | да | docs/date-time-inventory.md, docs/full-project-audit-2026-06-10.md, docs/technical-stabilization-log.md |
 | ClientDetail | src/components/Clients/ClientDetail.tsx | 6352 | да | docs/date-time-inventory.md, docs/full-project-audit-2026-06-10.md, docs/unused-frontend-candidates-2026-06-10.md |
 | ClientModal | src/components/Clients/ClientModal.tsx | 240 | да | нет |
@@ -88,12 +88,12 @@
 | LegalEntityModal | src/components/LegalEntities/LegalEntityModal.tsx | 3827 | да | docs/full-project-audit-2026-06-10.md |
 | ClientPortalPage | src/components/Public/ClientPortalPage.tsx | 223 | да | нет |
 | RoleModal | src/components/Roles/RoleModal.tsx | 121 | нет | docs/full-project-audit-2026-06-10.md |
-| S3Storage | src/components/S3Storage/S3Storage.tsx | 773 | да | docs/date-time-inventory.md, docs/file-upload-limits-2026-06-10.md, docs/full-project-audit-2026-06-10.md, docs/http-integration-error-coverage-2026-06-10.md, docs/s3-storage-acceptance-checklist.md |
+| S3Storage | src/components/S3Storage/S3Storage.tsx | 773 | да | docs/date-time-inventory.md, docs/file-upload-limits-2026-06-10.md, docs/full-project-audit-2026-06-10.md, docs/http-integration-error-coverage-2026-06-10.md, docs/s3-storage-acceptance-checklist.md, docs/storage-s3-backup-audit-2026-09-22.md |
 | TaskJournalSettings | src/components/Settings/TaskJournalSettings.tsx | 888 | да | docs/task-template-current-state-2026-07-09.md |
-| TaskJournal | src/components/Tasks/TaskJournal.tsx | 9989 | да | docs/date-time-inventory.md, docs/ef-production-warning-cleanup-plan-2026-06-22.md, docs/field-encryption-candidates.generated.md, docs/field-encryption-data-inventory-2026-07-30.md, docs/full-project-audit-2026-06-10.md, docs/hosted-service-lifecycle-coverage-2026-06-10.md, docs/task-critical-events-matrix-2026-07-09.md, docs/task-deadline-change-current-state-2026-07-09.md, docs/task-deadline-change-model-design-2026-07-09.md, docs/task-participants-current-state-2026-07-09.md, docs/task-result-approval-current-state-2026-07-09.md, docs/task-template-current-state-2026-07-09.md, docs/tz-crm-acceptance-baseline-roadmap-2026-07-08.md |
+| TaskJournal | src/components/Tasks/TaskJournal.tsx | 9989 | да | docs/date-time-inventory.md, docs/ef-production-warning-cleanup-plan-2026-06-22.md, docs/field-encryption-candidates.generated.md, docs/field-encryption-data-inventory-2026-07-30.md, docs/full-project-audit-2026-06-10.md, docs/hosted-service-lifecycle-coverage-2026-06-10.md, docs/storage-s3-backup-audit-2026-09-22.md, docs/task-critical-events-matrix-2026-07-09.md, docs/task-deadline-change-current-state-2026-07-09.md, docs/task-deadline-change-model-design-2026-07-09.md, docs/task-participants-current-state-2026-07-09.md, docs/task-result-approval-current-state-2026-07-09.md, docs/task-template-current-state-2026-07-09.md, docs/tz-crm-acceptance-baseline-roadmap-2026-07-08.md |
 | FormPromptModal | src/components/ui/FormPromptModal.tsx | 65 | да | нет |
 | TextPromptModal | src/components/ui/TextPromptModal.tsx | 55 | да | docs/full-project-audit-2026-06-10.md |
-| YandexDisk | src/components/YandexDisk/YandexDisk.tsx | 722 | да | docs/field-encryption-candidates.generated.md, docs/file-upload-limits-2026-06-10.md, docs/full-project-audit-2026-06-10.md, docs/hosted-service-lifecycle-coverage-2026-06-10.md, docs/http-integration-error-coverage-2026-06-10.md, docs/yandex-disk-integration-delivery-report.md |
+| YandexDisk | src/components/YandexDisk/YandexDisk.tsx | 722 | да | docs/field-encryption-candidates.generated.md, docs/file-upload-limits-2026-06-10.md, docs/full-project-audit-2026-06-10.md, docs/hosted-service-lifecycle-coverage-2026-06-10.md, docs/http-integration-error-coverage-2026-06-10.md, docs/storage-s3-backup-audit-2026-09-22.md, docs/yandex-disk-integration-delivery-report.md |
 | DialogContext | src/contexts/DialogContext.tsx | 213 | да | нет |
 
 ### Формы без тестовой связи
@@ -112,7 +112,7 @@
 | CaseProceduralDeadlineReminderNotificationService | backend/Services/CaseProceduralDeadlineReminderNotificationService.cs | 8 | да | docs/hosted-service-lifecycle-coverage-2026-06-10.md |
 | ClientBirthdayTaskSchedulerService | backend/Services/ClientBirthdayTaskSchedulerService.cs | 9 | да | docs/hosted-service-lifecycle-coverage-2026-06-10.md |
 | ContractExpirationNotificationService | backend/Services/ContractExpirationNotificationService.cs | 8 | да | нет |
-| DatabaseBackupSchedulerService | backend/Services/DatabaseBackupSchedulerService.cs | 3 | да | docs/full-project-audit-2026-06-10.md, docs/hosted-service-lifecycle-coverage-2026-06-10.md |
+| DatabaseBackupSchedulerService | backend/Services/DatabaseBackupSchedulerService.cs | 3 | да | docs/full-project-audit-2026-06-10.md, docs/hosted-service-lifecycle-coverage-2026-06-10.md, docs/storage-s3-backup-audit-2026-09-22.md |
 | ExternalCalendarTaskSyncOutboxWorker | backend/Services/ExternalCalendarTaskSyncOutboxService.cs | 194 | нет | нет |
 | ExternalWorkOrderApprovalExpirationService | backend/Services/ExternalWorkOrderApprovalNotifications.cs | 116 | да | нет |
 | GoogleCalendarBackgroundSyncService | backend/Services/GoogleCalendarBackgroundSyncService.cs | 11 | да | docs/date-time-inventory.md, docs/full-project-audit-2026-06-10.md, docs/hosted-service-lifecycle-coverage-2026-06-10.md |
@@ -131,6 +131,7 @@
 | TelegramBotPollingService | backend/Services/Notifications/TelegramBotPollingService.cs | 3 | да | docs/full-project-audit-2026-06-10.md, docs/hosted-service-lifecycle-coverage-2026-06-10.md |
 | PaymentAdvanceReviewMonitoringService | backend/Services/PaymentAdvanceReviewMonitoringService.cs | 8 | да | нет |
 | PaymentStatusUpdater | backend/Services/PaymentStatusUpdater.cs | 12 | да | docs/full-project-audit-2026-06-10.md, docs/hosted-service-lifecycle-coverage-2026-06-10.md |
+| StorageOperationWorker | backend/Services/Storage/StorageOperationProcessor.cs | 363 | нет | нет |
 | TaskJournalAutomationSchedulerService | backend/Services/TaskJournalAutomationSchedulerService.cs | 10 | да | docs/full-project-audit-2026-06-10.md, docs/hosted-service-lifecycle-coverage-2026-06-10.md |
 | UserActivityRetentionService | backend/Services/UserActivity/UserActivityRetentionService.cs | 7 | да | docs/batch-operations-audit-coverage-2026-06-10.md, docs/full-project-audit-2026-06-10.md, docs/hosted-service-lifecycle-coverage-2026-06-10.md |
 | YandexCalendarBackgroundSyncService | backend/Services/YandexCalendarBackgroundSyncService.cs | 11 | да | docs/full-project-audit-2026-06-10.md, docs/hosted-service-lifecycle-coverage-2026-06-10.md |
@@ -143,6 +144,7 @@
 | ExternalCalendarTaskSyncOutboxWorker | backend/Services/ExternalCalendarTaskSyncOutboxService.cs:194 | нет |
 | MessengerDocumentOutboxWorker | backend/Services/MessengerDocumentOutboxService.cs:288 | нет |
 | MaxOutboxWorker | backend/Services/Notifications/MaxOutboxService.cs:366 | нет |
+| StorageOperationWorker | backend/Services/Storage/StorageOperationProcessor.cs:363 | нет |
 
 ## Контроллеры
 
@@ -168,7 +170,7 @@
 | ContactsController | backend/Controllers/ContactsController.cs | 9 | [Authorize] | да |
 | ContractsController | backend/Controllers/ContractsController.cs | 26 | [Authorize] | да |
 | DadataIntegrationSettingsController | backend/Controllers/DadataIntegrationSettingsController.cs | 2 | [Authorize] | да |
-| DatabaseAdminController | backend/Controllers/DatabaseAdminController.cs | 15 | [Authorize(Policy = "Admin")] | да |
+| DatabaseAdminController | backend/Controllers/DatabaseAdminController.cs | 17 | [Authorize(Policy = "Admin")] | да |
 | DictionariesAdminController | backend/Controllers/DictionariesAdminController.cs | 74 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Dictionaries)] | да |
 | DictionariesReadController | backend/Controllers/DictionariesReadController.cs | 18 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Dictionaries)] | нет |
 | ElectronicSignaturesController | backend/Controllers/ElectronicSignaturesController.cs | 6 | [Authorize(Policy = "Admin")] | да |
@@ -203,6 +205,7 @@
 | S3StorageController | backend/Controllers/S3StorageController.cs | 13 | [Authorize] | да |
 | StatsController | backend/Controllers/StatsController.cs | 1 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Payments)] | нет |
 | StickyNotesController | backend/Controllers/StickyNotesController.cs | 14 | [Authorize] | да |
+| StorageAdminController | backend/Controllers/StorageAdminController.cs | 10 | [Authorize(Policy = "Admin")] | нет |
 | SystemJobsController | backend/Controllers/SystemJobsController.cs | 2 | [Authorize(Policy = "Admin")] | да |
 | TasksController | backend/Controllers/TasksController.cs | 43 | [Authorize] | да |
 | UserActivityController | backend/Controllers/UserActivityController.cs | 10 | [Authorize] | да |
@@ -222,18 +225,18 @@
 
 | Клиент или сервис | Регистрация | Файл:строка | Тест найден | Документация |
 | --- | --- | --- | --- | --- |
-| DadataLegalEntityEnrichmentService | AddHttpClient<ILegalEntityEnrichmentService, DadataLegalEntityEnrichmentService> | backend/Program.cs:223 | да | docs/full-project-audit-2026-06-10.md, docs/http-integration-error-coverage-2026-06-10.md, docs/technical-stabilization-log.md |
+| DadataLegalEntityEnrichmentService | AddHttpClient<ILegalEntityEnrichmentService, DadataLegalEntityEnrichmentService> | backend/Program.cs:243 | да | docs/full-project-audit-2026-06-10.md, docs/http-integration-error-coverage-2026-06-10.md, docs/technical-stabilization-log.md |
 | ExternalAuthService | IHttpClientFactory | backend/Services/ExternalAuthService.cs:29 | да | docs/batch-operations-audit-coverage-2026-06-10.md, docs/full-project-audit-2026-06-10.md |
 | GoogleCalendarSyncService | IHttpClientFactory | backend/Services/GoogleCalendarSyncService.cs:22 | да | docs/batch-operations-audit-coverage-2026-06-10.md, docs/date-time-inventory.md, docs/http-integration-error-coverage-2026-06-10.md, docs/tz-crm-acceptance-baseline-roadmap-2026-07-08.md |
-| MaxApiClient | AddHttpClient<IMaxApiClient, MaxApiClient> | backend/Program.cs:181 | да | нет |
-| SmsAeroProvider | AddHttpClient<SmsAeroProvider> | backend/Program.cs:173 | да | нет |
-| SmscRuProvider | AddHttpClient<SmscRuProvider> | backend/Program.cs:168 | да | нет |
-| SmsRuProvider | AddHttpClient<SmsRuProvider> | backend/Program.cs:163 | да | нет |
-| SudrfCourtSyncService | AddHttpClient<ISudrfCourtSyncService, SudrfCourtSyncService> | backend/Program.cs:224 | да | docs/crm-legal-module-gap-report-2026-05-25.md, docs/full-project-audit-2026-06-10.md, docs/http-integration-error-coverage-2026-06-10.md, docs/tz-crm-acceptance-baseline-roadmap-2026-07-08.md, docs/tz-crm-court-sync-roadmap-2026-07-08.md |
+| MaxApiClient | AddHttpClient<IMaxApiClient, MaxApiClient> | backend/Program.cs:198 | да | нет |
+| SmsAeroProvider | AddHttpClient<SmsAeroProvider> | backend/Program.cs:190 | да | нет |
+| SmscRuProvider | AddHttpClient<SmscRuProvider> | backend/Program.cs:185 | да | нет |
+| SmsRuProvider | AddHttpClient<SmsRuProvider> | backend/Program.cs:180 | да | нет |
+| SudrfCourtSyncService | AddHttpClient<ISudrfCourtSyncService, SudrfCourtSyncService> | backend/Program.cs:244 | да | docs/crm-legal-module-gap-report-2026-05-25.md, docs/full-project-audit-2026-06-10.md, docs/http-integration-error-coverage-2026-06-10.md, docs/tz-crm-acceptance-baseline-roadmap-2026-07-08.md, docs/tz-crm-court-sync-roadmap-2026-07-08.md |
 | TelegramBotUpdateService | IHttpClientFactory | backend/Services/Notifications/TelegramBotUpdateService.cs:13 | да | docs/hosted-service-lifecycle-coverage-2026-06-10.md |
 | TelegramNotificationService | IHttpClientFactory | backend/Services/Notifications/TelegramNotificationService.cs:8 | да | docs/http-integration-error-coverage-2026-06-10.md |
 | YandexCalendarSyncService | IHttpClientFactory | backend/Services/YandexCalendarSyncService.cs:21 | да | docs/batch-operations-audit-coverage-2026-06-10.md, docs/date-time-inventory.md, docs/http-integration-error-coverage-2026-06-10.md, docs/tz-crm-acceptance-baseline-roadmap-2026-07-08.md |
-| YandexDiskService | AddHttpClient<IYandexDiskService, YandexDiskService> | backend/Program.cs:225 | да | docs/full-project-audit-2026-06-10.md, docs/http-integration-error-coverage-2026-06-10.md |
+| YandexDiskService | AddHttpClient<IYandexDiskService, YandexDiskService> | backend/Program.cs:245 | да | docs/full-project-audit-2026-06-10.md, docs/http-integration-error-coverage-2026-06-10.md, docs/storage-s3-backup-audit-2026-09-22.md |
 
 ## Критичные endpoints без прямой тестовой связи
 
@@ -255,16 +258,17 @@
 | POST | api/auth/admin/users/{id:int}/approve | AdminUsersController.ApproveUser | изменение данных, чувствительные данные или операция | backend/Controllers/AdminUsersController.cs:146 |
 | POST | api/auth/admin/users/{id:int}/reject | AdminUsersController.RejectUser | изменение данных, чувствительные данные или операция | backend/Controllers/AdminUsersController.cs:159 |
 | POST | api/contacts/imports/yealink | ContactsController.ImportYealinkXml | изменение данных, чувствительные данные или операция | backend/Controllers/ContactsController.cs:785 |
-| POST | api/database/backups | DatabaseAdminController.CreateBackupAsync | изменение данных, чувствительные данные или операция | backend/Controllers/DatabaseAdminController.cs:101 |
-| DELETE | api/database/backups/all | DatabaseAdminController.DeleteAllBackupsAsync | изменение данных, чувствительные данные или операция | backend/Controllers/DatabaseAdminController.cs:185 |
-| DELETE | api/database/backups/file | DatabaseAdminController.DeleteBackupAsync | изменение данных, чувствительные данные или операция | backend/Controllers/DatabaseAdminController.cs:163 |
-| POST | api/database/backups/s3-uploads/{uploadResultId}/retry | DatabaseAdminController.RetryBackupS3UploadAsync | изменение данных, чувствительные данные или операция | backend/Controllers/DatabaseAdminController.cs:121 |
-| PUT | api/database/backups/settings | DatabaseAdminController.UpdateBackupSettingsAsync | изменение данных, чувствительные данные или операция | backend/Controllers/DatabaseAdminController.cs:74 |
-| POST | api/database/backups/yandex-disk-uploads/{uploadResultId}/retry | DatabaseAdminController.RetryBackupYandexDiskUploadAsync | изменение данных, чувствительные данные или операция | backend/Controllers/DatabaseAdminController.cs:142 |
-| POST | api/database/import/spreadsheets/apply | DatabaseAdminController.ApplySpreadsheetImportAsync | изменение данных, чувствительные данные или операция | backend/Controllers/DatabaseAdminController.cs:279 |
-| POST | api/database/import/spreadsheets/batches/{batchId:int}/rollback | DatabaseAdminController.RollbackSpreadsheetImportBatchAsync | изменение данных, чувствительные данные или операция | backend/Controllers/DatabaseAdminController.cs:349 |
-| POST | api/database/import/spreadsheets/preview | DatabaseAdminController.PreviewSpreadsheetImportAsync | изменение данных, чувствительные данные или операция | backend/Controllers/DatabaseAdminController.cs:254 |
-| POST | api/database/import/sqlite | DatabaseAdminController.ImportSqliteAsync | изменение данных, чувствительные данные или операция | backend/Controllers/DatabaseAdminController.cs:214 |
+| POST | api/database/backups | DatabaseAdminController.CreateBackupAsync | изменение данных, чувствительные данные или операция | backend/Controllers/DatabaseAdminController.cs:104 |
+| DELETE | api/database/backups/all | DatabaseAdminController.DeleteAllBackupsAsync | изменение данных, чувствительные данные или операция | backend/Controllers/DatabaseAdminController.cs:188 |
+| DELETE | api/database/backups/file | DatabaseAdminController.DeleteBackupAsync | изменение данных, чувствительные данные или операция | backend/Controllers/DatabaseAdminController.cs:166 |
+| POST | api/database/backups/restore-drill | DatabaseAdminController.RunRestoreDrillAsync | изменение данных, чувствительные данные или операция | backend/Controllers/DatabaseAdminController.cs:232 |
+| POST | api/database/backups/s3-uploads/{uploadResultId}/retry | DatabaseAdminController.RetryBackupS3UploadAsync | изменение данных, чувствительные данные или операция | backend/Controllers/DatabaseAdminController.cs:124 |
+| PUT | api/database/backups/settings | DatabaseAdminController.UpdateBackupSettingsAsync | изменение данных, чувствительные данные или операция | backend/Controllers/DatabaseAdminController.cs:77 |
+| POST | api/database/backups/yandex-disk-uploads/{uploadResultId}/retry | DatabaseAdminController.RetryBackupYandexDiskUploadAsync | изменение данных, чувствительные данные или операция | backend/Controllers/DatabaseAdminController.cs:145 |
+| POST | api/database/import/spreadsheets/apply | DatabaseAdminController.ApplySpreadsheetImportAsync | изменение данных, чувствительные данные или операция | backend/Controllers/DatabaseAdminController.cs:312 |
+| POST | api/database/import/spreadsheets/batches/{batchId:int}/rollback | DatabaseAdminController.RollbackSpreadsheetImportBatchAsync | изменение данных, чувствительные данные или операция | backend/Controllers/DatabaseAdminController.cs:382 |
+| POST | api/database/import/spreadsheets/preview | DatabaseAdminController.PreviewSpreadsheetImportAsync | изменение данных, чувствительные данные или операция | backend/Controllers/DatabaseAdminController.cs:287 |
+| POST | api/database/import/sqlite | DatabaseAdminController.ImportSqliteAsync | изменение данных, чувствительные данные или операция | backend/Controllers/DatabaseAdminController.cs:247 |
 | POST | api/dictionaries/document-statuses | DictionariesAdminController.CreateDocumentStatus | изменение данных, чувствительные данные или операция | backend/Controllers/DictionariesAdminController.cs:1094 |
 | DELETE | api/dictionaries/document-statuses/{id:int} | DictionariesAdminController.DeleteDocumentStatus | изменение данных, чувствительные данные или операция | backend/Controllers/DictionariesAdminController.cs:1146 |
 | POST | api/dictionaries/invoice-item-names | DictionariesAdminController.CreateInvoiceItemName | изменение данных, чувствительные данные или операция | backend/Controllers/DictionariesAdminController.cs:960 |
@@ -303,10 +307,10 @@
 | POST | api/portal/max/link | ClientPortalController.CreateMaxLink | публичный доступ, изменение данных | backend/Controllers/ClientPortalController.cs:181 |
 | DELETE | api/portal/max/link | ClientPortalController.DeleteMaxLink | публичный доступ, изменение данных | backend/Controllers/ClientPortalController.cs:198 |
 | GET | api/portal/profile | ClientPortalController.Profile | публичный доступ, чувствительные данные или операция | backend/Controllers/ClientPortalController.cs:111 |
-| PUT | api/profile | ProfileController.UpdateProfile | изменение данных, чувствительные данные или операция | backend/Controllers/ProfileController.cs:101 |
-| DELETE | api/profile/external/{provider} | ProfileController.DetachExternalIdentity | изменение данных, чувствительные данные или операция | backend/Controllers/ProfileController.cs:246 |
-| POST | api/profile/password | ProfileController.ChangePassword | изменение данных, чувствительные данные или операция | backend/Controllers/ProfileController.cs:125 |
-| POST | api/profile/photo | ProfileController.UploadProfilePhoto | изменение данных, чувствительные данные или операция | backend/Controllers/ProfileController.cs:162 |
+| PUT | api/profile | ProfileController.UpdateProfile | изменение данных, чувствительные данные или операция | backend/Controllers/ProfileController.cs:104 |
+| DELETE | api/profile/external/{provider} | ProfileController.DetachExternalIdentity | изменение данных, чувствительные данные или операция | backend/Controllers/ProfileController.cs:249 |
+| POST | api/profile/password | ProfileController.ChangePassword | изменение данных, чувствительные данные или операция | backend/Controllers/ProfileController.cs:128 |
+| POST | api/profile/photo | ProfileController.UploadProfilePhoto | изменение данных, чувствительные данные или операция | backend/Controllers/ProfileController.cs:165 |
 | POST | api/public/work-order-approvals/{publicId:guid}/attachments/{attachmentPublicId:guid}/download | PublicWorkOrderApprovalController.DownloadAttachment | публичный доступ, изменение данных | backend/Controllers/PublicWorkOrderApprovalController.cs:89 |
 | POST | api/public/work-order-approvals/{publicId:guid}/attachments/{attachmentPublicId:guid}/grant | PublicWorkOrderApprovalController.CreateAttachmentGrant | публичный доступ, изменение данных | backend/Controllers/PublicWorkOrderApprovalController.cs:67 |
 | POST | api/public/work-order-approvals/{publicId:guid}/decision | PublicWorkOrderApprovalController.Decide | публичный доступ, изменение данных | backend/Controllers/PublicWorkOrderApprovalController.cs:40 |
@@ -352,10 +356,11 @@
 | GET | api/auth/admin/users/{id:int} | AdminUsersController.GetUser | чувствительные данные или операция | backend/Controllers/AdminUsersController.cs:42 |
 | GET | api/calendar-sync/settings | CalendarSyncController.GetSettings | чувствительные данные или операция | backend/Controllers/CalendarSyncController.cs:74 |
 | POST | api/cash-orders/from-money-operation/{operationId:int} | CashOrdersController.CreateFromMoneyOperation | изменение данных | backend/Controllers/CashOrdersController.cs:548 |
-| GET | api/database/backups | DatabaseAdminController.GetBackupsAsync | чувствительные данные или операция | backend/Controllers/DatabaseAdminController.cs:67 |
-| GET | api/database/backups/download | DatabaseAdminController.DownloadBackupAsync | чувствительные данные или операция | backend/Controllers/DatabaseAdminController.cs:198 |
-| GET | api/database/import/spreadsheets/batches | DatabaseAdminController.GetSpreadsheetImportBatchesAsync | чувствительные данные или операция | backend/Controllers/DatabaseAdminController.cs:310 |
-| GET | api/database/import/spreadsheets/batches/{batchId:int} | DatabaseAdminController.GetSpreadsheetImportBatchAsync | чувствительные данные или операция | backend/Controllers/DatabaseAdminController.cs:336 |
+| GET | api/database/backups | DatabaseAdminController.GetBackupsAsync | чувствительные данные или операция | backend/Controllers/DatabaseAdminController.cs:70 |
+| GET | api/database/backups/download | DatabaseAdminController.DownloadBackupAsync | чувствительные данные или операция | backend/Controllers/DatabaseAdminController.cs:201 |
+| GET | api/database/backups/verify | DatabaseAdminController.VerifyBackupAsync | чувствительные данные или операция | backend/Controllers/DatabaseAdminController.cs:217 |
+| GET | api/database/import/spreadsheets/batches | DatabaseAdminController.GetSpreadsheetImportBatchesAsync | чувствительные данные или операция | backend/Controllers/DatabaseAdminController.cs:343 |
+| GET | api/database/import/spreadsheets/batches/{batchId:int} | DatabaseAdminController.GetSpreadsheetImportBatchAsync | чувствительные данные или операция | backend/Controllers/DatabaseAdminController.cs:369 |
 | POST | api/dictionaries/base-currencies | DictionariesAdminController.CreateBaseCurrency | изменение данных | backend/Controllers/DictionariesAdminController.cs:669 |
 | PUT | api/dictionaries/base-currencies/{id:int} | DictionariesAdminController.UpdateBaseCurrency | изменение данных | backend/Controllers/DictionariesAdminController.cs:677 |
 | DELETE | api/dictionaries/base-currencies/{id:int} | DictionariesAdminController.DeleteBaseCurrency | изменение данных | backend/Controllers/DictionariesAdminController.cs:687 |
@@ -447,7 +452,7 @@
 | POST | api/portal/admin/accounts/{accountId:int}/login | ClientPortalAdminController.SendLogin | изменение данных | backend/Controllers/ClientPortalAdminController.cs:78 |
 | GET | api/portal/cases/{casePublicId:guid} | ClientPortalController.GetCase | публичный доступ | backend/Controllers/ClientPortalController.cs:91 |
 | GET | api/portal/home | ClientPortalController.Home | публичный доступ | backend/Controllers/ClientPortalController.cs:69 |
-| GET | api/profile | ProfileController.GetProfile | чувствительные данные или операция | backend/Controllers/ProfileController.cs:35 |
+| GET | api/profile | ProfileController.GetProfile | чувствительные данные или операция | backend/Controllers/ProfileController.cs:38 |
 | GET | api/role-permissions/calendar-users | RolePermissionsController.GetCalendarUsers | чувствительные данные или операция | backend/Controllers/RolePermissionsController.cs:152 |
 | GET | api/roles | RolesController.GetRoles | чувствительные данные или операция | backend/Controllers/RolesController.cs:29 |
 | GET | api/roles/{id:int} | RolesController.GetRole | чувствительные данные или операция | backend/Controllers/RolesController.cs:78 |
@@ -458,6 +463,10 @@
 | DELETE | api/s3-storages/{id}/objects | S3StorageController.DeleteObject | изменение данных | backend/Controllers/S3StorageController.cs:195 |
 | PUT | api/s3-storages/{id}/text | S3StorageController.SaveTextFile | изменение данных | backend/Controllers/S3StorageController.cs:259 |
 | POST | api/sticky-notes/boards | StickyNotesController.CreateBoard | изменение данных | backend/Controllers/StickyNotesController.cs:99 |
+| POST | api/storage/legacy-backfill | StorageAdminController.BackfillLegacyStorage | изменение данных | backend/Controllers/StorageAdminController.cs:155 |
+| DELETE | api/storage/objects/{id:guid} | StorageAdminController.DeleteObject | изменение данных | backend/Controllers/StorageAdminController.cs:73 |
+| POST | api/storage/operations/{id:guid}/retry | StorageAdminController.RetryOperation | изменение данных | backend/Controllers/StorageAdminController.cs:127 |
+| POST | api/storage/reconcile | StorageAdminController.Reconcile | изменение данных | backend/Controllers/StorageAdminController.cs:149 |
 | GET | api/user-activity/filters | UserActivityController.GetFiltersAsync | чувствительные данные или операция | backend/Controllers/UserActivityController.cs:302 |
 | GET | api/users | UsersController.GetUsers | чувствительные данные или операция | backend/Controllers/UsersController.cs:167 |
 | GET | api/users/{id:int} | UsersController.GetUser | чувствительные данные или операция | backend/Controllers/UsersController.cs:115 |
@@ -569,7 +578,7 @@
 | GET | api/cash-orders/{id:int}/word | CashOrdersController | DownloadWord | backend/Controllers/CashOrdersController.cs:975 | [Authorize] | нет | нет |
 | GET |  | ClientBalancesController | GetSummary | backend/Controllers/ClientBalancesController.cs:58 | не задано | да | нет |
 | GET | transactions | ClientBalancesController | GetTransactions | backend/Controllers/ClientBalancesController.cs:79 | не задано | да | docs/delete-behavior-contract-2026-06-10.md |
-| POST | apply | ClientBalancesController | ApplyCredit | backend/Controllers/ClientBalancesController.cs:117 | не задано | да | docs/file-upload-limits-2026-06-10.md, docs/full-project-audit-2026-06-10.md |
+| POST | apply | ClientBalancesController | ApplyCredit | backend/Controllers/ClientBalancesController.cs:117 | не задано | да | docs/file-upload-limits-2026-06-10.md, docs/full-project-audit-2026-06-10.md, docs/storage-resilience-runbook.md |
 | GET |  | ClientPassportController | Get | backend/Controllers/ClientPassportController.cs:30 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Clients)] | да | нет |
 | PUT |  | ClientPassportController | Upsert | backend/Controllers/ClientPassportController.cs:70 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Clients)]; [RequireSectionPermission(RolePermissionCatalog.Clients, RequireSectionPermissionOperations.Edit)] | да | нет |
 | POST | api/portal/admin/access | ClientPortalAdminController | SaveAccess | backend/Controllers/ClientPortalAdminController.cs:13 | [Authorize(Policy = "Admin")] | нет | нет |
@@ -641,21 +650,23 @@
 | DELETE | api/[controller]/{id:int} | ContractsController | Delete | backend/Controllers/ContractsController.cs:1256 | [Authorize] | да | нет |
 | GET | api/integrations/dadata/settings | DadataIntegrationSettingsController | Get | backend/Controllers/DadataIntegrationSettingsController.cs:26 | [Authorize] | да | нет |
 | PUT | api/integrations/dadata/settings | DadataIntegrationSettingsController | Update | backend/Controllers/DadataIntegrationSettingsController.cs:61 | [Authorize] | да | нет |
-| GET | api/database/status | DatabaseAdminController | GetStatus | backend/Controllers/DatabaseAdminController.cs:55 | [Authorize(Policy = "Admin")] | нет | docs/crm-legal-module-release-runbook.md, docs/full-project-audit-2026-06-10.md |
-| GET | api/database/backups | DatabaseAdminController | GetBackupsAsync | backend/Controllers/DatabaseAdminController.cs:67 | [Authorize(Policy = "Admin")] | нет | docs/crm-legal-module-release-runbook.md |
-| PUT | api/database/backups/settings | DatabaseAdminController | UpdateBackupSettingsAsync | backend/Controllers/DatabaseAdminController.cs:74 | [Authorize(Policy = "Admin")] | нет | нет |
-| POST | api/database/backups | DatabaseAdminController | CreateBackupAsync | backend/Controllers/DatabaseAdminController.cs:101 | [Authorize(Policy = "Admin")] | нет | docs/crm-legal-module-release-runbook.md |
-| POST | api/database/backups/s3-uploads/{uploadResultId}/retry | DatabaseAdminController | RetryBackupS3UploadAsync | backend/Controllers/DatabaseAdminController.cs:121 | [Authorize(Policy = "Admin")] | нет | нет |
-| POST | api/database/backups/yandex-disk-uploads/{uploadResultId}/retry | DatabaseAdminController | RetryBackupYandexDiskUploadAsync | backend/Controllers/DatabaseAdminController.cs:142 | [Authorize(Policy = "Admin")] | нет | нет |
-| DELETE | api/database/backups/file | DatabaseAdminController | DeleteBackupAsync | backend/Controllers/DatabaseAdminController.cs:163 | [Authorize(Policy = "Admin")] | нет | нет |
-| DELETE | api/database/backups/all | DatabaseAdminController | DeleteAllBackupsAsync | backend/Controllers/DatabaseAdminController.cs:185 | [Authorize(Policy = "Admin")] | нет | нет |
-| GET | api/database/backups/download | DatabaseAdminController | DownloadBackupAsync | backend/Controllers/DatabaseAdminController.cs:198 | [Authorize(Policy = "Admin")] | нет | нет |
-| POST | api/database/import/sqlite | DatabaseAdminController | ImportSqliteAsync | backend/Controllers/DatabaseAdminController.cs:214 | [Authorize(Policy = "Admin")] | нет | docs/file-upload-limits-2026-06-10.md |
-| POST | api/database/import/spreadsheets/preview | DatabaseAdminController | PreviewSpreadsheetImportAsync | backend/Controllers/DatabaseAdminController.cs:254 | [Authorize(Policy = "Admin")] | нет | docs/file-upload-limits-2026-06-10.md |
-| POST | api/database/import/spreadsheets/apply | DatabaseAdminController | ApplySpreadsheetImportAsync | backend/Controllers/DatabaseAdminController.cs:279 | [Authorize(Policy = "Admin")] | нет | docs/file-upload-limits-2026-06-10.md |
-| GET | api/database/import/spreadsheets/batches | DatabaseAdminController | GetSpreadsheetImportBatchesAsync | backend/Controllers/DatabaseAdminController.cs:310 | [Authorize(Policy = "Admin")] | нет | нет |
-| GET | api/database/import/spreadsheets/batches/{batchId:int} | DatabaseAdminController | GetSpreadsheetImportBatchAsync | backend/Controllers/DatabaseAdminController.cs:336 | [Authorize(Policy = "Admin")] | нет | нет |
-| POST | api/database/import/spreadsheets/batches/{batchId:int}/rollback | DatabaseAdminController | RollbackSpreadsheetImportBatchAsync | backend/Controllers/DatabaseAdminController.cs:349 | [Authorize(Policy = "Admin")] | нет | нет |
+| GET | api/database/status | DatabaseAdminController | GetStatus | backend/Controllers/DatabaseAdminController.cs:58 | [Authorize(Policy = "Admin")] | нет | docs/crm-legal-module-release-runbook.md, docs/full-project-audit-2026-06-10.md |
+| GET | api/database/backups | DatabaseAdminController | GetBackupsAsync | backend/Controllers/DatabaseAdminController.cs:70 | [Authorize(Policy = "Admin")] | нет | docs/crm-legal-module-release-runbook.md |
+| PUT | api/database/backups/settings | DatabaseAdminController | UpdateBackupSettingsAsync | backend/Controllers/DatabaseAdminController.cs:77 | [Authorize(Policy = "Admin")] | нет | нет |
+| POST | api/database/backups | DatabaseAdminController | CreateBackupAsync | backend/Controllers/DatabaseAdminController.cs:104 | [Authorize(Policy = "Admin")] | нет | docs/crm-legal-module-release-runbook.md |
+| POST | api/database/backups/s3-uploads/{uploadResultId}/retry | DatabaseAdminController | RetryBackupS3UploadAsync | backend/Controllers/DatabaseAdminController.cs:124 | [Authorize(Policy = "Admin")] | нет | нет |
+| POST | api/database/backups/yandex-disk-uploads/{uploadResultId}/retry | DatabaseAdminController | RetryBackupYandexDiskUploadAsync | backend/Controllers/DatabaseAdminController.cs:145 | [Authorize(Policy = "Admin")] | нет | нет |
+| DELETE | api/database/backups/file | DatabaseAdminController | DeleteBackupAsync | backend/Controllers/DatabaseAdminController.cs:166 | [Authorize(Policy = "Admin")] | нет | нет |
+| DELETE | api/database/backups/all | DatabaseAdminController | DeleteAllBackupsAsync | backend/Controllers/DatabaseAdminController.cs:188 | [Authorize(Policy = "Admin")] | нет | нет |
+| GET | api/database/backups/download | DatabaseAdminController | DownloadBackupAsync | backend/Controllers/DatabaseAdminController.cs:201 | [Authorize(Policy = "Admin")] | нет | нет |
+| GET | api/database/backups/verify | DatabaseAdminController | VerifyBackupAsync | backend/Controllers/DatabaseAdminController.cs:217 | [Authorize(Policy = "Admin")] | нет | нет |
+| POST | api/database/backups/restore-drill | DatabaseAdminController | RunRestoreDrillAsync | backend/Controllers/DatabaseAdminController.cs:232 | [Authorize(Policy = "Admin")] | нет | нет |
+| POST | api/database/import/sqlite | DatabaseAdminController | ImportSqliteAsync | backend/Controllers/DatabaseAdminController.cs:247 | [Authorize(Policy = "Admin")] | нет | docs/file-upload-limits-2026-06-10.md |
+| POST | api/database/import/spreadsheets/preview | DatabaseAdminController | PreviewSpreadsheetImportAsync | backend/Controllers/DatabaseAdminController.cs:287 | [Authorize(Policy = "Admin")] | нет | docs/file-upload-limits-2026-06-10.md |
+| POST | api/database/import/spreadsheets/apply | DatabaseAdminController | ApplySpreadsheetImportAsync | backend/Controllers/DatabaseAdminController.cs:312 | [Authorize(Policy = "Admin")] | нет | docs/file-upload-limits-2026-06-10.md |
+| GET | api/database/import/spreadsheets/batches | DatabaseAdminController | GetSpreadsheetImportBatchesAsync | backend/Controllers/DatabaseAdminController.cs:343 | [Authorize(Policy = "Admin")] | нет | нет |
+| GET | api/database/import/spreadsheets/batches/{batchId:int} | DatabaseAdminController | GetSpreadsheetImportBatchAsync | backend/Controllers/DatabaseAdminController.cs:369 | [Authorize(Policy = "Admin")] | нет | нет |
+| POST | api/database/import/spreadsheets/batches/{batchId:int}/rollback | DatabaseAdminController | RollbackSpreadsheetImportBatchAsync | backend/Controllers/DatabaseAdminController.cs:382 | [Authorize(Policy = "Admin")] | нет | нет |
 | POST | api/dictionaries/deal-types | DictionariesAdminController | CreateDealType | backend/Controllers/DictionariesAdminController.cs:316 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Dictionaries)]; [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Create)] | да | docs/full-project-audit-2026-06-10.md |
 | PUT | api/dictionaries/deal-types/{id:int} | DictionariesAdminController | UpdateDealType | backend/Controllers/DictionariesAdminController.cs:324 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Dictionaries)]; [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Edit)] | да | нет |
 | DELETE | api/dictionaries/deal-types/{id:int} | DictionariesAdminController | DeleteDealType | backend/Controllers/DictionariesAdminController.cs:334 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Dictionaries)]; [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Delete)] | да | нет |
@@ -846,7 +857,7 @@
 | POST | api/legal-entities/migrate-legacy-addresses | LegalEntitiesController | MigrateLegacyAddresses | backend/Controllers/LegalEntitiesController.cs:2118 | [Authorize]; [Authorize(Policy = "Admin")] | да | нет |
 | GET |  | LegalEntityBalancesController | GetSummary | backend/Controllers/LegalEntityBalancesController.cs:58 | не задано | да | нет |
 | GET | transactions | LegalEntityBalancesController | GetTransactions | backend/Controllers/LegalEntityBalancesController.cs:79 | не задано | да | docs/delete-behavior-contract-2026-06-10.md |
-| POST | apply | LegalEntityBalancesController | ApplyCredit | backend/Controllers/LegalEntityBalancesController.cs:117 | не задано | да | docs/file-upload-limits-2026-06-10.md, docs/full-project-audit-2026-06-10.md |
+| POST | apply | LegalEntityBalancesController | ApplyCredit | backend/Controllers/LegalEntityBalancesController.cs:117 | не задано | да | docs/file-upload-limits-2026-06-10.md, docs/full-project-audit-2026-06-10.md, docs/storage-resilience-runbook.md |
 | POST | api/max/link | MaxMessengerController | CreateLink | backend/Controllers/MaxMessengerController.cs:22 | [Authorize] | нет | нет |
 | DELETE | api/max/link | MaxMessengerController | OptOut | backend/Controllers/MaxMessengerController.cs:29 | [Authorize] | нет | нет |
 | POST | api/max/messages | MaxMessengerController | QueueMessage | backend/Controllers/MaxMessengerController.cs:36 | [Authorize]; [Authorize(Roles = "admin")] | нет | нет |
@@ -960,14 +971,14 @@
 | DELETE | api/[controller]/{id:int} | PaymentsController | Delete | backend/Controllers/PaymentsController.cs:4464 | [Authorize] | да | нет |
 | GET |  | PowerOfAttorneyController | Get | backend/Controllers/PowerOfAttorneyController.cs:24 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Clients)] | нет | нет |
 | POST |  | PowerOfAttorneyController | Create | backend/Controllers/PowerOfAttorneyController.cs:32 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Clients)]; [RequireSectionPermission(RolePermissionCatalog.Clients, RequireSectionPermissionOperations.Create)] | нет | нет |
-| PUT | {id:int} | PowerOfAttorneyController | Update | backend/Controllers/PowerOfAttorneyController.cs:55 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Clients)]; [RequireSectionPermission(RolePermissionCatalog.Clients, RequireSectionPermissionOperations.Edit)] | нет | docs/case-access-query-optimization.md, docs/case-conversation-current-state-2026-07-08.md, docs/case-detail-query-optimization.md, docs/crm-legal-module-gap-report-2026-05-25.md, docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md, docs/financial-invoice-cancellation-current-state-2026-07-08.md, docs/full-project-audit-2026-06-10.md, docs/task-critical-events-matrix-2026-07-09.md, docs/task-deadline-change-current-state-2026-07-09.md, docs/task-deadline-change-model-design-2026-07-09.md, docs/task-result-approval-current-state-2026-07-09.md |
-| DELETE | {id:int} | PowerOfAttorneyController | Delete | backend/Controllers/PowerOfAttorneyController.cs:74 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Clients)]; [RequireSectionPermission(RolePermissionCatalog.Clients, RequireSectionPermissionOperations.Delete)] | нет | docs/case-access-query-optimization.md, docs/case-conversation-current-state-2026-07-08.md, docs/case-detail-query-optimization.md, docs/crm-legal-module-gap-report-2026-05-25.md, docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md, docs/financial-invoice-cancellation-current-state-2026-07-08.md, docs/full-project-audit-2026-06-10.md, docs/task-critical-events-matrix-2026-07-09.md, docs/task-deadline-change-current-state-2026-07-09.md, docs/task-deadline-change-model-design-2026-07-09.md, docs/task-result-approval-current-state-2026-07-09.md |
-| GET | api/profile | ProfileController | GetProfile | backend/Controllers/ProfileController.cs:35 | [Authorize] | нет | docs/full-project-audit-2026-06-10.md |
-| GET | api/profile/contractor-balance | ProfileController | GetContractorBalance | backend/Controllers/ProfileController.cs:48 | [Authorize] | да | нет |
-| PUT | api/profile | ProfileController | UpdateProfile | backend/Controllers/ProfileController.cs:101 | [Authorize] | нет | docs/full-project-audit-2026-06-10.md |
-| POST | api/profile/password | ProfileController | ChangePassword | backend/Controllers/ProfileController.cs:125 | [Authorize] | нет | нет |
-| POST | api/profile/photo | ProfileController | UploadProfilePhoto | backend/Controllers/ProfileController.cs:162 | [Authorize] | нет | docs/file-upload-limits-2026-06-10.md |
-| DELETE | api/profile/external/{provider} | ProfileController | DetachExternalIdentity | backend/Controllers/ProfileController.cs:246 | [Authorize] | нет | нет |
+| PUT | {id:int} | PowerOfAttorneyController | Update | backend/Controllers/PowerOfAttorneyController.cs:55 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Clients)]; [RequireSectionPermission(RolePermissionCatalog.Clients, RequireSectionPermissionOperations.Edit)] | нет | docs/case-access-query-optimization.md, docs/case-conversation-current-state-2026-07-08.md, docs/case-detail-query-optimization.md, docs/crm-legal-module-gap-report-2026-05-25.md, docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md, docs/financial-invoice-cancellation-current-state-2026-07-08.md, docs/full-project-audit-2026-06-10.md, docs/storage-s3-backup-audit-2026-09-22.md, docs/task-critical-events-matrix-2026-07-09.md, docs/task-deadline-change-current-state-2026-07-09.md, docs/task-deadline-change-model-design-2026-07-09.md, docs/task-result-approval-current-state-2026-07-09.md |
+| DELETE | {id:int} | PowerOfAttorneyController | Delete | backend/Controllers/PowerOfAttorneyController.cs:74 | [Authorize]; [RequireSectionPermission(RolePermissionCatalog.Clients)]; [RequireSectionPermission(RolePermissionCatalog.Clients, RequireSectionPermissionOperations.Delete)] | нет | docs/case-access-query-optimization.md, docs/case-conversation-current-state-2026-07-08.md, docs/case-detail-query-optimization.md, docs/crm-legal-module-gap-report-2026-05-25.md, docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md, docs/financial-invoice-cancellation-current-state-2026-07-08.md, docs/full-project-audit-2026-06-10.md, docs/storage-s3-backup-audit-2026-09-22.md, docs/task-critical-events-matrix-2026-07-09.md, docs/task-deadline-change-current-state-2026-07-09.md, docs/task-deadline-change-model-design-2026-07-09.md, docs/task-result-approval-current-state-2026-07-09.md |
+| GET | api/profile | ProfileController | GetProfile | backend/Controllers/ProfileController.cs:38 | [Authorize] | нет | docs/full-project-audit-2026-06-10.md |
+| GET | api/profile/contractor-balance | ProfileController | GetContractorBalance | backend/Controllers/ProfileController.cs:51 | [Authorize] | да | нет |
+| PUT | api/profile | ProfileController | UpdateProfile | backend/Controllers/ProfileController.cs:104 | [Authorize] | нет | docs/full-project-audit-2026-06-10.md |
+| POST | api/profile/password | ProfileController | ChangePassword | backend/Controllers/ProfileController.cs:128 | [Authorize] | нет | нет |
+| POST | api/profile/photo | ProfileController | UploadProfilePhoto | backend/Controllers/ProfileController.cs:165 | [Authorize] | нет | docs/file-upload-limits-2026-06-10.md |
+| DELETE | api/profile/external/{provider} | ProfileController | DetachExternalIdentity | backend/Controllers/ProfileController.cs:249 | [Authorize] | нет | нет |
 | POST | api/public/work-order-approvals/{publicId:guid}/open | PublicWorkOrderApprovalController | Open | backend/Controllers/PublicWorkOrderApprovalController.cs:23 | публичный ([AllowAnonymous]) | нет | нет |
 | POST | api/public/work-order-approvals/{publicId:guid}/decision | PublicWorkOrderApprovalController | Decide | backend/Controllers/PublicWorkOrderApprovalController.cs:40 | публичный ([AllowAnonymous]) | нет | нет |
 | POST | api/public/work-order-approvals/{publicId:guid}/attachments/{attachmentPublicId:guid}/grant | PublicWorkOrderApprovalController | CreateAttachmentGrant | backend/Controllers/PublicWorkOrderApprovalController.cs:67 | публичный ([AllowAnonymous]) | нет | нет |
@@ -1059,6 +1070,16 @@
 | PATCH | api/sticky-notes/notes/{noteId:int}/layout | StickyNotesController | UpdateNoteLayout | backend/Controllers/StickyNotesController.cs:578 | [Authorize] | да | нет |
 | DELETE | api/sticky-notes/notes/{noteId:int} | StickyNotesController | DeleteNote | backend/Controllers/StickyNotesController.cs:620 | [Authorize] | да | нет |
 | POST | api/sticky-notes/notes/{noteId:int}/restore | StickyNotesController | RestoreNote | backend/Controllers/StickyNotesController.cs:658 | [Authorize] | да | нет |
+| GET | api/storage/objects | StorageAdminController | GetObjects | backend/Controllers/StorageAdminController.cs:23 | [Authorize(Policy = "Admin")] | нет | нет |
+| GET | api/storage/objects/{id:guid}/content | StorageAdminController | DownloadObject | backend/Controllers/StorageAdminController.cs:61 | [Authorize(Policy = "Admin")] | нет | нет |
+| DELETE | api/storage/objects/{id:guid} | StorageAdminController | DeleteObject | backend/Controllers/StorageAdminController.cs:73 | [Authorize(Policy = "Admin")] | нет | нет |
+| GET | api/storage/policy/explain | StorageAdminController | ExplainPolicy | backend/Controllers/StorageAdminController.cs:79 | [Authorize(Policy = "Admin")] | нет | нет |
+| GET | api/storage/providers | StorageAdminController | GetProviders | backend/Controllers/StorageAdminController.cs:83 | [Authorize(Policy = "Admin")] | нет | нет |
+| GET | api/storage/operations | StorageAdminController | GetOperations | backend/Controllers/StorageAdminController.cs:89 | [Authorize(Policy = "Admin")] | нет | нет |
+| POST | api/storage/operations/{id:guid}/retry | StorageAdminController | RetryOperation | backend/Controllers/StorageAdminController.cs:127 | [Authorize(Policy = "Admin")] | нет | нет |
+| POST | api/storage/reconcile | StorageAdminController | Reconcile | backend/Controllers/StorageAdminController.cs:149 | [Authorize(Policy = "Admin")] | нет | нет |
+| POST | api/storage/legacy-backfill | StorageAdminController | BackfillLegacyStorage | backend/Controllers/StorageAdminController.cs:155 | [Authorize(Policy = "Admin")] | нет | docs/storage-resilience-runbook.md |
+| GET | api/storage/health | StorageAdminController | GetHealth | backend/Controllers/StorageAdminController.cs:170 | [Authorize(Policy = "Admin")] | нет | docs/storage-resilience-runbook.md |
 | GET | api/system/jobs/diagnostics | SystemJobsController | GetDiagnostics | backend/Controllers/SystemJobsController.cs:108 | [Authorize(Policy = "Admin")] | да | нет |
 | POST | api/system/jobs/{jobKey}/run | SystemJobsController | RunJob | backend/Controllers/SystemJobsController.cs:190 | [Authorize(Policy = "Admin")] | да | нет |
 | GET | api/tasks | TasksController | GetTasks | backend/Controllers/TasksController.cs:155 | [Authorize] | да | docs/full-project-audit-2026-06-10.md, docs/task-deadline-change-current-state-2026-07-09.md, docs/task-deadline-change-model-design-2026-07-09.md, docs/task-journal-query-optimization.md, docs/task-result-approval-current-state-2026-07-09.md, docs/task-template-current-state-2026-07-09.md |

@@ -119,7 +119,11 @@ public sealed class StorageObjectServiceTests
             Enabled = true,
             DefaultPolicy = new StoragePolicyDefinition
             {
-                Version = "hold-v1", RequiredCopies = 1, WriteProviders = ["local"], ReadProviders = ["local"], LegalHold = true,
+                Version = "hold-v1",
+                RequiredCopies = 1,
+                WriteProviders = ["local"],
+                ReadProviders = ["local"],
+                LegalHold = true,
             },
         };
         var monitor = new StaticOptionsMonitor<StorageOrchestrationOptions>(settings);

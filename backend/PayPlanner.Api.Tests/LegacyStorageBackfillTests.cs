@@ -26,14 +26,26 @@ public sealed class LegacyStorageBackfillTests
         fixture.Db.TaskJournalFiles.AddRange(
             new TaskJournalFile
             {
-                TaskJournalItemId = task.Id, DocumentKey = "one", Version = 1, OriginalFileName = "первый.txt",
-                StoredFileName = "first.txt", StoragePath = existingPath, ContentType = "text/plain", SizeBytes = new FileInfo(existingFullPath).Length,
+                TaskJournalItemId = task.Id,
+                DocumentKey = "one",
+                Version = 1,
+                OriginalFileName = "первый.txt",
+                StoredFileName = "first.txt",
+                StoragePath = existingPath,
+                ContentType = "text/plain",
+                SizeBytes = new FileInfo(existingFullPath).Length,
                 UploadedByName = "Тест",
             },
             new TaskJournalFile
             {
-                TaskJournalItemId = task.Id, DocumentKey = "two", Version = 1, OriginalFileName = "нет.txt",
-                StoredFileName = "missing.txt", StoragePath = Path.Combine(task.Id.ToString(), "missing.txt"), ContentType = "text/plain", SizeBytes = 10,
+                TaskJournalItemId = task.Id,
+                DocumentKey = "two",
+                Version = 1,
+                OriginalFileName = "нет.txt",
+                StoredFileName = "missing.txt",
+                StoragePath = Path.Combine(task.Id.ToString(), "missing.txt"),
+                ContentType = "text/plain",
+                SizeBytes = 10,
                 UploadedByName = "Тест",
             });
         await fixture.Db.SaveChangesAsync();
