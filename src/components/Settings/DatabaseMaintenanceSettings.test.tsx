@@ -24,6 +24,8 @@ const mocks = vi.hoisted(() => ({
   getYandexDiskSettingsMock: vi.fn(),
   retryDatabaseBackupS3UploadMock: vi.fn(),
   retryDatabaseBackupYandexDiskUploadMock: vi.fn(),
+  verifyDatabaseBackupMock: vi.fn(),
+  runDatabaseRestoreDrillMock: vi.fn(),
   getUserSettingMock: vi.fn(),
 }));
 
@@ -66,6 +68,8 @@ vi.mock('../../services/api', () => ({
     updateDatabaseBackupSettings: mocks.updateDatabaseBackupSettingsMock,
     retryDatabaseBackupS3Upload: mocks.retryDatabaseBackupS3UploadMock,
     retryDatabaseBackupYandexDiskUpload: mocks.retryDatabaseBackupYandexDiskUploadMock,
+    verifyDatabaseBackup: mocks.verifyDatabaseBackupMock,
+    runDatabaseRestoreDrill: mocks.runDatabaseRestoreDrillMock,
     getUserSetting: mocks.getUserSettingMock,
   },
 }));
@@ -176,6 +180,34 @@ describe('DatabaseMaintenanceSettings', () => {
     });
     mocks.retryDatabaseBackupS3UploadMock.mockResolvedValue(buildBackupOverview());
     mocks.retryDatabaseBackupYandexDiskUploadMock.mockResolvedValue(buildBackupOverview());
+    mocks.verifyDatabaseBackupMock.mockResolvedValue({
+      status: 'verified',
+      verified: true,
+      backupRelativePath: '2026/06/backup.zip',
+      backupId: 'backup-1',
+      actualSizeBytes: 1024,
+    });
+  });
+
+  it('verifies a backup set from the backup list', async () => {
+    mocks.getDatabaseBackupOverviewMock.mockResolvedValue({
+      ...buildBackupOverview(),
+      items: [{
+        fileName: 'backup.zip',
+        relativePath: '2026/06/backup.zip',
+        sizeBytes: 1024,
+        createdAt: '2026-06-01T10:00:00+07:00',
+        trigger: 'manual',
+      }],
+    });
+    render(<DatabaseMaintenanceSettings />);
+
+    await waitFor(() => expect(mocks.getDatabaseBackupOverviewMock).toHaveBeenCalled());
+    fireEvent.click(screen.getAllByRole('button')[4]);
+    fireEvent.click(await screen.findByRole('button', { name: 'Проверить' }));
+
+    await waitFor(() => expect(mocks.verifyDatabaseBackupMock).toHaveBeenCalledWith('2026/06/backup.zip'));
+    expect(await screen.findByText(/Целостность подтверждена.*backup-1/)).toBeTruthy();
   });
 
   it('wraps long backup directory paths inside the settings workspace', async () => {

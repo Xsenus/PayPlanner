@@ -19,17 +19,20 @@ public class ProfileController : ControllerBase
     private readonly ExternalAuthService _externalAuthService;
     private readonly PaymentContext _db;
     private readonly IWebHostEnvironment _environment;
+    private readonly IConfiguration _configuration;
 
     public ProfileController(
         AuthService authService,
         ExternalAuthService externalAuthService,
         PaymentContext db,
-        IWebHostEnvironment environment)
+        IWebHostEnvironment environment,
+        IConfiguration configuration)
     {
         _authService = authService;
         _externalAuthService = externalAuthService;
         _db = db;
         _environment = environment;
+        _configuration = configuration;
     }
 
     [HttpGet]
@@ -200,13 +203,8 @@ public class ProfileController : ControllerBase
             return NotFound();
         }
 
-        var webRootPath = _environment.WebRootPath;
-        if (string.IsNullOrWhiteSpace(webRootPath))
-        {
-            webRootPath = Path.Combine(_environment.ContentRootPath, "wwwroot");
-        }
-
-        var userPhotoDirectory = Path.Combine(webRootPath, "user-photos", userId.Value.ToString());
+        var photoStorageRoot = UserPhotoStoragePaths.ResolveRoot(_environment, _configuration);
+        var userPhotoDirectory = Path.Combine(photoStorageRoot, userId.Value.ToString());
         Directory.CreateDirectory(userPhotoDirectory);
 
         var fileName = $"{DateTime.UtcNow:yyyyMMddHHmmss}-{Guid.NewGuid():N}{extension}";
@@ -229,7 +227,12 @@ public class ProfileController : ControllerBase
                 return NotFound();
             }
 
-            DeletePreviousUploadedPhoto(currentUser.PhotoUrl, publicUrl, webRootPath);
+            DeletePreviousUploadedPhoto(currentUser.PhotoUrl, publicUrl, photoStorageRoot);
+            var legacyPhotoRoot = UserPhotoStoragePaths.ResolveLegacyRoot(_environment);
+            if (!string.Equals(photoStorageRoot, legacyPhotoRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                DeletePreviousUploadedPhoto(currentUser.PhotoUrl, publicUrl, legacyPhotoRoot);
+            }
             return Ok(updatedUser);
         }
         catch
@@ -331,7 +334,7 @@ public class ProfileController : ControllerBase
         };
     }
 
-    private static void DeletePreviousUploadedPhoto(string? previousPhotoUrl, string currentPhotoUrl, string webRootPath)
+    private static void DeletePreviousUploadedPhoto(string? previousPhotoUrl, string currentPhotoUrl, string photoStorageRoot)
     {
         if (string.IsNullOrWhiteSpace(previousPhotoUrl)
             || string.Equals(previousPhotoUrl, currentPhotoUrl, StringComparison.OrdinalIgnoreCase))
@@ -339,18 +342,8 @@ public class ProfileController : ControllerBase
             return;
         }
 
-        var relativePath = ExtractRelativePhotoPath(previousPhotoUrl);
-        if (string.IsNullOrWhiteSpace(relativePath)
-            || !relativePath.StartsWith("/user-photos/", StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        var physicalPath = Path.GetFullPath(Path.Combine(
-            webRootPath,
-            relativePath.TrimStart('/').Replace('/', Path.DirectorySeparatorChar)));
-        var normalizedRoot = Path.GetFullPath(webRootPath);
-        if (!physicalPath.StartsWith(normalizedRoot, StringComparison.OrdinalIgnoreCase))
+        var physicalPath = UserPhotoStoragePaths.ResolvePhotoPath(photoStorageRoot, previousPhotoUrl);
+        if (string.IsNullOrWhiteSpace(physicalPath))
         {
             return;
         }
@@ -361,13 +354,4 @@ public class ProfileController : ControllerBase
         }
     }
 
-    private static string? ExtractRelativePhotoPath(string photoUrl)
-    {
-        if (Uri.TryCreate(photoUrl, UriKind.Absolute, out var absoluteUri))
-        {
-            return absoluteUri.AbsolutePath;
-        }
-
-        return photoUrl.StartsWith('/') ? photoUrl : $"/{photoUrl}";
-    }
 }

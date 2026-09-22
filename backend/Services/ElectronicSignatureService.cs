@@ -152,6 +152,7 @@ public sealed class ElectronicSignatureService : IElectronicSignatureService
     private readonly IConfiguration _configuration;
     private readonly IDataProtector _contactProtector;
     private readonly string _storageRoot;
+    private readonly string _legacyStorageRoot;
 
     public ElectronicSignatureService(
         PaymentContext db,
@@ -164,8 +165,14 @@ public sealed class ElectronicSignatureService : IElectronicSignatureService
         _contactProtector = dataProtectionProvider.CreateProtector("PayPlanner.ElectronicSignature.Contact.v1");
         var configuredRoot = configuration["ElectronicSignature:StorageRoot"];
         _storageRoot = Path.GetFullPath(string.IsNullOrWhiteSpace(configuredRoot)
-            ? Path.Combine(environment.ContentRootPath, "storage", "electronic-signatures")
-            : configuredRoot);
+            ? Path.Combine(ApplicationFileStoragePaths.ResolveRoot(environment, configuration), "electronic-signatures")
+            : Path.IsPathRooted(configuredRoot)
+                ? configuredRoot
+                : Path.Combine(environment.ContentRootPath, configuredRoot));
+        _legacyStorageRoot = Path.GetFullPath(Path.Combine(
+            environment.ContentRootPath,
+            "storage",
+            "electronic-signatures"));
     }
 
     public async Task<ElectronicSignatureEnvelope> PrepareAsync(
@@ -541,11 +548,28 @@ public sealed class ElectronicSignatureService : IElectronicSignatureService
     private string EnsureStoragePath(string path)
     {
         var fullPath = Path.GetFullPath(Path.IsPathRooted(path) ? path : Path.Combine(_storageRoot, path));
-        var rootPrefix = _storageRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-            + Path.DirectorySeparatorChar;
-        if (!fullPath.StartsWith(rootPrefix, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
-            throw new InvalidOperationException("Файл доказательного пакета находится вне защищённого хранилища.");
-        return fullPath;
+        if (IsWithinStorageRoot(fullPath, _storageRoot))
+        {
+            return fullPath;
+        }
+
+        if (IsWithinStorageRoot(fullPath, _legacyStorageRoot))
+        {
+            var relativePath = Path.GetRelativePath(_legacyStorageRoot, fullPath);
+            var migratedPath = Path.GetFullPath(Path.Combine(_storageRoot, relativePath));
+            return File.Exists(migratedPath) ? migratedPath : fullPath;
+        }
+
+        throw new InvalidOperationException("Файл доказательного пакета находится вне защищённого хранилища.");
+    }
+
+    private static bool IsWithinStorageRoot(string fullPath, string root)
+    {
+        var normalizedRoot = Path.GetFullPath(root)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        return string.Equals(fullPath, normalizedRoot, comparison)
+            || fullPath.StartsWith(normalizedRoot + Path.DirectorySeparatorChar, comparison);
     }
 
     private static string SanitizeEntryName(string? fileName)

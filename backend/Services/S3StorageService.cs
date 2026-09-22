@@ -1,9 +1,13 @@
 using System.Net;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Amazon.Runtime;
 using Amazon.S3;
 using Amazon.S3.Model;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
@@ -23,6 +27,18 @@ public interface IS3StorageService
     Task<S3StorageOperationResultDto> CreateFolderAsync(string id, CreateS3StorageFolderRequest request, CancellationToken cancellationToken = default);
     Task<S3StorageOperationResultDto> UploadAsync(string id, string? path, Stream content, string? contentType, bool overwrite, CancellationToken cancellationToken = default);
     Task<S3StorageDownloadResult> DownloadAsync(string id, string? path, CancellationToken cancellationToken = default);
+    async Task<S3StorageStreamDownloadResult> OpenReadAsync(string id, string? path, CancellationToken cancellationToken = default)
+    {
+        var download = await DownloadAsync(id, path, cancellationToken);
+        return new S3StorageStreamDownloadResult(
+            download.Content,
+            download.ContentType,
+            download.FileName,
+            download.Path,
+            download.Key,
+            download.Content.Length,
+            download.Content);
+    }
     Task<S3StorageOperationResultDto> DeleteObjectAsync(string id, string? path, bool recursive, CancellationToken cancellationToken = default);
     Task<S3StorageOperationResultDto> CopyObjectAsync(string id, S3StorageObjectOperationRequest request, CancellationToken cancellationToken = default);
     Task<S3StorageOperationResultDto> MoveObjectAsync(string id, S3StorageObjectOperationRequest request, CancellationToken cancellationToken = default);
@@ -44,6 +60,11 @@ public interface IS3StorageClient : IAsyncDisposable
     Task PutAsync(string bucket, string key, Stream content, string contentType, CancellationToken cancellationToken);
     Task PutTextAsync(string bucket, string key, string content, CancellationToken cancellationToken);
     Task<S3StorageDownloadedObject> GetAsync(string bucket, string key, CancellationToken cancellationToken);
+    async Task<S3StorageStreamedObject> OpenReadAsync(string bucket, string key, CancellationToken cancellationToken)
+    {
+        var downloaded = await GetAsync(bucket, key, cancellationToken);
+        return new S3StorageStreamedObject(downloaded.Content, downloaded.ContentType, downloaded.FileName, downloaded.Content.Length, downloaded.Content);
+    }
     Task DeleteAsync(string bucket, string key, CancellationToken cancellationToken);
     Task DeleteManyAsync(string bucket, IReadOnlyCollection<string> keys, CancellationToken cancellationToken);
     Task CopyAsync(string bucket, string fromKey, string toKey, CancellationToken cancellationToken);
@@ -71,6 +92,48 @@ public sealed record S3StorageDownloadResult(
     string Path,
     string Key);
 
+public sealed record S3StorageStreamDownloadResult(
+    Stream Content,
+    string ContentType,
+    string FileName,
+    string Path,
+    string Key,
+    long SizeBytes,
+    IAsyncDisposable Owner) : IAsyncDisposable
+{
+    public ValueTask DisposeAsync() => Owner.DisposeAsync();
+}
+
+public sealed record S3StorageStreamedObject(
+    Stream Content,
+    string ContentType,
+    string FileName,
+    long SizeBytes,
+    IAsyncDisposable Owner) : IAsyncDisposable
+{
+    public ValueTask DisposeAsync() => Owner.DisposeAsync();
+}
+
+internal sealed class CompositeAsyncDisposable(params IAsyncDisposable[] items) : IAsyncDisposable
+{
+    public async ValueTask DisposeAsync()
+    {
+        foreach (var item in items)
+        {
+            await item.DisposeAsync();
+        }
+    }
+}
+
+internal sealed class DelegateAsyncDisposable(Action dispose) : IAsyncDisposable
+{
+    public ValueTask DisposeAsync()
+    {
+        dispose();
+        return ValueTask.CompletedTask;
+    }
+}
+
 public sealed class S3StorageOperationException : Exception
 {
     public S3StorageOperationException(int statusCode, string message, Exception? innerException = null)
@@ -91,15 +154,39 @@ public sealed class S3StorageService : IS3StorageService
     private const string ConnectionsSettingKey = "integrations.s3.connections";
     private const string DefaultProviderKey = HostkeyProviderKey;
     private const string DefaultRootPrefix = "";
+    private const string ProtectedSecretPrefix = "protected:v1:";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly IDataProtectionProvider FallbackDataProtectionProvider = new EphemeralDataProtectionProvider();
 
     private readonly PaymentContext _db;
     private readonly IS3StorageClientFactory _clientFactory;
+    private readonly IDataProtector _secretProtector;
+    private readonly IS3EndpointSecurityPolicy _endpointSecurityPolicy;
 
     public S3StorageService(PaymentContext db, IS3StorageClientFactory clientFactory)
+        : this(db, clientFactory, FallbackDataProtectionProvider, new DisabledS3EndpointSecurityPolicy())
+    {
+    }
+
+    public S3StorageService(
+        PaymentContext db,
+        IS3StorageClientFactory clientFactory,
+        IDataProtectionProvider dataProtectionProvider)
+        : this(db, clientFactory, dataProtectionProvider, new DisabledS3EndpointSecurityPolicy())
+    {
+    }
+
+    [ActivatorUtilitiesConstructor]
+    public S3StorageService(
+        PaymentContext db,
+        IS3StorageClientFactory clientFactory,
+        IDataProtectionProvider dataProtectionProvider,
+        IS3EndpointSecurityPolicy endpointSecurityPolicy)
     {
         _db = db;
         _clientFactory = clientFactory;
+        _secretProtector = dataProtectionProvider.CreateProtector("PayPlanner.S3Storage.Secrets.v1");
+        _endpointSecurityPolicy = endpointSecurityPolicy;
     }
 
     public async Task<S3StorageConnectionsOverviewDto> GetOverviewAsync(CancellationToken cancellationToken = default)
@@ -120,12 +207,22 @@ public sealed class S3StorageService : IS3StorageService
         var now = DateTime.UtcNow;
         var normalizedProvider = NormalizeProvider(request.Provider);
         var normalizedEndpoint = NormalizeEndpoint(request.Endpoint, normalizedProvider);
+        _endpointSecurityPolicy.ValidateConfiguration(normalizedEndpoint);
         var normalizedRegion = NormalizeRegion(request.Region, normalizedProvider);
         var normalizedBucket = NormalizeBucket(request.Bucket);
         var normalizedRootPrefix = NormalizeOptionalPrefix(request.RootPrefix, DefaultRootPrefix);
         var normalizedName = NormalizeName(request.Name, normalizedBucket);
         var id = string.IsNullOrWhiteSpace(request.Id) ? Guid.NewGuid().ToString("N") : request.Id.Trim();
         var existing = connections.FirstOrDefault(item => string.Equals(item.Id, id, StringComparison.OrdinalIgnoreCase));
+        if (existing?.SecretUnavailable == true
+            && !request.ClearSecret
+            && string.IsNullOrWhiteSpace(request.SecretAccessKey))
+        {
+            throw new S3StorageOperationException(
+                StatusCodes.Status409Conflict,
+                "Защищённый Secret Key S3 недоступен. Укажите Secret Key заново, чтобы восстановить подключение.");
+        }
+
         var secret = request.ClearSecret
             ? string.Empty
             : string.IsNullOrWhiteSpace(request.SecretAccessKey)
@@ -204,6 +301,7 @@ public sealed class S3StorageService : IS3StorageService
         }
 
         EnsureConfigured(connection);
+        await _endpointSecurityPolicy.ValidateResolvedAsync(connection.Endpoint, cancellationToken);
 
         var checkedAt = DateTime.UtcNow;
         var testPrefix = NormalizeOptionalPrefix(request.TestPrefix, "_payplanner-test");
@@ -367,6 +465,34 @@ public sealed class S3StorageService : IS3StorageService
             key);
     }
 
+    public async Task<S3StorageStreamDownloadResult> OpenReadAsync(string id, string? path, CancellationToken cancellationToken = default)
+    {
+        var connection = await GetEnabledConnectionAsync(id, cancellationToken);
+        var relativePath = NormalizeRelativePath(path, allowEmpty: false);
+        var key = CombineKeys(connection.RootPrefix, relativePath);
+        var client = _clientFactory.Create(connection);
+        try
+        {
+            var streamed = await client.OpenReadAsync(connection.Bucket, key, cancellationToken);
+            var ownedContent = new Storage.OwnedProviderStream(
+                streamed.Content,
+                new CompositeAsyncDisposable(streamed, client));
+            return new S3StorageStreamDownloadResult(
+                ownedContent,
+                streamed.ContentType,
+                string.IsNullOrWhiteSpace(streamed.FileName) ? Path.GetFileName(relativePath) : streamed.FileName,
+                ToDisplayPath(relativePath),
+                key,
+                streamed.SizeBytes,
+                ownedContent);
+        }
+        catch
+        {
+            await client.DisposeAsync();
+            throw;
+        }
+    }
+
     public async Task<S3StorageOperationResultDto> DeleteObjectAsync(
         string id,
         string? path,
@@ -525,6 +651,7 @@ public sealed class S3StorageService : IS3StorageService
         }
 
         EnsureConfigured(connection);
+        await _endpointSecurityPolicy.ValidateResolvedAsync(connection.Endpoint, cancellationToken);
         return connection;
     }
 
@@ -575,7 +702,16 @@ public sealed class S3StorageService : IS3StorageService
 
         try
         {
-            return JsonSerializer.Deserialize<List<S3StorageConnectionSettings>>(setting.Value, JsonOptions) ?? [];
+            var stored = JsonSerializer.Deserialize<List<S3StorageConnectionSettings>>(setting.Value, JsonOptions) ?? [];
+            var normalized = stored.Select(NormalizeStoredConnection).ToList();
+            if (!normalized.Any(item => item.SecretUnavailable)
+                && stored.Any(item => !string.IsNullOrWhiteSpace(item.SecretAccessKey)
+                    && !item.SecretAccessKey.StartsWith(ProtectedSecretPrefix, StringComparison.Ordinal)))
+            {
+                await SaveConnectionsAsync(normalized, cancellationToken);
+            }
+
+            return normalized;
         }
         catch (JsonException)
         {
@@ -587,7 +723,12 @@ public sealed class S3StorageService : IS3StorageService
     {
         var now = DateTime.UtcNow;
         var setting = await _db.SystemSettings.FirstOrDefaultAsync(item => item.Key == ConnectionsSettingKey, cancellationToken);
-        var value = JsonSerializer.Serialize(connections, JsonOptions);
+        var protectedConnections = connections
+            .Select(connection => connection.SecretUnavailable
+                ? connection
+                : connection.WithSecret(ProtectSecret(connection.SecretAccessKey)))
+            .ToList();
+        var value = JsonSerializer.Serialize(protectedConnections, JsonOptions);
         if (setting is null)
         {
             _db.SystemSettings.Add(new SystemSetting
@@ -642,17 +783,25 @@ public sealed class S3StorageService : IS3StorageService
             Bucket = connection.Bucket,
             RootPrefix = connection.RootPrefix,
             IsEnabled = connection.IsEnabled,
-            IsConfigured = !string.IsNullOrWhiteSpace(connection.AccessKeyId)
+            IsConfigured = !connection.SecretUnavailable
+                && !string.IsNullOrWhiteSpace(connection.AccessKeyId)
                 && !string.IsNullOrWhiteSpace(connection.SecretAccessKey)
                 && !string.IsNullOrWhiteSpace(connection.Bucket),
             AccessKeyPreview = BuildSecretPreview(connection.AccessKeyId),
-            SecretKeyPreview = BuildSecretPreview(connection.SecretAccessKey),
+            SecretKeyPreview = connection.SecretUnavailable ? null : BuildSecretPreview(connection.SecretAccessKey),
             CreatedAt = connection.CreatedAt,
             UpdatedAt = connection.UpdatedAt,
         };
 
     private static void EnsureConfigured(S3StorageConnectionSettings connection)
     {
+        if (connection.SecretUnavailable)
+        {
+            throw new S3StorageOperationException(
+                StatusCodes.Status409Conflict,
+                "Защищённый Secret Key S3 недоступен. Укажите Secret Key заново, чтобы восстановить подключение.");
+        }
+
         if (string.IsNullOrWhiteSpace(connection.Endpoint)
             || string.IsNullOrWhiteSpace(connection.Region)
             || string.IsNullOrWhiteSpace(connection.Bucket)
@@ -835,6 +984,30 @@ public sealed class S3StorageService : IS3StorageService
         var trimmed = value.Trim();
         return trimmed.Length <= 8 ? "********" : $"{trimmed[..4]}...{trimmed[^4..]}";
     }
+
+    private string ProtectSecret(string secret)
+        => string.IsNullOrWhiteSpace(secret)
+            ? string.Empty
+            : ProtectedSecretPrefix + _secretProtector.Protect(secret.Trim());
+
+    private S3StorageConnectionSettings NormalizeStoredConnection(S3StorageConnectionSettings connection)
+    {
+        if (string.IsNullOrWhiteSpace(connection.SecretAccessKey)
+            || !connection.SecretAccessKey.StartsWith(ProtectedSecretPrefix, StringComparison.Ordinal))
+        {
+            return connection;
+        }
+
+        try
+        {
+            return connection.WithSecret(
+                _secretProtector.Unprotect(connection.SecretAccessKey[ProtectedSecretPrefix.Length..]));
+        }
+        catch (Exception ex) when (ex is CryptographicException or FormatException)
+        {
+            return connection.WithSecret(connection.SecretAccessKey, secretUnavailable: true);
+        }
+    }
 }
 
 public sealed class S3StorageClientFactory : IS3StorageClientFactory
@@ -1015,6 +1188,35 @@ public sealed class AwsS3StorageClient : IS3StorageClient
         }
     }
 
+    public async Task<S3StorageStreamedObject> OpenReadAsync(string bucket, string key, CancellationToken cancellationToken)
+    {
+        GetObjectResponse? response = null;
+        try
+        {
+            response = await _client.GetObjectAsync(new GetObjectRequest
+            {
+                BucketName = bucket,
+                Key = key,
+            }, cancellationToken);
+            return new S3StorageStreamedObject(
+                response.ResponseStream,
+                string.IsNullOrWhiteSpace(response.Headers.ContentType) ? "application/octet-stream" : response.Headers.ContentType,
+                Path.GetFileName(key),
+                response.ContentLength,
+                new DelegateAsyncDisposable(response.Dispose));
+        }
+        catch (AmazonS3Exception ex)
+        {
+            response?.Dispose();
+            throw MapException(ex);
+        }
+        catch
+        {
+            response?.Dispose();
+            throw;
+        }
+    }
+
     public async Task DeleteAsync(string bucket, string key, CancellationToken cancellationToken)
     {
         try
@@ -1111,4 +1313,25 @@ public sealed class S3StorageConnectionSettings
     public bool IsEnabled { get; init; }
     public DateTime CreatedAt { get; init; }
     public DateTime UpdatedAt { get; init; }
+
+    [JsonIgnore]
+    public bool SecretUnavailable { get; init; }
+
+    public S3StorageConnectionSettings WithSecret(string secretAccessKey, bool secretUnavailable = false)
+        => new()
+        {
+            Id = Id,
+            Name = Name,
+            Provider = Provider,
+            Endpoint = Endpoint,
+            Region = Region,
+            Bucket = Bucket,
+            RootPrefix = RootPrefix,
+            AccessKeyId = AccessKeyId,
+            SecretAccessKey = secretAccessKey,
+            IsEnabled = IsEnabled,
+            CreatedAt = CreatedAt,
+            UpdatedAt = UpdatedAt,
+            SecretUnavailable = secretUnavailable,
+        };
 }

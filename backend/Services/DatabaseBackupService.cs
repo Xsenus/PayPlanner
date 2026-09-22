@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO.Compression;
+using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -88,6 +89,40 @@ public sealed record DatabaseBackupDeleteResult(
     int DeletedCount,
     bool DeletedAll);
 
+public sealed record DatabaseBackupManifest(
+    int FormatVersion,
+    string BackupId,
+    string BackupFileName,
+    string BackupRelativePath,
+    string DatabaseProvider,
+    string BackupFormat,
+    long SizeBytes,
+    string Sha256,
+    string Trigger,
+    DateTime CreatedAtUtc,
+    string ApplicationVersion,
+    string Status = "complete",
+    IReadOnlyList<DatabaseBackupPartManifest>? Parts = null,
+    string? RecoveryKeyReference = null);
+
+public sealed record DatabaseBackupPartManifest(
+    string Kind,
+    string RelativePath,
+    long SizeBytes,
+    string Sha256,
+    bool Required);
+
+public sealed record DatabaseBackupVerificationResult(
+    string Status,
+    bool Verified,
+    string BackupRelativePath,
+    string? BackupId,
+    long ActualSizeBytes,
+    long? ExpectedSizeBytes,
+    string? ActualSha256,
+    string? ExpectedSha256,
+    string? Error);
+
 public sealed class DatabaseBackupService
 {
     private const string AutomaticEnabledSettingKey = "database-backup.enabled";
@@ -169,7 +204,7 @@ public sealed class DatabaseBackupService
         Directory.CreateDirectory(_backupRootDirectory);
 
         var items = GetBackupSearchPatterns()
-            .SelectMany(pattern => Directory.EnumerateFiles(_backupRootDirectory, pattern, SearchOption.AllDirectories))
+            .SelectMany(pattern => EnumerateBackupFiles(pattern, cancellationToken))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Select(path => BuildFileInfo(path, _backupRootDirectory))
             .Where(static item => item is not null)
@@ -350,10 +385,12 @@ public sealed class DatabaseBackupService
             throw new FileNotFoundException("Резервная копия не найдена.");
         }
 
+        DeleteManifestParts(resolvedPath);
         if (!TryDeleteFile(resolvedPath))
         {
             throw new IOException("Не удалось удалить резервную копию.");
         }
+        TryDeleteFile(GetManifestPath(resolvedPath));
         CleanupEmptyDirectories();
         return Task.FromResult(new DatabaseBackupDeleteResult(1, DeletedAll: false));
     }
@@ -365,11 +402,13 @@ public sealed class DatabaseBackupService
         var deletedCount = 0;
         foreach (var pattern in GetBackupSearchPatterns())
         {
-            foreach (var filePath in Directory.EnumerateFiles(_backupRootDirectory, pattern, SearchOption.AllDirectories))
+            foreach (var filePath in EnumerateBackupFiles(pattern, cancellationToken))
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 if (TryDeleteFile(filePath))
                 {
+                    DeleteManifestParts(filePath);
+                    TryDeleteFile(GetManifestPath(filePath));
                     deletedCount++;
                 }
             }
@@ -413,6 +452,122 @@ public sealed class DatabaseBackupService
         }
 
         return createdCount;
+    }
+
+    public async Task<DatabaseBackupVerificationResult> VerifyBackupAsync(
+        string? relativePath,
+        CancellationToken cancellationToken = default)
+    {
+        var resolvedPath = ResolveBackupPath(relativePath);
+        if (string.IsNullOrWhiteSpace(resolvedPath))
+        {
+            throw new FileNotFoundException("Резервная копия не найдена.");
+        }
+
+        var actualSize = new FileInfo(resolvedPath).Length;
+        var manifestPath = GetManifestPath(resolvedPath);
+        if (!File.Exists(manifestPath))
+        {
+            return new DatabaseBackupVerificationResult(
+                "legacyUnverified",
+                false,
+                Path.GetRelativePath(_backupRootDirectory, resolvedPath).Replace('\\', '/'),
+                null,
+                actualSize,
+                null,
+                null,
+                null,
+                "Для legacy-копии отсутствует manifest с контрольной суммой.");
+        }
+
+        DatabaseBackupManifest? manifest;
+        try
+        {
+            await using var manifestStream = File.OpenRead(manifestPath);
+            manifest = await JsonSerializer.DeserializeAsync<DatabaseBackupManifest>(manifestStream, JsonOptions, cancellationToken);
+        }
+        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
+        {
+            return new DatabaseBackupVerificationResult(
+                "invalidManifest",
+                false,
+                Path.GetRelativePath(_backupRootDirectory, resolvedPath).Replace('\\', '/'),
+                null,
+                actualSize,
+                null,
+                null,
+                null,
+                ex.Message);
+        }
+
+        if (manifest is null || manifest.FormatVersion != 1)
+        {
+            return new DatabaseBackupVerificationResult(
+                "invalidManifest",
+                false,
+                Path.GetRelativePath(_backupRootDirectory, resolvedPath).Replace('\\', '/'),
+                manifest?.BackupId,
+                actualSize,
+                manifest?.SizeBytes,
+                null,
+                manifest?.Sha256,
+                "Manifest отсутствует или имеет неподдерживаемую версию.");
+        }
+
+        var actualSha256 = await ComputeSha256Async(resolvedPath, cancellationToken);
+        var verified = actualSize == manifest.SizeBytes
+            && string.Equals(actualSha256, manifest.Sha256, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(Path.GetFileName(resolvedPath), manifest.BackupFileName, StringComparison.Ordinal);
+        string? partError = null;
+        if (verified && manifest.Parts is { Count: > 0 })
+        {
+            foreach (var part in manifest.Parts.Where(item => item.Required))
+            {
+                var partPath = ResolveBackupPath(part.RelativePath);
+                if (partPath is null)
+                {
+                    verified = false;
+                    partError = $"Обязательная часть backup set отсутствует: {part.RelativePath}.";
+                    break;
+                }
+
+                var partInfo = new FileInfo(partPath);
+                var partHash = await ComputeSha256Async(partPath, cancellationToken);
+                if (partInfo.Length != part.SizeBytes || !string.Equals(partHash, part.Sha256, StringComparison.OrdinalIgnoreCase))
+                {
+                    verified = false;
+                    partError = $"Обязательная часть backup set повреждена: {part.RelativePath}.";
+                    break;
+                }
+            }
+        }
+        return new DatabaseBackupVerificationResult(
+            verified ? "verified" : "mismatch",
+            verified,
+            Path.GetRelativePath(_backupRootDirectory, resolvedPath).Replace('\\', '/'),
+            manifest.BackupId,
+            actualSize,
+            manifest.SizeBytes,
+            actualSha256,
+            manifest.Sha256,
+            verified ? null : partError ?? "Размер, имя файла или контрольная сумма не совпадают с manifest.");
+    }
+
+    public async Task<DatabaseBackupManifest> ReadVerifiedManifestAsync(
+        string? relativePath,
+        CancellationToken cancellationToken = default)
+    {
+        var verification = await VerifyBackupAsync(relativePath, cancellationToken);
+        if (!verification.Verified)
+        {
+            throw new InvalidDataException(verification.Error ?? "Резервная копия не прошла проверку manifest.");
+        }
+
+        var resolvedPath = ResolveBackupPath(relativePath)
+            ?? throw new FileNotFoundException("Резервная копия не найдена.");
+        await using var stream = File.OpenRead(GetManifestPath(resolvedPath));
+        return await JsonSerializer.DeserializeAsync<DatabaseBackupManifest>(stream, JsonOptions, cancellationToken)
+            ?? throw new InvalidDataException("Manifest резервной копии пуст.");
     }
 
     public string? ResolveBackupPath(string? relativePath)
@@ -464,6 +619,9 @@ public sealed class DatabaseBackupService
             DatabaseBackupFileInfo fileInfo = _databaseProvider.IsSqlite
                 ? await CreateSqliteBackupAsync(targetDirectory, settings.Format, nowLocal, trigger, scheduleSlot, cancellationToken)
                 : await CreatePostgreSqlBackupAsync(targetDirectory, settings.Format, settings.ToolCommand, nowLocal, trigger, scheduleSlot, cancellationToken);
+
+            var additionalParts = await CreateFileStorageArchiveAsync(fileInfo, cancellationToken);
+            await WriteBackupManifestAsync(fileInfo, settings.Format.Key, additionalParts, cancellationToken);
 
             await CleanupExpiredBackupsAsync(settings.RetentionDays, cancellationToken);
             var s3UploadResults = await UploadBackupToS3Async(fileInfo, settings.S3Upload, nowLocal, cancellationToken);
@@ -674,18 +832,32 @@ public sealed class DatabaseBackupService
         }
 
         var thresholdUtc = DateTimeOffset.UtcNow.AddDays(-retentionDays).UtcDateTime;
-        foreach (var searchPattern in GetBackupSearchPatterns())
-        {
-            foreach (var filePath in Directory.EnumerateFiles(_backupRootDirectory, searchPattern, SearchOption.AllDirectories))
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                var fileInfo = new FileInfo(filePath);
-                if (fileInfo.LastWriteTimeUtc > thresholdUtc)
-                {
-                    continue;
-                }
+        var backupFiles = GetBackupSearchPatterns()
+            .SelectMany(pattern => EnumerateBackupFiles(pattern, cancellationToken))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var newestBackupPath = backupFiles
+            .OrderByDescending(TryGetLastWriteTimeUtc)
+            .FirstOrDefault();
 
-                TryDeleteFile(filePath);
+        foreach (var filePath in backupFiles)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (string.Equals(filePath, newestBackupPath, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var lastWriteTimeUtc = TryGetLastWriteTimeUtc(filePath);
+            if (!lastWriteTimeUtc.HasValue || lastWriteTimeUtc.Value > thresholdUtc)
+            {
+                continue;
+            }
+
+            if (TryDeleteFile(filePath))
+            {
+                DeleteManifestParts(filePath);
+                TryDeleteFile(GetManifestPath(filePath));
             }
         }
 
@@ -761,6 +933,38 @@ public sealed class DatabaseBackupService
                 "application/octet-stream",
                 overwrite: true,
                 cancellationToken);
+            var manifestPath = GetManifestPath(resolvedPath);
+            if (!File.Exists(manifestPath))
+            {
+                throw new InvalidOperationException("Manifest резервной копии отсутствует.");
+            }
+
+            var manifest = TryReadManifest(resolvedPath)
+                ?? throw new InvalidDataException("Manifest резервной копии не читается.");
+            foreach (var part in manifest.Parts?.Where(item => item.Kind != "database") ?? [])
+            {
+                var partPath = ResolveBackupPath(part.RelativePath)
+                    ?? throw new FileNotFoundException($"Часть backup set не найдена: {part.RelativePath}.");
+                await using var partStream = File.OpenRead(partPath);
+                await s3StorageService.UploadAsync(
+                    result.ConnectionId,
+                    $"{result.TargetPath}.{Path.GetFileName(partPath)}",
+                    partStream,
+                    "application/octet-stream",
+                    overwrite: true,
+                    cancellationToken);
+            }
+
+            await using (var manifestStream = File.OpenRead(manifestPath))
+            {
+                await s3StorageService.UploadAsync(
+                    result.ConnectionId,
+                    $"{result.TargetPath}.manifest.json",
+                    manifestStream,
+                    "application/json",
+                    overwrite: true,
+                    cancellationToken);
+            }
 
             return result with
             {
@@ -838,6 +1042,36 @@ public sealed class DatabaseBackupService
                 "application/octet-stream",
                 overwrite: true,
                 cancellationToken);
+            var manifestPath = GetManifestPath(resolvedPath);
+            if (!File.Exists(manifestPath))
+            {
+                throw new InvalidOperationException("Manifest резервной копии отсутствует.");
+            }
+
+            var manifest = TryReadManifest(resolvedPath)
+                ?? throw new InvalidDataException("Manifest резервной копии не читается.");
+            foreach (var part in manifest.Parts?.Where(item => item.Kind != "database") ?? [])
+            {
+                var partPath = ResolveBackupPath(part.RelativePath)
+                    ?? throw new FileNotFoundException($"Часть backup set не найдена: {part.RelativePath}.");
+                await using var partStream = File.OpenRead(partPath);
+                await yandexDiskService.UploadAsync(
+                    $"{result.TargetPath}.{Path.GetFileName(partPath)}",
+                    partStream,
+                    "application/octet-stream",
+                    overwrite: true,
+                    cancellationToken);
+            }
+
+            await using (var manifestStream = File.OpenRead(manifestPath))
+            {
+                await yandexDiskService.UploadAsync(
+                    $"{result.TargetPath}.manifest.json",
+                    manifestStream,
+                    "application/json",
+                    overwrite: true,
+                    cancellationToken);
+            }
 
             return result with
             {
@@ -1207,6 +1441,289 @@ public sealed class DatabaseBackupService
         return ["*.backup", "*.dump", "*.sql"];
     }
 
+    private async Task WriteBackupManifestAsync(
+        DatabaseBackupFileInfo backup,
+        string backupFormat,
+        IReadOnlyList<DatabaseBackupPartManifest> additionalParts,
+        CancellationToken cancellationToken)
+    {
+        var resolvedPath = ResolveBackupPath(backup.RelativePath)
+            ?? throw new InvalidOperationException("Созданная резервная копия недоступна для формирования manifest.");
+        var databasePart = new DatabaseBackupPartManifest(
+            "database",
+            backup.RelativePath.Replace('\\', '/'),
+            backup.SizeBytes,
+            await ComputeSha256Async(resolvedPath, cancellationToken),
+            true);
+        var manifest = new DatabaseBackupManifest(
+            1,
+            Guid.NewGuid().ToString("N"),
+            backup.FileName,
+            backup.RelativePath.Replace('\\', '/'),
+            _databaseProvider.Key,
+            backupFormat,
+            backup.SizeBytes,
+            databasePart.Sha256,
+            backup.Trigger,
+            backup.CreatedAt.ToUniversalTime(),
+            typeof(DatabaseBackupService).Assembly.GetName().Version?.ToString() ?? "unknown",
+            "complete",
+            [databasePart, .. additionalParts],
+            _configuration["DatabaseBackup:RecoveryKeyReference"]);
+        var manifestPath = GetManifestPath(resolvedPath);
+        var temporaryPath = $"{manifestPath}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            await using (var stream = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, true))
+            {
+                await JsonSerializer.SerializeAsync(stream, manifest, JsonOptions, cancellationToken);
+                await stream.FlushAsync(cancellationToken);
+            }
+
+            File.Move(temporaryPath, manifestPath, overwrite: true);
+        }
+        finally
+        {
+            TryDeleteFile(temporaryPath);
+        }
+    }
+
+    private static string GetManifestPath(string backupPath)
+        => $"{backupPath}.manifest.json";
+
+    private async Task<IReadOnlyList<DatabaseBackupPartManifest>> CreateFileStorageArchiveAsync(
+        DatabaseBackupFileInfo backup,
+        CancellationToken cancellationToken)
+    {
+        if (!_configuration.GetValue("DatabaseBackup:IncludeFileStorage", true))
+        {
+            return [];
+        }
+
+        var configuredRoots = new[]
+        {
+            (Name: "file-storage", Path: _configuration["FileStorage:RootPath"]),
+            (Name: "profile-photos", Path: _configuration["ProfilePhotos:StorageRoot"]),
+            (Name: "electronic-signatures", Path: _configuration["ElectronicSignature:StorageRoot"]),
+        }
+        .Where(item => !string.IsNullOrWhiteSpace(item.Path))
+        .Select(item => (item.Name, Path: Path.GetFullPath(item.Path!)))
+        .Where(item => Directory.Exists(item.Path))
+        .OrderBy(item => item.Path.Length)
+        .ToList();
+        if (configuredRoots.Count == 0)
+        {
+            return [];
+        }
+
+        // Nested configured roots are already covered by their parent and must not be archived twice.
+        var selectedRoots = new List<(string Name, string Path)>();
+        foreach (var candidate in configuredRoots)
+        {
+            if (!selectedRoots.Any(parent => IsPathWithin(candidate.Path, parent.Path)))
+            {
+                selectedRoots.Add(candidate);
+            }
+        }
+
+        var backupPath = ResolveBackupPath(backup.RelativePath)
+            ?? throw new InvalidOperationException("Созданная резервная копия недоступна для file backup set.");
+        var archivePath = $"{backupPath}.fileset";
+        var temporaryPath = $"{archivePath}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            await using (var output = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, true))
+            using (var archive = new ZipArchive(output, ZipArchiveMode.Create, leaveOpen: false))
+            {
+                foreach (var root in selectedRoots)
+                {
+                    foreach (var filePath in EnumerateFilesSafely(root.Path, cancellationToken))
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        if (IsPathWithin(filePath, _backupRootDirectory)) continue;
+                        var relative = Path.GetRelativePath(root.Path, filePath).Replace('\\', '/');
+                        if (relative.StartsWith("../", StringComparison.Ordinal) || relative == "..") continue;
+                        var entry = archive.CreateEntry($"{root.Name}/{relative}", CompressionLevel.Fastest);
+                        await using var source = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 81920, true);
+                        await using var destination = entry.Open();
+                        await source.CopyToAsync(destination, cancellationToken);
+                    }
+                }
+            }
+            File.Move(temporaryPath, archivePath, overwrite: true);
+        }
+        finally
+        {
+            TryDeleteFile(temporaryPath);
+        }
+
+        var info = new FileInfo(archivePath);
+        return
+        [
+            new DatabaseBackupPartManifest(
+                "file-storage",
+                Path.GetRelativePath(_backupRootDirectory, archivePath).Replace('\\', '/'),
+                info.Length,
+                await ComputeSha256Async(archivePath, cancellationToken),
+                true),
+        ];
+    }
+
+    private static async Task<string> ComputeSha256Async(string path, CancellationToken cancellationToken)
+    {
+        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, true);
+        var hash = await SHA256.HashDataAsync(stream, cancellationToken);
+        return Convert.ToHexString(hash).ToLowerInvariant();
+    }
+
+    private static bool IsPathWithin(string path, string root)
+    {
+        var fullPath = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var fullRoot = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        return string.Equals(fullPath, fullRoot, comparison)
+               || fullPath.StartsWith(fullRoot + Path.DirectorySeparatorChar, comparison);
+    }
+
+    private IReadOnlyList<string> EnumerateFilesSafely(string root, CancellationToken cancellationToken)
+    {
+        var files = new List<string>();
+        var pending = new Stack<string>();
+        pending.Push(root);
+        while (pending.Count > 0)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var directory = pending.Pop();
+            try
+            {
+                files.AddRange(Directory.GetFiles(directory, "*", SearchOption.TopDirectoryOnly));
+                foreach (var child in Directory.GetDirectories(directory, "*", SearchOption.TopDirectoryOnly))
+                {
+                    if (!IsReparsePoint(child)) pending.Push(child);
+                }
+            }
+            catch (Exception ex) when (IsRecoverableFileSystemEnumerationError(ex))
+            {
+                _logger.LogWarning(ex, "Skipping inaccessible file-storage backup directory {Directory}.", directory);
+            }
+        }
+        return files;
+    }
+
+    private DatabaseBackupManifest? TryReadManifest(string backupPath)
+    {
+        try
+        {
+            var manifestPath = GetManifestPath(backupPath);
+            return File.Exists(manifestPath)
+                ? JsonSerializer.Deserialize<DatabaseBackupManifest>(File.ReadAllText(manifestPath), JsonOptions)
+                : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            _logger.LogWarning(ex, "Could not read backup manifest for cleanup: {BackupPath}", backupPath);
+            return null;
+        }
+    }
+
+    private void DeleteManifestParts(string backupPath)
+    {
+        var manifest = TryReadManifest(backupPath);
+        if (manifest?.Parts is null) return;
+        var mainRelative = Path.GetRelativePath(_backupRootDirectory, backupPath).Replace('\\', '/');
+        foreach (var part in manifest.Parts.Where(item => !string.Equals(item.RelativePath, mainRelative, StringComparison.OrdinalIgnoreCase)))
+        {
+            var partPath = ResolveBackupPath(part.RelativePath);
+            if (partPath is not null) TryDeleteFile(partPath);
+        }
+    }
+
+    private IReadOnlyList<string> EnumerateBackupFiles(
+        string searchPattern,
+        CancellationToken cancellationToken = default)
+    {
+        if (!Directory.Exists(_backupRootDirectory))
+        {
+            return [];
+        }
+
+        var files = new List<string>();
+        var directories = new Stack<string>();
+        directories.Push(_backupRootDirectory);
+
+        while (directories.Count > 0)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var directory = directories.Pop();
+
+            try
+            {
+                files.AddRange(Directory.GetFiles(directory, searchPattern, SearchOption.TopDirectoryOnly));
+            }
+            catch (Exception ex) when (IsRecoverableFileSystemEnumerationError(ex))
+            {
+                _logger.LogWarning(ex, "Skipping inaccessible database backup directory {Directory}.", directory);
+                continue;
+            }
+
+            try
+            {
+                foreach (var childDirectory in Directory.GetDirectories(directory, "*", SearchOption.TopDirectoryOnly))
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (!IsReparsePoint(childDirectory))
+                    {
+                        directories.Push(childDirectory);
+                    }
+                }
+            }
+            catch (Exception ex) when (IsRecoverableFileSystemEnumerationError(ex))
+            {
+                _logger.LogWarning(ex, "Skipping inaccessible database backup subdirectories under {Directory}.", directory);
+            }
+        }
+
+        return files;
+    }
+
+    private IReadOnlyList<string> EnumerateBackupDirectories(CancellationToken cancellationToken = default)
+    {
+        if (!Directory.Exists(_backupRootDirectory))
+        {
+            return [];
+        }
+
+        var discovered = new List<string>();
+        var pending = new Stack<string>();
+        pending.Push(_backupRootDirectory);
+
+        while (pending.Count > 0)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var directory = pending.Pop();
+            try
+            {
+                foreach (var childDirectory in Directory.GetDirectories(directory, "*", SearchOption.TopDirectoryOnly))
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (IsReparsePoint(childDirectory))
+                    {
+                        continue;
+                    }
+
+                    discovered.Add(childDirectory);
+                    pending.Push(childDirectory);
+                }
+            }
+            catch (Exception ex) when (IsRecoverableFileSystemEnumerationError(ex))
+            {
+                _logger.LogWarning(ex, "Skipping inaccessible database backup subdirectories under {Directory}.", directory);
+            }
+        }
+
+        return discovered;
+    }
+
     private void CleanupEmptyDirectories(CancellationToken cancellationToken = default)
     {
         if (!Directory.Exists(_backupRootDirectory))
@@ -1214,14 +1731,48 @@ public sealed class DatabaseBackupService
             return;
         }
 
-        foreach (var directory in Directory.EnumerateDirectories(_backupRootDirectory, "*", SearchOption.AllDirectories)
+        foreach (var directory in EnumerateBackupDirectories(cancellationToken)
                      .OrderByDescending(path => path.Length))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (!Directory.EnumerateFileSystemEntries(directory).Any())
+            try
             {
-                Directory.Delete(directory, false);
+                if (!Directory.EnumerateFileSystemEntries(directory).Any())
+                {
+                    Directory.Delete(directory, false);
+                }
             }
+            catch (Exception ex) when (IsRecoverableFileSystemEnumerationError(ex))
+            {
+                _logger.LogWarning(ex, "Could not inspect or remove database backup directory {Directory}.", directory);
+            }
+        }
+    }
+
+    private static bool IsRecoverableFileSystemEnumerationError(Exception exception)
+        => exception is UnauthorizedAccessException or IOException;
+
+    private static bool IsReparsePoint(string directory)
+    {
+        try
+        {
+            return (File.GetAttributes(directory) & FileAttributes.ReparsePoint) != 0;
+        }
+        catch (Exception ex) when (IsRecoverableFileSystemEnumerationError(ex))
+        {
+            return true;
+        }
+    }
+
+    private static DateTime? TryGetLastWriteTimeUtc(string path)
+    {
+        try
+        {
+            return File.Exists(path) ? File.GetLastWriteTimeUtc(path) : null;
+        }
+        catch (Exception ex) when (IsRecoverableFileSystemEnumerationError(ex))
+        {
+            return null;
         }
     }
 

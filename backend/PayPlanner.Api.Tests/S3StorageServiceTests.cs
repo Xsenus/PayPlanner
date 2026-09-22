@@ -1,8 +1,11 @@
 using System.Net;
+using System.Text.Json;
 using Amazon.S3;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Services;
 using Xunit;
@@ -41,6 +44,81 @@ public sealed class S3StorageServiceTests
         Assert.Contains(overview.ProviderPresets, item => item.Key == "hostkey"
             && item.Endpoint == S3StorageService.HostkeyEndpoint
             && item.Region == S3StorageService.HostkeyRegion);
+
+        var stored = await scope.Db.SystemSettings.SingleAsync(item => item.Key == "integrations.s3.connections");
+        Assert.Contains("protected:v1:", stored.Value, StringComparison.Ordinal);
+        Assert.DoesNotContain("secret-1234567890", stored.Value, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetOverviewAsync_MigratesLegacyPlaintextSecretToProtectedValue()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var legacy = new S3StorageConnectionSettings
+        {
+            Id = "legacy",
+            Name = "Legacy S3",
+            Provider = "hostkey",
+            Endpoint = S3StorageService.HostkeyEndpoint,
+            Region = S3StorageService.HostkeyRegion,
+            Bucket = "payplanner-backups",
+            AccessKeyId = "s3uid_1234567890",
+            SecretAccessKey = "legacy-secret-1234567890",
+            IsEnabled = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        scope.Db.SystemSettings.Add(new SystemSetting
+        {
+            Key = "integrations.s3.connections",
+            Value = JsonSerializer.Serialize(new[] { legacy }, new JsonSerializerOptions(JsonSerializerDefaults.Web)),
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await scope.Db.SaveChangesAsync();
+        var service = new S3StorageService(scope.Db, new FakeS3StorageClientFactory(), new EphemeralDataProtectionProvider());
+
+        var overview = await service.GetOverviewAsync(CancellationToken.None);
+
+        var connection = Assert.Single(overview.Connections);
+        Assert.True(connection.IsConfigured);
+        Assert.Equal("lega...7890", connection.SecretKeyPreview);
+        var stored = await scope.Db.SystemSettings.AsNoTracking()
+            .SingleAsync(item => item.Key == "integrations.s3.connections");
+        Assert.Contains("protected:v1:", stored.Value, StringComparison.Ordinal);
+        Assert.DoesNotContain("legacy-secret-1234567890", stored.Value, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ProtectedSecret_FromUnavailableKeyRingRequiresCredentialReplacement()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var firstService = new S3StorageService(
+            scope.Db,
+            new FakeS3StorageClientFactory(),
+            new EphemeralDataProtectionProvider());
+        var created = await firstService.UpsertConnectionAsync(new UpsertS3StorageConnectionRequest
+        {
+            Name = "Protected S3",
+            Provider = "hostkey",
+            Bucket = "payplanner-backups",
+            AccessKeyId = "s3uid_1234567890",
+            SecretAccessKey = "secret-1234567890",
+        }, CancellationToken.None);
+        var secondService = new S3StorageService(
+            scope.Db,
+            new FakeS3StorageClientFactory(),
+            new EphemeralDataProtectionProvider());
+
+        var overview = await secondService.GetOverviewAsync(CancellationToken.None);
+
+        var unavailable = Assert.Single(overview.Connections);
+        Assert.False(unavailable.IsConfigured);
+        Assert.Null(unavailable.SecretKeyPreview);
+        var error = await Assert.ThrowsAsync<S3StorageOperationException>(() =>
+            secondService.TestConnectionAsync(created.Id, new TestS3StorageConnectionRequest(), CancellationToken.None));
+        Assert.Equal(409, error.StatusCode);
+        Assert.Contains("Secret Key S3 недоступен", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -3716,6 +3716,65 @@ public class PaymentContext : DbContext
         modelBuilder.Entity<YandexCalendarTaskLink>()
             .HasQueryFilter(item => TaskJournalItems.Any(parent => parent.Id == item.TaskJournalItemId));
 
+        modelBuilder.Entity<StorageObject>(entity =>
+        {
+            entity.HasKey(item => item.Id);
+            entity.Property(item => item.Version).IsConcurrencyToken();
+            entity.HasIndex(item => new { item.OwnerType, item.OwnerId, item.DataClass });
+            entity.HasIndex(item => new { item.DataClass, item.IsDeleted, item.UpdatedAt });
+        });
+        modelBuilder.Entity<StorageObjectGeneration>(entity =>
+        {
+            entity.HasKey(item => item.Id);
+            entity.HasIndex(item => new { item.StorageObjectId, item.Generation }).IsUnique();
+            entity.HasOne(item => item.StorageObject)
+                .WithMany(item => item.Generations)
+                .HasForeignKey(item => item.StorageObjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<StorageReplica>(entity =>
+        {
+            entity.HasKey(item => item.Id);
+            entity.HasIndex(item => new { item.StorageObjectGenerationId, item.Status });
+            entity.HasIndex(item => new { item.ProviderKey, item.ConnectionId, item.Status });
+            entity.HasIndex(item => new
+            {
+                item.StorageObjectGenerationId,
+                item.ProviderKey,
+                item.ConnectionId,
+                item.Locator
+            }).IsUnique();
+            entity.HasOne(item => item.StorageObjectGeneration)
+                .WithMany(item => item.Replicas)
+                .HasForeignKey(item => item.StorageObjectGenerationId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<StorageOperation>(entity =>
+        {
+            entity.HasKey(item => item.Id);
+            entity.HasIndex(item => item.IdempotencyKey).IsUnique();
+            entity.HasIndex(item => new { item.Status, item.NextAttemptAt });
+            entity.HasIndex(item => new { item.ProviderKey, item.Status, item.NextAttemptAt });
+            entity.HasOne(item => item.StorageObject)
+                .WithMany(item => item.Operations)
+                .HasForeignKey(item => item.StorageObjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(item => item.StorageObjectGeneration)
+                .WithMany(item => item.Operations)
+                .HasForeignKey(item => item.StorageObjectGenerationId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<StorageTombstone>(entity =>
+        {
+            entity.HasKey(item => item.Id);
+            entity.HasIndex(item => new { item.StorageObjectId, item.Generation }).IsUnique();
+            entity.HasIndex(item => new { item.LegalHold, item.RetainUntil });
+            entity.HasOne(item => item.StorageObject)
+                .WithMany(item => item.Tombstones)
+                .HasForeignKey(item => item.StorageObjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
         ConfigureDecimalPrecision(modelBuilder);
 
         if (Database.IsNpgsql())
@@ -4528,6 +4587,11 @@ public class PaymentContext : DbContext
     public DbSet<YandexCalendarTaskLink> YandexCalendarTaskLinks { get; set; }
     public DbSet<YandexCalendarSyncLog> YandexCalendarSyncLogs { get; set; }
     public DbSet<ExternalCalendarTaskSyncRequest> ExternalCalendarTaskSyncRequests { get; set; }
+    public DbSet<StorageObject> StorageObjects { get; set; }
+    public DbSet<StorageObjectGeneration> StorageObjectGenerations { get; set; }
+    public DbSet<StorageReplica> StorageReplicas { get; set; }
+    public DbSet<StorageOperation> StorageOperations { get; set; }
+    public DbSet<StorageTombstone> StorageTombstones { get; set; }
 
     /// <summary>
     /// Пользователи системы.

@@ -178,11 +178,11 @@ public sealed class S3StorageController : ControllerBase
 
         try
         {
-            var file = await _service.DownloadAsync(id, path, ct);
+            var file = await _service.OpenReadAsync(id, path, ct);
             await AddAuditAsync(
                 "Downloaded",
                 "Файл скачан из S3-хранилища.",
-                new { ConnectionId = id, file.Path, file.Key, Size = file.Content.Length },
+                new { ConnectionId = id, file.Path, file.Key, Size = file.SizeBytes },
                 ct);
             return File(file.Content, file.ContentType, file.FileName);
         }

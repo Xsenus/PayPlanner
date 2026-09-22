@@ -97,31 +97,22 @@ public partial class AuthService
         }
 
         var photoPath = photoUrl.Trim();
-        if (Uri.TryCreate(photoPath, UriKind.Absolute, out var absoluteUri))
-        {
-            photoPath = absoluteUri.AbsolutePath;
-        }
-
-        if (!photoPath.StartsWith("/user-photos/", StringComparison.OrdinalIgnoreCase))
+        var persistentRoot = UserPhotoStoragePaths.ResolveRoot(_environment, _configuration);
+        var persistentPath = UserPhotoStoragePaths.ResolvePhotoPath(persistentRoot, photoPath);
+        if (persistentPath is null)
         {
             return photoUrl;
         }
 
-        if (string.IsNullOrWhiteSpace(_environment.WebRootPath))
+        if (File.Exists(persistentPath))
         {
             return photoUrl;
         }
 
-        var relativePath = photoPath.TrimStart('/').Replace('/', Path.DirectorySeparatorChar);
-        var rootPath = Path.GetFullPath(_environment.WebRootPath);
-        var fullPath = Path.GetFullPath(Path.Combine(rootPath, relativePath));
-
-        if (!fullPath.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase))
-        {
-            return null;
-        }
-
-        return File.Exists(fullPath) ? photoUrl : null;
+        var legacyPath = UserPhotoStoragePaths.ResolvePhotoPath(
+            UserPhotoStoragePaths.ResolveLegacyRoot(_environment),
+            photoPath);
+        return legacyPath is not null && File.Exists(legacyPath) ? photoUrl : null;
     }
 
     private sealed record AuditMetadataDto(

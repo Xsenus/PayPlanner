@@ -1,9 +1,11 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Data.Sqlite;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.FileProviders;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
@@ -38,7 +40,8 @@ public sealed class DatabaseBackupServiceS3Tests
         Assert.Contains($"/{DateTimeOffset.Now:yyyy}/{DateTimeOffset.Now:MM}/", $"/{upload.TargetPath}");
         Assert.Equal(result.Backup.RelativePath, upload.BackupRelativePath);
         Assert.Equal(result.Backup.SizeBytes, upload.SizeBytes);
-        Assert.Equal(upload.TargetPath, scope.S3.UploadedPath);
+        Assert.Contains(upload.TargetPath, scope.S3.UploadedPaths);
+        Assert.Contains($"{upload.TargetPath}.manifest.json", scope.S3.UploadedPaths);
         Assert.True(scope.S3.UploadedBytes > 0);
 
         var overview = await service.GetOverviewAsync(CancellationToken.None);
@@ -132,7 +135,8 @@ public sealed class DatabaseBackupServiceS3Tests
         Assert.Contains($"/{DateTimeOffset.Now:yyyy}/{DateTimeOffset.Now:MM}/", $"/{upload.TargetPath}");
         Assert.Equal(result.Backup.RelativePath, upload.BackupRelativePath);
         Assert.Equal(result.Backup.SizeBytes, upload.SizeBytes);
-        Assert.Equal(upload.TargetPath, scope.YandexDisk.UploadedPath);
+        Assert.Contains(upload.TargetPath, scope.YandexDisk.UploadedPaths);
+        Assert.Contains($"{upload.TargetPath}.manifest.json", scope.YandexDisk.UploadedPaths);
         Assert.True(scope.YandexDisk.UploadedBytes > 0);
 
         var overview = await service.GetOverviewAsync(CancellationToken.None);
@@ -186,12 +190,14 @@ public sealed class DatabaseBackupServiceS3Tests
         var created = await service.CreateManualBackupAsync(CancellationToken.None);
         var fullPath = service.ResolveBackupPath(created.Backup.RelativePath);
         Assert.NotNull(fullPath);
+        Assert.True(File.Exists($"{fullPath}.fileset"));
 
         var result = await service.DeleteBackupAsync(created.Backup.RelativePath, CancellationToken.None);
 
         Assert.Equal(1, result.DeletedCount);
         Assert.False(result.DeletedAll);
         Assert.False(File.Exists(fullPath));
+        Assert.False(File.Exists($"{fullPath}.fileset"));
         Assert.Null(service.ResolveBackupPath(created.Backup.RelativePath));
     }
 
@@ -225,12 +231,135 @@ public sealed class DatabaseBackupServiceS3Tests
         Assert.Null(service.ResolveBackupPath(second.Backup.RelativePath));
     }
 
+    [Fact]
+    public async Task EnsureScheduledBackupsAsync_RetainsNewestLocalBackupEvenWhenExpired()
+    {
+        await using var scope = await CreateScopeAsync();
+        var service = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        var created = await service.CreateManualBackupAsync(CancellationToken.None);
+        var fullPath = service.ResolveBackupPath(created.Backup.RelativePath);
+        Assert.NotNull(fullPath);
+        File.SetLastWriteTimeUtc(fullPath, DateTime.UtcNow.AddDays(-10));
+
+        await service.UpdateSettingsAsync(
+            automaticEnabled: false,
+            scheduleLocal: "03:00",
+            retentionDays: 1,
+            backupFormat: "sqlite",
+            cancellationToken: CancellationToken.None);
+
+        var createdCount = await service.EnsureScheduledBackupsAsync(CancellationToken.None);
+
+        Assert.Equal(0, createdCount);
+        Assert.True(File.Exists(fullPath));
+    }
+
+    [Fact]
+    public async Task EnsureScheduledBackupsAsync_DeletesExpiredBackupWhenNewerBackupExists()
+    {
+        await using var scope = await CreateScopeAsync();
+        var service = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        var first = await service.CreateManualBackupAsync(CancellationToken.None);
+        var second = await service.CreateManualBackupAsync(CancellationToken.None);
+        var firstPath = service.ResolveBackupPath(first.Backup.RelativePath);
+        var secondPath = service.ResolveBackupPath(second.Backup.RelativePath);
+        Assert.NotNull(firstPath);
+        Assert.NotNull(secondPath);
+        File.SetLastWriteTimeUtc(firstPath, DateTime.UtcNow.AddDays(-10));
+        File.SetLastWriteTimeUtc(secondPath, DateTime.UtcNow.AddDays(-9));
+
+        await service.UpdateSettingsAsync(
+            automaticEnabled: false,
+            scheduleLocal: "03:00",
+            retentionDays: 1,
+            backupFormat: "sqlite",
+            cancellationToken: CancellationToken.None);
+
+        await service.EnsureScheduledBackupsAsync(CancellationToken.None);
+
+        Assert.False(File.Exists(firstPath));
+        Assert.True(File.Exists(secondPath));
+    }
+
+    [Fact]
+    public async Task VerifyBackupAsync_ValidatesManifestAndDetectsTampering()
+    {
+        await using var scope = await CreateScopeAsync();
+        var service = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        var created = await service.CreateManualBackupAsync(CancellationToken.None);
+
+        var verified = await service.VerifyBackupAsync(created.Backup.RelativePath, CancellationToken.None);
+
+        Assert.True(verified.Verified);
+        Assert.Equal("verified", verified.Status);
+        Assert.NotNull(verified.BackupId);
+        Assert.Equal(verified.ExpectedSha256, verified.ActualSha256);
+
+        var fullPath = service.ResolveBackupPath(created.Backup.RelativePath);
+        Assert.NotNull(fullPath);
+        await File.AppendAllTextAsync(fullPath, "tampered");
+
+        var mismatch = await service.VerifyBackupAsync(created.Backup.RelativePath, CancellationToken.None);
+
+        Assert.False(mismatch.Verified);
+        Assert.Equal("mismatch", mismatch.Status);
+        Assert.NotEqual(mismatch.ExpectedSha256, mismatch.ActualSha256);
+    }
+
+    [Fact]
+    public async Task VerifyBackupAsync_LabelsLegacyBackupWithoutManifest()
+    {
+        await using var scope = await CreateScopeAsync();
+        var service = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        var created = await service.CreateManualBackupAsync(CancellationToken.None);
+        var fullPath = service.ResolveBackupPath(created.Backup.RelativePath);
+        Assert.NotNull(fullPath);
+        File.Delete($"{fullPath}.manifest.json");
+
+        var result = await service.VerifyBackupAsync(created.Backup.RelativePath, CancellationToken.None);
+
+        Assert.False(result.Verified);
+        Assert.Equal("legacyUnverified", result.Status);
+        Assert.Null(result.ExpectedSha256);
+    }
+
+    [Fact]
+    public async Task RestoreDrill_RestoresVerifiedSqliteBackupIntoDisposableDirectory()
+    {
+        await using var scope = await CreateScopeAsync();
+        Directory.CreateDirectory(Path.Combine(scope.Root, "files", "task-files"));
+        await File.WriteAllTextAsync(Path.Combine(scope.Root, "files", "task-files", "evidence.txt"), "restored evidence");
+        var backups = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        await backups.UpdateSettingsAsync(
+            automaticEnabled: false,
+            scheduleLocal: "03:00",
+            retentionDays: 14,
+            backupFormat: "zip",
+            cancellationToken: CancellationToken.None);
+        var created = await backups.CreateManualBackupAsync(CancellationToken.None);
+
+        var report = await scope.Provider.GetRequiredService<DatabaseRestoreDrillService>()
+            .RunAsync(created.Backup.RelativePath, executePostgreSql: false, confirmationToken: null, CancellationToken.None);
+
+        Assert.Equal("restored", report.Status);
+        Assert.Equal("ok", report.IntegrityStatus);
+        Assert.True(report.TableCount > 0);
+        Assert.Equal(0, report.ForeignKeyViolationCount);
+        Assert.True(File.Exists(report.Target));
+        Assert.True(File.Exists(report.ReportPath));
+        Assert.StartsWith(Path.Combine(scope.Root, "restore-drills"), report.Target, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("restored evidence", await File.ReadAllTextAsync(
+            Path.Combine(Path.GetDirectoryName(report.Target)!, "files", "file-storage", "task-files", "evidence.txt")));
+    }
+
     private static async Task<TestScope> CreateScopeAsync()
     {
         var root = Path.Combine(Path.GetTempPath(), $"payplanner-backup-s3-{Guid.NewGuid():N}");
         Directory.CreateDirectory(root);
         var dbPath = Path.Combine(root, "payplanner.db");
         var backupDirectory = Path.Combine(root, "backups");
+        var fileStorageDirectory = Path.Combine(root, "files");
+        Directory.CreateDirectory(fileStorageDirectory);
         var connectionString = $"Data Source={dbPath}";
         var providerInfo = new DatabaseProviderInfo(DatabaseProviderKind.Sqlite, DatabaseProviderResolver.NormalizeSqliteConnection(connectionString));
         var s3 = new FakeS3StorageService();
@@ -241,6 +370,8 @@ public sealed class DatabaseBackupServiceS3Tests
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["DatabaseBackup:Directory"] = backupDirectory,
+                ["DatabaseBackup:IncludeFileStorage"] = "true",
+                ["FileStorage:RootPath"] = fileStorageDirectory,
             })
             .Build());
         services.AddDbContextFactory<PaymentContext>(options => options.UseSqlite(providerInfo.ConnectionString));
@@ -249,7 +380,11 @@ public sealed class DatabaseBackupServiceS3Tests
         services.AddSingleton(s3);
         services.AddSingleton(yandexDisk);
         services.AddSingleton<ILogger<DatabaseBackupService>>(NullLogger<DatabaseBackupService>.Instance);
+        services.AddSingleton<ILogger<DatabaseRestoreDrillService>>(NullLogger<DatabaseRestoreDrillService>.Instance);
+        services.AddSingleton<IWebHostEnvironment>(new TestWebHostEnvironment(root));
+        services.Configure<DatabaseRestoreDrillOptions>(options => options.RootDirectory = Path.Combine(root, "restore-drills"));
         services.AddSingleton<DatabaseBackupService>();
+        services.AddSingleton<DatabaseRestoreDrillService>();
         var serviceProvider = services.BuildServiceProvider();
 
         await using (var db = await serviceProvider.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContextAsync())
@@ -263,7 +398,7 @@ public sealed class DatabaseBackupServiceS3Tests
     private sealed class FakeS3StorageService : IS3StorageService
     {
         public bool ThrowOnUpload { get; set; }
-        public string? UploadedPath { get; private set; }
+        public List<string> UploadedPaths { get; } = [];
         public long UploadedBytes { get; private set; }
 
         public Task<S3StorageConnectionsOverviewDto> GetOverviewAsync(CancellationToken cancellationToken = default)
@@ -291,7 +426,7 @@ public sealed class DatabaseBackupServiceS3Tests
                 throw new S3StorageOperationException(503, "S3 unavailable");
             }
 
-            UploadedPath = path;
+            UploadedPaths.Add(path ?? string.Empty);
             using var memory = new MemoryStream();
             await content.CopyToAsync(memory, cancellationToken);
             UploadedBytes = memory.Length;
@@ -325,7 +460,7 @@ public sealed class DatabaseBackupServiceS3Tests
     private sealed class FakeYandexDiskService : IYandexDiskService
     {
         public bool ThrowOnUpload { get; set; }
-        public string? UploadedPath { get; private set; }
+        public List<string> UploadedPaths { get; } = [];
         public long UploadedBytes { get; private set; }
 
         public Task<YandexDiskSettingsDto> GetSettingsAsync(CancellationToken cancellationToken = default)
@@ -359,7 +494,7 @@ public sealed class DatabaseBackupServiceS3Tests
                 throw new YandexDiskOperationException(503, "Yandex Disk unavailable");
             }
 
-            UploadedPath = path;
+            UploadedPaths.Add(path ?? string.Empty);
             using var memory = new MemoryStream();
             await content.CopyToAsync(memory, cancellationToken);
             UploadedBytes = memory.Length;
@@ -392,20 +527,39 @@ public sealed class DatabaseBackupServiceS3Tests
             => throw new NotSupportedException();
     }
 
-    private sealed class TestScope(string root, ServiceProvider provider, FakeS3StorageService s3, FakeYandexDiskService yandexDisk) : IAsyncDisposable
+    private sealed class TestScope : IAsyncDisposable
     {
-        public ServiceProvider Provider { get; } = provider;
-        public FakeS3StorageService S3 { get; } = s3;
-        public FakeYandexDiskService YandexDisk { get; } = yandexDisk;
+        public TestScope(string root, ServiceProvider provider, FakeS3StorageService s3, FakeYandexDiskService yandexDisk)
+        {
+            Root = root;
+            Provider = provider;
+            S3 = s3;
+            YandexDisk = yandexDisk;
+        }
+
+        public string Root { get; }
+        public ServiceProvider Provider { get; }
+        public FakeS3StorageService S3 { get; }
+        public FakeYandexDiskService YandexDisk { get; }
 
         public async ValueTask DisposeAsync()
         {
             await Provider.DisposeAsync();
             SqliteConnection.ClearAllPools();
-            if (Directory.Exists(root))
+            if (Directory.Exists(Root))
             {
-                Directory.Delete(root, recursive: true);
+                Directory.Delete(Root, recursive: true);
             }
         }
+    }
+
+    private sealed class TestWebHostEnvironment(string root) : IWebHostEnvironment
+    {
+        public string ApplicationName { get; set; } = "PayPlanner.Api.Tests";
+        public IFileProvider WebRootFileProvider { get; set; } = new NullFileProvider();
+        public string WebRootPath { get; set; } = Path.Combine(root, "wwwroot");
+        public string EnvironmentName { get; set; } = "Testing";
+        public string ContentRootPath { get; set; } = root;
+        public IFileProvider ContentRootFileProvider { get; set; } = new PhysicalFileProvider(root);
     }
 }

@@ -1497,6 +1497,36 @@ export interface DatabaseBackupFileDto {
   trigger: string;
 }
 
+export interface DatabaseBackupVerificationResultDto {
+  status: string;
+  verified: boolean;
+  backupRelativePath: string;
+  backupId?: string | null;
+  actualSizeBytes: number;
+  expectedSizeBytes?: number | null;
+  actualSha256?: string | null;
+  expectedSha256?: string | null;
+  error?: string | null;
+}
+
+export interface DatabaseRestoreDrillReportDto {
+  drillId: string;
+  status: string;
+  backupId: string;
+  backupRelativePath: string;
+  databaseProvider: string;
+  backupFormat: string;
+  target: string;
+  tableCount: number;
+  foreignKeyViolationCount: number;
+  integrityStatus: string;
+  startedAtUtc: string;
+  completedAtUtc: string;
+  durationMilliseconds: number;
+  reportPath: string;
+  error?: string | null;
+}
+
 export interface DatabaseBackupFormatOptionDto {
   key: string;
   label: string;
@@ -3824,6 +3854,19 @@ export class ApiService {
       blob: await response.blob(),
       fileName: parseContentDispositionFileName(response.headers.get('content-disposition')),
     };
+  }
+
+  async verifyDatabaseBackup(relativePath: string) {
+    return this.request<DatabaseBackupVerificationResultDto>(
+      `/database/backups/verify?relativePath=${encodeURIComponent(relativePath)}`,
+    );
+  }
+
+  async runDatabaseRestoreDrill(relativePath: string) {
+    return this.request<DatabaseRestoreDrillReportDto>('/database/backups/restore-drill', {
+      method: 'POST',
+      body: JSON.stringify({ relativePath, executePostgreSql: false }),
+    });
   }
 
   async importSqliteDatabase(file: File) {

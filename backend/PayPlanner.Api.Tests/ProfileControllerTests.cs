@@ -84,7 +84,7 @@ public class ProfileControllerTests
             authService,
             NullLogger<ExternalAuthService>.Instance);
 
-        return new ProfileController(authService, externalAuthService, db, new FakeWebHostEnvironment())
+        return new ProfileController(authService, externalAuthService, db, new FakeWebHostEnvironment(), configuration)
         {
             ControllerContext = new ControllerContext
             {

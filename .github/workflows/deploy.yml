@@ -252,12 +252,18 @@ jobs:
                 sudo sed \
                   -e '/^WebPush__/d' \
                   -e '/^FileStorage__RootPath=/d' \
+                  -e '/^ProfilePhotos__StorageRoot=/d' \
+                  -e '/^ElectronicSignature__StorageRoot=/d' \
                   "$RUNTIME_ENV_FILE" > "$existing_env"
               fi
 
               {
                 cat "$existing_env"
                 printf 'FileStorage__RootPath=%s\n' "$PERSISTENT_FILE_ROOT"
+                printf 'ProfilePhotos__StorageRoot=%s\n' "$PERSISTENT_FILE_ROOT/user-photos"
+                printf 'ElectronicSignature__StorageRoot=%s\n' "$PERSISTENT_FILE_ROOT/electronic-signatures"
+                printf 'DataProtection__KeysPath=%s\n' "/opt/payplanner/shared/data-protection-keys"
+                printf 'DataProtection__ApplicationName=%s\n' "PayPlanner"
                 printf 'WebPush__Enabled=%s\n' "$webpush_enabled"
                 if [ -n "$webpush_public_key" ]; then printf 'WebPush__PublicKey=%s\n' "$webpush_public_key"; fi
                 if [ -n "$webpush_private_key" ]; then printf 'WebPush__PrivateKey=%s\n' "$webpush_private_key"; fi
@@ -283,7 +289,18 @@ jobs:
               local before_count
               local after_count
 
-              sudo mkdir -p "$PERSISTENT_FILE_ROOT/task-files" "$PERSISTENT_FILE_ROOT/case-documents"
+              sudo mkdir -p \
+                "$PERSISTENT_FILE_ROOT/task-files" \
+                "$PERSISTENT_FILE_ROOT/case-documents" \
+                "$PERSISTENT_FILE_ROOT/user-photos" \
+                "$PERSISTENT_FILE_ROOT/electronic-signatures" \
+                "/opt/payplanner/shared/data-protection-keys"
+              if sudo test -d "$BE_DIR/wwwroot/user-photos"; then
+                sudo rsync -a --ignore-existing "$BE_DIR/wwwroot/user-photos/" "$PERSISTENT_FILE_ROOT/user-photos/"
+              fi
+              if sudo test -d "$BE_DIR/storage/electronic-signatures"; then
+                sudo rsync -a --ignore-existing "$BE_DIR/storage/electronic-signatures/" "$PERSISTENT_FILE_ROOT/electronic-signatures/"
+              fi
               before_count="$(sudo find "$PERSISTENT_FILE_ROOT" -type f ! -name '.legacy-app-data-migrated-v1' | wc -l)"
               if sudo test -f "$LEGACY_STORAGE_MIGRATION_MARKER"; then
                 echo "Persistent file storage is ready: files=$before_count"
@@ -316,7 +333,7 @@ jobs:
             tar -xzf "$TAR" -C "$STAGE"
 
             echo "[3/14] Ensure target dirs"
-            sudo mkdir -p "$BE_DIR" "$FE_APP_DIR" "$FE_PUBLIC_DIR" "$BACKUP_ROOT" /opt/payplanner/shared/backups "$PERSISTENT_FILE_ROOT"
+            sudo mkdir -p "$BE_DIR" "$FE_APP_DIR" "$FE_PUBLIC_DIR" "$BACKUP_ROOT" /opt/payplanner/shared/backups "$PERSISTENT_FILE_ROOT" /opt/payplanner/shared/data-protection-keys
 
             echo "[4/14] Configure runtime environment"
             configure_runtime_env

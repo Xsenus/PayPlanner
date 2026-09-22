@@ -1,7 +1,7 @@
 import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemSelect } from '../ui/SystemSelect';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Archive, Database, Download, Loader2, RefreshCw, Save, ShieldAlert, Trash2, UploadCloud } from 'lucide-react';
+import { Archive, BadgeCheck, Database, Download, FlaskConical, Loader2, RefreshCw, Save, ShieldAlert, Trash2, UploadCloud } from 'lucide-react';
 import { apiService } from '../../services/api';
 import type {
   DatabaseBackupOverviewDto,
@@ -163,6 +163,8 @@ export function DatabaseMaintenanceSettings() {
   const [databaseBackupS3RetryingId, setDatabaseBackupS3RetryingId] = useState<string | null>(null);
   const [databaseBackupYandexDiskRetryingId, setDatabaseBackupYandexDiskRetryingId] = useState<string | null>(null);
   const [databaseBackupDeleting, setDatabaseBackupDeleting] = useState<string | null>(null);
+  const [databaseBackupVerifying, setDatabaseBackupVerifying] = useState<string | null>(null);
+  const [databaseBackupDrilling, setDatabaseBackupDrilling] = useState<string | null>(null);
   const [databaseBackupClearing, setDatabaseBackupClearing] = useState(false);
   const [databaseBackupMessage, setDatabaseBackupMessage] = useState<string | null>(null);
   const [databaseBackupError, setDatabaseBackupError] = useState<string | null>(null);
@@ -448,6 +450,53 @@ export function DatabaseMaintenanceSettings() {
     link.click();
     link.remove();
     window.URL.revokeObjectURL(blobUrl);
+  };
+
+  const verifyDatabaseBackup = async (relativePath: string) => {
+    setDatabaseBackupVerifying(relativePath);
+    setDatabaseBackupError(null);
+    setDatabaseBackupMessage(null);
+    try {
+      const result = await apiService.verifyDatabaseBackup(relativePath);
+      if (!result.verified) {
+        setDatabaseBackupError(result.error || 'Проверка выявила повреждение или неполный комплект резервной копии.');
+        return;
+      }
+      setDatabaseBackupMessage(`Целостность подтверждена${result.backupId ? ` · комплект ${result.backupId}` : ''}.`);
+    } catch (error) {
+      setDatabaseBackupError(getErrorMessage(error, 'Не удалось проверить резервную копию.'));
+    } finally {
+      setDatabaseBackupVerifying(null);
+    }
+  };
+
+  const runDatabaseRestoreDrill = async (relativePath: string) => {
+    const approved = await confirm({
+      title: 'Проверить восстановление',
+      description: 'CRM восстановит копию в отдельный временный каталог и проверит целостность. Рабочая база данных не изменится.',
+      confirmLabel: 'Запустить проверку',
+      cancelLabel: 'Отмена',
+    });
+    if (!approved) return;
+
+    setDatabaseBackupDrilling(relativePath);
+    setDatabaseBackupError(null);
+    setDatabaseBackupMessage(null);
+    try {
+      const result = await apiService.runDatabaseRestoreDrill(relativePath);
+      if (result.status === 'failed') {
+        setDatabaseBackupError(result.error || 'Тестовое восстановление завершилось с ошибкой.');
+        return;
+      }
+      const details = result.databaseProvider === 'sqlite'
+        ? `таблиц: ${result.tableCount}, нарушений связей: ${result.foreignKeyViolationCount}`
+        : 'структура и комплект проверены; фактическое восстановление PostgreSQL не запускалось';
+      setDatabaseBackupMessage(`Тест восстановления завершён: ${details}.`);
+    } catch (error) {
+      setDatabaseBackupError(getErrorMessage(error, 'Не удалось выполнить тестовое восстановление.'));
+    } finally {
+      setDatabaseBackupDrilling(null);
+    }
   };
 
   const createAndDownloadDatabaseBackup = async () => {
@@ -1346,6 +1395,26 @@ export function DatabaseMaintenanceSettings() {
                             <td className="px-4 py-3 text-gray-700">{item.trigger === 'manual' ? 'Ручная' : item.trigger === 'auto' ? 'Автоматическая' : item.trigger}</td>
                             <td className="px-4 py-3">
                               <div className="flex justify-end gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => void verifyDatabaseBackup(item.relativePath)}
+                                  disabled={databaseBackupVerifying === item.relativePath || databaseBackupDrilling === item.relativePath}
+                                  title="Проверить размер, контрольную сумму и все обязательные части комплекта"
+                                  className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 disabled:opacity-60"
+                                >
+                                  {databaseBackupVerifying === item.relativePath ? <Loader2 size={14} className="animate-spin" /> : <BadgeCheck size={14} />}
+                                  Проверить
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => void runDatabaseRestoreDrill(item.relativePath)}
+                                  disabled={databaseBackupDrilling === item.relativePath || databaseBackupVerifying === item.relativePath}
+                                  title="Восстановить в изолированное место и проверить данные без изменения рабочей базы"
+                                  className="inline-flex items-center gap-2 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-xs font-semibold text-violet-700 hover:bg-violet-100 disabled:opacity-60"
+                                >
+                                  {databaseBackupDrilling === item.relativePath ? <Loader2 size={14} className="animate-spin" /> : <FlaskConical size={14} />}
+                                  Тест восстановления
+                                </button>
                                 <button
                                   type="button"
                                   onClick={() => void downloadDatabaseBackup(item.relativePath, item.fileName)}

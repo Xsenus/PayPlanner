@@ -8691,6 +8691,285 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.ToTable("StickyNoteBoardMembers");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.StorageObject", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<long>("CurrentGeneration")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("DataClass")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("LogicalName")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<string>("OwnerId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("OwnerType")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DataClass", "IsDeleted", "UpdatedAt");
+
+                    b.HasIndex("OwnerType", "OwnerId", "DataClass");
+
+                    b.ToTable("StorageObjects");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.StorageObjectGeneration", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<long>("Generation")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("PolicyVersion")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Sha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<long>("SizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("StorageObjectId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("StorageObjectId", "Generation")
+                        .IsUnique();
+
+                    b.ToTable("StorageObjectGenerations");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.StorageOperation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("ConnectionId")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("IdempotencyKey")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<DateTime?>("LeaseExpiresAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("LeaseOwner")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<DateTime?>("NextAttemptAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("OperationType")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("PayloadJson")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ProviderKey")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<Guid?>("StorageObjectGenerationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("StorageObjectId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IdempotencyKey")
+                        .IsUnique();
+
+                    b.HasIndex("StorageObjectGenerationId");
+
+                    b.HasIndex("StorageObjectId");
+
+                    b.HasIndex("Status", "NextAttemptAt");
+
+                    b.HasIndex("ProviderKey", "Status", "NextAttemptAt");
+
+                    b.ToTable("StorageOperations");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.StorageReplica", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("ConnectionId")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<DateTime?>("LastVerifiedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("Locator")
+                        .IsRequired()
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)");
+
+                    b.Property<string>("ProviderKey")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("ProviderVersion")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<string>("Sha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<long>("SizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<Guid>("StorageObjectGenerationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("StorageObjectGenerationId", "Status");
+
+                    b.HasIndex("ProviderKey", "ConnectionId", "Status");
+
+                    b.HasIndex("StorageObjectGenerationId", "ProviderKey", "ConnectionId", "Locator")
+                        .IsUnique();
+
+                    b.ToTable("StorageReplicas");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.StorageTombstone", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("DeletedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("DeletedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<long>("Generation")
+                        .HasColumnType("bigint");
+
+                    b.Property<bool>("LegalHold")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTime?>("RetainUntil")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<Guid>("StorageObjectId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LegalHold", "RetainUntil");
+
+                    b.HasIndex("StorageObjectId", "Generation")
+                        .IsUnique();
+
+                    b.ToTable("StorageTombstones");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.SystemSetting", b =>
                 {
                     b.Property<int>("Id")
@@ -12461,6 +12740,57 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.StorageObjectGeneration", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.StorageObject", "StorageObject")
+                        .WithMany("Generations")
+                        .HasForeignKey("StorageObjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("StorageObject");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.StorageOperation", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.StorageObjectGeneration", "StorageObjectGeneration")
+                        .WithMany("Operations")
+                        .HasForeignKey("StorageObjectGenerationId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("PayPlanner.Api.Models.StorageObject", "StorageObject")
+                        .WithMany("Operations")
+                        .HasForeignKey("StorageObjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("StorageObject");
+
+                    b.Navigation("StorageObjectGeneration");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.StorageReplica", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.StorageObjectGeneration", "StorageObjectGeneration")
+                        .WithMany("Replicas")
+                        .HasForeignKey("StorageObjectGenerationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("StorageObjectGeneration");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.StorageTombstone", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.StorageObject", "StorageObject")
+                        .WithMany("Tombstones")
+                        .HasForeignKey("StorageObjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("StorageObject");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.TaskJournalComment", b =>
                 {
                     b.HasOne("PayPlanner.Api.Models.User", "AuthorUser")
@@ -13131,6 +13461,22 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("Members");
 
                     b.Navigation("Notes");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.StorageObject", b =>
+                {
+                    b.Navigation("Generations");
+
+                    b.Navigation("Operations");
+
+                    b.Navigation("Tombstones");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.StorageObjectGeneration", b =>
+                {
+                    b.Navigation("Operations");
+
+                    b.Navigation("Replicas");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.TaskJournalItem", b =>

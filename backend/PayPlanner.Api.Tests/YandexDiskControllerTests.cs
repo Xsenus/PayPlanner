@@ -232,9 +232,12 @@ public sealed class YandexDiskControllerTests
 
         var response = await controller.Download("/Docs/report.txt", CancellationToken.None);
 
-        var file = Assert.IsType<FileContentResult>(response);
+        var file = Assert.IsType<FileStreamResult>(response);
         Assert.Equal("file.txt", file.FileDownloadName);
         Assert.Equal("text/plain", file.ContentType);
+        using var content = new MemoryStream();
+        await file.FileStream.CopyToAsync(content);
+        Assert.Equal([1, 2, 3], content.ToArray());
         Assert.True(service.DownloadCalled);
         var audit = Assert.Single(scope.Db.ObjectAuditEvents);
         Assert.Equal("Downloaded", audit.Action);

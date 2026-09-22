@@ -81,6 +81,22 @@ public sealed class ElectronicSignatureServiceTests
     }
 
     [Fact]
+    public async Task DefaultStorageRoot_UsesPersistentApplicationFileStorage()
+    {
+        await using var fixture = await Fixture.CreateAsync(useExplicitStorageRoot: false);
+
+        var prepared = await fixture.Service.PrepareAsync(
+            fixture.Request(),
+            new MemoryStream("%PDF-1.7 persistent"u8.ToArray()),
+            "invoice.pdf",
+            CancellationToken.None);
+
+        var expectedRoot = Path.GetFullPath(Path.Combine(fixture.Root, "shared-files", "electronic-signatures"));
+        Assert.StartsWith(expectedRoot + Path.DirectorySeparatorChar, prepared.SnapshotPath, StringComparison.OrdinalIgnoreCase);
+        Assert.True(File.Exists(prepared.SnapshotPath));
+    }
+
+    [Fact]
     public async Task ChangedVersionCreatesNewEnvelope()
     {
         await using var fixture = await Fixture.CreateAsync();
@@ -284,7 +300,7 @@ public sealed class ElectronicSignatureServiceTests
                 new("Представитель", "representative@example.test", "representative", RequiresMachineReadablePowerOfAttorney: true, PowerOfAttorneyReference: "МЧД-1")
             ]);
 
-        public static async Task<Fixture> CreateAsync()
+        public static async Task<Fixture> CreateAsync(bool useExplicitStorageRoot = true)
         {
             var connection = new SqliteConnection("Data Source=:memory:");
             await connection.OpenAsync();
@@ -307,11 +323,19 @@ public sealed class ElectronicSignatureServiceTests
 
             var root = Path.Combine(Path.GetTempPath(), $"payplanner-esign-{Guid.NewGuid():N}");
             Directory.CreateDirectory(root);
-            var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+            var configurationValues = new Dictionary<string, string?>
             {
                 ["ElectronicSignature:PreparationEnabled"] = "true",
-                ["ElectronicSignature:StorageRoot"] = Path.Combine(root, "storage")
-            }).Build();
+                ["FileStorage:RootPath"] = Path.Combine(root, "shared-files")
+            };
+            if (useExplicitStorageRoot)
+            {
+                configurationValues["ElectronicSignature:StorageRoot"] = Path.Combine(root, "storage");
+            }
+
+            var configuration = new ConfigurationBuilder()
+                .AddInMemoryCollection(configurationValues)
+                .Build();
             var protection = DataProtectionProvider.Create(new DirectoryInfo(Path.Combine(root, "keys")));
             var service = new ElectronicSignatureService(db, configuration, protection, new TestEnvironment(root));
             return new Fixture(connection, root, db, service, user.Id, client.Id);

@@ -49,6 +49,12 @@ public interface IYandexDiskService
         => throw new NotSupportedException();
     Task<YandexDiskDownload> DownloadAsync(string id, string? path, CancellationToken cancellationToken = default)
         => throw new NotSupportedException();
+    async Task<YandexDiskStreamDownload> OpenReadAsync(string id, string? path, CancellationToken cancellationToken = default)
+    {
+        var download = await DownloadAsync(id, path, cancellationToken);
+        var stream = new MemoryStream(download.Content, writable: false);
+        return new YandexDiskStreamDownload(download.FileName, download.ContentType, stream, stream.Length, stream);
+    }
     Task<YandexDiskTextFileDto> GetTextFileAsync(string id, string? path, CancellationToken cancellationToken = default)
         => throw new NotSupportedException();
     Task<YandexDiskOperationResultDto> SaveTextFileAsync(string id, UpdateYandexDiskTextFileRequest request, CancellationToken cancellationToken = default)
@@ -63,6 +69,12 @@ public interface IYandexDiskService
     Task<YandexDiskOperationResultDto> DeleteAsync(string? path, bool permanently, CancellationToken cancellationToken = default);
     Task<YandexDiskOperationResultDto> UploadAsync(string? path, Stream content, string? contentType, bool overwrite, CancellationToken cancellationToken = default);
     Task<YandexDiskDownload> DownloadAsync(string? path, CancellationToken cancellationToken = default);
+    async Task<YandexDiskStreamDownload> OpenReadAsync(string? path, CancellationToken cancellationToken = default)
+    {
+        var download = await DownloadAsync(path, cancellationToken);
+        var stream = new MemoryStream(download.Content, writable: false);
+        return new YandexDiskStreamDownload(download.FileName, download.ContentType, stream, stream.Length, stream);
+    }
     Task<YandexDiskTextFileDto> GetTextFileAsync(string? path, CancellationToken cancellationToken = default);
     Task<YandexDiskOperationResultDto> SaveTextFileAsync(UpdateYandexDiskTextFileRequest request, CancellationToken cancellationToken = default);
     Task<YandexDiskCrmSyncSettingsDto> GetCrmSyncSettingsAsync(CancellationToken cancellationToken = default);
@@ -72,6 +84,16 @@ public interface IYandexDiskService
 }
 
 public sealed record YandexDiskDownload(string FileName, string ContentType, byte[] Content);
+
+public sealed record YandexDiskStreamDownload(
+    string FileName,
+    string ContentType,
+    Stream Content,
+    long SizeBytes,
+    IAsyncDisposable Owner) : IAsyncDisposable
+{
+    public ValueTask DisposeAsync() => Owner.DisposeAsync();
+}
 
 public sealed record YandexDiskCrmDocumentUpload(
     Stream Content,
@@ -792,27 +814,56 @@ public sealed class YandexDiskService : IYandexDiskService
         string? path,
         CancellationToken cancellationToken)
     {
+        await using var streamed = await OpenReadAsync(settings, path, cancellationToken);
+        using var buffer = new MemoryStream();
+        await streamed.Content.CopyToAsync(buffer, cancellationToken);
+        return new YandexDiskDownload(streamed.FileName, streamed.ContentType, buffer.ToArray());
+    }
+
+    public async Task<YandexDiskStreamDownload> OpenReadAsync(string? path, CancellationToken cancellationToken = default)
+    {
+        var settings = await LoadConfiguredSettingsAsync(cancellationToken);
+        return await OpenReadAsync(settings, path, cancellationToken);
+    }
+
+    public async Task<YandexDiskStreamDownload> OpenReadAsync(string id, string? path, CancellationToken cancellationToken = default)
+    {
+        var settings = await LoadConfiguredConnectionAsync(id, cancellationToken);
+        return await OpenReadAsync(settings, path, cancellationToken);
+    }
+
+    private async Task<YandexDiskStreamDownload> OpenReadAsync(
+        YandexDiskSettingsState settings,
+        string? path,
+        CancellationToken cancellationToken)
+    {
         var relativePath = NormalizeRequiredRelativePath(path, "Выберите файл для скачивания.");
         var fullPath = BuildFullPath(settings.RootPath, relativePath);
-        var token = settings.OAuthToken!;
         var link = await SendJsonAsync<YandexDiskLinkPayload>(
             HttpMethod.Get,
             $"{ApiBaseUrl}/resources/download?path={Uri.EscapeDataString(fullPath)}",
-            token,
+            settings.OAuthToken!,
             null,
             cancellationToken);
-
-        using var response = await _httpClient.GetAsync(link.Href, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-        await EnsureSuccessAsync(response, cancellationToken);
-        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        using var buffer = new MemoryStream();
-        await stream.CopyToAsync(buffer, cancellationToken);
-
-        var fileName = Path.GetFileName(relativePath.Replace('\\', '/'));
-        return new YandexDiskDownload(
-            string.IsNullOrWhiteSpace(fileName) ? "yandex-disk-file" : fileName,
-            response.Content.Headers.ContentType?.ToString() ?? "application/octet-stream",
-            buffer.ToArray());
+        var response = await _httpClient.GetAsync(link.Href, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        try
+        {
+            await EnsureSuccessAsync(response, cancellationToken);
+            var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            var fileName = Path.GetFileName(relativePath.Replace('\\', '/'));
+            var ownedContent = new Storage.OwnedProviderStream(stream, new DelegateAsyncDisposable(response.Dispose));
+            return new YandexDiskStreamDownload(
+                string.IsNullOrWhiteSpace(fileName) ? "yandex-disk-file" : fileName,
+                response.Content.Headers.ContentType?.ToString() ?? "application/octet-stream",
+                ownedContent,
+                response.Content.Headers.ContentLength ?? 0,
+                ownedContent);
+        }
+        catch
+        {
+            response.Dispose();
+            throw;
+        }
     }
 
     public async Task<YandexDiskTextFileDto> GetTextFileAsync(string? path, CancellationToken cancellationToken = default)

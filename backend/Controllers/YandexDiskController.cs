@@ -566,11 +566,11 @@ public sealed class YandexDiskController : ControllerBase
 
         try
         {
-            var file = await _service.DownloadAsync(path, ct);
+            var file = await _service.OpenReadAsync(path, ct);
             await AddAuditAsync(
                 "Downloaded",
                 "Файл скачан с Яндекс.Диска.",
-                new { Path = path, file.FileName, Size = file.Content.Length },
+                new { Path = path, file.FileName, Size = file.SizeBytes },
                 ct);
             return File(file.Content, file.ContentType, file.FileName);
         }
@@ -588,11 +588,11 @@ public sealed class YandexDiskController : ControllerBase
 
         try
         {
-            var file = await _service.DownloadAsync(id, path, ct);
+            var file = await _service.OpenReadAsync(id, path, ct);
             await AddAuditAsync(
                 "Downloaded",
                 "Файл скачан с Я.Диска.",
-                new { Id = id, Path = path, file.FileName, Size = file.Content.Length },
+                new { Id = id, Path = path, file.FileName, Size = file.SizeBytes },
                 ct);
             return File(file.Content, file.ContentType, file.FileName);
         }

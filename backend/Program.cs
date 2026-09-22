@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using PayPlanner.Api.Data;
@@ -19,6 +20,7 @@ using PayPlanner.Api.Services.LegalIntegrations;
 using PayPlanner.Api.Services.LegalEntities;
 using PayPlanner.Api.Services.Notifications;
 using PayPlanner.Api.Services.UserActivity;
+using PayPlanner.Api.Services.Storage;
 using System.Diagnostics;
 using System.IO.Compression;
 using System.Text;
@@ -26,6 +28,21 @@ using System.Text.Json.Serialization;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton<IStorageProvider, LocalStorageProvider>();
+builder.Services.AddSingleton<LegacyLocalStorageProvider>();
+builder.Services.AddSingleton<ILegacyLocalStorageLocator>(sp => sp.GetRequiredService<LegacyLocalStorageProvider>());
+builder.Services.AddSingleton<IStorageProvider>(sp => sp.GetRequiredService<LegacyLocalStorageProvider>());
+builder.Services.AddScoped<IStorageProvider, S3StorageProvider>();
+builder.Services.AddScoped<IStorageProvider, YandexDiskStorageProvider>();
+builder.Services.AddScoped<IStorageProviderRegistry, StorageProviderRegistry>();
+builder.Services.AddSingleton<IStorageProviderHealthTracker, StorageProviderHealthTracker>();
+builder.Services.Configure<StorageOrchestrationOptions>(
+    builder.Configuration.GetSection(StorageOrchestrationOptions.SectionName));
+builder.Services.AddScoped<IStoragePolicyService, StoragePolicyService>();
+builder.Services.AddScoped<IStorageOperationProcessor, StorageOperationProcessor>();
+builder.Services.AddScoped<IStorageObjectService, StorageObjectService>();
+builder.Services.AddScoped<IStorageReconciliationService, StorageReconciliationService>();
+builder.Services.AddScoped<ILegacyStorageCatalogBackfillService, LegacyStorageCatalogBackfillService>();
 var databaseProvider = DatabaseProviderResolver.Resolve(builder.Configuration);
 
 builder.Services.AddControllers(options =>
@@ -209,6 +226,9 @@ builder.Services.AddSingleton<IClientPassportEncryptionDualWriteService, ClientP
 builder.Services.AddScoped<IClientPassportEncryptionBackfillService, ClientPassportEncryptionBackfillService>();
 builder.Services.AddSingleton<IInvoiceDocumentPdfService, InvoiceDocumentPdfService>();
 builder.Services.AddSingleton<DatabaseBackupService>();
+builder.Services.Configure<DatabaseRestoreDrillOptions>(
+    builder.Configuration.GetSection(DatabaseRestoreDrillOptions.SectionName));
+builder.Services.AddSingleton<DatabaseRestoreDrillService>();
 builder.Services.AddSingleton<ISystemJobRunStateService, SystemJobRunStateService>();
 builder.Services.AddSingleton<CourtSyncMetrics>();
 builder.Services.AddSingleton<CourtSyncMetricsRollupService>();
@@ -231,6 +251,9 @@ builder.Services.AddSingleton<ExternalCalendarTaskSyncWakeSignal>();
 builder.Services.AddScoped<IGoogleCalendarSyncService, GoogleCalendarSyncService>();
 builder.Services.AddScoped<IYandexCalendarSyncService, YandexCalendarSyncService>();
 builder.Services.AddSingleton<IS3StorageClientFactory, S3StorageClientFactory>();
+builder.Services.Configure<S3EndpointSecurityOptions>(
+    builder.Configuration.GetSection(S3EndpointSecurityOptions.SectionName));
+builder.Services.AddSingleton<IS3EndpointSecurityPolicy, S3EndpointSecurityPolicy>();
 builder.Services.AddScoped<IS3StorageService, S3StorageService>();
 builder.Services.AddScoped<ICourtSyncProvider, SudrfCourtSyncProvider>();
 builder.Services.AddScoped<ICourtSyncProvider, KadArbitrCourtSyncProvider>();
@@ -270,6 +293,7 @@ builder.Services.AddSingleton<YandexDiskCrmSyncSchedulerService>();
 if (builder.Configuration.GetValue("BackgroundServices:Enabled", true))
 {
     builder.Services.AddHostedService<DatabaseBackupSchedulerService>();
+    builder.Services.AddHostedService<StorageOperationWorker>();
     builder.Services.AddHostedService<MessengerDocumentOutboxWorker>();
     builder.Services.AddHostedService<MaxOutboxWorker>();
     builder.Services.AddHostedService<ExternalCalendarTaskSyncOutboxWorker>();
@@ -421,6 +445,13 @@ app.UseAuthorization();
 
 app.UseDefaultFiles();
 app.UseStaticFiles();
+var userPhotoStorageRoot = UserPhotoStoragePaths.ResolveRoot(app.Environment, app.Configuration);
+Directory.CreateDirectory(userPhotoStorageRoot);
+app.UseStaticFiles(new StaticFileOptions
+{
+    FileProvider = new PhysicalFileProvider(userPhotoStorageRoot),
+    RequestPath = UserPhotoStoragePaths.RequestPath,
+});
 
 using (var scope = app.Services.CreateScope())
 {

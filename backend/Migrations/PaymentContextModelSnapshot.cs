@@ -8486,6 +8486,283 @@ namespace PayPlanner.Api.Migrations
                     b.ToTable("StickyNoteBoardMembers");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.StorageObject", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("CurrentGeneration")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("DataClass")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("LogicalName")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OwnerId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OwnerType")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DataClass", "IsDeleted", "UpdatedAt");
+
+                    b.HasIndex("OwnerType", "OwnerId", "DataClass");
+
+                    b.ToTable("StorageObjects");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.StorageObjectGeneration", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Generation")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("PolicyVersion")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Sha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("SizeBytes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("StorageObjectId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("StorageObjectId", "Generation")
+                        .IsUnique();
+
+                    b.ToTable("StorageObjectGenerations");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.StorageOperation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ConnectionId")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("IdempotencyKey")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(2000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("LeaseExpiresAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LeaseOwner")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("NextAttemptAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OperationType")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PayloadJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProviderKey")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("StorageObjectGenerationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("StorageObjectId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IdempotencyKey")
+                        .IsUnique();
+
+                    b.HasIndex("StorageObjectGenerationId");
+
+                    b.HasIndex("StorageObjectId");
+
+                    b.HasIndex("Status", "NextAttemptAt");
+
+                    b.HasIndex("ProviderKey", "Status", "NextAttemptAt");
+
+                    b.ToTable("StorageOperations");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.StorageReplica", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ConnectionId")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(2000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("LastVerifiedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Locator")
+                        .IsRequired()
+                        .HasMaxLength(2048)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProviderKey")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProviderVersion")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Sha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("SizeBytes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("StorageObjectGenerationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("StorageObjectGenerationId", "Status");
+
+                    b.HasIndex("ProviderKey", "ConnectionId", "Status");
+
+                    b.HasIndex("StorageObjectGenerationId", "ProviderKey", "ConnectionId", "Locator")
+                        .IsUnique();
+
+                    b.ToTable("StorageReplicas");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.StorageTombstone", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("DeletedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("DeletedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Generation")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("LegalHold")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("RetainUntil")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("StorageObjectId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LegalHold", "RetainUntil");
+
+                    b.HasIndex("StorageObjectId", "Generation")
+                        .IsUnique();
+
+                    b.ToTable("StorageTombstones");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.SystemSetting", b =>
                 {
                     b.Property<int>("Id")
@@ -12209,6 +12486,57 @@ namespace PayPlanner.Api.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.StorageObjectGeneration", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.StorageObject", "StorageObject")
+                        .WithMany("Generations")
+                        .HasForeignKey("StorageObjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("StorageObject");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.StorageOperation", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.StorageObjectGeneration", "StorageObjectGeneration")
+                        .WithMany("Operations")
+                        .HasForeignKey("StorageObjectGenerationId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("PayPlanner.Api.Models.StorageObject", "StorageObject")
+                        .WithMany("Operations")
+                        .HasForeignKey("StorageObjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("StorageObject");
+
+                    b.Navigation("StorageObjectGeneration");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.StorageReplica", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.StorageObjectGeneration", "StorageObjectGeneration")
+                        .WithMany("Replicas")
+                        .HasForeignKey("StorageObjectGenerationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("StorageObjectGeneration");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.StorageTombstone", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.StorageObject", "StorageObject")
+                        .WithMany("Tombstones")
+                        .HasForeignKey("StorageObjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("StorageObject");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.TaskJournalComment", b =>
                 {
                     b.HasOne("PayPlanner.Api.Models.User", "AuthorUser")
@@ -12879,6 +13207,22 @@ namespace PayPlanner.Api.Migrations
                     b.Navigation("Members");
 
                     b.Navigation("Notes");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.StorageObject", b =>
+                {
+                    b.Navigation("Generations");
+
+                    b.Navigation("Operations");
+
+                    b.Navigation("Tombstones");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.StorageObjectGeneration", b =>
+                {
+                    b.Navigation("Operations");
+
+                    b.Navigation("Replicas");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.TaskJournalItem", b =>

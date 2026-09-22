@@ -23,6 +23,7 @@ public class DatabaseAdminController : ControllerBase, IAsyncActionFilter
     private readonly PaymentContext _db;
     private readonly DatabaseProviderInfo _databaseProvider;
     private readonly DatabaseBackupService _databaseBackupService;
+    private readonly DatabaseRestoreDrillService? _databaseRestoreDrillService;
     private readonly IDatabaseImportService _databaseImportService;
     private readonly ISpreadsheetImportService _spreadsheetImportService;
 
@@ -31,11 +32,13 @@ public class DatabaseAdminController : ControllerBase, IAsyncActionFilter
         DatabaseProviderInfo databaseProvider,
         DatabaseBackupService databaseBackupService,
         IDatabaseImportService databaseImportService,
-        ISpreadsheetImportService spreadsheetImportService)
+        ISpreadsheetImportService spreadsheetImportService,
+        DatabaseRestoreDrillService? databaseRestoreDrillService = null)
     {
         _db = db;
         _databaseProvider = databaseProvider;
         _databaseBackupService = databaseBackupService;
+        _databaseRestoreDrillService = databaseRestoreDrillService;
         _databaseImportService = databaseImportService;
         _spreadsheetImportService = spreadsheetImportService;
     }
@@ -209,6 +212,36 @@ public class DatabaseAdminController : ControllerBase, IAsyncActionFilter
             "application/octet-stream",
             Path.GetFileName(resolvedPath),
             enableRangeProcessing: true);
+    }
+
+    [HttpGet("backups/verify")]
+    public async Task<ActionResult<DatabaseBackupVerificationResult>> VerifyBackupAsync(
+        [FromQuery] string? relativePath,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await _databaseBackupService.VerifyBackupAsync(relativePath, cancellationToken));
+        }
+        catch (FileNotFoundException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+    }
+
+    [HttpPost("backups/restore-drill")]
+    public async Task<ActionResult<DatabaseRestoreDrillReport>> RunRestoreDrillAsync(
+        [FromBody] DatabaseRestoreDrillRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (_databaseRestoreDrillService is null)
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new { message = "Сервис тестового восстановления не настроен." });
+        var result = await _databaseRestoreDrillService.RunAsync(
+            request.RelativePath,
+            request.ExecutePostgreSql,
+            request.ConfirmationToken,
+            cancellationToken);
+        return result.Status == "failed" ? UnprocessableEntity(result) : Ok(result);
     }
 
     [HttpPost("import/sqlite")]
