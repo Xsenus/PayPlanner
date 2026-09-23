@@ -1202,6 +1202,10 @@ public partial class CasesV2Controller : ControllerBase
             JudicialUid = item.JudicialUid,
             CourtUrl = item.CourtUrl,
             NextHearingAt = item.NextHearingAt,
+            NextHearingConfirmedForAt = item.NextHearingConfirmedForAt,
+            NextHearingConfirmedAt = item.NextHearingConfirmedAt,
+            NextHearingConfirmedByUserId = item.NextHearingConfirmedByUserId,
+            NextHearingConfirmedByName = item.NextHearingConfirmedByName,
             Claimant = item.Claimant,
             Defendant = item.Defendant,
             ThirdParties = item.ThirdParties,
@@ -8548,6 +8552,7 @@ public partial class CasesV2Controller : ControllerBase
             {
                 removedItems.Add("прошедшее ближайшее заседание");
             }
+            ResetNextHearingConfirmation(clientCase);
             clientCase.NextHearingAt = nextHearingAt;
             changedFields.Add("ближайшее заседание");
         }
@@ -10007,6 +10012,10 @@ public partial class CasesV2Controller : ControllerBase
         target.CourtCaseNumber = source.CourtCaseNumber?.Trim() ?? string.Empty;
         target.JudicialUid = source.JudicialUid?.Trim() ?? string.Empty;
         target.CourtUrl = source.CourtUrl?.Trim() ?? string.Empty;
+        if (target.NextHearingAt != source.NextHearingAt)
+        {
+            ResetNextHearingConfirmation(target);
+        }
         target.NextHearingAt = source.NextHearingAt;
         target.Claimant = source.Claimant?.Trim() ?? string.Empty;
         target.Defendant = source.Defendant?.Trim() ?? string.Empty;

@@ -1493,6 +1493,20 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<DateTime?>("NextHearingAt")
                         .HasColumnType("timestamp without time zone");
 
+                    b.Property<DateTime?>("NextHearingConfirmedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("NextHearingConfirmedByName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<int?>("NextHearingConfirmedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("NextHearingConfirmedForAt")
+                        .HasColumnType("timestamp without time zone");
+
                     b.Property<DateTime?>("ObjectionDeadlineAt")
                         .HasColumnType("timestamp without time zone");
 

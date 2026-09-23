@@ -3165,6 +3165,67 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task ConfirmNextHearing_RequiresFutureSavedDateAndPermissionAndResetsAfterReschedule()
+    {
+        await using var db = await CreateContextAsync();
+        var lawyer = await CreateUserAsync(db, "hearing-lawyer@example.com", "Юрист");
+        var viewer = await CreateUserAsync(db, "hearing-viewer@example.com", "Наблюдатель", DataVisibilityScope.All);
+        var outsider = await CreateUserAsync(db, "hearing-outsider@example.com", "Другой юрист", DataVisibilityScope.Own);
+        await GrantSectionPermissionAsync(db, viewer, RolePermissionCatalog.Cases, canEdit: false);
+        var nextHearing = DateTime.UtcNow.AddDays(7);
+        var clientCase = new ClientCase
+        {
+            Client = new Client { Name = "Доверитель", IsActive = true, ResponsibleUserId = lawyer.Id },
+            Title = "Дело с заседанием", Status = ClientCaseStatus.Open, ResponsibleUserId = lawyer.Id,
+        };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, lawyer);
+        Assert.IsType<ConflictObjectResult>((await controller.ConfirmNextHearing(clientCase.Id, CancellationToken.None)).Result);
+        clientCase.NextHearingAt = DateTime.UtcNow.AddDays(-1);
+        await db.SaveChangesAsync();
+        Assert.IsType<ConflictObjectResult>((await controller.ConfirmNextHearing(clientCase.Id, CancellationToken.None)).Result);
+        clientCase.NextHearingAt = nextHearing;
+        await db.SaveChangesAsync();
+        Assert.IsType<ForbidResult>((await CreateController(db, viewer).ConfirmNextHearing(clientCase.Id, CancellationToken.None)).Result);
+        Assert.IsType<NotFoundResult>((await CreateController(db, outsider).ConfirmNextHearing(clientCase.Id, CancellationToken.None)).Result);
+
+        var first = Assert.IsType<CasesV2Controller.NextHearingConfirmationDto>(
+            Assert.IsType<OkObjectResult>((await controller.ConfirmNextHearing(clientCase.Id, CancellationToken.None)).Result).Value);
+        var repeated = Assert.IsType<CasesV2Controller.NextHearingConfirmationDto>(
+            Assert.IsType<OkObjectResult>((await controller.ConfirmNextHearing(clientCase.Id, CancellationToken.None)).Result).Value);
+        Assert.Equal(nextHearing, first.NextHearingConfirmedForAt);
+        Assert.Equal(first.NextHearingConfirmedAt, repeated.NextHearingConfirmedAt);
+        Assert.Equal(lawyer.Id, first.NextHearingConfirmedByUserId);
+        Assert.Equal(1, clientCase.EventHistory.Split("Дата следующего заседания проверена", StringSplitOptions.None).Length - 1);
+
+        var sameDateUpdate = await controller.Update(clientCase.Id, new ClientCase
+        {
+            ClientId = clientCase.ClientId, Title = clientCase.Title, Status = ClientCaseStatus.Open,
+            ResponsibleUserId = lawyer.Id, NextHearingAt = nextHearing,
+        }, CancellationToken.None);
+        Assert.IsType<OkObjectResult>(sameDateUpdate);
+        Assert.Equal(first.NextHearingConfirmedAt, clientCase.NextHearingConfirmedAt);
+
+        var rescheduled = nextHearing.AddDays(2);
+        var update = await controller.Update(clientCase.Id, new ClientCase
+        {
+            ClientId = clientCase.ClientId, Title = clientCase.Title, Status = ClientCaseStatus.Open,
+            ResponsibleUserId = lawyer.Id, NextHearingAt = rescheduled,
+        }, CancellationToken.None);
+        Assert.IsType<OkObjectResult>(update);
+        await db.Entry(clientCase).ReloadAsync();
+        Assert.Equal(rescheduled, clientCase.NextHearingAt);
+        Assert.Null(clientCase.NextHearingConfirmedAt);
+        Assert.Null(clientCase.NextHearingConfirmedForAt);
+
+        clientCase.Status = ClientCaseStatus.Closed;
+        await db.SaveChangesAsync();
+        Assert.IsType<ConflictObjectResult>((await controller.ConfirmNextHearing(clientCase.Id, CancellationToken.None)).Result);
+    }
+
+    [Fact]
     public async Task ExpiringCaseAppeals_ReturnsOnlyVisibleUnresolvedDecisionsInThreeDayWindow()
     {
         await using var db = await CreateContextAsync();
@@ -8130,6 +8191,10 @@ public class CasesV2ControllerTests
             CourtUrl = "https://test.sudrf.ru/modules.php?name=sud_delo&name_op=case&delo_id=42",
             CourtCaseNumber = "2-2026/99",
             NextHearingAt = oldHearingAt,
+            NextHearingConfirmedForAt = oldHearingAt,
+            NextHearingConfirmedAt = DateTime.UtcNow,
+            NextHearingConfirmedByUserId = responsible.Id,
+            NextHearingConfirmedByName = "Юрист",
             Status = ClientCaseStatus.Open,
             ResponsibleUserId = responsible.Id,
         };
@@ -8170,6 +8235,8 @@ public class CasesV2ControllerTests
             notificationService: CreateNotificationService(db));
 
         Assert.IsType<OkObjectResult>((await controller.RunCourtSync(clientCase.Id, null, CancellationToken.None)).Result);
+        Assert.Null(clientCase.NextHearingConfirmedForAt);
+        Assert.Null(clientCase.NextHearingConfirmedAt);
         var notification = await db.UserNotifications.SingleAsync(item =>
             item.RecipientUserId == responsible.Id && item.Type == UserNotificationTypes.CourtHearing);
         Assert.Contains("Перенесено", notification.Title, StringComparison.Ordinal);

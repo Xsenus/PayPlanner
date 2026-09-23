@@ -521,6 +521,10 @@ export interface ClientCase {
   judicialUid?: string | null;
   courtUrl?: string | null;
   nextHearingAt?: string | null;
+  nextHearingConfirmedForAt?: string | null;
+  nextHearingConfirmedAt?: string | null;
+  nextHearingConfirmedByUserId?: number | null;
+  nextHearingConfirmedByName?: string | null;
   nextHearingOutcome?: 'postponed' | 'considered' | 'interim' | null;
   claimant?: string | null;
   defendant?: string | null;

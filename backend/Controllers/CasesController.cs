@@ -228,6 +228,13 @@ public class CasesController : ControllerBase
         target.CourtCaseNumber = source.CourtCaseNumber?.Trim() ?? string.Empty;
         target.JudicialUid = source.JudicialUid?.Trim() ?? string.Empty;
         target.CourtUrl = source.CourtUrl?.Trim() ?? string.Empty;
+        if (target.NextHearingAt != source.NextHearingAt)
+        {
+            target.NextHearingConfirmedForAt = null;
+            target.NextHearingConfirmedAt = null;
+            target.NextHearingConfirmedByUserId = null;
+            target.NextHearingConfirmedByName = string.Empty;
+        }
         target.NextHearingAt = source.NextHearingAt;
         target.Claimant = source.Claimant?.Trim() ?? string.Empty;
         target.Defendant = source.Defendant?.Trim() ?? string.Empty;

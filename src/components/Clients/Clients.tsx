@@ -2042,6 +2042,13 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
                   } as ClientCase)
             }
             onSave={saveCase}
+            onNextHearingConfirmed={(confirmation) => {
+              setEditingCase((current) => current ? { ...current, ...confirmation } : current);
+              setClients((current) => current.map((client) => ({
+                ...client,
+                cases: client.cases?.map((item) => item.id === editingCase?.id ? { ...item, ...confirmation } : item),
+              })));
+            }}
             onDelete={caseMode === 'edit' ? deleteCase : undefined}
             canViewFinance={permissions.payments.canView}
           />

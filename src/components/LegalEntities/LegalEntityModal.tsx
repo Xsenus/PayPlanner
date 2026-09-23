@@ -5010,6 +5010,10 @@ export function LegalEntityModal({
               : blankLegalEntityCase
           }
           onSave={saveLegalEntityCase}
+          onNextHearingConfirmed={(confirmation) => {
+            setEditingCase((current) => current ? { ...current, ...confirmation } : current);
+            setLegalEntityCases((current) => current.map((item) => item.id === editingCase?.id ? { ...item, ...confirmation } : item));
+          }}
           onDelete={caseMode === "edit" && !readOnly ? removeLegalEntityCase : undefined}
           responsibles={responsibles}
           canViewFinance={canViewPayments}

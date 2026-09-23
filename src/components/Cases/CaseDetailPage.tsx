@@ -1476,6 +1476,7 @@ export function CaseDetailPage({
   const [creatingTask, setCreatingTask] = useState(false);
   const [savingHeader, setSavingHeader] = useState(false);
   const [reviewingPosition, setReviewingPosition] = useState(false);
+  const [confirmingNextHearing, setConfirmingNextHearing] = useState(false);
   const [requestingAccess, setRequestingAccess] = useState(false);
   const [generatingDocument, setGeneratingDocument] = useState(false);
   const [uploadingDocument, setUploadingDocument] = useState(false);
@@ -2479,6 +2480,21 @@ export function CaseDetailPage({
       setError(err instanceof Error ? err.message : 'Не удалось подтвердить проверку позиции.');
     } finally {
       setReviewingPosition(false);
+    }
+  };
+
+  const confirmNextHearing = async () => {
+    if (!caseItem || !canEdit || !caseItem.nextHearingAt) return;
+    setConfirmingNextHearing(true);
+    setError(null);
+    try {
+      const confirmation = await apiService.confirmNextHearing(caseItem.id);
+      setCaseItem((current) => current?.id === caseItem.id ? { ...current, ...confirmation } : current);
+      setNotice('Дата следующего заседания подтверждена.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось подтвердить дату следующего заседания.');
+    } finally {
+      setConfirmingNextHearing(false);
     }
   };
 
@@ -4143,6 +4159,8 @@ export function CaseDetailPage({
               onOverviewChange={setCourtOverview}
               caseItem={caseItem}
               canEdit={canEdit}
+              confirmingNextHearing={confirmingNextHearing}
+              onConfirmNextHearing={() => void confirmNextHearing()}
               timeZoneId={caseTimeZoneId}
               courtDirectory={courtDirectory}
               courtInstances={courtInstances}
@@ -6699,6 +6717,8 @@ function CourtPanel({
   onOverviewChange,
   caseItem,
   canEdit,
+  confirmingNextHearing,
+  onConfirmNextHearing,
   timeZoneId,
   courtDirectory,
   courtInstances,
@@ -6799,6 +6819,8 @@ function CourtPanel({
   onOverviewChange: (value: boolean) => void;
   caseItem: ClientCase;
   canEdit: boolean;
+  confirmingNextHearing: boolean;
+  onConfirmNextHearing: () => void;
   timeZoneId: string;
   courtDirectory: ClientCaseCourt[];
   courtInstances: ClientCaseCourtInstance[];
@@ -7142,6 +7164,19 @@ function CourtPanel({
                   ['Текущий результат', latestEvent?.resultSummary || latestEvent?.movementStatusLabel || latestEvent?.movementStatus || caseItem.stage || '—'],
                 ].map(([label, value]) => <div key={label} className="min-w-0 rounded-lg bg-slate-50 px-3 py-2"><div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-400">{label}</div><div className={`mt-1 break-words text-sm font-semibold text-slate-800 ${label === 'UID' ? 'font-mono text-xs text-cyan-800' : ''}`}>{value}</div></div>)}
               </div>
+              <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
+                <span className="font-semibold">Проверка следующей даты: </span>
+                {!caseItem.nextHearingAt
+                  ? 'Дата пока не назначена — ожидайте сведения суда или укажите её вручную.'
+                  : caseItem.nextHearingConfirmedAt && caseItem.nextHearingConfirmedForAt && Date.parse(caseItem.nextHearingConfirmedForAt) === Date.parse(caseItem.nextHearingAt)
+                    ? `Подтверждена ${formatRuDateTime(caseItem.nextHearingConfirmedAt)}${caseItem.nextHearingConfirmedByName ? ` · ${caseItem.nextHearingConfirmedByName}` : ''}. При переносе отметка сбросится.`
+                    : 'Дата назначена, но сотрудник ещё не подтвердил её проверку.'}
+                {canEdit && caseItem.nextHearingAt && !['Closed', 'Lost'].includes(caseItem.status) && Date.parse(caseItem.nextHearingAt) > Date.now() && (!caseItem.nextHearingConfirmedAt || !caseItem.nextHearingConfirmedForAt || Date.parse(caseItem.nextHearingConfirmedForAt) !== Date.parse(caseItem.nextHearingAt)) ? (
+                  <button type="button" onClick={onConfirmNextHearing} disabled={confirmingNextHearing} className="ml-2 rounded-md border border-blue-200 bg-white px-2 py-1 font-semibold text-blue-700 disabled:opacity-50">
+                    {confirmingNextHearing ? 'Сохраняем…' : 'Подтвердить дату'}
+                  </button>
+                ) : null}
+              </div>
               {(overviewInstance?.courtUrl || caseItem.courtUrl) ? <a href={overviewInstance?.courtUrl || caseItem.courtUrl || '#'} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-blue-700 hover:underline"><ExternalLink className="h-4 w-4" /> Открыть официальную карточку суда</a> : null}
             </section>
 
@@ -7221,6 +7256,19 @@ function CourtPanel({
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between rounded-xl border border-blue-200 bg-blue-50 p-3"><div><div className="text-sm font-semibold text-blue-900">Режим редактирования судебных данных</div><div className="text-xs text-blue-700">Здесь доступны привязка источника, ручные события, стороны, жалобы и процессуальные сроки.</div></div><button type="button" onClick={() => changeCourtEditMode(false)} className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100">Вернуться к обзору</button></div>
+      <div className="rounded-lg border border-slate-200 bg-white p-3 text-xs text-slate-700">
+        <span className="font-semibold">Следующее заседание: </span>{formatRuDateTime(caseItem.nextHearingAt) || 'не назначено'}.{' '}
+        {!caseItem.nextHearingAt
+          ? 'Ожидайте сведения суда или укажите дату вручную.'
+          : caseItem.nextHearingConfirmedAt && caseItem.nextHearingConfirmedForAt && Date.parse(caseItem.nextHearingConfirmedForAt) === Date.parse(caseItem.nextHearingAt)
+            ? `Дата подтверждена ${formatRuDateTime(caseItem.nextHearingConfirmedAt)}${caseItem.nextHearingConfirmedByName ? ` · ${caseItem.nextHearingConfirmedByName}` : ''}. При переносе отметка сбросится.`
+            : 'Дата ещё не подтверждена сотрудником.'}
+        {canEdit && caseItem.nextHearingAt && !['Closed', 'Lost'].includes(caseItem.status) && Date.parse(caseItem.nextHearingAt) > Date.now() && (!caseItem.nextHearingConfirmedAt || !caseItem.nextHearingConfirmedForAt || Date.parse(caseItem.nextHearingConfirmedForAt) !== Date.parse(caseItem.nextHearingAt)) ? (
+          <button type="button" onClick={onConfirmNextHearing} disabled={confirmingNextHearing} className="ml-2 rounded-md border border-blue-200 px-2 py-1 font-semibold text-blue-700 disabled:opacity-50">
+            {confirmingNextHearing ? 'Сохраняем…' : 'Подтвердить дату'}
+          </button>
+        ) : null}
+      </div>
       <div className="flex flex-col gap-3 rounded-xl border border-slate-200 p-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Судебный блок</h2>

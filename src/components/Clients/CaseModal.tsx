@@ -18,6 +18,7 @@ interface CaseModalProps {
   caseData: ClientCase; // для create передаём «пустой» кейс
   onSave: (patch: Partial<ClientCase>) => Promise<void> | void;
   onPositionReviewed?: (review: Pick<ClientCase, 'positionReviewedAt' | 'positionReviewedByUserId' | 'positionReviewedByName'>) => void;
+  onNextHearingConfirmed?: (confirmation: Pick<ClientCase, 'nextHearingConfirmedForAt' | 'nextHearingConfirmedAt' | 'nextHearingConfirmedByUserId' | 'nextHearingConfirmedByName'>) => void;
   onDelete?: () => Promise<void> | void;
   responsibles?: ActResponsible[];
   overlayClassName?: string;
@@ -248,6 +249,7 @@ export function CaseModal({
   caseData,
   onSave,
   onPositionReviewed,
+  onNextHearingConfirmed,
   onDelete,
   responsibles = [],
   overlayClassName,
@@ -297,6 +299,13 @@ export function CaseModal({
     positionReviewedByName: caseData.positionReviewedByName ?? '',
   });
   const [reviewingPosition, setReviewingPosition] = useState(false);
+  const [hearingConfirmation, setHearingConfirmation] = useState({
+    nextHearingConfirmedForAt: caseData.nextHearingConfirmedForAt ?? null,
+    nextHearingConfirmedAt: caseData.nextHearingConfirmedAt ?? null,
+    nextHearingConfirmedByUserId: caseData.nextHearingConfirmedByUserId ?? null,
+    nextHearingConfirmedByName: caseData.nextHearingConfirmedByName ?? '',
+  });
+  const [confirmingNextHearing, setConfirmingNextHearing] = useState(false);
   const [caseDocuments, setCaseDocuments] = useState<ClientCaseDocument[]>([]);
   const [documentsLoading, setDocumentsLoading] = useState(false);
   const [documentsSaving, setDocumentsSaving] = useState(false);
@@ -419,6 +428,12 @@ export function CaseModal({
       positionReviewedAt: caseData.positionReviewedAt ?? null,
       positionReviewedByUserId: caseData.positionReviewedByUserId ?? null,
       positionReviewedByName: caseData.positionReviewedByName ?? '',
+    });
+    setHearingConfirmation({
+      nextHearingConfirmedForAt: caseData.nextHearingConfirmedForAt ?? null,
+      nextHearingConfirmedAt: caseData.nextHearingConfirmedAt ?? null,
+      nextHearingConfirmedByUserId: caseData.nextHearingConfirmedByUserId ?? null,
+      nextHearingConfirmedByName: caseData.nextHearingConfirmedByName ?? '',
     });
     setDocumentsError(null);
     setCaseTasksError(null);
@@ -691,6 +706,25 @@ export function CaseModal({
       setError(err instanceof Error ? err.message : 'Не удалось подтвердить проверку позиции.');
     } finally {
       setReviewingPosition(false);
+    }
+  };
+
+  const handleConfirmNextHearing = async () => {
+    if (!allowEdit || !caseData.id || !caseData.nextHearingAt) return;
+    if (nextHearingAt !== toDateTimeInput(caseData.nextHearingAt)) {
+      setError('Сначала сохраните изменённую дату следующего заседания.');
+      return;
+    }
+    setConfirmingNextHearing(true);
+    setError(null);
+    try {
+      const confirmation = await apiService.confirmNextHearing(caseData.id);
+      setHearingConfirmation(confirmation);
+      onNextHearingConfirmed?.(confirmation);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось подтвердить дату следующего заседания.');
+    } finally {
+      setConfirmingNextHearing(false);
     }
   };
 
@@ -1559,6 +1593,20 @@ export function CaseModal({
               onChange={(e) => setNextHearingAt(e.target.value)}
               disabled={saving}
             />
+            <p className="mt-1 text-xs text-gray-600">
+              {!nextHearingAt
+                ? 'Дата пока не назначена — ожидайте сведения суда или укажите её вручную.'
+                : nextHearingAt !== toDateTimeInput(caseData.nextHearingAt)
+                  ? 'Дата изменена: сначала сохраните дело, затем подтвердите её.'
+                  : hearingConfirmation.nextHearingConfirmedAt && hearingConfirmation.nextHearingConfirmedForAt && Date.parse(hearingConfirmation.nextHearingConfirmedForAt) === Date.parse(caseData.nextHearingAt ?? '')
+                    ? `Дата подтверждена ${formatDocumentDate(hearingConfirmation.nextHearingConfirmedAt)}${hearingConfirmation.nextHearingConfirmedByName ? ` · ${hearingConfirmation.nextHearingConfirmedByName}` : ''}. При переносе отметка сбросится.`
+                    : 'Дата ещё не подтверждена сотрудником.'}
+            </p>
+            {caseData.id > 0 && allowEdit && caseData.status !== 'Closed' && caseData.status !== 'Lost' && caseData.nextHearingAt && Date.parse(caseData.nextHearingAt) > Date.now() && (!hearingConfirmation.nextHearingConfirmedAt || !hearingConfirmation.nextHearingConfirmedForAt || Date.parse(hearingConfirmation.nextHearingConfirmedForAt) !== Date.parse(caseData.nextHearingAt)) ? (
+              <button type="button" onClick={() => void handleConfirmNextHearing()} disabled={saving || confirmingNextHearing || nextHearingAt !== toDateTimeInput(caseData.nextHearingAt)} className="mt-1 rounded-lg border border-blue-200 px-2.5 py-1.5 text-xs font-semibold text-blue-700 disabled:cursor-not-allowed disabled:opacity-50">
+                {confirmingNextHearing ? 'Сохраняем…' : 'Подтвердить дату заседания'}
+              </button>
+            ) : null}
           </div>
 
           <div className="md:col-span-2">

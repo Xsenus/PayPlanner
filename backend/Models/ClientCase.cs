@@ -125,6 +125,13 @@ namespace PayPlanner.Api.Models
         /// </summary>
         public DateTime? NextHearingAt { get; set; }
 
+        /// <summary>Дата заседания, которую сотрудник сверил после предыдущего заседания.</summary>
+        public DateTime? NextHearingConfirmedForAt { get; set; }
+        public DateTime? NextHearingConfirmedAt { get; set; }
+        public int? NextHearingConfirmedByUserId { get; set; }
+        [MaxLength(256)]
+        public string NextHearingConfirmedByName { get; set; } = string.Empty;
+
         /// <summary>
         /// Истец/заявитель по делу.
         /// </summary>

@@ -1352,6 +1352,7 @@ public class PaymentContext : DbContext
             entity.Property(e => e.EventHistory).HasMaxLength(4000);
             entity.Property(e => e.Strategy).HasMaxLength(4000);
             entity.Property(e => e.PositionReviewedByName).HasMaxLength(256);
+            entity.Property(e => e.NextHearingConfirmedByName).HasMaxLength(256);
             entity.Property(e => e.LastViewedByUserName).HasMaxLength(256);
             entity.Property(e => e.ActivityConfirmedByUserName).HasMaxLength(256);
             entity.Property(e => e.InactivityRemindersEnabled).HasDefaultValue(true);

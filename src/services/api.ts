@@ -5853,6 +5853,12 @@ export class ApiService {
     });
   }
 
+  async confirmNextHearing(id: number) {
+    return this.request<{ nextHearingConfirmedForAt: string; nextHearingConfirmedAt: string; nextHearingConfirmedByUserId: number | null; nextHearingConfirmedByName: string }>(`/v2/cases/${id}/next-hearing-confirmation`, {
+      method: 'POST',
+    });
+  }
+
   async updateCaseV2(id: number, model: Omit<ClientCase, 'id' | 'createdAt' | 'payments'>) {
     return this.request<ClientCase>(`/v2/cases/${id}`, { method: 'PUT', body: JSON.stringify(model) });
   }

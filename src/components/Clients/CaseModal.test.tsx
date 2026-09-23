@@ -18,6 +18,7 @@ vi.mock('../../services/api', () => ({
   apiService: {
     getCaseDocuments: vi.fn(),
     reviewCasePosition: vi.fn(),
+    confirmNextHearing: vi.fn(),
     getCaseDocumentTemplates: vi.fn(),
     getTaskJournalItems: vi.fn(),
     getClientCaseFinanceSummaries: vi.fn(),
@@ -59,6 +60,7 @@ describe('CaseModal', () => {
     vi.mocked(apiService.getCaseDocuments).mockResolvedValue([]);
     vi.mocked(apiService.reviewCasePosition).mockReset();
     vi.mocked(apiService.reviewCasePosition).mockResolvedValue({ positionReviewedAt: '2026-09-23T10:00:00Z', positionReviewedByUserId: 7, positionReviewedByName: 'Юрист' });
+    vi.mocked(apiService.confirmNextHearing).mockReset();
     vi.mocked(apiService.getTaskJournalItems).mockReset();
     vi.mocked(apiService.getTaskJournalItems).mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 25 });
     vi.mocked(apiService.getClientCaseFinanceSummaries).mockReset();
@@ -176,6 +178,29 @@ describe('CaseModal', () => {
     expect(screen.getByText(/Позиция изменена: сохраните дело/)).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Подтвердить проверку позиции' }).hasAttribute('disabled')).toBe(true);
     expect(apiService.reviewCasePosition).not.toHaveBeenCalled();
+  });
+
+  it('requires a saved hearing date and shows who confirmed it', async () => {
+    const nextHearingAt = new Date(Date.now() + 7 * 86400000).toISOString();
+    const onNextHearingConfirmed = vi.fn();
+    vi.mocked(apiService.confirmNextHearing).mockResolvedValue({
+      nextHearingConfirmedForAt: nextHearingAt,
+      nextHearingConfirmedAt: new Date().toISOString(),
+      nextHearingConfirmedByUserId: 7,
+      nextHearingConfirmedByName: 'Юрист',
+    });
+    render(<CaseModal isOpen onClose={vi.fn()} caseData={createCase({ nextHearingAt })} onSave={vi.fn()} onNextHearingConfirmed={onNextHearingConfirmed} />);
+
+    const dateInput = screen.getByLabelText('Следующее заседание') as HTMLInputElement;
+    const savedInputValue = dateInput.value;
+    fireEvent.change(screen.getByLabelText('Следующее заседание'), { target: { value: '2099-01-01T12:00' } });
+    expect(screen.getByRole('button', { name: 'Подтвердить дату заседания' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByText(/сначала сохраните дело/)).toBeTruthy();
+    fireEvent.change(dateInput, { target: { value: savedInputValue } });
+    fireEvent.click(screen.getByRole('button', { name: 'Подтвердить дату заседания' }));
+    await waitFor(() => expect(apiService.confirmNextHearing).toHaveBeenCalledWith(1));
+    expect(onNextHearingConfirmed).toHaveBeenCalledWith(expect.objectContaining({ nextHearingConfirmedByName: 'Юрист' }));
+    expect(screen.getByText(/Дата подтверждена.*Юрист/)).toBeTruthy();
   });
 
   it('applies a custom overlay class when provided', () => {

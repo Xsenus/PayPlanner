@@ -1458,6 +1458,20 @@ namespace PayPlanner.Api.Migrations
                     b.Property<DateTime?>("NextHearingAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTime?>("NextHearingConfirmedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("NextHearingConfirmedByName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("NextHearingConfirmedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("NextHearingConfirmedForAt")
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime?>("ObjectionDeadlineAt")
                         .HasColumnType("TEXT");
 

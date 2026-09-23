@@ -104,6 +104,39 @@ public class CasesControllerTests
     }
 
     [Fact]
+    public async Task LegacyCaseEdit_ClearsNextHearingConfirmationOnlyWhenDateChanges()
+    {
+        await using var db = await CreateContextAsync();
+        var lawyer = await CreateUserAsync(db, "legacy-hearing@example.com");
+        var clientCase = await CreateCaseAsync(db, lawyer.Id, "Дело со сверенной датой");
+        var nextHearing = DateTime.UtcNow.AddDays(7);
+        clientCase.NextHearingAt = nextHearing;
+        clientCase.NextHearingConfirmedForAt = nextHearing;
+        clientCase.NextHearingConfirmedAt = DateTime.UtcNow;
+        clientCase.NextHearingConfirmedByUserId = lawyer.Id;
+        clientCase.NextHearingConfirmedByName = "Юрист";
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, lawyer);
+
+        Assert.IsType<OkObjectResult>(await controller.Update(clientCase.Id, new ClientCase
+        {
+            ClientId = clientCase.ClientId, Title = clientCase.Title, Status = ClientCaseStatus.Open,
+            NextHearingAt = nextHearing,
+        }, CancellationToken.None));
+        Assert.NotNull(clientCase.NextHearingConfirmedAt);
+
+        Assert.IsType<OkObjectResult>(await controller.Update(clientCase.Id, new ClientCase
+        {
+            ClientId = clientCase.ClientId, Title = clientCase.Title, Status = ClientCaseStatus.Open,
+            NextHearingAt = nextHearing.AddDays(1),
+        }, CancellationToken.None));
+        Assert.Null(clientCase.NextHearingConfirmedForAt);
+        Assert.Null(clientCase.NextHearingConfirmedAt);
+        Assert.Null(clientCase.NextHearingConfirmedByUserId);
+        Assert.Equal(string.Empty, clientCase.NextHearingConfirmedByName);
+    }
+
+    [Fact]
     public async Task LegacyCases_ApplyObjectVisibilityAndDoNotReturnPayments()
     {
         await using var db = await CreateContextAsync();

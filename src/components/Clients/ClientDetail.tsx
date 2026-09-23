@@ -10998,6 +10998,10 @@ export function ClientDetail({
               setEditingCase((current) => current ? { ...current, ...review } : current);
               setCasesLocal((current) => (current ?? []).map((item) => item.id === editingCase?.id ? { ...item, ...review } : item));
             }}
+            onNextHearingConfirmed={(confirmation) => {
+              setEditingCase((current) => current ? { ...current, ...confirmation } : current);
+              setCasesLocal((current) => (current ?? []).map((item) => item.id === editingCase?.id ? { ...item, ...confirmation } : item));
+            }}
             onDelete={
               caseMode === "edit" && casePermissions.canDelete
                 ? deleteCase

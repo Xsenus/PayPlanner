@@ -16,6 +16,7 @@ vi.mock('../../services/api', () => ({
     getCaseV2: vi.fn(),
     updateCaseV2: vi.fn(),
     reviewCasePosition: vi.fn(),
+    confirmNextHearing: vi.fn(),
     getActResponsibles: vi.fn(),
     getTaskJournalItems: vi.fn(),
     getCaseRelatedParties: vi.fn(),
@@ -239,6 +240,7 @@ describe('CaseDetailPage', () => {
     vi.mocked(apiService.updateCaseV2).mockImplementation(async (id, payload) => createCase({ ...payload, id }));
     vi.mocked(apiService.reviewCasePosition).mockReset();
     vi.mocked(apiService.reviewCasePosition).mockResolvedValue({ positionReviewedAt: '2026-09-23T10:00:00Z', positionReviewedByUserId: 7, positionReviewedByName: 'Юрист' });
+    vi.mocked(apiService.confirmNextHearing).mockReset();
     vi.mocked(apiService.getActResponsibles).mockReset();
     vi.mocked(apiService.getActResponsibles).mockResolvedValue([
       { id: 7, fullName: 'Кожеваткин Андрей Владимирович' },
@@ -945,6 +947,27 @@ describe('CaseDetailPage', () => {
     await waitFor(() => expect(apiService.reviewCasePosition).toHaveBeenCalledWith(15));
     expect(await screen.findByText(/Проверена.*Юрист/)).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Подтвердить проверку позиции' })).toBeNull();
+  });
+
+  it('shows the next hearing confirmation on the court tab and records it once', async () => {
+    const nextHearingAt = new Date(Date.now() + 7 * 86400000).toISOString();
+    vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({ nextHearingAt }));
+    vi.mocked(apiService.confirmNextHearing).mockResolvedValue({
+      nextHearingConfirmedForAt: nextHearingAt,
+      nextHearingConfirmedAt: new Date().toISOString(),
+      nextHearingConfirmedByUserId: 7,
+      nextHearingConfirmedByName: 'Юрист',
+    });
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Суд' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Подтвердить дату' }));
+    await waitFor(() => expect(apiService.confirmNextHearing).toHaveBeenCalledWith(15));
+    expect(await screen.findByText(/подтверждена.*Юрист/i)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Подтвердить дату' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Вернуться к обзору' }));
+    expect(screen.getByText(/подтверждена.*Юрист/i)).toBeTruthy();
   });
 
   it('keeps quick case settings in a wrapping responsive grid', async () => {
