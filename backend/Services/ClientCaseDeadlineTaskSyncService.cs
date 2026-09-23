@@ -93,6 +93,16 @@ public static class ClientCaseDeadlineTaskSyncService
             }
 
             var dueAt = NormalizeDueAt(deadline.DueAt.Value, deadline.DateOnly);
+            if (deadline.TaskType == "courtHearing"
+                && activeTask?.Status == "done"
+                && (activeTask.DueAt == dueAt
+                    || (deadline.HearingAt.HasValue
+                        && activeTask.DueAt == NormalizeDueAt(deadline.HearingAt.Value, deadline.DateOnly))))
+            {
+                // A completed preparation task is not recreated on every case sync.
+                // The second comparison covers tasks completed before the deadline moved three days earlier.
+                continue;
+            }
             if (activeTask is null || ClosedTaskStatuses.Contains(activeTask.Status))
             {
                 var task = BuildTask(
@@ -280,13 +290,14 @@ public static class ClientCaseDeadlineTaskSyncService
         ClientCaseCourtEvent? courtEvent = null)
         => new(
             key,
-            title,
-            dueAt,
+            isHearing ? "Подготовиться к заседанию" : title,
+            isHearing ? dueAt?.AddDays(-3) : dueAt,
             dateOnly,
             durationMinutes,
             isHearing ? "courtHearing" : "control",
             isHearing ? "судебное-заседание" : "процессуальный-срок",
-            courtEvent);
+            courtEvent,
+            isHearing ? dueAt : null);
 
     private static string ResolveDeadlineTitle(string deadlineType)
         => deadlineType.ToLowerInvariant() switch
@@ -326,6 +337,10 @@ public static class ClientCaseDeadlineTaskSyncService
 
         if (deadline.CourtEvent is { } courtEvent)
         {
+            if (!string.IsNullOrWhiteSpace(courtEvent.Title))
+            {
+                parts.Add($"Событие: {courtEvent.Title.Trim()}.");
+            }
             if (!string.IsNullOrWhiteSpace(courtEvent.CourtCaseNumber))
             {
                 parts.Add($"Номер в суде: {courtEvent.CourtCaseNumber.Trim()}.");
@@ -340,6 +355,11 @@ public static class ClientCaseDeadlineTaskSyncService
             {
                 parts.Add($"Судья: {courtEvent.JudgeName.Trim()}.");
             }
+        }
+
+        if (deadline.HearingAt.HasValue)
+        {
+            parts.Add($"Заседание назначено на {deadline.HearingAt.Value:dd.MM.yyyy HH:mm}.");
         }
 
         parts.Add($"Контроль: {deadline.Title}.");
@@ -501,6 +521,7 @@ public static class ClientCaseDeadlineTaskSyncService
         int DurationMinutes,
         string TaskType,
         string CategoryTag,
-        ClientCaseCourtEvent? CourtEvent);
+        ClientCaseCourtEvent? CourtEvent,
+        DateTime? HearingAt);
     private readonly record struct CaseOwner(int? ClientId, int? LegalEntityId, string Name);
 }

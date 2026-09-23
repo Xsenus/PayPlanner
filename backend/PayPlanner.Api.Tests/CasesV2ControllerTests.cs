@@ -3529,8 +3529,50 @@ public class CasesV2ControllerTests
             item.ClientCaseId == clientCase.Id && item.TagsJson.Contains($"case-deadline:court-event-{created.Id}"));
         Assert.Equal("courtHearing", hearingTask.Type);
         Assert.Equal(responsible.Id, hearingTask.AssigneeUserId);
-        Assert.Equal(new DateTime(2026, 7, 10, 9, 30, 0, DateTimeKind.Utc), hearingTask.DueAt);
-        Assert.Contains("Судебное заседание", hearingTask.Title);
+        Assert.Equal(new DateTime(2026, 7, 7, 9, 30, 0, DateTimeKind.Utc), hearingTask.DueAt);
+        Assert.Equal("Подготовиться к заседанию", hearingTask.Title);
+        Assert.Contains("Заседание назначено на 10.07.2026 09:30", hearingTask.Description);
+    }
+
+    [Fact]
+    public async Task HearingPreparationTask_DoesNotRecreateCompletedTaskUntilHearingMoves()
+    {
+        await using var db = await CreateContextAsync();
+        var lawyer = await CreateUserAsync(db, "hearing-preparation@example.com", "Юрист");
+        var hearing = new ClientCaseCourtEvent
+        {
+            EventType = "hearing",
+            Title = "Предварительное заседание",
+            ScheduledAt = new DateTime(2026, 11, 20, 10, 0, 0, DateTimeKind.Utc),
+        };
+        var clientCase = new ClientCase
+        {
+            Client = new Client { Name = "Клиент", IsActive = true, ResponsibleUserId = lawyer.Id },
+            Title = "Дело с подготовкой",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = lawyer.Id,
+            CourtEvents = [hearing],
+        };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+
+        await ClientCaseDeadlineTaskSyncService.SyncAsync(db, clientCase.Id, lawyer.Id, lawyer.FullName, CancellationToken.None);
+        var preparation = await db.TaskJournalItems.SingleAsync(item => item.ClientCaseId == clientCase.Id);
+        Assert.Equal(new DateTime(2026, 11, 17, 10, 0, 0, DateTimeKind.Utc), preparation.DueAt);
+        Assert.Equal("Подготовиться к заседанию", preparation.Title);
+        preparation.Status = "done";
+        await db.SaveChangesAsync();
+
+        await ClientCaseDeadlineTaskSyncService.SyncAsync(db, clientCase.Id, lawyer.Id, lawyer.FullName, CancellationToken.None);
+        Assert.Equal(1, await db.TaskJournalItems.CountAsync(item => item.ClientCaseId == clientCase.Id));
+
+        hearing.ScheduledAt = hearing.ScheduledAt.AddDays(7);
+        await db.SaveChangesAsync();
+        await ClientCaseDeadlineTaskSyncService.SyncAsync(db, clientCase.Id, lawyer.Id, lawyer.FullName, CancellationToken.None);
+        var tasks = await db.TaskJournalItems.Where(item => item.ClientCaseId == clientCase.Id).OrderBy(item => item.Id).ToListAsync();
+        Assert.Equal(2, tasks.Count);
+        Assert.Equal("done", tasks[0].Status);
+        Assert.Equal(new DateTime(2026, 11, 24, 10, 0, 0, DateTimeKind.Utc), tasks[1].DueAt);
     }
 
     [Fact]
@@ -6935,7 +6977,7 @@ public class CasesV2ControllerTests
                 && item.TagsJson.Contains($"case-deadline:court-event-{courtEvent.Id}"));
         Assert.Equal("courtHearing", hearingTask.Type);
         Assert.Equal(responsible.Id, hearingTask.AssigneeUserId);
-        Assert.Equal(courtEvent.ScheduledAt, hearingTask.DueAt);
+        Assert.Equal(courtEvent.ScheduledAt.AddDays(-3), hearingTask.DueAt);
         Assert.Contains("судебное-заседание", JsonSerializer.Deserialize<string[]>(hearingTask.TagsJson) ?? []);
         Assert.Contains("зал 12", hearingTask.Description, StringComparison.Ordinal);
         Assert.Contains(hearingTask.Participants, item => item.Role == "assignee" && item.UserId == responsible.Id);
@@ -7492,7 +7534,7 @@ public class CasesV2ControllerTests
         var hearingTask = await db.TaskJournalItems.SingleAsync(item => item.ClientCaseId == clientCase.Id);
         Assert.Equal("courtHearing", hearingTask.Type);
         Assert.Equal(owner.Id, hearingTask.AssigneeUserId);
-        Assert.Equal(hearingAt, hearingTask.DueAt);
+        Assert.Equal(hearingAt.AddDays(-3), hearingTask.DueAt);
         Assert.Contains($"case-deadline:court-event-{courtEvent.Id}", hearingTask.TagsJson, StringComparison.Ordinal);
     }
 
