@@ -2047,6 +2047,43 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task Update_WhenNearestHearingChanges_NotifiesResponsibleOnce()
+    {
+        await using var db = await CreateContextAsync();
+        var editor = await CreateUserAsync(db, "hearing-change-editor@example.com", "Редактор", DataVisibilityScope.All);
+        var responsible = await CreateUserAsync(db, "hearing-change-responsible@example.com", "Ответственный", DataVisibilityScope.All);
+        var client = new Client { Name = "Клиент", IsActive = true, ResponsibleUserId = editor.Id };
+        var previousAt = DateTime.UtcNow.AddDays(7);
+        var currentAt = previousAt.AddDays(2);
+        var clientCase = new ClientCase
+        {
+            Client = client, Title = "Судебное дело", Status = ClientCaseStatus.Open,
+            ResponsibleUserId = responsible.Id, NextHearingAt = previousAt,
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, editor, notificationService: CreateNotificationService(db));
+        var update = new ClientCase
+        {
+            ClientId = client.Id, Title = clientCase.Title, Status = ClientCaseStatus.Open,
+            ResponsibleUserId = responsible.Id, NextHearingAt = currentAt,
+        };
+
+        Assert.IsType<OkObjectResult>(await controller.Update(clientCase.Id, update, CancellationToken.None));
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal(responsible.Id, notification.RecipientUserId);
+        Assert.Equal(UserNotificationTypes.CourtHearing, notification.Type);
+        Assert.Equal("case", notification.ObjectType);
+        Assert.Equal(clientCase.Id, notification.ObjectId);
+        Assert.Contains("Прежняя дата", notification.BodyPreview);
+        Assert.Contains("Новая дата", notification.BodyPreview);
+
+        Assert.IsType<OkObjectResult>(await controller.Update(clientCase.Id, update, CancellationToken.None));
+        Assert.Single(await db.UserNotifications.ToListAsync());
+    }
+
+    [Fact]
     public async Task Update_WithoutPaymentsViewPermission_PreservesFeeAmount()
     {
         await using var db = await CreateContextAsync();

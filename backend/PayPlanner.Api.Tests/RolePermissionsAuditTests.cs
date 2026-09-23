@@ -741,5 +741,8 @@ public class RolePermissionsAuditTests
 
         public Task NotifyCourtSyncStalledAsync(ClientCase clientCase, string providerName, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
+
+        public Task NotifyCaseHearingDateChangedAsync(ClientCase clientCase, DateTime previousAt, DateTime currentAt, string actorName, int actorUserId, IReadOnlyCollection<int> recipientUserIds, DateTime changedAtUtc, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
     }
 }

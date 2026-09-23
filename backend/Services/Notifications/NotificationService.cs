@@ -2430,6 +2430,70 @@ public sealed class NotificationService : INotificationService
         }
     }
 
+    public async Task NotifyCaseHearingDateChangedAsync(
+        ClientCase clientCase,
+        DateTime previousAt,
+        DateTime currentAt,
+        string actorName,
+        int actorUserId,
+        IReadOnlyCollection<int> recipientUserIds,
+        DateTime changedAtUtc,
+        CancellationToken cancellationToken = default)
+    {
+        if (clientCase.Id <= 0 || previousAt == currentAt || recipientUserIds.Count == 0)
+        {
+            return;
+        }
+
+        var visibleRecipientUserIds = await ResolveVisibleCaseNotificationRecipientIdsAsync(
+            clientCase,
+            recipientUserIds,
+            actorUserId,
+            cancellationToken);
+        if (visibleRecipientUserIds.Count == 0)
+        {
+            return;
+        }
+
+        var channelsByUserId = await ResolveUserNotificationChannelsAsync(
+            visibleRecipientUserIds,
+            UserNotificationTypes.CourtHearing,
+            [NotificationChannels.InApp, NotificationChannels.Toast, NotificationChannels.ForcedModal, NotificationChannels.WebPush],
+            cancellationToken);
+        var timeZonesByUserId = await CalendarTimeZoneHelper.ResolveUserTimeZonesAsync(
+            _context,
+            visibleRecipientUserIds,
+            cancellationToken);
+        var normalizedActorName = NormalizeNotificationText(actorName, "Сотрудник");
+        var title = $"Перенесено судебное заседание: {BuildClientCaseTitle(clientCase)}";
+
+        foreach (var recipientUserId in visibleRecipientUserIds)
+        {
+            var timeZone = timeZonesByUserId.GetValueOrDefault(
+                recipientUserId,
+                CalendarTimeZoneHelper.ResolveTimeZone(null));
+            var body = $"{normalizedActorName} изменил(а) дату ближайшего заседания. Проверьте подготовку по делу.\n\n"
+                + $"Дело: {BuildClientCaseTitle(clientCase)}\n"
+                + $"Прежняя дата: {FormatCourtEventDate(previousAt, allDay: false, recipientTimeZone: timeZone)}\n"
+                + $"Новая дата: {FormatCourtEventDate(currentAt, allDay: false, recipientTimeZone: timeZone)}";
+            await CreateUserNotificationAsync(
+                recipientUserId,
+                UserNotificationTypes.CourtHearing,
+                $"case:{clientCase.Id}:hearing-date-changed:{changedAtUtc.Ticks}:{recipientUserId}",
+                title,
+                body,
+                "cyan",
+                "case",
+                clientCase.Id,
+                null,
+                null,
+                new { clientCaseId = clientCase.Id, previousAt, currentAt, actorUserId, actorName = normalizedActorName },
+                cancellationToken,
+                objectVisibilityValidated: true,
+                resolvedNotificationChannels: channelsByUserId[recipientUserId]);
+        }
+    }
+
     public async Task NotifyCaseProceduralDeadlineAsync(
         ClientCase clientCase,
         ClientCaseProceduralDeadline deadline,

@@ -6638,6 +6638,55 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyCaseHearingDateChangedAsync_RespectsVisibilityAndDeduplicates()
+    {
+        await using var db = await CreateContextAsync();
+        var adminRole = new Role { Name = "admin", Description = "Администратор" };
+        db.Roles.Add(adminRole);
+        await db.SaveChangesAsync();
+        var recipient = new User
+        {
+            Email = "hearing-change-recipient@example.com", FullName = "Получатель", PasswordHash = "hash",
+            RoleId = adminRole.Id, IsActive = true, IsApproved = true,
+            CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
+        };
+        var actor = new User
+        {
+            Email = "hearing-change-actor@example.com", FullName = "Автор", PasswordHash = "hash",
+            RoleId = adminRole.Id, IsActive = true, IsApproved = true,
+            CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
+        };
+        db.Users.AddRange(recipient, actor);
+        await db.SaveChangesAsync();
+        var denied = await CreateUserWithoutSectionAccessAsync(db, "hearing-change-denied@example.com", RolePermissionCatalog.Cases);
+        var client = new Client { Name = "Клиент", IsActive = true, ResponsibleUserId = recipient.Id };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+        var clientCase = new ClientCase
+        {
+            ClientId = client.Id, Title = "Судебное дело", Status = ClientCaseStatus.Open,
+            ResponsibleUserId = recipient.Id,
+        };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService());
+        var previousAt = new DateTime(2026, 10, 5, 7, 0, 0, DateTimeKind.Utc);
+        var currentAt = previousAt.AddDays(2);
+        var changedAt = DateTime.UtcNow;
+        var recipients = new[] { recipient.Id, actor.Id, denied.Id };
+
+        await service.NotifyCaseHearingDateChangedAsync(clientCase, previousAt, currentAt, actor.FullName, actor.Id, recipients, changedAt);
+        await service.NotifyCaseHearingDateChangedAsync(clientCase, previousAt, currentAt, actor.FullName, actor.Id, recipients, changedAt);
+
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal(recipient.Id, notification.RecipientUserId);
+        Assert.Equal(UserNotificationTypes.CourtHearing, notification.Type);
+        Assert.Equal(clientCase.Id, notification.ObjectId);
+        Assert.Contains("Прежняя дата", notification.BodyPreview);
+        Assert.Contains("Новая дата", notification.BodyPreview);
+    }
+
+    [Fact]
     public async Task NotifyCourtSyncStalledAsync_NotifiesOnlyAdminsOncePerFailureSeries()
     {
         await using var db = await CreateContextAsync();

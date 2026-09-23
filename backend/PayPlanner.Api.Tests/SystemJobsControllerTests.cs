@@ -2921,6 +2921,9 @@ public class SystemJobsControllerTests
 
         public Task NotifyCourtSyncStalledAsync(ClientCase clientCase, string providerName, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
+
+        public Task NotifyCaseHearingDateChangedAsync(ClientCase clientCase, DateTime previousAt, DateTime currentAt, string actorName, int actorUserId, IReadOnlyCollection<int> recipientUserIds, DateTime changedAtUtc, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
     }
 
     private sealed class RecordingWebPushRetryService : IWebPushNotificationService
