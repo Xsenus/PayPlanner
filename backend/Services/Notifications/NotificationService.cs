@@ -3778,7 +3778,7 @@ public sealed class NotificationService : INotificationService
             ? "Изменён срок задачи"
             : "Задача изменена";
         var eventKey = hasDueAtChange
-            ? $"task:{task.Id}:due-at:{DateTime.SpecifyKind(task.DueAt, DateTimeKind.Utc):yyyyMMddHHmm}:{actorUserId}"
+            ? $"task:{task.Id}:due-at:{DateTime.SpecifyKind(task.DueAt, DateTimeKind.Utc):yyyyMMddHHmm}:{actorUserId}:{(task.UpdatedAt ?? task.CreatedAt).Ticks}"
             : $"task:{task.Id}:changed:{DateTime.UtcNow:yyyyMMddHHmmssfff}:{actorUserId}";
         var tone = hasDueAtChange ? ResolveDueAtChangeTone(task) : "blue";
         var recipientTimeZones = await CalendarTimeZoneHelper.ResolveUserTimeZonesAsync(

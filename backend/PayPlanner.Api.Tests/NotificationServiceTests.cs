@@ -2456,6 +2456,34 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyTaskChangedAsync_DeadlineReturningToPreviousDatePublishesNewEventButRetryDoesNot()
+    {
+        await using var db = await CreateContextAsync();
+        var (task, author, assignee, observer) = await CreateTaskWithObserverAsync(db, "deadline-return");
+        var realtime = new RecordingRealtimeNotificationPublisher();
+        var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService(), realtime);
+        var firstDueAt = task.DueAt;
+        var firstVersionAt = DateTime.UtcNow;
+
+        for (var version = 0; version < 3; version++)
+        {
+            task.DueAt = version == 1 ? firstDueAt.AddDays(1) : firstDueAt;
+            task.UpdatedAt = firstVersionAt.AddSeconds(version);
+            await db.SaveChangesAsync();
+            await service.NotifyTaskChangedAsync(task, ["Срок"], author.FullName, author.Id);
+            await service.NotifyTaskChangedAsync(task, ["Срок"], author.FullName, author.Id);
+        }
+
+        var notifications = await db.UserNotifications.OrderBy(item => item.Id).ToListAsync();
+        Assert.Equal(6, notifications.Count);
+        Assert.Equal(3, notifications.Count(item => item.RecipientUserId == assignee.Id));
+        Assert.Equal(3, notifications.Count(item => item.RecipientUserId == observer.Id));
+        Assert.Equal(3, notifications.Select(item => item.EventKey).Distinct().Count());
+        Assert.Equal(6, realtime.Notifications.Count);
+        Assert.All(realtime.ToastEnabledValues, Assert.True);
+    }
+
+    [Fact]
     public async Task NotifyTaskChangedAsync_LoadsRecipientTimeZonesInSingleQuery()
     {
         var interceptor = new RecordingCommandInterceptor();

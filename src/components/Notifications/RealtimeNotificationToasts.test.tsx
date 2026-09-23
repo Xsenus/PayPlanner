@@ -34,6 +34,7 @@ const connectionState = vi.hoisted(() => ({
   stop: vi.fn(),
   off: vi.fn(),
   onreconnected: vi.fn(),
+  onreconnecting: vi.fn(),
   onclose: vi.fn(),
 }));
 
@@ -61,6 +62,7 @@ vi.mock('../../services/realtimeNotifications', async (importOriginal) => {
         },
         off: connectionState.off,
         onreconnected: connectionState.onreconnected,
+        onreconnecting: connectionState.onreconnecting,
         onclose: connectionState.onclose,
       };
     },
@@ -102,6 +104,7 @@ describe('RealtimeNotificationToasts', () => {
     connectionState.stop.mockResolvedValue(undefined);
     connectionState.off.mockReset();
     connectionState.onreconnected.mockReset();
+    connectionState.onreconnecting.mockReset();
     connectionState.onclose.mockReset();
     resetRealtimeNotificationDiagnostics();
   });
@@ -943,6 +946,152 @@ describe('RealtimeNotificationToasts', () => {
     );
 
     errorSpy.mockRestore();
+  });
+
+  it('delivers notifications through polling when the realtime endpoint returns a server error', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    connectionState.start.mockRejectedValue(new Error('Response status code: 502 (Bad Gateway).'));
+    apiMock.getUserNotifications.mockResolvedValue({
+      items: [{
+        id: 902,
+        type: 'taskAssigned',
+        eventKey: 'task:902:assigned',
+        title: 'Задача при недоступном канале',
+        bodyPreview: 'Подготовить документы',
+        tone: 'blue',
+        objectType: 'task',
+        objectId: 902,
+        taskId: 902,
+        createdAt: new Date().toISOString(),
+      }],
+    });
+
+    const { unmount } = render(<RealtimeNotificationToasts userId={5} />);
+    await flushRealtimeStart();
+
+    expect(apiMock.getUserNotifications).toHaveBeenCalled();
+    expect(toastMock.showToast).toHaveBeenCalledWith(expect.objectContaining({ title: 'Задача при недоступном канале' }));
+    expect(getRealtimeNotificationDiagnostics()).toMatchObject({ fallbackPollingActive: true });
+    unmount();
+    errorSpy.mockRestore();
+  });
+
+  it('checks notifications during automatic reconnect instead of waiting until reconnect is exhausted', async () => {
+    const { unmount } = render(<RealtimeNotificationToasts userId={5} />);
+    await flushRealtimeStart();
+    apiMock.getUserNotifications.mockClear();
+
+    expect(connectionState.onreconnecting).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      connectionState.onreconnecting.mock.calls[0][0](new Error('Connection lost'));
+    });
+
+    expect(apiMock.getUserNotifications).toHaveBeenCalledWith({ status: 'unread', page: 1, pageSize: 15 });
+    expect(getRealtimeNotificationDiagnostics()).toMatchObject({ fallbackPollingActive: true });
+    unmount();
+  });
+
+  it('keeps hidden-tab notifications for display when the employee returns', async () => {
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+    const { unmount } = render(<RealtimeNotificationToasts userId={5} />);
+    await flushRealtimeStart();
+    visibility.mockReturnValue('hidden');
+    act(() => document.dispatchEvent(new Event('visibilitychange')));
+    act(() => {
+      connectionState.handlers.get(REALTIME_USER_NOTIFICATION_CREATED_EVENT)?.({
+        id: 903,
+        recipientUserId: 5,
+        type: 'taskChanged',
+        eventKey: 'task:903:changed',
+        title: 'Изменён срок задачи',
+        bodyPreview: 'Завтра в 12:00',
+        tone: 'amber',
+        objectType: 'task',
+        taskJournalItemId: 903,
+        createdAt: new Date().toISOString(),
+      });
+    });
+    expect(toastMock.showToast).not.toHaveBeenCalled();
+
+    visibility.mockReturnValue('visible');
+    await act(async () => document.dispatchEvent(new Event('visibilitychange')));
+    expect(toastMock.showToast).toHaveBeenCalledTimes(1);
+    expect(toastMock.showToast).toHaveBeenCalledWith(expect.objectContaining({ title: 'Изменён срок задачи' }));
+    unmount();
+    visibility.mockRestore();
+  });
+
+  it('does not increment unread notifications twice when the same event is delivered again', async () => {
+    const listener = vi.fn();
+    window.addEventListener(USER_NOTIFICATIONS_EVENT, listener);
+    const { unmount } = render(<RealtimeNotificationToasts userId={5} />);
+    await flushRealtimeStart();
+    const notification: RealtimeUserNotification = {
+      id: 904, recipientUserId: 5, type: 'taskChanged', eventKey: 'task:904:changed',
+      title: 'Изменён исполнитель', bodyPreview: 'Задача передана коллеге', tone: 'amber',
+      objectType: 'task', taskJournalItemId: 904, createdAt: new Date().toISOString(),
+    };
+    act(() => {
+      connectionState.handlers.get(REALTIME_USER_NOTIFICATION_CREATED_EVENT)?.(notification);
+      connectionState.handlers.get(REALTIME_USER_NOTIFICATION_CREATED_EVENT)?.(notification);
+    });
+    expect(listener.mock.calls.filter(([event]) => event.detail.unreadDelta === 1)).toHaveLength(1);
+    expect(toastMock.showToast).toHaveBeenCalledTimes(1);
+    unmount();
+    window.removeEventListener(USER_NOTIFICATIONS_EVENT, listener);
+  });
+
+  it('replays the remaining hidden-tab queue after a reload before the queue has drained', async () => {
+    vi.useFakeTimers();
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+    const first = render(<RealtimeNotificationToasts userId={5} />);
+    await flushRealtimeStart();
+    visibility.mockReturnValue('hidden');
+    act(() => document.dispatchEvent(new Event('visibilitychange')));
+    const queuedNotification: RealtimeUserNotification = {
+      id: 907, recipientUserId: 5, type: 'taskChanged', eventKey: 'task:907:changed',
+      title: 'Изменён срок второй задачи', bodyPreview: 'Новый срок', tone: 'amber',
+      objectType: 'task', taskJournalItemId: 907, createdAt: new Date().toISOString(),
+    };
+    act(() => {
+      const receive = connectionState.handlers.get(REALTIME_USER_NOTIFICATION_CREATED_EVENT);
+      receive?.({ ...queuedNotification, id: 906, title: 'Первая задача', taskJournalItemId: 906 });
+      receive?.(queuedNotification);
+    });
+    await act(async () => vi.advanceTimersByTimeAsync(10_000));
+    visibility.mockReturnValue('visible');
+    await act(async () => document.dispatchEvent(new Event('visibilitychange')));
+    expect(toastMock.showToast).toHaveBeenCalledTimes(1);
+    first.unmount();
+
+    expect(Number(window.localStorage.getItem('payplanner.realtimeToastLastSeenAt.v1.5')))
+      .toBeLessThanOrEqual(Date.parse(queuedNotification.createdAt));
+    apiMock.getUserNotifications.mockResolvedValue({ items: [{ ...queuedNotification, taskId: 907 }] });
+    toastMock.showToast.mockClear();
+    const second = render(<RealtimeNotificationToasts userId={5} />);
+    await flushRealtimeStart();
+    expect(toastMock.showToast).toHaveBeenCalledWith(expect.objectContaining({ title: queuedNotification.title }));
+
+    second.unmount();
+    visibility.mockRestore();
+    vi.useRealTimers();
+  });
+
+  it('recovers an assignment created during the initial connection handshake on a new device', async () => {
+    let finishConnection: (() => void) | undefined;
+    connectionState.start.mockImplementation(() => new Promise<void>((resolve) => { finishConnection = resolve; }));
+    const { unmount } = render(<RealtimeNotificationToasts userId={5} />);
+    apiMock.getUserNotifications.mockResolvedValue({
+      items: [{
+        id: 905, type: 'taskAssigned', eventKey: 'task:905:assigned',
+        title: 'Новая задача во время подключения', bodyPreview: 'Проверить документы', tone: 'blue',
+        objectType: 'task', taskId: 905, createdAt: new Date().toISOString(),
+      }],
+    });
+    await act(async () => finishConnection?.());
+
+    expect(toastMock.showToast).toHaveBeenCalledWith(expect.objectContaining({ title: 'Новая задача во время подключения' }));
+    unmount();
   });
 
   it('replays unread notifications that arrived while this device was away', async () => {
