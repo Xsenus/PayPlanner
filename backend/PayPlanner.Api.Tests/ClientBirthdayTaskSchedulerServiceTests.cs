@@ -1,3 +1,4 @@
+using System.Reflection;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
@@ -8,6 +9,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Notifications;
 using Xunit;
 
 namespace PayPlanner.Api.Tests;
@@ -194,6 +196,34 @@ public sealed class ClientBirthdayTaskSchedulerServiceTests
     }
 
     [Fact]
+    public async Task RunOnceAsync_NotifiesSelectedAssigneeForNewClientAndEmployeeTasksOnlyOnce()
+    {
+        var notifications = DispatchProxy.Create<INotificationService, RecordingBirthdayNotificationServiceProxy>();
+        await using var fixture = await BirthdayFixture.CreateAsync(enabled: true, notifications);
+        await using (var scope = fixture.Provider.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<PaymentContext>();
+            var assignee = await db.Users.SingleAsync();
+            assignee.IsEmployee = true;
+            assignee.DateOfBirth = new DateTime(1990, 9, 28);
+            db.SystemSettings.AddRange(
+                new SystemSetting { Key = ClientBirthdayTaskSchedulerService.EmployeeEnabledSettingKey, Value = "true" },
+                new SystemSetting { Key = ClientBirthdayTaskSchedulerService.AssigneeUserIdSettingKey, Value = assignee.Id.ToString() });
+            await db.SaveChangesAsync();
+        }
+
+        var now = new DateTime(2026, 9, 21, 3, 0, 0, DateTimeKind.Utc);
+        Assert.Equal(2, (await fixture.Service.RunOnceAsync(now)).CreatedCount);
+        Assert.Equal(0, (await fixture.Service.RunOnceAsync(now.AddHours(1))).CreatedCount);
+
+        var calls = ((RecordingBirthdayNotificationServiceProxy)notifications).AssignedTasks;
+        Assert.Equal(2, calls.Count);
+        Assert.All(calls, call => Assert.Equal(0, call.ActorUserId));
+        Assert.Contains(calls, call => call.Task.Title.StartsWith("Поздравить с днём рождения:", StringComparison.Ordinal));
+        Assert.Contains(calls, call => call.Task.Title.StartsWith("Поздравить коллегу", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task RunOnceAsync_SkipsEmployeeWhenSelectedAssigneeIsUnavailable()
     {
         await using var fixture = await BirthdayFixture.CreateAsync(enabled: false);
@@ -268,12 +298,16 @@ public sealed class ClientBirthdayTaskSchedulerServiceTests
         public ServiceProvider Provider { get; }
         public ClientBirthdayTaskSchedulerService Service { get; }
 
-        public static async Task<BirthdayFixture> CreateAsync(bool enabled)
+        public static async Task<BirthdayFixture> CreateAsync(bool enabled, INotificationService? notifications = null)
         {
             var connection = new SqliteConnection("DataSource=:memory:");
             await connection.OpenAsync();
             var services = new ServiceCollection();
             services.AddDbContext<PaymentContext>(options => options.UseSqlite(connection));
+            if (notifications is not null)
+            {
+                services.AddSingleton(notifications);
+            }
             var provider = services.BuildServiceProvider();
             await using (var scope = provider.CreateAsyncScope())
             {
@@ -327,6 +361,21 @@ public sealed class ClientBirthdayTaskSchedulerServiceTests
         {
             await Provider.DisposeAsync();
             await _connection.DisposeAsync();
+        }
+    }
+
+    public class RecordingBirthdayNotificationServiceProxy : DispatchProxy
+    {
+        public List<(TaskJournalItem Task, int ActorUserId)> AssignedTasks { get; } = [];
+
+        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
+        {
+            if (targetMethod?.Name == nameof(INotificationService.NotifyTaskAssignedAsync) && args is not null)
+            {
+                AssignedTasks.Add(((TaskJournalItem)args[0]!, (int)args[2]!));
+                return Task.FromResult<IReadOnlyList<NotificationDelivery>>([]);
+            }
+            throw new NotSupportedException(targetMethod?.Name);
         }
     }
 }

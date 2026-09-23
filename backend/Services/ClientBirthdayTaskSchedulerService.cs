@@ -153,7 +153,7 @@ public sealed class ClientBirthdayTaskSchedulerService : BackgroundService
                     tag.StartsWith("employee-birthday:", StringComparison.Ordinal))
                 .ToHashSet(StringComparer.Ordinal);
 
-            var created = 0;
+            var createdTasks = new List<TaskJournalItem>();
             foreach (var candidate in candidates)
             {
                 var marker = BuildMarker(candidate.Client.Id, candidate.Birthday.Year);
@@ -169,9 +169,10 @@ public sealed class ClientBirthdayTaskSchedulerService : BackgroundService
                 {
                     continue;
                 }
-                context.TaskJournalItems.Add(BuildTask(candidate, assignee, marker, timeZone, now));
+                var task = BuildTask(candidate, assignee, marker, timeZone, now);
+                context.TaskJournalItems.Add(task);
+                createdTasks.Add(task);
                 existingMarkers.Add(marker);
-                created += 1;
             }
             foreach (var candidate in employeeCandidates)
             {
@@ -180,19 +181,30 @@ public sealed class ClientBirthdayTaskSchedulerService : BackgroundService
                 {
                     continue;
                 }
-                context.TaskJournalItems.Add(BuildEmployeeTask(candidate, selectedAssignee, marker, timeZone, now));
+                var task = BuildEmployeeTask(candidate, selectedAssignee, marker, timeZone, now);
+                context.TaskJournalItems.Add(task);
+                createdTasks.Add(task);
                 existingMarkers.Add(marker);
-                created += 1;
             }
 
-            if (created > 0)
+            if (createdTasks.Count > 0)
             {
                 await context.SaveChangesAsync(cancellationToken);
+                var notificationService = scope.ServiceProvider.GetService<INotificationService>();
+                if (notificationService is not null)
+                {
+                    foreach (var task in createdTasks)
+                    {
+                        await notificationService.NotifyTaskAssignedAsync(
+                            task, "Система: дни рождения", 0, cancellationToken);
+                    }
+                }
                 var realtimePublisher = scope.ServiceProvider.GetService<IRealtimeNotificationPublisher>();
                 await (realtimePublisher ?? NoOpRealtimeNotificationPublisher.Instance)
                     .PublishTaskJournalChangedAsync(cancellationToken);
             }
 
+            var created = createdTasks.Count;
             var skipped = Math.Max(0, candidates.Count + employeeCandidates.Count - created);
             await RecordSuccessAsync(
                 startedAt,
