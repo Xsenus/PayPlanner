@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Building2,
   Download,
+  GitMerge,
   GripVertical,
   LayoutGrid,
   List,
@@ -37,6 +38,7 @@ import { TableColumnSettings } from '../ui/TableColumnSettings';
 import { TablePagination } from '../ui/TablePagination';
 import { ContactEditorModal } from './ContactEditorModal';
 import { YealinkImportPreviewModal } from './YealinkImportPreviewModal';
+import { ContactMergeModal } from './ContactMergeModal';
 
 type EditorState =
   | { mode: 'create-external'; contact: null }
@@ -145,6 +147,7 @@ export function Contacts({ initialScope = 'all', onScopeChange, onOpenClient, on
   const [error, setError] = useState<string | null>(null);
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [yealinkImport, setYealinkImport] = useState<YealinkImportState | null>(null);
+  const [mergeOpen, setMergeOpen] = useState(false);
   const [page, setPage] = useState(() => (
     typeof savedViewState?.page === 'number' && Number.isInteger(savedViewState.page) && savedViewState.page > 0
       ? savedViewState.page
@@ -672,6 +675,13 @@ export function Contacts({ initialScope = 'all', onScopeChange, onOpenClient, on
           <div className="flex flex-wrap gap-3">
             {isAdmin() ? (
               <>
+                <button
+                  type="button"
+                  onClick={() => setMergeOpen(true)}
+                  className="inline-flex items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100"
+                >
+                  <GitMerge className="h-4 w-4" /> Объединить дубли
+                </button>
                 <input
                   ref={importInputRef}
                   type="file"
@@ -1005,6 +1015,7 @@ export function Contacts({ initialScope = 'all', onScopeChange, onOpenClient, on
           onConfirm={() => void handleConfirmImportPreview()}
         />
       ) : null}
+      {mergeOpen ? <ContactMergeModal onClose={() => setMergeOpen(false)} onMerged={() => void loadDirectory()} /> : null}
     </div>
   );
 }

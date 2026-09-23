@@ -17,6 +17,213 @@ namespace PayPlanner.Api.Tests;
 public class ContactsControllerTests
 {
     [Fact]
+    public async Task MergeContacts_TransfersClientCaseAndPayment_ArchivesDuplicate()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateClientUserAsync(db, "merge-clients", true, true, true, true, true);
+        var primary = await CreateClientAsync(db, user.Id, "Мария Манаева", "89198106343");
+        var duplicate = await CreateClientAsync(db, user.Id, "Мария Манаева", "79198106343");
+        db.ClientCases.Add(new ClientCase { ClientId = duplicate.Id, Title = "Дело дубля" });
+        db.Payments.Add(new Payment { ClientId = duplicate.Id, Date = DateTime.UtcNow, Amount = 100 });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, user.Id);
+        var request = new ContactMergeRequest
+        {
+            PrimarySourceType = "client", PrimarySourceId = primary.Id,
+            DuplicateSourceType = "client", DuplicateSourceId = duplicate.Id,
+        };
+
+        var preview = await controller.PreviewMerge(request, CancellationToken.None);
+        var previewResult = Assert.IsType<OkObjectResult>(preview.Result);
+        var details = Assert.IsType<ContactsController.ContactMergePreview>(previewResult.Value);
+        Assert.True(details.CanMerge);
+        Assert.True(details.AffectedLinks >= 2);
+
+        var merged = await controller.MergeContacts(request, CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(merged.Result);
+        db.ChangeTracker.Clear();
+        Assert.Equal(primary.Id, (await db.ClientCases.SingleAsync()).ClientId);
+        Assert.Equal(primary.Id, (await db.Payments.SingleAsync()).ClientId);
+        Assert.Null(await db.Clients.FirstOrDefaultAsync(x => x.Id == duplicate.Id));
+        Assert.NotNull(await db.Clients.IgnoreQueryFilters().FirstOrDefaultAsync(x => x.Id == duplicate.Id));
+        Assert.Contains(db.ObjectAuditEvents, x => x.ObjectType == "contact-merge" && x.ObjectId == primary.Id);
+    }
+
+    [Fact]
+    public async Task MergeContacts_RejectsDifferentBirthDatesWithoutChangingLinks()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateClientUserAsync(db, "merge-conflict", true, true, true, true, true);
+        var primary = await CreateClientAsync(db, user.Id, "Мария Манаева");
+        var duplicate = await CreateClientAsync(db, user.Id, "Мария Манаева");
+        primary.BirthDate = new DateTime(1980, 1, 1);
+        duplicate.BirthDate = new DateTime(1990, 1, 1);
+        db.ClientCases.Add(new ClientCase { ClientId = duplicate.Id, Title = "Не переносить" });
+        await db.SaveChangesAsync();
+        var request = new ContactMergeRequest
+        {
+            PrimarySourceType = "client", PrimarySourceId = primary.Id,
+            DuplicateSourceType = "client", DuplicateSourceId = duplicate.Id,
+        };
+
+        var response = await CreateController(db, user.Id).MergeContacts(request, CancellationToken.None);
+
+        Assert.IsType<ConflictObjectResult>(response.Result);
+        db.ChangeTracker.Clear();
+        Assert.Equal(duplicate.Id, (await db.ClientCases.SingleAsync()).ClientId);
+        Assert.NotNull(await db.Clients.FindAsync(duplicate.Id));
+    }
+
+    [Fact]
+    public async Task MergeContacts_MovesExternalContactChildren_ArchivesDuplicate()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateClientUserAsync(db, "merge-external", true, true, true, true, true);
+        var primary = await CreateExternalContactAsync(db, user.Id, "Дубль", "89198106343");
+        var duplicate = await CreateExternalContactAsync(db, user.Id, "Дубль", "79198106343");
+        var child = await CreateExternalContactAsync(db, user.Id, "Сотрудник", "79990000001");
+        child.ParentContactId = duplicate.Id;
+        await db.SaveChangesAsync();
+        var request = new ContactMergeRequest
+        {
+            PrimarySourceType = "external", PrimarySourceId = primary.Id,
+            DuplicateSourceType = "external", DuplicateSourceId = duplicate.Id,
+        };
+
+        var response = await CreateController(db, user.Id).MergeContacts(request, CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(response.Result);
+        db.ChangeTracker.Clear();
+        Assert.Equal(primary.Id, (await db.ExternalContacts.SingleAsync(x => x.Id == child.Id)).ParentContactId);
+        Assert.Null(await db.ExternalContacts.FirstOrDefaultAsync(x => x.Id == duplicate.Id));
+        var mergedPhones = (await db.ExternalContacts.SingleAsync(x => x.Id == primary.Id)).PhonesJson;
+        Assert.Contains("79198106343", mergedPhones);
+    }
+
+    [Fact]
+    public async Task MergeContacts_DoesNotExposeAnotherUsersCard()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateClientUserAsync(db, "merge-visible", true, true, true, true, true);
+        var another = await CreateClientUserAsync(db, "merge-hidden", true, true, true, true, true);
+        var primary = await CreateClientAsync(db, user.Id);
+        var duplicate = await CreateClientAsync(db, another.Id);
+        var request = new ContactMergeRequest
+        {
+            PrimarySourceType = "client", PrimarySourceId = primary.Id,
+            DuplicateSourceType = "client", DuplicateSourceId = duplicate.Id,
+        };
+
+        var response = await CreateController(db, user.Id).MergeContacts(request, CancellationToken.None);
+
+        Assert.IsType<NotFoundResult>(response.Result);
+        Assert.NotNull(await db.Clients.FindAsync(duplicate.Id));
+    }
+
+    [Fact]
+    public async Task MergeContacts_RequiresEditAndDeletePermissions()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateClientUserAsync(db, "merge-owner", true, true, true, true, true);
+        var noDelete = await CreateClientUserAsync(db, "merge-no-delete", true, true, true, false, true, DataVisibilityScope.All);
+        var noEdit = await CreateClientUserAsync(db, "merge-no-edit", true, true, false, true, true, DataVisibilityScope.All);
+        var primary = await CreateClientAsync(db, owner.Id);
+        var duplicate = await CreateClientAsync(db, owner.Id);
+        var request = new ContactMergeRequest
+        {
+            PrimarySourceType = "client", PrimarySourceId = primary.Id,
+            DuplicateSourceType = "client", DuplicateSourceId = duplicate.Id,
+        };
+
+        Assert.IsType<ForbidResult>((await CreateController(db, noDelete.Id).MergeContacts(request, CancellationToken.None)).Result);
+        Assert.IsType<ForbidResult>((await CreateController(db, noEdit.Id).MergeContacts(request, CancellationToken.None)).Result);
+        Assert.NotNull(await db.Clients.FindAsync(duplicate.Id));
+    }
+
+    [Fact]
+    public async Task MergeContacts_TransfersOrganizationClient_AndKeepsTheArchivedOrganization()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateClientUserAsync(db, "merge-legal", true, true, true, true, true, legalEntityViewScope: DataVisibilityScope.All);
+        var primary = await CreateLegalEntityAsync(db, user.Id, "ООО Мастер");
+        var duplicate = await CreateLegalEntityAsync(db, user.Id, "ООО Мастер");
+        var client = await CreateClientAsync(db, user.Id);
+        client.LegalEntityId = duplicate.Id;
+        await db.SaveChangesAsync();
+
+        var response = await CreateController(db, user.Id).MergeContacts(new ContactMergeRequest
+        {
+            PrimarySourceType = "legal", PrimarySourceId = primary.Id,
+            DuplicateSourceType = "legal", DuplicateSourceId = duplicate.Id,
+        }, CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(response.Result);
+        db.ChangeTracker.Clear();
+        Assert.Equal(primary.Id, (await db.Clients.SingleAsync(x => x.Id == client.Id)).LegalEntityId);
+        Assert.Null(await db.LegalEntities.FirstOrDefaultAsync(x => x.Id == duplicate.Id));
+        Assert.NotNull(await db.LegalEntities.IgnoreQueryFilters().FirstOrDefaultAsync(x => x.Id == duplicate.Id));
+    }
+
+    [Fact]
+    public async Task MergeContacts_RefusesOverlappingContractLinksWithoutLosingComments()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateClientUserAsync(db, "merge-contracts", true, true, true, true, true);
+        var primary = await CreateClientAsync(db, user.Id);
+        var duplicate = await CreateClientAsync(db, user.Id);
+        var contract = new Contract { Number = "MERGE-1", Date = DateTime.UtcNow };
+        db.Contracts.Add(contract);
+        await db.SaveChangesAsync();
+        db.ClientContracts.AddRange(
+            new ClientContract { ClientId = primary.Id, ContractId = contract.Id, Comment = "основной" },
+            new ClientContract { ClientId = duplicate.Id, ContractId = contract.Id, Comment = "дубль" });
+        await db.SaveChangesAsync();
+        var request = new ContactMergeRequest
+        {
+            PrimarySourceType = "client", PrimarySourceId = primary.Id,
+            DuplicateSourceType = "client", DuplicateSourceId = duplicate.Id,
+        };
+
+        var preview = await CreateController(db, user.Id).PreviewMerge(request, CancellationToken.None);
+        Assert.False(Assert.IsType<ContactsController.ContactMergePreview>(Assert.IsType<OkObjectResult>(preview.Result).Value).CanMerge);
+        var response = await CreateController(db, user.Id).MergeContacts(request, CancellationToken.None);
+        Assert.IsType<ConflictObjectResult>(response.Result);
+        db.ChangeTracker.Clear();
+        Assert.Equal(2, await db.ClientContracts.CountAsync());
+        Assert.Contains(await db.ClientContracts.ToListAsync(), x => x.ClientId == duplicate.Id && x.Comment == "дубль");
+    }
+
+    [Fact]
+    public async Task MergeContacts_KeepsSelectedClientsPrimaryPassportAndAddress()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateClientUserAsync(db, "merge-primary", true, true, true, true, true);
+        var primary = await CreateClientAsync(db, user.Id);
+        var duplicate = await CreateClientAsync(db, user.Id);
+        db.ClientPassports.AddRange(
+            new ClientPassport { ClientId = primary.Id, IsPrimary = true, Number = "111" },
+            new ClientPassport { ClientId = duplicate.Id, IsPrimary = true, Number = "222" });
+        db.AddressRecords.AddRange(
+            new AddressRecord { ClientId = primary.Id, IsPrimary = true, Value = "Первый адрес" },
+            new AddressRecord { ClientId = duplicate.Id, IsPrimary = true, Value = "Второй адрес" });
+        await db.SaveChangesAsync();
+
+        var result = await CreateController(db, user.Id).MergeContacts(new ContactMergeRequest
+        {
+            PrimarySourceType = "client", PrimarySourceId = primary.Id,
+            DuplicateSourceType = "client", DuplicateSourceId = duplicate.Id,
+        }, CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(result.Result);
+        db.ChangeTracker.Clear();
+        Assert.Equal(2, await db.ClientPassports.CountAsync(x => x.ClientId == primary.Id));
+        Assert.Equal("111", (await db.ClientPassports.SingleAsync(x => x.ClientId == primary.Id && x.IsPrimary)).Number);
+        Assert.Equal(2, await db.AddressRecords.CountAsync(x => x.ClientId == primary.Id));
+        Assert.Equal("Первый адрес", (await db.AddressRecords.SingleAsync(x => x.ClientId == primary.Id && x.IsPrimary)).Value);
+    }
+
+    [Fact]
     public async Task Endpoints_RequireClientSectionPermissions()
     {
         await using var db = await CreateContextAsync();
@@ -393,6 +600,18 @@ public class ContactsControllerTests
         Assert.Contains(items, item => item.FullName == "Быстрая организация Альфа" && item.LinkedLegalEntityId == legal.Id);
         Assert.DoesNotContain(items, item => item.SourceType == "client" && item.SourceId == client.Id);
         Assert.DoesNotContain(items, item => item.SourceType == "legal" && item.SourceId == legal.Id);
+
+        var mergeDirectory = await CreateController(db, user.Id).GetAll(
+            scope: "all",
+            search: "alpha",
+            legalEntityId: null,
+            includeInactive: false,
+            syncOnly: null,
+            includeLinkedProfiles: true,
+            ct: CancellationToken.None);
+        var mergeItems = Assert.IsType<List<ContactDirectoryItemDto>>(Assert.IsType<OkObjectResult>(mergeDirectory.Result).Value);
+        Assert.Contains(mergeItems, item => item.SourceType == "client" && item.SourceId == client.Id);
+        Assert.Contains(mergeItems, item => item.SourceType == "legal" && item.SourceId == legal.Id);
     }
 
     [Fact]
@@ -539,6 +758,7 @@ public class ContactsControllerTests
                 CanView = true,
                 CanCreate = true,
                 CanEdit = true,
+                CanDelete = true,
                 ViewScope = legalEntityViewScope,
             });
         }

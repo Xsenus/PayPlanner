@@ -2310,6 +2310,23 @@ export interface ContactDirectoryItemDto {
   auditDeletedByUserName?: string | null;
 }
 
+export interface ContactMergeRequestDto {
+  primarySourceType: ContactSourceType;
+  primarySourceId: number;
+  duplicateSourceType: ContactSourceType;
+  duplicateSourceId: number;
+}
+
+export interface ContactMergePreviewDto {
+  canMerge: boolean;
+  conflicts: string[];
+  affectedLinks: number;
+  primaryName: string;
+  duplicateName: string;
+  phones: string[];
+  emails: string[];
+}
+
 export interface UpdateClientContactRequestDto {
   fullName: string;
   phone?: string | null;
@@ -3986,12 +4003,27 @@ export class ApiService {
       legalEntityId?: number;
       includeInactive?: boolean;
       syncOnly?: boolean;
+      includeLinkedProfiles?: boolean;
     },
     options?: { signal?: AbortSignal },
   ) {
     const q = buildQuery(params ?? {});
     return this.request<ContactDirectoryItemDto[]>(`/contacts${q}`, {
       signal: options?.signal,
+    });
+  }
+
+  async previewContactMerge(payload: ContactMergeRequestDto) {
+    return this.request<ContactMergePreviewDto>('/contacts/merge/preview', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async mergeContacts(payload: ContactMergeRequestDto) {
+    return this.request<ContactMergePreviewDto>('/contacts/merge', {
+      method: 'POST',
+      body: JSON.stringify(payload),
     });
   }
 

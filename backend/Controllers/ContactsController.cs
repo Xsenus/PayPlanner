@@ -20,7 +20,7 @@ namespace PayPlanner.Api.Controllers;
 [ApiController]
 [Route("api/contacts")]
 [Authorize]
-public class ContactsController : ControllerBase
+public partial class ContactsController : ControllerBase
 {
     private const string ClientProfileNotesPrefix = "__PP_CLIENT_PROFILE_V2__:";
     private const string YealinkImportNote = "Импортировано из Yealink RemotePhonebook.xml";
@@ -57,6 +57,7 @@ public class ContactsController : ControllerBase
         [FromQuery] int? legalEntityId,
         [FromQuery] bool includeInactive = false,
         [FromQuery] bool? syncOnly = null,
+        [FromQuery] bool includeLinkedProfiles = false,
         CancellationToken ct = default)
     {
         var canViewClients = await _db.HasUserSectionPermissionAsync(
@@ -176,7 +177,7 @@ public class ContactsController : ControllerBase
                     || (x.LegalEntity != null && x.LegalEntity.ShortName.ToLower().Contains(normalizedSearch)));
             }
 
-            if (linkedClientIds.Count > 0)
+            if (!includeLinkedProfiles && linkedClientIds.Count > 0)
             {
                 clientsQuery = clientsQuery.Where(x => !linkedClientIds.Contains(x.Id));
             }
@@ -197,7 +198,7 @@ public class ContactsController : ControllerBase
                 legalQuery = legalQuery.Where(x => x.Id == legalEntityId.Value);
             }
 
-            if (linkedLegalEntityIds.Count > 0)
+            if (!includeLinkedProfiles && linkedLegalEntityIds.Count > 0)
             {
                 legalQuery = legalQuery.Where(x => !linkedLegalEntityIds.Contains(x.Id));
             }
