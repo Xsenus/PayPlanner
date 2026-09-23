@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { InternalMessenger, TaskChatPanel } from './InternalMessenger';
 
@@ -113,5 +113,43 @@ describe('InternalMessenger', () => {
     expect(await screen.findByText('Чат задачи · Участники: Анна')).toBeTruthy();
     expect((await screen.findAllByText('@Анна')).length).toBe(2);
     expect(screen.queryByText('@[8]')).toBeNull();
+  });
+
+  it('does not mark filtered search results as read and restores the conversation on closing search', async () => {
+    chatApiMock.openTask.mockResolvedValue({ ...thread, id: 44, kind: 'task', taskJournalItemId: 101, name: 'Задача №101' });
+    render(<TaskChatPanel taskId={101} />);
+
+    await waitFor(() => expect(chatApiMock.markRead).toHaveBeenCalledWith(44, 22));
+    chatApiMock.markRead.mockClear();
+    chatApiMock.getMessages.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: 'Поиск' }));
+    fireEvent.change(screen.getByPlaceholderText('Текст сообщения'), { target: { value: 'документ' } });
+    expect(chatApiMock.getMessages).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Найти' }));
+    await waitFor(() => expect(chatApiMock.getMessages).toHaveBeenCalledWith(44, expect.objectContaining({ search: 'документ' })));
+    expect(chatApiMock.markRead).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Поиск' }));
+    await waitFor(() => expect(chatApiMock.markRead).toHaveBeenCalledWith(44, 22));
+    expect(screen.queryByPlaceholderText('Текст сообщения')).toBeNull();
+  });
+
+  it('ignores an older conversation response after a search result arrives', async () => {
+    chatApiMock.openTask.mockResolvedValue({ ...thread, id: 44, kind: 'task', taskJournalItemId: 101, name: 'Задача №101' });
+    let resolveInitial: (value: unknown) => void = () => undefined;
+    chatApiMock.getMessages.mockImplementationOnce(() => new Promise((resolve) => { resolveInitial = resolve; }));
+    chatApiMock.getMessages.mockResolvedValue({
+      items: [{ ...message, id: 23, text: 'Найдено' }], hasMore: false, nextBeforeId: 23,
+    });
+    render(<TaskChatPanel taskId={101} />);
+
+    await waitFor(() => expect(chatApiMock.getMessages).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('button', { name: 'Поиск' }));
+    fireEvent.change(screen.getByPlaceholderText('Текст сообщения'), { target: { value: 'Найдено' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Найти' }));
+    expect(await screen.findByText('Найдено')).toBeTruthy();
+    await act(async () => { resolveInitial({ items: [{ ...message, text: 'Старое' }], hasMore: false, nextBeforeId: 22 }); });
+    expect(screen.queryByText('Старое')).toBeNull();
+    expect(chatApiMock.markRead).not.toHaveBeenCalled();
   });
 });

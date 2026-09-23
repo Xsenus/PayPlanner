@@ -118,6 +118,44 @@ public sealed class InternalChatControllerTests
         Assert.False(second.HasMore);
     }
 
+    [Fact]
+    public async Task MarkRead_RejectsOtherThreadAndUnknownMessagesWithoutClearingUnreadCount()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var owner = await fixture.AddUserAsync("read-owner@example.test", "Автор");
+        var member = await fixture.AddUserAsync("read-member@example.test", "Сотрудник");
+        var first = Assert.IsType<InternalChatThreadDto>(Assert.IsType<CreatedAtActionResult>(
+            (await fixture.Controller(owner).CreateChannel(new CreateInternalChatChannelRequest
+            {
+                Name = "Первый чат", MemberUserIds = [member.Id]
+            }, CancellationToken.None)).Result).Value);
+        var second = Assert.IsType<InternalChatThreadDto>(Assert.IsType<CreatedAtActionResult>(
+            (await fixture.Controller(owner).CreateChannel(new CreateInternalChatChannelRequest
+            {
+                Name = "Второй чат", MemberUserIds = [member.Id]
+            }, CancellationToken.None)).Result).Value);
+        var firstMessage = Assert.IsType<InternalChatMessageDto>(Assert.IsType<CreatedAtActionResult>(
+            (await fixture.Controller(member).SendMessage(first.Id,
+                new SendInternalChatMessageRequest { Text = "Новый документ" }, CancellationToken.None)).Result).Value);
+        var otherMessage = Assert.IsType<InternalChatMessageDto>(Assert.IsType<CreatedAtActionResult>(
+            (await fixture.Controller(member).SendMessage(second.Id,
+                new SendInternalChatMessageRequest { Text = "Другое обсуждение" }, CancellationToken.None)).Result).Value);
+
+        Assert.IsType<BadRequestObjectResult>(await fixture.Controller(owner).MarkRead(first.Id,
+            new MarkInternalChatReadRequest { MessageId = otherMessage.Id }, CancellationToken.None));
+        Assert.IsType<BadRequestObjectResult>(await fixture.Controller(owner).MarkRead(first.Id,
+            new MarkInternalChatReadRequest { MessageId = otherMessage.Id + 100 }, CancellationToken.None));
+        var unread = Assert.IsAssignableFrom<IReadOnlyList<InternalChatThreadDto>>(Assert.IsType<OkObjectResult>(
+            (await fixture.Controller(owner).GetThreads(CancellationToken.None)).Result).Value);
+        Assert.Equal(1, unread.Single(item => item.Id == first.Id).UnreadCount);
+
+        Assert.IsType<NoContentResult>(await fixture.Controller(owner).MarkRead(first.Id,
+            new MarkInternalChatReadRequest { MessageId = firstMessage.Id }, CancellationToken.None));
+        var read = Assert.IsAssignableFrom<IReadOnlyList<InternalChatThreadDto>>(Assert.IsType<OkObjectResult>(
+            (await fixture.Controller(owner).GetThreads(CancellationToken.None)).Result).Value);
+        Assert.Equal(0, read.Single(item => item.Id == first.Id).UnreadCount);
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly SqliteConnection _connection;

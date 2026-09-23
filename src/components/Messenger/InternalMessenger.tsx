@@ -134,6 +134,7 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
   const [actionsFor, setActionsFor] = useState<number | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [search, setSearch] = useState('');
+  const [appliedSearch, setAppliedSearch] = useState('');
   const [authorUserId, setAuthorUserId] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
@@ -149,6 +150,7 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const loadRequestId = useRef(0);
   const threadMemberIdsKey = (thread.memberUserIds ?? []).join(',');
   const peopleById = useMemo(() => new Map(people.map((person) => [person.id, person])), [people]);
   const otherMemberNames = (thread.memberUserIds ?? [])
@@ -159,31 +161,36 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
     : otherMemberNames.join(', ');
 
   const loadMessages = useCallback(async (beforeId?: number, appendEarlier = false) => {
+    const requestId = ++loadRequestId.current;
     if (appendEarlier) setLoadingEarlier(true);
     else setLoading(true);
     try {
       const page = await internalChatApi.getMessages(thread.id, {
         beforeId,
-        search: search.trim() || undefined,
+        search: appliedSearch || undefined,
         authorUserId: authorUserId ? Number(authorUserId) : undefined,
         from: dateFrom ? new Date(`${dateFrom}T00:00:00`).toISOString() : undefined,
         to: dateTo ? new Date(`${dateTo}T23:59:59.999`).toISOString() : undefined,
         mentionedMe,
       });
+      if (requestId !== loadRequestId.current) return;
       setMessages((current) => appendEarlier ? [...page.items, ...current] : page.items);
       setHasMore(page.hasMore);
-      if (!appendEarlier && page.items.length) {
+      const isFiltered = Boolean(appliedSearch || authorUserId || dateFrom || dateTo || mentionedMe);
+      if (!appendEarlier && page.items.length && !isFiltered) {
         await internalChatApi.markRead(thread.id, page.items.at(-1)?.id);
         onThreadChanged?.();
         window.setTimeout(() => bottomRef.current?.scrollIntoView?.({ block: 'end' }), 0);
       }
     } catch (error) {
-      toast.error(errorMessage(error));
+      if (requestId === loadRequestId.current) toast.error(errorMessage(error));
     } finally {
-      setLoading(false);
-      setLoadingEarlier(false);
+      if (requestId === loadRequestId.current) {
+        setLoading(false);
+        setLoadingEarlier(false);
+      }
     }
-  }, [authorUserId, dateFrom, dateTo, mentionedMe, onThreadChanged, search, thread.id, toast]);
+  }, [appliedSearch, authorUserId, dateFrom, dateTo, mentionedMe, onThreadChanged, thread.id, toast]);
 
   useEffect(() => {
     setMessages([]);
@@ -305,7 +312,17 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
           <div className="truncate text-sm font-semibold text-slate-900">{thread.name}</div>
           <div className="truncate text-xs text-slate-500">{thread.kind === 'task' ? `Чат задачи${memberSummary ? ` · Участники: ${memberSummary}` : ''}` : thread.kind === 'direct' ? `Личный диалог${memberSummary ? ` с ${memberSummary}` : ''}` : `Командный канал${memberSummary ? ` · Участники: ${memberSummary}` : ''}`}</div>
         </div>
-        <button type="button" onClick={() => setSearchOpen((value) => !value)} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" aria-label="Поиск"><Search className="h-4 w-4" /></button>
+        <button type="button" onClick={() => {
+          if (searchOpen) {
+            setSearch('');
+            setAppliedSearch('');
+            setAuthorUserId('');
+            setDateFrom('');
+            setDateTo('');
+            setMentionedMe(false);
+          }
+          setSearchOpen((value) => !value);
+        }} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" aria-label="Поиск"><Search className="h-4 w-4" /></button>
         {thread.kind === 'channel' && thread.role === 'owner' ? <button type="button" onClick={() => { setMemberUserIds(thread.memberUserIds ?? []); setMembersOpen(true); }} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" aria-label="Участники канала" title="Участники канала"><Users className="h-4 w-4" /></button> : null}
         <select value={thread.notificationMode} onChange={(event) => void setMode(event.target.value as InternalChatNotificationMode)} className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-600" aria-label="Уведомления чата">
           <option value="all">Все уведомления</option>
@@ -316,7 +333,7 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
 
       {searchOpen ? (
         <div className="grid gap-2 border-b border-slate-200 bg-slate-50 p-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_180px_145px_145px_auto_auto]">
-          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Текст сообщения" className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm" />
+          <input value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') setAppliedSearch(search.trim()); }} placeholder="Текст сообщения" className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm" />
           <select value={authorUserId} onChange={(event) => setAuthorUserId(event.target.value)} className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-sm">
             <option value="">Все авторы</option>
             {people.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}
@@ -324,7 +341,7 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
           <input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-sm" aria-label="Сообщения с даты" />
           <input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-sm" aria-label="Сообщения по дату" />
           <label className="inline-flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" checked={mentionedMe} onChange={(event) => setMentionedMe(event.target.checked)} />Упомянули меня</label>
-          <button type="button" onClick={() => void loadMessages()} className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white">Найти</button>
+          <button type="button" onClick={() => { if (appliedSearch === search.trim()) void loadMessages(); else setAppliedSearch(search.trim()); }} className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white">Найти</button>
         </div>
       ) : null}
 

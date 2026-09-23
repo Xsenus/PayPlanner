@@ -3803,7 +3803,8 @@ describe('TaskJournal', () => {
 
   it.each(['legacy', 'modern'] as const)('opens the weekly schedule, blocks overlaps and applies a free slot in the %s card', async (taskCardWindowMode) => {
     const busySlot = new Date();
-    busySlot.setDate(busySlot.getDate() + 3);
+    const daysUntilTuesday = (2 - busySlot.getDay() + 7) % 7 || 7;
+    busySlot.setDate(busySlot.getDate() + daysUntilTuesday);
     busySlot.setHours(14, 0, 0, 0);
 
     const selectedSlot = new Date(busySlot);

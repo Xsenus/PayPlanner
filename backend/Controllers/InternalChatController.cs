@@ -484,7 +484,16 @@ public sealed partial class InternalChatController : ControllerBase
         if (userId is null) return Unauthorized();
         var member = await _db.InternalChatMembers.FirstOrDefaultAsync(item => item.ThreadId == threadId && item.UserId == userId && item.IsActive, ct);
         if (member is null) return Forbid();
-        var latestId = request.MessageId ?? await _db.InternalChatMessages.Where(item => item.ThreadId == threadId).MaxAsync(item => (int?)item.Id, ct);
+        if (request.MessageId is <= 0) return BadRequest("Укажите сообщение из этого чата.");
+        var latestId = request.MessageId.HasValue
+            ? await _db.InternalChatMessages
+                .Where(item => item.ThreadId == threadId && item.Id == request.MessageId && item.DeletedAt == null)
+                .Select(item => (int?)item.Id)
+                .SingleOrDefaultAsync(ct)
+            : await _db.InternalChatMessages
+                .Where(item => item.ThreadId == threadId && item.DeletedAt == null)
+                .MaxAsync(item => (int?)item.Id, ct);
+        if (request.MessageId.HasValue && latestId is null) return BadRequest("Сообщение не найдено в этом чате.");
         var changed = latestId.HasValue && latestId > (member.LastReadMessageId ?? 0);
         if (latestId.HasValue && latestId > (member.LastReadMessageId ?? 0)) member.LastReadMessageId = latestId;
         member.UpdatedAt = DateTime.UtcNow;
