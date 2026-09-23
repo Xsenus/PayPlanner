@@ -11013,6 +11013,7 @@ export function ClientDetail({
             allowEdit={caseMode === "edit" ? casePermissions.canEdit : casePermissions.canCreate}
             canViewFinance={paymentPermissions.canView}
             onOpenTask={permissions.tasks.canView ? onOpenTask : undefined}
+            canCreateTasks={permissions.tasks.canView && permissions.tasks.canCreate}
           />
         )}
 

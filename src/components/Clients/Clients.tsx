@@ -2054,6 +2054,7 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
             onDelete={caseMode === 'edit' ? deleteCase : undefined}
             canViewFinance={permissions.payments.canView}
             onOpenTask={permissions.tasks.canView ? onOpenTask : undefined}
+            canCreateTasks={permissions.tasks.canView && permissions.tasks.canCreate}
           />
         )}
       </div>

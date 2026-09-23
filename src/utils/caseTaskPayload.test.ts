@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ClientCase } from '../types';
-import { buildCaseTaskPayload, getCaseStageTaskTemplates } from './caseTaskPayload';
+import { buildCasePreHearingTaskPayload, buildCaseTaskPayload, getCaseStageTaskTemplates } from './caseTaskPayload';
 import { fromTimeZoneDateTimeInput } from './timeZoneDate';
 
 function createCase(overrides: Partial<ClientCase> = {}): ClientCase {
@@ -98,5 +98,30 @@ describe('buildCaseTaskPayload', () => {
     const templates = getCaseStageTaskTemplates(createCase({ stage: 'Индивидуальный этап заказчика', caseType: '' }));
 
     expect(templates.map((item) => item.key)).toEqual(['current-stage-plan', 'documents-check']);
+  });
+
+  it('creates authority and travel tasks linked to the case, due no later than the hearing', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-24T07:00:00Z'));
+    const caseItem = createCase({ responsibleUserId: 7, nextHearingAt: '2026-09-24T15:00:00Z' });
+
+    const authority = buildCasePreHearingTaskPayload(caseItem, 'authority', 'Asia/Novosibirsk');
+    const travel = buildCasePreHearingTaskPayload(caseItem, 'travel', 'Asia/Novosibirsk');
+
+    expect(authority.clientCaseId).toBe(caseItem.id);
+    expect(authority.assigneeUserId).toBe(7);
+    expect(authority.title).toContain('доверенность');
+    expect(authority.dueAt).toBe('2026-09-24T15:00:00.000Z');
+    expect(authority.description).toContain('Заседание:');
+    expect(travel.title).toContain('поездку');
+    expect(travel.tags).toContain('командировка');
+    expect(Date.parse(travel.dueAt)).toBeLessThanOrEqual(Date.parse(caseItem.nextHearingAt!));
+  });
+
+  it('does not create a pre-hearing task without an upcoming hearing and responsible', () => {
+    expect(() => buildCasePreHearingTaskPayload(createCase({ nextHearingAt: null, responsibleUserId: 7 }), 'authority'))
+      .toThrow(/будущее заседание/);
+    expect(() => buildCasePreHearingTaskPayload(createCase({ nextHearingAt: '2099-09-24T15:00:00Z', responsibleUserId: null }), 'travel'))
+      .toThrow(/ответственный/);
   });
 });

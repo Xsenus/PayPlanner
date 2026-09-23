@@ -975,6 +975,22 @@ describe('CaseDetailPage', () => {
     expect(screen.getByText(/подтверждена.*Юрист/i)).toBeTruthy();
   });
 
+  it('lets a lawyer plan hearing travel from the court tab', async () => {
+    const nextHearingAt = new Date(Date.now() + 7 * 86400000).toISOString();
+    vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({ nextHearingAt }));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit canViewTasks canCreateTasks />);
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Суд' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Запланировать командировку' }));
+
+    await waitFor(() => expect(apiService.createTaskJournalItem).toHaveBeenCalledWith(expect.objectContaining({
+      clientCaseId: 15,
+      assigneeUserId: 7,
+      title: 'Организовать поездку на судебное заседание',
+    })));
+  });
+
   it('keeps quick case settings in a wrapping responsive grid', async () => {
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
 

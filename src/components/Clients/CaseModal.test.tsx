@@ -21,6 +21,7 @@ vi.mock('../../services/api', () => ({
     confirmNextHearing: vi.fn(),
     getCurrentCaseAppealDecision: vi.fn(),
     createCaseAppealTask: vi.fn(),
+    createTaskJournalItem: vi.fn(),
     getCaseDocumentTemplates: vi.fn(),
     getTaskJournalItems: vi.fn(),
     getClientCaseFinanceSummaries: vi.fn(),
@@ -66,6 +67,8 @@ describe('CaseModal', () => {
     vi.mocked(apiService.getCurrentCaseAppealDecision).mockReset();
     vi.mocked(apiService.getCurrentCaseAppealDecision).mockResolvedValue(null);
     vi.mocked(apiService.createCaseAppealTask).mockReset();
+    vi.mocked(apiService.createTaskJournalItem).mockReset();
+    vi.mocked(apiService.createTaskJournalItem).mockResolvedValue({ id: 91 } as never);
     vi.mocked(apiService.getTaskJournalItems).mockReset();
     vi.mocked(apiService.getTaskJournalItems).mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 25 });
     vi.mocked(apiService.getClientCaseFinanceSummaries).mockReset();
@@ -206,6 +209,20 @@ describe('CaseModal', () => {
     await waitFor(() => expect(apiService.confirmNextHearing).toHaveBeenCalledWith(1));
     expect(onNextHearingConfirmed).toHaveBeenCalledWith(expect.objectContaining({ nextHearingConfirmedByName: 'Юрист' }));
     expect(screen.getByText(/Дата подтверждена.*Юрист/)).toBeTruthy();
+  });
+
+  it('lets a lawyer request authority for an upcoming hearing without editing task details', async () => {
+    const nextHearingAt = new Date(Date.now() + 7 * 86400000).toISOString();
+    render(<CaseModal isOpen onClose={vi.fn()} caseData={createCase({ nextHearingAt, responsibleUserId: 7 })} onSave={vi.fn()} canCreateTasks />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Запросить доверенность' }));
+
+    await waitFor(() => expect(apiService.createTaskJournalItem).toHaveBeenCalledWith(expect.objectContaining({
+      clientCaseId: 1,
+      assigneeUserId: 7,
+      title: 'Оформить доверенность для участия в заседании',
+    })));
+    expect(await screen.findByText(/Задача создана/)).toBeTruthy();
   });
 
   it('applies a custom overlay class when provided', () => {

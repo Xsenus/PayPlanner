@@ -3,6 +3,7 @@ import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
 import { ClientPortalAccessPanel } from './ClientPortalAccessPanel';
 import { CaseAppealDecisionAction } from './CaseAppealDecisionAction';
+import { CasePreHearingActions } from './CasePreHearingActions';
 import { MessengerDocumentDeliveryModal } from './MessengerDocumentDeliveryModal';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -4158,6 +4159,14 @@ export function CaseDetailPage({
           ) : null}
 
           {activeTab === 'court' ? (
+            <div className="space-y-3">
+            <CasePreHearingActions
+              caseItem={caseItem}
+              timeZoneId={caseTimeZoneId}
+              canCreateTask={canCreateCaseTask}
+              onTaskCreated={() => setReloadToken((value) => value + 1)}
+              onOpenTask={onOpenTask}
+            />
             <CourtPanel
               initialOverview={courtOverview}
               onOverviewChange={setCourtOverview}
@@ -4264,6 +4273,7 @@ export function CaseDetailPage({
               onAddProceduralDeadline={() => void addProceduralDeadline()}
               onCloseProceduralDeadline={(deadline) => void closeProceduralDeadline(deadline)}
             />
+            </div>
           ) : null}
 
           {canViewFinance && activeTab === 'finance' ? (

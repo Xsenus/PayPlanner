@@ -2,6 +2,7 @@ import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
 import { CaseAppealDecisionAction } from '../Cases/CaseAppealDecisionAction';
+import { CasePreHearingActions } from '../Cases/CasePreHearingActions';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Download, ExternalLink, FileText, Link2, Plus, RotateCw, Trash2, Upload, X } from 'lucide-react';
@@ -28,6 +29,7 @@ interface CaseModalProps {
   canUseContactRelatedParties?: boolean;
   canUseLegalEntityRelatedParties?: boolean;
   onOpenTask?: (taskId: number) => void;
+  canCreateTasks?: boolean;
 }
 
 type StatusValue = 'Open' | 'OnHold' | 'Closed' | 'Lost';
@@ -260,6 +262,7 @@ export function CaseModal({
   canUseContactRelatedParties = true,
   canUseLegalEntityRelatedParties = true,
   onOpenTask,
+  canCreateTasks = false,
 }: CaseModalProps) {
   const { confirm, prompt } = useDialog();
   const [timeZoneId, setTimeZoneId] = useState(() => normalizeUserTimeZoneId());
@@ -1610,6 +1613,17 @@ export function CaseModal({
                 {confirmingNextHearing ? 'Сохраняем…' : 'Подтвердить дату заседания'}
               </button>
             ) : null}
+          </div>
+
+          <div className="md:col-span-2">
+            <CasePreHearingActions
+              caseItem={caseData}
+              timeZoneId={timeZoneId}
+              canCreateTask={canCreateTasks}
+              datesSaved={nextHearingAt === toDateTimeInput(caseData.nextHearingAt) && responsibleUserId === String(caseData.responsibleUserId ?? '')}
+              onTaskCreated={() => void refreshCaseTasks()}
+              onOpenTask={onOpenTask}
+            />
           </div>
 
           <div className="md:col-span-2">

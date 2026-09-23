@@ -26,6 +26,29 @@ export interface CaseStageTaskTemplate {
   participants?: TaskJournalParticipant[];
 }
 
+export type CasePreHearingAction = 'authority' | 'travel';
+
+const PRE_HEARING_TEMPLATES: Record<CasePreHearingAction, CaseStageTaskTemplate> = {
+  authority: {
+    key: 'hearing-authority',
+    stageLabel: 'Подготовка к заседанию',
+    title: 'Оформить доверенность для участия в заседании',
+    description: 'Проверьте, кому нужны полномочия для участия в заседании, и оформите доверенность до его начала.',
+    priority: 'high',
+    plannedDurationMinutes: 60,
+    tags: ['дело', 'суд', 'доверенность'],
+  },
+  travel: {
+    key: 'hearing-travel',
+    stageLabel: 'Подготовка к заседанию',
+    title: 'Организовать поездку на судебное заседание',
+    description: 'Если заседание проходит в другом городе, согласуйте командировку, дорогу и проживание до его начала.',
+    priority: 'high',
+    plannedDurationMinutes: 60,
+    tags: ['дело', 'суд', 'командировка'],
+  },
+};
+
 const DEFAULT_STAGE_TASK_TEMPLATES: CaseStageTaskTemplate[] = [
   {
     key: 'current-stage-plan',
@@ -237,4 +260,21 @@ export function buildCaseTaskPayload(
     protectedFields: ['clientId', 'legalEntityId', 'isInternal', 'clientCaseId', 'objectName'],
     replaceFields: ['title', 'description', 'assigneeUserId', 'assigneeName', 'plannedDurationMinutes', 'type', 'priority'],
   });
+}
+
+export function buildCasePreHearingTaskPayload(
+  caseItem: ClientCase,
+  action: CasePreHearingAction,
+  timeZoneId?: string | null,
+): TaskJournalUpsertPayload {
+  const hearingAt = Date.parse(caseItem.nextHearingAt ?? '');
+  if (!Number.isFinite(hearingAt) || hearingAt <= Date.now() || !caseItem.responsibleUserId) {
+    throw new Error('Для задачи нужны будущее заседание и ответственный по делу.');
+  }
+
+  const payload = buildCaseTaskPayload(caseItem, timeZoneId, PRE_HEARING_TEMPLATES[action]);
+  const suggestedDueAt = Date.parse(payload.dueAt);
+  payload.dueAt = new Date(Math.min(suggestedDueAt, hearingAt)).toISOString();
+  payload.description = `${payload.description}\nЗаседание: ${new Date(hearingAt).toLocaleString('ru-RU', { timeZone: timeZoneId || 'UTC' })}. Срок задачи можно уточнить в её карточке.`;
+  return payload;
 }
