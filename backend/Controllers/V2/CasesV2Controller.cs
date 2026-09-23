@@ -414,7 +414,13 @@ public partial class CasesV2Controller : ControllerBase
         });
     }
 
-    public sealed record CourtReportGroupDto(string Name, int Total, int Active, int Completed);
+    public sealed record CourtReportGroupDto(
+        string Name,
+        int Total,
+        int Active,
+        int Completed,
+        int DecisionDurationSampleCount,
+        double? AverageDaysFromClaimToDecision);
 
     public sealed record CourtReportOverviewDto(
         int Total,
@@ -501,16 +507,64 @@ public partial class CasesV2Controller : ControllerBase
             .Select(user => new { user.Id, user.FullName })
             .ToDictionaryAsync(user => user.Id, user => user.FullName, ct);
 
+        // Only dates needed for this optional report are streamed. Do not load case cards,
+        // documents or histories, and do not let malformed dates affect the average.
+        var durationByResponsible = new Dictionary<int, (long Days, int Count)>();
+        var durationByCourt = new Dictionary<string, (long Days, int Count)>(StringComparer.Ordinal);
+        var visibleResponsibleIds = responsibleRows.Select(row => row.UserId ?? 0).ToHashSet();
+        var visibleCourtNames = courtRows.Select(row => row.Name).ToHashSet(StringComparer.Ordinal);
+        await foreach (var row in query.AsNoTracking()
+            .Where(item => item.ClaimFiledAt.HasValue && item.CourtDecisionAt.HasValue)
+            .Select(item => new
+            {
+                item.ResponsibleUserId,
+                ClientResponsibleUserId = item.Client != null ? item.Client.ResponsibleUserId : null,
+                LegalEntityResponsibleUserId = item.LegalEntity != null ? item.LegalEntity.ResponsibleUserId : null,
+                item.CourtName,
+                item.ClaimFiledAt,
+                item.CourtDecisionAt,
+            })
+            .AsAsyncEnumerable()
+            .WithCancellation(ct))
+        {
+            var days = (row.CourtDecisionAt!.Value.Date - row.ClaimFiledAt!.Value.Date).Days;
+            if (days < 0) continue;
+
+            var responsibleId = row.ResponsibleUserId ?? row.ClientResponsibleUserId ?? row.LegalEntityResponsibleUserId ?? 0;
+            if (visibleResponsibleIds.Contains(responsibleId))
+            {
+                var current = durationByResponsible.GetValueOrDefault(responsibleId);
+                durationByResponsible[responsibleId] = (current.Days + days, current.Count + 1);
+            }
+
+            var courtName = string.IsNullOrEmpty(row.CourtName) ? "Суд не указан" : row.CourtName;
+            if (visibleCourtNames.Contains(courtName))
+            {
+                var current = durationByCourt.GetValueOrDefault(courtName);
+                durationByCourt[courtName] = (current.Days + days, current.Count + 1);
+            }
+        }
+
         var total = totals?.Total ?? 0;
         var active = totals?.Active ?? 0;
         return new CourtReportOverviewDto(
             total,
             active,
             total - active,
-            responsibleRows.Select(row => new CourtReportGroupDto(
-                row.UserId.HasValue ? userNames.GetValueOrDefault(row.UserId.Value, "Сотрудник не найден") : "Не назначен",
-                row.Total, row.Active, row.Total - row.Active)).ToArray(),
-            courtRows.Select(row => new CourtReportGroupDto(row.Name, row.Total, row.Active, row.Total - row.Active)).ToArray(),
+            responsibleRows.Select(row =>
+            {
+                var duration = durationByResponsible.GetValueOrDefault(row.UserId ?? 0);
+                return new CourtReportGroupDto(
+                    row.UserId.HasValue ? userNames.GetValueOrDefault(row.UserId.Value, "Сотрудник не найден") : "Не назначен",
+                    row.Total, row.Active, row.Total - row.Active, duration.Count,
+                    duration.Count > 0 ? Math.Round((double)duration.Days / duration.Count, 1) : null);
+            }).ToArray(),
+            courtRows.Select(row =>
+            {
+                var duration = durationByCourt.GetValueOrDefault(row.Name);
+                return new CourtReportGroupDto(row.Name, row.Total, row.Active, row.Total - row.Active,
+                    duration.Count, duration.Count > 0 ? Math.Round((double)duration.Days / duration.Count, 1) : null);
+            }).ToArray(),
             total - responsibleRows.Sum(row => row.Total),
             total - courtRows.Sum(row => row.Total));
     }

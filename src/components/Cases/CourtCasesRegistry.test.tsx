@@ -65,7 +65,7 @@ describe('CourtCasesRegistry', () => {
       withoutHearing: 0,
       underControl: 1,
     });
-    vi.mocked(apiService.getCourtReportOverview).mockResolvedValue({ total: 2, active: 1, completed: 1, byResponsible: [{ name: 'Петров Пётр Петрович', total: 2, active: 1, completed: 1 }], byCourt: [{ name: 'Новокуйбышевский городской суд', total: 2, active: 1, completed: 1 }], otherResponsibleCases: 0, otherCourtCases: 0 });
+    vi.mocked(apiService.getCourtReportOverview).mockResolvedValue({ total: 2, active: 1, completed: 1, byResponsible: [{ name: 'Петров Пётр Петрович', total: 2, active: 1, completed: 1, decisionDurationSampleCount: 1, averageDaysFromClaimToDecision: 12 }], byCourt: [{ name: 'Новокуйбышевский городской суд', total: 2, active: 1, completed: 1, decisionDurationSampleCount: 1, averageDaysFromClaimToDecision: 12 }], otherResponsibleCases: 0, otherCourtCases: 0 });
   });
 
   it('loads the court report only when opened and shows CRM completion separately from court outcome', async () => {
@@ -76,6 +76,7 @@ describe('CourtCasesRegistry', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Сводка по делам' }));
     expect(await screen.findByRole('dialog', { name: 'Сводка судебных дел' })).toBeTruthy();
     expect(await screen.findByText(/не выигрыш в суде/u)).toBeTruthy();
+    expect(screen.getAllByText('12 дн. · выборка: 1')).toHaveLength(2);
     expect(apiService.getCourtReportOverview).toHaveBeenCalledWith(
       expect.objectContaining({ courtState: 'all' }),
       expect.objectContaining({ signal: expect.any(AbortSignal) }),

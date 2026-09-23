@@ -628,6 +628,8 @@ export interface CourtReportGroup {
   total: number;
   active: number;
   completed: number;
+  decisionDurationSampleCount: number;
+  averageDaysFromClaimToDecision: number | null;
 }
 
 export interface CourtWorkload {
