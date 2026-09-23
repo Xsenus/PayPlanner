@@ -4622,6 +4622,19 @@ public class NotificationServiceTests
         Assert.Contains("CASE-COURT-1", notification.Title);
         Assert.Contains("Предварительное заседание", notification.BodyPreview);
         Assert.Contains($"\"courtEventId\":{courtEvent.Id}", notification.MetadataJson, StringComparison.Ordinal);
+
+        courtEvent.ScheduledAt = courtEvent.ScheduledAt.AddDays(2);
+        courtEvent.UpdatedAt = courtEvent.UpdatedAt!.Value.AddDays(1);
+        await db.SaveChangesAsync();
+        await service.NotifyCaseCourtEventAsync(clientCase, courtEvent, "rescheduled", "Court Actor", 999, [recipient.Id]);
+        await service.NotifyCaseCourtEventAsync(clientCase, courtEvent, "rescheduled", "Court Actor", 999, [recipient.Id]);
+
+        var rescheduled = Assert.Single(await db.UserNotifications.Where(item => item.Id != notification.Id).ToListAsync());
+        Assert.Equal(UserNotificationTypes.CourtHearing, rescheduled.Type);
+        Assert.StartsWith("Перенесено судебное заседание:", rescheduled.Title, StringComparison.Ordinal);
+        Assert.Contains("Новая дата:", rescheduled.BodyPreview);
+        Assert.Contains("Проверьте новую дату и подготовку", rescheduled.BodyPreview);
+        Assert.Contains("\"action\":\"rescheduled\"", rescheduled.MetadataJson, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -26,6 +26,7 @@ public static class NotificationTemplateKeys
     public const string TaskComment = "task.comment";
     public const string CaseInactivityControl = "case.inactivityControl";
     public const string CourtHearing = "court.hearing";
+    public const string CourtHearingRescheduled = "court.hearingRescheduled";
     public const string CourtStatusChanged = "court.statusChanged";
     public const string CourtDecisionPublished = "court.decisionPublished";
     public const string CourtSyncFailed = "court.syncFailed";
@@ -385,6 +386,13 @@ public static class NotificationTemplateCatalog
             "Уведомление ответственным по делу при назначении или переносе судебного заседания.",
             "Судебное заседание: {{case.title}}",
             "{{actor.name}} {{courtEvent.action}} судебное заседание по делу {{case.title}}.\n\nСобытие: {{courtEvent.title}}\nДата: {{courtEvent.scheduledAt}}\nСуд: {{courtEvent.courtName}}\nНомер в суде: {{courtEvent.courtCaseNumber}}\nСтатус: {{courtEvent.status}}",
+            CourtEventVariables),
+        new(
+            NotificationTemplateKeys.CourtHearingRescheduled,
+            "Перенос судебного заседания",
+            "Уведомление ответственным по делу при изменении даты судебного заседания.",
+            "Перенесено судебное заседание: {{case.title}}",
+            "{{actor.name}} перенёс(ла) судебное заседание по делу {{case.title}}. Проверьте новую дату и подготовку.\n\nСобытие: {{courtEvent.title}}\nНовая дата: {{courtEvent.scheduledAt}}\nСуд: {{courtEvent.courtName}}\nНомер в суде: {{courtEvent.courtCaseNumber}}\nСтатус: {{courtEvent.status}}",
             CourtEventVariables),
         new(
             NotificationTemplateKeys.CourtStatusChanged,

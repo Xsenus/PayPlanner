@@ -2355,9 +2355,13 @@ public sealed class NotificationService : INotificationService
         }
 
         var normalizedActorName = NormalizeNotificationText(actorName, "Сотрудник");
-        var notificationType = ResolveCourtEventNotificationType(courtEvent);
-        var templateKey = ResolveCourtEventTemplateKey(notificationType);
-        var title = BuildCourtEventSubject(clientCase, courtEvent, notificationType);
+        var notificationType = string.Equals(action, "rescheduled", StringComparison.OrdinalIgnoreCase)
+            ? UserNotificationTypes.CourtHearing
+            : ResolveCourtEventNotificationType(courtEvent);
+        var templateKey = string.Equals(action, "rescheduled", StringComparison.OrdinalIgnoreCase)
+            ? NotificationTemplateKeys.CourtHearingRescheduled
+            : ResolveCourtEventTemplateKey(notificationType);
+        var title = BuildCourtEventSubject(clientCase, courtEvent, notificationType, action);
 
         var version = (courtEvent.UpdatedAt ?? courtEvent.CreatedAt).Ticks.ToString(CultureInfo.InvariantCulture);
         var recipientNotificationChannels = await ResolveUserNotificationChannelsAsync(
@@ -7046,8 +7050,10 @@ public sealed class NotificationService : INotificationService
         => NotificationTemplateCatalog.CompactBlankLines(
             $"{actorName} {(granted ? "разрешил(а) доступ к делу." : "отклонил(а) запрос доступа к делу.")}\n\nКонтрагент: {BuildCaseOwnerName(clientCase)}\nДело: {BuildClientCaseTitle(clientCase)}\nКомментарий: {comment}\nДата решения: {FormatCourtEventDate(resolvedAt, allDay: false)}");
 
-    private static string BuildCourtEventSubject(ClientCase clientCase, ClientCaseCourtEvent courtEvent, string notificationType)
-        => notificationType switch
+    private static string BuildCourtEventSubject(ClientCase clientCase, ClientCaseCourtEvent courtEvent, string notificationType, string action)
+        => string.Equals(action, "rescheduled", StringComparison.OrdinalIgnoreCase)
+            ? $"Перенесено судебное заседание: {BuildClientCaseTitle(clientCase)}"
+            : notificationType switch
         {
             UserNotificationTypes.CourtDecisionPublished => $"Опубликован результат по суду: {BuildClientCaseTitle(clientCase)}",
             UserNotificationTypes.CourtStatusChanged => $"Изменился судебный статус: {BuildClientCaseTitle(clientCase)}",
@@ -7063,7 +7069,9 @@ public sealed class NotificationService : INotificationService
         TimeZoneInfo recipientTimeZone)
     {
         var actionText = ResolveCourtEventActionText(action);
-        var intro = notificationType switch
+        var intro = string.Equals(action, "rescheduled", StringComparison.OrdinalIgnoreCase)
+            ? $"{actorName} перенёс(ла) судебное заседание по делу. Проверьте новую дату и подготовку."
+            : notificationType switch
         {
             UserNotificationTypes.CourtDecisionPublished => $"{actorName} {actionText} судебный результат по делу.",
             UserNotificationTypes.CourtStatusChanged => $"{actorName} {actionText} судебный статус по делу.",
@@ -7080,7 +7088,7 @@ public sealed class NotificationService : INotificationService
             .Append("Событие: ")
             .Append(NormalizeNotificationText(courtEvent.Title, "Судебное событие"))
             .AppendLine()
-            .Append("Дата: ")
+            .Append(string.Equals(action, "rescheduled", StringComparison.OrdinalIgnoreCase) ? "Новая дата: " : "Дата: ")
             .Append(FormatCourtEventDate(courtEvent.ScheduledAt, courtEvent.AllDay, recipientTimeZone))
             .AppendLine()
             .Append("Статус: ")
@@ -7159,7 +7167,9 @@ public sealed class NotificationService : INotificationService
     private static string ResolveCourtEventActionText(string action)
         => NormalizeCourtEventAction(action).Equals("created", StringComparison.OrdinalIgnoreCase)
             ? "добавил(а)"
-            : "обновил(а)";
+            : NormalizeCourtEventAction(action).Equals("rescheduled", StringComparison.OrdinalIgnoreCase)
+                ? "перенёс(ла)"
+                : "обновил(а)";
 
     private static string NormalizeCaseProceduralDeadlineAction(string action)
         => string.IsNullOrWhiteSpace(action) ? "updated" : action.Trim();

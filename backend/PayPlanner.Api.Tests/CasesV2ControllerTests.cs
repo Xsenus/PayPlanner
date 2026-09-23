@@ -3660,6 +3660,31 @@ public class CasesV2ControllerTests
         Assert.Equal(new DateTime(2026, 7, 7, 9, 30, 0, DateTimeKind.Utc), hearingTask.DueAt);
         Assert.Equal("Подготовиться к заседанию", hearingTask.Title);
         Assert.Contains("Заседание назначено на 10.07.2026 09:30", hearingTask.Description);
+
+        var newHearingAt = new DateTime(2026, 7, 12, 9, 30, 0, DateTimeKind.Utc);
+        var updateResult = await controller.UpdateCourtEvent(
+            clientCase.Id,
+            created.Id,
+            new CasesV2Controller.UpsertClientCaseCourtEventRequest
+            {
+                EventType = "hearing",
+                Title = "Судебное заседание",
+                ScheduledAt = newHearingAt,
+                AllDay = false,
+                CourtInstance = "first",
+                MovementStatus = "scheduled",
+            },
+            CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(updateResult.Result);
+        var rescheduled = await db.UserNotifications.SingleAsync(item => item.Id != notification.Id);
+        Assert.Equal(UserNotificationTypes.CourtHearing, rescheduled.Type);
+        Assert.Equal(responsible.Id, rescheduled.RecipientUserId);
+        Assert.StartsWith("Перенесено судебное заседание:", rescheduled.Title, StringComparison.Ordinal);
+        Assert.Contains("Новая дата: 12.07.2026 12:30", rescheduled.BodyPreview);
+        Assert.Contains("\"action\":\"rescheduled\"", rescheduled.MetadataJson, StringComparison.Ordinal);
+        Assert.Equal(newHearingAt.AddDays(-3), hearingTask.DueAt);
+        Assert.Equal("Учесть новую дату, проверить готовность", hearingTask.Title);
     }
 
     [Fact]

@@ -1342,9 +1342,12 @@ public class CasesV2Controller : ControllerBase
         }
 
         var isCreated = string.Equals(action, "created", StringComparison.OrdinalIgnoreCase);
-        var title = isCreated
-            ? $"Новое судебное событие: {BuildCaseNotificationTitle(clientCase)}"
-            : $"Обновлено судебное событие: {BuildCaseNotificationTitle(clientCase)}";
+        var isRescheduled = string.Equals(action, "rescheduled", StringComparison.OrdinalIgnoreCase);
+        var title = isRescheduled
+            ? $"Перенесено судебное заседание: {BuildCaseNotificationTitle(clientCase)}"
+            : isCreated
+                ? $"Новое судебное событие: {BuildCaseNotificationTitle(clientCase)}"
+                : $"Обновлено судебное событие: {BuildCaseNotificationTitle(clientCase)}";
         var eventVersionTicks = (courtEvent.UpdatedAt ?? courtEvent.CreatedAt).Ticks;
         var eventKey = $"case:{clientCase.Id}:court-event:{courtEvent.Id}:{action}:{eventVersionTicks}";
         var metadata = new
@@ -1365,7 +1368,7 @@ public class CasesV2Controller : ControllerBase
         foreach (var recipientUserId in recipientUserIds.OrderBy(static id => id))
         {
             var recipientTimeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, recipientUserId, ct);
-            var body = BuildCourtEventNotificationBody(clientCase, courtEvent, isCreated, actorName, recipientTimeZone);
+            var body = BuildCourtEventNotificationBody(clientCase, courtEvent, isCreated, isRescheduled, actorName, recipientTimeZone);
             await AddCaseUserNotificationAsync(
                 recipientUserId,
                 UserNotificationTypes.CaseCourtEvent,
@@ -1412,11 +1415,14 @@ public class CasesV2Controller : ControllerBase
         ClientCase clientCase,
         ClientCaseCourtEvent courtEvent,
         bool isCreated,
+        bool isRescheduled,
         string actorName,
         TimeZoneInfo recipientTimeZone)
     {
         var builder = new StringBuilder()
-            .Append(isCreated ? "Добавлено судебное событие." : "Обновлено судебное событие.")
+            .Append(isRescheduled
+                ? "Судебное заседание перенесено. Проверьте новую дату и подготовку."
+                : isCreated ? "Добавлено судебное событие." : "Обновлено судебное событие.")
             .AppendLine()
             .Append("Дело: ")
             .Append(BuildCaseNotificationTitle(clientCase))
@@ -3589,6 +3595,9 @@ public class CasesV2Controller : ControllerBase
         var actorUserId = User.GetUserId();
         var actorName = User.GetDisplayName();
         var oldProceduralDeadlineId = courtEvent.ProceduralDeadlineId;
+        var wasRescheduled = string.Equals(courtEvent.EventType, CourtSyncNormalization.EventTypes.Hearing, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(validation.EventType, CourtSyncNormalization.EventTypes.Hearing, StringComparison.OrdinalIgnoreCase)
+            && (courtEvent.ScheduledAt != validation.ScheduledAt || courtEvent.AllDay != validation.AllDay);
         courtEvent.EventType = validation.EventType;
         courtEvent.Title = validation.Title;
         courtEvent.Description = validation.Description;
@@ -3614,7 +3623,7 @@ public class CasesV2Controller : ControllerBase
         _db.SetAuditReason($"Обновлено судебное событие дела: {courtEvent.Title}");
         AddCourtEventHistory(courtEvent, "updated", $"Событие обновлено: {courtEvent.Title}.", actorUserId, actorName);
         await SyncCourtEventDeadlineSourceAsync(courtEvent, oldProceduralDeadlineId, actorUserId, actorName, ct);
-        await AddCourtEventUserNotificationsAsync(clientCase, courtEvent, "updated", actorUserId, actorName, ct);
+        await AddCourtEventUserNotificationsAsync(clientCase, courtEvent, wasRescheduled ? "rescheduled" : "updated", actorUserId, actorName, ct);
         await _db.SaveChangesAsync(ct);
         await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, clientCase.Id, actorUserId, actorName, ct);
         await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
