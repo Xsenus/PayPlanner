@@ -2432,7 +2432,7 @@ public sealed class NotificationService : INotificationService
 
     public async Task NotifyCaseHearingDateChangedAsync(
         ClientCase clientCase,
-        DateTime previousAt,
+        DateTime? previousAt,
         DateTime currentAt,
         string actorName,
         int actorUserId,
@@ -2465,16 +2465,23 @@ public sealed class NotificationService : INotificationService
             visibleRecipientUserIds,
             cancellationToken);
         var normalizedActorName = NormalizeNotificationText(actorName, "Сотрудник");
-        var title = $"Перенесено судебное заседание: {BuildClientCaseTitle(clientCase)}";
+        var isRescheduled = previousAt.HasValue;
+        var title = isRescheduled
+            ? $"Перенесено судебное заседание: {BuildClientCaseTitle(clientCase)}"
+            : $"Назначено судебное заседание: {BuildClientCaseTitle(clientCase)}";
 
         foreach (var recipientUserId in visibleRecipientUserIds)
         {
             var timeZone = timeZonesByUserId.GetValueOrDefault(
                 recipientUserId,
                 CalendarTimeZoneHelper.ResolveTimeZone(null));
-            var body = $"{normalizedActorName} изменил(а) дату ближайшего заседания. Проверьте подготовку по делу.\n\n"
+            var body = (isRescheduled
+                    ? $"{normalizedActorName} изменил(а) дату ближайшего заседания. Проверьте подготовку по делу.\n\n"
+                    : $"{normalizedActorName} назначил(а) ближайшее судебное заседание. Проверьте подготовку по делу.\n\n")
                 + $"Дело: {BuildClientCaseTitle(clientCase)}\n"
-                + $"Прежняя дата: {FormatCourtEventDate(previousAt, allDay: false, recipientTimeZone: timeZone)}\n"
+                + (previousAt.HasValue
+                    ? $"Прежняя дата: {FormatCourtEventDate(previousAt.Value, allDay: false, recipientTimeZone: timeZone)}\n"
+                    : string.Empty)
                 + $"Новая дата: {FormatCourtEventDate(currentAt, allDay: false, recipientTimeZone: timeZone)}";
             await CreateUserNotificationAsync(
                 recipientUserId,

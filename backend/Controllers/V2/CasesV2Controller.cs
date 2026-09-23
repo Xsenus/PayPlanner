@@ -9513,6 +9513,21 @@ public partial class CasesV2Controller : ControllerBase
         _db.ClientCases.Add(model);
         await _db.SaveChangesAsync(ct);
         await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, model.Id, User.GetUserId(), User.GetDisplayName(), ct);
+        if (_notificationService is not null
+            && !ClientCaseStageClassifier.IsPretrial(model)
+            && model.NextHearingAt.HasValue)
+        {
+            var recipients = await ResolveCaseNotificationRecipientIdsAsync(model.Id, ct);
+            await _notificationService.NotifyCaseHearingDateChangedAsync(
+                model,
+                null,
+                model.NextHearingAt.Value,
+                User.GetDisplayName(),
+                User.GetUserId() ?? 0,
+                recipients,
+                DateTime.UtcNow,
+                ct);
+        }
         await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
         return Created($"/api/v2/cases/{model.Id}", model);
     }
@@ -9588,14 +9603,13 @@ public partial class CasesV2Controller : ControllerBase
         await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, e.Id, User.GetUserId(), User.GetDisplayName(), ct);
         if (_notificationService is not null
             && !ClientCaseStageClassifier.IsPretrial(e)
-            && previousNextHearingAt.HasValue
             && e.NextHearingAt.HasValue
-            && previousNextHearingAt.Value != e.NextHearingAt.Value)
+            && previousNextHearingAt != e.NextHearingAt)
         {
             var recipients = await ResolveCaseNotificationRecipientIdsAsync(e.Id, ct);
             await _notificationService.NotifyCaseHearingDateChangedAsync(
                 e,
-                previousNextHearingAt.Value,
+                previousNextHearingAt,
                 e.NextHearingAt.Value,
                 User.GetDisplayName(),
                 User.GetUserId() ?? 0,

@@ -1267,5 +1267,5 @@ public interface INotificationService
     Task NotifyCaseAccessResolvedAsync(ClientCase clientCase, bool granted, string actorName, int actorUserId, int requestedByUserId, string requestedByUserName, string? requestReason, string? comment, DateTime resolvedAt, CancellationToken cancellationToken = default);
     Task NotifyCourtSyncFailedAsync(ClientCase clientCase, string providerName, string summary, string actorName, int actorUserId, IReadOnlyCollection<int> recipientUserIds, CancellationToken cancellationToken = default);
     Task NotifyCourtSyncStalledAsync(ClientCase clientCase, string providerName, CancellationToken cancellationToken = default);
-    Task NotifyCaseHearingDateChangedAsync(ClientCase clientCase, DateTime previousAt, DateTime currentAt, string actorName, int actorUserId, IReadOnlyCollection<int> recipientUserIds, DateTime changedAtUtc, CancellationToken cancellationToken = default);
+    Task NotifyCaseHearingDateChangedAsync(ClientCase clientCase, DateTime? previousAt, DateTime currentAt, string actorName, int actorUserId, IReadOnlyCollection<int> recipientUserIds, DateTime changedAtUtc, CancellationToken cancellationToken = default);
 }

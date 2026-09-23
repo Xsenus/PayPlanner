@@ -2047,6 +2047,33 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task Create_WithNearestHearing_NotifiesAssignedResponsible()
+    {
+        await using var db = await CreateContextAsync();
+        var editor = await CreateUserAsync(db, "hearing-create-editor@example.com", "Редактор", DataVisibilityScope.All);
+        var responsible = await CreateUserAsync(db, "hearing-create-responsible@example.com", "Ответственный", DataVisibilityScope.All);
+        var client = new Client { Name = "Клиент", IsActive = true, ResponsibleUserId = editor.Id };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+        var hearingAt = DateTime.UtcNow.AddDays(7);
+        var controller = CreateController(db, editor, notificationService: CreateNotificationService(db));
+
+        var result = await controller.Create(new ClientCase
+        {
+            ClientId = client.Id, Title = "Судебное дело", Status = ClientCaseStatus.Open,
+            ResponsibleUserId = responsible.Id, NextHearingAt = hearingAt,
+        }, CancellationToken.None);
+
+        Assert.IsType<CreatedResult>(result);
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal(responsible.Id, notification.RecipientUserId);
+        Assert.Equal(UserNotificationTypes.CourtHearing, notification.Type);
+        Assert.Contains("Назначено судебное заседание", notification.Title);
+        Assert.Contains("Новая дата", notification.BodyPreview);
+        Assert.DoesNotContain("Прежняя дата", notification.BodyPreview);
+    }
+
+    [Fact]
     public async Task Update_WhenNearestHearingChanges_NotifiesResponsibleOnce()
     {
         await using var db = await CreateContextAsync();
@@ -2081,6 +2108,15 @@ public class CasesV2ControllerTests
 
         Assert.IsType<OkObjectResult>(await controller.Update(clientCase.Id, update, CancellationToken.None));
         Assert.Single(await db.UserNotifications.ToListAsync());
+
+        update.NextHearingAt = null;
+        Assert.IsType<OkObjectResult>(await controller.Update(clientCase.Id, update, CancellationToken.None));
+        Assert.Single(await db.UserNotifications.ToListAsync());
+
+        update.NextHearingAt = currentAt.AddDays(1);
+        Assert.IsType<OkObjectResult>(await controller.Update(clientCase.Id, update, CancellationToken.None));
+        var appointment = Assert.Single(await db.UserNotifications.Where(item => item.Title.StartsWith("Назначено судебное заседание")).ToListAsync());
+        Assert.Equal(responsible.Id, appointment.RecipientUserId);
     }
 
     [Fact]
