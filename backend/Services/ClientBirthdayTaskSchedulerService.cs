@@ -41,28 +41,13 @@ public sealed class ClientBirthdayTaskSchedulerService : BackgroundService
             _configuration.GetValue("TaskJournal:BirthdayAutomation:CheckMinutes", 60),
             5,
             1440);
-        DateOnly? lastCheckedLocalDate = null;
-        BirthdaySettings? lastCheckedSettings = null;
 
         using var timer = new PeriodicTimer(TimeSpan.FromMinutes(checkMinutes));
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                using var scope = _scopeFactory.CreateScope();
-                var context = scope.ServiceProvider.GetRequiredService<PaymentContext>();
-                var settings = await LoadSettingsAsync(context, stoppingToken);
-                var timeZone = CalendarTimeZoneHelper.ResolveTimeZone(settings.TimeZoneId);
-                var localDate = DateOnly.FromDateTime(CalendarTimeZoneHelper.ToUserLocal(DateTime.UtcNow, timeZone));
-                if (settings.Enabled && (lastCheckedLocalDate != localDate || lastCheckedSettings != settings))
-                {
-                    var result = await RunOnceAsync(DateTime.UtcNow, stoppingToken);
-                    if (result.Error is null)
-                    {
-                        lastCheckedLocalDate = localDate;
-                        lastCheckedSettings = settings;
-                    }
-                }
+                await RunOnceAsync(DateTime.UtcNow, stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -105,23 +90,28 @@ public sealed class ClientBirthdayTaskSchedulerService : BackgroundService
             var now = CalendarTimeZoneHelper.NormalizeUtcInstant(nowUtc ?? DateTime.UtcNow);
             var localToday = CalendarTimeZoneHelper.ToUserLocal(now, timeZone).Date;
             var windowEnd = localToday.AddDays(settings.LeadDays);
-            var selectedAssignee = settings.SelectedAssigneeUserId > 0
+            var relevantMonths = Enumerable.Range(0, settings.LeadDays + 1)
+                .Select(offset => localToday.AddDays(offset).Month)
+                .Distinct()
+                .ToArray();
+            var needsSelectedAssignee = settings.EmployeesEnabled ||
+                (settings.ClientsEnabled && settings.ClientUseSelectedAssignee);
+            var selectedAssignee = needsSelectedAssignee && settings.SelectedAssigneeUserId > 0
                 ? await context.Users.AsNoTracking()
                     .Where(user => user.Id == settings.SelectedAssigneeUserId && user.IsActive && user.IsApproved)
                     .Select(user => new BirthdayAssignee(user.Id, user.FullName ?? user.Email, user.Email))
                     .SingleOrDefaultAsync(cancellationToken)
                 : null;
-            if ((settings.EmployeesEnabled || (settings.ClientsEnabled && settings.ClientUseSelectedAssignee)) &&
-                selectedAssignee is null)
+            if (needsSelectedAssignee && selectedAssignee is null)
             {
                 throw new InvalidOperationException("Не назначен активный ответственный за поздравления.");
             }
-            var clients = await context.Clients
-                .AsNoTracking()
+            List<BirthdayClient> clients = settings.ClientsEnabled
+                ? await context.Clients.AsNoTracking()
                 .Where(client =>
-                    settings.ClientsEnabled &&
                     client.IsActive &&
                     client.BirthDate.HasValue &&
+                    relevantMonths.Contains(client.BirthDate.Value.Month) &&
                     (settings.ClientUseSelectedAssignee ||
                      (client.ResponsibleUserId.HasValue && client.ResponsibleUser != null &&
                       client.ResponsibleUser.IsActive && client.ResponsibleUser.IsApproved)))
@@ -132,7 +122,8 @@ public sealed class ClientBirthdayTaskSchedulerService : BackgroundService
                     client.ResponsibleUserId ?? 0,
                     client.ResponsibleUser != null ? client.ResponsibleUser.FullName ?? client.ResponsibleUser.Email : "",
                     client.ResponsibleUser != null ? client.ResponsibleUser.Email : ""))
-                .ToListAsync(cancellationToken);
+                .ToListAsync(cancellationToken)
+                : [];
 
             var candidates = clients
                 .Select(client => new BirthdayCandidate(client, ResolveNextBirthday(client.BirthDate, localToday)))
@@ -140,7 +131,8 @@ public sealed class ClientBirthdayTaskSchedulerService : BackgroundService
                 .ToList();
             var employees = settings.EmployeesEnabled && selectedAssignee is not null
                 ? await context.Users.AsNoTracking()
-                    .Where(user => user.IsEmployee && user.IsActive && user.IsApproved && user.DateOfBirth.HasValue)
+                    .Where(user => user.IsEmployee && user.IsActive && user.IsApproved && user.DateOfBirth.HasValue &&
+                        relevantMonths.Contains(user.DateOfBirth.Value.Month))
                     .Select(user => new BirthdayEmployee(user.Id, user.FullName ?? user.Email, user.DateOfBirth!.Value))
                     .ToListAsync(cancellationToken)
                 : [];

@@ -67,6 +67,68 @@ public sealed class ClientBirthdayTaskSchedulerServiceTests
     }
 
     [Fact]
+    public async Task RunOnceAsync_PicksUpBirthdayAddedAfterEarlierCheckOnSameDay()
+    {
+        await using var fixture = await BirthdayFixture.CreateAsync(enabled: true);
+        var now = new DateTime(2026, 9, 21, 3, 0, 0, DateTimeKind.Utc);
+        Assert.Equal(1, (await fixture.Service.RunOnceAsync(now)).CreatedCount);
+
+        await using (var scope = fixture.Provider.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<PaymentContext>();
+            var responsibleId = await db.Users.Select(user => user.Id).SingleAsync();
+            db.Clients.Add(new Client
+            {
+                Name = "Клиент с днём рождения сегодня",
+                BirthDate = new DateTime(1987, 9, 21),
+                ResponsibleUserId = responsibleId,
+                IsActive = true,
+            });
+            await db.SaveChangesAsync();
+        }
+
+        Assert.Equal(1, (await fixture.Service.RunOnceAsync(now.AddHours(1))).CreatedCount);
+        Assert.Equal(0, (await fixture.Service.RunOnceAsync(now.AddHours(2))).CreatedCount);
+        await using var checkScope = fixture.Provider.CreateAsyncScope();
+        var tasks = await checkScope.ServiceProvider.GetRequiredService<PaymentContext>()
+            .TaskJournalItems.OrderBy(item => item.Id).ToListAsync();
+        Assert.Equal(2, tasks.Count);
+        Assert.Contains(tasks, task => task.Title.Contains("сегодня", StringComparison.Ordinal) && task.DueAt == new DateTime(2026, 9, 21, 10, 0, 0, DateTimeKind.Utc));
+    }
+
+    [Fact]
+    public async Task RunOnceAsync_FindsBirthdaysAcrossNewYearWithoutLoadingUnrelatedMonth()
+    {
+        await using var fixture = await BirthdayFixture.CreateAsync(enabled: true);
+        await using (var scope = fixture.Provider.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<PaymentContext>();
+            var responsibleId = await db.Users.Select(user => user.Id).SingleAsync();
+            db.Clients.Add(new Client
+            {
+                Name = "Январский клиент",
+                BirthDate = new DateTime(1987, 1, 2),
+                ResponsibleUserId = responsibleId,
+                IsActive = true,
+            });
+            db.SystemSettings.Add(new SystemSetting
+            {
+                Key = ClientBirthdayTaskSchedulerService.LeadDaysSettingKey,
+                Value = "14",
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var result = await fixture.Service.RunOnceAsync(new DateTime(2026, 12, 25, 3, 0, 0, DateTimeKind.Utc));
+
+        Assert.Equal(1, result.CreatedCount);
+        await using var checkScope = fixture.Provider.CreateAsyncScope();
+        var task = await checkScope.ServiceProvider.GetRequiredService<PaymentContext>().TaskJournalItems.SingleAsync();
+        Assert.Contains("Январский клиент", task.Title, StringComparison.Ordinal);
+        Assert.Equal(new DateTime(2027, 1, 2, 10, 0, 0, DateTimeKind.Utc), task.DueAt);
+    }
+
+    [Fact]
     public async Task RunOnceAsync_DoesNothingWhenAutomationIsDisabled()
     {
         await using var fixture = await BirthdayFixture.CreateAsync(enabled: false);
@@ -116,6 +178,19 @@ public sealed class ClientBirthdayTaskSchedulerServiceTests
         Assert.Equal(new DateTime(2026, 9, 28, 10, 0, 0, DateTimeKind.Utc), task.DueAt);
         Assert.Null(task.ClientId);
         Assert.Single(task.Participants);
+
+        var roleId = await checkDb.Roles.Select(role => role.Id).SingleAsync();
+        checkDb.Users.Add(new User
+        {
+            Email = "late-birthday@example.com", FullName = "Новый именинник", PasswordHash = "test",
+            IsActive = true, IsApproved = true, IsEmployee = true,
+            DateOfBirth = new DateTime(1985, 9, 21), RoleId = roleId,
+        });
+        await checkDb.SaveChangesAsync();
+        Assert.Equal(1, (await fixture.Service.RunOnceAsync(now.AddHours(2))).CreatedCount);
+        var newTask = await checkDb.TaskJournalItems.OrderByDescending(item => item.Id).FirstAsync();
+        Assert.Contains("Новый именинник", newTask.Title, StringComparison.Ordinal);
+        Assert.Equal(assigneeId, newTask.AssigneeUserId);
     }
 
     [Fact]
