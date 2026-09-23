@@ -2,6 +2,7 @@ import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
 import { ClientPortalAccessPanel } from './ClientPortalAccessPanel';
+import { CaseAppealDecisionAction } from './CaseAppealDecisionAction';
 import { MessengerDocumentDeliveryModal } from './MessengerDocumentDeliveryModal';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -4026,6 +4027,7 @@ export function CaseDetailPage({
                 ) : null}
                 {caseItem.positionReviewedAt ? <p className="mt-1 text-xs text-slate-500">Если изменить текст позиции, подтверждение сбросится.</p> : null}
               </section>
+              <CaseAppealDecisionAction clientCase={caseItem} canEdit={canEdit} onTaskCreated={() => setReloadToken((value) => value + 1)} />
               <TextBlock title="Документы" value={caseItem.documentsSummary || 'Сводка документов пока не заполнена.'} />
             </div>
           ) : null}

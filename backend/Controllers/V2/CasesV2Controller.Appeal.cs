@@ -38,6 +38,52 @@ public partial class CasesV2Controller
         public string Choice { get; init; } = string.Empty;
         public int? TaskId { get; init; }
         public DateTime DecidedAt { get; init; }
+        public string DecidedByUserName { get; init; } = string.Empty;
+    }
+
+    /// <summary>Only the choice tied to the current court decision is shown; older choices stay in history.</summary>
+    [HttpGet("{id:int}/appeal-decision")]
+    public async Task<ActionResult<CaseAppealDecisionDto?>> GetCurrentCaseAppealDecision(int id, CancellationToken ct)
+    {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanView, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+        var visibility = await ResolveCasesVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return MissingCasesVisibilityResult();
+        }
+
+        var clientCase = await _db.ClientCases.AsNoTracking()
+            .ApplyClientCaseVisibility(visibility)
+            .Where(item => item.Id == id)
+            .Select(item => new { item.CourtDecisionAt })
+            .FirstOrDefaultAsync(ct);
+        if (clientCase is null)
+        {
+            return NotFound();
+        }
+        if (!clientCase.CourtDecisionAt.HasValue)
+        {
+            return Ok(null);
+        }
+
+        var currentDate = clientCase.CourtDecisionAt.Value.Date;
+        var decision = await _db.ClientCaseAppealDecisions.AsNoTracking()
+            .Where(item => item.ClientCaseId == id && item.CourtDecisionDate == currentDate)
+            .OrderByDescending(item => item.Id)
+            .Select(item => new CaseAppealDecisionDto
+            {
+                Id = item.Id,
+                CaseId = id,
+                Choice = item.Choice,
+                TaskId = item.TaskJournalItemId,
+                DecidedAt = item.DecidedAt,
+                DecidedByUserName = item.DecidedByUserName,
+            })
+            .FirstOrDefaultAsync(ct);
+        return Ok(decision);
     }
 
     public sealed class CaseAppealReminderDto
@@ -224,10 +270,15 @@ public partial class CasesV2Controller
         var now = DateTime.UtcNow;
         var assigneeName = string.IsNullOrWhiteSpace(assignee.FullName) ? assignee.Email : assignee.FullName.Trim();
         var ownerName = clientCase.Client?.Name ?? clientCase.LegalEntity?.ShortName ?? clientCase.Title;
-        // The dialog appears only in the last three days: a seven-day lead
-        // time would create an already overdue task even when the legal date
-        // recorded in the case is still ahead.
-        var dueAt = deadlineDate.AddHours(9);
+        // Set the work deadline a week before the legal deadline when the
+        // decision is made in time. A late decision must not create a task
+        // whose internal work deadline has already passed.
+        var assigneeTimeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, assignee.Id, ct);
+        var plannedDueAt = CalendarTimeZoneHelper.FromUserLocalToUtc(deadlineDate.AddDays(-7).AddHours(9), assigneeTimeZone);
+        var legalDueAt = CalendarTimeZoneHelper.FromUserLocalToUtc(deadlineDate.AddHours(18), assigneeTimeZone);
+        var dueAt = plannedDueAt > now
+            ? plannedDueAt
+            : legalDueAt > now ? legalDueAt : now.AddMinutes(15);
         var task = new TaskJournalItem
         {
             ClientId = clientCase.ClientId,
@@ -235,14 +286,14 @@ public partial class CasesV2Controller
             ClientCaseId = id,
             ObjectName = Truncate($"{ownerName} - {clientCase.Title}", 300),
             Title = "Подготовить апелляционную жалобу",
-            Description = $"По делу «{clientCase.Title}» вынесено решение {decisionDate:dd.MM.yyyy}. Срок обжалования: {deadlineDate:dd.MM.yyyy}. Подготовьте жалобу и проверьте комплект документов.",
+            Description = $"По делу «{clientCase.Title}» вынесено решение {decisionDate:dd.MM.yyyy}. Срок обжалования: {deadlineDate:dd.MM.yyyy}. Внутренний срок подготовки — за 7 дней до него, если решение принято заранее. Подготовьте жалобу и проверьте комплект документов.",
             AssigneeUserId = assignee.Id,
             AssigneeName = assigneeName,
             AuthorUserId = actorId,
             AuthorName = actorName,
             DueAt = dueAt,
             Type = "document",
-            Priority = dueAt <= now.AddDays(1) ? "urgent" : "high",
+            Priority = plannedDueAt <= now || dueAt <= now.AddDays(1) ? "urgent" : "high",
             Status = "new",
             PlannedDurationMinutes = 60,
             RemindersJson = JsonSerializer.Serialize(new[] { "before3d", "before1d", "atDue", "dailyOverdue" }),
@@ -317,6 +368,7 @@ public partial class CasesV2Controller
             Choice = decision.Choice,
             TaskId = task.Id,
             DecidedAt = decision.DecidedAt,
+            DecidedByUserName = decision.DecidedByUserName,
         });
     }
 

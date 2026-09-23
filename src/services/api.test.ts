@@ -659,6 +659,14 @@ describe('payments advance review API', () => {
 });
 
 describe('apiService auth handling', () => {
+  it('treats an empty current appeal decision as not yet decided', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(apiService.getCurrentCaseAppealDecision(42)).resolves.toBeNull();
+    expect(String(fetchMock.mock.calls[0][0])).toContain('/v2/cases/42/appeal-decision');
+  });
+
   it('returns null for missing optional user settings', async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response('', {
       status: 404,

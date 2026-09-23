@@ -19,6 +19,8 @@ vi.mock('../../services/api', () => ({
     getCaseDocuments: vi.fn(),
     reviewCasePosition: vi.fn(),
     confirmNextHearing: vi.fn(),
+    getCurrentCaseAppealDecision: vi.fn(),
+    createCaseAppealTask: vi.fn(),
     getCaseDocumentTemplates: vi.fn(),
     getTaskJournalItems: vi.fn(),
     getClientCaseFinanceSummaries: vi.fn(),
@@ -61,6 +63,9 @@ describe('CaseModal', () => {
     vi.mocked(apiService.reviewCasePosition).mockReset();
     vi.mocked(apiService.reviewCasePosition).mockResolvedValue({ positionReviewedAt: '2026-09-23T10:00:00Z', positionReviewedByUserId: 7, positionReviewedByName: 'Юрист' });
     vi.mocked(apiService.confirmNextHearing).mockReset();
+    vi.mocked(apiService.getCurrentCaseAppealDecision).mockReset();
+    vi.mocked(apiService.getCurrentCaseAppealDecision).mockResolvedValue(null);
+    vi.mocked(apiService.createCaseAppealTask).mockReset();
     vi.mocked(apiService.getTaskJournalItems).mockReset();
     vi.mocked(apiService.getTaskJournalItems).mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 25 });
     vi.mocked(apiService.getClientCaseFinanceSummaries).mockReset();

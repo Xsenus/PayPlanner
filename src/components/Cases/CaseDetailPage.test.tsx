@@ -17,6 +17,8 @@ vi.mock('../../services/api', () => ({
     updateCaseV2: vi.fn(),
     reviewCasePosition: vi.fn(),
     confirmNextHearing: vi.fn(),
+    getCurrentCaseAppealDecision: vi.fn(),
+    createCaseAppealTask: vi.fn(),
     getActResponsibles: vi.fn(),
     getTaskJournalItems: vi.fn(),
     getCaseRelatedParties: vi.fn(),
@@ -241,6 +243,9 @@ describe('CaseDetailPage', () => {
     vi.mocked(apiService.reviewCasePosition).mockReset();
     vi.mocked(apiService.reviewCasePosition).mockResolvedValue({ positionReviewedAt: '2026-09-23T10:00:00Z', positionReviewedByUserId: 7, positionReviewedByName: 'Юрист' });
     vi.mocked(apiService.confirmNextHearing).mockReset();
+    vi.mocked(apiService.getCurrentCaseAppealDecision).mockReset();
+    vi.mocked(apiService.getCurrentCaseAppealDecision).mockResolvedValue(null);
+    vi.mocked(apiService.createCaseAppealTask).mockReset();
     vi.mocked(apiService.getActResponsibles).mockReset();
     vi.mocked(apiService.getActResponsibles).mockResolvedValue([
       { id: 7, fullName: 'Кожеваткин Андрей Владимирович' },

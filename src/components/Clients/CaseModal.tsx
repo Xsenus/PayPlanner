@@ -1,6 +1,7 @@
 import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
+import { CaseAppealDecisionAction } from '../Cases/CaseAppealDecisionAction';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Download, ExternalLink, FileText, Link2, Plus, RotateCw, Trash2, Upload, X } from 'lucide-react';
@@ -1703,6 +1704,17 @@ export function CaseModal({
               disabled={saving}
             />
           </div>
+
+          {caseData.id > 0 && caseData.courtDecisionAt && caseData.appealDeadlineAt ? (
+            <div className="md:col-span-2">
+              <CaseAppealDecisionAction
+                clientCase={caseData}
+                canEdit={allowEdit}
+                datesSaved={courtDecisionAt === toDateInput(caseData.courtDecisionAt) && appealDeadlineAt === toDateInput(caseData.appealDeadlineAt)}
+                onTaskCreated={() => void refreshCaseTasks()}
+              />
+            </div>
+          ) : null}
 
           <div>
             <label className="text-sm text-gray-600">Срок кассации</label>

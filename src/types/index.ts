@@ -649,6 +649,7 @@ export interface CaseAppealDecision {
   choice: 'appeal';
   taskId: number | null;
   decidedAt: string;
+  decidedByUserName?: string;
 }
 
 export interface CaseAppealReminder {

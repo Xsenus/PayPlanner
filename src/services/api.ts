@@ -5982,6 +5982,11 @@ export class ApiService {
     });
   }
 
+  async getCurrentCaseAppealDecision(caseId: number, options?: { signal?: AbortSignal }) {
+    const decision = await this.request<CaseAppealDecision | undefined>(`/v2/cases/${caseId}/appeal-decision`, { signal: options?.signal });
+    return decision ?? null;
+  }
+
   async remindCaseAppealAssignee(caseId: number, dates: { courtDecisionAt: string; appealDeadlineAt: string }) {
     return this.request<CaseAppealReminder>(`/v2/cases/${caseId}/appeal-reminder`, {
       method: 'POST',
