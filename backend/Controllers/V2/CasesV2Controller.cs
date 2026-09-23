@@ -1382,7 +1382,11 @@ public partial class CasesV2Controller : ControllerBase
             NextHearingConfirmedByUserId = item.NextHearingConfirmedByUserId,
             NextHearingConfirmedByName = item.NextHearingConfirmedByName,
             Claimant = item.Claimant,
+            ClaimantInn = item.ClaimantInn,
+            ClaimantOgrn = item.ClaimantOgrn,
             Defendant = item.Defendant,
+            DefendantInn = item.DefendantInn,
+            DefendantOgrn = item.DefendantOgrn,
             ThirdParties = item.ThirdParties,
             Representatives = item.Representatives,
             JudgeName = item.JudgeName,
@@ -9729,6 +9733,7 @@ public partial class CasesV2Controller : ControllerBase
         var validation = await ValidateCaseOwnerAsync(model.ClientId, model.LegalEntityId, visibility, ct);
         if (validation is not null) return validation;
         if (!IsValidOurCourtRole(model.OurCourtRole)) return BadRequest("Укажите допустимую роль в судебном деле.");
+        if (!IsValidCourtPartyIdentifiers(model)) return BadRequest("ИНН должен содержать 10 или 12 цифр, ОГРН/ОГРНИП — 13 или 15 цифр.");
         if (!TryNormalizeInactivityReminderState(
                 model.InactivityRemindersEnabled,
                 model.InactivityRemindersDisabledReason,
@@ -9806,6 +9811,7 @@ public partial class CasesV2Controller : ControllerBase
         var validation = await ValidateCaseOwnerAsync(model.ClientId, model.LegalEntityId, visibility, ct);
         if (validation is not null) return validation;
         if (!IsValidOurCourtRole(model.OurCourtRole)) return BadRequest("Укажите допустимую роль в судебном деле.");
+        if (!IsValidCourtPartyIdentifiers(model)) return BadRequest("ИНН должен содержать 10 или 12 цифр, ОГРН/ОГРНИП — 13 или 15 цифр.");
         var inactivityStateChanged = e.InactivityRemindersEnabled != model.InactivityRemindersEnabled;
         if (!TryNormalizeInactivityReminderState(
                 model.InactivityRemindersEnabled,
@@ -10200,7 +10206,11 @@ public partial class CasesV2Controller : ControllerBase
         }
         target.NextHearingAt = source.NextHearingAt;
         target.Claimant = source.Claimant?.Trim() ?? string.Empty;
+        if (source.ClaimantInn is not null) target.ClaimantInn = source.ClaimantInn.Trim();
+        if (source.ClaimantOgrn is not null) target.ClaimantOgrn = source.ClaimantOgrn.Trim();
         target.Defendant = source.Defendant?.Trim() ?? string.Empty;
+        if (source.DefendantInn is not null) target.DefendantInn = source.DefendantInn.Trim();
+        if (source.DefendantOgrn is not null) target.DefendantOgrn = source.DefendantOgrn.Trim();
         target.ThirdParties = source.ThirdParties?.Trim() ?? string.Empty;
         target.Representatives = source.Representatives?.Trim() ?? string.Empty;
         target.JudgeName = source.JudgeName?.Trim() ?? string.Empty;
@@ -10244,6 +10254,22 @@ public partial class CasesV2Controller : ControllerBase
     private static bool IsValidOurCourtRole(string? role)
     {
         return role is null || role.Trim().ToLowerInvariant() is "" or "claimant" or "respondent" or "third-party";
+    }
+
+    private static bool IsValidCourtPartyIdentifiers(ClientCase model)
+    {
+        return IsValidIdentifier(model.ClaimantInn, 10, 12)
+            && IsValidIdentifier(model.DefendantInn, 10, 12)
+            && IsValidIdentifier(model.ClaimantOgrn, 13, 15)
+            && IsValidIdentifier(model.DefendantOgrn, 13, 15);
+    }
+
+    private static bool IsValidIdentifier(string? value, int firstLength, int secondLength)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return true;
+        var trimmed = value.Trim();
+        return (trimmed.Length == firstLength || trimmed.Length == secondLength)
+            && trimmed.All(static character => character is >= '0' and <= '9');
     }
 
     private static bool TryNormalizeInactivityReminderState(

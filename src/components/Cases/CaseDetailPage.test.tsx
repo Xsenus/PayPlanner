@@ -1224,6 +1224,8 @@ describe('CaseDetailPage', () => {
     fireEvent.change(hearingInput, { target: { value: '2026-06-05T17:30' } });
     fireEvent.click(screen.getByRole('combobox', { name: /Наша роль в деле/u }));
     fireEvent.click(screen.getByRole('option', { name: 'Третье лицо' }));
+    fireEvent.change(screen.getByLabelText('ИНН истца'), { target: { value: '1234567890' } });
+    fireEvent.change(screen.getByLabelText('ОГРН/ОГРНИП ответчика'), { target: { value: '1234567890123' } });
     fireEvent.click(screen.getAllByRole('button', { name: /Сохранить дело/u }).at(-1) as HTMLElement);
 
     await waitFor(() => {
@@ -1232,6 +1234,8 @@ describe('CaseDetailPage', () => {
         expect.objectContaining({
           nextHearingAt: '2026-06-05T13:30:00.000Z',
           ourCourtRole: 'third-party',
+          claimantInn: '1234567890',
+          defendantOgrn: '1234567890123',
         }),
       );
     });

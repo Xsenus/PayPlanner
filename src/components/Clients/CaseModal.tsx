@@ -282,8 +282,12 @@ export function CaseModal({
   const [courtUrl, setCourtUrl] = useState(caseData.courtUrl ?? '');
   const [nextHearingAt, setNextHearingAt] = useState(toDateTimeInput(caseData.nextHearingAt));
   const [claimant, setClaimant] = useState(caseData.claimant ?? '');
+  const [claimantInn, setClaimantInn] = useState(caseData.claimantInn ?? '');
+  const [claimantOgrn, setClaimantOgrn] = useState(caseData.claimantOgrn ?? '');
   const [ourCourtRole, setOurCourtRole] = useState(caseData.ourCourtRole ?? '');
   const [defendant, setDefendant] = useState(caseData.defendant ?? '');
+  const [defendantInn, setDefendantInn] = useState(caseData.defendantInn ?? '');
+  const [defendantOgrn, setDefendantOgrn] = useState(caseData.defendantOgrn ?? '');
   const [thirdParties, setThirdParties] = useState(caseData.thirdParties ?? '');
   const [representatives, setRepresentatives] = useState(caseData.representatives ?? '');
   const [judgeName, setJudgeName] = useState(caseData.judgeName ?? '');
@@ -414,8 +418,12 @@ export function CaseModal({
     setCourtUrl(caseData.courtUrl ?? '');
     setNextHearingAt(toDateTimeInput(caseData.nextHearingAt));
     setClaimant(caseData.claimant ?? '');
+    setClaimantInn(caseData.claimantInn ?? '');
+    setClaimantOgrn(caseData.claimantOgrn ?? '');
     setOurCourtRole(caseData.ourCourtRole ?? '');
     setDefendant(caseData.defendant ?? '');
+    setDefendantInn(caseData.defendantInn ?? '');
+    setDefendantOgrn(caseData.defendantOgrn ?? '');
     setThirdParties(caseData.thirdParties ?? '');
     setRepresentatives(caseData.representatives ?? '');
     setJudgeName(caseData.judgeName ?? '');
@@ -767,8 +775,12 @@ export function CaseModal({
         courtUrl: courtUrl.trim(),
         nextHearingAt: fromDateTimeInput(nextHearingAt),
         claimant: claimant.trim(),
+        claimantInn: claimantInn.trim(),
+        claimantOgrn: claimantOgrn.trim(),
         ourCourtRole,
         defendant: defendant.trim(),
+        defendantInn: defendantInn.trim(),
+        defendantOgrn: defendantOgrn.trim(),
         thirdParties: thirdParties.trim(),
         representatives: representatives.trim(),
         judgeName: judgeName.trim(),
@@ -1369,6 +1381,16 @@ export function CaseModal({
           </div>
 
           <div>
+            <label className="text-sm text-gray-600">ИНН истца</label>
+            <input aria-label="ИНН истца" inputMode="numeric" maxLength={12} className="mt-1 w-full border rounded-lg px-3 py-2" value={claimantInn} onChange={(event) => setClaimantInn(event.target.value)} disabled={saving} />
+          </div>
+
+          <div>
+            <label className="text-sm text-gray-600">ОГРН/ОГРНИП истца</label>
+            <input aria-label="ОГРН/ОГРНИП истца" inputMode="numeric" maxLength={15} className="mt-1 w-full border rounded-lg px-3 py-2" value={claimantOgrn} onChange={(event) => setClaimantOgrn(event.target.value)} disabled={saving} />
+          </div>
+
+          <div>
             <label className="text-sm text-gray-600">Ответчик / должник</label>
             <input
               aria-label="Ответчик / должник"
@@ -1378,6 +1400,16 @@ export function CaseModal({
               placeholder="ФИО или наименование"
               disabled={saving}
             />
+          </div>
+
+          <div>
+            <label className="text-sm text-gray-600">ИНН ответчика</label>
+            <input aria-label="ИНН ответчика" inputMode="numeric" maxLength={12} className="mt-1 w-full border rounded-lg px-3 py-2" value={defendantInn} onChange={(event) => setDefendantInn(event.target.value)} disabled={saving} />
+          </div>
+
+          <div>
+            <label className="text-sm text-gray-600">ОГРН/ОГРНИП ответчика</label>
+            <input aria-label="ОГРН/ОГРНИП ответчика" inputMode="numeric" maxLength={15} className="mt-1 w-full border rounded-lg px-3 py-2" value={defendantOgrn} onChange={(event) => setDefendantOgrn(event.target.value)} disabled={saving} />
           </div>
 
           <div>

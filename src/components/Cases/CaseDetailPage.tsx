@@ -179,7 +179,11 @@ interface CaseEditDraft {
   courtUrl: string;
   nextHearingAt: string;
   claimant: string;
+  claimantInn: string;
+  claimantOgrn: string;
   defendant: string;
+  defendantInn: string;
+  defendantOgrn: string;
   thirdParties: string;
   representatives: string;
   judgeName: string;
@@ -1219,7 +1223,11 @@ function buildCaseEditDraft(caseItem: ClientCase): CaseEditDraft {
     courtUrl: caseItem.courtUrl ?? '',
     nextHearingAt: toDateTimeInput(caseItem.nextHearingAt),
     claimant: caseItem.claimant ?? '',
+    claimantInn: caseItem.claimantInn ?? '',
+    claimantOgrn: caseItem.claimantOgrn ?? '',
     defendant: caseItem.defendant ?? '',
+    defendantInn: caseItem.defendantInn ?? '',
+    defendantOgrn: caseItem.defendantOgrn ?? '',
     thirdParties: caseItem.thirdParties ?? '',
     representatives: caseItem.representatives ?? '',
     judgeName: caseItem.judgeName ?? '',
@@ -1261,7 +1269,11 @@ function buildCasePatchFromEditDraft(draft: CaseEditDraft): Partial<ClientCase> 
     courtUrl: draft.courtUrl.trim(),
     nextHearingAt: fromDateTimeInput(draft.nextHearingAt),
     claimant: draft.claimant.trim(),
+    claimantInn: draft.claimantInn.trim(),
+    claimantOgrn: draft.claimantOgrn.trim(),
     defendant: draft.defendant.trim(),
+    defendantInn: draft.defendantInn.trim(),
+    defendantOgrn: draft.defendantOgrn.trim(),
     thirdParties: draft.thirdParties.trim(),
     representatives: draft.representatives.trim(),
     judgeName: draft.judgeName.trim(),
@@ -1310,7 +1322,11 @@ function buildCaseUpdatePayload(base: ClientCase, patch: Partial<ClientCase>): O
     courtUrl: patch.courtUrl ?? base.courtUrl ?? '',
     nextHearingAt: patch.nextHearingAt ?? base.nextHearingAt ?? null,
     claimant: patch.claimant ?? base.claimant ?? '',
+    claimantInn: patch.claimantInn ?? base.claimantInn ?? '',
+    claimantOgrn: patch.claimantOgrn ?? base.claimantOgrn ?? '',
     defendant: patch.defendant ?? base.defendant ?? '',
+    defendantInn: patch.defendantInn ?? base.defendantInn ?? '',
+    defendantOgrn: patch.defendantOgrn ?? base.defendantOgrn ?? '',
     thirdParties: patch.thirdParties ?? base.thirdParties ?? '',
     representatives: patch.representatives ?? base.representatives ?? '',
     judgeName: patch.judgeName ?? base.judgeName ?? '',
@@ -4015,7 +4031,11 @@ export function CaseDetailPage({
               <InfoSection title="Участники процесса" rows={[
                 ['Наша роль', caseItem.ourCourtRole === 'claimant' ? 'Истец' : caseItem.ourCourtRole === 'respondent' ? 'Ответчик' : caseItem.ourCourtRole === 'third-party' ? 'Третье лицо' : 'Не указана'],
                 ['Истец', caseItem.claimant || '—'],
+                ['ИНН истца', caseItem.claimantInn || '—'],
+                ['ОГРН/ОГРНИП истца', caseItem.claimantOgrn || '—'],
                 ['Ответчик', caseItem.defendant || '—'],
+                ['ИНН ответчика', caseItem.defendantInn || '—'],
+                ['ОГРН/ОГРНИП ответчика', caseItem.defendantOgrn || '—'],
                 ['Третьи лица', caseItem.thirdParties || '—'],
                 ['Представители', caseItem.representatives || '—'],
                 ['Судья', caseItem.judgeName || '—'],
@@ -4831,9 +4851,21 @@ function CaseEditPage({
               Истец
               <input value={draft.claimant} onChange={(event) => setField('claimant', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" />
             </label>
+            <label className="text-sm font-medium text-slate-700">ИНН истца
+              <input aria-label="ИНН истца" inputMode="numeric" maxLength={12} value={draft.claimantInn} onChange={(event) => setField('claimantInn', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" />
+            </label>
+            <label className="text-sm font-medium text-slate-700">ОГРН/ОГРНИП истца
+              <input aria-label="ОГРН/ОГРНИП истца" inputMode="numeric" maxLength={15} value={draft.claimantOgrn} onChange={(event) => setField('claimantOgrn', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" />
+            </label>
             <label className="text-sm font-medium text-slate-700">
               Ответчик
               <input value={draft.defendant} onChange={(event) => setField('defendant', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" />
+            </label>
+            <label className="text-sm font-medium text-slate-700">ИНН ответчика
+              <input aria-label="ИНН ответчика" inputMode="numeric" maxLength={12} value={draft.defendantInn} onChange={(event) => setField('defendantInn', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" />
+            </label>
+            <label className="text-sm font-medium text-slate-700">ОГРН/ОГРНИП ответчика
+              <input aria-label="ОГРН/ОГРНИП ответчика" inputMode="numeric" maxLength={15} value={draft.defendantOgrn} onChange={(event) => setField('defendantOgrn', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" />
             </label>
             <label className="text-sm font-medium text-slate-700">
               Судья
@@ -7183,7 +7215,9 @@ function CourtPanel({
                   ['Наша роль', caseItem.ourCourtRole === 'claimant' ? 'Истец' : caseItem.ourCourtRole === 'respondent' ? 'Ответчик' : caseItem.ourCourtRole === 'third-party' ? 'Третье лицо' : 'Не указана'],
                   ['Ближайшее заседание', formatRuDateTime(caseItem.nextHearingAt) || 'Не назначено'],
                   ['Истец / заявитель', caseItem.claimant || '—'],
+                  ['ИНН / ОГРН истца', [caseItem.claimantInn, caseItem.claimantOgrn].filter(Boolean).join(' / ') || '—'],
                   ['Ответчик / должник', caseItem.defendant || '—'],
+                  ['ИНН / ОГРН ответчика', [caseItem.defendantInn, caseItem.defendantOgrn].filter(Boolean).join(' / ') || '—'],
                   ['Текущий результат', latestEvent?.resultSummary || latestEvent?.movementStatusLabel || latestEvent?.movementStatus || caseItem.stage || '—'],
                 ].map(([label, value]) => <div key={label} className="min-w-0 rounded-lg bg-slate-50 px-3 py-2"><div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-400">{label}</div><div className={`mt-1 break-words text-sm font-semibold text-slate-800 ${label === 'UID' ? 'font-mono text-xs text-cyan-800' : ''}`}>{value}</div></div>)}
               </div>

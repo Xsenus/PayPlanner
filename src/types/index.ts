@@ -528,7 +528,11 @@ export interface ClientCase {
   nextHearingConfirmedByName?: string | null;
   nextHearingOutcome?: 'postponed' | 'considered' | 'interim' | null;
   claimant?: string | null;
+  claimantInn?: string | null;
+  claimantOgrn?: string | null;
   defendant?: string | null;
+  defendantInn?: string | null;
+  defendantOgrn?: string | null;
   thirdParties?: string | null;
   representatives?: string | null;
   judgeName?: string | null;

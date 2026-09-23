@@ -1343,7 +1343,11 @@ public class PaymentContext : DbContext
             entity.Property(e => e.JudicialUid).HasMaxLength(120);
             entity.Property(e => e.CourtUrl).HasMaxLength(1000);
             entity.Property(e => e.Claimant).HasMaxLength(300);
+            entity.Property(e => e.ClaimantInn).HasMaxLength(12);
+            entity.Property(e => e.ClaimantOgrn).HasMaxLength(15);
             entity.Property(e => e.Defendant).HasMaxLength(300);
+            entity.Property(e => e.DefendantInn).HasMaxLength(12);
+            entity.Property(e => e.DefendantOgrn).HasMaxLength(15);
             entity.Property(e => e.ThirdParties).HasMaxLength(1000);
             entity.Property(e => e.Representatives).HasMaxLength(1000);
             entity.Property(e => e.JudgeName).HasMaxLength(200);

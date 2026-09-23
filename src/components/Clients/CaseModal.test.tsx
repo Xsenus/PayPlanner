@@ -392,8 +392,12 @@ describe('CaseModal', () => {
     fireEvent.change(screen.getByLabelText('Следующее заседание'), { target: { value: '2026-05-20T12:30' } });
     fireEvent.change(screen.getByLabelText('Ссылка на карточку суда'), { target: { value: 'https://kad.arbitr.ru/card' } });
     fireEvent.change(screen.getByLabelText('Истец / заявитель'), { target: { value: ' Земцов Виктор Александрович ' } });
+    fireEvent.change(screen.getByLabelText('ИНН истца'), { target: { value: '123456789012' } });
+    fireEvent.change(screen.getByLabelText('ОГРН/ОГРНИП истца'), { target: { value: '123456789012345' } });
     fireEvent.change(screen.getByLabelText('Наша роль в деле'), { target: { value: 'claimant' } });
     fireEvent.change(screen.getByLabelText('Ответчик / должник'), { target: { value: ' Банк Точка ' } });
+    fireEvent.change(screen.getByLabelText('ИНН ответчика'), { target: { value: '1234567890' } });
+    fireEvent.change(screen.getByLabelText('ОГРН/ОГРНИП ответчика'), { target: { value: '1234567890123' } });
     fireEvent.change(screen.getByLabelText('Третьи лица'), { target: { value: 'ФНС\nСРО' } });
     fireEvent.change(screen.getByLabelText('Представители'), { target: { value: 'Кожеваткин А.В.' } });
     fireEvent.change(screen.getByLabelText('Судья'), { target: { value: ' Иванова И.И. ' } });
@@ -429,6 +433,10 @@ describe('CaseModal', () => {
       courtCaseNumber: 'А55-12345/2026',
       courtUrl: 'https://kad.arbitr.ru/card',
       claimant: 'Земцов Виктор Александрович',
+      claimantInn: '123456789012',
+      claimantOgrn: '123456789012345',
+      defendantInn: '1234567890',
+      defendantOgrn: '1234567890123',
       ourCourtRole: 'claimant',
       defendant: 'Банк Точка',
       thirdParties: 'ФНС\nСРО',

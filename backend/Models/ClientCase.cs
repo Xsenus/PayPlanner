@@ -142,11 +142,23 @@ namespace PayPlanner.Api.Models
         [MaxLength(300)]
         public string Claimant { get; set; } = string.Empty;
 
+        [MaxLength(12)]
+        public string? ClaimantInn { get; set; }
+
+        [MaxLength(15)]
+        public string? ClaimantOgrn { get; set; }
+
         /// <summary>
         /// Ответчик/должник по делу.
         /// </summary>
         [MaxLength(300)]
         public string Defendant { get; set; } = string.Empty;
+
+        [MaxLength(12)]
+        public string? DefendantInn { get; set; }
+
+        [MaxLength(15)]
+        public string? DefendantOgrn { get; set; }
 
         /// <summary>
         /// Третьи лица и иные участники процесса.

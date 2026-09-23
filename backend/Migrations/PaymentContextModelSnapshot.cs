@@ -1280,6 +1280,14 @@ namespace PayPlanner.Api.Migrations
                         .HasMaxLength(300)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("ClaimantInn")
+                        .HasMaxLength(12)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ClaimantOgrn")
+                        .HasMaxLength(15)
+                        .HasColumnType("TEXT");
+
                     b.Property<int?>("ClientId")
                         .HasColumnType("INTEGER");
 
@@ -1355,6 +1363,14 @@ namespace PayPlanner.Api.Migrations
                     b.Property<string>("Defendant")
                         .IsRequired()
                         .HasMaxLength(300)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DefendantInn")
+                        .HasMaxLength(12)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DefendantOgrn")
+                        .HasMaxLength(15)
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime?>("DeletedAt")

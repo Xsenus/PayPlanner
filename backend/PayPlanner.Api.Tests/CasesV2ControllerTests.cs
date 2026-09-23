@@ -2062,26 +2062,47 @@ public class CasesV2ControllerTests
         }, CancellationToken.None);
         Assert.IsType<BadRequestObjectResult>(invalid);
 
+        var invalidInn = await controller.Create(new ClientCase
+        {
+            ClientId = client.Id, Title = "Дело", ClaimantInn = "12345",
+        }, CancellationToken.None);
+        Assert.IsType<BadRequestObjectResult>(invalidInn);
+        var invalidOgrn = await controller.Create(new ClientCase
+        {
+            ClientId = client.Id, Title = "Дело", DefendantOgrn = "123456789012X",
+        }, CancellationToken.None);
+        Assert.IsType<BadRequestObjectResult>(invalidOgrn);
+
         var created = Assert.IsType<CreatedResult>(await controller.Create(new ClientCase
         {
             ClientId = client.Id, Title = "Дело", CourtName = "Районный суд",
-            OurCourtRole = " claimant ",
+            OurCourtRole = " claimant ", Claimant = "ООО Истец",
+            ClaimantInn = " 1234567890 ", ClaimantOgrn = "1234567890123",
+            Defendant = "Ответчик", DefendantInn = "123456789012",
+            DefendantOgrn = "123456789012345",
         }, CancellationToken.None));
         var courtCase = Assert.IsType<ClientCase>(created.Value);
         Assert.Equal("claimant", courtCase.OurCourtRole);
+        Assert.Equal("1234567890", courtCase.ClaimantInn);
+        Assert.Equal("1234567890123", courtCase.ClaimantOgrn);
+        Assert.Equal("123456789012", courtCase.DefendantInn);
+        Assert.Equal("123456789012345", courtCase.DefendantOgrn);
 
         Assert.IsType<OkObjectResult>(await controller.Update(courtCase.Id, new ClientCase
         {
             ClientId = client.Id, Title = "Дело после изменения", Status = ClientCaseStatus.Open,
-            OurCourtRole = "respondent",
+            OurCourtRole = "respondent", ClaimantInn = "0987654321",
         }, CancellationToken.None));
         Assert.Equal("respondent", (await db.ClientCases.FindAsync(courtCase.Id))?.OurCourtRole);
+        Assert.Equal("0987654321", (await db.ClientCases.FindAsync(courtCase.Id))?.ClaimantInn);
 
         Assert.IsType<OkObjectResult>(await controller.Update(courtCase.Id, new ClientCase
         {
             ClientId = client.Id, Title = "Старый клиент", Status = ClientCaseStatus.Open,
         }, CancellationToken.None));
         Assert.Equal("respondent", (await db.ClientCases.FindAsync(courtCase.Id))?.OurCourtRole);
+        Assert.Equal("0987654321", (await db.ClientCases.FindAsync(courtCase.Id))?.ClaimantInn);
+        Assert.Equal("123456789012345", (await db.ClientCases.FindAsync(courtCase.Id))?.DefendantOgrn);
     }
 
     [Fact]
