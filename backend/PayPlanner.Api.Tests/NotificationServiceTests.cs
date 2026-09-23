@@ -1486,7 +1486,7 @@ public class NotificationServiceTests
             [UserNotificationTypes.TaskReminder] = (NotificationPriorities.Critical, true, true, true),
             [UserNotificationTypes.TaskChanged] = (NotificationPriorities.Normal, false, true, true),
             [UserNotificationTypes.TaskComment] = (NotificationPriorities.Normal, false, true, true),
-            [UserNotificationTypes.TaskCompleted] = (NotificationPriorities.Silent, false, false, false),
+            [UserNotificationTypes.TaskCompleted] = (NotificationPriorities.Normal, false, true, false),
             [UserNotificationTypes.TaskCancelled] = (NotificationPriorities.High, true, true, true),
             [UserNotificationTypes.TaskScheduleConflict] = (NotificationPriorities.High, true, true, true),
             [UserNotificationTypes.TaskApprovalRequested] = (NotificationPriorities.High, true, true, true),
@@ -1523,9 +1523,60 @@ public class NotificationServiceTests
             else
             {
                 Assert.Contains(NotificationChannels.Toast, type.EffectiveChannels);
-                Assert.Contains(NotificationChannels.WebPush, type.EffectiveChannels);
+                Assert.Equal(metadata.PushEligible,
+                    type.EffectiveChannels.Contains(NotificationChannels.WebPush, StringComparer.OrdinalIgnoreCase));
             }
         }
+    }
+
+    [Fact]
+    public async Task NotifyTaskCompletedAsync_ShowsPersistentToastWithoutSendingExternalMessage()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateUserAsync(db, "completed-author@example.test");
+        var assignee = new User
+        {
+            Email = "completed-assignee@example.test",
+            FullName = "Исполнитель",
+            PasswordHash = "hash",
+            RoleId = author.RoleId,
+            IsActive = true,
+            IsApproved = true,
+        };
+        db.Users.Add(assignee);
+        await db.SaveChangesAsync();
+        var task = new TaskJournalItem
+        {
+            ObjectName = "Дело клиента",
+            Title = "Подготовить документ",
+            AuthorUserId = author.Id,
+            AuthorName = author.FullName,
+            AssigneeUserId = assignee.Id,
+            AssigneeName = assignee.FullName,
+            Status = "done",
+            DueAt = DateTime.UtcNow.AddHours(1),
+            ChannelsJson = "[\"inApp\"]",
+            RemindersJson = "[]",
+        };
+        db.TaskJournalItems.Add(task);
+        await db.SaveChangesAsync();
+
+        var email = new RecordingEmailService();
+        var telegram = new RecordingTelegramService();
+        var realtime = new RecordingRealtimeNotificationPublisher();
+        var webPush = new RecordingWebPushNotificationService();
+        var service = CreateService(db, email, telegram, realtime, webPush);
+
+        await service.NotifyTaskCompletedAsync(task);
+        await service.NotifyTaskCompletedAsync(task);
+
+        var notification = Assert.Single(await db.UserNotifications.ToListAsync());
+        Assert.Equal(author.Id, notification.RecipientUserId);
+        Assert.Equal(UserNotificationTypes.TaskCompleted, notification.Type);
+        Assert.True(Assert.Single(realtime.ToastEnabledValues));
+        Assert.Empty(email.Messages);
+        Assert.Empty(telegram.Messages);
+        Assert.Empty(webPush.Notifications);
     }
 
     [Fact]

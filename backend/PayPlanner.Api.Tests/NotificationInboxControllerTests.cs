@@ -75,13 +75,13 @@ public class NotificationInboxControllerTests
         Assert.True(advanceReview.RequiresAction);
 
         var completedTask = Assert.Single(types, item => item.Key == UserNotificationTypes.TaskCompleted);
-        Assert.Equal(NotificationPriorities.Silent, completedTask.Priority);
-        Assert.False(completedTask.ShowToastByDefault);
+        Assert.Equal(NotificationPriorities.Normal, completedTask.Priority);
+        Assert.True(completedTask.ShowToastByDefault);
         Assert.False(completedTask.PushEligible);
-        Assert.Equal(NotificationPriorities.Silent, completedTask.ToastPriority);
-        Assert.Equal(NotificationPriorities.Silent, completedTask.PushPriority);
-        Assert.Equal(600, completedTask.GroupingWindowSeconds);
-        Assert.Equal(new[] { NotificationChannels.InApp }, completedTask.Channels);
+        Assert.Equal(NotificationPriorities.Normal, completedTask.ToastPriority);
+        Assert.Equal(NotificationPriorities.Normal, completedTask.PushPriority);
+        Assert.Equal(60, completedTask.GroupingWindowSeconds);
+        Assert.Equal(new[] { NotificationChannels.InApp, NotificationChannels.Toast }, completedTask.Channels);
 
         Assert.Contains(types, item => item.Key == UserNotificationTypes.PaymentAssigned && item.Domain == UserNotificationDomains.Payment && item.DomainLabel == "Платежи");
         Assert.Contains(types, item => item.Key == UserNotificationTypes.InvoiceChanged && item.Domain == UserNotificationDomains.Invoice && item.DomainLabel == "Счета");
@@ -260,9 +260,9 @@ public class NotificationInboxControllerTests
         var user = await CreateUserAsync(db, "silent-type@example.com");
         var notification = CreateNotification(
             user.Id,
-            "task:1:completed",
-            UserNotificationTypes.TaskCompleted,
-            title: "Задача завершена");
+            "case:1:document",
+            UserNotificationTypes.CaseDocument,
+            title: "Документ дела");
         db.UserNotifications.Add(notification);
         await db.SaveChangesAsync();
 

@@ -281,7 +281,7 @@ public static class UserNotificationTypes
         new(TaskReminder, "Напоминание по задаче", "Сроки, просрочки и плановые напоминания по задачам.", "amber", NotificationPriorities.Critical, NotificationChannels.All, true, false),
         new(TaskChanged, "Изменение задачи", "Изменения статусов, сроков, исполнителей и других полей задачи.", "blue", "normal", NotificationChannels.All, false, true),
         new(TaskComment, "Комментарий по задаче", "Новые комментарии и сообщения по задаче.", "emerald", "normal", NotificationChannels.All, true, true),
-        new(TaskCompleted, "Задача выполнена", "Уведомление постановщику о завершении задачи.", "blue", NotificationPriorities.Silent, NotificationChannels.All, true, false),
+        new(TaskCompleted, "Задача выполнена", "Уведомление постановщику о завершении задачи.", "blue", NotificationPriorities.Normal, [NotificationChannels.InApp, NotificationChannels.Toast], true, false),
         new(TaskCancelled, "Задача отменена", "Календарная задача отменена или удалена.", "orange", "high", NotificationChannels.All, true, false),
         new(TaskScheduleConflict, "Конфликт расписания", "Задача пересекается по времени с другой активной задачей исполнителя.", "rose", "high", NotificationChannels.All, true, false),
         new(TaskApprovalRequested, "Ожидает согласования", "Задача отправлена согласующему на решение.", "violet", "high", NotificationChannels.All, true, false),
