@@ -4681,6 +4681,38 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task CourtRegistry_ShowsOutcomeOnlyForItsDisplayedHearing()
+    {
+        await using var db = await CreateContextAsync();
+        var lawyer = await CreateUserAsync(db, "court-registry-outcome@example.com", "Юрист");
+        var displayedAt = DateTime.UtcNow.AddDays(-2);
+        var clientCase = new ClientCase
+        {
+            Client = new Client { Name = "Клиент", IsActive = true, ResponsibleUserId = lawyer.Id },
+            Title = "Дело с прошедшим заседанием",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = lawyer.Id,
+            CourtName = "Районный суд",
+            NextHearingAt = displayedAt,
+            CourtEvents =
+            [
+                new ClientCaseCourtEvent { EventType = "hearing", Title = "Другое заседание", ScheduledAt = displayedAt.AddDays(-7), HearingOutcome = "considered" },
+                new ClientCaseCourtEvent { EventType = "hearing", Title = "Отображаемое заседание", ScheduledAt = displayedAt, HearingOutcome = "postponed", HearingOutcomeRecordedAt = DateTime.UtcNow },
+            ],
+        };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+
+        var response = await CreateController(db, lawyer).Get(
+            clientId: null, legalEntityId: null, status: null, search: null,
+            responsibleUserId: null, caseType: null, priority: null, from: null, to: null,
+            minFee: null, maxFee: null, sortBy: null, sortDir: null,
+            courtOnly: true, ct: CancellationToken.None);
+        var item = Assert.Single(GetAnonymousItems(Assert.IsType<OkObjectResult>(response).Value));
+        Assert.Equal("postponed", item.NextHearingOutcome);
+    }
+
+    [Fact]
     public async Task CourtEvents_CreateShowInCalendarAndCanLinkDeadline()
     {
         await using var db = await CreateContextAsync();

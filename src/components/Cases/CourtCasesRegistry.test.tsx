@@ -84,6 +84,20 @@ describe('CourtCasesRegistry', () => {
     );
   });
 
+  it('shows a recorded hearing result instead of asking to check a past hearing again', async () => {
+    vi.mocked(apiService.getCasesV2).mockResolvedValue({
+      items: [{ ...courtCase, nextHearingAt: '2020-09-25T03:00:00Z', nextHearingOutcome: 'postponed' }],
+      total: 1,
+      page: 1,
+      pageSize: 18,
+    });
+    render(<CourtCasesRegistry onOpenCaseCourt={vi.fn()} />);
+
+    await screen.findByText('ИВАНОВ — РАЗДЕЛ ИМУЩЕСТВА');
+    expect(await screen.findByText(/Итог: заседание отложено/u)).toBeTruthy();
+    expect(screen.queryByText('Дата прошла — проверьте результат')).toBeNull();
+  });
+
   it('opens the sync health window on entry when errors older than a day exist', async () => {
     vi.mocked(apiService.getCourtSyncHealth).mockResolvedValue({ items: [], total: 1, page: 1, pageSize: 50 });
     render(<CourtCasesRegistry allowAssign onOpenCaseCourt={vi.fn()} />);

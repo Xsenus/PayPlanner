@@ -328,6 +328,7 @@ public partial class CasesV2Controller : ControllerBase
         if (courtOnly || !string.IsNullOrWhiteSpace(courtInstance))
         {
             await PopulateCourtInstanceKeysAsync(items, ct);
+            await PopulateCourtHearingOutcomesAsync(items, ct);
         }
         if (canViewFinance)
         {
@@ -1126,6 +1127,33 @@ public partial class CasesV2Controller : ControllerBase
             {
                 item.CourtInstanceKeys.Add("first");
             }
+        }
+    }
+
+    private async Task PopulateCourtHearingOutcomesAsync(IReadOnlyList<ClientCase> items, CancellationToken ct)
+    {
+        var now = DateTime.UtcNow;
+        var pastHearings = items
+            .Where(item => item.NextHearingAt.HasValue && item.NextHearingAt.Value <= now)
+            .ToList();
+        if (pastHearings.Count == 0) return;
+
+        var caseIds = pastHearings.Select(item => item.Id).ToArray();
+        var hearingTimes = pastHearings.Select(item => item.NextHearingAt!.Value).Distinct().ToArray();
+        var outcomes = await _db.ClientCaseCourtEvents.AsNoTracking()
+            .Where(item => caseIds.Contains(item.ClientCaseId)
+                && hearingTimes.Contains(item.ScheduledAt)
+                && item.EventType == CourtSyncNormalization.EventTypes.Hearing
+                && item.HearingOutcome != null)
+            .Select(item => new { item.ClientCaseId, item.ScheduledAt, item.HearingOutcome, item.HearingOutcomeRecordedAt })
+            .ToListAsync(ct);
+        foreach (var clientCase in pastHearings)
+        {
+            clientCase.NextHearingOutcome = outcomes
+                .Where(item => item.ClientCaseId == clientCase.Id && item.ScheduledAt == clientCase.NextHearingAt)
+                .OrderByDescending(item => item.HearingOutcomeRecordedAt)
+                .Select(item => item.HearingOutcome)
+                .FirstOrDefault();
         }
     }
 

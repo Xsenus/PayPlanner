@@ -58,9 +58,14 @@ function getStatusClass(status: string) {
   return 'border-blue-200 bg-blue-50 text-blue-700';
 }
 
-function getHearingState(value: string | null | undefined) {
+function getHearingState(value: string | null | undefined, outcome?: ClientCase['nextHearingOutcome']) {
   if (!value) return { label: 'Заседание не назначено', className: 'border-slate-200 bg-slate-50 text-slate-600', icon: CalendarClock };
   const diffDays = Math.ceil((new Date(value).getTime() - Date.now()) / 86_400_000);
+  if (diffDays < 0 && outcome) return {
+    label: outcome === 'postponed' ? 'Итог: заседание отложено' : outcome === 'considered' ? 'Итог: дело рассмотрено по существу' : 'Итог: промежуточное решение',
+    className: 'border-emerald-200 bg-emerald-50 text-emerald-800',
+    icon: CheckCircle2,
+  };
   if (diffDays < 0) return { label: 'Дата прошла — проверьте результат', className: 'border-rose-200 bg-rose-50 text-rose-800', icon: AlertTriangle };
   if (diffDays <= 7) return { label: diffDays === 0 ? 'Заседание сегодня' : `До заседания ${diffDays} дн.`, className: 'border-amber-200 bg-amber-50 text-amber-900', icon: AlertTriangle };
   return { label: `До заседания ${diffDays} дн.`, className: 'border-blue-200 bg-blue-50 text-blue-800', icon: CheckCircle2 };
@@ -224,7 +229,7 @@ export function CourtCasesRegistry({ onOpenCaseCourt, allowCreate = false, allow
   };
 
   const cards = useMemo(() => items.map((item) => {
-    const hearing = getHearingState(item.nextHearingAt);
+    const hearing = getHearingState(item.nextHearingAt, item.nextHearingOutcome);
     const HearingIcon = hearing.icon;
     const instanceKeys = item.courtInstanceKeys ?? [];
     return <article key={item.id} className="group flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition hover:border-blue-300 hover:shadow-md">

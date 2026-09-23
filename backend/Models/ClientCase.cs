@@ -388,6 +388,10 @@ namespace PayPlanner.Api.Models
         [NotMapped]
         public List<string> CourtInstanceKeys { get; set; } = new();
 
+        /// <summary>Подтверждённый результат именно отображаемого в реестре заседания.</summary>
+        [NotMapped]
+        public string? NextHearingOutcome { get; set; }
+
         /// <summary>
         /// Описание или примечания по делу.
         /// </summary>
