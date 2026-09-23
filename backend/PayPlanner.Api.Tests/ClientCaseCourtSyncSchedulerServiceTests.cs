@@ -4,11 +4,13 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using System.Reflection;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.LegalIntegrations;
 using PayPlanner.Api.Services.LegalIntegrations.Models;
+using PayPlanner.Api.Services.Notifications;
 using Xunit;
 
 namespace PayPlanner.Api.Tests;
@@ -82,6 +84,35 @@ public sealed class ClientCaseCourtSyncSchedulerServiceTests
         Assert.Equal([activeCaseId], fixture.Provider.ReadCaseIds);
     }
 
+    [Fact]
+    public async Task RunOnceAsync_NotifiesResponsibleWhenBackgroundSyncFails()
+    {
+        await using var fixture = await SchedulerFixture.CreateAsync();
+        await fixture.SeedUserAsync("admin", "admin@example.com");
+        var responsibleId = await fixture.SeedUserAsync("employee", "lawyer@example.com");
+        var caseId = await fixture.SeedCaseAsync("https://court.test/case-1", responsibleId);
+        fixture.Provider.FailureMessage = "Судебный источник не ответил";
+
+        Assert.Equal(1, await fixture.Scheduler.RunOnceAsync(CancellationToken.None));
+        var notification = Assert.Single(fixture.NotificationRecorder.Failures);
+        Assert.Equal(caseId, notification.CaseId);
+        Assert.Contains(responsibleId, notification.RecipientUserIds);
+        Assert.Contains("Судебный источник не ответил", notification.Summary);
+    }
+
+    [Fact]
+    public async Task RunOnceAsync_DoesNotNotifyResponsibleWithoutCaseAccess()
+    {
+        await using var fixture = await SchedulerFixture.CreateAsync();
+        await fixture.SeedUserAsync("admin", "admin@example.com");
+        var responsibleId = await fixture.SeedUserAsync("employee", "no-case-access@example.com", canViewCases: false);
+        await fixture.SeedCaseAsync("https://court.test/case-1", responsibleId);
+        fixture.Provider.FailureMessage = "Судебный источник не ответил";
+
+        Assert.Equal(1, await fixture.Scheduler.RunOnceAsync(CancellationToken.None));
+        Assert.Empty(fixture.NotificationRecorder.Failures);
+    }
+
     private sealed class SchedulerFixture : IAsyncDisposable
     {
         private readonly SqliteConnection _connection;
@@ -91,15 +122,18 @@ public sealed class ClientCaseCourtSyncSchedulerServiceTests
             SqliteConnection connection,
             ServiceProvider services,
             RecordingCourtSyncProvider provider,
+            RecordingNotificationServiceProxy notificationRecorder,
             ClientCaseCourtSyncSchedulerService scheduler)
         {
             _connection = connection;
             _services = services;
             Provider = provider;
+            NotificationRecorder = notificationRecorder;
             Scheduler = scheduler;
         }
 
         public RecordingCourtSyncProvider Provider { get; }
+        public RecordingNotificationServiceProxy NotificationRecorder { get; }
         public ClientCaseCourtSyncSchedulerService Scheduler { get; }
 
         public static async Task<SchedulerFixture> CreateAsync(int batchSize = 25)
@@ -113,6 +147,8 @@ public sealed class ClientCaseCourtSyncSchedulerServiceTests
                 })
                 .Build();
             var provider = new RecordingCourtSyncProvider();
+            var notifications = DispatchProxy.Create<INotificationService, RecordingNotificationServiceProxy>();
+            var notificationRecorder = (RecordingNotificationServiceProxy)(object)notifications;
             var services = new ServiceCollection();
             services.AddDbContext<PaymentContext>(options => options.UseSqlite(connection));
             services.AddOptions();
@@ -121,6 +157,7 @@ public sealed class ClientCaseCourtSyncSchedulerServiceTests
             services.AddSingleton<ICaseDocumentStorage, LocalCaseDocumentStorage>();
             services.AddSingleton<ISudrfCourtSyncService, NoopSudrfCourtSyncService>();
             services.AddSingleton<ICourtSyncProviderRegistry>(provider);
+            services.AddSingleton(notifications);
             var serviceProvider = services.BuildServiceProvider();
 
             await using (var scope = serviceProvider.CreateAsyncScope())
@@ -133,26 +170,40 @@ public sealed class ClientCaseCourtSyncSchedulerServiceTests
                 serviceProvider.GetRequiredService<IOptionsMonitor<AppFeatureFlagsOptions>>(),
                 configuration,
                 NullLogger<ClientCaseCourtSyncSchedulerService>.Instance);
-            return new SchedulerFixture(connection, serviceProvider, provider, scheduler);
+            return new SchedulerFixture(connection, serviceProvider, provider, notificationRecorder, scheduler);
         }
 
-        public async Task SeedUserAsync(string roleName, string email)
+        public async Task<int> SeedUserAsync(string roleName, string email, bool canViewCases = true)
         {
             await using var scope = _services.CreateAsyncScope();
             var db = scope.ServiceProvider.GetRequiredService<PaymentContext>();
-            db.Users.Add(new User
+            var user = new User
             {
                 Email = email,
                 FullName = email,
                 PasswordHash = "test",
                 IsActive = true,
                 IsApproved = true,
-                Role = new Role { Name = roleName, Description = roleName },
-            });
+                Role = new Role
+                {
+                    Name = roleName,
+                    Description = roleName,
+                    Permissions = canViewCases
+                        ? [new RolePermission
+                        {
+                            Section = RolePermissionCatalog.Cases,
+                            CanView = true,
+                            ViewScope = DataVisibilityScope.All,
+                        }]
+                        : [],
+                },
+            };
+            db.Users.Add(user);
             await db.SaveChangesAsync();
+            return user.Id;
         }
 
-        public async Task<int> SeedCaseAsync(string courtUrl)
+        public async Task<int> SeedCaseAsync(string courtUrl, int? responsibleUserId = null)
         {
             await using var scope = _services.CreateAsyncScope();
             var db = scope.ServiceProvider.GetRequiredService<PaymentContext>();
@@ -169,6 +220,7 @@ public sealed class ClientCaseCourtSyncSchedulerServiceTests
                 CourtUrl = courtUrl,
                 CourtCaseNumber = courtUrl.Split('/').Last(),
                 Status = ClientCaseStatus.Open,
+                ResponsibleUserId = responsibleUserId,
             };
             db.ClientCases.Add(clientCase);
             await db.SaveChangesAsync();
@@ -205,6 +257,7 @@ public sealed class ClientCaseCourtSyncSchedulerServiceTests
     private sealed class RecordingCourtSyncProvider : ICourtSyncProviderRegistry, ICourtSyncCaseReader
     {
         public List<int> ReadCaseIds { get; } = [];
+        public string? FailureMessage { get; set; }
         public string Key => "test";
         public string Label => "Тестовый судебный источник";
         public string SourceType => "test";
@@ -224,12 +277,28 @@ public sealed class ClientCaseCourtSyncSchedulerServiceTests
         {
             var caseId = int.Parse(binding.SourceUrl.Split('-').Last(), System.Globalization.CultureInfo.InvariantCulture);
             ReadCaseIds.Add(caseId);
+            if (FailureMessage is not null) throw new SudrfCourtSyncException(FailureMessage);
             return Task.FromResult(new SudrfCourtCaseData
             {
                 SourceUrl = binding.SourceUrl,
                 CourtName = "Тестовый суд",
                 CaseNumber = binding.CourtCaseNumber ?? string.Empty,
             });
+        }
+    }
+
+    public class RecordingNotificationServiceProxy : DispatchProxy
+    {
+        public List<(int CaseId, string Summary, IReadOnlyCollection<int> RecipientUserIds)> Failures { get; } = [];
+
+        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
+        {
+            if (targetMethod?.Name == nameof(INotificationService.NotifyCourtSyncFailedAsync) && args is not null)
+            {
+                Failures.Add((((ClientCase)args[0]!).Id, (string)args[2]!, (IReadOnlyCollection<int>)args[5]!));
+                return Task.CompletedTask;
+            }
+            throw new NotSupportedException(targetMethod?.Name);
         }
     }
 

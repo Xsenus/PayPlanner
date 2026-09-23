@@ -196,6 +196,7 @@ public sealed class ClientCaseCourtSyncSchedulerService : BackgroundService
             environment,
             storage,
             sudrf,
+            notificationService: scope.ServiceProvider.GetService<INotificationService>(),
             courtSyncProviderRegistry: registry,
             courtSyncMetrics: metrics,
             realtimePublisher: realtimePublisher)
