@@ -2588,6 +2588,115 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task CourtWorkload_AggregatesCourtWorkAndChecksAssigneeVisibility()
+    {
+        await using var db = await CreateContextAsync();
+        var manager = await CreateUserAsync(db, "workload-manager@example.com", "Руководитель", DataVisibilityScope.All);
+        var lawyer = await CreateUserAsync(db, "workload-lawyer@example.com", "Юрист");
+        var noAccess = await CreateUserAsync(db, "workload-no-access@example.com", "Без доступа");
+        noAccess.Role!.Permissions.Single().CanView = false;
+        var now = DateTime.UtcNow;
+        var client = new Client { Name = "Контрагент", IsActive = true, ResponsibleUserId = lawyer.Id };
+        var caseWithEvent = new ClientCase
+        {
+            Client = client, Title = "Дело с событием", Status = ClientCaseStatus.Open,
+            ResponsibleUserId = lawyer.Id, CourtName = "Суд", NextHearingAt = now.AddDays(3),
+            CourtEvents =
+            [
+                new ClientCaseCourtEvent
+                {
+                    EventType = CourtSyncNormalization.EventTypes.Hearing,
+                    Title = "Судебное заседание", ScheduledAt = now.AddDays(2),
+                },
+                new ClientCaseCourtEvent
+                {
+                    EventType = CourtSyncNormalization.EventTypes.Hearing,
+                    Title = "Второе заседание", ScheduledAt = now.AddDays(5),
+                },
+            ],
+        };
+        var caseWithoutEvent = new ClientCase
+        {
+            Client = client, Title = "Дело с датой", Status = ClientCaseStatus.Open,
+            ResponsibleUserId = lawyer.Id, CourtName = "Суд", NextHearingAt = now.AddDays(3),
+        };
+        var hiddenCase = new ClientCase
+        {
+            Client = client, Title = "Скрытое дело", Status = ClientCaseStatus.Open,
+            ResponsibleUserId = manager.Id, CourtName = "Суд", IsHiddenFromExecutor = true,
+        };
+        var ordinaryCase = new ClientCase
+        {
+            Client = client, Title = "Несудебное дело", Status = ClientCaseStatus.Open,
+            ResponsibleUserId = lawyer.Id,
+        };
+        db.ClientCases.AddRange(caseWithEvent, caseWithoutEvent, hiddenCase, ordinaryCase);
+        await db.SaveChangesAsync();
+        db.TaskJournalItems.AddRange(
+            new TaskJournalItem
+            {
+                ClientCaseId = caseWithEvent.Id, AssigneeUserId = lawyer.Id,
+                Title = "Просроченная судебная задача", Status = "new", DueAt = now.AddDays(-1),
+            },
+            new TaskJournalItem
+            {
+                ClientCaseId = ordinaryCase.Id, AssigneeUserId = lawyer.Id,
+                Title = "Не судебная задача", Status = "new", DueAt = now.AddDays(-1),
+            });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, manager);
+        var result = await controller.GetCourtWorkload(hiddenCase.Id);
+        var rows = Assert.IsType<CasesV2Controller.CourtWorkloadDto[]>(
+            Assert.IsType<OkObjectResult>(result).Value);
+        var lawyerRow = Assert.Single(rows, row => row.UserId == lawyer.Id);
+        Assert.Equal(2, lawyerRow.ActiveCases);
+        Assert.Equal(3, lawyerRow.HearingsNextSevenDays);
+        Assert.Equal(1, lawyerRow.OverdueCourtTasks);
+        Assert.False(lawyerRow.CanAssign);
+        Assert.DoesNotContain(rows, row => row.UserId == noAccess.Id);
+        Assert.True(Assert.Single(rows, row => row.UserId == manager.Id).CanAssign);
+    }
+
+    [Fact]
+    public async Task AssignCourtCase_RequiresManagerAndTargetAccess()
+    {
+        await using var db = await CreateContextAsync();
+        var manager = await CreateUserAsync(db, "assign-manager@example.com", "Руководитель", DataVisibilityScope.All);
+        var lawyer = await CreateUserAsync(db, "assign-lawyer@example.com", "Юрист");
+        var noAccess = await CreateUserAsync(db, "assign-no-access@example.com", "Без доступа");
+        noAccess.Role!.Permissions.Single().CanView = false;
+        var client = new Client { Name = "Контрагент", IsActive = true, ResponsibleUserId = manager.Id };
+        var courtCase = new ClientCase
+        {
+            Client = client, Title = "Судебное дело", Status = ClientCaseStatus.Open,
+            CourtName = "Суд", ResponsibleUserId = manager.Id,
+        };
+        var hiddenCase = new ClientCase
+        {
+            Client = client, Title = "Скрытое судебное дело", Status = ClientCaseStatus.Open,
+            CourtName = "Суд", ResponsibleUserId = manager.Id, IsHiddenFromExecutor = true,
+        };
+        db.ClientCases.AddRange(courtCase, hiddenCase);
+        await db.SaveChangesAsync();
+
+        var limitedController = CreateController(db, lawyer);
+        Assert.IsType<ForbidResult>(await limitedController.GetCourtWorkload(null));
+        Assert.IsType<ForbidResult>(await limitedController.AssignCourtCase(
+            courtCase.Id, new CasesV2Controller.AssignCourtCaseRequest { UserId = lawyer.Id }, CancellationToken.None));
+        var managerController = CreateController(db, manager);
+        Assert.IsType<BadRequestObjectResult>(await managerController.AssignCourtCase(
+            courtCase.Id, new CasesV2Controller.AssignCourtCaseRequest { UserId = noAccess.Id }, CancellationToken.None));
+        Assert.IsType<BadRequestObjectResult>(await managerController.AssignCourtCase(
+            hiddenCase.Id, new CasesV2Controller.AssignCourtCaseRequest { UserId = lawyer.Id }, CancellationToken.None));
+        Assert.Equal(manager.Id, hiddenCase.ResponsibleUserId);
+        Assert.IsType<OkObjectResult>(await managerController.AssignCourtCase(
+            courtCase.Id, new CasesV2Controller.AssignCourtCaseRequest { UserId = lawyer.Id }, CancellationToken.None));
+        Assert.Equal(lawyer.Id, courtCase.ResponsibleUserId);
+        Assert.Contains("Ответственным по судебному делу назначен", courtCase.EventHistory, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task TomorrowCourtHearings_UsesUserDateVisibilityAndFiveNearestHearings()
     {
         await using var db = await CreateContextAsync();

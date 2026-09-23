@@ -603,6 +603,15 @@ export interface CourtCasesRegistrySummary {
   categories?: Array<{ name: string; count: number }>;
 }
 
+export interface CourtWorkload {
+  userId: number;
+  userName: string;
+  activeCases: number;
+  hearingsNextSevenDays: number;
+  overdueCourtTasks: number;
+  canAssign: boolean;
+}
+
 export interface CourtTomorrowHearing {
   caseId: number;
   caseTitle: string;

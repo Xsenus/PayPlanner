@@ -1381,6 +1381,7 @@ function AppContent() {
           ? (
               <CourtCasesRegistry
                 allowCreate={permissions.cases.canCreate}
+                allowAssign={permissions.cases.canEdit && permissions.cases.viewScope === 'all'}
                 ownerScopes={[
                   ...(permissions.clients.canView ? ['client' as const] : []),
                   ...(permissions.legalEntities.canView ? ['legalEntity' as const] : []),

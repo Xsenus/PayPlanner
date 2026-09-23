@@ -411,6 +411,177 @@ public partial class CasesV2Controller : ControllerBase
         });
     }
 
+    [HttpGet("court-workload")]
+    public async Task<IActionResult> GetCourtWorkload([FromQuery] int? caseId, CancellationToken ct = default)
+    {
+        var access = await ResolveCasesAccessAsync(ct);
+        if (access?.Permission?.CanEdit != true || !access.Visibility.SeesAll)
+        {
+            return Forbid();
+        }
+
+        bool? selectedCaseHiddenFromExecutor = null;
+        if (caseId.HasValue)
+        {
+            var selectedCase = await ApplyCourtRegistryFilters(
+                    _db.ClientCases.AsNoTracking().ApplyClientCaseVisibility(access.Visibility)
+                        .Where(item => item.Id == caseId.Value
+                            && (item.Status == ClientCaseStatus.Open || item.Status == ClientCaseStatus.OnHold)),
+                    courtOnly: true, courtState: null, courtInstance: null, DateTime.UtcNow)
+                .Select(item => new { item.IsHiddenFromExecutor })
+                .FirstOrDefaultAsync(ct);
+            if (selectedCase is null)
+            {
+                return NotFound();
+            }
+            selectedCaseHiddenFromExecutor = selectedCase.IsHiddenFromExecutor;
+        }
+
+        var candidates = await _db.Users.AsNoTracking()
+            .Where(user => user.IsActive && user.IsApproved && user.Role != null
+                && (user.Role.Name == "admin" || user.Role.Permissions.Any(permission =>
+                    permission.Section == RolePermissionCatalog.Cases && permission.CanView)))
+            .Select(user => new { user.Id, user.FullName, user.Email })
+            .ToListAsync(ct);
+        var candidateIds = candidates.Select(user => user.Id).ToArray();
+        var candidateVisibility = await _db.ResolveDataVisibilitiesForUsersAsync(
+            candidateIds, RolePermissionCatalog.Cases, ct);
+        var now = DateTime.UtcNow;
+        var weekEnd = now.AddDays(7);
+        var activeCases = ApplyCourtRegistryFilters(
+                _db.ClientCases.AsNoTracking().ApplyClientCaseVisibility(access.Visibility),
+                courtOnly: true, courtState: null, courtInstance: null, now)
+            .Where(item => item.Status == ClientCaseStatus.Open || item.Status == ClientCaseStatus.OnHold);
+        var activeCounts = await activeCases
+            .GroupBy(item => item.ResponsibleUserId
+                ?? (item.Client != null ? item.Client.ResponsibleUserId : null)
+                ?? (item.LegalEntity != null ? item.LegalEntity.ResponsibleUserId : null))
+            .Select(group => new { UserId = group.Key, Count = group.Count() })
+            .Where(item => item.UserId.HasValue)
+            .ToDictionaryAsync(item => item.UserId!.Value, item => item.Count, ct);
+        var hearingCounts = await _db.ClientCaseCourtEvents.AsNoTracking()
+            .Where(item => item.EventType == CourtSyncNormalization.EventTypes.Hearing
+                && item.ScheduledAt >= now && item.ScheduledAt < weekEnd
+                && item.MovementStatus != CourtSyncNormalization.MovementStatuses.Cancelled
+                && item.MovementStatus != CourtSyncNormalization.MovementStatuses.Archived
+                && item.MovementStatus != CourtSyncNormalization.MovementStatuses.Postponed
+                && activeCases.Any(clientCase => clientCase.Id == item.ClientCaseId))
+            .GroupBy(item => item.ClientCase!.ResponsibleUserId
+                ?? (item.ClientCase.Client != null ? item.ClientCase.Client.ResponsibleUserId : null)
+                ?? (item.ClientCase.LegalEntity != null ? item.ClientCase.LegalEntity.ResponsibleUserId : null))
+            .Select(group => new { UserId = group.Key, Count = group.Count() })
+            .Where(item => item.UserId.HasValue)
+            .ToDictionaryAsync(item => item.UserId!.Value, item => item.Count, ct);
+        var fallbackHearingCounts = await activeCases
+            .Where(item => item.NextHearingAt >= now && item.NextHearingAt < weekEnd
+                && !item.CourtEvents.Any(courtEvent =>
+                    courtEvent.EventType == CourtSyncNormalization.EventTypes.Hearing
+                    && courtEvent.ScheduledAt >= now && courtEvent.ScheduledAt < weekEnd
+                    && courtEvent.MovementStatus != CourtSyncNormalization.MovementStatuses.Cancelled
+                    && courtEvent.MovementStatus != CourtSyncNormalization.MovementStatuses.Archived
+                    && courtEvent.MovementStatus != CourtSyncNormalization.MovementStatuses.Postponed))
+            .GroupBy(item => item.ResponsibleUserId
+                ?? (item.Client != null ? item.Client.ResponsibleUserId : null)
+                ?? (item.LegalEntity != null ? item.LegalEntity.ResponsibleUserId : null))
+            .Select(group => new { UserId = group.Key, Count = group.Count() })
+            .Where(item => item.UserId.HasValue)
+            .ToDictionaryAsync(item => item.UserId!.Value, item => item.Count, ct);
+        var overdueCounts = await _db.TaskJournalItems.AsNoTracking()
+            .Where(task => task.AssigneeUserId.HasValue && task.DueAt < now
+                && task.Status != "done" && task.Status != "cancelled"
+                && task.ClientCaseId.HasValue
+                && activeCases.Any(clientCase => clientCase.Id == task.ClientCaseId.Value))
+            .GroupBy(task => task.AssigneeUserId)
+            .Select(group => new { UserId = group.Key, Count = group.Count() })
+            .Where(item => item.UserId.HasValue)
+            .ToDictionaryAsync(item => item.UserId!.Value, item => item.Count, ct);
+
+        var rows = candidates
+            .Where(user => candidateVisibility.GetValueOrDefault(user.Id) is not null)
+            .Select(user => new CourtWorkloadDto
+            {
+                UserId = user.Id,
+                UserName = string.IsNullOrWhiteSpace(user.FullName) ? user.Email : user.FullName,
+                ActiveCases = activeCounts.GetValueOrDefault(user.Id),
+                HearingsNextSevenDays = hearingCounts.GetValueOrDefault(user.Id) + fallbackHearingCounts.GetValueOrDefault(user.Id),
+                OverdueCourtTasks = overdueCounts.GetValueOrDefault(user.Id),
+                CanAssign = selectedCaseHiddenFromExecutor != true
+                    || candidateVisibility[user.Id]!.SeesAll,
+            })
+            .OrderBy(row => row.UserName)
+            .ToArray();
+        return Ok(rows);
+    }
+
+    [HttpPatch("{id:int}/court-assignee")]
+    public async Task<IActionResult> AssignCourtCase(int id, [FromBody] AssignCourtCaseRequest request, CancellationToken ct)
+    {
+        var access = await ResolveCasesAccessAsync(ct);
+        if (access?.Permission?.CanEdit != true || !access.Visibility.SeesAll)
+        {
+            return Forbid();
+        }
+
+        var clientCase = await ApplyCourtRegistryFilters(
+                _db.ClientCases.ApplyClientCaseVisibility(access.Visibility)
+                    .Where(item => item.Id == id
+                        && (item.Status == ClientCaseStatus.Open || item.Status == ClientCaseStatus.OnHold)),
+                courtOnly: true, courtState: null, courtInstance: null, DateTime.UtcNow)
+            .FirstOrDefaultAsync(ct);
+        if (clientCase is null)
+        {
+            return NotFound();
+        }
+
+        var assignee = await _db.Users.AsNoTracking()
+            .Where(user => user.Id == request.UserId && user.IsActive && user.IsApproved)
+            .Select(user => new { user.Id, user.FullName, user.Email })
+            .FirstOrDefaultAsync(ct);
+        if (assignee is null)
+        {
+            return BadRequest("Выберите действующего сотрудника.");
+        }
+
+        var targetVisibility = await _db.ResolveDataVisibilitiesForUsersAsync(
+            [assignee.Id], RolePermissionCatalog.Cases, ct);
+        if (targetVisibility.GetValueOrDefault(assignee.Id) is not { } permittedVisibility)
+        {
+            return BadRequest("У сотрудника нет доступа к судебным делам.");
+        }
+        if (clientCase.IsHiddenFromExecutor && !permittedVisibility.SeesAll)
+        {
+            return BadRequest("Дело скрыто от исполнителя. Сначала откройте доступ или выберите сотрудника с полным доступом.");
+        }
+
+        if (clientCase.ResponsibleUserId != assignee.Id)
+        {
+            clientCase.ResponsibleUserId = assignee.Id;
+            var assigneeName = string.IsNullOrWhiteSpace(assignee.FullName) ? assignee.Email : assignee.FullName;
+            AppendCaseEvent(clientCase, $"Ответственным по судебному делу назначен {assigneeName}. Изменил: {User.GetDisplayName()}.");
+            _db.SetAuditReason($"Назначен ответственный по судебному делу #{id}: {assigneeName}.");
+            await _db.SaveChangesAsync(ct);
+            await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, id, User.GetUserId(), User.GetDisplayName(), ct);
+            await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
+        }
+
+        return Ok(new { caseId = id, responsibleUserId = assignee.Id });
+    }
+
+    public sealed class CourtWorkloadDto
+    {
+        public int UserId { get; set; }
+        public string UserName { get; set; } = string.Empty;
+        public int ActiveCases { get; set; }
+        public int HearingsNextSevenDays { get; set; }
+        public int OverdueCourtTasks { get; set; }
+        public bool CanAssign { get; set; }
+    }
+
+    public sealed class AssignCourtCaseRequest
+    {
+        public int UserId { get; set; }
+    }
+
     [HttpGet("court-hearings/tomorrow")]
     public async Task<ActionResult<IReadOnlyList<CourtTomorrowHearingDto>>> GetTomorrowCourtHearings(
         [FromQuery] DateOnly? localDate = null,
