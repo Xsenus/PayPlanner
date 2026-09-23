@@ -30,6 +30,7 @@ import { AppVersionGate } from './components/AppVersion/AppVersionGate';
 import { RealtimeNotificationToasts } from './components/Notifications/RealtimeNotificationToasts';
 import { ForcedTaskRevisionModal } from './components/Notifications/ForcedTaskRevisionModal';
 import { DailyOverdueTaskReminder } from './components/Tasks/DailyOverdueTaskReminder';
+import { TomorrowCourtHearingsDialog } from './components/Cases/TomorrowCourtHearingsDialog';
 import type { User as AppUser } from './services/authService';
 import { apiService, type ContactScope } from './services/api';
 import { extractDisplayErrorMessage } from './utils/errorUtils';
@@ -2017,6 +2018,22 @@ function AppContent() {
             setOverdueTaskFilterSignal((value) => value + 1);
             handleTabChange('tasks');
           }}
+        />
+        <TomorrowCourtHearingsDialog
+          userId={user.id}
+          enabled={permissionsLoaded && permissions.cases.canView}
+          onOpenCase={(caseId) => {
+            try {
+              window.sessionStorage.setItem(`pp.case-detail.${caseId}.view.v1`, JSON.stringify({ activeTab: 'court', courtOverview: true }));
+            } catch {
+              /** */
+            }
+            setSelectedCaseId(caseId);
+            setCaseReturnTab(activeTab);
+            setActiveTab('caseDetail');
+          }}
+          onOpenCalendar={() => handleTabChange(permissions.tasks.canView ? 'tasksCalendar' : 'courtCases')}
+          calendarAvailable={permissions.tasks.canView}
         />
         <DoubleHorizontalScrollbars />
         <Navigation activeTab={activeTab} onTabChange={handleTabChange} />

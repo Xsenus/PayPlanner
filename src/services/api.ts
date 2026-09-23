@@ -5930,6 +5930,12 @@ export class ApiService {
     });
   }
 
+  async getTomorrowCourtHearings(options?: { signal?: AbortSignal }) {
+    return this.request<CourtTomorrowHearing[]>('/v2/cases/court-hearings/tomorrow', {
+      signal: options?.signal,
+    });
+  }
+
   async exportCasesRegistryCsv(params?: CasesRegistryExportParams) {
     const q = buildQuery(params ?? {});
     const token = getAuthToken();
@@ -8513,6 +8519,7 @@ import type {
   MonthlyStats,
   ClientCase,
   CourtCasesRegistrySummary,
+  CourtTomorrowHearing,
   ClientCaseAccessRequest,
   ClientCaseAccessRequestResolution,
   ClientCaseActivity,

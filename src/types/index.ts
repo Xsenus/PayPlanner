@@ -603,6 +603,16 @@ export interface CourtCasesRegistrySummary {
   categories?: Array<{ name: string; count: number }>;
 }
 
+export interface CourtTomorrowHearing {
+  caseId: number;
+  caseTitle: string;
+  hearingAt: string;
+  allDay: boolean;
+  courtName: string;
+  judgeName: string;
+  courtroom: string;
+}
+
 export interface CaseCalendarEvent {
   id: string;
   kind: 'task' | 'case-deadline' | 'procedural-deadline' | 'court' | string;

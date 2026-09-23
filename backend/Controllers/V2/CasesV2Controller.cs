@@ -410,6 +410,100 @@ public class CasesV2Controller : ControllerBase
         });
     }
 
+    [HttpGet("court-hearings/tomorrow")]
+    public async Task<ActionResult<IReadOnlyList<CourtTomorrowHearingDto>>> GetTomorrowCourtHearings(
+        [FromQuery] DateOnly? localDate = null,
+        CancellationToken ct = default)
+    {
+        var visibility = await ResolveCasesVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return MissingCasesVisibilityResult();
+        }
+
+        var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
+        var date = localDate ?? DateOnly.FromDateTime(CalendarTimeZoneHelper.ToUserLocal(DateTime.UtcNow, timeZone).AddDays(1));
+        if (date == DateOnly.MaxValue)
+        {
+            return BadRequest(new { message = "Укажите более раннюю дату заседания." });
+        }
+        var dayStart = date.ToDateTime(TimeOnly.MinValue);
+        var nextDayStart = date.AddDays(1).ToDateTime(TimeOnly.MinValue);
+        var startUtc = CalendarTimeZoneHelper.FromUserLocalToUtc(dayStart, timeZone);
+        var endUtc = CalendarTimeZoneHelper.FromUserLocalToUtc(nextDayStart, timeZone);
+
+        var visibleCases = _db.ClientCases.AsNoTracking()
+            .ApplyClientCaseVisibility(visibility)
+            .Where(item => item.Status == ClientCaseStatus.Open || item.Status == ClientCaseStatus.OnHold);
+
+        // Fetch at most five rows from each source before combining. A case with a current
+        // hearing event must not also appear through its legacy NextHearingAt field.
+        var events = await _db.ClientCaseCourtEvents.AsNoTracking()
+            .Where(item => item.EventType == "hearing"
+                && item.MovementStatus != "cancelled"
+                && item.MovementStatus != "archived"
+                && (item.AllDay
+                    ? item.ScheduledAt >= dayStart && item.ScheduledAt < nextDayStart
+                    : item.ScheduledAt >= startUtc && item.ScheduledAt < endUtc)
+                && visibleCases.Any(clientCase => clientCase.Id == item.ClientCaseId))
+            .OrderBy(item => item.ScheduledAt)
+            .ThenBy(item => item.Id)
+            .Select(item => new CourtTomorrowHearingDto
+            {
+                CaseId = item.ClientCaseId,
+                CaseTitle = item.ClientCase.Title,
+                HearingAt = item.ScheduledAt,
+                AllDay = item.AllDay,
+                CourtName = item.CourtName != "" ? item.CourtName : item.ClientCase.CourtName,
+                JudgeName = item.JudgeName != "" ? item.JudgeName : item.ClientCase.JudgeName,
+                Courtroom = item.Courtroom != "" ? item.Courtroom : item.ClientCase.Courtroom,
+            })
+            .Take(5)
+            .ToListAsync(ct);
+
+        var legacy = await visibleCases
+            .Where(item => item.NextHearingAt != null
+                && item.NextHearingAt >= startUtc
+                && item.NextHearingAt < endUtc
+                && !item.CourtEvents.Any(courtEvent => courtEvent.EventType == "hearing"
+                    && courtEvent.MovementStatus != "cancelled"
+                    && courtEvent.MovementStatus != "archived"
+                    && (courtEvent.AllDay
+                        ? courtEvent.ScheduledAt >= dayStart && courtEvent.ScheduledAt < nextDayStart
+                        : courtEvent.ScheduledAt >= startUtc && courtEvent.ScheduledAt < endUtc)))
+            .OrderBy(item => item.NextHearingAt)
+            .ThenBy(item => item.Id)
+            .Select(item => new CourtTomorrowHearingDto
+            {
+                CaseId = item.Id,
+                CaseTitle = item.Title,
+                HearingAt = item.NextHearingAt!.Value,
+                CourtName = item.CourtName,
+                JudgeName = item.JudgeName,
+                Courtroom = item.Courtroom,
+            })
+            .Take(5)
+            .ToListAsync(ct);
+
+        var result = events.Concat(legacy)
+            .OrderBy(item => item.AllDay ? startUtc : item.HearingAt)
+            .ThenBy(item => item.CaseId)
+            .Take(5)
+            .ToList();
+        return Ok(result);
+    }
+
+    public sealed class CourtTomorrowHearingDto
+    {
+        public int CaseId { get; init; }
+        public string CaseTitle { get; init; } = string.Empty;
+        public DateTime HearingAt { get; init; }
+        public bool AllDay { get; init; }
+        public string CourtName { get; init; } = string.Empty;
+        public string JudgeName { get; init; } = string.Empty;
+        public string Courtroom { get; init; } = string.Empty;
+    }
+
     [HttpGet("export.csv")]
     public async Task<IActionResult> ExportRegistryCsv(
         [FromQuery] int? clientId,

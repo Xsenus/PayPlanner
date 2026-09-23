@@ -2588,6 +2588,128 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task TomorrowCourtHearings_UsesUserDateVisibilityAndFiveNearestHearings()
+    {
+        await using var db = await CreateContextAsync();
+        var lawyer = await CreateUserAsync(db, "tomorrow-lawyer@example.com", "Юрист");
+        var otherLawyer = await CreateUserAsync(db, "tomorrow-other@example.com", "Другой юрист");
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = lawyer.Id,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = "Asia/Novosibirsk",
+        });
+        var client = new Client { Name = "Клиент", IsActive = true, ResponsibleUserId = lawyer.Id };
+        var firstInstant = new DateTime(2026, 9, 23, 17, 0, 0, DateTimeKind.Utc);
+        var cases = Enumerable.Range(0, 7).Select(index => new ClientCase
+        {
+            Client = client,
+            Title = $"Заседание {index}",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = lawyer.Id,
+            CourtName = "Районный суд",
+            NextHearingAt = firstInstant.AddMinutes(index * 30),
+        }).ToArray();
+        var eventCase = new ClientCase
+        {
+            Client = client,
+            Title = "Заседание по событию",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = lawyer.Id,
+            NextHearingAt = firstInstant.AddMinutes(10),
+            CourtEvents =
+            [
+                new ClientCaseCourtEvent
+                {
+                    EventType = "hearing",
+                    ScheduledAt = firstInstant.AddMinutes(10),
+                    CourtName = "Апелляционный суд",
+                    JudgeName = "Судья события",
+                },
+            ],
+        };
+        var hiddenCase = new ClientCase
+        {
+            Client = new Client { Name = "Чужой клиент", IsActive = true, ResponsibleUserId = otherLawyer.Id },
+            Title = "Чужое заседание",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = otherLawyer.Id,
+            NextHearingAt = firstInstant.AddMinutes(5),
+        };
+        var outsideCase = new ClientCase
+        {
+            Client = client,
+            Title = "Следующий день",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = lawyer.Id,
+            NextHearingAt = firstInstant.AddDays(1),
+        };
+        db.ClientCases.AddRange(cases);
+        db.ClientCases.AddRange(eventCase, hiddenCase, outsideCase);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, lawyer);
+        var response = await controller.GetTomorrowCourtHearings(new DateOnly(2026, 9, 24), CancellationToken.None);
+        var rows = Assert.IsAssignableFrom<IReadOnlyList<CasesV2Controller.CourtTomorrowHearingDto>>(
+            Assert.IsType<OkObjectResult>(response.Result).Value);
+
+        Assert.Equal(5, rows.Count);
+        Assert.Equal(cases[0].Id, rows[0].CaseId);
+        Assert.Contains(rows, item => item.CaseId == eventCase.Id && item.CourtName == "Апелляционный суд" && item.JudgeName == "Судья события");
+        Assert.Equal(1, rows.Count(item => item.CaseId == eventCase.Id));
+        Assert.DoesNotContain(rows, item => item.CaseId == hiddenCase.Id || item.CaseId == outsideCase.Id);
+
+        await GrantSectionPermissionAsync(db, lawyer, RolePermissionCatalog.Cases, canView: false);
+        var forbidden = await CreateController(db, lawyer).GetTomorrowCourtHearings(new DateOnly(2026, 9, 24), CancellationToken.None);
+        Assert.IsType<ForbidResult>(forbidden.Result);
+    }
+
+    [Fact]
+    public async Task TomorrowCourtHearings_IncludesAllDayAndExcludesCancelledOrClosedHearings()
+    {
+        await using var db = await CreateContextAsync();
+        var lawyer = await CreateUserAsync(db, "tomorrow-all-day@example.com", "Юрист");
+        var client = new Client { Name = "Клиент", IsActive = true, ResponsibleUserId = lawyer.Id };
+        var localDate = new DateTime(2026, 9, 24, 0, 0, 0, DateTimeKind.Unspecified);
+        var allDayCase = new ClientCase
+        {
+            Client = client,
+            Title = "Заседание на весь день",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = lawyer.Id,
+            CourtEvents = [new ClientCaseCourtEvent { EventType = "hearing", ScheduledAt = localDate, AllDay = true }],
+        };
+        var cancelledCase = new ClientCase
+        {
+            Client = client,
+            Title = "Отменённое заседание",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = lawyer.Id,
+            CourtEvents = [new ClientCaseCourtEvent { EventType = "hearing", ScheduledAt = localDate, AllDay = true, MovementStatus = "cancelled" }],
+        };
+        var closedCase = new ClientCase
+        {
+            Client = client,
+            Title = "Закрытое дело",
+            Status = ClientCaseStatus.Closed,
+            ResponsibleUserId = lawyer.Id,
+            CourtEvents = [new ClientCaseCourtEvent { EventType = "hearing", ScheduledAt = localDate, AllDay = true }],
+        };
+        db.ClientCases.AddRange(allDayCase, cancelledCase, closedCase);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, lawyer);
+        var result = await controller.GetTomorrowCourtHearings(new DateOnly(2026, 9, 24), CancellationToken.None);
+        var rows = Assert.IsAssignableFrom<IReadOnlyList<CasesV2Controller.CourtTomorrowHearingDto>>(
+            Assert.IsType<OkObjectResult>(result.Result).Value);
+        Assert.Equal(allDayCase.Id, Assert.Single(rows).CaseId);
+        Assert.True(rows[0].AllDay);
+
+        var invalid = await CreateController(db, lawyer).GetTomorrowCourtHearings(DateOnly.MaxValue, CancellationToken.None);
+        Assert.IsType<BadRequestObjectResult>(invalid.Result);
+    }
+
+    [Fact]
     public async Task CreateAndUpdate_SyncsProcessDeadlinesToTaskCalendarWithoutDuplicates()
     {
         await using var db = await CreateContextAsync();
