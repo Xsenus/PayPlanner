@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Archive, ArrowRight, CalendarDays, CalendarClock, CheckCircle2, ExternalLink, Folder, FolderOpen, Gavel, Grid2X2, Layers3, Loader2, Plus, RefreshCw, Scale, Search, ShieldCheck, UserRound, UsersRound, X } from 'lucide-react';
 
 import { apiService } from '../../services/api';
@@ -10,6 +10,7 @@ import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { SystemSelect } from '../ui/SystemSelect';
 import { CounterpartyPickerModal, type CounterpartyKind, type CounterpartySelection } from '../ui/CounterpartyPickerModal';
 import { CourtWorkloadDialog } from './CourtWorkloadDialog';
+import { CourtSyncHealthDialog } from './CourtSyncHealthDialog';
 
 type CourtState = 'all' | 'upcoming' | 'soon' | 'overdue' | 'without-hearing' | 'under-control';
 type CaseScope = 'active' | 'all' | 'mine' | 'archive';
@@ -101,6 +102,28 @@ export function CourtCasesRegistry({ onOpenCaseCourt, allowCreate = false, allow
   const [creating, setCreating] = useState(false);
   const [workloadTarget, setWorkloadTarget] = useState<{ caseId?: number; title?: string } | null>(null);
   const [newlyCreatedCaseId, setNewlyCreatedCaseId] = useState<number | null>(null);
+  const [syncHealthOpen, setSyncHealthOpen] = useState(false);
+  const [syncHealthReloadToken, setSyncHealthReloadToken] = useState(0);
+  const [failedSyncCount, setFailedSyncCount] = useState(0);
+  const [syncHealthCountError, setSyncHealthCountError] = useState(false);
+  const hasAutoOpenedSyncHealth = useRef(false);
+
+  useEffect(() => {
+    if (!allowAssign) return;
+    const controller = new AbortController();
+    void apiService.getCourtSyncHealth('failed', 1, { signal: controller.signal })
+      .then((result) => {
+        if (controller.signal.aborted) return;
+        setFailedSyncCount(result.total ?? 0);
+        setSyncHealthCountError(false);
+        if (result.total > 0 && !hasAutoOpenedSyncHealth.current) {
+          hasAutoOpenedSyncHealth.current = true;
+          setSyncHealthOpen(true);
+        }
+      })
+      .catch(() => { if (!controller.signal.aborted) setSyncHealthCountError(true); });
+    return () => controller.abort();
+  }, [allowAssign, syncHealthReloadToken]);
 
   useEffect(() => {
     let cancelled = false;
@@ -223,7 +246,7 @@ export function CourtCasesRegistry({ onOpenCaseCourt, allowCreate = false, allow
   }), [allowAssign, items, onOpenCaseCourt, responsibles, timeZoneId]);
 
   return <div className="space-y-3 p-3 lg:p-4">
-    {allowAssign ? <div className="flex justify-end"><button type="button" onClick={() => setWorkloadTarget({})} className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50"><UsersRound className="h-4 w-4" /> Распределение нагрузки</button></div> : null}
+    {allowAssign ? <div className="flex flex-wrap justify-end gap-2"><button type="button" onClick={() => setSyncHealthOpen(true)} className="inline-flex items-center gap-2 rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm font-semibold text-amber-800 hover:bg-amber-50"><AlertTriangle className="h-4 w-4" /> Синхронизация {failedSyncCount > 0 ? `· ${failedSyncCount}` : ''}{syncHealthCountError ? ' · проверить' : ''}</button><button type="button" onClick={() => setWorkloadTarget({})} className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50"><UsersRound className="h-4 w-4" /> Распределение нагрузки</button></div> : null}
     <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between"><div><div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-blue-700"><Scale className="h-4 w-4" /> Судебная работа</div><h1 className="mt-1 text-2xl font-bold text-slate-950">Судебные дела</h1><p className="mt-0.5 text-sm text-slate-500">Инстанции, заседания, движение дела и задачи в одном рабочем разделе.</p></div><div className="flex flex-wrap gap-2"><button type="button" onClick={() => setScope(scope === 'archive' ? 'active' : 'archive')} className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold ${scope === 'archive' ? 'border-blue-300 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-700 hover:bg-slate-50'}`}><Archive className="h-4 w-4" /> {scope === 'archive' ? 'Активные' : 'Завершённые'}</button><button type="button" onClick={() => setReloadToken((value) => value + 1)} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"><RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> Обновить</button>{allowCreate ? <button type="button" onClick={() => setOwnerPickerOpen(true)} className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"><Plus className="h-4 w-4" /> Поставить дело на отслеживание</button> : null}</div></div>
       <div className="mt-3 grid gap-2 lg:grid-cols-[minmax(260px,1fr)_180px_190px_210px_auto]"><label className="relative"><Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Название, клиент, суд, номер или UID" className="w-full rounded-lg border border-slate-200 py-2 pl-9 pr-3 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" /></label><SystemSelect aria-label="Судебная инстанция" value={instance} onChange={(event) => setInstance(event.target.value as CourtInstanceFilter)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm">{INSTANCE_OPTIONS.map((option) => <option key={option.value || 'all'} value={option.value}>{option.label}</option>)}</SystemSelect><SystemSelect aria-label="Состояние заседания" value={courtState} onChange={(event) => setCourtState(event.target.value as CourtState)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm"><option value="all">Все заседания</option><option value="upcoming">Предстоящие</option><option value="soon">Ближайшие 14 дней</option><option value="overdue">Дата прошла</option><option value="without-hearing">Без даты заседания</option><option value="under-control">На контроле</option></SystemSelect><SystemSelect aria-label="Ответственный по судебному делу" value={responsibleUserId} onChange={(event) => setResponsibleUserId(event.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm"><option value="">Все ответственные</option>{responsibles.map((person) => <option key={person.id} value={person.id}>{person.fullName}</option>)}</SystemSelect><button type="button" onClick={resetFilters} className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50">Сбросить</button></div>
@@ -234,6 +257,7 @@ export function CourtCasesRegistry({ onOpenCaseCourt, allowCreate = false, allow
 
     <CounterpartyPickerModal open={ownerPickerOpen} title="Выберите владельца судебного дела" counterpartyRole="client" allowedScopes={ownerScopes} onClose={() => setOwnerPickerOpen(false)} onSelect={startTracking} />
     <CourtWorkloadDialog open={workloadTarget !== null} caseId={workloadTarget?.caseId} caseTitle={workloadTarget?.title} onClose={closeWorkload} onAssigned={() => { setReloadToken((value) => value + 1); closeWorkload(); }} />
+    <CourtSyncHealthDialog open={syncHealthOpen} onClose={() => setSyncHealthOpen(false)} onOpenCase={(caseId) => { setSyncHealthOpen(false); onOpenCaseCourt(caseId); }} onChanged={() => { setSyncHealthReloadToken((value) => value + 1); setReloadToken((value) => value + 1); }} />
     {trackingOpen ? <div className="fixed inset-0 z-[1200] flex items-center justify-center bg-slate-950/50 p-4" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target && !creating) setTrackingOpen(false); }}><section role="dialog" aria-modal="true" aria-labelledby="court-tracking-title" className="w-full max-w-xl rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl"><div className="flex items-start justify-between gap-3"><div><h2 id="court-tracking-title" className="text-lg font-bold text-slate-950">Поставить дело на отслеживание</h2><p className="mt-1 text-sm text-slate-500">{allowAssign ? 'После создания можно назначить ответственного с учётом нагрузки, затем откроется судебная карточка.' : 'После создания откроется судебная карточка для поиска в источнике и проверки найденных данных.'}</p></div><button type="button" aria-label="Закрыть" onClick={() => setTrackingOpen(false)} disabled={creating} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100"><X className="h-5 w-5" /></button></div><div className="mt-4 rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-900"><span className="font-semibold">Владелец:</span> {selectedOwner?.name}</div><div className="mt-4 grid gap-3"><label className="text-sm font-medium text-slate-700">Источник судебных данных<SystemSelect value={trackingProvider} onChange={(event) => setTrackingProvider(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"><option value="">Определить при синхронизации</option>{providers.map((provider) => <option key={provider.key} value={provider.key}>{provider.label}</option>)}</SystemSelect></label><label className="text-sm font-medium text-slate-700">Название дела *<input value={trackingTitle} onChange={(event) => setTrackingTitle(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2" placeholder="Иванов — раздел имущества" /></label><div className="grid gap-3 sm:grid-cols-2"><label className="text-sm font-medium text-slate-700">Номер дела в суде *<input value={trackingNumber} onChange={(event) => setTrackingNumber(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2" placeholder="А55-12345/2026" /></label><label className="text-sm font-medium text-slate-700">Инстанция *<SystemSelect value={trackingInstance} onChange={(event) => setTrackingInstance(event.target.value as CourtInstanceFilter)} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2">{INSTANCE_OPTIONS.filter((option) => option.value).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</SystemSelect></label></div></div><div className="mt-4 flex justify-end gap-2"><button type="button" onClick={() => setTrackingOpen(false)} disabled={creating} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700">Отмена</button><button type="button" onClick={() => void createTrackedCase()} disabled={creating || !trackingTitle.trim() || !trackingNumber.trim() || !trackingInstance} className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Поставить на отслеживание</button></div></section></div> : null}
   </div>;
 }

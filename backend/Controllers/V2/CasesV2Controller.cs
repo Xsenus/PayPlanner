@@ -7569,6 +7569,194 @@ public partial class CasesV2Controller : ControllerBase
         return Ok(logs);
     }
 
+    [HttpGet("court-sync/health")]
+    public async Task<ActionResult<CourtSyncHealthPageDto>> GetCourtSyncHealth(
+        [FromQuery] string status = "failed", [FromQuery] int page = 1, CancellationToken ct = default)
+    {
+        var access = await ResolveCasesAccessAsync(ct);
+        if (access?.Permission?.CanEdit != true || !access.Visibility.SeesAll)
+        {
+            return Forbid();
+        }
+
+        var paused = string.Equals(status, "paused", StringComparison.OrdinalIgnoreCase);
+        if (!paused && !string.Equals(status, "failed", StringComparison.OrdinalIgnoreCase))
+        {
+            return BadRequest("Неизвестный статус судебной синхронизации.");
+        }
+
+        const int pageSize = 50;
+        var currentPage = Math.Clamp(page, 1, 100_000);
+        var cutoff = DateTime.UtcNow.AddHours(-24);
+        var query = ApplyCourtRegistryFilters(
+                _db.ClientCases.AsNoTracking().ApplyClientCaseVisibility(access.Visibility),
+                courtOnly: true, courtState: null, courtInstance: null, DateTime.UtcNow)
+            .Where(item => item.Status == ClientCaseStatus.Open && item.CourtUrl != string.Empty);
+        query = paused
+            ? query.Where(item => !item.CourtSyncMonitoringEnabled)
+            : query.Where(item => item.CourtSyncMonitoringEnabled
+                && item.CourtSyncFailureStartedAt <= cutoff && item.CourtSyncLastError != string.Empty);
+
+        var total = await query.CountAsync(ct);
+        var cases = await query
+            .OrderBy(item => item.CourtSyncFailureStartedAt ?? DateTime.MaxValue)
+            .ThenBy(item => item.Id)
+            .Skip((currentPage - 1) * pageSize)
+            .Take(pageSize)
+            .Select(item => new CourtSyncHealthCaseDto
+            {
+                CaseId = item.Id,
+                Title = item.Title,
+                CaseNumber = item.CourtCaseNumber != string.Empty ? item.CourtCaseNumber : item.CaseNumber,
+                CourtUrl = item.CourtUrl,
+                LastAttemptAt = item.CourtSyncLastAttemptAt,
+                LastSuccessAt = item.CourtSyncLastSuccessAt,
+                FailureStartedAt = item.CourtSyncFailureStartedAt,
+                LastError = item.CourtSyncLastError,
+                MonitoringEnabled = item.CourtSyncMonitoringEnabled,
+            })
+            .ToListAsync(ct);
+        foreach (var item in cases)
+        {
+            item.ProviderName = ResolveCourtSyncJournalProvider(item.CourtUrl).Label;
+        }
+        return Ok(new CourtSyncHealthPageDto { Items = cases, Total = total, Page = currentPage, PageSize = pageSize });
+    }
+
+    [HttpPatch("{id:int}/court-sync/monitoring")]
+    public async Task<IActionResult> SetCourtSyncMonitoring(
+        int id, [FromBody] SetCourtSyncMonitoringRequest request, CancellationToken ct)
+    {
+        var access = await ResolveCasesAccessAsync(ct);
+        if (access?.Permission?.CanEdit != true || !access.Visibility.SeesAll)
+        {
+            return Forbid();
+        }
+
+        var clientCase = await ApplyCourtRegistryFilters(
+                _db.ClientCases.ApplyClientCaseVisibility(access.Visibility)
+                    .Where(item => item.Id == id && item.Status == ClientCaseStatus.Open),
+                courtOnly: true, courtState: null, courtInstance: null, DateTime.UtcNow)
+            .FirstOrDefaultAsync(ct);
+        if (clientCase is null)
+        {
+            return NotFound();
+        }
+        if (request.Enabled && (string.IsNullOrWhiteSpace(clientCase.CourtUrl)
+            || ResolveCourtSyncProvider(clientCase.CourtUrl) is null))
+        {
+            return BadRequest("Для возобновления мониторинга укажите поддерживаемую ссылку на судебный источник.");
+        }
+
+        if (clientCase.CourtSyncMonitoringEnabled != request.Enabled)
+        {
+            clientCase.CourtSyncMonitoringEnabled = request.Enabled;
+            if (request.Enabled)
+            {
+                clientCase.CourtSyncFailureStartedAt = null;
+                clientCase.CourtSyncLastError = string.Empty;
+            }
+            AppendCaseEvent(clientCase, request.Enabled
+                ? $"Автоматический мониторинг судебного дела возобновлен. Изменил: {User.GetDisplayName()}."
+                : $"Автоматический мониторинг судебного дела остановлен. Изменил: {User.GetDisplayName()}.");
+            _db.SetAuditReason(request.Enabled
+                ? $"Возобновлен судебный мониторинг дела #{id}."
+                : $"Остановлен судебный мониторинг дела #{id}.");
+            await _db.SaveChangesAsync(ct);
+        }
+        return Ok(new { caseId = id, monitoringEnabled = clientCase.CourtSyncMonitoringEnabled });
+    }
+
+    [HttpPatch("{id:int}/court-sync/case-number")]
+    public async Task<IActionResult> UpdateCourtSyncCaseNumber(
+        int id, [FromBody] UpdateCourtSyncCaseNumberRequest request, CancellationToken ct)
+    {
+        var access = await ResolveCasesAccessAsync(ct);
+        if (access?.Permission?.CanEdit != true || !access.Visibility.SeesAll)
+        {
+            return Forbid();
+        }
+
+        var clientCase = await ApplyCourtRegistryFilters(
+                _db.ClientCases.ApplyClientCaseVisibility(access.Visibility)
+                    .Where(item => item.Id == id && item.Status == ClientCaseStatus.Open),
+                courtOnly: true, courtState: null, courtInstance: null, DateTime.UtcNow)
+            .FirstOrDefaultAsync(ct);
+        if (clientCase is null)
+        {
+            return NotFound();
+        }
+
+        var number = NormalizeHistoryText(request.CourtCaseNumber ?? string.Empty);
+        if (string.IsNullOrWhiteSpace(number) || number.Length > 100)
+        {
+            return BadRequest("Укажите номер судебного дела длиной до 100 символов.");
+        }
+        var sourceUrl = request.CourtUrl is null ? clientCase.CourtUrl : request.CourtUrl.Trim();
+        if (string.IsNullOrWhiteSpace(sourceUrl) || sourceUrl.Length > 1000 || ResolveCourtSyncProvider(sourceUrl) is null)
+        {
+            return BadRequest("Укажите поддерживаемую ссылку на карточку дела в судебном источнике.");
+        }
+
+        var previousNumber = clientCase.CourtCaseNumber;
+        var previousUrl = clientCase.CourtUrl;
+        if (previousNumber != number || previousUrl != sourceUrl)
+        {
+            var matchingInstance = await _db.ClientCaseCourtInstances
+                .Where(item => item.ClientCaseId == id
+                    && item.CourtCaseNumber == previousNumber && item.CourtUrl == previousUrl)
+                .OrderByDescending(item => item.UpdatedAt ?? item.CreatedAt)
+                .FirstOrDefaultAsync(ct);
+            clientCase.CourtCaseNumber = number;
+            clientCase.CourtUrl = sourceUrl;
+            if (matchingInstance is not null)
+            {
+                matchingInstance.CourtCaseNumber = number;
+                matchingInstance.CourtUrl = sourceUrl;
+                matchingInstance.UpdatedAt = DateTime.UtcNow;
+                matchingInstance.UpdatedByUserId = User.GetUserId();
+                matchingInstance.UpdatedByUserName = Truncate(User.GetDisplayName(), 256);
+            }
+            AppendCaseEvent(clientCase, $"Номер судебного дела для синхронизации исправлен: {number}. Изменил: {User.GetDisplayName()}.");
+            _db.SetAuditReason($"Исправлен номер судебного дела #{id} для синхронизации.");
+            await _db.SaveChangesAsync(ct);
+        }
+        return Ok(new { caseId = id, courtCaseNumber = clientCase.CourtCaseNumber, courtUrl = clientCase.CourtUrl });
+    }
+
+    public sealed class CourtSyncHealthPageDto
+    {
+        public IReadOnlyList<CourtSyncHealthCaseDto> Items { get; set; } = [];
+        public int Total { get; set; }
+        public int Page { get; set; }
+        public int PageSize { get; set; }
+    }
+
+    public sealed class CourtSyncHealthCaseDto
+    {
+        public int CaseId { get; set; }
+        public string Title { get; set; } = string.Empty;
+        public string CaseNumber { get; set; } = string.Empty;
+        public string ProviderName { get; set; } = string.Empty;
+        public string CourtUrl { get; set; } = string.Empty;
+        public DateTime? LastAttemptAt { get; set; }
+        public DateTime? LastSuccessAt { get; set; }
+        public DateTime? FailureStartedAt { get; set; }
+        public string LastError { get; set; } = string.Empty;
+        public bool MonitoringEnabled { get; set; }
+    }
+
+    public sealed class SetCourtSyncMonitoringRequest
+    {
+        public bool Enabled { get; set; }
+    }
+
+    public sealed class UpdateCourtSyncCaseNumberRequest
+    {
+        public string? CourtCaseNumber { get; set; }
+        public string? CourtUrl { get; set; }
+    }
+
     [HttpGet("court-sync/logs")]
     public async Task<ActionResult<IReadOnlyList<ClientCaseCourtSyncJournalEntryDto>>> GetCourtSyncJournal(
         [FromQuery] int take = 50,
@@ -7898,11 +8086,13 @@ public partial class CasesV2Controller : ControllerBase
                 ct);
             var sourceTimeZone = await ResolveCourtSyncSourceTimeZoneAsync(clientCase, ct);
             syncResult = await ApplySudrfCourtSyncAsync(clientCase, courtData, sourceTimeZone, actorName, now, ct);
+            MarkCourtSyncSuccess(clientCase, now);
             await PropagateJudicialUidAsync(clientCase, clientCase.JudicialUid, now, actorUserId, actorName, ct, courtInstance);
         }
         catch (SudrfCourtSyncException ex)
         {
             syncError = ex.Message;
+            MarkCourtSyncFailure(clientCase, now, ex.Message);
             await NotifyCourtSyncFailedForCaseAsync(
                 clientCase,
                 provider.Label,
@@ -8057,6 +8247,7 @@ public partial class CasesV2Controller : ControllerBase
                     ct);
                 var sourceTimeZone = await ResolveCourtSyncSourceTimeZoneAsync(clientCase, ct);
                 var syncResult = await ApplySudrfCourtSyncAsync(clientCase, courtData, sourceTimeZone, actorName, checkedAt, ct);
+                MarkCourtSyncSuccess(clientCase, checkedAt);
                 await PropagateJudicialUidAsync(clientCase, clientCase.JudicialUid, checkedAt, User.GetUserId(), actorName, ct);
                 var syncMessage = !syncResult.HasChanges
                     ? $"Судебный источник проверен: новых изменений не найдено. Суд: {FormatCaseTextValue(clientCase.CourtName)}; № в суде: {FormatCaseTextValue(clientCase.CourtCaseNumber)}."
@@ -8101,6 +8292,7 @@ public partial class CasesV2Controller : ControllerBase
             catch (SudrfCourtSyncException ex)
             {
                 var errorMessage = $"Проверка судебного источника не выполнена: {ex.Message} Проверьте ссылку на карточку дела суда и повторите попытку.";
+                MarkCourtSyncFailure(clientCase, checkedAt, ex.Message);
                 AppendCaseEvent(clientCase, $"{errorMessage} Инициатор: {actorName}.");
                 await NotifyCourtSyncFailedForCaseAsync(
                     clientCase,
@@ -8152,6 +8344,21 @@ public partial class CasesV2Controller : ControllerBase
             JudicialUid = clientCase.JudicialUid,
             CourtUrl = clientCase.CourtUrl,
         });
+    }
+
+    private static void MarkCourtSyncSuccess(ClientCase clientCase, DateTime checkedAt)
+    {
+        clientCase.CourtSyncLastAttemptAt = checkedAt;
+        clientCase.CourtSyncLastSuccessAt = checkedAt;
+        clientCase.CourtSyncFailureStartedAt = null;
+        clientCase.CourtSyncLastError = string.Empty;
+    }
+
+    private static void MarkCourtSyncFailure(ClientCase clientCase, DateTime checkedAt, string reason)
+    {
+        clientCase.CourtSyncLastAttemptAt = checkedAt;
+        clientCase.CourtSyncFailureStartedAt ??= checkedAt;
+        clientCase.CourtSyncLastError = Truncate(NormalizeHistoryText(reason), 1000);
     }
 
     private async Task<TimeZoneInfo?> ResolveCourtSyncSourceTimeZoneAsync(ClientCase clientCase, CancellationToken ct)

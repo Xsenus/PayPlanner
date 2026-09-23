@@ -11,6 +11,7 @@ vi.mock('../../services/api', () => ({
     getCourtCasesRegistrySummary: vi.fn(),
     getActResponsibles: vi.fn(),
     getCourtSyncProviders: vi.fn(),
+    getCourtSyncHealth: vi.fn(),
   },
 }));
 
@@ -49,8 +50,10 @@ describe('CourtCasesRegistry', () => {
     vi.mocked(apiService.getCourtCasesRegistrySummary).mockReset();
     vi.mocked(apiService.getActResponsibles).mockReset();
     vi.mocked(apiService.getCourtSyncProviders).mockReset();
+    vi.mocked(apiService.getCourtSyncHealth).mockReset();
     vi.mocked(apiService.getActResponsibles).mockResolvedValue([]);
     vi.mocked(apiService.getCourtSyncProviders).mockResolvedValue([]);
+    vi.mocked(apiService.getCourtSyncHealth).mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 50 });
     vi.mocked(apiService.getCasesV2).mockResolvedValue({ items: [courtCase], total: 1, page: 1, pageSize: 12 });
     vi.mocked(apiService.getCourtCasesRegistrySummary).mockResolvedValue({
       total: 1,
@@ -79,6 +82,13 @@ describe('CourtCasesRegistry', () => {
       expect.objectContaining({ courtOnly: true, scope: 'active', sortBy: 'nextHearingAt' }),
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
+  });
+
+  it('opens the sync health window on entry when errors older than a day exist', async () => {
+    vi.mocked(apiService.getCourtSyncHealth).mockResolvedValue({ items: [], total: 1, page: 1, pageSize: 50 });
+    render(<CourtCasesRegistry allowAssign onOpenCaseCourt={vi.fn()} />);
+    expect(await screen.findByRole('dialog', { name: 'Состояние судебной синхронизации' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Синхронизация · 1/ })).toBeTruthy();
   });
 
   it('filters cards by court state from the summary', async () => {

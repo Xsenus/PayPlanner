@@ -104,6 +104,22 @@ namespace PayPlanner.Api.Models
         [MaxLength(1000)]
         public string CourtUrl { get; set; } = string.Empty;
 
+        /// <summary>Включён ли автоматический опрос судебного источника для этого дела.</summary>
+        public bool CourtSyncMonitoringEnabled { get; set; } = true;
+
+        /// <summary>Последняя попытка автоматической или ручной внешней синхронизации (UTC).</summary>
+        public DateTime? CourtSyncLastAttemptAt { get; set; }
+
+        /// <summary>Последняя успешная внешняя синхронизация (UTC).</summary>
+        public DateTime? CourtSyncLastSuccessAt { get; set; }
+
+        /// <summary>Начало текущей непрерывной серии ошибок синхронизации (UTC).</summary>
+        public DateTime? CourtSyncFailureStartedAt { get; set; }
+
+        /// <summary>Причина последней ошибки внешней синхронизации.</summary>
+        [MaxLength(1000)]
+        public string CourtSyncLastError { get; set; } = string.Empty;
+
         /// <summary>
         /// Дата ближайшего судебного заседания.
         /// </summary>

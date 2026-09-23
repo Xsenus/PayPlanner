@@ -69,6 +69,19 @@ public sealed class ClientCaseCourtSyncSchedulerServiceTests
         Assert.Equal([firstCaseId, secondCaseId, firstCaseId], fixture.Provider.ReadCaseIds);
     }
 
+    [Fact]
+    public async Task RunOnceAsync_SkipsCasesRemovedFromMonitoring()
+    {
+        await using var fixture = await SchedulerFixture.CreateAsync();
+        await fixture.SeedUserAsync("admin", "admin@example.com");
+        var pausedCaseId = await fixture.SeedCaseAsync("https://court.test/case-1");
+        var activeCaseId = await fixture.SeedCaseAsync("https://court.test/case-2");
+        await fixture.SetMonitoringAsync(pausedCaseId, false);
+
+        Assert.Equal(1, await fixture.Scheduler.RunOnceAsync(CancellationToken.None));
+        Assert.Equal([activeCaseId], fixture.Provider.ReadCaseIds);
+    }
+
     private sealed class SchedulerFixture : IAsyncDisposable
     {
         private readonly SqliteConnection _connection;
@@ -160,6 +173,15 @@ public sealed class ClientCaseCourtSyncSchedulerServiceTests
             db.ClientCases.Add(clientCase);
             await db.SaveChangesAsync();
             return clientCase.Id;
+        }
+
+        public async Task SetMonitoringAsync(int caseId, bool enabled)
+        {
+            await using var scope = _services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<PaymentContext>();
+            var clientCase = await db.ClientCases.SingleAsync(item => item.Id == caseId);
+            clientCase.CourtSyncMonitoringEnabled = enabled;
+            await db.SaveChangesAsync();
         }
 
         public async Task<string?> ReadSettingAsync(string key)

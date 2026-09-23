@@ -268,6 +268,7 @@ public sealed class ClientCaseCourtSyncSchedulerService : BackgroundService
         => db.ClientCases
             .AsNoTracking()
             .Where(item => item.Status == ClientCaseStatus.Open)
+            .Where(item => item.CourtSyncMonitoringEnabled)
             .Where(item => item.CourtUrl != string.Empty);
 
     /// <summary>

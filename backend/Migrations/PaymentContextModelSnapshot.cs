@@ -1312,6 +1312,23 @@ namespace PayPlanner.Api.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTime?>("CourtSyncFailureStartedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("CourtSyncLastAttemptAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CourtSyncLastError")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("CourtSyncLastSuccessAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("CourtSyncMonitoringEnabled")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("CourtUrl")
                         .IsRequired()
                         .HasMaxLength(1000)
@@ -1569,6 +1586,9 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasIndex("ClientId", "Status")
                         .HasDatabaseName("IX_ClientCases_ClientId_Status");
+
+                    b.HasIndex("CourtSyncMonitoringEnabled", "CourtSyncFailureStartedAt")
+                        .HasDatabaseName("IX_ClientCases_CourtSyncMonitoringEnabled_FailureStartedAt");
 
                     b.HasIndex("LegalEntityId", "CreatedAt")
                         .HasDatabaseName("IX_ClientCases_LegalEntityId_CreatedAt");

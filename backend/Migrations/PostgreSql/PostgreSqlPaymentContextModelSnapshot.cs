@@ -1347,6 +1347,23 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)");
 
+                    b.Property<DateTime?>("CourtSyncFailureStartedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<DateTime?>("CourtSyncLastAttemptAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("CourtSyncLastError")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateTime?>("CourtSyncLastSuccessAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<bool>("CourtSyncMonitoringEnabled")
+                        .HasColumnType("boolean");
+
                     b.Property<string>("CourtUrl")
                         .IsRequired()
                         .HasMaxLength(1000)
@@ -1604,6 +1621,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.HasIndex("ClientId", "Status")
                         .HasDatabaseName("IX_ClientCases_ClientId_Status");
+
+                    b.HasIndex("CourtSyncMonitoringEnabled", "CourtSyncFailureStartedAt")
+                        .HasDatabaseName("IX_ClientCases_CourtSyncMonitoringEnabled_FailureStartedAt");
 
                     b.HasIndex("LegalEntityId", "CreatedAt")
                         .HasDatabaseName("IX_ClientCases_LegalEntityId_CreatedAt");

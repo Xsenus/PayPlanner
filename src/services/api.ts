@@ -6494,6 +6494,22 @@ export class ApiService {
     return this.request<ClientCaseCourtSyncLog[]>(`/v2/cases/${caseId}/court-sync/logs`);
   }
 
+  async getCourtSyncHealth(status: 'failed' | 'paused' = 'failed', page = 1, options?: { signal?: AbortSignal }) {
+    return this.request<CourtSyncHealthPage>(`/v2/cases/court-sync/health?status=${status}&page=${page}`, { signal: options?.signal });
+  }
+
+  async setCourtSyncMonitoring(caseId: number, enabled: boolean) {
+    return this.request<{ caseId: number; monitoringEnabled: boolean }>(`/v2/cases/${caseId}/court-sync/monitoring`, {
+      method: 'PATCH', body: JSON.stringify({ enabled }),
+    });
+  }
+
+  async updateCourtSyncCaseNumber(caseId: number, courtCaseNumber: string, courtUrl: string) {
+    return this.request<{ caseId: number; courtCaseNumber: string; courtUrl: string }>(`/v2/cases/${caseId}/court-sync/case-number`, {
+      method: 'PATCH', body: JSON.stringify({ courtCaseNumber, courtUrl }),
+    });
+  }
+
   async getCourtSyncJournal(params: {
     take?: number;
     status?: string;
@@ -8573,6 +8589,7 @@ import type {
   ClientCaseCourtSyncBinding,
   ClientCaseCourtSyncBindRequest,
   ClientCaseCourtSyncLog,
+  CourtSyncHealthPage,
   ClientCaseCourtSyncProvider,
   ClientCaseCourtSyncRun,
   ClientCaseCourtSyncRunRequest,

@@ -2659,6 +2659,89 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task CourtSyncHealth_ShowsOnlyContinuousErrorsOlderThanTwentyFourHours()
+    {
+        await using var db = await CreateContextAsync();
+        var manager = await CreateUserAsync(db, "sync-health-manager@example.com", "Руководитель", DataVisibilityScope.All);
+        var limited = await CreateUserAsync(db, "sync-health-limited@example.com", "Юрист");
+        var client = new Client { Name = "Контрагент", IsActive = true, ResponsibleUserId = manager.Id };
+        var now = DateTime.UtcNow;
+        ClientCase MakeCase(string title, DateTime failureStartedAt, bool monitoringEnabled = true) => new()
+        {
+            Client = client, Title = title, Status = ClientCaseStatus.Open, CourtName = "Суд",
+            CourtCaseNumber = "2-100/2026", CourtUrl = "https://example.sudrf.ru/case/42",
+            CourtSyncFailureStartedAt = failureStartedAt, CourtSyncLastAttemptAt = now.AddMinutes(-10),
+            CourtSyncLastError = "Сайт суда недоступен", CourtSyncMonitoringEnabled = monitoringEnabled,
+        };
+        var oldFailure = MakeCase("Старая ошибка", now.AddHours(-25));
+        var recentFailure = MakeCase("Новая ошибка", now.AddHours(-23));
+        var paused = MakeCase("Мониторинг остановлен", now.AddHours(-30), false);
+        db.ClientCases.AddRange(oldFailure, recentFailure, paused);
+        await db.SaveChangesAsync();
+
+        var limitedController = CreateController(db, limited);
+        Assert.IsType<ForbidResult>((await limitedController.GetCourtSyncHealth("failed", 1)).Result);
+        var controller = CreateController(db, manager);
+        var failedResult = await controller.GetCourtSyncHealth("failed", 1);
+        var failed = Assert.IsType<CasesV2Controller.CourtSyncHealthPageDto>(
+            Assert.IsType<OkObjectResult>(failedResult.Result).Value);
+        Assert.Equal(1, failed.Total);
+        Assert.Equal(oldFailure.Id, Assert.Single(failed.Items).CaseId);
+        Assert.Equal("Сайт суда недоступен", failed.Items[0].LastError);
+
+        var pausedResult = await controller.GetCourtSyncHealth("paused", 1);
+        var pausedPage = Assert.IsType<CasesV2Controller.CourtSyncHealthPageDto>(
+            Assert.IsType<OkObjectResult>(pausedResult.Result).Value);
+        Assert.Equal(paused.Id, Assert.Single(pausedPage.Items).CaseId);
+        Assert.IsType<BadRequestObjectResult>((await controller.GetCourtSyncHealth("unknown", 1)).Result);
+        var farPageResult = await controller.GetCourtSyncHealth("failed", int.MaxValue);
+        var farPage = Assert.IsType<CasesV2Controller.CourtSyncHealthPageDto>(
+            Assert.IsType<OkObjectResult>(farPageResult.Result).Value);
+        Assert.Equal(100_000, farPage.Page);
+        Assert.Empty(farPage.Items);
+    }
+
+    [Fact]
+    public async Task CourtSyncHealthActions_EnforceManagerAccessAndPreserveMonitoringChoice()
+    {
+        await using var db = await CreateContextAsync();
+        var manager = await CreateUserAsync(db, "sync-actions-manager@example.com", "Руководитель", DataVisibilityScope.All);
+        var limited = await CreateUserAsync(db, "sync-actions-limited@example.com", "Юрист");
+        var clientCase = new ClientCase
+        {
+            Client = new Client { Name = "Контрагент", IsActive = true, ResponsibleUserId = manager.Id },
+            Title = "Судебное дело", Status = ClientCaseStatus.Open, CourtName = "Суд",
+            CourtCaseNumber = "2-100/2026", CourtUrl = "https://example.sudrf.ru/case/42",
+            CourtSyncFailureStartedAt = DateTime.UtcNow.AddDays(-2), CourtSyncLastError = "Дело не найдено",
+        };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        var limitedController = CreateController(db, limited);
+        Assert.IsType<ForbidResult>(await limitedController.SetCourtSyncMonitoring(
+            clientCase.Id, new CasesV2Controller.SetCourtSyncMonitoringRequest { Enabled = false }, CancellationToken.None));
+
+        var controller = CreateController(db, manager, sudrfCourtSyncService: new ThrowingSudrfCourtSyncService("Дело не найдено"));
+        Assert.IsType<BadRequestObjectResult>(await controller.UpdateCourtSyncCaseNumber(
+            clientCase.Id, new CasesV2Controller.UpdateCourtSyncCaseNumberRequest { CourtCaseNumber = "" }, CancellationToken.None));
+        Assert.IsType<BadRequestObjectResult>(await controller.UpdateCourtSyncCaseNumber(
+            clientCase.Id, new CasesV2Controller.UpdateCourtSyncCaseNumberRequest
+            { CourtCaseNumber = "2-101/2026", CourtUrl = "https://untrusted.example/case/42" }, CancellationToken.None));
+        Assert.IsType<OkObjectResult>(await controller.UpdateCourtSyncCaseNumber(
+            clientCase.Id, new CasesV2Controller.UpdateCourtSyncCaseNumberRequest
+            { CourtCaseNumber = "2-101/2026", CourtUrl = "https://example.sudrf.ru/case/43" }, CancellationToken.None));
+        Assert.Equal("2-101/2026", clientCase.CourtCaseNumber);
+
+        Assert.IsType<OkObjectResult>(await controller.SetCourtSyncMonitoring(
+            clientCase.Id, new CasesV2Controller.SetCourtSyncMonitoringRequest { Enabled = false }, CancellationToken.None));
+        Assert.False(clientCase.CourtSyncMonitoringEnabled);
+        Assert.IsType<OkObjectResult>(await controller.SetCourtSyncMonitoring(
+            clientCase.Id, new CasesV2Controller.SetCourtSyncMonitoringRequest { Enabled = true }, CancellationToken.None));
+        Assert.True(clientCase.CourtSyncMonitoringEnabled);
+        Assert.Null(clientCase.CourtSyncFailureStartedAt);
+        Assert.Empty(clientCase.CourtSyncLastError);
+    }
+
+    [Fact]
     public async Task AssignCourtCase_RequiresManagerAndTargetAccess()
     {
         await using var db = await CreateContextAsync();
@@ -7639,6 +7722,10 @@ public class CasesV2ControllerTests
         var dto = Assert.IsType<CasesV2Controller.ClientCaseCourtSyncRunDto>(ok.Value);
         Assert.Equal("external-sync-completed", dto.Status);
         Assert.True(dto.SyncedFromExternalSource);
+        Assert.NotNull(clientCase.CourtSyncLastAttemptAt);
+        Assert.Equal(clientCase.CourtSyncLastAttemptAt, clientCase.CourtSyncLastSuccessAt);
+        Assert.Null(clientCase.CourtSyncFailureStartedAt);
+        Assert.Empty(clientCase.CourtSyncLastError);
         Assert.Equal(1, dto.CreatedCourtEvents);
         Assert.Equal(3, dto.CreatedCourtParties);
         Assert.Equal(1, dto.CreatedCourtActDocuments);
@@ -8059,6 +8146,25 @@ public class CasesV2ControllerTests
         var ok = Assert.IsType<OkObjectResult>(result.Result);
         var dto = Assert.IsType<CasesV2Controller.ClientCaseCourtSyncRunDto>(ok.Value);
         Assert.Equal("external-sync-error", dto.Status);
+        Assert.NotNull(clientCase.CourtSyncFailureStartedAt);
+        Assert.Equal(clientCase.CourtSyncLastAttemptAt, clientCase.CourtSyncFailureStartedAt);
+        Assert.Equal("Источник временно недоступен", clientCase.CourtSyncLastError);
+
+        var failureStartedAt = clientCase.CourtSyncFailureStartedAt;
+        await controller.RunCourtSync(clientCase.Id, null, CancellationToken.None);
+        Assert.Equal(failureStartedAt, clientCase.CourtSyncFailureStartedAt);
+
+        var recoveredController = CreateController(db, owner,
+            sudrfCourtSyncService: new FixedSudrfCourtSyncService(new SudrfCourtCaseData
+            {
+                SourceUrl = clientCase.CourtUrl,
+                CourtName = clientCase.CourtName,
+                CaseNumber = clientCase.CourtCaseNumber,
+            }));
+        await recoveredController.RunCourtSync(clientCase.Id, null, CancellationToken.None);
+        Assert.Null(clientCase.CourtSyncFailureStartedAt);
+        Assert.Equal(clientCase.CourtSyncLastAttemptAt, clientCase.CourtSyncLastSuccessAt);
+        Assert.Empty(clientCase.CourtSyncLastError);
 
         var notification = await db.UserNotifications.SingleAsync();
         Assert.Equal(UserNotificationTypes.CourtSyncFailed, notification.Type);
@@ -8703,6 +8809,10 @@ public class CasesV2ControllerTests
         await db.Entry(clientCase).ReloadAsync();
         Assert.Equal("Хабаровский краевой суд", clientCase.CourtName);
         Assert.Equal("33а-3390/2026", clientCase.CourtCaseNumber);
+        Assert.NotNull(clientCase.CourtSyncLastAttemptAt);
+        Assert.Equal(clientCase.CourtSyncLastAttemptAt, clientCase.CourtSyncLastSuccessAt);
+        Assert.Null(clientCase.CourtSyncFailureStartedAt);
+        Assert.Empty(clientCase.CourtSyncLastError);
         Assert.Equal("27RS0005-01-2025-002659-56", clientCase.JudicialUid);
         Assert.Equal("https://kraevoy--hbr.sudrf.ru/modules.php?name=sud_delo&name_op=case&delo_id=42", clientCase.CourtUrl);
         Assert.Contains("Привязана судебная карточка", clientCase.EventHistory);
@@ -8782,6 +8892,8 @@ public class CasesV2ControllerTests
         await db.Entry(clientCase).ReloadAsync();
         Assert.Equal("Хабаровский краевой суд", clientCase.CourtName);
         Assert.Equal("33а-3390/2026", clientCase.CourtCaseNumber);
+        Assert.NotNull(clientCase.CourtSyncFailureStartedAt);
+        Assert.Equal("Судебный источник не ответил", clientCase.CourtSyncLastError);
         Assert.Contains("Автоматическая синхронизация после привязки не выполнена", clientCase.EventHistory, StringComparison.Ordinal);
 
         var notification = await db.UserNotifications.SingleAsync();

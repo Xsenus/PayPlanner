@@ -1384,6 +1384,26 @@ export interface ClientCaseCourtSyncLog {
   actorName?: string | null;
 }
 
+export interface CourtSyncHealthCase {
+  caseId: number;
+  title: string;
+  caseNumber: string;
+  providerName: string;
+  courtUrl: string;
+  lastAttemptAt: string | null;
+  lastSuccessAt: string | null;
+  failureStartedAt: string | null;
+  lastError: string;
+  monitoringEnabled: boolean;
+}
+
+export interface CourtSyncHealthPage {
+  items: CourtSyncHealthCase[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
 export interface ClientCaseCourtSyncJournalEntry {
   id: string;
   logId: number;

@@ -1393,6 +1393,8 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.Priority).HasDatabaseName("IX_ClientCases_Priority");
             entity.HasIndex(e => e.CourtName).HasDatabaseName("IX_ClientCases_CourtName");
             entity.HasIndex(e => e.JudicialUid).HasFilter("\"JudicialUid\" <> ''").HasDatabaseName("IX_ClientCases_JudicialUid");
+            entity.HasIndex(e => new { e.CourtSyncMonitoringEnabled, e.CourtSyncFailureStartedAt })
+                .HasDatabaseName("IX_ClientCases_CourtSyncMonitoringEnabled_FailureStartedAt");
             entity.HasIndex(e => e.LastViewedAt).HasDatabaseName("IX_ClientCases_LastViewedAt");
             entity.HasIndex(e => e.InactivityRemindersEnabled).HasDatabaseName("IX_ClientCases_InactivityRemindersEnabled");
             entity.HasIndex(e => e.IsUnderControl).HasDatabaseName("IX_ClientCases_IsUnderControl");
