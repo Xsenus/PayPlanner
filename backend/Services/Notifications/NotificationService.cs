@@ -2656,8 +2656,7 @@ public sealed class NotificationService : INotificationService
         CancellationToken cancellationToken = default)
     {
         var createdAt = DateTime.UtcNow;
-        var reminderVersion = createdAt.ToString("yyyyMMdd", CultureInfo.InvariantCulture);
-        var candidates = reminders
+        var recipientCandidates = reminders
             .Where(item => item.ClientCase.Id > 0 && item.Deadline.Id > 0)
             .SelectMany(item => item.RecipientUserIds
                 .Where(userId => userId > 0)
@@ -2666,23 +2665,34 @@ public sealed class NotificationService : INotificationService
                 {
                     Item = item,
                     RecipientUserId = userId,
-                    EventKey = BuildCaseProceduralDeadlineReminderEventKey(
-                        item.ClientCase.Id,
-                        item.Deadline.Id,
-                        userId,
-                        reminderVersion),
                 }))
-            .GroupBy(item => item.EventKey, StringComparer.Ordinal)
-            .Select(group => group.First())
             .ToArray();
-        if (candidates.Length == 0)
+        if (recipientCandidates.Length == 0)
         {
             return 0;
         }
 
-        var recipientIds = candidates
+        var recipientIds = recipientCandidates
             .Select(item => item.RecipientUserId)
             .Distinct()
+            .ToArray();
+        var timeZonesByUserId = await CalendarTimeZoneHelper.ResolveUserTimeZonesAsync(
+            _context, recipientIds, cancellationToken);
+        var candidates = recipientCandidates
+            .Select(item => new
+            {
+                item.Item,
+                item.RecipientUserId,
+                EventKey = BuildCaseProceduralDeadlineReminderEventKey(
+                    item.Item.ClientCase.Id,
+                    item.Item.Deadline.Id,
+                    item.RecipientUserId,
+                    CaseDeadlineReminderCalendar.LocalDay(
+                        createdAt, timeZonesByUserId[item.RecipientUserId])
+                        .ToString("yyyyMMdd", CultureInfo.InvariantCulture)),
+            })
+            .GroupBy(item => item.EventKey, StringComparer.Ordinal)
+            .Select(group => group.First())
             .ToArray();
         var channelsByUser = await ResolveUserNotificationChannelsAsync(
             recipientIds,

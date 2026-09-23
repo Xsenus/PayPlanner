@@ -18,6 +18,31 @@ namespace PayPlanner.Api.Tests;
 public class CaseProceduralDeadlineReminderNotificationServiceTests
 {
     [Fact]
+    public void WarningWindow_UsesRecipientCalendarDayForAllDayAndTimedDeadlines()
+    {
+        var timeZone = TimeZoneInfo.CreateCustomTimeZone("test-plus-seven", TimeSpan.FromHours(7), "UTC+7", "UTC+7");
+        var utcNow = new DateTime(2026, 9, 23, 18, 30, 0, DateTimeKind.Utc);
+        var allDay = new ClientCaseProceduralDeadline
+        {
+            DueAt = new DateTime(2026, 9, 24),
+            AllDay = true,
+            WarningDaysBefore = 0,
+        };
+        var timed = new ClientCaseProceduralDeadline
+        {
+            DueAt = new DateTime(2026, 9, 23, 20, 0, 0, DateTimeKind.Utc),
+            AllDay = false,
+            WarningDaysBefore = 0,
+        };
+
+        Assert.True(CaseDeadlineReminderCalendar.IsInWarningWindow(allDay, utcNow, timeZone, 90));
+        Assert.True(CaseDeadlineReminderCalendar.IsInWarningWindow(timed, utcNow, timeZone, 90));
+        Assert.False(CaseDeadlineReminderCalendar.IsInWarningWindow(allDay, utcNow.AddDays(1), timeZone, 90));
+        timed.DueAt = utcNow.AddHours(-3);
+        Assert.False(CaseDeadlineReminderCalendar.IsInWarningWindow(timed, utcNow, timeZone, 90));
+    }
+
+    [Fact]
     public async Task RunOnceAsync_UsesFixedQueryCountAndSkipsAlreadyCreatedDailyReminders()
     {
         var singleDeadline = await RunRealNotificationBatchScenarioAsync(1);
@@ -219,7 +244,7 @@ public class CaseProceduralDeadlineReminderNotificationServiceTests
         Assert.Contains(notificationRecorder.Calls, call => call.ClientCaseId == adminHiddenCaseId);
         Assert.DoesNotContain(notificationRecorder.Calls, call => call.ClientCaseId == deniedCaseId);
         Assert.All(notificationRecorder.Calls, call => Assert.Single(call.RecipientUserIds));
-        Assert.Equal(3, interceptor.ReaderCommands.Count);
+        Assert.Equal(4, interceptor.ReaderCommands.Count);
         Assert.Single(interceptor.ReaderCommands, command =>
             command.StartsWith("SELECT \"c\".\"Id\"", StringComparison.Ordinal)
             && command.Contains("IsHiddenFromExecutor", StringComparison.Ordinal));
@@ -366,6 +391,12 @@ public class CaseProceduralDeadlineReminderNotificationServiceTests
             };
             db.Users.Add(user);
             await db.SaveChangesAsync();
+            db.UserSettings.Add(new UserSetting
+            {
+                UserId = user.Id,
+                Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+                Value = "Asia/Novosibirsk",
+            });
             var client = new Client
             {
                 Name = "Клиент дела",
@@ -418,6 +449,9 @@ public class CaseProceduralDeadlineReminderNotificationServiceTests
         Assert.Contains("Подать апелляцию", notification.BodyPreview);
         Assert.Contains($"\"proceduralDeadlineId\":{deadline.Id}", notification.MetadataJson, StringComparison.Ordinal);
         Assert.Contains("\"action\":\"reminder\"", notification.MetadataJson, StringComparison.Ordinal);
+        var localDay = CaseDeadlineReminderCalendar.LocalDay(
+            notification.CreatedAt, CalendarTimeZoneHelper.ResolveTimeZone("Asia/Novosibirsk"));
+        Assert.Contains($":reminder:{localDay:yyyyMMdd}:", notification.EventKey, StringComparison.Ordinal);
     }
 
     [Fact]

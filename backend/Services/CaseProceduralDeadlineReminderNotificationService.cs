@@ -64,8 +64,11 @@ public sealed class CaseProceduralDeadlineReminderNotificationService : Backgrou
             return 0;
         }
 
-        var today = DateTime.UtcNow.Date;
-        var maxDueDate = today.AddDays(MaxWarningWindowDays + 1);
+        var utcNow = DateTime.UtcNow;
+        // A recipient's calendar day can differ from UTC by one day. Keep both
+        // edge days in the database window, then apply the exact local window.
+        var minDueDate = utcNow.Date.AddDays(-1);
+        var maxDueDate = utcNow.Date.AddDays(MaxWarningWindowDays + 2);
         var batchSize = ResolveBatchSize();
         var pageSize = Math.Clamp(batchSize * 2, 50, 500);
         var candidates = db.ClientCaseProceduralDeadlines
@@ -76,7 +79,7 @@ public sealed class CaseProceduralDeadlineReminderNotificationService : Backgrou
             .ThenInclude(clientCase => clientCase.LegalEntity)
             .Where(deadline =>
                 deadline.Status == "active"
-                && deadline.DueAt >= today
+                && deadline.DueAt >= minDueDate
                 && deadline.DueAt < maxDueDate
                 && deadline.WarningDaysBefore >= 0)
             .OrderBy(deadline => deadline.DueAt)
@@ -91,20 +94,26 @@ public sealed class CaseProceduralDeadlineReminderNotificationService : Backgrou
                     || deadline.DueAt == lastDueAt.Value && deadline.Id > lastId)
                 : candidates;
             var page = await pageQuery.Take(pageSize).ToListAsync(cancellationToken);
-            var eligible = page.Where(deadline => !ClientCaseStageClassifier.IsPretrial(deadline.ClientCase)
-                && deadline.DueAt.Date <= today.AddDays(
-                    Math.Clamp(deadline.WarningDaysBefore, 0, MaxWarningWindowDays))).ToArray();
+            var eligible = page.Where(deadline => !ClientCaseStageClassifier.IsPretrial(deadline.ClientCase)).ToArray();
             var recipientsByCaseId = await ResolveCaseNotificationRecipientIdsAsync(
                 db,
                 eligible.Select(deadline => deadline.ClientCaseId).Distinct().ToArray(),
+                cancellationToken);
+            var timeZonesByUserId = await CalendarTimeZoneHelper.ResolveUserTimeZonesAsync(
+                db,
+                recipientsByCaseId.Values.SelectMany(userIds => userIds),
                 cancellationToken);
             var pageReminders = new List<CaseProceduralDeadlineReminderBatchItem>(eligible.Length);
             foreach (var deadline in eligible)
             {
                 if (!recipientsByCaseId.TryGetValue(deadline.ClientCaseId, out var recipients)
                     || recipients.Count == 0) continue;
+                var dueRecipients = recipients.Where(userId => timeZonesByUserId.TryGetValue(userId, out var timeZone)
+                    && CaseDeadlineReminderCalendar.IsInWarningWindow(
+                        deadline, utcNow, timeZone, MaxWarningWindowDays)).ToArray();
+                if (dueRecipients.Length == 0) continue;
                 pageReminders.Add(new CaseProceduralDeadlineReminderBatchItem(
-                    deadline.ClientCase, deadline, recipients));
+                    deadline.ClientCase, deadline, dueRecipients));
             }
             for (var offset = 0; offset < pageReminders.Count && created < batchSize;)
             {
@@ -222,4 +231,24 @@ public sealed class CaseProceduralDeadlineReminderNotificationService : Backgrou
         int? LegalEntityResponsibleUserId);
 
     private sealed record CaseRecipient(int ClientCaseId, bool IsHiddenFromExecutor, int UserId);
+}
+
+public static class CaseDeadlineReminderCalendar
+{
+    public static DateTime LocalDay(DateTime utcNow, TimeZoneInfo timeZone)
+        => CalendarTimeZoneHelper.ToUserLocal(utcNow, timeZone).Date;
+
+    public static bool IsInWarningWindow(
+        ClientCaseProceduralDeadline deadline,
+        DateTime utcNow,
+        TimeZoneInfo timeZone,
+        int maxWarningDays)
+    {
+        var today = LocalDay(utcNow, timeZone);
+        var dueDay = deadline.AllDay
+            ? deadline.DueAt.Date
+            : CalendarTimeZoneHelper.ToUserLocal(deadline.DueAt, timeZone).Date;
+        return dueDay >= today
+            && dueDay <= today.AddDays(Math.Clamp(deadline.WarningDaysBefore, 0, maxWarningDays));
+    }
 }
