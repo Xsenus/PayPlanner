@@ -31,6 +31,7 @@ import { RealtimeNotificationToasts } from './components/Notifications/RealtimeN
 import { ForcedTaskRevisionModal } from './components/Notifications/ForcedTaskRevisionModal';
 import { DailyOverdueTaskReminder } from './components/Tasks/DailyOverdueTaskReminder';
 import { TomorrowCourtHearingsDialog } from './components/Cases/TomorrowCourtHearingsDialog';
+import { AppealDeadlineDialog } from './components/Cases/AppealDeadlineDialog';
 import type { User as AppUser } from './services/authService';
 import { apiService, type ContactScope } from './services/api';
 import { extractDisplayErrorMessage } from './utils/errorUtils';
@@ -359,6 +360,8 @@ function AppContent() {
     actId?: number | null;
   } | null>(null);
   const [appVersionOpenSignal, setAppVersionOpenSignal] = useState(0);
+  const [tomorrowCourtReminderDone, setTomorrowCourtReminderDone] = useState(false);
+  const finishTomorrowCourtReminder = useCallback(() => setTomorrowCourtReminderDone(true), []);
 
   const accessibleMenuTabs = useMemo(
     () =>
@@ -2022,6 +2025,7 @@ function AppContent() {
         <TomorrowCourtHearingsDialog
           userId={user.id}
           enabled={permissionsLoaded && permissions.cases.canView}
+          onDone={finishTomorrowCourtReminder}
           onOpenCase={(caseId) => {
             try {
               window.sessionStorage.setItem(`pp.case-detail.${caseId}.view.v1`, JSON.stringify({ activeTab: 'court', courtOverview: true }));
@@ -2034,6 +2038,12 @@ function AppContent() {
           }}
           onOpenCalendar={() => handleTabChange(permissions.tasks.canView ? 'tasksCalendar' : 'courtCases')}
           calendarAvailable={permissions.tasks.canView}
+        />
+        <AppealDeadlineDialog
+          userId={user.id}
+          enabled={permissionsLoaded && permissions.cases.canEdit && tomorrowCourtReminderDone}
+          onOpenCase={(caseId) => openCaseDetailSection(caseId, 'court')}
+          onOpenTask={permissions.tasks.canView ? (taskId) => openTaskDetail(taskId, { returnTo: activeTab }) : undefined}
         />
         <DoubleHorizontalScrollbars />
         <Navigation activeTab={activeTab} onTabChange={handleTabChange} />

@@ -1853,6 +1853,25 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => new { e.ClientCaseId, e.TargetInstance, e.IsArchived }).HasDatabaseName("IX_ClientCaseCourtComplaints_Case_Target_Archived");
         });
 
+        modelBuilder.Entity<ClientCaseAppealDecision>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Choice).HasMaxLength(24).IsRequired();
+            entity.Property(e => e.Comment).HasMaxLength(1000);
+            entity.Property(e => e.DecidedByUserName).HasMaxLength(256);
+            entity.HasOne(e => e.ClientCase)
+                .WithMany(e => e.AppealDecisions)
+                .HasForeignKey(e => e.ClientCaseId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.TaskJournalItem)
+                .WithMany()
+                .HasForeignKey(e => e.TaskJournalItemId)
+                .OnDelete(DeleteBehavior.SetNull);
+            entity.HasIndex(e => new { e.ClientCaseId, e.CourtDecisionDate })
+                .IsUnique();
+            entity.HasIndex(e => e.TaskJournalItemId);
+        });
+
         // ------------------ ClientCaseCourtEventHistory ------------------
         modelBuilder.Entity<ClientCaseCourtEventHistory>(entity =>
         {
@@ -3648,6 +3667,8 @@ public class PaymentContext : DbContext
         modelBuilder.Entity<ClientCaseCourtComplaint>()
             .HasQueryFilter(item => ClientCases.Any(parent => parent.Id == item.ClientCaseId)
                 && ClientCaseCourtInstances.Any(parent => parent.Id == item.CourtInstanceId));
+        modelBuilder.Entity<ClientCaseAppealDecision>()
+            .HasQueryFilter(item => ClientCases.Any(parent => parent.Id == item.ClientCaseId));
         modelBuilder.Entity<ClientCaseCourtEventHistory>()
             .HasQueryFilter(item => ClientCases.Any(parent => parent.Id == item.ClientCaseId)
                 && ClientCaseCourtEvents.Any(parent => parent.Id == item.ClientCaseCourtEventId));
@@ -4421,6 +4442,8 @@ public class PaymentContext : DbContext
     public DbSet<ClientCaseCourtInstance> ClientCaseCourtInstances { get; set; }
 
     public DbSet<ClientCaseCourtComplaint> ClientCaseCourtComplaints { get; set; }
+
+    public DbSet<ClientCaseAppealDecision> ClientCaseAppealDecisions { get; set; }
 
     /// <summary>
     /// Карточки клиентов.

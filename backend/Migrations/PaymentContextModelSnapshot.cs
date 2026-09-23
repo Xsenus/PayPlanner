@@ -1582,6 +1582,55 @@ namespace PayPlanner.Api.Migrations
                         });
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseAppealDecision", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("AppealDeadlineDate")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Choice")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ClientCaseId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Comment")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CourtDecisionDate")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("DecidedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("DecidedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("DecidedByUserName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("TaskJournalItemId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TaskJournalItemId");
+
+                    b.HasIndex("ClientCaseId", "CourtDecisionDate")
+                        .IsUnique();
+
+                    b.ToTable("ClientCaseAppealDecisions");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseContract", b =>
                 {
                     b.Property<int>("ClientCaseId")
@@ -11180,6 +11229,24 @@ namespace PayPlanner.Api.Migrations
                     b.Navigation("ResponsibleUser");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseAppealDecision", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.ClientCase", "ClientCase")
+                        .WithMany("AppealDecisions")
+                        .HasForeignKey("ClientCaseId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.TaskJournalItem", "TaskJournalItem")
+                        .WithMany()
+                        .HasForeignKey("TaskJournalItemId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("ClientCase");
+
+                    b.Navigation("TaskJournalItem");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseContract", b =>
                 {
                     b.HasOne("PayPlanner.Api.Models.ClientCase", "ClientCase")
@@ -12984,6 +13051,8 @@ namespace PayPlanner.Api.Migrations
 
             modelBuilder.Entity("PayPlanner.Api.Models.ClientCase", b =>
                 {
+                    b.Navigation("AppealDecisions");
+
                     b.Navigation("ClientCaseContracts");
 
                     b.Navigation("CourtComplaints");

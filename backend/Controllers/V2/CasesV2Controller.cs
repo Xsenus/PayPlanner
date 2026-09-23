@@ -28,7 +28,7 @@ namespace PayPlanner.Api.Controllers.V2;
 [ApiController]
 [Route("api/v2/cases")]
 [Authorize]
-public class CasesV2Controller : ControllerBase
+public partial class CasesV2Controller : ControllerBase
 {
     private const long MaxCaseDocumentBytes = 25 * 1024 * 1024;
     private const int MaxRegistryPageSize = 200;

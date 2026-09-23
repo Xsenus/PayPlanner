@@ -5936,6 +5936,26 @@ export class ApiService {
     });
   }
 
+  async getExpiringCaseAppeals(options?: { signal?: AbortSignal }) {
+    return this.request<ExpiringCaseAppeal[]>('/v2/cases/appeal-deadlines/expiring', {
+      signal: options?.signal,
+    });
+  }
+
+  async createCaseAppealTask(caseId: number, dates: { courtDecisionAt: string; appealDeadlineAt: string }) {
+    return this.request<CaseAppealDecision>(`/v2/cases/${caseId}/appeal-decision`, {
+      method: 'POST',
+      body: JSON.stringify({ ...dates, choice: 'appeal' }),
+    });
+  }
+
+  async remindCaseAppealAssignee(caseId: number, dates: { courtDecisionAt: string; appealDeadlineAt: string }) {
+    return this.request<CaseAppealReminder>(`/v2/cases/${caseId}/appeal-reminder`, {
+      method: 'POST',
+      body: JSON.stringify(dates),
+    });
+  }
+
   async exportCasesRegistryCsv(params?: CasesRegistryExportParams) {
     const q = buildQuery(params ?? {});
     const token = getAuthToken();
@@ -8520,6 +8540,9 @@ import type {
   ClientCase,
   CourtCasesRegistrySummary,
   CourtTomorrowHearing,
+  ExpiringCaseAppeal,
+  CaseAppealDecision,
+  CaseAppealReminder,
   ClientCaseAccessRequest,
   ClientCaseAccessRequestResolution,
   ClientCaseActivity,

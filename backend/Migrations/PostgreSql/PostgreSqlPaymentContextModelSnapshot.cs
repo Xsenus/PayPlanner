@@ -1617,6 +1617,57 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         });
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseAppealDecision", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("AppealDeadlineDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("Choice")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)");
+
+                    b.Property<int>("ClientCaseId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Comment")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateTime>("CourtDecisionDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<DateTime>("DecidedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("DecidedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("DecidedByUserName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<int?>("TaskJournalItemId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TaskJournalItemId");
+
+                    b.HasIndex("ClientCaseId", "CourtDecisionDate")
+                        .IsUnique();
+
+                    b.ToTable("ClientCaseAppealDecisions");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseContract", b =>
                 {
                     b.Property<int>("ClientCaseId")
@@ -11434,6 +11485,24 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("ResponsibleUser");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseAppealDecision", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.ClientCase", "ClientCase")
+                        .WithMany("AppealDecisions")
+                        .HasForeignKey("ClientCaseId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.TaskJournalItem", "TaskJournalItem")
+                        .WithMany()
+                        .HasForeignKey("TaskJournalItemId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("ClientCase");
+
+                    b.Navigation("TaskJournalItem");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseContract", b =>
                 {
                     b.HasOne("PayPlanner.Api.Models.ClientCase", "ClientCase")
@@ -13238,6 +13307,8 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
             modelBuilder.Entity("PayPlanner.Api.Models.ClientCase", b =>
                 {
+                    b.Navigation("AppealDecisions");
+
                     b.Navigation("ClientCaseContracts");
 
                     b.Navigation("CourtComplaints");

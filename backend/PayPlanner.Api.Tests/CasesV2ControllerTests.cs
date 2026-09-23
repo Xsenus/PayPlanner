@@ -2757,6 +2757,246 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task ExpiringCaseAppeals_ReturnsOnlyVisibleUnresolvedDecisionsInThreeDayWindow()
+    {
+        await using var db = await CreateContextAsync();
+        var lawyer = await CreateUserAsync(db, "appeal-lawyer@example.test", "Юрист");
+        var other = await CreateUserAsync(db, "appeal-other@example.test", "Другой юрист");
+        var decisionAt = new DateTime(2026, 10, 1);
+        var deadlineAt = new DateTime(2026, 10, 13);
+        var visible = new ClientCase
+        {
+            Client = new Client { Name = "Доверитель", IsActive = true, ResponsibleUserId = lawyer.Id },
+            Title = "Спор с решением",
+            CaseNumber = "Д-10",
+            CourtCaseNumber = "А55-10/2026",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = lawyer.Id,
+            CourtDecisionAt = decisionAt,
+            AppealDeadlineAt = deadlineAt,
+            CourtEvents =
+            [
+                new ClientCaseCourtEvent
+                {
+                    EventType = "decision",
+                    Title = "Решение суда",
+                    ScheduledAt = decisionAt,
+                    ResultSummary = "Иск удовлетворён частично",
+                },
+            ],
+        };
+        var resolved = new ClientCase
+        {
+            Client = new Client { Name = "Разобранный", IsActive = true, ResponsibleUserId = lawyer.Id },
+            Title = "Уже решено",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = lawyer.Id,
+            CourtDecisionAt = decisionAt,
+            AppealDeadlineAt = deadlineAt,
+            AppealDecisions =
+            [
+                new ClientCaseAppealDecision
+                {
+                    CourtDecisionDate = decisionAt,
+                    AppealDeadlineDate = deadlineAt,
+                    Choice = "decline",
+                    DecidedByUserName = lawyer.FullName,
+                },
+            ],
+        };
+        var hidden = new ClientCase
+        {
+            Client = new Client { Name = "Чужой", IsActive = true, ResponsibleUserId = other.Id },
+            Title = "Скрытое дело",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = other.Id,
+            CourtDecisionAt = decisionAt,
+            AppealDeadlineAt = deadlineAt,
+        };
+        var late = new ClientCase
+        {
+            Client = new Client { Name = "Позднее", IsActive = true, ResponsibleUserId = lawyer.Id },
+            Title = "Срок позже окна",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = lawyer.Id,
+            CourtDecisionAt = decisionAt,
+            AppealDeadlineAt = deadlineAt.AddDays(1),
+        };
+        var alreadyTasked = new ClientCase
+        {
+            Client = new Client { Name = "Уже с задачей", IsActive = true, ResponsibleUserId = lawyer.Id },
+            Title = "Жалоба уже готовится",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = lawyer.Id,
+            CourtDecisionAt = decisionAt,
+            AppealDeadlineAt = deadlineAt,
+        };
+        db.ClientCases.AddRange(visible, resolved, hidden, late, alreadyTasked);
+        await db.SaveChangesAsync();
+        db.TaskJournalItems.Add(new TaskJournalItem
+        {
+            ClientCaseId = alreadyTasked.Id,
+            ObjectName = alreadyTasked.Title,
+            Title = "Подготовить апелляционную жалобу",
+            DueAt = deadlineAt.AddDays(-7),
+            Status = "inProgress",
+            CreatedAt = decisionAt.AddDays(1),
+        });
+        await db.SaveChangesAsync();
+
+        var response = await CreateController(db, lawyer).GetExpiringCaseAppeals(new DateOnly(2026, 10, 10), CancellationToken.None);
+        var item = Assert.Single(Assert.IsType<List<CasesV2Controller.ExpiringCaseAppealDto>>(Assert.IsType<OkObjectResult>(response.Result).Value));
+        Assert.Equal(visible.Id, item.CaseId);
+        Assert.Equal("А55-10/2026", item.CaseNumber);
+        Assert.Equal("Иск удовлетворён частично", item.DecisionSummary);
+        Assert.Empty(Assert.IsType<List<CasesV2Controller.ExpiringCaseAppealDto>>(
+            Assert.IsType<OkObjectResult>((await CreateController(db, lawyer).GetExpiringCaseAppeals(new DateOnly(2026, 10, 15), CancellationToken.None)).Result).Value));
+    }
+
+    [Fact]
+    public async Task DecideCaseAppeal_CreatesOneFilingTaskAndKeepsHistoricalChoice()
+    {
+        await using var db = await CreateContextAsync();
+        var lawyer = await CreateUserAsync(db, "appeal-choice-lawyer@example.test", "Юрист");
+        var decisionAt = DateTime.UtcNow.Date.AddDays(-1);
+        var deadlineAt = DateTime.UtcNow.Date.AddDays(20);
+        var clientCase = new ClientCase
+        {
+            Client = new Client { Name = "Доверитель", IsActive = true, ResponsibleUserId = lawyer.Id },
+            Title = "Спор для обжалования",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = lawyer.Id,
+            CourtDecisionAt = decisionAt,
+            AppealDeadlineAt = deadlineAt,
+        };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        var request = new CasesV2Controller.DecideCaseAppealRequest
+        {
+            CourtDecisionAt = clientCase.CourtDecisionAt.Value,
+            AppealDeadlineAt = clientCase.AppealDeadlineAt.Value,
+            Choice = "appeal",
+            Comment = "Подготовить жалобу",
+        };
+
+        var response = await CreateController(db, lawyer).DecideCaseAppeal(clientCase.Id, request, CancellationToken.None);
+        var result = Assert.IsType<CasesV2Controller.CaseAppealDecisionDto>(Assert.IsType<OkObjectResult>(response.Result).Value);
+        var task = await db.TaskJournalItems.Include(item => item.Participants).SingleAsync(item => item.Id == result.TaskId);
+        var decision = await db.ClientCaseAppealDecisions.SingleAsync();
+        Assert.Equal("appeal", decision.Choice);
+        Assert.Equal("Подготовить жалобу", decision.Comment);
+        Assert.Equal(deadlineAt.AddHours(9), task.DueAt);
+        Assert.Equal("Подготовить апелляционную жалобу", task.Title);
+        Assert.Equal(lawyer.Id, task.AssigneeUserId);
+        Assert.Contains(task.Participants, item => item.Role == "assignee" && item.UserId == lawyer.Id);
+        Assert.Contains($"case-appeal-filing:{decisionAt:yyyyMMdd}", task.TagsJson, StringComparison.Ordinal);
+        Assert.Empty(Assert.IsType<List<CasesV2Controller.ExpiringCaseAppealDto>>(
+            Assert.IsType<OkObjectResult>((await CreateController(db, lawyer).GetExpiringCaseAppeals(DateOnly.FromDateTime(deadlineAt.AddDays(-3)), CancellationToken.None)).Result).Value));
+
+        var duplicate = await CreateController(db, lawyer).DecideCaseAppeal(clientCase.Id, request, CancellationToken.None);
+        Assert.IsType<ConflictObjectResult>(duplicate.Result);
+        Assert.Equal(1, await db.TaskJournalItems.CountAsync(item => item.ClientCaseId == clientCase.Id && item.TagsJson.Contains("case-appeal-filing")));
+
+        clientCase.CourtDecisionAt = decisionAt.AddDays(1);
+        clientCase.AppealDeadlineAt = deadlineAt.AddDays(30);
+        await db.SaveChangesAsync();
+        var nextWindow = await CreateController(db, lawyer).GetExpiringCaseAppeals(
+            DateOnly.FromDateTime(clientCase.AppealDeadlineAt.Value.AddDays(-3)), CancellationToken.None);
+        Assert.Single(Assert.IsType<List<CasesV2Controller.ExpiringCaseAppealDto>>(
+            Assert.IsType<OkObjectResult>(nextWindow.Result).Value));
+        var secondResponse = await CreateController(db, lawyer).DecideCaseAppeal(clientCase.Id, new CasesV2Controller.DecideCaseAppealRequest
+        {
+            CourtDecisionAt = clientCase.CourtDecisionAt.Value,
+            AppealDeadlineAt = clientCase.AppealDeadlineAt.Value,
+            Choice = "appeal",
+        }, CancellationToken.None);
+        Assert.IsType<OkObjectResult>(secondResponse.Result);
+        Assert.Equal(2, await db.ClientCaseAppealDecisions.CountAsync());
+        Assert.Equal(2, await db.TaskJournalItems.CountAsync(item => item.ClientCaseId == clientCase.Id && item.TagsJson.Contains("case-appeal-filing")));
+    }
+
+    [Fact]
+    public async Task DecideCaseAppeal_RejectsStaleDatesDeclineAndMissingEditPermission()
+    {
+        await using var db = await CreateContextAsync();
+        var lawyer = await CreateUserAsync(db, "appeal-protection-lawyer@example.test", "Юрист");
+        var viewer = await CreateUserAsync(db, "appeal-protection-viewer@example.test", "Наблюдатель", DataVisibilityScope.All);
+        await GrantSectionPermissionAsync(db, viewer, RolePermissionCatalog.Cases, canEdit: false);
+        var decisionAt = DateTime.UtcNow.Date.AddDays(-1);
+        var deadlineAt = DateTime.UtcNow.Date.AddDays(20);
+        var clientCase = new ClientCase
+        {
+            Client = new Client { Name = "Доверитель", IsActive = true, ResponsibleUserId = lawyer.Id },
+            Title = "Дело с проверкой доступа",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = lawyer.Id,
+            CourtDecisionAt = decisionAt,
+            AppealDeadlineAt = deadlineAt,
+        };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        var request = new CasesV2Controller.DecideCaseAppealRequest
+        {
+            CourtDecisionAt = decisionAt,
+            AppealDeadlineAt = deadlineAt.AddDays(-1),
+            Choice = "appeal",
+        };
+
+        Assert.IsType<ForbidResult>((await CreateController(db, viewer).DecideCaseAppeal(clientCase.Id, request, CancellationToken.None)).Result);
+        Assert.IsType<ConflictObjectResult>((await CreateController(db, lawyer).DecideCaseAppeal(clientCase.Id, request, CancellationToken.None)).Result);
+        Assert.IsType<BadRequestObjectResult>((await CreateController(db, lawyer).DecideCaseAppeal(clientCase.Id, new CasesV2Controller.DecideCaseAppealRequest
+        {
+            CourtDecisionAt = clientCase.CourtDecisionAt.Value,
+            AppealDeadlineAt = clientCase.AppealDeadlineAt.Value,
+            Choice = "decline",
+        }, CancellationToken.None)).Result);
+        Assert.Empty(await db.ClientCaseAppealDecisions.ToListAsync());
+        Assert.Empty(await db.TaskJournalItems.Where(item => item.ClientCaseId == clientCase.Id && item.TagsJson.Contains("case-appeal-filing")).ToListAsync());
+    }
+
+    [Fact]
+    public async Task RemindCaseAppealAssignee_SendsOnceToVisibleLawyer()
+    {
+        await using var db = await CreateContextAsync();
+        var manager = await CreateUserAsync(db, "appeal-reminder-manager@example.test", "Руководитель", DataVisibilityScope.All);
+        var lawyer = await CreateUserAsync(db, "appeal-reminder-lawyer@example.test", "Юрист");
+        var today = DateTime.UtcNow.Date;
+        var clientCase = new ClientCase
+        {
+            Client = new Client { Name = "Доверитель", IsActive = true, ResponsibleUserId = lawyer.Id },
+            Title = "Дело с напоминанием",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = lawyer.Id,
+            CourtDecisionAt = today.AddDays(-20),
+            AppealDeadlineAt = today.AddDays(2),
+        };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        var request = new CasesV2Controller.DecideCaseAppealRequest
+        {
+            CourtDecisionAt = clientCase.CourtDecisionAt.Value,
+            AppealDeadlineAt = clientCase.AppealDeadlineAt.Value,
+        };
+        var controller = CreateController(db, manager, notificationService: CreateNotificationService(db));
+
+        var first = await controller.RemindCaseAppealAssignee(clientCase.Id, request, CancellationToken.None);
+        var firstResult = Assert.IsType<CasesV2Controller.CaseAppealReminderDto>(Assert.IsType<OkObjectResult>(first.Result).Value);
+        Assert.True(firstResult.Sent);
+        Assert.Equal(lawyer.Id, firstResult.RecipientUserId);
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal(lawyer.Id, notification.RecipientUserId);
+        Assert.Equal(UserNotificationTypes.CaseProceduralDeadline, notification.Type);
+        Assert.Contains("Срок обжалования истекает", notification.Title, StringComparison.Ordinal);
+
+        var second = await CreateController(db, manager, notificationService: CreateNotificationService(db))
+            .RemindCaseAppealAssignee(clientCase.Id, request, CancellationToken.None);
+        Assert.False(Assert.IsType<CasesV2Controller.CaseAppealReminderDto>(Assert.IsType<OkObjectResult>(second.Result).Value).Sent);
+        Assert.Single(await db.UserNotifications.ToListAsync());
+        Assert.IsType<BadRequestObjectResult>((await CreateController(db, lawyer)
+            .RemindCaseAppealAssignee(clientCase.Id, request, CancellationToken.None)).Result);
+    }
+
+    [Fact]
     public async Task CreateAndUpdate_SyncsProcessDeadlinesToTaskCalendarWithoutDuplicates()
     {
         await using var db = await CreateContextAsync();

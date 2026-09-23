@@ -614,6 +614,28 @@ export interface CourtTomorrowHearing {
   documentsPrepared: boolean;
 }
 
+export interface ExpiringCaseAppeal {
+  caseId: number;
+  caseTitle: string;
+  caseNumber: string;
+  courtDecisionAt: string;
+  appealDeadlineAt: string;
+  decisionSummary: string;
+}
+
+export interface CaseAppealDecision {
+  id: number;
+  caseId: number;
+  choice: 'appeal';
+  taskId: number | null;
+  decidedAt: string;
+}
+
+export interface CaseAppealReminder {
+  sent: boolean;
+  recipientUserId: number;
+}
+
 export interface CaseCalendarEvent {
   id: string;
   kind: 'task' | 'case-deadline' | 'procedural-deadline' | 'court' | string;

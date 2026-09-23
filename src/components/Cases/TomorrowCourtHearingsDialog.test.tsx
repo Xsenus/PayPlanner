@@ -58,4 +58,19 @@ describe('TomorrowCourtHearingsDialog', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'К судебным делам' }));
     expect(onOpenCalendar).toHaveBeenCalledTimes(1);
   });
+
+  it('releases the next startup reminder only after this one is handled or empty', async () => {
+    const onDone = vi.fn();
+    const first = render(<TomorrowCourtHearingsDialog userId={5} enabled onDone={onDone} onOpenCase={vi.fn()} onOpenCalendar={vi.fn()} />);
+    expect(await screen.findByRole('dialog', { name: 'Заседания завтра' })).toBeTruthy();
+    expect(onDone).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Позже' }));
+    expect(onDone).toHaveBeenCalledTimes(1);
+    first.unmount();
+
+    apiMock.getTomorrowCourtHearings.mockResolvedValueOnce([]);
+    const noHearingsDone = vi.fn();
+    render(<TomorrowCourtHearingsDialog userId={6} enabled onDone={noHearingsDone} onOpenCase={vi.fn()} onOpenCalendar={vi.fn()} />);
+    await waitFor(() => expect(noHearingsDone).toHaveBeenCalledTimes(1));
+  });
 });

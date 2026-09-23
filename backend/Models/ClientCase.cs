@@ -405,6 +405,8 @@ namespace PayPlanner.Api.Models
 
         public ICollection<ClientCaseCourtComplaint> CourtComplaints { get; set; } = new List<ClientCaseCourtComplaint>();
 
+        public ICollection<ClientCaseAppealDecision> AppealDecisions { get; set; } = new List<ClientCaseAppealDecision>();
+
         /// <summary>
         /// Статус дела (черновик/в работе/закрыто).
         /// </summary>

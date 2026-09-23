@@ -12,6 +12,7 @@ interface Props {
   onOpenCase: (caseId: number) => void;
   onOpenCalendar: () => void;
   calendarAvailable?: boolean;
+  onDone?: () => void;
 }
 
 function tomorrowKey(timeZoneId: string) {
@@ -21,7 +22,7 @@ function tomorrowKey(timeZoneId: string) {
   return tomorrow.toISOString().slice(0, 10);
 }
 
-export function TomorrowCourtHearingsDialog({ userId, enabled, onOpenCase, onOpenCalendar, calendarAvailable = true }: Props) {
+export function TomorrowCourtHearingsDialog({ userId, enabled, onOpenCase, onOpenCalendar, calendarAvailable = true, onDone }: Props) {
   const timeZoneId = useUserTimeZone();
   const dateKey = useMemo(() => tomorrowKey(timeZoneId), [timeZoneId]);
   const storageKey = `pp.court.tomorrow-hearings.${userId}.${dateKey}`;
@@ -34,7 +35,10 @@ export function TomorrowCourtHearingsDialog({ userId, enabled, onOpenCase, onOpe
       return;
     }
     try {
-      if (window.localStorage.getItem(storageKey) === 'seen') return;
+      if (window.localStorage.getItem(storageKey) === 'seen') {
+        onDone?.();
+        return;
+      }
     } catch {
       // The reminder remains available when browser storage is disabled.
     }
@@ -45,13 +49,16 @@ export function TomorrowCourtHearingsDialog({ userId, enabled, onOpenCase, onOpe
         if (!controller.signal.aborted && rows.length > 0) {
           setHearings(rows);
           setOpen(true);
+        } else if (!controller.signal.aborted) {
+          onDone?.();
         }
       })
       .catch(() => {
         // An optional reminder must not block the rest of the CRM.
+        if (!controller.signal.aborted) onDone?.();
       });
     return () => controller.abort();
-  }, [dateKey, enabled, storageKey]);
+  }, [dateKey, enabled, onDone, storageKey]);
 
   const dismiss = () => {
     try {
@@ -60,6 +67,7 @@ export function TomorrowCourtHearingsDialog({ userId, enabled, onOpenCase, onOpe
       // Close the dialog even when storage is unavailable.
     }
     setOpen(false);
+    onDone?.();
   };
 
   if (!open) return null;
