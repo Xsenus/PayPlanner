@@ -79,6 +79,106 @@ public sealed class ClientBirthdayTaskSchedulerServiceTests
         Assert.Empty(await db.TaskJournalItems.ToListAsync());
     }
 
+    [Fact]
+    public async Task RunOnceAsync_CreatesEmployeeTaskForSelectedAssigneeOnlyOnce()
+    {
+        await using var fixture = await BirthdayFixture.CreateAsync(enabled: false);
+        int assigneeId;
+        await using (var scope = fixture.Provider.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<PaymentContext>();
+            var assignee = await db.Users.SingleAsync();
+            assigneeId = assignee.Id;
+            db.Users.Add(new User
+            {
+                Email = "birthday@example.com", FullName = "Именинник", PasswordHash = "test",
+                IsActive = true, IsApproved = true, IsEmployee = true,
+                DateOfBirth = new DateTime(1990, 9, 28), RoleId = assignee.RoleId,
+            });
+            db.SystemSettings.AddRange(
+                new SystemSetting { Key = ClientBirthdayTaskSchedulerService.EmployeeEnabledSettingKey, Value = "true" },
+                new SystemSetting { Key = ClientBirthdayTaskSchedulerService.AssigneeUserIdSettingKey, Value = assigneeId.ToString() });
+            await db.SaveChangesAsync();
+        }
+
+        var now = new DateTime(2026, 9, 21, 3, 0, 0, DateTimeKind.Utc);
+        var first = await fixture.Service.RunOnceAsync(now);
+        var second = await fixture.Service.RunOnceAsync(now.AddHours(1));
+
+        Assert.Equal(1, first.CreatedCount);
+        Assert.Equal(0, second.CreatedCount);
+        await using var checkScope = fixture.Provider.CreateAsyncScope();
+        var checkDb = checkScope.ServiceProvider.GetRequiredService<PaymentContext>();
+        var task = await checkDb.TaskJournalItems.Include(item => item.Participants).SingleAsync();
+        Assert.Contains("Именинник", task.Title, StringComparison.Ordinal);
+        Assert.Contains("employee-birthday:", task.TagsJson, StringComparison.Ordinal);
+        Assert.Equal(assigneeId, task.AssigneeUserId);
+        Assert.Equal(new DateTime(2026, 9, 28, 10, 0, 0, DateTimeKind.Utc), task.DueAt);
+        Assert.Null(task.ClientId);
+        Assert.Single(task.Participants);
+    }
+
+    [Fact]
+    public async Task RunOnceAsync_SkipsEmployeeWhenSelectedAssigneeIsUnavailable()
+    {
+        await using var fixture = await BirthdayFixture.CreateAsync(enabled: false);
+        await using (var scope = fixture.Provider.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<PaymentContext>();
+            var roleId = await db.Roles.Select(role => role.Id).SingleAsync();
+            db.Users.Add(new User
+            {
+                Email = "birthday@example.com", FullName = "Именинник", PasswordHash = "test",
+                IsActive = true, IsApproved = true, IsEmployee = true,
+                DateOfBirth = new DateTime(1990, 9, 28), RoleId = roleId,
+            });
+            db.SystemSettings.AddRange(
+                new SystemSetting { Key = ClientBirthdayTaskSchedulerService.EmployeeEnabledSettingKey, Value = "true" },
+                new SystemSetting { Key = ClientBirthdayTaskSchedulerService.AssigneeUserIdSettingKey, Value = "999999" });
+            await db.SaveChangesAsync();
+        }
+
+        var result = await fixture.Service.RunOnceAsync(new DateTime(2026, 9, 21, 3, 0, 0, DateTimeKind.Utc));
+
+        Assert.Equal(0, result.CreatedCount);
+        Assert.Contains("ответственный", result.Error, StringComparison.OrdinalIgnoreCase);
+        await using var checkScope = fixture.Provider.CreateAsyncScope();
+        Assert.Empty(await checkScope.ServiceProvider.GetRequiredService<PaymentContext>().TaskJournalItems.ToListAsync());
+    }
+
+    [Fact]
+    public async Task RunOnceAsync_UsesConfiguredLeadAndSelectedClientAssignee()
+    {
+        await using var fixture = await BirthdayFixture.CreateAsync(enabled: true);
+        int selectedId;
+        await using (var scope = fixture.Provider.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<PaymentContext>();
+            var roleId = await db.Roles.Select(role => role.Id).SingleAsync();
+            var selected = new User
+            {
+                Email = "selected@example.com", FullName = "Назначенный сотрудник", PasswordHash = "test",
+                IsActive = true, IsApproved = true, RoleId = roleId,
+            };
+            db.Users.Add(selected);
+            await db.SaveChangesAsync();
+            selectedId = selected.Id;
+            db.SystemSettings.AddRange(
+                new SystemSetting { Key = ClientBirthdayTaskSchedulerService.LeadDaysSettingKey, Value = "14" },
+                new SystemSetting { Key = ClientBirthdayTaskSchedulerService.ClientUseSelectedAssigneeSettingKey, Value = "true" },
+                new SystemSetting { Key = ClientBirthdayTaskSchedulerService.AssigneeUserIdSettingKey, Value = selectedId.ToString() });
+            await db.SaveChangesAsync();
+        }
+
+        var result = await fixture.Service.RunOnceAsync(new DateTime(2026, 9, 14, 3, 0, 0, DateTimeKind.Utc));
+
+        Assert.Equal(1, result.CreatedCount);
+        await using var checkScope = fixture.Provider.CreateAsyncScope();
+        var task = await checkScope.ServiceProvider.GetRequiredService<PaymentContext>().TaskJournalItems.SingleAsync();
+        Assert.Equal(selectedId, task.AssigneeUserId);
+        Assert.Equal(1, task.ClientId);
+    }
+
     private sealed class BirthdayFixture : IAsyncDisposable
     {
         private readonly SqliteConnection _connection;

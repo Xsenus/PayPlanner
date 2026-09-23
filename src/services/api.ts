@@ -1933,6 +1933,11 @@ export interface TaskJournalSettingsDto {
   requireCompletionResult: boolean;
   dailyOverdueReminderEnabled: boolean;
   birthdayTaskAutomationEnabled: boolean;
+  employeeBirthdayTaskAutomationEnabled: boolean;
+  birthdayTaskLeadDays: number;
+  birthdayClientUseSelectedAssignee: boolean;
+  birthdayTaskAssigneeUserId?: number | null;
+  birthdayTaskAssigneeUserName?: string;
   allowAdminCompleteAnyTask: boolean;
   financialDocumentsResponsibleUserId?: number | null;
   financialDocumentsResponsibleUserName?: string;
@@ -2075,6 +2080,11 @@ export interface UpdateTaskJournalSettingsRequest {
   executorCompletionAllowedUserIds: number[];
   requireCompletionResult: boolean;
   dailyOverdueReminderEnabled: boolean;
+  birthdayTaskAutomationEnabled: boolean;
+  employeeBirthdayTaskAutomationEnabled: boolean;
+  birthdayTaskLeadDays: number;
+  birthdayClientUseSelectedAssignee: boolean;
+  birthdayTaskAssigneeUserId?: number | null;
   allowAdminCompleteAnyTask: boolean;
   financialDocumentsResponsibleUserId?: number | null;
   approvalDueDays: number;

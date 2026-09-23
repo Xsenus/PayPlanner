@@ -29,6 +29,11 @@ const DEFAULT_SETTINGS: TaskJournalSettingsDto = {
   requireCompletionResult: true,
   dailyOverdueReminderEnabled: true,
   birthdayTaskAutomationEnabled: false,
+  employeeBirthdayTaskAutomationEnabled: false,
+  birthdayTaskLeadDays: 7,
+  birthdayClientUseSelectedAssignee: false,
+  birthdayTaskAssigneeUserId: null,
+  birthdayTaskAssigneeUserName: '',
   allowAdminCompleteAnyTask: true,
   financialDocumentsResponsibleUserId: null,
   financialDocumentsResponsibleUserName: '',
@@ -586,19 +591,51 @@ export function TaskJournalSettings({
           </span>
         </label>
 
-        <label className="flex items-start gap-3 rounded-2xl border border-fuchsia-200 bg-fuchsia-50/70 p-3 text-sm text-gray-700">
-          <SystemCheckbox
-            type="checkbox"
-            checked={settings.birthdayTaskAutomationEnabled}
-            onChange={(event) => setSettings((prev) => ({ ...prev, birthdayTaskAutomationEnabled: event.target.checked }))}
-            disabled={loading || saving}
-            className="mt-0.5 h-4 w-4 rounded border-gray-300 text-fuchsia-600 focus:ring-fuchsia-500"
-          />
-          <span>
-            <span className="block font-semibold text-gray-900">Создавать задачи для поздравления клиентов с днём рождения</span>
-            <span className="mt-1 block text-gray-500">За 7 дней до даты рождения CRM создаст задачу ответственному сотруднику. Для одного клиента создаётся только одна задача в год; нужен активный клиент, заполненная дата рождения и активный ответственный.</span>
-          </span>
-        </label>
+        <section className="rounded-xl border border-fuchsia-200 bg-fuchsia-50/70 p-3 text-sm text-gray-700">
+          <h5 className="font-semibold text-gray-900">Поздравления с днём рождения</h5>
+          <p className="mt-1 text-xs text-gray-500">CRM создаёт по одной задаче на человека в год. Дата задачи — день рождения, время — 10:00 в часовом поясе автоконтроля дел.</p>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <label className="flex items-start gap-2">
+              <SystemCheckbox type="checkbox" checked={settings.birthdayTaskAutomationEnabled}
+                onChange={(event) => setSettings((prev) => ({ ...prev, birthdayTaskAutomationEnabled: event.target.checked }))}
+                disabled={loading || saving} className="mt-0.5 h-4 w-4" />
+              <span>Поздравлять клиентов</span>
+            </label>
+            <label className="flex items-start gap-2">
+              <SystemCheckbox type="checkbox" checked={settings.employeeBirthdayTaskAutomationEnabled}
+                onChange={(event) => setSettings((prev) => ({ ...prev, employeeBirthdayTaskAutomationEnabled: event.target.checked }))}
+                disabled={loading || saving} className="mt-0.5 h-4 w-4" />
+              <span>Поздравлять сотрудников</span>
+            </label>
+            <label className="block">
+              <span className="block text-xs font-medium">За сколько дней создать задачу</span>
+              <input type="number" min={0} max={60} value={settings.birthdayTaskLeadDays}
+                onChange={(event) => setSettings((prev) => ({ ...prev, birthdayTaskLeadDays: Math.min(60, Math.max(0, Number(event.target.value) || 0)) }))}
+                disabled={loading || saving} className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm" />
+            </label>
+            <label className="block">
+              <span className="block text-xs font-medium">Кому назначать поздравление клиента</span>
+              <SystemSelect aria-label="Кому назначать поздравление клиента" value={settings.birthdayClientUseSelectedAssignee ? 'selected' : 'responsible'}
+                onChange={(event) => setSettings((prev) => ({ ...prev, birthdayClientUseSelectedAssignee: event.target.value === 'selected' }))}
+                disabled={loading || saving || !settings.birthdayTaskAutomationEnabled}
+                className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm">
+                <option value="responsible">Ответственному за клиента</option>
+                <option value="selected">Выбранному сотруднику</option>
+              </SystemSelect>
+            </label>
+            <label className="block sm:col-span-2">
+              <span className="block text-xs font-medium">Ответственный за поздравления сотрудников и клиентов при выборе выше</span>
+              <SystemSelect aria-label="Ответственный за поздравления сотрудников и клиентов" value={settings.birthdayTaskAssigneeUserId ?? ''}
+                onChange={(event) => setSettings((prev) => ({ ...prev, birthdayTaskAssigneeUserId: event.target.value ? Number(event.target.value) : null }))}
+                disabled={loading || saving || (!settings.employeeBirthdayTaskAutomationEnabled && !settings.birthdayClientUseSelectedAssignee)}
+                className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm">
+                <option value="">Выберите сотрудника</option>
+                {assignees.map((assignee) => <option key={assignee.id} value={assignee.id}>{assignee.name}</option>)}
+              </SystemSelect>
+              <span className="mt-1 block text-xs text-gray-500">Нужен активный сотрудник. Если он станет недоступен, новые задачи не создаются до смены ответственного.</span>
+            </label>
+          </div>
+        </section>
 
         <section className="rounded-2xl border border-emerald-200 bg-emerald-50/40 p-3 text-sm text-gray-700">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">

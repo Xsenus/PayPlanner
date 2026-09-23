@@ -9,9 +9,12 @@ namespace PayPlanner.Api.Services;
 public sealed class ClientBirthdayTaskSchedulerService : BackgroundService
 {
     public const string EnabledSettingKey = "tasks.automation.birthdays.enabled";
+    public const string EmployeeEnabledSettingKey = "tasks.automation.birthdays.employees.enabled";
+    public const string LeadDaysSettingKey = "tasks.automation.birthdays.leadDays";
+    public const string ClientUseSelectedAssigneeSettingKey = "tasks.automation.birthdays.clients.useSelectedAssignee";
+    public const string AssigneeUserIdSettingKey = "tasks.automation.birthdays.assigneeUserId";
     public const string AutomationTag = "auto-birthday";
     private const string ScheduleTimeZoneSettingKey = "tasks.automation.caseControl.scheduleTimeZone";
-    private const int LeadDays = 7;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly IServiceScopeFactory _scopeFactory;
@@ -39,6 +42,7 @@ public sealed class ClientBirthdayTaskSchedulerService : BackgroundService
             5,
             1440);
         DateOnly? lastCheckedLocalDate = null;
+        BirthdaySettings? lastCheckedSettings = null;
 
         using var timer = new PeriodicTimer(TimeSpan.FromMinutes(checkMinutes));
         while (!stoppingToken.IsCancellationRequested)
@@ -50,12 +54,13 @@ public sealed class ClientBirthdayTaskSchedulerService : BackgroundService
                 var settings = await LoadSettingsAsync(context, stoppingToken);
                 var timeZone = CalendarTimeZoneHelper.ResolveTimeZone(settings.TimeZoneId);
                 var localDate = DateOnly.FromDateTime(CalendarTimeZoneHelper.ToUserLocal(DateTime.UtcNow, timeZone));
-                if (settings.Enabled && lastCheckedLocalDate != localDate)
+                if (settings.Enabled && (lastCheckedLocalDate != localDate || lastCheckedSettings != settings))
                 {
                     var result = await RunOnceAsync(DateTime.UtcNow, stoppingToken);
                     if (result.Error is null)
                     {
                         lastCheckedLocalDate = localDate;
+                        lastCheckedSettings = settings;
                     }
                 }
             }
@@ -65,7 +70,7 @@ public sealed class ClientBirthdayTaskSchedulerService : BackgroundService
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Не удалось проверить дни рождения клиентов.");
+                _logger.LogError(ex, "Не удалось проверить дни рождения клиентов и сотрудников.");
             }
 
             try
@@ -99,40 +104,61 @@ public sealed class ClientBirthdayTaskSchedulerService : BackgroundService
             var timeZone = CalendarTimeZoneHelper.ResolveTimeZone(settings.TimeZoneId);
             var now = CalendarTimeZoneHelper.NormalizeUtcInstant(nowUtc ?? DateTime.UtcNow);
             var localToday = CalendarTimeZoneHelper.ToUserLocal(now, timeZone).Date;
-            var windowEnd = localToday.AddDays(LeadDays);
+            var windowEnd = localToday.AddDays(settings.LeadDays);
+            var selectedAssignee = settings.SelectedAssigneeUserId > 0
+                ? await context.Users.AsNoTracking()
+                    .Where(user => user.Id == settings.SelectedAssigneeUserId && user.IsActive && user.IsApproved)
+                    .Select(user => new BirthdayAssignee(user.Id, user.FullName ?? user.Email, user.Email))
+                    .SingleOrDefaultAsync(cancellationToken)
+                : null;
+            if ((settings.EmployeesEnabled || (settings.ClientsEnabled && settings.ClientUseSelectedAssignee)) &&
+                selectedAssignee is null)
+            {
+                throw new InvalidOperationException("Не назначен активный ответственный за поздравления.");
+            }
             var clients = await context.Clients
                 .AsNoTracking()
                 .Where(client =>
+                    settings.ClientsEnabled &&
                     client.IsActive &&
                     client.BirthDate.HasValue &&
-                    client.ResponsibleUserId.HasValue &&
-                    client.ResponsibleUser != null &&
-                    client.ResponsibleUser.IsActive &&
-                    client.ResponsibleUser.IsApproved)
+                    (settings.ClientUseSelectedAssignee ||
+                     (client.ResponsibleUserId.HasValue && client.ResponsibleUser != null &&
+                      client.ResponsibleUser.IsActive && client.ResponsibleUser.IsApproved)))
                 .Select(client => new BirthdayClient(
                     client.Id,
                     client.Name,
                     client.BirthDate!.Value,
-                    client.ResponsibleUserId!.Value,
-                    client.ResponsibleUser!.FullName ?? client.ResponsibleUser.Email,
-                    client.ResponsibleUser.Email))
+                    client.ResponsibleUserId ?? 0,
+                    client.ResponsibleUser != null ? client.ResponsibleUser.FullName ?? client.ResponsibleUser.Email : "",
+                    client.ResponsibleUser != null ? client.ResponsibleUser.Email : ""))
                 .ToListAsync(cancellationToken);
 
             var candidates = clients
                 .Select(client => new BirthdayCandidate(client, ResolveNextBirthday(client.BirthDate, localToday)))
                 .Where(item => item.Birthday >= localToday && item.Birthday <= windowEnd)
                 .ToList();
-            var candidateClientIds = candidates.Select(item => item.Client.Id).Distinct().ToArray();
-            var existingTags = candidateClientIds.Length == 0
+            var employees = settings.EmployeesEnabled && selectedAssignee is not null
+                ? await context.Users.AsNoTracking()
+                    .Where(user => user.IsEmployee && user.IsActive && user.IsApproved && user.DateOfBirth.HasValue)
+                    .Select(user => new BirthdayEmployee(user.Id, user.FullName ?? user.Email, user.DateOfBirth!.Value))
+                    .ToListAsync(cancellationToken)
+                : [];
+            var employeeCandidates = employees
+                .Select(employee => new BirthdayEmployeeCandidate(employee, ResolveNextBirthday(employee.BirthDate, localToday)))
+                .Where(item => item.Birthday >= localToday && item.Birthday <= windowEnd)
+                .ToList();
+            var existingTags = candidates.Count == 0 && employeeCandidates.Count == 0
                 ? []
                 : await context.TaskJournalItems
                     .AsNoTracking()
-                    .Where(task => task.ClientId.HasValue && candidateClientIds.Contains(task.ClientId.Value) && task.TagsJson.Contains(AutomationTag))
+                    .Where(task => task.CreatedAt >= now.AddDays(-430) && task.TagsJson.Contains(AutomationTag))
                     .Select(task => task.TagsJson)
                     .ToListAsync(cancellationToken);
             var existingMarkers = existingTags
                 .SelectMany(DeserializeTags)
-                .Where(tag => tag.StartsWith("birthday:", StringComparison.Ordinal))
+                .Where(tag => tag.StartsWith("birthday:", StringComparison.Ordinal) ||
+                    tag.StartsWith("employee-birthday:", StringComparison.Ordinal))
                 .ToHashSet(StringComparer.Ordinal);
 
             var created = 0;
@@ -144,7 +170,25 @@ public sealed class ClientBirthdayTaskSchedulerService : BackgroundService
                     continue;
                 }
 
-                context.TaskJournalItems.Add(BuildTask(candidate, marker, timeZone, now));
+                var assignee = settings.ClientUseSelectedAssignee
+                    ? selectedAssignee
+                    : new BirthdayAssignee(candidate.Client.ResponsibleUserId, candidate.Client.ResponsibleName, candidate.Client.ResponsibleEmail);
+                if (assignee is null)
+                {
+                    continue;
+                }
+                context.TaskJournalItems.Add(BuildTask(candidate, assignee, marker, timeZone, now));
+                existingMarkers.Add(marker);
+                created += 1;
+            }
+            foreach (var candidate in employeeCandidates)
+            {
+                var marker = $"employee-birthday:{candidate.Employee.Id}:{candidate.Birthday.Year}";
+                if (existingMarkers.Contains(marker) || selectedAssignee is null)
+                {
+                    continue;
+                }
+                context.TaskJournalItems.Add(BuildEmployeeTask(candidate, selectedAssignee, marker, timeZone, now));
                 existingMarkers.Add(marker);
                 created += 1;
             }
@@ -157,27 +201,27 @@ public sealed class ClientBirthdayTaskSchedulerService : BackgroundService
                     .PublishTaskJournalChangedAsync(cancellationToken);
             }
 
-            var skipped = Math.Max(0, candidates.Count - created);
+            var skipped = Math.Max(0, candidates.Count + employeeCandidates.Count - created);
             await RecordSuccessAsync(
                 startedAt,
                 created,
                 skipped,
                 created > 0
-                    ? $"Создано задач для поздравления клиентов: {created}."
+                    ? $"Создано задач для поздравления клиентов и сотрудников: {created}."
                     : "Ближайшие дни рождения проверены, новые задачи не требуются.",
                 cancellationToken);
             return new ClientBirthdayTaskSchedulerResult(created, skipped, true, null);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogError(ex, "Не удалось создать задачи для поздравления клиентов.");
+            _logger.LogError(ex, "Не удалось создать задачи для поздравления клиентов и сотрудников.");
             if (_jobRunState is not null)
             {
                 await _jobRunState.RecordFailureAsync(
                     SystemJobKeys.ClientBirthdayTasks,
                     startedAt,
                     ex,
-                    "Проверка дней рождения клиентов завершилась с ошибкой.",
+                    "Проверка дней рождения завершилась с ошибкой.",
                     cancellationToken);
             }
 
@@ -193,13 +237,19 @@ public sealed class ClientBirthdayTaskSchedulerService : BackgroundService
     {
         var values = await context.SystemSettings
             .AsNoTracking()
-            .Where(item => item.Key == EnabledSettingKey || item.Key == ScheduleTimeZoneSettingKey)
+            .Where(item => item.Key == EnabledSettingKey || item.Key == EmployeeEnabledSettingKey ||
+                item.Key == LeadDaysSettingKey || item.Key == ClientUseSelectedAssigneeSettingKey ||
+                item.Key == AssigneeUserIdSettingKey || item.Key == ScheduleTimeZoneSettingKey)
             .ToDictionaryAsync(item => item.Key, item => item.Value, cancellationToken);
         var enabled = values.TryGetValue(EnabledSettingKey, out var rawEnabled) && bool.TryParse(rawEnabled, out var parsedEnabled)
             ? parsedEnabled
             : _configuration.GetValue("TaskJournal:BirthdayAutomation:Enabled", false);
         return new BirthdaySettings(
             enabled,
+            bool.TryParse(values.GetValueOrDefault(EmployeeEnabledSettingKey), out var employeesEnabled) && employeesEnabled,
+            Math.Clamp(int.TryParse(values.GetValueOrDefault(LeadDaysSettingKey), out var leadDays) ? leadDays : 7, 0, 60),
+            bool.TryParse(values.GetValueOrDefault(ClientUseSelectedAssigneeSettingKey), out var clientSelected) && clientSelected,
+            int.TryParse(values.GetValueOrDefault(AssigneeUserIdSettingKey), out var assigneeId) ? assigneeId : 0,
             values.GetValueOrDefault(ScheduleTimeZoneSettingKey) ?? CalendarTimeZoneHelper.DefaultTimeZoneId);
     }
 
@@ -227,10 +277,10 @@ public sealed class ClientBirthdayTaskSchedulerService : BackgroundService
 
     private static string BuildMarker(int clientId, int year) => $"birthday:{clientId}:{year}";
 
-    private static TaskJournalItem BuildTask(BirthdayCandidate candidate, string marker, TimeZoneInfo timeZone, DateTime now)
+    private static TaskJournalItem BuildTask(BirthdayCandidate candidate, BirthdayAssignee assignee, string marker, TimeZoneInfo timeZone, DateTime now)
     {
         var client = candidate.Client;
-        var assigneeName = string.IsNullOrWhiteSpace(client.ResponsibleName) ? client.ResponsibleEmail : client.ResponsibleName;
+        var assigneeName = string.IsNullOrWhiteSpace(assignee.Name) ? assignee.Email : assignee.Name;
         var dueAt = CalendarTimeZoneHelper.FromUserLocalToUtc(candidate.Birthday.AddHours(10), timeZone);
         var task = new TaskJournalItem
         {
@@ -239,9 +289,9 @@ public sealed class ClientBirthdayTaskSchedulerService : BackgroundService
             ObjectName = client.Name,
             Title = $"Поздравить с днём рождения: {client.Name}",
             Description = $"Связаться с клиентом и поздравить с днём рождения {candidate.Birthday:dd.MM.yyyy}.",
-            AssigneeUserId = client.ResponsibleUserId,
+            AssigneeUserId = assignee.Id,
             AssigneeName = assigneeName,
-            AuthorUserId = client.ResponsibleUserId,
+            AuthorUserId = assignee.Id,
             AuthorName = "Система: дни рождения",
             DueAt = dueAt,
             PlannedDurationMinutes = 30,
@@ -256,10 +306,10 @@ public sealed class ClientBirthdayTaskSchedulerService : BackgroundService
         };
         task.Participants.Add(new TaskJournalParticipant
         {
-            UserId = client.ResponsibleUserId,
+            UserId = assignee.Id,
             Role = "assignee",
             DisplayName = assigneeName,
-            Email = client.ResponsibleEmail,
+            Email = assignee.Email,
             SortOrder = 0,
             ApprovalStatus = "pending",
             CreatedAt = now,
@@ -271,6 +321,51 @@ public sealed class ClientBirthdayTaskSchedulerService : BackgroundService
             AuthorName = "Система: дни рождения",
             Kind = "system",
             Text = "Задача создана автоматически по дате рождения из карточки клиента.",
+            CreatedAt = now,
+            UpdatedAt = now,
+        });
+        return task;
+    }
+
+    private static TaskJournalItem BuildEmployeeTask(BirthdayEmployeeCandidate candidate, BirthdayAssignee assignee, string marker, TimeZoneInfo timeZone, DateTime now)
+    {
+        var task = new TaskJournalItem
+        {
+            ClientBillingClassification = TaskClientBillingClassification.Internal,
+            ObjectName = candidate.Employee.Name,
+            Title = $"Поздравить коллегу с днём рождения: {candidate.Employee.Name}",
+            Description = $"Поздравить сотрудника {candidate.Employee.Name} с днём рождения {candidate.Birthday:dd.MM.yyyy}.",
+            AssigneeUserId = assignee.Id,
+            AssigneeName = assignee.Name,
+            AuthorUserId = assignee.Id,
+            AuthorName = "Система: дни рождения",
+            DueAt = CalendarTimeZoneHelper.FromUserLocalToUtc(candidate.Birthday.AddHours(10), timeZone),
+            PlannedDurationMinutes = 30,
+            Type = "task",
+            Priority = "normal",
+            Status = "new",
+            RemindersJson = SerializeList(["before7d", "before3d", "before1d", "atDue", "dailyOverdue"]),
+            ChannelsJson = SerializeList(["inApp"]),
+            TagsJson = SerializeList([AutomationTag, marker]),
+            CreatedAt = now,
+            UpdatedAt = now,
+        };
+        task.Participants.Add(new TaskJournalParticipant
+        {
+            UserId = assignee.Id,
+            Role = "assignee",
+            DisplayName = assignee.Name,
+            Email = assignee.Email,
+            SortOrder = 0,
+            ApprovalStatus = "pending",
+            CreatedAt = now,
+            UpdatedAt = now,
+        });
+        task.Comments.Add(new TaskJournalComment
+        {
+            AuthorName = "Система: дни рождения",
+            Kind = "system",
+            Text = "Задача создана автоматически по дате рождения из карточки сотрудника.",
             CreatedAt = now,
             UpdatedAt = now,
         });
@@ -292,9 +387,15 @@ public sealed class ClientBirthdayTaskSchedulerService : BackgroundService
         }
     }
 
-    private sealed record BirthdaySettings(bool Enabled, string TimeZoneId);
+    private sealed record BirthdaySettings(bool ClientsEnabled, bool EmployeesEnabled, int LeadDays, bool ClientUseSelectedAssignee, int SelectedAssigneeUserId, string TimeZoneId)
+    {
+        public bool Enabled => ClientsEnabled || EmployeesEnabled;
+    }
+    private sealed record BirthdayAssignee(int Id, string Name, string Email);
     private sealed record BirthdayClient(int Id, string Name, DateTime BirthDate, int ResponsibleUserId, string ResponsibleName, string ResponsibleEmail);
     private sealed record BirthdayCandidate(BirthdayClient Client, DateTime Birthday);
+    private sealed record BirthdayEmployee(int Id, string Name, DateTime BirthDate);
+    private sealed record BirthdayEmployeeCandidate(BirthdayEmployee Employee, DateTime Birthday);
 }
 
 public sealed record ClientBirthdayTaskSchedulerResult(int CreatedCount, int SkippedCount, bool Enabled, string? Error)

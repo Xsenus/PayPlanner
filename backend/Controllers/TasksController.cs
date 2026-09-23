@@ -76,6 +76,10 @@ public class TasksController : ControllerBase
     private const string RequireCompletionResultSettingKey = "tasks.requireCompletionResult";
     private const string DailyOverdueReminderEnabledSettingKey = "tasks.dailyOverdueReminderEnabled";
     private const string BirthdayTaskAutomationEnabledSettingKey = "tasks.automation.birthdays.enabled";
+    private const string EmployeeBirthdayTaskAutomationEnabledSettingKey = "tasks.automation.birthdays.employees.enabled";
+    private const string BirthdayTaskLeadDaysSettingKey = "tasks.automation.birthdays.leadDays";
+    private const string BirthdayClientUseSelectedAssigneeSettingKey = "tasks.automation.birthdays.clients.useSelectedAssignee";
+    private const string BirthdayTaskAssigneeUserIdSettingKey = "tasks.automation.birthdays.assigneeUserId";
     private const string AllowAdminCompleteAnyTaskSettingKey = "tasks.allowAdminCompleteAnyTask";
     private const string FinancialDocumentsResponsibleUserSettingKey = "tasks.financialDocumentsResponsibleUserId";
     private const string ApprovalDueDaysSettingKey = "tasks.approvalDueDays";
@@ -453,6 +457,18 @@ public class TasksController : ControllerBase
         var approvalQuickActionMode = NormalizeApprovalQuickActionMode(request.ApprovalQuickActionMode);
         var approvalDueDays = Math.Clamp(request.ApprovalDueDays, 1, 365);
         var financialDocumentsResponsibleUserId = request.FinancialDocumentsResponsibleUserId.GetValueOrDefault();
+        var birthdayAssigneeUserId = request.BirthdayTaskAssigneeUserId.GetValueOrDefault();
+        var birthdaySelectedAssigneeRequired = request.EmployeeBirthdayTaskAutomationEnabled ||
+            (request.BirthdayTaskAutomationEnabled && request.BirthdayClientUseSelectedAssignee);
+        if (birthdaySelectedAssigneeRequired && birthdayAssigneeUserId <= 0)
+        {
+            return BadRequest(new { message = "Выберите ответственного за поздравления." });
+        }
+        if (birthdaySelectedAssigneeRequired && !await _db.Users.AsNoTracking().AnyAsync(user =>
+                user.Id == birthdayAssigneeUserId && user.IsActive && user.IsApproved, ct))
+        {
+            return BadRequest(new { message = "Ответственный за поздравления недоступен." });
+        }
         if (financialDocumentsResponsibleUserId > 0)
         {
             var responsibleUserExists = await _db.Users.AsNoTracking().AnyAsync(user =>
@@ -495,6 +511,10 @@ public class TasksController : ControllerBase
         await UpsertSystemSettingAsync(RequireCompletionResultSettingKey, request.RequireCompletionResult ? "true" : "false", now, ct);
         await UpsertSystemSettingAsync(DailyOverdueReminderEnabledSettingKey, request.DailyOverdueReminderEnabled ? "true" : "false", now, ct);
         await UpsertSystemSettingAsync(BirthdayTaskAutomationEnabledSettingKey, request.BirthdayTaskAutomationEnabled ? "true" : "false", now, ct);
+        await UpsertSystemSettingAsync(EmployeeBirthdayTaskAutomationEnabledSettingKey, request.EmployeeBirthdayTaskAutomationEnabled ? "true" : "false", now, ct);
+        await UpsertSystemSettingAsync(BirthdayTaskLeadDaysSettingKey, Math.Clamp(request.BirthdayTaskLeadDays, 0, 60).ToString(), now, ct);
+        await UpsertSystemSettingAsync(BirthdayClientUseSelectedAssigneeSettingKey, request.BirthdayClientUseSelectedAssignee ? "true" : "false", now, ct);
+        await UpsertSystemSettingAsync(BirthdayTaskAssigneeUserIdSettingKey, birthdayAssigneeUserId.ToString(), now, ct);
         await UpsertSystemSettingAsync(AllowAdminCompleteAnyTaskSettingKey, request.AllowAdminCompleteAnyTask ? "true" : "false", now, ct);
         await UpsertSystemSettingAsync(FinancialDocumentsResponsibleUserSettingKey, financialDocumentsResponsibleUserId.ToString(), now, ct);
         await UpsertSystemSettingAsync(ApprovalDueDaysSettingKey, approvalDueDays.ToString(), now, ct);
@@ -5201,6 +5221,10 @@ public class TasksController : ControllerBase
                 item.Key == RequireCompletionResultSettingKey ||
                 item.Key == DailyOverdueReminderEnabledSettingKey ||
                 item.Key == BirthdayTaskAutomationEnabledSettingKey ||
+                item.Key == EmployeeBirthdayTaskAutomationEnabledSettingKey ||
+                item.Key == BirthdayTaskLeadDaysSettingKey ||
+                item.Key == BirthdayClientUseSelectedAssigneeSettingKey ||
+                item.Key == BirthdayTaskAssigneeUserIdSettingKey ||
                 item.Key == AllowAdminCompleteAnyTaskSettingKey ||
                 item.Key == FinancialDocumentsResponsibleUserSettingKey ||
                 item.Key == ApprovalDueDaysSettingKey ||
@@ -5220,6 +5244,13 @@ public class TasksController : ControllerBase
         var defaultAssigneeUserId = ParseIntSetting(settings.GetValueOrDefault(CaseInactivityAutomationDefaultAssigneeSettingKey), 0);
         var escalationUserId = ParseIntSetting(settings.GetValueOrDefault(CaseInactivityAutomationEscalationUserSettingKey), 0);
         var financialDocumentsResponsibleUserId = ParseIntSetting(settings.GetValueOrDefault(FinancialDocumentsResponsibleUserSettingKey), 0);
+        var birthdayAssigneeUserId = ParseIntSetting(settings.GetValueOrDefault(BirthdayTaskAssigneeUserIdSettingKey), 0);
+        var birthdayAssigneeName = birthdayAssigneeUserId > 0
+            ? await _db.Users.AsNoTracking()
+                .Where(user => user.Id == birthdayAssigneeUserId && user.IsActive && user.IsApproved)
+                .Select(user => user.FullName ?? user.Email)
+                .FirstOrDefaultAsync(ct) ?? string.Empty
+            : string.Empty;
         var financialDocumentsResponsibleUserName = financialDocumentsResponsibleUserId > 0
             ? await _db.Users.AsNoTracking()
                 .Where(user => user.Id == financialDocumentsResponsibleUserId && user.IsActive && user.IsApproved)
@@ -5239,6 +5270,11 @@ public class TasksController : ControllerBase
             RequireCompletionResult = ParseBoolSetting(settings.GetValueOrDefault(RequireCompletionResultSettingKey), true),
             DailyOverdueReminderEnabled = ParseBoolSetting(settings.GetValueOrDefault(DailyOverdueReminderEnabledSettingKey), true),
             BirthdayTaskAutomationEnabled = ParseBoolSetting(settings.GetValueOrDefault(BirthdayTaskAutomationEnabledSettingKey), false),
+            EmployeeBirthdayTaskAutomationEnabled = ParseBoolSetting(settings.GetValueOrDefault(EmployeeBirthdayTaskAutomationEnabledSettingKey), false),
+            BirthdayTaskLeadDays = Math.Clamp(ParseIntSetting(settings.GetValueOrDefault(BirthdayTaskLeadDaysSettingKey), 7), 0, 60),
+            BirthdayClientUseSelectedAssignee = ParseBoolSetting(settings.GetValueOrDefault(BirthdayClientUseSelectedAssigneeSettingKey), false),
+            BirthdayTaskAssigneeUserId = string.IsNullOrWhiteSpace(birthdayAssigneeName) ? null : birthdayAssigneeUserId,
+            BirthdayTaskAssigneeUserName = birthdayAssigneeName,
             AllowAdminCompleteAnyTask = ParseBoolSetting(settings.GetValueOrDefault(AllowAdminCompleteAnyTaskSettingKey), true),
             FinancialDocumentsResponsibleUserId = effectiveFinancialDocumentsResponsibleUserId > 0 ? effectiveFinancialDocumentsResponsibleUserId : null,
             FinancialDocumentsResponsibleUserName = financialDocumentsResponsibleUserName,

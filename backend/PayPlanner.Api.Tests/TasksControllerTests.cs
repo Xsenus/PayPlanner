@@ -515,6 +515,10 @@ public class TasksControllerTests
             RequireCompletionResult = false,
             DailyOverdueReminderEnabled = false,
             BirthdayTaskAutomationEnabled = true,
+            EmployeeBirthdayTaskAutomationEnabled = true,
+            BirthdayTaskLeadDays = 14,
+            BirthdayClientUseSelectedAssignee = true,
+            BirthdayTaskAssigneeUserId = fallbackAssignee.Id,
             AllowAdminCompleteAnyTask = true,
             FinancialDocumentsResponsibleUserId = fallbackAssignee.Id,
             ApprovalDueDays = 400,
@@ -539,6 +543,10 @@ public class TasksControllerTests
         Assert.False(dto.RequireCompletionResult);
         Assert.False(dto.DailyOverdueReminderEnabled);
         Assert.True(dto.BirthdayTaskAutomationEnabled);
+        Assert.True(dto.EmployeeBirthdayTaskAutomationEnabled);
+        Assert.Equal(14, dto.BirthdayTaskLeadDays);
+        Assert.True(dto.BirthdayClientUseSelectedAssignee);
+        Assert.Equal(fallbackAssignee.Id, dto.BirthdayTaskAssigneeUserId);
         Assert.True(dto.AllowAdminCompleteAnyTask);
         Assert.Equal(fallbackAssignee.Id, dto.FinancialDocumentsResponsibleUserId);
         Assert.Equal("Резервный исполнитель", dto.FinancialDocumentsResponsibleUserName);
@@ -563,7 +571,7 @@ public class TasksControllerTests
                 || item.Key == "tasks.approvalQuickActionMode"
                 || item.Key == "tasks.financialDocumentsResponsibleUserId"
                 || item.Key == "tasks.executorCompletionAllowedUserIds"
-                || item.Key == "tasks.automation.birthdays.enabled")
+                || item.Key.StartsWith("tasks.automation.birthdays."))
             .ToDictionaryAsync(item => item.Key, item => item.Value);
 
         Assert.Equal("365", stored["tasks.approvalDueDays"]);
@@ -579,6 +587,10 @@ public class TasksControllerTests
         Assert.Equal("16:45", stored["tasks.automation.caseControl.runLocalTime"]);
         Assert.Equal("Asia/Novosibirsk", stored["tasks.automation.caseControl.scheduleTimeZone"]);
         Assert.Equal("true", stored["tasks.automation.birthdays.enabled"]);
+        Assert.Equal("true", stored["tasks.automation.birthdays.employees.enabled"]);
+        Assert.Equal("14", stored["tasks.automation.birthdays.leadDays"]);
+        Assert.Equal("true", stored["tasks.automation.birthdays.clients.useSelectedAssignee"]);
+        Assert.Equal(fallbackAssignee.Id.ToString(), stored["tasks.automation.birthdays.assigneeUserId"]);
 
         var requireCompletionResult = await db.SystemSettings
             .AsNoTracking()
@@ -594,6 +606,25 @@ public class TasksControllerTests
             .AsNoTracking()
             .SingleAsync(item => item.Key == "tasks.taskCardWindowMode");
         Assert.Equal("modern", taskCardWindowMode.Value);
+    }
+
+    [Fact]
+    public async Task UpdateSettings_RejectsEmployeeBirthdayAutomationWithoutAssignee()
+    {
+        await using var db = await CreateContextAsync();
+        var admin = await CreateAdminUserAsync(db, "admin-birthday@example.com", "Администратор");
+        var controller = CreateController(db, new RecordingNotificationService(), admin);
+
+        var result = await controller.UpdateSettings(new TaskJournalSettingsRequest
+        {
+            EmployeeBirthdayTaskAutomationEnabled = true,
+            BirthdayTaskLeadDays = 7,
+        }, CancellationToken.None);
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+        Assert.Empty(await db.SystemSettings.AsNoTracking()
+            .Where(item => item.Key.StartsWith("tasks.automation.birthdays."))
+            .ToListAsync());
     }
 
     [Fact]

@@ -27,6 +27,11 @@ const settings: TaskJournalSettingsDto = {
   requireCompletionResult: true,
   dailyOverdueReminderEnabled: true,
   birthdayTaskAutomationEnabled: false,
+  employeeBirthdayTaskAutomationEnabled: false,
+  birthdayTaskLeadDays: 7,
+  birthdayClientUseSelectedAssignee: false,
+  birthdayTaskAssigneeUserId: null,
+  birthdayTaskAssigneeUserName: '',
   allowAdminCompleteAnyTask: true,
   financialDocumentsResponsibleUserId: null,
   financialDocumentsResponsibleUserName: '',
@@ -145,13 +150,27 @@ describe('TaskJournalSettings', () => {
   it('lets an administrator enable birthday greeting tasks', async () => {
     render(<TaskJournalSettings />);
 
-    const toggle = await screen.findByRole('checkbox', { name: /Создавать задачи для поздравления клиентов/i });
+    const toggle = await screen.findByRole('checkbox', { name: /Поздравлять клиентов/i });
     expect((toggle as HTMLInputElement).checked).toBe(false);
     fireEvent.click(toggle);
     fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
 
     await waitFor(() => expect(apiMock.updateTaskJournalSettings).toHaveBeenCalledWith(
       expect.objectContaining({ birthdayTaskAutomationEnabled: true }),
+    ));
+  });
+
+  it('configures employee greetings and a shared assignee', async () => {
+    render(<TaskJournalSettings />);
+
+    fireEvent.click(await screen.findByRole('checkbox', { name: /Поздравлять сотрудников/i }));
+    fireEvent.change(screen.getByLabelText('За сколько дней создать задачу'), { target: { value: '14' } });
+    fireEvent.click(screen.getByRole('combobox', { name: /Ответственный за поздравления сотрудников и клиентов/i }));
+    fireEvent.click(screen.getByRole('option', { name: 'Иван Петров' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    await waitFor(() => expect(apiMock.updateTaskJournalSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ employeeBirthdayTaskAutomationEnabled: true, birthdayTaskLeadDays: 14, birthdayTaskAssigneeUserId: 8 }),
     ));
   });
 

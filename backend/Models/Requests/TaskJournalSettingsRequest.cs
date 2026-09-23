@@ -10,6 +10,10 @@ public class TaskJournalSettingsRequest
     public bool RequireCompletionResult { get; set; } = true;
     public bool DailyOverdueReminderEnabled { get; set; } = true;
     public bool BirthdayTaskAutomationEnabled { get; set; }
+    public bool EmployeeBirthdayTaskAutomationEnabled { get; set; }
+    public int BirthdayTaskLeadDays { get; set; } = 7;
+    public bool BirthdayClientUseSelectedAssignee { get; set; }
+    public int? BirthdayTaskAssigneeUserId { get; set; }
     public bool AllowAdminCompleteAnyTask { get; set; } = true;
     public int? FinancialDocumentsResponsibleUserId { get; set; }
     public int ApprovalDueDays { get; set; } = 5;
