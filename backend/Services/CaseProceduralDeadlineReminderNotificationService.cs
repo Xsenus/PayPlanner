@@ -66,7 +66,9 @@ public sealed class CaseProceduralDeadlineReminderNotificationService : Backgrou
 
         var today = DateTime.UtcNow.Date;
         var maxDueDate = today.AddDays(MaxWarningWindowDays + 1);
-        var deadlines = await db.ClientCaseProceduralDeadlines
+        var batchSize = ResolveBatchSize();
+        var pageSize = Math.Clamp(batchSize * 2, 50, 500);
+        var candidates = db.ClientCaseProceduralDeadlines
             .AsNoTracking()
             .Include(deadline => deadline.ClientCase)
             .ThenInclude(clientCase => clientCase.Client)
@@ -78,32 +80,45 @@ public sealed class CaseProceduralDeadlineReminderNotificationService : Backgrou
                 && deadline.DueAt < maxDueDate
                 && deadline.WarningDaysBefore >= 0)
             .OrderBy(deadline => deadline.DueAt)
-            .ThenBy(deadline => deadline.Id)
-            .Take(ResolveBatchSize())
-            .ToListAsync(cancellationToken);
-        deadlines = deadlines
-            .Where(deadline => !ClientCaseStageClassifier.IsPretrial(deadline.ClientCase))
-            .Where(deadline => deadline.DueAt.Date <= today.AddDays(
-                Math.Clamp(deadline.WarningDaysBefore, 0, MaxWarningWindowDays)))
-            .ToList();
+            .ThenBy(deadline => deadline.Id);
+        var created = 0;
+        DateTime? lastDueAt = null;
+        var lastId = 0;
+        while (created < batchSize)
+        {
+            var pageQuery = lastDueAt.HasValue
+                ? candidates.Where(deadline => deadline.DueAt > lastDueAt.Value
+                    || deadline.DueAt == lastDueAt.Value && deadline.Id > lastId)
+                : candidates;
+            var page = await pageQuery.Take(pageSize).ToListAsync(cancellationToken);
+            var eligible = page.Where(deadline => !ClientCaseStageClassifier.IsPretrial(deadline.ClientCase)
+                && deadline.DueAt.Date <= today.AddDays(
+                    Math.Clamp(deadline.WarningDaysBefore, 0, MaxWarningWindowDays))).ToArray();
+            var recipientsByCaseId = await ResolveCaseNotificationRecipientIdsAsync(
+                db,
+                eligible.Select(deadline => deadline.ClientCaseId).Distinct().ToArray(),
+                cancellationToken);
+            var pageReminders = new List<CaseProceduralDeadlineReminderBatchItem>(eligible.Length);
+            foreach (var deadline in eligible)
+            {
+                if (!recipientsByCaseId.TryGetValue(deadline.ClientCaseId, out var recipients)
+                    || recipients.Count == 0) continue;
+                pageReminders.Add(new CaseProceduralDeadlineReminderBatchItem(
+                    deadline.ClientCase, deadline, recipients));
+            }
+            for (var offset = 0; offset < pageReminders.Count && created < batchSize;)
+            {
+                var count = Math.Min(batchSize - created, pageReminders.Count - offset);
+                created += await notificationService.NotifyCaseProceduralDeadlineRemindersAsync(
+                    pageReminders.GetRange(offset, count), cancellationToken);
+                offset += count;
+            }
+            if (page.Count < pageSize || created >= batchSize) break;
+            lastDueAt = page[^1].DueAt;
+            lastId = page[^1].Id;
+        }
 
-        var recipientsByCaseId = await ResolveCaseNotificationRecipientIdsAsync(
-            db,
-            deadlines.Select(deadline => deadline.ClientCaseId).Distinct().ToArray(),
-            cancellationToken);
-
-        var reminders = deadlines
-            .Where(deadline => recipientsByCaseId.TryGetValue(deadline.ClientCaseId, out var recipients)
-                && recipients.Count > 0)
-            .Select(deadline => new CaseProceduralDeadlineReminderBatchItem(
-                deadline.ClientCase,
-                deadline,
-                recipientsByCaseId[deadline.ClientCaseId]))
-            .ToArray();
-
-        return await notificationService.NotifyCaseProceduralDeadlineRemindersAsync(
-            reminders,
-            cancellationToken);
+        return created;
     }
 
     private bool IsEnabled()

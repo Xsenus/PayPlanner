@@ -32,6 +32,16 @@ public class CaseProceduralDeadlineReminderNotificationServiceTests
     }
 
     [Fact]
+    public async Task RunOnceAsync_ReachesNextDeadlineWhenFirstBatchWasAlreadyNotifiedToday()
+    {
+        var result = await RunRealNotificationBatchScenarioAsync(2, batchSize: 1);
+
+        Assert.Equal(1, result.Created);
+        Assert.Equal(1, result.CreatedOnRepeat);
+        Assert.Equal(0, result.CreatedOnThirdRun);
+    }
+
+    [Fact]
     public async Task RunOnceAsync_BatchesRecipientQueriesAndPreservesCaseVisibility()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
@@ -213,6 +223,101 @@ public class CaseProceduralDeadlineReminderNotificationServiceTests
         Assert.Single(interceptor.ReaderCommands, command =>
             command.StartsWith("SELECT \"c\".\"Id\"", StringComparison.Ordinal)
             && command.Contains("IsHiddenFromExecutor", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RunOnceAsync_FindsEligibleDeadlineBeyondEarlierNotYetDueAndPretrialRows()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var notificationService = DispatchProxy.Create<INotificationService, RecordingNotificationServiceProxy>();
+        var recorder = (RecordingNotificationServiceProxy)(object)notificationService;
+        var services = new ServiceCollection();
+        services.AddDbContext<PaymentContext>(options => options.UseSqlite(connection));
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Notifications:CaseProceduralDeadlineReminders:BatchSize"] = "1",
+            }).Build());
+        services.AddSingleton(notificationService);
+        await using var provider = services.BuildServiceProvider();
+
+        int eligibleCaseId;
+        await using (var scope = provider.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<PaymentContext>();
+            await db.Database.EnsureCreatedAsync();
+            var role = new Role { Name = $"deadline-page-{Guid.NewGuid():N}", CreatedAt = DateTime.UtcNow };
+            db.Roles.Add(role);
+            await db.SaveChangesAsync();
+            db.RolePermissions.Add(new RolePermission
+            {
+                RoleId = role.Id,
+                Section = RolePermissionCatalog.Cases,
+                CanView = true,
+                ViewScope = DataVisibilityScope.Own,
+            });
+            var user = new User
+            {
+                Email = "deadline-page@example.test",
+                FullName = "Юрист по срокам",
+                PasswordHash = "hash",
+                RoleId = role.Id,
+                IsActive = true,
+                IsApproved = true,
+            };
+            db.Users.Add(user);
+            await db.SaveChangesAsync();
+            var client = new Client { Name = "Клиент", IsActive = true, ResponsibleUserId = user.Id };
+            db.Clients.Add(client);
+            await db.SaveChangesAsync();
+
+            var today = DateTime.UtcNow.Date;
+            var entries = new List<(string Title, string Stage, DateTime DueAt, int Warning)>
+            {
+                ("Напоминать ещё рано", "Суд", today.AddDays(1), 0),
+                ("Скрытое без адресата", "Суд", today.AddDays(1), 7),
+            };
+            entries.AddRange(Enumerable.Range(1, 51).Select(index =>
+                ($"Внесудебное дело {index}", "Внесудебное производство", today.AddDays(1), 7)));
+            entries.Add(("Напомнить сейчас", "Суд", today.AddDays(2), 7));
+            foreach (var entry in entries)
+            {
+                var clientCase = new ClientCase
+                {
+                    ClientId = client.Id,
+                    Title = entry.Title,
+                    Stage = entry.Stage,
+                    Status = ClientCaseStatus.Open,
+                    ResponsibleUserId = user.Id,
+                    IsHiddenFromExecutor = entry.Title == "Скрытое без адресата",
+                };
+                db.ClientCases.Add(clientCase);
+                db.ClientCaseProceduralDeadlines.Add(new ClientCaseProceduralDeadline
+                {
+                    ClientCase = clientCase,
+                    DeadlineType = "appeal",
+                    Title = entry.Title,
+                    DueAt = entry.DueAt,
+                    AllDay = true,
+                    Status = "active",
+                    WarningDaysBefore = entry.Warning,
+                    CreatedAt = today,
+                });
+            }
+            await db.SaveChangesAsync();
+            eligibleCaseId = await db.ClientCases.Where(item => item.Title == "Напомнить сейчас")
+                .Select(item => item.Id).SingleAsync();
+        }
+
+        var service = new CaseProceduralDeadlineReminderNotificationService(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            provider.GetRequiredService<IConfiguration>(),
+            NullLogger<CaseProceduralDeadlineReminderNotificationService>.Instance);
+
+        Assert.Equal(1, await service.RunOnceAsync(CancellationToken.None));
+        Assert.Single(recorder.Calls);
+        Assert.Equal(eligibleCaseId, recorder.Calls[0].ClientCaseId);
     }
 
     [Fact]
@@ -486,7 +591,8 @@ public class CaseProceduralDeadlineReminderNotificationServiceTests
 
     private sealed record CaseNotificationCall(int ClientCaseId, IReadOnlyCollection<int> RecipientUserIds);
 
-    private static async Task<NotificationBatchScenarioResult> RunRealNotificationBatchScenarioAsync(int deadlineCount)
+    private static async Task<NotificationBatchScenarioResult> RunRealNotificationBatchScenarioAsync(
+        int deadlineCount, int batchSize = 100)
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
@@ -498,7 +604,7 @@ public class CaseProceduralDeadlineReminderNotificationServiceTests
         services.AddSingleton<IConfiguration>(new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["Notifications:CaseProceduralDeadlineReminders:BatchSize"] = "100",
+                ["Notifications:CaseProceduralDeadlineReminders:BatchSize"] = batchSize.ToString(),
             })
             .Build());
         services.AddSingleton<IEmailService, NoopEmailService>();
@@ -581,12 +687,14 @@ public class CaseProceduralDeadlineReminderNotificationServiceTests
         var readerQueryCount = interceptor.ReaderCommands.Count(command =>
             command.TrimStart().StartsWith("SELECT", StringComparison.OrdinalIgnoreCase));
         var createdOnRepeat = await service.RunOnceAsync(CancellationToken.None);
+        var createdOnThirdRun = await service.RunOnceAsync(CancellationToken.None);
 
-        return new NotificationBatchScenarioResult(created, createdOnRepeat, readerQueryCount);
+        return new NotificationBatchScenarioResult(created, createdOnRepeat, createdOnThirdRun, readerQueryCount);
     }
 
     private sealed record NotificationBatchScenarioResult(
         int Created,
         int CreatedOnRepeat,
+        int CreatedOnThirdRun,
         int ReaderQueryCount);
 }
