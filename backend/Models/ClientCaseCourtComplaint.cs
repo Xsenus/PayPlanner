@@ -23,6 +23,9 @@ public class ClientCaseCourtComplaint
 
     public DateTime? FiledAt { get; set; }
 
+    [Required, MaxLength(16)]
+    public string FiledBy { get; set; } = "unknown";
+
     [Required, MaxLength(64)]
     public string Status { get; set; } = "draft";
 

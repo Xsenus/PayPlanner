@@ -3461,6 +3461,7 @@ public partial class CasesV2Controller : ControllerBase
             Title = validation.Title,
             TargetInstance = validation.TargetInstance,
             FiledAt = validation.FiledAt,
+            FiledBy = validation.FiledBy,
             Status = validation.Status,
             ClientCaseDocumentId = validation.ClientCaseDocumentId,
             Notes = validation.Notes,
@@ -3476,6 +3477,10 @@ public partial class CasesV2Controller : ControllerBase
         AppendCaseEvent(clientCase, $"Добавлена жалоба «{complaint.Title}» в блок {ResolveCourtInstanceLabel(normalizedInstance)}. Автор: {actorName}.");
         _db.SetAuditReason($"Добавлена жалоба по судебной инстанции: {complaint.Title}");
         await _db.SaveChangesAsync(ct);
+        if (await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, id, actorUserId, actorName, ct))
+        {
+            await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
+        }
 
         return Created($"/api/v2/cases/{id}/court-instances/{normalizedInstance}/complaints/{complaint.Id}", MapCourtComplaint(complaint));
     }
@@ -3521,7 +3526,7 @@ public partial class CasesV2Controller : ControllerBase
             return NotFound();
         }
 
-        var validation = await ValidateCourtComplaintRequestAsync(id, normalizedInstance, request, ct);
+        var validation = await ValidateCourtComplaintRequestAsync(id, normalizedInstance, request, ct, complaint.FiledBy);
         if (validation.Error is not null)
         {
             return BadRequest(new { message = validation.Error });
@@ -3533,6 +3538,7 @@ public partial class CasesV2Controller : ControllerBase
         complaint.Title = validation.Title;
         complaint.TargetInstance = validation.TargetInstance;
         complaint.FiledAt = validation.FiledAt;
+        complaint.FiledBy = validation.FiledBy;
         complaint.Status = validation.Status;
         complaint.ClientCaseDocumentId = validation.ClientCaseDocumentId;
         complaint.Notes = validation.Notes;
@@ -3543,6 +3549,10 @@ public partial class CasesV2Controller : ControllerBase
         AppendCaseEvent(clientCase, $"Обновлена жалоба «{complaint.Title}». Автор: {actorName}.");
         _db.SetAuditReason($"Обновлена жалоба по судебной инстанции: {complaint.Title}");
         await _db.SaveChangesAsync(ct);
+        if (await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, id, actorUserId, actorName, ct))
+        {
+            await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
+        }
 
         return Ok(MapCourtComplaint(complaint));
     }
@@ -3596,6 +3606,10 @@ public partial class CasesV2Controller : ControllerBase
         AppendCaseEvent(clientCase, $"Жалоба «{complaint.Title}» перенесена в архив. Автор: {actorName}.");
         _db.SetAuditReason($"Жалоба по судебной инстанции перенесена в архив: {complaint.Title}");
         await _db.SaveChangesAsync(ct);
+        if (await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, id, actorUserId, actorName, ct))
+        {
+            await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
+        }
 
         return NoContent();
     }
@@ -12698,6 +12712,7 @@ public partial class CasesV2Controller : ControllerBase
             TargetInstance = item.TargetInstance,
             TargetInstanceLabel = ResolveCourtInstanceLabel(item.TargetInstance),
             FiledAt = item.FiledAt,
+            FiledBy = item.FiledBy,
             Status = item.Status,
             StatusLabel = ResolveCourtComplaintStatusLabel(item.Status),
             ClientCaseDocumentId = item.ClientCaseDocumentId,
@@ -12950,11 +12965,18 @@ public partial class CasesV2Controller : ControllerBase
         int clientCaseId,
         string instance,
         UpsertClientCaseCourtComplaintRequest? request,
-        CancellationToken ct)
+        CancellationToken ct,
+        string? existingFiledBy = null)
     {
         if (request is null)
         {
             return new("Укажите параметры жалобы.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.FiledBy)
+            && request.FiledBy.Trim().ToLowerInvariant() is not ("ours" or "opponent" or "unknown"))
+        {
+            return new("Укажите сторону подачи жалобы: наша сторона, против нас или не указано.");
         }
 
         if (request.ClientCaseDocumentId is { } documentId)
@@ -12970,16 +12992,36 @@ public partial class CasesV2Controller : ControllerBase
 
         var complaintType = NormalizeCourtComplaintType(request.ComplaintType);
         var title = NormalizeOptional(request.Title) ?? ResolveCourtComplaintTypeLabel(complaintType);
+        var targetInstance = NormalizeCourtInstance(request.TargetInstance ?? ResolveNextCourtInstance(instance));
+        var status = NormalizeCourtComplaintStatus(request.Status);
+        var filedBy = NormalizeComplaintFiledBy(request.FiledBy ?? existingFiledBy);
+        if (complaintType == "appealComplaint"
+            && targetInstance == "appeal"
+            && filedBy != "unknown"
+            && status is ("filed" or "accepted")
+            && !request.FiledAt.HasValue)
+        {
+            return new("Для поданной апелляционной жалобы укажите дату подачи — от неё зависит срок задачи.");
+        }
         return new(
             null,
             complaintType,
             Truncate(title, 200),
-            NormalizeCourtInstance(request.TargetInstance ?? ResolveNextCourtInstance(instance)),
+            targetInstance,
             request.FiledAt,
-            NormalizeCourtComplaintStatus(request.Status),
+            status,
             request.ClientCaseDocumentId,
-            Truncate(NormalizeOptional(request.Notes) ?? string.Empty, 1000));
+            Truncate(NormalizeOptional(request.Notes) ?? string.Empty, 1000),
+            filedBy);
     }
+
+    private static string NormalizeComplaintFiledBy(string? value)
+        => value?.Trim().ToLowerInvariant() switch
+        {
+            "ours" => "ours",
+            "opponent" => "opponent",
+            _ => "unknown",
+        };
 
     private static CourtEventValidationResult ValidateCourtEventRequest(UpsertClientCaseCourtEventRequest? request, ClientCase clientCase, ClientCaseCourt? court)
     {
@@ -14616,6 +14658,7 @@ public partial class CasesV2Controller : ControllerBase
         public string TargetInstance { get; set; } = string.Empty;
         public string TargetInstanceLabel { get; set; } = string.Empty;
         public DateTime? FiledAt { get; set; }
+        public string FiledBy { get; set; } = "unknown";
         public string Status { get; set; } = string.Empty;
         public string StatusLabel { get; set; } = string.Empty;
         public int? ClientCaseDocumentId { get; set; }
@@ -14635,6 +14678,7 @@ public partial class CasesV2Controller : ControllerBase
         public string? Title { get; set; }
         public string? TargetInstance { get; set; }
         public DateTime? FiledAt { get; set; }
+        public string? FiledBy { get; set; }
         public string? Status { get; set; }
         public int? ClientCaseDocumentId { get; set; }
         public string? Notes { get; set; }
@@ -15314,7 +15358,8 @@ public partial class CasesV2Controller : ControllerBase
         DateTime? FiledAt = null,
         string Status = "draft",
         int? ClientCaseDocumentId = null,
-        string Notes = "");
+        string Notes = "",
+        string FiledBy = "unknown");
 
     private readonly record struct CourtSyncApplyResult(
         IReadOnlyList<string> ChangedFields,

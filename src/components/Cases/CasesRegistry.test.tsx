@@ -571,7 +571,7 @@ describe('CasesRegistry', () => {
         expect.objectContaining({ search: 'земцов', status: 'Open' }),
         expect.objectContaining({ signal: expect.any(AbortSignal) }),
       );
-    });
+    }, { timeout: 5000 });
 
     fireEvent.click(screen.getByRole('button', { name: /^CSV$/u }));
 

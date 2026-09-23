@@ -436,6 +436,7 @@ describe('CaseDetailPage', () => {
       title: 'Частная жалоба',
       targetInstance: 'appeal',
       targetInstanceLabel: 'Апелляция',
+      filedBy: 'opponent',
       status: 'draft',
       statusLabel: 'Черновик',
       isArchived: false,
@@ -451,6 +452,7 @@ describe('CaseDetailPage', () => {
       title: 'Частная жалоба',
       targetInstance: 'appeal',
       targetInstanceLabel: 'Апелляция',
+      filedBy: 'opponent',
       status: 'accepted',
       statusLabel: 'Принята',
       isArchived: false,
@@ -3141,6 +3143,36 @@ describe('CaseDetailPage', () => {
     expect(screen.getByText('Конфликты · 1')).toBeTruthy();
     expect(screen.getByText(/не удаляются и не перезаписываются автоматически/u)).toBeTruthy();
     expect(screen.getByRole('button', { name: /Проверить источник/u })).toBeTruthy();
+  });
+
+  it('lets the lawyer identify who filed a court complaint', async () => {
+    window.sessionStorage.setItem('pp.case-detail.15.view.v1', JSON.stringify({ activeTab: 'court' }));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+
+    expect(await screen.findByText('Режим редактирования судебных данных')).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Кем подана жалоба'), { target: { value: 'opponent' } });
+    fireEvent.change(screen.getByPlaceholderText('Например, частная жалоба на определение суда'), { target: { value: 'Апелляция против нас' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Добавить жалобу' }));
+
+    await waitFor(() => expect(apiService.createCaseCourtComplaint).toHaveBeenCalledWith(
+      15,
+      'first',
+      expect.objectContaining({ title: 'Апелляция против нас', filedBy: 'opponent' }),
+    ));
+  });
+
+  it('requires the filing date before saving a filed appeal with a known side', async () => {
+    window.sessionStorage.setItem('pp.case-detail.15.view.v1', JSON.stringify({ activeTab: 'court' }));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+
+    expect(await screen.findByText('Режим редактирования судебных данных')).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Кем подана жалоба'), { target: { value: 'ours' } });
+    fireEvent.change(screen.getByLabelText('Статус жалобы'), { target: { value: 'filed' } });
+    fireEvent.change(screen.getByPlaceholderText('Например, частная жалоба на определение суда'), { target: { value: 'Наша апелляция' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Добавить жалобу' }));
+
+    expect(await screen.findByText(/Укажите дату подачи апелляционной жалобы/)).toBeTruthy();
+    expect(apiService.createCaseCourtComplaint).not.toHaveBeenCalled();
   });
 
   it('shows a compact court sync summary in overview without duplicating the technical message', async () => {

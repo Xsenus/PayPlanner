@@ -11,6 +11,8 @@ public static class ClientCaseDeadlineTaskSyncService
     private const string DeadlineTag = "case-deadline";
     private const string AppealReviewTaskTitle = "Изучить решение, оценить обжалование";
     private const string CassationReviewTaskTitle = "Оценить кассацию, подготовить жалобу";
+    private const string AppealObjectionTaskTitle = "Подготовить возражения на апелляцию";
+    private const string AppealHearingFollowupTaskTitle = "Отслеживать назначение заседания";
     private const string RescheduledHearingTaskTitle = "Учесть новую дату, проверить готовность";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly HashSet<string> ClosedTaskStatuses = new(StringComparer.OrdinalIgnoreCase)
@@ -30,6 +32,7 @@ public static class ClientCaseDeadlineTaskSyncService
             .Include(item => item.LegalEntity)
             .Include(item => item.ProceduralDeadlines)
             .Include(item => item.CourtEvents)
+            .Include(item => item.CourtComplaints)
             .AsSplitQuery()
             .FirstOrDefaultAsync(item => item.Id == clientCaseId, ct);
         if (clientCase is null)
@@ -81,16 +84,27 @@ public static class ClientCaseDeadlineTaskSyncService
                 if (activeTask is not null && !ClosedTaskStatuses.Contains(activeTask.Status))
                 {
                     var writReceived = deadline.Key == "writ-obtain" && clientCase.ExecutiveWritReceivedAt.HasValue;
+                    var appealHearingScheduled = deadline.CompleteOnHearing;
+                    var isAppealComplaintTask = deadline.Key.StartsWith("appeal-followup-", StringComparison.Ordinal)
+                        || deadline.Key.StartsWith("appeal-objection-", StringComparison.Ordinal);
                     var isCourtHearing = deadline.TaskType == "courtHearing";
-                    activeTask.Status = writReceived ? "done" : "cancelled";
+                    activeTask.Status = writReceived || appealHearingScheduled ? "done" : "cancelled";
                     activeTask.Result = writReceived
                         ? $"Исполнительный лист получен {clientCase.ExecutiveWritReceivedAt!.Value:dd.MM.yyyy}."
+                        : appealHearingScheduled
+                            ? "Заседание апелляционной инстанции назначено. Проверьте его дату в карточке дела."
+                        : isAppealComplaintTask
+                            ? "Жалоба или заседание больше не требуют этого действия. Проверьте карточку дела."
                         : isCourtHearing
                             ? "Судебное заседание отменено, перенесено или больше не активно."
                             : "Срок удален из карточки дела.";
                     activeTask.UpdatedAt = now;
                     AddHistory(db, activeTask, actorUserId, normalizedActorName, writReceived
                         ? "Получение исполнительного листа отмечено в карточке дела, задача выполнена."
+                        : appealHearingScheduled
+                            ? "Заседание апелляционной инстанции назначено, задача отслеживания выполнена."
+                        : isAppealComplaintTask
+                            ? "Связанная жалоба или заседание изменены, задача отменена."
                         : isCourtHearing
                             ? "Судебное заседание отменено, перенесено или завершено, связанная задача отменена."
                             : "Срок удален из карточки дела, контрольная задача отменена.", now);
@@ -127,6 +141,18 @@ public static class ClientCaseDeadlineTaskSyncService
                     && activeTask.Result?.StartsWith("Исполнительный лист получен", StringComparison.Ordinal) == true))
             {
                 // Repeated synchronization must not reopen a completed writ action.
+                continue;
+            }
+            if (deadline.Key.StartsWith("appeal-followup-", StringComparison.Ordinal)
+                && activeTask?.Status == "done"
+                && activeTask.DueAt == dueAt)
+            {
+                continue;
+            }
+            if (deadline.Key.StartsWith("appeal-objection-", StringComparison.Ordinal)
+                && activeTask?.Status == "done"
+                && activeTask.DueAt == dueAt)
+            {
                 continue;
             }
             var taskDeadline = deadline.TaskType == "courtHearing"
@@ -240,6 +266,9 @@ public static class ClientCaseDeadlineTaskSyncService
         UpsertPrimaryAssignee(task, assigneeUserId, assigneeName, assigneeEmail, now);
         task.Comments.Add(CreateHistory(task.Id, actorUserId, actorName, deadline.TaskType == "courtHearing"
             ? "Задача создана автоматически после назначения судебного заседания."
+            : deadline.Key.StartsWith("appeal-followup-", StringComparison.Ordinal)
+                || deadline.Key.StartsWith("appeal-objection-", StringComparison.Ordinal)
+                ? "Задача создана автоматически по поданной апелляционной жалобе."
             : "Контрольная задача создана из процессуального срока карточки дела.", now));
         return task;
     }
@@ -331,6 +360,37 @@ public static class ClientCaseDeadlineTaskSyncService
             "исполнительный-лист",
             null,
             null));
+        var appealHearings = clientCase.CourtEvents
+            .Where(item => item.CourtInstance == "appeal"
+                && item.EventType == CourtSyncNormalization.EventTypes.Hearing
+                && item.MovementStatus is not CourtSyncNormalization.MovementStatuses.Held
+                    and not CourtSyncNormalization.MovementStatuses.Postponed
+                    and not CourtSyncNormalization.MovementStatuses.Cancelled
+                    and not CourtSyncNormalization.MovementStatuses.Completed
+                    and not CourtSyncNormalization.MovementStatuses.Archived)
+            .OrderBy(item => item.ScheduledAt)
+            .ThenBy(item => item.Id)
+            .ToArray();
+        foreach (var complaint in clientCase.CourtComplaints.Where(item => item.ComplaintType == "appealComplaint" && item.TargetInstance == "appeal"))
+        {
+            var filed = !complaint.IsArchived
+                && complaint.FiledAt.HasValue
+                && complaint.Status is ("filed" or "accepted");
+            var ourFiledAppeal = filed && complaint.FiledBy == "ours";
+            var opponentFiledAppeal = filed && complaint.FiledBy == "opponent";
+            var hearing = appealHearings.FirstOrDefault(item => !complaint.FiledAt.HasValue || item.ScheduledAt.Date >= complaint.FiledAt.Value.Date);
+            result.Add(new CaseDeadline(
+                $"appeal-followup-{complaint.Id}",
+                AppealHearingFollowupTaskTitle,
+                ourFiledAppeal && hearing is null ? complaint.FiledAt!.Value.Date.AddDays(10) : null,
+                true, 60, "control", "апелляция", null, null,
+                ourFiledAppeal && hearing is not null, complaint.FiledAt));
+            result.Add(new CaseDeadline(
+                $"appeal-objection-{complaint.Id}",
+                AppealObjectionTaskTitle,
+                opponentFiledAppeal ? hearing?.ScheduledAt : null,
+                hearing?.AllDay ?? false, 90, "control", "апелляция", hearing, hearing?.ScheduledAt));
+        }
         return result;
     }
 
@@ -433,6 +493,14 @@ public static class ClientCaseDeadlineTaskSyncService
         if (deadline.Title == CassationReviewTaskTitle && FindAppealDecisionAt(clientCase) is { } appealDecisionAt)
         {
             parts.Add($"Решение апелляции вынесено {appealDecisionAt:dd.MM.yyyy}. Оцените необходимость кассации и подготовьте жалобу до истечения срока кассации.");
+        }
+        if (deadline.Key.StartsWith("appeal-followup-", StringComparison.Ordinal) && deadline.ReferenceDate.HasValue)
+        {
+            parts.Add($"Жалоба нашей стороны подана {deadline.ReferenceDate.Value:dd.MM.yyyy}. Проверьте, назначено ли заседание апелляционной инстанции. Дата задачи — внутренний ориентир через 10 дней после подачи.");
+        }
+        if (deadline.Key.StartsWith("appeal-objection-", StringComparison.Ordinal))
+        {
+            parts.Add("Апелляционная жалоба подана против нашей стороны. Подготовьте возражения до заседания апелляционной инстанции.");
         }
         if (deadline.Key == "writ-obtain" && clientCase.CourtDecisionEffectiveAt.HasValue)
         {
@@ -630,6 +698,8 @@ public static class ClientCaseDeadlineTaskSyncService
         string TaskType,
         string CategoryTag,
         ClientCaseCourtEvent? CourtEvent,
-        DateTime? HearingAt);
+        DateTime? HearingAt,
+        bool CompleteOnHearing = false,
+        DateTime? ReferenceDate = null);
     private readonly record struct CaseOwner(int? ClientId, int? LegalEntityId, string Name);
 }

@@ -1854,6 +1854,7 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.CourtInstanceId).HasDatabaseName("IX_ClientCaseCourtComplaints_CourtInstanceId");
             entity.HasIndex(e => e.ClientCaseDocumentId).HasDatabaseName("IX_ClientCaseCourtComplaints_DocumentId");
             entity.HasIndex(e => new { e.ClientCaseId, e.TargetInstance, e.IsArchived }).HasDatabaseName("IX_ClientCaseCourtComplaints_Case_Target_Archived");
+            entity.Property(e => e.FiledBy).HasMaxLength(16).HasDefaultValue("unknown");
         });
 
         modelBuilder.Entity<ClientCaseAppealDecision>(entity =>

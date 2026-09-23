@@ -152,6 +152,7 @@ interface CourtComplaintDraft {
   title: string;
   targetInstance: string;
   filedAt: string;
+  filedBy: 'ours' | 'opponent' | 'unknown';
   status: string;
   clientCaseDocumentId: string;
   notes: string;
@@ -1188,6 +1189,7 @@ function buildCourtComplaintDraft(instance = 'first', complaint?: ClientCaseCour
     title: complaint?.title ?? '',
     targetInstance: complaint?.targetInstance ?? getNextCourtInstance(instance),
     filedAt: toDateInput(complaint?.filedAt),
+    filedBy: complaint?.filedBy ?? 'unknown',
     status: complaint?.status ?? 'draft',
     clientCaseDocumentId: complaint?.clientCaseDocumentId ? String(complaint.clientCaseDocumentId) : '',
     notes: complaint?.notes ?? '',
@@ -2942,6 +2944,14 @@ export function CaseDetailPage({
       setError('Укажите название жалобы.');
       return;
     }
+    if (courtComplaintDraft.complaintType === 'appealComplaint'
+      && courtComplaintDraft.targetInstance === 'appeal'
+      && courtComplaintDraft.filedBy !== 'unknown'
+      && ['filed', 'accepted'].includes(courtComplaintDraft.status)
+      && !courtComplaintDraft.filedAt) {
+      setError('Укажите дату подачи апелляционной жалобы, чтобы рассчитать срок задачи.');
+      return;
+    }
 
     setSavingCourtComplaint(true);
     setError(null);
@@ -2952,6 +2962,7 @@ export function CaseDetailPage({
         title: courtComplaintDraft.title.trim(),
         targetInstance: courtComplaintDraft.targetInstance,
         filedAt: courtComplaintDraft.filedAt || null,
+        filedBy: courtComplaintDraft.filedBy,
         status: courtComplaintDraft.status,
         clientCaseDocumentId: courtComplaintDraft.clientCaseDocumentId ? Number(courtComplaintDraft.clientCaseDocumentId) : null,
         notes: courtComplaintDraft.notes.trim(),
@@ -7435,8 +7446,17 @@ function CourtPanel({
                 <SystemDateInput type="date" value={courtComplaintDraft.filedAt} onChange={(event) => onCourtComplaintDraftChange({ ...courtComplaintDraft, filedAt: event.target.value })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
               </label>
               <label className="text-sm font-medium text-slate-700">
+                <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Кем подана жалоба</span>
+                <SystemSelect aria-label="Кем подана жалоба" value={courtComplaintDraft.filedBy} onChange={(event) => onCourtComplaintDraftChange({ ...courtComplaintDraft, filedBy: event.target.value as CourtComplaintDraft['filedBy'] })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
+                  <option value="unknown">Не указано</option>
+                  <option value="ours">Нашей стороной</option>
+                  <option value="opponent">Против нас</option>
+                </SystemSelect>
+                <span className="mt-1 block text-xs font-normal text-slate-500">Без указанной стороны задачи по апелляции не создаются. Для возражений также нужна дата заседания апелляции.</span>
+              </label>
+              <label className="text-sm font-medium text-slate-700">
                 <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Статус</span>
-                <SystemSelect value={courtComplaintDraft.status} onChange={(event) => onCourtComplaintDraftChange({ ...courtComplaintDraft, status: event.target.value })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
+                <SystemSelect aria-label="Статус жалобы" value={courtComplaintDraft.status} onChange={(event) => onCourtComplaintDraftChange({ ...courtComplaintDraft, status: event.target.value })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
                   {COURT_COMPLAINT_STATUSES.map((status) => <option key={status.value} value={status.value}>{status.label}</option>)}
                 </SystemSelect>
               </label>
@@ -7483,7 +7503,7 @@ function CourtPanel({
                       </button>
                     </div>
                   </div>
-                  <div className="mt-2 text-sm text-slate-600">В инстанцию: {complaint.targetInstanceLabel}{complaint.filedAt ? ` · ${toRuDate(complaint.filedAt)}` : ''}</div>
+                  <div className="mt-2 text-sm text-slate-600">В инстанцию: {complaint.targetInstanceLabel}{complaint.filedAt ? ` · ${toRuDate(complaint.filedAt)}` : ''} · {complaint.filedBy === 'ours' ? 'Подана нашей стороной' : complaint.filedBy === 'opponent' ? 'Подана против нас' : 'Сторона подачи не указана'}</div>
                   {complaint.clientCaseDocumentId ? <div className="mt-1 text-sm text-slate-500">Документ #{complaint.clientCaseDocumentId}</div> : null}
                   {complaint.notes ? <div className="mt-2 text-sm text-slate-500">{complaint.notes}</div> : null}
                 </div>

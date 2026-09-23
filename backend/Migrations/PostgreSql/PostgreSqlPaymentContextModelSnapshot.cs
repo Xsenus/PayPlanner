@@ -1864,6 +1864,13 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<DateTime?>("FiledAt")
                         .HasColumnType("timestamp without time zone");
 
+                    b.Property<string>("FiledBy")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasDefaultValue("unknown");
+
                     b.Property<bool>("IsArchived")
                         .HasColumnType("boolean");
 

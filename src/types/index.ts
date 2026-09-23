@@ -912,6 +912,7 @@ export interface ClientCaseCourtComplaint {
   targetInstance: string;
   targetInstanceLabel: string;
   filedAt?: string | null;
+  filedBy: 'ours' | 'opponent' | 'unknown';
   status: string;
   statusLabel: string;
   clientCaseDocumentId?: number | null;
@@ -930,6 +931,7 @@ export interface UpsertClientCaseCourtComplaintPayload {
   title?: string;
   targetInstance?: string;
   filedAt?: string | null;
+  filedBy?: 'ours' | 'opponent' | 'unknown';
   status?: string;
   clientCaseDocumentId?: number | null;
   notes?: string;

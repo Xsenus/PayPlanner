@@ -1823,6 +1823,13 @@ namespace PayPlanner.Api.Migrations
                     b.Property<DateTime?>("FiledAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("FiledBy")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("unknown");
+
                     b.Property<bool>("IsArchived")
                         .HasColumnType("INTEGER");
 
