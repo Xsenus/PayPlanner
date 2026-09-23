@@ -79,15 +79,20 @@ public static class ClientCaseDeadlineTaskSyncService
             {
                 if (activeTask is not null && !ClosedTaskStatuses.Contains(activeTask.Status))
                 {
+                    var writReceived = deadline.Key == "writ-obtain" && clientCase.ExecutiveWritReceivedAt.HasValue;
                     var isCourtHearing = deadline.TaskType == "courtHearing";
-                    activeTask.Status = "cancelled";
-                    activeTask.Result = isCourtHearing
-                        ? "Судебное заседание отменено, перенесено или больше не активно."
-                        : "Срок удален из карточки дела.";
+                    activeTask.Status = writReceived ? "done" : "cancelled";
+                    activeTask.Result = writReceived
+                        ? $"Исполнительный лист получен {clientCase.ExecutiveWritReceivedAt!.Value:dd.MM.yyyy}."
+                        : isCourtHearing
+                            ? "Судебное заседание отменено, перенесено или больше не активно."
+                            : "Срок удален из карточки дела.";
                     activeTask.UpdatedAt = now;
-                    AddHistory(db, activeTask, actorUserId, normalizedActorName, isCourtHearing
-                        ? "Судебное заседание отменено, перенесено или завершено, связанная задача отменена."
-                        : "Срок удален из карточки дела, контрольная задача отменена.", now);
+                    AddHistory(db, activeTask, actorUserId, normalizedActorName, writReceived
+                        ? "Получение исполнительного листа отмечено в карточке дела, задача выполнена."
+                        : isCourtHearing
+                            ? "Судебное заседание отменено, перенесено или завершено, связанная задача отменена."
+                            : "Срок удален из карточки дела, контрольная задача отменена.", now);
                     taskJournalChanged = true;
                 }
 
@@ -111,6 +116,16 @@ public static class ClientCaseDeadlineTaskSyncService
                 && string.Equals(activeTask.Description, BuildDescription(clientCase, deadline), StringComparison.Ordinal))
             {
                 // Saving the same court decision must not recreate completed review work.
+                continue;
+            }
+            if (deadline.Key is "writ-obtain" or "writ-submit"
+                && activeTask?.Status == "done"
+                && activeTask.DueAt == dueAt
+                && !(deadline.Key == "writ-obtain"
+                    && !clientCase.ExecutiveWritReceivedAt.HasValue
+                    && activeTask.Result?.StartsWith("Исполнительный лист получен", StringComparison.Ordinal) == true))
+            {
+                // Repeated synchronization must not reopen a completed writ action.
                 continue;
             }
             var taskDeadline = deadline.TaskType == "courtHearing"
@@ -296,6 +311,28 @@ public static class ClientCaseDeadlineTaskSyncService
         };
 
         result.AddRange(legacyDeadlines.Where(item => !separateDeadlineTypes.Contains(item.Key)));
+        result.Add(new CaseDeadline(
+            "writ-obtain",
+            "Получить исполнительный лист",
+            clientCase.ExecutiveWritReceivedAt.HasValue
+                ? null
+                : clientCase.CourtDecisionEffectiveAt?.Date.AddDays(7),
+            true,
+            60,
+            "control",
+            "исполнительный-лист",
+            null,
+            null));
+        result.Add(new CaseDeadline(
+            "writ-submit",
+            "Подать исполнительный лист в ФССП или банк",
+            clientCase.ExecutiveWritReceivedAt?.Date.AddDays(5),
+            true,
+            60,
+            "control",
+            "исполнительный-лист",
+            null,
+            null));
         return result;
     }
 
@@ -360,6 +397,14 @@ public static class ClientCaseDeadlineTaskSyncService
         if (deadline.Title == AppealReviewTaskTitle && clientCase.CourtDecisionAt.HasValue)
         {
             parts.Add($"Решение вынесено {clientCase.CourtDecisionAt.Value:dd.MM.yyyy}. Оцените необходимость подачи жалобы до истечения срока обжалования.");
+        }
+        if (deadline.Key == "writ-obtain" && clientCase.CourtDecisionEffectiveAt.HasValue)
+        {
+            parts.Add($"Решение вступило в силу {clientCase.CourtDecisionEffectiveAt.Value:dd.MM.yyyy}. Получите исполнительный лист. Дата задачи — внутренний ориентир через 7 дней, не процессуальный срок.");
+        }
+        if (deadline.Key == "writ-submit" && clientCase.ExecutiveWritReceivedAt.HasValue)
+        {
+            parts.Add($"Исполнительный лист получен {clientCase.ExecutiveWritReceivedAt.Value:dd.MM.yyyy}. Подайте его в ФССП или банк. Дата задачи — внутренний ориентир через 5 дней, не процессуальный срок.");
         }
 
         if (deadline.CourtEvent is { } courtEvent)

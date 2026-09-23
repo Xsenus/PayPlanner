@@ -331,6 +331,8 @@ describe('CaseModal', () => {
     fireEvent.change(screen.getByLabelText('Контакты секретаря суда'), { target: { value: ' secretary@example.test ' } });
     fireEvent.change(screen.getByLabelText('Дата подачи заявления'), { target: { value: '2026-05-11' } });
     fireEvent.change(screen.getByLabelText('Дата решения суда'), { target: { value: '2026-04-01' } });
+    fireEvent.change(screen.getByLabelText('Дата вступления решения в силу'), { target: { value: '2026-05-06' } });
+    fireEvent.change(screen.getByLabelText('Дата получения исполнительного листа'), { target: { value: '2026-05-10' } });
     expect((screen.getByLabelText('Срок апелляции') as HTMLInputElement).value).toBe('2026-05-04');
     expect((screen.getByLabelText('Срок кассации') as HTMLInputElement).value).toBe('2026-07-01');
     fireEvent.change(screen.getByLabelText('Срок апелляции'), { target: { value: '2026-07-01' } });
@@ -364,6 +366,8 @@ describe('CaseModal', () => {
       courtroom: 'зал 12',
       courtSecretaryContacts: 'secretary@example.test',
       courtDecisionAt: '2026-04-01',
+      courtDecisionEffectiveAt: '2026-05-06',
+      executiveWritReceivedAt: '2026-05-10',
       cassationDeadlineAt: '2026-07-01',
       documentsSummary: 'Паспорт, договор',
       eventHistory: 'Заявление принято',

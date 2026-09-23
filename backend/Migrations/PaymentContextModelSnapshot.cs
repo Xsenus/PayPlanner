@@ -1302,6 +1302,9 @@ namespace PayPlanner.Api.Migrations
                     b.Property<DateTime?>("CourtDecisionAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTime?>("CourtDecisionEffectiveAt")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("CourtName")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -1380,6 +1383,9 @@ namespace PayPlanner.Api.Migrations
                     b.Property<string>("EventHistory")
                         .IsRequired()
                         .HasMaxLength(4000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("ExecutiveWritReceivedAt")
                         .HasColumnType("TEXT");
 
                     b.Property<decimal>("FeeAmount")

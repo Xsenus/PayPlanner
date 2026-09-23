@@ -1176,6 +1176,8 @@ describe('CaseDetailPage', () => {
 
     const titleInput = await screen.findByLabelText('Название дела');
     fireEvent.change(titleInput, { target: { value: 'ЗЕМЦОВ - обновленная карточка' } });
+    fireEvent.change(screen.getByLabelText('Дата вступления решения в силу'), { target: { value: '2026-10-01' } });
+    fireEvent.change(screen.getByLabelText('Дата получения исполнительного листа'), { target: { value: '2026-10-03' } });
     fireEvent.click(screen.getAllByRole('button', { name: /Сохранить дело/u }).at(-1) as HTMLElement);
 
     await waitFor(() => {
@@ -1183,6 +1185,8 @@ describe('CaseDetailPage', () => {
         15,
         expect.objectContaining({
           title: 'ЗЕМЦОВ - обновленная карточка',
+          courtDecisionEffectiveAt: '2026-10-01',
+          executiveWritReceivedAt: '2026-10-03',
           clientId: 12,
           legalEntityId: null,
           status: 'Open',
@@ -1190,6 +1194,30 @@ describe('CaseDetailPage', () => {
       );
     });
     expect(await screen.findByText('Карточка дела обновлена.')).toBeTruthy();
+  });
+
+  it('allows clearing both writ workflow dates in the full case editor', async () => {
+    vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({
+      courtDecisionEffectiveAt: '2026-10-01',
+      executiveWritReceivedAt: '2026-10-03',
+    }));
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+    expect(await screen.findByText('ЗЕМЦОВ - банкротство')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Редактировать дело' }));
+    fireEvent.change(screen.getByLabelText('Дата вступления решения в силу'), { target: { value: '' } });
+    fireEvent.change(screen.getByLabelText('Дата получения исполнительного листа'), { target: { value: '' } });
+    fireEvent.click(screen.getAllByRole('button', { name: /Сохранить дело/u }).at(-1) as HTMLElement);
+
+    await waitFor(() => {
+      expect(apiService.updateCaseV2).toHaveBeenCalledWith(
+        15,
+        expect.objectContaining({
+          courtDecisionEffectiveAt: null,
+          executiveWritReceivedAt: null,
+        }),
+      );
+    });
   });
 
   it('offers stage tasks and procedural deadlines after full case stage change', async () => {

@@ -91,6 +91,8 @@ public partial class CasesV2Controller : ControllerBase
         new("nextHearingAt", "Сроки", "Дата и время ближайшего заседания."),
         new("claimFiledAt", "Сроки", "Дата подачи заявления."),
         new("courtDecisionAt", "Сроки", "Дата судебного решения."),
+        new("courtDecisionEffectiveAt", "Сроки", "Дата вступления решения в силу, указанная сотрудником."),
+        new("executiveWritReceivedAt", "Сроки", "Дата получения исполнительного листа."),
         new("appealDeadlineAt", "Сроки", "Срок апелляции."),
         new("cassationDeadlineAt", "Сроки", "Срок кассации."),
         new("document.type", "Документ", "Тип формируемого документа."),
@@ -1178,6 +1180,8 @@ public partial class CasesV2Controller : ControllerBase
             CourtSecretaryContacts = item.CourtSecretaryContacts,
             ClaimFiledAt = item.ClaimFiledAt,
             CourtDecisionAt = item.CourtDecisionAt,
+            CourtDecisionEffectiveAt = item.CourtDecisionEffectiveAt,
+            ExecutiveWritReceivedAt = item.ExecutiveWritReceivedAt,
             AppealDeadlineAt = item.AppealDeadlineAt,
             CassationDeadlineAt = item.CassationDeadlineAt,
             MotionDeadlineAt = item.MotionDeadlineAt,
@@ -5555,6 +5559,8 @@ public partial class CasesV2Controller : ControllerBase
             (item.NextHearingAt.HasValue && item.NextHearingAt.Value >= range.FromInstantUtc && item.NextHearingAt.Value < range.ToInstantExclusiveUtc) ||
             (item.ClaimFiledAt.HasValue && item.ClaimFiledAt.Value >= range.FromDate && item.ClaimFiledAt.Value < range.ToDateExclusive) ||
             (item.CourtDecisionAt.HasValue && item.CourtDecisionAt.Value >= range.FromDate && item.CourtDecisionAt.Value < range.ToDateExclusive) ||
+            (item.CourtDecisionEffectiveAt.HasValue && item.CourtDecisionEffectiveAt.Value >= range.FromDate && item.CourtDecisionEffectiveAt.Value < range.ToDateExclusive) ||
+            (item.ExecutiveWritReceivedAt.HasValue && item.ExecutiveWritReceivedAt.Value >= range.FromDate && item.ExecutiveWritReceivedAt.Value < range.ToDateExclusive) ||
             (item.AppealDeadlineAt.HasValue && item.AppealDeadlineAt.Value >= range.FromDate && item.AppealDeadlineAt.Value < range.ToDateExclusive) ||
             (item.CassationDeadlineAt.HasValue && item.CassationDeadlineAt.Value >= range.FromDate && item.CassationDeadlineAt.Value < range.ToDateExclusive) ||
             (item.MotionDeadlineAt.HasValue && item.MotionDeadlineAt.Value >= range.FromDate && item.MotionDeadlineAt.Value < range.ToDateExclusive) ||
@@ -5582,7 +5588,7 @@ public partial class CasesV2Controller : ControllerBase
                 task.Status != "cancelled")));
 
         var cases = await caseQuery
-            .OrderBy(item => item.NextHearingAt ?? item.DueDate ?? item.AppealDeadlineAt ?? item.MotionDeadlineAt ?? item.ObjectionDeadlineAt ?? item.CourtDecisionAt ?? item.StartDate ?? DateTime.MaxValue)
+            .OrderBy(item => item.NextHearingAt ?? item.DueDate ?? item.AppealDeadlineAt ?? item.MotionDeadlineAt ?? item.ObjectionDeadlineAt ?? item.CourtDecisionAt ?? item.CourtDecisionEffectiveAt ?? item.ExecutiveWritReceivedAt ?? item.StartDate ?? DateTime.MaxValue)
             .ThenBy(item => item.Id)
             .Take(1000)
             .ToListAsync(ct);
@@ -5767,6 +5773,8 @@ public partial class CasesV2Controller : ControllerBase
 
         AddCaseCalendarEvent(events, clientCase, "court", "claim", "Подача иска", clientCase.ClaimFiledAt, true, range);
         AddCaseCalendarEvent(events, clientCase, "court", "decision", "Судебное решение", clientCase.CourtDecisionAt, true, range);
+        AddCaseCalendarEvent(events, clientCase, "court", "decision-effective", "Решение вступило в силу", clientCase.CourtDecisionEffectiveAt, true, range);
+        AddCaseCalendarEvent(events, clientCase, "court", "writ-received", "Исполнительный лист получен", clientCase.ExecutiveWritReceivedAt, true, range);
         AddLegacyProceduralCalendarEvent(events, clientCase, separateDeadlineTypes, "appeal", "Срок апелляции", clientCase.AppealDeadlineAt, range);
         AddLegacyProceduralCalendarEvent(events, clientCase, separateDeadlineTypes, "cassation", "Срок кассации", clientCase.CassationDeadlineAt, range);
         AddLegacyProceduralCalendarEvent(events, clientCase, separateDeadlineTypes, "motion", "Срок подачи ходатайства", clientCase.MotionDeadlineAt, range);
@@ -9928,6 +9936,8 @@ public partial class CasesV2Controller : ControllerBase
         target.CourtSecretaryContacts = source.CourtSecretaryContacts?.Trim() ?? string.Empty;
         target.ClaimFiledAt = source.ClaimFiledAt;
         target.CourtDecisionAt = source.CourtDecisionAt;
+        target.CourtDecisionEffectiveAt = source.CourtDecisionEffectiveAt;
+        target.ExecutiveWritReceivedAt = source.ExecutiveWritReceivedAt;
         target.AppealDeadlineAt = ResolveProceduralDeadline(
             source.AppealDeadlineAt,
             target.CourtDecisionAt,
@@ -11085,6 +11095,8 @@ public partial class CasesV2Controller : ControllerBase
         AppendTemplateRow(html, "Ближайшее заседание", FormatTemplateDateTime(clientCase.NextHearingAt, timeZone));
         AppendTemplateRow(html, "Дата подачи заявления", FormatTemplateDate(clientCase.ClaimFiledAt));
         AppendTemplateRow(html, "Дата решения суда", FormatTemplateDate(clientCase.CourtDecisionAt));
+        AppendTemplateRow(html, "Решение вступило в силу", FormatTemplateDate(clientCase.CourtDecisionEffectiveAt));
+        AppendTemplateRow(html, "Исполнительный лист получен", FormatTemplateDate(clientCase.ExecutiveWritReceivedAt));
         AppendTemplateRow(html, "Срок апелляции", FormatTemplateDate(clientCase.AppealDeadlineAt));
         AppendTemplateRow(html, "Срок кассации", FormatTemplateDate(clientCase.CassationDeadlineAt));
         html.AppendLine("    </table>");
@@ -11209,6 +11221,8 @@ public partial class CasesV2Controller : ControllerBase
             ["{{nextHearingAt}}"] = FormatTemplateDateTime(clientCase.NextHearingAt, timeZone),
             ["{{claimFiledAt}}"] = FormatTemplateDate(clientCase.ClaimFiledAt),
             ["{{courtDecisionAt}}"] = FormatTemplateDate(clientCase.CourtDecisionAt),
+            ["{{courtDecisionEffectiveAt}}"] = FormatTemplateDate(clientCase.CourtDecisionEffectiveAt),
+            ["{{executiveWritReceivedAt}}"] = FormatTemplateDate(clientCase.ExecutiveWritReceivedAt),
             ["{{appealDeadlineAt}}"] = FormatTemplateDate(clientCase.AppealDeadlineAt),
             ["{{cassationDeadlineAt}}"] = FormatTemplateDate(clientCase.CassationDeadlineAt),
             ["{{document.type}}"] = documentType,

@@ -3423,6 +3423,97 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task Update_PersistsManuallyConfirmedWritDates()
+    {
+        await using var db = await CreateContextAsync();
+        var lawyer = await CreateUserAsync(db, "writ-dates-lawyer@example.com", "Юрист");
+        var clientCase = new ClientCase
+        {
+            Client = new Client { Name = "Клиент", IsActive = true, ResponsibleUserId = lawyer.Id },
+            Title = "Исполнительный лист", Status = ClientCaseStatus.Open,
+            ResponsibleUserId = lawyer.Id,
+        };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        var effectiveAt = new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Utc);
+        var receivedAt = effectiveAt.AddDays(2);
+        var controller = CreateController(db, lawyer);
+
+        var result = await controller.Update(clientCase.Id, new ClientCase
+        {
+            ClientId = clientCase.ClientId, Title = clientCase.Title, Status = ClientCaseStatus.Open,
+            ResponsibleUserId = lawyer.Id, CourtDecisionEffectiveAt = effectiveAt,
+            ExecutiveWritReceivedAt = receivedAt,
+        }, CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(result);
+        await db.Entry(clientCase).ReloadAsync();
+        Assert.Equal(effectiveAt, clientCase.CourtDecisionEffectiveAt);
+        Assert.Equal(receivedAt, clientCase.ExecutiveWritReceivedAt);
+        var details = Assert.IsType<OkObjectResult>(await controller.GetById(clientCase.Id, CancellationToken.None));
+        var detailedCase = Assert.IsType<ClientCase>(details.Value);
+        Assert.Equal(effectiveAt, detailedCase.CourtDecisionEffectiveAt);
+        Assert.Equal(receivedAt, detailedCase.ExecutiveWritReceivedAt);
+    }
+
+    [Fact]
+    public async Task WritMilestones_CreateCompleteAndRescheduleLinkedTasksWithoutDuplicates()
+    {
+        await using var db = await CreateContextAsync();
+        var lawyer = await CreateUserAsync(db, "writ-workflow-lawyer@example.com", "Юрист");
+        var effectiveAt = new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Utc);
+        var clientCase = new ClientCase
+        {
+            Client = new Client { Name = "Клиент", IsActive = true, ResponsibleUserId = lawyer.Id },
+            Title = "Исполнительный лист", Status = ClientCaseStatus.Open,
+            ResponsibleUserId = lawyer.Id, CourtDecisionEffectiveAt = effectiveAt,
+        };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+
+        await ClientCaseDeadlineTaskSyncService.SyncAsync(db, clientCase.Id, lawyer.Id, lawyer.FullName, CancellationToken.None);
+        var obtain = await db.TaskJournalItems.SingleAsync(item => item.ClientCaseId == clientCase.Id);
+        Assert.Equal("Получить исполнительный лист", obtain.Title);
+        Assert.Equal(effectiveAt.AddDays(7).AddHours(9), obtain.DueAt);
+        Assert.Equal(lawyer.Id, obtain.AssigneeUserId);
+        Assert.Contains("не процессуальный срок", obtain.Description);
+        await ClientCaseDeadlineTaskSyncService.SyncAsync(db, clientCase.Id, lawyer.Id, lawyer.FullName, CancellationToken.None);
+        Assert.Equal(1, await db.TaskJournalItems.CountAsync(item => item.ClientCaseId == clientCase.Id));
+
+        clientCase.ExecutiveWritReceivedAt = effectiveAt.AddDays(2);
+        await db.SaveChangesAsync();
+        await ClientCaseDeadlineTaskSyncService.SyncAsync(db, clientCase.Id, lawyer.Id, lawyer.FullName, CancellationToken.None);
+        Assert.Equal("done", obtain.Status);
+        Assert.Contains("получен", obtain.Result);
+        var submit = await db.TaskJournalItems.SingleAsync(item => item.ClientCaseId == clientCase.Id && item.Title == "Подать исполнительный лист в ФССП или банк");
+        Assert.Equal(effectiveAt.AddDays(7).AddHours(9), submit.DueAt);
+        await ClientCaseDeadlineTaskSyncService.SyncAsync(db, clientCase.Id, lawyer.Id, lawyer.FullName, CancellationToken.None);
+        Assert.Equal(2, await db.TaskJournalItems.CountAsync(item => item.ClientCaseId == clientCase.Id));
+
+        submit.Status = "done";
+        await db.SaveChangesAsync();
+        await ClientCaseDeadlineTaskSyncService.SyncAsync(db, clientCase.Id, lawyer.Id, lawyer.FullName, CancellationToken.None);
+        Assert.Equal(2, await db.TaskJournalItems.CountAsync(item => item.ClientCaseId == clientCase.Id));
+
+        clientCase.ExecutiveWritReceivedAt = effectiveAt.AddDays(3);
+        await db.SaveChangesAsync();
+        await ClientCaseDeadlineTaskSyncService.SyncAsync(db, clientCase.Id, lawyer.Id, lawyer.FullName, CancellationToken.None);
+        var submitTasks = await db.TaskJournalItems.Where(item => item.ClientCaseId == clientCase.Id && item.Title == "Подать исполнительный лист в ФССП или банк").OrderBy(item => item.Id).ToListAsync();
+        Assert.Equal(2, submitTasks.Count);
+        Assert.Equal("done", submitTasks[0].Status);
+        Assert.Equal(effectiveAt.AddDays(8).AddHours(9), submitTasks[1].DueAt);
+
+        clientCase.ExecutiveWritReceivedAt = null;
+        await db.SaveChangesAsync();
+        await ClientCaseDeadlineTaskSyncService.SyncAsync(db, clientCase.Id, lawyer.Id, lawyer.FullName, CancellationToken.None);
+        Assert.Equal("cancelled", submitTasks[1].Status);
+        var obtainTasks = await db.TaskJournalItems.Where(item => item.ClientCaseId == clientCase.Id && item.Title == "Получить исполнительный лист").OrderBy(item => item.Id).ToListAsync();
+        Assert.Equal(2, obtainTasks.Count);
+        Assert.Equal("done", obtainTasks[0].Status);
+        Assert.Equal("new", obtainTasks[1].Status);
+    }
+
+    [Fact]
     public async Task Create_CalculatesProceduralDeadlinesWithRussianHolidays()
     {
         await using var db = await CreateContextAsync();

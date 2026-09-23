@@ -1337,6 +1337,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<DateTime?>("CourtDecisionAt")
                         .HasColumnType("timestamp without time zone");
 
+                    b.Property<DateTime?>("CourtDecisionEffectiveAt")
+                        .HasColumnType("timestamp without time zone");
+
                     b.Property<string>("CourtName")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -1416,6 +1419,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .IsRequired()
                         .HasMaxLength(4000)
                         .HasColumnType("character varying(4000)");
+
+                    b.Property<DateTime?>("ExecutiveWritReceivedAt")
+                        .HasColumnType("timestamp without time zone");
 
                     b.Property<decimal>("FeeAmount")
                         .HasPrecision(18, 2)

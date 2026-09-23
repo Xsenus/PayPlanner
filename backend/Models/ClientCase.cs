@@ -175,6 +175,17 @@ namespace PayPlanner.Api.Models
         public DateTime? CourtDecisionAt { get; set; }
 
         /// <summary>
+        /// Указанная сотрудником дата вступления судебного решения в силу.
+        /// Не вычисляется автоматически из даты решения.
+        /// </summary>
+        public DateTime? CourtDecisionEffectiveAt { get; set; }
+
+        /// <summary>
+        /// Указанная сотрудником дата фактического получения исполнительного листа.
+        /// </summary>
+        public DateTime? ExecutiveWritReceivedAt { get; set; }
+
+        /// <summary>
         /// Срок обжалования решения.
         /// </summary>
         public DateTime? AppealDeadlineAt { get; set; }

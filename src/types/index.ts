@@ -530,6 +530,8 @@ export interface ClientCase {
   courtSecretaryContacts?: string | null;
   claimFiledAt?: string | null;
   courtDecisionAt?: string | null;
+  courtDecisionEffectiveAt?: string | null;
+  executiveWritReceivedAt?: string | null;
   appealDeadlineAt?: string | null;
   cassationDeadlineAt?: string | null;
   motionDeadlineAt?: string | null;

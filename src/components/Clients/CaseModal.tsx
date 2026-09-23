@@ -280,6 +280,8 @@ export function CaseModal({
   const [courtSecretaryContacts, setCourtSecretaryContacts] = useState(caseData.courtSecretaryContacts ?? '');
   const [claimFiledAt, setClaimFiledAt] = useState(toDateInput(caseData.claimFiledAt));
   const [courtDecisionAt, setCourtDecisionAt] = useState(toDateInput(caseData.courtDecisionAt));
+  const [courtDecisionEffectiveAt, setCourtDecisionEffectiveAt] = useState(toDateInput(caseData.courtDecisionEffectiveAt));
+  const [executiveWritReceivedAt, setExecutiveWritReceivedAt] = useState(toDateInput(caseData.executiveWritReceivedAt));
   const [appealDeadlineAt, setAppealDeadlineAt] = useState(toDateInput(caseData.appealDeadlineAt));
   const [cassationDeadlineAt, setCassationDeadlineAt] = useState(toDateInput(caseData.cassationDeadlineAt));
   const [motionDeadlineAt, setMotionDeadlineAt] = useState(toDateInput(caseData.motionDeadlineAt));
@@ -396,6 +398,8 @@ export function CaseModal({
     setCourtSecretaryContacts(caseData.courtSecretaryContacts ?? '');
     setClaimFiledAt(toDateInput(caseData.claimFiledAt));
     setCourtDecisionAt(toDateInput(caseData.courtDecisionAt));
+    setCourtDecisionEffectiveAt(toDateInput(caseData.courtDecisionEffectiveAt));
+    setExecutiveWritReceivedAt(toDateInput(caseData.executiveWritReceivedAt));
     setAppealDeadlineAt(toDateInput(caseData.appealDeadlineAt));
     setCassationDeadlineAt(toDateInput(caseData.cassationDeadlineAt));
     setMotionDeadlineAt(toDateInput(caseData.motionDeadlineAt));
@@ -697,6 +701,8 @@ export function CaseModal({
         courtSecretaryContacts: courtSecretaryContacts.trim(),
         claimFiledAt: fromDateInput(claimFiledAt),
         courtDecisionAt: fromDateInput(courtDecisionAt),
+        courtDecisionEffectiveAt: fromDateInput(courtDecisionEffectiveAt),
+        executiveWritReceivedAt: fromDateInput(executiveWritReceivedAt),
         appealDeadlineAt: fromDateInput(appealDeadlineAt),
         cassationDeadlineAt: fromDateInput(cassationDeadlineAt),
         motionDeadlineAt: fromDateInput(motionDeadlineAt),
@@ -1577,6 +1583,31 @@ export function CaseModal({
               className="mt-1 w-full border rounded-lg px-3 py-2"
               value={courtDecisionAt}
               onChange={(e) => handleCourtDecisionChange(e.target.value)}
+              disabled={saving}
+            />
+          </div>
+
+          <div>
+            <label className="text-sm text-gray-600">Решение вступило в силу</label>
+            <SystemDateInput
+              aria-label="Дата вступления решения в силу"
+              type="date"
+              className="mt-1 w-full border rounded-lg px-3 py-2"
+              value={courtDecisionEffectiveAt}
+              onChange={(e) => setCourtDecisionEffectiveAt(e.target.value)}
+              disabled={saving}
+            />
+            <p className="mt-1 text-xs text-gray-500">Укажите подтверждённую дату. CRM не рассчитывает её автоматически.</p>
+          </div>
+
+          <div>
+            <label className="text-sm text-gray-600">Исполнительный лист получен</label>
+            <SystemDateInput
+              aria-label="Дата получения исполнительного листа"
+              type="date"
+              className="mt-1 w-full border rounded-lg px-3 py-2"
+              value={executiveWritReceivedAt}
+              onChange={(e) => setExecutiveWritReceivedAt(e.target.value)}
               disabled={saving}
             />
           </div>

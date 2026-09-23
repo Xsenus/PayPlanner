@@ -378,6 +378,8 @@ function buildCaseUpdatePayload(base: ClientCase, patch: Partial<ClientCase>): O
     courtSecretaryContacts: patch.courtSecretaryContacts ?? base.courtSecretaryContacts ?? '',
     claimFiledAt: patch.claimFiledAt ?? base.claimFiledAt ?? null,
     courtDecisionAt: patch.courtDecisionAt ?? base.courtDecisionAt ?? null,
+    courtDecisionEffectiveAt: patch.courtDecisionEffectiveAt !== undefined ? patch.courtDecisionEffectiveAt : base.courtDecisionEffectiveAt ?? null,
+    executiveWritReceivedAt: patch.executiveWritReceivedAt !== undefined ? patch.executiveWritReceivedAt : base.executiveWritReceivedAt ?? null,
     appealDeadlineAt: patch.appealDeadlineAt ?? base.appealDeadlineAt ?? null,
     cassationDeadlineAt: patch.cassationDeadlineAt ?? base.cassationDeadlineAt ?? null,
     motionDeadlineAt: patch.motionDeadlineAt ?? base.motionDeadlineAt ?? null,
