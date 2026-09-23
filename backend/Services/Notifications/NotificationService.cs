@@ -3029,6 +3029,76 @@ public sealed class NotificationService : INotificationService
         }
     }
 
+    public async Task NotifyCourtSyncStalledAsync(
+        ClientCase clientCase,
+        string providerName,
+        CancellationToken cancellationToken = default)
+    {
+        if (clientCase.Id <= 0
+            || !clientCase.CourtSyncMonitoringEnabled
+            || clientCase.CourtSyncFailureStartedAt is not { } failureStartedAt
+            || failureStartedAt > DateTime.UtcNow.AddHours(-24))
+        {
+            return;
+        }
+
+        var adminIds = await _context.Users
+            .AsNoTracking()
+            .Where(user => user.IsActive && user.IsApproved && user.Role != null && user.Role.Name == "admin")
+            .Select(user => user.Id)
+            .ToListAsync(cancellationToken);
+        var visibleAdminIds = await ResolveVisibleCaseNotificationRecipientIdsAsync(
+            clientCase,
+            adminIds,
+            actorUserId: null,
+            cancellationToken);
+        if (visibleAdminIds.Count == 0)
+        {
+            return;
+        }
+
+        var provider = NormalizeNotificationText(providerName, "судебный источник");
+        var title = $"Синхронизация с судом не работает более суток: {BuildClientCaseTitle(clientCase)}";
+        var body = $"Не удаётся обновить данные дела из источника «{provider}» с {failureStartedAt:dd.MM.yyyy HH:mm} UTC.\n"
+            + $"Последняя ошибка: {NormalizeNotificationText(clientCase.CourtSyncLastError, "Источник недоступен.")}\n"
+            + "Проверьте подключение и данные дела в CRM. После успешного обновления отсчёт сбоя начнётся заново.";
+        var message = new NotificationMessage(title, body, Purpose: NotificationPurposes.TaskReminder);
+        var eventKey = $"case:{clientCase.Id}:court-sync-stalled:{failureStartedAt.Ticks}";
+        var channelsByUserId = await ResolveUserNotificationChannelsAsync(
+            visibleAdminIds,
+            UserNotificationTypes.SystemAdminWarning,
+            [NotificationChannels.InApp, NotificationChannels.Toast, NotificationChannels.WebPush, NotificationChannels.Email],
+            cancellationToken);
+        var emailRecipientIds = visibleAdminIds
+            .Where(id => channelsByUserId[id].Contains(NotificationChannels.Email))
+            .ToArray();
+        var recipientsById = await ResolveRecipientsAsync(emailRecipientIds, cancellationToken);
+
+        foreach (var adminId in visibleAdminIds)
+        {
+            await CreateUserNotificationAsync(
+                adminId,
+                UserNotificationTypes.SystemAdminWarning,
+                eventKey,
+                title,
+                body,
+                "rose",
+                "case",
+                clientCase.Id,
+                null,
+                null,
+                new { clientCaseId = clientCase.Id, providerName = provider, failureStartedAt },
+                cancellationToken,
+                objectVisibilityValidated: true,
+                resolvedNotificationChannels: channelsByUserId[adminId]);
+
+            if (recipientsById.TryGetValue(adminId, out var recipient))
+            {
+                await SendAsync(recipient, message, [NotificationChannels.Email], eventKey, cancellationToken);
+            }
+        }
+    }
+
     public async Task<IReadOnlyList<NotificationDelivery>> NotifyCaseInactivityControlTaskCreatedAsync(
         TaskJournalItem task,
         int daysWithoutActiveTask,

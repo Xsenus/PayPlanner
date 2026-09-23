@@ -8150,9 +8150,15 @@ public class CasesV2ControllerTests
         Assert.Equal(clientCase.CourtSyncLastAttemptAt, clientCase.CourtSyncFailureStartedAt);
         Assert.Equal("Источник временно недоступен", clientCase.CourtSyncLastError);
 
+        owner.Role!.Name = "admin";
+        clientCase.CourtSyncFailureStartedAt = DateTime.UtcNow.AddHours(-25);
+        await db.SaveChangesAsync();
         var failureStartedAt = clientCase.CourtSyncFailureStartedAt;
         await controller.RunCourtSync(clientCase.Id, null, CancellationToken.None);
         Assert.Equal(failureStartedAt, clientCase.CourtSyncFailureStartedAt);
+        var adminWarning = await db.UserNotifications.SingleAsync(item => item.Type == UserNotificationTypes.SystemAdminWarning);
+        Assert.Equal(owner.Id, adminWarning.RecipientUserId);
+        Assert.Equal(clientCase.Id, adminWarning.ObjectId);
 
         var recoveredController = CreateController(db, owner,
             sudrfCourtSyncService: new FixedSudrfCourtSyncService(new SudrfCourtCaseData
@@ -8166,7 +8172,7 @@ public class CasesV2ControllerTests
         Assert.Equal(clientCase.CourtSyncLastAttemptAt, clientCase.CourtSyncLastSuccessAt);
         Assert.Empty(clientCase.CourtSyncLastError);
 
-        var notification = await db.UserNotifications.SingleAsync();
+        var notification = await db.UserNotifications.SingleAsync(item => item.Type == UserNotificationTypes.CourtSyncFailed);
         Assert.Equal(UserNotificationTypes.CourtSyncFailed, notification.Type);
         Assert.Equal(responsible.Id, notification.RecipientUserId);
         Assert.Equal("case", notification.ObjectType);

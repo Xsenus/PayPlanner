@@ -10237,5 +10237,8 @@ public class TasksControllerTests
 
         public Task NotifyCourtSyncFailedAsync(ClientCase clientCase, string providerName, string summary, string actorName, int actorUserId, IReadOnlyCollection<int> recipientUserIds, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
+
+        public Task NotifyCourtSyncStalledAsync(ClientCase clientCase, string providerName, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
     }
 }

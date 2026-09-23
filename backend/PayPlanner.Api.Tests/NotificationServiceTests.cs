@@ -6638,6 +6638,79 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyCourtSyncStalledAsync_NotifiesOnlyAdminsOncePerFailureSeries()
+    {
+        await using var db = await CreateContextAsync();
+        await SeedEmailSettingsAsync(db);
+        var adminRole = new Role { Name = "admin", Description = "Администратор" };
+        var employeeRole = new Role { Name = "user", Description = "Сотрудник" };
+        db.Roles.AddRange(adminRole, employeeRole);
+        await db.SaveChangesAsync();
+        var admin = new User
+        {
+            Email = "court-stalled-admin@example.com", FullName = "Администратор", PasswordHash = "hash",
+            RoleId = adminRole.Id, IsActive = true, IsApproved = true,
+            CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
+        };
+        var employee = new User
+        {
+            Email = "court-stalled-employee@example.com", FullName = "Сотрудник", PasswordHash = "hash",
+            RoleId = employeeRole.Id, IsActive = true, IsApproved = true,
+            CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
+        };
+        db.Users.AddRange(admin, employee);
+        await db.SaveChangesAsync();
+        var client = new Client { Name = "Клиент", IsActive = true, ResponsibleUserId = employee.Id };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+        var clientCase = new ClientCase
+        {
+            ClientId = client.Id, Title = "Судебное дело", CaseNumber = "CASE-STALLED-1",
+            Status = ClientCaseStatus.Open, ResponsibleUserId = employee.Id,
+            CourtSyncMonitoringEnabled = true,
+            CourtSyncFailureStartedAt = DateTime.UtcNow.AddHours(-25),
+            CourtSyncLastError = "Источник недоступен",
+        };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+
+        var email = new RecordingEmailService();
+        var service = CreateService(db, email, new RecordingTelegramService());
+        await service.NotifyCourtSyncStalledAsync(clientCase, "Судебный источник");
+        await service.NotifyCourtSyncStalledAsync(clientCase, "Судебный источник");
+
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal(admin.Id, notification.RecipientUserId);
+        Assert.Equal(UserNotificationTypes.SystemAdminWarning, notification.Type);
+        Assert.Equal("case", notification.ObjectType);
+        Assert.Equal(clientCase.Id, notification.ObjectId);
+        Assert.Contains("более суток", notification.Title);
+        Assert.Single(email.Messages);
+        Assert.Equal(admin.Email, email.Messages[0].To);
+
+        clientCase.CourtSyncFailureStartedAt = null;
+        await db.SaveChangesAsync();
+        await service.NotifyCourtSyncStalledAsync(clientCase, "Судебный источник");
+        Assert.Single(email.Messages);
+
+        clientCase.CourtSyncFailureStartedAt = DateTime.UtcNow.AddHours(-23);
+        await db.SaveChangesAsync();
+        await service.NotifyCourtSyncStalledAsync(clientCase, "Судебный источник");
+        Assert.Single(email.Messages);
+
+        clientCase.CourtSyncFailureStartedAt = DateTime.UtcNow.AddHours(-26);
+        await db.SaveChangesAsync();
+        await service.NotifyCourtSyncStalledAsync(clientCase, "Судебный источник");
+        Assert.Equal(2, await db.UserNotifications.CountAsync());
+        Assert.Equal(2, email.Messages.Count);
+
+        clientCase.CourtSyncMonitoringEnabled = false;
+        await service.NotifyCourtSyncStalledAsync(clientCase, "Судебный источник");
+        Assert.Equal(2, await db.UserNotifications.CountAsync());
+        Assert.Equal(2, email.Messages.Count);
+    }
+
+    [Fact]
     public async Task NotifyExternalCalendarSyncWarningAsync_NotifiesAdminsOnlyAndDeduplicates()
     {
         await using var db = await CreateContextAsync();

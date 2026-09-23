@@ -1566,6 +1566,13 @@ public partial class CasesV2Controller : ControllerBase
             return;
         }
 
+        if (clientCase.CourtSyncMonitoringEnabled
+            && clientCase.CourtSyncFailureStartedAt is { } failureStartedAt
+            && failureStartedAt <= DateTime.UtcNow.AddHours(-24))
+        {
+            await _notificationService.NotifyCourtSyncStalledAsync(clientCase, providerName, ct);
+        }
+
         var recipients = await ResolveCaseNotificationRecipientIdsAsync(clientCase.Id, ct);
         if (recipients.Count == 0)
         {
