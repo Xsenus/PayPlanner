@@ -34,6 +34,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Content Update="appsettings.Development.json;appsettings.Local*.json" CopyToPublishDirectory="Never" />
     <EmbeddedResource Include="Assets\Fonts\DejaVuSansCondensed.ttf">
       <LogicalName>PayPlanner.Fonts.DejaVuSansCondensed.ttf</LogicalName>
     </EmbeddedResource>

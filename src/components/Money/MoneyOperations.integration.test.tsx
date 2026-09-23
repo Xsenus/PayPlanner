@@ -1341,15 +1341,16 @@ describe('MoneyOperations integration', () => {
     expect(document.querySelector('datalist#money-operation-category-options-Bank option[value="Хозрасходы"]')).toBeTruthy();
 
     await user.selectOptions(screen.getByLabelText('Банковский счёт'), '102');
+    // A real paste event fills each text field with one controlled-form update.
     await user.clear(screen.getByLabelText('Поставщик'));
-    await user.type(screen.getByLabelText('Поставщик'), 'Новый поставщик');
+    await user.paste('Новый поставщик');
     await user.selectOptions(screen.getByLabelText('Ответственный'), '12');
     await user.clear(categoryInput as HTMLElement);
-    await user.type(categoryInput as HTMLElement, 'Хозрасходы');
+    await user.paste('Хозрасходы');
     await user.clear(screen.getByLabelText('Сумма, RUB'));
     await user.type(screen.getByLabelText('Сумма, RUB'), '1500');
     await user.clear(screen.getByLabelText(/^Назначение$/));
-    await user.type(screen.getByLabelText(/^Назначение$/), 'Оплата по договору');
+    await user.paste('Оплата по договору');
 
     const modalSaveButton = screen
       .getAllByRole('button', { name: 'Сохранить' })
