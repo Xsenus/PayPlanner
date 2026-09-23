@@ -539,6 +539,9 @@ export interface ClientCase {
   documentsSummary?: string | null;
   eventHistory?: string | null;
   strategy?: string | null;
+  positionReviewedAt?: string | null;
+  positionReviewedByUserId?: number | null;
+  positionReviewedByName?: string | null;
   incomeTotal?: number;
   incomePaid?: number;
   incomeOutstanding?: number;
@@ -623,6 +626,7 @@ export interface CourtTomorrowHearing {
   judgeName: string;
   courtroom: string;
   documentsPrepared: boolean;
+  positionReviewed: boolean;
 }
 
 export interface ExpiringCaseAppeal {

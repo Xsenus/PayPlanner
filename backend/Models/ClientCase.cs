@@ -220,6 +220,14 @@ namespace PayPlanner.Api.Models
         [MaxLength(4000)]
         public string Strategy { get; set; } = string.Empty;
 
+        /// <summary>
+        /// Explicit review of the current case position. Editing Strategy clears the review.
+        /// </summary>
+        public DateTime? PositionReviewedAt { get; set; }
+        public int? PositionReviewedByUserId { get; set; }
+        [MaxLength(256)]
+        public string PositionReviewedByName { get; set; } = string.Empty;
+
         [NotMapped]
         public int? AuditCreatedByUserId { get; set; }
 

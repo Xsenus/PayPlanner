@@ -1473,6 +1473,7 @@ export function CaseDetailPage({
   const [reloadToken, setReloadToken] = useState(0);
   const [creatingTask, setCreatingTask] = useState(false);
   const [savingHeader, setSavingHeader] = useState(false);
+  const [reviewingPosition, setReviewingPosition] = useState(false);
   const [requestingAccess, setRequestingAccess] = useState(false);
   const [generatingDocument, setGeneratingDocument] = useState(false);
   const [uploadingDocument, setUploadingDocument] = useState(false);
@@ -2460,6 +2461,22 @@ export function CaseDetailPage({
       setError(err instanceof Error ? err.message : 'Не удалось сохранить карточку дела.');
     } finally {
       setSavingCaseEdit(false);
+    }
+  };
+
+  const reviewPosition = async () => {
+    if (!caseItem || !canEdit || !caseItem.strategy?.trim()) return;
+    setReviewingPosition(true);
+    setError(null);
+    try {
+      const review = await apiService.reviewCasePosition(caseItem.id);
+      setCaseItem((current) => current?.id === caseItem.id ? { ...current, ...review } : current);
+      setNotice('Позиция по делу отмечена как проверенная.');
+      setReloadToken((value) => value + 1);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось подтвердить проверку позиции.');
+    } finally {
+      setReviewingPosition(false);
     }
   };
 
@@ -3952,6 +3969,20 @@ export function CaseDetailPage({
                 ['Судья', caseItem.judgeName || '—'],
               ]} />
               <TextBlock title="Стратегия" value={caseItem.strategy || 'Стратегия по делу пока не заполнена.'} />
+              <section className="rounded-xl border border-slate-200 bg-white p-3">
+                <h2 className="text-sm font-semibold text-slate-900">Проверка позиции по делу</h2>
+                <p className={`mt-1 text-xs ${caseItem.positionReviewedAt ? 'text-emerald-700' : 'text-amber-700'}`}>
+                  {caseItem.positionReviewedAt
+                    ? `Проверена ${formatRuDateTime(caseItem.positionReviewedAt)}${caseItem.positionReviewedByName ? ` · ${caseItem.positionReviewedByName}` : ''}`
+                    : caseItem.strategy?.trim() ? 'Позиция заполнена, но ещё не подтверждена.' : 'Сначала заполните позицию в режиме редактирования.'}
+                </p>
+                {canEdit && caseItem.status !== 'Closed' && caseItem.status !== 'Lost' && !caseItem.positionReviewedAt ? (
+                  <button type="button" onClick={() => void reviewPosition()} disabled={!caseItem.strategy?.trim() || reviewingPosition} className="mt-2 rounded-lg border border-blue-200 px-2.5 py-1.5 text-xs font-semibold text-blue-700 disabled:cursor-not-allowed disabled:opacity-50">
+                    {reviewingPosition ? 'Сохраняем…' : 'Подтвердить проверку позиции'}
+                  </button>
+                ) : null}
+                {caseItem.positionReviewedAt ? <p className="mt-1 text-xs text-slate-500">Если изменить текст позиции, подтверждение сбросится.</p> : null}
+              </section>
               <TextBlock title="Документы" value={caseItem.documentsSummary || 'Сводка документов пока не заполнена.'} />
             </div>
           ) : null}

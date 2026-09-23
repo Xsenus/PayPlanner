@@ -73,6 +73,37 @@ public class CasesControllerTests
     }
 
     [Fact]
+    public async Task LegacyCaseEdit_PreservesPositionReviewUntilPositionChanges()
+    {
+        await using var db = await CreateContextAsync();
+        var lawyer = await CreateUserAsync(db, "legacy-position@example.com");
+        var clientCase = await CreateCaseAsync(db, lawyer.Id, "Дело с проверенной позицией");
+        var reviewedAt = new DateTime(2026, 9, 23, 10, 0, 0, DateTimeKind.Utc);
+        clientCase.Strategy = "Первоначальная позиция";
+        clientCase.PositionReviewedAt = reviewedAt;
+        clientCase.PositionReviewedByUserId = lawyer.Id;
+        clientCase.PositionReviewedByName = "Юрист";
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, lawyer);
+
+        Assert.IsType<OkObjectResult>(await controller.Update(clientCase.Id, new ClientCase
+        {
+            ClientId = clientCase.ClientId, Title = clientCase.Title,
+            Status = ClientCaseStatus.Open, Strategy = clientCase.Strategy,
+        }, CancellationToken.None));
+        Assert.Equal(reviewedAt, clientCase.PositionReviewedAt);
+
+        Assert.IsType<OkObjectResult>(await controller.Update(clientCase.Id, new ClientCase
+        {
+            ClientId = clientCase.ClientId, Title = clientCase.Title,
+            Status = ClientCaseStatus.Open, Strategy = "Изменённая позиция",
+        }, CancellationToken.None));
+        Assert.Null(clientCase.PositionReviewedAt);
+        Assert.Null(clientCase.PositionReviewedByUserId);
+        Assert.Equal(string.Empty, clientCase.PositionReviewedByName);
+    }
+
+    [Fact]
     public async Task LegacyCases_ApplyObjectVisibilityAndDoNotReturnPayments()
     {
         await using var db = await CreateContextAsync();

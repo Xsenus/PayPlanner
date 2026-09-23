@@ -242,7 +242,14 @@ public class CasesController : ControllerBase
         target.ObjectionDeadlineAt = source.ObjectionDeadlineAt;
         target.DocumentsSummary = source.DocumentsSummary?.Trim() ?? string.Empty;
         target.EventHistory = source.EventHistory?.Trim() ?? string.Empty;
-        target.Strategy = source.Strategy?.Trim() ?? string.Empty;
+        var updatedStrategy = source.Strategy?.Trim() ?? string.Empty;
+        if (!string.Equals(target.Strategy, updatedStrategy, StringComparison.Ordinal))
+        {
+            target.PositionReviewedAt = null;
+            target.PositionReviewedByUserId = null;
+            target.PositionReviewedByName = string.Empty;
+        }
+        target.Strategy = updatedStrategy;
     }
 
     private static bool IsFinishedCaseStatus(ClientCaseStatus status)

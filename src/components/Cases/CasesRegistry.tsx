@@ -1991,6 +1991,10 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
           responsibles={responsibles}
           onClose={() => setEditingCase(null)}
           onSave={updateCase}
+          onPositionReviewed={(review) => {
+            setEditingCase((current) => current ? { ...current, ...review } : current);
+            setItems((current) => current.map((item) => item.id === editingCase.id ? { ...item, ...review } : item));
+          }}
           allowEdit={canEditCases}
           canViewFinance={canViewFinance}
           canUseContactRelatedParties={canViewClients}

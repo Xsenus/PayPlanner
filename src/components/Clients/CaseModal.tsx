@@ -17,6 +17,7 @@ interface CaseModalProps {
   onClose: () => void;
   caseData: ClientCase; // для create передаём «пустой» кейс
   onSave: (patch: Partial<ClientCase>) => Promise<void> | void;
+  onPositionReviewed?: (review: Pick<ClientCase, 'positionReviewedAt' | 'positionReviewedByUserId' | 'positionReviewedByName'>) => void;
   onDelete?: () => Promise<void> | void;
   responsibles?: ActResponsible[];
   overlayClassName?: string;
@@ -246,6 +247,7 @@ export function CaseModal({
   onClose,
   caseData,
   onSave,
+  onPositionReviewed,
   onDelete,
   responsibles = [],
   overlayClassName,
@@ -289,6 +291,12 @@ export function CaseModal({
   const [documentsSummary, setDocumentsSummary] = useState(caseData.documentsSummary ?? '');
   const [eventHistory, setEventHistory] = useState(caseData.eventHistory ?? '');
   const [strategy, setStrategy] = useState(caseData.strategy ?? '');
+  const [positionReview, setPositionReview] = useState({
+    positionReviewedAt: caseData.positionReviewedAt ?? null,
+    positionReviewedByUserId: caseData.positionReviewedByUserId ?? null,
+    positionReviewedByName: caseData.positionReviewedByName ?? '',
+  });
+  const [reviewingPosition, setReviewingPosition] = useState(false);
   const [caseDocuments, setCaseDocuments] = useState<ClientCaseDocument[]>([]);
   const [documentsLoading, setDocumentsLoading] = useState(false);
   const [documentsSaving, setDocumentsSaving] = useState(false);
@@ -407,6 +415,11 @@ export function CaseModal({
     setDocumentsSummary(caseData.documentsSummary ?? '');
     setEventHistory(caseData.eventHistory ?? '');
     setStrategy(caseData.strategy ?? '');
+    setPositionReview({
+      positionReviewedAt: caseData.positionReviewedAt ?? null,
+      positionReviewedByUserId: caseData.positionReviewedByUserId ?? null,
+      positionReviewedByName: caseData.positionReviewedByName ?? '',
+    });
     setDocumentsError(null);
     setCaseTasksError(null);
     setFinanceError(null);
@@ -660,6 +673,25 @@ export function CaseModal({
   const validate = (): string | null => {
     if (!title.trim()) return 'Введите название дела';
     return null;
+  };
+
+  const handleReviewPosition = async () => {
+    if (!allowEdit || !caseData.id || !strategy.trim() || positionReview.positionReviewedAt) return;
+    if (strategy.trim() !== (caseData.strategy ?? '').trim()) {
+      setError('Сначала сохраните изменённую позицию по делу.');
+      return;
+    }
+    setReviewingPosition(true);
+    setError(null);
+    try {
+      const review = await apiService.reviewCasePosition(caseData.id);
+      setPositionReview(review);
+      onPositionReviewed?.(review);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось подтвердить проверку позиции.');
+    } finally {
+      setReviewingPosition(false);
+    }
   };
 
   const handleSave = async () => {
@@ -1909,6 +1941,18 @@ export function CaseModal({
               placeholder="Позиция, риски, ближайшие шаги"
               disabled={saving}
             />
+            <p className="mt-1 text-xs text-gray-600">
+              {strategy.trim() !== (caseData.strategy ?? '').trim()
+                ? 'Позиция изменена: сохраните дело, прежняя отметка проверки будет сброшена.'
+                : positionReview.positionReviewedAt
+                  ? `Позиция проверена ${formatDocumentDate(positionReview.positionReviewedAt)}${positionReview.positionReviewedByName ? ` · ${positionReview.positionReviewedByName}` : ''}`
+                  : 'Позиция ещё не подтверждена.'}
+            </p>
+            {caseData.id > 0 && allowEdit && caseData.status !== 'Closed' && caseData.status !== 'Lost' && !positionReview.positionReviewedAt ? (
+              <button type="button" onClick={() => void handleReviewPosition()} disabled={saving || reviewingPosition || !strategy.trim() || strategy.trim() !== (caseData.strategy ?? '').trim()} className="mt-2 rounded-lg border border-blue-200 px-2.5 py-1.5 text-xs font-semibold text-blue-700 disabled:cursor-not-allowed disabled:opacity-50">
+                {reviewingPosition ? 'Сохраняем…' : 'Подтвердить проверку позиции'}
+              </button>
+            ) : null}
           </div>
           </div>
         </div>

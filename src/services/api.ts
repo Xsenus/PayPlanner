@@ -5847,6 +5847,12 @@ export class ApiService {
     return this.request<ClientCase>(`/v2/cases/${id}`);
   }
 
+  async reviewCasePosition(id: number) {
+    return this.request<{ positionReviewedAt: string; positionReviewedByUserId: number | null; positionReviewedByName: string }>(`/v2/cases/${id}/position-review`, {
+      method: 'POST',
+    });
+  }
+
   async updateCaseV2(id: number, model: Omit<ClientCase, 'id' | 'createdAt' | 'payments'>) {
     return this.request<ClientCase>(`/v2/cases/${id}`, { method: 'PUT', body: JSON.stringify(model) });
   }

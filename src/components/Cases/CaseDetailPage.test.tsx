@@ -15,6 +15,7 @@ vi.mock('../../services/api', () => ({
   apiService: {
     getCaseV2: vi.fn(),
     updateCaseV2: vi.fn(),
+    reviewCasePosition: vi.fn(),
     getActResponsibles: vi.fn(),
     getTaskJournalItems: vi.fn(),
     getCaseRelatedParties: vi.fn(),
@@ -235,6 +236,8 @@ describe('CaseDetailPage', () => {
     vi.mocked(apiService.getUserSetting).mockResolvedValue(null);
     vi.mocked(apiService.updateCaseV2).mockReset();
     vi.mocked(apiService.updateCaseV2).mockImplementation(async (id, payload) => createCase({ ...payload, id }));
+    vi.mocked(apiService.reviewCasePosition).mockReset();
+    vi.mocked(apiService.reviewCasePosition).mockResolvedValue({ positionReviewedAt: '2026-09-23T10:00:00Z', positionReviewedByUserId: 7, positionReviewedByName: 'Юрист' });
     vi.mocked(apiService.getActResponsibles).mockReset();
     vi.mocked(apiService.getActResponsibles).mockResolvedValue([
       { id: 7, fullName: 'Кожеваткин Андрей Владимирович' },
@@ -918,6 +921,26 @@ describe('CaseDetailPage', () => {
     });
     vi.mocked(apiService.deleteCaseRelatedParty).mockReset();
     vi.mocked(apiService.deleteCaseRelatedParty).mockResolvedValue(undefined);
+  });
+
+  it('confirms the saved position and refreshes its review mark', async () => {
+    let reviewed = false;
+    vi.mocked(apiService.getCaseV2).mockImplementation(async () => createCase(reviewed ? {
+      positionReviewedAt: '2026-09-23T10:00:00Z',
+      positionReviewedByUserId: 7,
+      positionReviewedByName: 'Юрист',
+    } : {}));
+    vi.mocked(apiService.reviewCasePosition).mockImplementation(async () => {
+      reviewed = true;
+      return { positionReviewedAt: '2026-09-23T10:00:00Z', positionReviewedByUserId: 7, positionReviewedByName: 'Юрист' };
+    });
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+
+    expect(await screen.findByText('Позиция заполнена, но ещё не подтверждена.')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Подтвердить проверку позиции' }));
+    await waitFor(() => expect(apiService.reviewCasePosition).toHaveBeenCalledWith(15));
+    expect(await screen.findByText(/Проверена.*Юрист/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Подтвердить проверку позиции' })).toBeNull();
   });
 
   it('keeps quick case settings in a wrapping responsive grid', async () => {

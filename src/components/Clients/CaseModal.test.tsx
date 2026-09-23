@@ -17,6 +17,7 @@ vi.mock('../../hooks/useDialog', () => ({
 vi.mock('../../services/api', () => ({
   apiService: {
     getCaseDocuments: vi.fn(),
+    reviewCasePosition: vi.fn(),
     getCaseDocumentTemplates: vi.fn(),
     getTaskJournalItems: vi.fn(),
     getClientCaseFinanceSummaries: vi.fn(),
@@ -56,6 +57,8 @@ describe('CaseModal', () => {
     dialogMock.prompt.mockResolvedValue(null);
     vi.mocked(apiService.getCaseDocuments).mockReset();
     vi.mocked(apiService.getCaseDocuments).mockResolvedValue([]);
+    vi.mocked(apiService.reviewCasePosition).mockReset();
+    vi.mocked(apiService.reviewCasePosition).mockResolvedValue({ positionReviewedAt: '2026-09-23T10:00:00Z', positionReviewedByUserId: 7, positionReviewedByName: 'Юрист' });
     vi.mocked(apiService.getTaskJournalItems).mockReset();
     vi.mocked(apiService.getTaskJournalItems).mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 25 });
     vi.mocked(apiService.getClientCaseFinanceSummaries).mockReset();
@@ -154,6 +157,25 @@ describe('CaseModal', () => {
     vi.mocked(apiService.downloadCaseDocument).mockResolvedValue({ blob: new Blob(['test']), fileName: 'file.pdf' });
     vi.mocked(apiService.deleteCaseDocument).mockReset();
     vi.mocked(apiService.deleteCaseDocument).mockResolvedValue(undefined);
+  });
+
+  it('confirms only a saved position and shows who checked it', async () => {
+    const onPositionReviewed = vi.fn();
+    render(<CaseModal isOpen onClose={vi.fn()} caseData={createCase({ strategy: 'Подать ходатайство' })} onSave={vi.fn()} onPositionReviewed={onPositionReviewed} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Подтвердить проверку позиции' }));
+    await waitFor(() => expect(apiService.reviewCasePosition).toHaveBeenCalledWith(1));
+    expect(onPositionReviewed).toHaveBeenCalledWith(expect.objectContaining({ positionReviewedByName: 'Юрист' }));
+    expect(screen.getByText(/Позиция проверена.*Юрист/)).toBeTruthy();
+  });
+
+  it('requires saving an edited position before confirming it', () => {
+    render(<CaseModal isOpen onClose={vi.fn()} caseData={createCase({ strategy: 'Исходная позиция' })} onSave={vi.fn()} />);
+
+    fireEvent.change(screen.getByLabelText('Стратегия и план действий'), { target: { value: 'Новая позиция' } });
+    expect(screen.getByText(/Позиция изменена: сохраните дело/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Подтвердить проверку позиции' }).hasAttribute('disabled')).toBe(true);
+    expect(apiService.reviewCasePosition).not.toHaveBeenCalled();
   });
 
   it('applies a custom overlay class when provided', () => {

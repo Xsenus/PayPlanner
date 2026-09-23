@@ -1461,6 +1461,17 @@ namespace PayPlanner.Api.Migrations
                     b.Property<DateTime?>("ObjectionDeadlineAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTime?>("PositionReviewedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PositionReviewedByName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("PositionReviewedByUserId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Priority")
                         .IsRequired()
                         .ValueGeneratedOnAdd()

@@ -95,6 +95,9 @@ export function TomorrowCourtHearingsDialog({ userId, enabled, onOpenCase, onOpe
                 <div className={`text-xs font-semibold ${hearing.documentsPrepared ? 'text-emerald-700' : 'text-amber-700'}`}>
                   {hearing.documentsPrepared ? 'Документы подготовлены' : 'Требуется внимание: завершите задачу «Подготовиться к заседанию» после проверки документов.'}
                 </div>
+                <div className={`text-xs font-semibold ${hearing.positionReviewed ? 'text-emerald-700' : 'text-amber-700'}`}>
+                  {hearing.positionReviewed ? 'Позиция по делу проверена' : 'Позиция по делу не проверена — откройте дело и подтвердите её после проверки.'}
+                </div>
               </div>
               <button type="button" onClick={() => { dismiss(); onOpenCase(hearing.caseId); }} className="inline-flex items-center justify-center gap-1 rounded-lg border border-blue-200 px-2.5 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-50">К делу <ArrowRight className="h-3.5 w-3.5" /></button>
             </div>

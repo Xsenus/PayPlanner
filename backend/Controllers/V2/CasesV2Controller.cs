@@ -627,6 +627,7 @@ public partial class CasesV2Controller : ControllerBase
                 CaseId = item.ClientCaseId,
                 CourtEventId = item.Id,
                 CaseTitle = item.ClientCase.Title,
+                PositionReviewed = item.ClientCase.PositionReviewedAt.HasValue,
                 HearingAt = item.ScheduledAt,
                 AllDay = item.AllDay,
                 CourtName = item.CourtName != "" ? item.CourtName : item.ClientCase.CourtName,
@@ -652,6 +653,7 @@ public partial class CasesV2Controller : ControllerBase
             {
                 CaseId = item.Id,
                 CaseTitle = item.Title,
+                PositionReviewed = item.PositionReviewedAt.HasValue,
                 HearingAt = item.NextHearingAt!.Value,
                 CourtName = item.CourtName,
                 JudgeName = item.JudgeName,
@@ -717,6 +719,7 @@ public partial class CasesV2Controller : ControllerBase
         public string JudgeName { get; init; } = string.Empty;
         public string Courtroom { get; init; } = string.Empty;
         public bool DocumentsPrepared { get; set; }
+        public bool PositionReviewed { get; init; }
     }
 
     [HttpGet("export.csv")]
@@ -1189,6 +1192,9 @@ public partial class CasesV2Controller : ControllerBase
             DocumentsSummary = item.DocumentsSummary,
             EventHistory = item.EventHistory,
             Strategy = item.Strategy,
+            PositionReviewedAt = item.PositionReviewedAt,
+            PositionReviewedByUserId = item.PositionReviewedByUserId,
+            PositionReviewedByName = item.PositionReviewedByName,
             LastViewedAt = item.LastViewedAt,
             LastViewedByUserId = item.LastViewedByUserId,
             LastViewedByUserName = item.LastViewedByUserName,
@@ -9987,7 +9993,14 @@ public partial class CasesV2Controller : ControllerBase
         target.ObjectionDeadlineAt = source.ObjectionDeadlineAt;
         target.DocumentsSummary = source.DocumentsSummary?.Trim() ?? string.Empty;
         target.EventHistory = source.EventHistory?.Trim() ?? string.Empty;
-        target.Strategy = source.Strategy?.Trim() ?? string.Empty;
+        var updatedStrategy = source.Strategy?.Trim() ?? string.Empty;
+        if (!string.Equals(target.Strategy, updatedStrategy, StringComparison.Ordinal))
+        {
+            target.PositionReviewedAt = null;
+            target.PositionReviewedByUserId = null;
+            target.PositionReviewedByName = string.Empty;
+        }
+        target.Strategy = updatedStrategy;
         target.InactivityRemindersEnabled = source.InactivityRemindersEnabled;
         target.InactivityRemindersDisabledReason = source.InactivityRemindersEnabled
             ? string.Empty

@@ -1496,6 +1496,17 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<DateTime?>("ObjectionDeadlineAt")
                         .HasColumnType("timestamp without time zone");
 
+                    b.Property<DateTime?>("PositionReviewedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("PositionReviewedByName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<int?>("PositionReviewedByUserId")
+                        .HasColumnType("integer");
+
                     b.Property<string>("Priority")
                         .IsRequired()
                         .ValueGeneratedOnAdd()

@@ -10994,6 +10994,10 @@ export function ClientDetail({
               caseMode === "edit" && editingCase ? editingCase : blankCaseDraft
             }
             onSave={saveCase}
+            onPositionReviewed={(review) => {
+              setEditingCase((current) => current ? { ...current, ...review } : current);
+              setCasesLocal((current) => (current ?? []).map((item) => item.id === editingCase?.id ? { ...item, ...review } : item));
+            }}
             onDelete={
               caseMode === "edit" && casePermissions.canDelete
                 ? deleteCase

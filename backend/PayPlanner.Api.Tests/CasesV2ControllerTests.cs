@@ -2970,6 +2970,10 @@ public class CasesV2ControllerTests
             Title = "Заседание по событию",
             Status = ClientCaseStatus.Open,
             ResponsibleUserId = lawyer.Id,
+            Strategy = "Позиция проверена по материалам дела",
+            PositionReviewedAt = new DateTime(2026, 9, 23, 10, 0, 0, DateTimeKind.Utc),
+            PositionReviewedByUserId = lawyer.Id,
+            PositionReviewedByName = lawyer.FullName,
             NextHearingAt = firstInstant.AddMinutes(10),
             CourtEvents =
             [
@@ -3043,7 +3047,9 @@ public class CasesV2ControllerTests
         Assert.Equal(cases[0].Id, rows[0].CaseId);
         Assert.Contains(rows, item => item.CaseId == eventCase.Id && item.CourtName == "Апелляционный суд" && item.JudgeName == "Судья события");
         Assert.True(rows.Single(item => item.CaseId == eventCase.Id).DocumentsPrepared);
+        Assert.True(rows.Single(item => item.CaseId == eventCase.Id).PositionReviewed);
         Assert.False(rows.Single(item => item.CaseId == cases[0].Id).DocumentsPrepared);
+        Assert.False(rows.Single(item => item.CaseId == cases[0].Id).PositionReviewed);
         Assert.True(rows.Single(item => item.CaseId == cases[1].Id).DocumentsPrepared);
         Assert.Equal(1, rows.Count(item => item.CaseId == eventCase.Id));
         Assert.DoesNotContain(rows, item => item.CaseId == hiddenCase.Id || item.CaseId == outsideCase.Id);
@@ -3108,6 +3114,54 @@ public class CasesV2ControllerTests
 
         var invalid = await CreateController(db, lawyer).GetTomorrowCourtHearings(DateOnly.MaxValue, CancellationToken.None);
         Assert.IsType<BadRequestObjectResult>(invalid.Result);
+    }
+
+    [Fact]
+    public async Task ReviewCasePosition_RequiresSavedPositionAndEditPermissionAndResetsAfterChange()
+    {
+        await using var db = await CreateContextAsync();
+        var lawyer = await CreateUserAsync(db, "position-lawyer@example.com", "Юрист");
+        var viewer = await CreateUserAsync(db, "position-viewer@example.com", "Наблюдатель", DataVisibilityScope.All);
+        var outsider = await CreateUserAsync(db, "position-outsider@example.com", "Другой юрист", DataVisibilityScope.Own);
+        await GrantSectionPermissionAsync(db, viewer, RolePermissionCatalog.Cases, canEdit: false);
+        var clientCase = new ClientCase
+        {
+            Client = new Client { Name = "Доверитель", IsActive = true, ResponsibleUserId = lawyer.Id },
+            Title = "Дело с позицией", Status = ClientCaseStatus.Open, ResponsibleUserId = lawyer.Id,
+        };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+
+        var lawyerController = CreateController(db, lawyer);
+        Assert.IsType<ConflictObjectResult>((await lawyerController.ReviewCasePosition(clientCase.Id, CancellationToken.None)).Result);
+        clientCase.Strategy = "Проверить доказательства и подготовить отзыв";
+        await db.SaveChangesAsync();
+        Assert.IsType<ForbidResult>((await CreateController(db, viewer).ReviewCasePosition(clientCase.Id, CancellationToken.None)).Result);
+        Assert.IsType<NotFoundResult>((await CreateController(db, outsider).ReviewCasePosition(clientCase.Id, CancellationToken.None)).Result);
+
+        var first = Assert.IsType<CasesV2Controller.CasePositionReviewDto>(
+            Assert.IsType<OkObjectResult>((await lawyerController.ReviewCasePosition(clientCase.Id, CancellationToken.None)).Result).Value);
+        var repeated = Assert.IsType<CasesV2Controller.CasePositionReviewDto>(
+            Assert.IsType<OkObjectResult>((await lawyerController.ReviewCasePosition(clientCase.Id, CancellationToken.None)).Result).Value);
+        Assert.Equal(first.PositionReviewedAt, repeated.PositionReviewedAt);
+        Assert.Equal(lawyer.Id, first.PositionReviewedByUserId);
+        Assert.Equal(lawyer.FullName, first.PositionReviewedByName);
+        Assert.Equal(1, clientCase.EventHistory.Split("Позиция по делу проверена", StringSplitOptions.None).Length - 1);
+
+        var update = await lawyerController.Update(clientCase.Id, new ClientCase
+        {
+            ClientId = clientCase.ClientId, Title = clientCase.Title, Status = ClientCaseStatus.Open,
+            ResponsibleUserId = lawyer.Id, Strategy = "Обновлённая позиция",
+        }, CancellationToken.None);
+        Assert.IsType<OkObjectResult>(update);
+        await db.Entry(clientCase).ReloadAsync();
+        Assert.Null(clientCase.PositionReviewedAt);
+        Assert.Null(clientCase.PositionReviewedByUserId);
+        Assert.Equal(string.Empty, clientCase.PositionReviewedByName);
+
+        clientCase.Status = ClientCaseStatus.Closed;
+        await db.SaveChangesAsync();
+        Assert.IsType<ConflictObjectResult>((await lawyerController.ReviewCasePosition(clientCase.Id, CancellationToken.None)).Result);
     }
 
     [Fact]

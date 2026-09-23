@@ -12,7 +12,7 @@ describe('TomorrowCourtHearingsDialog', () => {
     vi.clearAllMocks();
     window.localStorage.clear();
     apiMock.getTomorrowCourtHearings.mockResolvedValue([
-      { caseId: 24, caseTitle: 'Дело клиента', hearingAt: '2026-09-24T03:30:00Z', allDay: false, courtName: 'Районный суд', judgeName: 'Петрова', courtroom: '12', documentsPrepared: false },
+      { caseId: 24, caseTitle: 'Дело клиента', hearingAt: '2026-09-24T03:30:00Z', allDay: false, courtName: 'Районный суд', judgeName: 'Петрова', courtroom: '12', documentsPrepared: false, positionReviewed: false },
     ]);
   });
 
@@ -24,6 +24,7 @@ describe('TomorrowCourtHearingsDialog', () => {
     expect(screen.getByText('Дело клиента')).toBeTruthy();
     expect(screen.getByText(/Районный суд · Петрова · зал 12/)).toBeTruthy();
     expect(screen.getByText(/Требуется внимание/)).toBeTruthy();
+    expect(screen.getByText(/Позиция по делу не проверена/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /К делу/ }));
     expect(onOpenCase).toHaveBeenCalledWith(24);
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
@@ -31,10 +32,11 @@ describe('TomorrowCourtHearingsDialog', () => {
 
   it('shows preparation as complete only for a completed matching task', async () => {
     apiMock.getTomorrowCourtHearings.mockResolvedValueOnce([
-      { caseId: 24, caseTitle: 'Дело клиента', hearingAt: '2026-09-24T03:30:00Z', allDay: false, courtName: 'Районный суд', judgeName: '', courtroom: '', documentsPrepared: true },
+      { caseId: 24, caseTitle: 'Дело клиента', hearingAt: '2026-09-24T03:30:00Z', allDay: false, courtName: 'Районный суд', judgeName: '', courtroom: '', documentsPrepared: true, positionReviewed: true },
     ]);
     render(<TomorrowCourtHearingsDialog userId={3} enabled onOpenCase={vi.fn()} onOpenCalendar={vi.fn()} />);
     expect(await screen.findByText('Документы подготовлены')).toBeTruthy();
+    expect(screen.getByText('Позиция по делу проверена')).toBeTruthy();
     expect(screen.queryByText(/Требуется внимание/)).toBeNull();
   });
 
