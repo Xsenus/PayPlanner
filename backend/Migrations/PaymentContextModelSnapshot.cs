@@ -1954,6 +1954,24 @@ namespace PayPlanner.Api.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("HearingOutcome")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("HearingOutcomeNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("HearingOutcomeRecordedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("HearingOutcomeRecordedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("HearingOutcomeRecordedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
                     b.Property<bool>("IsDeleted")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER")

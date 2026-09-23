@@ -6618,6 +6618,13 @@ export class ApiService {
     });
   }
 
+  async recordCaseHearingOutcome(caseId: number, courtEventId: number, payload: { outcome: 'postponed' | 'considered' | 'interim'; note?: string }) {
+    return this.request<ClientCaseCourtEvent>(`/v2/cases/${caseId}/court-events/${courtEventId}/hearing-outcome`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
   async getCaseCourtEventHistory(caseId: number, courtEventId: number) {
     return this.request<ClientCaseCourtEventHistory[]>(`/v2/cases/${caseId}/court-events/${courtEventId}/history`);
   }

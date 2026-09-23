@@ -50,6 +50,7 @@ vi.mock('../../services/api', () => ({
     updateCaseCourtComplaint: vi.fn(),
     archiveCaseCourtComplaint: vi.fn(),
     getCaseCourtEvents: vi.fn(),
+    recordCaseHearingOutcome: vi.fn(),
     createCaseCourtEvent: vi.fn(),
     updateCaseCourtEvent: vi.fn(),
     getCaseCourtEventHistory: vi.fn(),
@@ -380,6 +381,7 @@ describe('CaseDetailPage', () => {
         isOverdue: false,
       },
     ]);
+    vi.mocked(apiService.recordCaseHearingOutcome).mockReset();
     vi.mocked(apiService.getCaseCourtDirectory).mockReset();
     vi.mocked(apiService.getCaseCourtDirectory).mockResolvedValue([
       {
@@ -1186,6 +1188,51 @@ describe('CaseDetailPage', () => {
         }),
       );
     });
+  });
+
+  it('records a hearing result from the court tab without editing the case', async () => {
+    const hearing = {
+      id: 41,
+      clientCaseId: 15,
+      eventType: 'hearing',
+      eventTypeLabel: 'Заседание',
+      title: 'Заседание с результатом',
+      scheduledAt: '2026-06-12T09:30:00Z',
+      allDay: false,
+      courtInstance: 'first',
+      courtInstanceLabel: 'Первая инстанция',
+      movementStatus: 'scheduled',
+      movementStatusLabel: 'Назначено',
+      sourceType: 'sudrf',
+      createdAt: '2026-05-21T00:00:00Z',
+      isOverdue: false,
+    } as const;
+    const savedHearing = {
+      ...hearing,
+      hearingOutcome: 'postponed',
+      hearingOutcomeNote: 'Назначат новую дату',
+      hearingOutcomeRecordedByUserName: 'Юрист',
+    } as const;
+    let currentHearing: typeof hearing | typeof savedHearing = hearing;
+    vi.mocked(apiService.getCaseCourtEvents).mockImplementation(async () => [currentHearing]);
+    vi.mocked(apiService.recordCaseHearingOutcome).mockImplementation(async () => {
+      currentHearing = savedHearing;
+      return savedHearing;
+    });
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Суд' }));
+    await screen.findByText('Заседание с результатом');
+    fireEvent.click(screen.getByRole('button', { name: 'Зафиксировать результат' }));
+    fireEvent.change(screen.getByLabelText('Результат заседания'), { target: { value: 'postponed' } });
+    fireEvent.change(screen.getByLabelText('Пояснение'), { target: { value: 'Назначат новую дату' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить итог' }));
+
+    await waitFor(() => expect(apiService.recordCaseHearingOutcome).toHaveBeenCalledWith(
+      15, 41, { outcome: 'postponed', note: 'Назначат новую дату' },
+    ));
+    expect(await screen.findByText('Итог юриста: отложено')).toBeTruthy();
   });
 
   it('opens full case editing from the detail header and saves changes', async () => {

@@ -791,6 +791,11 @@ export interface ClientCaseCourtEvent {
   movementStatus: string;
   movementStatusLabel: string;
   resultSummary?: string | null;
+  hearingOutcome?: 'postponed' | 'considered' | 'interim' | null;
+  hearingOutcomeNote?: string | null;
+  hearingOutcomeRecordedAt?: string | null;
+  hearingOutcomeRecordedByUserId?: number | null;
+  hearingOutcomeRecordedByUserName?: string | null;
   sourceType: string;
   sourceUrl?: string | null;
   sourceCheckedAt?: string | null;

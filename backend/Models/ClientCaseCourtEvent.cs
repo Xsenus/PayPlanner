@@ -49,6 +49,19 @@ public class ClientCaseCourtEvent
     [MaxLength(1000)]
     public string ResultSummary { get; set; } = string.Empty;
 
+    [MaxLength(32)]
+    public string? HearingOutcome { get; set; }
+
+    [MaxLength(1000)]
+    public string? HearingOutcomeNote { get; set; }
+
+    public DateTime? HearingOutcomeRecordedAt { get; set; }
+
+    public int? HearingOutcomeRecordedByUserId { get; set; }
+
+    [MaxLength(256)]
+    public string? HearingOutcomeRecordedByUserName { get; set; }
+
     [Required, MaxLength(64)]
     public string SourceType { get; set; } = "manual";
 

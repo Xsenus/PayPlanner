@@ -3059,6 +3059,22 @@ export function CaseDetailPage({
     }
   };
 
+  const recordHearingOutcome = async (courtEventId: number, outcome: 'postponed' | 'considered' | 'interim', note: string): Promise<boolean> => {
+    if (!caseItem || !canEdit) return false;
+    setError(null);
+    setNotice(null);
+    try {
+      const updated = await apiService.recordCaseHearingOutcome(caseItem.id, courtEventId, { outcome, note: note.trim() });
+      setCourtEvents((current) => current.map((item) => item.id === updated.id ? updated : item));
+      setNotice('Итог заседания сохранён. Открытая задача подготовки обновлена.');
+      setReloadToken((value) => value + 1);
+      return true;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось сохранить итог заседания.');
+      return false;
+    }
+  };
+
   const addCourtParty = async () => {
     if (!caseItem) return;
     if (!courtPartyNameDraft.trim()) {
@@ -4126,6 +4142,7 @@ export function CaseDetailPage({
               initialOverview={courtOverview}
               onOverviewChange={setCourtOverview}
               caseItem={caseItem}
+              canEdit={canEdit}
               timeZoneId={caseTimeZoneId}
               courtDirectory={courtDirectory}
               courtInstances={courtInstances}
@@ -4206,6 +4223,7 @@ export function CaseDetailPage({
               onCourtEventResultChange={setCourtEventResultDraft}
               onCourtEventDocumentIdChange={setCourtEventDocumentIdDraft}
               onAddCourtEvent={() => void addCourtEvent()}
+              onRecordHearingOutcome={recordHearingOutcome}
               onCourtPartyNameChange={setCourtPartyNameDraft}
               onCourtPartySideChange={setCourtPartySideDraft}
               onCourtPartyRoleChange={setCourtPartyRoleDraft}
@@ -6680,6 +6698,7 @@ function CourtPanel({
   initialOverview,
   onOverviewChange,
   caseItem,
+  canEdit,
   timeZoneId,
   courtDirectory,
   courtInstances,
@@ -6757,6 +6776,7 @@ function CourtPanel({
   onCourtEventResultChange,
   onCourtEventDocumentIdChange,
   onAddCourtEvent,
+  onRecordHearingOutcome,
   onCourtPartyNameChange,
   onCourtPartySideChange,
   onCourtPartyRoleChange,
@@ -6778,6 +6798,7 @@ function CourtPanel({
   initialOverview: boolean;
   onOverviewChange: (value: boolean) => void;
   caseItem: ClientCase;
+  canEdit: boolean;
   timeZoneId: string;
   courtDirectory: ClientCaseCourt[];
   courtInstances: ClientCaseCourtInstance[];
@@ -6855,6 +6876,7 @@ function CourtPanel({
   onCourtEventResultChange: (value: string) => void;
   onCourtEventDocumentIdChange: (value: string) => void;
   onAddCourtEvent: () => void;
+  onRecordHearingOutcome: (courtEventId: number, outcome: 'postponed' | 'considered' | 'interim', note: string) => Promise<boolean>;
   onCourtPartyNameChange: (value: string) => void;
   onCourtPartySideChange: (value: string) => void;
   onCourtPartyRoleChange: (value: string) => void;
@@ -6896,6 +6918,21 @@ function CourtPanel({
   const selectedArchivedCourtEventsCount = selectedCourtEvents.length - selectedActiveCourtEvents.length;
   const courtDirectoryForInstance = courtDirectory.filter((court) => court.instance === activeCourtInstance || (activeCourtInstance === 'supreme' && court.instance === 'supervision'));
   const [courtSafeModeExpanded, setCourtSafeModeExpanded] = useState(false);
+  const [editingHearingOutcomeId, setEditingHearingOutcomeId] = useState<number | null>(null);
+  const [hearingOutcomeDraft, setHearingOutcomeDraft] = useState<'postponed' | 'considered' | 'interim'>('considered');
+  const [hearingOutcomeNoteDraft, setHearingOutcomeNoteDraft] = useState('');
+  const [savingHearingOutcome, setSavingHearingOutcome] = useState(false);
+  const saveHearingOutcome = async () => {
+    if (editingHearingOutcomeId === null || savingHearingOutcome) return;
+    setSavingHearingOutcome(true);
+    try {
+      if (await onRecordHearingOutcome(editingHearingOutcomeId, hearingOutcomeDraft, hearingOutcomeNoteDraft)) {
+        setEditingHearingOutcomeId(null);
+      }
+    } finally {
+      setSavingHearingOutcome(false);
+    }
+  };
   const [courtEditMode, setCourtEditMode] = useState(!initialOverview);
   const changeCourtEditMode = (editing: boolean) => {
     setCourtEditMode(editing);
@@ -7677,6 +7714,37 @@ function CourtPanel({
                 {event.courtName ? <div className="mt-2 text-sm text-slate-500">{event.courtName}{event.courtCaseNumber ? ` · ${event.courtCaseNumber}` : ''}</div> : null}
                 {event.clientCaseDocumentId ? <div className="mt-2 text-sm text-slate-500">Документ #{event.clientCaseDocumentId}</div> : null}
                 {event.resultSummary ? <div className="mt-2 text-sm text-slate-500">{event.resultSummary}</div> : null}
+                {event.hearingOutcome ? (
+                  <div className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50 p-2 text-xs text-emerald-900">
+                    <div className="font-semibold">Итог юриста: {event.hearingOutcome === 'postponed' ? 'отложено' : event.hearingOutcome === 'considered' ? 'рассмотрено по существу' : 'промежуточное решение'}</div>
+                    {event.hearingOutcomeNote ? <div className="mt-1 whitespace-pre-wrap">{event.hearingOutcomeNote}</div> : null}
+                    {event.hearingOutcomeRecordedByUserName ? <div className="mt-1 text-emerald-700">Записал(а): {event.hearingOutcomeRecordedByUserName}</div> : null}
+                  </div>
+                ) : null}
+                {canEdit && event.eventType === 'hearing' ? (
+                  editingHearingOutcomeId === event.id ? (
+                    <div className="mt-3 space-y-2 rounded-lg border border-blue-200 bg-white p-2">
+                      <label className="block text-xs font-medium text-slate-700">Результат заседания
+                        <SystemSelect value={hearingOutcomeDraft} onChange={(change) => setHearingOutcomeDraft(change.target.value as 'postponed' | 'considered' | 'interim')} className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm">
+                          <option value="postponed">Отложено</option>
+                          <option value="considered">Рассмотрено по существу</option>
+                          <option value="interim">Принято промежуточное решение</option>
+                        </SystemSelect>
+                      </label>
+                      <label className="block text-xs font-medium text-slate-700">Пояснение
+                        <textarea value={hearingOutcomeNoteDraft} onChange={(change) => setHearingOutcomeNoteDraft(change.target.value)} maxLength={1000} rows={2} className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm" />
+                      </label>
+                      <div className="flex gap-2">
+                        <button type="button" onClick={() => void saveHearingOutcome()} disabled={savingHearingOutcome} className="rounded-lg bg-blue-600 px-2.5 py-1.5 text-xs font-semibold text-white disabled:opacity-50">{savingHearingOutcome ? 'Сохраняем…' : 'Сохранить итог'}</button>
+                        <button type="button" onClick={() => setEditingHearingOutcomeId(null)} disabled={savingHearingOutcome} className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs text-slate-600">Отмена</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button type="button" onClick={() => { setEditingHearingOutcomeId(event.id); setHearingOutcomeDraft(event.hearingOutcome ?? 'considered'); setHearingOutcomeNoteDraft(event.hearingOutcomeNote ?? ''); }} className="mt-2 rounded-lg border border-blue-200 px-2.5 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-50">
+                      {event.hearingOutcome ? 'Изменить итог' : 'Зафиксировать результат'}
+                    </button>
+                  )
+                ) : null}
                 <CourtSourceProvenance item={event} />
               </div>
             ))}

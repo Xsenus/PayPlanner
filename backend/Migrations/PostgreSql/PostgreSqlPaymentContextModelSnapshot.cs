@@ -1997,6 +1997,24 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
 
+                    b.Property<string>("HearingOutcome")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("HearingOutcomeNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateTime?>("HearingOutcomeRecordedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("HearingOutcomeRecordedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("HearingOutcomeRecordedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
                     b.Property<bool>("IsDeleted")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")

@@ -308,7 +308,8 @@ public static class ClientCaseDeadlineTaskSyncService
             .ToList();
         foreach (var courtEvent in hearingEvents)
         {
-            var isInactive = courtEvent.MovementStatus is CourtSyncNormalization.MovementStatuses.Held
+            var isInactive = courtEvent.HearingOutcome is not null
+                || courtEvent.MovementStatus is CourtSyncNormalization.MovementStatuses.Held
                 or CourtSyncNormalization.MovementStatuses.Postponed
                 or CourtSyncNormalization.MovementStatuses.Cancelled
                 or CourtSyncNormalization.MovementStatuses.Completed

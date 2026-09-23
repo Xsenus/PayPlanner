@@ -12587,6 +12587,11 @@ public partial class CasesV2Controller : ControllerBase
             MovementStatus = item.MovementStatus,
             MovementStatusLabel = ResolveCourtMovementStatusLabel(item.MovementStatus),
             ResultSummary = item.ResultSummary,
+            HearingOutcome = item.HearingOutcome,
+            HearingOutcomeNote = item.HearingOutcomeNote,
+            HearingOutcomeRecordedAt = item.HearingOutcomeRecordedAt,
+            HearingOutcomeRecordedByUserId = item.HearingOutcomeRecordedByUserId,
+            HearingOutcomeRecordedByUserName = item.HearingOutcomeRecordedByUserName,
             SourceType = item.SourceType,
             SourceUrl = item.SourceUrl,
             SourceCheckedAt = item.SourceCheckedAt.HasValue
@@ -12601,7 +12606,9 @@ public partial class CasesV2Controller : ControllerBase
             UpdatedAt = item.UpdatedAt,
             UpdatedByUserId = item.UpdatedByUserId,
             UpdatedByUserName = item.UpdatedByUserName,
-            IsOverdue = item.MovementStatus is not "held" and not "completed" and not "cancelled" and not "archived" && IsCaseStatusOverdue(item.ScheduledAt, item.AllDay, clock),
+            IsOverdue = item.HearingOutcome is null
+                && item.MovementStatus is not "held" and not "completed" and not "cancelled" and not "archived"
+                && IsCaseStatusOverdue(item.ScheduledAt, item.AllDay, clock),
         };
 
     private static bool IsCaseStatusOverdue(DateTime value, bool allDay, CaseStatusClock clock)
@@ -14705,6 +14712,11 @@ public partial class CasesV2Controller : ControllerBase
         public string MovementStatus { get; set; } = string.Empty;
         public string MovementStatusLabel { get; set; } = string.Empty;
         public string ResultSummary { get; set; } = string.Empty;
+        public string? HearingOutcome { get; set; }
+        public string? HearingOutcomeNote { get; set; }
+        public DateTime? HearingOutcomeRecordedAt { get; set; }
+        public int? HearingOutcomeRecordedByUserId { get; set; }
+        public string? HearingOutcomeRecordedByUserName { get; set; }
         public string SourceType { get; set; } = string.Empty;
         public string SourceUrl { get; set; } = string.Empty;
         public DateTime? SourceCheckedAt { get; set; }
