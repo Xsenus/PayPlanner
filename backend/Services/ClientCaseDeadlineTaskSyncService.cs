@@ -10,6 +10,7 @@ public static class ClientCaseDeadlineTaskSyncService
 {
     private const string DeadlineTag = "case-deadline";
     private const string AppealReviewTaskTitle = "Изучить решение, оценить обжалование";
+    private const string CassationReviewTaskTitle = "Оценить кассацию, подготовить жалобу";
     private const string RescheduledHearingTaskTitle = "Учесть новую дату, проверить готовность";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly HashSet<string> ClosedTaskStatuses = new(StringComparer.OrdinalIgnoreCase)
@@ -110,7 +111,7 @@ public static class ClientCaseDeadlineTaskSyncService
                 // The second comparison covers tasks completed before the deadline moved three days earlier.
                 continue;
             }
-            if (deadline.Title == AppealReviewTaskTitle
+            if (deadline.Title is AppealReviewTaskTitle or CassationReviewTaskTitle
                 && activeTask?.Status == "done"
                 && activeTask.DueAt == dueAt
                 && string.Equals(activeTask.Description, BuildDescription(clientCase, deadline), StringComparison.Ordinal))
@@ -255,6 +256,7 @@ public static class ClientCaseDeadlineTaskSyncService
 
         var result = new List<CaseDeadline>();
         var separateDeadlineTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var appealDecisionAt = FindAppealDecisionAt(clientCase);
         foreach (var deadline in clientCase.ProceduralDeadlines.OrderBy(item => item.DueAt).ThenBy(item => item.Id))
         {
             separateDeadlineTypes.Add(deadline.DeadlineType);
@@ -263,11 +265,7 @@ public static class ClientCaseDeadlineTaskSyncService
                 || string.Equals(deadline.Status, "archived", StringComparison.OrdinalIgnoreCase);
             result.Add(CreateDeadline(
                 $"entity-{deadline.Id}",
-                IsAppealReviewDue(clientCase.CourtDecisionAt, deadline.DueAt)
-                    && string.Equals(deadline.DeadlineType, "appeal", StringComparison.OrdinalIgnoreCase)
-                    && (string.IsNullOrWhiteSpace(deadline.Title) || string.Equals(deadline.Title.Trim(), "Срок апелляции", StringComparison.OrdinalIgnoreCase))
-                        ? AppealReviewTaskTitle
-                        : string.IsNullOrWhiteSpace(deadline.Title) ? ResolveDeadlineTitle(deadline.DeadlineType) : deadline.Title,
+                ResolveReviewTaskTitle(clientCase, deadline, appealDecisionAt),
                 isClosed ? null : deadline.DueAt,
                 deadline.AllDay,
                 deadline.AllDay ? 60 : 90,
@@ -304,7 +302,7 @@ public static class ClientCaseDeadlineTaskSyncService
             CreateDeadline("due", "Крайний срок по делу", clientCase.DueDate, true, 60),
             CreateDeadline("claim", "Дата подачи иска", clientCase.ClaimFiledAt, true, 60),
             CreateDeadline("appeal", IsAppealReviewDue(clientCase.CourtDecisionAt, clientCase.AppealDeadlineAt) ? AppealReviewTaskTitle : "Срок апелляции", clientCase.AppealDeadlineAt, true, 60),
-            CreateDeadline("cassation", "Срок кассации", clientCase.CassationDeadlineAt, true, 60),
+            CreateDeadline("cassation", IsCassationReviewDue(appealDecisionAt, clientCase.CassationDeadlineAt) ? CassationReviewTaskTitle : "Срок кассации", clientCase.CassationDeadlineAt, true, 60),
             CreateDeadline("motion", "Срок подачи ходатайства", clientCase.MotionDeadlineAt, true, 60),
             CreateDeadline("objection", "Срок подачи возражений", clientCase.ObjectionDeadlineAt, true, 60),
             CreateDeadline("hearing", "Судебное заседание", clientCase.NextHearingAt, false, 90, isHearing: true),
@@ -338,6 +336,40 @@ public static class ClientCaseDeadlineTaskSyncService
 
     private static bool IsAppealReviewDue(DateTime? decisionAt, DateTime? deadlineAt)
         => decisionAt.HasValue && deadlineAt.HasValue && deadlineAt.Value.Date >= decisionAt.Value.Date;
+
+    private static DateTime? FindAppealDecisionAt(ClientCase clientCase)
+        => clientCase.CourtEvents
+            .Where(item => item.EventType == CourtSyncNormalization.EventTypes.Decision
+                && item.CourtInstance == "appeal"
+                && item.MovementStatus is not CourtSyncNormalization.MovementStatuses.Cancelled
+                    and not CourtSyncNormalization.MovementStatuses.Archived
+                && item.ScheduledAt.Date <= DateTime.UtcNow.Date)
+            .Select(item => (DateTime?)item.ScheduledAt)
+            .OrderByDescending(item => item)
+            .FirstOrDefault();
+
+    private static bool IsCassationReviewDue(DateTime? appealDecisionAt, DateTime? deadlineAt)
+        => appealDecisionAt.HasValue && deadlineAt.HasValue && deadlineAt.Value.Date >= appealDecisionAt.Value.Date;
+
+    private static string ResolveReviewTaskTitle(ClientCase clientCase, ClientCaseProceduralDeadline deadline, DateTime? appealDecisionAt)
+    {
+        var defaultTitle = ResolveDeadlineTitle(deadline.DeadlineType);
+        if (!string.IsNullOrWhiteSpace(deadline.Title) && !string.Equals(deadline.Title.Trim(), defaultTitle, StringComparison.OrdinalIgnoreCase))
+        {
+            return deadline.Title;
+        }
+        if (string.Equals(deadline.DeadlineType, "appeal", StringComparison.OrdinalIgnoreCase)
+            && IsAppealReviewDue(clientCase.CourtDecisionAt, deadline.DueAt))
+        {
+            return AppealReviewTaskTitle;
+        }
+        if (string.Equals(deadline.DeadlineType, "cassation", StringComparison.OrdinalIgnoreCase)
+            && IsCassationReviewDue(appealDecisionAt, deadline.DueAt))
+        {
+            return CassationReviewTaskTitle;
+        }
+        return string.IsNullOrWhiteSpace(deadline.Title) ? defaultTitle : deadline.Title;
+    }
 
     private static CaseDeadline CreateDeadline(
         string key,
@@ -397,6 +429,10 @@ public static class ClientCaseDeadlineTaskSyncService
         if (deadline.Title == AppealReviewTaskTitle && clientCase.CourtDecisionAt.HasValue)
         {
             parts.Add($"Решение вынесено {clientCase.CourtDecisionAt.Value:dd.MM.yyyy}. Оцените необходимость подачи жалобы до истечения срока обжалования.");
+        }
+        if (deadline.Title == CassationReviewTaskTitle && FindAppealDecisionAt(clientCase) is { } appealDecisionAt)
+        {
+            parts.Add($"Решение апелляции вынесено {appealDecisionAt:dd.MM.yyyy}. Оцените необходимость кассации и подготовьте жалобу до истечения срока кассации.");
         }
         if (deadline.Key == "writ-obtain" && clientCase.CourtDecisionEffectiveAt.HasValue)
         {

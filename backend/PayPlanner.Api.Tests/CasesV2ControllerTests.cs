@@ -3512,6 +3512,107 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task AppealDecision_ChangesCassationDeadlineTaskWithoutDuplicatesOrOverwritingCustomTitle()
+    {
+        await using var db = await CreateContextAsync();
+        var lawyer = await CreateUserAsync(db, "cassation-review@example.com", "Юрист");
+        var deadlineAt = new DateTime(2026, 9, 30, 0, 0, 0, DateTimeKind.Utc);
+        var client = new Client { Name = "Клиент", IsActive = true, ResponsibleUserId = lawyer.Id };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Решение апелляции",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = lawyer.Id,
+            ProceduralDeadlines =
+            [
+                new ClientCaseProceduralDeadline
+                {
+                    DeadlineType = "cassation", Title = "Срок кассации", DueAt = deadlineAt,
+                },
+            ],
+        };
+        var customCase = new ClientCase
+        {
+            Client = client,
+            Title = "Особый срок кассации",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = lawyer.Id,
+            ProceduralDeadlines =
+            [
+                new ClientCaseProceduralDeadline
+                {
+                    DeadlineType = "cassation", Title = "Проверить материалы кассации", DueAt = deadlineAt,
+                },
+            ],
+            CourtEvents =
+            [
+                new ClientCaseCourtEvent
+                {
+                    EventType = "decision", CourtInstance = "appeal", MovementStatus = "completed",
+                    Title = "Постановление апелляции", ScheduledAt = new DateTime(2026, 9, 12, 0, 0, 0, DateTimeKind.Utc),
+                },
+            ],
+        };
+        var futureCase = new ClientCase
+        {
+            Client = client,
+            Title = "Будущее решение апелляции",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = lawyer.Id,
+            CassationDeadlineAt = DateTime.UtcNow.Date.AddDays(30),
+            CourtEvents =
+            [
+                new ClientCaseCourtEvent
+                {
+                    EventType = "decision", CourtInstance = "appeal", MovementStatus = "scheduled",
+                    Title = "Ожидаемое постановление", ScheduledAt = DateTime.UtcNow.Date.AddDays(2),
+                },
+            ],
+        };
+        db.ClientCases.AddRange(clientCase, customCase, futureCase);
+        await db.SaveChangesAsync();
+
+        await ClientCaseDeadlineTaskSyncService.SyncAsync(db, clientCase.Id, lawyer.Id, lawyer.FullName, CancellationToken.None);
+        var task = await db.TaskJournalItems.SingleAsync(item => item.ClientCaseId == clientCase.Id);
+        Assert.Equal("Срок кассации", task.Title);
+
+        var appealDecision = new ClientCaseCourtEvent
+        {
+            EventType = "decision", CourtInstance = "appeal", MovementStatus = "completed",
+            Title = "Постановление апелляции", ScheduledAt = new DateTime(2026, 9, 10, 0, 0, 0, DateTimeKind.Utc),
+        };
+        clientCase.CourtEvents.Add(appealDecision);
+        await db.SaveChangesAsync();
+        await ClientCaseDeadlineTaskSyncService.SyncAsync(db, clientCase.Id, lawyer.Id, lawyer.FullName, CancellationToken.None);
+        Assert.Equal("Оценить кассацию, подготовить жалобу", task.Title);
+        Assert.Equal(deadlineAt.AddHours(9), task.DueAt);
+        Assert.Equal(lawyer.Id, task.AssigneeUserId);
+        Assert.Contains("Решение апелляции вынесено 10.09.2026", task.Description);
+
+        task.Status = "done";
+        await db.SaveChangesAsync();
+        await ClientCaseDeadlineTaskSyncService.SyncAsync(db, clientCase.Id, lawyer.Id, lawyer.FullName, CancellationToken.None);
+        Assert.Equal(1, await db.TaskJournalItems.CountAsync(item => item.ClientCaseId == clientCase.Id));
+
+        appealDecision.ScheduledAt = appealDecision.ScheduledAt.AddDays(1);
+        await db.SaveChangesAsync();
+        await ClientCaseDeadlineTaskSyncService.SyncAsync(db, clientCase.Id, lawyer.Id, lawyer.FullName, CancellationToken.None);
+        var tasks = await db.TaskJournalItems.Where(item => item.ClientCaseId == clientCase.Id).OrderBy(item => item.Id).ToListAsync();
+        Assert.Equal(2, tasks.Count);
+        Assert.Equal("done", tasks[0].Status);
+        Assert.Contains("Решение апелляции вынесено 11.09.2026", tasks[1].Description);
+
+        await ClientCaseDeadlineTaskSyncService.SyncAsync(db, customCase.Id, lawyer.Id, lawyer.FullName, CancellationToken.None);
+        var customTask = await db.TaskJournalItems.SingleAsync(item => item.ClientCaseId == customCase.Id);
+        Assert.Equal("Проверить материалы кассации", customTask.Title);
+
+        await ClientCaseDeadlineTaskSyncService.SyncAsync(db, futureCase.Id, lawyer.Id, lawyer.FullName, CancellationToken.None);
+        var futureTask = await db.TaskJournalItems.SingleAsync(item => item.ClientCaseId == futureCase.Id);
+        Assert.Equal("Срок кассации", futureTask.Title);
+    }
+
+    [Fact]
     public async Task Update_PersistsManuallyConfirmedWritDates()
     {
         await using var db = await CreateContextAsync();
