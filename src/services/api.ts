@@ -5952,6 +5952,21 @@ export class ApiService {
     });
   }
 
+  async getCourtReportOverview(params?: {
+    search?: string;
+    responsibleUserId?: number;
+    caseType?: string;
+    courtState?: string;
+    courtInstance?: string;
+    from?: string;
+    toExclusive?: string;
+  }, options?: { signal?: AbortSignal }) {
+    const q = buildQuery(params ?? {});
+    return this.request<CourtReportOverview>(`/v2/cases/court-report-overview${q}`, {
+      signal: options?.signal,
+    });
+  }
+
   async getCourtWorkload(caseId?: number, options?: { signal?: AbortSignal }) {
     const q = buildQuery(caseId ? { caseId } : {});
     return this.request<CourtWorkload[]>(`/v2/cases/court-workload${q}`, { signal: options?.signal });
@@ -8600,6 +8615,7 @@ import type {
   MonthlyStats,
   ClientCase,
   CourtCasesRegistrySummary,
+  CourtReportOverview,
   CourtWorkload,
   CourtTomorrowHearing,
   ExpiringCaseAppeal,

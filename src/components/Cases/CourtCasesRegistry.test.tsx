@@ -9,6 +9,7 @@ vi.mock('../../services/api', () => ({
   apiService: {
     getCasesV2: vi.fn(),
     getCourtCasesRegistrySummary: vi.fn(),
+    getCourtReportOverview: vi.fn(),
     getActResponsibles: vi.fn(),
     getCourtSyncProviders: vi.fn(),
     getCourtSyncHealth: vi.fn(),
@@ -48,6 +49,7 @@ describe('CourtCasesRegistry', () => {
   beforeEach(() => {
     vi.mocked(apiService.getCasesV2).mockReset();
     vi.mocked(apiService.getCourtCasesRegistrySummary).mockReset();
+    vi.mocked(apiService.getCourtReportOverview).mockReset();
     vi.mocked(apiService.getActResponsibles).mockReset();
     vi.mocked(apiService.getCourtSyncProviders).mockReset();
     vi.mocked(apiService.getCourtSyncHealth).mockReset();
@@ -63,6 +65,27 @@ describe('CourtCasesRegistry', () => {
       withoutHearing: 0,
       underControl: 1,
     });
+    vi.mocked(apiService.getCourtReportOverview).mockResolvedValue({ total: 2, active: 1, completed: 1, byResponsible: [{ name: 'Петров Пётр Петрович', total: 2, active: 1, completed: 1 }], byCourt: [{ name: 'Новокуйбышевский городской суд', total: 2, active: 1, completed: 1 }], otherResponsibleCases: 0, otherCourtCases: 0 });
+  });
+
+  it('loads the court report only when opened and shows CRM completion separately from court outcome', async () => {
+    render(<CourtCasesRegistry onOpenCaseCourt={vi.fn()} />);
+    await screen.findByText('ИВАНОВ — РАЗДЕЛ ИМУЩЕСТВА');
+    expect(apiService.getCourtReportOverview).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Сводка по делам' }));
+    expect(await screen.findByRole('dialog', { name: 'Сводка судебных дел' })).toBeTruthy();
+    expect(await screen.findByText(/не выигрыш в суде/u)).toBeTruthy();
+    expect(apiService.getCourtReportOverview).toHaveBeenCalledWith(
+      expect.objectContaining({ courtState: 'all' }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    fireEvent.change(screen.getByLabelText('Дела созданы с'), { target: { value: '2026-09-02' } });
+    fireEvent.change(screen.getByLabelText('Дела созданы по'), { target: { value: '2026-09-02' } });
+    await waitFor(() => expect(apiService.getCourtReportOverview).toHaveBeenLastCalledWith(
+      expect.objectContaining({ from: '2026-09-01T17:00:00.000Z', toExclusive: '2026-09-02T17:00:00.000Z' }),
+      expect.any(Object),
+    ));
   });
 
   it('shows a complete court card and opens the court tab', async () => {

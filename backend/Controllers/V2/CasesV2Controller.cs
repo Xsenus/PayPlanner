@@ -414,6 +414,107 @@ public partial class CasesV2Controller : ControllerBase
         });
     }
 
+    public sealed record CourtReportGroupDto(string Name, int Total, int Active, int Completed);
+
+    public sealed record CourtReportOverviewDto(
+        int Total,
+        int Active,
+        int Completed,
+        IReadOnlyList<CourtReportGroupDto> ByResponsible,
+        IReadOnlyList<CourtReportGroupDto> ByCourt,
+        int OtherResponsibleCases,
+        int OtherCourtCases);
+
+    [HttpGet("court-report-overview")]
+    public async Task<ActionResult<CourtReportOverviewDto>> GetCourtReportOverview(
+        [FromQuery] string? search = null,
+        [FromQuery] int? responsibleUserId = null,
+        [FromQuery] string? caseType = null,
+        [FromQuery] string? courtState = null,
+        [FromQuery] string? courtInstance = null,
+        [FromQuery] DateTime? from = null,
+        [FromQuery] DateTime? toExclusive = null,
+        CancellationToken ct = default)
+    {
+        var visibility = await ResolveCasesVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return MissingCasesVisibilityResult();
+        }
+
+        if (from.HasValue && toExclusive.HasValue && from.Value >= toExclusive.Value)
+        {
+            return BadRequest("Дата начала не может быть позже даты окончания.");
+        }
+
+        var query = BuildRegistryQuery(
+            visibility, null, null, null, search, responsibleUserId, caseType,
+            null, null, null, null, null, null, null, "all", null, null);
+        query = ApplyCourtRegistryFilters(query, courtOnly: true, courtState, courtInstance, DateTime.UtcNow);
+        if (from.HasValue)
+        {
+            query = query.Where(item => item.CreatedAt >= from.Value);
+        }
+        if (toExclusive.HasValue)
+        {
+            query = query.Where(item => item.CreatedAt < toExclusive.Value);
+        }
+
+        const int maxGroups = 50;
+        var totals = await query.GroupBy(_ => 1).Select(group => new
+        {
+            Total = group.Count(),
+            Active = group.Count(item => item.Status == ClientCaseStatus.Open || item.Status == ClientCaseStatus.OnHold),
+        }).SingleOrDefaultAsync(ct);
+
+        var responsibleRows = await query
+            .GroupBy(item => item.ResponsibleUserId
+                ?? (item.Client != null ? item.Client.ResponsibleUserId : null)
+                ?? (item.LegalEntity != null ? item.LegalEntity.ResponsibleUserId : null))
+            .Select(group => new
+            {
+                UserId = group.Key,
+                Total = group.Count(),
+                Active = group.Count(item => item.Status == ClientCaseStatus.Open || item.Status == ClientCaseStatus.OnHold),
+            })
+            .OrderByDescending(row => row.Total)
+            .ThenBy(row => row.UserId)
+            .Take(maxGroups)
+            .ToListAsync(ct);
+
+        var courtRows = await query
+            .GroupBy(item => item.CourtName == null || item.CourtName == "" ? "Суд не указан" : item.CourtName)
+            .Select(group => new
+            {
+                Name = group.Key,
+                Total = group.Count(),
+                Active = group.Count(item => item.Status == ClientCaseStatus.Open || item.Status == ClientCaseStatus.OnHold),
+            })
+            .OrderByDescending(row => row.Total)
+            .ThenBy(row => row.Name)
+            .Take(maxGroups)
+            .ToListAsync(ct);
+
+        var userIds = responsibleRows.Where(row => row.UserId.HasValue).Select(row => row.UserId!.Value).ToArray();
+        var userNames = await _db.Users.AsNoTracking()
+            .Where(user => userIds.Contains(user.Id))
+            .Select(user => new { user.Id, user.FullName })
+            .ToDictionaryAsync(user => user.Id, user => user.FullName, ct);
+
+        var total = totals?.Total ?? 0;
+        var active = totals?.Active ?? 0;
+        return new CourtReportOverviewDto(
+            total,
+            active,
+            total - active,
+            responsibleRows.Select(row => new CourtReportGroupDto(
+                row.UserId.HasValue ? userNames.GetValueOrDefault(row.UserId.Value, "Сотрудник не найден") : "Не назначен",
+                row.Total, row.Active, row.Total - row.Active)).ToArray(),
+            courtRows.Select(row => new CourtReportGroupDto(row.Name, row.Total, row.Active, row.Total - row.Active)).ToArray(),
+            total - responsibleRows.Sum(row => row.Total),
+            total - courtRows.Sum(row => row.Total));
+    }
+
     [HttpGet("court-workload")]
     public async Task<IActionResult> GetCourtWorkload([FromQuery] int? caseId, CancellationToken ct = default)
     {

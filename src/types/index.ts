@@ -613,6 +613,23 @@ export interface CourtCasesRegistrySummary {
   categories?: Array<{ name: string; count: number }>;
 }
 
+export interface CourtReportOverview {
+  total: number;
+  active: number;
+  completed: number;
+  byResponsible: CourtReportGroup[];
+  byCourt: CourtReportGroup[];
+  otherResponsibleCases: number;
+  otherCourtCases: number;
+}
+
+export interface CourtReportGroup {
+  name: string;
+  total: number;
+  active: number;
+  completed: number;
+}
+
 export interface CourtWorkload {
   userId: number;
   userName: string;

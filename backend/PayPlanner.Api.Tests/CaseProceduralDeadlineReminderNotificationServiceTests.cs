@@ -293,6 +293,13 @@ public class CaseProceduralDeadlineReminderNotificationServiceTests
             };
             db.Users.Add(user);
             await db.SaveChangesAsync();
+            db.UserSettings.Add(new UserSetting
+            {
+                UserId = user.Id,
+                Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+                Value = "UTC",
+            });
+            await db.SaveChangesAsync();
             var client = new Client { Name = "Клиент", IsActive = true, ResponsibleUserId = user.Id };
             db.Clients.Add(client);
             await db.SaveChangesAsync();

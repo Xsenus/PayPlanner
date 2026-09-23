@@ -2750,6 +2750,44 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task CourtReportOverview_AggregatesOnlyVisibleCourtCasesAndFiltersCreationPeriod()
+    {
+        await using var db = await CreateContextAsync();
+        var manager = await CreateUserAsync(db, "court-report-manager@example.com", "Руководитель", DataVisibilityScope.All);
+        var lawyer = await CreateUserAsync(db, "court-report-lawyer@example.com", "Юрист");
+        var outsider = await CreateUserAsync(db, "court-report-outsider@example.com", "Другой юрист");
+        db.ClientCases.AddRange(
+            new ClientCase { Client = new Client { Name = "Клиент 1", IsActive = true, ResponsibleUserId = lawyer.Id }, Title = "Активное судебное дело", ResponsibleUserId = lawyer.Id, CourtName = "Суд А", Status = ClientCaseStatus.Open, CreatedAt = new DateTime(2026, 9, 1, 12, 0, 0, DateTimeKind.Utc) },
+            new ClientCase { Client = new Client { Name = "Клиент 2", IsActive = true, ResponsibleUserId = lawyer.Id }, Title = "Завершённое судебное дело", ResponsibleUserId = lawyer.Id, CourtName = "Суд А", Status = ClientCaseStatus.Closed, CreatedAt = new DateTime(2026, 9, 2, 12, 0, 0, DateTimeKind.Utc) },
+            new ClientCase { Client = new Client { Name = "Клиент с назначенным юристом", IsActive = true, ResponsibleUserId = lawyer.Id }, Title = "Судебное дело без отдельного исполнителя", CourtName = "Суд А", Status = ClientCaseStatus.Open, CreatedAt = new DateTime(2026, 9, 2, 12, 0, 0, DateTimeKind.Utc) },
+            new ClientCase { Client = new Client { Name = "Клиент 3", IsActive = true, ResponsibleUserId = outsider.Id }, Title = "Чужое судебное дело", ResponsibleUserId = outsider.Id, CourtName = "Суд Б", Status = ClientCaseStatus.Open, CreatedAt = new DateTime(2026, 9, 2, 12, 0, 0, DateTimeKind.Utc) },
+            new ClientCase { Client = new Client { Name = "Клиент 4", IsActive = true, ResponsibleUserId = lawyer.Id }, Title = "Несудебное дело", ResponsibleUserId = lawyer.Id, Status = ClientCaseStatus.Open, CreatedAt = new DateTime(2026, 9, 2, 12, 0, 0, DateTimeKind.Utc) });
+        await db.SaveChangesAsync();
+
+        var visible = (await CreateController(db, lawyer).GetCourtReportOverview(ct: CancellationToken.None)).Value!;
+        Assert.Equal(3, visible.Total);
+        Assert.Equal(2, visible.Active);
+        Assert.Equal(1, visible.Completed);
+        Assert.Equal("Юрист", Assert.Single(visible.ByResponsible).Name);
+        Assert.Equal(3, Assert.Single(visible.ByCourt).Total);
+
+        var all = (await CreateController(db, manager).GetCourtReportOverview(ct: CancellationToken.None)).Value!;
+        Assert.Equal(4, all.Total);
+        Assert.Equal(2, all.ByCourt.Count);
+
+        var period = (await CreateController(db, manager).GetCourtReportOverview(
+            from: new DateTime(2026, 9, 1, 17, 0, 0, DateTimeKind.Utc),
+            toExclusive: new DateTime(2026, 9, 2, 17, 0, 0, DateTimeKind.Utc), ct: CancellationToken.None)).Value!;
+        Assert.Equal(3, period.Total);
+        Assert.IsType<BadRequestObjectResult>((await CreateController(db, manager).GetCourtReportOverview(
+            from: new DateTime(2026, 9, 3), toExclusive: new DateTime(2026, 9, 2), ct: CancellationToken.None)).Result);
+
+        lawyer.Role!.Permissions.Single().CanView = false;
+        await db.SaveChangesAsync();
+        Assert.IsType<ForbidResult>((await CreateController(db, lawyer).GetCourtReportOverview(ct: CancellationToken.None)).Result);
+    }
+
+    [Fact]
     public async Task CourtWorkload_AggregatesCourtWorkAndChecksAssigneeVisibility()
     {
         await using var db = await CreateContextAsync();
