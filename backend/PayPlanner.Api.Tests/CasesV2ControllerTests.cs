@@ -7257,6 +7257,200 @@ public class CasesV2ControllerTests
         Assert.True(archived.IsArchived);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task RunCourtSync_NotifiesAboutFutureHearingRescheduleOnlyOnce(bool includeMovement)
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "court-reschedule-owner@example.com", "Владелец");
+        var responsible = await CreateUserAsync(db, "court-reschedule-lawyer@example.com", "Юрист");
+        var oldHearingAt = DateTime.UtcNow.AddDays(10);
+        var newHearingAt = oldHearingAt.AddDays(5);
+        var client = new Client { Name = "Контрагент", IsActive = true, ResponsibleUserId = owner.Id };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Дело с переносом заседания",
+            Stage = "Суд",
+            CourtUrl = "https://test.sudrf.ru/modules.php?name=sud_delo&name_op=case&delo_id=42",
+            CourtCaseNumber = "2-2026/99",
+            NextHearingAt = oldHearingAt,
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = responsible.Id,
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        db.ClientCaseCourtEvents.Add(new ClientCaseCourtEvent
+        {
+            ClientCaseId = clientCase.Id,
+            EventType = CourtSyncNormalization.EventTypes.Hearing,
+            Title = "Судебное заседание",
+            ScheduledAt = oldHearingAt,
+            SourceType = "sudrf",
+            SourceUrl = clientCase.CourtUrl,
+            ExternalKey = "previous-hearing",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var courtData = new SudrfCourtCaseData
+        {
+            SourceUrl = clientCase.CourtUrl,
+            CourtName = "Тестовый суд",
+            CaseNumber = clientCase.CourtCaseNumber,
+            NextHearingAt = newHearingAt,
+            MovementEvents = includeMovement
+                ? [new SudrfCourtMovementEvent
+                {
+                    Title = "Судебное заседание",
+                    ScheduledAt = newHearingAt,
+                    SourceSummary = "Заседание назначено на новую дату",
+                }]
+                : [],
+        };
+        var controller = CreateController(
+            db, owner,
+            sudrfCourtSyncService: new FixedSudrfCourtSyncService(courtData),
+            notificationService: CreateNotificationService(db));
+
+        Assert.IsType<OkObjectResult>((await controller.RunCourtSync(clientCase.Id, null, CancellationToken.None)).Result);
+        var notification = await db.UserNotifications.SingleAsync(item =>
+            item.RecipientUserId == responsible.Id && item.Type == UserNotificationTypes.CourtHearing);
+        Assert.Contains("Перенесено", notification.Title, StringComparison.Ordinal);
+        Assert.Contains("Новая дата", notification.BodyPreview, StringComparison.Ordinal);
+        Assert.Contains("\"action\":\"rescheduled\"", notification.MetadataJson, StringComparison.Ordinal);
+        Assert.Single(await db.ClientCaseCourtEvents.Where(item =>
+            item.ClientCaseId == clientCase.Id && item.ScheduledAt == newHearingAt).ToListAsync());
+
+        Assert.IsType<OkObjectResult>((await controller.RunCourtSync(clientCase.Id, null, CancellationToken.None)).Result);
+        Assert.Equal(1, await db.UserNotifications.CountAsync(item =>
+            item.RecipientUserId == responsible.Id && item.Type == UserNotificationTypes.CourtHearing));
+        if (!includeMovement)
+        {
+            var detailedController = CreateController(db, owner,
+                sudrfCourtSyncService: new FixedSudrfCourtSyncService(new SudrfCourtCaseData
+                {
+                    SourceUrl = clientCase.CourtUrl,
+                    CourtName = courtData.CourtName,
+                    CaseNumber = courtData.CaseNumber,
+                    NextHearingAt = newHearingAt,
+                    MovementEvents =
+                    [
+                        new() { Title = "Судебное заседание", ScheduledAt = newHearingAt, SourceSummary = "Движение дела опубликовано позднее" },
+                    ],
+                }),
+                notificationService: CreateNotificationService(db));
+            Assert.IsType<OkObjectResult>((await detailedController.RunCourtSync(clientCase.Id, null, CancellationToken.None)).Result);
+            Assert.Single(await db.ClientCaseCourtEvents.Where(item =>
+                item.ClientCaseId == clientCase.Id && item.ScheduledAt == newHearingAt).ToListAsync());
+            Assert.Equal(1, await db.UserNotifications.CountAsync(item =>
+                item.RecipientUserId == responsible.Id && item.Type == UserNotificationTypes.CourtHearing));
+            var changedController = CreateController(db, owner,
+                sudrfCourtSyncService: new FixedSudrfCourtSyncService(new SudrfCourtCaseData
+                {
+                    SourceUrl = clientCase.CourtUrl,
+                    CourtName = courtData.CourtName,
+                    CaseNumber = courtData.CaseNumber,
+                    NextHearingAt = newHearingAt,
+                    MovementEvents =
+                    [
+                        new() { Title = "Судебное заседание", ScheduledAt = newHearingAt, Place = "зал 5", SourceSummary = "Зал заседания уточнён" },
+                    ],
+                }),
+                notificationService: CreateNotificationService(db));
+            Assert.IsType<OkObjectResult>((await changedController.RunCourtSync(clientCase.Id, null, CancellationToken.None)).Result);
+            Assert.Equal(2, await db.UserNotifications.CountAsync(item =>
+                item.RecipientUserId == responsible.Id && item.Type == UserNotificationTypes.CourtHearing));
+        }
+    }
+
+    [Fact]
+    public async Task RunCourtSync_TreatsHearingAfterPastSessionAsNewNotRescheduled()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "court-next-owner@example.com", "Владелец");
+        var responsible = await CreateUserAsync(db, "court-next-lawyer@example.com", "Юрист");
+        var client = new Client { Name = "Контрагент", IsActive = true, ResponsibleUserId = owner.Id };
+        var nextHearingAt = DateTime.UtcNow.AddDays(7);
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Дело с очередным заседанием",
+            Stage = "Суд",
+            CourtUrl = "https://test.sudrf.ru/modules.php?name=sud_delo&name_op=case&delo_id=43",
+            NextHearingAt = DateTime.UtcNow.AddDays(-2),
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = responsible.Id,
+        };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, owner,
+            sudrfCourtSyncService: new FixedSudrfCourtSyncService(new SudrfCourtCaseData
+            {
+                SourceUrl = clientCase.CourtUrl,
+                CourtName = "Тестовый суд",
+                NextHearingAt = nextHearingAt,
+                MovementEvents =
+                [
+                    new() { Title = "Судебное заседание", ScheduledAt = nextHearingAt, SourceSummary = "Назначено заседание" },
+                ],
+            }),
+            notificationService: CreateNotificationService(db));
+
+        Assert.IsType<OkObjectResult>((await controller.RunCourtSync(clientCase.Id, null, CancellationToken.None)).Result);
+        var notification = await db.UserNotifications.SingleAsync(item =>
+            item.RecipientUserId == responsible.Id && item.Type == UserNotificationTypes.CourtHearing);
+        Assert.DoesNotContain("Перенесено", notification.Title, StringComparison.Ordinal);
+        Assert.Contains("\"action\":\"created\"", notification.MetadataJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunCourtSync_DoesNotCallSecondScheduledHearingAReschedule()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "court-two-dates-owner@example.com", "Владелец");
+        var responsible = await CreateUserAsync(db, "court-two-dates-lawyer@example.com", "Юрист");
+        var oldHearingAt = DateTime.UtcNow.AddDays(10);
+        var newHearingAt = oldHearingAt.AddDays(5);
+        var client = new Client { Name = "Контрагент", IsActive = true, ResponsibleUserId = owner.Id };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Дело с двумя действующими заседаниями",
+            Stage = "Суд",
+            CourtUrl = "https://test.sudrf.ru/modules.php?name=sud_delo&name_op=case&delo_id=44",
+            NextHearingAt = oldHearingAt,
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = responsible.Id,
+        };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, owner,
+            sudrfCourtSyncService: new FixedSudrfCourtSyncService(new SudrfCourtCaseData
+            {
+                SourceUrl = clientCase.CourtUrl,
+                CourtName = "Тестовый суд",
+                NextHearingAt = newHearingAt,
+                MovementEvents =
+                [
+                    new() { Title = "Судебное заседание", ScheduledAt = oldHearingAt },
+                    new() { Title = "Судебное заседание", ScheduledAt = newHearingAt },
+                ],
+            }),
+            notificationService: CreateNotificationService(db));
+
+        Assert.IsType<OkObjectResult>((await controller.RunCourtSync(clientCase.Id, null, CancellationToken.None)).Result);
+        var notifications = await db.UserNotifications.Where(item =>
+            item.RecipientUserId == responsible.Id && item.Type == UserNotificationTypes.CourtHearing).ToListAsync();
+        Assert.Equal(2, notifications.Count);
+        Assert.All(notifications, notification =>
+            Assert.DoesNotContain("Перенесено", notification.Title, StringComparison.Ordinal));
+        Assert.All(notifications, notification =>
+            Assert.Contains("\"action\":\"created\"", notification.MetadataJson, StringComparison.Ordinal));
+    }
+
     [Fact]
     public async Task RunCourtSync_UpdatesCaseAndCreatesCourtEventFromSudrf()
     {

@@ -8049,9 +8049,11 @@ public partial class CasesV2Controller : ControllerBase
         CancellationToken ct)
     {
         var actorUserId = User.GetUserId();
+        var previousNextHearingAt = clientCase.NextHearingAt;
         var changedFields = new List<string>();
         var createdEvents = new List<ClientCaseCourtEvent>();
         var updatedEvents = new List<ClientCaseCourtEvent>();
+        var silentUpdatedEventIds = new HashSet<int>();
         var updatedCourtEvents = 0;
         var createdCourtParties = 0;
         var createdCourtActDocuments = 0;
@@ -8078,6 +8080,22 @@ public partial class CasesV2Controller : ControllerBase
         var nextHearingAt = courtData.NextHearingAt.HasValue
             ? NormalizeCourtSyncSourceDateTime(courtData.NextHearingAt.Value, sourceTimeZone, courtData.NextHearingAt.Value.TimeOfDay == TimeSpan.Zero)
             : (DateTime?)null;
+        var previousHearingStillScheduled = previousNextHearingAt.HasValue && courtData.MovementEvents.Any(movement =>
+            movement.ScheduledAt.HasValue
+            && NormalizeCourtSyncSourceDateTime(
+                movement.ScheduledAt.Value,
+                sourceTimeZone,
+                movement.ScheduledAt.Value.TimeOfDay == TimeSpan.Zero) == previousNextHearingAt.Value
+            && string.Equals(ResolveSudrfCourtEventType(movement), CourtSyncNormalization.EventTypes.Hearing, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(
+                ResolveSudrfCourtMovementStatus(movement, CourtSyncNormalization.EventTypes.Hearing),
+                CourtSyncNormalization.MovementStatuses.Scheduled,
+                StringComparison.OrdinalIgnoreCase));
+        var nextHearingRescheduled = previousNextHearingAt.HasValue
+            && previousNextHearingAt.Value > checkedAt
+            && nextHearingAt.HasValue
+            && nextHearingAt.Value != previousNextHearingAt.Value
+            && !previousHearingStillScheduled;
         if (clientCase.NextHearingAt != nextHearingAt
             && (nextHearingAt.HasValue || courtData.MovementEvents.Count > 0))
         {
@@ -8180,6 +8198,8 @@ public partial class CasesV2Controller : ControllerBase
                 continue;
             }
 
+            var wasFallbackHearing = string.IsNullOrWhiteSpace(existing.ExternalKey)
+                && string.Equals(existing.Description, "Новая дата ближайшего заседания получена из карточки судебного источника.", StringComparison.Ordinal);
             var updated = false;
             if (string.IsNullOrWhiteSpace(existing.ExternalKey))
             {
@@ -8199,12 +8219,17 @@ public partial class CasesV2Controller : ControllerBase
             updated |= UpdateCourtEventString(existing.Courtroom, movement.Place, value => existing.Courtroom = value, 120);
             updated |= UpdateCourtEventString(existing.JudgeName, courtData.JudgeName, value => existing.JudgeName = value, 200);
             updated |= UpdateCourtEventString(existing.SecretaryName, FirstNonEmpty(movement.SecretaryName, courtData.SecretaryName), value => existing.SecretaryName = value, 200);
-            updated |= UpdateCourtEventString(existing.Description, movement.SourceSummary, value => existing.Description = value, 1000);
-            updated |= UpdateCourtEventString(existing.ResultSummary, resultSummary, value => existing.ResultSummary = value, 1000);
+            var materialUpdated = updated;
+            var descriptionUpdated = UpdateCourtEventString(existing.Description, movement.SourceSummary, value => existing.Description = value, 1000);
+            updated |= descriptionUpdated;
+            var resultUpdated = UpdateCourtEventString(existing.ResultSummary, resultSummary, value => existing.ResultSummary = value, 1000);
+            updated |= resultUpdated;
+            materialUpdated |= resultUpdated;
             if (!existing.MovementStatus.Equals(movementStatus, StringComparison.OrdinalIgnoreCase))
             {
                 existing.MovementStatus = movementStatus;
                 updated = true;
+                materialUpdated = true;
             }
 
             if (updated)
@@ -8214,6 +8239,10 @@ public partial class CasesV2Controller : ControllerBase
                 existing.UpdatedByUserName = Truncate(actorName, 256);
                 AddCourtEventHistory(existing, "updated", $"Событие обновлено из ГАС «Правосудие»: {summary}.", actorUserId, actorName);
                 updatedEvents.Add(existing);
+                if (wasFallbackHearing && !materialUpdated)
+                {
+                    silentUpdatedEventIds.Add(existing.Id);
+                }
                 courtEventTaskSyncChanged = true;
                 updatedCourtEvents++;
                 changedItems.Add($"судебное событие «{existing.Title}»");
@@ -8241,6 +8270,47 @@ public partial class CasesV2Controller : ControllerBase
                 actorName);
         }
 
+        if (nextHearingRescheduled && nextHearingAt.HasValue
+            && !createdEvents.Concat(updatedEvents).Any(item =>
+                item.ScheduledAt == nextHearingAt.Value
+                && (string.Equals(item.EventType, CourtSyncNormalization.EventTypes.Hearing, StringComparison.OrdinalIgnoreCase)
+                    || item.Title.Contains("заседан", StringComparison.OrdinalIgnoreCase)))
+            && !existingEvents.Any(item =>
+                item.ScheduledAt == nextHearingAt.Value
+                && string.Equals(item.EventType, CourtSyncNormalization.EventTypes.Hearing, StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(item.MovementStatus, "archived", StringComparison.OrdinalIgnoreCase)))
+        {
+            var hearingEvent = new ClientCaseCourtEvent
+            {
+                ClientCaseId = clientCase.Id,
+                EventType = CourtSyncNormalization.EventTypes.Hearing,
+                Title = "Судебное заседание",
+                Description = "Новая дата ближайшего заседания получена из карточки судебного источника.",
+                ScheduledAt = nextHearingAt.Value,
+                AllDay = nextHearingAt.Value.TimeOfDay == TimeSpan.Zero,
+                CourtInstance = courtData.Instance,
+                CourtName = Truncate(NormalizeOptional(courtData.CourtName) ?? clientCase.CourtName, 200),
+                CourtCaseNumber = Truncate(NormalizeOptional(courtData.CaseNumber) ?? clientCase.CourtCaseNumber, 100),
+                Courtroom = Truncate(courtData.NextHearingPlace, 120),
+                JudgeName = Truncate(NormalizeOptional(courtData.JudgeName) ?? clientCase.JudgeName, 200),
+                SourceType = "sudrf",
+                SourceUrl = Truncate(courtData.SourceUrl, 1000),
+                SourceCheckedAt = checkedAt,
+                SourceConfidence = "official-source",
+                CreatedAt = checkedAt,
+                CreatedByUserId = actorUserId,
+                CreatedByUserName = Truncate(actorName, 256),
+                UpdatedAt = checkedAt,
+                UpdatedByUserId = actorUserId,
+                UpdatedByUserName = Truncate(actorName, 256),
+            };
+            _db.ClientCaseCourtEvents.Add(hearingEvent);
+            existingEvents.Add(hearingEvent);
+            createdEvents.Add(hearingEvent);
+            courtEventTaskSyncChanged = true;
+            newItems.Add("судебное событие «Судебное заседание»");
+        }
+
         if (createdEvents.Count > 0)
         {
             await _db.SaveChangesAsync(ct);
@@ -8250,14 +8320,28 @@ public partial class CasesV2Controller : ControllerBase
             }
         }
 
+        var rescheduleNotificationSent = false;
         foreach (var courtEvent in createdEvents.Where(ShouldNotifyAboutSyncedCourtEvent))
         {
-            await AddCourtEventUserNotificationsAsync(clientCase, courtEvent, "created", actorUserId, actorName, ct);
+            var isRescheduledHearing = !rescheduleNotificationSent && nextHearingRescheduled
+                && courtEvent.ScheduledAt == nextHearingAt
+                && (string.Equals(courtEvent.EventType, CourtSyncNormalization.EventTypes.Hearing, StringComparison.OrdinalIgnoreCase)
+                    || courtEvent.Title.Contains("заседан", StringComparison.OrdinalIgnoreCase));
+            await AddCourtEventUserNotificationsAsync(
+                clientCase, courtEvent, isRescheduledHearing ? "rescheduled" : "created", actorUserId, actorName, ct);
+            rescheduleNotificationSent |= isRescheduledHearing;
         }
 
-        foreach (var courtEvent in updatedEvents.Where(ShouldNotifyAboutSyncedCourtEvent))
+        foreach (var courtEvent in updatedEvents.Where(item =>
+                     ShouldNotifyAboutSyncedCourtEvent(item) && !silentUpdatedEventIds.Contains(item.Id)))
         {
-            await AddCourtEventUserNotificationsAsync(clientCase, courtEvent, "updated", actorUserId, actorName, ct);
+            var isRescheduledHearing = !rescheduleNotificationSent && nextHearingRescheduled
+                && courtEvent.ScheduledAt == nextHearingAt
+                && (string.Equals(courtEvent.EventType, CourtSyncNormalization.EventTypes.Hearing, StringComparison.OrdinalIgnoreCase)
+                    || courtEvent.Title.Contains("заседан", StringComparison.OrdinalIgnoreCase));
+            await AddCourtEventUserNotificationsAsync(
+                clientCase, courtEvent, isRescheduledHearing ? "rescheduled" : "updated", actorUserId, actorName, ct);
+            rescheduleNotificationSent |= isRescheduledHearing;
         }
 
         var partyCandidates = BuildSudrfCourtPartyCandidates(courtData.Participants);
