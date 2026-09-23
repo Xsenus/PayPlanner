@@ -58,13 +58,31 @@ describe('contact merge dialog', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('does not offer a destructive action for mixed source types', async () => {
+  it('previews merging a quick duplicate into a full primary card', async () => {
     vi.mocked(apiService.getContacts).mockResolvedValue([contact(1, 'client'), contact(2, 'external')]);
+    vi.mocked(apiService.previewContactMerge).mockResolvedValue({
+      canMerge: true, conflicts: [], affectedLinks: 2,
+      primaryName: 'Манаева Мария Михайловна', duplicateName: 'Манаева Мария Михайловна',
+      phones: ['89198106343'], emails: [],
+    });
     render(<ContactMergeModal onMerged={vi.fn()} onClose={vi.fn()} />);
 
     fireEvent.click(await screen.findByRole('button', { name: /2 записи/i }));
 
-    expect(await screen.findByText(/Сначала оформите быстрый контакт/)).toBeTruthy();
+    await waitFor(() => expect(apiService.previewContactMerge).toHaveBeenCalledWith({
+      primarySourceType: 'client', primarySourceId: 1,
+      duplicateSourceType: 'external', duplicateSourceId: 2,
+    }));
+    expect((screen.getByRole('button', { name: 'Объединить и архивировать' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('does not offer merging a full profile into a quick primary contact', async () => {
+    vi.mocked(apiService.getContacts).mockResolvedValue([contact(1, 'external'), contact(2, 'client')]);
+    render(<ContactMergeModal onMerged={vi.fn()} onClose={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /2 записи/i }));
+
+    expect(await screen.findByText(/выберите полную карточку основной/)).toBeTruthy();
     expect(apiService.previewContactMerge).not.toHaveBeenCalled();
     expect((screen.getByRole('button', { name: 'Объединить и архивировать' }) as HTMLButtonElement).disabled).toBe(true);
   });

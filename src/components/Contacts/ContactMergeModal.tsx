@@ -58,13 +58,15 @@ export function ContactMergeModal({ onClose, onMerged }: Props) {
   const duplicate = byKey.get(duplicateKey);
   const differentKinds = Boolean(primary && duplicate && primary.contactType !== duplicate.contactType);
   const differentSources = Boolean(primary && duplicate && primary.sourceType !== duplicate.sourceType);
+  const unsupportedMixedPair = differentSources && !(duplicate?.sourceType === 'external'
+    && (primary?.sourceType === 'client' || primary?.sourceType === 'legal'));
   const sameRecord = Boolean(primaryKey && primaryKey === duplicateKey);
 
   useEffect(() => {
     const requestId = ++previewRequestId.current;
     setPreview(null);
     setError(null);
-    if (!primary || !duplicate || sameRecord || differentKinds || differentSources) return;
+    if (!primary || !duplicate || sameRecord || differentKinds || unsupportedMixedPair) return;
     setPreviewing(true);
     const request: ContactMergeRequestDto = {
       primarySourceType: primary.sourceType,
@@ -79,7 +81,7 @@ export function ContactMergeModal({ onClose, onMerged }: Props) {
     }).finally(() => {
       if (requestId === previewRequestId.current) setPreviewing(false);
     });
-  }, [differentKinds, differentSources, duplicate, primary, sameRecord]);
+  }, [differentKinds, duplicate, primary, sameRecord, unsupportedMixedPair]);
 
   const chooseGroup = (group: (typeof groups)[number]) => {
     setPrimaryKey(keyOf(group.contacts[0]));
@@ -167,7 +169,7 @@ export function ContactMergeModal({ onClose, onMerged }: Props) {
           </div>
           {sameRecord ? <p className="rounded-lg bg-amber-50 p-2 text-sm text-amber-800">Выберите две разные карточки.</p> : null}
           {differentKinds ? <p className="rounded-lg bg-amber-50 p-2 text-sm text-amber-800">Человека нельзя объединить с организацией.</p> : null}
-          {differentSources ? <p className="rounded-lg bg-amber-50 p-2 text-sm text-amber-800">Выбраны быстрый контакт и полная карточка. Сначала оформите быстрый контакт в карточку того же вида; затем повторите объединение.</p> : null}
+          {unsupportedMixedPair ? <p className="rounded-lg bg-amber-50 p-2 text-sm text-amber-800">Для смешанной пары выберите полную карточку основной, а быстрый контакт — дублем. Так связи дел и документов останутся на полной карточке.</p> : null}
           {previewing ? <p role="status" className="text-sm text-slate-600">Проверяем связи и права…</p> : null}
           {preview ? (
             <section className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm">
