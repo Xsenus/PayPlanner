@@ -163,6 +163,7 @@ interface ClientDetailProps {
     options?: { section?: "acts" | "accounts" },
   ) => void;
   onOpenCasePage?: (caseId: number, clientId: number) => void;
+  onOpenTask?: (taskId: number) => void;
 }
 
 type PaymentUpsert = PaymentPayload | ({ id: number } & PaymentPayload);
@@ -1375,6 +1376,7 @@ export function ClientDetail({
   onOpenInvoicePage,
   onCreateActPage,
   onOpenCasePage,
+  onOpenTask,
 }: ClientDetailProps) {
   const { t } = useTranslation();
   const { user, isAdmin } = useAuth();
@@ -11010,6 +11012,7 @@ export function ClientDetail({
             responsibles={actResponsibles}
             allowEdit={caseMode === "edit" ? casePermissions.canEdit : casePermissions.canCreate}
             canViewFinance={paymentPermissions.canView}
+            onOpenTask={permissions.tasks.canView ? onOpenTask : undefined}
           />
         )}
 

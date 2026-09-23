@@ -27,6 +27,7 @@ interface CaseModalProps {
   canViewFinance?: boolean;
   canUseContactRelatedParties?: boolean;
   canUseLegalEntityRelatedParties?: boolean;
+  onOpenTask?: (taskId: number) => void;
 }
 
 type StatusValue = 'Open' | 'OnHold' | 'Closed' | 'Lost';
@@ -258,6 +259,7 @@ export function CaseModal({
   canViewFinance = true,
   canUseContactRelatedParties = true,
   canUseLegalEntityRelatedParties = true,
+  onOpenTask,
 }: CaseModalProps) {
   const { confirm, prompt } = useDialog();
   const [timeZoneId, setTimeZoneId] = useState(() => normalizeUserTimeZoneId());
@@ -1712,6 +1714,7 @@ export function CaseModal({
                 canEdit={allowEdit}
                 datesSaved={courtDecisionAt === toDateInput(caseData.courtDecisionAt) && appealDeadlineAt === toDateInput(caseData.appealDeadlineAt)}
                 onTaskCreated={() => void refreshCaseTasks()}
+                onOpenTask={onOpenTask}
               />
             </div>
           ) : null}

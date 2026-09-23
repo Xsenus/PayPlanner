@@ -1421,6 +1421,7 @@ function AppContent() {
         return (
           <CaseDetailPage
             caseId={selectedCaseId}
+            onOpenTask={permissions.tasks.canView ? (taskId) => openTaskDetail(taskId, { returnTo: 'caseDetail' }) : undefined}
             canEdit={permissions.cases.canEdit}
             canDelete={permissions.cases.canDelete}
             canViewFinance={permissions.payments.canView}
@@ -1474,6 +1475,7 @@ function AppContent() {
         return permissions.clients.canView
           ? (
               <Clients
+                onOpenTask={permissions.tasks.canView ? (taskId) => openTaskDetail(taskId, { returnTo: 'clients' }) : undefined}
                 onOpenContract={(id) => openContractDetail(id, { returnTo: 'clients' })}
                 onOpenInvoice={(id, type) =>
                   openInvoicePage(id, { ...(type ? { type } : {}), returnTo: { tab: 'clients' } })
@@ -1515,6 +1517,7 @@ function AppContent() {
         if (!selectedClientId) {
           return (
             <Clients
+              onOpenTask={permissions.tasks.canView ? (taskId) => openTaskDetail(taskId, { returnTo: 'clients' }) : undefined}
               onOpenContract={(id) => openContractDetail(id, { returnTo: 'clients' })}
               onOpenInvoice={(id, type) =>
                 openInvoicePage(id, { ...(type ? { type } : {}), returnTo: { tab: 'clients' } })
@@ -1527,6 +1530,7 @@ function AppContent() {
 
         return (
           <ClientDetail
+            onOpenTask={permissions.tasks.canView ? (taskId) => openTaskDetail(taskId, { returnTo: 'clientDetail' }) : undefined}
             key={selectedClientId}
             clientId={selectedClientId}
             initialCaseId={initialCaseId}

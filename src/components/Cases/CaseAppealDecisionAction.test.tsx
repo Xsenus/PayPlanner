@@ -60,4 +60,16 @@ describe('CaseAppealDecisionAction', () => {
     expect(screen.getByText(/Сначала сохраните изменённые даты/)).toBeTruthy();
     expect(apiService.createCaseAppealTask).not.toHaveBeenCalled();
   });
+
+  it('opens the task created for an appeal decision', async () => {
+    const onOpenTask = vi.fn();
+    vi.mocked(apiService.getCurrentCaseAppealDecision).mockResolvedValue({
+      id: 8, caseId: 42, choice: 'appeal', taskId: 91, decidedAt: '2026-09-24T00:00:00Z',
+    });
+
+    render(<CaseAppealDecisionAction clientCase={clientCase} canEdit onOpenTask={onOpenTask} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Открыть задачу' }));
+    expect(onOpenTask).toHaveBeenCalledExactlyOnceWith(91);
+  });
 });

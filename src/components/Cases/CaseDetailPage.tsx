@@ -86,6 +86,7 @@ interface CaseDetailPageProps {
   onOpenFinance?: (caseItem: ClientCase) => void;
   onCreateInvoice?: (caseItem: ClientCase) => void;
   onCreatePayment?: (caseItem: ClientCase) => void;
+  onOpenTask?: (taskId: number) => void;
   canEdit?: boolean;
   canDelete?: boolean;
   canViewFinance?: boolean;
@@ -1411,6 +1412,7 @@ export function CaseDetailPage({
   onOpenFinance,
   onCreateInvoice,
   onCreatePayment,
+  onOpenTask,
   canEdit = true,
   canDelete = true,
   canViewFinance = true,
@@ -4027,7 +4029,7 @@ export function CaseDetailPage({
                 ) : null}
                 {caseItem.positionReviewedAt ? <p className="mt-1 text-xs text-slate-500">Если изменить текст позиции, подтверждение сбросится.</p> : null}
               </section>
-              <CaseAppealDecisionAction clientCase={caseItem} canEdit={canEdit} onTaskCreated={() => setReloadToken((value) => value + 1)} />
+              <CaseAppealDecisionAction clientCase={caseItem} canEdit={canEdit} onTaskCreated={() => setReloadToken((value) => value + 1)} onOpenTask={canViewTasks ? onOpenTask : undefined} />
               <TextBlock title="Документы" value={caseItem.documentsSummary || 'Сводка документов пока не заполнена.'} />
             </div>
           ) : null}

@@ -299,6 +299,7 @@ interface ClientsProps {
   onOpenInvoice?: (invoiceId: number, type?: PaymentKind) => void;
   onOpenAct?: (actId: number) => void;
   onOpenPayment?: (paymentId: number, type?: PaymentKind) => void;
+  onOpenTask?: (taskId: number) => void;
 }
 
 const TABLE_LAYOUT_COLUMNS = COLUMN_DEFINITIONS.map((column) => ({
@@ -367,7 +368,7 @@ function saveFilterSettings(storageKey: string, settings: ClientTableFilterSetti
   }
 }
 
-export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPayment }: ClientsProps = {}) {
+export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPayment, onOpenTask }: ClientsProps = {}) {
   const { statuses: clientStatuses } = useClientStatuses();
   const { t } = useTranslation();
   const { user } = useAuth();
@@ -1065,6 +1066,7 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
         }}
         onBack={() => setSelectedClientId(null)}
         initialCaseId={initialCaseId}
+        onOpenTask={onOpenTask}
       />
     );
   }
@@ -2051,6 +2053,7 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
             }}
             onDelete={caseMode === 'edit' ? deleteCase : undefined}
             canViewFinance={permissions.payments.canView}
+            onOpenTask={permissions.tasks.canView ? onOpenTask : undefined}
           />
         )}
       </div>
