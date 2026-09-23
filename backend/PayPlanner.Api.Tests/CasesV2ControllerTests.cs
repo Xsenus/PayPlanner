@@ -2806,6 +2806,8 @@ public class CasesV2ControllerTests
         Assert.Equal(owner.Id, dueTask.AssigneeUserId);
         Assert.Contains(dueTask.Participants, item => item.Role == "assignee" && item.UserId == owner.Id);
         Assert.Equal(calculatedAppealDeadline.Date.AddHours(9), appealTask.DueAt);
+        Assert.Equal("Изучить решение, оценить обжалование", appealTask.Title);
+        Assert.Contains("Решение вынесено 16.05.2026", appealTask.Description, StringComparison.Ordinal);
         Assert.Equal(calculatedCassationDeadline.Date.AddHours(9), cassationTask.DueAt);
 
         var newDueDate = dueDate.AddDays(1);
@@ -2834,6 +2836,85 @@ public class CasesV2ControllerTests
         Assert.NotEqual("cancelled", updatedDueTask.Status);
         Assert.Equal("cancelled", cancelledAppealTask.Status);
         Assert.Equal("cancelled", cancelledCassationTask.Status);
+    }
+
+    [Fact]
+    public async Task DecisionAppealTask_UsesProcessDeadlineButPreservesCustomTitle()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "decision-appeal@example.com", "Юрист");
+        var client = new Client { Name = "Клиент", IsActive = true, ResponsibleUserId = owner.Id };
+        var decisionAt = new DateTime(2026, 5, 16, 0, 0, 0, DateTimeKind.Utc);
+        var deadlineAt = new DateTime(2026, 6, 16, 0, 0, 0, DateTimeKind.Utc);
+        var normalCase = new ClientCase
+        {
+            Client = client,
+            Title = "Решение суда",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = owner.Id,
+            CourtDecisionAt = decisionAt,
+            ProceduralDeadlines =
+            [
+                new ClientCaseProceduralDeadline
+                {
+                    DeadlineType = "appeal", Title = "Срок апелляции", DueAt = deadlineAt,
+                },
+            ],
+        };
+        var customCase = new ClientCase
+        {
+            Client = client,
+            Title = "Особый срок",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = owner.Id,
+            CourtDecisionAt = decisionAt,
+            ProceduralDeadlines =
+            [
+                new ClientCaseProceduralDeadline
+                {
+                    DeadlineType = "appeal", Title = "Проверить судебный акт", DueAt = deadlineAt,
+                },
+            ],
+        };
+        var staleCase = new ClientCase
+        {
+            Client = client,
+            Title = "Старый срок апелляции",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = owner.Id,
+            CourtDecisionAt = decisionAt.AddMonths(2),
+            ProceduralDeadlines =
+            [
+                new ClientCaseProceduralDeadline
+                {
+                    DeadlineType = "appeal", Title = "Срок апелляции", DueAt = deadlineAt,
+                },
+            ],
+        };
+        db.ClientCases.AddRange(normalCase, customCase, staleCase);
+        await db.SaveChangesAsync();
+
+        await ClientCaseDeadlineTaskSyncService.SyncAsync(db, normalCase.Id, owner.Id, owner.FullName, CancellationToken.None);
+        await ClientCaseDeadlineTaskSyncService.SyncAsync(db, customCase.Id, owner.Id, owner.FullName, CancellationToken.None);
+        await ClientCaseDeadlineTaskSyncService.SyncAsync(db, staleCase.Id, owner.Id, owner.FullName, CancellationToken.None);
+
+        var normalTask = Assert.Single(await db.TaskJournalItems.Where(item => item.ClientCaseId == normalCase.Id).ToListAsync());
+        var customTask = Assert.Single(await db.TaskJournalItems.Where(item => item.ClientCaseId == customCase.Id).ToListAsync());
+        var staleTask = Assert.Single(await db.TaskJournalItems.Where(item => item.ClientCaseId == staleCase.Id).ToListAsync());
+        Assert.Equal("Изучить решение, оценить обжалование", normalTask.Title);
+        Assert.Equal(deadlineAt.AddHours(9), normalTask.DueAt);
+        Assert.Equal("Проверить судебный акт", customTask.Title);
+        Assert.Equal("Срок апелляции", staleTask.Title);
+
+        normalTask.Status = "done";
+        await db.SaveChangesAsync();
+        await ClientCaseDeadlineTaskSyncService.SyncAsync(db, normalCase.Id, owner.Id, owner.FullName, CancellationToken.None);
+        Assert.Equal(1, await db.TaskJournalItems.CountAsync(item => item.ClientCaseId == normalCase.Id));
+
+        normalCase.CourtDecisionAt = decisionAt.AddDays(1);
+        await db.SaveChangesAsync();
+        await ClientCaseDeadlineTaskSyncService.SyncAsync(db, normalCase.Id, owner.Id, owner.FullName, CancellationToken.None);
+        Assert.Equal(2, await db.TaskJournalItems.CountAsync(item => item.ClientCaseId == normalCase.Id));
     }
 
     [Fact]
@@ -3620,6 +3701,17 @@ public class CasesV2ControllerTests
         Assert.Equal(2, tasks.Count);
         Assert.Equal("done", tasks[0].Status);
         Assert.Equal(new DateTime(2026, 11, 24, 10, 0, 0, DateTimeKind.Utc), tasks[1].DueAt);
+        Assert.Equal("Учесть новую дату, проверить готовность", tasks[1].Title);
+
+        await ClientCaseDeadlineTaskSyncService.SyncAsync(db, clientCase.Id, lawyer.Id, lawyer.FullName, CancellationToken.None);
+        Assert.Equal("Учесть новую дату, проверить готовность", tasks[1].Title);
+        Assert.Equal(2, await db.TaskJournalItems.CountAsync(item => item.ClientCaseId == clientCase.Id));
+
+        hearing.ScheduledAt = hearing.ScheduledAt.AddDays(1);
+        await db.SaveChangesAsync();
+        await ClientCaseDeadlineTaskSyncService.SyncAsync(db, clientCase.Id, lawyer.Id, lawyer.FullName, CancellationToken.None);
+        Assert.Equal(new DateTime(2026, 11, 25, 10, 0, 0, DateTimeKind.Utc), tasks[1].DueAt);
+        Assert.Equal("Учесть новую дату, проверить готовность", tasks[1].Title);
     }
 
     [Fact]

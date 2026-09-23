@@ -9,6 +9,8 @@ namespace PayPlanner.Api.Services;
 public static class ClientCaseDeadlineTaskSyncService
 {
     private const string DeadlineTag = "case-deadline";
+    private const string AppealReviewTaskTitle = "Изучить решение, оценить обжалование";
+    private const string RescheduledHearingTaskTitle = "Учесть новую дату, проверить готовность";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly HashSet<string> ClosedTaskStatuses = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -103,12 +105,25 @@ public static class ClientCaseDeadlineTaskSyncService
                 // The second comparison covers tasks completed before the deadline moved three days earlier.
                 continue;
             }
+            if (deadline.Title == AppealReviewTaskTitle
+                && activeTask?.Status == "done"
+                && activeTask.DueAt == dueAt
+                && string.Equals(activeTask.Description, BuildDescription(clientCase, deadline), StringComparison.Ordinal))
+            {
+                // Saving the same court decision must not recreate completed review work.
+                continue;
+            }
+            var taskDeadline = deadline.TaskType == "courtHearing"
+                && activeTask is not null
+                && (activeTask.DueAt != dueAt || activeTask.Title == RescheduledHearingTaskTitle)
+                    ? deadline with { Title = RescheduledHearingTaskTitle }
+                    : deadline;
             if (activeTask is null || ClosedTaskStatuses.Contains(activeTask.Status))
             {
                 var task = BuildTask(
                     clientCase,
                     owner.Value,
-                    deadline,
+                    taskDeadline,
                     dueAt,
                     assigneeUserId,
                     assigneeName,
@@ -124,8 +139,8 @@ public static class ClientCaseDeadlineTaskSyncService
 
             var changed = false;
             changed |= SetIfChanged(activeTask, static (task, value) => task.ObjectName = value, activeTask.ObjectName, BuildObjectName(owner.Value.Name, clientCase.Title));
-            changed |= SetIfChanged(activeTask, static (task, value) => task.Title = value, activeTask.Title, deadline.Title);
-            changed |= SetIfChanged(activeTask, static (task, value) => task.Description = value, activeTask.Description ?? string.Empty, BuildDescription(clientCase, deadline));
+            changed |= SetIfChanged(activeTask, static (task, value) => task.Title = value, activeTask.Title, taskDeadline.Title);
+            changed |= SetIfChanged(activeTask, static (task, value) => task.Description = value, activeTask.Description ?? string.Empty, BuildDescription(clientCase, taskDeadline));
             changed |= SetIfChanged(activeTask, static (task, value) => task.Type = value, activeTask.Type, deadline.TaskType);
             changed |= SetIfChanged(activeTask, static (task, value) => task.Priority = value, activeTask.Priority, ResolvePriority(dueAt, now));
             changed |= SetIfChanged(activeTask, static (task, value) => task.Status = value, activeTask.Status, activeTask.Status == "cancelled" ? "new" : activeTask.Status);
@@ -233,7 +248,11 @@ public static class ClientCaseDeadlineTaskSyncService
                 || string.Equals(deadline.Status, "archived", StringComparison.OrdinalIgnoreCase);
             result.Add(CreateDeadline(
                 $"entity-{deadline.Id}",
-                string.IsNullOrWhiteSpace(deadline.Title) ? ResolveDeadlineTitle(deadline.DeadlineType) : deadline.Title,
+                IsAppealReviewDue(clientCase.CourtDecisionAt, deadline.DueAt)
+                    && string.Equals(deadline.DeadlineType, "appeal", StringComparison.OrdinalIgnoreCase)
+                    && (string.IsNullOrWhiteSpace(deadline.Title) || string.Equals(deadline.Title.Trim(), "Срок апелляции", StringComparison.OrdinalIgnoreCase))
+                        ? AppealReviewTaskTitle
+                        : string.IsNullOrWhiteSpace(deadline.Title) ? ResolveDeadlineTitle(deadline.DeadlineType) : deadline.Title,
                 isClosed ? null : deadline.DueAt,
                 deadline.AllDay,
                 deadline.AllDay ? 60 : 90,
@@ -269,7 +288,7 @@ public static class ClientCaseDeadlineTaskSyncService
         {
             CreateDeadline("due", "Крайний срок по делу", clientCase.DueDate, true, 60),
             CreateDeadline("claim", "Дата подачи иска", clientCase.ClaimFiledAt, true, 60),
-            CreateDeadline("appeal", "Срок апелляции", clientCase.AppealDeadlineAt, true, 60),
+            CreateDeadline("appeal", IsAppealReviewDue(clientCase.CourtDecisionAt, clientCase.AppealDeadlineAt) ? AppealReviewTaskTitle : "Срок апелляции", clientCase.AppealDeadlineAt, true, 60),
             CreateDeadline("cassation", "Срок кассации", clientCase.CassationDeadlineAt, true, 60),
             CreateDeadline("motion", "Срок подачи ходатайства", clientCase.MotionDeadlineAt, true, 60),
             CreateDeadline("objection", "Срок подачи возражений", clientCase.ObjectionDeadlineAt, true, 60),
@@ -279,6 +298,9 @@ public static class ClientCaseDeadlineTaskSyncService
         result.AddRange(legacyDeadlines.Where(item => !separateDeadlineTypes.Contains(item.Key)));
         return result;
     }
+
+    private static bool IsAppealReviewDue(DateTime? decisionAt, DateTime? deadlineAt)
+        => decisionAt.HasValue && deadlineAt.HasValue && deadlineAt.Value.Date >= decisionAt.Value.Date;
 
     private static CaseDeadline CreateDeadline(
         string key,
@@ -333,6 +355,11 @@ public static class ClientCaseDeadlineTaskSyncService
         if (!string.IsNullOrWhiteSpace(clientCase.CourtName))
         {
             parts.Add($"Суд: {clientCase.CourtName.Trim()}.");
+        }
+
+        if (deadline.Title == AppealReviewTaskTitle && clientCase.CourtDecisionAt.HasValue)
+        {
+            parts.Add($"Решение вынесено {clientCase.CourtDecisionAt.Value:dd.MM.yyyy}. Оцените необходимость подачи жалобы до истечения срока обжалования.");
         }
 
         if (deadline.CourtEvent is { } courtEvent)
