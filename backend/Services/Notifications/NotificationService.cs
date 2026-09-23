@@ -2501,6 +2501,67 @@ public sealed class NotificationService : INotificationService
         }
     }
 
+    public async Task NotifyCaseDecisionDateChangedAsync(
+        ClientCase clientCase,
+        DateTime? previousAt,
+        DateTime? currentAt,
+        string actorName,
+        int actorUserId,
+        IReadOnlyCollection<int> recipientUserIds,
+        DateTime changedAtUtc,
+        CancellationToken cancellationToken = default)
+    {
+        if (clientCase.Id <= 0 || previousAt?.Date == currentAt?.Date || recipientUserIds.Count == 0)
+        {
+            return;
+        }
+
+        var visibleRecipientUserIds = await ResolveVisibleCaseNotificationRecipientIdsAsync(
+            clientCase,
+            recipientUserIds,
+            actorUserId,
+            cancellationToken);
+        if (visibleRecipientUserIds.Count == 0)
+        {
+            return;
+        }
+
+        var channelsByUserId = await ResolveUserNotificationChannelsAsync(
+            visibleRecipientUserIds,
+            UserNotificationTypes.CourtDecisionPublished,
+            [NotificationChannels.InApp, NotificationChannels.Toast, NotificationChannels.WebPush, NotificationChannels.Email],
+            cancellationToken);
+        var normalizedActorName = NormalizeNotificationText(actorName, "Сотрудник");
+        var title = !currentAt.HasValue
+            ? $"Удалена дата судебного решения: {BuildClientCaseTitle(clientCase)}"
+            : previousAt.HasValue
+                ? $"Изменена дата судебного решения: {BuildClientCaseTitle(clientCase)}"
+                : $"Вынесено судебное решение: {BuildClientCaseTitle(clientCase)}";
+        var body = $"{normalizedActorName} {(!currentAt.HasValue ? "удалил(а) дату решения" : previousAt.HasValue ? "изменил(а) дату решения" : "указал(а) дату решения")} по делу.\n\n"
+            + $"Дело: {BuildClientCaseTitle(clientCase)}\n"
+            + (previousAt.HasValue ? $"Прежняя дата: {FormatCourtEventDate(previousAt.Value, allDay: true)}\n" : string.Empty)
+            + (currentAt.HasValue ? $"Новая дата: {FormatCourtEventDate(currentAt.Value, allDay: true)}" : "Дата решения пока не указана.");
+
+        foreach (var recipientUserId in visibleRecipientUserIds)
+        {
+            await CreateUserNotificationAsync(
+                recipientUserId,
+                UserNotificationTypes.CourtDecisionPublished,
+                $"case:{clientCase.Id}:decision-date-changed:{changedAtUtc.Ticks}:{recipientUserId}",
+                title,
+                body,
+                "emerald",
+                "case",
+                clientCase.Id,
+                null,
+                null,
+                new { clientCaseId = clientCase.Id, previousAt, currentAt, actorUserId, actorName = normalizedActorName },
+                cancellationToken,
+                objectVisibilityValidated: true,
+                resolvedNotificationChannels: channelsByUserId[recipientUserId]);
+        }
+    }
+
     public async Task NotifyCaseProceduralDeadlineAsync(
         ClientCase clientCase,
         ClientCaseProceduralDeadline deadline,

@@ -2120,6 +2120,95 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task Create_WithCourtDecisionDate_NotifiesAssignedResponsible()
+    {
+        await using var db = await CreateContextAsync();
+        var editor = await CreateUserAsync(db, "decision-create-editor@example.com", "Редактор", DataVisibilityScope.All);
+        var responsible = await CreateUserAsync(db, "decision-create-responsible@example.com", "Ответственный", DataVisibilityScope.All);
+        var client = new Client { Name = "Клиент", IsActive = true, ResponsibleUserId = editor.Id };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+        var decisionAt = new DateTime(2026, 10, 5);
+        var controller = CreateController(db, editor, notificationService: CreateNotificationService(db));
+
+        var result = await controller.Create(new ClientCase
+        {
+            ClientId = client.Id, Title = "Судебное дело", Status = ClientCaseStatus.Open,
+            ResponsibleUserId = responsible.Id, CourtDecisionAt = decisionAt,
+        }, CancellationToken.None);
+
+        Assert.IsType<CreatedResult>(result);
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal(responsible.Id, notification.RecipientUserId);
+        Assert.Equal(UserNotificationTypes.CourtDecisionPublished, notification.Type);
+        Assert.Contains("Вынесено судебное решение", notification.Title);
+        Assert.Contains("05.10.2026", notification.BodyPreview);
+        Assert.DoesNotContain("Прежняя дата", notification.BodyPreview);
+    }
+
+    [Fact]
+    public async Task Create_WithHearingAndDecision_NotifiesForBothEvents()
+    {
+        await using var db = await CreateContextAsync();
+        var editor = await CreateUserAsync(db, "case-events-editor@example.com", "Редактор", DataVisibilityScope.All);
+        var responsible = await CreateUserAsync(db, "case-events-responsible@example.com", "Ответственный", DataVisibilityScope.All);
+        var client = new Client { Name = "Клиент", IsActive = true, ResponsibleUserId = editor.Id };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, editor, notificationService: CreateNotificationService(db));
+
+        Assert.IsType<CreatedResult>(await controller.Create(new ClientCase
+        {
+            ClientId = client.Id, Title = "Судебное дело", Status = ClientCaseStatus.Open,
+            ResponsibleUserId = responsible.Id,
+            NextHearingAt = new DateTime(2026, 10, 12, 10, 0, 0, DateTimeKind.Utc),
+            CourtDecisionAt = new DateTime(2026, 10, 5),
+        }, CancellationToken.None));
+
+        var notifications = await db.UserNotifications.ToListAsync();
+        Assert.Equal(2, notifications.Count);
+        Assert.All(notifications, item => Assert.Equal(responsible.Id, item.RecipientUserId));
+        Assert.Contains(notifications, item => item.Type == UserNotificationTypes.CourtHearing);
+        Assert.Contains(notifications, item => item.Type == UserNotificationTypes.CourtDecisionPublished);
+    }
+
+    [Fact]
+    public async Task Update_WhenCourtDecisionDateChanges_NotifiesOnlyForActualChanges()
+    {
+        await using var db = await CreateContextAsync();
+        var editor = await CreateUserAsync(db, "decision-update-editor@example.com", "Редактор", DataVisibilityScope.All);
+        var responsible = await CreateUserAsync(db, "decision-update-responsible@example.com", "Ответственный", DataVisibilityScope.All);
+        var client = new Client { Name = "Клиент", IsActive = true, ResponsibleUserId = editor.Id };
+        var clientCase = new ClientCase
+        {
+            Client = client, Title = "Судебное дело", Status = ClientCaseStatus.Open,
+            ResponsibleUserId = responsible.Id, CourtDecisionAt = new DateTime(2026, 10, 5),
+        };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, editor, notificationService: CreateNotificationService(db));
+        var update = new ClientCase
+        {
+            ClientId = client.Id, Title = clientCase.Title, Status = ClientCaseStatus.Open,
+            ResponsibleUserId = responsible.Id, CourtDecisionAt = new DateTime(2026, 10, 7),
+        };
+
+        Assert.IsType<OkObjectResult>(await controller.Update(clientCase.Id, update, CancellationToken.None));
+        var changed = await db.UserNotifications.SingleAsync();
+        Assert.Equal(responsible.Id, changed.RecipientUserId);
+        Assert.Contains("Прежняя дата: 05.10.2026", changed.BodyPreview);
+        Assert.Contains("Новая дата: 07.10.2026", changed.BodyPreview);
+
+        Assert.IsType<OkObjectResult>(await controller.Update(clientCase.Id, update, CancellationToken.None));
+        Assert.Single(await db.UserNotifications.ToListAsync());
+
+        update.CourtDecisionAt = null;
+        Assert.IsType<OkObjectResult>(await controller.Update(clientCase.Id, update, CancellationToken.None));
+        var removed = Assert.Single(await db.UserNotifications.Where(item => item.Title.StartsWith("Удалена дата судебного решения")).ToListAsync());
+        Assert.Equal(responsible.Id, removed.RecipientUserId);
+    }
+
+    [Fact]
     public async Task Update_WithoutPaymentsViewPermission_PreservesFeeAmount()
     {
         await using var db = await CreateContextAsync();

@@ -6687,6 +6687,51 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyCaseDecisionDateChangedAsync_RespectsVisibilityAndDeduplicates()
+    {
+        await using var db = await CreateContextAsync();
+        var adminRole = new Role { Name = "admin", Description = "Администратор" };
+        db.Roles.Add(adminRole);
+        await db.SaveChangesAsync();
+        var recipient = new User
+        {
+            Email = "decision-recipient@example.com", FullName = "Получатель", PasswordHash = "hash",
+            RoleId = adminRole.Id, IsActive = true, IsApproved = true,
+            CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
+        };
+        var actor = new User
+        {
+            Email = "decision-actor@example.com", FullName = "Автор", PasswordHash = "hash",
+            RoleId = adminRole.Id, IsActive = true, IsApproved = true,
+            CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
+        };
+        db.Users.AddRange(recipient, actor);
+        await db.SaveChangesAsync();
+        var denied = await CreateUserWithoutSectionAccessAsync(db, "decision-denied@example.com", RolePermissionCatalog.Cases);
+        var client = new Client { Name = "Клиент", IsActive = true, ResponsibleUserId = recipient.Id };
+        var clientCase = new ClientCase
+        {
+            Client = client, Title = "Судебное дело", Status = ClientCaseStatus.Open,
+            ResponsibleUserId = recipient.Id,
+        };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService());
+        var changedAt = DateTime.UtcNow;
+        var currentAt = new DateTime(2026, 10, 7);
+        var recipients = new[] { recipient.Id, actor.Id, denied.Id };
+
+        await service.NotifyCaseDecisionDateChangedAsync(clientCase, null, currentAt, actor.FullName, actor.Id, recipients, changedAt);
+        await service.NotifyCaseDecisionDateChangedAsync(clientCase, null, currentAt, actor.FullName, actor.Id, recipients, changedAt);
+
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal(recipient.Id, notification.RecipientUserId);
+        Assert.Equal(UserNotificationTypes.CourtDecisionPublished, notification.Type);
+        Assert.Equal(clientCase.Id, notification.ObjectId);
+        Assert.Contains("07.10.2026", notification.BodyPreview);
+    }
+
+    [Fact]
     public async Task NotifyCourtSyncStalledAsync_NotifiesOnlyAdminsOncePerFailureSeries()
     {
         await using var db = await CreateContextAsync();

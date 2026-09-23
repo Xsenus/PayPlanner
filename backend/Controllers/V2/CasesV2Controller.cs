@@ -9521,18 +9521,34 @@ public partial class CasesV2Controller : ControllerBase
         _db.ClientCases.Add(model);
         await _db.SaveChangesAsync(ct);
         await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, model.Id, User.GetUserId(), User.GetDisplayName(), ct);
+        IReadOnlyCollection<int>? caseNotificationRecipients = null;
         if (_notificationService is not null
             && !ClientCaseStageClassifier.IsPretrial(model)
             && model.NextHearingAt.HasValue)
         {
-            var recipients = await ResolveCaseNotificationRecipientIdsAsync(model.Id, ct);
+            caseNotificationRecipients ??= await ResolveCaseNotificationRecipientIdsAsync(model.Id, ct);
             await _notificationService.NotifyCaseHearingDateChangedAsync(
                 model,
                 null,
                 model.NextHearingAt.Value,
                 User.GetDisplayName(),
                 User.GetUserId() ?? 0,
-                recipients,
+                caseNotificationRecipients,
+                DateTime.UtcNow,
+                ct);
+        }
+        if (_notificationService is not null
+            && !ClientCaseStageClassifier.IsPretrial(model)
+            && model.CourtDecisionAt.HasValue)
+        {
+            caseNotificationRecipients ??= await ResolveCaseNotificationRecipientIdsAsync(model.Id, ct);
+            await _notificationService.NotifyCaseDecisionDateChangedAsync(
+                model,
+                null,
+                model.CourtDecisionAt,
+                User.GetDisplayName(),
+                User.GetUserId() ?? 0,
+                caseNotificationRecipients,
                 DateTime.UtcNow,
                 ct);
         }
@@ -9575,6 +9591,7 @@ public partial class CasesV2Controller : ControllerBase
 
         var shouldCloseLinkedTasks = !IsFinishedCaseStatus(e.Status) && IsFinishedCaseStatus(model.Status);
         var previousNextHearingAt = e.NextHearingAt;
+        var previousCourtDecisionAt = e.CourtDecisionAt;
         var previousFeeAmount = e.FeeAmount;
         var canViewFinance = await CanViewCaseFinanceAsync(ct);
         e.Title = model.Title;
@@ -9609,19 +9626,35 @@ public partial class CasesV2Controller : ControllerBase
 
         await _db.SaveChangesAsync(ct);
         await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, e.Id, User.GetUserId(), User.GetDisplayName(), ct);
+        IReadOnlyCollection<int>? caseNotificationRecipients = null;
         if (_notificationService is not null
             && !ClientCaseStageClassifier.IsPretrial(e)
             && e.NextHearingAt.HasValue
             && previousNextHearingAt != e.NextHearingAt)
         {
-            var recipients = await ResolveCaseNotificationRecipientIdsAsync(e.Id, ct);
+            caseNotificationRecipients ??= await ResolveCaseNotificationRecipientIdsAsync(e.Id, ct);
             await _notificationService.NotifyCaseHearingDateChangedAsync(
                 e,
                 previousNextHearingAt,
                 e.NextHearingAt.Value,
                 User.GetDisplayName(),
                 User.GetUserId() ?? 0,
-                recipients,
+                caseNotificationRecipients,
+                DateTime.UtcNow,
+                ct);
+        }
+        if (_notificationService is not null
+            && !ClientCaseStageClassifier.IsPretrial(e)
+            && previousCourtDecisionAt?.Date != e.CourtDecisionAt?.Date)
+        {
+            caseNotificationRecipients ??= await ResolveCaseNotificationRecipientIdsAsync(e.Id, ct);
+            await _notificationService.NotifyCaseDecisionDateChangedAsync(
+                e,
+                previousCourtDecisionAt,
+                e.CourtDecisionAt,
+                User.GetDisplayName(),
+                User.GetUserId() ?? 0,
+                caseNotificationRecipients,
                 DateTime.UtcNow,
                 ct);
         }

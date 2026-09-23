@@ -744,5 +744,8 @@ public class RolePermissionsAuditTests
 
         public Task NotifyCaseHearingDateChangedAsync(ClientCase clientCase, DateTime? previousAt, DateTime currentAt, string actorName, int actorUserId, IReadOnlyCollection<int> recipientUserIds, DateTime changedAtUtc, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
+
+        public Task NotifyCaseDecisionDateChangedAsync(ClientCase clientCase, DateTime? previousAt, DateTime? currentAt, string actorName, int actorUserId, IReadOnlyCollection<int> recipientUserIds, DateTime changedAtUtc, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
     }
 }
