@@ -4878,6 +4878,20 @@ public class NotificationServiceTests
             .ToArray();
         db.Users.AddRange(recipients.Append(actor));
         await db.SaveChangesAsync();
+        db.UserSettings.AddRange(
+            new UserSetting
+            {
+                UserId = recipients[0].Id,
+                Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+                Value = "Asia/Novosibirsk",
+            },
+            new UserSetting
+            {
+                UserId = recipients[1].Id,
+                Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+                Value = "America/Los_Angeles",
+            });
+        await db.SaveChangesAsync();
         var deniedRecipient = await CreateUserWithoutSectionAccessAsync(
             db,
             "deadline-query-denied@example.com",
@@ -4954,6 +4968,17 @@ public class NotificationServiceTests
             Assert.Contains("Апелляционная жалоба для нескольких получателей", notification.BodyPreview);
             Assert.Contains("Подготовить общий пакет документов", notification.BodyPreview);
         });
+        foreach (var (recipient, zoneId) in new[]
+        {
+            (recipients[0], "Asia/Novosibirsk"),
+            (recipients[1], "America/Los_Angeles"),
+        })
+        {
+            var expectedDate = CalendarTimeZoneHelper.ToUserLocal(
+                deadline.DueAt, CalendarTimeZoneHelper.ResolveTimeZone(zoneId));
+            var notification = Assert.Single(notifications, item => item.RecipientUserId == recipient.Id);
+            Assert.Contains(expectedDate.ToString("dd.MM.yyyy HH:mm"), notification.BodyPreview, StringComparison.Ordinal);
+        }
         Assert.Single(interceptor.ReaderCommands, command =>
             command.Contains("SELECT EXISTS", StringComparison.Ordinal)
             && command.Contains("FROM \"ClientCases\"", StringComparison.Ordinal));

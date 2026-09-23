@@ -2589,16 +2589,16 @@ public sealed class NotificationService : INotificationService
         var normalizedAction = NormalizeCaseProceduralDeadlineAction(action);
         var normalizedActorName = NormalizeNotificationText(actorName, "CRM");
         var actionText = ResolveCaseProceduralDeadlineActionText(normalizedAction);
-        var message = await RenderTemplateAsync(
-            NotificationTemplateKeys.CaseProceduralDeadline,
-            BuildCaseProceduralDeadlineSubject(clientCase, deadline, normalizedAction),
-            BuildCaseProceduralDeadlineBody(clientCase, deadline, normalizedAction, normalizedActorName),
-            BuildCaseProceduralDeadlineTemplateValues(clientCase, deadline, normalizedAction, normalizedActorName),
-            purpose: NotificationPurposes.TaskReminder,
-            cancellationToken: cancellationToken);
-        var version = string.Equals(normalizedAction, "reminder", StringComparison.OrdinalIgnoreCase)
-            ? DateTime.UtcNow.ToString("yyyyMMdd", CultureInfo.InvariantCulture)
-            : (deadline.UpdatedAt ?? deadline.ClosedAt ?? deadline.CreatedAt).Ticks.ToString(CultureInfo.InvariantCulture);
+        var now = DateTime.UtcNow;
+        var eventVersion = (deadline.UpdatedAt ?? deadline.ClosedAt ?? deadline.CreatedAt)
+            .Ticks.ToString(CultureInfo.InvariantCulture);
+        var timeZonesByUserId = await CalendarTimeZoneHelper.ResolveUserTimeZonesAsync(
+            _context, visibleRecipientUserIds, cancellationToken);
+        var templateDefinition = NotificationTemplateCatalog.Find(NotificationTemplateKeys.CaseProceduralDeadline);
+        var templateStorage = templateDefinition is null
+            ? new NotificationTemplateStorage()
+            : await LoadTemplateStorageAsync(cancellationToken);
+        var messagesByTimeZoneId = new Dictionary<string, NotificationMessage>(StringComparer.Ordinal);
         var recipientNotificationChannels = await ResolveUserNotificationChannelsAsync(
             visibleRecipientUserIds,
             UserNotificationTypes.CaseProceduralDeadline,
@@ -2611,6 +2611,23 @@ public sealed class NotificationService : INotificationService
 
         foreach (var recipientUserId in visibleRecipientUserIds)
         {
+            var recipientTimeZone = timeZonesByUserId[recipientUserId];
+            if (!messagesByTimeZoneId.TryGetValue(recipientTimeZone.Id, out var message))
+            {
+                message = RenderTemplate(
+                    templateDefinition,
+                    templateStorage,
+                    BuildCaseProceduralDeadlineSubject(clientCase, deadline, normalizedAction),
+                    BuildCaseProceduralDeadlineBody(clientCase, deadline, normalizedAction, normalizedActorName, recipientTimeZone),
+                    BuildCaseProceduralDeadlineTemplateValues(clientCase, deadline, normalizedAction, normalizedActorName, recipientTimeZone),
+                    isSensitive: false,
+                    purpose: NotificationPurposes.TaskReminder);
+                messagesByTimeZoneId[recipientTimeZone.Id] = message;
+            }
+            var version = string.Equals(normalizedAction, "reminder", StringComparison.OrdinalIgnoreCase)
+                ? CaseDeadlineReminderCalendar.LocalDay(now, recipientTimeZone)
+                    .ToString("yyyyMMdd", CultureInfo.InvariantCulture)
+                : eventVersion;
             await CreateUserNotificationAsync(
                 recipientUserId,
                 UserNotificationTypes.CaseProceduralDeadline,
