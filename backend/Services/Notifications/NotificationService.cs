@@ -2709,7 +2709,7 @@ public sealed class NotificationService : INotificationService
         var templateStorage = templateDefinition is null
             ? new NotificationTemplateStorage()
             : await LoadTemplateStorageAsync(cancellationToken);
-        var messagesByDeadlineId = new Dictionary<int, NotificationMessage>();
+        var messagesByDeadlineAndTimeZone = new Dictionary<(int DeadlineId, string TimeZoneId), NotificationMessage>();
         var notifications = new List<UserNotification>(candidates.Length);
         var deliveryChannels = new Dictionary<string, IReadOnlySet<string>>(StringComparer.Ordinal);
 
@@ -2724,17 +2724,19 @@ public sealed class NotificationService : INotificationService
 
             var deadline = candidate.Item.Deadline;
             var clientCase = candidate.Item.ClientCase;
-            if (!messagesByDeadlineId.TryGetValue(deadline.Id, out var message))
+            var recipientTimeZone = timeZonesByUserId[candidate.RecipientUserId];
+            var messageKey = (deadline.Id, recipientTimeZone.Id);
+            if (!messagesByDeadlineAndTimeZone.TryGetValue(messageKey, out var message))
             {
                 message = RenderTemplate(
                     templateDefinition,
                     templateStorage,
                     BuildCaseProceduralDeadlineSubject(clientCase, deadline, "reminder"),
-                    BuildCaseProceduralDeadlineBody(clientCase, deadline, "reminder", "CRM"),
-                    BuildCaseProceduralDeadlineTemplateValues(clientCase, deadline, "reminder", "CRM"),
+                    BuildCaseProceduralDeadlineBody(clientCase, deadline, "reminder", "CRM", recipientTimeZone),
+                    BuildCaseProceduralDeadlineTemplateValues(clientCase, deadline, "reminder", "CRM", recipientTimeZone),
                     isSensitive: false,
                     purpose: NotificationPurposes.TaskReminder);
-                messagesByDeadlineId[deadline.Id] = message;
+                messagesByDeadlineAndTimeZone[messageKey] = message;
             }
 
             var notification = new UserNotification
@@ -7000,7 +7002,8 @@ public sealed class NotificationService : INotificationService
         ClientCase clientCase,
         ClientCaseProceduralDeadline deadline,
         string action,
-        string actorName)
+        string actorName,
+        TimeZoneInfo? recipientTimeZone = null)
         => new()
         {
             ["actor.name"] = actorName,
@@ -7009,7 +7012,9 @@ public sealed class NotificationService : INotificationService
             ["deadline.title"] = NormalizeNotificationText(deadline.Title, "Процессуальный срок"),
             ["deadline.type"] = NormalizeNotificationText(deadline.DeadlineType, "не указан"),
             ["deadline.action"] = ResolveCaseProceduralDeadlineActionText(action),
-            ["deadline.dueAt"] = FormatCourtEventDate(deadline.DueAt, deadline.AllDay),
+            ["deadline.dueAt"] = recipientTimeZone is null
+                ? FormatCourtEventDate(deadline.DueAt, deadline.AllDay)
+                : FormatCourtEventDate(deadline.DueAt, deadline.AllDay, recipientTimeZone),
             ["deadline.status"] = FormatCaseProceduralDeadlineStatus(deadline.Status),
             ["deadline.warningDaysBefore"] = Math.Max(deadline.WarningDaysBefore, 0).ToString(CultureInfo.InvariantCulture),
             ["deadline.sourceType"] = NormalizeNotificationText(deadline.SourceType, "CRM"),
@@ -7096,7 +7101,8 @@ public sealed class NotificationService : INotificationService
         ClientCase clientCase,
         ClientCaseProceduralDeadline deadline,
         string action,
-        string actorName)
+        string actorName,
+        TimeZoneInfo? recipientTimeZone = null)
     {
         var normalizedAction = NormalizeCaseProceduralDeadlineAction(action);
         var intro = normalizedAction switch
@@ -7118,7 +7124,9 @@ public sealed class NotificationService : INotificationService
             .Append(NormalizeNotificationText(deadline.Title, "Процессуальный срок"))
             .AppendLine()
             .Append("Дата: ")
-            .Append(FormatCourtEventDate(deadline.DueAt, deadline.AllDay))
+            .Append(recipientTimeZone is null
+                ? FormatCourtEventDate(deadline.DueAt, deadline.AllDay)
+                : FormatCourtEventDate(deadline.DueAt, deadline.AllDay, recipientTimeZone))
             .AppendLine()
             .Append("Статус: ")
             .Append(FormatCaseProceduralDeadlineStatus(deadline.Status))

@@ -419,8 +419,8 @@ public class CaseProceduralDeadlineReminderNotificationServiceTests
                 ClientCaseId = clientCase.Id,
                 DeadlineType = "appeal",
                 Title = "Подать апелляцию",
-                DueAt = DateTime.UtcNow.Date.AddDays(3),
-                AllDay = true,
+                DueAt = DateTime.UtcNow.Date.AddDays(3).AddHours(22),
+                AllDay = false,
                 Status = "active",
                 WarningDaysBefore = 7,
                 Notes = "Проверить срок",
@@ -449,8 +449,11 @@ public class CaseProceduralDeadlineReminderNotificationServiceTests
         Assert.Contains("Подать апелляцию", notification.BodyPreview);
         Assert.Contains($"\"proceduralDeadlineId\":{deadline.Id}", notification.MetadataJson, StringComparison.Ordinal);
         Assert.Contains("\"action\":\"reminder\"", notification.MetadataJson, StringComparison.Ordinal);
+        var recipientTimeZone = CalendarTimeZoneHelper.ResolveTimeZone("Asia/Novosibirsk");
+        var localDueAt = CalendarTimeZoneHelper.ToUserLocal(deadline.DueAt, recipientTimeZone);
+        Assert.Contains(localDueAt.ToString("dd.MM.yyyy HH:mm"), notification.BodyPreview, StringComparison.Ordinal);
         var localDay = CaseDeadlineReminderCalendar.LocalDay(
-            notification.CreatedAt, CalendarTimeZoneHelper.ResolveTimeZone("Asia/Novosibirsk"));
+            notification.CreatedAt, recipientTimeZone);
         Assert.Contains($":reminder:{localDay:yyyyMMdd}:", notification.EventKey, StringComparison.Ordinal);
     }
 
