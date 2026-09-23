@@ -94,6 +94,7 @@ export interface TaskJournalItem {
   legalEntityId?: number | null;
   legalEntityName?: string;
   isInternal?: boolean;
+  isUntriaged?: boolean;
   clientCaseId?: number | null;
   clientCaseTitle?: string;
   clientBillingClassification?: TaskClientBillingClassification;

@@ -58,7 +58,21 @@ function formatFileSize(value: number) {
   return `${(value / 1024 / 1024).toFixed(1)} МБ`;
 }
 
-function renderFormattedText(text: string): ReactNode {
+function renderFormattedText(text: string, peopleById: Map<number, InternalChatPerson>): ReactNode {
+  const mentions = text.split(/(@\[\d+\]|@\d+\b)/g);
+  return mentions.map((part, partIndex) => {
+    const mention = /^@(?:\[(\d+)\]|(\d+))$/.exec(part);
+    if (mention) {
+      const person = peopleById.get(Number(mention[1] || mention[2]));
+      return person
+        ? <span key={partIndex} className="rounded bg-blue-100 px-1 font-semibold text-blue-800" title={person.email}>@{person.name}</span>
+        : <span key={partIndex} className="rounded bg-slate-100 px-1 text-slate-600">@участник #{mention[1] || mention[2]}</span>;
+    }
+    return <span key={partIndex}>{renderPlainFormattedText(part)}</span>;
+  });
+}
+
+function renderPlainFormattedText(text: string): ReactNode {
   const tokens = text.split(/(https?:\/\/[^\s]+|\*\*[^*]+\*\*|`[^`]+`|\*[^*]+\*)/g);
   return tokens.map((token, index) => {
     if (/^https?:\/\//.test(token)) return <a key={index} href={token} target="_blank" rel="noreferrer" className="underline">{token}</a>;
@@ -136,6 +150,13 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const threadMemberIdsKey = (thread.memberUserIds ?? []).join(',');
+  const peopleById = useMemo(() => new Map(people.map((person) => [person.id, person])), [people]);
+  const otherMemberNames = (thread.memberUserIds ?? [])
+    .filter((id) => id !== currentUserId)
+    .map((id) => peopleById.get(id)?.name || `Участник #${id}`);
+  const memberSummary = otherMemberNames.length > 3
+    ? `${otherMemberNames.slice(0, 3).join(', ')} и ещё ${otherMemberNames.length - 3}`
+    : otherMemberNames.join(', ');
 
   const loadMessages = useCallback(async (beforeId?: number, appendEarlier = false) => {
     if (appendEarlier) setLoadingEarlier(true);
@@ -282,7 +303,7 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
         {onBack ? <button type="button" onClick={onBack} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 lg:hidden" aria-label="К списку чатов"><ArrowLeft className="h-4 w-4" /></button> : null}
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-semibold text-slate-900">{thread.name}</div>
-          <div className="text-xs text-slate-500">{thread.kind === 'task' ? 'Чат задачи' : thread.kind === 'direct' ? 'Личный диалог' : 'Командный канал'}</div>
+          <div className="truncate text-xs text-slate-500">{thread.kind === 'task' ? `Чат задачи${memberSummary ? ` · Участники: ${memberSummary}` : ''}` : thread.kind === 'direct' ? `Личный диалог${memberSummary ? ` с ${memberSummary}` : ''}` : `Командный канал${memberSummary ? ` · Участники: ${memberSummary}` : ''}`}</div>
         </div>
         <button type="button" onClick={() => setSearchOpen((value) => !value)} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" aria-label="Поиск"><Search className="h-4 w-4" /></button>
         {thread.kind === 'channel' && thread.role === 'owner' ? <button type="button" onClick={() => { setMemberUserIds(thread.memberUserIds ?? []); setMembersOpen(true); }} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" aria-label="Участники канала" title="Участники канала"><Users className="h-4 w-4" /></button> : null}
@@ -322,7 +343,7 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
                       {message.isPinned ? <div className={`mb-1 flex items-center gap-1 text-[11px] font-semibold ${mine ? 'text-blue-100' : 'text-amber-700'}`}><Pin className="h-3 w-3" />Закреплено</div> : null}
                       {!mine && !deleted ? <div className="mb-1 text-xs font-semibold text-slate-900">{message.authorName}</div> : null}
                       {message.replyToMessageId ? <div className={`mb-2 rounded-lg border-l-2 px-2 py-1 text-xs ${mine ? 'border-blue-200 bg-blue-500/40 text-blue-50' : 'border-slate-300 bg-slate-50 text-slate-500'}`}><strong>{message.replyAuthorName}</strong><div className="truncate">{message.replyPreview}</div></div> : null}
-                      {deleted ? <span>Сообщение удалено</span> : <div className="whitespace-pre-wrap break-words">{renderFormattedText(message.text)}</div>}
+                      {deleted ? <span>Сообщение удалено</span> : <div className="whitespace-pre-wrap break-words">{renderFormattedText(message.text, peopleById)}</div>}
                       {!deleted && message.attachments.length ? <div className="mt-2 space-y-1.5">{message.attachments.map((attachment) => attachment.contentType.startsWith('image/') ? <SecureImageAttachment key={attachment.id} attachment={attachment} onError={showError} /> : <button key={attachment.id} type="button" onClick={() => void internalChatApi.downloadAttachment(attachment).catch(showError)} className={`flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs ${mine ? 'bg-blue-500/60 text-white' : 'bg-slate-100 text-slate-700'}`}><Paperclip className="h-4 w-4" /><span className="min-w-0 flex-1 truncate">{attachment.fileName}</span><span>{formatFileSize(attachment.size)}</span><Download className="h-3.5 w-3.5" /></button>)}</div> : null}
                       {message.createdTaskJournalItemId ? <button type="button" onClick={() => onOpenTask?.(message.createdTaskJournalItemId!)} className="mt-2 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white">Открыть задачу #{message.createdTaskJournalItemId}</button> : null}
                       {!deleted && message.reactions.length ? <div className="mt-2 flex flex-wrap gap-1">{message.reactions.map((reaction) => <button key={reaction.emoji} type="button" onClick={() => void internalChatApi.toggleReaction(message.id, reaction.emoji).then(refreshMessage).catch((error) => toast.error(errorMessage(error)))} className={`rounded-full px-2 py-0.5 text-xs ring-1 ${reaction.userIds.includes(currentUserId) ? 'bg-amber-100 text-amber-900 ring-amber-300' : 'bg-white text-slate-700 ring-slate-200'}`}>{reaction.emoji} {reaction.count}</button>)}</div> : null}

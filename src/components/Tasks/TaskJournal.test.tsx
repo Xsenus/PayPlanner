@@ -326,9 +326,13 @@ function filterTaskJournalMockItems(tasks: TaskJournalItem[], params: Record<str
     const billingMatches = typeof params.billingStatus !== 'string'
       || (task.billingStatus === params.billingStatus
         && (params.billingStatus === 'unbilled' ? task.status !== 'cancelled' : active));
+    const untriagedMatches = params.untriaged !== true
+      || (task.clientId == null && task.legalEntityId == null
+        && task.assigneeUserId == null && !task.assigneeName?.trim());
 
     return statusMatches
       && metricMatches
+      && untriagedMatches
       && assigneeMatches
       && participantRoleMatches
       && (typeof params.authorUserId !== 'number' || task.authorUserId === params.authorUserId)
@@ -349,7 +353,7 @@ async function renderJournal(
   tasks: TaskJournalItem[] = [createTask()],
   options: {
     initialView?: 'list' | 'board' | 'calendar' | 'timeline';
-    mode?: 'journal' | 'approvals';
+    mode?: 'journal' | 'approvals' | 'untriaged';
     assignees?: TaskJournalAssignee[];
     withRoute?: boolean;
     waitForTitle?: string | null;
@@ -425,12 +429,12 @@ async function renderJournal(
     ...options.settings,
   });
   const currentUserId = authState.user.id;
-  const filterStorageKey = options.mode === 'approvals'
-    ? `pp.task_journal.filters.v1.approvals.user:${currentUserId}`
+  const filterStorageKey = options.mode && options.mode !== 'journal'
+    ? `pp.task_journal.filters.v1.${options.mode}.user:${currentUserId}`
     : `pp.task_journal.filters.v1.user:${currentUserId}`;
   if (!window.localStorage.getItem(filterStorageKey)) {
     window.localStorage.setItem(filterStorageKey, JSON.stringify({
-      quickFilter: 'all',
+      quickFilter: options.mode === 'untriaged' ? 'untriaged' : 'all',
       viewMode: options.initialView ?? 'list',
       periodMode: options.periodMode ?? 'all',
       statusFilter: 'active',
@@ -699,18 +703,22 @@ describe('TaskJournal', () => {
     await waitFor(() => expect(apiMock.createTaskJournalItem).toHaveBeenCalledTimes(1));
     expect(apiMock.createTaskJournalItem).toHaveBeenCalledWith(expect.objectContaining({
       isInternal: true,
+      isUntriaged: true,
       clientId: null,
       legalEntityId: null,
       clientCaseId: null,
       objectName: 'Внутренняя задача',
       clientBillingClassification: 'internal',
+      assigneeUserId: null,
+      assigneeName: '',
+      participants: [],
       billingContractId: null,
       title: 'Срочно проверить документ',
       description: 'Кратко сверить реквизиты',
       dueAt: expect.any(String),
     }));
     await waitFor(() => expect(screen.queryByRole('heading', { name: 'Быстрая задача' })).toBeNull());
-    expect(toastMock.success).toHaveBeenCalledWith(expect.stringContaining('Быстрая задача создана'), 'Журнал задач');
+    expect(toastMock.success).toHaveBeenCalledWith(expect.stringContaining('Неразобранные'), 'Журнал задач');
   });
 
   it('shows a valid cached calendar as read-only when the task API is unavailable', async () => {
@@ -3033,6 +3041,71 @@ describe('TaskJournal', () => {
         quickFilter: 'assignedToMe',
       });
     });
+  });
+
+  it('shows only tasks without a client and assignee in the untriaged view', async () => {
+    await renderJournal([
+      createTask({ id: 101, title: 'Разобрать срочную задачу', clientId: null, clientName: null, legalEntityId: null, assigneeUserId: null, assigneeName: '', participants: [] }),
+      createTask({ id: 102, title: 'Назначенная задача' }),
+    ]);
+
+    fireEvent.click(screen.getByTestId('task-quick-filter-untriaged'));
+
+    await waitFor(() => expect(apiMock.getTaskJournalItems).toHaveBeenCalledWith(expect.objectContaining({ untriaged: true }), expect.anything()));
+    expect(await screen.findByText('Разобрать срочную задачу')).toBeTruthy();
+    expect(screen.queryByText('Назначенная задача')).toBeNull();
+  });
+
+  it('opens the dedicated untriaged section with independent saved filters', async () => {
+    await renderJournal([
+      createTask({ id: 101, title: 'Нужно распределить', isInternal: true, clientId: null, clientName: null, clientCaseId: null, assigneeUserId: null, assigneeName: '', participants: [] }),
+      createTask({ id: 102, title: 'Уже назначена' }),
+    ], { mode: 'untriaged', waitForTitle: null });
+
+    expect(await screen.findByRole('heading', { name: 'Неразобранные' })).toBeTruthy();
+    expect(await screen.findByText('Нужно распределить')).toBeTruthy();
+    expect(screen.queryByText('Уже назначена')).toBeNull();
+    expect(screen.queryByTestId('task-quick-filter-row')).toBeNull();
+    expect(apiMock.getTaskJournalItems).toHaveBeenCalledWith(expect.objectContaining({ untriaged: true }), expect.anything());
+    expect(window.localStorage.getItem('pp.task_journal.filters.v1.user:7')).toBeNull();
+  });
+
+  it.each(['legacy', 'modern'] as const)('asks how to account for an untriaged task before linking it in the %s card', async (taskCardWindowMode) => {
+    await renderJournal([createTask({
+      isInternal: true,
+      clientId: null,
+      clientName: null,
+      clientCaseId: null,
+      clientCaseTitle: null,
+      legalEntityId: null,
+      objectName: 'Внутренняя задача',
+      assigneeUserId: null,
+      assigneeName: '',
+      participants: [],
+    })], { settings: { taskCardWindowMode } });
+
+    fireEvent.click(screen.getAllByTitle('Просмотр')[0]);
+    await screen.findByRole('heading', { name: 'Просмотр задачи' });
+    fireEvent.click(screen.getAllByRole('button', { name: 'Редактировать задачу' })[0]);
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    fireEvent.click(within(card).getByTestId('task-internal-checkbox'));
+    fireEvent.click(within(card).getByRole('button', { name: taskCardWindowMode === 'modern' ? 'Контрагент' : 'Выберите контрагента' }));
+    const lookup = await screen.findByRole('dialog', { name: 'Выбор контрагента' });
+    fireEvent.click(within(lookup).getByRole('button', { name: /Иванов Иван Иванович/ }));
+    fireEvent.click(within(card).getByRole('button', { name: 'Сохранить' }));
+
+    expect(await screen.findByRole('heading', { name: 'Выберите клиента и дело' })).toBeTruthy();
+    expect(apiMock.updateTaskJournalItem).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByTestId('task-billing-wizard-case'), { target: { value: '100' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Проверить договор' }));
+    await screen.findByRole('heading', { name: 'Определите учёт задачи' });
+    fireEvent.click(screen.getByRole('button', { name: /^Платная задача/ }));
+    await waitFor(() => expect(apiMock.updateTaskJournalItem).toHaveBeenCalledWith(101, expect.objectContaining({
+      clientId: 10,
+      clientCaseId: 100,
+      clientBillingClassification: 'billable',
+      isUntriaged: false,
+    })));
   });
 
   it('keeps the search filter after opening a task from the filtered journal', async () => {
@@ -6420,6 +6493,32 @@ describe('TaskJournal', () => {
     const requestPayload = apiMock.createTaskJournalDeadlineChangeRequest.mock.calls.at(-1)?.[1];
     expect(toDatetimeLocalInputValue(new Date(requestPayload.requestedDueAt))).toBe('2026-05-15T10:30');
     expect(apiMock.updateTaskJournalItem).not.toHaveBeenCalled();
+  });
+
+  it.each(['legacy', 'modern'] as const)('shows deadline change request to an executor with edit access in the %s task card', async (taskCardWindowMode) => {
+    authState.isAdmin = false;
+    authState.user = { id: 7, fullName: 'Исполнитель', email: 'assignee@example.com' };
+    await renderJournal([
+      createTask({ assigneeUserId: 7, authorUserId: 8, authorName: 'Постановщик' }),
+    ], { settings: { taskCardWindowMode, restrictExecutorEditing: false } });
+
+    fireEvent.click(screen.getByTitle('Просмотр'));
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+
+    expect(within(card).getAllByRole('button', { name: 'Редактировать задачу' }).length).toBeGreaterThan(0);
+    expect(within(card).getByRole('button', { name: 'Запросить перенос' })).toBeTruthy();
+  });
+
+  it.each(['legacy', 'modern'] as const)('does not offer deadline change request to the task author in the %s task card', async (taskCardWindowMode) => {
+    authState.isAdmin = false;
+    authState.user = { id: 7, fullName: 'Постановщик', email: 'author@example.com' };
+    await renderJournal([
+      createTask({ assigneeUserId: 7, authorUserId: 7, authorName: 'Постановщик' }),
+    ], { settings: { taskCardWindowMode, restrictExecutorEditing: false } });
+
+    fireEvent.click(screen.getByTitle('Просмотр'));
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    expect(within(card).queryByRole('button', { name: 'Запросить перенос' })).toBeNull();
   });
 
   it('shows deadline change requests in the task card', async () => {

@@ -5,6 +5,7 @@ public class UpsertTaskJournalItemRequest
     public int? ClientId { get; set; }
     public int? LegalEntityId { get; set; }
     public bool IsInternal { get; set; }
+    public bool IsUntriaged { get; set; }
     public int? ClientCaseId { get; set; }
     public string? ClientBillingClassification { get; set; }
     public int? BillingContractId { get; set; }

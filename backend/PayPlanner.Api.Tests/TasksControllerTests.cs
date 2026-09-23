@@ -1826,6 +1826,134 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task QuickTask_RemainsUnassignedAndAppearsInUntriagedList()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "quick-untriaged@example.com", "Автор");
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var createdResult = await controller.CreateTask(new UpsertTaskJournalItemRequest
+        {
+            IsInternal = true,
+            IsUntriaged = true,
+            Title = "Срочная внутренняя задача",
+            DueAt = DateTime.UtcNow.AddDays(3),
+        }, CancellationToken.None);
+
+        var created = Assert.IsType<TaskJournalItemDto>(Assert.IsType<CreatedResult>(createdResult.Result).Value);
+        Assert.Null(created.AssigneeUserId);
+        Assert.Equal(string.Empty, created.AssigneeName);
+        Assert.Empty(created.Participants);
+
+        var listResult = await controller.GetTasks(
+            search: null, status: null, type: null, assigneeUserId: null, from: null, to: null,
+            untriaged: true, pageSize: 1, ct: CancellationToken.None);
+        var page = Assert.IsType<PagedResponse<TaskJournalItemDto>>(Assert.IsType<OkObjectResult>(listResult.Result).Value);
+        Assert.Equal(1, page.Total);
+        Assert.Equal(created.Id, Assert.Single(page.Items).Id);
+
+        var updatedResult = await controller.UpdateTask(created.Id, new UpsertTaskJournalItemRequest
+        {
+            IsInternal = true,
+            IsUntriaged = true,
+            Title = "Срочная задача уточнена",
+            DueAt = DateTime.UtcNow.AddDays(4),
+        }, CancellationToken.None);
+        var updated = Assert.IsType<TaskJournalItemDto>(Assert.IsType<OkObjectResult>(updatedResult.Result).Value);
+        Assert.Null(updated.AssigneeUserId);
+        Assert.Equal(string.Empty, updated.AssigneeName);
+        Assert.Empty(updated.Participants);
+    }
+
+    [Fact]
+    public async Task QuickTask_CannotBeUntriagedWhenAssignedOrBoundToClient()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "quick-invalid@example.com", "Автор");
+        var client = await CreateClientAsync(db, "Клиент");
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        foreach (var request in new[]
+        {
+            new UpsertTaskJournalItemRequest { IsInternal = true, IsUntriaged = true, AssigneeUserId = author.Id, Title = "Назначенная", DueAt = DateTime.UtcNow.AddHours(2) },
+            new UpsertTaskJournalItemRequest { IsInternal = true, IsUntriaged = true, ClientId = client.Id, Title = "Клиентская", DueAt = DateTime.UtcNow.AddHours(2) },
+        })
+        {
+            var result = await controller.CreateTask(request, CancellationToken.None);
+            Assert.IsType<BadRequestObjectResult>(result.Result);
+        }
+
+        Assert.Empty(await db.TaskJournalItems.ToListAsync());
+    }
+
+    [Fact]
+    public async Task QuickTask_UntriagedListRespectsTaskVisibility()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateTaskUserAsync(db, "quick-visible@example.com", "Автор", canEdit: false, canCreate: true);
+        var other = await CreateTaskUserAsync(db, "quick-hidden@example.com", "Другой сотрудник", canEdit: false, canCreate: true);
+        var authorController = CreateController(db, new RecordingNotificationService(), author);
+        var createdResult = await authorController.CreateTask(new UpsertTaskJournalItemRequest
+        {
+            IsInternal = true,
+            IsUntriaged = true,
+            Title = "Личная неразобранная задача",
+            DueAt = DateTime.UtcNow.AddHours(2),
+        }, CancellationToken.None);
+        Assert.IsType<CreatedResult>(createdResult.Result);
+
+        var otherController = CreateController(db, new RecordingNotificationService(), other);
+        var listResult = await otherController.GetTasks(
+            search: null, status: null, type: null, assigneeUserId: null, from: null, to: null,
+            untriaged: true, ct: CancellationToken.None);
+        var page = Assert.IsType<PagedResponse<TaskJournalItemDto>>(Assert.IsType<OkObjectResult>(listResult.Result).Value);
+        Assert.Equal(0, page.Total);
+        Assert.Empty(page.Items);
+    }
+
+    [Fact]
+    public async Task QuickTask_RequiresBillingDecisionWhenLinkedToClient()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "quick-billing@example.com", "Автор");
+        var client = await CreateClientAsync(db, "Платный клиент");
+        var clientCase = await CreateCaseAsync(db, client.Id, "Дело для срочной проверки");
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+        var createdResult = await controller.CreateTask(new UpsertTaskJournalItemRequest
+        {
+            IsInternal = true,
+            IsUntriaged = true,
+            Title = "Срочная проверка",
+            DueAt = DateTime.UtcNow.AddHours(2),
+        }, CancellationToken.None);
+        var created = Assert.IsType<TaskJournalItemDto>(Assert.IsType<CreatedResult>(createdResult.Result).Value);
+
+        var missingDecision = await controller.UpdateTask(created.Id, new UpsertTaskJournalItemRequest
+        {
+            ClientId = client.Id,
+            ClientCaseId = clientCase.Id,
+            Title = "Срочная проверка",
+            DueAt = DateTime.UtcNow.AddHours(2),
+        }, CancellationToken.None);
+        Assert.IsType<BadRequestObjectResult>(missingDecision.Result);
+        Assert.Null((await db.TaskJournalItems.SingleAsync(task => task.Id == created.Id)).ClientId);
+
+        var updatedResult = await controller.UpdateTask(created.Id, new UpsertTaskJournalItemRequest
+        {
+            ClientId = client.Id,
+            ClientCaseId = clientCase.Id,
+            ClientBillingClassification = TaskClientBillingClassification.Billable,
+            Title = "Срочная проверка",
+            DueAt = DateTime.UtcNow.AddHours(2),
+        }, CancellationToken.None);
+        var updated = Assert.IsType<TaskJournalItemDto>(Assert.IsType<OkObjectResult>(updatedResult.Result).Value);
+        Assert.Equal(client.Id, updated.ClientId);
+        Assert.Equal(TaskClientBillingClassification.Billable, updated.ClientBillingClassification);
+        Assert.Equal("unbilled", updated.BillingStatus);
+        Assert.NotNull((await db.TaskJournalItems.SingleAsync(task => task.Id == created.Id)).BillingDecisionAt);
+    }
+
+    [Fact]
     public async Task CreateTask_PersistsActualBillingDecisionAndReturnsContractContext()
     {
         await using var db = await CreateContextAsync();

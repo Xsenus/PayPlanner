@@ -40,6 +40,7 @@ export const TAB_ACCESS_RULES = {
   profile: () => true,
   calendar: (permissions) => permissions.calendar.canView,
   tasks: (permissions) => permissions.tasks.canView,
+  tasksUntriaged: (permissions) => permissions.tasks.canView,
   tasksControl: (permissions) => permissions.tasks.canView,
   tasksApprovals: (permissions) => permissions.tasks.canView,
   tasksCalendar: (permissions) => permissions.tasks.canView,
@@ -185,6 +186,14 @@ export function isTasksControlPath(): boolean {
   }
 
   return /^\/tasks\/control\/?$/i.test(window.location.pathname);
+}
+
+export function isTasksUntriagedPath(): boolean {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  return /^\/tasks\/untriaged\/?$/i.test(window.location.pathname);
 }
 
 export function isTasksApprovalsPath(): boolean {
@@ -403,6 +412,10 @@ export function getInitialTab(): Tab {
     return 'tasksControl';
   }
 
+  if (isTasksUntriagedPath()) {
+    return 'tasksUntriaged';
+  }
+
   if (isTasksApprovalsPath()) {
     return 'tasksApprovals';
   }
@@ -474,6 +487,10 @@ export function getTabHref(tab: Tab): string {
 
   if (tab === 'tasksControl') {
     return '/tasks/control';
+  }
+
+  if (tab === 'tasksUntriaged') {
+    return '/tasks/untriaged';
   }
 
   if (tab === 'tasksCalendar') {

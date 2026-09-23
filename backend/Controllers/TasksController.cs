@@ -178,6 +178,7 @@ public class TasksController : ControllerBase
         [FromQuery] string? sortBy = null,
         [FromQuery] string? sortDir = null,
         [FromQuery] string? billingStatus = null,
+        [FromQuery] bool untriaged = false,
         CancellationToken ct = default)
     {
         var access = await GetTaskAccessAsync(ct, calendarView ? RolePermissionCatalog.Calendar : RolePermissionCatalog.Tasks);
@@ -211,6 +212,15 @@ public class TasksController : ControllerBase
             todayFrom,
             todayTo,
             billingStatus);
+
+        if (untriaged)
+        {
+            query = query.Where(task =>
+                !task.ClientId.HasValue &&
+                !task.LegalEntityId.HasValue &&
+                !task.AssigneeUserId.HasValue &&
+                task.AssigneeName == "");
+        }
 
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, 200);
@@ -3271,6 +3281,22 @@ public class TasksController : ControllerBase
             return BadRequest(new { message = binding.Error });
         }
 
+        TaskBillingDecision? newBindingBilling = null;
+        if (!entity.ClientId.HasValue && !entity.LegalEntityId.HasValue
+            && (binding.ClientId.HasValue || binding.LegalEntityId.HasValue))
+        {
+            if (!TaskClientBillingClassification.IsDecision(request.ClientBillingClassification))
+            {
+                return BadRequest(new { message = "При привязке клиента укажите, оплачивается ли задача." });
+            }
+
+            newBindingBilling = await ResolveTaskBillingDecisionAsync(request, binding, ct);
+            if (newBindingBilling.Error is not null)
+            {
+                return BadRequest(new { message = newBindingBilling.Error });
+            }
+        }
+
         var participants = await ResolveParticipantsAsync(request, entity.AssigneeUserId ?? access.UserId, ct);
         if (participants.Error is not null)
         {
@@ -3363,6 +3389,12 @@ public class TasksController : ControllerBase
         var previousAssigneeUserId = entity.AssigneeUserId;
         var previousAssigneeName = entity.AssigneeName;
         var changeLabels = BuildTaskChangeLabels(entity, request, binding, participants, nextStatus).ToList();
+        if (newBindingBilling is not null)
+        {
+            changeLabels.Add(newBindingBilling.Classification == TaskClientBillingClassification.Billable
+                ? "Оплата клиента: платная задача"
+                : "Оплата клиента: неоплачиваемая задача");
+        }
         AddIfChanged(changeLabels, "Постановщик", entity.AuthorName, nextAuthorName);
         var assigneeChanged = HasTaskAssigneeChange(changeLabels);
         IReadOnlyCollection<int>? formerAuthorRecipientIds = authorChanged && previousAuthorUserId.HasValue
@@ -3377,6 +3409,13 @@ public class TasksController : ControllerBase
         entity.ClientId = binding.ClientId;
         entity.LegalEntityId = binding.LegalEntityId;
         entity.ClientCaseId = binding.ClientCaseId;
+        if (newBindingBilling is not null)
+        {
+            entity.ClientBillingClassification = newBindingBilling.Classification;
+            entity.BillingContractId = newBindingBilling.ContractId;
+            entity.BillingModeSnapshot = newBindingBilling.BillingMode;
+            entity.BillingDecisionAt = updatedAt;
+        }
         entity.ObjectName = BuildObjectName(binding.OwnerName, binding.ClientCaseTitle);
         entity.Title = request.Title.Trim();
         entity.Description = NormalizeOptional(request.Description);
@@ -5413,6 +5452,18 @@ public class TasksController : ControllerBase
         int fallbackUserId,
         CancellationToken ct)
     {
+        if (request.IsUntriaged)
+        {
+            if (!request.IsInternal || request.ClientId.HasValue || request.LegalEntityId.HasValue
+                || request.ClientCaseId.HasValue || request.AssigneeUserId.HasValue
+                || !string.IsNullOrWhiteSpace(request.AssigneeName) || request.Participants.Count > 0)
+            {
+                return TaskParticipantsResolution.Invalid("Неразобранная задача должна быть внутренней, без клиента и исполнителя.");
+            }
+
+            return TaskParticipantsResolution.Valid(null, string.Empty, []);
+        }
+
         var drafts = new List<TaskParticipantDraft>();
         var index = 0;
 

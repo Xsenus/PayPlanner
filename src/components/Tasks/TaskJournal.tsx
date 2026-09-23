@@ -25,6 +25,7 @@ import {
   ExternalLink,
   FileText,
   History,
+  Inbox,
   LayoutGrid,
   ListFilter,
   Loader2,
@@ -155,7 +156,7 @@ import { TASK_JOURNAL_TABLE_COLUMNS, type TaskJournalSortKey, type TaskTableColu
 type ViewMode = 'list' | 'board' | 'calendar' | 'timeline';
 type TaskCardLayoutMode = 'compact' | 'expanded';
 type PeriodMode = 'day' | 'week' | 'month' | 'all';
-type QuickFilter = 'all' | 'assignedToMe' | 'authoredByMe' | 'observer' | 'approver' | 'underControl';
+type QuickFilter = 'all' | 'assignedToMe' | 'authoredByMe' | 'untriaged' | 'observer' | 'approver' | 'underControl';
 type MetricFilter = 'none' | 'active' | 'overdue' | 'today' | 'highPriority';
 type TaskStatusFilter = TaskJournalStatus | 'active' | 'all' | 'overdue';
 type TaskCalendarColorMode = 'smart' | 'priority' | 'status';
@@ -189,7 +190,7 @@ type ApprovalDecisionPromptState = {
   task: TaskJournalItem;
   participant: TaskJournalParticipant;
 } | null;
-type TaskJournalMode = 'journal' | 'approvals';
+type TaskJournalMode = 'journal' | 'approvals' | 'untriaged';
 type TaskApprovalFinalAction = 'complete' | 'returnToAssignee';
 type TaskJournalProps = {
   initialView?: ViewMode;
@@ -395,6 +396,7 @@ const QUICK_FILTER_OPTIONS: Array<{ value: QuickFilter; label: string; descripti
   { value: 'all', label: 'Все', description: 'Все доступные вам задачи.', icon: ListFilter },
   { value: 'assignedToMe', label: 'Поручено мне', description: 'Задачи, где вы основной или дополнительный исполнитель.', icon: CheckCircle2 },
   { value: 'authoredByMe', label: 'Я поручил', description: 'Задачи, которые вы создали или поручили другим сотрудникам.', icon: Send },
+  { value: 'untriaged', label: 'Неразобранные', description: 'Быстрые задачи без клиента и исполнителя, которые нужно распределить.', icon: Inbox },
   { value: 'observer', label: 'Я наблюдатель', description: 'Задачи, где вы следите за ходом работы и получаете общие уведомления, но не принимаете решение по согласованию.', icon: Eye },
   { value: 'approver', label: 'Я согласую', description: 'Задачи, где вы включены в маршрут согласования. Когда наступит ваша очередь, CRM попросит принять решение.', icon: Scale },
   { value: 'underControl', label: 'На контроле', description: 'Все задачи, отмеченные для дополнительного контроля.', icon: ShieldAlert },
@@ -479,6 +481,9 @@ function writeTaskCardLayoutMode(userId: number | null, mode: TaskCardLayoutMode
 }
 
 function getDefaultQuickFilter(_userId: number | null, mode: TaskJournalMode = 'journal'): QuickFilter {
+  if (mode === 'untriaged') {
+    return 'untriaged';
+  }
   if (mode === 'approvals') {
     return 'all';
   }
@@ -504,7 +509,7 @@ function createDefaultFilterPreferences(userId: number | null, mode: TaskJournal
     assigneeFilter: 'all',
     typeFilter: 'all',
     priorityFilter: 'all',
-    periodMode: 'day',
+    periodMode: mode === 'untriaged' ? 'all' : 'day',
     sortBy: 'dueAt',
     sortDir: 'asc',
   };
@@ -514,6 +519,7 @@ function isQuickFilter(value: unknown): value is QuickFilter {
   return value === 'all'
     || value === 'assignedToMe'
     || value === 'authoredByMe'
+    || value === 'untriaged'
     || value === 'observer'
     || value === 'approver'
     || value === 'underControl';
@@ -1002,6 +1008,7 @@ function moveDueAtToDate(currentDueAt: string, targetDate: Date) {
 function taskToPayload(task: TaskJournalItem, overrides: Partial<TaskJournalUpsertPayload> = {}): TaskJournalUpsertPayload {
   return {
     isInternal: task.isInternal ?? (!task.clientId && !task.legalEntityId),
+    isUntriaged: !task.clientId && !task.legalEntityId && !task.assigneeUserId && !task.assigneeName,
     clientId: task.clientId ?? null,
     legalEntityId: task.legalEntityId ?? null,
     clientCaseId: task.clientCaseId ?? null,
@@ -1746,6 +1753,9 @@ function taskTouchesCalendarUsers(task: TaskJournalItem, visibleUserIds: Set<num
 }
 
 function matchesQuickFilter(task: TaskJournalItem, quickFilter: QuickFilter, userId: number | null, userName: string) {
+  if (quickFilter === 'untriaged') {
+    return !task.clientId && !task.legalEntityId && !task.assigneeUserId && !task.assigneeName;
+  }
   if (quickFilter === 'assignedToMe') {
     return isTaskExecutorForUser(task, userId);
   }
@@ -2515,6 +2525,7 @@ export function TaskJournal({
     || taskCalendarViewScope === 'all'
     || taskCalendarViewScope === 'specific';
   const isApprovalsMode = mode === 'approvals';
+  const untriagedOnly = mode === 'untriaged';
   const taskContextDefaults = useMemo<Partial<TaskJournalUpsertPayload>>(() => {
     if (!contextFilter) {
       return {};
@@ -2595,6 +2606,7 @@ export function TaskJournal({
   const [savedViewOwnerKey, setSavedViewOwnerKey] = useState(() => getTaskJournalSavedViewsStorageKey(currentUserId, mode));
 
   const [quickFilter, setQuickFilter] = useState<QuickFilter>(initialPreferences.quickFilter);
+  const activeQuickFilter: QuickFilter = untriagedOnly ? 'untriaged' : quickFilter;
   const [metricFilter, setMetricFilter] = useState<MetricFilter>(initialPreferences.metricFilter);
   const [search, setSearch] = useState(initialPreferences.search);
   const debouncedSearch = useDebouncedValue(search, 300);
@@ -3034,7 +3046,7 @@ export function TaskJournal({
     const explicitAssigneeUserId = assigneeFilter !== 'all' && /^\d+$/.test(assigneeFilter)
       ? Number(assigneeFilter)
       : undefined;
-    const quickAssigneeUserId = quickFilter === 'assignedToMe' && currentUserId
+    const quickAssigneeUserId = activeQuickFilter === 'assignedToMe' && currentUserId
       ? currentUserId
       : undefined;
     const assigneeUserId = quickAssigneeUserId && explicitAssigneeUserId && quickAssigneeUserId !== explicitAssigneeUserId
@@ -3070,13 +3082,14 @@ export function TaskJournal({
       status: statusFilter,
       type: typeFilter === 'all' ? undefined : typeFilter,
       priority: priorityFilter === 'all' ? undefined : priorityFilter,
-      underControl: underControlOnly || quickFilter === 'underControl' || undefined,
+      underControl: underControlOnly || activeQuickFilter === 'underControl' || undefined,
       assigneeUserId,
-      authorUserId: quickFilter === 'authoredByMe' && currentUserId ? currentUserId : undefined,
-      participantRole: quickFilter === 'observer' || quickFilter === 'approver' ? quickFilter : undefined,
+      authorUserId: activeQuickFilter === 'authoredByMe' && currentUserId ? currentUserId : undefined,
+      participantRole: activeQuickFilter === 'observer' || activeQuickFilter === 'approver' ? activeQuickFilter : undefined,
       approvalScope: isApprovalsMode || undefined,
       metric: metricFilter === 'none' ? undefined : metricFilter,
       billingStatus: billingFilter,
+      untriaged: activeQuickFilter === 'untriaged' || undefined,
       clientCaseId: selectedCaseId,
       clientId,
       legalEntityId,
@@ -3103,7 +3116,7 @@ export function TaskJournal({
     metricFilter,
     periodMode,
     priorityFilter,
-    quickFilter,
+    activeQuickFilter,
     selectedFilterClientId,
     selectedFilterLegalEntityId,
     shouldUseCalendarVisibility,
@@ -4073,7 +4086,7 @@ export function TaskJournal({
     return tasks.filter((task) => {
       const due = new Date(task.dueAt);
       const approvalScopeOk = !isApprovalsMode || isTaskInApprovalsScope(task, currentUserId, isAdminUser);
-      const quickOk = matchesQuickFilter(task, quickFilter, currentUserId, currentUserName);
+      const quickOk = matchesQuickFilter(task, activeQuickFilter, currentUserId, currentUserName);
       const assigneeOk =
         assigneeFilter === 'all' ||
         String(task.assigneeUserId ?? task.assigneeName) === assigneeFilter ||
@@ -4101,7 +4114,7 @@ export function TaskJournal({
 
       return approvalScopeOk && quickOk && assigneeOk && counterpartyOk && caseOk && typeOk && priorityOk && dateOk && searchOk;
     });
-  }, [assigneeFilter, caseFilter, counterpartyFilter, currentUserId, currentUserName, dateRangeBounds, isAdminUser, isApprovalsMode, priorityFilter, quickFilter, search, tasks, typeFilter]);
+  }, [activeQuickFilter, assigneeFilter, caseFilter, counterpartyFilter, currentUserId, currentUserName, dateRangeBounds, isAdminUser, isApprovalsMode, priorityFilter, search, tasks, typeFilter]);
 
   const statusAndPeriodFilteredTasks = useMemo(() => {
     const nowDate = getCurrentCalendarDate();
@@ -4515,6 +4528,13 @@ export function TaskJournal({
 
     if (nextFilter === 'assignedToMe') {
       setAssigneeFilter('all');
+    } else if (nextFilter === 'untriaged') {
+      setViewMode('list');
+      setPeriodMode('all');
+      setAssigneeFilter('all');
+      setCounterpartyFilter('all');
+      setCaseFilter('all');
+      setBillingFilter(undefined);
     }
   };
 
@@ -4783,9 +4803,11 @@ export function TaskJournal({
       }
     }
 
+    const normalizedParticipants = normalizeParticipants(form, assignees);
     const normalized: TaskForm = {
       ...form,
       isInternal: Boolean(form.isInternal),
+      isUntriaged: Boolean(form.isInternal && !form.assigneeUserId && !form.assigneeName.trim() && normalizedParticipants.length === 0),
       clientId: form.isInternal ? null : form.clientId,
       legalEntityId: form.isInternal ? null : form.legalEntityId,
       clientCaseId: form.isInternal ? null : form.clientCaseId,
@@ -4809,7 +4831,7 @@ export function TaskJournal({
       tags: unique(form.tags),
       reminders: form.reminders.length ? form.reminders : ['atDue'],
       channels: form.channels.length ? form.channels : ['inApp'],
-      participants: normalizeParticipants(form, assignees),
+      participants: normalizedParticipants,
       recurrenceEnabled: Boolean(form.recurrenceEnabled),
       recurrenceFrequency: form.recurrenceEnabled ? form.recurrenceFrequency ?? 'monthly' : null,
       recurrenceInterval: form.recurrenceEnabled ? Math.min(365, Math.max(1, Number(form.recurrenceInterval) || 1)) : 1,
@@ -4899,6 +4921,10 @@ export function TaskJournal({
       const form = emptyForm(currentUserName, currentUserId, taskNotificationDefaults);
       await apiService.createTaskJournalItem({
         ...form,
+        isUntriaged: true,
+        assigneeUserId: null,
+        assigneeName: '',
+        participants: [],
         isInternal: true,
         clientId: null,
         legalEntityId: null,
@@ -4912,7 +4938,7 @@ export function TaskJournal({
         dueAt: fromLocalInputValue(dueAt),
       });
       setQuickCreateOpen(false);
-      toast.success('Быстрая задача создана. Её можно дополнить и привязать к клиенту или делу.', 'Журнал задач');
+      toast.success('Задача добавлена в «Неразобранные». Назначьте исполнителя или привяжите её к клиенту.', 'Журнал задач');
       await refreshTasks();
       emitTaskChange();
     } catch (error) {
@@ -5624,9 +5650,11 @@ export function TaskJournal({
   };
 
   const contextTitle = contextFilter?.title?.trim();
-  const pageTitle = isApprovalsMode ? 'Согласования' : underControlOnly ? 'На контроле' : contextTitle ? `Задачи: ${contextTitle}` : 'Журнал задач';
+  const pageTitle = isApprovalsMode ? 'Согласования' : untriagedOnly ? 'Неразобранные' : underControlOnly ? 'На контроле' : contextTitle ? `Задачи: ${contextTitle}` : 'Журнал задач';
   const pageDescription = isApprovalsMode
     ? 'Задачи, которые находятся на согласовании и требуют решения текущего согласующего. Они остаются в общем журнале задач.'
+    : untriagedOnly
+      ? 'Быстрые задачи без клиента и исполнителя. Назначьте ответственного или привяжите задачу к клиенту и определите оплату.'
     : underControlOnly
       ? 'Задачи, поставленные на контроль руководством и отслеживаемые через движение, комментарии и изменения статусов.'
     : contextTitle
@@ -5650,6 +5678,7 @@ export function TaskJournal({
             clients={clients}
             legalEntities={legalEntities}
             counterpartyOptions={counterpartyOptions}
+            canViewCases={canViewCases}
             currentUserId={currentUserId}
             currentUserName={currentUserName}
             isAdminUser={isAdminUser}
@@ -5887,7 +5916,7 @@ export function TaskJournal({
         </section>
 
         <section className="mb-4 flex min-w-0 max-w-full flex-wrap items-center justify-between gap-3">
-          <div className="flex max-w-full flex-wrap overflow-x-auto rounded-xl bg-slate-100 p-1" data-testid="task-quick-filter-row">
+          {!untriagedOnly ? <div className="flex max-w-full flex-wrap overflow-x-auto rounded-xl bg-slate-100 p-1" data-testid="task-quick-filter-row">
             {QUICK_FILTER_OPTIONS.map(({ value, label, description, icon: Icon }) => (
               <button
                 key={value}
@@ -5906,7 +5935,7 @@ export function TaskJournal({
                 {label}
               </button>
             ))}
-          </div>
+          </div> : null}
 
           <div className="flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2">
             <SystemSelect
@@ -6524,6 +6553,7 @@ export function TaskJournal({
           clients={clients}
           legalEntities={legalEntities}
           counterpartyOptions={counterpartyOptions}
+          canViewCases={canViewCases}
           currentUserId={currentUserId}
           currentUserName={currentUserName}
           isAdminUser={isAdminUser}
@@ -10106,6 +10136,7 @@ function QuickTaskCreateModal({
 function TaskBillingCreateWizard({
   counterpartyOptions,
   initialDefaults,
+  mode = 'create',
   autoLoadBilling = false,
   canViewCases,
   onCancel,
@@ -10113,6 +10144,7 @@ function TaskBillingCreateWizard({
 }: {
   counterpartyOptions: LookupSelectOption[];
   initialDefaults: Partial<TaskJournalUpsertPayload>;
+  mode?: 'create' | 'edit';
   autoLoadBilling?: boolean;
   canViewCases: boolean;
   onCancel: () => void;
@@ -10198,24 +10230,24 @@ function TaskBillingCreateWizard({
     });
   };
 
-  const mode = selectedContract?.billingMode;
-  const warningTitle = mode === 'Actual'
+  const contractMode = selectedContract?.billingMode;
+  const warningTitle = contractMode === 'Actual'
     ? 'Договор с оплатой по факту'
-    : mode === 'Fixed'
+    : contractMode === 'Fixed'
       ? 'Договор с фиксированной оплатой'
       : 'По делу нет договора — задача платная';
-  const warningText = mode === 'Actual'
+  const warningText = contractMode === 'Actual'
     ? 'Клиент оплачивает фактически выполненные задачи. Клиентская задача получит яркую метку и будет ожидать включения в счёт.'
-    : mode === 'Fixed'
+    : contractMode === 'Fixed'
       ? 'Работа выполняется в рамках фиксированной суммы. Внимание: следите за объёмом услуг по этому делу.'
       : 'Новая клиентская задача без договора учитывается как платная и попадёт в контроль выставления счёта. Если работа не должна оплачиваться клиентом, выберите внутреннюю задачу.';
   const isAutoLoadingBilling = step === 'binding' && autoLoadBilling && loading;
   const billingContextLabel = [selectedCounterparty?.label, selectedCase?.title].filter(Boolean).join(' · ')
     || initialDefaults.objectName
     || 'Клиентская задача';
-  const billingNoticeTone = mode === 'Actual'
+  const billingNoticeTone = contractMode === 'Actual'
     ? 'danger'
-    : mode === 'Fixed'
+    : contractMode === 'Fixed'
       ? 'special'
       : 'warning';
 
@@ -10225,7 +10257,7 @@ function TaskBillingCreateWizard({
         <div className="flex items-start justify-between gap-3">
           <div>
             <div className="pp-task-billing-kicker text-xs font-bold uppercase tracking-[0.16em]">
-              {isAutoLoadingBilling ? 'Новая задача · подготовка' : `Новая задача · шаг ${step === 'binding' ? '1 из 2' : '2 из 2'}`}
+              {isAutoLoadingBilling ? 'Проверка привязки' : `${mode === 'edit' ? 'Привязка задачи' : 'Новая задача'} · шаг ${step === 'binding' ? '1 из 2' : '2 из 2'}`}
             </div>
             <h2 id="task-create-wizard-title" className="pp-task-billing-heading mt-1 text-xl font-bold">
               {isAutoLoadingBilling
@@ -10298,7 +10330,7 @@ function TaskBillingCreateWizard({
                 })}
                 className="rounded-xl px-3 py-2.5 text-left text-sm font-semibold text-slate-500 hover:bg-slate-100 hover:text-slate-800"
               >
-                Создать общую внутреннюю задачу без клиента
+                {mode === 'edit' ? 'Оставить задачу внутренней без клиента' : 'Создать общую внутреннюю задачу без клиента'}
               </button>
               <div className="flex flex-wrap justify-end gap-2">
                 <button type="button" onClick={onCancel} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600">Отмена</button>
@@ -10339,8 +10371,8 @@ function TaskBillingCreateWizard({
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
               <button type="button" onClick={() => complete('billable')} className={`pp-task-billing-choice pp-task-billing-choice-${billingNoticeTone} min-h-32 rounded-2xl border-2 p-4 text-left transition`}>
                 <WalletCards className="h-7 w-7" />
-                <span className="mt-3 block text-base font-bold">{mode === 'Fixed' ? 'Клиентская задача' : mode === 'Actual' ? 'Платная задача' : 'Платная задача без договора'}</span>
-                <span className="mt-1 block text-sm">{mode === 'Fixed' ? 'Учесть объём в рамках фиксированного договора' : 'Добавить в контроль будущего счёта'}</span>
+                <span className="mt-3 block text-base font-bold">{contractMode === 'Fixed' ? 'Клиентская задача' : contractMode === 'Actual' ? 'Платная задача' : 'Платная задача без договора'}</span>
+                <span className="mt-1 block text-sm">{contractMode === 'Fixed' ? 'Учесть объём в рамках фиксированного договора' : 'Добавить в контроль будущего счёта'}</span>
               </button>
               <button type="button" onClick={() => complete('internal')} className="pp-task-billing-choice pp-task-billing-choice-neutral min-h-32 rounded-2xl border-2 p-4 text-left transition">
                 <ShieldAlert className="h-7 w-7" />
@@ -10365,6 +10397,7 @@ type TaskModalProps = {
   clients: Client[];
   legalEntities: LegalEntitySummary[];
   counterpartyOptions: LookupSelectOption[];
+  canViewCases: boolean;
   currentUserId: number | null;
   currentUserName: string;
   isAdminUser: boolean;
@@ -10409,6 +10442,7 @@ function TaskModal({
   clients,
   legalEntities,
   counterpartyOptions,
+  canViewCases,
   currentUserId,
   currentUserName,
   isAdminUser,
@@ -10530,6 +10564,7 @@ function TaskModal({
     };
   });
   const [resultError, setResultError] = useState<string | null>(null);
+  const [billingWizardForm, setBillingWizardForm] = useState<TaskForm | null>(null);
   const [approvalResultPrompt, setApprovalResultPrompt] = useState<{ form: TaskForm; taskId?: number } | null>(null);
   const [approvalResultPromptResult, setApprovalResultPromptResult] = useState('');
   const [approvalResultPromptError, setApprovalResultPromptError] = useState<string | null>(null);
@@ -10673,7 +10708,15 @@ function TaskModal({
   );
   const isReadOnly = state?.mode === 'view';
   const isLockedViewWithEditAccess = Boolean(isReadOnly && canSwitchToEdit);
-  const canRequestDeadlineChange = Boolean(taskId && isReadOnly && !canSwitchToEdit && taskSettings.allowExecutorDeadlineChangeRequests);
+  const canRequestDeadlineChange = Boolean(
+    taskId
+      && isReadOnly
+      && state?.task
+      && currentUserId
+      && isTaskExecutorForUser(state.task, currentUserId)
+      && state.task.authorUserId !== currentUserId
+      && taskSettings.allowExecutorDeadlineChangeRequests,
+  );
   const canPrepareCreationMaterials = Boolean(!taskId && !isReadOnly);
   const canPostComment = Boolean(taskId && canPostTaskCommentForCurrentUser(state?.task, currentUserId, canSwitchToEdit));
   const canSubmitForApproval = Boolean(
@@ -11032,9 +11075,31 @@ function TaskModal({
       return;
     }
 
+    if (state?.task && !state.task.clientId && !state.task.legalEntityId
+        && !nextForm.isInternal && (nextForm.clientId || nextForm.legalEntityId)) {
+      setBillingWizardForm(nextForm);
+      return;
+    }
+
     setResultError(null);
     await saveTask(nextForm, state?.task?.id);
   };
+
+  const billingWizardDialog = billingWizardForm && state?.task ? (
+    <TaskBillingCreateWizard
+      mode="edit"
+      counterpartyOptions={counterpartyOptions}
+      initialDefaults={billingWizardForm}
+      autoLoadBilling={Boolean(billingWizardForm.clientCaseId)}
+      canViewCases={canViewCases}
+      onCancel={() => setBillingWizardForm(null)}
+      onContinue={(defaults) => {
+        const nextForm: TaskForm = { ...billingWizardForm, ...defaults };
+        setBillingWizardForm(null);
+        void saveTask(nextForm, state.task!.id);
+      }}
+    />
+  ) : null;
 
   const handleApproveParticipant = (participant: TaskJournalParticipant) => {
     const task = state?.task;
@@ -13007,6 +13072,7 @@ function TaskModal({
           </div>
         </div>
         {approvalChoiceDialog}
+        {billingWizardDialog}
         {revisionReviewDialog}
         {deadlineRequestReasonDialog}
         {approvalResultPromptDialog}
@@ -14075,6 +14141,7 @@ function TaskModal({
         </div>
       </div>
       {approvalChoiceDialog}
+      {billingWizardDialog}
       {revisionReviewDialog}
       {deadlineRequestReasonDialog}
       {approvalResultPromptDialog}

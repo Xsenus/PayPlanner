@@ -37,6 +37,7 @@ import {
   CircleDollarSign,
   Phone,
   History,
+  Inbox,
   Bell,
   Briefcase,
   StickyNote,
@@ -274,6 +275,11 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
         icon: ListTodo,
         children: [
           {
+            id: 'tasksUntriaged' as Tab,
+            label: 'Неразобранные',
+            icon: Inbox,
+          },
+          {
             id: 'tasksControl' as Tab,
             label: 'На контроле',
             icon: ShieldAlert,
@@ -288,6 +294,9 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
             label: 'Календарь',
             icon: CalendarDays,
           },
+          ...(permissions.cases.canView
+            ? [{ id: 'courtCases' as Tab, label: 'Суд', icon: Scale }]
+            : []),
         ],
       });
     }
@@ -307,7 +316,9 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
     }
     if (permissions.cases.canView) {
       items.push({ id: 'cases', tab: 'cases' as Tab, label: 'Дела', icon: Briefcase });
-      items.push({ id: 'courtCases', tab: 'courtCases' as Tab, label: 'Судебные дела', icon: Scale });
+      if (!permissions.tasks.canView) {
+        items.push({ id: 'courtCases', tab: 'courtCases' as Tab, label: 'Судебные дела', icon: Scale });
+      }
     }
     if (permissions.clients.canView || permissions.legalEntities.canView) {
       const contactChildren: SidebarChild[] = [

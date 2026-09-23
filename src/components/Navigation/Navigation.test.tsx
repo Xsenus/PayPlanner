@@ -176,6 +176,7 @@ describe('Navigation links', () => {
     expect(findLinkByHref(getTabHref('calendar'))).toBeTruthy();
     expect(findLinkByHref(getTabHref('notifications'))).toBeTruthy();
     expect(findLinkByHref(getTabHref('tasksApprovals'))).toBeTruthy();
+    expect(findLinkByHref(getTabHref('tasksUntriaged'))?.textContent).toContain('Неразобранные');
     expect(findLinkByHref(getTabHref('tasksCalendar'))).toBeTruthy();
     expect(screen.getByRole('link', { name: /^Контакты$/i }).getAttribute('href')).toBe(getTabHref('contacts'));
     expect(findLinkByHref(getTabHref('accountsIncome'))).toBeTruthy();
@@ -183,6 +184,24 @@ describe('Navigation links', () => {
     expect(findLinkByHref(getTabHref('settings'))).toBeTruthy();
     expect(findLinkByHref(getTabHref('yandexDisk'))).toBeFalsy();
     expect(findLinkByHref(getTabHref('s3Storage'))).toBeFalsy();
+  });
+
+  it('shows court work under tasks', async () => {
+    renderNavigation();
+    await waitForNavigationPermissions();
+    expect(findLinkByHref(getTabHref('courtCases'))?.textContent).toContain('Суд');
+    expect(screen.queryByRole('link', { name: 'Судебные дела' })).toBeNull();
+  });
+
+  it('keeps court work visible to a cases-only role', async () => {
+    authState.isAdmin = false;
+    authState.roleId = 101;
+    apiMock.getRolePermissions.mockResolvedValueOnce({
+      ...defaultRestrictedRolePermissions,
+      cases: { ...lawyerWorkSection },
+    });
+    renderNavigation();
+    await waitFor(() => expect(findLinkByHref(getTabHref('courtCases'))?.textContent).toContain('Судебные дела'));
   });
 
   it('uses the common server order and custom section names', async () => {

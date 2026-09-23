@@ -99,4 +99,19 @@ describe('InternalMessenger', () => {
     expect(await screen.findByText('Задача №101')).toBeTruthy();
     expect(chatApiMock.openTask).toHaveBeenCalledWith(101);
   });
+
+  it('shows task chat participants and resolves stored mention IDs to names', async () => {
+    chatApiMock.openTask.mockResolvedValue({ ...thread, id: 44, kind: 'task', taskJournalItemId: 101, name: 'Задача №101' });
+    chatApiMock.getMessages.mockResolvedValue({
+      items: [{ ...message, threadId: 44, text: 'Посмотрите @[8] и @8, пожалуйста', mentionUserIds: [8] }],
+      hasMore: false,
+      nextBeforeId: 22,
+    });
+
+    render(<TaskChatPanel taskId={101} />);
+
+    expect(await screen.findByText('Чат задачи · Участники: Анна')).toBeTruthy();
+    expect((await screen.findAllByText('@Анна')).length).toBe(2);
+    expect(screen.queryByText('@[8]')).toBeNull();
+  });
 });

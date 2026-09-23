@@ -261,6 +261,7 @@ function AppContent() {
       messenger: 'Мессенджер',
       calendar: 'Календарь',
       tasks: 'Журнал задач',
+      tasksUntriaged: 'Неразобранные задачи',
       tasksControl: 'Задачи на контроле',
       tasksApprovals: 'Согласования задач',
       tasksCalendar: 'Журнал задач: календарь',
@@ -365,6 +366,7 @@ function AppContent() {
         { tab: 'calendar' as Tab, allowed: permissions.calendar.canView },
         { tab: 'tasks' as Tab, allowed: permissions.tasks.canView },
         { tab: 'tasksControl' as Tab, allowed: permissions.tasks.canView },
+        { tab: 'tasksUntriaged' as Tab, allowed: permissions.tasks.canView },
         { tab: 'tasksApprovals' as Tab, allowed: permissions.tasks.canView },
         { tab: 'tasksCalendar' as Tab, allowed: permissions.tasks.canView },
         { tab: 'notes' as Tab, allowed: permissions.notes.canView },
@@ -460,7 +462,7 @@ function AppContent() {
   );
 
   const getTaskReturnTab = useCallback(
-    (): Tab => (activeTab === 'tasksApprovals' || activeTab === 'tasksCalendar' || activeTab === 'tasksControl' ? activeTab : 'tasks'),
+    (): Tab => (activeTab === 'tasksApprovals' || activeTab === 'tasksCalendar' || activeTab === 'tasksControl' || activeTab === 'tasksUntriaged' ? activeTab : 'tasks'),
     [activeTab],
   );
 
@@ -851,7 +853,7 @@ function AppContent() {
         setSelectedPaymentId(null);
       }
 
-      if (tab !== 'tasks' && tab !== 'tasksApprovals' && tab !== 'tasksControl') {
+      if (tab !== 'tasks' && tab !== 'tasksApprovals' && tab !== 'tasksControl' && tab !== 'tasksUntriaged') {
         setSelectedTaskId(null);
         setTaskReturnTab(null);
       } else if (tab !== activeTab) {
@@ -903,6 +905,8 @@ function AppContent() {
       url.pathname = selectedTaskId ? `/tasks/${selectedTaskId}` : '/tasks';
     } else if (activeTab === 'tasksControl') {
       url.pathname = '/tasks/control';
+    } else if (activeTab === 'tasksUntriaged') {
+      url.pathname = '/tasks/untriaged';
     } else if (activeTab === 'tasksApprovals') {
       url.pathname = '/tasks/approvals';
     } else if (activeTab === 'tasksCalendar') {
@@ -1231,6 +1235,21 @@ function AppContent() {
               <TaskJournal
                 key="tasks-control"
                 underControlOnly
+                onRouteTaskChange={handleRouteTaskChange}
+                onOpenClient={handleOpenTaskClient}
+                onOpenCase={openRelatedCase}
+                onOpenLegalEntity={handleOpenLegalEntity}
+                onCreateInvoiceDraft={permissions.accounts.canCreate ? openTaskBillingInvoiceDraft : undefined}
+              />
+            )
+          : renderNoAccess('Журнал задач недоступен для вашей роли.');
+
+      case 'tasksUntriaged':
+        return permissions.tasks.canView
+          ? (
+              <TaskJournal
+                key="tasks-untriaged"
+                mode="untriaged"
                 onRouteTaskChange={handleRouteTaskChange}
                 onOpenClient={handleOpenTaskClient}
                 onOpenCase={openRelatedCase}

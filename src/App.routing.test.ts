@@ -28,6 +28,7 @@ import {
   isPaymentsListPath,
   selectAccessibleFallbackTab,
   isTasksApprovalsPath,
+  isTasksUntriagedPath,
   isTasksCalendarPath,
   isTasksListPath,
   TAB_ACCESS_RULES,
@@ -207,6 +208,13 @@ describe('App task routing helpers', () => {
     expect(isTasksApprovalsPath()).toBe(true);
     expect(getInitialTab()).toBe('tasksApprovals');
   });
+
+  it('opens untriaged tasks from their direct address', () => {
+    window.history.replaceState({}, '', '/tasks/untriaged');
+
+    expect(isTasksUntriagedPath()).toBe(true);
+    expect(getInitialTab()).toBe('tasksUntriaged');
+  });
 });
 
 describe('App contract routing helpers', () => {
@@ -319,6 +327,7 @@ describe('App sidebar routing helpers', () => {
     expect(getTabHref('notifications')).toBe('/notifications');
     expect(getTabHref('notes')).toBe('/notes');
     expect(getTabHref('tasks')).toBe('/tasks');
+    expect(getTabHref('tasksUntriaged')).toBe('/tasks/untriaged');
     expect(getTabHref('tasksApprovals')).toBe('/tasks/approvals');
     expect(getTabHref('tasksCalendar')).toBe('/tasks/calendar');
     expect(getTabHref('clients')).toBe('/clients');
@@ -469,18 +478,18 @@ describe('App real role route access matrix', () => {
   it.each([
     {
       role: 'secretary' as const,
-      allowedTabs: ['workspace', 'calendar', 'tasks', 'tasksCalendar', 'clients', 'cases', 'notifications', 'settings'] as Tab[],
+      allowedTabs: ['workspace', 'calendar', 'tasks', 'tasksUntriaged', 'tasksCalendar', 'clients', 'cases', 'notifications', 'settings'] as Tab[],
       deniedTabs: ['payroll', 'accounts', 'acts', 'payments', 'contracts', 'reports', 'roles', 'audit', 'yandexDisk', 's3Storage', 'companyProfile', 'users', 'userDetail', 'userActivity'] as Tab[],
     },
     {
       role: 'lawyer' as const,
-      allowedTabs: ['workspace', 'calendar', 'tasks', 'tasksCalendar', 'notifications', 'settings'] as Tab[],
+      allowedTabs: ['workspace', 'calendar', 'tasks', 'tasksUntriaged', 'tasksCalendar', 'notifications', 'settings'] as Tab[],
       deniedTabs: ['payroll', 'clients', 'clientDetail', 'contacts', 'contactsClients', 'contactsExternal', 'cases', 'caseDetail', 'accounts', 'acts', 'payments', 'contracts', 'reports', 'roles', 'audit', 'yandexDisk', 's3Storage', 'companyProfile', 'users', 'userDetail', 'userActivity'] as Tab[],
     },
     {
       role: 'accountant' as const,
       allowedTabs: ['workspace', 'calendar', 'clients', 'cases', 'accounts', 'acts', 'payments', 'contracts', 'notifications', 'settings'] as Tab[],
-      deniedTabs: ['payroll', 'tasks', 'tasksControl', 'tasksApprovals', 'tasksCalendar', 'reports', 'roles', 'audit', 'yandexDisk', 's3Storage', 'companyProfile', 'users', 'userDetail', 'userActivity'] as Tab[],
+      deniedTabs: ['payroll', 'tasks', 'tasksUntriaged', 'tasksControl', 'tasksApprovals', 'tasksCalendar', 'reports', 'roles', 'audit', 'yandexDisk', 's3Storage', 'companyProfile', 'users', 'userDetail', 'userActivity'] as Tab[],
     },
   ])('applies expected menu access for $role', ({ role, allowedTabs, deniedTabs }) => {
     const permissions = createOperationalRolePermissions(role);
@@ -518,6 +527,7 @@ describe('App real role route access matrix', () => {
       'profile',
       'calendar',
       'tasks',
+      'tasksUntriaged',
       'tasksControl',
       'tasksApprovals',
       'tasksCalendar',

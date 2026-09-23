@@ -4,6 +4,7 @@ export const ALL_TABS = [
   'notifications',
   'messenger',
   'tasks',
+  'tasksUntriaged',
   'tasksControl',
   'tasksApprovals',
   'tasksCalendar',
