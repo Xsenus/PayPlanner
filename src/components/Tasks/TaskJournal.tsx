@@ -67,6 +67,7 @@ import {
   type TaskJournalSettingsDto,
 } from '../../services/api';
 import { TablePagination } from '../ui/TablePagination';
+import { loadTaskWeekSchedule } from '../../services/taskWeekSchedule';
 import {
   clearOfflineCalendarSnapshot,
   getOfflineCalendarTrustedDevice,
@@ -148,6 +149,8 @@ import {
 import { LookupSelect, type LookupSelectOption } from '../ui/LookupSelect';
 import { TaskTemplatesPanel } from './TaskTemplatesPanel';
 import { TaskChatPanel } from '../Messenger/InternalMessenger';
+import { TaskJournalColumnSettings, TaskTableColumns } from './TaskJournalColumnSettings';
+import { TASK_JOURNAL_TABLE_COLUMNS, type TaskJournalSortKey, type TaskTableColumnKey } from '../../utils/taskJournalColumns';
 
 type ViewMode = 'list' | 'board' | 'calendar' | 'timeline';
 type TaskCardLayoutMode = 'compact' | 'expanded';
@@ -160,9 +163,9 @@ type TaskCalendarConflictPolicy = 'warn' | 'block';
 type TaskCalendarLoadWarningMode = 'strict' | 'standard' | 'relaxed';
 type IcsReminderPreset = 'default' | 'hour' | 'twoHours' | 'day';
 type TaskPlanningReportFormat = 'html' | 'word' | 'pdf';
-type TaskJournalSortKey = 'counterparty' | 'title' | 'assignee' | 'author' | 'dueAt' | 'type' | 'result' | 'status';
-type TaskTableColumnKey = TaskJournalSortKey | 'actions';
 type TaskTableLayoutSettings = {
+  orderedVisibleColumns: TaskTableColumnKey[];
+  getTableWidth: (extraWidth?: number, minimumWidth?: number) => number;
   getColumnWidth: (key: TaskTableColumnKey) => number;
   handleResizeStart: (key: TaskTableColumnKey, event: ReactMouseEvent<HTMLDivElement>) => void;
 };
@@ -278,17 +281,6 @@ const DEFAULT_TASK_JOURNAL_SETTINGS: TaskJournalSettingsDto = {
 };
 
 const TASK_JOURNAL_TABLE_SETTINGS_KEY = 'task_journal_table_settings_v1';
-const TASK_JOURNAL_TABLE_COLUMNS: Array<{ key: TaskTableColumnKey; defaultWidth: number }> = [
-  { key: 'counterparty', defaultWidth: 200 },
-  { key: 'title', defaultWidth: 290 },
-  { key: 'assignee', defaultWidth: 180 },
-  { key: 'author', defaultWidth: 170 },
-  { key: 'dueAt', defaultWidth: 180 },
-  { key: 'type', defaultWidth: 130 },
-  { key: 'result', defaultWidth: 260 },
-  { key: 'status', defaultWidth: 160 },
-  { key: 'actions', defaultWidth: 156 },
-];
 
 type AutomationCandidateStateFilter = 'all' | 'critical' | 'ready' | 'waiting' | 'paused';
 
@@ -929,6 +921,12 @@ function formatDuration(minutes: number | null | undefined) {
   if (hours > 0 && rest > 0) return `${hours} ч ${rest} мин`;
   if (hours > 0) return `${hours} ч`;
   return `${rest} мин`;
+}
+
+const TASK_DURATION_PRESETS = [15, 30, 45, 60, 90, 120, 180, 240, 360, 480];
+
+function taskDurationOptions(value: number | null | undefined) {
+  return [...new Set([...TASK_DURATION_PRESETS, normalizeTaskDuration(value)])].sort((a, b) => a - b);
 }
 
 function formatRecurrenceTime(minutes: number | null | undefined) {
@@ -5647,7 +5645,7 @@ export function TaskJournal({
             key={`page-${routeTaskState.task!.id}-${routeTaskState.mode}`}
             presentation="page"
             state={routeTaskState}
-            tasks={tasks}
+            calendarView={shouldUseCalendarVisibility}
             assignees={assignees}
             clients={clients}
             legalEntities={legalEntities}
@@ -6263,6 +6261,8 @@ export function TaskJournal({
           </div>
         </section>
 
+        {viewMode === 'list' ? <TaskJournalColumnSettings settings={taskTableLayoutSettings} /> : null}
+
         {!isApprovalsMode && categorizedBillingTaskCount > 0 ? (
           <section className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-rose-200 bg-gradient-to-r from-rose-50 to-amber-50 p-3" data-testid="task-unbilled-reminder">
             <div className="flex items-center gap-3">
@@ -6519,7 +6519,7 @@ export function TaskJournal({
           key={modal.task ? `edit-${modal.task.id}` : 'create'}
           presentation="modal"
           state={modal}
-          tasks={tasks}
+          calendarView={shouldUseCalendarVisibility}
           assignees={assignees}
           clients={clients}
           legalEntities={legalEntities}
@@ -7882,7 +7882,11 @@ function TaskTable({
   const {
     handleResizeStart,
     getColumnWidth,
+    getTableWidth,
+    orderedVisibleColumns,
   } = layoutSettings;
+  const columnCount = orderedVisibleColumns.length + 1;
+  const actionsPinned = orderedVisibleColumns.at(-1) === 'actions';
 
   const getColumnStyle = (columnKey: TaskTableColumnKey) => {
     const width = getColumnWidth(columnKey);
@@ -7909,13 +7913,12 @@ function TaskTable({
       : <ArrowUp className="h-3.5 w-3.5 text-blue-600" />;
   };
 
-  const renderSortHeader = (columnKey: TaskJournalSortKey, label: string, className = '') => {
-    const compactColumnClass = columnKey === 'author' || columnKey === 'result' ? 'hidden 2xl:table-cell' : '';
-
+  const renderSortHeader = (columnKey: TaskJournalSortKey, label: string) => {
     return (
       <th
+        key={columnKey}
         data-testid={`task-column-header-${columnKey}`}
-        className={`relative px-2 py-4 sm:px-3 xl:px-4 ${compactColumnClass} ${className}`}
+        className="relative px-2 py-4 sm:px-3 xl:px-4"
         style={getColumnStyle(columnKey)}
       >
         <button
@@ -7938,7 +7941,7 @@ function TaskTable({
   return (
     <div data-testid="task-table-card" className="min-w-0 max-w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div data-testid="task-table-scroll" className="max-w-full overflow-x-auto overscroll-x-contain">
-        <table data-testid="task-table" className="pp-task-journal-table w-max min-w-full table-fixed">
+        <table data-testid="task-table" className="pp-task-journal-table w-max min-w-full table-fixed" style={{ width: getTableWidth(48) }}>
           <thead className="border-b border-slate-200 bg-slate-50">
             <tr className="text-left text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
               <th className="w-10 px-2 py-4 sm:px-3 xl:w-12 xl:px-4">
@@ -7951,28 +7954,21 @@ function TaskTable({
                   className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                 />
               </th>
-              {renderSortHeader('counterparty', 'Контрагент / дело')}
-              {renderSortHeader('title', 'Наименование задачи')}
-              {renderSortHeader('assignee', 'Исполнитель')}
-              {renderSortHeader('author', 'Поручил')}
-              {renderSortHeader('dueAt', 'Дата исполнения')}
-              {renderSortHeader('type', 'Тип', 'hidden xl:table-cell')}
-              {renderSortHeader('result', 'Результат')}
-              {renderSortHeader('status', 'Статус')}
-              <th
+              {orderedVisibleColumns.map((key) => key === 'actions' ? <th
+                key={key}
                 data-testid="task-column-header-actions"
-                className="sticky right-0 z-20 bg-slate-50 px-3 py-4 text-center shadow-[-10px_0_18px_-18px_rgba(15,23,42,0.55)] xl:px-4"
+                className={`${actionsPinned ? 'sticky right-0 z-20 shadow-[-10px_0_18px_-18px_rgba(15,23,42,0.55)]' : 'relative'} bg-slate-50 px-3 py-4 text-center xl:px-4`}
                 style={getColumnStyle('actions')}
               >
                 Действия
                 {renderResizeHandle('actions', 'Действия')}
-              </th>
+              </th> : renderSortHeader(key, TASK_JOURNAL_TABLE_COLUMNS.find((column) => column.key === key)!.label))}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {tasks.length === 0 ? (
               <tr>
-                <td colSpan={10} className="px-4 py-12 text-center text-sm text-slate-500">
+                <td colSpan={columnCount} className="px-4 py-12 text-center text-sm text-slate-500">
                   По текущим фильтрам задач нет.
                 </td>
               </tr>
@@ -8033,7 +8029,7 @@ function TaskTable({
                       aria-label={`Задачи на ${dateLabel}`}
                       className="pp-date-group-separator"
                     >
-                      <th colSpan={10} scope="rowgroup" className="px-4 py-2 text-left text-sm font-semibold">
+                      <th colSpan={columnCount} scope="rowgroup" className="px-4 py-2 text-left text-sm font-semibold">
                         {dateLabel}
                       </th>
                     </tr>
@@ -8053,7 +8049,8 @@ function TaskTable({
                       className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-40"
                     />
                   </td>
-                  <td className="px-2 py-4 sm:px-3 xl:px-4" style={getColumnStyle('counterparty')}>
+                  <TaskTableColumns columns={orderedVisibleColumns}>
+                  <td data-task-column="counterparty" className="px-2 py-4 sm:px-3 xl:px-4" style={getColumnStyle('counterparty')}>
                     {canOpenCounterparty ? (
                       <button
                         type="button"
@@ -8092,7 +8089,7 @@ function TaskTable({
                       ))}
                     </div>
                   </td>
-                  <td className="px-2 py-4 sm:px-3 xl:px-4" style={getColumnStyle('title')}>
+                  <td data-task-column="title" className="px-2 py-4 sm:px-3 xl:px-4" style={getColumnStyle('title')}>
                     <button
                       type="button"
                       onClick={() => onEdit(task)}
@@ -8125,7 +8122,7 @@ function TaskTable({
                       </div>
                     ) : null}
                   </td>
-                  <td className="px-2 py-4 text-sm text-slate-600 sm:px-3 xl:px-4" style={getColumnStyle('assignee')}>
+                  <td data-task-column="assignee" className="px-2 py-4 text-sm text-slate-600 sm:px-3 xl:px-4" style={getColumnStyle('assignee')}>
                     <div className="font-semibold text-slate-700">
                       {taskAssignees.map(getParticipantDisplayName).filter(Boolean).join(', ') || task.assigneeName}
                     </div>
@@ -8140,28 +8137,29 @@ function TaskTable({
                       </div>
                     ) : null}
                   </td>
-                  <td className="hidden px-2 py-4 text-sm text-slate-600 sm:px-3 2xl:table-cell 2xl:px-4" style={getColumnStyle('author')}>
+                  <td data-task-column="author" className="px-2 py-4 text-sm text-slate-600 sm:px-3 xl:px-4" style={getColumnStyle('author')}>
                     <div className="font-semibold text-slate-700">{getTaskAuthorName(task)}</div>
                   </td>
-                  <td className="px-2 py-4 sm:px-3 xl:px-4" style={getColumnStyle('dueAt')}>
+                  <td data-task-column="dueAt" className="px-2 py-4 sm:px-3 xl:px-4" style={getColumnStyle('dueAt')}>
                     <div className={isOverdue ? 'font-semibold text-rose-600' : 'font-medium text-slate-800'}>{formatDateTime(task.dueAt)}</div>
                     <div className="mt-1 text-xs text-slate-500">{formatRelative(task.dueAt)}</div>
                     <div className="mt-1 text-xs font-semibold text-slate-500">Длительность: {formatDuration(task.plannedDurationMinutes)}</div>
                   </td>
-                  <td className="hidden px-2 py-4 sm:px-3 xl:table-cell xl:px-4" style={getColumnStyle('type')}>
+                  <td data-task-column="type" className="px-2 py-4 sm:px-3 xl:px-4" style={getColumnStyle('type')}>
                     <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
                       <TypeIcon className="h-3.5 w-3.5" />
                       {getTypeMeta(task.type).label}
                     </span>
                   </td>
                   <td
-                    className="hidden whitespace-normal break-words px-4 py-4 text-sm text-slate-600 2xl:table-cell"
+                    data-task-column="result"
+                    className="whitespace-normal break-words px-4 py-4 text-sm text-slate-600"
                     style={getColumnStyle('result')}
                     title={task.result || undefined}
                   >
                     {task.result || '—'}
                   </td>
-                  <td className="px-2 py-4 sm:px-3 xl:px-4" style={getColumnStyle('status')}>
+                  <td data-task-column="status" className="px-2 py-4 sm:px-3 xl:px-4" style={getColumnStyle('status')}>
                     {isReadOnly ? (
                       <div>
                         <span className={`inline-flex rounded-xl px-3 py-2 text-sm font-semibold ${statusClass(task.status)}`}>
@@ -8185,7 +8183,8 @@ function TaskTable({
                     )}
                   </td>
                   <td
-                    className={`sticky right-0 z-10 px-2 py-4 shadow-[-10px_0_18px_-18px_rgba(15,23,42,0.55)] sm:px-3 xl:px-4 ${isHighlighted ? 'bg-blue-50' : 'bg-white group-hover:bg-slate-50'}`}
+                    data-task-column="actions"
+                    className={`${actionsPinned ? 'sticky right-0 z-10 shadow-[-10px_0_18px_-18px_rgba(15,23,42,0.55)]' : ''} px-2 py-4 sm:px-3 xl:px-4 ${isHighlighted ? 'bg-blue-50' : 'bg-white group-hover:bg-slate-50'}`}
                     style={getColumnStyle('actions')}
                   >
                     <div
@@ -8258,6 +8257,7 @@ function TaskTable({
                       ) : null}
                     </div>
                   </td>
+                  </TaskTableColumns>
                   </tr>
                 </Fragment>
               );
@@ -9755,7 +9755,7 @@ export function TaskDaySchedulePanel({
 
 function TaskWeekScheduleDialog({
   open,
-  tasks,
+  calendarView,
   selectedDueAt,
   plannedDurationMinutes,
   assigneeUserId,
@@ -9768,7 +9768,7 @@ function TaskWeekScheduleDialog({
   onApply,
 }: {
   open: boolean;
-  tasks: TaskJournalItem[];
+  calendarView: boolean;
   selectedDueAt: string;
   plannedDurationMinutes: number | null | undefined;
   assigneeUserId?: number | null;
@@ -9783,16 +9783,54 @@ function TaskWeekScheduleDialog({
   const initialDate = parseLocalInputDate(selectedDueAt) ?? new Date();
   const [draftDate, setDraftDate] = useState(initialDate);
   const [draftDuration, setDraftDuration] = useState(normalizeTaskDuration(plannedDurationMinutes));
-  const [weekAnchor, setWeekAnchor] = useState(initialDate);
+  const [weekAnchor, setWeekAnchor] = useState(() => getCalendarDateForTaskValue(initialDate));
+  const [scheduleState, setScheduleState] = useState<{
+    key: string;
+    tasks: TaskJournalItem[];
+    error: string | null;
+  }>({ key: '', tasks: [], error: null });
+  const [reloadVersion, setReloadVersion] = useState(0);
   const resizeStateRef = useRef<{ startY: number; duration: number } | null>(null);
+  const weekStart = startOfWeek(weekAnchor);
+  const weekFrom = fromTimeZoneDateTimeInput(`${toLocalDateKey(weekStart)}T00:00`, activeTaskJournalTimeZoneId);
+  const weekTo = fromTimeZoneDateTimeInput(`${toLocalDateKey(addDays(weekStart, 7))}T00:00`, activeTaskJournalTimeZoneId);
+  const assigneeKeysJson = JSON.stringify([...new Set(assigneeConflictKeys)].sort());
+  const requestKey = JSON.stringify([weekFrom, weekTo, assigneeKeysJson, calendarView, reloadVersion]);
+  const loadingSchedule = scheduleState.key !== requestKey;
+  const scheduleError = !loadingSchedule ? scheduleState.error : null;
+  const hasAssignees = assigneeConflictKeys.length > 0;
 
   useEffect(() => {
     if (!open) return;
     const nextDate = parseLocalInputDate(selectedDueAt) ?? new Date();
     setDraftDate(nextDate);
     setDraftDuration(normalizeTaskDuration(plannedDurationMinutes));
-    setWeekAnchor(nextDate);
+    setWeekAnchor(getCalendarDateForTaskValue(nextDate));
   }, [open, plannedDurationMinutes, selectedDueAt]);
+
+  useEffect(() => {
+    if (!open) {
+      setScheduleState({ key: '', tasks: [], error: null });
+      return undefined;
+    }
+    const controller = new AbortController();
+    // Eight hours is the maximum task duration. Include both adjoining edges:
+    // an existing task can start before Monday, and a draft can end after Sunday.
+    void loadTaskWeekSchedule({
+      from: new Date(new Date(weekFrom).getTime() - 8 * 60 * 60 * 1000).toISOString(),
+      to: new Date(new Date(weekTo).getTime() + 8 * 60 * 60 * 1000 - 1).toISOString(),
+      assigneeKeys: JSON.parse(assigneeKeysJson) as string[],
+      calendarView,
+      signal: controller.signal,
+    }).then((loadedTasks) => {
+      if (!controller.signal.aborted) setScheduleState({ key: requestKey, tasks: loadedTasks, error: null });
+    }).catch((error: unknown) => {
+      if (!controller.signal.aborted) {
+        setScheduleState({ key: requestKey, tasks: [], error: extractDisplayErrorMessage(error, 'Не удалось загрузить занятость исполнителей.') });
+      }
+    });
+    return () => controller.abort();
+  }, [open, weekFrom, weekTo, assigneeKeysJson, calendarView, requestKey]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -9816,8 +9854,7 @@ function TaskWeekScheduleDialog({
   if (!open) return null;
 
   const visibleDays = Array.from({ length: 7 }, (_, index) => addDays(startOfWeek(weekAnchor), index));
-  const visibleKeys = new Set(visibleDays.map(toLocalDateKey));
-  const scheduleTasks = tasks
+  const assigneeTasks = (loadingSchedule ? [] : scheduleState.tasks)
     .filter((task) => task.id !== currentTaskId)
     .filter((task) => isTaskJournalActive(task.status))
     .filter((task) => {
@@ -9826,18 +9863,20 @@ function TaskWeekScheduleDialog({
         return taskKeys.some((key) => assigneeConflictKeys.includes(key));
       }
       return taskMatchesAssignee(task, assigneeUserId, assigneeName);
-    })
-    .filter((task) => visibleKeys.has(getTaskDateKey(task.dueAt)));
+    });
+  const scheduleTasks = assigneeTasks
+    .filter((task) => new Date(task.dueAt).getTime() < new Date(weekTo).getTime()
+      && new Date(task.dueAt).getTime() + normalizeTaskDuration(task.plannedDurationMinutes) * 60000 > new Date(weekFrom).getTime());
   const draftStartMinute = getMinuteOfDay(draftDate);
-  const draftEndMinute = draftStartMinute + draftDuration;
-  const conflicts = scheduleTasks.filter((task) => (
-    isSameTaskDay(task.dueAt, draftDate)
-    && intervalsOverlap(draftStartMinute, draftEndMinute, getTaskStartMinute(task), getTaskEndMinute(task))
+  const conflicts = assigneeTasks.filter((task) => (
+    intervalsOverlap(draftDate.getTime(), draftDate.getTime() + draftDuration * 60000,
+      new Date(task.dueAt).getTime(), new Date(task.dueAt).getTime() + normalizeTaskDuration(task.plannedDurationMinutes) * 60000)
   ));
   const timelineHeight = (TIMELINE_END_HOUR - TIMELINE_START_HOUR) * TIMELINE_HOUR_HEIGHT;
   const draftTop = Math.max(0, (draftStartMinute - TIMELINE_START_MINUTE) * TIMELINE_MINUTE_HEIGHT);
   const draftHeight = Math.max(36, Math.min(timelineHeight - draftTop, draftDuration * TIMELINE_MINUTE_HEIGHT));
   const draftDayKey = getTaskDateKey(draftDate);
+  const draftInVisibleWeek = visibleDays.some((day) => toLocalDateKey(day) === draftDayKey);
   const assigneeLabel = assigneeName?.trim() || 'исполнителя';
 
   const moveDraft = (day: Date, relativeY: number) => {
@@ -9862,19 +9901,26 @@ function TaskWeekScheduleDialog({
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-slate-50 px-4 py-3">
           <div className="flex items-center gap-2">
             <button type="button" onClick={() => setWeekAnchor(addDays(weekAnchor, -7))} className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white" aria-label="Предыдущая неделя"><ChevronLeft className="h-4 w-4" /></button>
-            <button type="button" onClick={() => setWeekAnchor(new Date())} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700">Сегодня</button>
+            <button type="button" onClick={() => setWeekAnchor(getCurrentCalendarDate())} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700">Сегодня</button>
             <button type="button" onClick={() => setWeekAnchor(addDays(weekAnchor, 7))} className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white" aria-label="Следующая неделя"><ChevronRight className="h-4 w-4" /></button>
             <span className="ml-2 text-sm font-semibold text-slate-700">{formatPeriodTitle(weekAnchor, 'week')}</span>
           </div>
           <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
             <span className="rounded-full bg-white px-3 py-1.5 text-slate-600 ring-1 ring-slate-200">{assigneeLabel}</span>
             <span className="rounded-full bg-blue-50 px-3 py-1.5 text-blue-700 ring-1 ring-blue-200">{formatTimeRange(draftDate, draftDuration)} · {formatDuration(draftDuration)}</span>
-            <span className={`rounded-full px-3 py-1.5 ring-1 ${conflicts.length > 0 ? 'bg-rose-50 text-rose-700 ring-rose-200' : 'bg-emerald-50 text-emerald-700 ring-emerald-200'}`}>
-              {conflicts.length > 0 ? `Найдено пересечений: ${conflicts.length}` : 'Время свободно'}
+            <span role="status" className={`rounded-full px-3 py-1.5 ring-1 ${loadingSchedule || scheduleError || !hasAssignees || !draftInVisibleWeek ? 'bg-slate-100 text-slate-600 ring-slate-200' : conflicts.length > 0 ? 'bg-rose-50 text-rose-700 ring-rose-200' : 'bg-emerald-50 text-emerald-700 ring-emerald-200'}`}>
+              {loadingSchedule ? 'Загрузка занятости…' : scheduleError ? 'Занятость не проверена' : !hasAssignees ? 'Выберите исполнителя' : !draftInVisibleWeek ? 'Выберите время на этой неделе' : conflicts.length > 0 ? `Найдено пересечений: ${conflicts.length}` : 'Время свободно'}
             </span>
           </div>
         </div>
 
+        {scheduleError ? (
+          <div role="alert" className="flex items-center justify-between gap-3 border-b border-rose-200 bg-rose-50 px-4 py-2 text-sm text-rose-800">
+            <span>{scheduleError} Выбор времени доступен после загрузки расписания.</span>
+            <button type="button" onClick={() => setReloadVersion((value) => value + 1)} className="shrink-0 rounded-lg border border-rose-300 px-3 py-1 font-semibold">Повторить загрузку</button>
+          </div>
+        ) : null}
+        <p className="border-b border-slate-100 px-4 py-2 text-xs text-slate-500">Показаны доступные вам активные задачи всех выбранных исполнителей, независимо от фильтров журнала.</p>
         {conflicts.length > 0 ? (
           <div role="alert" className="border-b border-rose-200 bg-rose-50 px-4 py-2 text-sm font-medium text-rose-800">
             Выберите свободный слот: задача пересекается с «{conflicts[0].title}» ({formatTimeRange(new Date(conflicts[0].dueAt), normalizeTaskDuration(conflicts[0].plannedDurationMinutes))}).
@@ -9954,7 +10000,7 @@ function TaskWeekScheduleDialog({
           </div>
           <div className="flex gap-2">
             <button type="button" onClick={onClose} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600">Отмена</button>
-            <button type="button" disabled={readOnly || conflicts.length > 0} onClick={() => onApply(toTimeZoneDateTimeInput(draftDate, activeTaskJournalTimeZoneId), draftDuration)} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-300" title={conflicts.length > 0 ? 'Сначала выберите свободное время' : 'Применить дату и длительность'}>Применить расписание</button>
+            <button type="button" disabled={readOnly || loadingSchedule || Boolean(scheduleError) || !hasAssignees || !draftInVisibleWeek || conflicts.length > 0} onClick={() => onApply(toTimeZoneDateTimeInput(draftDate, activeTaskJournalTimeZoneId), draftDuration)} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-300" title={conflicts.length > 0 ? 'Сначала выберите свободное время' : 'Применить дату и длительность'}>Применить расписание</button>
           </div>
         </div>
       </div>
@@ -10313,8 +10359,8 @@ function TaskBillingCreateWizard({
 type TaskModalProps = {
   presentation?: 'modal' | 'page';
   chrome?: TaskCardChrome;
+  calendarView?: boolean;
   state: ModalState;
-  tasks: TaskJournalItem[];
   assignees: TaskJournalAssignee[];
   clients: Client[];
   legalEntities: LegalEntitySummary[];
@@ -10357,8 +10403,8 @@ function ModernTaskModal(props: TaskModalProps) {
 function TaskModal({
   presentation = 'modal',
   chrome = 'legacy',
+  calendarView = false,
   state,
-  tasks,
   assignees,
   clients,
   legalEntities,
@@ -12010,7 +12056,7 @@ function TaskModal({
   const weekScheduleDialog = (
     <TaskWeekScheduleDialog
       open={scheduleOpen}
-      tasks={tasks}
+      calendarView={calendarView}
       selectedDueAt={form.dueAt}
       plannedDurationMinutes={form.plannedDurationMinutes}
       assigneeUserId={form.assigneeUserId}
@@ -12574,7 +12620,7 @@ function TaskModal({
                       disabled={isReadOnly}
                       className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-center text-sm outline-none focus:border-blue-400 focus:bg-white"
                     >
-                      {[15, 30, 45, 60, 90, 120, 180, 240, 360, 480].map((minutes) => (
+                      {taskDurationOptions(form.plannedDurationMinutes).map((minutes) => (
                         <option key={minutes} value={minutes}>{formatDuration(minutes)}</option>
                       ))}
                     </SystemSelect>
@@ -13328,7 +13374,7 @@ function TaskModal({
                 disabled={isReadOnly}
                 className="form-input"
               >
-                {[15, 30, 45, 60, 90, 120, 180, 240, 360, 480].map((minutes) => (
+                {taskDurationOptions(form.plannedDurationMinutes).map((minutes) => (
                   <option key={minutes} value={minutes}>{formatDuration(minutes)}</option>
                 ))}
               </SystemSelect>

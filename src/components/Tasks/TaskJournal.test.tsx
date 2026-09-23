@@ -9,6 +9,7 @@ import type { Client, ClientCase, LegalEntitySummary } from '../../types';
 import { fromTimeZoneDateTimeInput, getZonedParts, toTimeZoneDateKey } from '../../utils/timeZoneDate';
 import { TASK_JOURNAL_EVENT, type TaskJournalAssignee, type TaskJournalItem } from '../../utils/taskJournalStore';
 import { cloneDefaultTaskStickerStyles } from '../../utils/taskStickerStyles';
+import { TASK_JOURNAL_TABLE_COLUMNS } from '../../utils/taskJournalColumns';
 import { USER_NOTIFICATIONS_EVENT } from '../../utils/userNotifications';
 import {
   FORCED_TASK_SNOOZE_STORAGE_KEY,
@@ -837,8 +838,91 @@ describe('TaskJournal', () => {
     expect(screen.getByText('Действия').closest('th')?.className).toContain('sticky');
     expect(screen.getByTitle('Просмотр').closest('td')?.className).toContain('sticky');
     expect(screen.getByTestId('task-actions-101').className).toContain('grid-cols-[repeat(auto-fit,minmax(2.25rem,1fr))]');
-    expect(screen.getByTestId('task-column-header-result').className).toContain('hidden');
-    expect(screen.getByTestId('task-column-header-result').className).toContain('2xl:table-cell');
+    expect(screen.getByTestId('task-column-header-result').className).not.toContain('hidden');
+    expect(screen.getByRole('button', { name: 'Колонки' })).toBeTruthy();
+  });
+
+  it('lets users hide, restore and reorder task columns in both headers and rows', async () => {
+    await renderJournal([createTask({ result: 'Подготовлен документ' })]);
+    const table = screen.getByTestId('task-table');
+    const controls = screen.getByRole('button', { name: 'Колонки' });
+    expect(controls.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(controls);
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Показать колонку Результат' }));
+    expect(screen.queryByTestId('task-column-header-result')).toBeNull();
+    expect(within(table).queryByText('Подготовлен документ')).toBeNull();
+    expect(table.querySelector('th[scope="rowgroup"]')?.getAttribute('colspan')).toBe('9');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Переместить колонку Наименование задачи вверх' }));
+    expect(Array.from(table.querySelectorAll('thead th[data-testid]')).map((cell) => cell.getAttribute('data-testid')).slice(0, 2))
+      .toEqual(['task-column-header-title', 'task-column-header-counterparty']);
+    expect(Array.from(table.querySelectorAll('tbody td[data-task-column]')).map((cell) => cell.getAttribute('data-task-column')).slice(0, 2))
+      .toEqual(['title', 'counterparty']);
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Показать колонку Результат' }));
+    expect(screen.getByTestId('task-column-header-result').className).not.toContain('hidden');
+    expect(within(table).getByText('Подготовлен документ')).toBeTruthy();
+    fireEvent.click(controls);
+    expect(controls.getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByRole('checkbox', { name: 'Показать колонку Результат' })).toBeNull();
+  });
+
+  it('saves personal task columns and restores them after reopening the journal', async () => {
+    await renderJournal([createTask()]);
+    fireEvent.click(screen.getByRole('button', { name: 'Колонки' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Показать колонку Поручил' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Переместить колонку Наименование задачи вверх' }));
+
+    await waitFor(() => expect(apiMock.upsertUserSetting).toHaveBeenCalledWith(
+      'task_journal_table_settings_v1',
+      expect.any(String),
+    ));
+    const savedCall = apiMock.upsertUserSetting.mock.calls.filter(([key]) => key === 'task_journal_table_settings_v1').at(-1)!;
+    const saved = JSON.parse(savedCall[1]);
+    expect(saved.visibleColumns).not.toContain('author');
+    expect(saved.columnOrder.slice(0, 2)).toEqual(['title', 'counterparty']);
+    expect(JSON.parse(localStorage.getItem('pp.task_journal.table_settings.v1.user:7')!)).toEqual(saved);
+
+    cleanup();
+    await renderJournal([createTask()]);
+    expect(screen.queryByTestId('task-column-header-author')).toBeNull();
+    expect(screen.getByTestId('task-table').querySelector('thead th[data-testid]')?.getAttribute('data-testid')).toBe('task-column-header-title');
+  });
+
+  it('loads server task columns and resets visibility order and width together', async () => {
+    const keys = TASK_JOURNAL_TABLE_COLUMNS.map((column) => column.key);
+    apiMock.getUserSetting.mockImplementation(async (key: string) => key === 'task_journal_table_settings_v1' ? {
+      key,
+      value: JSON.stringify({ visibleColumns: ['title', 'actions'], columnOrder: ['actions', ...keys.filter((column) => column !== 'actions')], columnWidths: { title: 400 }, pageSize: 25 }),
+    } : null);
+    await renderJournal([createTask()]);
+
+    expect(screen.queryByTestId('task-column-header-counterparty')).toBeNull();
+    expect(screen.getByTestId('task-column-header-title').style.width).toBe('400px');
+    expect(screen.getByTestId('task-column-header-actions').className).not.toContain('sticky');
+    expect(screen.getByTitle('Просмотр').closest('td')?.className).not.toContain('sticky');
+    fireEvent.click(screen.getByRole('button', { name: 'Колонки' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Сбросить настройки' }));
+
+    expect(screen.getByTestId('task-column-header-counterparty')).toBeTruthy();
+    expect(screen.getByTestId('task-column-header-title').style.width).toBe('290px');
+    expect(screen.getByTestId('task-column-header-actions').className).toContain('sticky');
+    expect(screen.getByTestId('task-table').querySelectorAll('thead th')).toHaveLength(keys.length + 1);
+  });
+
+  it('keeps at least one task column and matches empty state colspan to its layout', async () => {
+    await renderJournal([], { waitForTitle: null });
+    await screen.findByTestId('task-table');
+    fireEvent.click(screen.getByRole('button', { name: 'Колонки' }));
+    for (const column of TASK_JOURNAL_TABLE_COLUMNS) {
+      fireEvent.click(screen.getByRole('checkbox', { name: `Показать колонку ${column.label}` }));
+    }
+
+    const table = screen.getByTestId('task-table');
+    expect(table.querySelectorAll('thead th')).toHaveLength(2);
+    expect(within(table).getByText('По текущим фильтрам задач нет.').getAttribute('colspan')).toBe('2');
+    expect((screen.getByRole('checkbox', { name: 'Показать колонку Действия' }) as HTMLInputElement).checked).toBe(true);
   });
 
   it('separates tasks by execution date when the journal is ordered by date', async () => {
@@ -1110,7 +1194,7 @@ describe('TaskJournal', () => {
 
     fireEvent.click(within(card).getByRole('tab', { name: 'Таймер' }));
     expect(await within(card).findByText('Плановая длительность')).toBeTruthy();
-    expect(within(card).getByText('1 ч 15 мин')).toBeTruthy();
+    expect(within(within(card).getByRole('tabpanel')).getByText('1 ч 15 мин')).toBeTruthy();
   });
 
   it('keeps result disabled in the modern task card until completion', async () => {
@@ -3405,8 +3489,7 @@ describe('TaskJournal', () => {
     expect(screen.getByText('Действия').closest('th')?.className).toContain('sticky');
     expect(screen.getByTitle('Просмотр').closest('td')?.className).toContain('sticky');
     expect(screen.getByTestId('task-table').className).not.toContain('min-w-[920px]');
-    expect(screen.getByTestId('task-column-header-author').className).toContain('hidden');
-    expect(screen.getByTestId('task-column-header-author').className).toContain('2xl:table-cell');
+    expect(screen.getByTestId('task-column-header-author').className).not.toContain('hidden');
   });
 
   it('restores the saved journal presentation mode for the current user', async () => {
@@ -3694,7 +3777,7 @@ describe('TaskJournal', () => {
     fireEvent.click(screen.getByTestId(taskCardWindowMode === 'modern' ? 'task-week-schedule-toggle' : 'task-day-schedule-toggle'));
 
     const dialog = screen.getByTestId('task-week-schedule-dialog');
-    expect(within(dialog).getByText('Busy slot')).toBeTruthy();
+    expect(await within(dialog).findByText('Busy slot')).toBeTruthy();
     expect(within(dialog).queryByText('Other assignee same day task')).toBeNull();
     expect(within(dialog).getByText('Other day task')).toBeTruthy();
     expect(within(dialog).getByText(/Найдено пересечений: 1/)).toBeTruthy();
@@ -3708,6 +3791,91 @@ describe('TaskJournal', () => {
 
     const dueInput = screen.getByTestId('task-due-at-input') as HTMLInputElement;
     expect(dueInput.value).toContain('T09:00');
+  });
+
+  it.each(['legacy', 'modern'] as const)('loads busy slots excluded by the journal filters in the %s card', async (taskCardWindowMode) => {
+    const busySlot = new Date();
+    busySlot.setHours(14, 0, 0, 0);
+    await renderJournal([
+      createTask({ title: 'Скрытая фильтром занятость', dueAt: busySlot.toISOString(), isUnderControl: false }),
+    ], { underControlOnly: true, waitForTitle: null, settings: { taskCardWindowMode } });
+    expect(screen.queryByText('Скрытая фильтром занятость')).toBeNull();
+    await openNewTaskFormAsGlobalInternal();
+    fireEvent.change(screen.getByTestId('task-due-at-input'), { target: { value: toDatetimeLocalInputValue(busySlot) } });
+    fireEvent.click(screen.getByTestId(taskCardWindowMode === 'modern' ? 'task-week-schedule-toggle' : 'task-day-schedule-toggle'));
+    const dialog = screen.getByTestId('task-week-schedule-dialog');
+    expect(await within(dialog).findByText('Скрытая фильтром занятость')).toBeTruthy();
+    expect(within(dialog).getByText('Найдено пересечений: 1')).toBeTruthy();
+    expect((within(dialog).getByRole('button', { name: 'Применить расписание' }) as HTMLButtonElement).disabled).toBe(true);
+    const scheduleRequest = apiMock.getTaskJournalItems.mock.calls.find(([params]) => params.assigneeUserId === 7 && params.from && params.to);
+    expect(scheduleRequest?.[0]).toMatchObject({ status: 'active', assigneeUserId: 7, page: 1, pageSize: 200 });
+    expect(scheduleRequest?.[0].underControl).toBeUndefined();
+  });
+
+  it.each(['legacy', 'modern'] as const)('detects a week-boundary overlap in the profile time zone in the %s card', async (taskCardWindowMode) => {
+    apiMock.getUserSetting.mockImplementation(async (key: string) => (
+      key === 'profile.timeZoneId' ? { key, value: 'Europe/Samara' } : null
+    ));
+    await renderJournal([
+      createTask({ title: 'Занято в понедельник', dueAt: '2026-09-27T20:00:00.000Z' }),
+    ], { waitForTitle: null, settings: { taskCardWindowMode } });
+    await openNewTaskFormAsGlobalInternal();
+    fireEvent.change(screen.getByTestId('task-due-at-input'), { target: { value: '2026-09-27T20:00' } });
+    const durationSelect = screen.getByTestId(`task-${taskCardWindowMode}-card-window`).querySelector('option[value="480"]')?.closest('select');
+    expect(durationSelect).not.toBeNull();
+    fireEvent.change(durationSelect!, { target: { value: '480' } });
+    fireEvent.click(screen.getByTestId(taskCardWindowMode === 'modern' ? 'task-week-schedule-toggle' : 'task-day-schedule-toggle'));
+    const dialog = screen.getByTestId('task-week-schedule-dialog');
+    expect(await within(dialog).findByText('Найдено пересечений: 1')).toBeTruthy();
+    expect(within(dialog).getByRole('alert').textContent).toContain('Занято в понедельник');
+    expect((within(dialog).getByRole('button', { name: 'Применить расписание' }) as HTMLButtonElement).disabled).toBe(true);
+    const scheduleRequest = apiMock.getTaskJournalItems.mock.calls.find(([params]) => params.assigneeUserId === 7 && params.from && params.to);
+    expect(scheduleRequest?.[0]).toMatchObject({
+      from: '2026-09-20T12:00:00.000Z',
+      to: '2026-09-28T03:59:59.999Z',
+    });
+  });
+
+  it.each(['legacy', 'modern'] as const)('shows a 15-minute schedule adjustment in the %s card duration field', async (taskCardWindowMode) => {
+    await renderJournal([createTask({ plannedDurationMinutes: 60 })], {
+      settings: { taskCardWindowMode },
+    });
+    await openFirstTaskForEdit();
+    const card = screen.getByTestId(`task-${taskCardWindowMode}-card-window`);
+    fireEvent.click(within(card).getByTestId(taskCardWindowMode === 'modern'
+      ? 'task-week-schedule-toggle'
+      : 'task-day-schedule-toggle'));
+    const dialog = screen.getByTestId('task-week-schedule-dialog');
+    expect(await within(dialog).findByText('Время свободно')).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole('button', { name: '+ 15 мин' }));
+    expect(within(dialog).getByText('1 ч 15 мин', { exact: false })).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Применить расписание' }));
+    const durationSelect = card.querySelector('option[value="75"]')?.closest('select');
+    expect(durationSelect).not.toBeNull();
+    expect(durationSelect?.value).toBe('75');
+    expect(durationSelect?.selectedOptions[0]?.textContent).toBe('1 ч 15 мин');
+  });
+
+  it('does not claim a free slot while loading or after a schedule error, and allows retry', async () => {
+    await renderJournal([], { waitForTitle: null });
+    await openNewTaskFormAsGlobalInternal();
+    let rejectSchedule: (reason: Error) => void = () => undefined;
+    apiMock.getTaskJournalItems.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectSchedule = reject; }));
+    fireEvent.click(screen.getByTestId('task-day-schedule-toggle'));
+    const dialog = screen.getByTestId('task-week-schedule-dialog');
+    expect(within(dialog).getByText('Загрузка занятости…')).toBeTruthy();
+    expect(within(dialog).queryByText('Время свободно')).toBeNull();
+    expect((within(dialog).getByRole('button', { name: 'Применить расписание' }) as HTMLButtonElement).disabled).toBe(true);
+    rejectSchedule(new Error('Не удалось загрузить занятость исполнителей.'));
+    expect(await within(dialog).findByText('Занятость не проверена')).toBeTruthy();
+    expect(within(dialog).queryByText('Время свободно')).toBeNull();
+    expect((within(dialog).getByRole('button', { name: 'Применить расписание' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Повторить загрузку' }));
+    expect(await within(dialog).findByText('Время свободно')).toBeTruthy();
+    expect((within(dialog).getByRole('button', { name: 'Применить расписание' }) as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Следующая неделя' }));
+    expect(await within(dialog).findByText('Выберите время на этой неделе')).toBeTruthy();
+    expect((within(dialog).getByRole('button', { name: 'Применить расписание' }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it('stacks description and result fields vertically in the task form', async () => {

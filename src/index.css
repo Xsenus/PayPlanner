@@ -1299,12 +1299,3 @@ html[data-payplanner-theme] .pp-navigation-shell [class*='border-slate-700'] { b
 html[data-payplanner-theme] .pp-navigation-shell :is(button, a, [role='button'])[class*='hover:bg-slate-800']:hover {
   background-color: rgba(30, 41, 59, 0.72) !important;
 }
-
-@media (max-width: 1279.98px) {
-  .pp-task-journal-table th:nth-child(5),
-  .pp-task-journal-table td:nth-child(5),
-  .pp-task-journal-table th:nth-child(8),
-  .pp-task-journal-table td:nth-child(8) {
-    display: none;
-  }
-}
