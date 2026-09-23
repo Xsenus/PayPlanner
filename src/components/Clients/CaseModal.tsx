@@ -282,6 +282,7 @@ export function CaseModal({
   const [courtUrl, setCourtUrl] = useState(caseData.courtUrl ?? '');
   const [nextHearingAt, setNextHearingAt] = useState(toDateTimeInput(caseData.nextHearingAt));
   const [claimant, setClaimant] = useState(caseData.claimant ?? '');
+  const [ourCourtRole, setOurCourtRole] = useState(caseData.ourCourtRole ?? '');
   const [defendant, setDefendant] = useState(caseData.defendant ?? '');
   const [thirdParties, setThirdParties] = useState(caseData.thirdParties ?? '');
   const [representatives, setRepresentatives] = useState(caseData.representatives ?? '');
@@ -413,6 +414,7 @@ export function CaseModal({
     setCourtUrl(caseData.courtUrl ?? '');
     setNextHearingAt(toDateTimeInput(caseData.nextHearingAt));
     setClaimant(caseData.claimant ?? '');
+    setOurCourtRole(caseData.ourCourtRole ?? '');
     setDefendant(caseData.defendant ?? '');
     setThirdParties(caseData.thirdParties ?? '');
     setRepresentatives(caseData.representatives ?? '');
@@ -765,6 +767,7 @@ export function CaseModal({
         courtUrl: courtUrl.trim(),
         nextHearingAt: fromDateTimeInput(nextHearingAt),
         claimant: claimant.trim(),
+        ourCourtRole,
         defendant: defendant.trim(),
         thirdParties: thirdParties.trim(),
         representatives: representatives.trim(),
@@ -1344,6 +1347,13 @@ export function CaseModal({
 
           <div className="md:col-span-2 mt-2 border-t pt-4">
             <h4 className="text-sm font-semibold text-gray-700 tracking-wide uppercase">Участники процесса</h4>
+          </div>
+
+          <div>
+            <label className="text-sm text-gray-600">Наша роль в деле</label>
+            <SystemSelect aria-label="Наша роль в деле" className="mt-1 w-full border rounded-lg px-3 py-2" value={ourCourtRole} onChange={(event) => setOurCourtRole(event.target.value as typeof ourCourtRole)} disabled={saving}>
+              <option value="">Не указана</option><option value="claimant">Истец</option><option value="respondent">Ответчик</option><option value="third-party">Третье лицо</option>
+            </SystemSelect>
           </div>
 
           <div>

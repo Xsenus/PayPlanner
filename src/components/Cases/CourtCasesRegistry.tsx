@@ -92,6 +92,7 @@ export function CourtCasesRegistry({ onOpenCaseCourt, allowCreate = false, allow
   const [instance, setInstance] = useState<CourtInstanceFilter>('');
   const [responsibleUserId, setResponsibleUserId] = useState('');
   const [courtState, setCourtState] = useState<CourtState>('all');
+  const [ourCourtRole, setOurCourtRole] = useState('');
   const [sortBy, setSortBy] = useState<SortKey>('nextHearingAt');
   const [viewMode, setViewMode] = useState<'cards' | 'schedule'>('cards');
   const [page, setPage] = useState(1);
@@ -144,11 +145,11 @@ export function CourtCasesRegistry({ onOpenCaseCourt, allowCreate = false, allow
     return () => { cancelled = true; };
   }, []);
 
-  useEffect(() => { setPage(1); }, [debouncedSearch, scope, category, instance, responsibleUserId, courtState, sortBy]);
+  useEffect(() => { setPage(1); }, [debouncedSearch, scope, category, instance, responsibleUserId, courtState, ourCourtRole, sortBy]);
 
   useEffect(() => {
     const controller = new AbortController();
-    const common = { search: debouncedSearch || undefined, responsibleUserId: responsibleUserId ? Number(responsibleUserId) : undefined, scope };
+    const common = { search: debouncedSearch || undefined, responsibleUserId: responsibleUserId ? Number(responsibleUserId) : undefined, scope, ourCourtRole: ourCourtRole || undefined };
     setLoading(true);
     setError(null);
     void Promise.all([
@@ -169,7 +170,7 @@ export function CourtCasesRegistry({ onOpenCaseCourt, allowCreate = false, allow
       })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [category, courtState, debouncedSearch, instance, page, reloadToken, responsibleUserId, scope, sortBy]);
+  }, [category, courtState, debouncedSearch, instance, ourCourtRole, page, reloadToken, responsibleUserId, scope, sortBy]);
 
   const pageCount = Math.max(1, Math.ceil(filteredTotal / PAGE_SIZE));
   const categories = summary.categories ?? [];
@@ -181,14 +182,15 @@ export function CourtCasesRegistry({ onOpenCaseCourt, allowCreate = false, allow
     });
     return [...groups.entries()];
   }, [items, timeZoneId]);
-  const resetFilters = () => { setSearch(''); setScope('active'); setCategory(''); setInstance(''); setResponsibleUserId(''); setCourtState('all'); setSortBy('nextHearingAt'); };
+  const resetFilters = () => { setSearch(''); setScope('active'); setCategory(''); setInstance(''); setResponsibleUserId(''); setCourtState('all'); setOurCourtRole(''); setSortBy('nextHearingAt'); };
   const reportFilters = useMemo(() => ({
     search: debouncedSearch || undefined,
     responsibleUserId: responsibleUserId ? Number(responsibleUserId) : undefined,
     caseType: category || undefined,
     courtState,
     courtInstance: instance || undefined,
-  }), [category, courtState, debouncedSearch, instance, responsibleUserId]);
+    ourCourtRole: ourCourtRole || undefined,
+  }), [category, courtState, debouncedSearch, instance, ourCourtRole, responsibleUserId]);
 
   const startTracking = (owner: CounterpartySelection | null) => {
     setOwnerPickerOpen(false);
@@ -210,7 +212,7 @@ export function CourtCasesRegistry({ onOpenCaseCourt, allowCreate = false, allow
       const created = await apiService.createCaseV2({
         clientId: selectedOwner.kind === 'client' ? selectedOwner.id : null,
         legalEntityId: selectedOwner.kind === 'legalEntity' ? selectedOwner.id : null,
-        title: trackingTitle.trim(), description: 'Судебное дело добавлено из рабочего раздела для автоматического контроля.', status: 'Open', caseNumber: '', caseType: 'Судебное дело', stage: INSTANCE_LABELS[trackingInstance], responsibleUserId: null, startDate: new Date().toISOString(), dueDate: null, feeAmount: 0, priority: 'normal', courtName: '', courtCaseNumber: trackingNumber.trim(), judicialUid: '', courtUrl: '', nextHearingAt: null, claimant: '', defendant: '', thirdParties: '', representatives: '', judgeName: '', courtroom: '', courtSecretaryContacts: '', claimFiledAt: null, courtDecisionAt: null, appealDeadlineAt: null, cassationDeadlineAt: null, motionDeadlineAt: null, objectionDeadlineAt: null, documentsSummary: '', eventHistory: '', strategy: '',
+        title: trackingTitle.trim(), description: 'Судебное дело добавлено из рабочего раздела для автоматического контроля.', status: 'Open', caseNumber: '', caseType: 'Судебное дело', stage: INSTANCE_LABELS[trackingInstance], responsibleUserId: null, startDate: new Date().toISOString(), dueDate: null, feeAmount: 0, priority: 'normal', courtName: '', ourCourtRole: '', courtCaseNumber: trackingNumber.trim(), judicialUid: '', courtUrl: '', nextHearingAt: null, claimant: '', defendant: '', thirdParties: '', representatives: '', judgeName: '', courtroom: '', courtSecretaryContacts: '', claimFiledAt: null, courtDecisionAt: null, appealDeadlineAt: null, cassationDeadlineAt: null, motionDeadlineAt: null, objectionDeadlineAt: null, documentsSummary: '', eventHistory: '', strategy: '',
       });
       await apiService.updateCaseCourtInstance(created.id, trackingInstance, { courtCaseNumber: trackingNumber.trim(), notes: provider ? `Источник контроля: ${provider.label}` : 'Источник контроля будет выбран при первой синхронизации.' });
       setTrackingOpen(false);
@@ -264,6 +266,12 @@ export function CourtCasesRegistry({ onOpenCaseCourt, allowCreate = false, allow
     <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between"><div><div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-blue-700"><Scale className="h-4 w-4" /> Судебная работа</div><h1 className="mt-1 text-2xl font-bold text-slate-950">Судебные дела</h1><p className="mt-0.5 text-sm text-slate-500">Инстанции, заседания, движение дела и задачи в одном рабочем разделе.</p></div><div className="flex flex-wrap gap-2"><button type="button" onClick={() => setScope(scope === 'archive' ? 'active' : 'archive')} className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold ${scope === 'archive' ? 'border-blue-300 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-700 hover:bg-slate-50'}`}><Archive className="h-4 w-4" /> {scope === 'archive' ? 'Активные' : 'Завершённые'}</button><button type="button" onClick={() => setReloadToken((value) => value + 1)} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"><RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> Обновить</button>{allowCreate ? <button type="button" onClick={() => setOwnerPickerOpen(true)} className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"><Plus className="h-4 w-4" /> Поставить дело на отслеживание</button> : null}</div></div>
       <div className="mt-3 grid gap-2 lg:grid-cols-[minmax(260px,1fr)_180px_190px_210px_auto]"><label className="relative"><Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Название, клиент, суд, номер или UID" className="w-full rounded-lg border border-slate-200 py-2 pl-9 pr-3 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" /></label><SystemSelect aria-label="Судебная инстанция" value={instance} onChange={(event) => setInstance(event.target.value as CourtInstanceFilter)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm">{INSTANCE_OPTIONS.map((option) => <option key={option.value || 'all'} value={option.value}>{option.label}</option>)}</SystemSelect><SystemSelect aria-label="Состояние заседания" value={courtState} onChange={(event) => setCourtState(event.target.value as CourtState)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm"><option value="all">Все заседания</option><option value="upcoming">Предстоящие</option><option value="soon">Ближайшие 14 дней</option><option value="overdue">Дата прошла</option><option value="without-hearing">Без даты заседания</option><option value="under-control">На контроле</option></SystemSelect><SystemSelect aria-label="Ответственный по судебному делу" value={responsibleUserId} onChange={(event) => setResponsibleUserId(event.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm"><option value="">Все ответственные</option>{responsibles.map((person) => <option key={person.id} value={person.id}>{person.fullName}</option>)}</SystemSelect><button type="button" onClick={resetFilters} className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50">Сбросить</button></div>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <label htmlFor="court-our-role" className="text-xs font-semibold text-slate-600">Наша роль в деле</label>
+        <SystemSelect id="court-our-role" aria-label="Наша роль в деле" value={ourCourtRole} onChange={(event) => setOurCourtRole(event.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm">
+          <option value="">Все роли</option><option value="claimant">Истец</option><option value="respondent">Ответчик</option><option value="third-party">Третье лицо</option><option value="unknown">Не указана</option>
+        </SystemSelect>
+      </div>
     </section>
 
     <div className="grid gap-3 xl:grid-cols-[220px_minmax(0,1fr)]"><aside className="h-fit rounded-xl border border-slate-200 bg-white p-2 shadow-sm xl:sticky xl:top-3"><div className="flex items-center gap-2 px-2 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500"><FolderOpen className="h-4 w-4 text-blue-600" /> Разделы дел</div><button type="button" onClick={() => setCategory('')} className={`flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-sm ${category === '' ? 'bg-blue-50 font-semibold text-blue-700' : 'text-slate-700 hover:bg-slate-50'}`}><span className="inline-flex items-center gap-2"><Layers3 className="h-4 w-4" /> Все дела</span><span>{summary.total}</span></button>{categories.filter((entry) => entry.name !== 'Без категории').map((entry) => <button key={entry.name} type="button" onClick={() => setCategory(entry.name)} className={`mt-1 flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-sm ${category === entry.name ? 'bg-blue-50 font-semibold text-blue-700' : 'text-slate-700 hover:bg-slate-50'}`}><span className="inline-flex min-w-0 items-center gap-2"><Folder className="h-4 w-4 shrink-0" /><span className="truncate">{entry.name}</span></span><span className="ml-2 text-xs text-slate-500">{entry.count}</span></button>)}<div className="mt-2 border-t border-slate-100 pt-2"><button type="button" onClick={() => setCourtState('under-control')} className={`flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-sm ${courtState === 'under-control' ? 'bg-rose-50 font-semibold text-rose-700' : 'text-slate-700 hover:bg-slate-50'}`}><span className="inline-flex items-center gap-2"><ShieldCheck className="h-4 w-4" /> На контроле</span><span>{summary.underControl}</span></button></div></aside>

@@ -15,6 +15,7 @@ interface CourtReportOverviewDialogProps {
     caseType?: string;
     courtState?: string;
     courtInstance?: string;
+    ourCourtRole?: string;
   };
 }
 

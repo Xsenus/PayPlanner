@@ -2047,6 +2047,44 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task CourtRole_CreateUpdateAndLegacyUpdate_PreserveExplicitChoice()
+    {
+        await using var db = await CreateContextAsync();
+        var editor = await CreateUserAsync(db, "court-role-editor@example.com", "Редактор", DataVisibilityScope.All);
+        var client = new Client { Name = "Клиент", IsActive = true, ResponsibleUserId = editor.Id };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, editor);
+
+        var invalid = await controller.Create(new ClientCase
+        {
+            ClientId = client.Id, Title = "Дело", OurCourtRole = "other",
+        }, CancellationToken.None);
+        Assert.IsType<BadRequestObjectResult>(invalid);
+
+        var created = Assert.IsType<CreatedResult>(await controller.Create(new ClientCase
+        {
+            ClientId = client.Id, Title = "Дело", CourtName = "Районный суд",
+            OurCourtRole = " claimant ",
+        }, CancellationToken.None));
+        var courtCase = Assert.IsType<ClientCase>(created.Value);
+        Assert.Equal("claimant", courtCase.OurCourtRole);
+
+        Assert.IsType<OkObjectResult>(await controller.Update(courtCase.Id, new ClientCase
+        {
+            ClientId = client.Id, Title = "Дело после изменения", Status = ClientCaseStatus.Open,
+            OurCourtRole = "respondent",
+        }, CancellationToken.None));
+        Assert.Equal("respondent", (await db.ClientCases.FindAsync(courtCase.Id))?.OurCourtRole);
+
+        Assert.IsType<OkObjectResult>(await controller.Update(courtCase.Id, new ClientCase
+        {
+            ClientId = client.Id, Title = "Старый клиент", Status = ClientCaseStatus.Open,
+        }, CancellationToken.None));
+        Assert.Equal("respondent", (await db.ClientCases.FindAsync(courtCase.Id))?.OurCourtRole);
+    }
+
+    [Fact]
     public async Task Create_WithNearestHearing_NotifiesAssignedResponsible()
     {
         await using var db = await CreateContextAsync();
@@ -2632,6 +2670,7 @@ public class CasesV2ControllerTests
             ResponsibleUserId = owner.Id,
             CourtName = "Тестовый районный суд",
             CourtCaseNumber = "2-100/2026",
+            OurCourtRole = "claimant",
             NextHearingAt = now.AddDays(5),
             IsUnderControl = true,
         };
@@ -2640,6 +2679,7 @@ public class CasesV2ControllerTests
             Client = client,
             Title = "Дело только с инстанцией",
             CaseType = "Арбитражное дело",
+            OurCourtRole = "respondent",
             Status = ClientCaseStatus.OnHold,
             ResponsibleUserId = owner.Id,
         };
@@ -2731,6 +2771,21 @@ public class CasesV2ControllerTests
         Assert.Equal(instanceOnlyCase.Id, appealItem.Id);
         Assert.Contains("appeal", appealItem.CourtInstanceKeys);
 
+        var claimantResult = await controller.Get(
+            clientId: null, legalEntityId: null, status: null, search: null,
+            responsibleUserId: null, caseType: null, priority: null, from: null, to: null,
+            minFee: null, maxFee: null, sortBy: null, sortDir: null,
+            scope: "all", courtOnly: true, ct: CancellationToken.None, ourCourtRole: "claimant");
+        var claimantItem = Assert.Single(GetAnonymousItems(Assert.IsType<OkObjectResult>(claimantResult).Value));
+        Assert.Equal(soonCase.Id, claimantItem.Id);
+        Assert.Equal("claimant", claimantItem.OurCourtRole);
+
+        var roleSummary = await controller.GetCourtRegistrySummary(
+            status: null, search: null, responsibleUserId: null, scope: "all",
+            ct: CancellationToken.None, ourCourtRole: "respondent");
+        var roleSummaryValue = Assert.IsType<OkObjectResult>(roleSummary).Value!;
+        Assert.Equal(1, roleSummaryValue.GetType().GetProperty("total")?.GetValue(roleSummaryValue));
+
         var summaryResult = await controller.GetCourtRegistrySummary(
             status: null,
             search: null,
@@ -2757,8 +2812,8 @@ public class CasesV2ControllerTests
         var lawyer = await CreateUserAsync(db, "court-report-lawyer@example.com", "Юрист");
         var outsider = await CreateUserAsync(db, "court-report-outsider@example.com", "Другой юрист");
         db.ClientCases.AddRange(
-            new ClientCase { Client = new Client { Name = "Клиент 1", IsActive = true, ResponsibleUserId = lawyer.Id }, Title = "Активное судебное дело", ResponsibleUserId = lawyer.Id, CourtName = "Суд А", Status = ClientCaseStatus.Open, CreatedAt = new DateTime(2026, 9, 1, 12, 0, 0, DateTimeKind.Utc), ClaimFiledAt = new DateTime(2026, 8, 1), CourtDecisionAt = new DateTime(2026, 8, 11) },
-            new ClientCase { Client = new Client { Name = "Клиент 2", IsActive = true, ResponsibleUserId = lawyer.Id }, Title = "Завершённое судебное дело", ResponsibleUserId = lawyer.Id, CourtName = "Суд А", Status = ClientCaseStatus.Closed, CreatedAt = new DateTime(2026, 9, 2, 12, 0, 0, DateTimeKind.Utc), ClaimFiledAt = new DateTime(2026, 8, 2), CourtDecisionAt = new DateTime(2026, 8, 6) },
+            new ClientCase { Client = new Client { Name = "Клиент 1", IsActive = true, ResponsibleUserId = lawyer.Id }, Title = "Активное судебное дело", ResponsibleUserId = lawyer.Id, CourtName = "Суд А", OurCourtRole = "claimant", Status = ClientCaseStatus.Open, CreatedAt = new DateTime(2026, 9, 1, 12, 0, 0, DateTimeKind.Utc), ClaimFiledAt = new DateTime(2026, 8, 1), CourtDecisionAt = new DateTime(2026, 8, 11) },
+            new ClientCase { Client = new Client { Name = "Клиент 2", IsActive = true, ResponsibleUserId = lawyer.Id }, Title = "Завершённое судебное дело", ResponsibleUserId = lawyer.Id, CourtName = "Суд А", OurCourtRole = "respondent", Status = ClientCaseStatus.Closed, CreatedAt = new DateTime(2026, 9, 2, 12, 0, 0, DateTimeKind.Utc), ClaimFiledAt = new DateTime(2026, 8, 2), CourtDecisionAt = new DateTime(2026, 8, 6) },
             new ClientCase { Client = new Client { Name = "Клиент с назначенным юристом", IsActive = true, ResponsibleUserId = lawyer.Id }, Title = "Судебное дело без отдельного исполнителя", CourtName = "Суд А", Status = ClientCaseStatus.Open, CreatedAt = new DateTime(2026, 9, 2, 12, 0, 0, DateTimeKind.Utc), ClaimFiledAt = new DateTime(2026, 8, 10), CourtDecisionAt = new DateTime(2026, 8, 1) },
             new ClientCase { Client = new Client { Name = "Клиент 3", IsActive = true, ResponsibleUserId = outsider.Id }, Title = "Чужое судебное дело", ResponsibleUserId = outsider.Id, CourtName = "Суд Б", Status = ClientCaseStatus.Open, CreatedAt = new DateTime(2026, 9, 2, 12, 0, 0, DateTimeKind.Utc), ClaimFiledAt = new DateTime(2026, 8, 3), CourtDecisionAt = new DateTime(2026, 8, 5) },
             new ClientCase { Client = new Client { Name = "Клиент без ответственного", IsActive = true }, Title = "Судебное дело без ответственного", CourtName = "Суд В", Status = ClientCaseStatus.Open, CreatedAt = new DateTime(2026, 9, 2, 12, 0, 0, DateTimeKind.Utc), ClaimFiledAt = new DateTime(2026, 8, 1), CourtDecisionAt = new DateTime(2026, 8, 1) },
@@ -2774,6 +2829,11 @@ public class CasesV2ControllerTests
         Assert.Equal(7, Assert.Single(visible.ByResponsible).AverageDaysFromClaimToDecision);
         Assert.Equal(3, Assert.Single(visible.ByCourt).Total);
         Assert.Equal(7, Assert.Single(visible.ByCourt).AverageDaysFromClaimToDecision);
+
+        var claimantOnly = (await CreateController(db, lawyer).GetCourtReportOverview(
+            ct: CancellationToken.None, ourCourtRole: "claimant")).Value!;
+        Assert.Equal(1, claimantOnly.Total);
+        Assert.Equal(1, Assert.Single(claimantOnly.ByCourt).Total);
 
         var all = (await CreateController(db, manager).GetCourtReportOverview(ct: CancellationToken.None)).Value!;
         Assert.Equal(5, all.Total);

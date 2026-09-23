@@ -108,6 +108,23 @@ describe('CourtCasesRegistry', () => {
     );
   });
 
+  it('filters the registry and report by our role in the case', async () => {
+    render(<CourtCasesRegistry onOpenCaseCourt={vi.fn()} />);
+    await screen.findByText('ИВАНОВ — РАЗДЕЛ ИМУЩЕСТВА');
+    fireEvent.click(screen.getByRole('combobox', { name: /Наша роль в деле/u }));
+    fireEvent.click(screen.getByRole('option', { name: 'Ответчик' }));
+    await waitFor(() => expect(apiService.getCasesV2).toHaveBeenLastCalledWith(
+      expect.objectContaining({ ourCourtRole: 'respondent' }), expect.any(Object),
+    ));
+    expect(apiService.getCourtCasesRegistrySummary).toHaveBeenLastCalledWith(
+      expect.objectContaining({ ourCourtRole: 'respondent' }), expect.any(Object),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Сводка по делам' }));
+    await waitFor(() => expect(apiService.getCourtReportOverview).toHaveBeenCalledWith(
+      expect.objectContaining({ ourCourtRole: 'respondent' }), expect.any(Object),
+    ));
+  });
+
   it('shows a recorded hearing result instead of asking to check a past hearing again', async () => {
     vi.mocked(apiService.getCasesV2).mockResolvedValue({
       items: [{ ...courtCase, nextHearingAt: '2020-09-25T03:00:00Z', nextHearingOutcome: 'postponed' }],

@@ -1338,6 +1338,7 @@ public class PaymentContext : DbContext
             entity.Property(e => e.FeeAmount).HasPrecision(18, 2);
             entity.Property(e => e.Priority).HasMaxLength(32).HasDefaultValue("normal");
             entity.Property(e => e.CourtName).HasMaxLength(200);
+            entity.Property(e => e.OurCourtRole).HasMaxLength(24);
             entity.Property(e => e.CourtCaseNumber).HasMaxLength(100);
             entity.Property(e => e.JudicialUid).HasMaxLength(120);
             entity.Property(e => e.CourtUrl).HasMaxLength(1000);
@@ -1394,6 +1395,7 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.DueDate).HasDatabaseName("IX_ClientCases_DueDate");
             entity.HasIndex(e => e.Priority).HasDatabaseName("IX_ClientCases_Priority");
             entity.HasIndex(e => e.CourtName).HasDatabaseName("IX_ClientCases_CourtName");
+            entity.HasIndex(e => e.OurCourtRole).HasDatabaseName("IX_ClientCases_OurCourtRole");
             entity.HasIndex(e => e.JudicialUid).HasFilter("\"JudicialUid\" <> ''").HasDatabaseName("IX_ClientCases_JudicialUid");
             entity.HasIndex(e => new { e.CourtSyncMonitoringEnabled, e.CourtSyncFailureStartedAt })
                 .HasDatabaseName("IX_ClientCases_CourtSyncMonitoringEnabled_FailureStartedAt");

@@ -517,6 +517,7 @@ export interface ClientCase {
   feeAmount?: number;
   priority?: string | null;
   courtName?: string | null;
+  ourCourtRole?: 'claimant' | 'respondent' | 'third-party' | '' | null;
   courtCaseNumber?: string | null;
   judicialUid?: string | null;
   courtUrl?: string | null;

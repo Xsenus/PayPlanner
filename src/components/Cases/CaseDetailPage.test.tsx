@@ -1222,6 +1222,8 @@ describe('CaseDetailPage', () => {
     expect(hearingInput.value).toBe('2026-06-05T16:00');
 
     fireEvent.change(hearingInput, { target: { value: '2026-06-05T17:30' } });
+    fireEvent.click(screen.getByRole('combobox', { name: /Наша роль в деле/u }));
+    fireEvent.click(screen.getByRole('option', { name: 'Третье лицо' }));
     fireEvent.click(screen.getAllByRole('button', { name: /Сохранить дело/u }).at(-1) as HTMLElement);
 
     await waitFor(() => {
@@ -1229,6 +1231,7 @@ describe('CaseDetailPage', () => {
         15,
         expect.objectContaining({
           nextHearingAt: '2026-06-05T13:30:00.000Z',
+          ourCourtRole: 'third-party',
         }),
       );
     });

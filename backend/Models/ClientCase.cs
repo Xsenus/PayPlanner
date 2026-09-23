@@ -86,6 +86,10 @@ namespace PayPlanner.Api.Models
         [MaxLength(200)]
         public string CourtName { get; set; } = string.Empty;
 
+        /// <summary>Наша роль в судебном деле: claimant, respondent или third-party. Null — не указана.</summary>
+        [MaxLength(24)]
+        public string? OurCourtRole { get; set; }
+
         /// <summary>
         /// Номер дела, присвоенный судом.
         /// </summary>

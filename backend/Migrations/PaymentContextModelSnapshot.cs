@@ -1475,6 +1475,10 @@ namespace PayPlanner.Api.Migrations
                     b.Property<DateTime?>("ObjectionDeadlineAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("OurCourtRole")
+                        .HasMaxLength(24)
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime?>("PositionReviewedAt")
                         .HasColumnType("TEXT");
 
@@ -1599,6 +1603,9 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasIndex("ObjectionDeadlineAt")
                         .HasDatabaseName("IX_ClientCases_ObjectionDeadlineAt");
+
+                    b.HasIndex("OurCourtRole")
+                        .HasDatabaseName("IX_ClientCases_OurCourtRole");
 
                     b.HasIndex("Priority")
                         .HasDatabaseName("IX_ClientCases_Priority");

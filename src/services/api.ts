@@ -5909,6 +5909,7 @@ export class ApiService {
     courtOnly?: boolean;
     courtState?: 'all' | 'upcoming' | 'soon' | 'overdue' | 'without-hearing' | 'under-control' | string;
     courtInstance?: 'first' | 'appeal' | 'cassation' | 'supervision' | 'supreme' | string;
+    ourCourtRole?: string;
     sortBy?:
       | 'createdAt'
       | 'title'
@@ -5945,6 +5946,7 @@ export class ApiService {
     responsibleUserId?: number;
     scope?: 'all' | 'active' | 'archive' | 'mine' | string;
     courtState?: 'all' | 'upcoming' | 'soon' | 'overdue' | 'without-hearing' | 'under-control' | string;
+    ourCourtRole?: string;
   }, options?: { signal?: AbortSignal }) {
     const q = buildQuery(params ?? {});
     return this.request<CourtCasesRegistrySummary>(`/v2/cases/court-registry-summary${q}`, {
@@ -5958,6 +5960,7 @@ export class ApiService {
     caseType?: string;
     courtState?: string;
     courtInstance?: string;
+    ourCourtRole?: string;
     from?: string;
     toExclusive?: string;
   }, options?: { signal?: AbortSignal }) {

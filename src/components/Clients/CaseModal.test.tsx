@@ -392,6 +392,7 @@ describe('CaseModal', () => {
     fireEvent.change(screen.getByLabelText('Следующее заседание'), { target: { value: '2026-05-20T12:30' } });
     fireEvent.change(screen.getByLabelText('Ссылка на карточку суда'), { target: { value: 'https://kad.arbitr.ru/card' } });
     fireEvent.change(screen.getByLabelText('Истец / заявитель'), { target: { value: ' Земцов Виктор Александрович ' } });
+    fireEvent.change(screen.getByLabelText('Наша роль в деле'), { target: { value: 'claimant' } });
     fireEvent.change(screen.getByLabelText('Ответчик / должник'), { target: { value: ' Банк Точка ' } });
     fireEvent.change(screen.getByLabelText('Третьи лица'), { target: { value: 'ФНС\nСРО' } });
     fireEvent.change(screen.getByLabelText('Представители'), { target: { value: 'Кожеваткин А.В.' } });
@@ -428,6 +429,7 @@ describe('CaseModal', () => {
       courtCaseNumber: 'А55-12345/2026',
       courtUrl: 'https://kad.arbitr.ru/card',
       claimant: 'Земцов Виктор Александрович',
+      ourCourtRole: 'claimant',
       defendant: 'Банк Точка',
       thirdParties: 'ФНС\nСРО',
       representatives: 'Кожеваткин А.В.',

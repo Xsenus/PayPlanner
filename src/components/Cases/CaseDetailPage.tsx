@@ -141,6 +141,7 @@ function courtMovementStatusClasses(status?: string | null) {
 interface CourtInstanceDraft {
   courtId: string;
   courtName: string;
+  ourCourtRole: string;
   courtCaseNumber: string;
   judicialUid: string;
   courtUrl: string;
@@ -1213,6 +1214,7 @@ function buildCaseEditDraft(caseItem: ClientCase): CaseEditDraft {
     feeAmount: typeof caseItem.feeAmount === 'number' ? String(caseItem.feeAmount) : '',
     priority: caseItem.priority ?? 'normal',
     courtName: caseItem.courtName ?? '',
+    ourCourtRole: caseItem.ourCourtRole ?? '',
     courtCaseNumber: caseItem.courtCaseNumber ?? '',
     courtUrl: caseItem.courtUrl ?? '',
     nextHearingAt: toDateTimeInput(caseItem.nextHearingAt),
@@ -1254,6 +1256,7 @@ function buildCasePatchFromEditDraft(draft: CaseEditDraft): Partial<ClientCase> 
     feeAmount: Number(draft.feeAmount.replace(',', '.')) || 0,
     priority: draft.priority,
     courtName: draft.courtName.trim(),
+    ourCourtRole: draft.ourCourtRole,
     courtCaseNumber: draft.courtCaseNumber.trim(),
     courtUrl: draft.courtUrl.trim(),
     nextHearingAt: fromDateTimeInput(draft.nextHearingAt),
@@ -1301,6 +1304,7 @@ function buildCaseUpdatePayload(base: ClientCase, patch: Partial<ClientCase>): O
     feeAmount: patch.feeAmount ?? base.feeAmount ?? 0,
     priority: patch.priority ?? base.priority ?? 'normal',
     courtName: patch.courtName ?? base.courtName ?? '',
+    ourCourtRole: patch.ourCourtRole ?? base.ourCourtRole ?? '',
     courtCaseNumber: patch.courtCaseNumber ?? base.courtCaseNumber ?? '',
     judicialUid: patch.judicialUid ?? base.judicialUid ?? '',
     courtUrl: patch.courtUrl ?? base.courtUrl ?? '',
@@ -4009,6 +4013,7 @@ export function CaseDetailPage({
                 ['Просмотр ответственным', responsibleLastViewedAt ? `${formatRuDateTime(responsibleLastViewedAt)}${responsibleLastViewedByName ? ` · ${responsibleLastViewedByName}` : ''}` : '—'],
               ]} />
               <InfoSection title="Участники процесса" rows={[
+                ['Наша роль', caseItem.ourCourtRole === 'claimant' ? 'Истец' : caseItem.ourCourtRole === 'respondent' ? 'Ответчик' : caseItem.ourCourtRole === 'third-party' ? 'Третье лицо' : 'Не указана'],
                 ['Истец', caseItem.claimant || '—'],
                 ['Ответчик', caseItem.defendant || '—'],
                 ['Третьи лица', caseItem.thirdParties || '—'],
@@ -4803,6 +4808,9 @@ function CaseEditPage({
         <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Суд и участники процесса</h2>
           <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            <label className="text-sm font-medium text-slate-700">Наша роль в деле
+              <SystemSelect aria-label="Наша роль в деле" value={draft.ourCourtRole} onChange={(event) => setField('ourCourtRole', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm"><option value="">Не указана</option><option value="claimant">Истец</option><option value="respondent">Ответчик</option><option value="third-party">Третье лицо</option></SystemSelect>
+            </label>
             <label className="text-sm font-medium text-slate-700">
               Суд
               <input value={draft.courtName} onChange={(event) => setField('courtName', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" />
@@ -7172,6 +7180,7 @@ function CourtPanel({
                   ['UID', overviewInstance?.judicialUid || caseItem.judicialUid || '—'],
                   ['Суд', overviewInstance?.courtName || caseItem.courtName || '—'],
                   ['Судья', overviewInstance?.judgeName || caseItem.judgeName || '—'],
+                  ['Наша роль', caseItem.ourCourtRole === 'claimant' ? 'Истец' : caseItem.ourCourtRole === 'respondent' ? 'Ответчик' : caseItem.ourCourtRole === 'third-party' ? 'Третье лицо' : 'Не указана'],
                   ['Ближайшее заседание', formatRuDateTime(caseItem.nextHearingAt) || 'Не назначено'],
                   ['Истец / заявитель', caseItem.claimant || '—'],
                   ['Ответчик / должник', caseItem.defendant || '—'],

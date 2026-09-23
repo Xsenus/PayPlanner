@@ -1510,6 +1510,10 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<DateTime?>("ObjectionDeadlineAt")
                         .HasColumnType("timestamp without time zone");
 
+                    b.Property<string>("OurCourtRole")
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)");
+
                     b.Property<DateTime?>("PositionReviewedAt")
                         .HasColumnType("timestamp without time zone");
 
@@ -1634,6 +1638,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.HasIndex("ObjectionDeadlineAt")
                         .HasDatabaseName("IX_ClientCases_ObjectionDeadlineAt");
+
+                    b.HasIndex("OurCourtRole")
+                        .HasDatabaseName("IX_ClientCases_OurCourtRole");
 
                     b.HasIndex("Priority")
                         .HasDatabaseName("IX_ClientCases_Priority");

@@ -285,7 +285,8 @@ public partial class CasesV2Controller : ControllerBase
         [FromQuery] bool courtOnly = false,
         [FromQuery] string? courtState = null,
         [FromQuery] string? courtInstance = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        [FromQuery] string? ourCourtRole = null)
     {
         var visibility = await ResolveCasesVisibilityAsync(ct);
         if (visibility is null)
@@ -318,6 +319,7 @@ public partial class CasesV2Controller : ControllerBase
             effectiveInactiveDays);
 
         q = ApplyCourtRegistryFilters(q, courtOnly, courtState, courtInstance, DateTime.UtcNow);
+        q = ApplyOurCourtRoleFilter(q, ourCourtRole);
 
         var total = await q.CountAsync(ct);
         var items = await SelectRegistryCaseRows(q
@@ -351,7 +353,8 @@ public partial class CasesV2Controller : ControllerBase
         [FromQuery] int? responsibleUserId,
         [FromQuery] string? scope = null,
         [FromQuery] string? courtState = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        [FromQuery] string? ourCourtRole = null)
     {
         var visibility = await ResolveCasesVisibilityAsync(ct);
         if (visibility is null)
@@ -380,6 +383,7 @@ public partial class CasesV2Controller : ControllerBase
             null,
             null);
         query = ApplyCourtRegistryFilters(query, courtOnly: true, courtState, courtInstance: null, now);
+        query = ApplyOurCourtRoleFilter(query, ourCourtRole);
 
         var summary = await query
             .GroupBy(_ => 1)
@@ -440,7 +444,8 @@ public partial class CasesV2Controller : ControllerBase
         [FromQuery] string? courtInstance = null,
         [FromQuery] DateTime? from = null,
         [FromQuery] DateTime? toExclusive = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        [FromQuery] string? ourCourtRole = null)
     {
         var visibility = await ResolveCasesVisibilityAsync(ct);
         if (visibility is null)
@@ -457,6 +462,7 @@ public partial class CasesV2Controller : ControllerBase
             visibility, null, null, null, search, responsibleUserId, caseType,
             null, null, null, null, null, null, null, "all", null, null);
         query = ApplyCourtRegistryFilters(query, courtOnly: true, courtState, courtInstance, DateTime.UtcNow);
+        query = ApplyOurCourtRoleFilter(query, ourCourtRole);
         if (from.HasValue)
         {
             query = query.Where(item => item.CreatedAt >= from.Value);
@@ -1215,6 +1221,7 @@ public partial class CasesV2Controller : ControllerBase
         {
             query = query.Where(item =>
                 item.CourtName != string.Empty
+                || (item.OurCourtRole != null && item.OurCourtRole != string.Empty)
                 || item.CourtCaseNumber != string.Empty
                 || item.JudicialUid != string.Empty
                 || item.CourtUrl != string.Empty
@@ -1245,6 +1252,18 @@ public partial class CasesV2Controller : ControllerBase
             "overdue" => query.Where(item => item.NextHearingAt != null && item.NextHearingAt < now),
             "without-hearing" => query.Where(item => item.NextHearingAt == null),
             "under-control" => query.Where(item => item.IsUnderControl),
+            _ => query,
+        };
+    }
+
+    private static IQueryable<ClientCase> ApplyOurCourtRoleFilter(IQueryable<ClientCase> query, string? role)
+    {
+        return role?.Trim().ToLowerInvariant() switch
+        {
+            "claimant" => query.Where(item => item.OurCourtRole == "claimant"),
+            "respondent" => query.Where(item => item.OurCourtRole == "respondent"),
+            "third-party" => query.Where(item => item.OurCourtRole == "third-party"),
+            "unknown" => query.Where(item => item.OurCourtRole == null || item.OurCourtRole == ""),
             _ => query,
         };
     }
@@ -1353,6 +1372,7 @@ public partial class CasesV2Controller : ControllerBase
             FeeAmount = item.FeeAmount,
             Priority = item.Priority,
             CourtName = item.CourtName,
+            OurCourtRole = item.OurCourtRole,
             CourtCaseNumber = item.CourtCaseNumber,
             JudicialUid = item.JudicialUid,
             CourtUrl = item.CourtUrl,
@@ -9708,6 +9728,7 @@ public partial class CasesV2Controller : ControllerBase
 
         var validation = await ValidateCaseOwnerAsync(model.ClientId, model.LegalEntityId, visibility, ct);
         if (validation is not null) return validation;
+        if (!IsValidOurCourtRole(model.OurCourtRole)) return BadRequest("Укажите допустимую роль в судебном деле.");
         if (!TryNormalizeInactivityReminderState(
                 model.InactivityRemindersEnabled,
                 model.InactivityRemindersDisabledReason,
@@ -9784,6 +9805,7 @@ public partial class CasesV2Controller : ControllerBase
         if (e is null) return NotFound();
         var validation = await ValidateCaseOwnerAsync(model.ClientId, model.LegalEntityId, visibility, ct);
         if (validation is not null) return validation;
+        if (!IsValidOurCourtRole(model.OurCourtRole)) return BadRequest("Укажите допустимую роль в судебном деле.");
         var inactivityStateChanged = e.InactivityRemindersEnabled != model.InactivityRemindersEnabled;
         if (!TryNormalizeInactivityReminderState(
                 model.InactivityRemindersEnabled,
@@ -10164,6 +10186,11 @@ public partial class CasesV2Controller : ControllerBase
         target.FeeAmount = source.FeeAmount;
         target.Priority = string.IsNullOrWhiteSpace(source.Priority) ? "normal" : source.Priority.Trim();
         target.CourtName = source.CourtName?.Trim() ?? string.Empty;
+        // Старые клиенты не передают поле: при обновлении сохраняем уже выбранную роль.
+        if (source.OurCourtRole is not null)
+        {
+            target.OurCourtRole = source.OurCourtRole.Trim().ToLowerInvariant();
+        }
         target.CourtCaseNumber = source.CourtCaseNumber?.Trim() ?? string.Empty;
         target.JudicialUid = source.JudicialUid?.Trim() ?? string.Empty;
         target.CourtUrl = source.CourtUrl?.Trim() ?? string.Empty;
@@ -10212,6 +10239,11 @@ public partial class CasesV2Controller : ControllerBase
             ? string.Empty
             : Truncate(source.InactivityRemindersDisabledReason?.Trim() ?? string.Empty, 1000);
         target.IsHiddenFromExecutor = source.IsHiddenFromExecutor;
+    }
+
+    private static bool IsValidOurCourtRole(string? role)
+    {
+        return role is null || role.Trim().ToLowerInvariant() is "" or "claimant" or "respondent" or "third-party";
     }
 
     private static bool TryNormalizeInactivityReminderState(
