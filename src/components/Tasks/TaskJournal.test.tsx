@@ -6307,6 +6307,18 @@ describe('TaskJournal', () => {
     )).toBeTruthy();
   });
 
+  it.each(['legacy', 'modern'] as const)('explains hearing document readiness in the %s task card', async (taskCardWindowMode) => {
+    await renderJournal([createTask({
+      type: 'courtHearing',
+      title: 'Подготовиться к заседанию',
+      tags: ['case-deadline', 'case-deadline:court-event-12'],
+    })], { settings: { taskCardWindowMode } });
+
+    fireEvent.click(screen.getByTitle('Просмотр'));
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    expect(within(card).getByTestId('court-preparation-hint').textContent).toContain('Проверьте документы к заседанию');
+  });
+
   it.each(['legacy', 'modern'] as const)('sends an executor result to approval from the %s read-only task card', async (taskCardWindowMode) => {
     authState.isAdmin = false;
     authState.user = { id: 7, fullName: 'Исполнитель', email: 'assignee@example.com' };

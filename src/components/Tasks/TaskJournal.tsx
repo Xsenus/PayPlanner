@@ -12146,6 +12146,14 @@ function TaskModal({
     />
   );
 
+  const courtPreparationHint = state?.task?.type === 'courtHearing' && state.task.tags.includes('case-deadline') ? (
+    <div className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900" data-testid="court-preparation-hint">
+      {state.task.status === 'done'
+        ? 'Подготовка по этой задаче завершена. Если заседание перенесли, проверьте новую задачу подготовки.'
+        : 'Проверьте документы к заседанию и завершите эту задачу: тогда в напоминании появится отметка «Документы подготовлены».'}
+    </div>
+  ) : null;
+
   if (isModernChrome) {
     const TypeIcon = typeOption.icon;
     const titleText = state?.mode === 'view'
@@ -12380,6 +12388,8 @@ function TaskModal({
                   placeholder="Добавить описание"
                 />
               </section>
+
+              {courtPreparationHint}
 
               <section className={`rounded-xl border p-3 ${canEditResult ? 'border-emerald-200 bg-emerald-50/50' : 'border-dashed border-slate-200 bg-slate-50'}`}>
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -13705,6 +13715,8 @@ function TaskModal({
               </div>
             ) : null}
           </section>
+
+          {courtPreparationHint ? <div className="mt-5">{courtPreparationHint}</div> : null}
 
           <div className="mt-5 grid gap-5" data-testid="task-text-fields">
             <Field label="Описание">

@@ -11,6 +11,7 @@ using System.Globalization;
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
@@ -451,6 +452,7 @@ public class CasesV2Controller : ControllerBase
             .Select(item => new CourtTomorrowHearingDto
             {
                 CaseId = item.ClientCaseId,
+                CourtEventId = item.Id,
                 CaseTitle = item.ClientCase.Title,
                 HearingAt = item.ScheduledAt,
                 AllDay = item.AllDay,
@@ -490,18 +492,58 @@ public class CasesV2Controller : ControllerBase
             .ThenBy(item => item.CaseId)
             .Take(5)
             .ToList();
+        if (result.Count > 0)
+        {
+            var caseIds = result.Select(item => item.CaseId).Distinct().ToArray();
+            var expectedDueTimes = result.Select(item => PreparationTaskDueAt(item.HearingAt, item.AllDay)).ToArray();
+            var earliestDue = expectedDueTimes.Min();
+            var latestDue = expectedDueTimes.Max();
+            var preparationTasks = await _db.TaskJournalItems.AsNoTracking()
+                .Where(item => item.ClientCaseId.HasValue
+                    && caseIds.Contains(item.ClientCaseId.Value)
+                    && item.Type == "courtHearing"
+                    && item.DueAt >= earliestDue
+                    && item.DueAt <= latestDue)
+                .Select(item => new { item.ClientCaseId, item.DueAt, item.Status, item.TagsJson })
+                .ToListAsync(ct);
+
+            foreach (var hearing in result)
+            {
+                var sourceTag = hearing.CourtEventId.HasValue
+                    ? $"\"case-deadline:court-event-{hearing.CourtEventId.Value}\""
+                    : "\"case-deadline:hearing\"";
+                var dueAt = PreparationTaskDueAt(hearing.HearingAt, hearing.AllDay);
+                hearing.DocumentsPrepared = preparationTasks.Any(task =>
+                    task.ClientCaseId == hearing.CaseId
+                    && task.DueAt == dueAt
+                    && task.Status == "done"
+                    && task.TagsJson.Contains(sourceTag, StringComparison.Ordinal));
+            }
+        }
         return Ok(result);
+    }
+
+    private static DateTime PreparationTaskDueAt(DateTime hearingAt, bool allDay)
+    {
+        var scheduledAt = hearingAt.Kind == DateTimeKind.Unspecified
+            ? DateTime.SpecifyKind(hearingAt, DateTimeKind.Utc)
+            : hearingAt.ToUniversalTime();
+        var dueAt = scheduledAt.AddDays(-3);
+        return allDay ? dueAt.Date.AddHours(9) : dueAt;
     }
 
     public sealed class CourtTomorrowHearingDto
     {
         public int CaseId { get; init; }
+        [JsonIgnore]
+        public int? CourtEventId { get; init; }
         public string CaseTitle { get; init; } = string.Empty;
         public DateTime HearingAt { get; init; }
         public bool AllDay { get; init; }
         public string CourtName { get; init; } = string.Empty;
         public string JudgeName { get; init; } = string.Empty;
         public string Courtroom { get; init; } = string.Empty;
+        public bool DocumentsPrepared { get; set; }
     }
 
     [HttpGet("export.csv")]

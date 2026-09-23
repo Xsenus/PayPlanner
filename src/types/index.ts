@@ -611,6 +611,7 @@ export interface CourtTomorrowHearing {
   courtName: string;
   judgeName: string;
   courtroom: string;
+  documentsPrepared: boolean;
 }
 
 export interface CaseCalendarEvent {

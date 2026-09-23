@@ -2647,6 +2647,38 @@ public class CasesV2ControllerTests
         db.ClientCases.AddRange(cases);
         db.ClientCases.AddRange(eventCase, hiddenCase, outsideCase);
         await db.SaveChangesAsync();
+        db.TaskJournalItems.AddRange(
+            new TaskJournalItem
+            {
+                ClientCaseId = eventCase.Id,
+                Title = "Подготовиться к заседанию",
+                ObjectName = eventCase.Title,
+                Type = "courtHearing",
+                Status = "done",
+                DueAt = firstInstant.AddMinutes(10).AddDays(-3),
+                TagsJson = $"[\"case-deadline\",\"case-deadline:court-event-{eventCase.CourtEvents.Single().Id}\"]",
+            },
+            new TaskJournalItem
+            {
+                ClientCaseId = cases[0].Id,
+                Title = "Подготовиться к заседанию",
+                ObjectName = cases[0].Title,
+                Type = "courtHearing",
+                Status = "done",
+                DueAt = firstInstant.AddDays(-4),
+                TagsJson = "[\"case-deadline\",\"case-deadline:hearing\"]",
+            },
+            new TaskJournalItem
+            {
+                ClientCaseId = cases[1].Id,
+                Title = "Подготовиться к заседанию",
+                ObjectName = cases[1].Title,
+                Type = "courtHearing",
+                Status = "done",
+                DueAt = firstInstant.AddMinutes(30).AddDays(-3),
+                TagsJson = "[\"case-deadline\",\"case-deadline:hearing\"]",
+            });
+        await db.SaveChangesAsync();
 
         var controller = CreateController(db, lawyer);
         var response = await controller.GetTomorrowCourtHearings(new DateOnly(2026, 9, 24), CancellationToken.None);
@@ -2656,6 +2688,9 @@ public class CasesV2ControllerTests
         Assert.Equal(5, rows.Count);
         Assert.Equal(cases[0].Id, rows[0].CaseId);
         Assert.Contains(rows, item => item.CaseId == eventCase.Id && item.CourtName == "Апелляционный суд" && item.JudgeName == "Судья события");
+        Assert.True(rows.Single(item => item.CaseId == eventCase.Id).DocumentsPrepared);
+        Assert.False(rows.Single(item => item.CaseId == cases[0].Id).DocumentsPrepared);
+        Assert.True(rows.Single(item => item.CaseId == cases[1].Id).DocumentsPrepared);
         Assert.Equal(1, rows.Count(item => item.CaseId == eventCase.Id));
         Assert.DoesNotContain(rows, item => item.CaseId == hiddenCase.Id || item.CaseId == outsideCase.Id);
 
@@ -2697,6 +2732,17 @@ public class CasesV2ControllerTests
         };
         db.ClientCases.AddRange(allDayCase, cancelledCase, closedCase);
         await db.SaveChangesAsync();
+        db.TaskJournalItems.Add(new TaskJournalItem
+        {
+            ClientCaseId = allDayCase.Id,
+            Title = "Подготовиться к заседанию",
+            ObjectName = allDayCase.Title,
+            Type = "courtHearing",
+            Status = "done",
+            DueAt = localDate.AddDays(-3).AddHours(9),
+            TagsJson = $"[\"case-deadline\",\"case-deadline:court-event-{allDayCase.CourtEvents.Single().Id}\"]",
+        });
+        await db.SaveChangesAsync();
 
         var controller = CreateController(db, lawyer);
         var result = await controller.GetTomorrowCourtHearings(new DateOnly(2026, 9, 24), CancellationToken.None);
@@ -2704,6 +2750,7 @@ public class CasesV2ControllerTests
             Assert.IsType<OkObjectResult>(result.Result).Value);
         Assert.Equal(allDayCase.Id, Assert.Single(rows).CaseId);
         Assert.True(rows[0].AllDay);
+        Assert.True(rows[0].DocumentsPrepared);
 
         var invalid = await CreateController(db, lawyer).GetTomorrowCourtHearings(DateOnly.MaxValue, CancellationToken.None);
         Assert.IsType<BadRequestObjectResult>(invalid.Result);
