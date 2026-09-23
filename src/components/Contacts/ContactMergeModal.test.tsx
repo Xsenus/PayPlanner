@@ -76,11 +76,31 @@ describe('contact merge dialog', () => {
     expect((screen.getByRole('button', { name: 'Объединить и архивировать' }) as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it('does not offer merging a full profile into a quick primary contact', async () => {
+  it('suggests the full profile as primary when a quick contact comes first in the duplicate group', async () => {
     vi.mocked(apiService.getContacts).mockResolvedValue([contact(1, 'external'), contact(2, 'client')]);
+    vi.mocked(apiService.previewContactMerge).mockResolvedValue({
+      canMerge: true, conflicts: [], affectedLinks: 1,
+      primaryName: 'Манаева Мария Михайловна', duplicateName: 'Манаева Мария Михайловна',
+      phones: ['79198106343'], emails: [],
+    });
     render(<ContactMergeModal onMerged={vi.fn()} onClose={vi.fn()} />);
 
     fireEvent.click(await screen.findByRole('button', { name: /2 записи/i }));
+
+    await waitFor(() => expect(apiService.previewContactMerge).toHaveBeenCalledWith({
+      primarySourceType: 'client', primarySourceId: 2,
+      duplicateSourceType: 'external', duplicateSourceId: 1,
+    }));
+    expect((screen.getByRole('button', { name: 'Объединить и архивировать' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('still blocks archiving a full profile when the user selects a quick contact as primary', async () => {
+    vi.mocked(apiService.getContacts).mockResolvedValue([contact(1, 'external'), contact(2, 'client')]);
+    render(<ContactMergeModal onMerged={vi.fn()} onClose={vi.fn()} />);
+
+    await screen.findByRole('button', { name: /2 записи/i });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Основная карточка' }), { target: { value: 'external:1' } });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Дубль в архив' }), { target: { value: 'client:2' } });
 
     expect(await screen.findByText(/выберите полную карточку основной/)).toBeTruthy();
     expect(apiService.previewContactMerge).not.toHaveBeenCalled();

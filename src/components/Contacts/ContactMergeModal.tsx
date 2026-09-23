@@ -84,10 +84,12 @@ export function ContactMergeModal({ onClose, onMerged }: Props) {
   }, [differentKinds, duplicate, primary, sameRecord, unsupportedMixedPair]);
 
   const chooseGroup = (group: (typeof groups)[number]) => {
-    setPrimaryKey(keyOf(group.contacts[0]));
-    setDuplicateKey(keyOf(group.contacts[1]));
-    setPrimarySearch(group.contacts[0].fullName);
-    setDuplicateSearch(group.contacts[1].fullName);
+    const suggestedPrimary = group.contacts.find((contact) => contact.sourceType !== 'external') ?? group.contacts[0];
+    const suggestedDuplicate = group.contacts.find((contact) => keyOf(contact) !== keyOf(suggestedPrimary))!;
+    setPrimaryKey(keyOf(suggestedPrimary));
+    setDuplicateKey(keyOf(suggestedDuplicate));
+    setPrimarySearch(suggestedPrimary.fullName);
+    setDuplicateSearch(suggestedDuplicate.fullName);
   };
 
   const filteredOptions = (search: string, selectedKey: string) => {
