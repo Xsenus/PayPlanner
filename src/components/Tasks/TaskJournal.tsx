@@ -2613,6 +2613,7 @@ export function TaskJournal({
   const [dateFromFilter, setDateFromFilter] = useState(initialPreferences.dateFrom);
   const [dateToFilter, setDateToFilter] = useState(initialPreferences.dateTo);
   const [viewMode, setViewMode] = useState<ViewMode>(initialPreferences.viewMode);
+  const [boardGroupMode, setBoardGroupMode] = useState<'due' | 'status'>('due');
   const shouldUseCalendarVisibility = viewMode === 'calendar' || initialView === 'calendar';
   const shouldUseOfflineCalendar = shouldUseCalendarVisibility
     || viewMode === 'timeline'
@@ -4487,6 +4488,16 @@ export function TaskJournal({
   }, [statusAndPeriodFilteredTasks, taskListSummary, viewMode]);
 
   const boardColumns = useMemo(() => {
+    if (boardGroupMode === 'status') {
+      return [
+        { key: 'new', title: 'Новые', tone: 'slate', items: filteredTasks.filter((task) => task.status === 'new') },
+        { key: 'inProgress', title: 'В работе и на доработке', tone: 'blue', items: filteredTasks.filter((task) => task.status === 'inProgress' || task.status === 'revision') },
+        { key: 'waiting', title: 'Ожидают', tone: 'amber', items: filteredTasks.filter((task) => task.status === 'waiting') },
+        { key: 'approval', title: 'Согласование', tone: 'violet', items: filteredTasks.filter((task) => task.status === 'onApproval' || task.status === 'overdueApproval' || task.status === 'approved') },
+        { key: 'closed', title: 'Завершены', tone: 'emerald', items: filteredTasks.filter((task) => task.status === 'done' || task.status === 'cancelled') },
+      ];
+    }
+
     const nowDate = getCurrentCalendarDate();
     const tomorrow = addDays(nowDate, 1);
     const active = filteredTasks.filter((task) => isTaskJournalActive(task.status));
@@ -4502,7 +4513,7 @@ export function TaskJournal({
         key: 'today',
         title: 'На сегодня',
         tone: 'blue',
-        items: active.filter((task) => isSameTaskDay(task.dueAt, nowDate)),
+        items: active.filter((task) => new Date(task.dueAt).getTime() >= Date.now() && isSameTaskDay(task.dueAt, nowDate)),
       },
       {
         key: 'tomorrow',
@@ -4520,7 +4531,7 @@ export function TaskJournal({
         }),
       },
     ];
-  }, [filteredTasks, periodMode]);
+  }, [boardGroupMode, filteredTasks, periodMode]);
 
   const handleQuickFilterChange = (nextFilter: QuickFilter) => {
     setQuickFilter(nextFilter);
@@ -6437,15 +6448,42 @@ export function TaskJournal({
           </>
           )
         ) : viewMode === 'board' ? (
+          <div>
+            <div className="mb-3 flex flex-wrap items-center gap-2" aria-label="Группировка доски задач">
+              <span className="text-sm font-semibold text-slate-700">Показать задачи:</span>
+              <button
+                type="button"
+                onClick={() => setBoardGroupMode('due')}
+                aria-pressed={boardGroupMode === 'due'}
+                className={`rounded-lg border px-3 py-1.5 text-sm font-semibold transition ${boardGroupMode === 'due' ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-200 bg-white text-slate-600 hover:border-blue-300'}`}
+              >
+                По срокам
+              </button>
+              <button
+                type="button"
+                onClick={() => { setBoardGroupMode('status'); setStatusFilter('all'); setPeriodMode('all'); }}
+                aria-pressed={boardGroupMode === 'status'}
+                className={`rounded-lg border px-3 py-1.5 text-sm font-semibold transition ${boardGroupMode === 'status' ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-200 bg-white text-slate-600 hover:border-blue-300'}`}
+              >
+                По статусу
+              </button>
+              <span className="text-xs text-slate-500">При смене статуса карточка перемещается между этапами доски «По статусу».</span>
+            </div>
           <TaskBoard
             columns={boardColumns}
             highlightedTaskId={highlightedTaskId}
             currentUserId={currentUserId}
             isAdminUser={isAdminUser}
+            taskSettings={taskSettings}
+            taskPermissions={permissions.tasks}
             onEdit={openTaskEditor}
             onDone={handleQuickTaskCompletion}
+            onAccept={(task) => void setTaskStatus(task, 'inProgress')}
             onReviewDeadlineChange={openDeadlineChangeDecisionPrompt}
             onReviewApproval={openApprovalDecisionPrompt}
+            onOpenClient={onOpenClient}
+            onOpenCase={onOpenCase}
+            onOpenLegalEntity={onOpenLegalEntity}
             approvalQuickActionMode={taskSettings.approvalQuickActionMode}
             canCompleteTask={(task) => canCompleteTaskForCurrentUser(
               task,
@@ -6455,6 +6493,7 @@ export function TaskJournal({
               permissions.tasks,
             )}
           />
+          </div>
         ) : viewMode === 'calendar' ? (
           <>
             {!embedded ? (
@@ -8244,8 +8283,9 @@ function TaskTable({
                           <Scale className="h-4 w-4" />
                         </button>
                       ) : null}
-                      {!isReadOnly && isTaskJournalActive(task.status) && task.status !== 'inProgress' ? (
-                        <button type="button" onClick={() => onStatusChange(task, 'inProgress')} className="inline-flex h-9 w-9 items-center justify-center rounded-xl text-blue-600 transition hover:bg-blue-50 hover:text-blue-700" title="Принять в работу">
+                      {(task.status === 'new' || task.status === 'waiting' || task.status === 'revision')
+                        && (!isReadOnly || isTaskExecutorForUser(task, currentUserId)) ? (
+                        <button type="button" onClick={() => onStatusChange(task, 'inProgress')} className="inline-flex h-9 w-9 items-center justify-center rounded-xl text-blue-600 transition hover:bg-blue-50 hover:text-blue-700" title="Принять в работу" aria-label="Принять в работу">
                           <Play className="h-4 w-4" />
                         </button>
                       ) : null}
@@ -8341,10 +8381,16 @@ function TaskBoard({
   highlightedTaskId,
   currentUserId,
   isAdminUser,
+  taskSettings,
+  taskPermissions,
   onEdit,
   onDone,
+  onAccept,
   onReviewDeadlineChange,
   onReviewApproval,
+  onOpenClient,
+  onOpenCase,
+  onOpenLegalEntity,
   approvalQuickActionMode,
   canCompleteTask,
 }: {
@@ -8352,21 +8398,27 @@ function TaskBoard({
   highlightedTaskId: number | null;
   currentUserId: number | null;
   isAdminUser: boolean;
+  taskSettings: TaskJournalSettingsDto;
+  taskPermissions: TaskSectionPermissions;
   onEdit: (task: TaskJournalItem) => void;
   onDone: (task: TaskJournalItem) => void;
+  onAccept: (task: TaskJournalItem) => void;
   onReviewDeadlineChange: (task: TaskJournalItem, request: TaskJournalDeadlineChangeRequest) => void;
   onReviewApproval: (task: TaskJournalItem, participant: TaskJournalParticipant) => void;
+  onOpenClient?: (clientId: number, caseId?: number | null) => void | Promise<void>;
+  onOpenCase?: (caseId: number, clientId?: number | null) => void | Promise<void>;
+  onOpenLegalEntity?: (legalEntityId: number) => void | Promise<void>;
   approvalQuickActionMode: TaskJournalSettingsDto['approvalQuickActionMode'];
   canCompleteTask: (task: TaskJournalItem) => boolean;
 }) {
   return (
-    <div data-testid="task-board" className="grid gap-4 xl:grid-cols-4">
+    <div data-testid="task-board" className="flex max-w-full gap-3 overflow-x-auto pb-2">
       {columns.map((column) => (
-        <section key={column.key} className="min-h-[360px] rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <div className="border-b border-slate-100 px-4 py-4">
+        <section key={column.key} data-testid={`task-board-column-${column.key}`} className="min-h-[360px] w-[280px] min-w-[280px] flex-1 rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className={`border-b px-3 py-2.5 ${column.tone === 'rose' ? 'border-rose-200 bg-rose-50' : column.tone === 'blue' ? 'border-blue-200 bg-blue-50' : column.tone === 'emerald' ? 'border-emerald-200 bg-emerald-50' : column.tone === 'amber' ? 'border-amber-200 bg-amber-50' : column.tone === 'violet' ? 'border-violet-200 bg-violet-50' : 'border-slate-200 bg-slate-50'}`}>
             <div className="flex items-center justify-between gap-3">
-              <h2 className="font-semibold text-slate-900">{column.title}</h2>
-              <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">{column.items.length}</span>
+              <h2 className="text-sm font-bold text-slate-900">{column.title}</h2>
+              <span className="rounded-full bg-white px-2.5 py-1 text-xs font-bold text-slate-700">{column.items.length}</span>
             </div>
           </div>
           <div className="space-y-3 p-3">
@@ -8383,10 +8435,16 @@ function TaskBoard({
               const useSeparateApprovalAction = isAwaitingApproval && approvalQuickActionMode === 'separateButton';
               const completionActionDisabled = isAwaitingApproval
                 && (useSeparateApprovalAction || !reviewableApprovalParticipant);
+              const canAccept = (task.status === 'new' || task.status === 'waiting' || task.status === 'revision')
+                && (isTaskExecutorForUser(task, currentUserId)
+                  || !isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings, taskPermissions));
+              const clientName = getTaskClientName(task);
+              const caseTitle = getTaskCaseTitle(task);
               return (
                 <article
                   key={task.id}
-                  className={`rounded-xl border bg-white p-4 shadow-sm ${
+                  data-testid={`task-board-card-${task.id}`}
+                  className={`rounded-xl border bg-white p-3 shadow-sm ${
                     isHighlighted ? 'border-blue-300 ring-2 ring-blue-100' : 'border-slate-200'
                   }`}
                 >
@@ -8396,16 +8454,29 @@ function TaskBoard({
                       <Eye className="h-4 w-4" />
                     </button>
                   </div>
-                  <div className="mt-3 text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">{getTaskClientName(task)}</div>
-                  {getTaskCaseTitle(task) ? (
-                    <div className="mt-1 text-xs text-slate-500">{getTaskCaseTitle(task)}</div>
+                  <div className="mt-2">
+                    {(task.clientId && onOpenClient) || (task.legalEntityId && onOpenLegalEntity) ? (
+                      <button type="button" onClick={() => task.clientId && onOpenClient ? void onOpenClient(task.clientId, task.clientCaseId ?? null) : task.legalEntityId && onOpenLegalEntity ? void onOpenLegalEntity(task.legalEntityId) : undefined} className="max-w-full truncate text-left text-xs font-bold uppercase tracking-wide text-blue-700 hover:underline" title="Открыть карточку клиента">{clientName}</button>
+                    ) : <span className="text-xs font-bold uppercase tracking-wide text-slate-600">{clientName}</span>}
+                  </div>
+                  {caseTitle ? (
+                    task.clientCaseId && onOpenCase ? (
+                      <button type="button" onClick={() => void onOpenCase(task.clientCaseId!, task.clientId ?? null)} className="mt-1 block max-w-full truncate text-left text-xs font-semibold text-blue-700 hover:underline" title="Открыть дело">{caseTitle}</button>
+                    ) : <div className="mt-1 text-xs text-slate-500">{caseTitle}</div>
                   ) : null}
-                  <h3 className="mt-2 text-sm font-semibold leading-5 text-slate-900">{task.title}</h3>
+                  <button type="button" onClick={() => onEdit(task)} className="mt-2 block text-left text-sm font-bold leading-5 text-slate-900 hover:text-blue-700 hover:underline" title="Открыть задачу">{task.title}</button>
+                  <span className={`mt-2 inline-flex rounded-lg px-2 py-1 text-xs font-bold ${statusClass(task.status)}`}>{getStatusLabel(task.status)}</span>
                   <TaskBillingBadge task={task} className="mt-2" />
                   <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
                     <TypeIcon className="h-3.5 w-3.5" />
                     {getTypeMeta(task.type).label}
                   </div>
+                  {canAccept ? (
+                    <button type="button" onClick={() => onAccept(task)} className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-100" title="Принять в работу">
+                      <Play className="h-4 w-4" />
+                      Принять в работу
+                    </button>
+                  ) : null}
                   <div className="mt-2 text-xs text-slate-500">
                     Исполнитель: {getTaskAssigneeNames(task).join(', ') || task.assigneeName}
                   </div>
@@ -12180,9 +12251,7 @@ function TaskModal({
             </div>
             <div className="relative flex shrink-0 items-center gap-1">
               {state?.task
-                && isTaskJournalActive(state.task.status)
-                && state.task.status !== 'inProgress'
-                && !isTaskAwaitingApproval(state.task) ? (
+                && (state.task.status === 'new' || state.task.status === 'waiting' || state.task.status === 'revision') ? (
                 <button
                   type="button"
                   onClick={() => void saveWithStatus('inProgress')}
@@ -12190,7 +12259,7 @@ function TaskModal({
                   className="inline-flex h-9 items-center gap-2 rounded-lg bg-blue-50 px-3 text-sm font-semibold text-blue-700 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <Play className="h-4 w-4" />
-                  {state.task.status === 'revision' ? 'Продолжить работу' : 'Запустить'}
+                  {state.task.status === 'revision' ? 'Продолжить работу' : 'Принять в работу'}
                 </button>
               ) : null}
               {isLockedViewWithEditAccess ? (
@@ -13112,16 +13181,14 @@ function TaskModal({
           <div className="flex shrink-0 flex-wrap items-start justify-end gap-2">
             {state?.task ? (
               <>
-                {state.task.status !== 'inProgress'
-                  && isTaskJournalActive(state.task.status)
-                  && !isTaskAwaitingApproval(state.task) ? (
+                {(state.task.status === 'new' || state.task.status === 'waiting' || state.task.status === 'revision') ? (
                   <button
                     type="button"
                     onClick={() => void saveWithStatus('inProgress')}
                     disabled={isReadOnly && !canPostComment}
                     className="inline-flex items-center justify-center rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    {state.task.status === 'revision' ? 'Продолжить работу' : 'В работу'}
+                    {state.task.status === 'revision' ? 'Продолжить работу' : 'Принять в работу'}
                   </button>
                 ) : null}
                 {isLockedViewWithEditAccess ? (

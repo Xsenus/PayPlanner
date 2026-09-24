@@ -3540,6 +3540,71 @@ describe('TaskJournal', () => {
     expect(screen.getByTestId('task-view-list').getAttribute('aria-pressed')).toBe('true');
   });
 
+  it('groups board cards by workflow status and opens linked client, case and task', async () => {
+    const onOpenClient = vi.fn();
+    const onOpenCase = vi.fn();
+    await renderJournal([
+      createTask({ id: 101, title: 'Новая задача', status: 'new' }),
+      createTask({ id: 102, title: 'Рабочая задача', status: 'inProgress' }),
+      createTask({ id: 103, title: 'Готовая задача', status: 'done', result: 'Выполнено' }),
+    ], { initialView: 'board', onOpenClient, onOpenCase });
+
+    fireEvent.click(screen.getByRole('button', { name: 'По статусу' }));
+
+    await waitFor(() => expect(within(screen.getByTestId('task-board-column-closed')).getByText('Готовая задача')).toBeTruthy());
+    expect(within(screen.getByTestId('task-board-column-new')).getByText('Новая задача')).toBeTruthy();
+    expect(within(screen.getByTestId('task-board-column-inProgress')).getByText('Рабочая задача')).toBeTruthy();
+    expect((screen.getByLabelText('Статус') as HTMLSelectElement).value).toBe('all');
+
+    const card = screen.getByTestId('task-board-card-101');
+    fireEvent.click(within(card).getByRole('button', { name: 'Иванов Иван Иванович' }));
+    fireEvent.click(within(card).getByRole('button', { name: 'БАНКРОТСТВО' }));
+    fireEvent.click(within(card).getByRole('button', { name: 'Новая задача' }));
+    expect(onOpenClient).toHaveBeenCalledWith(10, 100);
+    expect(onOpenCase).toHaveBeenCalledWith(100, 10);
+    expect(await screen.findByTestId('task-legacy-card-window')).toBeTruthy();
+  });
+
+  it('shows an explicit accept action only on eligible board cards', async () => {
+    const tasks = [
+      createTask({ id: 101, title: 'Нужно принять', status: 'new' }),
+      createTask({ id: 102, title: 'Уже в работе', status: 'inProgress' }),
+    ];
+    await renderJournal(tasks, { initialView: 'board' });
+    apiMock.updateTaskJournalStatus.mockImplementation(async (id: number, status: TaskJournalItem['status']) => {
+      const task = tasks.find((item) => item.id === id)!;
+      task.status = status;
+      return task;
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'По статусу' }));
+
+    expect(within(screen.getByTestId('task-board-card-101')).getByRole('button', { name: 'Принять в работу' })).toBeTruthy();
+    expect(within(screen.getByTestId('task-board-card-102')).queryByRole('button', { name: 'Принять в работу' })).toBeNull();
+    fireEvent.click(within(screen.getByTestId('task-board-card-101')).getByRole('button', { name: 'Принять в работу' }));
+    await waitFor(() => expect(apiMock.updateTaskJournalStatus).toHaveBeenCalledWith(101, 'inProgress', undefined));
+    await waitFor(() => expect(within(screen.getByTestId('task-board-column-inProgress')).getByText('Нужно принять')).toBeTruthy());
+    expect(within(screen.getByTestId('task-board-column-new')).queryByText('Нужно принять')).toBeNull();
+  });
+
+  it('lets an assigned executor accept a task without edit permission from the board and list', async () => {
+    authState.isAdmin = false;
+    permissionsState.taskCanEdit = false;
+    permissionsState.taskCanEditOthers = false;
+    await renderJournal([createTask({ status: 'new', assigneeUserId: 7, authorUserId: 8 })], { initialView: 'board' });
+
+    fireEvent.click(within(screen.getByTestId('task-board-card-101')).getByRole('button', { name: 'Принять в работу' }));
+    await waitFor(() => expect(apiMock.updateTaskJournalStatus).toHaveBeenCalledWith(101, 'inProgress', undefined));
+    fireEvent.click(screen.getByTestId('task-view-list'));
+    await waitFor(() => expect(screen.getByTitle('Принять в работу')).toBeTruthy());
+  });
+
+  it('places a task due earlier today only in the overdue board column', async () => {
+    await renderJournal([createTask({ dueAt: new Date(Date.now() - 60_000).toISOString() })], { initialView: 'board' });
+
+    expect(within(screen.getByTestId('task-board-column-overdue')).getByText('Тестовая задача')).toBeTruthy();
+    expect(within(screen.getByTestId('task-board-column-today')).queryByText('Тестовая задача')).toBeNull();
+  });
+
   it('keeps task filter and view controls constrained on mobile widths', async () => {
     await renderJournal();
 
