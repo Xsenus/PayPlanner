@@ -122,7 +122,7 @@ describe('CourtCasesRegistry', () => {
       id: 'court-event:1', kind: 'court', sourceType: 'hearing', title: 'Судебное заседание',
       startAt: hearingAt, endAt: hearingAt, allDay: false, clientCaseId: 77,
       caseTitle: 'Первое дело', responsibleName: 'Юрист', status: 'scheduled', priority: 'normal',
-      isOverdue: false, isWarning: true, documentsPrepared: true,
+      isOverdue: false, isWarning: true, documentsPrepared: true, materialsReviewed: true,
     };
     vi.mocked(apiService.getCaseCalendarEvents).mockResolvedValue([
       baseEvent,
@@ -134,7 +134,7 @@ describe('CourtCasesRegistry', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Календарь заседаний' }));
 
     expect(await screen.findByRole('region', { name: 'Календарь судебных заседаний' })).toBeTruthy();
-    expect(screen.getByText('Подготовлено: 1')).toBeTruthy();
+    expect(screen.getByText('Задача и материалы: 1')).toBeTruthy();
     expect(screen.getByText('Внимание: 1')).toBeTruthy();
     expect(screen.getAllByText(/Дело с другой страницы/u).length).toBeGreaterThan(0);
     expect(screen.queryByText('Не заседание')).toBeNull();

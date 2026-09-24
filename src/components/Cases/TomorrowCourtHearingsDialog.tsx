@@ -93,7 +93,10 @@ export function TomorrowCourtHearingsDialog({ userId, enabled, onOpenCase, onOpe
                 <div className="truncate text-sm font-semibold text-slate-900">{hearing.caseTitle}</div>
                 <div className="text-xs text-slate-600">{hearing.courtName || 'Суд не указан'}{hearing.judgeName ? ` · ${hearing.judgeName}` : ' · судья не указан'}{hearing.courtroom ? ` · зал ${hearing.courtroom}` : ''}</div>
                 <div className={`text-xs font-semibold ${hearing.documentsPrepared ? 'text-emerald-700' : 'text-amber-700'}`}>
-                  {hearing.documentsPrepared ? 'Документы подготовлены' : 'Требуется внимание: завершите задачу «Подготовиться к заседанию» после проверки документов.'}
+                  {hearing.documentsPrepared ? 'Контрольная задача подготовки завершена' : 'Контрольная задача «Подготовиться к заседанию» не завершена.'}
+                </div>
+                <div className={`text-xs font-semibold ${hearing.materialsReviewed ? 'text-emerald-700' : 'text-amber-700'}`}>
+                  {hearing.materialsReviewed ? 'Материалы к этому заседанию проверены' : 'Материалы не подтверждены в чек-листе дела.'}
                 </div>
                 <div className={`text-xs font-semibold ${hearing.positionReviewed ? 'text-emerald-700' : 'text-amber-700'}`}>
                   {hearing.positionReviewed ? 'Позиция по делу проверена' : 'Позиция по делу не проверена — откройте дело и подтвердите её после проверки.'}

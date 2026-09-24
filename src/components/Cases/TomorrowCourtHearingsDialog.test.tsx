@@ -12,7 +12,7 @@ describe('TomorrowCourtHearingsDialog', () => {
     vi.clearAllMocks();
     window.localStorage.clear();
     apiMock.getTomorrowCourtHearings.mockResolvedValue([
-      { caseId: 24, caseTitle: 'Дело клиента', hearingAt: '2026-09-24T03:30:00Z', allDay: false, courtName: 'Районный суд', judgeName: 'Петрова', courtroom: '12', documentsPrepared: false, positionReviewed: false },
+      { caseId: 24, caseTitle: 'Дело клиента', hearingAt: '2026-09-24T03:30:00Z', allDay: false, courtName: 'Районный суд', judgeName: 'Петрова', courtroom: '12', documentsPrepared: false, materialsReviewed: false, positionReviewed: false },
     ]);
   });
 
@@ -23,21 +23,32 @@ describe('TomorrowCourtHearingsDialog', () => {
     expect(await screen.findByRole('dialog', { name: 'Заседания завтра' })).toBeTruthy();
     expect(screen.getByText('Дело клиента')).toBeTruthy();
     expect(screen.getByText(/Районный суд · Петрова · зал 12/)).toBeTruthy();
-    expect(screen.getByText(/Требуется внимание/)).toBeTruthy();
+    expect(screen.getByText(/Контрольная задача.*не завершена/)).toBeTruthy();
+    expect(screen.getByText(/Материалы не подтверждены/)).toBeTruthy();
     expect(screen.getByText(/Позиция по делу не проверена/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /К делу/ }));
     expect(onOpenCase).toHaveBeenCalledWith(24);
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
 
-  it('shows preparation as complete only for a completed matching task', async () => {
+  it('shows the completed task and checked materials as separate signals', async () => {
     apiMock.getTomorrowCourtHearings.mockResolvedValueOnce([
-      { caseId: 24, caseTitle: 'Дело клиента', hearingAt: '2026-09-24T03:30:00Z', allDay: false, courtName: 'Районный суд', judgeName: '', courtroom: '', documentsPrepared: true, positionReviewed: true },
+      { caseId: 24, caseTitle: 'Дело клиента', hearingAt: '2026-09-24T03:30:00Z', allDay: false, courtName: 'Районный суд', judgeName: '', courtroom: '', documentsPrepared: true, materialsReviewed: true, positionReviewed: true },
     ]);
     render(<TomorrowCourtHearingsDialog userId={3} enabled onOpenCase={vi.fn()} onOpenCalendar={vi.fn()} />);
-    expect(await screen.findByText('Документы подготовлены')).toBeTruthy();
+    expect(await screen.findByText('Контрольная задача подготовки завершена')).toBeTruthy();
+    expect(screen.getByText('Материалы к этому заседанию проверены')).toBeTruthy();
     expect(screen.getByText('Позиция по делу проверена')).toBeTruthy();
-    expect(screen.queryByText(/Требуется внимание/)).toBeNull();
+    expect(screen.queryByText(/Материалы не подтверждены/)).toBeNull();
+  });
+
+  it('does not treat a closed task as proof that materials were checked', async () => {
+    apiMock.getTomorrowCourtHearings.mockResolvedValueOnce([
+      { caseId: 24, caseTitle: 'Дело клиента', hearingAt: '2026-09-24T03:30:00Z', allDay: false, courtName: '', judgeName: '', courtroom: '', documentsPrepared: true, materialsReviewed: false, positionReviewed: false },
+    ]);
+    render(<TomorrowCourtHearingsDialog userId={3} enabled onOpenCase={vi.fn()} onOpenCalendar={vi.fn()} />);
+    expect(await screen.findByText('Контрольная задача подготовки завершена')).toBeTruthy();
+    expect(screen.getByText('Материалы не подтверждены в чек-листе дела.')).toBeTruthy();
   });
 
   it('does not query without access or reopen after dismissal on the same date', async () => {

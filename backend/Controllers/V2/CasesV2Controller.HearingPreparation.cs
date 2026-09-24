@@ -165,4 +165,21 @@ public partial class CasesV2Controller
         MaterialsCheckedByName = item?.MaterialsCheckedByName ?? string.Empty,
         DocumentIds = item?.Documents.Select(link => link.ClientCaseDocumentId).Order().ToArray() ?? [],
     };
+
+    private async Task<HashSet<(int CaseId, DateTime HearingAt)>> LoadReviewedHearingMaterialsAsync(
+        IReadOnlyCollection<(int CaseId, DateTime HearingAt)> hearings, CancellationToken ct)
+    {
+        if (hearings.Count == 0)
+            return [];
+        var caseIds = hearings.Select(item => item.CaseId).Distinct().ToArray();
+        var earliest = hearings.Min(item => item.HearingAt);
+        var latest = hearings.Max(item => item.HearingAt);
+        var reviewed = await _db.ClientCaseHearingPreparations.AsNoTracking()
+            .Where(item => caseIds.Contains(item.ClientCaseId)
+                && item.HearingAt >= earliest && item.HearingAt <= latest
+                && item.MaterialsCheckedAt.HasValue && item.Documents.Any())
+            .Select(item => new { item.ClientCaseId, item.HearingAt })
+            .ToListAsync(ct);
+        return reviewed.Select(item => (item.ClientCaseId, item.HearingAt)).ToHashSet();
+    }
 }

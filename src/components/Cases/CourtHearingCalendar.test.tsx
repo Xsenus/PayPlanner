@@ -12,7 +12,7 @@ const hearing: CaseCalendarEvent = {
   startAt: '2026-09-24T03:00:00Z', endAt: '2026-09-24T04:00:00Z', allDay: false,
   clientCaseId: 42, caseTitle: 'Дело о разделе', responsibleName: 'Юрист',
   status: 'scheduled', priority: 'normal', isOverdue: false, isWarning: false,
-  courtName: 'Районный суд', courtCaseNumber: '2-123/2026', documentsPrepared: true,
+  courtName: 'Районный суд', courtCaseNumber: '2-123/2026', documentsPrepared: true, materialsReviewed: true,
   sourceCheckedAt: '2026-09-23T17:00:00Z',
   previousScheduledAt: '2026-09-20T03:00:00Z', previousAllDay: false,
 };
@@ -35,7 +35,7 @@ describe('CourtHearingCalendar', () => {
     expect(agenda.textContent).toContain('24 сентября');
     expect(agenda.textContent).toContain('10:00');
     expect(agenda.textContent).toContain('Дело о разделе');
-    expect(agenda.textContent).toContain('Документы подготовлены');
+    expect(agenda.textContent).toContain('Задача закрыта · материалы проверены');
     expect(agenda.textContent).toContain('Источник проверен 24 сент. 2026 г.');
     expect(agenda.textContent).toContain('Перенесено: 20 сент. 2026 г., 10:00 → 24 сент. 2026 г., 10:00');
     expect(screen.getAllByText(/Перенесено: 20 сент/)).toHaveLength(2);
@@ -51,6 +51,24 @@ describe('CourtHearingCalendar', () => {
     const agenda = await screen.findByLabelText('Расписание заседаний по датам');
     expect(agenda.textContent).not.toContain('Источник проверен');
     expect(agenda.textContent).not.toContain('Перенесено:');
+  });
+
+  it('keeps the hearing in attention when the task is done but materials are not checked', async () => {
+    vi.mocked(apiService.getCaseCalendarEvents).mockResolvedValue([{ ...hearing, materialsReviewed: false }]);
+    render(<CourtHearingCalendar timeZoneId="Asia/Novosibirsk" reloadToken={0} onOpenCase={vi.fn()} />);
+    const agenda = await screen.findByLabelText('Расписание заседаний по датам');
+    expect(agenda.textContent).toContain('Задача закрыта · материалы не проверены');
+    expect(screen.getByText('Задача и материалы: 0')).toBeTruthy();
+    expect(screen.getByText('Внимание: 1')).toBeTruthy();
+  });
+
+  it('keeps the hearing in attention when materials are checked but the task is open', async () => {
+    vi.mocked(apiService.getCaseCalendarEvents).mockResolvedValue([{ ...hearing, documentsPrepared: false }]);
+    render(<CourtHearingCalendar timeZoneId="Asia/Novosibirsk" reloadToken={0} onOpenCase={vi.fn()} />);
+    const agenda = await screen.findByLabelText('Расписание заседаний по датам');
+    expect(agenda.textContent).toContain('Материалы проверены · задача открыта');
+    expect(screen.getByText('Задача и материалы: 0')).toBeTruthy();
+    expect(screen.getByText('Внимание: 1')).toBeTruthy();
   });
 
   it('shows an empty month without a wide empty mobile grid', async () => {

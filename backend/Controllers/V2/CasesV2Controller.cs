@@ -915,6 +915,9 @@ public partial class CasesV2Controller : ControllerBase
                 .Select(item => new { item.ClientCaseId, item.DueAt, item.Status, item.TagsJson })
                 .ToListAsync(ct);
 
+            var reviewedMaterials = await LoadReviewedHearingMaterialsAsync(
+                result.Select(item => (item.CaseId, item.HearingAt)).ToArray(), ct);
+
             foreach (var hearing in result)
             {
                 var sourceTag = hearing.CourtEventId.HasValue
@@ -926,6 +929,7 @@ public partial class CasesV2Controller : ControllerBase
                     && task.DueAt == dueAt
                     && task.Status == "done"
                     && task.TagsJson.Contains(sourceTag, StringComparison.Ordinal));
+                hearing.MaterialsReviewed = reviewedMaterials.Contains((hearing.CaseId, hearing.HearingAt));
             }
         }
         return Ok(result);
@@ -952,6 +956,7 @@ public partial class CasesV2Controller : ControllerBase
         public string JudgeName { get; init; } = string.Empty;
         public string Courtroom { get; init; } = string.Empty;
         public bool DocumentsPrepared { get; set; }
+        public bool MaterialsReviewed { get; set; }
         public bool PositionReviewed { get; init; }
     }
 
@@ -6048,6 +6053,8 @@ public partial class CasesV2Controller : ControllerBase
                 .ToListAsync(ct);
             var completedTasksByHearing = preparationTasks
                 .ToLookup(item => (item.ClientCaseId!.Value, item.DueAt));
+            var reviewedMaterials = await LoadReviewedHearingMaterialsAsync(
+                hearings.Select(item => (item.ClientCaseId, item.StartAt)).ToArray(), ct);
 
             foreach (var hearing in hearings)
             {
@@ -6057,6 +6064,7 @@ public partial class CasesV2Controller : ControllerBase
                 var dueAt = PreparationTaskDueAt(hearing.StartAt, hearing.AllDay);
                 hearing.DocumentsPrepared = completedTasksByHearing[(hearing.ClientCaseId, dueAt)]
                     .Any(task => task.TagsJson.Contains(sourceTag, StringComparison.Ordinal));
+                hearing.MaterialsReviewed = reviewedMaterials.Contains((hearing.ClientCaseId, hearing.StartAt));
             }
         }
 
@@ -15487,6 +15495,7 @@ public partial class CasesV2Controller : ControllerBase
         public string? CourtName { get; set; }
         public string? CourtCaseNumber { get; set; }
         public bool? DocumentsPrepared { get; set; }
+        public bool? MaterialsReviewed { get; set; }
         public DateTime? SourceCheckedAt { get; set; }
         public DateTime? PreviousScheduledAt { get; set; }
         public bool? PreviousAllDay { get; set; }

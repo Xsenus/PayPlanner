@@ -3530,6 +3530,28 @@ public class CasesV2ControllerTests
         Assert.Equal(allDayCase.Id, Assert.Single(rows).CaseId);
         Assert.True(rows[0].AllDay);
         Assert.True(rows[0].DocumentsPrepared);
+        Assert.False(rows[0].MaterialsReviewed);
+
+        var hearingDocument = new ClientCaseDocument
+        {
+            ClientCaseId = allDayCase.Id, DocumentKey = "tomorrow-hearing-material",
+            DocumentType = "Материал", Status = "Подготовлен",
+            OriginalFileName = "position.pdf", StoredFileName = "position.pdf",
+            StoragePath = "cases/tomorrow-position.pdf", ContentType = "application/pdf",
+            SizeBytes = 100, UploadedByName = lawyer.FullName,
+        };
+        db.ClientCaseDocuments.Add(hearingDocument);
+        db.ClientCaseHearingPreparations.Add(new ClientCaseHearingPreparation
+        {
+            ClientCaseId = allDayCase.Id, HearingAt = localDate,
+            MaterialsCheckedAt = DateTime.UtcNow, MaterialsCheckedByName = lawyer.FullName,
+            Documents = [new ClientCaseHearingPreparationDocument { Document = hearingDocument }],
+        });
+        await db.SaveChangesAsync();
+        var checkedResult = await controller.GetTomorrowCourtHearings(new DateOnly(2026, 9, 24), CancellationToken.None);
+        var checkedRows = Assert.IsAssignableFrom<IReadOnlyList<CasesV2Controller.CourtTomorrowHearingDto>>(
+            Assert.IsType<OkObjectResult>(checkedResult.Result).Value);
+        Assert.True(Assert.Single(checkedRows).MaterialsReviewed);
 
         var invalid = await CreateController(db, lawyer).GetTomorrowCourtHearings(DateOnly.MaxValue, CancellationToken.None);
         Assert.IsType<BadRequestObjectResult>(invalid.Result);
@@ -4826,6 +4848,23 @@ public class CasesV2ControllerTests
             });
         await db.SaveChangesAsync();
 
+        var material = new ClientCaseDocument
+        {
+            ClientCaseId = clientCase.Id, DocumentKey = "calendar-hearing-material",
+            DocumentType = "Материал", Status = "Подготовлен",
+            OriginalFileName = "calendar-position.pdf", StoredFileName = "calendar-position.pdf",
+            StoragePath = "cases/calendar-position.pdf", ContentType = "application/pdf",
+            SizeBytes = 100, UploadedByName = owner.FullName,
+        };
+        db.ClientCaseDocuments.Add(material);
+        db.ClientCaseHearingPreparations.Add(new ClientCaseHearingPreparation
+        {
+            ClientCaseId = clientCase.Id, HearingAt = hearingAt,
+            MaterialsCheckedAt = DateTime.UtcNow, MaterialsCheckedByName = owner.FullName,
+            Documents = [new ClientCaseHearingPreparationDocument { Document = material }],
+        });
+        await db.SaveChangesAsync();
+
         var result = await CreateController(db, owner).GetCaseCalendarEvents(
             new DateTime(2026, 10, 1), new DateTime(2026, 10, 31),
             clientCaseId: null, responsibleUserId: null, includeTasks: false, ct: CancellationToken.None);
@@ -4834,9 +4873,36 @@ public class CasesV2ControllerTests
         var hearings = events.Where(item => item.SourceType == "hearing").OrderBy(item => item.StartAt).ToArray();
         Assert.Equal(2, hearings.Length);
         Assert.True(hearings[0].DocumentsPrepared);
+        Assert.True(hearings[0].MaterialsReviewed);
         Assert.False(hearings[1].DocumentsPrepared);
+        Assert.False(hearings[1].MaterialsReviewed);
         Assert.Equal(new DateTime(2026, 10, 8, 6, 0, 0, DateTimeKind.Utc), hearings[0].SourceCheckedAt);
         Assert.Null(hearings[1].SourceCheckedAt);
+
+        var secondMaterial = new ClientCaseDocument
+        {
+            ClientCaseId = clientCase.Id, DocumentKey = "calendar-second-hearing-material",
+            DocumentType = "Материал", Status = "Подготовлен",
+            OriginalFileName = "second-position.pdf", StoredFileName = "second-position.pdf",
+            StoragePath = "cases/second-position.pdf", ContentType = "application/pdf",
+            SizeBytes = 100, UploadedByName = owner.FullName,
+        };
+        db.ClientCaseDocuments.Add(secondMaterial);
+        db.ClientCaseHearingPreparations.Add(new ClientCaseHearingPreparation
+        {
+            ClientCaseId = clientCase.Id, HearingAt = hearingAt.AddDays(7),
+            MaterialsCheckedAt = DateTime.UtcNow, MaterialsCheckedByName = owner.FullName,
+            Documents = [new ClientCaseHearingPreparationDocument { Document = secondMaterial }],
+        });
+        await db.SaveChangesAsync();
+        var secondResult = await CreateController(db, owner).GetCaseCalendarEvents(
+            new DateTime(2026, 10, 1), new DateTime(2026, 10, 31),
+            clientCaseId: null, responsibleUserId: null, includeTasks: false, ct: CancellationToken.None);
+        var secondEvents = Assert.IsAssignableFrom<IReadOnlyList<CasesV2Controller.CaseCalendarEventDto>>(
+            Assert.IsType<OkObjectResult>(secondResult.Result).Value);
+        var secondHearing = Assert.Single(secondEvents, item => item.SourceType == "hearing" && item.StartAt == hearingAt.AddDays(7));
+        Assert.False(secondHearing.DocumentsPrepared);
+        Assert.True(secondHearing.MaterialsReviewed);
     }
 
     [Fact]

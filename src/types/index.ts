@@ -677,6 +677,7 @@ export interface CourtTomorrowHearing {
   judgeName: string;
   courtroom: string;
   documentsPrepared: boolean;
+  materialsReviewed: boolean;
   positionReviewed: boolean;
 }
 
@@ -726,6 +727,7 @@ export interface CaseCalendarEvent {
   courtName?: string | null;
   courtCaseNumber?: string | null;
   documentsPrepared?: boolean | null;
+  materialsReviewed?: boolean | null;
   sourceCheckedAt?: string | null;
   previousScheduledAt?: string | null;
   previousAllDay?: boolean | null;
