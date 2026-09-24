@@ -28,6 +28,7 @@ import {
   X,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
+import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useToast } from '../../hooks/useToast';
 import {
   internalChatApi,
@@ -120,6 +121,9 @@ interface ConversationProps {
 }
 
 function ChatConversation({ thread, people, currentUserId, compact = false, onBack, onThreadChanged, onOpenTask }: ConversationProps) {
+  const { user, isAdmin } = useAuth();
+  const permissions = useRolePermissions(user?.role?.id);
+  const canCreateTasks = isAdmin() || permissions.tasks.canCreate;
   const toast = useToast();
   const showError = useCallback((error: unknown) => toast.error(errorMessage(error)), [toast]);
   const [messages, setMessages] = useState<InternalChatMessage[]>([]);
@@ -370,7 +374,7 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
                         <button type="button" onClick={() => { setReplyTo(message); setActionsFor(null); textareaRef.current?.focus(); }} className="flex w-full items-center gap-2 px-3 py-2 hover:bg-slate-50"><Reply className="h-3.5 w-3.5" />Ответить</button>
                         <div className="flex gap-1 border-y border-slate-100 px-2 py-2">{REACTIONS.map((emoji) => <button key={emoji} type="button" onClick={() => void internalChatApi.toggleReaction(message.id, emoji).then(refreshMessage)} className="rounded p-1 hover:bg-slate-100">{emoji}</button>)}</div>
                         <button type="button" onClick={() => void internalChatApi.setPinned(message.id, !message.isPinned).then(refreshMessage).catch((error) => toast.error(errorMessage(error)))} className="flex w-full items-center gap-2 px-3 py-2 hover:bg-slate-50"><Pin className="h-3.5 w-3.5" />{message.isPinned ? 'Открепить' : 'Закрепить'}</button>
-                        <button type="button" onClick={() => { setTaskSource(message); setTaskTitle(message.text.slice(0, 120)); setActionsFor(null); }} className="flex w-full items-center gap-2 px-3 py-2 hover:bg-slate-50"><FilePlus2 className="h-3.5 w-3.5" />Создать задачу</button>
+                        {canCreateTasks ? <button type="button" onClick={() => { setTaskSource(message); setTaskTitle(message.text.slice(0, 120)); setActionsFor(null); }} className="flex w-full items-center gap-2 px-3 py-2 hover:bg-slate-50"><FilePlus2 className="h-3.5 w-3.5" />Создать задачу</button> : null}
                         {mine && message.kind === 'user' ? <><button type="button" onClick={() => { setEditing(message); setText(message.text); setActionsFor(null); }} className="flex w-full items-center gap-2 px-3 py-2 hover:bg-slate-50"><Pencil className="h-3.5 w-3.5" />Редактировать</button><button type="button" onClick={() => void internalChatApi.deleteMessage(message.id).then(refreshMessage).catch((error) => toast.error(errorMessage(error)))} className="flex w-full items-center gap-2 px-3 py-2 text-rose-600 hover:bg-rose-50"><Trash2 className="h-3.5 w-3.5" />Удалить</button></> : null}
                       </div> : null}
                     </div>

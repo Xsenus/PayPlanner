@@ -22,13 +22,15 @@ const chatApiMock = vi.hoisted(() => ({
 }));
 
 const toastMock = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn() }));
+const permissionState = vi.hoisted(() => ({ canCreateTasks: true }));
 const connectionMock = vi.hoisted(() => ({ on: vi.fn(), start: vi.fn(() => Promise.resolve()), stop: vi.fn(() => Promise.resolve()) }));
 
 vi.mock('../../services/internalChatApi', async () => {
   const actual = await vi.importActual<typeof import('../../services/internalChatApi')>('../../services/internalChatApi');
   return { ...actual, internalChatApi: chatApiMock };
 });
-vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: 7, email: 'me@example.test', fullName: 'Я' } }) }));
+vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: 7, email: 'me@example.test', fullName: 'Я' }, isAdmin: () => false }) }));
+vi.mock('../../hooks/useRolePermissions', () => ({ useRolePermissions: () => ({ tasks: { canCreate: permissionState.canCreateTasks } }) }));
 vi.mock('../../hooks/useToast', () => ({ useToast: () => toastMock }));
 vi.mock('../../services/realtimeNotifications', () => ({
   REALTIME_TASK_JOURNAL_CHANGED_EVENT: 'taskJournalChanged',
@@ -65,6 +67,7 @@ const message = {
 
 describe('InternalMessenger', () => {
   beforeEach(() => {
+    permissionState.canCreateTasks = true;
     Object.values(chatApiMock).forEach((mock) => mock.mockReset());
     toastMock.error.mockReset();
     toastMock.success.mockReset();
@@ -88,6 +91,15 @@ describe('InternalMessenger', () => {
 
     await waitFor(() => expect(chatApiMock.sendMessage).toHaveBeenCalledWith(12, 'Готово', [], undefined));
     expect(await screen.findByText('Готово')).toBeTruthy();
+  });
+
+  it('hides task creation from messages when the user cannot create tasks', async () => {
+    permissionState.canCreateTasks = false;
+    render(<InternalMessenger />);
+
+    expect(await screen.findByText('документ')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Действия' }));
+    expect(screen.queryByRole('button', { name: 'Создать задачу' })).toBeNull();
   });
 
   it('opens the task chat through the same protected API', async () => {

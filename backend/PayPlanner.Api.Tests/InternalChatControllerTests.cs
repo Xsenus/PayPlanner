@@ -119,6 +119,47 @@ public sealed class InternalChatControllerTests
     }
 
     [Fact]
+    public async Task CreateTaskFromMessage_RequiresTaskCreationPermissionInAdditionToChatMembership()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var owner = await fixture.AddUserAsync("task-owner@example.test", "Автор");
+        var outsider = await fixture.AddUserAsync("task-outsider@example.test", "Посторонний");
+        var channelResult = await fixture.Controller(owner).CreateChannel(
+            new CreateInternalChatChannelRequest { Name = "Обсуждение" }, CancellationToken.None);
+        var channel = Assert.IsType<InternalChatThreadDto>(Assert.IsType<CreatedAtActionResult>(channelResult.Result).Value);
+        var sent = await fixture.Controller(owner).SendMessage(channel.Id,
+            new SendInternalChatMessageRequest { Text = "Подготовить документ" }, CancellationToken.None);
+        var message = Assert.IsType<InternalChatMessageDto>(Assert.IsType<CreatedAtActionResult>(sent.Result).Value);
+        var request = new CreateTaskFromInternalChatMessageRequest
+        {
+            Title = "Подготовить документ",
+            DueAt = DateTime.UtcNow.AddDays(1)
+        };
+        var permission = new RolePermission
+        {
+            RoleId = owner.RoleId,
+            Section = RolePermissionCatalog.Tasks,
+            CanView = true,
+            CanCreate = false
+        };
+        fixture.Db.RolePermissions.Add(permission);
+        await fixture.Db.SaveChangesAsync();
+
+        var denied = await fixture.Controller(owner).CreateTaskFromMessage(message.Id, request, CancellationToken.None);
+        Assert.IsType<ForbidResult>(denied.Result);
+        Assert.Equal(0, await fixture.Db.TaskJournalItems.CountAsync());
+
+        permission.CanCreate = true;
+        await fixture.Db.SaveChangesAsync();
+        var nonMember = await fixture.Controller(outsider).CreateTaskFromMessage(message.Id, request, CancellationToken.None);
+        Assert.IsType<ForbidResult>(nonMember.Result);
+
+        var allowed = await fixture.Controller(owner).CreateTaskFromMessage(message.Id, request, CancellationToken.None);
+        Assert.IsType<OkObjectResult>(allowed.Result);
+        Assert.Equal(1, await fixture.Db.TaskJournalItems.CountAsync());
+    }
+
+    [Fact]
     public async Task MarkRead_RejectsOtherThreadAndUnknownMessagesWithoutClearingUnreadCount()
     {
         await using var fixture = await Fixture.CreateAsync();

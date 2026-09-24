@@ -541,6 +541,7 @@ public sealed partial class InternalChatController : ControllerBase
         var source = await _db.InternalChatMessages.Include(item => item.Thread).FirstOrDefaultAsync(item => item.Id == messageId && item.DeletedAt == null, ct);
         if (source is null) return NotFound();
         if (!await IsMemberAsync(source.ThreadId, userId.Value, ct)) return Forbid();
+        if (!await _db.HasUserSectionPermissionAsync(User, RolePermissionCatalog.Tasks, permission => permission.CanCreate, ct)) return Forbid();
         var title = NormalizeRequired(request.Title, 500);
         if (title is null) return BadRequest("Укажите название задачи.");
         if (request.DueAt <= DateTime.UtcNow.AddMinutes(-1)) return BadRequest("Срок задачи должен быть в будущем.");
