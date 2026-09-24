@@ -7491,11 +7491,19 @@ public class TasksController : ControllerBase
             if (task.AssigneeUserId.HasValue) desiredIds.Add(task.AssigneeUserId.Value);
             foreach (var member in thread.Members)
             {
-                member.IsActive = desiredIds.Contains(member.UserId);
+                member.IsActive = desiredIds.Contains(member.UserId)
+                    || member.Role == "guest" && member.IsActive;
+                if (desiredIds.Contains(member.UserId))
+                    member.Role = member.UserId == task.AuthorUserId ? "owner" : "member";
                 member.UpdatedAt = now;
             }
             foreach (var userId in desiredIds.Where(id => thread.Members.All(member => member.UserId != id)))
-                thread.Members.Add(new InternalChatMember { UserId = userId, Role = "member", JoinedAt = now });
+                thread.Members.Add(new InternalChatMember
+                {
+                    UserId = userId,
+                    Role = userId == task.AuthorUserId ? "owner" : "member",
+                    JoinedAt = now
+                });
             thread.Name = task.Title;
             thread.UpdatedAt = now;
         }

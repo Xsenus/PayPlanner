@@ -2606,6 +2606,54 @@ public class TasksControllerTests
         Assert.Null(stored.Result);
     }
 
+    [Fact]
+    public async Task UpdateTask_PreservesInvitedChatGuestButDoesNotRestoreRevokedGuest()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "chat-author@example.com", "Постановщик");
+        var assignee = await CreateAdminUserAsync(db, "chat-assignee@example.com", "Исполнитель");
+        var guest = await CreateAdminUserAsync(db, "chat-guest@example.com", "Приглашённый");
+        var revoked = await CreateAdminUserAsync(db, "chat-revoked@example.com", "Отключённый");
+        var client = await CreateClientAsync(db, "Клиент чата");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, assignee.Id);
+        var thread = new InternalChatThread
+        {
+            Kind = InternalChatThreadKinds.Task,
+            Name = task.Title,
+            TaskJournalItemId = task.Id,
+            CreatedByUserId = author.Id,
+            Members =
+            [
+                new InternalChatMember { UserId = author.Id, Role = "owner" },
+                new InternalChatMember { UserId = assignee.Id, Role = "member" },
+                new InternalChatMember { UserId = guest.Id, Role = "guest" },
+                new InternalChatMember { UserId = revoked.Id, Role = "guest", IsActive = false },
+            ]
+        };
+        db.InternalChatThreads.Add(thread);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+        var result = await controller.UpdateTask(task.Id, new UpsertTaskJournalItemRequest
+        {
+            ClientId = client.Id,
+            Title = "Задача уточнена",
+            AssigneeUserId = assignee.Id,
+            DueAt = task.DueAt,
+            Status = "new",
+        }, CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(result.Result);
+        var members = await db.InternalChatMembers.AsNoTracking()
+            .Where(member => member.ThreadId == thread.Id)
+            .ToDictionaryAsync(member => member.UserId);
+        Assert.True(members[guest.Id].IsActive);
+        Assert.Equal("guest", members[guest.Id].Role);
+        Assert.False(members[revoked.Id].IsActive);
+        Assert.Equal("owner", members[author.Id].Role);
+        Assert.Equal("Задача уточнена", (await db.InternalChatThreads.AsNoTracking().SingleAsync(item => item.Id == thread.Id)).Name);
+    }
+
     [Theory]
     [InlineData("onApproval")]
     [InlineData("inProgress")]
