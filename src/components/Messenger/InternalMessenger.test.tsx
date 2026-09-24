@@ -77,6 +77,7 @@ describe('InternalMessenger', () => {
   });
 
   beforeEach(() => {
+    sessionStorage.clear();
     permissionState.canCreateTasks = true;
     Object.values(chatApiMock).forEach((mock) => mock.mockReset());
     toastMock.error.mockReset();
@@ -103,6 +104,53 @@ describe('InternalMessenger', () => {
 
     await waitFor(() => expect(chatApiMock.sendMessage).toHaveBeenCalledWith(12, 'Готово', [], undefined));
     expect(await screen.findByText('Готово')).toBeTruthy();
+  });
+
+  it('keeps an unfinished message in this tab across a chat remount and clears it after sending', async () => {
+    chatApiMock.openTask.mockResolvedValue({ ...thread, id: 44, kind: 'task', taskJournalItemId: 101 });
+    const first = render(<TaskChatPanel taskId={101} />);
+    const editor = await screen.findByPlaceholderText('Напишите сообщение…');
+    fireEvent.change(editor, { target: { value: 'Важный незаконченный текст' } });
+    expect(sessionStorage.getItem('payplanner.chatDraft.v1.7.44')).toBe('Важный незаконченный текст');
+    first.unmount();
+
+    render(<TaskChatPanel taskId={101} />);
+    expect(await screen.findByDisplayValue('Важный незаконченный текст')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Отправить' }));
+    await waitFor(() => expect(sessionStorage.getItem('payplanner.chatDraft.v1.7.44')).toBeNull());
+  });
+
+  it('keeps the reading position and draft when a realtime message arrives', async () => {
+    render(<InternalMessenger />);
+    expect(await screen.findByText('документ')).toBeTruthy();
+    const conversation = screen.getByLabelText('Сообщения чата');
+    Object.defineProperty(conversation, 'scrollHeight', { configurable: true, get: () => 1000 });
+    Object.defineProperty(conversation, 'clientHeight', { configurable: true, get: () => 400 });
+    conversation.scrollTop = 300;
+    fireEvent.change(screen.getByPlaceholderText('Напишите сообщение…'), { target: { value: 'Пишу ответ' } });
+    chatApiMock.getMessages.mockResolvedValue({ items: [message, { ...message, id: 23, text: 'Новое сообщение' }], hasMore: false });
+    const realtimeHandler = connectionMock.on.mock.calls.find(([name]) => name === 'taskJournalChanged')?.[1];
+    expect(realtimeHandler).toBeTypeOf('function');
+    await act(async () => { realtimeHandler(); });
+    expect(await screen.findByText('Новое сообщение')).toBeTruthy();
+    expect(conversation.scrollTop).toBe(300);
+    expect(screen.getByDisplayValue('Пишу ответ')).toBeTruthy();
+  });
+
+  it('copies the source message into task description and lets the author enter a short title', async () => {
+    chatApiMock.createTask.mockResolvedValue({ ...message, id: 24, kind: 'taskLink', text: 'Создана задача' });
+    render(<InternalMessenger />);
+    expect(await screen.findByText('документ')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Действия' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Создать задачу' }));
+    expect((screen.getByLabelText('Название') as HTMLInputElement).value).toBe('');
+    expect((screen.getByLabelText('Описание') as HTMLTextAreaElement).value).toBe(message.text);
+    fireEvent.change(screen.getByLabelText('Название'), { target: { value: 'Проверить документ' } });
+    fireEvent.change(screen.getByLabelText('Срок'), { target: { value: '2027-01-01T11:00' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Создать задачу' }));
+    await waitFor(() => expect(chatApiMock.createTask).toHaveBeenCalledWith(22, expect.objectContaining({
+      title: 'Проверить документ', description: message.text,
+    })));
   });
 
   it('hides task creation from messages when the user cannot create tasks', async () => {
