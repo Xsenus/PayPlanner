@@ -2876,31 +2876,45 @@ public class CasesV2ControllerTests
         var lawyer = await CreateUserAsync(db, "court-report-lawyer@example.com", "Юрист");
         var outsider = await CreateUserAsync(db, "court-report-outsider@example.com", "Другой юрист");
         db.ClientCases.AddRange(
-            new ClientCase { Client = new Client { Name = "Клиент 1", IsActive = true, ResponsibleUserId = lawyer.Id }, Title = "Активное судебное дело", ResponsibleUserId = lawyer.Id, CourtName = "Суд А", OurCourtRole = "claimant", Status = ClientCaseStatus.Open, CreatedAt = new DateTime(2026, 9, 1, 12, 0, 0, DateTimeKind.Utc), ClaimFiledAt = new DateTime(2026, 8, 1), CourtDecisionAt = new DateTime(2026, 8, 11) },
-            new ClientCase { Client = new Client { Name = "Клиент 2", IsActive = true, ResponsibleUserId = lawyer.Id }, Title = "Завершённое судебное дело", ResponsibleUserId = lawyer.Id, CourtName = "Суд А", OurCourtRole = "respondent", Status = ClientCaseStatus.Closed, CreatedAt = new DateTime(2026, 9, 2, 12, 0, 0, DateTimeKind.Utc), ClaimFiledAt = new DateTime(2026, 8, 2), CourtDecisionAt = new DateTime(2026, 8, 6) },
+            new ClientCase { Client = new Client { Name = "Клиент 1", IsActive = true, ResponsibleUserId = lawyer.Id }, Title = "Активное судебное дело", ResponsibleUserId = lawyer.Id, CourtName = "Суд А", OurCourtRole = "claimant", Status = ClientCaseStatus.Open, CreatedAt = new DateTime(2026, 9, 1, 12, 0, 0, DateTimeKind.Utc), ClaimFiledAt = new DateTime(2026, 8, 1), CourtDecisionAt = new DateTime(2026, 8, 11), CourtClaimAmount = 100000.50m, CourtAwardedAmount = 75000m, CourtStateFeeAmount = 3000m },
+            new ClientCase { Client = new Client { Name = "Клиент 2", IsActive = true, ResponsibleUserId = lawyer.Id }, Title = "Завершённое судебное дело", ResponsibleUserId = lawyer.Id, CourtName = "Суд А", OurCourtRole = "respondent", Status = ClientCaseStatus.Closed, CreatedAt = new DateTime(2026, 9, 2, 12, 0, 0, DateTimeKind.Utc), ClaimFiledAt = new DateTime(2026, 8, 2), CourtDecisionAt = new DateTime(2026, 8, 6), CourtClaimAmount = 200000m, CourtStateFeeAmount = 0m },
             new ClientCase { Client = new Client { Name = "Клиент с назначенным юристом", IsActive = true, ResponsibleUserId = lawyer.Id }, Title = "Судебное дело без отдельного исполнителя", CourtName = "Суд А", Status = ClientCaseStatus.Open, CreatedAt = new DateTime(2026, 9, 2, 12, 0, 0, DateTimeKind.Utc), ClaimFiledAt = new DateTime(2026, 8, 10), CourtDecisionAt = new DateTime(2026, 8, 1) },
-            new ClientCase { Client = new Client { Name = "Клиент 3", IsActive = true, ResponsibleUserId = outsider.Id }, Title = "Чужое судебное дело", ResponsibleUserId = outsider.Id, CourtName = "Суд Б", Status = ClientCaseStatus.Open, CreatedAt = new DateTime(2026, 9, 2, 12, 0, 0, DateTimeKind.Utc), ClaimFiledAt = new DateTime(2026, 8, 3), CourtDecisionAt = new DateTime(2026, 8, 5) },
-            new ClientCase { Client = new Client { Name = "Клиент без ответственного", IsActive = true }, Title = "Судебное дело без ответственного", CourtName = "Суд В", Status = ClientCaseStatus.Open, CreatedAt = new DateTime(2026, 9, 2, 12, 0, 0, DateTimeKind.Utc), ClaimFiledAt = new DateTime(2026, 8, 1), CourtDecisionAt = new DateTime(2026, 8, 1) },
-            new ClientCase { Client = new Client { Name = "Клиент 4", IsActive = true, ResponsibleUserId = lawyer.Id }, Title = "Несудебное дело", ResponsibleUserId = lawyer.Id, Status = ClientCaseStatus.Open, CreatedAt = new DateTime(2026, 9, 2, 12, 0, 0, DateTimeKind.Utc) });
+            new ClientCase { Client = new Client { Name = "Клиент 3", IsActive = true, ResponsibleUserId = outsider.Id }, Title = "Чужое судебное дело", ResponsibleUserId = outsider.Id, CourtName = "Суд Б", Status = ClientCaseStatus.Open, CreatedAt = new DateTime(2026, 9, 2, 12, 0, 0, DateTimeKind.Utc), ClaimFiledAt = new DateTime(2026, 8, 3), CourtDecisionAt = new DateTime(2026, 8, 5), CourtClaimAmount = 500000m, CourtAwardedAmount = 250000m, CourtStateFeeAmount = 5000m },
+            new ClientCase { Client = new Client { Name = "Клиент без ответственного", IsActive = true }, Title = "Судебное дело без ответственного", CourtName = "Суд В", Status = ClientCaseStatus.Open, CreatedAt = new DateTime(2026, 9, 2, 12, 0, 0, DateTimeKind.Utc), ClaimFiledAt = new DateTime(2026, 8, 1), CourtDecisionAt = new DateTime(2026, 8, 1), CourtClaimAmount = 0m },
+            new ClientCase { Client = new Client { Name = "Клиент 4", IsActive = true, ResponsibleUserId = lawyer.Id }, Title = "Несудебное дело", ResponsibleUserId = lawyer.Id, Status = ClientCaseStatus.Open, CreatedAt = new DateTime(2026, 9, 2, 12, 0, 0, DateTimeKind.Utc), CourtClaimAmount = 900000m });
         await db.SaveChangesAsync();
 
         var visible = (await CreateController(db, lawyer).GetCourtReportOverview(ct: CancellationToken.None)).Value!;
         Assert.Equal(3, visible.Total);
         Assert.Equal(2, visible.Active);
         Assert.Equal(1, visible.Completed);
+        Assert.Equal(300000.50m, visible.Amounts.ClaimTotal);
+        Assert.Equal(2, visible.Amounts.ClaimCases);
+        Assert.Equal(75000m, visible.Amounts.AwardedTotal);
+        Assert.Equal(1, visible.Amounts.AwardedCases);
+        Assert.Equal(3000m, visible.Amounts.StateFeeTotal);
+        Assert.Equal(2, visible.Amounts.StateFeeCases);
         Assert.Equal("Юрист", Assert.Single(visible.ByResponsible).Name);
+        Assert.Equal(visible.Amounts, Assert.Single(visible.ByResponsible).Amounts);
         Assert.Equal(2, Assert.Single(visible.ByResponsible).DecisionDurationSampleCount);
         Assert.Equal(7, Assert.Single(visible.ByResponsible).AverageDaysFromClaimToDecision);
         Assert.Equal(3, Assert.Single(visible.ByCourt).Total);
         Assert.Equal(7, Assert.Single(visible.ByCourt).AverageDaysFromClaimToDecision);
+        Assert.Equal(visible.Amounts, Assert.Single(visible.ByCourt).Amounts);
 
         var claimantOnly = (await CreateController(db, lawyer).GetCourtReportOverview(
             ct: CancellationToken.None, ourCourtRole: "claimant")).Value!;
         Assert.Equal(1, claimantOnly.Total);
+        Assert.Equal(100000.50m, claimantOnly.Amounts.ClaimTotal);
+        Assert.Equal(1, claimantOnly.Amounts.ClaimCases);
         Assert.Equal(1, Assert.Single(claimantOnly.ByCourt).Total);
 
         var all = (await CreateController(db, manager).GetCourtReportOverview(ct: CancellationToken.None)).Value!;
         Assert.Equal(5, all.Total);
+        Assert.Equal(800000.50m, all.Amounts.ClaimTotal);
+        Assert.Equal(4, all.Amounts.ClaimCases);
+        Assert.Equal(250000m, Assert.Single(all.ByCourt, row => row.Name == "Суд Б").Amounts.AwardedTotal);
+        Assert.Equal(1, Assert.Single(all.ByCourt, row => row.Name == "Суд В").Amounts.ClaimCases);
         Assert.Equal(3, all.ByCourt.Count);
         Assert.Equal(2, Assert.Single(all.ByCourt, row => row.Name == "Суд Б").AverageDaysFromClaimToDecision);
         Assert.Equal(0, Assert.Single(all.ByResponsible, row => row.Name == "Не назначен").AverageDaysFromClaimToDecision);

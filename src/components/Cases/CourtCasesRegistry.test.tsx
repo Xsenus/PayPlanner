@@ -65,7 +65,8 @@ describe('CourtCasesRegistry', () => {
       withoutHearing: 0,
       underControl: 1,
     });
-    vi.mocked(apiService.getCourtReportOverview).mockResolvedValue({ total: 2, active: 1, completed: 1, byResponsible: [{ name: 'Петров Пётр Петрович', total: 2, active: 1, completed: 1, decisionDurationSampleCount: 1, averageDaysFromClaimToDecision: 12 }], byCourt: [{ name: 'Новокуйбышевский городской суд', total: 2, active: 1, completed: 1, decisionDurationSampleCount: 1, averageDaysFromClaimToDecision: 12 }], otherResponsibleCases: 0, otherCourtCases: 0 });
+    const amounts = { claimTotal: 100000.5, claimCases: 1, awardedTotal: 75000, awardedCases: 1, stateFeeTotal: 0, stateFeeCases: 1 };
+    vi.mocked(apiService.getCourtReportOverview).mockResolvedValue({ total: 2, active: 1, completed: 1, amounts, byResponsible: [{ name: 'Петров Пётр Петрович', total: 2, active: 1, completed: 1, decisionDurationSampleCount: 1, averageDaysFromClaimToDecision: 12, amounts }], byCourt: [{ name: 'Новокуйбышевский городской суд', total: 2, active: 1, completed: 1, decisionDurationSampleCount: 1, averageDaysFromClaimToDecision: 12, amounts }], otherResponsibleCases: 0, otherCourtCases: 0 });
   });
 
   it('loads the court report only when opened and shows CRM completion separately from court outcome', async () => {
@@ -77,6 +78,9 @@ describe('CourtCasesRegistry', () => {
     expect(await screen.findByRole('dialog', { name: 'Сводка судебных дел' })).toBeTruthy();
     expect(await screen.findByText(/не выигрыш в суде/u)).toBeTruthy();
     expect(screen.getAllByText('12 дн. · выборка: 1')).toHaveLength(2);
+    expect(screen.getAllByText('Дел с заполненным полем: 1')).toHaveLength(3);
+    expect(screen.getAllByText(/100\s?000,50\s?₽/u).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/0\s?₽/u).length).toBeGreaterThan(0);
     expect(apiService.getCourtReportOverview).toHaveBeenCalledWith(
       expect.objectContaining({ courtState: 'all' }),
       expect.objectContaining({ signal: expect.any(AbortSignal) }),

@@ -4064,9 +4064,9 @@ export function CaseDetailPage({
                 ['Судья', caseItem.judgeName || '—'],
               ]} />
               <InfoSection title="Судебные суммы" rows={[
-                ['Сумма иска', caseItem.courtClaimAmount == null ? '—' : formatCurrencySmart(caseItem.courtClaimAmount)],
-                ['Взыскано судом', caseItem.courtAwardedAmount == null ? '—' : formatCurrencySmart(caseItem.courtAwardedAmount)],
-                ['Госпошлина', caseItem.courtStateFeeAmount == null ? '—' : formatCurrencySmart(caseItem.courtStateFeeAmount)],
+                ['Сумма иска', caseItem.courtClaimAmount == null ? '—' : formatCurrencySmart(caseItem.courtClaimAmount).full],
+                ['Взыскано судом', caseItem.courtAwardedAmount == null ? '—' : formatCurrencySmart(caseItem.courtAwardedAmount).full],
+                ['Госпошлина', caseItem.courtStateFeeAmount == null ? '—' : formatCurrencySmart(caseItem.courtStateFeeAmount).full],
               ]} />
               <TextBlock title="Стратегия" value={caseItem.strategy || 'Стратегия по делу пока не заполнена.'} />
               <section className="rounded-xl border border-slate-200 bg-white p-3">
@@ -7257,9 +7257,9 @@ function CourtPanel({
                   ['Суд', overviewInstance?.courtName || caseItem.courtName || '—'],
                   ['Судья', overviewInstance?.judgeName || caseItem.judgeName || '—'],
                   ['Наша роль', caseItem.ourCourtRole === 'claimant' ? 'Истец' : caseItem.ourCourtRole === 'respondent' ? 'Ответчик' : caseItem.ourCourtRole === 'third-party' ? 'Третье лицо' : 'Не указана'],
-                  ['Сумма иска', caseItem.courtClaimAmount == null ? '—' : formatCurrencySmart(caseItem.courtClaimAmount)],
-                  ['Взыскано судом', caseItem.courtAwardedAmount == null ? '—' : formatCurrencySmart(caseItem.courtAwardedAmount)],
-                  ['Госпошлина', caseItem.courtStateFeeAmount == null ? '—' : formatCurrencySmart(caseItem.courtStateFeeAmount)],
+                  ['Сумма иска', caseItem.courtClaimAmount == null ? '—' : formatCurrencySmart(caseItem.courtClaimAmount).full],
+                  ['Взыскано судом', caseItem.courtAwardedAmount == null ? '—' : formatCurrencySmart(caseItem.courtAwardedAmount).full],
+                  ['Госпошлина', caseItem.courtStateFeeAmount == null ? '—' : formatCurrencySmart(caseItem.courtStateFeeAmount).full],
                   ['Ближайшее заседание', formatRuDateTime(caseItem.nextHearingAt) || 'Не назначено'],
                   ['Истец / заявитель', caseItem.claimant || '—'],
                   ['ИНН / ОГРН истца', [caseItem.claimantInn, caseItem.claimantOgrn].filter(Boolean).join(' / ') || '—'],

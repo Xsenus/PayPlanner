@@ -418,18 +418,28 @@ public partial class CasesV2Controller : ControllerBase
         });
     }
 
+    public sealed record CourtAmountSummaryDto(
+        decimal ClaimTotal,
+        int ClaimCases,
+        decimal AwardedTotal,
+        int AwardedCases,
+        decimal StateFeeTotal,
+        int StateFeeCases);
+
     public sealed record CourtReportGroupDto(
         string Name,
         int Total,
         int Active,
         int Completed,
         int DecisionDurationSampleCount,
-        double? AverageDaysFromClaimToDecision);
+        double? AverageDaysFromClaimToDecision,
+        CourtAmountSummaryDto Amounts);
 
     public sealed record CourtReportOverviewDto(
         int Total,
         int Active,
         int Completed,
+        CourtAmountSummaryDto Amounts,
         IReadOnlyList<CourtReportGroupDto> ByResponsible,
         IReadOnlyList<CourtReportGroupDto> ByCourt,
         int OtherResponsibleCases,
@@ -477,6 +487,12 @@ public partial class CasesV2Controller : ControllerBase
         {
             Total = group.Count(),
             Active = group.Count(item => item.Status == ClientCaseStatus.Open || item.Status == ClientCaseStatus.OnHold),
+            ClaimTotal = group.Sum(item => item.CourtClaimAmount ?? 0m),
+            ClaimCases = group.Count(item => item.CourtClaimAmount.HasValue),
+            AwardedTotal = group.Sum(item => item.CourtAwardedAmount ?? 0m),
+            AwardedCases = group.Count(item => item.CourtAwardedAmount.HasValue),
+            StateFeeTotal = group.Sum(item => item.CourtStateFeeAmount ?? 0m),
+            StateFeeCases = group.Count(item => item.CourtStateFeeAmount.HasValue),
         }).SingleOrDefaultAsync(ct);
 
         var responsibleRows = await query
@@ -488,6 +504,12 @@ public partial class CasesV2Controller : ControllerBase
                 UserId = group.Key,
                 Total = group.Count(),
                 Active = group.Count(item => item.Status == ClientCaseStatus.Open || item.Status == ClientCaseStatus.OnHold),
+                ClaimTotal = group.Sum(item => item.CourtClaimAmount ?? 0m),
+                ClaimCases = group.Count(item => item.CourtClaimAmount.HasValue),
+                AwardedTotal = group.Sum(item => item.CourtAwardedAmount ?? 0m),
+                AwardedCases = group.Count(item => item.CourtAwardedAmount.HasValue),
+                StateFeeTotal = group.Sum(item => item.CourtStateFeeAmount ?? 0m),
+                StateFeeCases = group.Count(item => item.CourtStateFeeAmount.HasValue),
             })
             .OrderByDescending(row => row.Total)
             .ThenBy(row => row.UserId)
@@ -501,6 +523,12 @@ public partial class CasesV2Controller : ControllerBase
                 Name = group.Key,
                 Total = group.Count(),
                 Active = group.Count(item => item.Status == ClientCaseStatus.Open || item.Status == ClientCaseStatus.OnHold),
+                ClaimTotal = group.Sum(item => item.CourtClaimAmount ?? 0m),
+                ClaimCases = group.Count(item => item.CourtClaimAmount.HasValue),
+                AwardedTotal = group.Sum(item => item.CourtAwardedAmount ?? 0m),
+                AwardedCases = group.Count(item => item.CourtAwardedAmount.HasValue),
+                StateFeeTotal = group.Sum(item => item.CourtStateFeeAmount ?? 0m),
+                StateFeeCases = group.Count(item => item.CourtStateFeeAmount.HasValue),
             })
             .OrderByDescending(row => row.Total)
             .ThenBy(row => row.Name)
@@ -557,19 +585,25 @@ public partial class CasesV2Controller : ControllerBase
             total,
             active,
             total - active,
+            new CourtAmountSummaryDto(
+                totals?.ClaimTotal ?? 0m, totals?.ClaimCases ?? 0,
+                totals?.AwardedTotal ?? 0m, totals?.AwardedCases ?? 0,
+                totals?.StateFeeTotal ?? 0m, totals?.StateFeeCases ?? 0),
             responsibleRows.Select(row =>
             {
                 var duration = durationByResponsible.GetValueOrDefault(row.UserId ?? 0);
                 return new CourtReportGroupDto(
                     row.UserId.HasValue ? userNames.GetValueOrDefault(row.UserId.Value, "Сотрудник не найден") : "Не назначен",
                     row.Total, row.Active, row.Total - row.Active, duration.Count,
-                    duration.Count > 0 ? Math.Round((double)duration.Days / duration.Count, 1) : null);
+                    duration.Count > 0 ? Math.Round((double)duration.Days / duration.Count, 1) : null,
+                    new CourtAmountSummaryDto(row.ClaimTotal, row.ClaimCases, row.AwardedTotal, row.AwardedCases, row.StateFeeTotal, row.StateFeeCases));
             }).ToArray(),
             courtRows.Select(row =>
             {
                 var duration = durationByCourt.GetValueOrDefault(row.Name);
                 return new CourtReportGroupDto(row.Name, row.Total, row.Active, row.Total - row.Active,
-                    duration.Count, duration.Count > 0 ? Math.Round((double)duration.Days / duration.Count, 1) : null);
+                    duration.Count, duration.Count > 0 ? Math.Round((double)duration.Days / duration.Count, 1) : null,
+                    new CourtAmountSummaryDto(row.ClaimTotal, row.ClaimCases, row.AwardedTotal, row.AwardedCases, row.StateFeeTotal, row.StateFeeCases));
             }).ToArray(),
             total - responsibleRows.Sum(row => row.Total),
             total - courtRows.Sum(row => row.Total));

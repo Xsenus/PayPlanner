@@ -934,6 +934,24 @@ describe('CaseDetailPage', () => {
     vi.mocked(apiService.deleteCaseRelatedParty).mockResolvedValue(undefined);
   });
 
+  it('shows saved judicial amounts as currency without mixing them with the fee', async () => {
+    vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({
+      courtClaimAmount: 100000.5,
+      courtAwardedAmount: 0,
+      courtStateFeeAmount: 3500.25,
+    }));
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Суд' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Вернуться к обзору' }));
+
+    expect(screen.queryAllByText('Сумма иска').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/100\s?000,50\s?₽/u).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/0\s?₽/u).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/3\s?500,25\s?₽/u).length).toBeGreaterThan(0);
+  });
+
   it('confirms the saved position and refreshes its review mark', async () => {
     let reviewed = false;
     vi.mocked(apiService.getCaseV2).mockImplementation(async () => createCase(reviewed ? {
