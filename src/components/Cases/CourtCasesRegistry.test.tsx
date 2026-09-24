@@ -129,6 +129,37 @@ describe('CourtCasesRegistry', () => {
     ));
   });
 
+  it('filters cards, counters and report by claim amount without confusing it with the fee', async () => {
+    render(<CourtCasesRegistry onOpenCaseCourt={vi.fn()} />);
+    await screen.findByText('ИВАНОВ — РАЗДЕЛ ИМУЩЕСТВА');
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'Сумма иска от' }), { target: { value: '100000,50' } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Сумма иска до' }), { target: { value: '200000' } });
+    await waitFor(() => expect(apiService.getCasesV2).toHaveBeenLastCalledWith(
+      expect.objectContaining({ minClaimAmount: 100000.5, maxClaimAmount: 200000 }), expect.any(Object),
+    ));
+    expect(apiService.getCourtCasesRegistrySummary).toHaveBeenLastCalledWith(
+      expect.objectContaining({ minClaimAmount: 100000.5, maxClaimAmount: 200000 }), expect.any(Object),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Сводка по делам' }));
+    await waitFor(() => expect(apiService.getCourtReportOverview).toHaveBeenCalledWith(
+      expect.objectContaining({ minClaimAmount: 100000.5, maxClaimAmount: 200000 }), expect.any(Object),
+    ));
+  });
+
+  it('does not request an inverted claim amount range', async () => {
+    render(<CourtCasesRegistry onOpenCaseCourt={vi.fn()} />);
+    await screen.findByText('ИВАНОВ — РАЗДЕЛ ИМУЩЕСТВА');
+    vi.mocked(apiService.getCasesV2).mockClear();
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'Сумма иска от' }), { target: { value: '300' } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Сумма иска до' }), { target: { value: '100' } });
+    await screen.findByText('Минимальная сумма иска не может быть больше максимальной.');
+    expect(apiService.getCasesV2).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Сводка по делам' }).hasAttribute('disabled')).toBe(true);
+  });
+
   it('shows a recorded hearing result instead of asking to check a past hearing again', async () => {
     vi.mocked(apiService.getCasesV2).mockResolvedValue({
       items: [{ ...courtCase, nextHearingAt: '2020-09-25T03:00:00Z', nextHearingOutcome: 'postponed' }],

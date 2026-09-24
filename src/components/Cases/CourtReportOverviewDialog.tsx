@@ -17,6 +17,8 @@ interface CourtReportOverviewDialogProps {
     courtState?: string;
     courtInstance?: string;
     ourCourtRole?: string;
+    minClaimAmount?: number;
+    maxClaimAmount?: number;
   };
 }
 

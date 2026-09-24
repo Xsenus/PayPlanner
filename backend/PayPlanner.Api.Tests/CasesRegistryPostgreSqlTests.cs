@@ -107,6 +107,8 @@ public sealed class CasesRegistryPostgreSqlTests
                 Status = ClientCaseStatus.Open,
                 ResponsibleUserId = user.Id,
                 FeeAmount = 15000m,
+                CourtName = "Суд PostgreSQL",
+                CourtClaimAmount = 250000.50m,
                 CourtParties =
                 [
                     new ClientCaseCourtParty
@@ -206,6 +208,14 @@ public sealed class CasesRegistryPostgreSqlTests
                 && command.Contains("ClientCaseDocuments", StringComparison.Ordinal)
                 && command.Contains("ClientCaseCourtEvents", StringComparison.Ordinal));
             Assert.Contains("UNION ALL", activityCommand, StringComparison.OrdinalIgnoreCase);
+
+            var amountFiltered = await CreateController(db, principal).GetCourtReportOverview(
+                ct: CancellationToken.None, minClaimAmount: 250000.50m, maxClaimAmount: 250000.50m);
+            Assert.Equal(1, amountFiltered.Value!.Total);
+            Assert.Equal(250000.50m, amountFiltered.Value.Amounts.ClaimTotal);
+            var amountExcluded = await CreateController(db, principal).GetCourtReportOverview(
+                ct: CancellationToken.None, minClaimAmount: 250000.51m);
+            Assert.Equal(0, amountExcluded.Value!.Total);
 
             interceptor.Commands.Clear();
             var timelineResult = await CreateController(db, principal).GetTimeline(clientCase.Id, CancellationToken.None);

@@ -2909,6 +2909,36 @@ public class CasesV2ControllerTests
         Assert.Equal(1, claimantOnly.Amounts.ClaimCases);
         Assert.Equal(1, Assert.Single(claimantOnly.ByCourt).Total);
 
+        var amountReport = (await CreateController(db, lawyer).GetCourtReportOverview(
+            ct: CancellationToken.None, minClaimAmount: 200000m, maxClaimAmount: 200000m)).Value!;
+        Assert.Equal(1, amountReport.Total);
+        Assert.Equal(200000m, amountReport.Amounts.ClaimTotal);
+        Assert.Equal(1, Assert.Single(amountReport.ByResponsible).Total);
+        var amountSummary = Assert.IsType<OkObjectResult>(await CreateController(db, lawyer).GetCourtRegistrySummary(
+            status: null, search: null, responsibleUserId: null, scope: "all", ct: CancellationToken.None,
+            minClaimAmount: 200000m, maxClaimAmount: 200000m));
+        Assert.Equal(1, amountSummary.Value!.GetType().GetProperty("total")?.GetValue(amountSummary.Value));
+        var amountPage = Assert.IsType<OkObjectResult>(await CreateController(db, lawyer).Get(
+            clientId: null, legalEntityId: null, status: null, search: null, responsibleUserId: null,
+            caseType: null, priority: null, from: null, to: null, minFee: null, maxFee: null,
+            sortBy: null, sortDir: null, scope: "all", courtOnly: true, ct: CancellationToken.None,
+            minClaimAmount: 200000m, maxClaimAmount: 200000m));
+        Assert.Equal("Завершённое судебное дело", Assert.Single(GetAnonymousItems(amountPage.Value)).Title);
+
+        Assert.IsType<BadRequestObjectResult>((await CreateController(db, lawyer).GetCourtReportOverview(
+            ct: CancellationToken.None, minClaimAmount: 200001m, maxClaimAmount: 200000m)).Result);
+        Assert.IsType<BadRequestObjectResult>((await CreateController(db, lawyer).GetCourtReportOverview(
+            ct: CancellationToken.None, minClaimAmount: -1m)).Result);
+        Assert.IsType<BadRequestObjectResult>((await CreateController(db, lawyer).GetCourtReportOverview(
+            ct: CancellationToken.None, maxClaimAmount: 1.001m)).Result);
+        Assert.IsType<BadRequestObjectResult>(await CreateController(db, lawyer).GetCourtRegistrySummary(
+            status: null, search: null, responsibleUserId: null, ct: CancellationToken.None,
+            minClaimAmount: 200001m, maxClaimAmount: 200000m));
+        Assert.IsType<BadRequestObjectResult>(await CreateController(db, lawyer).Get(
+            clientId: null, legalEntityId: null, status: null, search: null, responsibleUserId: null,
+            caseType: null, priority: null, from: null, to: null, minFee: null, maxFee: null,
+            sortBy: null, sortDir: null, ct: CancellationToken.None, minClaimAmount: -1m));
+
         var all = (await CreateController(db, manager).GetCourtReportOverview(ct: CancellationToken.None)).Value!;
         Assert.Equal(5, all.Total);
         Assert.Equal(800000.50m, all.Amounts.ClaimTotal);
@@ -2918,6 +2948,11 @@ public class CasesV2ControllerTests
         Assert.Equal(3, all.ByCourt.Count);
         Assert.Equal(2, Assert.Single(all.ByCourt, row => row.Name == "Суд Б").AverageDaysFromClaimToDecision);
         Assert.Equal(0, Assert.Single(all.ByResponsible, row => row.Name == "Не назначен").AverageDaysFromClaimToDecision);
+
+        var zeroAmount = (await CreateController(db, manager).GetCourtReportOverview(
+            ct: CancellationToken.None, minClaimAmount: 0m, maxClaimAmount: 0m)).Value!;
+        Assert.Equal(1, zeroAmount.Total);
+        Assert.Equal(1, zeroAmount.Amounts.ClaimCases);
 
         var period = (await CreateController(db, manager).GetCourtReportOverview(
             from: new DateTime(2026, 9, 1, 17, 0, 0, DateTimeKind.Utc),

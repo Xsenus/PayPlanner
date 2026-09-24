@@ -286,12 +286,19 @@ public partial class CasesV2Controller : ControllerBase
         [FromQuery] string? courtState = null,
         [FromQuery] string? courtInstance = null,
         CancellationToken ct = default,
-        [FromQuery] string? ourCourtRole = null)
+        [FromQuery] string? ourCourtRole = null,
+        [FromQuery] decimal? minClaimAmount = null,
+        [FromQuery] decimal? maxClaimAmount = null)
     {
         var visibility = await ResolveCasesVisibilityAsync(ct);
         if (visibility is null)
         {
             return MissingCasesVisibilityResult();
+        }
+
+        if (!AreValidCourtClaimAmountBounds(minClaimAmount, maxClaimAmount))
+        {
+            return BadRequest("Укажите корректный диапазон суммы иска в рублях и копейках.");
         }
 
         page = Math.Max(1, page);
@@ -320,6 +327,7 @@ public partial class CasesV2Controller : ControllerBase
 
         q = ApplyCourtRegistryFilters(q, courtOnly, courtState, courtInstance, DateTime.UtcNow);
         q = ApplyOurCourtRoleFilter(q, ourCourtRole);
+        q = ApplyCourtClaimAmountFilter(q, minClaimAmount, maxClaimAmount);
 
         var total = await q.CountAsync(ct);
         var items = await SelectRegistryCaseRows(q
@@ -354,12 +362,19 @@ public partial class CasesV2Controller : ControllerBase
         [FromQuery] string? scope = null,
         [FromQuery] string? courtState = null,
         CancellationToken ct = default,
-        [FromQuery] string? ourCourtRole = null)
+        [FromQuery] string? ourCourtRole = null,
+        [FromQuery] decimal? minClaimAmount = null,
+        [FromQuery] decimal? maxClaimAmount = null)
     {
         var visibility = await ResolveCasesVisibilityAsync(ct);
         if (visibility is null)
         {
             return MissingCasesVisibilityResult();
+        }
+
+        if (!AreValidCourtClaimAmountBounds(minClaimAmount, maxClaimAmount))
+        {
+            return BadRequest("Укажите корректный диапазон суммы иска в рублях и копейках.");
         }
 
         var now = DateTime.UtcNow;
@@ -384,6 +399,7 @@ public partial class CasesV2Controller : ControllerBase
             null);
         query = ApplyCourtRegistryFilters(query, courtOnly: true, courtState, courtInstance: null, now);
         query = ApplyOurCourtRoleFilter(query, ourCourtRole);
+        query = ApplyCourtClaimAmountFilter(query, minClaimAmount, maxClaimAmount);
 
         var summary = await query
             .GroupBy(_ => 1)
@@ -455,12 +471,19 @@ public partial class CasesV2Controller : ControllerBase
         [FromQuery] DateTime? from = null,
         [FromQuery] DateTime? toExclusive = null,
         CancellationToken ct = default,
-        [FromQuery] string? ourCourtRole = null)
+        [FromQuery] string? ourCourtRole = null,
+        [FromQuery] decimal? minClaimAmount = null,
+        [FromQuery] decimal? maxClaimAmount = null)
     {
         var visibility = await ResolveCasesVisibilityAsync(ct);
         if (visibility is null)
         {
             return MissingCasesVisibilityResult();
+        }
+
+        if (!AreValidCourtClaimAmountBounds(minClaimAmount, maxClaimAmount))
+        {
+            return BadRequest("Укажите корректный диапазон суммы иска в рублях и копейках.");
         }
 
         if (from.HasValue && toExclusive.HasValue && from.Value >= toExclusive.Value)
@@ -473,6 +496,7 @@ public partial class CasesV2Controller : ControllerBase
             null, null, null, null, null, null, null, "all", null, null);
         query = ApplyCourtRegistryFilters(query, courtOnly: true, courtState, courtInstance, DateTime.UtcNow);
         query = ApplyOurCourtRoleFilter(query, ourCourtRole);
+        query = ApplyCourtClaimAmountFilter(query, minClaimAmount, maxClaimAmount);
         if (from.HasValue)
         {
             query = query.Where(item => item.CreatedAt >= from.Value);
@@ -1300,6 +1324,21 @@ public partial class CasesV2Controller : ControllerBase
             "unknown" => query.Where(item => item.OurCourtRole == null || item.OurCourtRole == ""),
             _ => query,
         };
+    }
+
+    private static bool AreValidCourtClaimAmountBounds(decimal? minAmount, decimal? maxAmount)
+    {
+        const decimal maximum = 999999999999.99m;
+        return (!minAmount.HasValue || minAmount.Value >= 0m && minAmount.Value <= maximum && decimal.Round(minAmount.Value, 2) == minAmount.Value)
+            && (!maxAmount.HasValue || maxAmount.Value >= 0m && maxAmount.Value <= maximum && decimal.Round(maxAmount.Value, 2) == maxAmount.Value)
+            && (!minAmount.HasValue || !maxAmount.HasValue || minAmount.Value <= maxAmount.Value);
+    }
+
+    private static IQueryable<ClientCase> ApplyCourtClaimAmountFilter(IQueryable<ClientCase> query, decimal? minAmount, decimal? maxAmount)
+    {
+        if (minAmount.HasValue) query = query.Where(item => item.CourtClaimAmount >= minAmount.Value);
+        if (maxAmount.HasValue) query = query.Where(item => item.CourtClaimAmount <= maxAmount.Value);
+        return query;
     }
 
     private async Task PopulateCourtInstanceKeysAsync(IReadOnlyList<ClientCase> items, CancellationToken ct)
