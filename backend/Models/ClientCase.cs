@@ -223,10 +223,26 @@ namespace PayPlanner.Api.Models
         /// </summary>
         public DateTime? CourtDecisionEffectiveAt { get; set; }
 
+        [NotMapped]
+        public bool ClearCourtDecisionEffectiveAt { get; set; }
+
         /// <summary>
         /// Указанная сотрудником дата фактического получения исполнительного листа.
         /// </summary>
         public DateTime? ExecutiveWritReceivedAt { get; set; }
+
+        [NotMapped]
+        public bool ClearExecutiveWritReceivedAt { get; set; }
+
+        /// <summary>Дата фактической передачи исполнительного листа на исполнение.</summary>
+        public DateTime? ExecutiveWritSubmittedAt { get; set; }
+
+        /// <summary>Адресат передачи: fssp или bank.</summary>
+        [MaxLength(10)]
+        public string? ExecutiveWritSubmittedTo { get; set; }
+
+        [NotMapped]
+        public bool ClearExecutiveWritSubmission { get; set; }
 
         /// <summary>
         /// Срок обжалования решения.

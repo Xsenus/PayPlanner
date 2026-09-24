@@ -1325,6 +1325,8 @@ describe('CaseDetailPage', () => {
     fireEvent.change(titleInput, { target: { value: 'ЗЕМЦОВ - обновленная карточка' } });
     fireEvent.change(screen.getByLabelText('Дата вступления решения в силу'), { target: { value: '2026-10-01' } });
     fireEvent.change(screen.getByLabelText('Дата получения исполнительного листа'), { target: { value: '2026-10-03' } });
+    fireEvent.change(screen.getByLabelText('Дата подачи исполнительного листа'), { target: { value: '2026-10-04' } });
+    fireEvent.change(screen.getByLabelText('Куда подан исполнительный лист'), { target: { value: 'bank' } });
     fireEvent.click(screen.getAllByRole('button', { name: /Сохранить дело/u }).at(-1) as HTMLElement);
 
     await waitFor(() => {
@@ -1334,6 +1336,9 @@ describe('CaseDetailPage', () => {
           title: 'ЗЕМЦОВ - обновленная карточка',
           courtDecisionEffectiveAt: '2026-10-01',
           executiveWritReceivedAt: '2026-10-03',
+          executiveWritSubmittedAt: '2026-10-04',
+          executiveWritSubmittedTo: 'bank',
+          clearExecutiveWritSubmission: false,
           clientId: 12,
           legalEntityId: null,
           status: 'Open',
@@ -1362,6 +1367,8 @@ describe('CaseDetailPage', () => {
     vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({
       courtDecisionEffectiveAt: '2026-10-01',
       executiveWritReceivedAt: '2026-10-03',
+      executiveWritSubmittedAt: '2026-10-04',
+      executiveWritSubmittedTo: 'bank',
     }));
 
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
@@ -1369,6 +1376,7 @@ describe('CaseDetailPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Редактировать дело' }));
     fireEvent.change(screen.getByLabelText('Дата вступления решения в силу'), { target: { value: '' } });
     fireEvent.change(screen.getByLabelText('Дата получения исполнительного листа'), { target: { value: '' } });
+    fireEvent.change(screen.getByLabelText('Дата подачи исполнительного листа'), { target: { value: '' } });
     fireEvent.click(screen.getAllByRole('button', { name: /Сохранить дело/u }).at(-1) as HTMLElement);
 
     await waitFor(() => {
@@ -1377,9 +1385,23 @@ describe('CaseDetailPage', () => {
         expect.objectContaining({
           courtDecisionEffectiveAt: null,
           executiveWritReceivedAt: null,
+          executiveWritSubmittedAt: null,
+          clearExecutiveWritSubmission: true,
         }),
       );
     });
+  });
+
+  it('prevents submitting the writ before its receipt in the full editor', async () => {
+    vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({ executiveWritReceivedAt: '2026-10-03' }));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+    expect(await screen.findByText('ЗЕМЦОВ - банкротство')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Редактировать дело' }));
+    fireEvent.change(screen.getByLabelText('Дата подачи исполнительного листа'), { target: { value: '2026-10-02' } });
+    fireEvent.change(screen.getByLabelText('Куда подан исполнительный лист'), { target: { value: 'fssp' } });
+    fireEvent.click(screen.getAllByRole('button', { name: /Сохранить дело/u }).at(-1) as HTMLElement);
+    expect(await screen.findByText('Дата подачи исполнительного листа должна быть не раньше даты получения.')).toBeTruthy();
+    expect(apiService.updateCaseV2).not.toHaveBeenCalled();
   });
 
   it('offers stage tasks and procedural deadlines after full case stage change', async () => {

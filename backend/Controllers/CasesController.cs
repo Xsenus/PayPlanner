@@ -105,6 +105,7 @@ public class CasesController : ControllerBase
         var validation = await ValidateCaseOwnerAsync(model.ClientId, model.LegalEntityId, visibility, ct);
         if (validation is not null) return validation;
         if (ValidateCourtDetails(model) is { } courtError) return BadRequest(courtError);
+        if (ClientCaseWritSubmissionRules.Validate(model.ExecutiveWritReceivedAt, model.ExecutiveWritSubmittedAt, model.ExecutiveWritSubmittedTo) is { } writError) return BadRequest(writError);
         ApplyCaseDetails(model, model);
         _db.ClientCases.Add(model);
         await _db.SaveChangesAsync(ct);
@@ -134,14 +135,28 @@ public class CasesController : ControllerBase
         var validation = await ValidateCaseOwnerAsync(model.ClientId, model.LegalEntityId, visibility, ct);
         if (validation is not null) return validation;
         if (ValidateCourtDetails(model) is { } courtError) return BadRequest(courtError);
+        var receivedAt = model.ClearExecutiveWritReceivedAt ? null : model.ExecutiveWritReceivedAt ?? e.ExecutiveWritReceivedAt;
+        var submittedAt = model.ClearExecutiveWritSubmission ? null : model.ExecutiveWritSubmittedAt ?? e.ExecutiveWritSubmittedAt;
+        var submittedTo = model.ClearExecutiveWritSubmission ? null : model.ExecutiveWritSubmittedTo ?? e.ExecutiveWritSubmittedTo;
+        if (ClientCaseWritSubmissionRules.Validate(receivedAt, submittedAt, submittedTo) is { } writError) return BadRequest(writError);
 
         var shouldCloseLinkedTasks = !IsFinishedCaseStatus(e.Status) && IsFinishedCaseStatus(model.Status);
+        var previousSubmittedAt = e.ExecutiveWritSubmittedAt;
+        var previousSubmittedTo = e.ExecutiveWritSubmittedTo;
         e.Title = model.Title;
         e.Description = model.Description;
         e.Status = model.Status;
         e.ClientId = model.ClientId;
         e.LegalEntityId = model.LegalEntityId;
         ApplyCaseDetails(e, model);
+        if (previousSubmittedAt != e.ExecutiveWritSubmittedAt
+            || !string.Equals(previousSubmittedTo, e.ExecutiveWritSubmittedTo, StringComparison.Ordinal))
+        {
+            var message = e.ExecutiveWritSubmittedAt.HasValue
+                ? $"Исполнительный лист подан {e.ExecutiveWritSubmittedAt.Value:dd.MM.yyyy} в {(e.ExecutiveWritSubmittedTo == "bank" ? "банк" : "ФССП")}. Отметил: {User.GetDisplayName()}."
+                : $"Отметка о подаче исполнительного листа снята. Изменил: {User.GetDisplayName()}.";
+            e.EventHistory = string.IsNullOrWhiteSpace(e.EventHistory) ? message : $"{e.EventHistory.TrimEnd()}\n{message}";
+        }
 
         if (shouldCloseLinkedTasks)
         {
@@ -257,6 +272,20 @@ public class CasesController : ControllerBase
         target.Courtroom = source.Courtroom?.Trim() ?? string.Empty;
         target.CourtSecretaryContacts = source.CourtSecretaryContacts?.Trim() ?? string.Empty;
         target.ClaimFiledAt = source.ClaimFiledAt;
+        if (source.CourtDecisionEffectiveAt.HasValue) target.CourtDecisionEffectiveAt = source.CourtDecisionEffectiveAt;
+        else if (source.ClearCourtDecisionEffectiveAt) target.CourtDecisionEffectiveAt = null;
+        if (source.ExecutiveWritReceivedAt.HasValue) target.ExecutiveWritReceivedAt = source.ExecutiveWritReceivedAt;
+        else if (source.ClearExecutiveWritReceivedAt) target.ExecutiveWritReceivedAt = null;
+        if (source.ClearExecutiveWritSubmission)
+        {
+            target.ExecutiveWritSubmittedAt = null;
+            target.ExecutiveWritSubmittedTo = null;
+        }
+        else
+        {
+            if (source.ExecutiveWritSubmittedAt.HasValue) target.ExecutiveWritSubmittedAt = source.ExecutiveWritSubmittedAt;
+            if (source.ExecutiveWritSubmittedTo is not null) target.ExecutiveWritSubmittedTo = source.ExecutiveWritSubmittedTo.Trim().ToLowerInvariant();
+        }
         target.AppealDeadlineAt = source.AppealDeadlineAt;
         target.MotionDeadlineAt = source.MotionDeadlineAt;
         target.ObjectionDeadlineAt = source.ObjectionDeadlineAt;

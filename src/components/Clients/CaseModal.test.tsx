@@ -410,6 +410,8 @@ describe('CaseModal', () => {
     fireEvent.change(screen.getByLabelText('Дата решения суда'), { target: { value: '2026-04-01' } });
     fireEvent.change(screen.getByLabelText('Дата вступления решения в силу'), { target: { value: '2026-05-06' } });
     fireEvent.change(screen.getByLabelText('Дата получения исполнительного листа'), { target: { value: '2026-05-10' } });
+    fireEvent.change(screen.getByLabelText('Дата подачи исполнительного листа'), { target: { value: '2026-05-12' } });
+    fireEvent.change(screen.getByLabelText('Куда подан исполнительный лист'), { target: { value: 'fssp' } });
     expect((screen.getByLabelText('Срок апелляции') as HTMLInputElement).value).toBe('2026-05-04');
     expect((screen.getByLabelText('Срок кассации') as HTMLInputElement).value).toBe('2026-07-01');
     fireEvent.change(screen.getByLabelText('Срок апелляции'), { target: { value: '2026-07-01' } });
@@ -453,6 +455,9 @@ describe('CaseModal', () => {
       courtDecisionAt: '2026-04-01',
       courtDecisionEffectiveAt: '2026-05-06',
       executiveWritReceivedAt: '2026-05-10',
+      executiveWritSubmittedAt: '2026-05-12',
+      executiveWritSubmittedTo: 'fssp',
+      clearExecutiveWritSubmission: false,
       cassationDeadlineAt: '2026-07-01',
       documentsSummary: 'Паспорт, договор',
       eventHistory: 'Заявление принято',
@@ -564,6 +569,30 @@ describe('CaseModal', () => {
     render(<CaseModal isOpen onClose={vi.fn()} caseData={createCase()} onSave={vi.fn()} allowEdit={false} />);
     expect(await screen.findByText('Скан пока не прикреплён.')).toBeTruthy();
     expect(screen.queryByLabelText('Загрузить скан исполнительного листа')).toBeNull();
+  });
+
+  it('clears the writ submission mark without deleting the receipt date', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    render(<CaseModal isOpen onClose={vi.fn()} caseData={createCase({
+      executiveWritReceivedAt: '2026-10-03', executiveWritSubmittedAt: '2026-10-04', executiveWritSubmittedTo: 'bank',
+    })} onSave={onSave} />);
+    fireEvent.change(screen.getByLabelText('Дата подачи исполнительного листа'), { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+      executiveWritReceivedAt: '2026-10-03',
+      executiveWritSubmittedAt: null,
+      clearExecutiveWritSubmission: true,
+    })));
+  });
+
+  it('prevents saving a writ submission dated before its receipt', async () => {
+    const onSave = vi.fn();
+    render(<CaseModal isOpen onClose={vi.fn()} caseData={createCase({ executiveWritReceivedAt: '2026-10-03' })} onSave={onSave} />);
+    fireEvent.change(screen.getByLabelText('Дата подачи исполнительного листа'), { target: { value: '2026-10-02' } });
+    fireEvent.change(screen.getByLabelText('Куда подан исполнительный лист'), { target: { value: 'bank' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+    expect(await screen.findByText('Дата подачи исполнительного листа должна быть не раньше даты получения.')).toBeTruthy();
+    expect(onSave).not.toHaveBeenCalled();
   });
 
   it('shows document upload time in the profile time zone', async () => {

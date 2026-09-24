@@ -1416,6 +1416,13 @@ namespace PayPlanner.Api.Migrations
                     b.Property<DateTime?>("ExecutiveWritReceivedAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTime?>("ExecutiveWritSubmittedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ExecutiveWritSubmittedTo")
+                        .HasMaxLength(10)
+                        .HasColumnType("TEXT");
+
                     b.Property<decimal>("FeeAmount")
                         .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");

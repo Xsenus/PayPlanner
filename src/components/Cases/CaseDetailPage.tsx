@@ -198,6 +198,8 @@ interface CaseEditDraft {
   courtDecisionAt: string;
   courtDecisionEffectiveAt: string;
   executiveWritReceivedAt: string;
+  executiveWritSubmittedAt: string;
+  executiveWritSubmittedTo: 'fssp' | 'bank' | '';
   appealDeadlineAt: string;
   cassationDeadlineAt: string;
   motionDeadlineAt: string;
@@ -1246,6 +1248,8 @@ function buildCaseEditDraft(caseItem: ClientCase): CaseEditDraft {
     courtDecisionAt: toDateInput(caseItem.courtDecisionAt),
     courtDecisionEffectiveAt: toDateInput(caseItem.courtDecisionEffectiveAt),
     executiveWritReceivedAt: toDateInput(caseItem.executiveWritReceivedAt),
+    executiveWritSubmittedAt: toDateInput(caseItem.executiveWritSubmittedAt),
+    executiveWritSubmittedTo: caseItem.executiveWritSubmittedTo ?? '',
     appealDeadlineAt: toDateInput(caseItem.appealDeadlineAt),
     cassationDeadlineAt: toDateInput(caseItem.cassationDeadlineAt),
     motionDeadlineAt: toDateInput(caseItem.motionDeadlineAt),
@@ -1297,7 +1301,12 @@ function buildCasePatchFromEditDraft(draft: CaseEditDraft): Partial<ClientCase> 
     claimFiledAt: fromDateInput(draft.claimFiledAt),
     courtDecisionAt: fromDateInput(draft.courtDecisionAt),
     courtDecisionEffectiveAt: fromDateInput(draft.courtDecisionEffectiveAt),
+    clearCourtDecisionEffectiveAt: !draft.courtDecisionEffectiveAt,
     executiveWritReceivedAt: fromDateInput(draft.executiveWritReceivedAt),
+    clearExecutiveWritReceivedAt: !draft.executiveWritReceivedAt,
+    executiveWritSubmittedAt: fromDateInput(draft.executiveWritSubmittedAt),
+    executiveWritSubmittedTo: draft.executiveWritSubmittedAt ? draft.executiveWritSubmittedTo : '',
+    clearExecutiveWritSubmission: !draft.executiveWritSubmittedAt,
     appealDeadlineAt: fromDateInput(draft.appealDeadlineAt),
     cassationDeadlineAt: fromDateInput(draft.cassationDeadlineAt),
     motionDeadlineAt: fromDateInput(draft.motionDeadlineAt),
@@ -1356,7 +1365,12 @@ function buildCaseUpdatePayload(base: ClientCase, patch: Partial<ClientCase>): O
     claimFiledAt: patch.claimFiledAt ?? base.claimFiledAt ?? null,
     courtDecisionAt: patch.courtDecisionAt ?? base.courtDecisionAt ?? null,
     courtDecisionEffectiveAt: patch.courtDecisionEffectiveAt !== undefined ? patch.courtDecisionEffectiveAt : base.courtDecisionEffectiveAt ?? null,
+    clearCourtDecisionEffectiveAt: patch.clearCourtDecisionEffectiveAt ?? false,
     executiveWritReceivedAt: patch.executiveWritReceivedAt !== undefined ? patch.executiveWritReceivedAt : base.executiveWritReceivedAt ?? null,
+    clearExecutiveWritReceivedAt: patch.clearExecutiveWritReceivedAt ?? false,
+    executiveWritSubmittedAt: patch.executiveWritSubmittedAt !== undefined ? patch.executiveWritSubmittedAt : base.executiveWritSubmittedAt ?? null,
+    executiveWritSubmittedTo: patch.executiveWritSubmittedTo !== undefined ? patch.executiveWritSubmittedTo : base.executiveWritSubmittedTo ?? '',
+    clearExecutiveWritSubmission: patch.clearExecutiveWritSubmission ?? false,
     appealDeadlineAt: patch.appealDeadlineAt ?? base.appealDeadlineAt ?? null,
     cassationDeadlineAt: patch.cassationDeadlineAt ?? base.cassationDeadlineAt ?? null,
     motionDeadlineAt: patch.motionDeadlineAt ?? base.motionDeadlineAt ?? null,
@@ -2499,6 +2513,14 @@ export function CaseDetailPage({
     }
     if (hasInvalidCourtAmounts(caseEditDraft.courtClaimAmount, caseEditDraft.courtAwardedAmount, caseEditDraft.courtStateFeeAmount)) {
       setError('Судебные суммы укажите неотрицательным числом с точностью до копеек.');
+      return;
+    }
+    if (caseEditDraft.executiveWritSubmittedAt && (!caseEditDraft.executiveWritReceivedAt || caseEditDraft.executiveWritSubmittedAt < caseEditDraft.executiveWritReceivedAt)) {
+      setError('Дата подачи исполнительного листа должна быть не раньше даты получения.');
+      return;
+    }
+    if (caseEditDraft.executiveWritSubmittedAt && !caseEditDraft.executiveWritSubmittedTo) {
+      setError('Выберите, куда подан исполнительный лист.');
       return;
     }
     if (!caseEditDraft.inactivityRemindersEnabled &&
@@ -4959,6 +4981,11 @@ function CaseEditPage({
             <label className="text-sm font-medium text-slate-700">Решение суда<SystemDateInput type="date" value={draft.courtDecisionAt} onChange={(event) => setField('courtDecisionAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /></label>
             <label className="text-sm font-medium text-slate-700">Решение вступило в силу<SystemDateInput aria-label="Дата вступления решения в силу" type="date" value={draft.courtDecisionEffectiveAt} onChange={(event) => setField('courtDecisionEffectiveAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /><span className="mt-1 block text-xs font-normal text-slate-500">Дата указывается вручную; CRM её не рассчитывает.</span></label>
             <div><label className="text-sm font-medium text-slate-700">Исполнительный лист получен<SystemDateInput aria-label="Дата получения исполнительного листа" type="date" value={draft.executiveWritReceivedAt} onChange={(event) => setField('executiveWritReceivedAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /></label><div className="mt-2"><ExecutiveWritDocumentUpload caseId={caseItem.id} canUpload documents={documents} onUploaded={onWritUploaded} /></div></div>
+            <div className="rounded-lg border border-blue-100 bg-blue-50/40 p-3">
+              <label className="text-sm font-medium text-slate-700">Исполнительный лист подан<SystemDateInput aria-label="Дата подачи исполнительного листа" type="date" value={draft.executiveWritSubmittedAt} onChange={(event) => setField('executiveWritSubmittedAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /></label>
+              <label className="mt-2 block text-sm font-medium text-slate-700">Куда подан<select aria-label="Куда подан исполнительный лист" value={draft.executiveWritSubmittedTo} onChange={(event) => setField('executiveWritSubmittedTo', event.target.value as 'fssp' | 'bank' | '')} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm"><option value="">Выберите адресата</option><option value="fssp">ФССП</option><option value="bank">Банк</option></select></label>
+              <p className="mt-1 text-xs text-slate-500">После сохранения задача на подачу завершится. Для отмены отметки очистите дату.</p>
+            </div>
             <label className="text-sm font-medium text-slate-700">Апелляция<SystemDateInput type="date" value={draft.appealDeadlineAt} onChange={(event) => setField('appealDeadlineAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /></label>
             <label className="text-sm font-medium text-slate-700">Кассация<SystemDateInput type="date" value={draft.cassationDeadlineAt} onChange={(event) => setField('cassationDeadlineAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /></label>
             <label className="text-sm font-medium text-slate-700">Возражения<SystemDateInput type="date" value={draft.objectionDeadlineAt} onChange={(event) => setField('objectionDeadlineAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /></label>
@@ -6700,6 +6727,13 @@ function buildCourtTimeline(caseItem: ClientCase, logs: ClientCaseCourtSyncLog[]
       state: getCourtTimelineState(caseItem.executiveWritReceivedAt),
     },
     {
+      id: 'writ-submitted',
+      label: caseItem.executiveWritSubmittedTo === 'bank' ? 'Исполнительный лист подан в банк' : 'Исполнительный лист подан в ФССП',
+      value: caseItem.executiveWritSubmittedAt,
+      kind: 'milestone' as CourtTimelineKind,
+      state: getCourtTimelineState(caseItem.executiveWritSubmittedAt),
+    },
+    {
       id: 'appeal',
       label: 'Апелляция',
       value: caseItem.appealDeadlineAt,
@@ -7041,6 +7075,7 @@ function CourtPanel({
     ['Решение суда', caseItem.courtDecisionAt],
     ['Решение вступило в силу', caseItem.courtDecisionEffectiveAt],
     ['Исполнительный лист получен', caseItem.executiveWritReceivedAt],
+    [caseItem.executiveWritSubmittedTo === 'bank' ? 'Исполнительный лист подан в банк' : 'Исполнительный лист подан в ФССП', caseItem.executiveWritSubmittedAt],
     ['Апелляция', caseItem.appealDeadlineAt],
     ['Кассация', caseItem.cassationDeadlineAt],
     ['Ходатайства', caseItem.motionDeadlineAt],

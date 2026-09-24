@@ -109,6 +109,48 @@ public class CasesControllerTests
     }
 
     [Fact]
+    public async Task LegacyCaseEdit_SavesAndClearsWritWorkflowWithoutLosingItOnOlderClientSave()
+    {
+        await using var db = await CreateContextAsync();
+        var lawyer = await CreateUserAsync(db, "legacy-writ@example.com");
+        var clientCase = await CreateCaseAsync(db, lawyer.Id, "Исполнительный лист");
+        var controller = CreateController(db, lawyer);
+        var effectiveAt = new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Utc);
+        var receivedAt = effectiveAt.AddDays(2);
+        var submittedAt = receivedAt.AddDays(1);
+
+        Assert.IsType<OkObjectResult>(await controller.Update(clientCase.Id, new ClientCase
+        {
+            ClientId = clientCase.ClientId, Title = clientCase.Title, Status = ClientCaseStatus.Open,
+            CourtDecisionEffectiveAt = effectiveAt, ExecutiveWritReceivedAt = receivedAt,
+            ExecutiveWritSubmittedAt = submittedAt, ExecutiveWritSubmittedTo = "fssp",
+        }, CancellationToken.None));
+        Assert.Equal(effectiveAt, clientCase.CourtDecisionEffectiveAt);
+        Assert.Equal(receivedAt, clientCase.ExecutiveWritReceivedAt);
+        Assert.Equal(submittedAt, clientCase.ExecutiveWritSubmittedAt);
+        Assert.Equal("fssp", clientCase.ExecutiveWritSubmittedTo);
+        Assert.Contains("Исполнительный лист подан", clientCase.EventHistory);
+
+        Assert.IsType<OkObjectResult>(await controller.Update(clientCase.Id, new ClientCase
+        {
+            ClientId = clientCase.ClientId, Title = "Старый клиент", Status = ClientCaseStatus.Open,
+        }, CancellationToken.None));
+        Assert.Equal(submittedAt, clientCase.ExecutiveWritSubmittedAt);
+        Assert.Equal(receivedAt, clientCase.ExecutiveWritReceivedAt);
+
+        Assert.IsType<OkObjectResult>(await controller.Update(clientCase.Id, new ClientCase
+        {
+            ClientId = clientCase.ClientId, Title = clientCase.Title, Status = ClientCaseStatus.Open,
+            ClearExecutiveWritSubmission = true, ClearExecutiveWritReceivedAt = true,
+            ClearCourtDecisionEffectiveAt = true,
+        }, CancellationToken.None));
+        Assert.Null(clientCase.ExecutiveWritSubmittedAt);
+        Assert.Null(clientCase.ExecutiveWritSubmittedTo);
+        Assert.Null(clientCase.ExecutiveWritReceivedAt);
+        Assert.Null(clientCase.CourtDecisionEffectiveAt);
+    }
+
+    [Fact]
     public async Task LegacyCaseEdit_PreservesPositionReviewUntilPositionChanges()
     {
         await using var db = await CreateContextAsync();

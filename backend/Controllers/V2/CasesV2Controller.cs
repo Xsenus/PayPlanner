@@ -1473,6 +1473,8 @@ public partial class CasesV2Controller : ControllerBase
             CourtDecisionAt = item.CourtDecisionAt,
             CourtDecisionEffectiveAt = item.CourtDecisionEffectiveAt,
             ExecutiveWritReceivedAt = item.ExecutiveWritReceivedAt,
+            ExecutiveWritSubmittedAt = item.ExecutiveWritSubmittedAt,
+            ExecutiveWritSubmittedTo = item.ExecutiveWritSubmittedTo,
             AppealDeadlineAt = item.AppealDeadlineAt,
             CassationDeadlineAt = item.CassationDeadlineAt,
             MotionDeadlineAt = item.MotionDeadlineAt,
@@ -5869,6 +5871,7 @@ public partial class CasesV2Controller : ControllerBase
             (item.CourtDecisionAt.HasValue && item.CourtDecisionAt.Value >= range.FromDate && item.CourtDecisionAt.Value < range.ToDateExclusive) ||
             (item.CourtDecisionEffectiveAt.HasValue && item.CourtDecisionEffectiveAt.Value >= range.FromDate && item.CourtDecisionEffectiveAt.Value < range.ToDateExclusive) ||
             (item.ExecutiveWritReceivedAt.HasValue && item.ExecutiveWritReceivedAt.Value >= range.FromDate && item.ExecutiveWritReceivedAt.Value < range.ToDateExclusive) ||
+            (item.ExecutiveWritSubmittedAt.HasValue && item.ExecutiveWritSubmittedAt.Value >= range.FromDate && item.ExecutiveWritSubmittedAt.Value < range.ToDateExclusive) ||
             (item.AppealDeadlineAt.HasValue && item.AppealDeadlineAt.Value >= range.FromDate && item.AppealDeadlineAt.Value < range.ToDateExclusive) ||
             (item.CassationDeadlineAt.HasValue && item.CassationDeadlineAt.Value >= range.FromDate && item.CassationDeadlineAt.Value < range.ToDateExclusive) ||
             (item.MotionDeadlineAt.HasValue && item.MotionDeadlineAt.Value >= range.FromDate && item.MotionDeadlineAt.Value < range.ToDateExclusive) ||
@@ -5896,7 +5899,7 @@ public partial class CasesV2Controller : ControllerBase
                 task.Status != "cancelled")));
 
         var cases = await caseQuery
-            .OrderBy(item => item.NextHearingAt ?? item.DueDate ?? item.AppealDeadlineAt ?? item.MotionDeadlineAt ?? item.ObjectionDeadlineAt ?? item.CourtDecisionAt ?? item.CourtDecisionEffectiveAt ?? item.ExecutiveWritReceivedAt ?? item.StartDate ?? DateTime.MaxValue)
+            .OrderBy(item => item.NextHearingAt ?? item.DueDate ?? item.AppealDeadlineAt ?? item.MotionDeadlineAt ?? item.ObjectionDeadlineAt ?? item.CourtDecisionAt ?? item.CourtDecisionEffectiveAt ?? item.ExecutiveWritReceivedAt ?? item.ExecutiveWritSubmittedAt ?? item.StartDate ?? DateTime.MaxValue)
             .ThenBy(item => item.Id)
             .Take(1000)
             .ToListAsync(ct);
@@ -6083,6 +6086,7 @@ public partial class CasesV2Controller : ControllerBase
         AddCaseCalendarEvent(events, clientCase, "court", "decision", "Судебное решение", clientCase.CourtDecisionAt, true, range);
         AddCaseCalendarEvent(events, clientCase, "court", "decision-effective", "Решение вступило в силу", clientCase.CourtDecisionEffectiveAt, true, range);
         AddCaseCalendarEvent(events, clientCase, "court", "writ-received", "Исполнительный лист получен", clientCase.ExecutiveWritReceivedAt, true, range);
+        AddCaseCalendarEvent(events, clientCase, "court", "writ-submitted", clientCase.ExecutiveWritSubmittedTo == "bank" ? "Исполнительный лист подан в банк" : "Исполнительный лист подан в ФССП", clientCase.ExecutiveWritSubmittedAt, true, range);
         AddLegacyProceduralCalendarEvent(events, clientCase, separateDeadlineTypes, "appeal", "Срок апелляции", clientCase.AppealDeadlineAt, range);
         AddLegacyProceduralCalendarEvent(events, clientCase, separateDeadlineTypes, "cassation", "Срок кассации", clientCase.CassationDeadlineAt, range);
         AddLegacyProceduralCalendarEvent(events, clientCase, separateDeadlineTypes, "motion", "Срок подачи ходатайства", clientCase.MotionDeadlineAt, range);
@@ -9812,6 +9816,9 @@ public partial class CasesV2Controller : ControllerBase
         if (!IsValidOurCourtRole(model.OurCourtRole)) return BadRequest("Укажите допустимую роль в судебном деле.");
         if (!IsValidCourtPartyIdentifiers(model)) return BadRequest("ИНН должен содержать 10 или 12 цифр, ОГРН/ОГРНИП — 13 или 15 цифр.");
         if (!IsValidCourtAmounts(model)) return BadRequest("Судебные суммы должны быть неотрицательными и содержать не более двух знаков после запятой.");
+        if (ClientCaseWritSubmissionRules.Validate(model.ClearExecutiveWritReceivedAt ? null : model.ExecutiveWritReceivedAt,
+                model.ClearExecutiveWritSubmission ? null : model.ExecutiveWritSubmittedAt,
+                model.ClearExecutiveWritSubmission ? null : model.ExecutiveWritSubmittedTo) is { } writError) return BadRequest(writError);
         if (!TryNormalizeInactivityReminderState(
                 model.InactivityRemindersEnabled,
                 model.InactivityRemindersDisabledReason,
@@ -9891,6 +9898,10 @@ public partial class CasesV2Controller : ControllerBase
         if (!IsValidOurCourtRole(model.OurCourtRole)) return BadRequest("Укажите допустимую роль в судебном деле.");
         if (!IsValidCourtPartyIdentifiers(model)) return BadRequest("ИНН должен содержать 10 или 12 цифр, ОГРН/ОГРНИП — 13 или 15 цифр.");
         if (!IsValidCourtAmounts(model)) return BadRequest("Судебные суммы должны быть неотрицательными и содержать не более двух знаков после запятой.");
+        var submittedAt = model.ClearExecutiveWritSubmission ? null : model.ExecutiveWritSubmittedAt ?? e.ExecutiveWritSubmittedAt;
+        var submittedTo = model.ClearExecutiveWritSubmission ? null : model.ExecutiveWritSubmittedTo ?? e.ExecutiveWritSubmittedTo;
+        var receivedAt = model.ClearExecutiveWritReceivedAt ? null : model.ExecutiveWritReceivedAt ?? e.ExecutiveWritReceivedAt;
+        if (ClientCaseWritSubmissionRules.Validate(receivedAt, submittedAt, submittedTo) is { } writError) return BadRequest(writError);
         var inactivityStateChanged = e.InactivityRemindersEnabled != model.InactivityRemindersEnabled;
         if (!TryNormalizeInactivityReminderState(
                 model.InactivityRemindersEnabled,
@@ -9907,6 +9918,8 @@ public partial class CasesV2Controller : ControllerBase
         var shouldCloseLinkedTasks = !IsFinishedCaseStatus(e.Status) && IsFinishedCaseStatus(model.Status);
         var previousNextHearingAt = e.NextHearingAt;
         var previousCourtDecisionAt = e.CourtDecisionAt;
+        var previousWritSubmittedAt = e.ExecutiveWritSubmittedAt;
+        var previousWritSubmittedTo = e.ExecutiveWritSubmittedTo;
         var previousFeeAmount = e.FeeAmount;
         var canViewFinance = await CanViewCaseFinanceAsync(ct);
         e.Title = model.Title;
@@ -9916,6 +9929,14 @@ public partial class CasesV2Controller : ControllerBase
         e.LegalEntityId = model.LegalEntityId;
         var previousHiddenFromExecutor = e.IsHiddenFromExecutor;
         ApplyCaseDetails(e, model);
+        if (previousWritSubmittedAt != e.ExecutiveWritSubmittedAt
+            || !string.Equals(previousWritSubmittedTo, e.ExecutiveWritSubmittedTo, StringComparison.Ordinal))
+        {
+            var destination = e.ExecutiveWritSubmittedTo == "bank" ? "банк" : "ФССП";
+            AppendCaseEvent(e, e.ExecutiveWritSubmittedAt.HasValue
+                ? $"Исполнительный лист подан {e.ExecutiveWritSubmittedAt.Value:dd.MM.yyyy} в {destination}. Отметил: {User.GetDisplayName()}."
+                : $"Отметка о подаче исполнительного листа снята. Изменил: {User.GetDisplayName()}.");
+        }
         if (!canViewFinance)
         {
             e.FeeAmount = previousFeeAmount;
@@ -10303,8 +10324,20 @@ public partial class CasesV2Controller : ControllerBase
         target.CourtSecretaryContacts = source.CourtSecretaryContacts?.Trim() ?? string.Empty;
         target.ClaimFiledAt = source.ClaimFiledAt;
         target.CourtDecisionAt = source.CourtDecisionAt;
-        target.CourtDecisionEffectiveAt = source.CourtDecisionEffectiveAt;
-        target.ExecutiveWritReceivedAt = source.ExecutiveWritReceivedAt;
+        if (source.CourtDecisionEffectiveAt.HasValue) target.CourtDecisionEffectiveAt = source.CourtDecisionEffectiveAt;
+        else if (source.ClearCourtDecisionEffectiveAt) target.CourtDecisionEffectiveAt = null;
+        if (source.ExecutiveWritReceivedAt.HasValue) target.ExecutiveWritReceivedAt = source.ExecutiveWritReceivedAt;
+        else if (source.ClearExecutiveWritReceivedAt) target.ExecutiveWritReceivedAt = null;
+        if (source.ClearExecutiveWritSubmission)
+        {
+            target.ExecutiveWritSubmittedAt = null;
+            target.ExecutiveWritSubmittedTo = null;
+        }
+        else
+        {
+            if (source.ExecutiveWritSubmittedAt.HasValue) target.ExecutiveWritSubmittedAt = source.ExecutiveWritSubmittedAt;
+            if (source.ExecutiveWritSubmittedTo is not null) target.ExecutiveWritSubmittedTo = source.ExecutiveWritSubmittedTo.Trim().ToLowerInvariant();
+        }
         target.AppealDeadlineAt = ResolveProceduralDeadline(
             source.AppealDeadlineAt,
             target.CourtDecisionAt,
@@ -11503,6 +11536,9 @@ public partial class CasesV2Controller : ControllerBase
         AppendTemplateRow(html, "Дата решения суда", FormatTemplateDate(clientCase.CourtDecisionAt));
         AppendTemplateRow(html, "Решение вступило в силу", FormatTemplateDate(clientCase.CourtDecisionEffectiveAt));
         AppendTemplateRow(html, "Исполнительный лист получен", FormatTemplateDate(clientCase.ExecutiveWritReceivedAt));
+        AppendTemplateRow(html, "Исполнительный лист подан", clientCase.ExecutiveWritSubmittedAt.HasValue
+            ? $"{FormatTemplateDate(clientCase.ExecutiveWritSubmittedAt)} ({(clientCase.ExecutiveWritSubmittedTo == "bank" ? "банк" : "ФССП")})"
+            : string.Empty);
         AppendTemplateRow(html, "Срок апелляции", FormatTemplateDate(clientCase.AppealDeadlineAt));
         AppendTemplateRow(html, "Срок кассации", FormatTemplateDate(clientCase.CassationDeadlineAt));
         html.AppendLine("    </table>");

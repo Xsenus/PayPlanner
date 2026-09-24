@@ -84,13 +84,16 @@ public static class ClientCaseDeadlineTaskSyncService
                 if (activeTask is not null && !ClosedTaskStatuses.Contains(activeTask.Status))
                 {
                     var writReceived = deadline.Key == "writ-obtain" && clientCase.ExecutiveWritReceivedAt.HasValue;
+                    var writSubmitted = deadline.Key == "writ-submit" && clientCase.ExecutiveWritSubmittedAt.HasValue;
                     var appealHearingScheduled = deadline.CompleteOnHearing;
                     var isAppealComplaintTask = deadline.Key.StartsWith("appeal-followup-", StringComparison.Ordinal)
                         || deadline.Key.StartsWith("appeal-objection-", StringComparison.Ordinal);
                     var isCourtHearing = deadline.TaskType == "courtHearing";
-                    activeTask.Status = writReceived || appealHearingScheduled ? "done" : "cancelled";
+                    activeTask.Status = writReceived || writSubmitted || appealHearingScheduled ? "done" : "cancelled";
                     activeTask.Result = writReceived
                         ? $"Исполнительный лист получен {clientCase.ExecutiveWritReceivedAt!.Value:dd.MM.yyyy}."
+                        : writSubmitted
+                            ? $"Исполнительный лист подан {clientCase.ExecutiveWritSubmittedAt!.Value:dd.MM.yyyy} в {(clientCase.ExecutiveWritSubmittedTo == "bank" ? "банк" : "ФССП")}."
                         : appealHearingScheduled
                             ? "Заседание апелляционной инстанции назначено. Проверьте его дату в карточке дела."
                         : isAppealComplaintTask
@@ -101,6 +104,8 @@ public static class ClientCaseDeadlineTaskSyncService
                     activeTask.UpdatedAt = now;
                     AddHistory(db, activeTask, actorUserId, normalizedActorName, writReceived
                         ? "Получение исполнительного листа отмечено в карточке дела, задача выполнена."
+                        : writSubmitted
+                            ? "Подача исполнительного листа отмечена в карточке дела, задача выполнена."
                         : appealHearingScheduled
                             ? "Заседание апелляционной инстанции назначено, задача отслеживания выполнена."
                         : isAppealComplaintTask
@@ -109,6 +114,19 @@ public static class ClientCaseDeadlineTaskSyncService
                             ? "Судебное заседание отменено, перенесено или завершено, связанная задача отменена."
                             : "Срок удален из карточки дела, контрольная задача отменена.", now);
                     taskJournalChanged = true;
+                }
+                else if (deadline.Key == "writ-submit" && clientCase.ExecutiveWritSubmittedAt.HasValue
+                    && activeTask?.Status == "done"
+                    && activeTask.Result?.StartsWith("Исполнительный лист подан", StringComparison.Ordinal) == true)
+                {
+                    var correctedResult = $"Исполнительный лист подан {clientCase.ExecutiveWritSubmittedAt.Value:dd.MM.yyyy} в {(clientCase.ExecutiveWritSubmittedTo == "bank" ? "банк" : "ФССП")}.";
+                    if (!string.Equals(activeTask.Result, correctedResult, StringComparison.Ordinal))
+                    {
+                        activeTask.Result = correctedResult;
+                        activeTask.UpdatedAt = now;
+                        AddHistory(db, activeTask, actorUserId, normalizedActorName, "Сведения о подаче исполнительного листа исправлены в карточке дела.", now);
+                        taskJournalChanged = true;
+                    }
                 }
 
                 continue;
@@ -138,7 +156,10 @@ public static class ClientCaseDeadlineTaskSyncService
                 && activeTask.DueAt == dueAt
                 && !(deadline.Key == "writ-obtain"
                     && !clientCase.ExecutiveWritReceivedAt.HasValue
-                    && activeTask.Result?.StartsWith("Исполнительный лист получен", StringComparison.Ordinal) == true))
+                    && activeTask.Result?.StartsWith("Исполнительный лист получен", StringComparison.Ordinal) == true)
+                && !(deadline.Key == "writ-submit"
+                    && !clientCase.ExecutiveWritSubmittedAt.HasValue
+                    && activeTask.Result?.StartsWith("Исполнительный лист подан", StringComparison.Ordinal) == true))
             {
                 // Repeated synchronization must not reopen a completed writ action.
                 continue;
@@ -354,7 +375,7 @@ public static class ClientCaseDeadlineTaskSyncService
         result.Add(new CaseDeadline(
             "writ-submit",
             "Подать исполнительный лист в ФССП или банк",
-            clientCase.ExecutiveWritReceivedAt?.Date.AddDays(5),
+            clientCase.ExecutiveWritSubmittedAt.HasValue ? null : clientCase.ExecutiveWritReceivedAt?.Date.AddDays(5),
             true,
             60,
             "control",

@@ -303,6 +303,8 @@ export function CaseModal({
   const [courtDecisionAt, setCourtDecisionAt] = useState(toDateInput(caseData.courtDecisionAt));
   const [courtDecisionEffectiveAt, setCourtDecisionEffectiveAt] = useState(toDateInput(caseData.courtDecisionEffectiveAt));
   const [executiveWritReceivedAt, setExecutiveWritReceivedAt] = useState(toDateInput(caseData.executiveWritReceivedAt));
+  const [executiveWritSubmittedAt, setExecutiveWritSubmittedAt] = useState(toDateInput(caseData.executiveWritSubmittedAt));
+  const [executiveWritSubmittedTo, setExecutiveWritSubmittedTo] = useState(caseData.executiveWritSubmittedTo ?? '');
   const [appealDeadlineAt, setAppealDeadlineAt] = useState(toDateInput(caseData.appealDeadlineAt));
   const [cassationDeadlineAt, setCassationDeadlineAt] = useState(toDateInput(caseData.cassationDeadlineAt));
   const [motionDeadlineAt, setMotionDeadlineAt] = useState(toDateInput(caseData.motionDeadlineAt));
@@ -442,6 +444,8 @@ export function CaseModal({
     setCourtDecisionAt(toDateInput(caseData.courtDecisionAt));
     setCourtDecisionEffectiveAt(toDateInput(caseData.courtDecisionEffectiveAt));
     setExecutiveWritReceivedAt(toDateInput(caseData.executiveWritReceivedAt));
+    setExecutiveWritSubmittedAt(toDateInput(caseData.executiveWritSubmittedAt));
+    setExecutiveWritSubmittedTo(caseData.executiveWritSubmittedTo ?? '');
     setAppealDeadlineAt(toDateInput(caseData.appealDeadlineAt));
     setCassationDeadlineAt(toDateInput(caseData.cassationDeadlineAt));
     setMotionDeadlineAt(toDateInput(caseData.motionDeadlineAt));
@@ -713,6 +717,8 @@ export function CaseModal({
   const validate = (): string | null => {
     if (!title.trim()) return 'Введите название дела';
     if (hasInvalidCourtAmounts(courtClaimAmount, courtAwardedAmount, courtStateFeeAmount)) return 'Судебные суммы укажите неотрицательным числом с точностью до копеек.';
+    if (executiveWritSubmittedAt && (!executiveWritReceivedAt || executiveWritSubmittedAt < executiveWritReceivedAt)) return 'Дата подачи исполнительного листа должна быть не раньше даты получения.';
+    if (executiveWritSubmittedAt && !executiveWritSubmittedTo) return 'Выберите, куда подан исполнительный лист.';
     return null;
   };
 
@@ -805,7 +811,12 @@ export function CaseModal({
         claimFiledAt: fromDateInput(claimFiledAt),
         courtDecisionAt: fromDateInput(courtDecisionAt),
         courtDecisionEffectiveAt: fromDateInput(courtDecisionEffectiveAt),
+        clearCourtDecisionEffectiveAt: !courtDecisionEffectiveAt,
         executiveWritReceivedAt: fromDateInput(executiveWritReceivedAt),
+        clearExecutiveWritReceivedAt: !executiveWritReceivedAt,
+        executiveWritSubmittedAt: fromDateInput(executiveWritSubmittedAt),
+        executiveWritSubmittedTo: executiveWritSubmittedAt ? executiveWritSubmittedTo : '',
+        clearExecutiveWritSubmission: !executiveWritSubmittedAt,
         appealDeadlineAt: fromDateInput(appealDeadlineAt),
         cassationDeadlineAt: fromDateInput(cassationDeadlineAt),
         motionDeadlineAt: fromDateInput(motionDeadlineAt),
@@ -1779,6 +1790,16 @@ export function CaseModal({
               disabled={saving}
             />
             <div className="mt-2"><ExecutiveWritDocumentUpload caseId={caseData.id} canUpload={allowEdit} documents={caseDocuments} onUploaded={refreshDocuments} /></div>
+          </div>
+
+          <div className="rounded-lg border border-blue-100 bg-blue-50/40 p-3">
+            <label className="text-sm text-gray-600">Исполнительный лист подан</label>
+            <SystemDateInput aria-label="Дата подачи исполнительного листа" type="date" className="mt-1 w-full border rounded-lg px-3 py-2" value={executiveWritSubmittedAt} onChange={(event) => setExecutiveWritSubmittedAt(event.target.value)} disabled={saving || !allowEdit} />
+            <label htmlFor="writ-submitted-to" className="mt-2 block text-sm text-gray-600">Куда подан</label>
+            <select id="writ-submitted-to" aria-label="Куда подан исполнительный лист" className="mt-1 w-full border rounded-lg px-3 py-2" value={executiveWritSubmittedTo} onChange={(event) => setExecutiveWritSubmittedTo(event.target.value as 'fssp' | 'bank' | '')} disabled={saving || !allowEdit}>
+              <option value="">Выберите адресата</option><option value="fssp">ФССП</option><option value="bank">Банк</option>
+            </select>
+            <p className="mt-1 text-xs text-gray-500">Отметка завершит задачу на подачу. Чтобы снять отметку, очистите дату и сохраните дело.</p>
           </div>
 
           <div>

@@ -547,7 +547,12 @@ export interface ClientCase {
   claimFiledAt?: string | null;
   courtDecisionAt?: string | null;
   courtDecisionEffectiveAt?: string | null;
+  clearCourtDecisionEffectiveAt?: boolean;
   executiveWritReceivedAt?: string | null;
+  clearExecutiveWritReceivedAt?: boolean;
+  executiveWritSubmittedAt?: string | null;
+  executiveWritSubmittedTo?: 'fssp' | 'bank' | '' | null;
+  clearExecutiveWritSubmission?: boolean;
   appealDeadlineAt?: string | null;
   cassationDeadlineAt?: string | null;
   motionDeadlineAt?: string | null;

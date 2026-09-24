@@ -1451,6 +1451,13 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<DateTime?>("ExecutiveWritReceivedAt")
                         .HasColumnType("timestamp without time zone");
 
+                    b.Property<DateTime?>("ExecutiveWritSubmittedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("ExecutiveWritSubmittedTo")
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)");
+
                     b.Property<decimal>("FeeAmount")
                         .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
