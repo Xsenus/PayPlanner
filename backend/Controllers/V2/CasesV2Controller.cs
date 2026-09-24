@@ -3647,6 +3647,7 @@ public partial class CasesV2Controller : ControllerBase
             .Include(item => item.Complaints.Where(complaint => !complaint.IsArchived))
             .Where(item => item.ClientCaseId == id)
             .ToListAsync(ct);
+        var hasSavedLaterInstance = savedInstances.Any(item => item.Instance != "first");
 
         var items = CourtInstanceOrder
             .Select(instance =>
@@ -3655,7 +3656,7 @@ public partial class CasesV2Controller : ControllerBase
                     string.Equals(item.Instance, instance, StringComparison.OrdinalIgnoreCase));
                 return saved is not null
                     ? MapCourtInstance(saved)
-                    : MapCourtInstance(BuildDefaultCourtInstance(clientCase, instance));
+                    : MapCourtInstance(BuildDefaultCourtInstance(clientCase, instance, inheritCaseFields: !hasSavedLaterInstance));
             })
             .ToList();
 
@@ -3695,7 +3696,14 @@ public partial class CasesV2Controller : ControllerBase
             return BadRequest(new { message = "Судебная инстанция не найдена в справочнике." });
         }
 
-        var validation = ValidateCourtInstanceRequest(request, clientCase, normalizedInstance, court);
+        var courtInstance = await _db.ClientCaseCourtInstances
+            .Include(item => item.Complaints.Where(complaint => !complaint.IsArchived))
+            .FirstOrDefaultAsync(item => item.ClientCaseId == id && item.Instance == normalizedInstance, ct);
+        var inheritCaseFields = normalizedInstance != "first" || courtInstance is null
+            && !await _db.ClientCaseCourtInstances.AsNoTracking()
+                .AnyAsync(item => item.ClientCaseId == id && item.Instance != "first", ct);
+        var validation = ValidateCourtInstanceRequest(
+            request, clientCase, normalizedInstance, court, courtInstance, inheritCaseFields);
         if (validation.Error is not null)
         {
             return BadRequest(new { message = validation.Error });
@@ -3704,9 +3712,6 @@ public partial class CasesV2Controller : ControllerBase
         var actorUserId = User.GetUserId();
         var actorName = User.GetDisplayName();
         var now = DateTime.UtcNow;
-        var courtInstance = await _db.ClientCaseCourtInstances
-            .Include(item => item.Complaints.Where(complaint => !complaint.IsArchived))
-            .FirstOrDefaultAsync(item => item.ClientCaseId == id && item.Instance == normalizedInstance, ct);
         if (courtInstance is null)
         {
             courtInstance = new ClientCaseCourtInstance
@@ -8894,6 +8899,21 @@ public partial class CasesV2Controller : ControllerBase
         UpdateString("третьи лица", clientCase.ThirdParties, JoinParticipants(courtData.Participants, "ТРЕТ", "ЗАИНТЕРЕС"), value => clientCase.ThirdParties = value, 1000);
         UpdateString("представители", clientCase.Representatives, JoinParticipants(courtData.Participants, "ПРЕДСТАВИТЕЛ"), value => clientCase.Representatives = value, 1000);
 
+        var sourceInstance = NormalizeCourtInstance(courtData.Instance);
+        await SyncCourtInstanceReferenceAsync(
+            sourceInstance, courtData.CourtName, courtData.CaseNumber, courtData.SourceUrl,
+            courtData.JudgeName, courtData.JudicialUid, "карточка текущей инстанции");
+        if (sourceInstance == "appeal"
+            && (!string.IsNullOrWhiteSpace(courtData.LowerCourtName)
+                || !string.IsNullOrWhiteSpace(courtData.LowerCourtCaseNumber)))
+        {
+            // An appeal card names the lower court, but does not prove its decision.
+            // Keep that reference separate and leave the result and source URL unknown.
+            await SyncCourtInstanceReferenceAsync(
+                "first", courtData.LowerCourtName, courtData.LowerCourtCaseNumber,
+                string.Empty, string.Empty, string.Empty, "первая инстанция (реквизиты из апелляции)");
+        }
+
         var nextHearingAt = courtData.NextHearingAt.HasValue
             ? NormalizeCourtSyncSourceDateTime(courtData.NextHearingAt.Value, sourceTimeZone, courtData.NextHearingAt.Value.TimeOfDay == TimeSpan.Zero)
             : (DateTime?)null;
@@ -9445,6 +9465,60 @@ public partial class CasesV2Controller : ControllerBase
             removedItems.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
             conflictItems.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
             requiresDeadlineTaskSync);
+
+        async Task SyncCourtInstanceReferenceAsync(
+            string instance, string courtName, string caseNumber, string sourceUrl,
+            string judgeName, string judicialUid, string label)
+        {
+            var reference = _db.ClientCaseCourtInstances.Local
+                .FirstOrDefault(item => item.ClientCaseId == clientCase.Id && item.Instance == instance)
+                ?? await _db.ClientCaseCourtInstances
+                    .FirstOrDefaultAsync(item => item.ClientCaseId == clientCase.Id && item.Instance == instance, ct);
+            var created = reference is null;
+            if (created)
+            {
+                reference = new ClientCaseCourtInstance
+                {
+                    ClientCaseId = clientCase.Id,
+                    Instance = instance,
+                    CreatedAt = checkedAt,
+                    CreatedByUserId = actorUserId,
+                    CreatedByUserName = Truncate(actorName, 256),
+                };
+                _db.ClientCaseCourtInstances.Add(reference);
+            }
+
+            var changed = false;
+            MergeField("суд", reference!.CourtName, courtName, value => reference.CourtName = value, 200);
+            MergeField("номер дела", reference.CourtCaseNumber, caseNumber, value => reference.CourtCaseNumber = value, 100);
+            MergeField("ссылка", reference.CourtUrl, sourceUrl, value => reference.CourtUrl = value, 1000);
+            MergeField("судья", reference.JudgeName, judgeName, value => reference.JudgeName = value, 200);
+            MergeField("UID", reference.JudicialUid, judicialUid, value => reference.JudicialUid = value, 120);
+            if (created || changed)
+            {
+                reference.UpdatedAt = checkedAt;
+                reference.UpdatedByUserId = actorUserId;
+                reference.UpdatedByUserName = Truncate(actorName, 256);
+                (created ? newItems : changedItems).Add(label);
+                changedFields.Add(label);
+            }
+
+            void MergeField(string field, string current, string incoming, Action<string> assign, int maxLength)
+            {
+                var value = NormalizeOptional(incoming);
+                if (value is null) return;
+                var truncated = Truncate(value, maxLength);
+                if (string.IsNullOrWhiteSpace(current))
+                {
+                    assign(truncated);
+                    changed = true;
+                }
+                else if (!SameNormalizedCourtSyncText(current, truncated))
+                {
+                    conflictItems.Add($"{label}: {field} в источнике отличается от сохранённого значения");
+                }
+            }
+        }
 
         void UpdateString(string label, string currentValue, string sourceValue, Action<string> setValue, int maxLength)
         {
@@ -13292,10 +13366,11 @@ public partial class CasesV2Controller : ControllerBase
             UpdatedByUserName = item.UpdatedByUserName,
         };
 
-    private static ClientCaseCourtInstance BuildDefaultCourtInstance(ClientCase clientCase, string instance)
+    private static ClientCaseCourtInstance BuildDefaultCourtInstance(
+        ClientCase clientCase, string instance, bool inheritCaseFields = true)
     {
         var normalizedInstance = NormalizeCourtInstance(instance);
-        var isFirstInstance = normalizedInstance == "first";
+        var isFirstInstance = inheritCaseFields && normalizedInstance == "first";
         return new ClientCaseCourtInstance
         {
             ClientCaseId = clientCase.Id,
@@ -13359,7 +13434,10 @@ public partial class CasesV2Controller : ControllerBase
             return courtInstance;
         }
 
-        var defaults = BuildDefaultCourtInstance(clientCase, normalizedInstance);
+        var inheritCaseFields = normalizedInstance != "first"
+            || !await _db.ClientCaseCourtInstances.AsNoTracking()
+                .AnyAsync(item => item.ClientCaseId == clientCase.Id && item.Instance != "first", ct);
+        var defaults = BuildDefaultCourtInstance(clientCase, normalizedInstance, inheritCaseFields);
         var now = DateTime.UtcNow;
         courtInstance = new ClientCaseCourtInstance
         {
@@ -13507,14 +13585,16 @@ public partial class CasesV2Controller : ControllerBase
         UpsertClientCaseCourtInstanceRequest? request,
         ClientCase clientCase,
         string instance,
-        ClientCaseCourt? court)
+        ClientCaseCourt? court,
+        ClientCaseCourtInstance? existing,
+        bool inheritCaseFields)
     {
         if (request is null)
         {
             return new("Укажите параметры судебной инстанции.");
         }
 
-        var defaults = BuildDefaultCourtInstance(clientCase, instance);
+        var defaults = existing ?? BuildDefaultCourtInstance(clientCase, instance, inheritCaseFields);
         return new(
             null,
             Truncate(NormalizeOptional(request.CourtName) ?? NormalizeOptional(court?.Name) ?? defaults.CourtName, 200),

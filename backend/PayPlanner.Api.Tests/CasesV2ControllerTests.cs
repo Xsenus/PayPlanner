@@ -8777,6 +8777,122 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task GetCourtInstances_DoesNotPresentAppealAsFirstInstance()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "appeal-only-owner@example.com", "Юрист");
+        var clientCase = new ClientCase
+        {
+            Client = new Client { Name = "Клиент", IsActive = true, ResponsibleUserId = owner.Id },
+            Title = "Апелляционное дело",
+            Status = ClientCaseStatus.Open,
+            CourtName = "Областной суд",
+            CourtCaseNumber = "33-42/2026",
+            CourtUrl = "https://appeal.sudrf.ru/case/42",
+        };
+        db.ClientCases.Add(clientCase);
+        db.ClientCaseCourtInstances.Add(new ClientCaseCourtInstance
+        {
+            ClientCase = clientCase,
+            Instance = "appeal",
+            CourtName = clientCase.CourtName,
+            CourtCaseNumber = clientCase.CourtCaseNumber,
+            CourtUrl = clientCase.CourtUrl,
+        });
+        await db.SaveChangesAsync();
+
+        var result = await CreateController(db, owner).GetCourtInstances(clientCase.Id, CancellationToken.None);
+
+        var instances = Assert.IsAssignableFrom<IReadOnlyList<CasesV2Controller.ClientCaseCourtInstanceDto>>(
+            Assert.IsType<OkObjectResult>(result.Result).Value);
+        var first = Assert.Single(instances, item => item.Instance == "first");
+        Assert.Empty(first.CourtName);
+        Assert.Empty(first.CourtCaseNumber);
+        Assert.Empty(first.CourtUrl);
+        Assert.Equal("Областной суд", Assert.Single(instances, item => item.Instance == "appeal").CourtName);
+    }
+
+    [Fact]
+    public async Task UpsertCourtInstance_DoesNotCopyAppealFieldsIntoFirstInstance()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "first-after-appeal@example.com", "Юрист");
+        var clientCase = new ClientCase
+        {
+            Client = new Client { Name = "Клиент", IsActive = true, ResponsibleUserId = owner.Id },
+            Title = "Апелляционное дело",
+            Status = ClientCaseStatus.Open,
+            CourtName = "Областной суд",
+            CourtCaseNumber = "33-42/2026",
+            CourtUrl = "https://appeal.sudrf.ru/case/42",
+        };
+        db.ClientCases.Add(clientCase);
+        db.ClientCaseCourtInstances.Add(new ClientCaseCourtInstance
+        {
+            ClientCase = clientCase,
+            Instance = "appeal",
+            CourtName = clientCase.CourtName,
+            CourtCaseNumber = clientCase.CourtCaseNumber,
+            CourtUrl = clientCase.CourtUrl,
+        });
+        await db.SaveChangesAsync();
+
+        var result = await CreateController(db, owner).UpsertCourtInstance(
+            clientCase.Id, "first", new CasesV2Controller.UpsertClientCaseCourtInstanceRequest(), CancellationToken.None);
+
+        var first = Assert.IsType<CasesV2Controller.ClientCaseCourtInstanceDto>(
+            Assert.IsType<OkObjectResult>(result.Result).Value);
+        Assert.Empty(first.CourtName);
+        Assert.Empty(first.CourtCaseNumber);
+        Assert.Empty(first.CourtUrl);
+    }
+
+    [Fact]
+    public async Task RunCourtSync_PreservesLowerCourtReferenceWithoutGuessingDecision()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "appeal-lower-court@example.com", "Юрист");
+        var clientCase = new ClientCase
+        {
+            Client = new Client { Name = "Клиент", IsActive = true, ResponsibleUserId = owner.Id },
+            Title = "Апелляционное дело",
+            Status = ClientCaseStatus.Open,
+            CourtUrl = "https://appeal.sudrf.ru/modules.php?name=sud_delo&name_op=case&delo_id=42",
+        };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, owner,
+            sudrfCourtSyncService: new FixedSudrfCourtSyncService(new SudrfCourtCaseData
+            {
+                SourceUrl = clientCase.CourtUrl,
+                CourtName = "Областной суд",
+                CaseNumber = "33-42/2026",
+                Instance = "appeal",
+                LowerCourtName = "Районный суд",
+                LowerCourtCaseNumber = "2-42/2026",
+                JudicialUid = "appeal-uid-42",
+                CaseOutcome = "Апелляционная жалоба оставлена без удовлетворения",
+            }));
+
+        Assert.IsType<OkObjectResult>((await controller.RunCourtSync(clientCase.Id, null, CancellationToken.None)).Result);
+        Assert.IsType<OkObjectResult>((await controller.RunCourtSync(clientCase.Id, null, CancellationToken.None)).Result);
+
+        var first = Assert.Single(await db.ClientCaseCourtInstances
+            .Where(item => item.ClientCaseId == clientCase.Id && item.Instance == "first").ToListAsync());
+        Assert.Equal("Районный суд", first.CourtName);
+        Assert.Equal("2-42/2026", first.CourtCaseNumber);
+        Assert.Empty(first.CourtUrl);
+        Assert.Empty(first.Notes);
+        var appeal = Assert.Single(await db.ClientCaseCourtInstances
+            .Where(item => item.ClientCaseId == clientCase.Id && item.Instance == "appeal").ToListAsync());
+        Assert.Equal("Областной суд", appeal.CourtName);
+        Assert.Equal("33-42/2026", appeal.CourtCaseNumber);
+        Assert.Equal(clientCase.CourtUrl, appeal.CourtUrl);
+        Assert.Equal("appeal-uid-42", appeal.JudicialUid);
+        Assert.Null(clientCase.CourtDecisionAt);
+    }
+
+    [Fact]
     public async Task CourtInstanceComplaintFlow_CreatesUpdatesAndArchivesComplaint()
     {
         await using var db = await CreateContextAsync();
@@ -9979,6 +10095,13 @@ public class CasesV2ControllerTests
             owner,
             sudrfCourtSyncService: new FixedSudrfCourtSyncService(courtData),
             notificationService: CreateNotificationService(db));
+
+        var firstResult = await controller.RunCourtSync(clientCase.Id, null, CancellationToken.None);
+        var firstDto = Assert.IsType<CasesV2Controller.ClientCaseCourtSyncRunDto>(
+            Assert.IsType<OkObjectResult>(firstResult.Result).Value);
+        Assert.Contains(firstDto.UpdatedFields, field => field.Contains("карточка текущей инстанции", StringComparison.Ordinal));
+        Assert.Single(await db.ClientCaseCourtInstances
+            .Where(item => item.ClientCaseId == clientCase.Id && item.Instance == "appeal").ToListAsync());
 
         var result = await controller.RunCourtSync(clientCase.Id, null, CancellationToken.None);
 
