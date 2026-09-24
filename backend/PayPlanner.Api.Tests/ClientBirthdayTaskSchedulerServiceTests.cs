@@ -155,9 +155,14 @@ public sealed class ClientBirthdayTaskSchedulerServiceTests
             assigneeId = assignee.Id;
             db.Users.Add(new User
             {
-                Email = "birthday@example.com", FullName = "Именинник", PasswordHash = "test",
-                IsActive = true, IsApproved = true, IsEmployee = true,
-                DateOfBirth = new DateTime(1990, 9, 28), RoleId = assignee.RoleId,
+                Email = "birthday@example.com",
+                FullName = "Именинник",
+                PasswordHash = "test",
+                IsActive = true,
+                IsApproved = true,
+                IsEmployee = true,
+                DateOfBirth = new DateTime(1990, 9, 28),
+                RoleId = assignee.RoleId,
             });
             db.SystemSettings.AddRange(
                 new SystemSetting { Key = ClientBirthdayTaskSchedulerService.EmployeeEnabledSettingKey, Value = "true" },
@@ -184,9 +189,14 @@ public sealed class ClientBirthdayTaskSchedulerServiceTests
         var roleId = await checkDb.Roles.Select(role => role.Id).SingleAsync();
         checkDb.Users.Add(new User
         {
-            Email = "late-birthday@example.com", FullName = "Новый именинник", PasswordHash = "test",
-            IsActive = true, IsApproved = true, IsEmployee = true,
-            DateOfBirth = new DateTime(1985, 9, 21), RoleId = roleId,
+            Email = "late-birthday@example.com",
+            FullName = "Новый именинник",
+            PasswordHash = "test",
+            IsActive = true,
+            IsApproved = true,
+            IsEmployee = true,
+            DateOfBirth = new DateTime(1985, 9, 21),
+            RoleId = roleId,
         });
         await checkDb.SaveChangesAsync();
         Assert.Equal(1, (await fixture.Service.RunOnceAsync(now.AddHours(2))).CreatedCount);
@@ -233,9 +243,14 @@ public sealed class ClientBirthdayTaskSchedulerServiceTests
             var roleId = await db.Roles.Select(role => role.Id).SingleAsync();
             db.Users.Add(new User
             {
-                Email = "birthday@example.com", FullName = "Именинник", PasswordHash = "test",
-                IsActive = true, IsApproved = true, IsEmployee = true,
-                DateOfBirth = new DateTime(1990, 9, 28), RoleId = roleId,
+                Email = "birthday@example.com",
+                FullName = "Именинник",
+                PasswordHash = "test",
+                IsActive = true,
+                IsApproved = true,
+                IsEmployee = true,
+                DateOfBirth = new DateTime(1990, 9, 28),
+                RoleId = roleId,
             });
             db.SystemSettings.AddRange(
                 new SystemSetting { Key = ClientBirthdayTaskSchedulerService.EmployeeEnabledSettingKey, Value = "true" },
@@ -262,8 +277,12 @@ public sealed class ClientBirthdayTaskSchedulerServiceTests
             var roleId = await db.Roles.Select(role => role.Id).SingleAsync();
             var selected = new User
             {
-                Email = "selected@example.com", FullName = "Назначенный сотрудник", PasswordHash = "test",
-                IsActive = true, IsApproved = true, RoleId = roleId,
+                Email = "selected@example.com",
+                FullName = "Назначенный сотрудник",
+                PasswordHash = "test",
+                IsActive = true,
+                IsApproved = true,
+                RoleId = roleId,
             };
             db.Users.Add(selected);
             await db.SaveChangesAsync();

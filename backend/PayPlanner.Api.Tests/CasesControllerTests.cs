@@ -82,23 +82,29 @@ public class CasesControllerTests
 
         Assert.IsType<BadRequestObjectResult>(await controller.Update(clientCase.Id, new ClientCase
         {
-            ClientId = clientCase.ClientId, Title = clientCase.Title,
+            ClientId = clientCase.ClientId,
+            Title = clientCase.Title,
             CourtClaimAmount = -1m,
         }, CancellationToken.None));
         Assert.IsType<OkObjectResult>(await controller.Update(clientCase.Id, new ClientCase
         {
-            ClientId = clientCase.ClientId, Title = clientCase.Title,
-            CourtClaimAmount = 120000m, CourtAwardedAmount = 50000.75m,
-            CourtStateFeeAmount = 3000m, OurCourtRole = "claimant",
+            ClientId = clientCase.ClientId,
+            Title = clientCase.Title,
+            CourtClaimAmount = 120000m,
+            CourtAwardedAmount = 50000.75m,
+            CourtStateFeeAmount = 3000m,
+            OurCourtRole = "claimant",
         }, CancellationToken.None));
         Assert.IsType<OkObjectResult>(await controller.Update(clientCase.Id, new ClientCase
         {
-            ClientId = clientCase.ClientId, Title = clientCase.Title,
+            ClientId = clientCase.ClientId,
+            Title = clientCase.Title,
             ClearCourtAwardedAmount = true,
         }, CancellationToken.None));
         Assert.IsType<OkObjectResult>(await controller.Update(clientCase.Id, new ClientCase
         {
-            ClientId = clientCase.ClientId, Title = "Старый клиент",
+            ClientId = clientCase.ClientId,
+            Title = "Старый клиент",
         }, CancellationToken.None));
 
         await db.Entry(clientCase).ReloadAsync();
@@ -121,9 +127,13 @@ public class CasesControllerTests
 
         Assert.IsType<OkObjectResult>(await controller.Update(clientCase.Id, new ClientCase
         {
-            ClientId = clientCase.ClientId, Title = clientCase.Title, Status = ClientCaseStatus.Open,
-            CourtDecisionEffectiveAt = effectiveAt, ExecutiveWritReceivedAt = receivedAt,
-            ExecutiveWritSubmittedAt = submittedAt, ExecutiveWritSubmittedTo = "fssp",
+            ClientId = clientCase.ClientId,
+            Title = clientCase.Title,
+            Status = ClientCaseStatus.Open,
+            CourtDecisionEffectiveAt = effectiveAt,
+            ExecutiveWritReceivedAt = receivedAt,
+            ExecutiveWritSubmittedAt = submittedAt,
+            ExecutiveWritSubmittedTo = "fssp",
         }, CancellationToken.None));
         Assert.Equal(effectiveAt, clientCase.CourtDecisionEffectiveAt);
         Assert.Equal(receivedAt, clientCase.ExecutiveWritReceivedAt);
@@ -133,15 +143,20 @@ public class CasesControllerTests
 
         Assert.IsType<OkObjectResult>(await controller.Update(clientCase.Id, new ClientCase
         {
-            ClientId = clientCase.ClientId, Title = "Старый клиент", Status = ClientCaseStatus.Open,
+            ClientId = clientCase.ClientId,
+            Title = "Старый клиент",
+            Status = ClientCaseStatus.Open,
         }, CancellationToken.None));
         Assert.Equal(submittedAt, clientCase.ExecutiveWritSubmittedAt);
         Assert.Equal(receivedAt, clientCase.ExecutiveWritReceivedAt);
 
         Assert.IsType<OkObjectResult>(await controller.Update(clientCase.Id, new ClientCase
         {
-            ClientId = clientCase.ClientId, Title = clientCase.Title, Status = ClientCaseStatus.Open,
-            ClearExecutiveWritSubmission = true, ClearExecutiveWritReceivedAt = true,
+            ClientId = clientCase.ClientId,
+            Title = clientCase.Title,
+            Status = ClientCaseStatus.Open,
+            ClearExecutiveWritSubmission = true,
+            ClearExecutiveWritReceivedAt = true,
             ClearCourtDecisionEffectiveAt = true,
         }, CancellationToken.None));
         Assert.Null(clientCase.ExecutiveWritSubmittedAt);
@@ -166,15 +181,19 @@ public class CasesControllerTests
 
         Assert.IsType<OkObjectResult>(await controller.Update(clientCase.Id, new ClientCase
         {
-            ClientId = clientCase.ClientId, Title = clientCase.Title,
-            Status = ClientCaseStatus.Open, Strategy = clientCase.Strategy,
+            ClientId = clientCase.ClientId,
+            Title = clientCase.Title,
+            Status = ClientCaseStatus.Open,
+            Strategy = clientCase.Strategy,
         }, CancellationToken.None));
         Assert.Equal(reviewedAt, clientCase.PositionReviewedAt);
 
         Assert.IsType<OkObjectResult>(await controller.Update(clientCase.Id, new ClientCase
         {
-            ClientId = clientCase.ClientId, Title = clientCase.Title,
-            Status = ClientCaseStatus.Open, Strategy = "Изменённая позиция",
+            ClientId = clientCase.ClientId,
+            Title = clientCase.Title,
+            Status = ClientCaseStatus.Open,
+            Strategy = "Изменённая позиция",
         }, CancellationToken.None));
         Assert.Null(clientCase.PositionReviewedAt);
         Assert.Null(clientCase.PositionReviewedByUserId);
@@ -198,14 +217,18 @@ public class CasesControllerTests
 
         Assert.IsType<OkObjectResult>(await controller.Update(clientCase.Id, new ClientCase
         {
-            ClientId = clientCase.ClientId, Title = clientCase.Title, Status = ClientCaseStatus.Open,
+            ClientId = clientCase.ClientId,
+            Title = clientCase.Title,
+            Status = ClientCaseStatus.Open,
             NextHearingAt = nextHearing,
         }, CancellationToken.None));
         Assert.NotNull(clientCase.NextHearingConfirmedAt);
 
         Assert.IsType<OkObjectResult>(await controller.Update(clientCase.Id, new ClientCase
         {
-            ClientId = clientCase.ClientId, Title = clientCase.Title, Status = ClientCaseStatus.Open,
+            ClientId = clientCase.ClientId,
+            Title = clientCase.Title,
+            Status = ClientCaseStatus.Open,
             NextHearingAt = nextHearing.AddDays(1),
         }, CancellationToken.None));
         Assert.Null(clientCase.NextHearingConfirmedForAt);

@@ -206,12 +206,14 @@ public sealed class InternalChatControllerTests
         var first = Assert.IsType<InternalChatThreadDto>(Assert.IsType<CreatedAtActionResult>(
             (await fixture.Controller(owner).CreateChannel(new CreateInternalChatChannelRequest
             {
-                Name = "Первый чат", MemberUserIds = [member.Id]
+                Name = "Первый чат",
+                MemberUserIds = [member.Id]
             }, CancellationToken.None)).Result).Value);
         var second = Assert.IsType<InternalChatThreadDto>(Assert.IsType<CreatedAtActionResult>(
             (await fixture.Controller(owner).CreateChannel(new CreateInternalChatChannelRequest
             {
-                Name = "Второй чат", MemberUserIds = [member.Id]
+                Name = "Второй чат",
+                MemberUserIds = [member.Id]
             }, CancellationToken.None)).Result).Value);
         var firstMessage = Assert.IsType<InternalChatMessageDto>(Assert.IsType<CreatedAtActionResult>(
             (await fixture.Controller(member).SendMessage(first.Id,

@@ -29,8 +29,10 @@ public class ContactsControllerTests
         var controller = CreateController(db, user.Id);
         var request = new ContactMergeRequest
         {
-            PrimarySourceType = "client", PrimarySourceId = primary.Id,
-            DuplicateSourceType = "client", DuplicateSourceId = duplicate.Id,
+            PrimarySourceType = "client",
+            PrimarySourceId = primary.Id,
+            DuplicateSourceType = "client",
+            DuplicateSourceId = duplicate.Id,
         };
 
         var preview = await controller.PreviewMerge(request, CancellationToken.None);
@@ -63,8 +65,10 @@ public class ContactsControllerTests
         await db.SaveChangesAsync();
         var request = new ContactMergeRequest
         {
-            PrimarySourceType = "client", PrimarySourceId = primary.Id,
-            DuplicateSourceType = "client", DuplicateSourceId = duplicate.Id,
+            PrimarySourceType = "client",
+            PrimarySourceId = primary.Id,
+            DuplicateSourceType = "client",
+            DuplicateSourceId = duplicate.Id,
         };
 
         var response = await CreateController(db, user.Id).MergeContacts(request, CancellationToken.None);
@@ -87,8 +91,10 @@ public class ContactsControllerTests
         await db.SaveChangesAsync();
         var request = new ContactMergeRequest
         {
-            PrimarySourceType = "external", PrimarySourceId = primary.Id,
-            DuplicateSourceType = "external", DuplicateSourceId = duplicate.Id,
+            PrimarySourceType = "external",
+            PrimarySourceId = primary.Id,
+            DuplicateSourceType = "external",
+            DuplicateSourceId = duplicate.Id,
         };
 
         var response = await CreateController(db, user.Id).MergeContacts(request, CancellationToken.None);
@@ -115,14 +121,18 @@ public class ContactsControllerTests
         await db.SaveChangesAsync();
         db.ClientCaseRelatedParties.Add(new ClientCaseRelatedParty
         {
-            ClientCaseId = clientCase.Id, SourceType = "external", ExternalContactId = quick.Id,
+            ClientCaseId = clientCase.Id,
+            SourceType = "external",
+            ExternalContactId = quick.Id,
             DisplayName = quick.FullName,
         });
         await db.SaveChangesAsync();
         var request = new ContactMergeRequest
         {
-            PrimarySourceType = "client", PrimarySourceId = client.Id,
-            DuplicateSourceType = "external", DuplicateSourceId = quick.Id,
+            PrimarySourceType = "client",
+            PrimarySourceId = client.Id,
+            DuplicateSourceType = "external",
+            DuplicateSourceId = quick.Id,
         };
 
         var preview = await CreateController(db, user.Id).PreviewMerge(request, CancellationToken.None);
@@ -156,8 +166,10 @@ public class ContactsControllerTests
 
         var result = await CreateController(db, user.Id).MergeContacts(new ContactMergeRequest
         {
-            PrimarySourceType = "legal", PrimarySourceId = legal.Id,
-            DuplicateSourceType = "external", DuplicateSourceId = quick.Id,
+            PrimarySourceType = "legal",
+            PrimarySourceId = legal.Id,
+            DuplicateSourceType = "external",
+            DuplicateSourceId = quick.Id,
         }, CancellationToken.None);
 
         Assert.IsType<OkObjectResult>(result.Result);
@@ -180,8 +192,10 @@ public class ContactsControllerTests
         await db.SaveChangesAsync();
         var request = new ContactMergeRequest
         {
-            PrimarySourceType = "external", PrimarySourceId = quick.Id,
-            DuplicateSourceType = "client", DuplicateSourceId = oldClient.Id,
+            PrimarySourceType = "external",
+            PrimarySourceId = quick.Id,
+            DuplicateSourceType = "client",
+            DuplicateSourceId = oldClient.Id,
         };
 
         var preview = await CreateController(db, user.Id).PreviewMerge(request, CancellationToken.None);
@@ -219,8 +233,10 @@ public class ContactsControllerTests
 
         var response = await CreateController(db, user.Id).MergeContacts(new ContactMergeRequest
         {
-            PrimarySourceType = "external", PrimarySourceId = quick.Id,
-            DuplicateSourceType = "client", DuplicateSourceId = oldClient.Id,
+            PrimarySourceType = "external",
+            PrimarySourceId = quick.Id,
+            DuplicateSourceType = "client",
+            DuplicateSourceId = oldClient.Id,
         }, CancellationToken.None);
 
         Assert.IsType<OkObjectResult>(response.Result);
@@ -249,8 +265,10 @@ public class ContactsControllerTests
 
         var response = await CreateController(db, user.Id).MergeContacts(new ContactMergeRequest
         {
-            PrimarySourceType = "external", PrimarySourceId = quick.Id,
-            DuplicateSourceType = "legal", DuplicateSourceId = oldLegal.Id,
+            PrimarySourceType = "external",
+            PrimarySourceId = quick.Id,
+            DuplicateSourceType = "legal",
+            DuplicateSourceId = oldLegal.Id,
         }, CancellationToken.None);
 
         Assert.IsType<OkObjectResult>(response.Result);
@@ -281,8 +299,10 @@ public class ContactsControllerTests
         await db.SaveChangesAsync();
         var request = new ContactMergeRequest
         {
-            PrimarySourceType = "external", PrimarySourceId = quick.Id,
-            DuplicateSourceType = "client", DuplicateSourceId = oldClient.Id,
+            PrimarySourceType = "external",
+            PrimarySourceId = quick.Id,
+            DuplicateSourceType = "client",
+            DuplicateSourceId = oldClient.Id,
         };
 
         var preview = await CreateController(db, user.Id).PreviewMerge(request, CancellationToken.None);
@@ -306,8 +326,10 @@ public class ContactsControllerTests
 
         var response = await CreateController(db, noCreate.Id).MergeContacts(new ContactMergeRequest
         {
-            PrimarySourceType = "external", PrimarySourceId = quick.Id,
-            DuplicateSourceType = "client", DuplicateSourceId = oldClient.Id,
+            PrimarySourceType = "external",
+            PrimarySourceId = quick.Id,
+            DuplicateSourceType = "client",
+            DuplicateSourceId = oldClient.Id,
         }, CancellationToken.None);
 
         Assert.IsType<ForbidResult>(response.Result);
@@ -326,8 +348,10 @@ public class ContactsControllerTests
         await db.SaveChangesAsync();
         var request = new ContactMergeRequest
         {
-            PrimarySourceType = "client", PrimarySourceId = primary.Id,
-            DuplicateSourceType = "external", DuplicateSourceId = quick.Id,
+            PrimarySourceType = "client",
+            PrimarySourceId = primary.Id,
+            DuplicateSourceType = "external",
+            DuplicateSourceId = quick.Id,
         };
 
         var preview = await CreateController(db, user.Id).PreviewMerge(request, CancellationToken.None);
@@ -348,8 +372,10 @@ public class ContactsControllerTests
 
         var result = await CreateController(db, user.Id).MergeContacts(new ContactMergeRequest
         {
-            PrimarySourceType = "client", PrimarySourceId = client.Id,
-            DuplicateSourceType = "external", DuplicateSourceId = quick.Id,
+            PrimarySourceType = "client",
+            PrimarySourceId = client.Id,
+            DuplicateSourceType = "external",
+            DuplicateSourceId = quick.Id,
         }, CancellationToken.None);
 
         Assert.True(result.Result is OkObjectResult,
@@ -374,8 +400,10 @@ public class ContactsControllerTests
 
         var result = await CreateController(db, noLegalAccess.Id).MergeContacts(new ContactMergeRequest
         {
-            PrimarySourceType = "legal", PrimarySourceId = legal.Id,
-            DuplicateSourceType = "external", DuplicateSourceId = quick.Id,
+            PrimarySourceType = "legal",
+            PrimarySourceId = legal.Id,
+            DuplicateSourceType = "external",
+            DuplicateSourceId = quick.Id,
         }, CancellationToken.None);
 
         Assert.IsType<ForbidResult>(result.Result);
@@ -397,8 +425,10 @@ public class ContactsControllerTests
 
         var preview = await CreateController(db, user.Id).PreviewMerge(new ContactMergeRequest
         {
-            PrimarySourceType = "client", PrimarySourceId = client.Id,
-            DuplicateSourceType = "external", DuplicateSourceId = quick.Id,
+            PrimarySourceType = "client",
+            PrimarySourceId = client.Id,
+            DuplicateSourceType = "external",
+            DuplicateSourceId = quick.Id,
         }, CancellationToken.None);
 
         var details = Assert.IsType<ContactsController.ContactMergePreview>(Assert.IsType<OkObjectResult>(preview.Result).Value);
@@ -420,8 +450,10 @@ public class ContactsControllerTests
 
         var preview = await CreateController(db, user.Id).PreviewMerge(new ContactMergeRequest
         {
-            PrimarySourceType = "client", PrimarySourceId = client.Id,
-            DuplicateSourceType = "external", DuplicateSourceId = quick.Id,
+            PrimarySourceType = "client",
+            PrimarySourceId = client.Id,
+            DuplicateSourceType = "external",
+            DuplicateSourceId = quick.Id,
         }, CancellationToken.None);
 
         var details = Assert.IsType<ContactsController.ContactMergePreview>(Assert.IsType<OkObjectResult>(preview.Result).Value);
@@ -439,8 +471,10 @@ public class ContactsControllerTests
         var duplicate = await CreateClientAsync(db, another.Id);
         var request = new ContactMergeRequest
         {
-            PrimarySourceType = "client", PrimarySourceId = primary.Id,
-            DuplicateSourceType = "client", DuplicateSourceId = duplicate.Id,
+            PrimarySourceType = "client",
+            PrimarySourceId = primary.Id,
+            DuplicateSourceType = "client",
+            DuplicateSourceId = duplicate.Id,
         };
 
         var response = await CreateController(db, user.Id).MergeContacts(request, CancellationToken.None);
@@ -460,8 +494,10 @@ public class ContactsControllerTests
         var duplicate = await CreateClientAsync(db, owner.Id);
         var request = new ContactMergeRequest
         {
-            PrimarySourceType = "client", PrimarySourceId = primary.Id,
-            DuplicateSourceType = "client", DuplicateSourceId = duplicate.Id,
+            PrimarySourceType = "client",
+            PrimarySourceId = primary.Id,
+            DuplicateSourceType = "client",
+            DuplicateSourceId = duplicate.Id,
         };
 
         Assert.IsType<ForbidResult>((await CreateController(db, noDelete.Id).MergeContacts(request, CancellationToken.None)).Result);
@@ -482,8 +518,10 @@ public class ContactsControllerTests
 
         var response = await CreateController(db, user.Id).MergeContacts(new ContactMergeRequest
         {
-            PrimarySourceType = "legal", PrimarySourceId = primary.Id,
-            DuplicateSourceType = "legal", DuplicateSourceId = duplicate.Id,
+            PrimarySourceType = "legal",
+            PrimarySourceId = primary.Id,
+            DuplicateSourceType = "legal",
+            DuplicateSourceId = duplicate.Id,
         }, CancellationToken.None);
 
         Assert.IsType<OkObjectResult>(response.Result);
@@ -509,8 +547,10 @@ public class ContactsControllerTests
         await db.SaveChangesAsync();
         var request = new ContactMergeRequest
         {
-            PrimarySourceType = "client", PrimarySourceId = primary.Id,
-            DuplicateSourceType = "client", DuplicateSourceId = duplicate.Id,
+            PrimarySourceType = "client",
+            PrimarySourceId = primary.Id,
+            DuplicateSourceType = "client",
+            DuplicateSourceId = duplicate.Id,
         };
 
         var preview = await CreateController(db, user.Id).PreviewMerge(request, CancellationToken.None);
@@ -539,8 +579,10 @@ public class ContactsControllerTests
 
         var result = await CreateController(db, user.Id).MergeContacts(new ContactMergeRequest
         {
-            PrimarySourceType = "client", PrimarySourceId = primary.Id,
-            DuplicateSourceType = "client", DuplicateSourceId = duplicate.Id,
+            PrimarySourceType = "client",
+            PrimarySourceId = primary.Id,
+            DuplicateSourceType = "client",
+            DuplicateSourceId = duplicate.Id,
         }, CancellationToken.None);
 
         Assert.IsType<OkObjectResult>(result.Result);

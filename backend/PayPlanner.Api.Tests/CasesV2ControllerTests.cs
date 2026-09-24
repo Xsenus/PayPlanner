@@ -2000,15 +2000,23 @@ public class CasesV2ControllerTests
         var client = new Client { Name = "Клиент по взысканию", IsActive = true, ResponsibleUserId = user.Id };
         var clientCase = new ClientCase
         {
-            Client = client, ResponsibleUserId = user.Id, Title = "Исполнение решения",
-            Status = ClientCaseStatus.Open, CourtAwardedAmount = 100_000m,
+            Client = client,
+            ResponsibleUserId = user.Id,
+            Title = "Исполнение решения",
+            Status = ClientCaseStatus.Open,
+            CourtAwardedAmount = 100_000m,
         };
         var payment = new Payment
         {
-            Client = client, ClientCase = clientCase, DocumentKind = DocumentKind.Payment,
-            Type = PaymentType.Income, Status = PaymentStatus.Processing,
-            Amount = 50_000m, PaidAmount = 30_000m,
-            Date = new DateTime(2026, 9, 24), PlannedDate = new DateTime(2026, 9, 24),
+            Client = client,
+            ClientCase = clientCase,
+            DocumentKind = DocumentKind.Payment,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Processing,
+            Amount = 50_000m,
+            PaidAmount = 30_000m,
+            Date = new DateTime(2026, 9, 24),
+            PlannedDate = new DateTime(2026, 9, 24),
             Description = "Частичное взыскание",
         };
         db.Payments.Add(payment);
@@ -2161,27 +2169,38 @@ public class CasesV2ControllerTests
 
         var invalid = await controller.Create(new ClientCase
         {
-            ClientId = client.Id, Title = "Дело", OurCourtRole = "other",
+            ClientId = client.Id,
+            Title = "Дело",
+            OurCourtRole = "other",
         }, CancellationToken.None);
         Assert.IsType<BadRequestObjectResult>(invalid);
 
         var invalidInn = await controller.Create(new ClientCase
         {
-            ClientId = client.Id, Title = "Дело", ClaimantInn = "12345",
+            ClientId = client.Id,
+            Title = "Дело",
+            ClaimantInn = "12345",
         }, CancellationToken.None);
         Assert.IsType<BadRequestObjectResult>(invalidInn);
         var invalidOgrn = await controller.Create(new ClientCase
         {
-            ClientId = client.Id, Title = "Дело", DefendantOgrn = "123456789012X",
+            ClientId = client.Id,
+            Title = "Дело",
+            DefendantOgrn = "123456789012X",
         }, CancellationToken.None);
         Assert.IsType<BadRequestObjectResult>(invalidOgrn);
 
         var created = Assert.IsType<CreatedResult>(await controller.Create(new ClientCase
         {
-            ClientId = client.Id, Title = "Дело", CourtName = "Районный суд",
-            OurCourtRole = " claimant ", Claimant = "ООО Истец",
-            ClaimantInn = " 1234567890 ", ClaimantOgrn = "1234567890123",
-            Defendant = "Ответчик", DefendantInn = "123456789012",
+            ClientId = client.Id,
+            Title = "Дело",
+            CourtName = "Районный суд",
+            OurCourtRole = " claimant ",
+            Claimant = "ООО Истец",
+            ClaimantInn = " 1234567890 ",
+            ClaimantOgrn = "1234567890123",
+            Defendant = "Ответчик",
+            DefendantInn = "123456789012",
             DefendantOgrn = "123456789012345",
         }, CancellationToken.None));
         var courtCase = Assert.IsType<ClientCase>(created.Value);
@@ -2193,15 +2212,20 @@ public class CasesV2ControllerTests
 
         Assert.IsType<OkObjectResult>(await controller.Update(courtCase.Id, new ClientCase
         {
-            ClientId = client.Id, Title = "Дело после изменения", Status = ClientCaseStatus.Open,
-            OurCourtRole = "respondent", ClaimantInn = "0987654321",
+            ClientId = client.Id,
+            Title = "Дело после изменения",
+            Status = ClientCaseStatus.Open,
+            OurCourtRole = "respondent",
+            ClaimantInn = "0987654321",
         }, CancellationToken.None));
         Assert.Equal("respondent", (await db.ClientCases.FindAsync(courtCase.Id))?.OurCourtRole);
         Assert.Equal("0987654321", (await db.ClientCases.FindAsync(courtCase.Id))?.ClaimantInn);
 
         Assert.IsType<OkObjectResult>(await controller.Update(courtCase.Id, new ClientCase
         {
-            ClientId = client.Id, Title = "Старый клиент", Status = ClientCaseStatus.Open,
+            ClientId = client.Id,
+            Title = "Старый клиент",
+            Status = ClientCaseStatus.Open,
         }, CancellationToken.None));
         Assert.Equal("respondent", (await db.ClientCases.FindAsync(courtCase.Id))?.OurCourtRole);
         Assert.Equal("0987654321", (await db.ClientCases.FindAsync(courtCase.Id))?.ClaimantInn);
@@ -2220,17 +2244,24 @@ public class CasesV2ControllerTests
 
         Assert.IsType<BadRequestObjectResult>(await controller.Create(new ClientCase
         {
-            ClientId = client.Id, Title = "Некорректная сумма", CourtClaimAmount = -1m,
+            ClientId = client.Id,
+            Title = "Некорректная сумма",
+            CourtClaimAmount = -1m,
         }, CancellationToken.None));
         Assert.IsType<BadRequestObjectResult>(await controller.Create(new ClientCase
         {
-            ClientId = client.Id, Title = "Лишние копейки", CourtStateFeeAmount = 12.345m,
+            ClientId = client.Id,
+            Title = "Лишние копейки",
+            CourtStateFeeAmount = 12.345m,
         }, CancellationToken.None));
 
         var created = Assert.IsType<ClientCase>(Assert.IsType<CreatedResult>(await controller.Create(new ClientCase
         {
-            ClientId = client.Id, Title = "Судебные суммы", CourtClaimAmount = 100000.50m,
-            CourtAwardedAmount = 75000m, CourtStateFeeAmount = 3500.25m,
+            ClientId = client.Id,
+            Title = "Судебные суммы",
+            CourtClaimAmount = 100000.50m,
+            CourtAwardedAmount = 75000m,
+            CourtStateFeeAmount = 3500.25m,
         }, CancellationToken.None)).Value);
         Assert.Equal(100000.50m, created.CourtClaimAmount);
         Assert.Equal(75000m, created.CourtAwardedAmount);
@@ -2238,12 +2269,15 @@ public class CasesV2ControllerTests
 
         Assert.IsType<OkObjectResult>(await controller.Update(created.Id, new ClientCase
         {
-            ClientId = client.Id, Title = created.Title, CourtAwardedAmount = 80000.10m,
+            ClientId = client.Id,
+            Title = created.Title,
+            CourtAwardedAmount = 80000.10m,
             ClearCourtStateFeeAmount = true,
         }, CancellationToken.None));
         Assert.IsType<OkObjectResult>(await controller.Update(created.Id, new ClientCase
         {
-            ClientId = client.Id, Title = "Старый клиент",
+            ClientId = client.Id,
+            Title = "Старый клиент",
         }, CancellationToken.None));
         await db.Entry(created).ReloadAsync();
         Assert.Equal(100000.50m, created.CourtClaimAmount);
@@ -2265,8 +2299,11 @@ public class CasesV2ControllerTests
 
         var result = await controller.Create(new ClientCase
         {
-            ClientId = client.Id, Title = "Судебное дело", Status = ClientCaseStatus.Open,
-            ResponsibleUserId = responsible.Id, NextHearingAt = hearingAt,
+            ClientId = client.Id,
+            Title = "Судебное дело",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = responsible.Id,
+            NextHearingAt = hearingAt,
         }, CancellationToken.None);
 
         Assert.IsType<CreatedResult>(result);
@@ -2289,8 +2326,11 @@ public class CasesV2ControllerTests
         var currentAt = previousAt.AddDays(2);
         var clientCase = new ClientCase
         {
-            Client = client, Title = "Судебное дело", Status = ClientCaseStatus.Open,
-            ResponsibleUserId = responsible.Id, NextHearingAt = previousAt,
+            Client = client,
+            Title = "Судебное дело",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = responsible.Id,
+            NextHearingAt = previousAt,
         };
         db.Clients.Add(client);
         db.ClientCases.Add(clientCase);
@@ -2298,8 +2338,11 @@ public class CasesV2ControllerTests
         var controller = CreateController(db, editor, notificationService: CreateNotificationService(db));
         var update = new ClientCase
         {
-            ClientId = client.Id, Title = clientCase.Title, Status = ClientCaseStatus.Open,
-            ResponsibleUserId = responsible.Id, NextHearingAt = currentAt,
+            ClientId = client.Id,
+            Title = clientCase.Title,
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = responsible.Id,
+            NextHearingAt = currentAt,
         };
 
         Assert.IsType<OkObjectResult>(await controller.Update(clientCase.Id, update, CancellationToken.None));
@@ -2338,8 +2381,11 @@ public class CasesV2ControllerTests
 
         var result = await controller.Create(new ClientCase
         {
-            ClientId = client.Id, Title = "Судебное дело", Status = ClientCaseStatus.Open,
-            ResponsibleUserId = responsible.Id, CourtDecisionAt = decisionAt,
+            ClientId = client.Id,
+            Title = "Судебное дело",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = responsible.Id,
+            CourtDecisionAt = decisionAt,
         }, CancellationToken.None);
 
         Assert.IsType<CreatedResult>(result);
@@ -2364,7 +2410,9 @@ public class CasesV2ControllerTests
 
         Assert.IsType<CreatedResult>(await controller.Create(new ClientCase
         {
-            ClientId = client.Id, Title = "Судебное дело", Status = ClientCaseStatus.Open,
+            ClientId = client.Id,
+            Title = "Судебное дело",
+            Status = ClientCaseStatus.Open,
             ResponsibleUserId = responsible.Id,
             NextHearingAt = new DateTime(2026, 10, 12, 10, 0, 0, DateTimeKind.Utc),
             CourtDecisionAt = new DateTime(2026, 10, 5),
@@ -2386,16 +2434,22 @@ public class CasesV2ControllerTests
         var client = new Client { Name = "Клиент", IsActive = true, ResponsibleUserId = editor.Id };
         var clientCase = new ClientCase
         {
-            Client = client, Title = "Судебное дело", Status = ClientCaseStatus.Open,
-            ResponsibleUserId = responsible.Id, CourtDecisionAt = new DateTime(2026, 10, 5),
+            Client = client,
+            Title = "Судебное дело",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = responsible.Id,
+            CourtDecisionAt = new DateTime(2026, 10, 5),
         };
         db.ClientCases.Add(clientCase);
         await db.SaveChangesAsync();
         var controller = CreateController(db, editor, notificationService: CreateNotificationService(db));
         var update = new ClientCase
         {
-            ClientId = client.Id, Title = clientCase.Title, Status = ClientCaseStatus.Open,
-            ResponsibleUserId = responsible.Id, CourtDecisionAt = new DateTime(2026, 10, 7),
+            ClientId = client.Id,
+            Title = clientCase.Title,
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = responsible.Id,
+            CourtDecisionAt = new DateTime(2026, 10, 7),
         };
 
         Assert.IsType<OkObjectResult>(await controller.Update(clientCase.Id, update, CancellationToken.None));
@@ -3081,8 +3135,12 @@ public class CasesV2ControllerTests
         var client = new Client { Name = "Контрагент", IsActive = true, ResponsibleUserId = lawyer.Id };
         var caseWithEvent = new ClientCase
         {
-            Client = client, Title = "Дело с событием", Status = ClientCaseStatus.Open,
-            ResponsibleUserId = lawyer.Id, CourtName = "Суд", NextHearingAt = now.AddDays(3),
+            Client = client,
+            Title = "Дело с событием",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = lawyer.Id,
+            CourtName = "Суд",
+            NextHearingAt = now.AddDays(3),
             CourtEvents =
             [
                 new ClientCaseCourtEvent
@@ -3099,17 +3157,27 @@ public class CasesV2ControllerTests
         };
         var caseWithoutEvent = new ClientCase
         {
-            Client = client, Title = "Дело с датой", Status = ClientCaseStatus.Open,
-            ResponsibleUserId = lawyer.Id, CourtName = "Суд", NextHearingAt = now.AddDays(3),
+            Client = client,
+            Title = "Дело с датой",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = lawyer.Id,
+            CourtName = "Суд",
+            NextHearingAt = now.AddDays(3),
         };
         var hiddenCase = new ClientCase
         {
-            Client = client, Title = "Скрытое дело", Status = ClientCaseStatus.Open,
-            ResponsibleUserId = manager.Id, CourtName = "Суд", IsHiddenFromExecutor = true,
+            Client = client,
+            Title = "Скрытое дело",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = manager.Id,
+            CourtName = "Суд",
+            IsHiddenFromExecutor = true,
         };
         var ordinaryCase = new ClientCase
         {
-            Client = client, Title = "Несудебное дело", Status = ClientCaseStatus.Open,
+            Client = client,
+            Title = "Несудебное дело",
+            Status = ClientCaseStatus.Open,
             ResponsibleUserId = lawyer.Id,
         };
         db.ClientCases.AddRange(caseWithEvent, caseWithoutEvent, hiddenCase, ordinaryCase);
@@ -3117,13 +3185,19 @@ public class CasesV2ControllerTests
         db.TaskJournalItems.AddRange(
             new TaskJournalItem
             {
-                ClientCaseId = caseWithEvent.Id, AssigneeUserId = lawyer.Id,
-                Title = "Просроченная судебная задача", Status = "new", DueAt = now.AddDays(-1),
+                ClientCaseId = caseWithEvent.Id,
+                AssigneeUserId = lawyer.Id,
+                Title = "Просроченная судебная задача",
+                Status = "new",
+                DueAt = now.AddDays(-1),
             },
             new TaskJournalItem
             {
-                ClientCaseId = ordinaryCase.Id, AssigneeUserId = lawyer.Id,
-                Title = "Не судебная задача", Status = "new", DueAt = now.AddDays(-1),
+                ClientCaseId = ordinaryCase.Id,
+                AssigneeUserId = lawyer.Id,
+                Title = "Не судебная задача",
+                Status = "new",
+                DueAt = now.AddDays(-1),
             });
         await db.SaveChangesAsync();
 
@@ -3150,10 +3224,16 @@ public class CasesV2ControllerTests
         var now = DateTime.UtcNow;
         ClientCase MakeCase(string title, DateTime failureStartedAt, bool monitoringEnabled = true) => new()
         {
-            Client = client, Title = title, Status = ClientCaseStatus.Open, CourtName = "Суд",
-            CourtCaseNumber = "2-100/2026", CourtUrl = "https://example.sudrf.ru/case/42",
-            CourtSyncFailureStartedAt = failureStartedAt, CourtSyncLastAttemptAt = now.AddMinutes(-10),
-            CourtSyncLastError = "Сайт суда недоступен", CourtSyncMonitoringEnabled = monitoringEnabled,
+            Client = client,
+            Title = title,
+            Status = ClientCaseStatus.Open,
+            CourtName = "Суд",
+            CourtCaseNumber = "2-100/2026",
+            CourtUrl = "https://example.sudrf.ru/case/42",
+            CourtSyncFailureStartedAt = failureStartedAt,
+            CourtSyncLastAttemptAt = now.AddMinutes(-10),
+            CourtSyncLastError = "Сайт суда недоступен",
+            CourtSyncMonitoringEnabled = monitoringEnabled,
         };
         var oldFailure = MakeCase("Старая ошибка", now.AddHours(-25));
         var recentFailure = MakeCase("Новая ошибка", now.AddHours(-23));
@@ -3192,9 +3272,13 @@ public class CasesV2ControllerTests
         var clientCase = new ClientCase
         {
             Client = new Client { Name = "Контрагент", IsActive = true, ResponsibleUserId = manager.Id },
-            Title = "Судебное дело", Status = ClientCaseStatus.Open, CourtName = "Суд",
-            CourtCaseNumber = "2-100/2026", CourtUrl = "https://example.sudrf.ru/case/42",
-            CourtSyncFailureStartedAt = DateTime.UtcNow.AddDays(-2), CourtSyncLastError = "Дело не найдено",
+            Title = "Судебное дело",
+            Status = ClientCaseStatus.Open,
+            CourtName = "Суд",
+            CourtCaseNumber = "2-100/2026",
+            CourtUrl = "https://example.sudrf.ru/case/42",
+            CourtSyncFailureStartedAt = DateTime.UtcNow.AddDays(-2),
+            CourtSyncLastError = "Дело не найдено",
         };
         db.ClientCases.Add(clientCase);
         await db.SaveChangesAsync();
@@ -3234,13 +3318,20 @@ public class CasesV2ControllerTests
         var client = new Client { Name = "Контрагент", IsActive = true, ResponsibleUserId = manager.Id };
         var courtCase = new ClientCase
         {
-            Client = client, Title = "Судебное дело", Status = ClientCaseStatus.Open,
-            CourtName = "Суд", ResponsibleUserId = manager.Id,
+            Client = client,
+            Title = "Судебное дело",
+            Status = ClientCaseStatus.Open,
+            CourtName = "Суд",
+            ResponsibleUserId = manager.Id,
         };
         var hiddenCase = new ClientCase
         {
-            Client = client, Title = "Скрытое судебное дело", Status = ClientCaseStatus.Open,
-            CourtName = "Суд", ResponsibleUserId = manager.Id, IsHiddenFromExecutor = true,
+            Client = client,
+            Title = "Скрытое судебное дело",
+            Status = ClientCaseStatus.Open,
+            CourtName = "Суд",
+            ResponsibleUserId = manager.Id,
+            IsHiddenFromExecutor = true,
         };
         db.ClientCases.AddRange(courtCase, hiddenCase);
         await db.SaveChangesAsync();
@@ -3447,7 +3538,9 @@ public class CasesV2ControllerTests
         var clientCase = new ClientCase
         {
             Client = new Client { Name = "Доверитель", IsActive = true, ResponsibleUserId = lawyer.Id },
-            Title = "Дело с позицией", Status = ClientCaseStatus.Open, ResponsibleUserId = lawyer.Id,
+            Title = "Дело с позицией",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = lawyer.Id,
         };
         db.ClientCases.Add(clientCase);
         await db.SaveChangesAsync();
@@ -3470,8 +3563,11 @@ public class CasesV2ControllerTests
 
         var update = await lawyerController.Update(clientCase.Id, new ClientCase
         {
-            ClientId = clientCase.ClientId, Title = clientCase.Title, Status = ClientCaseStatus.Open,
-            ResponsibleUserId = lawyer.Id, Strategy = "Обновлённая позиция",
+            ClientId = clientCase.ClientId,
+            Title = clientCase.Title,
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = lawyer.Id,
+            Strategy = "Обновлённая позиция",
         }, CancellationToken.None);
         Assert.IsType<OkObjectResult>(update);
         await db.Entry(clientCase).ReloadAsync();
@@ -3496,7 +3592,9 @@ public class CasesV2ControllerTests
         var clientCase = new ClientCase
         {
             Client = new Client { Name = "Доверитель", IsActive = true, ResponsibleUserId = lawyer.Id },
-            Title = "Дело с заседанием", Status = ClientCaseStatus.Open, ResponsibleUserId = lawyer.Id,
+            Title = "Дело с заседанием",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = lawyer.Id,
         };
         db.ClientCases.Add(clientCase);
         await db.SaveChangesAsync();
@@ -3522,8 +3620,11 @@ public class CasesV2ControllerTests
 
         var sameDateUpdate = await controller.Update(clientCase.Id, new ClientCase
         {
-            ClientId = clientCase.ClientId, Title = clientCase.Title, Status = ClientCaseStatus.Open,
-            ResponsibleUserId = lawyer.Id, NextHearingAt = nextHearing,
+            ClientId = clientCase.ClientId,
+            Title = clientCase.Title,
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = lawyer.Id,
+            NextHearingAt = nextHearing,
         }, CancellationToken.None);
         Assert.IsType<OkObjectResult>(sameDateUpdate);
         Assert.Equal(first.NextHearingConfirmedAt, clientCase.NextHearingConfirmedAt);
@@ -3531,8 +3632,11 @@ public class CasesV2ControllerTests
         var rescheduled = nextHearing.AddDays(2);
         var update = await controller.Update(clientCase.Id, new ClientCase
         {
-            ClientId = clientCase.ClientId, Title = clientCase.Title, Status = ClientCaseStatus.Open,
-            ResponsibleUserId = lawyer.Id, NextHearingAt = rescheduled,
+            ClientId = clientCase.ClientId,
+            Title = clientCase.Title,
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = lawyer.Id,
+            NextHearingAt = rescheduled,
         }, CancellationToken.None);
         Assert.IsType<OkObjectResult>(update);
         await db.Entry(clientCase).ReloadAsync();
@@ -3724,8 +3828,11 @@ public class CasesV2ControllerTests
         var clientCase = new ClientCase
         {
             Client = new Client { Name = "Доверитель", IsActive = true, ResponsibleUserId = lawyer.Id },
-            Title = "Позднее решение обжаловать", Status = ClientCaseStatus.Open,
-            ResponsibleUserId = lawyer.Id, CourtDecisionAt = decisionAt, AppealDeadlineAt = deadlineAt,
+            Title = "Позднее решение обжаловать",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = lawyer.Id,
+            CourtDecisionAt = decisionAt,
+            AppealDeadlineAt = deadlineAt,
         };
         db.ClientCases.Add(clientCase);
         await db.SaveChangesAsync();
@@ -3733,7 +3840,9 @@ public class CasesV2ControllerTests
         var before = DateTime.UtcNow;
         var response = await CreateController(db, lawyer).DecideCaseAppeal(clientCase.Id, new CasesV2Controller.DecideCaseAppealRequest
         {
-            CourtDecisionAt = decisionAt, AppealDeadlineAt = deadlineAt, Choice = "appeal",
+            CourtDecisionAt = decisionAt,
+            AppealDeadlineAt = deadlineAt,
+            Choice = "appeal",
         }, CancellationToken.None);
         var result = Assert.IsType<CasesV2Controller.CaseAppealDecisionDto>(Assert.IsType<OkObjectResult>(response.Result).Value);
         var task = await db.TaskJournalItems.SingleAsync(item => item.Id == result.TaskId);
@@ -3755,7 +3864,9 @@ public class CasesV2ControllerTests
         var clientCase = new ClientCase
         {
             Client = new Client { Name = "Доверитель", IsActive = true, ResponsibleUserId = lawyer.Id },
-            Title = "Дело с новым актом", Status = ClientCaseStatus.Open, ResponsibleUserId = lawyer.Id,
+            Title = "Дело с новым актом",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = lawyer.Id,
             CourtDecisionAt = DateTime.UtcNow.Date.AddDays(-1),
         };
         db.ClientCases.Add(clientCase);
@@ -3765,7 +3876,8 @@ public class CasesV2ControllerTests
             ClientCaseId = clientCase.Id,
             CourtDecisionDate = clientCase.CourtDecisionAt.Value.AddDays(-3),
             AppealDeadlineDate = DateTime.UtcNow.Date.AddDays(3),
-            Choice = "appeal", DecidedByUserName = "Юрист",
+            Choice = "appeal",
+            DecidedByUserName = "Юрист",
         });
         await db.SaveChangesAsync();
 
@@ -4084,8 +4196,11 @@ public class CasesV2ControllerTests
 
         var appealDecision = new ClientCaseCourtEvent
         {
-            EventType = "decision", CourtInstance = "appeal", MovementStatus = "completed",
-            Title = "Постановление апелляции", ScheduledAt = new DateTime(2026, 9, 10, 0, 0, 0, DateTimeKind.Utc),
+            EventType = "decision",
+            CourtInstance = "appeal",
+            MovementStatus = "completed",
+            Title = "Постановление апелляции",
+            ScheduledAt = new DateTime(2026, 9, 10, 0, 0, 0, DateTimeKind.Utc),
         };
         clientCase.CourtEvents.Add(appealDecision);
         await db.SaveChangesAsync();
@@ -4125,7 +4240,8 @@ public class CasesV2ControllerTests
         var clientCase = new ClientCase
         {
             Client = new Client { Name = "Клиент", IsActive = true, ResponsibleUserId = lawyer.Id },
-            Title = "Исполнительный лист", Status = ClientCaseStatus.Open,
+            Title = "Исполнительный лист",
+            Status = ClientCaseStatus.Open,
             ResponsibleUserId = lawyer.Id,
         };
         db.ClientCases.Add(clientCase);
@@ -4136,8 +4252,11 @@ public class CasesV2ControllerTests
 
         var result = await controller.Update(clientCase.Id, new ClientCase
         {
-            ClientId = clientCase.ClientId, Title = clientCase.Title, Status = ClientCaseStatus.Open,
-            ResponsibleUserId = lawyer.Id, CourtDecisionEffectiveAt = effectiveAt,
+            ClientId = clientCase.ClientId,
+            Title = clientCase.Title,
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = lawyer.Id,
+            CourtDecisionEffectiveAt = effectiveAt,
             ExecutiveWritReceivedAt = receivedAt,
         }, CancellationToken.None);
 
@@ -4160,8 +4279,10 @@ public class CasesV2ControllerTests
         var clientCase = new ClientCase
         {
             Client = new Client { Name = "Клиент", IsActive = true, ResponsibleUserId = lawyer.Id },
-            Title = "Исполнительный лист", Status = ClientCaseStatus.Open,
-            ResponsibleUserId = lawyer.Id, CourtDecisionEffectiveAt = effectiveAt,
+            Title = "Исполнительный лист",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = lawyer.Id,
+            CourtDecisionEffectiveAt = effectiveAt,
         };
         db.ClientCases.Add(clientCase);
         await db.SaveChangesAsync();
@@ -4217,8 +4338,10 @@ public class CasesV2ControllerTests
         var clientCase = new ClientCase
         {
             Client = new Client { Name = "Клиент", IsActive = true, ResponsibleUserId = lawyer.Id },
-            Title = "Подача листа", Status = ClientCaseStatus.Open,
-            ResponsibleUserId = lawyer.Id, ExecutiveWritReceivedAt = receivedAt,
+            Title = "Подача листа",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = lawyer.Id,
+            ExecutiveWritReceivedAt = receivedAt,
         };
         db.ClientCases.Add(clientCase);
         await db.SaveChangesAsync();
@@ -4230,9 +4353,13 @@ public class CasesV2ControllerTests
         var submittedAt = receivedAt.AddDays(1);
         var saved = await controller.Update(clientCase.Id, new ClientCase
         {
-            ClientId = clientCase.ClientId, Title = clientCase.Title, Status = ClientCaseStatus.Open,
-            ResponsibleUserId = lawyer.Id, ExecutiveWritReceivedAt = receivedAt,
-            ExecutiveWritSubmittedAt = submittedAt, ExecutiveWritSubmittedTo = "bank",
+            ClientId = clientCase.ClientId,
+            Title = clientCase.Title,
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = lawyer.Id,
+            ExecutiveWritReceivedAt = receivedAt,
+            ExecutiveWritSubmittedAt = submittedAt,
+            ExecutiveWritSubmittedTo = "bank",
         }, CancellationToken.None);
         Assert.IsType<OkObjectResult>(saved);
         Assert.Equal("done", task.Status);
@@ -4246,9 +4373,13 @@ public class CasesV2ControllerTests
         var correctedAt = submittedAt.AddDays(1);
         var corrected = await controller.Update(clientCase.Id, new ClientCase
         {
-            ClientId = clientCase.ClientId, Title = clientCase.Title, Status = ClientCaseStatus.Open,
-            ResponsibleUserId = lawyer.Id, ExecutiveWritReceivedAt = receivedAt,
-            ExecutiveWritSubmittedAt = correctedAt, ExecutiveWritSubmittedTo = "fssp",
+            ClientId = clientCase.ClientId,
+            Title = clientCase.Title,
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = lawyer.Id,
+            ExecutiveWritReceivedAt = receivedAt,
+            ExecutiveWritSubmittedAt = correctedAt,
+            ExecutiveWritSubmittedTo = "fssp",
         }, CancellationToken.None);
         Assert.IsType<OkObjectResult>(corrected);
         Assert.Contains("ФССП", task.Result);
@@ -4257,7 +4388,9 @@ public class CasesV2ControllerTests
 
         var legacyUpdate = await controller.Update(clientCase.Id, new ClientCase
         {
-            ClientId = clientCase.ClientId, Title = clientCase.Title, Status = ClientCaseStatus.Open,
+            ClientId = clientCase.ClientId,
+            Title = clientCase.Title,
+            Status = ClientCaseStatus.Open,
             ResponsibleUserId = lawyer.Id,
         }, CancellationToken.None);
         Assert.IsType<OkObjectResult>(legacyUpdate);
@@ -4267,8 +4400,11 @@ public class CasesV2ControllerTests
 
         var cleared = await controller.Update(clientCase.Id, new ClientCase
         {
-            ClientId = clientCase.ClientId, Title = clientCase.Title, Status = ClientCaseStatus.Open,
-            ResponsibleUserId = lawyer.Id, ExecutiveWritReceivedAt = receivedAt,
+            ClientId = clientCase.ClientId,
+            Title = clientCase.Title,
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = lawyer.Id,
+            ExecutiveWritReceivedAt = receivedAt,
             ClearExecutiveWritSubmission = true,
         }, CancellationToken.None);
         Assert.IsType<OkObjectResult>(cleared);
@@ -4286,7 +4422,9 @@ public class CasesV2ControllerTests
         var clientCase = new ClientCase
         {
             Client = new Client { Name = "Клиент", IsActive = true, ResponsibleUserId = lawyer.Id },
-            Title = "Подача листа", Status = ClientCaseStatus.Open, ResponsibleUserId = lawyer.Id,
+            Title = "Подача листа",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = lawyer.Id,
         };
         db.ClientCases.Add(clientCase);
         await db.SaveChangesAsync();
@@ -4294,9 +4432,13 @@ public class CasesV2ControllerTests
         var receivedAt = new DateTime(2026, 10, 3, 0, 0, 0, DateTimeKind.Utc);
         var model = new ClientCase
         {
-            ClientId = clientCase.ClientId, Title = clientCase.Title, Status = ClientCaseStatus.Open,
-            ResponsibleUserId = lawyer.Id, ExecutiveWritReceivedAt = receivedAt,
-            ExecutiveWritSubmittedAt = receivedAt.AddDays(-1), ExecutiveWritSubmittedTo = "fssp",
+            ClientId = clientCase.ClientId,
+            Title = clientCase.Title,
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = lawyer.Id,
+            ExecutiveWritReceivedAt = receivedAt,
+            ExecutiveWritSubmittedAt = receivedAt.AddDays(-1),
+            ExecutiveWritSubmittedTo = "fssp",
         };
         Assert.IsType<BadRequestObjectResult>(await controller.Update(clientCase.Id, model, CancellationToken.None));
         model.ExecutiveWritSubmittedAt = receivedAt;
