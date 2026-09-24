@@ -6720,6 +6720,7 @@ public class CasesV2ControllerTests
         var ok = Assert.IsType<OkObjectResult>(result.Result);
         var types = Assert.IsAssignableFrom<IReadOnlyList<string>>(ok.Value);
         Assert.Contains("Акт сверки", types);
+        Assert.Contains("Исполнительный лист", types);
         Assert.Contains("Иск", types);
         Assert.Contains("Жалоба", types);
         Assert.Contains("Доказательство", types);

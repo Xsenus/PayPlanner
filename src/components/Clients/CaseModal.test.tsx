@@ -547,6 +547,25 @@ describe('CaseModal', () => {
     });
   });
 
+  it('uploads an executive writ scan directly from the case workflow', async () => {
+    render(<CaseModal isOpen onClose={vi.fn()} caseData={createCase()} onSave={vi.fn()} />);
+
+    const file = new File(['writ'], 'Исполнительный лист.pdf', { type: 'application/pdf' });
+    fireEvent.change(screen.getByLabelText('Загрузить скан исполнительного листа'), { target: { files: [file] } });
+
+    await waitFor(() => expect(apiService.uploadCaseDocument).toHaveBeenCalledWith(1, file, {
+      documentType: 'Исполнительный лист',
+      status: 'Получен',
+    }));
+    await waitFor(() => expect(apiService.getCaseDocuments).toHaveBeenCalledTimes(2));
+  });
+
+  it('does not allow a read-only case viewer to upload an executive writ', async () => {
+    render(<CaseModal isOpen onClose={vi.fn()} caseData={createCase()} onSave={vi.fn()} allowEdit={false} />);
+    expect(await screen.findByText('Скан пока не прикреплён.')).toBeTruthy();
+    expect(screen.queryByLabelText('Загрузить скан исполнительного листа')).toBeNull();
+  });
+
   it('shows document upload time in the profile time zone', async () => {
     vi.mocked(apiService.getUserSetting).mockResolvedValue({ key: 'profile.timeZoneId', value: 'Europe/Samara' });
     vi.mocked(apiService.getCaseDocuments).mockResolvedValue([

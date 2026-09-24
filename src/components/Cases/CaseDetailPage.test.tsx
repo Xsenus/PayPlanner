@@ -1343,6 +1343,21 @@ describe('CaseDetailPage', () => {
     expect(await screen.findByText('Карточка дела обновлена.')).toBeTruthy();
   });
 
+  it('uploads the executive writ scan from the full case editor', async () => {
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+    expect(await screen.findByText('ЗЕМЦОВ - банкротство')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Редактировать дело' }));
+
+    const file = new File(['writ'], 'Лист.pdf', { type: 'application/pdf' });
+    fireEvent.change(screen.getByLabelText('Загрузить скан исполнительного листа'), { target: { files: [file] } });
+
+    await waitFor(() => expect(apiService.uploadCaseDocument).toHaveBeenCalledWith(15, file, {
+      documentType: 'Исполнительный лист',
+      status: 'Получен',
+    }));
+    await waitFor(() => expect(apiService.getCaseDocuments).toHaveBeenCalled());
+  });
+
   it('allows clearing both writ workflow dates in the full case editor', async () => {
     vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({
       courtDecisionEffectiveAt: '2026-10-01',

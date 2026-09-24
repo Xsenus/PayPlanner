@@ -4,6 +4,7 @@ import { SystemSelect } from '../ui/SystemSelect';
 import { ClientPortalAccessPanel } from './ClientPortalAccessPanel';
 import { CaseAppealDecisionAction } from './CaseAppealDecisionAction';
 import { CasePreHearingActions } from './CasePreHearingActions';
+import { ExecutiveWritDocumentUpload } from './ExecutiveWritDocumentUpload';
 import { MessengerDocumentDeliveryModal } from './MessengerDocumentDeliveryModal';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -298,6 +299,7 @@ const FALLBACK_DOCUMENT_TYPE_OPTIONS = [
   'Возражение',
   'Переписка',
   'Доверенность',
+  'Исполнительный лист',
   'Заявление',
   'Процессуальный документ',
   'Доказательство',
@@ -2050,6 +2052,16 @@ export function CaseDetailPage({
       cancelled = true;
     };
   }, [activeTab, caseId, externalApprovalAvailable, reloadToken]);
+
+  useEffect(() => {
+    if (!editPageOpen || activeTab === 'documents' || activeTab === 'court'
+      || (activeTab === 'workOrder' && externalApprovalAvailable)) return;
+    let cancelled = false;
+    void apiService.getCaseDocuments(caseId)
+      .then((items) => { if (!cancelled) setDocuments(items); })
+      .catch(() => { if (!cancelled) setDocuments([]); });
+    return () => { cancelled = true; };
+  }, [activeTab, caseId, editPageOpen, externalApprovalAvailable]);
 
   useEffect(() => {
     if (activeTab !== 'court' && activeTab !== 'documents') return;
@@ -3818,6 +3830,7 @@ export function CaseDetailPage({
       <CaseEditPage
         caseItem={caseItem}
         draft={caseEditDraft}
+        documents={documents}
         responsibles={responsibles}
         saving={savingCaseEdit}
         error={error}
@@ -3825,6 +3838,7 @@ export function CaseDetailPage({
         onBack={closeCaseEditPage}
         onChange={setCaseEditDraft}
         onSave={() => void saveCaseFromPage()}
+        onWritUploaded={async () => setDocuments(await apiService.getCaseDocuments(caseItem.id))}
       />
     );
   }
@@ -4685,6 +4699,7 @@ export function CaseDetailPage({
 function CaseEditPage({
   caseItem,
   draft,
+  documents,
   responsibles,
   saving,
   error,
@@ -4692,9 +4707,11 @@ function CaseEditPage({
   onBack,
   onChange,
   onSave,
+  onWritUploaded,
 }: {
   caseItem: ClientCase;
   draft: CaseEditDraft;
+  documents: ClientCaseDocument[];
   responsibles: ActResponsible[];
   saving: boolean;
   error: string | null;
@@ -4702,6 +4719,7 @@ function CaseEditPage({
   onBack: () => void;
   onChange: (draft: CaseEditDraft) => void;
   onSave: () => void;
+  onWritUploaded: () => Promise<void>;
 }) {
   const setField = <K extends keyof CaseEditDraft>(key: K, value: CaseEditDraft[K]) => {
     onChange({ ...draft, [key]: value });
@@ -4940,7 +4958,7 @@ function CaseEditPage({
             <label className="text-sm font-medium text-slate-700">Иск подан<SystemDateInput type="date" value={draft.claimFiledAt} onChange={(event) => setField('claimFiledAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /></label>
             <label className="text-sm font-medium text-slate-700">Решение суда<SystemDateInput type="date" value={draft.courtDecisionAt} onChange={(event) => setField('courtDecisionAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /></label>
             <label className="text-sm font-medium text-slate-700">Решение вступило в силу<SystemDateInput aria-label="Дата вступления решения в силу" type="date" value={draft.courtDecisionEffectiveAt} onChange={(event) => setField('courtDecisionEffectiveAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /><span className="mt-1 block text-xs font-normal text-slate-500">Дата указывается вручную; CRM её не рассчитывает.</span></label>
-            <label className="text-sm font-medium text-slate-700">Исполнительный лист получен<SystemDateInput aria-label="Дата получения исполнительного листа" type="date" value={draft.executiveWritReceivedAt} onChange={(event) => setField('executiveWritReceivedAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /></label>
+            <div><label className="text-sm font-medium text-slate-700">Исполнительный лист получен<SystemDateInput aria-label="Дата получения исполнительного листа" type="date" value={draft.executiveWritReceivedAt} onChange={(event) => setField('executiveWritReceivedAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /></label><div className="mt-2"><ExecutiveWritDocumentUpload caseId={caseItem.id} canUpload documents={documents} onUploaded={onWritUploaded} /></div></div>
             <label className="text-sm font-medium text-slate-700">Апелляция<SystemDateInput type="date" value={draft.appealDeadlineAt} onChange={(event) => setField('appealDeadlineAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /></label>
             <label className="text-sm font-medium text-slate-700">Кассация<SystemDateInput type="date" value={draft.cassationDeadlineAt} onChange={(event) => setField('cassationDeadlineAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /></label>
             <label className="text-sm font-medium text-slate-700">Возражения<SystemDateInput type="date" value={draft.objectionDeadlineAt} onChange={(event) => setField('objectionDeadlineAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /></label>

@@ -3,6 +3,7 @@ import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
 import { CaseAppealDecisionAction } from '../Cases/CaseAppealDecisionAction';
 import { CasePreHearingActions } from '../Cases/CasePreHearingActions';
+import { ExecutiveWritDocumentUpload } from '../Cases/ExecutiveWritDocumentUpload';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Download, ExternalLink, FileText, Link2, Plus, RotateCw, Trash2, Upload, X } from 'lucide-react';
@@ -55,6 +56,7 @@ const DOCUMENT_TYPE_OPTIONS = [
   'Ходатайство',
   'Возражение',
   'Решение суда',
+  'Исполнительный лист',
   'Переписка',
   'Доказательства',
   'Другое',
@@ -1776,6 +1778,7 @@ export function CaseModal({
               onChange={(e) => setExecutiveWritReceivedAt(e.target.value)}
               disabled={saving}
             />
+            <div className="mt-2"><ExecutiveWritDocumentUpload caseId={caseData.id} canUpload={allowEdit} documents={caseDocuments} onUploaded={refreshDocuments} /></div>
           </div>
 
           <div>

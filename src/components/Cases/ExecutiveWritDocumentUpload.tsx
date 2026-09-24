@@ -1,0 +1,59 @@
+import { useState } from 'react';
+import { Loader2, UploadCloud } from 'lucide-react';
+
+import { apiService } from '../../services/api';
+import type { ClientCaseDocument } from '../../types';
+import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+
+export const EXECUTIVE_WRIT_DOCUMENT_TYPE = 'Исполнительный лист';
+
+interface ExecutiveWritDocumentUploadProps {
+  caseId: number;
+  canUpload: boolean;
+  documents: ClientCaseDocument[];
+  onUploaded: () => Promise<void> | void;
+}
+
+export function ExecutiveWritDocumentUpload({ caseId, canUpload, documents, onUploaded }: ExecutiveWritDocumentUploadProps) {
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const scans = documents.filter((document) => document.documentType?.trim() === EXECUTIVE_WRIT_DOCUMENT_TYPE && document.isLatestVersion !== false);
+
+  const upload = async (file: File | null, input: HTMLInputElement) => {
+    if (!file || uploading || !canUpload || caseId <= 0) return;
+    setUploading(true);
+    setError(null);
+    try {
+      await apiService.uploadCaseDocument(caseId, file, {
+        documentType: EXECUTIVE_WRIT_DOCUMENT_TYPE,
+        status: 'Получен',
+      });
+    } catch (uploadError) {
+      setError(extractDisplayErrorMessage(uploadError, 'Не удалось загрузить скан исполнительного листа.'));
+      input.value = '';
+      setUploading(false);
+      return;
+    }
+    try {
+      await onUploaded();
+    } catch {
+      setError('Скан загружен, но список документов не обновился. Проверьте его перед повторной загрузкой.');
+    } finally {
+      input.value = '';
+      setUploading(false);
+    }
+  };
+
+  return <div className="rounded-lg border border-blue-100 bg-blue-50/40 p-2.5 text-xs text-slate-700">
+    <div className="font-semibold text-slate-800">Скан исполнительного листа</div>
+    {scans.length > 0 ? <ul className="mt-1 space-y-0.5">{scans.map((document) => <li key={document.id} className="truncate" title={document.originalFileName}>{document.originalFileName}</li>)}</ul>
+      : <p className="mt-1 text-slate-500">Скан пока не прикреплён.</p>}
+    {canUpload && caseId > 0 ? <label className="mt-2 inline-flex cursor-pointer items-center gap-1 rounded-md border border-blue-200 bg-white px-2 py-1.5 font-semibold text-blue-700 hover:bg-blue-50">
+      {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UploadCloud className="h-3.5 w-3.5" />}
+      {uploading ? 'Загружаем...' : 'Добавить скан'}
+      <input aria-label="Загрузить скан исполнительного листа" type="file" accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff" disabled={uploading} onChange={(event) => void upload(event.currentTarget.files?.[0] ?? null, event.currentTarget)} className="sr-only" />
+    </label> : caseId <= 0 ? <p className="mt-1 text-slate-500">Сначала сохраните дело.</p> : null}
+    <p className="mt-1 text-slate-500">Файл сохранится в документах дела с типом «Исполнительный лист».</p>
+    {error ? <p role="alert" className="mt-1 text-rose-700">{error}</p> : null}
+  </div>;
+}
