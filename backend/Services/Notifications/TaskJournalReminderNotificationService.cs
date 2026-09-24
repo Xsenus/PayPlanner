@@ -23,6 +23,9 @@ public sealed class TaskJournalReminderNotificationService : BackgroundService
     private readonly ILogger<TaskJournalReminderNotificationService> _logger;
     private readonly ISystemJobRunStateService? _jobRunState;
     private readonly SemaphoreSlim _runLock = new(1, 1);
+    private int _lastCaseDeadlineSyncId;
+    private DateTime? _lastReminderDueAt;
+    private int _lastReminderTaskId;
 
     public TaskJournalReminderNotificationService(
         IServiceScopeFactory scopeFactory,
@@ -106,7 +109,9 @@ public sealed class TaskJournalReminderNotificationService : BackgroundService
                 await realtimePublisher.PublishTaskJournalChangedAsync(cancellationToken);
             }
 
-            var tasks = await context.TaskJournalItems
+            var reminderBatchSize = Math.Clamp(
+                _configuration.GetValue("Notifications:TaskReminders:BatchSize", 500), 1, 500);
+            var eligibleTasks = context.TaskJournalItems
                 .AsNoTracking()
                 .Include(task => task.Participants)
                     .ThenInclude(participant => participant.User)
@@ -117,10 +122,25 @@ public sealed class TaskJournalReminderNotificationService : BackgroundService
                     && (task.DueAt <= nowUtc.AddDays(7)
                         || (task.ApprovalDueAt.HasValue
                             && task.ApprovalDueAt <= nowUtc
-                            && (task.Status == "onApproval" || task.Status == "overdueApproval"))))
+                            && (task.Status == "onApproval" || task.Status == "overdueApproval"))));
+            var tasks = await eligibleTasks
+                .Where(task => !_lastReminderDueAt.HasValue
+                    || task.DueAt > _lastReminderDueAt.Value
+                    || task.DueAt == _lastReminderDueAt.Value && task.Id > _lastReminderTaskId)
                 .OrderBy(task => task.DueAt)
-                .Take(500)
+                .ThenBy(task => task.Id)
+                .Take(reminderBatchSize)
                 .ToListAsync(cancellationToken);
+            if (tasks.Count == 0 && _lastReminderDueAt.HasValue)
+            {
+                _lastReminderDueAt = null;
+                _lastReminderTaskId = 0;
+                tasks = await eligibleTasks
+                    .OrderBy(task => task.DueAt)
+                    .ThenBy(task => task.Id)
+                    .Take(reminderBatchSize)
+                    .ToListAsync(cancellationToken);
+            }
             if (tasks.Count == 0)
             {
                 return 0;
@@ -172,6 +192,9 @@ public sealed class TaskJournalReminderNotificationService : BackgroundService
                 }
             }
 
+            _lastReminderDueAt = tasks[^1].DueAt;
+            _lastReminderTaskId = tasks[^1].Id;
+
             return sent;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -206,7 +229,7 @@ public sealed class TaskJournalReminderNotificationService : BackgroundService
             500);
         var fromUtc = nowUtc.AddDays(-1);
         var toUtc = nowUtc.AddDays(lookAheadDays);
-        var caseIds = await context.ClientCases
+        var upcomingCases = context.ClientCases
             .AsNoTracking()
             .Where(clientCase =>
                 clientCase.Status != ClientCaseStatus.Closed &&
@@ -222,12 +245,22 @@ public sealed class TaskJournalReminderNotificationService : BackgroundService
                      deadline.Status != "cancelled" &&
                      deadline.Status != "archived" &&
                      deadline.DueAt >= fromUtc &&
-                     deadline.DueAt <= toUtc)))
+                     deadline.DueAt <= toUtc)));
+        var caseIds = await upcomingCases
+            .Where(clientCase => clientCase.Id > _lastCaseDeadlineSyncId)
             .OrderBy(clientCase => clientCase.Id)
             .Select(clientCase => clientCase.Id)
             .Take(batchSize)
             .ToListAsync(cancellationToken);
-
+        if (caseIds.Count == 0 && _lastCaseDeadlineSyncId > 0)
+        {
+            _lastCaseDeadlineSyncId = 0;
+            caseIds = await upcomingCases
+                .OrderBy(clientCase => clientCase.Id)
+                .Select(clientCase => clientCase.Id)
+                .Take(batchSize)
+                .ToListAsync(cancellationToken);
+        }
         var taskJournalChanged = false;
         foreach (var caseId in caseIds)
         {
@@ -238,6 +271,11 @@ public sealed class TaskJournalReminderNotificationService : BackgroundService
                 actorName: "Система",
                 cancellationToken);
             context.ChangeTracker.Clear();
+        }
+
+        if (caseIds.Count > 0)
+        {
+            _lastCaseDeadlineSyncId = caseIds[^1];
         }
 
         return taskJournalChanged;

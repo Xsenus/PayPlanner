@@ -2020,6 +2020,108 @@ public class SystemJobsControllerTests
     }
 
     [Fact]
+    public async Task TaskReminderService_BackfillsCasesBeyondFirstBatchOnLaterRuns()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var now = DateTime.UtcNow;
+        var role = new Role { Name = $"paged-deadline-role-{Guid.NewGuid():N}", Description = "Deadline role" };
+        scope.Db.Roles.Add(role);
+        await scope.Db.SaveChangesAsync();
+        var responsible = new User
+        {
+            Email = $"paged-deadline-user-{Guid.NewGuid():N}@example.com",
+            FullName = "Deadline Owner",
+            PasswordHash = "hash",
+            RoleId = role.Id,
+            IsApproved = true,
+            IsActive = true,
+        };
+        var client = new Client { Name = "Paged deadline client" };
+        scope.Db.Users.Add(responsible);
+        scope.Db.Clients.Add(client);
+        await scope.Db.SaveChangesAsync();
+        scope.Db.ClientCases.AddRange(
+            new ClientCase { ClientId = client.Id, ResponsibleUserId = responsible.Id, CaseNumber = "PAGED-1", Title = "First case", Status = ClientCaseStatus.Open, DueDate = now.AddDays(8) },
+            new ClientCase { ClientId = client.Id, ResponsibleUserId = responsible.Id, CaseNumber = "PAGED-2", Title = "Second case", Status = ClientCaseStatus.Open, DueDate = now.AddDays(8) });
+        await scope.Db.SaveChangesAsync();
+
+        var services = new ServiceCollection();
+        services.AddScoped(_ => new PaymentContext(scope.Options, useObjectAuditModel: false));
+        await using var provider = services.BuildServiceProvider();
+        var service = new TaskJournalReminderNotificationService(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Notifications:TaskReminders:DeadlineSyncLookAheadDays"] = "14",
+                    ["Notifications:TaskReminders:DeadlineSyncBatchSize"] = "1",
+                })
+                .Build(),
+            NullLogger<TaskJournalReminderNotificationService>.Instance);
+
+        Assert.Equal(0, await service.RunOnceAsync(CancellationToken.None));
+        scope.Db.ChangeTracker.Clear();
+        Assert.Equal(1, await scope.Db.TaskJournalItems.CountAsync(task => task.TagsJson.Contains("case-deadline:due")));
+
+        Assert.Equal(0, await service.RunOnceAsync(CancellationToken.None));
+        scope.Db.ChangeTracker.Clear();
+        Assert.Equal(2, await scope.Db.TaskJournalItems.CountAsync(task => task.TagsJson.Contains("case-deadline:due")));
+
+        Assert.Equal(0, await service.RunOnceAsync(CancellationToken.None));
+        scope.Db.ChangeTracker.Clear();
+        Assert.Equal(2, await scope.Db.TaskJournalItems.CountAsync(task => task.TagsJson.Contains("case-deadline:due")));
+    }
+
+    [Fact]
+    public async Task TaskReminderService_ProcessesRemindersBeyondFirstBatchOnLaterRuns()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var role = new Role { Name = $"paged-reminder-role-{Guid.NewGuid():N}", Description = "Reminder role" };
+        scope.Db.Roles.Add(role);
+        await scope.Db.SaveChangesAsync();
+        var assignee = new User
+        {
+            Email = $"paged-reminder-user-{Guid.NewGuid():N}@example.com",
+            FullName = "Reminder Owner",
+            PasswordHash = "hash",
+            RoleId = role.Id,
+            IsApproved = true,
+            IsActive = true,
+        };
+        scope.Db.Users.Add(assignee);
+        await scope.Db.SaveChangesAsync();
+        var now = DateTime.UtcNow;
+        scope.Db.TaskJournalItems.AddRange(
+            new TaskJournalItem { ObjectName = "PAGED-1", Title = "First reminder", AssigneeUserId = assignee.Id, AssigneeName = assignee.FullName, DueAt = now.AddMinutes(10), RemindersJson = "[\"before15m\"]", ChannelsJson = "[\"inApp\"]", Status = "new" },
+            new TaskJournalItem { ObjectName = "PAGED-2", Title = "Second reminder", AssigneeUserId = assignee.Id, AssigneeName = assignee.FullName, DueAt = now.AddMinutes(11), RemindersJson = "[\"before15m\"]", ChannelsJson = "[\"inApp\"]", Status = "new" });
+        await scope.Db.SaveChangesAsync();
+        var taskIds = await scope.Db.TaskJournalItems
+            .Where(task => task.ObjectName == "PAGED-1" || task.ObjectName == "PAGED-2")
+            .OrderBy(task => task.DueAt)
+            .Select(task => task.Id)
+            .ToArrayAsync();
+
+        var notificationService = new RecordingTaskReminderNotificationService();
+        var services = new ServiceCollection();
+        services.AddScoped(_ => new PaymentContext(scope.Options, useObjectAuditModel: false));
+        services.AddSingleton<INotificationService>(notificationService);
+        await using var provider = services.BuildServiceProvider();
+        var service = new TaskJournalReminderNotificationService(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Notifications:TaskReminders:BatchSize"] = "1",
+                })
+                .Build(),
+            NullLogger<TaskJournalReminderNotificationService>.Instance);
+
+        Assert.Equal(1, await service.RunOnceAsync(CancellationToken.None));
+        Assert.Equal(1, await service.RunOnceAsync(CancellationToken.None));
+        Assert.Equal(taskIds, notificationService.Reminders.Select(reminder => reminder.TaskId));
+    }
+
+    [Fact]
     public async Task TaskReminderService_ForPretrialCasesBackfillsOnlyInternalCaseDeadline()
     {
         await using var scope = await CreateDbScopeAsync();
