@@ -518,6 +518,12 @@ export interface ClientCase {
   priority?: string | null;
   courtName?: string | null;
   ourCourtRole?: 'claimant' | 'respondent' | 'third-party' | '' | null;
+  courtClaimAmount?: number | null;
+  courtAwardedAmount?: number | null;
+  courtStateFeeAmount?: number | null;
+  clearCourtClaimAmount?: boolean;
+  clearCourtAwardedAmount?: boolean;
+  clearCourtStateFeeAmount?: boolean;
   courtCaseNumber?: string | null;
   judicialUid?: string | null;
   courtUrl?: string | null;

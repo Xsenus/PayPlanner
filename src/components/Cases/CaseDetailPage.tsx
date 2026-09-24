@@ -73,6 +73,7 @@ import type {
 import { toRuDate } from '../../utils/dateUtils';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { formatCurrencySmart } from '../../utils/formatters';
+import { courtAmountToInput, hasInvalidCourtAmounts, parseCourtAmountInput } from '../../utils/courtAmounts';
 import { buildCaseTaskPayload, getCaseStageTaskTemplates, isPretrialCaseStage, type CaseStageTaskTemplate } from '../../utils/caseTaskPayload';
 import { buildCourtCaseProcessSummary, type CourtProcessSummaryTone } from '../../utils/courtCaseSummary';
 import { formatDateTimeInTimeZone, fromTimeZoneDateTimeInput, getEffectiveScheduleTime, toTimeZoneDateKey, toTimeZoneDateTimeInput } from '../../utils/timeZoneDate';
@@ -173,6 +174,9 @@ interface CaseEditDraft {
   startDate: string;
   dueDate: string;
   feeAmount: string;
+  courtClaimAmount: string;
+  courtAwardedAmount: string;
+  courtStateFeeAmount: string;
   priority: string;
   courtName: string;
   courtCaseNumber: string;
@@ -1216,6 +1220,9 @@ function buildCaseEditDraft(caseItem: ClientCase): CaseEditDraft {
     startDate: toDateInput(caseItem.startDate),
     dueDate: toDateInput(caseItem.dueDate),
     feeAmount: typeof caseItem.feeAmount === 'number' ? String(caseItem.feeAmount) : '',
+    courtClaimAmount: courtAmountToInput(caseItem.courtClaimAmount),
+    courtAwardedAmount: courtAmountToInput(caseItem.courtAwardedAmount),
+    courtStateFeeAmount: courtAmountToInput(caseItem.courtStateFeeAmount),
     priority: caseItem.priority ?? 'normal',
     courtName: caseItem.courtName ?? '',
     ourCourtRole: caseItem.ourCourtRole ?? '',
@@ -1262,6 +1269,12 @@ function buildCasePatchFromEditDraft(draft: CaseEditDraft): Partial<ClientCase> 
     startDate: fromDateInput(draft.startDate),
     dueDate: fromDateInput(draft.dueDate),
     feeAmount: Number(draft.feeAmount.replace(',', '.')) || 0,
+    courtClaimAmount: parseCourtAmountInput(draft.courtClaimAmount),
+    courtAwardedAmount: parseCourtAmountInput(draft.courtAwardedAmount),
+    courtStateFeeAmount: parseCourtAmountInput(draft.courtStateFeeAmount),
+    clearCourtClaimAmount: !draft.courtClaimAmount.trim(),
+    clearCourtAwardedAmount: !draft.courtAwardedAmount.trim(),
+    clearCourtStateFeeAmount: !draft.courtStateFeeAmount.trim(),
     priority: draft.priority,
     courtName: draft.courtName.trim(),
     ourCourtRole: draft.ourCourtRole,
@@ -1314,6 +1327,12 @@ function buildCaseUpdatePayload(base: ClientCase, patch: Partial<ClientCase>): O
     startDate: patch.startDate ?? base.startDate ?? null,
     dueDate: patch.dueDate ?? base.dueDate ?? null,
     feeAmount: patch.feeAmount ?? base.feeAmount ?? 0,
+    courtClaimAmount: patch.courtClaimAmount !== undefined ? patch.courtClaimAmount : base.courtClaimAmount ?? null,
+    courtAwardedAmount: patch.courtAwardedAmount !== undefined ? patch.courtAwardedAmount : base.courtAwardedAmount ?? null,
+    courtStateFeeAmount: patch.courtStateFeeAmount !== undefined ? patch.courtStateFeeAmount : base.courtStateFeeAmount ?? null,
+    clearCourtClaimAmount: patch.clearCourtClaimAmount ?? false,
+    clearCourtAwardedAmount: patch.clearCourtAwardedAmount ?? false,
+    clearCourtStateFeeAmount: patch.clearCourtStateFeeAmount ?? false,
     priority: patch.priority ?? base.priority ?? 'normal',
     courtName: patch.courtName ?? base.courtName ?? '',
     ourCourtRole: patch.ourCourtRole ?? base.ourCourtRole ?? '',
@@ -2464,6 +2483,10 @@ export function CaseDetailPage({
     if (!caseItem || !caseEditDraft) return;
     if (!caseEditDraft.title.trim()) {
       setError('Введите название дела.');
+      return;
+    }
+    if (hasInvalidCourtAmounts(caseEditDraft.courtClaimAmount, caseEditDraft.courtAwardedAmount, caseEditDraft.courtStateFeeAmount)) {
+      setError('Судебные суммы укажите неотрицательным числом с точностью до копеек.');
       return;
     }
     if (!caseEditDraft.inactivityRemindersEnabled &&
@@ -4040,6 +4063,11 @@ export function CaseDetailPage({
                 ['Представители', caseItem.representatives || '—'],
                 ['Судья', caseItem.judgeName || '—'],
               ]} />
+              <InfoSection title="Судебные суммы" rows={[
+                ['Сумма иска', caseItem.courtClaimAmount == null ? '—' : formatCurrencySmart(caseItem.courtClaimAmount)],
+                ['Взыскано судом', caseItem.courtAwardedAmount == null ? '—' : formatCurrencySmart(caseItem.courtAwardedAmount)],
+                ['Госпошлина', caseItem.courtStateFeeAmount == null ? '—' : formatCurrencySmart(caseItem.courtStateFeeAmount)],
+              ]} />
               <TextBlock title="Стратегия" value={caseItem.strategy || 'Стратегия по делу пока не заполнена.'} />
               <section className="rounded-xl border border-slate-200 bg-white p-3">
                 <h2 className="text-sm font-semibold text-slate-900">Проверка позиции по делу</h2>
@@ -4888,6 +4916,22 @@ function CaseEditPage({
               <input value={draft.courtSecretaryContacts} onChange={(event) => setField('courtSecretaryContacts', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" />
             </label>
           </div>
+        </section>
+
+        <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+          <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Судебные суммы</h2>
+          <div className="mt-3 grid gap-3 md:grid-cols-3">
+            <label className="text-sm font-medium text-slate-700">Сумма иска, ₽
+              <input aria-label="Сумма иска" inputMode="decimal" value={draft.courtClaimAmount} onChange={(event) => setField('courtClaimAmount', event.target.value)} placeholder="Не указана" className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" />
+            </label>
+            <label className="text-sm font-medium text-slate-700">Взыскано судом, ₽
+              <input aria-label="Взыскано судом" inputMode="decimal" value={draft.courtAwardedAmount} onChange={(event) => setField('courtAwardedAmount', event.target.value)} placeholder="Не указано" className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" />
+            </label>
+            <label className="text-sm font-medium text-slate-700">Госпошлина, ₽
+              <input aria-label="Госпошлина по делу" inputMode="decimal" value={draft.courtStateFeeAmount} onChange={(event) => setField('courtStateFeeAmount', event.target.value)} placeholder="Не указана" className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" />
+            </label>
+          </div>
+          <p className="mt-2 text-xs text-slate-500">Заполняется вручную; не влияет на гонорар и счета клиента. Пустое поле означает «не указано».</p>
         </section>
 
         <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -7213,6 +7257,9 @@ function CourtPanel({
                   ['Суд', overviewInstance?.courtName || caseItem.courtName || '—'],
                   ['Судья', overviewInstance?.judgeName || caseItem.judgeName || '—'],
                   ['Наша роль', caseItem.ourCourtRole === 'claimant' ? 'Истец' : caseItem.ourCourtRole === 'respondent' ? 'Ответчик' : caseItem.ourCourtRole === 'third-party' ? 'Третье лицо' : 'Не указана'],
+                  ['Сумма иска', caseItem.courtClaimAmount == null ? '—' : formatCurrencySmart(caseItem.courtClaimAmount)],
+                  ['Взыскано судом', caseItem.courtAwardedAmount == null ? '—' : formatCurrencySmart(caseItem.courtAwardedAmount)],
+                  ['Госпошлина', caseItem.courtStateFeeAmount == null ? '—' : formatCurrencySmart(caseItem.courtStateFeeAmount)],
                   ['Ближайшее заседание', formatRuDateTime(caseItem.nextHearingAt) || 'Не назначено'],
                   ['Истец / заявитель', caseItem.claimant || '—'],
                   ['ИНН / ОГРН истца', [caseItem.claimantInn, caseItem.claimantOgrn].filter(Boolean).join(' / ') || '—'],

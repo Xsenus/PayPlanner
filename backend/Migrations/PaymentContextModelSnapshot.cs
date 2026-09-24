@@ -1302,10 +1302,18 @@ namespace PayPlanner.Api.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
+                    b.Property<decimal?>("CourtAwardedAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
                     b.Property<string>("CourtCaseNumber")
                         .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("TEXT");
+
+                    b.Property<decimal?>("CourtClaimAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
 
                     b.Property<DateTime?>("CourtDecisionAt")
                         .HasColumnType("TEXT");
@@ -1322,6 +1330,10 @@ namespace PayPlanner.Api.Migrations
                         .IsRequired()
                         .HasMaxLength(500)
                         .HasColumnType("TEXT");
+
+                    b.Property<decimal?>("CourtStateFeeAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
 
                     b.Property<DateTime?>("CourtSyncFailureStartedAt")
                         .HasColumnType("TEXT");

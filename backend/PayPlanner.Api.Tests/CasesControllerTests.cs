@@ -73,6 +73,42 @@ public class CasesControllerTests
     }
 
     [Fact]
+    public async Task LegacyCaseEdit_SavesCourtAmountsAndPreservesThemForOlderClients()
+    {
+        await using var db = await CreateContextAsync();
+        var lawyer = await CreateUserAsync(db, "legacy-court-amounts@example.com");
+        var clientCase = await CreateCaseAsync(db, lawyer.Id, "Судебное дело");
+        var controller = CreateController(db, lawyer);
+
+        Assert.IsType<BadRequestObjectResult>(await controller.Update(clientCase.Id, new ClientCase
+        {
+            ClientId = clientCase.ClientId, Title = clientCase.Title,
+            CourtClaimAmount = -1m,
+        }, CancellationToken.None));
+        Assert.IsType<OkObjectResult>(await controller.Update(clientCase.Id, new ClientCase
+        {
+            ClientId = clientCase.ClientId, Title = clientCase.Title,
+            CourtClaimAmount = 120000m, CourtAwardedAmount = 50000.75m,
+            CourtStateFeeAmount = 3000m, OurCourtRole = "claimant",
+        }, CancellationToken.None));
+        Assert.IsType<OkObjectResult>(await controller.Update(clientCase.Id, new ClientCase
+        {
+            ClientId = clientCase.ClientId, Title = clientCase.Title,
+            ClearCourtAwardedAmount = true,
+        }, CancellationToken.None));
+        Assert.IsType<OkObjectResult>(await controller.Update(clientCase.Id, new ClientCase
+        {
+            ClientId = clientCase.ClientId, Title = "Старый клиент",
+        }, CancellationToken.None));
+
+        await db.Entry(clientCase).ReloadAsync();
+        Assert.Equal(120000m, clientCase.CourtClaimAmount);
+        Assert.Null(clientCase.CourtAwardedAmount);
+        Assert.Equal(3000m, clientCase.CourtStateFeeAmount);
+        Assert.Equal("claimant", clientCase.OurCourtRole);
+    }
+
+    [Fact]
     public async Task LegacyCaseEdit_PreservesPositionReviewUntilPositionChanges()
     {
         await using var db = await CreateContextAsync();

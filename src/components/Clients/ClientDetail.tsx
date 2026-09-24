@@ -5192,6 +5192,13 @@ export function ClientDetail({
       feeAmount: patch.feeAmount ?? editingCase?.feeAmount ?? 0,
       priority: patch.priority ?? editingCase?.priority ?? "normal",
       courtName: (patch.courtName ?? editingCase?.courtName ?? "").trim(),
+      ourCourtRole: patch.ourCourtRole ?? editingCase?.ourCourtRole ?? '',
+      courtClaimAmount: patch.courtClaimAmount !== undefined ? patch.courtClaimAmount : editingCase?.courtClaimAmount ?? null,
+      courtAwardedAmount: patch.courtAwardedAmount !== undefined ? patch.courtAwardedAmount : editingCase?.courtAwardedAmount ?? null,
+      courtStateFeeAmount: patch.courtStateFeeAmount !== undefined ? patch.courtStateFeeAmount : editingCase?.courtStateFeeAmount ?? null,
+      clearCourtClaimAmount: patch.clearCourtClaimAmount ?? false,
+      clearCourtAwardedAmount: patch.clearCourtAwardedAmount ?? false,
+      clearCourtStateFeeAmount: patch.clearCourtStateFeeAmount ?? false,
       courtCaseNumber: (
         patch.courtCaseNumber ??
         editingCase?.courtCaseNumber ??
@@ -5202,6 +5209,28 @@ export function ClientDetail({
         patch.nextHearingAt === undefined
           ? editingCase?.nextHearingAt ?? null
           : patch.nextHearingAt,
+      claimant: patch.claimant ?? editingCase?.claimant ?? '',
+      claimantInn: patch.claimantInn ?? editingCase?.claimantInn ?? '',
+      claimantOgrn: patch.claimantOgrn ?? editingCase?.claimantOgrn ?? '',
+      defendant: patch.defendant ?? editingCase?.defendant ?? '',
+      defendantInn: patch.defendantInn ?? editingCase?.defendantInn ?? '',
+      defendantOgrn: patch.defendantOgrn ?? editingCase?.defendantOgrn ?? '',
+      thirdParties: patch.thirdParties ?? editingCase?.thirdParties ?? '',
+      representatives: patch.representatives ?? editingCase?.representatives ?? '',
+      judgeName: patch.judgeName ?? editingCase?.judgeName ?? '',
+      courtroom: patch.courtroom ?? editingCase?.courtroom ?? '',
+      courtSecretaryContacts: patch.courtSecretaryContacts ?? editingCase?.courtSecretaryContacts ?? '',
+      claimFiledAt: patch.claimFiledAt ?? editingCase?.claimFiledAt ?? null,
+      courtDecisionAt: patch.courtDecisionAt ?? editingCase?.courtDecisionAt ?? null,
+      courtDecisionEffectiveAt: patch.courtDecisionEffectiveAt ?? editingCase?.courtDecisionEffectiveAt ?? null,
+      executiveWritReceivedAt: patch.executiveWritReceivedAt ?? editingCase?.executiveWritReceivedAt ?? null,
+      appealDeadlineAt: patch.appealDeadlineAt ?? editingCase?.appealDeadlineAt ?? null,
+      cassationDeadlineAt: patch.cassationDeadlineAt ?? editingCase?.cassationDeadlineAt ?? null,
+      motionDeadlineAt: patch.motionDeadlineAt ?? editingCase?.motionDeadlineAt ?? null,
+      objectionDeadlineAt: patch.objectionDeadlineAt ?? editingCase?.objectionDeadlineAt ?? null,
+      documentsSummary: patch.documentsSummary ?? editingCase?.documentsSummary ?? '',
+      eventHistory: patch.eventHistory ?? editingCase?.eventHistory ?? '',
+      strategy: patch.strategy ?? editingCase?.strategy ?? '',
     };
 
     if (caseMode === "edit" && editingCase) {

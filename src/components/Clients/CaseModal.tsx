@@ -10,6 +10,7 @@ import type { ActResponsible, ClientCase, ClientCaseActivity, ClientCaseDocument
 import { useDialog } from '../../hooks/useDialog';
 import { apiService, type ContactDirectoryItemDto } from '../../services/api';
 import { formatCurrencySmart } from '../../utils/formatters';
+import { courtAmountToInput, hasInvalidCourtAmounts, parseCourtAmountInput } from '../../utils/courtAmounts';
 import { formatDateTimeInTimeZone, fromTimeZoneDateTimeInput, toTimeZoneDateTimeInput } from '../../utils/timeZoneDate';
 import { normalizeUserTimeZoneId, USER_TIME_ZONE_SETTING_KEY } from '../../utils/timeZoneOptions';
 import type { TaskJournalItem, TaskJournalPriority, TaskJournalStatus } from '../../utils/taskJournalStore';
@@ -276,6 +277,9 @@ export function CaseModal({
   const [startDate, setStartDate] = useState(toDateInput(caseData.startDate));
   const [dueDate, setDueDate] = useState(toDateInput(caseData.dueDate));
   const [feeAmount, setFeeAmount] = useState(toAmount(caseData.feeAmount));
+  const [courtClaimAmount, setCourtClaimAmount] = useState(courtAmountToInput(caseData.courtClaimAmount));
+  const [courtAwardedAmount, setCourtAwardedAmount] = useState(courtAmountToInput(caseData.courtAwardedAmount));
+  const [courtStateFeeAmount, setCourtStateFeeAmount] = useState(courtAmountToInput(caseData.courtStateFeeAmount));
   const [priority, setPriority] = useState(caseData.priority ?? 'normal');
   const [courtName, setCourtName] = useState(caseData.courtName ?? '');
   const [courtCaseNumber, setCourtCaseNumber] = useState(caseData.courtCaseNumber ?? '');
@@ -412,6 +416,9 @@ export function CaseModal({
     setStartDate(toDateInput(caseData.startDate));
     setDueDate(toDateInput(caseData.dueDate));
     setFeeAmount(toAmount(caseData.feeAmount));
+    setCourtClaimAmount(courtAmountToInput(caseData.courtClaimAmount));
+    setCourtAwardedAmount(courtAmountToInput(caseData.courtAwardedAmount));
+    setCourtStateFeeAmount(courtAmountToInput(caseData.courtStateFeeAmount));
     setPriority(caseData.priority ?? 'normal');
     setCourtName(caseData.courtName ?? '');
     setCourtCaseNumber(caseData.courtCaseNumber ?? '');
@@ -703,6 +710,7 @@ export function CaseModal({
 
   const validate = (): string | null => {
     if (!title.trim()) return 'Введите название дела';
+    if (hasInvalidCourtAmounts(courtClaimAmount, courtAwardedAmount, courtStateFeeAmount)) return 'Судебные суммы укажите неотрицательным числом с точностью до копеек.';
     return null;
   };
 
@@ -771,6 +779,12 @@ export function CaseModal({
         ...(canViewFinance ? { feeAmount: Number(feeAmount.replace(',', '.')) || 0 } : {}),
         priority,
         courtName: courtName.trim(),
+        courtClaimAmount: parseCourtAmountInput(courtClaimAmount),
+        courtAwardedAmount: parseCourtAmountInput(courtAwardedAmount),
+        courtStateFeeAmount: parseCourtAmountInput(courtStateFeeAmount),
+        clearCourtClaimAmount: !courtClaimAmount.trim(),
+        clearCourtAwardedAmount: !courtAwardedAmount.trim(),
+        clearCourtStateFeeAmount: !courtStateFeeAmount.trim(),
         courtCaseNumber: courtCaseNumber.trim(),
         courtUrl: courtUrl.trim(),
         nextHearingAt: fromDateTimeInput(nextHearingAt),
@@ -1436,6 +1450,19 @@ export function CaseModal({
               placeholder="Юристы, доверенности, контакты"
               disabled={saving}
             />
+          </div>
+
+          <div className="md:col-span-2 grid gap-3 rounded-xl border border-slate-200 bg-slate-50/60 p-3 sm:grid-cols-3">
+            <label className="text-sm text-gray-600">Сумма иска, ₽
+              <input aria-label="Сумма иска" inputMode="decimal" value={courtClaimAmount} onChange={(event) => setCourtClaimAmount(event.target.value)} disabled={saving || !allowEdit} className="mt-1 w-full rounded-lg border px-3 py-2" placeholder="Не указана" />
+            </label>
+            <label className="text-sm text-gray-600">Взыскано судом, ₽
+              <input aria-label="Взыскано судом" inputMode="decimal" value={courtAwardedAmount} onChange={(event) => setCourtAwardedAmount(event.target.value)} disabled={saving || !allowEdit} className="mt-1 w-full rounded-lg border px-3 py-2" placeholder="Не указано" />
+            </label>
+            <label className="text-sm text-gray-600">Госпошлина, ₽
+              <input aria-label="Госпошлина по делу" inputMode="decimal" value={courtStateFeeAmount} onChange={(event) => setCourtStateFeeAmount(event.target.value)} disabled={saving || !allowEdit} className="mt-1 w-full rounded-lg border px-3 py-2" placeholder="Не указана" />
+            </label>
+            <p className="text-xs text-slate-500 sm:col-span-3">Судебные суммы заполняются вручную и не влияют на гонорар или счета клиента.</p>
           </div>
 
           <div className="md:col-span-2 rounded-xl border border-slate-200 bg-slate-50/60 p-4">

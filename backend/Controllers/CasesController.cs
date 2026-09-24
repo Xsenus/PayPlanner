@@ -104,6 +104,7 @@ public class CasesController : ControllerBase
 
         var validation = await ValidateCaseOwnerAsync(model.ClientId, model.LegalEntityId, visibility, ct);
         if (validation is not null) return validation;
+        if (ValidateCourtDetails(model) is { } courtError) return BadRequest(courtError);
         ApplyCaseDetails(model, model);
         _db.ClientCases.Add(model);
         await _db.SaveChangesAsync(ct);
@@ -132,6 +133,7 @@ public class CasesController : ControllerBase
         if (e is null) return NotFound();
         var validation = await ValidateCaseOwnerAsync(model.ClientId, model.LegalEntityId, visibility, ct);
         if (validation is not null) return validation;
+        if (ValidateCourtDetails(model) is { } courtError) return BadRequest(courtError);
 
         var shouldCloseLinkedTasks = !IsFinishedCaseStatus(e.Status) && IsFinishedCaseStatus(model.Status);
         e.Title = model.Title;
@@ -225,6 +227,13 @@ public class CasesController : ControllerBase
         target.FeeAmount = source.FeeAmount;
         target.Priority = string.IsNullOrWhiteSpace(source.Priority) ? "normal" : source.Priority.Trim();
         target.CourtName = source.CourtName?.Trim() ?? string.Empty;
+        if (source.OurCourtRole is not null) target.OurCourtRole = source.OurCourtRole.Trim().ToLowerInvariant();
+        if (source.CourtClaimAmount.HasValue) target.CourtClaimAmount = source.CourtClaimAmount;
+        else if (source.ClearCourtClaimAmount) target.CourtClaimAmount = null;
+        if (source.CourtAwardedAmount.HasValue) target.CourtAwardedAmount = source.CourtAwardedAmount;
+        else if (source.ClearCourtAwardedAmount) target.CourtAwardedAmount = null;
+        if (source.CourtStateFeeAmount.HasValue) target.CourtStateFeeAmount = source.CourtStateFeeAmount;
+        else if (source.ClearCourtStateFeeAmount) target.CourtStateFeeAmount = null;
         target.CourtCaseNumber = source.CourtCaseNumber?.Trim() ?? string.Empty;
         target.JudicialUid = source.JudicialUid?.Trim() ?? string.Empty;
         target.CourtUrl = source.CourtUrl?.Trim() ?? string.Empty;
@@ -237,7 +246,11 @@ public class CasesController : ControllerBase
         }
         target.NextHearingAt = source.NextHearingAt;
         target.Claimant = source.Claimant?.Trim() ?? string.Empty;
+        if (source.ClaimantInn is not null) target.ClaimantInn = source.ClaimantInn.Trim();
+        if (source.ClaimantOgrn is not null) target.ClaimantOgrn = source.ClaimantOgrn.Trim();
         target.Defendant = source.Defendant?.Trim() ?? string.Empty;
+        if (source.DefendantInn is not null) target.DefendantInn = source.DefendantInn.Trim();
+        if (source.DefendantOgrn is not null) target.DefendantOgrn = source.DefendantOgrn.Trim();
         target.ThirdParties = source.ThirdParties?.Trim() ?? string.Empty;
         target.Representatives = source.Representatives?.Trim() ?? string.Empty;
         target.JudgeName = source.JudgeName?.Trim() ?? string.Empty;
@@ -257,6 +270,29 @@ public class CasesController : ControllerBase
             target.PositionReviewedByName = string.Empty;
         }
         target.Strategy = updatedStrategy;
+    }
+
+    private static string? ValidateCourtDetails(ClientCase model)
+    {
+        if (model.OurCourtRole is not null && model.OurCourtRole.Trim().ToLowerInvariant() is not ("" or "claimant" or "respondent" or "third-party"))
+            return "Укажите допустимую роль в судебном деле.";
+        if (!IsValidIdentifier(model.ClaimantInn, 10, 12) || !IsValidIdentifier(model.DefendantInn, 10, 12)
+            || !IsValidIdentifier(model.ClaimantOgrn, 13, 15) || !IsValidIdentifier(model.DefendantOgrn, 13, 15))
+            return "ИНН должен содержать 10 или 12 цифр, ОГРН/ОГРНИП — 13 или 15 цифр.";
+        if (!IsValidAmount(model.CourtClaimAmount) || !IsValidAmount(model.CourtAwardedAmount) || !IsValidAmount(model.CourtStateFeeAmount))
+            return "Судебные суммы должны быть неотрицательными и содержать не более двух знаков после запятой.";
+        return null;
+
+        static bool IsValidIdentifier(string? value, int firstLength, int secondLength)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return true;
+            var trimmed = value.Trim();
+            return (trimmed.Length == firstLength || trimmed.Length == secondLength)
+                && trimmed.All(static character => character is >= '0' and <= '9');
+        }
+
+        static bool IsValidAmount(decimal? value)
+            => !value.HasValue || value.Value >= 0m && value.Value <= 999999999999.99m && decimal.Round(value.Value, 2) == value.Value;
     }
 
     private static bool IsFinishedCaseStatus(ClientCaseStatus status)

@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using System.Text.Json.Serialization;
 
 namespace PayPlanner.Api.Models
 {
@@ -89,6 +90,25 @@ namespace PayPlanner.Api.Models
         /// <summary>Наша роль в судебном деле: claimant, respondent или third-party. Null — не указана.</summary>
         [MaxLength(24)]
         public string? OurCourtRole { get; set; }
+
+        /// <summary>Заявленная в суде сумма требований, не гонорар по договору.</summary>
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal? CourtClaimAmount { get; set; }
+
+        /// <summary>Сумма требований, присуждённая судом; направление взыскания определяется ролью в деле.</summary>
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal? CourtAwardedAmount { get; set; }
+
+        /// <summary>Указанная сотрудником сумма госпошлины по делу.</summary>
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal? CourtStateFeeAmount { get; set; }
+
+        [NotMapped, JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        public bool ClearCourtClaimAmount { get; set; }
+        [NotMapped, JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        public bool ClearCourtAwardedAmount { get; set; }
+        [NotMapped, JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        public bool ClearCourtStateFeeAmount { get; set; }
 
         /// <summary>
         /// Номер дела, присвоенный судом.

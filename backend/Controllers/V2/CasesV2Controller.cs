@@ -1373,6 +1373,9 @@ public partial class CasesV2Controller : ControllerBase
             Priority = item.Priority,
             CourtName = item.CourtName,
             OurCourtRole = item.OurCourtRole,
+            CourtClaimAmount = item.CourtClaimAmount,
+            CourtAwardedAmount = item.CourtAwardedAmount,
+            CourtStateFeeAmount = item.CourtStateFeeAmount,
             CourtCaseNumber = item.CourtCaseNumber,
             JudicialUid = item.JudicialUid,
             CourtUrl = item.CourtUrl,
@@ -9734,6 +9737,7 @@ public partial class CasesV2Controller : ControllerBase
         if (validation is not null) return validation;
         if (!IsValidOurCourtRole(model.OurCourtRole)) return BadRequest("Укажите допустимую роль в судебном деле.");
         if (!IsValidCourtPartyIdentifiers(model)) return BadRequest("ИНН должен содержать 10 или 12 цифр, ОГРН/ОГРНИП — 13 или 15 цифр.");
+        if (!IsValidCourtAmounts(model)) return BadRequest("Судебные суммы должны быть неотрицательными и содержать не более двух знаков после запятой.");
         if (!TryNormalizeInactivityReminderState(
                 model.InactivityRemindersEnabled,
                 model.InactivityRemindersDisabledReason,
@@ -9812,6 +9816,7 @@ public partial class CasesV2Controller : ControllerBase
         if (validation is not null) return validation;
         if (!IsValidOurCourtRole(model.OurCourtRole)) return BadRequest("Укажите допустимую роль в судебном деле.");
         if (!IsValidCourtPartyIdentifiers(model)) return BadRequest("ИНН должен содержать 10 или 12 цифр, ОГРН/ОГРНИП — 13 или 15 цифр.");
+        if (!IsValidCourtAmounts(model)) return BadRequest("Судебные суммы должны быть неотрицательными и содержать не более двух знаков после запятой.");
         var inactivityStateChanged = e.InactivityRemindersEnabled != model.InactivityRemindersEnabled;
         if (!TryNormalizeInactivityReminderState(
                 model.InactivityRemindersEnabled,
@@ -10197,6 +10202,12 @@ public partial class CasesV2Controller : ControllerBase
         {
             target.OurCourtRole = source.OurCourtRole.Trim().ToLowerInvariant();
         }
+        if (source.CourtClaimAmount.HasValue) target.CourtClaimAmount = source.CourtClaimAmount;
+        else if (source.ClearCourtClaimAmount) target.CourtClaimAmount = null;
+        if (source.CourtAwardedAmount.HasValue) target.CourtAwardedAmount = source.CourtAwardedAmount;
+        else if (source.ClearCourtAwardedAmount) target.CourtAwardedAmount = null;
+        if (source.CourtStateFeeAmount.HasValue) target.CourtStateFeeAmount = source.CourtStateFeeAmount;
+        else if (source.ClearCourtStateFeeAmount) target.CourtStateFeeAmount = null;
         target.CourtCaseNumber = source.CourtCaseNumber?.Trim() ?? string.Empty;
         target.JudicialUid = source.JudicialUid?.Trim() ?? string.Empty;
         target.CourtUrl = source.CourtUrl?.Trim() ?? string.Empty;
@@ -10262,6 +10273,17 @@ public partial class CasesV2Controller : ControllerBase
             && IsValidIdentifier(model.DefendantInn, 10, 12)
             && IsValidIdentifier(model.ClaimantOgrn, 13, 15)
             && IsValidIdentifier(model.DefendantOgrn, 13, 15);
+    }
+
+    private static bool IsValidCourtAmounts(ClientCase model)
+    {
+        const decimal maximum = 999999999999.99m;
+        return IsValidAmount(model.CourtClaimAmount)
+            && IsValidAmount(model.CourtAwardedAmount)
+            && IsValidAmount(model.CourtStateFeeAmount);
+
+        static bool IsValidAmount(decimal? value)
+            => !value.HasValue || value.Value >= 0m && value.Value <= maximum && decimal.Round(value.Value, 2) == value.Value;
     }
 
     private static bool IsValidIdentifier(string? value, int firstLength, int secondLength)

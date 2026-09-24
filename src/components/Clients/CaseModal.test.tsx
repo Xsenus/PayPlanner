@@ -387,6 +387,9 @@ describe('CaseModal', () => {
     fireEvent.change(screen.getByLabelText('Дата начала'), { target: { value: '2026-05-10' } });
     fireEvent.change(screen.getByLabelText('Крайний срок'), { target: { value: '2026-06-15' } });
     fireEvent.change(screen.getByLabelText('Сумма гонорара'), { target: { value: '150000.50' } });
+    fireEvent.change(screen.getByLabelText('Сумма иска'), { target: { value: '200000,50' } });
+    fireEvent.change(screen.getByLabelText('Взыскано судом'), { target: { value: '175000' } });
+    fireEvent.change(screen.getByLabelText('Госпошлина по делу'), { target: { value: '3500.25' } });
     fireEvent.change(screen.getByLabelText('Суд'), { target: { value: 'Арбитражный суд Самарской области' } });
     fireEvent.change(screen.getByLabelText('Номер в суде'), { target: { value: 'А55-12345/2026' } });
     fireEvent.change(screen.getByLabelText('Следующее заседание'), { target: { value: '2026-05-20T12:30' } });
@@ -429,6 +432,9 @@ describe('CaseModal', () => {
       startDate: '2026-05-10',
       dueDate: '2026-06-15',
       feeAmount: 150000.5,
+      courtClaimAmount: 200000.5,
+      courtAwardedAmount: 175000,
+      courtStateFeeAmount: 3500.25,
       courtName: 'Арбитражный суд Самарской области',
       courtCaseNumber: 'А55-12345/2026',
       courtUrl: 'https://kad.arbitr.ru/card',

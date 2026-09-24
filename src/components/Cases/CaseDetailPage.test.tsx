@@ -1226,6 +1226,9 @@ describe('CaseDetailPage', () => {
     fireEvent.click(screen.getByRole('option', { name: 'Третье лицо' }));
     fireEvent.change(screen.getByLabelText('ИНН истца'), { target: { value: '1234567890' } });
     fireEvent.change(screen.getByLabelText('ОГРН/ОГРНИП ответчика'), { target: { value: '1234567890123' } });
+    fireEvent.change(screen.getByLabelText('Сумма иска'), { target: { value: '100000,50' } });
+    fireEvent.change(screen.getByLabelText('Взыскано судом'), { target: { value: '75000' } });
+    fireEvent.change(screen.getByLabelText('Госпошлина по делу'), { target: { value: '3500,25' } });
     fireEvent.click(screen.getAllByRole('button', { name: /Сохранить дело/u }).at(-1) as HTMLElement);
 
     await waitFor(() => {
@@ -1236,6 +1239,9 @@ describe('CaseDetailPage', () => {
           ourCourtRole: 'third-party',
           claimantInn: '1234567890',
           defendantOgrn: '1234567890123',
+          courtClaimAmount: 100000.5,
+          courtAwardedAmount: 75000,
+          courtStateFeeAmount: 3500.25,
         }),
       );
     });

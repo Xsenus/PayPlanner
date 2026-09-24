@@ -1339,6 +1339,9 @@ public class PaymentContext : DbContext
             entity.Property(e => e.Priority).HasMaxLength(32).HasDefaultValue("normal");
             entity.Property(e => e.CourtName).HasMaxLength(200);
             entity.Property(e => e.OurCourtRole).HasMaxLength(24);
+            entity.Property(e => e.CourtClaimAmount).HasPrecision(18, 2);
+            entity.Property(e => e.CourtAwardedAmount).HasPrecision(18, 2);
+            entity.Property(e => e.CourtStateFeeAmount).HasPrecision(18, 2);
             entity.Property(e => e.CourtCaseNumber).HasMaxLength(100);
             entity.Property(e => e.JudicialUid).HasMaxLength(120);
             entity.Property(e => e.CourtUrl).HasMaxLength(1000);

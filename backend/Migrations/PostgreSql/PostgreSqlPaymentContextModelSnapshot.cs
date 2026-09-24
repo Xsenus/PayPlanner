@@ -1337,10 +1337,18 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasMaxLength(256)
                         .HasColumnType("character varying(256)");
 
+                    b.Property<decimal?>("CourtAwardedAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
                     b.Property<string>("CourtCaseNumber")
                         .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
+
+                    b.Property<decimal?>("CourtClaimAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
 
                     b.Property<DateTime?>("CourtDecisionAt")
                         .HasColumnType("timestamp without time zone");
@@ -1357,6 +1365,10 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .IsRequired()
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)");
+
+                    b.Property<decimal?>("CourtStateFeeAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
 
                     b.Property<DateTime?>("CourtSyncFailureStartedAt")
                         .HasColumnType("timestamp without time zone");

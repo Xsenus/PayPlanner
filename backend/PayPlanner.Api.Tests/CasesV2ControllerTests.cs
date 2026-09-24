@@ -2106,6 +2106,49 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task CourtAmounts_ValidatePersistClearAndSurviveOlderUpdates()
+    {
+        await using var db = await CreateContextAsync();
+        var editor = await CreateUserAsync(db, "court-amounts@example.com", "Редактор", DataVisibilityScope.All);
+        var client = new Client { Name = "Клиент", IsActive = true, ResponsibleUserId = editor.Id };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, editor);
+
+        Assert.IsType<BadRequestObjectResult>(await controller.Create(new ClientCase
+        {
+            ClientId = client.Id, Title = "Некорректная сумма", CourtClaimAmount = -1m,
+        }, CancellationToken.None));
+        Assert.IsType<BadRequestObjectResult>(await controller.Create(new ClientCase
+        {
+            ClientId = client.Id, Title = "Лишние копейки", CourtStateFeeAmount = 12.345m,
+        }, CancellationToken.None));
+
+        var created = Assert.IsType<ClientCase>(Assert.IsType<CreatedResult>(await controller.Create(new ClientCase
+        {
+            ClientId = client.Id, Title = "Судебные суммы", CourtClaimAmount = 100000.50m,
+            CourtAwardedAmount = 75000m, CourtStateFeeAmount = 3500.25m,
+        }, CancellationToken.None)).Value);
+        Assert.Equal(100000.50m, created.CourtClaimAmount);
+        Assert.Equal(75000m, created.CourtAwardedAmount);
+        Assert.Equal(3500.25m, created.CourtStateFeeAmount);
+
+        Assert.IsType<OkObjectResult>(await controller.Update(created.Id, new ClientCase
+        {
+            ClientId = client.Id, Title = created.Title, CourtAwardedAmount = 80000.10m,
+            ClearCourtStateFeeAmount = true,
+        }, CancellationToken.None));
+        Assert.IsType<OkObjectResult>(await controller.Update(created.Id, new ClientCase
+        {
+            ClientId = client.Id, Title = "Старый клиент",
+        }, CancellationToken.None));
+        await db.Entry(created).ReloadAsync();
+        Assert.Equal(100000.50m, created.CourtClaimAmount);
+        Assert.Equal(80000.10m, created.CourtAwardedAmount);
+        Assert.Null(created.CourtStateFeeAmount);
+    }
+
+    [Fact]
     public async Task Create_WithNearestHearing_NotifiesAssignedResponsible()
     {
         await using var db = await CreateContextAsync();
