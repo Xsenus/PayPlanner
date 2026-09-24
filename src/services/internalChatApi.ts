@@ -10,7 +10,9 @@ export interface InternalChatThread {
   taskJournalItemId?: number | null;
   role: string;
   notificationMode: InternalChatNotificationMode;
+  isArchived: boolean;
   memberUserIds: number[];
+  guestUserIds: number[];
   unreadCount: number;
   lastMessagePreview?: string | null;
   lastMessageAt?: string | null;
@@ -99,6 +101,12 @@ export const internalChatApi = {
   openTask: (taskId: number) => chatRequest<InternalChatThread>(`/tasks/${taskId}`, { method: 'POST' }),
   updateMembers: (threadId: number, memberUserIds: number[]) => chatRequest<void>(`/threads/${threadId}/members`, {
     method: 'PUT', body: JSON.stringify({ memberUserIds }),
+  }),
+  updateTaskGuests: (threadId: number, guestUserIds: number[]) => chatRequest<void>(`/threads/${threadId}/task-guests`, {
+    method: 'PUT', body: JSON.stringify({ guestUserIds }),
+  }),
+  setPersonalState: (threadId: number, state: 'visible' | 'hidden' | 'archived') => chatRequest<void>(`/threads/${threadId}/personal-state`, {
+    method: 'PUT', body: JSON.stringify({ state }),
   }),
   getMessages: (threadId: number, params: { beforeId?: number; search?: string; authorUserId?: number; from?: string; to?: string; mentionedMe?: boolean } = {}) => {
     const query = new URLSearchParams();

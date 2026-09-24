@@ -9,6 +9,8 @@ const chatApiMock = vi.hoisted(() => ({
   createChannel: vi.fn(),
   openDirect: vi.fn(),
   openTask: vi.fn(),
+  updateTaskGuests: vi.fn(),
+  setPersonalState: vi.fn(),
   getMessages: vi.fn(),
   markRead: vi.fn(),
   sendMessage: vi.fn(),
@@ -45,7 +47,9 @@ const thread = {
   name: 'Судебная команда',
   role: 'owner',
   notificationMode: 'all' as const,
+  isArchived: false,
   memberUserIds: [7, 8],
+  guestUserIds: [],
   unreadCount: 1,
   lastMessagePreview: 'Проверьте документ',
   lastMessageAt: '2026-09-21T10:01:00Z',
@@ -84,6 +88,8 @@ describe('InternalMessenger', () => {
     chatApiMock.getPeople.mockResolvedValue([{ id: 8, name: 'Анна', email: 'anna@example.test' }]);
     chatApiMock.getMessages.mockResolvedValue({ items: [message], hasMore: false, nextBeforeId: 22 });
     chatApiMock.markRead.mockResolvedValue(undefined);
+    chatApiMock.setPersonalState.mockResolvedValue(undefined);
+    chatApiMock.updateTaskGuests.mockResolvedValue(undefined);
     chatApiMock.sendMessage.mockResolvedValue({ ...message, id: 23, authorUserId: 7, authorName: 'Я', text: 'Готово' });
   });
 
@@ -131,6 +137,52 @@ describe('InternalMessenger', () => {
     expect(await screen.findByText('Чат задачи · Участники: Анна')).toBeTruthy();
     expect((await screen.findAllByText('@Анна')).length).toBe(2);
     expect(screen.queryByText('@[8]')).toBeNull();
+  });
+
+  it('links task references and the task chat title to the task card', async () => {
+    const onOpenTask = vi.fn();
+    chatApiMock.getThreads.mockResolvedValue([{ ...thread, kind: 'task', taskJournalItemId: 101, name: 'Сверка по делу' }]);
+    chatApiMock.getMessages.mockResolvedValue({ items: [{ ...message, text: 'Проверьте задачу №102 и #103' }], hasMore: false });
+    render(<InternalMessenger onOpenTask={onOpenTask} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Открыть задачу' }));
+    fireEvent.click(screen.getByRole('button', { name: '№102' }));
+    fireEvent.click(screen.getByRole('button', { name: '#103' }));
+    expect(onOpenTask.mock.calls).toEqual([[101], [102], [103]]);
+  });
+
+  it('shows unread markers by chat type and archives without deleting the colleague conversation', async () => {
+    chatApiMock.getThreads.mockResolvedValue([
+      thread,
+      { ...thread, id: 13, kind: 'task', name: 'Задача №13', unreadCount: 2 },
+      { ...thread, id: 14, kind: 'direct', name: 'Личный диалог', isArchived: true, unreadCount: 3 },
+    ]);
+    render(<InternalMessenger />);
+
+    expect(await screen.findByRole('button', { name: 'Задачи2 непрочитанных' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Архив3 непрочитанных' }));
+    expect(screen.getByText('Личный диалог')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Все3 непрочитанных' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Действия с чатом Судебная команда' }));
+    fireEvent.click(screen.getByRole('button', { name: 'В архив' }));
+    await waitFor(() => expect(chatApiMock.setPersonalState).toHaveBeenCalledWith(12, 'archived'));
+  });
+
+  it('allows the task owner to invite a chat guest without changing task participants', async () => {
+    chatApiMock.openTask.mockResolvedValue({ ...thread, id: 44, kind: 'task', taskJournalItemId: 101, name: 'Задача №101' });
+    chatApiMock.getPeople.mockResolvedValue([
+      { id: 7, name: 'Постановщик', email: 'author@example.test' },
+      { id: 8, name: 'Участник задачи', email: 'member@example.test' },
+      { id: 9, name: 'Бухгалтер', email: 'accountant@example.test' },
+    ]);
+    render(<TaskChatPanel taskId={101} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Участники чата' }));
+    const memberCheckbox = screen.getByRole('checkbox', { name: /Участник задачи/ });
+    expect((memberCheckbox as HTMLInputElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole('checkbox', { name: /Бухгалтер/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить участников' }));
+    await waitFor(() => expect(chatApiMock.updateTaskGuests).toHaveBeenCalledWith(44, [9]));
   });
 
   it('does not mark filtered search results as read and restores the conversation on closing search', async () => {

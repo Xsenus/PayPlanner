@@ -39,6 +39,107 @@ public sealed class InternalChatControllerTests
     }
 
     [Fact]
+    public async Task TaskGuest_CanReadOnlyWhileInvited_AndCannotBeAddedByExecutor()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var author = await fixture.AddUserAsync("guest-author@example.test", "Постановщик");
+        var assignee = await fixture.AddUserAsync("guest-assignee@example.test", "Исполнитель");
+        var observer = await fixture.AddUserAsync("guest-observer@example.test", "Наблюдатель");
+        var accountant = await fixture.AddUserAsync("guest-accountant@example.test", "Бухгалтер");
+        var task = await fixture.AddTaskAsync(author.Id, assignee.Id, observer.Id);
+        var opened = await fixture.Controller(author).OpenTaskChat(task.Id, CancellationToken.None);
+        var thread = Assert.IsType<InternalChatThreadDto>(Assert.IsType<OkObjectResult>(opened.Result).Value);
+
+        Assert.IsType<ForbidResult>(await fixture.Controller(assignee).UpdateTaskGuests(thread.Id,
+            new UpdateInternalChatGuestsRequest { GuestUserIds = [accountant.Id] }, CancellationToken.None));
+        Assert.IsType<NoContentResult>(await fixture.Controller(author).UpdateTaskGuests(thread.Id,
+            new UpdateInternalChatGuestsRequest { GuestUserIds = [accountant.Id] }, CancellationToken.None));
+        Assert.DoesNotContain(task.Participants, participant => participant.UserId == accountant.Id);
+        Assert.IsType<OkObjectResult>((await fixture.Controller(accountant).OpenTaskChat(task.Id, CancellationToken.None)).Result);
+        Assert.IsType<OkObjectResult>((await fixture.Controller(accountant).GetMessages(thread.Id,
+            null, null, null, null, null, false, 50, CancellationToken.None)).Result);
+
+        var attachmentMessage = new InternalChatMessage { ThreadId = thread.Id, AuthorUserId = author.Id, Text = "Документ" };
+        fixture.Db.InternalChatMessages.Add(attachmentMessage);
+        await fixture.Db.SaveChangesAsync();
+        var attachment = new InternalChatAttachment
+        {
+            MessageId = attachmentMessage.Id, FileName = "report.txt", StoredFileName = "report.txt",
+            UploadedByUserId = author.Id, Size = 1
+        };
+        fixture.Db.InternalChatAttachments.Add(attachment);
+        await fixture.Db.SaveChangesAsync();
+        Assert.IsType<NotFoundResult>(await fixture.Controller(accountant).DownloadAttachment(attachment.Id, CancellationToken.None));
+
+        Assert.IsType<NoContentResult>(await fixture.Controller(author).UpdateTaskGuests(thread.Id,
+            new UpdateInternalChatGuestsRequest(), CancellationToken.None));
+        Assert.IsType<ForbidResult>((await fixture.Controller(accountant).GetMessages(thread.Id,
+            null, null, null, null, null, false, 50, CancellationToken.None)).Result);
+        Assert.IsType<ForbidResult>((await fixture.Controller(accountant).OpenTaskChat(task.Id, CancellationToken.None)).Result);
+        Assert.IsType<ForbidResult>(await fixture.Controller(accountant).DownloadAttachment(attachment.Id, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task RemovedTaskParticipant_LosesChatAndAttachmentAccessWithoutReopeningTask()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var author = await fixture.AddUserAsync("removed-author@example.test", "Постановщик");
+        var assignee = await fixture.AddUserAsync("removed-assignee@example.test", "Исполнитель");
+        var observer = await fixture.AddUserAsync("removed-observer@example.test", "Наблюдатель");
+        var task = await fixture.AddTaskAsync(author.Id, assignee.Id, observer.Id);
+        var opened = await fixture.Controller(author).OpenTaskChat(task.Id, CancellationToken.None);
+        var thread = Assert.IsType<InternalChatThreadDto>(Assert.IsType<OkObjectResult>(opened.Result).Value);
+        var sent = await fixture.Controller(author).SendMessage(thread.Id,
+            new SendInternalChatMessageRequest { Text = "Конфиденциальная переписка" }, CancellationToken.None);
+        Assert.IsType<CreatedAtActionResult>(sent.Result);
+
+        fixture.Db.TaskJournalParticipants.RemoveRange(task.Participants);
+        await fixture.Db.SaveChangesAsync();
+        var list = Assert.IsAssignableFrom<IReadOnlyList<InternalChatThreadDto>>(Assert.IsType<OkObjectResult>(
+            (await fixture.Controller(observer).GetThreads(CancellationToken.None)).Result).Value);
+        Assert.DoesNotContain(list, item => item.Id == thread.Id);
+        Assert.IsType<ForbidResult>((await fixture.Controller(observer).GetMessages(thread.Id,
+            null, null, null, null, null, false, 50, CancellationToken.None)).Result);
+        Assert.IsType<ForbidResult>((await fixture.Controller(observer).SendMessage(thread.Id,
+            new SendInternalChatMessageRequest { Text = "Ответ после исключения" }, CancellationToken.None)).Result);
+    }
+
+    [Fact]
+    public async Task PersonalHideAndArchive_AffectOnlyOwnerAndHiddenChatReturnsOnNewMessage()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var owner = await fixture.AddUserAsync("hide-owner@example.test", "Владелец");
+        var colleague = await fixture.AddUserAsync("hide-colleague@example.test", "Коллега");
+        var created = await fixture.Controller(owner).CreateChannel(new CreateInternalChatChannelRequest
+        {
+            Name = "Обсуждение", MemberUserIds = [colleague.Id]
+        }, CancellationToken.None);
+        var thread = Assert.IsType<InternalChatThreadDto>(Assert.IsType<CreatedAtActionResult>(created.Result).Value);
+        Assert.IsType<NoContentResult>(await fixture.Controller(owner).SetPersonalState(thread.Id,
+            new UpdateInternalChatPersonalStateRequest { State = "hidden" }, CancellationToken.None));
+        var hidden = Assert.IsAssignableFrom<IReadOnlyList<InternalChatThreadDto>>(Assert.IsType<OkObjectResult>(
+            (await fixture.Controller(owner).GetThreads(CancellationToken.None)).Result).Value);
+        Assert.DoesNotContain(hidden, item => item.Id == thread.Id);
+        var colleagueList = Assert.IsAssignableFrom<IReadOnlyList<InternalChatThreadDto>>(Assert.IsType<OkObjectResult>(
+            (await fixture.Controller(colleague).GetThreads(CancellationToken.None)).Result).Value);
+        Assert.Contains(colleagueList, item => item.Id == thread.Id);
+
+        await fixture.Controller(colleague).SendMessage(thread.Id,
+            new SendInternalChatMessageRequest { Text = "Новая сверка" }, CancellationToken.None);
+        var restored = Assert.IsAssignableFrom<IReadOnlyList<InternalChatThreadDto>>(Assert.IsType<OkObjectResult>(
+            (await fixture.Controller(owner).GetThreads(CancellationToken.None)).Result).Value);
+        Assert.Contains(restored, item => item.Id == thread.Id && item.UnreadCount == 1);
+
+        Assert.IsType<NoContentResult>(await fixture.Controller(owner).SetPersonalState(thread.Id,
+            new UpdateInternalChatPersonalStateRequest { State = "archived" }, CancellationToken.None));
+        var archived = Assert.IsAssignableFrom<IReadOnlyList<InternalChatThreadDto>>(Assert.IsType<OkObjectResult>(
+            (await fixture.Controller(owner).GetThreads(CancellationToken.None)).Result).Value);
+        Assert.Contains(archived, item => item.Id == thread.Id && item.IsArchived);
+        Assert.IsType<BadRequestObjectResult>(await fixture.Controller(owner).SetPersonalState(thread.Id,
+            new UpdateInternalChatPersonalStateRequest { State = "deleted" }, CancellationToken.None));
+    }
+
+    [Fact]
     public async Task OpenDirect_ReusesSingleThreadRegardlessOfParticipantOrder()
     {
         await using var fixture = await Fixture.CreateAsync();

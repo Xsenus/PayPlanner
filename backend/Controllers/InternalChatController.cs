@@ -50,17 +50,22 @@ public sealed partial class InternalChatController : ControllerBase
         var userId = CurrentUserId();
         if (userId is null) return Unauthorized();
 
-        var rows = await _db.InternalChatMembers
-            .AsNoTracking()
-            .Where(member => member.UserId == userId && member.IsActive && !member.Thread.IsArchived)
+        var rows = await ActiveAuthorizedMembers()
+            .Where(member => member.UserId == userId && member.IsActive && !member.Thread.IsArchived
+                && (member.HiddenAfterMessageId == null || member.Thread.Messages.Any(message => message.Id > member.HiddenAfterMessageId)))
             .OrderByDescending(member => member.Thread.LastMessageAt ?? member.Thread.CreatedAt)
             .Select(member => new
             {
                 member.Thread,
                 member.Role,
                 member.NotificationMode,
-                MemberUserIds = _db.InternalChatMembers
-                    .Where(item => item.ThreadId == member.ThreadId && item.IsActive)
+                member.IsArchived,
+                MemberUserIds = ActiveAuthorizedMembers()
+                    .Where(item => item.ThreadId == member.ThreadId)
+                    .Select(item => item.UserId)
+                    .ToList(),
+                GuestUserIds = ActiveAuthorizedMembers()
+                    .Where(item => item.ThreadId == member.ThreadId && item.Role == "guest")
                     .Select(item => item.UserId)
                     .ToList(),
                 UnreadCount = _db.InternalChatMessages.Count(message => message.ThreadId == member.ThreadId
@@ -73,8 +78,8 @@ public sealed partial class InternalChatController : ControllerBase
                     .Select(message => new { message.Text, message.CreatedAt })
                     .FirstOrDefault(),
                 DirectName = member.Thread.Kind == InternalChatThreadKinds.Direct
-                    ? _db.InternalChatMembers
-                        .Where(other => other.ThreadId == member.ThreadId && other.UserId != userId && other.IsActive)
+                    ? ActiveAuthorizedMembers()
+                        .Where(other => other.ThreadId == member.ThreadId && other.UserId != userId)
                         .Select(other => other.User.FullName == "" ? other.User.Email : other.User.FullName)
                         .FirstOrDefault()
                     : null
@@ -91,7 +96,9 @@ public sealed partial class InternalChatController : ControllerBase
                 thread.TaskJournalItemId,
                 row.Role,
                 row.NotificationMode,
+                row.IsArchived,
                 row.MemberUserIds,
+                row.GuestUserIds,
                 row.UnreadCount,
                 row.LatestMessage is null ? null : MessagePreview(row.LatestMessage.Text),
                 AsUtc(row.LatestMessage?.CreatedAt),
@@ -175,6 +182,54 @@ public sealed partial class InternalChatController : ControllerBase
         return NoContent();
     }
 
+    [HttpPut("threads/{threadId:int}/task-guests")]
+    public async Task<IActionResult> UpdateTaskGuests(int threadId, [FromBody] UpdateInternalChatGuestsRequest request, CancellationToken ct)
+    {
+        var userId = CurrentUserId();
+        if (userId is null) return Unauthorized();
+        var thread = await _db.InternalChatThreads.Include(item => item.Members).FirstOrDefaultAsync(item => item.Id == threadId, ct);
+        if (thread?.Kind != InternalChatThreadKinds.Task || thread.TaskJournalItemId is null) return NotFound();
+        var task = await _db.TaskJournalItems.Include(item => item.Participants)
+            .FirstOrDefaultAsync(item => item.Id == thread.TaskJournalItemId, ct);
+        if (task is null) return NotFound();
+        if (task.AuthorUserId != userId && !User.HasAdminRole()) return Forbid();
+
+        var taskMembers = TaskMemberIds(task);
+        var desiredGuests = request.GuestUserIds.Where(id => id > 0 && !taskMembers.Contains(id)).Distinct().ToHashSet();
+        var activeCount = await _db.Users.CountAsync(user => desiredGuests.Contains(user.Id) && user.IsActive && user.IsApproved, ct);
+        if (activeCount != desiredGuests.Count) return BadRequest("Один или несколько сотрудников не найдены или отключены.");
+        var now = DateTime.UtcNow;
+        SyncTaskMembers(thread, taskMembers, task.AuthorUserId, now);
+        foreach (var member in thread.Members.Where(member => !taskMembers.Contains(member.UserId)))
+        {
+            member.IsActive = desiredGuests.Contains(member.UserId);
+            if (member.IsActive) member.Role = "guest";
+            member.UpdatedAt = now;
+        }
+        foreach (var guestId in desiredGuests.Where(id => thread.Members.All(member => member.UserId != id)))
+            thread.Members.Add(new InternalChatMember { UserId = guestId, Role = "guest", JoinedAt = now });
+        await _db.SaveChangesAsync(ct);
+        return NoContent();
+    }
+
+    [HttpPut("threads/{threadId:int}/personal-state")]
+    public async Task<IActionResult> SetPersonalState(int threadId, [FromBody] UpdateInternalChatPersonalStateRequest request, CancellationToken ct)
+    {
+        var userId = CurrentUserId();
+        if (userId is null) return Unauthorized();
+        var member = await _db.InternalChatMembers.FirstOrDefaultAsync(item => item.ThreadId == threadId && item.UserId == userId && item.IsActive, ct);
+        if (member is null) return Forbid();
+        if (!await IsMemberAsync(threadId, userId.Value, ct)) return Forbid();
+        if (request.State is not ("visible" or "hidden" or "archived")) return BadRequest("Неизвестное состояние чата.");
+        member.IsArchived = request.State == "archived";
+        member.HiddenAfterMessageId = request.State == "hidden"
+            ? await _db.InternalChatMessages.Where(message => message.ThreadId == threadId).MaxAsync(message => (int?)message.Id, ct) ?? 0
+            : null;
+        member.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync(ct);
+        return NoContent();
+    }
+
     [HttpPost("direct/{otherUserId:int}")]
     public async Task<ActionResult<InternalChatThreadDto>> OpenDirect(int otherUserId, CancellationToken ct)
     {
@@ -191,8 +246,10 @@ public sealed partial class InternalChatController : ControllerBase
         if (existing is not null)
         {
             foreach (var member in existing.Members) member.IsActive = true;
-            await _db.SaveChangesAsync(ct);
             var mine = existing.Members.First(member => member.UserId == userId);
+            mine.HiddenAfterMessageId = null;
+            mine.IsArchived = false;
+            await _db.SaveChangesAsync(ct);
             return Ok(ToThreadDto(existing, mine.Role, mine.NotificationMode, DisplayName(other)));
         }
 
@@ -225,10 +282,11 @@ public sealed partial class InternalChatController : ControllerBase
         if (task is null) return NotFound();
 
         var memberIds = TaskMemberIds(task);
-        if (!memberIds.Contains(userId.Value)) return Forbid();
         var now = DateTime.UtcNow;
         var thread = await _db.InternalChatThreads.Include(item => item.Members)
             .FirstOrDefaultAsync(item => item.TaskJournalItemId == taskId, ct);
+        if (!memberIds.Contains(userId.Value) && thread?.Members.Any(member => member.UserId == userId && member.IsActive && member.Role == "guest") != true)
+            return Forbid();
         if (thread is null)
         {
             thread = new InternalChatThread
@@ -247,10 +305,11 @@ public sealed partial class InternalChatController : ControllerBase
             thread.UpdatedAt = now;
         }
 
-        SyncTaskMembers(thread, memberIds, now);
+        SyncTaskMembers(thread, memberIds, task.AuthorUserId, now);
+        var currentMember = thread.Members.First(member => member.UserId == userId);
+        currentMember.HiddenAfterMessageId = null;
         await _db.SaveChangesAsync(ct);
-        var mine = thread.Members.First(member => member.UserId == userId);
-        return Ok(ToThreadDto(thread, mine.Role, mine.NotificationMode));
+        return Ok(ToThreadDto(thread, currentMember.Role, currentMember.NotificationMode, isArchived: currentMember.IsArchived));
     }
 
     [HttpGet("threads/{threadId:int}/messages")]
@@ -295,8 +354,8 @@ public sealed partial class InternalChatController : ControllerBase
         var hasMore = rows.Count > take;
         if (hasMore) rows.RemoveAt(rows.Count - 1);
         rows.Reverse();
-        var readStates = await _db.InternalChatMembers.AsNoTracking()
-            .Where(member => member.ThreadId == threadId && member.IsActive && member.LastReadMessageId.HasValue)
+        var readStates = await ActiveAuthorizedMembers()
+            .Where(member => member.ThreadId == threadId && member.LastReadMessageId.HasValue)
             .Select(member => new { member.UserId, LastReadMessageId = member.LastReadMessageId!.Value })
             .ToListAsync(ct);
         return Ok(new InternalChatMessagePageDto(
@@ -333,7 +392,7 @@ public sealed partial class InternalChatController : ControllerBase
         var mentionIds = ParseMentionIds(text, request.MentionUserIds);
         if (mentionIds.Count > 0)
         {
-            var validMentionCount = await _db.InternalChatMembers.CountAsync(member => member.ThreadId == threadId && member.IsActive && mentionIds.Contains(member.UserId), ct);
+            var validMentionCount = await ActiveAuthorizedMembers().CountAsync(member => member.ThreadId == threadId && mentionIds.Contains(member.UserId), ct);
             if (validMentionCount != mentionIds.Count) return BadRequest("Упоминать можно только участников этого чата.");
         }
 
@@ -405,7 +464,7 @@ public sealed partial class InternalChatController : ControllerBase
         var text = (request.Text ?? string.Empty).Trim();
         if (text.Length == 0 || text.Length > 8000) return BadRequest("Введите сообщение длиной не более 8000 символов.");
         var mentionIds = ParseMentionIds(text, request.MentionUserIds);
-        var validCount = await _db.InternalChatMembers.CountAsync(member => member.ThreadId == message.ThreadId && member.IsActive && mentionIds.Contains(member.UserId), ct);
+        var validCount = await ActiveAuthorizedMembers().CountAsync(member => member.ThreadId == message.ThreadId && mentionIds.Contains(member.UserId), ct);
         if (validCount != mentionIds.Count) return BadRequest("Упоминать можно только участников этого чата.");
         _db.InternalChatMentions.RemoveRange(message.Mentions);
         message.Mentions = mentionIds.Select(id => new InternalChatMention { UserId = id }).ToList();
@@ -595,8 +654,15 @@ public sealed partial class InternalChatController : ControllerBase
 
     private int? CurrentUserId() => User.GetUserId();
 
+    private IQueryable<InternalChatMember> ActiveAuthorizedMembers()
+        => _db.InternalChatMembers.AsNoTracking().Where(member => member.IsActive
+            && (member.Thread.Kind != InternalChatThreadKinds.Task || member.Role == "guest"
+                || member.Thread.TaskJournalItem!.AuthorUserId == member.UserId
+                || member.Thread.TaskJournalItem.AssigneeUserId == member.UserId
+                || member.Thread.TaskJournalItem.Participants.Any(participant => participant.UserId == member.UserId)));
+
     private Task<bool> IsMemberAsync(int threadId, int userId, CancellationToken ct)
-        => _db.InternalChatMembers.AsNoTracking().AnyAsync(member => member.ThreadId == threadId && member.UserId == userId && member.IsActive, ct);
+        => ActiveAuthorizedMembers().AnyAsync(member => member.ThreadId == threadId && member.UserId == userId, ct);
 
     private async Task<InternalChatMessage?> LoadMessageAsync(int messageId, CancellationToken ct)
         => await _db.InternalChatMessages.AsNoTracking()
@@ -609,9 +675,8 @@ public sealed partial class InternalChatController : ControllerBase
 
     private async Task<InternalChatMessageDto> MapMessageWithReadStateAsync(InternalChatMessage message, CancellationToken ct)
     {
-        var readBy = await _db.InternalChatMembers.AsNoTracking()
+        var readBy = await ActiveAuthorizedMembers()
             .Where(member => member.ThreadId == message.ThreadId
-                && member.IsActive
                 && member.UserId != message.AuthorUserId
                 && member.LastReadMessageId >= message.Id)
             .Select(member => member.UserId)
@@ -626,9 +691,8 @@ public sealed partial class InternalChatController : ControllerBase
         int actorUserId,
         CancellationToken ct)
     {
-        var recipients = await _db.InternalChatMembers.AsNoTracking()
+        var recipients = await ActiveAuthorizedMembers()
             .Where(member => member.ThreadId == thread.Id
-                && member.IsActive
                 && member.UserId != actorUserId
                 && member.NotificationMode != InternalChatNotificationModes.Muted)
             .Select(member => member.UserId)
@@ -657,8 +721,8 @@ public sealed partial class InternalChatController : ControllerBase
         IReadOnlyCollection<int> mentionIds,
         CancellationToken ct)
     {
-        var members = await _db.InternalChatMembers.AsNoTracking()
-            .Where(member => member.ThreadId == thread.Id && member.IsActive && member.UserId != message.AuthorUserId)
+        var members = await ActiveAuthorizedMembers()
+            .Where(member => member.ThreadId == thread.Id && member.UserId != message.AuthorUserId)
             .ToListAsync(ct);
         foreach (var member in members)
         {
@@ -691,20 +755,22 @@ public sealed partial class InternalChatController : ControllerBase
         return ids;
     }
 
-    private static void SyncTaskMembers(InternalChatThread thread, IReadOnlySet<int> desiredIds, DateTime now)
+    private static void SyncTaskMembers(InternalChatThread thread, IReadOnlySet<int> desiredIds, int? authorId, DateTime now)
     {
         foreach (var member in thread.Members)
         {
-            member.IsActive = desiredIds.Contains(member.UserId);
+            member.IsActive = desiredIds.Contains(member.UserId) || member.Role == "guest" && member.IsActive;
+            if (desiredIds.Contains(member.UserId)) member.Role = member.UserId == authorId ? "owner" : "member";
             member.UpdatedAt = now;
         }
         foreach (var userId in desiredIds.Where(id => thread.Members.All(member => member.UserId != id)))
-            thread.Members.Add(new InternalChatMember { UserId = userId, Role = "member", JoinedAt = now });
+            thread.Members.Add(new InternalChatMember { UserId = userId, Role = userId == authorId ? "owner" : "member", JoinedAt = now });
     }
 
-    private static InternalChatThreadDto ToThreadDto(InternalChatThread thread, string role, string mode, string? overrideName = null)
-        => new(thread.Id, thread.Kind, overrideName ?? thread.Name, thread.TaskJournalItemId, role, mode,
+    private static InternalChatThreadDto ToThreadDto(InternalChatThread thread, string role, string mode, string? overrideName = null, bool isArchived = false)
+        => new(thread.Id, thread.Kind, overrideName ?? thread.Name, thread.TaskJournalItemId, role, mode, isArchived,
             thread.Members.Where(member => member.IsActive).Select(member => member.UserId).ToList(),
+            thread.Members.Where(member => member.IsActive && member.Role == "guest").Select(member => member.UserId).ToList(),
             0, null, AsUtc(thread.LastMessageAt), AsUtc(thread.CreatedAt));
 
     private static InternalChatMessageDto MapMessage(InternalChatMessage message, IReadOnlyList<int>? readByUserIds = null)
@@ -780,7 +846,7 @@ public sealed partial class InternalChatController : ControllerBase
     private static partial Regex MentionPattern();
 }
 
-public sealed record InternalChatThreadDto(int Id, string Kind, string Name, int? TaskJournalItemId, string Role, string NotificationMode, IReadOnlyList<int> MemberUserIds, int UnreadCount, string? LastMessagePreview, DateTime? LastMessageAt, DateTime CreatedAt);
+public sealed record InternalChatThreadDto(int Id, string Kind, string Name, int? TaskJournalItemId, string Role, string NotificationMode, bool IsArchived, IReadOnlyList<int> MemberUserIds, IReadOnlyList<int> GuestUserIds, int UnreadCount, string? LastMessagePreview, DateTime? LastMessageAt, DateTime CreatedAt);
 public sealed record InternalChatMessagePageDto(IReadOnlyList<InternalChatMessageDto> Items, bool HasMore, int? NextBeforeId);
 public sealed record InternalChatMessageDto(int Id, int ThreadId, int? AuthorUserId, string AuthorName, string Kind, string Text, int? ReplyToMessageId, string? ReplyPreview, string? ReplyAuthorName, int? CreatedTaskJournalItemId, bool IsPinned, DateTime? EditedAt, DateTime? DeletedAt, DateTime CreatedAt, IReadOnlyList<InternalChatAttachmentDto> Attachments, IReadOnlyList<InternalChatReactionDto> Reactions, IReadOnlyList<int> MentionUserIds, IReadOnlyList<int> ReadByUserIds);
 public sealed record InternalChatAttachmentDto(int Id, string FileName, string ContentType, long Size);
@@ -789,6 +855,8 @@ public sealed record InternalChatPersonDto(int Id, string Name, string Email, st
 
 public sealed class CreateInternalChatChannelRequest { public string Name { get; set; } = string.Empty; public List<int> MemberUserIds { get; set; } = []; }
 public sealed class UpdateInternalChatMembersRequest { public List<int> MemberUserIds { get; set; } = []; }
+public sealed class UpdateInternalChatGuestsRequest { public List<int> GuestUserIds { get; set; } = []; }
+public sealed class UpdateInternalChatPersonalStateRequest { public string State { get; set; } = string.Empty; }
 public sealed class SendInternalChatMessageRequest { public string? Text { get; set; } public int? ReplyToMessageId { get; set; } public List<int> MentionUserIds { get; set; } = []; public List<IFormFile> Files { get; set; } = []; }
 public sealed class EditInternalChatMessageRequest { public string? Text { get; set; } public List<int> MentionUserIds { get; set; } = []; }
 public sealed class ToggleInternalChatReactionRequest { public string? Emoji { get; set; } }
