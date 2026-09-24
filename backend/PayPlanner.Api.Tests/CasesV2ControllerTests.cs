@@ -4177,6 +4177,49 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task MainCaseMotionAndObjectionDeadlines_CreateReminderTasksWithoutDuplicates()
+    {
+        await using var db = await CreateContextAsync();
+        var lawyer = await CreateUserAsync(db, "main-deadline-lawyer@example.com", "Юрист");
+        var motionAt = DateTime.UtcNow.Date.AddDays(15);
+        var objectionAt = DateTime.UtcNow.Date.AddDays(20);
+        var clientCase = new ClientCase
+        {
+            Client = new Client { Name = "Клиент со сроками", IsActive = true, ResponsibleUserId = lawyer.Id },
+            Title = "Ходатайство и возражения",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = lawyer.Id,
+            MotionDeadlineAt = motionAt,
+            ObjectionDeadlineAt = objectionAt,
+        };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+
+        await ClientCaseDeadlineTaskSyncService.SyncAsync(db, clientCase.Id, lawyer.Id, lawyer.FullName, CancellationToken.None);
+        await ClientCaseDeadlineTaskSyncService.SyncAsync(db, clientCase.Id, lawyer.Id, lawyer.FullName, CancellationToken.None);
+
+        var tasks = await db.TaskJournalItems
+            .AsNoTracking()
+            .Where(item => item.ClientCaseId == clientCase.Id)
+            .ToListAsync();
+        Assert.Equal(2, tasks.Count);
+        var motionTask = Assert.Single(tasks, item => item.TagsJson.Contains("case-deadline:motion", StringComparison.Ordinal));
+        var objectionTask = Assert.Single(tasks, item => item.TagsJson.Contains("case-deadline:objection", StringComparison.Ordinal));
+        Assert.Equal(motionAt.AddHours(9), motionTask.DueAt);
+        Assert.Equal(objectionAt.AddHours(9), objectionTask.DueAt);
+        foreach (var task in tasks)
+        {
+            Assert.Equal(lawyer.Id, task.AssigneeUserId);
+            Assert.Contains("before7d", task.RemindersJson, StringComparison.Ordinal);
+            Assert.Contains("before3d", task.RemindersJson, StringComparison.Ordinal);
+            Assert.Contains("before1d", task.RemindersJson, StringComparison.Ordinal);
+            Assert.Contains("atDue", task.RemindersJson, StringComparison.Ordinal);
+            Assert.Contains("dailyOverdue", task.RemindersJson, StringComparison.Ordinal);
+            Assert.Contains("inApp", task.ChannelsJson, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
     public async Task DecisionAppealTask_UsesProcessDeadlineButPreservesCustomTitle()
     {
         await using var db = await CreateContextAsync();
