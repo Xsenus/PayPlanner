@@ -46,6 +46,8 @@ function containsAny(value: string, fragments: string[]) {
 }
 
 function isDecisionEvent(event: ClientCaseCourtEvent) {
+  const status = (event.movementStatus || '').trim().toLowerCase();
+  if (!['completed', 'held'].includes(status)) return false;
   if (event.eventType === 'decision') return true;
   if (isAppealMovement(event)) return false;
 
@@ -166,7 +168,9 @@ export function buildCourtCaseProcessSummary(
     ) - (
       getScheduleTime(left.scheduledAt, left.allDay) ?? Number.NEGATIVE_INFINITY
     ))[0];
-  const decisionDate = caseItem.courtDecisionAt || decisionEvent?.scheduledAt || null;
+  const decisionDate = decisionEvent && ['appeal', 'cassation', 'supervision', 'supreme'].includes(decisionEvent.courtInstance)
+    ? decisionEvent.scheduledAt
+    : caseItem.courtDecisionAt || decisionEvent?.scheduledAt || null;
   const hasDecision = Boolean(decisionDate || decisionEvent);
   const hasCourtMovement = activeEvents.length > 0;
 
@@ -204,11 +208,29 @@ export function buildCourtCaseProcessSummary(
     ) - (
       getScheduleTime(left.scheduledAt, left.allDay) ?? Number.NEGATIVE_INFINITY
     ))[0];
+  const appealProceedingEvents = activeEvents
+    .filter((event) => event.courtInstance === 'appeal')
+    .sort((left, right) => (
+      getScheduleTime(right.scheduledAt, right.allDay) ?? Number.NEGATIVE_INFINITY
+    ) - (
+      getScheduleTime(left.scheduledAt, left.allDay) ?? Number.NEGATIVE_INFINITY
+    ));
+  const appealDecisionCandidate = appealProceedingEvents.find(isDecisionEvent);
+  const appealDecisionTime = getScheduleTime(appealDecisionCandidate?.scheduledAt, appealDecisionCandidate?.allDay);
+  const hasLaterScheduledAppealEvent = appealDecisionTime !== null && appealProceedingEvents.some((event) => (
+    (event.movementStatus || '').trim().toLowerCase() === 'scheduled'
+    && (getScheduleTime(event.scheduledAt, event.allDay) ?? Number.NEGATIVE_INFINITY) > appealDecisionTime
+  ));
+  const appealDecisionEvent = hasLaterScheduledAppealEvent ? null : appealDecisionCandidate;
+  const appealProceedingEvent = appealProceedingEvents[0];
+  const completedAppealHearing = appealProceedingEvent?.hearingOutcome === 'considered'
+    ? appealProceedingEvent
+    : null;
   const laterInstance = instances.find(hasPopulatedLaterInstance);
   const activeComplaint = instances
     .flatMap((instance) => instance.complaints ?? [])
     .find((complaint) => !complaint.isArchived);
-  const hasAppeal = Boolean(appealEvent || laterInstance || activeComplaint);
+  const hasAppeal = Boolean(appealEvent || appealProceedingEvent || laterInstance || activeComplaint);
   const appealDeadline = proceduralDeadlines
     .filter((deadline) => deadline.deadlineType === 'appeal')
     .filter(isActiveDeadline)
@@ -219,18 +241,39 @@ export function buildCourtCaseProcessSummary(
       getScheduleTime(right.dueAt, right.allDay) ?? 0
     ))[0];
 
-  const appeal: CourtProcessSummaryItem = hasAppeal
+  const appeal: CourtProcessSummaryItem = appealDecisionEvent
     ? {
         status: 'confirmed',
-        label: 'Обжалование зафиксировано',
-        detail: appealEvent?.resultSummary
-          || activeComplaint?.title
-          || (laterInstance ? `${laterInstance.instanceLabel}: ${laterInstance.courtCaseNumber || 'карточка связана'}` : 'В деле есть сведения об обжаловании.'),
-        basis: appealEvent ? 'актуальное движение дела' : activeComplaint ? 'активная жалоба' : 'связанная судебная инстанция',
-        date: appealEvent?.scheduledAt || activeComplaint?.filedAt || null,
-        allDay: appealEvent?.scheduledAt ? appealEvent.allDay : undefined,
-        tone: 'blue',
+        label: 'Решение апелляции зафиксировано',
+        detail: appealDecisionEvent.resultSummary || appealDecisionEvent.title,
+        basis: 'решение апелляционной инстанции',
+        date: appealDecisionEvent.scheduledAt,
+        allDay: appealDecisionEvent.allDay,
+        tone: 'emerald',
       }
+    : completedAppealHearing
+      ? {
+          status: 'confirmed',
+          label: 'Рассмотрение апелляции завершено',
+          detail: completedAppealHearing.hearingOutcomeNote || 'Итог заседания указан, но решение апелляционного суда не зафиксировано.',
+          basis: 'отметка по заседанию апелляции',
+          date: completedAppealHearing.scheduledAt,
+          allDay: completedAppealHearing.allDay,
+          tone: 'blue',
+        }
+    : hasAppeal
+      ? {
+          status: 'confirmed',
+          label: 'Обжалование зафиксировано',
+          detail: appealEvent?.resultSummary
+            || activeComplaint?.title
+            || appealProceedingEvent?.title
+            || (laterInstance ? `${laterInstance.instanceLabel}: ${laterInstance.courtCaseNumber || 'карточка связана'}` : 'В деле есть сведения об обжаловании.'),
+          basis: appealEvent || appealProceedingEvent ? 'актуальное движение дела' : activeComplaint ? 'активная жалоба' : 'связанная судебная инстанция',
+          date: appealEvent?.scheduledAt || appealProceedingEvent?.scheduledAt || activeComplaint?.filedAt || null,
+          allDay: appealEvent?.scheduledAt ? appealEvent.allDay : appealProceedingEvent?.allDay,
+          tone: 'blue',
+        }
     : hasDecision
       ? {
           status: 'not-found',

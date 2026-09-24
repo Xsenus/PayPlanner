@@ -67,6 +67,123 @@ describe('buildCourtCaseProcessSummary', () => {
     expect(summary.appeal.label).toBe('Обжалование не обнаружено');
   });
 
+  it('does not call a scheduled announcement an issued decision', () => {
+    const summary = buildCourtCaseProcessSummary(
+      { courtDecisionAt: null },
+      [courtEvent({
+        eventType: 'decision',
+        title: 'Ожидаемое решение суда',
+        movementStatus: 'scheduled',
+        movementStatusLabel: 'Назначено',
+      })],
+      [],
+    );
+
+    expect(summary.decision.label).toBe('Решение не обнаружено');
+    expect(summary.appeal.label).toBe('Обжалование пока не определяется');
+  });
+
+  it('shows a completed appeal decision even without a populated instance card', () => {
+    const summary = buildCourtCaseProcessSummary(
+      { courtDecisionAt: '2026-07-01T00:00:00Z' },
+      [courtEvent({
+        eventType: 'decision',
+        title: 'Апелляционное определение',
+        courtInstance: 'appeal',
+        courtInstanceLabel: 'Апелляция',
+        movementStatus: 'completed',
+        scheduledAt: '2026-09-14T10:00:00Z',
+        resultSummary: 'Решение оставлено без изменения',
+      })],
+      [],
+    );
+
+    expect(summary.decision.label).toBe('Решение вынесено');
+    expect(summary.decision.date).toBe('2026-09-14T10:00:00Z');
+    expect(summary.appeal.label).toBe('Решение апелляции зафиксировано');
+    expect(summary.appeal.detail).toBe('Решение оставлено без изменения');
+    expect(summary.appeal.basis).toBe('решение апелляционной инстанции');
+  });
+
+  it('does not confuse a scheduled appeal decision with an issued one', () => {
+    const summary = buildCourtCaseProcessSummary(
+      { courtDecisionAt: '2026-07-01T00:00:00Z' },
+      [courtEvent({
+        eventType: 'decision',
+        title: 'Ожидаемое апелляционное определение',
+        courtInstance: 'appeal',
+        movementStatus: 'scheduled',
+        scheduledAt: '2026-10-14T10:00:00Z',
+      })],
+      [],
+    );
+
+    expect(summary.appeal.label).toBe('Обжалование зафиксировано');
+    expect(summary.appeal.label).not.toBe('Решение апелляции зафиксировано');
+  });
+
+  it('does not call an appeal completed when a later hearing is scheduled', () => {
+    const summary = buildCourtCaseProcessSummary(
+      { courtDecisionAt: '2026-07-01T00:00:00Z' },
+      [
+        courtEvent({
+          eventType: 'decision',
+          title: 'Апелляционное определение',
+          courtInstance: 'appeal',
+          scheduledAt: '2026-09-14T10:00:00Z',
+        }),
+        courtEvent({
+          id: 2,
+          eventType: 'hearing',
+          title: 'Новое заседание апелляции',
+          courtInstance: 'appeal',
+          movementStatus: 'scheduled',
+          scheduledAt: '2026-10-14T10:00:00Z',
+        }),
+      ],
+      [],
+    );
+
+    expect(summary.appeal.label).toBe('Обжалование зафиксировано');
+  });
+
+  it('distinguishes a considered appeal hearing from a published decision', () => {
+    const completed = buildCourtCaseProcessSummary(
+      { courtDecisionAt: null },
+      [courtEvent({
+        eventType: 'hearing',
+        courtInstance: 'appeal',
+        movementStatus: 'held',
+        hearingOutcome: 'considered',
+        hearingOutcomeNote: 'Рассмотрение завершено',
+      })],
+      [],
+    );
+    const continued = buildCourtCaseProcessSummary(
+      { courtDecisionAt: null },
+      [
+        courtEvent({
+          eventType: 'hearing',
+          courtInstance: 'appeal',
+          movementStatus: 'held',
+          hearingOutcome: 'considered',
+        }),
+        courtEvent({
+          id: 2,
+          eventType: 'hearing',
+          courtInstance: 'appeal',
+          movementStatus: 'scheduled',
+          scheduledAt: '2026-10-14T10:00:00Z',
+        }),
+      ],
+      [],
+    );
+
+    expect(completed.appeal.label).toBe('Рассмотрение апелляции завершено');
+    expect(completed.appeal.detail).toBe('Рассмотрение завершено');
+    expect(continued.appeal.label).toBe('Обжалование зафиксировано');
+  });
+
   it('recognizes an appeal from a linked later instance', () => {
     const instance = {
       id: 1,

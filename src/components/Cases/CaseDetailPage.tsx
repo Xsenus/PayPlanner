@@ -7337,7 +7337,7 @@ function CourtPanel({
                   ['ИНН / ОГРН истца', [caseItem.claimantInn, caseItem.claimantOgrn].filter(Boolean).join(' / ') || '—'],
                   ['Ответчик / должник', caseItem.defendant || '—'],
                   ['ИНН / ОГРН ответчика', [caseItem.defendantInn, caseItem.defendantOgrn].filter(Boolean).join(' / ') || '—'],
-                  ['Текущий результат', latestEvent?.resultSummary || latestEvent?.movementStatusLabel || latestEvent?.movementStatus || caseItem.stage || '—'],
+                  ['Текущий результат', latestEvent?.resultSummary || latestEvent?.hearingOutcomeNote || '—'],
                 ].map(([label, value]) => <div key={label} className="min-w-0 rounded-lg bg-slate-50 px-3 py-2"><div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-400">{label}</div><div className={`mt-1 break-words text-sm font-semibold text-slate-800 ${label === 'UID' ? 'font-mono text-xs text-cyan-800' : ''}`}>{value}</div></div>)}
               </div>
               <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">

@@ -3518,6 +3518,7 @@ describe('CaseDetailPage', () => {
     expect(screen.getAllByText('Самарский областной суд').length).toBeGreaterThan(0);
     expect(screen.queryByText('UID-FIRST-ONLY')).toBeNull();
     expect(within(screen.getByText('Номер карточки').parentElement!).getByText('Не указан')).toBeTruthy();
+    expect(within(screen.getByText('Текущий результат').parentElement!).getByText('—')).toBeTruthy();
     expect(screen.queryByRole('link', { name: 'Открыть официальную карточку суда' })).toBeNull();
   });
 
