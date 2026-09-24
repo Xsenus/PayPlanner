@@ -3484,6 +3484,89 @@ describe('CaseDetailPage', () => {
     });
   });
 
+  it('does not show first-instance court details in an appeal card with missing fields', async () => {
+    vi.mocked(apiService.getCaseV2).mockResolvedValueOnce(createCase({ judicialUid: 'UID-FIRST-ONLY' }));
+    vi.mocked(apiService.getCaseCourtInstances).mockResolvedValueOnce([
+      {
+        id: 81,
+        clientCaseId: 15,
+        instance: 'first',
+        instanceLabel: 'Первая инстанция',
+        courtName: 'Арбитражный суд Самарской области',
+        courtCaseNumber: 'А55-12345/2026',
+        judicialUid: 'UID-FIRST-ONLY',
+        courtUrl: 'https://kad.arbitr.ru/card',
+        createdAt: '2026-05-21T00:00:00Z',
+        complaints: [],
+      },
+      {
+        id: 82,
+        clientCaseId: 15,
+        instance: 'appeal',
+        instanceLabel: 'Апелляция',
+        courtName: 'Самарский областной суд',
+        createdAt: '2026-05-21T00:00:00Z',
+        complaints: [],
+      },
+    ]);
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Суд' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Вернуться к обзору' }));
+    fireEvent.click(screen.getByRole('button', { name: /Апелляция Номер не указан/u }));
+
+    expect(screen.getAllByText('Самарский областной суд').length).toBeGreaterThan(0);
+    expect(screen.queryByText('UID-FIRST-ONLY')).toBeNull();
+    expect(within(screen.getByText('Номер карточки').parentElement!).getByText('Не указан')).toBeTruthy();
+    expect(screen.queryByRole('link', { name: 'Открыть официальную карточку суда' })).toBeNull();
+  });
+
+  it('does not include another instance details when searching an appeal court card', async () => {
+    vi.mocked(apiService.getCaseV2).mockResolvedValueOnce(createCase({ judicialUid: 'UID-FIRST-ONLY' }));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Суд' }));
+    const instancesSection = screen.getByText('Инстанции судов').closest('section');
+    expect(instancesSection).toBeTruthy();
+    fireEvent.click(within(instancesSection!).getByRole('button', { name: /Апелляция/u }));
+    fireEvent.change(screen.getByPlaceholderText('https://...sudrf.ru/...'), {
+      target: { value: 'https://example.test/appeal' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Найти/u }));
+
+    await waitFor(() => expect(apiService.searchCaseCourtSyncCases).toHaveBeenCalledWith(15, {
+      sourceUrl: 'https://example.test/appeal',
+      courtCaseNumber: null,
+      judicialUid: null,
+      courtName: null,
+      instance: 'appeal',
+    }));
+  });
+
+  it('does not copy first-instance court details into a new appeal event', async () => {
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Суд' }));
+    const instancesSection = screen.getByText('Инстанции судов').closest('section');
+    expect(instancesSection).toBeTruthy();
+    fireEvent.click(within(instancesSection!).getByRole('button', { name: /Апелляция/u }));
+
+    const titleInput = screen.getByPlaceholderText('Например, предварительное заседание');
+    const eventForm = titleInput.closest('.grid');
+    expect(eventForm).toBeTruthy();
+    fireEvent.change(titleInput, { target: { value: 'Заседание апелляции' } });
+    fireEvent.change(eventForm!.querySelector('input[type="datetime-local"]')!, {
+      target: { value: '2026-09-25T10:00' },
+    });
+    fireEvent.click(within(eventForm as HTMLElement).getByRole('button', { name: 'Добавить' }));
+
+    await waitFor(() => expect(apiService.createCaseCourtEvent).toHaveBeenCalledWith(15, expect.objectContaining({
+      courtInstance: 'appeal',
+      title: 'Заседание апелляции',
+      courtName: undefined,
+      courtCaseNumber: undefined,
+      courtroom: undefined,
+    })));
+  });
+
   it('calculates a procedural deadline and shows calculation details', async () => {
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
 

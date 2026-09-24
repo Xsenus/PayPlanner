@@ -1186,6 +1186,12 @@ function getNextCourtInstance(instance: string) {
   return 'supreme';
 }
 
+function caseSourceMatchesCourtInstance(caseItem: ClientCase, instance?: ClientCaseCourtInstance | null) {
+  const caseUrl = caseItem.courtUrl?.trim();
+  const instanceUrl = instance?.courtUrl?.trim();
+  return Boolean(caseUrl && instanceUrl && caseUrl === instanceUrl);
+}
+
 function buildCourtInstanceDraft(instance?: ClientCaseCourtInstance | null): CourtInstanceDraft {
   return {
     courtId: instance?.courtId ? String(instance.courtId) : '',
@@ -2920,7 +2926,11 @@ export function CaseDetailPage({
   const searchCourtSyncCases = async () => {
     if (!caseItem) return;
 
-    const sourceUrl = courtInstanceDraft.courtUrl.trim() || caseItem.courtUrl || '';
+    const selectedInstance = courtInstances.find((item) => item.instance === activeCourtInstance);
+    const draftSourceUrl = courtInstanceDraft.courtUrl.trim();
+    const caseSourceIsSelected = caseSourceMatchesCourtInstance(caseItem, selectedInstance)
+      && (!draftSourceUrl || draftSourceUrl === caseItem.courtUrl?.trim());
+    const sourceUrl = draftSourceUrl || (caseSourceIsSelected ? caseItem.courtUrl : '') || '';
     if (!sourceUrl.trim()) {
       setError('Укажите ссылку на судебную карточку или страницу поиска суда.');
       return;
@@ -2932,9 +2942,9 @@ export function CaseDetailPage({
     try {
       const results = await apiService.searchCaseCourtSyncCases(caseItem.id, {
         sourceUrl: sourceUrl.trim(),
-        courtCaseNumber: courtInstanceDraft.courtCaseNumber.trim() || caseItem.courtCaseNumber || null,
-        judicialUid: courtInstanceDraft.judicialUid.trim() || caseItem.judicialUid || null,
-        courtName: courtInstanceDraft.courtName.trim() || caseItem.courtName || null,
+        courtCaseNumber: courtInstanceDraft.courtCaseNumber.trim() || (caseSourceIsSelected ? caseItem.courtCaseNumber : null) || null,
+        judicialUid: courtInstanceDraft.judicialUid.trim() || (caseSourceIsSelected ? caseItem.judicialUid : null) || null,
+        courtName: courtInstanceDraft.courtName.trim() || (caseSourceIsSelected ? caseItem.courtName : null) || null,
         instance: activeCourtInstance,
       });
       setCourtSyncSearchResults(results ?? []);
@@ -3128,6 +3138,7 @@ export function CaseDetailPage({
     setNotice(null);
     try {
       const selectedCourtInstance = courtInstances.find((item) => item.instance === activeCourtInstance);
+      const caseSourceIsSelected = caseSourceMatchesCourtInstance(caseItem, selectedCourtInstance);
       const item = await apiService.createCaseCourtEvent(caseItem.id, {
         eventType: courtEventTypeDraft,
         title: courtEventTitleDraft.trim() || undefined,
@@ -3135,9 +3146,9 @@ export function CaseDetailPage({
         allDay: courtEventTypeDraft !== 'hearing',
         courtId: courtEventCourtIdDraft ? Number(courtEventCourtIdDraft) : undefined,
         courtInstance: activeCourtInstance,
-        courtName: selectedCourtInstance?.courtName || caseItem.courtName || undefined,
-        courtCaseNumber: selectedCourtInstance?.courtCaseNumber || caseItem.courtCaseNumber || undefined,
-        courtroom: selectedCourtInstance?.courtroom || caseItem.courtroom || undefined,
+        courtName: selectedCourtInstance?.courtName || (caseSourceIsSelected ? caseItem.courtName : undefined) || undefined,
+        courtCaseNumber: selectedCourtInstance?.courtCaseNumber || (caseSourceIsSelected ? caseItem.courtCaseNumber : undefined) || undefined,
+        courtroom: selectedCourtInstance?.courtroom || (caseSourceIsSelected ? caseItem.courtroom : undefined) || undefined,
         movementStatus: courtEventStatusDraft,
         resultSummary: courtEventResultDraft.trim() || undefined,
         clientCaseDocumentId: courtEventDocumentIdDraft ? Number(courtEventDocumentIdDraft) : undefined,
@@ -7194,6 +7205,12 @@ function CourtPanel({
 
   if (!courtEditMode) {
     const overviewInstance = selectedCourtInstance;
+    const caseSourceIsSelected = caseSourceMatchesCourtInstance(caseItem, overviewInstance);
+    const overviewCourtName = overviewInstance?.courtName || (caseSourceIsSelected ? caseItem.courtName : null);
+    const overviewCourtCaseNumber = overviewInstance?.courtCaseNumber || (caseSourceIsSelected ? caseItem.courtCaseNumber : null);
+    const overviewJudicialUid = overviewInstance?.judicialUid || (caseSourceIsSelected ? caseItem.judicialUid : null);
+    const overviewCourtUrl = overviewInstance?.courtUrl || (caseSourceIsSelected ? caseItem.courtUrl : null);
+    const overviewJudgeName = overviewInstance?.judgeName || (caseSourceIsSelected ? caseItem.judgeName : null);
     const overviewEvents = selectedActiveCourtEvents
       .slice()
       .sort((left, right) => new Date(left.scheduledAt).getTime() - new Date(right.scheduledAt).getTime());
@@ -7307,10 +7324,10 @@ function CourtPanel({
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 {[
                   ['Владелец', ownerName],
-                  ['Номер дела', overviewInstance?.courtCaseNumber || caseItem.courtCaseNumber || caseItem.caseNumber || '—'],
-                  ['UID', overviewInstance?.judicialUid || caseItem.judicialUid || '—'],
-                  ['Суд', overviewInstance?.courtName || caseItem.courtName || '—'],
-                  ['Судья', overviewInstance?.judgeName || caseItem.judgeName || '—'],
+                  ['Номер дела', overviewCourtCaseNumber || '—'],
+                  ['UID', overviewJudicialUid || '—'],
+                  ['Суд', overviewCourtName || '—'],
+                  ['Судья', overviewJudgeName || '—'],
                   ['Наша роль', caseItem.ourCourtRole === 'claimant' ? 'Истец' : caseItem.ourCourtRole === 'respondent' ? 'Ответчик' : caseItem.ourCourtRole === 'third-party' ? 'Третье лицо' : 'Не указана'],
                   ['Сумма иска', caseItem.courtClaimAmount == null ? '—' : formatCurrencySmart(caseItem.courtClaimAmount).full],
                   ['Присуждено судом', caseItem.courtAwardedAmount == null ? '—' : formatCurrencySmart(caseItem.courtAwardedAmount).full],
@@ -7336,7 +7353,7 @@ function CourtPanel({
                   </button>
                 ) : null}
               </div>
-              {(overviewInstance?.courtUrl || caseItem.courtUrl) ? <a href={overviewInstance?.courtUrl || caseItem.courtUrl || '#'} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-blue-700 hover:underline"><ExternalLink className="h-4 w-4" /> Открыть официальную карточку суда</a> : null}
+              {overviewCourtUrl ? <a href={overviewCourtUrl} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-blue-700 hover:underline"><ExternalLink className="h-4 w-4" /> Открыть официальную карточку суда</a> : null}
             </section>
 
             <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
@@ -7345,7 +7362,7 @@ function CourtPanel({
                 const instanceData = courtInstances.find((item) => item.instance === tab.value);
                 return <button key={tab.value} type="button" onClick={() => onActiveCourtInstanceChange(tab.value)} className={`min-w-[170px] rounded-lg border px-3 py-2 text-left ${activeCourtInstance === tab.value ? 'border-blue-400 bg-blue-50 text-blue-800' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}><div className="text-sm font-bold">{tab.label}</div><div className="mt-0.5 truncate text-xs opacity-75">{instanceData?.courtCaseNumber || 'Номер не указан'}</div></button>;
               })}</div>
-              <div className="mt-3 grid gap-2 rounded-lg border border-slate-200 bg-slate-50/60 p-3 sm:grid-cols-2"><div><div className="text-[11px] uppercase tracking-[0.1em] text-slate-400">Суд</div><div className="mt-1 text-sm font-semibold text-slate-800">{overviewInstance?.courtName || caseItem.courtName || 'Не указан'}</div></div><div><div className="text-[11px] uppercase tracking-[0.1em] text-slate-400">Номер карточки</div><div className="mt-1 text-sm font-semibold text-slate-800">{overviewInstance?.courtCaseNumber || caseItem.courtCaseNumber || 'Не указан'}</div></div><div><div className="text-[11px] uppercase tracking-[0.1em] text-slate-400">Судья</div><div className="mt-1 text-sm font-semibold text-slate-800">{overviewInstance?.judgeName || caseItem.judgeName || 'Не указан'}</div></div><div><div className="text-[11px] uppercase tracking-[0.1em] text-slate-400">Статус</div><div className="mt-1 text-sm font-semibold text-slate-800">{latestEvent?.movementStatusLabel || latestEvent?.movementStatus || caseItem.stage || 'Нет данных'}</div></div></div>
+              <div className="mt-3 grid gap-2 rounded-lg border border-slate-200 bg-slate-50/60 p-3 sm:grid-cols-2"><div><div className="text-[11px] uppercase tracking-[0.1em] text-slate-400">Суд</div><div className="mt-1 text-sm font-semibold text-slate-800">{overviewCourtName || 'Не указан'}</div></div><div><div className="text-[11px] uppercase tracking-[0.1em] text-slate-400">Номер карточки</div><div className="mt-1 text-sm font-semibold text-slate-800">{overviewCourtCaseNumber || 'Не указан'}</div></div><div><div className="text-[11px] uppercase tracking-[0.1em] text-slate-400">Судья</div><div className="mt-1 text-sm font-semibold text-slate-800">{overviewJudgeName || 'Не указан'}</div></div><div><div className="text-[11px] uppercase tracking-[0.1em] text-slate-400">Статус</div><div className="mt-1 text-sm font-semibold text-slate-800">{latestEvent?.movementStatusLabel || latestEvent?.movementStatus || 'Нет данных'}</div></div></div>
             </section>
 
             <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
