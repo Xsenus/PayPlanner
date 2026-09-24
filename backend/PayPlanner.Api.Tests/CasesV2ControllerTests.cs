@@ -4466,6 +4466,61 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task CaseCalendarEvents_MarksOnlyTheMatchingCompletedHearingPreparation()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "hearing-calendar@example.com", "Юрист");
+        var hearingAt = new DateTime(2026, 10, 10, 9, 0, 0, DateTimeKind.Utc);
+        var clientCase = new ClientCase
+        {
+            Client = new Client { Name = "Клиент", IsActive = true, ResponsibleUserId = owner.Id },
+            Title = "Дело с двумя заседаниями",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = owner.Id,
+            CourtEvents =
+            [
+                new ClientCaseCourtEvent { EventType = "hearing", ScheduledAt = hearingAt, Title = "Первое заседание" },
+                new ClientCaseCourtEvent { EventType = "hearing", ScheduledAt = hearingAt.AddDays(7), Title = "Второе заседание" },
+            ],
+        };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        var firstEventId = clientCase.CourtEvents.OrderBy(item => item.ScheduledAt).First().Id;
+        db.TaskJournalItems.AddRange(
+            new TaskJournalItem
+            {
+                ClientCaseId = clientCase.Id,
+                Title = "Подготовка первого заседания",
+                ObjectName = clientCase.Title,
+                Type = "courtHearing",
+                Status = "done",
+                DueAt = hearingAt.AddDays(-3),
+                TagsJson = $"[\"case-deadline:court-event-{firstEventId}\"]",
+            },
+            new TaskJournalItem
+            {
+                ClientCaseId = clientCase.Id,
+                Title = "Подготовка второго заседания не завершена",
+                ObjectName = clientCase.Title,
+                Type = "courtHearing",
+                Status = "inProgress",
+                DueAt = hearingAt.AddDays(4),
+                TagsJson = $"[\"case-deadline:court-event-{clientCase.CourtEvents.OrderBy(item => item.ScheduledAt).Last().Id}\"]",
+            });
+        await db.SaveChangesAsync();
+
+        var result = await CreateController(db, owner).GetCaseCalendarEvents(
+            new DateTime(2026, 10, 1), new DateTime(2026, 10, 31),
+            clientCaseId: null, responsibleUserId: null, includeTasks: false, ct: CancellationToken.None);
+        var events = Assert.IsAssignableFrom<IReadOnlyList<CasesV2Controller.CaseCalendarEventDto>>(
+            Assert.IsType<OkObjectResult>(result.Result).Value);
+        var hearings = events.Where(item => item.SourceType == "hearing").OrderBy(item => item.StartAt).ToArray();
+        Assert.Equal(2, hearings.Length);
+        Assert.True(hearings[0].DocumentsPrepared);
+        Assert.False(hearings[1].DocumentsPrepared);
+    }
+
+    [Fact]
     public async Task CaseCalendarEvents_UsesUserTimeZoneForTimedEventBoundaries()
     {
         await using var db = await CreateContextAsync();

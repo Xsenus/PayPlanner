@@ -5942,6 +5942,40 @@ public partial class CasesV2Controller : ControllerBase
             }
         }
 
+        // The calendar uses the same per-hearing preparation rule as the
+        // tomorrow dialog. Fetch candidates once for the whole visible range.
+        var hearings = events
+            .Where(item => item.Kind == "court" && item.SourceType == "hearing")
+            .ToArray();
+        if (hearings.Length > 0)
+        {
+            var hearingCaseIds = hearings.Select(item => item.ClientCaseId).Distinct().ToArray();
+            var dueTimes = hearings.Select(item => PreparationTaskDueAt(item.StartAt, item.AllDay)).ToArray();
+            var earliestDue = dueTimes.Min();
+            var latestDue = dueTimes.Max();
+            var preparationTasks = await _db.TaskJournalItems.AsNoTracking()
+                .Where(item => item.ClientCaseId.HasValue
+                    && hearingCaseIds.Contains(item.ClientCaseId.Value)
+                    && item.Type == "courtHearing"
+                    && item.Status == "done"
+                    && item.DueAt >= earliestDue
+                    && item.DueAt <= latestDue)
+                .Select(item => new { item.ClientCaseId, item.DueAt, item.TagsJson })
+                .ToListAsync(ct);
+            var completedTasksByHearing = preparationTasks
+                .ToLookup(item => (item.ClientCaseId!.Value, item.DueAt));
+
+            foreach (var hearing in hearings)
+            {
+                var sourceTag = hearing.SourceId.HasValue
+                    ? $"\"case-deadline:court-event-{hearing.SourceId.Value}\""
+                    : "\"case-deadline:hearing\"";
+                var dueAt = PreparationTaskDueAt(hearing.StartAt, hearing.AllDay);
+                hearing.DocumentsPrepared = completedTasksByHearing[(hearing.ClientCaseId, dueAt)]
+                    .Any(task => task.TagsJson.Contains(sourceTag, StringComparison.Ordinal));
+            }
+        }
+
         return events
             .OrderBy(item => item.StartAt)
             .ThenBy(item => item.Kind, StringComparer.Ordinal)
@@ -15244,6 +15278,7 @@ public partial class CasesV2Controller : ControllerBase
         public bool IsWarning { get; set; }
         public string? CourtName { get; set; }
         public string? CourtCaseNumber { get; set; }
+        public bool? DocumentsPrepared { get; set; }
     }
 
     public sealed class CaseCalendarSummaryDto

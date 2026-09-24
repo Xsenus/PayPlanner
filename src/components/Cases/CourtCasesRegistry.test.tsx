@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { apiService } from '../../services/api';
-import type { ClientCase } from '../../types';
+import type { CaseCalendarEvent, ClientCase } from '../../types';
 import { CourtCasesRegistry } from './CourtCasesRegistry';
 
 vi.mock('../../services/api', () => ({
@@ -13,6 +13,7 @@ vi.mock('../../services/api', () => ({
     getActResponsibles: vi.fn(),
     getCourtSyncProviders: vi.fn(),
     getCourtSyncHealth: vi.fn(),
+    getCaseCalendarEvents: vi.fn(),
   },
 }));
 
@@ -53,9 +54,11 @@ describe('CourtCasesRegistry', () => {
     vi.mocked(apiService.getActResponsibles).mockReset();
     vi.mocked(apiService.getCourtSyncProviders).mockReset();
     vi.mocked(apiService.getCourtSyncHealth).mockReset();
+    vi.mocked(apiService.getCaseCalendarEvents).mockReset();
     vi.mocked(apiService.getActResponsibles).mockResolvedValue([]);
     vi.mocked(apiService.getCourtSyncProviders).mockResolvedValue([]);
     vi.mocked(apiService.getCourtSyncHealth).mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 50 });
+    vi.mocked(apiService.getCaseCalendarEvents).mockResolvedValue([]);
     vi.mocked(apiService.getCasesV2).mockResolvedValue({ items: [courtCase], total: 1, page: 1, pageSize: 12 });
     vi.mocked(apiService.getCourtCasesRegistrySummary).mockResolvedValue({
       total: 1,
@@ -110,6 +113,39 @@ describe('CourtCasesRegistry', () => {
       expect.objectContaining({ courtOnly: true, scope: 'active', sortBy: 'nextHearingAt' }),
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
+  });
+
+  it('shows all visible hearings for the selected period instead of only the registry page', async () => {
+    const onOpenCaseCourt = vi.fn();
+    const hearingAt = new Date().toISOString();
+    const baseEvent: CaseCalendarEvent = {
+      id: 'court-event:1', kind: 'court', sourceType: 'hearing', title: 'Судебное заседание',
+      startAt: hearingAt, endAt: hearingAt, allDay: false, clientCaseId: 77,
+      caseTitle: 'Первое дело', responsibleName: 'Юрист', status: 'scheduled', priority: 'normal',
+      isOverdue: false, isWarning: true, documentsPrepared: true,
+    };
+    vi.mocked(apiService.getCaseCalendarEvents).mockResolvedValue([
+      baseEvent,
+      { ...baseEvent, id: 'court-event:2', clientCaseId: 99, caseTitle: 'Дело с другой страницы', documentsPrepared: false },
+      { ...baseEvent, id: 'case-deadline:1', kind: 'case-deadline', sourceType: 'due', caseTitle: 'Не заседание' },
+    ]);
+    render(<CourtCasesRegistry onOpenCaseCourt={onOpenCaseCourt} />);
+    await screen.findByText('ИВАНОВ — РАЗДЕЛ ИМУЩЕСТВА');
+    fireEvent.click(screen.getByRole('button', { name: 'Календарь заседаний' }));
+
+    expect(await screen.findByRole('region', { name: 'Календарь судебных заседаний' })).toBeTruthy();
+    expect(screen.getByText('Подготовлено: 1')).toBeTruthy();
+    expect(screen.getByText('Внимание: 1')).toBeTruthy();
+    expect(screen.getAllByText(/Дело с другой страницы/u).length).toBeGreaterThan(0);
+    expect(screen.queryByText('Не заседание')).toBeNull();
+    expect(apiService.getCaseCalendarEvents).toHaveBeenCalledWith(expect.objectContaining({ includeTasks: false }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Месяц' }));
+    await waitFor(() => expect(apiService.getCaseCalendarEvents).toHaveBeenLastCalledWith(
+      expect.objectContaining({ from: expect.stringMatching(/^\d{4}-\d{2}-01$/), includeTasks: false }),
+    ));
+    fireEvent.click(screen.getByRole('button', { name: 'К карточкам дел' }));
+    expect(screen.queryByRole('region', { name: 'Календарь судебных заседаний' })).toBeNull();
   });
 
   it('filters the registry and report by our role in the case', async () => {

@@ -725,6 +725,7 @@ export interface CaseCalendarEvent {
   isWarning: boolean;
   courtName?: string | null;
   courtCaseNumber?: string | null;
+  documentsPrepared?: boolean | null;
 }
 
 export interface CaseCalendarSummary {
