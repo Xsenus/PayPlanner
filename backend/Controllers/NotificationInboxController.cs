@@ -599,6 +599,7 @@ public class NotificationInboxController : ControllerBase
                 || item.Type == UserNotificationTypes.CaseCourtEvent
                 || item.Type == UserNotificationTypes.CourtHearing
                 || item.Type == UserNotificationTypes.CourtStatusChanged
+                || item.Type == UserNotificationTypes.CourtDecisionRecorded
                 || item.Type == UserNotificationTypes.CourtDecisionPublished
                 || item.Type == UserNotificationTypes.CourtSyncFailed
                 || item.Type == UserNotificationTypes.CaseProceduralDeadline

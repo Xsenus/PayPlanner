@@ -175,7 +175,8 @@ public sealed class MaxOutboxServiceTests
 
     [Theory]
     [InlineData(UserNotificationTypes.TaskAssigned, "Новая задача")]
-    [InlineData(UserNotificationTypes.CourtDecisionPublished, "Судебное решение")]
+    [InlineData(UserNotificationTypes.CourtDecisionRecorded, "Судебное решение")]
+    [InlineData(UserNotificationTypes.CourtDecisionPublished, "Судебный акт или решение")]
     [InlineData(UserNotificationTypes.PaymentChanged, "Изменение платежа")]
     public async Task NotificationTypesUseNeutralTemplatesWithoutSourceDetails(string type, string label)
     {

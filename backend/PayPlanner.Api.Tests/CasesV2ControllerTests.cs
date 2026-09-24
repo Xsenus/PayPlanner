@@ -2391,8 +2391,8 @@ public class CasesV2ControllerTests
         Assert.IsType<CreatedResult>(result);
         var notification = await db.UserNotifications.SingleAsync();
         Assert.Equal(responsible.Id, notification.RecipientUserId);
-        Assert.Equal(UserNotificationTypes.CourtDecisionPublished, notification.Type);
-        Assert.Contains("Вынесено судебное решение", notification.Title);
+        Assert.Equal(UserNotificationTypes.CourtDecisionRecorded, notification.Type);
+        Assert.Contains("Указана дата судебного решения", notification.Title);
         Assert.Contains("05.10.2026", notification.BodyPreview);
         Assert.DoesNotContain("Прежняя дата", notification.BodyPreview);
     }
@@ -2422,7 +2422,7 @@ public class CasesV2ControllerTests
         Assert.Equal(2, notifications.Count);
         Assert.All(notifications, item => Assert.Equal(responsible.Id, item.RecipientUserId));
         Assert.Contains(notifications, item => item.Type == UserNotificationTypes.CourtHearing);
-        Assert.Contains(notifications, item => item.Type == UserNotificationTypes.CourtDecisionPublished);
+        Assert.Contains(notifications, item => item.Type == UserNotificationTypes.CourtDecisionRecorded);
     }
 
     [Fact]

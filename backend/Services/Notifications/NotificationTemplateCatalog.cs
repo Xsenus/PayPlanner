@@ -28,6 +28,7 @@ public static class NotificationTemplateKeys
     public const string CourtHearing = "court.hearing";
     public const string CourtHearingRescheduled = "court.hearingRescheduled";
     public const string CourtStatusChanged = "court.statusChanged";
+    public const string CourtDecisionRecorded = "court.decisionRecorded";
     public const string CourtDecisionPublished = "court.decisionPublished";
     public const string CourtSyncFailed = "court.syncFailed";
     public const string CaseProceduralDeadline = "case.proceduralDeadline";
@@ -402,10 +403,17 @@ public static class NotificationTemplateCatalog
             "{{actor.name}} {{courtEvent.action}} судебное событие по делу {{case.title}}.\n\nСобытие: {{courtEvent.title}}\nДата: {{courtEvent.scheduledAt}}\nСтатус: {{courtEvent.status}}\nРезультат: {{courtEvent.result}}",
             CourtEventVariables),
         new(
-            NotificationTemplateKeys.CourtDecisionPublished,
-            "Судебное решение",
-            "Уведомление ответственным по делу при фиксации судебного решения; наличие текста судебного акта проверяется отдельно.",
+            NotificationTemplateKeys.CourtDecisionRecorded,
+            "Судебное решение зафиксировано",
+            "Уведомление ответственным по делу при фиксации судебного решения без утверждения о публикации текста акта.",
             "Зафиксировано судебное решение: {{case.title}}",
+            "{{actor.name}} {{courtEvent.action}} судебное решение по делу {{case.title}}.\n\nСобытие: {{courtEvent.title}}\nДата: {{courtEvent.scheduledAt}}\nСуд: {{courtEvent.courtName}}\nРезультат: {{courtEvent.result}}",
+            CourtEventVariables),
+        new(
+            NotificationTemplateKeys.CourtDecisionPublished,
+            "Публикация судебного акта",
+            "Уведомление ответственным по делу только при подтверждённой публикации текста судебного акта.",
+            "Опубликован судебный акт: {{case.title}}",
             "{{actor.name}} {{courtEvent.action}} судебный результат по делу {{case.title}}.\n\nСобытие: {{courtEvent.title}}\nДата: {{courtEvent.scheduledAt}}\nСуд: {{courtEvent.courtName}}\nРезультат: {{courtEvent.result}}",
             CourtEventVariables),
         new(

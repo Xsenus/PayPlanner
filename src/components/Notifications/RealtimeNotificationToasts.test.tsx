@@ -236,6 +236,38 @@ describe('RealtimeNotificationToasts', () => {
     expect(openCase).not.toHaveBeenCalled();
   });
 
+  it('shows a recorded court decision without claiming publication', async () => {
+    const openCase = vi.fn();
+    render(<RealtimeNotificationToasts userId={5} onOpenCase={openCase} />);
+
+    await waitFor(() => expect(connectionState.start).toHaveBeenCalledTimes(1));
+    act(() => {
+      connectionState.handlers.get(REALTIME_USER_NOTIFICATION_CREATED_EVENT)?.({
+        id: 44,
+        recipientUserId: 5,
+        type: 'courtDecisionRecorded',
+        eventKey: 'case:77:decision:901',
+        title: 'По делу зафиксировано решение суда',
+        bodyPreview: 'Текст судебного акта пока не опубликован.',
+        tone: 'rose',
+        objectType: 'case',
+        objectId: 77,
+        taskJournalItemId: null,
+        metadataJson: null,
+        createdAt: '2026-09-25T10:05:00Z',
+      });
+    });
+
+    expect(toastMock.showToast).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'По делу зафиксировано решение суда',
+      actionLabel: 'Открыть дело',
+      domain: 'case',
+    }));
+    const toastOptions = toastMock.showToast.mock.calls[0][0] as { onAction: () => void };
+    act(() => toastOptions.onAction());
+    expect(openCase).toHaveBeenCalledWith(77);
+  });
+
   it('updates realtime state without toast when toast channel is disabled', async () => {
     const changedEvents: UserNotificationsChangedDetail[] = [];
     const listener = (event: Event) => {

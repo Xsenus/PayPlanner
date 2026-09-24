@@ -2370,7 +2370,7 @@ public sealed class NotificationService : INotificationService
         var title = BuildCourtEventSubject(clientCase, courtEvent, notificationType, action);
 
         var version = (courtEvent.UpdatedAt ?? courtEvent.CreatedAt).Ticks.ToString(CultureInfo.InvariantCulture);
-        var allowedChannels = notificationType == UserNotificationTypes.CourtDecisionPublished
+        var allowedChannels = notificationType == UserNotificationTypes.CourtDecisionRecorded
             ? new[] { NotificationChannels.InApp, NotificationChannels.Toast, NotificationChannels.ForcedModal, NotificationChannels.WebPush, NotificationChannels.Email }
             : new[] { NotificationChannels.InApp, NotificationChannels.Toast, NotificationChannels.ForcedModal, NotificationChannels.WebPush };
         var recipientNotificationChannels = await ResolveUserNotificationChannelsAsync(
@@ -2541,7 +2541,7 @@ public sealed class NotificationService : INotificationService
 
         var channelsByUserId = await ResolveUserNotificationChannelsAsync(
             visibleRecipientUserIds,
-            UserNotificationTypes.CourtDecisionPublished,
+            UserNotificationTypes.CourtDecisionRecorded,
             [NotificationChannels.InApp, NotificationChannels.Toast, NotificationChannels.WebPush, NotificationChannels.Email],
             cancellationToken);
         var normalizedActorName = NormalizeNotificationText(actorName, "Сотрудник");
@@ -2549,7 +2549,7 @@ public sealed class NotificationService : INotificationService
             ? $"Удалена дата судебного решения: {BuildClientCaseTitle(clientCase)}"
             : previousAt.HasValue
                 ? $"Изменена дата судебного решения: {BuildClientCaseTitle(clientCase)}"
-                : $"Вынесено судебное решение: {BuildClientCaseTitle(clientCase)}";
+                : $"Указана дата судебного решения: {BuildClientCaseTitle(clientCase)}";
         var body = $"{normalizedActorName} {(!currentAt.HasValue ? "удалил(а) дату решения" : previousAt.HasValue ? "изменил(а) дату решения" : "указал(а) дату решения")} по делу.\n\n"
             + $"Дело: {BuildClientCaseTitle(clientCase)}\n"
             + (previousAt.HasValue ? $"Прежняя дата: {FormatCourtEventDate(previousAt.Value, allDay: true)}\n" : string.Empty)
@@ -2565,7 +2565,7 @@ public sealed class NotificationService : INotificationService
             var eventKey = $"case:{clientCase.Id}:decision-date-changed:{changedAtUtc.Ticks}:{recipientUserId}";
             await CreateUserNotificationAsync(
                 recipientUserId,
-                UserNotificationTypes.CourtDecisionPublished,
+                UserNotificationTypes.CourtDecisionRecorded,
                 eventKey,
                 title,
                 body,
@@ -7362,7 +7362,8 @@ public sealed class NotificationService : INotificationService
             ? $"Перенесено судебное заседание: {BuildClientCaseTitle(clientCase)}"
             : notificationType switch
             {
-                UserNotificationTypes.CourtDecisionPublished => $"Зафиксировано судебное решение: {BuildClientCaseTitle(clientCase)}",
+                UserNotificationTypes.CourtDecisionRecorded => $"Зафиксировано судебное решение: {BuildClientCaseTitle(clientCase)}",
+                UserNotificationTypes.CourtDecisionPublished => $"Опубликован судебный акт: {BuildClientCaseTitle(clientCase)}",
                 UserNotificationTypes.CourtStatusChanged => $"Изменился судебный статус: {BuildClientCaseTitle(clientCase)}",
                 _ => $"Судебное заседание: {BuildClientCaseTitle(clientCase)}"
             };
@@ -7380,7 +7381,8 @@ public sealed class NotificationService : INotificationService
             ? $"{actorName} перенёс(ла) судебное заседание по делу. Проверьте новую дату и подготовку."
             : notificationType switch
             {
-                UserNotificationTypes.CourtDecisionPublished => $"{actorName} {actionText} судебный результат по делу.",
+                UserNotificationTypes.CourtDecisionRecorded => $"{actorName} {actionText} судебное решение по делу.",
+                UserNotificationTypes.CourtDecisionPublished => $"{actorName} {actionText} опубликованный судебный акт по делу.",
                 UserNotificationTypes.CourtStatusChanged => $"{actorName} {actionText} судебный статус по делу.",
                 _ => $"{actorName} {actionText} судебное заседание по делу."
             };
@@ -7444,7 +7446,7 @@ public sealed class NotificationService : INotificationService
                 || string.Equals(courtEvent.MovementStatus, "held", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(courtEvent.MovementStatus, "completed", StringComparison.OrdinalIgnoreCase)))
         {
-            return UserNotificationTypes.CourtDecisionPublished;
+            return UserNotificationTypes.CourtDecisionRecorded;
         }
 
         if (!isScheduled || !string.IsNullOrWhiteSpace(courtEvent.ResultSummary))
@@ -7458,6 +7460,7 @@ public sealed class NotificationService : INotificationService
     private static string ResolveCourtEventTemplateKey(string notificationType)
         => notificationType switch
         {
+            UserNotificationTypes.CourtDecisionRecorded => NotificationTemplateKeys.CourtDecisionRecorded,
             UserNotificationTypes.CourtDecisionPublished => NotificationTemplateKeys.CourtDecisionPublished,
             UserNotificationTypes.CourtStatusChanged => NotificationTemplateKeys.CourtStatusChanged,
             _ => NotificationTemplateKeys.CourtHearing
@@ -7466,6 +7469,7 @@ public sealed class NotificationService : INotificationService
     private static string ResolveCourtEventTone(string notificationType)
         => notificationType switch
         {
+            UserNotificationTypes.CourtDecisionRecorded => "emerald",
             UserNotificationTypes.CourtDecisionPublished => "emerald",
             UserNotificationTypes.CourtStatusChanged => "blue",
             _ => "cyan"

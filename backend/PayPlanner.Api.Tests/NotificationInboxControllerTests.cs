@@ -89,6 +89,7 @@ public class NotificationInboxControllerTests
         Assert.Contains(types, item => item.Key == UserNotificationTypes.ContractExpiring && item.Domain == UserNotificationDomains.Contract && item.DomainLabel == "Договоры");
         Assert.Contains(types, item => item.Key == UserNotificationTypes.CourtHearing && item.Priority == NotificationPriorities.High && item.Domain == UserNotificationDomains.Court);
         Assert.Contains(types, item => item.Key == UserNotificationTypes.CourtStatusChanged && item.Priority == NotificationPriorities.High);
+        Assert.Contains(types, item => item.Key == UserNotificationTypes.CourtDecisionRecorded && item.Priority == NotificationPriorities.High);
         Assert.Contains(types, item => item.Key == UserNotificationTypes.CourtDecisionPublished && item.Priority == NotificationPriorities.High);
         Assert.Contains(types, item => item.Key == UserNotificationTypes.CourtSyncFailed && item.Priority == NotificationPriorities.Critical && item.Tone == "rose");
         Assert.Contains(types, item => item.Key == UserNotificationTypes.CaseInactivityReminder && item.Priority == NotificationPriorities.High && item.Domain == UserNotificationDomains.Case);

@@ -159,6 +159,7 @@ public class CaseNotificationInventoryTests
         Assert.Contains("UserNotificationTypes.CaseCourtEvent", inboxSource, StringComparison.Ordinal);
         Assert.Contains("UserNotificationTypes.CourtHearing", inboxSource, StringComparison.Ordinal);
         Assert.Contains("UserNotificationTypes.CourtStatusChanged", inboxSource, StringComparison.Ordinal);
+        Assert.Contains("UserNotificationTypes.CourtDecisionRecorded", inboxSource, StringComparison.Ordinal);
         Assert.Contains("UserNotificationTypes.CourtDecisionPublished", inboxSource, StringComparison.Ordinal);
         Assert.Contains("UserNotificationTypes.CourtSyncFailed", inboxSource, StringComparison.Ordinal);
         Assert.Contains("UserNotificationTypes.CaseProceduralDeadline", inboxSource, StringComparison.Ordinal);
@@ -207,6 +208,7 @@ public class CaseNotificationInventoryTests
             [UserNotificationTypes.CaseCourtEvent] = new(UserNotificationDomains.Court, NotificationPriorities.High, RequiresAction: true, ShowToast: true, PushEligible: true),
             [UserNotificationTypes.CourtHearing] = new(UserNotificationDomains.Court, NotificationPriorities.High, RequiresAction: true, ShowToast: true, PushEligible: true),
             [UserNotificationTypes.CourtStatusChanged] = new(UserNotificationDomains.Court, NotificationPriorities.High, RequiresAction: true, ShowToast: true, PushEligible: true),
+            [UserNotificationTypes.CourtDecisionRecorded] = new(UserNotificationDomains.Court, NotificationPriorities.High, RequiresAction: true, ShowToast: true, PushEligible: true),
             [UserNotificationTypes.CourtDecisionPublished] = new(UserNotificationDomains.Court, NotificationPriorities.High, RequiresAction: true, ShowToast: true, PushEligible: true),
             [UserNotificationTypes.CourtSyncFailed] = new(UserNotificationDomains.Court, NotificationPriorities.Critical, RequiresAction: true, ShowToast: true, PushEligible: true),
         };

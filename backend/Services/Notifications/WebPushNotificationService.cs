@@ -448,6 +448,7 @@ public class WebPushNotificationService : IWebPushNotificationService
             or UserNotificationTypes.CaseProceduralDeadline
             or UserNotificationTypes.CourtHearing
             or UserNotificationTypes.CourtStatusChanged
+            or UserNotificationTypes.CourtDecisionRecorded
             or UserNotificationTypes.CourtDecisionPublished
             or UserNotificationTypes.CourtSyncFailed
             || TryReadPositiveMetadataInt(notification.MetadataJson, "courtEventId").HasValue

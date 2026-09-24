@@ -4756,7 +4756,7 @@ public class NotificationServiceTests
     [Theory]
     [InlineData("hearing", "completed", "Иск рассмотрен", UserNotificationTypes.CourtStatusChanged)]
     [InlineData("decision", "scheduled", "Ожидается решение", UserNotificationTypes.CourtStatusChanged)]
-    [InlineData("decision", "completed", "Иск удовлетворён частично", UserNotificationTypes.CourtDecisionPublished)]
+    [InlineData("decision", "completed", "Иск удовлетворён частично", UserNotificationTypes.CourtDecisionRecorded)]
     public async Task NotifyCaseCourtEventAsync_DoesNotPresentHearingOrScheduledDecisionAsRenderedDecision(
         string eventType,
         string movementStatus,
@@ -4805,7 +4805,7 @@ public class NotificationServiceTests
         var notification = await db.UserNotifications.SingleAsync();
         Assert.Equal(expectedType, notification.Type);
         Assert.DoesNotContain("Опубликован", notification.Title, StringComparison.OrdinalIgnoreCase);
-        if (expectedType == UserNotificationTypes.CourtDecisionPublished)
+        if (expectedType == UserNotificationTypes.CourtDecisionRecorded)
         {
             Assert.StartsWith("Зафиксировано судебное решение:", notification.Title, StringComparison.Ordinal);
             Assert.Single(emailService.Messages, message => message.To == recipient.Email);
@@ -7008,7 +7008,7 @@ public class NotificationServiceTests
 
         var notification = await db.UserNotifications.SingleAsync();
         Assert.Equal(recipient.Id, notification.RecipientUserId);
-        Assert.Equal(UserNotificationTypes.CourtDecisionPublished, notification.Type);
+        Assert.Equal(UserNotificationTypes.CourtDecisionRecorded, notification.Type);
         Assert.Equal(clientCase.Id, notification.ObjectId);
         Assert.Contains("07.10.2026", notification.BodyPreview);
         var email = Assert.Single(emailService.Messages);
