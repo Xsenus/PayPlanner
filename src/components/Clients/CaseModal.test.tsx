@@ -25,6 +25,7 @@ vi.mock('../../services/api', () => ({
     getCaseDocumentTemplates: vi.fn(),
     getTaskJournalItems: vi.fn(),
     getClientCaseFinanceSummaries: vi.fn(),
+    getCourtRecoveries: vi.fn(),
     getLegalEntityCaseFinanceSummaries: vi.fn(),
     markCaseActivity: vi.fn(),
     getUserSetting: vi.fn(),
@@ -73,6 +74,7 @@ describe('CaseModal', () => {
     vi.mocked(apiService.getTaskJournalItems).mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 25 });
     vi.mocked(apiService.getClientCaseFinanceSummaries).mockReset();
     vi.mocked(apiService.getClientCaseFinanceSummaries).mockResolvedValue([]);
+    vi.mocked(apiService.getCourtRecoveries).mockResolvedValue({ awardedAmount: null, receivedAmount: 0, remainingAmount: null, linkedPayments: [], availablePayments: [], hasMoreAvailablePayments: false });
     vi.mocked(apiService.getLegalEntityCaseFinanceSummaries).mockReset();
     vi.mocked(apiService.getLegalEntityCaseFinanceSummaries).mockResolvedValue([]);
     vi.mocked(apiService.markCaseActivity).mockReset();
@@ -388,6 +390,7 @@ describe('CaseModal', () => {
     fireEvent.change(screen.getByLabelText('Крайний срок'), { target: { value: '2026-06-15' } });
     fireEvent.change(screen.getByLabelText('Сумма гонорара'), { target: { value: '150000.50' } });
     fireEvent.change(screen.getByLabelText('Сумма иска'), { target: { value: '200000,50' } });
+    expect(screen.getByText('Фактически получено по решению суда')).toBeTruthy();
     fireEvent.change(screen.getByLabelText('Присуждено судом'), { target: { value: '175000' } });
     fireEvent.change(screen.getByLabelText('Госпошлина по делу'), { target: { value: '3500.25' } });
     fireEvent.change(screen.getByLabelText('Суд'), { target: { value: 'Арбитражный суд Самарской области' } });

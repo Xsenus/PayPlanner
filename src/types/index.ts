@@ -1132,6 +1132,25 @@ export interface ClientCaseFinanceDetail {
   contracts: ClientCaseFinanceContract[];
 }
 
+export interface CourtRecoveryPayment {
+  paymentId: number;
+  date: string;
+  description: string;
+  paidAmount: number;
+  allocatedAmount: number | null;
+  effectiveAmount: number;
+  warning: string | null;
+}
+
+export interface CourtRecoveryOverview {
+  awardedAmount: number | null;
+  receivedAmount: number;
+  remainingAmount: number | null;
+  linkedPayments: CourtRecoveryPayment[];
+  availablePayments: CourtRecoveryPayment[];
+  hasMoreAvailablePayments: boolean;
+}
+
 export interface ClientCaseFinanceTotals {
   feeAmount: number;
   incomeTotal: number;

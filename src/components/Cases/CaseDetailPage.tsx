@@ -4,6 +4,7 @@ import { SystemSelect } from '../ui/SystemSelect';
 import { ClientPortalAccessPanel } from './ClientPortalAccessPanel';
 import { CaseAppealDecisionAction } from './CaseAppealDecisionAction';
 import { CasePreHearingActions } from './CasePreHearingActions';
+import { CourtRecoveryPanel } from './CourtRecoveryPanel';
 import { ExecutiveWritDocumentUpload } from './ExecutiveWritDocumentUpload';
 import { MessengerDocumentDeliveryModal } from './MessengerDocumentDeliveryModal';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -4104,6 +4105,7 @@ export function CaseDetailPage({
                 ['Присуждено судом', caseItem.courtAwardedAmount == null ? '—' : formatCurrencySmart(caseItem.courtAwardedAmount).full],
                 ['Госпошлина', caseItem.courtStateFeeAmount == null ? '—' : formatCurrencySmart(caseItem.courtStateFeeAmount).full],
               ]} />
+              {canViewFinance ? <CourtRecoveryPanel caseId={caseItem.id} canEdit={canEdit} /> : null}
               <TextBlock title="Стратегия" value={caseItem.strategy || 'Стратегия по делу пока не заполнена.'} />
               <section className="rounded-xl border border-slate-200 bg-white p-3">
                 <h2 className="text-sm font-semibold text-slate-900">Проверка позиции по делу</h2>

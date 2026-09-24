@@ -75,6 +75,7 @@ vi.mock('../../services/api', () => ({
     getLegalEntityCaseFinanceSummaries: vi.fn(),
     markCaseActivity: vi.fn(),
     getCaseRelatedParties: vi.fn(),
+    getCourtRecoveries: vi.fn(),
     getContacts: vi.fn(),
     getClients: vi.fn(),
     getLegalEntities: vi.fn(),
@@ -248,6 +249,15 @@ describe('CasesRegistry', () => {
     vi.mocked(apiService.getCaseDocumentTemplates).mockResolvedValue([]);
     vi.mocked(apiService.getCaseDocuments).mockReset();
     vi.mocked(apiService.getCaseDocuments).mockResolvedValue([]);
+    vi.mocked(apiService.getCourtRecoveries).mockReset();
+    vi.mocked(apiService.getCourtRecoveries).mockResolvedValue({
+      awardedAmount: null,
+      receivedAmount: 0,
+      remainingAmount: null,
+      linkedPayments: [],
+      availablePayments: [],
+      hasMoreAvailablePayments: false,
+    });
     vi.mocked(apiService.getTaskJournalItems).mockReset();
     vi.mocked(apiService.getTaskJournalItems).mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 10 });
     vi.mocked(apiService.getClientCaseFinanceSummaries).mockReset();

@@ -67,6 +67,7 @@ vi.mock('../../services/api', () => ({
     closeCaseProceduralDeadline: vi.fn(),
     getCaseTimeline: vi.fn(),
     getCaseFinance: vi.fn(),
+    getCourtRecoveries: vi.fn(),
     getClientCaseFinanceSummaries: vi.fn(),
     getLegalEntityCaseFinanceSummaries: vi.fn(),
     getCaseWorkOrder: vi.fn(),
@@ -882,6 +883,8 @@ describe('CaseDetailPage', () => {
       ],
     });
     vi.mocked(apiService.getClientCaseFinanceSummaries).mockReset();
+    vi.mocked(apiService.getCourtRecoveries).mockReset();
+    vi.mocked(apiService.getCourtRecoveries).mockResolvedValue({ awardedAmount: null, receivedAmount: 0, remainingAmount: null, linkedPayments: [], availablePayments: [], hasMoreAvailablePayments: false });
     vi.mocked(apiService.getClientCaseFinanceSummaries).mockResolvedValue([]);
     vi.mocked(apiService.getLegalEntityCaseFinanceSummaries).mockReset();
     vi.mocked(apiService.getLegalEntityCaseFinanceSummaries).mockResolvedValue([]);
@@ -1226,6 +1229,7 @@ describe('CaseDetailPage', () => {
       }).length).toBeGreaterThan(0);
     });
 
+    expect(await screen.findByText('Фактически получено по решению суда')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Суд' }));
     expect(await screen.findByText('Судебное заседание')).toBeTruthy();
     await waitFor(() => {

@@ -2456,6 +2456,38 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.ToTable("ClientCaseCourtParties");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseCourtRecoveryPayment", b =>
+                {
+                    b.Property<int>("PaymentId")
+                        .HasColumnType("integer");
+
+                    b.Property<decimal>("AllocatedAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<int>("ClientCaseId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("UpdatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("PaymentId");
+
+                    b.HasIndex("ClientCaseId")
+                        .HasDatabaseName("IX_ClientCaseCourtRecoveryPayments_ClientCaseId");
+
+                    b.ToTable("ClientCaseCourtRecoveryPayments", (string)null);
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseDocument", b =>
                 {
                     b.Property<int>("Id")
@@ -11751,6 +11783,25 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("ClientCase");
 
                     b.Navigation("RelatedParty");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseCourtRecoveryPayment", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.ClientCase", "ClientCase")
+                        .WithMany()
+                        .HasForeignKey("ClientCaseId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.Payment", "Payment")
+                        .WithMany()
+                        .HasForeignKey("PaymentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("ClientCase");
+
+                    b.Navigation("Payment");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseDocument", b =>

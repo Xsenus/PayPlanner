@@ -521,6 +521,16 @@ public class PaymentContext : DbContext
             entity.HasIndex(x => x.ClientCaseId).HasDatabaseName("IX_InvoiceClientCases_ClientCaseId");
         });
 
+        modelBuilder.Entity<ClientCaseCourtRecoveryPayment>(entity =>
+        {
+            entity.ToTable("ClientCaseCourtRecoveryPayments");
+            entity.HasKey(x => x.PaymentId);
+            entity.Property(x => x.AllocatedAmount).HasColumnType("decimal(18,2)");
+            entity.HasOne(x => x.Payment).WithMany().HasForeignKey(x => x.PaymentId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.ClientCase).WithMany().HasForeignKey(x => x.ClientCaseId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(x => x.ClientCaseId).HasDatabaseName("IX_ClientCaseCourtRecoveryPayments_ClientCaseId");
+        });
+
         modelBuilder.Entity<ClientCaseContract>(entity =>
         {
             entity.HasKey(x => new { x.ClientCaseId, x.ContractId });
@@ -3681,6 +3691,9 @@ public class PaymentContext : DbContext
         modelBuilder.Entity<ClientCaseCourtComplaint>()
             .HasQueryFilter(item => ClientCases.Any(parent => parent.Id == item.ClientCaseId)
                 && ClientCaseCourtInstances.Any(parent => parent.Id == item.CourtInstanceId));
+        modelBuilder.Entity<ClientCaseCourtRecoveryPayment>()
+            .HasQueryFilter(item => ClientCases.Any(parent => parent.Id == item.ClientCaseId)
+                && Payments.Any(parent => parent.Id == item.PaymentId));
         modelBuilder.Entity<ClientCaseAppealDecision>()
             .HasQueryFilter(item => ClientCases.Any(parent => parent.Id == item.ClientCaseId));
         modelBuilder.Entity<ClientCaseCourtEventHistory>()
@@ -4422,6 +4435,8 @@ public class PaymentContext : DbContext
     /// Дела (кейсы) клиентов.
     /// </summary>
     public DbSet<ClientCase> ClientCases { get; set; }
+
+    public DbSet<ClientCaseCourtRecoveryPayment> ClientCaseCourtRecoveryPayments { get; set; }
 
     public DbSet<ClientCaseContract> ClientCaseContracts { get; set; }
 

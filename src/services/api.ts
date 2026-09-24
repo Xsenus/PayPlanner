@@ -6183,6 +6183,22 @@ export class ApiService {
     return this.request<ClientCaseFinanceDetail>(`/v2/cases/${caseId}/finance`);
   }
 
+  async getCourtRecoveries(caseId: number, search = '') {
+    const params = search.trim() ? `?search=${encodeURIComponent(search.trim())}` : '';
+    return this.request<CourtRecoveryOverview>(`/v2/cases/${caseId}/court-recoveries${params}`);
+  }
+
+  async setCourtRecoveryPayment(caseId: number, paymentId: number, amount: number) {
+    return this.request<void>(`/v2/cases/${caseId}/court-recoveries/${paymentId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ amount }),
+    });
+  }
+
+  async removeCourtRecoveryPayment(caseId: number, paymentId: number) {
+    return this.request<void>(`/v2/cases/${caseId}/court-recoveries/${paymentId}`, { method: 'DELETE' });
+  }
+
   async getCaseWorkOrder(caseId: number) {
     return this.request<ClientCaseWorkOrder>(`/v2/cases/${caseId}/work-order`);
   }
@@ -8650,6 +8666,7 @@ import type {
   ClientCaseDocumentTemplateToken,
   RenderedCaseDocumentTemplate,
   ClientCaseFinanceDetail,
+  CourtRecoveryOverview,
   ClientCaseRelatedParty,
   ClientCaseSummary,
   ClientCaseTimelineEntry,

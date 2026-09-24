@@ -1,0 +1,211 @@
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using PayPlanner.Api.Data;
+using PayPlanner.Api.Extensions;
+using PayPlanner.Api.Models;
+
+namespace PayPlanner.Api.Controllers.V2;
+
+public partial class CasesV2Controller
+{
+    public sealed record CourtRecoveryPaymentDto(
+        int PaymentId,
+        DateTime Date,
+        string Description,
+        decimal PaidAmount,
+        decimal? AllocatedAmount,
+        decimal EffectiveAmount,
+        string? Warning);
+
+    public sealed record CourtRecoveryOverviewDto(
+        decimal? AwardedAmount,
+        decimal ReceivedAmount,
+        decimal? RemainingAmount,
+        IReadOnlyList<CourtRecoveryPaymentDto> LinkedPayments,
+        IReadOnlyList<CourtRecoveryPaymentDto> AvailablePayments,
+        bool HasMoreAvailablePayments);
+
+    public sealed record SetCourtRecoveryPaymentRequest(decimal Amount);
+
+    [HttpGet("{id:int}/court-recoveries")]
+    public async Task<ActionResult<CourtRecoveryOverviewDto>> GetCourtRecoveries(
+        int id, [FromQuery] string? search, CancellationToken ct)
+    {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanView, ct) is { } forbidden)
+            return forbidden;
+        if (!await CanViewCaseFinanceAsync(ct))
+            return Forbid();
+
+        var visibility = await ResolveCasesVisibilityAsync(ct);
+        if (visibility is null)
+            return Unauthorized();
+        var caseAmounts = await _db.ClientCases.ApplyClientCaseVisibility(visibility)
+            .AsNoTracking().Where(item => item.Id == id)
+            .Select(item => new { item.CourtAwardedAmount }).FirstOrDefaultAsync(ct);
+        if (caseAmounts is null)
+            return NotFound();
+
+        var links = await _db.ClientCaseCourtRecoveryPayments.AsNoTracking()
+            .Where(item => item.ClientCaseId == id)
+            .Include(item => item.Payment)
+            .OrderByDescending(item => item.Payment.Date)
+            .ToListAsync(ct);
+        var linkedPaymentIds = links.Select(item => item.PaymentId).ToArray();
+        var linkedCasePaymentIds = await _db.InvoiceClientCases.AsNoTracking()
+            .Where(item => item.ClientCaseId == id && linkedPaymentIds.Contains(item.PaymentId))
+            .Select(item => item.PaymentId).ToListAsync(ct);
+        var validLinkedIds = linkedCasePaymentIds.ToHashSet();
+
+        var linked = links.Select(link =>
+        {
+            var payment = link.Payment;
+            var warning = CourtRecoveryPaymentWarning(payment, id, validLinkedIds.Contains(link.PaymentId), link.AllocatedAmount);
+            return new CourtRecoveryPaymentDto(
+                link.PaymentId, payment.Date, payment.Description, payment.PaidAmount,
+                link.AllocatedAmount,
+                warning is null ? link.AllocatedAmount : 0m,
+                warning);
+        }).ToArray();
+
+        var availableQuery = _db.Payments.AsNoTracking()
+            .Where(payment => payment.Status != PaymentStatus.Cancelled &&
+                payment.Type == PaymentType.Income && payment.DocumentKind == DocumentKind.Payment &&
+                payment.PaidAmount > 0m &&
+                (payment.ClientCaseId == id || payment.InvoiceClientCases.Any(item => item.ClientCaseId == id)) &&
+                !_db.ClientCaseCourtRecoveryPayments.Any(link => link.PaymentId == payment.Id));
+        var normalizedSearch = search?.Trim();
+        if (!string.IsNullOrEmpty(normalizedSearch))
+        {
+            if (normalizedSearch.Length > 100)
+                return BadRequest(new { message = "Слишком длинный поисковый запрос." });
+            availableQuery = int.TryParse(normalizedSearch, out var searchedPaymentId)
+                ? availableQuery.Where(payment => payment.Id == searchedPaymentId || payment.Description.Contains(normalizedSearch))
+                : availableQuery.Where(payment => payment.Description.Contains(normalizedSearch));
+        }
+        var availablePage = await availableQuery
+            .OrderByDescending(payment => payment.Date).ThenByDescending(payment => payment.Id)
+            .Take(101)
+            .Select(payment => new CourtRecoveryPaymentDto(
+                payment.Id, payment.Date, payment.Description, payment.PaidAmount,
+                null, 0m, null))
+            .ToListAsync(ct);
+        var available = availablePage.Take(100).ToArray();
+
+        var received = linked.Sum(item => item.EffectiveAmount);
+        return Ok(new CourtRecoveryOverviewDto(
+            caseAmounts.CourtAwardedAmount,
+            received,
+            caseAmounts.CourtAwardedAmount.HasValue ? Math.Max(caseAmounts.CourtAwardedAmount.Value - received, 0m) : null,
+            linked,
+            available,
+            availablePage.Count > 100));
+    }
+
+    [HttpPut("{id:int}/court-recoveries/{paymentId:int}")]
+    public async Task<IActionResult> SetCourtRecoveryPayment(
+        int id, int paymentId, [FromBody] SetCourtRecoveryPaymentRequest request, CancellationToken ct)
+    {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+            return forbidden;
+        if (!await CanViewCaseFinanceAsync(ct))
+            return Forbid();
+        if (request.Amount <= 0m || request.Amount != Math.Round(request.Amount, 2))
+            return BadRequest(new { message = "Укажите положительную сумму взыскания с точностью до копеек." });
+
+        var visibility = await ResolveCasesVisibilityAsync(ct);
+        if (visibility is null)
+            return Unauthorized();
+        var clientCase = await _db.ClientCases.ApplyClientCaseVisibility(visibility)
+            .FirstOrDefaultAsync(item => item.Id == id, ct);
+        if (clientCase is null)
+            return NotFound();
+        if (clientCase.CourtAwardedAmount is null or <= 0m)
+            return BadRequest(new { message = "Сначала укажите присуждённую судом сумму в карточке дела." });
+
+        var payment = await _db.Payments
+            .FirstOrDefaultAsync(item => item.Id == paymentId &&
+                (item.ClientCaseId == id || item.InvoiceClientCases.Any(link => link.ClientCaseId == id)), ct);
+        if (payment is null)
+            return NotFound();
+        if (payment.Type != PaymentType.Income || payment.DocumentKind != DocumentKind.Payment ||
+            payment.Status == PaymentStatus.Cancelled || payment.PaidAmount <= 0m)
+            return BadRequest(new { message = "Можно связать только фактически оплаченный приходный платёж по этому делу." });
+        if (request.Amount > payment.PaidAmount)
+            return BadRequest(new { message = "Сумма взыскания не может превышать уже оплаченную часть платежа." });
+
+        var existing = await _db.ClientCaseCourtRecoveryPayments
+            .FirstOrDefaultAsync(item => item.PaymentId == paymentId, ct);
+        if (existing is not null && existing.ClientCaseId != id)
+            return Conflict(new { message = "Этот платёж уже отмечен как взыскание по другому делу." });
+
+        var now = DateTime.UtcNow;
+        if (existing is null)
+        {
+            _db.ClientCaseCourtRecoveryPayments.Add(new ClientCaseCourtRecoveryPayment
+            {
+                ClientCaseId = id,
+                PaymentId = paymentId,
+                AllocatedAmount = request.Amount,
+                CreatedAt = now,
+                CreatedByUserId = User.GetUserId(),
+                UpdatedAt = now,
+                UpdatedByUserId = User.GetUserId(),
+            });
+        }
+        else
+        {
+            existing.AllocatedAmount = request.Amount;
+            existing.UpdatedAt = now;
+            existing.UpdatedByUserId = User.GetUserId();
+        }
+
+        _db.SetAuditReason($"Связь платежа #{paymentId} с взысканием по делу #{id}");
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException) when (existing is null)
+        {
+            if (await _db.ClientCaseCourtRecoveryPayments.AsNoTracking()
+                .AnyAsync(item => item.PaymentId == paymentId, ct))
+                return Conflict(new { message = "Этот платёж уже отмечен как взыскание. Обновите список платежей." });
+            throw;
+        }
+        return NoContent();
+    }
+
+    [HttpDelete("{id:int}/court-recoveries/{paymentId:int}")]
+    public async Task<IActionResult> RemoveCourtRecoveryPayment(int id, int paymentId, CancellationToken ct)
+    {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+            return forbidden;
+        if (!await CanViewCaseFinanceAsync(ct))
+            return Forbid();
+        var visibility = await ResolveCasesVisibilityAsync(ct);
+        if (visibility is null)
+            return Unauthorized();
+        if (!await _db.ClientCases.ApplyClientCaseVisibility(visibility).AsNoTracking().AnyAsync(item => item.Id == id, ct))
+            return NotFound();
+
+        var link = await _db.ClientCaseCourtRecoveryPayments
+            .FirstOrDefaultAsync(item => item.ClientCaseId == id && item.PaymentId == paymentId, ct);
+        if (link is null)
+            return NotFound();
+        _db.ClientCaseCourtRecoveryPayments.Remove(link);
+        _db.SetAuditReason($"Удалена связь платежа #{paymentId} с взысканием по делу #{id}");
+        await _db.SaveChangesAsync(ct);
+        return NoContent();
+    }
+
+    private static string? CourtRecoveryPaymentWarning(Payment payment, int clientCaseId, bool linkedByInvoice, decimal amount)
+    {
+        if (payment.ClientCaseId != clientCaseId && !linkedByInvoice)
+            return "Платёж больше не связан с этим делом; сумма не учитывается.";
+        if (payment.Status == PaymentStatus.Cancelled || payment.Type != PaymentType.Income ||
+            payment.DocumentKind != DocumentKind.Payment)
+            return "Платёж больше не является действительным приходным платежом; сумма не учитывается.";
+        if (payment.PaidAmount < amount)
+            return "Оплаченная сумма платежа уменьшилась; проверьте и исправьте связь. Пока сумма не учитывается.";
+        return null;
+    }
+}

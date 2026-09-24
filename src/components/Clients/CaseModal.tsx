@@ -3,6 +3,7 @@ import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
 import { CaseAppealDecisionAction } from '../Cases/CaseAppealDecisionAction';
 import { CasePreHearingActions } from '../Cases/CasePreHearingActions';
+import { CourtRecoveryPanel } from '../Cases/CourtRecoveryPanel';
 import { ExecutiveWritDocumentUpload } from '../Cases/ExecutiveWritDocumentUpload';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -1477,6 +1478,7 @@ export function CaseModal({
             </label>
             <p className="text-xs text-slate-500 sm:col-span-3">Судебные суммы заполняются вручную и не влияют на гонорар или счета клиента.</p>
           </div>
+          {canViewFinance && caseData.id > 0 ? <div className="md:col-span-2"><CourtRecoveryPanel caseId={caseData.id} canEdit={allowEdit} /></div> : null}
 
           <div className="md:col-span-2 rounded-xl border border-slate-200 bg-slate-50/60 p-4">
             <div className="flex flex-wrap items-center justify-between gap-2">

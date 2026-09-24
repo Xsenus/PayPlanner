@@ -1992,6 +1992,109 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task CourtRecoveries_LinkOnlyPaidAmountWithoutCreatingAnotherPayment()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "court-recovery@example.com", "Юрист", DataVisibilityScope.All);
+        await GrantSectionPermissionAsync(db, user, RolePermissionCatalog.Payments);
+        var client = new Client { Name = "Клиент по взысканию", IsActive = true, ResponsibleUserId = user.Id };
+        var clientCase = new ClientCase
+        {
+            Client = client, ResponsibleUserId = user.Id, Title = "Исполнение решения",
+            Status = ClientCaseStatus.Open, CourtAwardedAmount = 100_000m,
+        };
+        var payment = new Payment
+        {
+            Client = client, ClientCase = clientCase, DocumentKind = DocumentKind.Payment,
+            Type = PaymentType.Income, Status = PaymentStatus.Processing,
+            Amount = 50_000m, PaidAmount = 30_000m,
+            Date = new DateTime(2026, 9, 24), PlannedDate = new DateTime(2026, 9, 24),
+            Description = "Частичное взыскание",
+        };
+        db.Payments.Add(payment);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, user);
+
+        Assert.IsType<BadRequestObjectResult>(await controller.SetCourtRecoveryPayment(
+            clientCase.Id, payment.Id, new(30_000.01m), CancellationToken.None));
+        Assert.IsType<NoContentResult>(await controller.SetCourtRecoveryPayment(
+            clientCase.Id, payment.Id, new(20_000m), CancellationToken.None));
+        Assert.IsType<NoContentResult>(await controller.SetCourtRecoveryPayment(
+            clientCase.Id, payment.Id, new(25_000m), CancellationToken.None));
+
+        var result = await controller.GetCourtRecoveries(clientCase.Id, null, CancellationToken.None);
+        var overview = Assert.IsType<CasesV2Controller.CourtRecoveryOverviewDto>(
+            Assert.IsType<OkObjectResult>(result.Result).Value);
+        Assert.Equal(100_000m, overview.AwardedAmount);
+        Assert.Equal(25_000m, overview.ReceivedAmount);
+        Assert.Equal(75_000m, overview.RemainingAmount);
+        Assert.Single(overview.LinkedPayments);
+        Assert.Equal(25_000m, overview.LinkedPayments[0].EffectiveAmount);
+        Assert.Single(await db.Payments.ToListAsync());
+        Assert.Equal(30_000m, (await db.Payments.SingleAsync()).PaidAmount);
+
+        Assert.IsType<NoContentResult>(await controller.RemoveCourtRecoveryPayment(
+            clientCase.Id, payment.Id, CancellationToken.None));
+        Assert.Empty(await db.ClientCaseCourtRecoveryPayments.ToListAsync());
+    }
+
+    [Fact]
+    public async Task CourtRecoveries_RejectUnrelatedOrNonPaymentAndPreventReuseAcrossCases()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "court-recovery-boundary@example.com", "Юрист", DataVisibilityScope.All);
+        await GrantSectionPermissionAsync(db, user, RolePermissionCatalog.Payments);
+        var client = new Client { Name = "Клиент", IsActive = true, ResponsibleUserId = user.Id };
+        var firstCase = new ClientCase { Client = client, ResponsibleUserId = user.Id, Title = "Дело 1", Status = ClientCaseStatus.Open, CourtAwardedAmount = 50_000m };
+        var secondCase = new ClientCase { Client = client, ResponsibleUserId = user.Id, Title = "Дело 2", Status = ClientCaseStatus.Open, CourtAwardedAmount = 50_000m };
+        db.ClientCases.AddRange(firstCase, secondCase);
+        await db.SaveChangesAsync();
+        var payment = new Payment { Client = client, ClientCase = firstCase, DocumentKind = DocumentKind.Payment, Type = PaymentType.Income, Status = PaymentStatus.Completed, Amount = 10_000m, PaidAmount = 10_000m, Date = DateTime.UtcNow, PlannedDate = DateTime.UtcNow };
+        var invoice = new Payment { Client = client, ClientCase = firstCase, DocumentKind = DocumentKind.Invoice, Type = PaymentType.Income, Status = PaymentStatus.Completed, Amount = 10_000m, PaidAmount = 10_000m, Date = DateTime.UtcNow, PlannedDate = DateTime.UtcNow };
+        db.Payments.AddRange(payment, invoice);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, user);
+
+        Assert.IsType<NotFoundResult>(await controller.SetCourtRecoveryPayment(secondCase.Id, payment.Id, new(1_000m), CancellationToken.None));
+        Assert.IsType<BadRequestObjectResult>(await controller.SetCourtRecoveryPayment(firstCase.Id, invoice.Id, new(1_000m), CancellationToken.None));
+        Assert.IsType<BadRequestObjectResult>(await controller.SetCourtRecoveryPayment(firstCase.Id, payment.Id, new(0m), CancellationToken.None));
+        Assert.IsType<NoContentResult>(await controller.SetCourtRecoveryPayment(firstCase.Id, payment.Id, new(1_000m), CancellationToken.None));
+        db.InvoiceClientCases.Add(new InvoiceClientCase { PaymentId = payment.Id, ClientCaseId = secondCase.Id });
+        await db.SaveChangesAsync();
+        Assert.IsType<ConflictObjectResult>(await controller.SetCourtRecoveryPayment(secondCase.Id, payment.Id, new(1_000m), CancellationToken.None));
+
+        payment.PaidAmount = 500m;
+        await db.SaveChangesAsync();
+        var overview = Assert.IsType<CasesV2Controller.CourtRecoveryOverviewDto>(
+            Assert.IsType<OkObjectResult>((await controller.GetCourtRecoveries(firstCase.Id, null, CancellationToken.None)).Result).Value);
+        Assert.Equal(0m, overview.ReceivedAmount);
+        Assert.NotNull(overview.LinkedPayments[0].Warning);
+
+        db.Payments.Remove(payment);
+        await db.SaveChangesAsync();
+        Assert.Empty(await db.ClientCaseCourtRecoveryPayments.ToListAsync());
+    }
+
+    [Fact]
+    public async Task CourtRecoveries_RequireCaseEditAndPaymentsView()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "court-recovery-permissions@example.com", "Сотрудник", DataVisibilityScope.All);
+        await GrantSectionPermissionAsync(db, user, RolePermissionCatalog.Payments, canView: false);
+        var clientCase = new ClientCase { Client = new Client { Name = "Клиент", IsActive = true, ResponsibleUserId = user.Id }, Title = "Дело", Status = ClientCaseStatus.Open, ResponsibleUserId = user.Id, CourtAwardedAmount = 10_000m };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, user);
+        Assert.IsType<ForbidResult>((await controller.GetCourtRecoveries(clientCase.Id, null, CancellationToken.None)).Result);
+        Assert.IsType<ForbidResult>(await controller.SetCourtRecoveryPayment(clientCase.Id, 1, new(1m), CancellationToken.None));
+        await GrantSectionPermissionAsync(db, user, RolePermissionCatalog.Payments);
+        await GrantSectionPermissionAsync(db, user, RolePermissionCatalog.Cases, canEdit: false);
+        controller = CreateController(db, user);
+        Assert.IsType<ForbidResult>(await controller.SetCourtRecoveryPayment(clientCase.Id, 1, new(1m), CancellationToken.None));
+    }
+
+    [Fact]
     public async Task GetById_WithoutPaymentsViewPermission_HidesFinanceFieldsAndPayments()
     {
         await using var db = await CreateContextAsync();
