@@ -667,7 +667,14 @@ function readTaskJournalFilterPreferences(userId: number | null, mode: TaskJourn
     }
 
     const parsed = JSON.parse(raw) as Partial<TaskJournalFilterPreferences>;
-    return normalizeTaskJournalFilterPreferences(parsed, defaults);
+    // A previously selected column is only a temporary table sort. Every fresh
+    // journal visit starts with the nearest execution date; saved views retain
+    // their own explicit sorting when the user selects one.
+    return {
+      ...normalizeTaskJournalFilterPreferences(parsed, defaults),
+      sortBy: defaults.sortBy,
+      sortDir: defaults.sortDir,
+    };
   } catch {
     return defaults;
   }
@@ -6301,7 +6308,17 @@ export function TaskJournal({
           </div>
         </section>
 
-        {viewMode === 'list' ? <TaskJournalColumnSettings settings={taskTableLayoutSettings} /> : null}
+        {viewMode === 'list' ? (
+          <TaskJournalColumnSettings
+            settings={taskTableLayoutSettings}
+            sortBy={sortBy}
+            sortDir={sortDir}
+            onSortSelect={(nextSortBy, nextSortDir) => {
+              setSortBy(nextSortBy);
+              setSortDir(nextSortDir);
+            }}
+          />
+        ) : null}
 
         {!isApprovalsMode && categorizedBillingTaskCount > 0 ? (
           <section className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-rose-200 bg-gradient-to-r from-rose-50 to-amber-50 p-3" data-testid="task-unbilled-reminder">

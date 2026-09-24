@@ -1016,6 +1016,33 @@ describe('TaskJournal', () => {
     }), expect.objectContaining({ signal: expect.any(AbortSignal) })));
   });
 
+  it('opens the journal by execution date despite a previously selected column and offers an explicit sort control', async () => {
+    window.localStorage.setItem('pp.task_journal.filters.v1.user:7', JSON.stringify({
+      periodMode: 'all',
+      sortBy: 'counterparty',
+      sortDir: 'desc',
+    }));
+
+    await renderJournal([createTask()]);
+
+    const sortControl = screen.getByRole('combobox', { name: 'Сортировка журнала задач' }) as HTMLSelectElement;
+    expect(sortControl.value).toBe('dueAt:asc');
+    await waitFor(() => expect(apiMock.getTaskJournalItems).toHaveBeenLastCalledWith(
+      expect.objectContaining({ sortBy: 'dueAt', sortDir: 'asc' }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    ));
+
+    fireEvent.change(sortControl, { target: { value: 'counterparty:desc' } });
+    await waitFor(() => expect(apiMock.getTaskJournalItems).toHaveBeenLastCalledWith(
+      expect.objectContaining({ sortBy: 'counterparty', sortDir: 'desc' }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    ));
+
+    cleanup();
+    await renderJournal([createTask()]);
+    expect((screen.getByRole('combobox', { name: 'Сортировка журнала задач' }) as HTMLSelectElement).value).toBe('dueAt:asc');
+  });
+
   it('loads one server page and moves to the next page without reloading metadata', async () => {
     const tasks = Array.from({ length: 60 }, (_, index) => createTask({
       id: index + 1,
