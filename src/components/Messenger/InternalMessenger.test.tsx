@@ -124,10 +124,12 @@ describe('InternalMessenger', () => {
     render(<InternalMessenger />);
     expect(await screen.findByText('документ')).toBeTruthy();
     const conversation = screen.getByLabelText('Сообщения чата');
-    Object.defineProperty(conversation, 'scrollHeight', { configurable: true, get: () => 1000 });
+    let scrollHeight = 1000;
+    Object.defineProperty(conversation, 'scrollHeight', { configurable: true, get: () => scrollHeight });
     Object.defineProperty(conversation, 'clientHeight', { configurable: true, get: () => 400 });
     conversation.scrollTop = 300;
     fireEvent.change(screen.getByPlaceholderText('Напишите сообщение…'), { target: { value: 'Пишу ответ' } });
+    scrollHeight = 1200;
     chatApiMock.getMessages.mockResolvedValue({ items: [message, { ...message, id: 23, text: 'Новое сообщение' }], hasMore: false });
     const realtimeHandler = connectionMock.on.mock.calls.find(([name]) => name === 'taskJournalChanged')?.[1];
     expect(realtimeHandler).toBeTypeOf('function');
@@ -163,13 +165,14 @@ describe('InternalMessenger', () => {
   });
 
   it('opens the task chat through the same protected API', async () => {
-    chatApiMock.openTask.mockResolvedValue({ ...thread, id: 44, kind: 'task', taskJournalItemId: 101, name: 'Задача №101' });
+    chatApiMock.openTask.mockResolvedValue({ ...thread, id: 44, kind: 'task', taskJournalItemId: 101, name: 'Задача №101', lastReadMessageId: 20, firstUnreadMessageId: 22 });
     chatApiMock.getMessages.mockResolvedValue({ items: [], hasMore: false, nextBeforeId: null });
 
     render(<TaskChatPanel taskId={101} />);
 
     expect(await screen.findByText('Задача №101')).toBeTruthy();
     expect(chatApiMock.openTask).toHaveBeenCalledWith(101);
+    await waitFor(() => expect(chatApiMock.getMessages).toHaveBeenCalledWith(44, expect.objectContaining({ afterId: 21 })));
   });
 
   it('shows task chat participants and resolves stored mention IDs to names', async () => {
@@ -248,8 +251,38 @@ describe('InternalMessenger', () => {
     expect(chatApiMock.markRead).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Поиск' }));
-    await waitFor(() => expect(chatApiMock.markRead).toHaveBeenCalledWith(44, 22));
+    await waitFor(() => expect(chatApiMock.getMessages).toHaveBeenCalledWith(44, expect.not.objectContaining({ search: 'документ' })));
+    expect(chatApiMock.markRead).not.toHaveBeenCalled();
     expect(screen.queryByPlaceholderText('Текст сообщения')).toBeNull();
+  });
+
+  it('opens a long unread conversation at the first unread page without marking the latest page read', async () => {
+    chatApiMock.getThreads.mockResolvedValue([{ ...thread, lastReadMessageId: 4, firstUnreadMessageId: 5, unreadCount: 56 }]);
+    chatApiMock.getMessages.mockResolvedValueOnce({ items: [{ ...message, id: 5, text: 'Первое непрочитанное' }], hasMore: true, hasNewer: true });
+    render(<InternalMessenger />);
+
+    expect(await screen.findByText('Первое непрочитанное')).toBeTruthy();
+    expect(chatApiMock.getMessages).toHaveBeenCalledWith(12, expect.objectContaining({ afterId: 4 }));
+    expect(await screen.findByRole('button', { name: 'Показать более новые' })).toBeTruthy();
+    expect(chatApiMock.markRead).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByPlaceholderText('Напишите сообщение…'), { target: { value: 'Ответ из середины истории' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Отправить' }));
+    await waitFor(() => expect(chatApiMock.sendMessage).toHaveBeenCalledWith(12, 'Ответ из середины истории', [], undefined));
+    expect(screen.queryByText('Готово')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Показать более новые' }));
+    await waitFor(() => expect(chatApiMock.getMessages).toHaveBeenCalledWith(12, expect.objectContaining({ afterId: 5 })));
+  });
+
+  it('offers a jump to the latest messages while reading earlier ones', async () => {
+    render(<InternalMessenger />);
+    expect(await screen.findByText('документ')).toBeTruthy();
+    const conversation = screen.getByLabelText('Сообщения чата');
+    Object.defineProperty(conversation, 'scrollHeight', { configurable: true, get: () => 1000 });
+    Object.defineProperty(conversation, 'clientHeight', { configurable: true, get: () => 300 });
+    conversation.scrollTop = 100;
+    fireEvent.scroll(conversation);
+    fireEvent.click(screen.getByRole('button', { name: 'К последним сообщениям' }));
+    expect(conversation.scrollTop).toBe(1000);
   });
 
   it('ignores an older conversation response after a search result arrives', async () => {

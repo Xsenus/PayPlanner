@@ -11,6 +11,7 @@ import {
 import {
   ArrowLeft,
   Archive,
+  ArrowDown,
   Check,
   Download,
   ExternalLink,
@@ -157,7 +158,11 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
   const [messages, setMessages] = useState<InternalChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingEarlier, setLoadingEarlier] = useState(false);
+  const [loadingNewer, setLoadingNewer] = useState(false);
   const [hasMore, setHasMore] = useState(false);
+  const [hasNewer, setHasNewer] = useState(false);
+  const [unreadOutsidePage, setUnreadOutsidePage] = useState(false);
+  const [showJumpToBottom, setShowJumpToBottom] = useState(false);
   const [text, setText] = useState(() => readChatDraft(currentUserId, thread.id));
   const [files, setFiles] = useState<File[]>([]);
   const [sending, setSending] = useState(false);
@@ -183,8 +188,11 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
-  const scrollIntentRef = useRef<{ mode: 'bottom' | 'preserve'; height: number; top: number } | null>(null);
+  const scrollIntentRef = useRef<{ mode: 'bottom' | 'preserve' | 'prepend' | 'unread'; height: number; top: number; unreadId?: number } | null>(null);
   const hasLoadedMessagesRef = useRef(false);
+  const lastReadMessageIdRef = useRef(thread.lastReadMessageId ?? 0);
+  const initialUnreadCountRef = useRef(thread.unreadCount);
+  const firstUnreadMessageIdRef = useRef(thread.firstUnreadMessageId);
   const draftBeforeEditRef = useRef('');
   const loadRequestId = useRef(0);
   const threadMemberIdsKey = `${(thread.memberUserIds ?? []).join(',')}|${(thread.guestUserIds ?? []).join(',')}`;
@@ -197,6 +205,10 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
     : otherMemberNames.join(', ');
 
   useEffect(() => {
+    lastReadMessageIdRef.current = Math.max(lastReadMessageIdRef.current, thread.lastReadMessageId ?? 0);
+  }, [thread.lastReadMessageId]);
+
+  useEffect(() => {
     if (!editing) saveChatDraft(currentUserId, thread.id, text);
   }, [currentUserId, editing, text, thread.id]);
 
@@ -205,18 +217,40 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
     const intent = scrollIntentRef.current;
     if (!container || !intent) return;
     if (intent.mode === 'bottom') container.scrollTop = container.scrollHeight;
-    else container.scrollTop = intent.top + container.scrollHeight - intent.height;
+    else if (intent.mode === 'unread' && intent.unreadId) {
+      const target = Array.from(container.querySelectorAll<HTMLElement>('[data-message-id]'))
+        .find((element) => Number(element.dataset.messageId) === intent.unreadId);
+      if (target) container.scrollTop += target.getBoundingClientRect().top - container.getBoundingClientRect().top;
+    } else if (intent.mode === 'prepend') container.scrollTop = intent.top + container.scrollHeight - intent.height;
+    else container.scrollTop = intent.top;
     scrollIntentRef.current = null;
+    setShowJumpToBottom(container.scrollHeight - container.scrollTop - container.clientHeight > 96);
   }, [messages]);
 
-  const loadMessages = useCallback(async (beforeId?: number, appendEarlier = false) => {
+  const markLatestReadIfAtBottom = useCallback(() => {
+    const container = messagesContainerRef.current;
+    if (!container || unreadOutsidePage || hasNewer || appliedSearch || authorUserId || dateFrom || dateTo || mentionedMe) return;
+    if (container.scrollHeight - container.scrollTop - container.clientHeight > 96) return;
+    const latestId = messages.at(-1)?.id;
+    if (!latestId || latestId <= lastReadMessageIdRef.current) return;
+    lastReadMessageIdRef.current = latestId;
+    void internalChatApi.markRead(thread.id, latestId)
+      .then(() => onThreadChanged?.())
+      .catch(showError);
+  }, [appliedSearch, authorUserId, dateFrom, dateTo, hasNewer, mentionedMe, messages, onThreadChanged, showError, thread.id, unreadOutsidePage]);
+
+  useEffect(() => { markLatestReadIfAtBottom(); }, [markLatestReadIfAtBottom]);
+
+  const loadMessages = useCallback(async (beforeId?: number, appendEarlier = false, afterId?: number, replaceWithUnread = false, forceBottom = false) => {
     const requestId = ++loadRequestId.current;
     const container = messagesContainerRef.current;
     if (appendEarlier) setLoadingEarlier(true);
+    else if (afterId !== undefined) setLoadingNewer(true);
     else if (!hasLoadedMessagesRef.current) setLoading(true);
     try {
       const page = await internalChatApi.getMessages(thread.id, {
         beforeId,
+        afterId,
         search: appliedSearch || undefined,
         authorUserId: authorUserId ? Number(authorUserId) : undefined,
         from: dateFrom ? new Date(`${dateFrom}T00:00:00`).toISOString() : undefined,
@@ -224,47 +258,84 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
         mentionedMe,
       });
       if (requestId !== loadRequestId.current) return;
+      const isFiltered = Boolean(appliedSearch || authorUserId || dateFrom || dateTo || mentionedMe);
+      const openingUnread = !appendEarlier && afterId === undefined && !hasLoadedMessagesRef.current && !isFiltered && initialUnreadCountRef.current > 0;
+      const loadedUnreadCount = openingUnread
+        ? page.items.filter((message) => message.id > lastReadMessageIdRef.current && message.authorUserId !== currentUserId && !message.deletedAt).length
+        : 0;
+      const unreadOutside = openingUnread && initialUnreadCountRef.current > loadedUnreadCount;
+      const firstUnread = openingUnread && !unreadOutside
+        ? page.items.find((message) => message.id > lastReadMessageIdRef.current && message.authorUserId !== currentUserId && !message.deletedAt)
+        : undefined;
+      if (unreadOutside) setUnreadOutsidePage(true);
+      else if (replaceWithUnread) setUnreadOutsidePage(false);
+      else if (forceBottom) setUnreadOutsidePage(false);
+      else if (!appendEarlier && afterId === undefined && isFiltered) setUnreadOutsidePage(false);
       if (container) {
         const nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 96;
         scrollIntentRef.current = {
-          mode: !appendEarlier && (!hasLoadedMessagesRef.current || nearBottom) ? 'bottom' : 'preserve',
+          mode: firstUnread || afterId !== undefined && page.items.length > 0 ? 'unread'
+            : forceBottom || !appendEarlier && afterId === undefined && (!hasLoadedMessagesRef.current || nearBottom) ? 'bottom'
+            : appendEarlier ? 'prepend' : 'preserve',
           height: container.scrollHeight,
           top: container.scrollTop,
+          unreadId: firstUnread?.id ?? (afterId !== undefined ? page.items[0]?.id : undefined),
         };
       }
       setLoading(false);
-      setMessages((current) => appendEarlier ? [...page.items, ...current] : page.items);
+      setMessages((current) => appendEarlier ? [...page.items, ...current] : afterId !== undefined && !replaceWithUnread ? [...current, ...page.items] : page.items);
       hasLoadedMessagesRef.current = true;
-      setHasMore(page.hasMore);
-      const isFiltered = Boolean(appliedSearch || authorUserId || dateFrom || dateTo || mentionedMe);
-      if (!appendEarlier && page.items.length && !isFiltered) {
-        await internalChatApi.markRead(thread.id, page.items.at(-1)?.id);
-        onThreadChanged?.();
-      }
+      if (afterId === undefined || replaceWithUnread) setHasMore(page.hasMore);
+      if (afterId !== undefined) setHasNewer(Boolean(page.hasNewer));
+      else if (!appendEarlier && (isFiltered || forceBottom)) setHasNewer(false);
     } catch (error) {
       if (requestId === loadRequestId.current) toast.error(errorMessage(error));
     } finally {
       if (requestId === loadRequestId.current) {
         setLoading(false);
         setLoadingEarlier(false);
+        setLoadingNewer(false);
       }
     }
-  }, [appliedSearch, authorUserId, dateFrom, dateTo, mentionedMe, onThreadChanged, thread.id, toast]);
+  }, [appliedSearch, authorUserId, currentUserId, dateFrom, dateTo, mentionedMe, thread.id, toast]);
 
   useEffect(() => {
     setMemberUserIds(threadMemberIdsKey.split('|')[0].split(',').filter(Boolean).map(Number));
   }, [threadMemberIdsKey]);
 
   useEffect(() => {
-    void loadMessages();
+    if (!hasLoadedMessagesRef.current && firstUnreadMessageIdRef.current) {
+      void loadMessages(undefined, false, firstUnreadMessageIdRef.current - 1, true);
+    } else void loadMessages();
   }, [loadMessages]);
 
   useEffect(() => {
     const connection = createNotificationsHubConnection();
-    connection.on(REALTIME_TASK_JOURNAL_CHANGED_EVENT, () => void loadMessages());
+    connection.on(REALTIME_TASK_JOURNAL_CHANGED_EVENT, () => { if (!hasNewer) void loadMessages(); });
     void connection.start().catch(() => undefined);
     return () => { void stopNotificationsHubConnection(connection); };
-  }, [loadMessages]);
+  }, [hasNewer, loadMessages]);
+
+  const handleMessagesScroll = () => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+    const awayFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight > 96;
+    setShowJumpToBottom(awayFromBottom);
+    if (!awayFromBottom) markLatestReadIfAtBottom();
+  };
+
+  const jumpToBottom = async () => {
+    if (hasNewer || unreadOutsidePage) {
+      await loadMessages(undefined, false, undefined, false, true);
+      return;
+    }
+    const container = messagesContainerRef.current;
+    if (container) {
+      container.scrollTop = container.scrollHeight;
+      setShowJumpToBottom(false);
+      markLatestReadIfAtBottom();
+    }
+  };
 
   const groupedMessages = useMemo(() => {
     const groups: Array<{ day: string; items: InternalChatMessage[] }> = [];
@@ -308,8 +379,12 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
     setSending(true);
     try {
       const created = await internalChatApi.sendMessage(thread.id, text, files, replyTo?.id);
-      scrollIntentRef.current = { mode: 'bottom', height: 0, top: 0 };
-      setMessages((current) => [...current, created]);
+      if (hasNewer) {
+        toast.success('Сообщение отправлено. Оно появится при переходе к новым сообщениям.');
+      } else {
+        scrollIntentRef.current = { mode: 'bottom', height: 0, top: 0 };
+        setMessages((current) => [...current, created]);
+      }
       setText('');
       setFiles([]);
       setReplyTo(null);
@@ -406,7 +481,9 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
         </div>
       ) : null}
 
-      <div ref={messagesContainerRef} aria-label="Сообщения чата" className={`min-h-0 flex-1 overflow-y-auto bg-slate-50/60 p-3 ${compact ? 'max-h-[420px]' : ''}`}>
+      <div className="relative min-h-0 flex-1">
+      <div ref={messagesContainerRef} onScroll={handleMessagesScroll} aria-label="Сообщения чата" className={`h-full min-h-0 overflow-y-auto bg-slate-50/60 p-3 ${compact ? 'max-h-[420px]' : ''}`}>
+        {unreadOutsidePage ? <button type="button" onClick={() => void loadMessages(undefined, false, lastReadMessageIdRef.current, true)} className="mx-auto mb-3 block rounded-full border border-blue-200 bg-blue-50 px-4 py-1.5 text-xs font-semibold text-blue-700">К первому непрочитанному</button> : null}
         {hasMore ? <button type="button" disabled={loadingEarlier} onClick={() => void loadMessages(messages[0]?.id, true)} className="mx-auto mb-3 block rounded-full border border-slate-200 bg-white px-4 py-1.5 text-xs font-semibold text-slate-600">{loadingEarlier ? 'Загрузка...' : 'Показать более ранние'}</button> : null}
         {loading ? <div className="flex h-full items-center justify-center text-sm text-slate-500"><Loader2 className="mr-2 h-4 w-4 animate-spin" />Загружаем сообщения</div> : messages.length === 0 ? <div className="flex h-full min-h-48 items-center justify-center text-sm text-slate-500">Сообщений пока нет. Начните обсуждение.</div> : groupedMessages.map((group) => (
           <div key={group.day}>
@@ -416,7 +493,7 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
                 const mine = message.authorUserId === currentUserId;
                 const deleted = Boolean(message.deletedAt);
                 return (
-                  <article key={message.id} className={`group flex ${mine ? 'justify-end' : 'justify-start'}`}>
+                  <article key={message.id} data-message-id={message.id} className={`group flex ${mine ? 'justify-end' : 'justify-start'}`}>
                     <div className={`relative max-w-[88%] rounded-2xl px-3 py-2 text-sm shadow-sm ${deleted ? 'border border-dashed border-slate-200 bg-white text-slate-400' : mine ? 'bg-blue-600 text-white' : message.kind === 'task-link' ? 'border border-emerald-200 bg-emerald-50 text-slate-700' : 'border border-slate-200 bg-white text-slate-700'}`}>
                       {message.isPinned ? <div className={`mb-1 flex items-center gap-1 text-[11px] font-semibold ${mine ? 'text-blue-100' : 'text-amber-700'}`}><Pin className="h-3 w-3" />Закреплено</div> : null}
                       {!mine && !deleted ? <div className="mb-1 text-xs font-semibold text-slate-900">{message.authorName}</div> : null}
@@ -441,6 +518,9 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
             </div>
           </div>
         ))}
+        {hasNewer ? <button type="button" disabled={loadingNewer} onClick={() => void loadMessages(undefined, false, messages.at(-1)?.id)} className="mx-auto mt-3 block rounded-full border border-blue-200 bg-white px-4 py-1.5 text-xs font-semibold text-blue-700">{loadingNewer ? 'Загрузка...' : 'Показать более новые'}</button> : null}
+      </div>
+      {showJumpToBottom || hasNewer ? <button type="button" onClick={() => void jumpToBottom()} className="absolute bottom-3 right-5 rounded-full border border-slate-200 bg-white p-2 text-blue-700 shadow-md" aria-label="К последним сообщениям" title="К последним сообщениям"><ArrowDown className="h-4 w-4" /></button> : null}
       </div>
 
       <footer className="border-t border-slate-200 bg-white p-3">

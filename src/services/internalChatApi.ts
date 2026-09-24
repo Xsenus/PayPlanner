@@ -14,6 +14,8 @@ export interface InternalChatThread {
   memberUserIds: number[];
   guestUserIds: number[];
   unreadCount: number;
+  lastReadMessageId?: number | null;
+  firstUnreadMessageId?: number | null;
   lastMessagePreview?: string | null;
   lastMessageAt?: string | null;
   createdAt: string;
@@ -63,6 +65,7 @@ export interface InternalChatMessage {
 export interface InternalChatMessagePage {
   items: InternalChatMessage[];
   hasMore: boolean;
+  hasNewer?: boolean;
   nextBeforeId?: number | null;
 }
 
@@ -108,9 +111,10 @@ export const internalChatApi = {
   setPersonalState: (threadId: number, state: 'visible' | 'hidden' | 'archived') => chatRequest<void>(`/threads/${threadId}/personal-state`, {
     method: 'PUT', body: JSON.stringify({ state }),
   }),
-  getMessages: (threadId: number, params: { beforeId?: number; search?: string; authorUserId?: number; from?: string; to?: string; mentionedMe?: boolean } = {}) => {
+  getMessages: (threadId: number, params: { beforeId?: number; afterId?: number; search?: string; authorUserId?: number; from?: string; to?: string; mentionedMe?: boolean } = {}) => {
     const query = new URLSearchParams();
     if (params.beforeId) query.set('beforeId', String(params.beforeId));
+    if (params.afterId !== undefined) query.set('afterId', String(params.afterId));
     if (params.search) query.set('search', params.search);
     if (params.authorUserId) query.set('authorUserId', String(params.authorUserId));
     if (params.from) query.set('from', params.from);

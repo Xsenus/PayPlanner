@@ -36,6 +36,14 @@ public sealed class InternalChatControllerTests
 
         var members = await fixture.Db.InternalChatMembers.Where(item => item.ThreadId == dto.Id && item.IsActive).Select(item => item.UserId).ToListAsync();
         Assert.Equal([author.Id, assignee.Id, observer.Id], members.Order().ToArray());
+
+        var posted = await fixture.Controller(author).SendMessage(dto.Id,
+            new SendInternalChatMessageRequest { Text = "Посмотрите приложенные документы" }, CancellationToken.None);
+        var message = Assert.IsType<InternalChatMessageDto>(Assert.IsType<CreatedAtActionResult>(posted.Result).Value);
+        var reopened = await fixture.Controller(assignee).OpenTaskChat(task.Id, CancellationToken.None);
+        var unread = Assert.IsType<InternalChatThreadDto>(Assert.IsType<OkObjectResult>(reopened.Result).Value);
+        Assert.Equal(1, unread.UnreadCount);
+        Assert.Equal(message.Id, unread.FirstUnreadMessageId);
     }
 
     [Fact]
@@ -218,6 +226,55 @@ public sealed class InternalChatControllerTests
         var second = Assert.IsType<InternalChatMessagePageDto>(Assert.IsType<OkObjectResult>(secondResult.Result).Value);
         Assert.Equal(5, second.Items.Count);
         Assert.False(second.HasMore);
+    }
+
+    [Fact]
+    public async Task UnreadMessages_ExposeReadCursorAndPageForwardWithoutSkippingMessages()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var owner = await fixture.AddUserAsync("unread-owner@example.test", "Автор");
+        var reader = await fixture.AddUserAsync("unread-reader@example.test", "Читатель");
+        var outsider = await fixture.AddUserAsync("unread-outsider@example.test", "Посторонний");
+        var created = await fixture.Controller(owner).CreateChannel(new CreateInternalChatChannelRequest
+        {
+            Name = "Много непрочитанных", MemberUserIds = [reader.Id]
+        }, CancellationToken.None);
+        var channel = Assert.IsType<InternalChatThreadDto>(Assert.IsType<CreatedAtActionResult>(created.Result).Value);
+        fixture.Db.InternalChatMessages.AddRange(Enumerable.Range(1, 60).Select(index => new InternalChatMessage
+        {
+            ThreadId = channel.Id, AuthorUserId = owner.Id, Text = $"Сообщение {index}"
+        }));
+        await fixture.Db.SaveChangesAsync();
+        var fifthId = await fixture.Db.InternalChatMessages.Where(item => item.ThreadId == channel.Id)
+            .OrderBy(item => item.Id).Skip(4).Select(item => item.Id).FirstAsync();
+        Assert.IsType<NoContentResult>(await fixture.Controller(reader).MarkRead(channel.Id,
+            new MarkInternalChatReadRequest { MessageId = fifthId }, CancellationToken.None));
+
+        var threads = Assert.IsAssignableFrom<IReadOnlyList<InternalChatThreadDto>>(Assert.IsType<OkObjectResult>(
+            (await fixture.Controller(reader).GetThreads(CancellationToken.None)).Result).Value);
+        var listed = Assert.Single(threads);
+        Assert.Equal(fifthId, listed.LastReadMessageId);
+        Assert.Equal(55, listed.UnreadCount);
+        Assert.Equal(fifthId + 1, listed.FirstUnreadMessageId);
+
+        var first = Assert.IsType<InternalChatMessagePageDto>(Assert.IsType<OkObjectResult>(
+            (await fixture.Controller(reader).GetMessages(channel.Id, null, null, null, null, null, false, 50,
+                CancellationToken.None, fifthId)).Result).Value);
+        Assert.Equal(50, first.Items.Count);
+        Assert.True(first.HasNewer);
+        Assert.Equal("Сообщение 6", first.Items[0].Text);
+        Assert.True(first.Items.Zip(first.Items.Skip(1)).All(pair => pair.First.Id < pair.Second.Id));
+
+        var second = Assert.IsType<InternalChatMessagePageDto>(Assert.IsType<OkObjectResult>(
+            (await fixture.Controller(reader).GetMessages(channel.Id, null, null, null, null, null, false, 50,
+                CancellationToken.None, first.Items[^1].Id)).Result).Value);
+        Assert.Equal(5, second.Items.Count);
+        Assert.False(second.HasNewer);
+        Assert.Equal("Сообщение 60", second.Items[^1].Text);
+        Assert.IsType<BadRequestObjectResult>((await fixture.Controller(reader).GetMessages(channel.Id, fifthId,
+            null, null, null, null, false, 50, CancellationToken.None, fifthId)).Result);
+        Assert.IsType<ForbidResult>((await fixture.Controller(outsider).GetMessages(channel.Id, null,
+            null, null, null, null, false, 50, CancellationToken.None, fifthId)).Result);
     }
 
     [Fact]
