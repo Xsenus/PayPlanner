@@ -3076,6 +3076,36 @@ describe('CaseDetailPage', () => {
     expect(within(historySection!).getByText('Архив источника')).toBeTruthy();
   });
 
+  it('shows an issued appeal decision from the result of a completed complaint hearing', async () => {
+    window.sessionStorage.setItem(
+      'pp.case-detail.15.view.v1',
+      JSON.stringify({ activeTab: 'court', courtOverview: true }),
+    );
+    vi.mocked(apiService.getCaseCourtEvents).mockResolvedValue([{
+      id: 51,
+      clientCaseId: 15,
+      eventType: 'hearing',
+      eventTypeLabel: 'Заседание',
+      title: 'Рассмотрение апелляционной жалобы',
+      scheduledAt: '2026-09-14T10:00:00Z',
+      allDay: false,
+      courtInstance: 'appeal',
+      courtInstanceLabel: 'Апелляция',
+      movementStatus: 'completed',
+      movementStatusLabel: 'Завершено',
+      resultSummary: 'Вынесено решение по делу: решение оставлено без изменения',
+      sourceType: 'sudrf',
+      createdAt: '2026-09-14T10:00:00Z',
+      isOverdue: false,
+    }]);
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    expect(await screen.findByText('Сводка по судебному делу')).toBeTruthy();
+    expect(screen.getByText('Решение апелляции зафиксировано')).toBeTruthy();
+    expect(screen.getAllByText('Решение зафиксировано').length).toBeGreaterThan(0);
+  });
+
   it('does not show court conclusions while source data is still loading', async () => {
     window.sessionStorage.setItem(
       'pp.case-detail.15.view.v1',

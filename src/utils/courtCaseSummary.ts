@@ -56,6 +56,15 @@ function isDecisionEvent(event: ClientCaseCourtEvent) {
   const status = (event.movementStatus || '').trim().toLowerCase();
   if (!['completed', 'held'].includes(status)) return false;
   if (event.eventType === 'decision') return true;
+  const result = (event.resultSummary || '').toLocaleLowerCase('ru');
+  if (containsAny(result, [
+    'вынесено решение',
+    'принято решение',
+    'решение оставлено без изменения',
+    'решение отменено',
+    'решение изменено',
+    'апелляционное определение',
+  ])) return true;
   if (isAppealMovement(event)) return false;
 
   return containsAny(eventText(event), [

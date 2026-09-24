@@ -356,6 +356,38 @@ describe('buildCourtCaseProcessSummary', () => {
     expect(summary.appeal.label).toBe('Обжалование зафиксировано');
   });
 
+  it('recognizes an issued appeal decision in the result of a completed hearing about a complaint', () => {
+    const event = courtEvent({
+      eventType: 'hearing',
+      courtInstance: 'appeal',
+      title: 'Рассмотрение апелляционной жалобы',
+      movementStatus: 'completed',
+      scheduledAt: '2026-09-14T10:00:00Z',
+      resultSummary: 'Вынесено решение по делу: решение оставлено без изменения',
+    });
+    const summary = buildCourtCaseProcessSummary({ courtDecisionAt: null }, [event], []);
+    const stage = buildCourtInstanceStage([event], 'appeal');
+
+    expect(summary.decision.label).toBe('Решение вынесено');
+    expect(summary.appeal.label).toBe('Решение апелляции зафиксировано');
+    expect(stage.label).toBe('Решение зафиксировано');
+    expect(stage.lastConfirmedResult).toContain('Вынесено решение по делу');
+  });
+
+  it('does not treat a completed complaint filing as an issued decision', () => {
+    const event = courtEvent({
+      eventType: 'other',
+      courtInstance: 'appeal',
+      title: 'Апелляционная жалоба на решение суда',
+      movementStatus: 'completed',
+      resultSummary: 'Жалоба направлена в суд',
+    });
+    const summary = buildCourtCaseProcessSummary({ courtDecisionAt: null }, [event], []);
+
+    expect(summary.decision.label).toBe('Решение не обнаружено');
+    expect(summary.appeal.label).toBe('Обжалование зафиксировано');
+  });
+
   it('does not invent a decision when movement has not been loaded', () => {
     const summary = buildCourtCaseProcessSummary({ courtDecisionAt: null }, [], []);
 
