@@ -3599,6 +3599,11 @@ public partial class CasesV2Controller : ControllerBase
             return NotFound();
         }
 
+        if (deadline.Status == "closed")
+        {
+            return Ok(MapProceduralDeadline(deadline, await ResolveCaseStatusClockAsync(ct)));
+        }
+
         var actorUserId = User.GetUserId();
         var actorName = User.GetDisplayName();
         deadline.Status = "closed";

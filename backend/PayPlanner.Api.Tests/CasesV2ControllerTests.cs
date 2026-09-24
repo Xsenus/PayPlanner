@@ -5389,6 +5389,20 @@ public class CasesV2ControllerTests
         Assert.Equal("closed", closed.Status);
         Assert.Equal("Подано в суд", closed.CloseReason);
 
+        var historyAfterClose = clientCase.EventHistory;
+        var notificationCountAfterClose = await db.UserNotifications.CountAsync();
+        var repeatedCloseResult = await controller.CloseProceduralDeadline(
+            clientCase.Id,
+            created.Id,
+            new CasesV2Controller.CloseClientCaseProceduralDeadlineRequest { Reason = "Повторная попытка" },
+            CancellationToken.None);
+        var repeatedClose = Assert.IsType<CasesV2Controller.ClientCaseProceduralDeadlineDto>(
+            Assert.IsType<OkObjectResult>(repeatedCloseResult.Result).Value);
+        Assert.Equal(closed.ClosedAt, repeatedClose.ClosedAt);
+        Assert.Equal(closed.CloseReason, repeatedClose.CloseReason);
+        Assert.Equal(historyAfterClose, clientCase.EventHistory);
+        Assert.Equal(notificationCountAfterClose, await db.UserNotifications.CountAsync());
+
         var tasks = await db.TaskJournalItems
             .Where(item => item.ClientCaseId == clientCase.Id && item.TagsJson.Contains($"case-deadline:entity-{created.Id}"))
             .ToListAsync();
