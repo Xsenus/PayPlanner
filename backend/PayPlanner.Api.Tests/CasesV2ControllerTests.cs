@@ -4702,7 +4702,7 @@ public class CasesV2ControllerTests
             ResponsibleUserId = owner.Id,
             CourtEvents =
             [
-                new ClientCaseCourtEvent { EventType = "hearing", ScheduledAt = hearingAt, Title = "Первое заседание" },
+                new ClientCaseCourtEvent { EventType = "hearing", ScheduledAt = hearingAt, Title = "Первое заседание", SourceCheckedAt = new DateTime(2026, 10, 8, 6, 0, 0, DateTimeKind.Utc) },
                 new ClientCaseCourtEvent { EventType = "hearing", ScheduledAt = hearingAt.AddDays(7), Title = "Второе заседание" },
             ],
         };
@@ -4741,6 +4741,8 @@ public class CasesV2ControllerTests
         Assert.Equal(2, hearings.Length);
         Assert.True(hearings[0].DocumentsPrepared);
         Assert.False(hearings[1].DocumentsPrepared);
+        Assert.Equal(new DateTime(2026, 10, 8, 6, 0, 0, DateTimeKind.Utc), hearings[0].SourceCheckedAt);
+        Assert.Null(hearings[1].SourceCheckedAt);
     }
 
     [Fact]

@@ -13,6 +13,7 @@ const hearing: CaseCalendarEvent = {
   clientCaseId: 42, caseTitle: 'Дело о разделе', responsibleName: 'Юрист',
   status: 'scheduled', priority: 'normal', isOverdue: false, isWarning: false,
   courtName: 'Районный суд', courtCaseNumber: '2-123/2026', documentsPrepared: true,
+  sourceCheckedAt: '2026-09-23T17:00:00Z',
 };
 
 describe('CourtHearingCalendar', () => {
@@ -34,10 +35,18 @@ describe('CourtHearingCalendar', () => {
     expect(agenda.textContent).toContain('10:00');
     expect(agenda.textContent).toContain('Дело о разделе');
     expect(agenda.textContent).toContain('Документы подготовлены');
+    expect(agenda.textContent).toContain('Источник проверен 24 сент. 2026 г.');
     expect(agenda.querySelectorAll('button')).toHaveLength(1);
     expect(apiService.getCaseCalendarEvents).toHaveBeenCalledWith(expect.objectContaining({ responsibleUserId: 7, includeTasks: false }));
     fireEvent.click(agenda.querySelector('button')!);
     expect(onOpenCase).toHaveBeenCalledWith(42);
+  });
+
+  it('does not claim a source check for a manually entered hearing', async () => {
+    vi.mocked(apiService.getCaseCalendarEvents).mockResolvedValue([{ ...hearing, sourceCheckedAt: null }]);
+    render(<CourtHearingCalendar timeZoneId="Asia/Novosibirsk" reloadToken={0} onOpenCase={vi.fn()} />);
+    const agenda = await screen.findByLabelText('Расписание заседаний по датам');
+    expect(agenda.textContent).not.toContain('Источник проверен');
   });
 
   it('shows an empty month without a wide empty mobile grid', async () => {

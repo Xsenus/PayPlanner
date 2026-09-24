@@ -6266,6 +6266,9 @@ public partial class CasesV2Controller : ControllerBase
                 IsWarning = IsCalendarEventInWarningPeriod(normalizedStart, courtEvent.AllDay, 7, range),
                 CourtName = NormalizeOptional(courtEvent.CourtName) ?? NormalizeOptional(clientCase.CourtName),
                 CourtCaseNumber = NormalizeOptional(courtEvent.CourtCaseNumber) ?? NormalizeOptional(clientCase.CourtCaseNumber),
+                SourceCheckedAt = courtEvent.SourceCheckedAt.HasValue
+                    ? CalendarTimeZoneHelper.NormalizeUtcInstant(courtEvent.SourceCheckedAt.Value)
+                    : null,
             });
         }
     }
@@ -15323,6 +15326,7 @@ public partial class CasesV2Controller : ControllerBase
         public string? CourtName { get; set; }
         public string? CourtCaseNumber { get; set; }
         public bool? DocumentsPrepared { get; set; }
+        public DateTime? SourceCheckedAt { get; set; }
     }
 
     public sealed class CaseCalendarSummaryDto
