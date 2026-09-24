@@ -88,6 +88,8 @@ public partial class CasesV2Controller
         var selectedIds = request.DocumentIds?.Distinct().Order().ToArray()
             ?? preparation?.Documents.Select(item => item.ClientCaseDocumentId).Order().ToArray()
             ?? [];
+        var documentsChanged = request.DocumentIds is not null && preparation is not null
+            && !selectedIds.SequenceEqual(preparation.Documents.Select(item => item.ClientCaseDocumentId).Order());
         if (checkKind == "materials" && request.Checked && selectedIds.Length == 0)
             return BadRequest(new { message = "Сначала привяжите хотя бы один подготовленный документ к заседанию." });
         if (request.DocumentIds is not null)
@@ -121,7 +123,9 @@ public partial class CasesV2Controller
             case "materials":
                 (preparation.MaterialsCheckedAt, preparation.MaterialsCheckedByUserId, preparation.MaterialsCheckedByName) =
                     ReviewValues(preparation.MaterialsCheckedAt, preparation.MaterialsCheckedByUserId,
-                        preparation.MaterialsCheckedByName, request.Checked, now, actorId, actorName);
+                        preparation.MaterialsCheckedByName,
+                        request.Checked && !(documentsChanged && preparation.MaterialsCheckedAt.HasValue),
+                        now, actorId, actorName);
                 if (request.DocumentIds is not null)
                 {
                     foreach (var link in preparation.Documents.Where(item => !selectedIds.Contains(item.ClientCaseDocumentId)).ToArray())

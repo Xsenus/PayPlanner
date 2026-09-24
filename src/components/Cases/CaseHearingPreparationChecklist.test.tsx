@@ -80,6 +80,7 @@ describe('CaseHearingPreparationChecklist', () => {
     render(<CaseHearingPreparationChecklist caseItem={caseItem} timeZoneId="UTC" canEdit />);
     await screen.findByText('Позиция.pdf');
     fireEvent.click(screen.getByRole('checkbox'));
+    expect(screen.getByText(/После сохранения отметку проверки материалов нужно будет поставить заново/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Сохранить связи с документами' }));
     await waitFor(() => expect(apiService.updateCaseHearingPreparation).toHaveBeenCalledWith(42, {
       hearingAt, checkKind: 'materials', checked: false, documentIds: [],

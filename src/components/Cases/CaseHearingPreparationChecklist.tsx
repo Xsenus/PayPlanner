@@ -129,6 +129,7 @@ export function CaseHearingPreparationChecklist({ caseItem, timeZoneId, canEdit,
                         </label>
                       ))}
                     </div>
+                    {selectedChanged && preparation.materialsCheckedAt ? <p className="mt-2 text-xs text-amber-800">Набор документов изменён. После сохранения отметку проверки материалов нужно будет поставить заново.</p> : null}
                     {canEdit && selectedChanged ? <button type="button" onClick={() => void save('materials', false)} disabled={Boolean(saving)} className="mt-2 rounded-lg border border-sky-200 px-2.5 py-1 text-xs font-semibold text-sky-800 disabled:opacity-50">Сохранить связи с документами</button> : null}
                   </div>
                 ) : null}

@@ -3709,8 +3709,9 @@ public class CasesV2ControllerTests
             SizeBytes = 100, UploadedByName = lawyer.FullName,
         };
         var ownDocument = MakeDocument(clientCase.Id, "position.pdf");
+        var replacementDocument = MakeDocument(clientCase.Id, "updated-position.pdf");
         var foreignDocument = MakeDocument(otherCase.Id, "foreign.pdf");
-        db.ClientCaseDocuments.AddRange(ownDocument, foreignDocument);
+        db.ClientCaseDocuments.AddRange(ownDocument, replacementDocument, foreignDocument);
         await db.SaveChangesAsync();
 
         var controller = CreateController(db, lawyer);
@@ -3740,6 +3741,16 @@ public class CasesV2ControllerTests
         var visible = Assert.IsType<CasesV2Controller.HearingPreparationDto>(Assert.IsType<OkObjectResult>(
             (await CreateController(db, viewer).GetHearingPreparation(clientCase.Id, CancellationToken.None)).Result).Value);
         Assert.Equal(materials.MaterialsCheckedAt, visible.MaterialsCheckedAt);
+
+        var changedMaterials = Assert.IsType<CasesV2Controller.HearingPreparationDto>(Assert.IsType<OkObjectResult>(
+            (await controller.UpdateHearingPreparation(clientCase.Id,
+                new() { HearingAt = hearingAt, CheckKind = "materials", Checked = true, DocumentIds = [replacementDocument.Id] }, CancellationToken.None)).Result).Value);
+        Assert.Equal([replacementDocument.Id], changedMaterials.DocumentIds);
+        Assert.Null(changedMaterials.MaterialsCheckedAt);
+        var reconfirmedMaterials = Assert.IsType<CasesV2Controller.HearingPreparationDto>(Assert.IsType<OkObjectResult>(
+            (await controller.UpdateHearingPreparation(clientCase.Id,
+                new() { HearingAt = hearingAt, CheckKind = "materials", Checked = true, DocumentIds = [replacementDocument.Id] }, CancellationToken.None)).Result).Value);
+        Assert.NotNull(reconfirmedMaterials.MaterialsCheckedAt);
 
         var cleared = Assert.IsType<CasesV2Controller.HearingPreparationDto>(Assert.IsType<OkObjectResult>(
             (await controller.UpdateHearingPreparation(clientCase.Id,
