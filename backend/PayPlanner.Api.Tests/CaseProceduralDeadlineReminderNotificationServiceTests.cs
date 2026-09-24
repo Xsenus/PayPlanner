@@ -90,6 +90,9 @@ public class CaseProceduralDeadlineReminderNotificationServiceTests
         int hiddenCaseId;
         int adminHiddenCaseId;
         int deniedCaseId;
+        int closedCaseId;
+        int lostCaseId;
+        int onHoldCaseId;
         await using (var scope = provider.CreateAsyncScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<PaymentContext>();
@@ -147,8 +150,33 @@ public class CaseProceduralDeadlineReminderNotificationServiceTests
             };
             db.ClientCases.AddRange(allowedCases);
             db.ClientCases.Add(hiddenCase);
+            var closedCase = new ClientCase
+            {
+                ClientId = client.Id,
+                Title = "Закрытое дело со старым сроком",
+                Status = ClientCaseStatus.Closed,
+                ResponsibleUserId = allowedUser.Id
+            };
+            var lostCase = new ClientCase
+            {
+                ClientId = client.Id,
+                Title = "Завершённое отрицательно дело со старым сроком",
+                Status = ClientCaseStatus.Lost,
+                ResponsibleUserId = allowedUser.Id
+            };
+            var onHoldCase = new ClientCase
+            {
+                ClientId = client.Id,
+                Title = "Приостановленное дело с действующим сроком",
+                Status = ClientCaseStatus.OnHold,
+                ResponsibleUserId = allowedUser.Id
+            };
+            db.ClientCases.AddRange(closedCase, lostCase, onHoldCase);
             await db.SaveChangesAsync();
             hiddenCaseId = hiddenCase.Id;
+            closedCaseId = closedCase.Id;
+            lostCaseId = lostCase.Id;
+            onHoldCaseId = onHoldCase.Id;
 
             var adminRole = new Role { Name = "admin", CreatedAt = DateTime.UtcNow };
             db.Roles.Add(adminRole);
@@ -214,7 +242,8 @@ public class CaseProceduralDeadlineReminderNotificationServiceTests
             await db.SaveChangesAsync();
             deniedCaseId = deniedCase.Id;
 
-            var deadlineCases = allowedCases.Append(hiddenCase).Append(adminHiddenCase).Append(deniedCase);
+            var deadlineCases = allowedCases.Append(hiddenCase).Append(adminHiddenCase).Append(deniedCase)
+                .Append(closedCase).Append(lostCase).Append(onHoldCase);
             db.ClientCaseProceduralDeadlines.AddRange(deadlineCases.Select((clientCase, index) =>
                 new ClientCaseProceduralDeadline
                 {
@@ -238,11 +267,14 @@ public class CaseProceduralDeadlineReminderNotificationServiceTests
 
         var notified = await service.RunOnceAsync(CancellationToken.None);
 
-        Assert.Equal(13, notified);
-        Assert.Equal(13, notificationRecorder.Calls.Count);
+        Assert.Equal(14, notified);
+        Assert.Equal(14, notificationRecorder.Calls.Count);
         Assert.DoesNotContain(notificationRecorder.Calls, call => call.ClientCaseId == hiddenCaseId);
         Assert.Contains(notificationRecorder.Calls, call => call.ClientCaseId == adminHiddenCaseId);
         Assert.DoesNotContain(notificationRecorder.Calls, call => call.ClientCaseId == deniedCaseId);
+        Assert.DoesNotContain(notificationRecorder.Calls, call => call.ClientCaseId == closedCaseId);
+        Assert.DoesNotContain(notificationRecorder.Calls, call => call.ClientCaseId == lostCaseId);
+        Assert.Contains(notificationRecorder.Calls, call => call.ClientCaseId == onHoldCaseId);
         Assert.All(notificationRecorder.Calls, call => Assert.Single(call.RecipientUserIds));
         Assert.Equal(4, interceptor.ReaderCommands.Count);
         Assert.Single(interceptor.ReaderCommands, command =>

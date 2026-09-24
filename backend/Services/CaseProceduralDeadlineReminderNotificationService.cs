@@ -79,6 +79,8 @@ public sealed class CaseProceduralDeadlineReminderNotificationService : Backgrou
             .ThenInclude(clientCase => clientCase.LegalEntity)
             .Where(deadline =>
                 deadline.Status == "active"
+                && (deadline.ClientCase.Status == ClientCaseStatus.Open
+                    || deadline.ClientCase.Status == ClientCaseStatus.OnHold)
                 && deadline.DueAt >= minDueDate
                 && deadline.DueAt < maxDueDate
                 && deadline.WarningDaysBefore >= 0)
