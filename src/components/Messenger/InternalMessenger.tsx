@@ -42,6 +42,7 @@ import {
   REALTIME_TASK_JOURNAL_CHANGED_EVENT,
   stopNotificationsHubConnection,
 } from '../../services/realtimeNotifications';
+import { localChatDayKey } from '../../utils/chatDateTime';
 
 const REACTIONS = ['👍', '❤️', '👏', '✅', '👀'];
 
@@ -216,7 +217,7 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
   const groupedMessages = useMemo(() => {
     const groups: Array<{ day: string; items: InternalChatMessage[] }> = [];
     messages.forEach((message) => {
-      const day = new Date(message.createdAt).toISOString().slice(0, 10);
+      const day = localChatDayKey(message.createdAt);
       const group = groups.at(-1);
       if (!group || group.day !== day) groups.push({ day, items: [message] });
       else group.items.push(message);

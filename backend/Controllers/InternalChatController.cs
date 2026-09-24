@@ -94,8 +94,8 @@ public sealed partial class InternalChatController : ControllerBase
                 row.MemberUserIds,
                 row.UnreadCount,
                 row.LatestMessage is null ? null : MessagePreview(row.LatestMessage.Text),
-                row.LatestMessage?.CreatedAt,
-                thread.CreatedAt);
+                AsUtc(row.LatestMessage?.CreatedAt),
+                AsUtc(thread.CreatedAt));
         }).ToList());
     }
 
@@ -705,7 +705,7 @@ public sealed partial class InternalChatController : ControllerBase
     private static InternalChatThreadDto ToThreadDto(InternalChatThread thread, string role, string mode, string? overrideName = null)
         => new(thread.Id, thread.Kind, overrideName ?? thread.Name, thread.TaskJournalItemId, role, mode,
             thread.Members.Where(member => member.IsActive).Select(member => member.UserId).ToList(),
-            0, null, thread.LastMessageAt, thread.CreatedAt);
+            0, null, AsUtc(thread.LastMessageAt), AsUtc(thread.CreatedAt));
 
     private static InternalChatMessageDto MapMessage(InternalChatMessage message, IReadOnlyList<int>? readByUserIds = null)
         => new(
@@ -720,13 +720,22 @@ public sealed partial class InternalChatController : ControllerBase
             message.ReplyToMessage?.AuthorUser is null ? null : DisplayName(message.ReplyToMessage.AuthorUser),
             message.CreatedTaskJournalItemId,
             message.IsPinned,
-            message.EditedAt,
-            message.DeletedAt,
-            message.CreatedAt,
+            AsUtc(message.EditedAt),
+            AsUtc(message.DeletedAt),
+            AsUtc(message.CreatedAt),
             message.Attachments.Select(file => new InternalChatAttachmentDto(file.Id, file.FileName, file.ContentType, file.Size)).ToList(),
             message.Reactions.GroupBy(reaction => reaction.Emoji).Select(group => new InternalChatReactionDto(group.Key, group.Count(), group.Select(reaction => reaction.UserId).ToList())).ToList(),
             message.Mentions.Select(mention => mention.UserId).ToList(),
             readByUserIds ?? []);
+
+    private static DateTime AsUtc(DateTime value) => value.Kind switch
+    {
+        DateTimeKind.Utc => value,
+        DateTimeKind.Local => value.ToUniversalTime(),
+        _ => DateTime.SpecifyKind(value, DateTimeKind.Utc)
+    };
+
+    private static DateTime? AsUtc(DateTime? value) => value.HasValue ? AsUtc(value.Value) : null;
 
     private static string DisplayName(User user) => string.IsNullOrWhiteSpace(user.FullName) ? user.Email : user.FullName.Trim();
     private static string BuildDirectKey(int first, int second) => first < second ? $"{first}:{second}" : $"{second}:{first}";

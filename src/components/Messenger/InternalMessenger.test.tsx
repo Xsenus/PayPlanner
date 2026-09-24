@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { InternalMessenger, TaskChatPanel } from './InternalMessenger';
+import { localChatDayKey } from '../../utils/chatDateTime';
 
 const chatApiMock = vi.hoisted(() => ({
   getThreads: vi.fn(),
@@ -66,6 +67,11 @@ const message = {
 };
 
 describe('InternalMessenger', () => {
+  it('groups messages by the viewer’s local date, not by the UTC date', () => {
+    expect(localChatDayKey('2026-09-23T16:30:00Z', 'Asia/Novosibirsk')).toBe('2026-09-23');
+    expect(localChatDayKey('2026-09-23T17:30:00Z', 'Asia/Novosibirsk')).toBe('2026-09-24');
+  });
+
   beforeEach(() => {
     permissionState.canCreateTasks = true;
     Object.values(chatApiMock).forEach((mock) => mock.mockReset());

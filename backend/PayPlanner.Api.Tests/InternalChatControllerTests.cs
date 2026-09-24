@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Security.Claims;
+using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
@@ -116,6 +117,43 @@ public sealed class InternalChatControllerTests
         var second = Assert.IsType<InternalChatMessagePageDto>(Assert.IsType<OkObjectResult>(secondResult.Result).Value);
         Assert.Equal(5, second.Items.Count);
         Assert.False(second.HasMore);
+    }
+
+    [Fact]
+    public async Task ChatDates_ReadFromDatabase_AreSerializedAsUtc()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var owner = await fixture.AddUserAsync("dates@example.test", "Автор");
+        var created = await fixture.Controller(owner).CreateChannel(
+            new CreateInternalChatChannelRequest { Name = "Время сообщений" }, CancellationToken.None);
+        var channel = Assert.IsType<InternalChatThreadDto>(Assert.IsType<CreatedAtActionResult>(created.Result).Value);
+        var storedUtc = new DateTime(2026, 9, 23, 18, 30, 0, DateTimeKind.Unspecified);
+        var thread = await fixture.Db.InternalChatThreads.SingleAsync(item => item.Id == channel.Id);
+        thread.CreatedAt = storedUtc;
+        thread.LastMessageAt = storedUtc;
+        fixture.Db.InternalChatMessages.Add(new InternalChatMessage
+        {
+            ThreadId = channel.Id,
+            AuthorUserId = owner.Id,
+            Text = "Сообщение около полуночи",
+            CreatedAt = storedUtc
+        });
+        await fixture.Db.SaveChangesAsync();
+        fixture.Db.ChangeTracker.Clear();
+
+        var threads = Assert.IsAssignableFrom<IReadOnlyList<InternalChatThreadDto>>(Assert.IsType<OkObjectResult>(
+            (await fixture.Controller(owner).GetThreads(CancellationToken.None)).Result).Value);
+        var listed = Assert.Single(threads);
+        Assert.Equal(DateTimeKind.Utc, listed.CreatedAt.Kind);
+        Assert.Equal(DateTimeKind.Utc, listed.LastMessageAt?.Kind);
+        Assert.EndsWith("Z", JsonSerializer.Serialize(listed.CreatedAt).Trim('"'));
+
+        var page = Assert.IsType<InternalChatMessagePageDto>(Assert.IsType<OkObjectResult>(
+            (await fixture.Controller(owner).GetMessages(channel.Id, null, null, null, null, null, false, 50, CancellationToken.None)).Result).Value);
+        var message = Assert.Single(page.Items);
+        Assert.Equal(DateTimeKind.Utc, message.CreatedAt.Kind);
+        Assert.Equal(new DateTime(2026, 9, 23, 18, 30, 0, DateTimeKind.Utc), message.CreatedAt);
+        Assert.EndsWith("Z", JsonSerializer.Serialize(message.CreatedAt).Trim('"'));
     }
 
     [Fact]
