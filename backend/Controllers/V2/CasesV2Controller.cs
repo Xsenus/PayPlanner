@@ -663,7 +663,7 @@ public partial class CasesV2Controller : ControllerBase
         var candidates = await _db.Users.AsNoTracking()
             .Where(user => user.IsActive && user.IsApproved && user.Role != null
                 && (user.Role.Name == "admin" || user.Role.Permissions.Any(permission =>
-                    permission.Section == RolePermissionCatalog.Cases && permission.CanView)))
+                    permission.Section == RolePermissionCatalog.Cases && permission.CanView && permission.CanEdit)))
             .Select(user => new { user.Id, user.FullName, user.Email })
             .ToListAsync(ct);
         var candidateIds = candidates.Select(user => user.Id).ToArray();
@@ -758,11 +758,23 @@ public partial class CasesV2Controller : ControllerBase
 
         var assignee = await _db.Users.AsNoTracking()
             .Where(user => user.Id == request.UserId && user.IsActive && user.IsApproved)
-            .Select(user => new { user.Id, user.FullName, user.Email })
+            .Select(user => new
+            {
+                user.Id,
+                user.FullName,
+                user.Email,
+                CanWorkOnCases = user.Role != null && (user.Role.Name == "admin"
+                    || user.Role.Permissions.Any(permission => permission.Section == RolePermissionCatalog.Cases
+                        && permission.CanView && permission.CanEdit))
+            })
             .FirstOrDefaultAsync(ct);
         if (assignee is null)
         {
             return BadRequest("Выберите действующего сотрудника.");
+        }
+        if (!assignee.CanWorkOnCases)
+        {
+            return BadRequest("У сотрудника нет права работать с судебными делами.");
         }
 
         var targetVisibility = await _db.ResolveDataVisibilitiesForUsersAsync(

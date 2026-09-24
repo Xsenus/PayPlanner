@@ -3313,6 +3313,8 @@ public class CasesV2ControllerTests
         await using var db = await CreateContextAsync();
         var manager = await CreateUserAsync(db, "assign-manager@example.com", "Руководитель", DataVisibilityScope.All);
         var lawyer = await CreateUserAsync(db, "assign-lawyer@example.com", "Юрист");
+        var observer = await CreateUserAsync(db, "assign-observer@example.com", "Наблюдатель", DataVisibilityScope.All);
+        observer.Role!.Permissions.Single().CanEdit = false;
         var noAccess = await CreateUserAsync(db, "assign-no-access@example.com", "Без доступа");
         noAccess.Role!.Permissions.Single().CanView = false;
         var client = new Client { Name = "Контрагент", IsActive = true, ResponsibleUserId = manager.Id };
@@ -3343,6 +3345,12 @@ public class CasesV2ControllerTests
         var managerController = CreateController(db, manager);
         Assert.IsType<BadRequestObjectResult>(await managerController.AssignCourtCase(
             courtCase.Id, new CasesV2Controller.AssignCourtCaseRequest { UserId = noAccess.Id }, CancellationToken.None));
+        var workload = Assert.IsType<CasesV2Controller.CourtWorkloadDto[]>(
+            Assert.IsType<OkObjectResult>(await managerController.GetCourtWorkload(courtCase.Id)).Value);
+        Assert.DoesNotContain(workload, row => row.UserId == observer.Id);
+        Assert.IsType<BadRequestObjectResult>(await managerController.AssignCourtCase(
+            courtCase.Id, new CasesV2Controller.AssignCourtCaseRequest { UserId = observer.Id }, CancellationToken.None));
+        Assert.Equal(manager.Id, courtCase.ResponsibleUserId);
         Assert.IsType<BadRequestObjectResult>(await managerController.AssignCourtCase(
             hiddenCase.Id, new CasesV2Controller.AssignCourtCaseRequest { UserId = lawyer.Id }, CancellationToken.None));
         Assert.Equal(manager.Id, hiddenCase.ResponsibleUserId);
