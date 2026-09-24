@@ -27,11 +27,53 @@ public interface IMaxOutboxService
 
 public static class MaxMessageTemplateCatalog
 {
-    public static string RenderNotification(string notificationType) => notificationType switch
+    public static string RenderNotification(string notificationType)
     {
-        UserNotificationTypes.SystemAdminWarning => "В CRM есть критическое системное предупреждение. Откройте CRM, чтобы безопасно посмотреть подробности.",
-        _ => throw new InvalidOperationException("Для события не настроен безопасный шаблон MAX."),
-    };
+        var definition = UserNotificationTypes.Find(notificationType);
+        if (definition is null || NotificationPriorities.IsSilent(definition.Priority))
+            throw new InvalidOperationException("Для события не настроен безопасный шаблон MAX.");
+
+        return definition.Key == UserNotificationTypes.SystemAdminWarning
+            ? "В CRM есть критическое системное предупреждение. Откройте CRM, чтобы безопасно посмотреть подробности."
+            : $"В CRM новое уведомление: {definition.Label}. Откройте CRM, чтобы безопасно посмотреть подробности.";
+    }
+}
+
+internal static class MaxNotificationRecipientPolicy
+{
+    public static async Task<IReadOnlyDictionary<int, UserNotificationPreferenceSnapshot>> LoadAsync(
+        PaymentContext db, IReadOnlyCollection<int> userIds, CancellationToken ct)
+    {
+        if (userIds.Count == 0)
+            return new Dictionary<int, UserNotificationPreferenceSnapshot>();
+
+        var users = await db.Users.AsNoTracking()
+            .Where(user => userIds.Contains(user.Id) && user.IsActive && user.IsApproved)
+            .Select(user => new
+            {
+                user.Id,
+                user.RoleId,
+                RoleName = user.Role != null ? user.Role.Name : string.Empty,
+                Preference = db.UserSettings
+                    .Where(setting => setting.UserId == user.Id && setting.Key == UserNotificationPreferenceSettings.SettingKey)
+                    .Select(setting => setting.Value)
+                    .FirstOrDefault(),
+            })
+            .ToListAsync(ct);
+        var roleSetting = users.Any(user => user.Preference is null)
+            ? await db.SystemSettings.AsNoTracking()
+                .Where(setting => setting.Key == RoleNotificationPreferenceSettings.SettingKey)
+                .Select(setting => setting.Value)
+                .FirstOrDefaultAsync(ct)
+            : null;
+
+        return users.ToDictionary(
+            user => user.Id,
+            user => user.Preference is not null
+                ? UserNotificationPreferenceSettings.Parse(user.Preference)
+                : RoleNotificationPreferenceSettings.ParseForRole(roleSetting, user.RoleId)
+                    ?? RoleNotificationPreferenceDefaults.Resolve(user.RoleName).Preferences);
+    }
 }
 
 public sealed class MaxOutboxService(
@@ -57,7 +99,8 @@ public sealed class MaxOutboxService(
             if (!request.RecipientUserId.HasValue)
                 throw new InvalidOperationException("Системные уведомления MAX доступны только сотрудникам.");
             notificationType = UserNotificationTypes.Find(request.NotificationType)?.Key;
-            if (!string.Equals(notificationType, UserNotificationTypes.SystemAdminWarning, StringComparison.Ordinal))
+            if (notificationType is null
+                || NotificationPriorities.IsSilent(UserNotificationTypes.Find(notificationType)?.Priority))
                 throw new InvalidOperationException("Событие пока не разрешено для MAX.");
             if (!await IsNotificationAllowedForRecipientAsync(request.RecipientUserId.Value, notificationType!, ct))
                 throw new InvalidOperationException("Получатель отключил это уведомление MAX.");
@@ -93,14 +136,20 @@ public sealed class MaxOutboxService(
         var now = timeProvider.GetUtcNow().UtcDateTime;
         var timeZone = TimeZoneInfo.FindSystemTimeZoneById(runtime.QuietHoursTimeZone);
         var localNow = TimeZoneInfo.ConvertTimeFromUtc(now, timeZone);
+        var nextAttemptAt = now;
         if (runtime.QuietHoursEnabled && IsWithinQuietHours(TimeOnly.FromDateTime(localNow), runtime.QuietHoursStart, runtime.QuietHoursEnd))
-            throw new InvalidOperationException("Сообщение MAX не создано: действуют тихие часы.");
-        var localDayStart = DateTime.SpecifyKind(localNow.Date, DateTimeKind.Unspecified);
+        {
+            if (scenario != MaxMessengerScenarios.Notifications)
+                throw new InvalidOperationException("Сообщение MAX не создано: действуют тихие часы.");
+            nextAttemptAt = NextQuietHoursEndUtc(localNow, runtime.QuietHoursStart, runtime.QuietHoursEnd, timeZone);
+        }
+        var scheduledLocal = TimeZoneInfo.ConvertTimeFromUtc(nextAttemptAt, timeZone);
+        var localDayStart = DateTime.SpecifyKind(scheduledLocal.Date, DateTimeKind.Unspecified);
         var dayStartUtc = TimeZoneInfo.ConvertTimeToUtc(localDayStart, timeZone);
         var dayEndUtc = TimeZoneInfo.ConvertTimeToUtc(localDayStart.AddDays(1), timeZone);
         var sentToday = await db.MaxOutboxMessages.AsNoTracking()
             .CountAsync(item => item.RecipientLinkId == link.Id
-                && item.CreatedAt >= dayStartUtc && item.CreatedAt < dayEndUtc
+                && item.NextAttemptAt >= dayStartUtc && item.NextAttemptAt < dayEndUtc
                 && item.Status != MaxOutboxStatuses.Cancelled, ct);
         if (sentToday >= runtime.DailyLimitPerRecipient)
             throw new InvalidOperationException("Достигнут дневной лимит MAX для получателя.");
@@ -116,7 +165,7 @@ public sealed class MaxOutboxService(
             ActionText = string.IsNullOrWhiteSpace(request.ActionText) ? null : request.ActionText.Trim()[..Math.Min(request.ActionText.Trim().Length, 128)],
             IdempotencyKey = idempotencyKey,
             Status = MaxOutboxStatuses.Queued,
-            NextAttemptAt = now,
+            NextAttemptAt = nextAttemptAt,
             CreatedAt = now,
             UpdatedAt = now
         };
@@ -172,7 +221,7 @@ public sealed class MaxOutboxService(
         return true;
     }
 
-    private static bool IsScenarioEnabled(MaxRuntimeSettings settings, string scenario) => scenario switch
+    internal static bool IsScenarioEnabled(MaxRuntimeSettings settings, string scenario) => scenario switch
     {
         MaxMessengerScenarios.Notifications => settings.NotificationsEnabled,
         MaxMessengerScenarios.Documents => settings.DocumentsEnabled,
@@ -191,40 +240,25 @@ public sealed class MaxOutboxService(
     private static string Sha256(string value) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
 
-    private static bool IsWithinQuietHours(TimeOnly now, TimeOnly start, TimeOnly end)
+    internal static bool IsWithinQuietHours(TimeOnly now, TimeOnly start, TimeOnly end)
         => start == end ? false : start < end ? now >= start && now < end : now >= start || now < end;
+
+    internal static DateTime NextQuietHoursEndUtc(DateTime localNow, TimeOnly start, TimeOnly end, TimeZoneInfo timeZone)
+    {
+        var endDate = start > end && TimeOnly.FromDateTime(localNow) >= start
+            ? localNow.Date.AddDays(1)
+            : localNow.Date;
+        var localEnd = endDate.Add(end.ToTimeSpan());
+        while (timeZone.IsInvalidTime(localEnd))
+            localEnd = localEnd.AddMinutes(1);
+        return TimeZoneInfo.ConvertTimeToUtc(localEnd, timeZone);
+    }
 
     private async Task<bool> IsNotificationAllowedForRecipientAsync(int userId, string notificationType, CancellationToken ct)
     {
-        var user = await db.Users.AsNoTracking()
-            .Where(item => item.Id == userId && item.IsActive && item.IsApproved)
-            .Select(item => new
-            {
-                item.RoleId,
-                RoleName = item.Role != null ? item.Role.Name : string.Empty,
-                Preference = db.UserSettings
-                    .Where(setting => setting.UserId == item.Id)
-                    .Where(setting => setting.Key == UserNotificationPreferenceSettings.SettingKey)
-                    .Select(setting => setting.Value)
-                    .FirstOrDefault(),
-            })
-            .FirstOrDefaultAsync(ct);
-        if (user is null) return false;
-        UserNotificationPreferenceSnapshot preferences;
-        if (user.Preference is not null)
-        {
-            preferences = UserNotificationPreferenceSettings.Parse(user.Preference);
-        }
-        else
-        {
-            var roleSetting = await db.SystemSettings.AsNoTracking()
-                .Where(item => item.Key == RoleNotificationPreferenceSettings.SettingKey)
-                .Select(item => item.Value)
-                .FirstOrDefaultAsync(ct);
-            preferences = RoleNotificationPreferenceSettings.ParseForRole(roleSetting, user.RoleId)
-                ?? RoleNotificationPreferenceDefaults.Resolve(user.RoleName).Preferences;
-        }
-        return UserNotificationPreferenceSettings.IsChannelEnabled(preferences, notificationType, NotificationChannels.Max);
+        var preferences = await MaxNotificationRecipientPolicy.LoadAsync(db, [userId], ct);
+        return preferences.TryGetValue(userId, out var recipientPreferences)
+            && UserNotificationPreferenceSettings.IsChannelEnabled(recipientPreferences, notificationType, NotificationChannels.Max);
     }
 }
 
@@ -254,6 +288,13 @@ public sealed class MaxOutboxProcessor(
         if (!settings.Ready) return 0;
         var now = timeProvider.GetUtcNow().UtcDateTime;
         var stale = now.AddMinutes(-5);
+        var timeZone = TimeZoneInfo.FindSystemTimeZoneById(settings.QuietHoursTimeZone);
+        var localNow = TimeZoneInfo.ConvertTimeFromUtc(now, timeZone);
+        var quietHoursActive = settings.QuietHoursEnabled
+            && MaxOutboxService.IsWithinQuietHours(TimeOnly.FromDateTime(localNow), settings.QuietHoursStart, settings.QuietHoursEnd);
+        var quietHoursEndUtc = quietHoursActive
+            ? MaxOutboxService.NextQuietHoursEndUtc(localNow, settings.QuietHoursStart, settings.QuietHoursEnd, timeZone)
+            : now;
         List<MaxOutboxMessage> messages;
         var lastSendByRecipient = new Dictionary<long, DateTime>();
         var processableMessages = new List<(MaxOutboxMessage Message, long RecipientId)>();
@@ -271,6 +312,24 @@ public sealed class MaxOutboxProcessor(
                 .Take(20)
                 .ToListAsync(ct);
             processableMessages.Capacity = messages.Count;
+            var notificationMessages = messages
+                .Where(message => message.Scenario == MaxMessengerScenarios.Notifications && message.RecipientUserId.HasValue)
+                .ToArray();
+            var notificationRecipientIds = notificationMessages
+                .Select(message => message.RecipientUserId!.Value)
+                .Distinct()
+                .ToArray();
+            var recipientPreferences = await MaxNotificationRecipientPolicy.LoadAsync(db, notificationRecipientIds, ct);
+            var eventKeys = notificationMessages.Select(message => message.EventKey).Distinct().ToArray();
+            var notificationTypes = eventKeys.Length == 0
+                ? new Dictionary<(int RecipientUserId, string EventKey), string>()
+                : (await db.UserNotifications.AsNoTracking()
+                    .Where(notification => notificationRecipientIds.Contains(notification.RecipientUserId)
+                        && eventKeys.Contains(notification.EventKey))
+                    .Select(notification => new { notification.RecipientUserId, notification.EventKey, notification.Type })
+                    .ToListAsync(ct))
+                    .GroupBy(notification => (notification.RecipientUserId, notification.EventKey))
+                    .ToDictionary(group => group.Key, group => group.First().Type);
             foreach (var message in messages)
             {
                 if (message.RecipientLink.Status != MaxRecipientLinkStatuses.Verified
@@ -278,6 +337,35 @@ public sealed class MaxOutboxProcessor(
                 {
                     message.Status = MaxOutboxStatuses.Cancelled;
                     message.LastErrorCode = "recipient-unlinked";
+                    message.UpdatedAt = now;
+                    continue;
+                }
+
+                if (message.Scenario == MaxMessengerScenarios.Notifications
+                    && message.RecipientUserId is int userId
+                    && (!recipientPreferences.TryGetValue(userId, out var preferences)
+                        || (notificationTypes.TryGetValue((userId, message.EventKey), out var notificationType)
+                            && !UserNotificationPreferenceSettings.IsChannelEnabled(
+                                preferences, notificationType, NotificationChannels.Max))))
+                {
+                    message.Status = MaxOutboxStatuses.Cancelled;
+                    message.LastErrorCode = "recipient-preference-disabled";
+                    message.UpdatedAt = now;
+                    continue;
+                }
+
+                if (!MaxOutboxService.IsScenarioEnabled(settings, message.Scenario))
+                {
+                    message.Status = MaxOutboxStatuses.Cancelled;
+                    message.LastErrorCode = "scenario-disabled";
+                    message.UpdatedAt = now;
+                    continue;
+                }
+
+                if (quietHoursActive)
+                {
+                    message.Status = MaxOutboxStatuses.Queued;
+                    message.NextAttemptAt = quietHoursEndUtc;
                     message.UpdatedAt = now;
                     continue;
                 }

@@ -50,6 +50,8 @@ public sealed class NotificationService : INotificationService
     private readonly ITelegramNotificationService _telegramService;
     private readonly ISmsNotificationService? _smsService;
     private readonly IMaxNotificationService? _maxService;
+    private readonly IMaxOutboxService? _maxOutboxService;
+    private Task<MaxRuntimeSettings>? _maxRuntimeSettingsTask;
     private readonly IRealtimeNotificationPublisher _realtimePublisher;
     private readonly IWebPushNotificationService? _webPushNotificationService;
     private readonly ILogger<NotificationService> _logger;
@@ -102,7 +104,8 @@ public sealed class NotificationService : INotificationService
         ISmsNotificationService? smsService = null,
         TimeProvider? timeProvider = null,
         IHttpContextAccessor? httpContextAccessor = null,
-        IMaxNotificationService? maxService = null)
+        IMaxNotificationService? maxService = null,
+        IMaxOutboxService? maxOutboxService = null)
     {
         _context = context;
         _configuration = configuration;
@@ -110,6 +113,7 @@ public sealed class NotificationService : INotificationService
         _telegramService = telegramService;
         _smsService = smsService;
         _maxService = maxService;
+        _maxOutboxService = maxOutboxService;
         _realtimePublisher = realtimePublisher ?? NoOpRealtimeNotificationPublisher.Instance;
         _webPushNotificationService = webPushNotificationService;
         _logger = logger;
@@ -1404,6 +1408,7 @@ public sealed class NotificationService : INotificationService
         await _context.SaveChangesAsync(cancellationToken);
         foreach (var notification in notifications)
         {
+            await QueueMaxNotificationIfAvailableAsync(notification, cancellationToken);
             var channels = adminNotificationChannels[notification.RecipientUserId];
             await _realtimePublisher.PublishUserNotificationAsync(
                 notification,
@@ -2799,6 +2804,7 @@ public sealed class NotificationService : INotificationService
         await _context.SaveChangesAsync(cancellationToken);
         foreach (var notification in notifications)
         {
+            await QueueMaxNotificationIfAvailableAsync(notification, cancellationToken);
             var channels = deliveryChannels[notification.EventKey];
             await _realtimePublisher.PublishUserNotificationAsync(
                 notification,
@@ -4744,6 +4750,7 @@ public sealed class NotificationService : INotificationService
         };
         _context.UserNotifications.Add(notification);
         await _context.SaveChangesAsync(cancellationToken);
+        await QueueMaxNotificationIfAvailableAsync(notification, cancellationToken);
         var toastEnabled = resolvedNotificationChannels is not null
             ? resolvedNotificationChannels.Contains(NotificationChannels.Toast)
             : await IsUserNotificationChannelEnabledAsync(
@@ -4767,6 +4774,51 @@ public sealed class NotificationService : INotificationService
         }
 
         return true;
+    }
+
+    private async Task QueueMaxNotificationIfAvailableAsync(UserNotification notification, CancellationToken cancellationToken)
+    {
+        if (_maxService is null || _maxOutboxService is null
+            || UserNotificationTypes.Find(notification.Type) is not { } typeDefinition
+            || NotificationPriorities.IsSilent(typeDefinition.Priority))
+            return;
+
+        var configuredUrl = (_configuration["App:FrontendUrl"]
+            ?? _configuration["Frontend:BaseUrl"]
+            ?? _configuration["Frontend:PublicUrl"])?.Trim();
+        if (!Uri.TryCreate(configuredUrl, UriKind.Absolute, out var baseUri)
+            || baseUri.Scheme != Uri.UriSchemeHttps
+            || !string.IsNullOrEmpty(baseUri.UserInfo)
+            || !string.IsNullOrEmpty(baseUri.Query)
+            || !string.IsNullOrEmpty(baseUri.Fragment))
+            return;
+
+        try
+        {
+            var runtime = await (_maxRuntimeSettingsTask ??= _maxService.GetRuntimeSettingsAsync(cancellationToken));
+            if (!runtime.Ready || !runtime.NotificationsEnabled
+                || !await IsUserNotificationChannelEnabledAsync(
+                    notification.RecipientUserId,
+                    notification.Type,
+                    NotificationChannels.Max,
+                    cancellationToken))
+                return;
+
+            await _maxOutboxService.QueueAsync(new MaxQueueRequest(
+                notification.RecipientUserId,
+                MaxMessengerScenarios.Notifications,
+                notification.EventKey,
+                string.Empty,
+                "Открыть CRM",
+                baseUri.AbsoluteUri,
+                notification.Type), cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // Отказ дополнительного канала не должен скрывать уже сохранённое уведомление CRM.
+            _logger.LogWarning("MAX notification was not queued for user {RecipientUserId}, type {Type}: {ErrorType}.",
+                notification.RecipientUserId, notification.Type, exception.GetType().Name);
+        }
     }
 
     private async Task<bool> CanRecipientSeeNotificationObjectAsync(
@@ -7291,11 +7343,11 @@ public sealed class NotificationService : INotificationService
         => string.Equals(action, "rescheduled", StringComparison.OrdinalIgnoreCase)
             ? $"Перенесено судебное заседание: {BuildClientCaseTitle(clientCase)}"
             : notificationType switch
-        {
-            UserNotificationTypes.CourtDecisionPublished => $"Опубликован результат по суду: {BuildClientCaseTitle(clientCase)}",
-            UserNotificationTypes.CourtStatusChanged => $"Изменился судебный статус: {BuildClientCaseTitle(clientCase)}",
-            _ => $"Судебное заседание: {BuildClientCaseTitle(clientCase)}"
-        };
+            {
+                UserNotificationTypes.CourtDecisionPublished => $"Опубликован результат по суду: {BuildClientCaseTitle(clientCase)}",
+                UserNotificationTypes.CourtStatusChanged => $"Изменился судебный статус: {BuildClientCaseTitle(clientCase)}",
+                _ => $"Судебное заседание: {BuildClientCaseTitle(clientCase)}"
+            };
 
     private static string BuildCourtEventBody(
         ClientCase clientCase,
@@ -7309,11 +7361,11 @@ public sealed class NotificationService : INotificationService
         var intro = string.Equals(action, "rescheduled", StringComparison.OrdinalIgnoreCase)
             ? $"{actorName} перенёс(ла) судебное заседание по делу. Проверьте новую дату и подготовку."
             : notificationType switch
-        {
-            UserNotificationTypes.CourtDecisionPublished => $"{actorName} {actionText} судебный результат по делу.",
-            UserNotificationTypes.CourtStatusChanged => $"{actorName} {actionText} судебный статус по делу.",
-            _ => $"{actorName} {actionText} судебное заседание по делу."
-        };
+            {
+                UserNotificationTypes.CourtDecisionPublished => $"{actorName} {actionText} судебный результат по делу.",
+                UserNotificationTypes.CourtStatusChanged => $"{actorName} {actionText} судебный статус по делу.",
+                _ => $"{actorName} {actionText} судебное заседание по делу."
+            };
 
         var builder = new StringBuilder()
             .Append(intro)

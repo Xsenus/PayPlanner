@@ -95,7 +95,7 @@ public class NotificationServiceTests
     }
 
     [Fact]
-    public async Task GetChannelsAsync_ReturnsActiveChannelsAndFutureAdapters()
+    public async Task GetChannelsAsync_ReturnsAvailableChannelsAndFutureSmsAdapter()
     {
         await using var db = await CreateContextAsync();
         var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService());
@@ -108,9 +108,9 @@ public class NotificationServiceTests
         Assert.Contains(channels, item => item.Key == NotificationChannels.Email && item.IsEnabled && item.IsSendable && item.RequiresProvider);
         Assert.Contains(channels, item => item.Key == NotificationChannels.Telegram && item.IsEnabled && item.IsSendable && item.RequiresProvider);
         Assert.Contains(channels, item => item.Key == NotificationChannels.Sms && !item.IsEnabled && !item.IsSendable && item.IsFuture);
-        Assert.Contains(channels, item => item.Key == NotificationChannels.Max && !item.IsEnabled && !item.IsSendable && item.IsFuture);
+        Assert.Contains(channels, item => item.Key == NotificationChannels.Max && item.IsEnabled && item.IsSendable && !item.IsFuture);
         Assert.Equal(new[] { NotificationChannels.InApp, NotificationChannels.Toast, NotificationChannels.WebPush, NotificationChannels.Email, NotificationChannels.Telegram }, NotificationChannels.All);
-        Assert.Equal(new[] { NotificationChannels.Sms, NotificationChannels.Max }, NotificationChannels.Future);
+        Assert.Equal(new[] { NotificationChannels.Sms }, NotificationChannels.Future);
     }
 
     [Fact]
@@ -1612,6 +1612,71 @@ public class NotificationServiceTests
         Assert.Equal(paymentId, notification.ObjectId);
         Assert.Single(realtime.Notifications);
         Assert.Single(webPush.Notifications);
+    }
+
+    [Fact]
+    public async Task NotifyAsync_QueuesNeutralMaxMessageOnlyOnceAndKeepsInternalNotificationOnMaxFailure()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "max-notification@example.com");
+        var paymentId = await CreateProtectedNotificationObjectAsync(db, "payment", user);
+        var max = new RecordingMaxOutboxService();
+        var service = CreateService(
+            db, new RecordingEmailService(), new RecordingTelegramService(),
+            maxService: new ReadyMaxNotificationService(), maxOutboxService: max,
+            configurationValues: new Dictionary<string, string?> { ["App:FrontendUrl"] = "https://crm.example.test/" });
+        var envelope = new NotificationEventEnvelope(
+            user.Id, UserNotificationTypes.PaymentAdvanceReviewRequired, "payment:max:test:1",
+            "Секретный платеж клиента", "Сумма 500 ₽", "payment", paymentId, null);
+
+        Assert.True(await service.NotifyAsync(envelope));
+        Assert.False(await service.NotifyAsync(envelope));
+        var queued = Assert.Single(max.Requests);
+        Assert.Equal(UserNotificationTypes.PaymentAdvanceReviewRequired, queued.NotificationType);
+        Assert.Equal("https://crm.example.test/", queued.ActionUrl);
+        Assert.Empty(queued.Text);
+
+        max.Fail = true;
+        Assert.True(await service.NotifyAsync(envelope with { EventKey = "payment:max:test:2" }));
+        Assert.Equal(2, await db.UserNotifications.CountAsync());
+    }
+
+    [Fact]
+    public async Task NotifyAsync_DoesNotQueueMaxWithInsecureFrontendUrlOrPersonalOptOut()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "max-optout@example.com");
+        var max = new RecordingMaxOutboxService();
+        var service = CreateService(
+            db, new RecordingEmailService(), new RecordingTelegramService(),
+            maxService: new ReadyMaxNotificationService(), maxOutboxService: max,
+            configurationValues: new Dictionary<string, string?> { ["App:FrontendUrl"] = "http://crm.example.test/" });
+
+        Assert.True(await service.NotifyAsync(new NotificationEventEnvelope(
+            user.Id, UserNotificationTypes.SystemAdminWarning, "max:insecure:1",
+            "Проверка", "Проверка", "system", null, null)));
+        Assert.Empty(max.Requests);
+
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = user.Id,
+            Key = UserNotificationPreferenceSettings.SettingKey,
+            Value = UserNotificationPreferenceSettings.Serialize(new UserNotificationPreferenceSnapshot(
+                [], new Dictionary<string, IReadOnlyList<string>>
+                {
+                    [UserNotificationTypes.SystemAdminWarning] = [NotificationChannels.Max],
+                })),
+        });
+        await db.SaveChangesAsync();
+        var secureService = CreateService(
+            db, new RecordingEmailService(), new RecordingTelegramService(),
+            maxService: new ReadyMaxNotificationService(), maxOutboxService: max,
+            configurationValues: new Dictionary<string, string?> { ["App:FrontendUrl"] = "https://crm.example.test/" });
+
+        Assert.True(await secureService.NotifyAsync(new NotificationEventEnvelope(
+            user.Id, UserNotificationTypes.SystemAdminWarning, "max:optout:2",
+            "Проверка", "Проверка", "system", null, null)));
+        Assert.Empty(max.Requests);
     }
 
     [Fact]
@@ -4891,6 +4956,50 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyCaseProceduralDeadlineRemindersAsync_QueuesMaxForBatchNotification()
+    {
+        await using var db = await CreateContextAsync();
+        var recipient = await CreateUserAsync(db, "deadline-max-recipient@example.com");
+        var client = new Client { Name = "Клиент", IsActive = true, ResponsibleUserId = recipient.Id };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+        var clientCase = new ClientCase
+        {
+            ClientId = client.Id,
+            Title = "Дело",
+            CaseNumber = "CASE-MAX-1",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = recipient.Id,
+        };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        var deadline = new ClientCaseProceduralDeadline
+        {
+            ClientCaseId = clientCase.Id,
+            DeadlineType = "appeal",
+            Title = "Апелляция",
+            DueAt = DateTime.UtcNow.AddDays(1),
+            Status = "active",
+            WarningDaysBefore = 2,
+        };
+        db.ClientCaseProceduralDeadlines.Add(deadline);
+        await db.SaveChangesAsync();
+        var max = new RecordingMaxOutboxService();
+        var service = CreateService(
+            db, new RecordingEmailService(), new RecordingTelegramService(),
+            maxService: new ReadyMaxNotificationService(), maxOutboxService: max,
+            configurationValues: new Dictionary<string, string?> { ["App:FrontendUrl"] = "https://crm.example.test/" });
+
+        Assert.Equal(1, await service.NotifyCaseProceduralDeadlineRemindersAsync(
+            [new CaseProceduralDeadlineReminderBatchItem(clientCase, deadline, [recipient.Id])]));
+        Assert.Equal(0, await service.NotifyCaseProceduralDeadlineRemindersAsync(
+            [new CaseProceduralDeadlineReminderBatchItem(clientCase, deadline, [recipient.Id])]));
+        var request = Assert.Single(max.Requests);
+        Assert.Equal(UserNotificationTypes.CaseProceduralDeadline, request.NotificationType);
+        Assert.Equal(recipient.Id, request.RecipientUserId);
+    }
+
+    [Fact]
     public async Task NotifyCaseProceduralDeadlineAsync_LoadsVisibilityAndRecipientSettingsInSingleQueries()
     {
         var interceptor = new RecordingCommandInterceptor();
@@ -6722,15 +6831,25 @@ public class NotificationServiceTests
         await db.SaveChangesAsync();
         var recipient = new User
         {
-            Email = "hearing-change-recipient@example.com", FullName = "Получатель", PasswordHash = "hash",
-            RoleId = adminRole.Id, IsActive = true, IsApproved = true,
-            CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
+            Email = "hearing-change-recipient@example.com",
+            FullName = "Получатель",
+            PasswordHash = "hash",
+            RoleId = adminRole.Id,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
         };
         var actor = new User
         {
-            Email = "hearing-change-actor@example.com", FullName = "Автор", PasswordHash = "hash",
-            RoleId = adminRole.Id, IsActive = true, IsApproved = true,
-            CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
+            Email = "hearing-change-actor@example.com",
+            FullName = "Автор",
+            PasswordHash = "hash",
+            RoleId = adminRole.Id,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
         };
         db.Users.AddRange(recipient, actor);
         await db.SaveChangesAsync();
@@ -6740,7 +6859,9 @@ public class NotificationServiceTests
         await db.SaveChangesAsync();
         var clientCase = new ClientCase
         {
-            ClientId = client.Id, Title = "Судебное дело", Status = ClientCaseStatus.Open,
+            ClientId = client.Id,
+            Title = "Судебное дело",
+            Status = ClientCaseStatus.Open,
             ResponsibleUserId = recipient.Id,
         };
         db.ClientCases.Add(clientCase);
@@ -6771,15 +6892,25 @@ public class NotificationServiceTests
         await db.SaveChangesAsync();
         var recipient = new User
         {
-            Email = "decision-recipient@example.com", FullName = "Получатель", PasswordHash = "hash",
-            RoleId = adminRole.Id, IsActive = true, IsApproved = true,
-            CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
+            Email = "decision-recipient@example.com",
+            FullName = "Получатель",
+            PasswordHash = "hash",
+            RoleId = adminRole.Id,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
         };
         var actor = new User
         {
-            Email = "decision-actor@example.com", FullName = "Автор", PasswordHash = "hash",
-            RoleId = adminRole.Id, IsActive = true, IsApproved = true,
-            CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
+            Email = "decision-actor@example.com",
+            FullName = "Автор",
+            PasswordHash = "hash",
+            RoleId = adminRole.Id,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
         };
         db.Users.AddRange(recipient, actor);
         await db.SaveChangesAsync();
@@ -6787,7 +6918,9 @@ public class NotificationServiceTests
         var client = new Client { Name = "Клиент", IsActive = true, ResponsibleUserId = recipient.Id };
         var clientCase = new ClientCase
         {
-            Client = client, Title = "Судебное дело", Status = ClientCaseStatus.Open,
+            Client = client,
+            Title = "Судебное дело",
+            Status = ClientCaseStatus.Open,
             ResponsibleUserId = recipient.Id,
         };
         db.ClientCases.Add(clientCase);
@@ -6818,15 +6951,25 @@ public class NotificationServiceTests
         await db.SaveChangesAsync();
         var admin = new User
         {
-            Email = "court-stalled-admin@example.com", FullName = "Администратор", PasswordHash = "hash",
-            RoleId = adminRole.Id, IsActive = true, IsApproved = true,
-            CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
+            Email = "court-stalled-admin@example.com",
+            FullName = "Администратор",
+            PasswordHash = "hash",
+            RoleId = adminRole.Id,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
         };
         var employee = new User
         {
-            Email = "court-stalled-employee@example.com", FullName = "Сотрудник", PasswordHash = "hash",
-            RoleId = employeeRole.Id, IsActive = true, IsApproved = true,
-            CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
+            Email = "court-stalled-employee@example.com",
+            FullName = "Сотрудник",
+            PasswordHash = "hash",
+            RoleId = employeeRole.Id,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
         };
         db.Users.AddRange(admin, employee);
         await db.SaveChangesAsync();
@@ -6835,8 +6978,11 @@ public class NotificationServiceTests
         await db.SaveChangesAsync();
         var clientCase = new ClientCase
         {
-            ClientId = client.Id, Title = "Судебное дело", CaseNumber = "CASE-STALLED-1",
-            Status = ClientCaseStatus.Open, ResponsibleUserId = employee.Id,
+            ClientId = client.Id,
+            Title = "Судебное дело",
+            CaseNumber = "CASE-STALLED-1",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = employee.Id,
             CourtSyncMonitoringEnabled = true,
             CourtSyncFailureStartedAt = DateTime.UtcNow.AddHours(-25),
             CourtSyncLastError = "Источник недоступен",
@@ -7052,12 +7198,16 @@ public class NotificationServiceTests
         await db.SaveChangesAsync();
         var realtime = new RecordingRealtimeNotificationPublisher();
         var webPush = new RecordingWebPushNotificationService();
+        var max = new RecordingMaxOutboxService();
         var service = CreateService(
             db,
             new RecordingEmailService(),
             new RecordingTelegramService(),
             realtime,
-            webPush);
+            webPush,
+            maxService: new ReadyMaxNotificationService(),
+            maxOutboxService: max,
+            configurationValues: new Dictionary<string, string?> { ["App:FrontendUrl"] = "https://crm.example.test/" });
 
         var firstCount = await service.NotifySmsChannelWarningAsync(
             "20260730",
@@ -7081,6 +7231,7 @@ public class NotificationServiceTests
         Assert.DoesNotContain(await db.UserNotifications.ToListAsync(), item => item.RecipientUserId == employee.Id);
         Assert.Single(realtime.Notifications);
         Assert.Single(webPush.Notifications);
+        Assert.Equal(UserNotificationTypes.SystemAdminWarning, Assert.Single(max.Requests).NotificationType);
     }
 
     [Fact]
@@ -10695,10 +10846,13 @@ public class NotificationServiceTests
         ISmsNotificationService? smsNotificationService = null,
         TimeProvider? timeProvider = null,
         IHttpContextAccessor? httpContextAccessor = null,
-        ILogger<NotificationService>? logger = null)
+        ILogger<NotificationService>? logger = null,
+        IMaxNotificationService? maxService = null,
+        IMaxOutboxService? maxOutboxService = null,
+        IReadOnlyDictionary<string, string?>? configurationValues = null)
     {
         var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>())
+            .AddInMemoryCollection(configurationValues ?? new Dictionary<string, string?>())
             .Build();
 
         return new NotificationService(
@@ -10711,7 +10865,9 @@ public class NotificationServiceTests
             webPushNotificationService,
             smsNotificationService,
             timeProvider,
-            httpContextAccessor);
+            httpContextAccessor,
+            maxService,
+            maxOutboxService);
     }
 
     private static ExternalAuthService CreateExternalAuthService(
@@ -11251,6 +11407,40 @@ public class NotificationServiceTests
 
             return Task.FromResult(NextResult);
         }
+    }
+
+    private sealed class ReadyMaxNotificationService : IMaxNotificationService
+    {
+        private static readonly MaxRuntimeSettings Runtime = new(
+            true, false, "test-token", "test-secret", true, false, false, false,
+            false, new TimeOnly(20, 0), new TimeOnly(9, 0), "Asia/Novosibirsk", 20, 30);
+
+        public Task<MaxRuntimeSettings> GetRuntimeSettingsAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(Runtime);
+
+        public Task<MaxNotificationDiagnosticsDto> GetSettingsAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(new MaxNotificationDiagnosticsDto { Enabled = true, Ready = true });
+
+        public Task<MaxNotificationDiagnosticsDto> UpdateSettingsAsync(
+            UpdateMaxNotificationSettingsRequest request,
+            CancellationToken cancellationToken = default)
+            => GetSettingsAsync(cancellationToken);
+    }
+
+    private sealed class RecordingMaxOutboxService : IMaxOutboxService
+    {
+        public List<MaxQueueRequest> Requests { get; } = [];
+        public bool Fail { get; set; }
+
+        public Task<MaxOutboxMessage> QueueAsync(MaxQueueRequest request, CancellationToken cancellationToken)
+        {
+            Requests.Add(request);
+            if (Fail) throw new InvalidOperationException("MAX is unavailable");
+            return Task.FromResult(new MaxOutboxMessage());
+        }
+
+        public Task<bool> RetryAsync(Guid publicId, int? actorUserId, string actorName, CancellationToken cancellationToken)
+            => Task.FromResult(false);
     }
 
     private sealed class RecordingLogger<T> : ILogger<T>

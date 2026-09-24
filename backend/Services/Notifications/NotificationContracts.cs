@@ -31,7 +31,7 @@ public static class NotificationChannels
     public const string Max = "max";
     public static readonly IReadOnlyList<string> All = [InApp, Toast, WebPush, Email, Telegram];
     public static readonly IReadOnlyList<string> External = [Email, Telegram, WebPush];
-    public static readonly IReadOnlyList<string> Future = [Sms, Max];
+    public static readonly IReadOnlyList<string> Future = [Sms];
     public static readonly IReadOnlyList<string> Known = [InApp, Toast, ForcedModal, WebPush, Email, Telegram, Sms, Max];
     public static readonly IReadOnlyList<string> UserPreferences = [InApp, Toast, ForcedModal, WebPush, Email, Telegram, Sms, Max];
     public static readonly IReadOnlyList<NotificationChannelDefinition> Definitions =
@@ -42,7 +42,7 @@ public static class NotificationChannels
         new(Email, "Email", "Письма через настроенных SMTP-отправителей.", "active", true, true, true, true, true, false),
         new(Telegram, "Telegram", "Сообщения через подключенных Telegram-ботов и привязанные чаты пользователей.", "active", true, true, true, true, true, false),
         new(Sms, "SMS", "SMS-уведомления. Адаптер подготовлен в модели каналов, провайдер будет выбран отдельно.", "planned", false, false, false, true, true, true),
-        new(Max, "MAX", "Уведомления через официальный Bot API MAX после привязки сотрудника и явного включения администратором.", "configured", false, false, true, true, true, true)
+        new(Max, "MAX", "Уведомления через официальный Bot API MAX после привязки сотрудника и явного включения администратором.", "configured", true, true, true, true, true, false)
     ];
 }
 
@@ -421,6 +421,12 @@ public sealed record UserNotificationTypeDefinition(
                 channels.Add(NotificationChannels.ForcedModal);
             }
 
+            if (!NotificationPriorities.IsSilent(Priority)
+                && !channels.Contains(NotificationChannels.Max, StringComparer.OrdinalIgnoreCase))
+            {
+                channels.Add(NotificationChannels.Max);
+            }
+
             return channels;
         }
     }
@@ -649,7 +655,8 @@ public static class UserNotificationDoNotDisturbSettings
         NotificationChannels.WebPush,
         NotificationChannels.Email,
         NotificationChannels.Telegram,
-        NotificationChannels.Sms
+        NotificationChannels.Sms,
+        NotificationChannels.Max
     };
 
     public static readonly UserNotificationDoNotDisturbSnapshot Disabled = new(

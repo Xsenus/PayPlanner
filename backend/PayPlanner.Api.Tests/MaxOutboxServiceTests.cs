@@ -68,19 +68,73 @@ public sealed class MaxOutboxServiceTests
     }
 
     [Fact]
-    public async Task QuietHoursAndDailyRecipientLimitRejectBeforeCreatingMessage()
+    public async Task NotificationsWaitForQuietHoursToEndAndDailyLimitStillApplies()
     {
         await using var fixture = await Fixture.CreateAsync();
         await fixture.ConfigureLimitsAsync(quietHoursEnabled: true, dailyLimit: 20);
-        await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Outbox.QueueAsync(fixture.Request(), CancellationToken.None));
-        Assert.Empty(await fixture.Db.MaxOutboxMessages.ToListAsync());
+        var deferred = await fixture.Outbox.QueueAsync(fixture.Request(), CancellationToken.None);
+        Assert.Equal(new DateTime(2026, 8, 1, 2, 0, 0, DateTimeKind.Utc), deferred.NextAttemptAt);
+        var api = new RecordingApiClient();
+        Assert.Equal(0, await fixture.Processor(api).ProcessBatchAsync(CancellationToken.None));
+        fixture.MoveTimeTo(new DateTimeOffset(2026, 8, 1, 2, 0, 0, TimeSpan.Zero));
+        Assert.Equal(1, await fixture.Processor(api).ProcessBatchAsync(CancellationToken.None));
+        Assert.Single(api.Messages);
 
         await fixture.ConfigureLimitsAsync(quietHoursEnabled: false, dailyLimit: 1);
-        var first = await fixture.Outbox.QueueAsync(fixture.Request(), CancellationToken.None);
-        Assert.Equal(first.Id, (await fixture.Outbox.QueueAsync(fixture.Request(), CancellationToken.None)).Id);
+        Assert.Equal(deferred.Id, (await fixture.Outbox.QueueAsync(fixture.Request(), CancellationToken.None)).Id);
         await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Outbox.QueueAsync(
             fixture.Request() with { EventKey = "critical:event:2" }, CancellationToken.None));
         Assert.Single(await fixture.Db.MaxOutboxMessages.ToListAsync());
+    }
+
+    [Fact]
+    public async Task ProcessorDefersAlreadyQueuedMessageWhenQuietHoursTurnedOn()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var queued = await fixture.Outbox.QueueAsync(fixture.Request(), CancellationToken.None);
+        await fixture.ConfigureLimitsAsync(quietHoursEnabled: true, dailyLimit: 20);
+        var api = new RecordingApiClient();
+
+        Assert.Equal(1, await fixture.Processor(api).ProcessBatchAsync(CancellationToken.None));
+        var stored = await fixture.Db.MaxOutboxMessages.AsNoTracking().SingleAsync(item => item.Id == queued.Id);
+        Assert.Equal(MaxOutboxStatuses.Queued, stored.Status);
+        Assert.Equal(new DateTime(2026, 8, 1, 2, 0, 0, DateTimeKind.Utc), stored.NextAttemptAt);
+        Assert.Equal(0, stored.AttemptCount);
+        Assert.Empty(api.Messages);
+    }
+
+    [Fact]
+    public async Task ProcessorCancelsPendingNotificationAfterPersonalMaxOptOut()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var queued = await fixture.Outbox.QueueAsync(fixture.Request(), CancellationToken.None);
+        fixture.Db.UserNotifications.Add(new UserNotification
+        {
+            RecipientUserId = fixture.UserId,
+            Type = UserNotificationTypes.SystemAdminWarning,
+            EventKey = "critical:event:1",
+            Title = "Системное предупреждение",
+            BodyPreview = "Подробности остаются в CRM",
+            ObjectType = "system",
+        });
+        fixture.Db.UserSettings.Add(new UserSetting
+        {
+            UserId = fixture.UserId,
+            Key = UserNotificationPreferenceSettings.SettingKey,
+            Value = UserNotificationPreferenceSettings.Serialize(new UserNotificationPreferenceSnapshot(
+                [], new Dictionary<string, IReadOnlyList<string>>
+                {
+                    [UserNotificationTypes.SystemAdminWarning] = [NotificationChannels.Max],
+                })),
+        });
+        await fixture.Db.SaveChangesAsync();
+        var api = new RecordingApiClient();
+
+        Assert.Equal(1, await fixture.Processor(api).ProcessBatchAsync(CancellationToken.None));
+        var stored = await fixture.Db.MaxOutboxMessages.AsNoTracking().SingleAsync(message => message.Id == queued.Id);
+        Assert.Equal(MaxOutboxStatuses.Cancelled, stored.Status);
+        Assert.Equal("recipient-preference-disabled", stored.LastErrorCode);
+        Assert.Empty(api.Messages);
     }
 
     [Fact]
@@ -117,6 +171,40 @@ public sealed class MaxOutboxServiceTests
         Assert.DoesNotContain("1234", queued.ProtectedText, StringComparison.Ordinal);
         Assert.DoesNotContain("567890", queued.ProtectedText, StringComparison.Ordinal);
         Assert.Equal(MaxMessageTemplateCatalog.RenderNotification(UserNotificationTypes.SystemAdminWarning), api.Messages.Single().Text);
+    }
+
+    [Theory]
+    [InlineData(UserNotificationTypes.TaskAssigned, "Новая задача")]
+    [InlineData(UserNotificationTypes.CourtDecisionPublished, "Судебное решение")]
+    [InlineData(UserNotificationTypes.PaymentChanged, "Изменение платежа")]
+    public async Task NotificationTypesUseNeutralTemplatesWithoutSourceDetails(string type, string label)
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var queued = await fixture.Outbox.QueueAsync(fixture.Request() with
+        {
+            NotificationType = type,
+            Text = "Секретное содержание дела №123 и платёж 500 ₽",
+            EventKey = $"event:{type}:123",
+        }, CancellationToken.None);
+
+        var api = new RecordingApiClient();
+        await fixture.Processor(api).ProcessBatchAsync(CancellationToken.None);
+        var sentText = Assert.Single(api.Messages).Text;
+        Assert.Contains(label, sentText, StringComparison.Ordinal);
+        Assert.DoesNotContain("№123", sentText, StringComparison.Ordinal);
+        Assert.DoesNotContain("500", sentText, StringComparison.Ordinal);
+        Assert.DoesNotContain("Секретное", queued.ProtectedText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task UnknownAndSilentNotificationTypesCannotBeQueued()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Outbox.QueueAsync(
+            fixture.Request() with { NotificationType = "unknown" }, CancellationToken.None));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Outbox.QueueAsync(
+            fixture.Request() with { NotificationType = UserNotificationTypes.CaseDocument }, CancellationToken.None));
+        Assert.Empty(await fixture.Db.MaxOutboxMessages.ToListAsync());
     }
 
     [Fact]
@@ -223,6 +311,7 @@ public sealed class MaxOutboxServiceTests
         public MaxOutboxService Outbox { get; }
         public int UserId { get; }
         public DateTime Now => _time.GetUtcNow().UtcDateTime;
+        public void MoveTimeTo(DateTimeOffset now) => _time.Set(now);
 
         private Fixture(SqliteConnection connection, DirectoryInfo keys, IDataProtectionProvider protection, SystemMaxNotificationService settings, FixedTimeProvider time, PaymentContext db, MaxOutboxService outbox, int userId)
         {
@@ -329,6 +418,8 @@ public sealed class MaxOutboxServiceTests
 
     private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
     {
-        public override DateTimeOffset GetUtcNow() => now;
+        private DateTimeOffset _now = now;
+        public void Set(DateTimeOffset value) => _now = value;
+        public override DateTimeOffset GetUtcNow() => _now;
     }
 }
