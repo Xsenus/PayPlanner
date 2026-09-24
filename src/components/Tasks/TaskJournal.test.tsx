@@ -1277,6 +1277,49 @@ describe('TaskJournal', () => {
     expect(apiMock.uploadTaskJournalFile).toHaveBeenNthCalledWith(2, 101, files[1]);
   });
 
+  it.each(['legacy', 'modern'] as const)('keeps the created task open when its first file fails in the %s card', async (taskCardWindowMode) => {
+    await renderJournal([], { waitForTitle: null, settings: { taskCardWindowMode } });
+    await openNewTaskFormAsGlobalInternal();
+    apiMock.uploadTaskJournalFile.mockRejectedValueOnce(new Error('Загрузка недоступна'));
+
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    fireEvent.change(within(card).getByTestId('task-title-input'), { target: { value: 'Задача с недогруженным файлом' } });
+    const file = new File(['document'], 'первый.pdf', { type: 'application/pdf' });
+    fireEvent.change(card.querySelector('input[type="file"]') as HTMLInputElement, { target: { files: [file] } });
+    fireEvent.click(within(card).getByRole('button', { name: 'Создать задачу' }));
+
+    await waitFor(() => expect(toastMock.error).toHaveBeenCalledWith(
+      expect.stringContaining('Задача создана, но не удалось добавить: первый.pdf'),
+      'Журнал задач',
+    ));
+    const savedCard = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    expect(within(savedCard).getAllByText('Просмотр задачи').length).toBeGreaterThan(0);
+    expect(within(savedCard).queryByRole('button', { name: 'Создать задачу' })).toBeNull();
+    expect(apiMock.createTaskJournalItem).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['legacy', 'modern'] as const)('keeps the created task open when its first comment fails in the %s card', async (taskCardWindowMode) => {
+    await renderJournal([], { waitForTitle: null, settings: { taskCardWindowMode } });
+    await openNewTaskFormAsGlobalInternal();
+    apiMock.createTaskJournalComment.mockRejectedValueOnce(new Error('Комментарий недоступен'));
+
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    fireEvent.change(within(card).getByTestId('task-title-input'), { target: { value: 'Задача с недобавленным комментарием' } });
+    fireEvent.change(within(card).getByPlaceholderText(taskCardWindowMode === 'modern'
+      ? 'Напишите комментарий...'
+      : 'Введите первый комментарий'), { target: { value: 'Первый комментарий' } });
+    fireEvent.click(within(card).getByRole('button', { name: 'Создать задачу' }));
+
+    await waitFor(() => expect(toastMock.error).toHaveBeenCalledWith(
+      expect.stringContaining('Задача создана, но не удалось добавить: комментарий'),
+      'Журнал задач',
+    ));
+    const savedCard = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    expect(within(savedCard).getAllByText('Просмотр задачи').length).toBeGreaterThan(0);
+    expect(within(savedCard).queryByRole('button', { name: 'Создать задачу' })).toBeNull();
+    expect(apiMock.createTaskJournalItem).toHaveBeenCalledTimes(1);
+  });
+
   it.each(['legacy', 'modern'] as const)('opens linked client and case profiles from the %s task card', async (taskCardWindowMode) => {
     const onOpenClient = vi.fn();
     const onOpenCase = vi.fn();

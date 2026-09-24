@@ -4881,6 +4881,7 @@ export function TaskJournal({
       } else {
         const created = await apiService.createTaskJournalItem(normalized);
         const materialOperations: Promise<unknown>[] = [];
+        const materialLabels: string[] = [];
         const initialComment = creationMaterials?.commentText.trim();
         if (initialComment) {
           materialOperations.push(apiService.createTaskJournalComment(
@@ -4888,24 +4889,30 @@ export function TaskJournal({
             initialComment,
             creationMaterials?.commentExternalCalendarVisible ?? false,
           ));
+          materialLabels.push('комментарий');
         }
         for (const file of creationMaterials?.files ?? []) {
           materialOperations.push(apiService.uploadTaskJournalFile(created.id, file));
+          materialLabels.push(file.name);
         }
 
         const materialResults = await Promise.allSettled(materialOperations);
-        const failedMaterials = materialResults.filter((result) => result.status === 'rejected').length;
-        if (failedMaterials > 0) {
+        const failedMaterials = materialResults.flatMap((result, index) => result.status === 'rejected' ? [materialLabels[index] ?? 'материал'] : []);
+        if (failedMaterials.length > 0) {
+          const failedNames = failedMaterials.slice(0, 2).join(', ');
+          const more = failedMaterials.length > 2 ? ` и ещё ${failedMaterials.length - 2}` : '';
           toast.error(
-            `Задача создана, но не удалось добавить материалов: ${failedMaterials}. Откройте задачу и повторите загрузку.`,
+            `Задача создана, но не удалось добавить: ${failedNames}${more}. Карточка открыта — повторите добавление здесь.`,
             'Журнал задач',
           );
+          openTaskEditor(created);
         } else if (materialOperations.length > 0) {
           toast.success('Задача создана вместе с комментарием и файлами.', 'Журнал задач');
+          closeTaskModal();
         } else {
           toast.success('Задача создана.', 'Журнал задач');
+          closeTaskModal();
         }
-        closeTaskModal();
       }
       await refreshTasks();
       emitTaskChange();
