@@ -1,7 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
 
-const CHUNK_RELOAD_STORAGE_KEY = 'pp.chunk-load-retry-url';
-
 type RouteErrorBoundaryProps = {
   children: ReactNode;
   resetKey: string;
@@ -29,18 +27,6 @@ export class RouteErrorBoundary extends Component<RouteErrorBoundaryProps, Route
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('Route render failed', error, errorInfo);
-
-    if (!isChunkLoadError(error) || typeof window === 'undefined') {
-      return;
-    }
-
-    const currentUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-    const lastReloadUrl = window.sessionStorage.getItem(CHUNK_RELOAD_STORAGE_KEY);
-
-    if (lastReloadUrl !== currentUrl) {
-      window.sessionStorage.setItem(CHUNK_RELOAD_STORAGE_KEY, currentUrl);
-      window.location.reload();
-    }
   }
 
   componentDidUpdate(previousProps: RouteErrorBoundaryProps) {
@@ -77,7 +63,7 @@ export class RouteErrorBoundary extends Component<RouteErrorBoundaryProps, Route
           </h2>
           <p className="mx-auto mt-3 max-w-2xl text-sm leading-6 text-amber-800">
             {chunkLoadFailed
-              ? 'Похоже, браузер попытался открыть старый файл интерфейса после обновления системы. Перезагрузка подтянет свежую версию.'
+              ? 'Похоже, браузер попытался открыть старый файл интерфейса после обновления системы. Сначала сохраните несохранённые данные, затем обновите страницу вручную.'
               : 'Мы не будем оставлять вас на белом экране. Попробуйте открыть раздел ещё раз или вернитесь в календарь.'}
           </p>
           <div className="mt-6 flex flex-wrap justify-center gap-3">

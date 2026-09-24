@@ -1,5 +1,4 @@
-const STALE_ASSET_RELOAD_STORAGE_KEY = 'payplanner:stale-asset-reload-at';
-const STALE_ASSET_RELOAD_COOLDOWN_MS = 30_000;
+const STALE_ASSET_NOTICE_ID = 'payplanner-stale-asset-notice';
 
 const STALE_ASSET_ERROR_MARKERS = [
   'failed to fetch dynamically imported module',
@@ -15,8 +14,6 @@ export function isStaleAssetLoadError(reason: unknown) {
 }
 
 export function installStaleAssetReload(win: Window = window) {
-  const reload = () => reloadOnce(win);
-
   win.addEventListener('vite:preloadError', (event) => {
     const payload = (event as Event & { payload?: unknown }).payload ?? event;
     if (!isStaleAssetLoadError(payload)) {
@@ -24,7 +21,7 @@ export function installStaleAssetReload(win: Window = window) {
     }
 
     event.preventDefault();
-    reload();
+    showReloadNotice(win);
   });
 
   win.addEventListener('unhandledrejection', (event) => {
@@ -33,7 +30,7 @@ export function installStaleAssetReload(win: Window = window) {
     }
 
     event.preventDefault();
-    reload();
+    showReloadNotice(win);
   });
 }
 
@@ -60,19 +57,36 @@ function extractErrorMessage(reason: unknown) {
   return '';
 }
 
-function reloadOnce(win: Window) {
-  const now = Date.now();
+function showReloadNotice(win: Window) {
+  const document = win.document;
+  if (document.getElementById(STALE_ASSET_NOTICE_ID)) return;
 
-  try {
-    const previous = Number(win.sessionStorage.getItem(STALE_ASSET_RELOAD_STORAGE_KEY) ?? '0');
-    if (Number.isFinite(previous) && now - previous < STALE_ASSET_RELOAD_COOLDOWN_MS) {
-      return;
-    }
+  const notice = document.createElement('aside');
+  notice.id = STALE_ASSET_NOTICE_ID;
+  notice.setAttribute('role', 'alert');
+  notice.className = 'fixed bottom-4 right-4 z-[1000] w-[min(24rem,calc(100vw-2rem))] rounded-xl border border-amber-300 bg-amber-50 p-4 text-amber-950 shadow-xl';
 
-    win.sessionStorage.setItem(STALE_ASSET_RELOAD_STORAGE_KEY, String(now));
-  } catch {
-    // Storage may be blocked; reloading is still the safest recovery path.
-  }
+  const title = document.createElement('strong');
+  title.className = 'block text-sm';
+  title.textContent = 'Доступно обновление страницы';
+  const explanation = document.createElement('p');
+  explanation.className = 'mt-1 text-xs leading-5';
+  explanation.textContent = 'Сначала сохраните несохранённые данные. Затем обновите страницу, чтобы открыть новую версию раздела.';
 
-  win.location.reload();
+  const actions = document.createElement('div');
+  actions.className = 'mt-3 flex justify-end gap-2';
+  const later = document.createElement('button');
+  later.type = 'button';
+  later.className = 'rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-semibold';
+  later.textContent = 'Позже';
+  later.addEventListener('click', () => notice.remove());
+  const reload = document.createElement('button');
+  reload.type = 'button';
+  reload.className = 'rounded-lg bg-amber-900 px-3 py-1.5 text-xs font-semibold text-white';
+  reload.textContent = 'Обновить страницу';
+  reload.addEventListener('click', () => win.location.reload());
+
+  actions.append(later, reload);
+  notice.append(title, explanation, actions);
+  document.body.appendChild(notice);
 }
