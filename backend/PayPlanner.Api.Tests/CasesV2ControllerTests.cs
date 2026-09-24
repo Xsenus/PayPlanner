@@ -4608,6 +4608,87 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task CaseCalendarEvents_AppliesCourtRegistryFiltersWithoutUsingCurrentPage()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "court-calendar-filter@example.com", "Юрист");
+        var client = new Client { Name = "Клиент календаря", IsActive = true, ResponsibleUserId = owner.Id };
+        db.ClientCases.AddRange(
+            new ClientCase
+            {
+                Client = client, Title = "отбор по иску", Status = ClientCaseStatus.Open,
+                ResponsibleUserId = owner.Id, CaseType = "Гражданское дело", OurCourtRole = "claimant",
+                CourtClaimAmount = 5000m, CourtName = "Районный суд",
+                NextHearingAt = new DateTime(2027, 1, 10, 9, 0, 0, DateTimeKind.Utc),
+            },
+            new ClientCase
+            {
+                Client = client, Title = "Другой спор", Status = ClientCaseStatus.Closed,
+                ResponsibleUserId = owner.Id, CaseType = "Арбитраж", OurCourtRole = "respondent",
+                CourtClaimAmount = 20000m, CourtName = "Арбитражный суд",
+                NextHearingAt = new DateTime(2027, 1, 11, 9, 0, 0, DateTimeKind.Utc),
+            },
+            new ClientCase
+            {
+                Client = client, Title = "Внутреннее дело", Status = ClientCaseStatus.Open,
+                ResponsibleUserId = owner.Id,
+                DueDate = new DateTime(2027, 1, 12, 0, 0, 0, DateTimeKind.Utc),
+            });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, owner);
+        var from = new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        var to = new DateTime(2027, 1, 31, 0, 0, 0, DateTimeKind.Utc);
+
+        var baseline = await controller.GetCaseCalendarEvents(from, to, null, owner.Id, false, CancellationToken.None);
+        var baselineEvents = Assert.IsAssignableFrom<IReadOnlyList<CasesV2Controller.CaseCalendarEventDto>>(
+            Assert.IsType<OkObjectResult>(baseline.Result).Value);
+        Assert.Equal(2, baselineEvents.Count(item => item.SourceType == "hearing"));
+        Assert.Contains(baselineEvents, item => item.CaseTitle == "Внутреннее дело" && item.SourceType == "due");
+
+        var scopeOnly = await controller.GetCaseCalendarEvents(from, to, null, owner.Id, false, CancellationToken.None, scope: "active");
+        Assert.Single(Assert.IsAssignableFrom<IReadOnlyList<CasesV2Controller.CaseCalendarEventDto>>(
+            Assert.IsType<OkObjectResult>(scopeOnly.Result).Value), item => item.SourceType == "hearing");
+
+        var archiveOnly = await controller.GetCaseCalendarEvents(from, to, null, owner.Id, false, CancellationToken.None, scope: "archive");
+        var archivedHearing = Assert.Single(Assert.IsAssignableFrom<IReadOnlyList<CasesV2Controller.CaseCalendarEventDto>>(
+            Assert.IsType<OkObjectResult>(archiveOnly.Result).Value), item => item.SourceType == "hearing");
+        Assert.Equal("Другой спор", archivedHearing.CaseTitle);
+
+        var searchOnly = await controller.GetCaseCalendarEvents(from, to, null, owner.Id, false, CancellationToken.None, search: "отбор");
+        Assert.NotEmpty(Assert.IsAssignableFrom<IReadOnlyList<CasesV2Controller.CaseCalendarEventDto>>(
+            Assert.IsType<OkObjectResult>(searchOnly.Result).Value));
+
+        var claimOnly = await controller.GetCaseCalendarEvents(from, to, null, owner.Id, false, CancellationToken.None,
+            minClaimAmount: 1000m, maxClaimAmount: 9000m);
+        Assert.NotEmpty(Assert.IsAssignableFrom<IReadOnlyList<CasesV2Controller.CaseCalendarEventDto>>(
+            Assert.IsType<OkObjectResult>(claimOnly.Result).Value));
+
+        var typeOnly = await controller.GetCaseCalendarEvents(from, to, null, owner.Id, false, CancellationToken.None, caseType: "Гражданское дело");
+        Assert.NotEmpty(Assert.IsAssignableFrom<IReadOnlyList<CasesV2Controller.CaseCalendarEventDto>>(
+            Assert.IsType<OkObjectResult>(typeOnly.Result).Value));
+
+        var instanceOnly = await controller.GetCaseCalendarEvents(from, to, null, owner.Id, false, CancellationToken.None, courtInstance: "first");
+        Assert.NotEmpty(Assert.IsAssignableFrom<IReadOnlyList<CasesV2Controller.CaseCalendarEventDto>>(
+            Assert.IsType<OkObjectResult>(instanceOnly.Result).Value));
+
+        var roleOnly = await controller.GetCaseCalendarEvents(from, to, null, owner.Id, false, CancellationToken.None, ourCourtRole: "claimant");
+        Assert.NotEmpty(Assert.IsAssignableFrom<IReadOnlyList<CasesV2Controller.CaseCalendarEventDto>>(
+            Assert.IsType<OkObjectResult>(roleOnly.Result).Value));
+
+        var result = await controller.GetCaseCalendarEvents(from, to, null, owner.Id, false, CancellationToken.None,
+            search: "отбор", scope: "active", caseType: "Гражданское дело", courtState: "all",
+            courtInstance: "first", ourCourtRole: "claimant", minClaimAmount: 1000m, maxClaimAmount: 9000m);
+        var events = Assert.IsAssignableFrom<IReadOnlyList<CasesV2Controller.CaseCalendarEventDto>>(
+            Assert.IsType<OkObjectResult>(result.Result).Value);
+        var hearing = Assert.Single(events, item => item.SourceType == "hearing");
+        Assert.Equal("отбор по иску", hearing.CaseTitle);
+
+        var invalidRange = await controller.GetCaseCalendarEvents(from, to, null, owner.Id, false, CancellationToken.None,
+            minClaimAmount: 9000m, maxClaimAmount: 1000m);
+        Assert.IsType<BadRequestObjectResult>(invalidRange.Result);
+    }
+
+    [Fact]
     public async Task CaseCalendarEvents_MarksOnlyTheMatchingCompletedHearingPreparation()
     {
         await using var db = await CreateContextAsync();

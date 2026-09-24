@@ -6801,6 +6801,14 @@ export class ApiService {
     responsibleUserId?: number;
     includeTasks?: boolean;
     reminderMinutes?: number[];
+    search?: string;
+    scope?: string;
+    caseType?: string;
+    courtState?: string;
+    courtInstance?: string;
+    ourCourtRole?: string;
+    minClaimAmount?: number;
+    maxClaimAmount?: number;
   }) {
     const q = buildQuery({
       from: params?.from,
@@ -6809,6 +6817,14 @@ export class ApiService {
       responsibleUserId: params?.responsibleUserId,
       includeTasks: params?.includeTasks,
       reminderMinutes: params?.reminderMinutes,
+      search: params?.search,
+      scope: params?.scope,
+      caseType: params?.caseType,
+      courtState: params?.courtState,
+      courtInstance: params?.courtInstance,
+      ourCourtRole: params?.ourCourtRole,
+      minClaimAmount: params?.minClaimAmount,
+      maxClaimAmount: params?.maxClaimAmount,
     });
     return this.request<CaseCalendarEvent[]>(`/case-calendar/events${q}`);
   }

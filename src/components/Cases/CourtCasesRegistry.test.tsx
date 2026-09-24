@@ -165,6 +165,24 @@ describe('CourtCasesRegistry', () => {
     ));
   });
 
+  it('passes the selected court registry filters to the full-period hearing calendar', async () => {
+    render(<CourtCasesRegistry onOpenCaseCourt={vi.fn()} />);
+    await screen.findByText('ИВАНОВ — РАЗДЕЛ ИМУЩЕСТВА');
+    fireEvent.change(screen.getByPlaceholderText('Название, клиент, суд, номер или UID'), { target: { value: 'Иванов' } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Сумма иска от' }), { target: { value: '1000' } });
+    fireEvent.click(screen.getByRole('combobox', { name: /Наша роль в деле/u }));
+    fireEvent.click(screen.getByRole('option', { name: 'Истец' }));
+    await waitFor(() => expect(apiService.getCasesV2).toHaveBeenLastCalledWith(
+      expect.objectContaining({ search: 'Иванов', ourCourtRole: 'claimant', minClaimAmount: 1000 }), expect.any(Object),
+    ));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Календарь заседаний' }));
+    await waitFor(() => expect(apiService.getCaseCalendarEvents).toHaveBeenCalledWith(expect.objectContaining({
+      search: 'Иванов', scope: 'active', courtState: 'all', ourCourtRole: 'claimant', minClaimAmount: 1000,
+      includeTasks: false,
+    })));
+  });
+
   it('filters cards, counters and report by claim amount without confusing it with the fee', async () => {
     render(<CourtCasesRegistry onOpenCaseCourt={vi.fn()} />);
     await screen.findByText('ИВАНОВ — РАЗДЕЛ ИМУЩЕСТВА');
@@ -194,6 +212,9 @@ describe('CourtCasesRegistry', () => {
     await screen.findByText('Минимальная сумма иска не может быть больше максимальной.');
     expect(apiService.getCasesV2).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: 'Сводка по делам' }).hasAttribute('disabled')).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Календарь заседаний' }));
+    expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'Минимальная сумма иска не может быть больше максимальной.');
+    expect(apiService.getCaseCalendarEvents).not.toHaveBeenCalled();
   });
 
   it('shows a recorded hearing result instead of asking to check a past hearing again', async () => {

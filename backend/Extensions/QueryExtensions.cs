@@ -432,8 +432,10 @@ namespace PayPlanner.Api.Extensions
             if (responsibleUserId.HasValue) q = q.Where(c => c.ResponsibleUserId == responsibleUserId.Value);
             if (!string.IsNullOrWhiteSpace(caseType))
             {
-                var type = caseType.Trim().ToLower();
-                q = q.Where(c => c.CaseType != null && c.CaseType.ToLower().Contains(type));
+                var selectedType = caseType.Trim();
+                var type = selectedType.ToLower();
+                q = q.Where(c => c.CaseType != null &&
+                    (c.CaseType == selectedType || c.CaseType.ToLower().Contains(type)));
             }
 
             if (!string.IsNullOrWhiteSpace(priority))

@@ -77,7 +77,7 @@ describe('CourtSyncJournalSettings', () => {
     render(<CourtSyncJournalSettings />);
 
     expect(await screen.findByText('Журнал судебной синхронизации')).toBeTruthy();
-    expect(screen.getByText('Земцов - суд')).toBeTruthy();
+    expect(await screen.findByText('Земцов - суд')).toBeTruthy();
     expect(screen.getByText('Проверка ошибки')).toBeTruthy();
     expect(screen.getByText('А55-12345/2026')).toBeTruthy();
     expect(screen.getAllByText('ГАС Правосудие / sudrf.ru').length).toBeGreaterThan(0);

@@ -79,11 +79,22 @@ function hearingCountLabel(count: number) {
 interface CourtHearingCalendarProps {
   timeZoneId: string;
   responsibleUserId?: number;
+  filters?: {
+    search?: string;
+    scope?: string;
+    caseType?: string;
+    courtState?: string;
+    courtInstance?: string;
+    ourCourtRole?: string;
+    minClaimAmount?: number;
+    maxClaimAmount?: number;
+  };
+  filterError?: string | null;
   reloadToken: number;
   onOpenCase: (caseId: number) => void;
 }
 
-export function CourtHearingCalendar({ timeZoneId, responsibleUserId, reloadToken, onOpenCase }: CourtHearingCalendarProps) {
+export function CourtHearingCalendar({ timeZoneId, responsibleUserId, filters, filterError, reloadToken, onOpenCase }: CourtHearingCalendarProps) {
   const today = toTimeZoneDateKey(new Date(), timeZoneId);
   const [period, setPeriod] = useState<Period>('week');
   const [anchor, setAnchor] = useState(today);
@@ -92,12 +103,19 @@ export function CourtHearingCalendar({ timeZoneId, responsibleUserId, reloadToke
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const range = useMemo(() => periodRange(anchor, period), [anchor, period]);
+  const { search, scope, caseType, courtState, courtInstance, ourCourtRole, minClaimAmount, maxClaimAmount } = filters ?? {};
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    void apiService.getCaseCalendarEvents({ from: range.from, to: range.to, responsibleUserId, includeTasks: false })
+    if (filterError) {
+      setLoading(false);
+      setError(filterError);
+      return () => { cancelled = true; };
+    }
+    void apiService.getCaseCalendarEvents({ from: range.from, to: range.to, responsibleUserId, includeTasks: false,
+      search, scope, caseType, courtState, courtInstance, ourCourtRole, minClaimAmount, maxClaimAmount })
       .then((result) => {
         if (cancelled) return;
         setEvents((result ?? []).filter((item) => item.kind === 'court' && item.sourceType === 'hearing'));
@@ -109,7 +127,7 @@ export function CourtHearingCalendar({ timeZoneId, responsibleUserId, reloadToke
       })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [range.from, range.to, responsibleUserId, reloadToken]);
+  }, [range.from, range.to, responsibleUserId, search, scope, caseType, courtState, courtInstance, ourCourtRole, minClaimAmount, maxClaimAmount, filterError, reloadToken]);
 
   const eventsByDay = useMemo(() => {
     const grouped = new Map<string, CaseCalendarEvent[]>();
@@ -134,7 +152,7 @@ export function CourtHearingCalendar({ timeZoneId, responsibleUserId, reloadToke
 
   return <section aria-label="Календарь судебных заседаний" className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
     <div className="flex flex-wrap items-center justify-between gap-2">
-      <div><h2 className="flex items-center gap-2 text-base font-bold text-slate-900"><CalendarDays className="h-4 w-4 text-blue-600" /> Заседания</h2><p className="text-xs text-slate-500">Все доступные заседания за период; учитывается выбранный ответственный. Остальные фильтры реестра действуют только для карточек и расписания.</p></div>
+      <div><h2 className="flex items-center gap-2 text-base font-bold text-slate-900"><CalendarDays className="h-4 w-4 text-blue-600" /> Заседания</h2><p className="text-xs text-slate-500">Доступные заседания за период с учётом фильтров судебного реестра.</p></div>
       <div className="flex items-center gap-1 rounded-lg border border-slate-200 p-0.5">{(['day', 'week', 'month'] as const).map((value) => <button key={value} type="button" onClick={() => { setAnchor(selectedDay); setPeriod(value); }} className={`rounded-md px-2.5 py-1.5 text-xs font-semibold ${period === value ? 'bg-blue-50 text-blue-700' : 'text-slate-600 hover:bg-slate-50'}`}>{value === 'day' ? 'День' : value === 'week' ? 'Неделя' : 'Месяц'}</button>)}</div>
     </div>
     <div className="mt-3 flex flex-wrap items-center justify-between gap-2"><div className="flex items-center gap-1"><button type="button" aria-label="Предыдущий период" onClick={() => { const next = shiftPeriod(anchor, period, -1); setAnchor(next); setSelectedDay(next); }} className="rounded-lg border border-slate-200 p-1.5 hover:bg-slate-50"><ChevronLeft className="h-4 w-4" /></button><button type="button" onClick={() => { setAnchor(today); setSelectedDay(today); }} className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-semibold hover:bg-slate-50">Сегодня</button><button type="button" aria-label="Следующий период" onClick={() => { const next = shiftPeriod(anchor, period, 1); setAnchor(next); setSelectedDay(next); }} className="rounded-lg border border-slate-200 p-1.5 hover:bg-slate-50"><ChevronRight className="h-4 w-4" /></button><span className="ml-2 text-sm font-semibold text-slate-800">{heading[0].toUpperCase() + heading.slice(1)}</span></div><div className="flex gap-1.5 text-xs"><span className="rounded-full bg-emerald-50 px-2 py-1 text-emerald-800">Подготовлено: {preparedCount}</span><span className="rounded-full bg-amber-50 px-2 py-1 text-amber-900">Внимание: {attentionCount}</span></div></div>

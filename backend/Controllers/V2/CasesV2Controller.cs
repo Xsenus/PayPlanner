@@ -2939,7 +2939,15 @@ public partial class CasesV2Controller : ControllerBase
         [FromQuery] int? clientCaseId,
         [FromQuery] int? responsibleUserId,
         [FromQuery] bool includeTasks = true,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        [FromQuery] string? search = null,
+        [FromQuery] string? scope = null,
+        [FromQuery] string? caseType = null,
+        [FromQuery] string? courtState = null,
+        [FromQuery] string? courtInstance = null,
+        [FromQuery] string? ourCourtRole = null,
+        [FromQuery] decimal? minClaimAmount = null,
+        [FromQuery] decimal? maxClaimAmount = null)
     {
         if (await RequireCasesPermissionAsync(static permission => permission.CanView, ct) is { } forbidden)
         {
@@ -2952,6 +2960,11 @@ public partial class CasesV2Controller : ControllerBase
             return Unauthorized();
         }
 
+        if (!AreValidCourtClaimAmountBounds(minClaimAmount, maxClaimAmount))
+        {
+            return BadRequest("Укажите корректный диапазон суммы иска в рублях и копейках.");
+        }
+
         var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
         var range = ResolveCaseCalendarDateRange(from, to, timeZone);
         if (range.ToDate < range.FromDate)
@@ -2959,7 +2972,17 @@ public partial class CasesV2Controller : ControllerBase
             return BadRequest(new { message = "Дата окончания периода не может быть раньше даты начала." });
         }
 
-        var events = await QueryCaseCalendarEventsAsync(visibility, range, clientCaseId, responsibleUserId, includeTasks, ct);
+        var registryFilters = !string.IsNullOrWhiteSpace(search)
+            || !string.IsNullOrWhiteSpace(scope)
+            || !string.IsNullOrWhiteSpace(caseType)
+            || !string.IsNullOrWhiteSpace(courtState)
+            || !string.IsNullOrWhiteSpace(courtInstance)
+            || !string.IsNullOrWhiteSpace(ourCourtRole)
+            || minClaimAmount.HasValue
+            || maxClaimAmount.HasValue
+            ? new CourtCalendarRegistryFilters(search, scope, caseType, courtState, courtInstance, ourCourtRole, minClaimAmount, maxClaimAmount)
+            : null;
+        var events = await QueryCaseCalendarEventsAsync(visibility, range, clientCaseId, responsibleUserId, includeTasks, ct, registryFilters);
         return Ok(events);
     }
 
@@ -5842,11 +5865,22 @@ public partial class CasesV2Controller : ControllerBase
         int? clientCaseId,
         int? responsibleUserId,
         bool includeTasks,
-        CancellationToken ct)
+        CancellationToken ct,
+        CourtCalendarRegistryFilters? registryFilters = null)
     {
-        var caseQuery = _db.ClientCases
+        IQueryable<ClientCase> caseQuery = registryFilters is null
+            ? _db.ClientCases.ApplyClientCaseVisibility(visibility)
+            : ApplyCourtClaimAmountFilter(
+                ApplyOurCourtRoleFilter(
+                    ApplyCourtRegistryFilters(
+                        BuildRegistryQuery(visibility, null, null, null, registryFilters.Search, responsibleUserId,
+                            registryFilters.CaseType, null, null, null, null, null, null, null,
+                            registryFilters.Scope, null, null),
+                        courtOnly: true, registryFilters.CourtState, registryFilters.CourtInstance, DateTime.UtcNow),
+                    registryFilters.OurCourtRole),
+                registryFilters.MinClaimAmount, registryFilters.MaxClaimAmount);
+        caseQuery = caseQuery
             .AsNoTracking()
-            .ApplyClientCaseVisibility(visibility)
             .Include(item => item.Client)
             .Include(item => item.LegalEntity)
             .Include(item => item.ResponsibleUser)
@@ -5982,6 +6016,16 @@ public partial class CasesV2Controller : ControllerBase
             .ThenBy(item => item.Title, StringComparer.CurrentCulture)
             .ToList();
     }
+
+    private sealed record CourtCalendarRegistryFilters(
+        string? Search,
+        string? Scope,
+        string? CaseType,
+        string? CourtState,
+        string? CourtInstance,
+        string? OurCourtRole,
+        decimal? MinClaimAmount,
+        decimal? MaxClaimAmount);
 
     private static CaseCalendarSummaryDto BuildCaseCalendarSummary(
         IReadOnlyCollection<CaseCalendarEventDto> events,
