@@ -8788,6 +8788,7 @@ public class CasesV2ControllerTests
             Status = ClientCaseStatus.Open,
             CourtName = "Областной суд",
             CourtCaseNumber = "33-42/2026",
+            JudicialUid = "appeal-uid-42",
             CourtUrl = "https://appeal.sudrf.ru/case/42",
         };
         db.ClientCases.Add(clientCase);
@@ -8844,7 +8845,46 @@ public class CasesV2ControllerTests
             Assert.IsType<OkObjectResult>(result.Result).Value);
         Assert.Empty(first.CourtName);
         Assert.Empty(first.CourtCaseNumber);
+        Assert.Empty(first.JudicialUid);
         Assert.Empty(first.CourtUrl);
+    }
+
+    [Fact]
+    public async Task UpsertCourtInstance_DoesNotReplaceBoundOrOtherInstanceUid()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "separate-instance-uid@example.com", "Юрист");
+        var clientCase = new ClientCase
+        {
+            Client = new Client { Name = "Клиент", IsActive = true, ResponsibleUserId = owner.Id },
+            Title = "Дело с двумя судебными карточками",
+            Status = ClientCaseStatus.Open,
+            CourtUrl = "https://first.sudrf.ru/case/17",
+            JudicialUid = "first-uid-17",
+        };
+        db.ClientCases.Add(clientCase);
+        db.ClientCaseCourtInstances.Add(new ClientCaseCourtInstance
+        {
+            ClientCase = clientCase,
+            Instance = "first",
+            CourtUrl = clientCase.CourtUrl,
+            JudicialUid = "first-uid-17",
+        });
+        await db.SaveChangesAsync();
+
+        var result = await CreateController(db, owner).UpsertCourtInstance(
+            clientCase.Id, "appeal", new CasesV2Controller.UpsertClientCaseCourtInstanceRequest
+            {
+                CourtUrl = "https://appeal.sudrf.ru/case/42",
+                JudicialUid = "appeal-uid-42",
+            }, CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(result.Result);
+        await db.Entry(clientCase).ReloadAsync();
+        Assert.Equal("first-uid-17", clientCase.JudicialUid);
+        var instances = await db.ClientCaseCourtInstances.Where(item => item.ClientCaseId == clientCase.Id).ToListAsync();
+        Assert.Equal("first-uid-17", Assert.Single(instances, item => item.Instance == "first").JudicialUid);
+        Assert.Equal("appeal-uid-42", Assert.Single(instances, item => item.Instance == "appeal").JudicialUid);
     }
 
     [Fact]
@@ -8881,6 +8921,7 @@ public class CasesV2ControllerTests
             .Where(item => item.ClientCaseId == clientCase.Id && item.Instance == "first").ToListAsync());
         Assert.Equal("Районный суд", first.CourtName);
         Assert.Equal("2-42/2026", first.CourtCaseNumber);
+        Assert.Empty(first.JudicialUid);
         Assert.Empty(first.CourtUrl);
         Assert.Empty(first.Notes);
         var appeal = Assert.Single(await db.ClientCaseCourtInstances
@@ -10601,9 +10642,8 @@ public class CasesV2ControllerTests
         Assert.Equal("33а-3390/2026", courtInstance.CourtCaseNumber);
         Assert.Equal("27RS0005-01-2025-002659-56", courtInstance.JudicialUid);
         Assert.Equal(clientCase.CourtUrl, courtInstance.CourtUrl);
-        Assert.All(
-            await db.ClientCaseCourtInstances.Where(item => item.ClientCaseId == clientCase.Id).ToListAsync(),
-            item => Assert.Equal("27RS0005-01-2025-002659-56", item.JudicialUid));
+        Assert.Equal("УСТАРЕВШИЙ-UID", (await db.ClientCaseCourtInstances.SingleAsync(item =>
+            item.ClientCaseId == clientCase.Id && item.Instance == "first")).JudicialUid);
 
         var courtEvent = await db.ClientCaseCourtEvents.SingleAsync(item => item.ClientCaseId == clientCase.Id);
         Assert.Equal("appeal", courtEvent.CourtInstance);

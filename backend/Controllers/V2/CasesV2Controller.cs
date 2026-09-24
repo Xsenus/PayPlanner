@@ -3737,7 +3737,14 @@ public partial class CasesV2Controller : ControllerBase
         courtInstance.UpdatedAt = now;
         courtInstance.UpdatedByUserId = actorUserId;
         courtInstance.UpdatedByUserName = Truncate(actorName, 256);
-        await PropagateJudicialUidAsync(clientCase, validation.JudicialUid, now, actorUserId, actorName, ct, courtInstance);
+        // The case-level UID identifies the currently bound source. Another
+        // instance may have its own judicial card and must keep its own UID.
+        if (!string.IsNullOrWhiteSpace(validation.JudicialUid)
+            && !string.IsNullOrWhiteSpace(courtInstance.CourtUrl)
+            && string.Equals(courtInstance.CourtUrl, clientCase.CourtUrl, StringComparison.OrdinalIgnoreCase))
+        {
+            clientCase.JudicialUid = validation.JudicialUid;
+        }
 
         AppendCaseEvent(clientCase, $"Обновлена судебная инстанция «{ResolveCourtInstanceLabel(normalizedInstance)}». Автор: {actorName}.");
         _db.SetAuditReason($"Обновлена судебная инстанция дела: {ResolveCourtInstanceLabel(normalizedInstance)}");
@@ -8531,7 +8538,6 @@ public partial class CasesV2Controller : ControllerBase
             var sourceTimeZone = await ResolveCourtSyncSourceTimeZoneAsync(clientCase, ct);
             syncResult = await ApplySudrfCourtSyncAsync(clientCase, courtData, sourceTimeZone, actorName, now, ct);
             MarkCourtSyncSuccess(clientCase, now);
-            await PropagateJudicialUidAsync(clientCase, clientCase.JudicialUid, now, actorUserId, actorName, ct, courtInstance);
         }
         catch (SudrfCourtSyncException ex)
         {
@@ -8692,7 +8698,6 @@ public partial class CasesV2Controller : ControllerBase
                 var sourceTimeZone = await ResolveCourtSyncSourceTimeZoneAsync(clientCase, ct);
                 var syncResult = await ApplySudrfCourtSyncAsync(clientCase, courtData, sourceTimeZone, actorName, checkedAt, ct);
                 MarkCourtSyncSuccess(clientCase, checkedAt);
-                await PropagateJudicialUidAsync(clientCase, clientCase.JudicialUid, checkedAt, User.GetUserId(), actorName, ct);
                 var syncMessage = !syncResult.HasChanges
                     ? $"Судебный источник проверен: новых изменений не найдено. Суд: {FormatCaseTextValue(clientCase.CourtName)}; № в суде: {FormatCaseTextValue(clientCase.CourtCaseNumber)}."
                     : $"Судебный источник обновлен: {FormatCourtSyncResult(syncResult)}";
@@ -13377,46 +13382,13 @@ public partial class CasesV2Controller : ControllerBase
             Instance = normalizedInstance,
             CourtName = isFirstInstance ? clientCase.CourtName : string.Empty,
             CourtCaseNumber = isFirstInstance ? clientCase.CourtCaseNumber : string.Empty,
-            JudicialUid = clientCase.JudicialUid,
+            JudicialUid = isFirstInstance ? clientCase.JudicialUid : string.Empty,
             CourtUrl = isFirstInstance ? clientCase.CourtUrl : string.Empty,
             JudgeName = isFirstInstance ? clientCase.JudgeName : string.Empty,
             Courtroom = isFirstInstance ? clientCase.Courtroom : string.Empty,
             SecretaryName = isFirstInstance ? clientCase.CourtSecretaryContacts : string.Empty,
             Complaints = [],
         };
-    }
-
-    private async Task PropagateJudicialUidAsync(
-        ClientCase clientCase,
-        string? judicialUid,
-        DateTime updatedAt,
-        int? actorUserId,
-        string actorName,
-        CancellationToken ct,
-        ClientCaseCourtInstance? currentInstance = null)
-    {
-        var normalizedUid = Truncate(NormalizeOptional(judicialUid) ?? string.Empty, 120);
-        if (string.IsNullOrWhiteSpace(normalizedUid))
-        {
-            return;
-        }
-
-        clientCase.JudicialUid = normalizedUid;
-        var instances = await _db.ClientCaseCourtInstances
-            .Where(item => item.ClientCaseId == clientCase.Id)
-            .ToListAsync(ct);
-        if (currentInstance is not null && !instances.Contains(currentInstance))
-        {
-            instances.Add(currentInstance);
-        }
-
-        foreach (var instance in instances.Where(item => !string.Equals(item.JudicialUid, normalizedUid, StringComparison.Ordinal)))
-        {
-            instance.JudicialUid = normalizedUid;
-            instance.UpdatedAt = updatedAt;
-            instance.UpdatedByUserId = actorUserId;
-            instance.UpdatedByUserName = Truncate(actorName, 256);
-        }
     }
 
     private async Task<ClientCaseCourtInstance> EnsureCourtInstanceAsync(
