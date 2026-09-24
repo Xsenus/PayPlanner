@@ -22,6 +22,10 @@ public class ClientCaseCourtEvent
 
     public bool AllDay { get; set; }
 
+    public DateTime? PreviousScheduledAt { get; set; }
+
+    public bool? PreviousAllDay { get; set; }
+
     [Required, MaxLength(64)]
     public string CourtInstance { get; set; } = string.Empty;
 

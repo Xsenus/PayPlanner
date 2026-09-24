@@ -7918,6 +7918,7 @@ function CourtPanel({
                 <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">{event.eventTypeLabel || event.eventType} · {event.movementStatusLabel || event.movementStatus}</div>
                 <div className="mt-2 font-semibold text-slate-900">{event.title}</div>
                 <div className="mt-1 text-sm text-slate-600">{formatCourtEventSchedule(event) || '—'} · {event.courtInstanceLabel}</div>
+                {event.previousScheduledAt ? <div className="mt-1 text-xs font-medium text-amber-800">Перенесено: {formatCourtSchedule(event.previousScheduledAt, event.previousAllDay ?? undefined)} → {formatCourtEventSchedule(event)}</div> : null}
                 {event.courtName ? <div className="mt-2 text-sm text-slate-500">{event.courtName}{event.courtCaseNumber ? ` · ${event.courtCaseNumber}` : ''}</div> : null}
                 {event.clientCaseDocumentId ? <div className="mt-2 text-sm text-slate-500">Документ #{event.clientCaseDocumentId}</div> : null}
                 {event.resultSummary ? <div className="mt-2 text-sm text-slate-500">{event.resultSummary}</div> : null}

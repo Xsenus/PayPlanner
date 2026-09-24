@@ -727,6 +727,8 @@ export interface CaseCalendarEvent {
   courtCaseNumber?: string | null;
   documentsPrepared?: boolean | null;
   sourceCheckedAt?: string | null;
+  previousScheduledAt?: string | null;
+  previousAllDay?: boolean | null;
 }
 
 export interface CaseCalendarSummary {
@@ -834,6 +836,8 @@ export interface ClientCaseCourtEvent {
   description?: string | null;
   scheduledAt: string;
   allDay: boolean;
+  previousScheduledAt?: string | null;
+  previousAllDay?: boolean | null;
   courtInstance: string;
   courtInstanceLabel: string;
   courtId?: number | null;

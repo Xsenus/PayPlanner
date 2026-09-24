@@ -4110,9 +4110,21 @@ public partial class CasesV2Controller : ControllerBase
         var actorUserId = User.GetUserId();
         var actorName = User.GetDisplayName();
         var oldProceduralDeadlineId = courtEvent.ProceduralDeadlineId;
+        var previousScheduledAt = courtEvent.ScheduledAt;
+        var previousAllDay = courtEvent.AllDay;
         var wasRescheduled = string.Equals(courtEvent.EventType, CourtSyncNormalization.EventTypes.Hearing, StringComparison.OrdinalIgnoreCase)
             && string.Equals(validation.EventType, CourtSyncNormalization.EventTypes.Hearing, StringComparison.OrdinalIgnoreCase)
             && (courtEvent.ScheduledAt != validation.ScheduledAt || courtEvent.AllDay != validation.AllDay);
+        if (wasRescheduled)
+        {
+            courtEvent.PreviousScheduledAt = previousScheduledAt;
+            courtEvent.PreviousAllDay = previousAllDay;
+        }
+        else if (!string.Equals(validation.EventType, CourtSyncNormalization.EventTypes.Hearing, StringComparison.OrdinalIgnoreCase))
+        {
+            courtEvent.PreviousScheduledAt = null;
+            courtEvent.PreviousAllDay = null;
+        }
         courtEvent.EventType = validation.EventType;
         courtEvent.Title = validation.Title;
         courtEvent.Description = validation.Description;
@@ -4136,7 +4148,10 @@ public partial class CasesV2Controller : ControllerBase
 
         AppendCaseEvent(clientCase, $"Обновлено судебное событие «{courtEvent.Title}». Автор: {actorName}.");
         _db.SetAuditReason($"Обновлено судебное событие дела: {courtEvent.Title}");
-        AddCourtEventHistory(courtEvent, "updated", $"Событие обновлено: {courtEvent.Title}.", actorUserId, actorName);
+        AddCourtEventHistory(courtEvent, wasRescheduled ? "rescheduled" : "updated",
+            wasRescheduled
+                ? $"Расписание заседания изменено: {previousScheduledAt:dd.MM.yyyy HH:mm}{(previousAllDay ? " (весь день)" : "")} → {validation.ScheduledAt:dd.MM.yyyy HH:mm}{(validation.AllDay ? " (весь день)" : "")}."
+                : $"Событие обновлено: {courtEvent.Title}.", actorUserId, actorName);
         await SyncCourtEventDeadlineSourceAsync(courtEvent, oldProceduralDeadlineId, actorUserId, actorName, ct);
         await AddCourtEventUserNotificationsAsync(clientCase, courtEvent, wasRescheduled ? "rescheduled" : "updated", actorUserId, actorName, ct);
         await _db.SaveChangesAsync(ct);
@@ -6269,6 +6284,10 @@ public partial class CasesV2Controller : ControllerBase
                 SourceCheckedAt = courtEvent.SourceCheckedAt.HasValue
                     ? CalendarTimeZoneHelper.NormalizeUtcInstant(courtEvent.SourceCheckedAt.Value)
                     : null,
+                PreviousScheduledAt = courtEvent.PreviousScheduledAt.HasValue
+                    ? NormalizeCaseCalendarStart(courtEvent.PreviousScheduledAt.Value, courtEvent.PreviousAllDay == true)
+                    : null,
+                PreviousAllDay = courtEvent.PreviousAllDay,
             });
         }
     }
@@ -8912,6 +8931,10 @@ public partial class CasesV2Controller : ControllerBase
             .Where(static item => item.ScheduledAt.HasValue && !string.IsNullOrWhiteSpace(item.Title))
             .OrderBy(static item => item.ScheduledAt)
             .ToList();
+        var movementCountBySchedule = movements
+            .GroupBy(item => NormalizeCourtSyncSourceDateTime(
+                item.ScheduledAt!.Value, sourceTimeZone, item.ScheduledAt.Value.TimeOfDay == TimeSpan.Zero))
+            .ToDictionary(group => group.Key, group => group.Count());
         var existingEvents = await _db.ClientCaseCourtEvents
             .Where(item => item.ClientCaseId == clientCase.Id)
             .ToListAsync(ct);
@@ -8929,9 +8952,18 @@ public partial class CasesV2Controller : ControllerBase
             var title = Truncate(NormalizeOptional(movement.Title) ?? "Движение дела", 200);
             var externalKey = BuildSudrfCourtEventExternalKey(courtData, sourceScheduledAt, title);
             currentEventExternalKeys.Add(externalKey);
-            var existing = existingEventsByExternalKey.GetValueOrDefault(externalKey)
-                ?? existingEvents.FirstOrDefault(item =>
-                    CourtEventMatchesSudrfMovement(item, scheduledAt, title, courtData, movement));
+            var existing = existingEventsByExternalKey.GetValueOrDefault(externalKey);
+            if (existing is null && movementCountBySchedule[scheduledAt] == 1)
+            {
+                var fallbackMatches = existingEvents
+                    .Where(item => CourtEventMatchesSudrfMovement(item, scheduledAt, title, courtData, movement))
+                    .Take(2)
+                    .ToList();
+                if (fallbackMatches.Count == 1)
+                {
+                    existing = fallbackMatches[0];
+                }
+            }
             var summary = Truncate(movement.SourceSummary, 1000);
             var eventType = ResolveSudrfCourtEventType(movement);
             var resultSummary = string.Equals(eventType, CourtSyncNormalization.EventTypes.Decision, StringComparison.OrdinalIgnoreCase)
@@ -8999,6 +9031,11 @@ public partial class CasesV2Controller : ControllerBase
             if (!string.Equals(existing.EventType, eventType, StringComparison.OrdinalIgnoreCase))
             {
                 existing.EventType = eventType;
+                if (!string.Equals(eventType, CourtSyncNormalization.EventTypes.Hearing, StringComparison.OrdinalIgnoreCase))
+                {
+                    existing.PreviousScheduledAt = null;
+                    existing.PreviousAllDay = null;
+                }
                 updated = true;
             }
             updated |= UpdateCourtEventString(existing.CourtName, courtData.CourtName, value => existing.CourtName = value, 200);
@@ -9098,6 +9135,28 @@ public partial class CasesV2Controller : ControllerBase
             newItems.Add("судебное событие «Судебное заседание»");
         }
 
+        ClientCaseCourtEvent? movedHearingForHistory = null;
+        if (nextHearingRescheduled && previousNextHearingAt.HasValue && nextHearingAt.HasValue)
+        {
+            var movedHearings = existingEvents
+                .Where(item => string.Equals(item.SourceType, "sudrf", StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(item.EventType, CourtSyncNormalization.EventTypes.Hearing, StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(item.MovementStatus, "archived", StringComparison.OrdinalIgnoreCase)
+                    && item.ScheduledAt == nextHearingAt.Value)
+                .ToList();
+            if (movedHearings.Count == 1)
+            {
+                var movedHearing = movedHearings[0];
+                var oldHearing = existingEvents.FirstOrDefault(item =>
+                    string.Equals(item.SourceType, "sudrf", StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(item.EventType, CourtSyncNormalization.EventTypes.Hearing, StringComparison.OrdinalIgnoreCase)
+                    && item.ScheduledAt == previousNextHearingAt.Value);
+                movedHearing.PreviousScheduledAt = previousNextHearingAt.Value;
+                movedHearing.PreviousAllDay = oldHearing?.AllDay ?? previousNextHearingAt.Value.TimeOfDay == TimeSpan.Zero;
+                movedHearingForHistory = movedHearing;
+            }
+        }
+
         if (createdEvents.Count > 0)
         {
             await _db.SaveChangesAsync(ct);
@@ -9107,13 +9166,18 @@ public partial class CasesV2Controller : ControllerBase
             }
         }
 
+        if (movedHearingForHistory is not null)
+        {
+            AddCourtEventHistory(movedHearingForHistory, "rescheduled",
+                $"Судебный источник перенёс ближайшее заседание с {previousNextHearingAt!.Value:dd.MM.yyyy HH:mm} на {nextHearingAt!.Value:dd.MM.yyyy HH:mm}.",
+                actorUserId, actorName);
+        }
+
         var rescheduleNotificationSent = false;
         foreach (var courtEvent in createdEvents.Where(ShouldNotifyAboutSyncedCourtEvent))
         {
-            var isRescheduledHearing = !rescheduleNotificationSent && nextHearingRescheduled
-                && courtEvent.ScheduledAt == nextHearingAt
-                && (string.Equals(courtEvent.EventType, CourtSyncNormalization.EventTypes.Hearing, StringComparison.OrdinalIgnoreCase)
-                    || courtEvent.Title.Contains("заседан", StringComparison.OrdinalIgnoreCase));
+            var isRescheduledHearing = !rescheduleNotificationSent
+                && ReferenceEquals(courtEvent, movedHearingForHistory);
             await AddCourtEventUserNotificationsAsync(
                 clientCase, courtEvent, isRescheduledHearing ? "rescheduled" : "created", actorUserId, actorName, ct);
             rescheduleNotificationSent |= isRescheduledHearing;
@@ -9122,10 +9186,8 @@ public partial class CasesV2Controller : ControllerBase
         foreach (var courtEvent in updatedEvents.Where(item =>
                      ShouldNotifyAboutSyncedCourtEvent(item) && !silentUpdatedEventIds.Contains(item.Id)))
         {
-            var isRescheduledHearing = !rescheduleNotificationSent && nextHearingRescheduled
-                && courtEvent.ScheduledAt == nextHearingAt
-                && (string.Equals(courtEvent.EventType, CourtSyncNormalization.EventTypes.Hearing, StringComparison.OrdinalIgnoreCase)
-                    || courtEvent.Title.Contains("заседан", StringComparison.OrdinalIgnoreCase));
+            var isRescheduledHearing = !rescheduleNotificationSent
+                && ReferenceEquals(courtEvent, movedHearingForHistory);
             await AddCourtEventUserNotificationsAsync(
                 clientCase, courtEvent, isRescheduledHearing ? "rescheduled" : "updated", actorUserId, actorName, ct);
             rescheduleNotificationSent |= isRescheduledHearing;
@@ -13039,6 +13101,8 @@ public partial class CasesV2Controller : ControllerBase
             Description = item.Description,
             ScheduledAt = item.ScheduledAt,
             AllDay = item.AllDay,
+            PreviousScheduledAt = item.PreviousScheduledAt,
+            PreviousAllDay = item.PreviousAllDay,
             CourtInstance = item.CourtInstance,
             CourtInstanceLabel = ResolveCourtInstanceLabel(item.CourtInstance),
             CourtId = item.CourtId,
@@ -15164,6 +15228,8 @@ public partial class CasesV2Controller : ControllerBase
         public string Description { get; set; } = string.Empty;
         public DateTime ScheduledAt { get; set; }
         public bool AllDay { get; set; }
+        public DateTime? PreviousScheduledAt { get; set; }
+        public bool? PreviousAllDay { get; set; }
         public string CourtInstance { get; set; } = string.Empty;
         public string CourtInstanceLabel { get; set; } = string.Empty;
         public int? CourtId { get; set; }
@@ -15327,6 +15393,8 @@ public partial class CasesV2Controller : ControllerBase
         public string? CourtCaseNumber { get; set; }
         public bool? DocumentsPrepared { get; set; }
         public DateTime? SourceCheckedAt { get; set; }
+        public DateTime? PreviousScheduledAt { get; set; }
+        public bool? PreviousAllDay { get; set; }
     }
 
     public sealed class CaseCalendarSummaryDto

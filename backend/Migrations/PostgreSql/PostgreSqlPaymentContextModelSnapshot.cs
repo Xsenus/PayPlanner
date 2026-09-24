@@ -2086,6 +2086,12 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
 
+                    b.Property<bool?>("PreviousAllDay")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("PreviousScheduledAt")
+                        .HasColumnType("timestamp without time zone");
+
                     b.Property<int?>("ProceduralDeadlineId")
                         .HasColumnType("integer");
 

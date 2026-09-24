@@ -2043,6 +2043,12 @@ namespace PayPlanner.Api.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
+                    b.Property<bool?>("PreviousAllDay")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("PreviousScheduledAt")
+                        .HasColumnType("TEXT");
+
                     b.Property<int?>("ProceduralDeadlineId")
                         .HasColumnType("INTEGER");
 

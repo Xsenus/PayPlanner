@@ -1207,6 +1207,8 @@ describe('CaseDetailPage', () => {
         title: 'Судебное заседание',
         scheduledAt: '2026-06-05T12:00:00',
         allDay: false,
+        previousScheduledAt: '2026-06-02T12:00:00Z',
+        previousAllDay: false,
         courtInstance: 'first',
         courtInstanceLabel: 'Первая инстанция',
         courtName: 'Арбитражный суд Самарской области',
@@ -1232,6 +1234,7 @@ describe('CaseDetailPage', () => {
     expect(await screen.findByText('Фактически получено по решению суда')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Суд' }));
     expect(await screen.findByText('Судебное заседание')).toBeTruthy();
+    expect(await screen.findByText(/Перенесено: 02.06.2026, 16:00 → 05.06.2026, 16:00/)).toBeTruthy();
     await waitFor(() => {
       expect(screen.getAllByText((_text, element) => {
         const value = element?.textContent ?? '';

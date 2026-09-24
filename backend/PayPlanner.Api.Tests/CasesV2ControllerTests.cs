@@ -5353,7 +5353,13 @@ public class CasesV2ControllerTests
             },
             CancellationToken.None);
 
-        Assert.IsType<OkObjectResult>(updateResult.Result);
+        var updatedEvent = Assert.IsType<CasesV2Controller.ClientCaseCourtEventDto>(
+            Assert.IsType<OkObjectResult>(updateResult.Result).Value);
+        Assert.Equal(new DateTime(2026, 7, 10, 9, 30, 0, DateTimeKind.Utc), updatedEvent.PreviousScheduledAt);
+        Assert.False(updatedEvent.PreviousAllDay);
+        Assert.Contains(await db.ClientCaseCourtEventHistory.Where(item => item.ClientCaseCourtEventId == created.Id).ToListAsync(),
+            item => item.Action == "rescheduled" && item.Summary.Contains("10.07.2026 09:30", StringComparison.Ordinal)
+                && item.Summary.Contains("12.07.2026 09:30", StringComparison.Ordinal));
         var rescheduled = await db.UserNotifications.SingleAsync(item => item.Id != notification.Id);
         Assert.Equal(UserNotificationTypes.CourtHearing, rescheduled.Type);
         Assert.Equal(responsible.Id, rescheduled.RecipientUserId);
@@ -5362,6 +5368,24 @@ public class CasesV2ControllerTests
         Assert.Contains("\"action\":\"rescheduled\"", rescheduled.MetadataJson, StringComparison.Ordinal);
         Assert.Equal(newHearingAt.AddDays(-3), hearingTask.DueAt);
         Assert.Equal("Учесть новую дату, проверить готовность", hearingTask.Title);
+
+        var reclassifiedResult = await controller.UpdateCourtEvent(
+            clientCase.Id,
+            created.Id,
+            new CasesV2Controller.UpsertClientCaseCourtEventRequest
+            {
+                EventType = "decision",
+                Title = "Решение суда",
+                ScheduledAt = newHearingAt,
+                AllDay = false,
+                CourtInstance = "first",
+                MovementStatus = "completed",
+            },
+            CancellationToken.None);
+        var reclassified = Assert.IsType<CasesV2Controller.ClientCaseCourtEventDto>(
+            Assert.IsType<OkObjectResult>(reclassifiedResult.Result).Value);
+        Assert.Null(reclassified.PreviousScheduledAt);
+        Assert.Null(reclassified.PreviousAllDay);
     }
 
     [Fact]
@@ -9019,12 +9043,23 @@ public class CasesV2ControllerTests
         Assert.Contains("Перенесено", notification.Title, StringComparison.Ordinal);
         Assert.Contains("Новая дата", notification.BodyPreview, StringComparison.Ordinal);
         Assert.Contains("\"action\":\"rescheduled\"", notification.MetadataJson, StringComparison.Ordinal);
-        Assert.Single(await db.ClientCaseCourtEvents.Where(item =>
+        var movedHearing = Assert.Single(await db.ClientCaseCourtEvents.Where(item =>
             item.ClientCaseId == clientCase.Id && item.ScheduledAt == newHearingAt).ToListAsync());
+        Assert.Equal(oldHearingAt, movedHearing.PreviousScheduledAt);
+        Assert.False(movedHearing.PreviousAllDay);
+        Assert.Contains(await db.ClientCaseCourtEventHistory.Where(item => item.ClientCaseCourtEventId == movedHearing.Id).ToListAsync(),
+            item => item.Action == "rescheduled" && item.Summary.Contains("перенёс ближайшее заседание", StringComparison.Ordinal));
+        var calendarResult = await controller.GetCaseCalendarEvents(
+            newHearingAt.Date.AddDays(-1), newHearingAt.Date.AddDays(2),
+            clientCaseId: clientCase.Id, responsibleUserId: null, includeTasks: false, ct: CancellationToken.None);
+        var calendarEvents = Assert.IsAssignableFrom<IReadOnlyList<CasesV2Controller.CaseCalendarEventDto>>(
+            Assert.IsType<OkObjectResult>(calendarResult.Result).Value);
+        Assert.Equal(oldHearingAt, Assert.Single(calendarEvents, item => item.SourceId == movedHearing.Id).PreviousScheduledAt);
 
         Assert.IsType<OkObjectResult>((await controller.RunCourtSync(clientCase.Id, null, CancellationToken.None)).Result);
         Assert.Equal(1, await db.UserNotifications.CountAsync(item =>
             item.RecipientUserId == responsible.Id && item.Type == UserNotificationTypes.CourtHearing));
+        Assert.Equal(oldHearingAt, movedHearing.PreviousScheduledAt);
         if (!includeMovement)
         {
             var detailedController = CreateController(db, owner,
@@ -9062,6 +9097,49 @@ public class CasesV2ControllerTests
             Assert.Equal(2, await db.UserNotifications.CountAsync(item =>
                 item.RecipientUserId == responsible.Id && item.Type == UserNotificationTypes.CourtHearing));
         }
+    }
+
+    [Fact]
+    public async Task RunCourtSync_DoesNotGuessPreviousDateForAmbiguousHearings()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "court-reschedule-ambiguous@example.com", "Юрист");
+        var oldHearingAt = DateTime.UtcNow.AddDays(10);
+        var newHearingAt = oldHearingAt.AddDays(5);
+        var clientCase = new ClientCase
+        {
+            Client = new Client { Name = "Контрагент", IsActive = true, ResponsibleUserId = owner.Id },
+            Title = "Дело с неоднозначным переносом",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = owner.Id,
+            CourtUrl = "https://test.sudrf.ru/modules.php?name=sud_delo&name_op=case&delo_id=43",
+            CourtCaseNumber = "2-2026/100",
+            NextHearingAt = oldHearingAt,
+        };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        var courtData = new SudrfCourtCaseData
+        {
+            SourceUrl = clientCase.CourtUrl,
+            CourtName = "Тестовый суд",
+            CaseNumber = clientCase.CourtCaseNumber,
+            NextHearingAt = newHearingAt,
+            MovementEvents =
+            [
+                new() { Title = "Судебное заседание: зал 1", ScheduledAt = newHearingAt },
+                new() { Title = "Судебное заседание: зал 2", ScheduledAt = newHearingAt },
+            ],
+        };
+        var controller = CreateController(db, owner,
+            sudrfCourtSyncService: new FixedSudrfCourtSyncService(courtData),
+            notificationService: CreateNotificationService(db));
+
+        Assert.IsType<OkObjectResult>((await controller.RunCourtSync(clientCase.Id, null, CancellationToken.None)).Result);
+        var hearings = await db.ClientCaseCourtEvents.Where(item => item.ClientCaseId == clientCase.Id && item.ScheduledAt == newHearingAt).ToListAsync();
+        Assert.Equal(2, hearings.Count);
+        Assert.All(hearings, item => Assert.Null(item.PreviousScheduledAt));
+        Assert.DoesNotContain(await db.UserNotifications.Where(item => item.Type == UserNotificationTypes.CourtHearing).ToListAsync(),
+            item => item.MetadataJson.Contains("\"action\":\"rescheduled\"", StringComparison.Ordinal));
     }
 
     [Fact]
