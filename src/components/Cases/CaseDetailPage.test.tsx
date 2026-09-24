@@ -3408,7 +3408,7 @@ describe('CaseDetailPage', () => {
     expect(await screen.findByText('Сводка по судебному делу')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /Проверить источник/u }));
 
-    expect(await screen.findByText(/Судебный источник обновлён: 13 событий, 3 участника, 2 судебных акта, 1 процессуальный срок/u)).toBeTruthy();
+    expect(await screen.findByText(/Судебный источник обновлён: 13 событий, 3 участника, 2 сводки судебных событий, 1 процессуальный срок/u)).toBeTruthy();
     expect(screen.queryByText(/Технический подробный результат синхронизации/u)).toBeNull();
     expect(screen.getByText('Сводка по судебному делу')).toBeTruthy();
     expect(screen.queryByText('Режим редактирования судебных данных')).toBeNull();

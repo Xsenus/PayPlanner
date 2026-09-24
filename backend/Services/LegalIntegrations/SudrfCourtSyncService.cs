@@ -312,7 +312,8 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
         var caseOutcome = GetValue(labelValues, "результат рассмотрения");
         var decisionAt = ResolveDecisionAt(
             movements,
-            ParseDate(GetValue(labelValues, "дата рассмотрения")));
+            ParseDate(GetValue(labelValues, "дата рассмотрения")),
+            caseOutcome);
         var courtActs = ExtractCourtActs(movements, sourceUri, caseOutcome, decisionAt);
         var nextHearing = ResolveNextHearing(movements, nowUtc ?? DateTime.UtcNow);
         var caseNumber = FirstNotEmpty(
@@ -661,10 +662,12 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
 
     private static DateTime? ResolveDecisionAt(
         IReadOnlyList<SudrfCourtMovementEvent> movements,
-        DateTime? considerationAt)
+        DateTime? considerationAt,
+        string caseOutcome)
     {
         var motivatedDecision = movements
             .Where(static movement => movement.ScheduledAt.HasValue
+                && CourtSyncNormalization.IsConfirmedDecisionMovement(movement.Title, movement.Result, movement.Reason)
                 && $"{movement.Title} {movement.Result} {movement.Reason}".Contains("мотивированное решение", StringComparison.OrdinalIgnoreCase))
             .OrderByDescending(static movement => movement.ScheduledAt)
             .FirstOrDefault();
@@ -675,14 +678,22 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
 
         var finalDecision = movements
             .Where(static movement => movement.ScheduledAt.HasValue
-                && ContainsFinalDecisionText($"{movement.Title} {movement.Result} {movement.Reason}"))
+                && CourtSyncNormalization.IsConfirmedDecisionMovement(movement.Title, movement.Result, movement.Reason))
             .OrderByDescending(static movement => movement.ScheduledAt)
             .FirstOrDefault();
-        return finalDecision?.ScheduledAt?.Date ?? considerationAt?.Date;
+        return finalDecision?.ScheduledAt?.Date
+            ?? (CourtSyncNormalization.IsConfirmedDecisionMovement(null, caseOutcome, null)
+                ? considerationAt?.Date
+                : null);
     }
 
     private static string ResolveCourtActTitle(SudrfCourtMovementEvent movement)
     {
+        if (!IsConfirmedCourtActMovement(movement))
+        {
+            return string.Empty;
+        }
+
         var text = $"{movement.Title} {movement.Result} {movement.Reason}";
         if (text.Contains("апелляционное определение", StringComparison.OrdinalIgnoreCase))
         {
@@ -695,7 +706,8 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
             return "Кассационный судебный акт";
         }
 
-        if (ContainsFinalDecisionText(text))
+        if (ContainsFinalDecisionText(text)
+            && CourtSyncNormalization.IsConfirmedDecisionMovement(movement.Title, movement.Result, movement.Reason))
         {
             return "Решение суда";
         }
@@ -711,6 +723,34 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
         }
 
         return string.Empty;
+    }
+
+    private static bool IsConfirmedCourtActMovement(SudrfCourtMovementEvent movement)
+    {
+        if (CourtSyncNormalization.IsConfirmedDecisionMovement(movement.Title, movement.Result, movement.Reason))
+        {
+            return true;
+        }
+
+        var sourceResult = $"{movement.Result} {movement.Reason}";
+        var status = CourtSyncNormalization.ResolveMovementStatusFromResult(sourceResult);
+        if (status is CourtSyncNormalization.MovementStatuses.Postponed
+            or CourtSyncNormalization.MovementStatuses.Cancelled
+            || (status == CourtSyncNormalization.MovementStatuses.Scheduled
+                && !string.IsNullOrWhiteSpace(sourceResult)))
+        {
+            return false;
+        }
+
+        var title = movement.Title;
+        return title.Contains("вынесено апелляционное определение", StringComparison.OrdinalIgnoreCase)
+            || title.Contains("вынесено кассационное определение", StringComparison.OrdinalIgnoreCase)
+            || title.Contains("вынесено кассационное постановление", StringComparison.OrdinalIgnoreCase)
+            || title.Contains("вынесено определение", StringComparison.OrdinalIgnoreCase)
+            || title.Contains("вынесено постановление", StringComparison.OrdinalIgnoreCase)
+            || sourceResult.Contains("оставлено без изменения", StringComparison.OrdinalIgnoreCase)
+            || sourceResult.Contains("оставлена без удовлетворения", StringComparison.OrdinalIgnoreCase)
+            || sourceResult.Contains("оставлено без удовлетворения", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool ContainsFinalDecisionText(string value)

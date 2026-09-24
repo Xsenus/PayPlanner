@@ -9794,9 +9794,10 @@ public class CasesV2ControllerTests
             && item.Side == "other"
             && item.ProcessRole == "ПРЕДСТАВИТЕЛЬ");
 
-        var document = await db.ClientCaseDocuments.SingleAsync(item => item.ClientCaseId == clientCase.Id && item.DocumentType == "Судебный акт");
+        var document = await db.ClientCaseDocuments.SingleAsync(item => item.ClientCaseId == clientCase.Id && item.DocumentType == CourtSyncNormalization.DocumentTypes.CourtEventSummary);
         Assert.Equal("received", document.Status);
         Assert.StartsWith("sudrf-act-", document.DocumentKey, StringComparison.Ordinal);
+        Assert.Contains("Сводка", document.OriginalFileName, StringComparison.Ordinal);
         Assert.Equal("sudrf", document.SourceType);
         Assert.Equal(clientCase.CourtUrl, document.SourceUrl);
         Assert.NotNull(document.SourceCheckedAt);
@@ -9880,7 +9881,7 @@ public class CasesV2ControllerTests
         Assert.Equal(3, await db.ClientCaseCourtParties.CountAsync(item => item.ClientCaseId == clientCase.Id && item.IsArchived));
         Assert.Equal(1, await db.ClientCaseDocuments.CountAsync(item =>
             item.ClientCaseId == clientCase.Id
-            && item.DocumentType == "Судебный акт"));
+            && item.DocumentType == CourtSyncNormalization.DocumentTypes.CourtEventSummary));
 
         var emptySourceController = CreateController(
             db,
@@ -9897,7 +9898,7 @@ public class CasesV2ControllerTests
         var emptySourceResult = await emptySourceController.RunCourtSync(clientCase.Id, null, CancellationToken.None);
         var emptySourceOk = Assert.IsType<OkObjectResult>(emptySourceResult.Result);
         var emptySourceDto = Assert.IsType<CasesV2Controller.ClientCaseCourtSyncRunDto>(emptySourceOk.Value);
-        Assert.Contains(emptySourceDto.RemovedItems, item => item.Contains("судебный акт", StringComparison.Ordinal));
+        Assert.Contains(emptySourceDto.RemovedItems, item => item.Contains("сводка судебного события", StringComparison.Ordinal));
         Assert.Contains(emptySourceDto.RemovedItems, item => item.Contains("процессуальный срок", StringComparison.Ordinal));
         Assert.Equal("archived", (await db.ClientCaseDocuments.SingleAsync(item => item.Id == document.Id)).Status);
         Assert.Equal("archived", (await db.ClientCaseProceduralDeadlines.SingleAsync(item => item.Id == deadline.Id)).Status);
@@ -10020,6 +10021,63 @@ public class CasesV2ControllerTests
         Assert.Equal("Иск удовлетворен частично", events[2].ResultSummary);
         Assert.Equal(CourtSyncNormalization.EventTypes.Movement, events[3].EventType);
         Assert.Contains("апелляционная жалоба", events[3].Title, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("Решение будет подготовлено")]
+    public async Task RunCourtSync_KeepsDecisionWithoutOutcomeScheduled(string sourceResult)
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "scheduled-decision-owner@example.com", "Ответственный");
+        var responsible = await CreateUserAsync(db, "scheduled-decision-responsible@example.com", "Исполнитель");
+        var client = new Client { Name = "Клиент", IsActive = true, ResponsibleUserId = owner.Id };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Дело с назначенным решением",
+            CourtUrl = "https://test--sam.sudrf.ru/modules.php?name=sud_delo&name_op=case&delo_id=1540005",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = responsible.Id,
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+
+        var courtData = new SudrfCourtCaseData
+        {
+            SourceUrl = clientCase.CourtUrl,
+            CourtName = "Тестовый суд",
+            CaseNumber = "2-1500/2026",
+            Instance = "first",
+            MovementEvents =
+            [
+                new()
+                {
+                    Title = "Решение суда назначено",
+                    ScheduledAt = new DateTime(2026, 10, 1),
+                    Result = sourceResult,
+                    SourceSummary = "Решение суда назначено; 01.10.2026",
+                },
+            ],
+        };
+        var controller = CreateController(
+            db,
+            owner,
+            sudrfCourtSyncService: new FixedSudrfCourtSyncService(courtData),
+            notificationService: CreateNotificationService(db));
+
+        Assert.IsType<OkObjectResult>((await controller.RunCourtSync(clientCase.Id, null, CancellationToken.None)).Result);
+
+        var courtEvent = await db.ClientCaseCourtEvents.SingleAsync(item => item.ClientCaseId == clientCase.Id);
+        Assert.Equal(CourtSyncNormalization.EventTypes.Decision, courtEvent.EventType);
+        Assert.Equal(CourtSyncNormalization.MovementStatuses.Scheduled, courtEvent.MovementStatus);
+        Assert.Null(clientCase.CourtDecisionAt);
+        Assert.DoesNotContain(await db.UserNotifications.ToListAsync(), item =>
+            item.Type == UserNotificationTypes.CourtDecisionRecorded);
+        var notification = await db.UserNotifications.SingleAsync(item =>
+            item.Type == UserNotificationTypes.CourtStatusChanged);
+        Assert.DoesNotContain("Зафиксировано", notification.Title, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

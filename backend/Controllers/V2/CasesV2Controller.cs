@@ -106,6 +106,7 @@ public partial class CasesV2Controller : ControllerBase
         "Жалоба",
         "Возражение",
         "Судебный акт",
+        "Сводка судебного события",
         "Доверенность",
         "Исполнительный лист",
         "Переписка",
@@ -9352,6 +9353,7 @@ public partial class CasesV2Controller : ControllerBase
                 item.ClientCaseId == clientCase.Id
                 && (item.SourceType == "sudrf"
                     || courtActDocumentKeys.Contains(item.DocumentKey)
+                    || item.DocumentType == CourtSyncNormalization.DocumentTypes.CourtEventSummary
                     || item.DocumentType == CourtSyncNormalization.DocumentTypes.CourtAct))
             .OrderByDescending(item => item.Version)
             .ToListAsync(ct);
@@ -9359,7 +9361,8 @@ public partial class CasesV2Controller : ControllerBase
             .GroupBy(static item => item.DocumentKey, StringComparer.Ordinal)
             .ToDictionary(static group => group.Key, static group => group.First(), StringComparer.Ordinal);
         var existingCourtActDocumentsByFileName = existingCourtActDocuments
-            .Where(static item => item.DocumentType == CourtSyncNormalization.DocumentTypes.CourtAct)
+            .Where(static item => item.DocumentType is CourtSyncNormalization.DocumentTypes.CourtAct
+                or CourtSyncNormalization.DocumentTypes.CourtEventSummary)
             .GroupBy(static item => item.OriginalFileName, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(static group => group.Key, static group => group.First(), StringComparer.OrdinalIgnoreCase);
         var existingCourtActDeadlines = await _db.ClientCaseProceduralDeadlines
@@ -9388,32 +9391,34 @@ public partial class CasesV2Controller : ControllerBase
                 document = await SaveGeneratedCaseDocumentAsync(
                     clientCase,
                     documentKey,
-                    CourtSyncNormalization.DocumentTypes.CourtAct,
+                    CourtSyncNormalization.DocumentTypes.CourtEventSummary,
                     "received",
                     courtActWithKey.FileName,
                     BuildSudrfCourtActHtml(clientCase, courtData, courtAct),
                     "Created",
-                    $"Судебный акт «{courtAct.Title}» добавлен из ГАС «Правосудие».",
-                    $"Судебный акт «{courtAct.Title}» добавлен из ГАС «Правосудие».",
+                    $"Сводка судебного события «{courtAct.Title}» добавлена из ГАС «Правосудие»; текст акта не загружен.",
+                    $"Сводка судебного события «{courtAct.Title}» добавлена из ГАС «Правосудие»; текст акта не загружен.",
                     ct,
                     publishTaskJournalChanged: false);
                 createdCourtActDocuments++;
                 _courtSyncMetrics?.RecordDocument(document.SizeBytes);
-                newItems.Add($"судебный акт «{courtAct.Title}»");
+                newItems.Add($"сводка судебного события «{courtAct.Title}»");
             }
             else if (!string.Equals(document.DocumentKey, documentKey, StringComparison.Ordinal))
             {
                 document.DocumentKey = documentKey;
-                changedItems.Add($"судебный акт «{courtAct.Title}»");
+                changedItems.Add($"сводка судебного события «{courtAct.Title}»");
             }
 
             if (string.Equals(document.Status, "archived", StringComparison.OrdinalIgnoreCase))
             {
                 document.Status = "received";
-                changedItems.Add($"судебный акт «{courtAct.Title}» восстановлен из архива");
+                changedItems.Add($"сводка судебного события «{courtAct.Title}» восстановлена из архива");
             }
 
             document.SourceType = "sudrf";
+            document.DocumentType = CourtSyncNormalization.DocumentTypes.CourtEventSummary;
+            document.OriginalFileName = courtActWithKey.FileName;
             document.SourceUrl = Truncate(FirstNonEmpty(courtAct.SourceUrl, courtData.SourceUrl), 1000);
             document.SourceCheckedAt = checkedAt;
             document.SourceConfidence = "official-source";
@@ -9437,7 +9442,7 @@ public partial class CasesV2Controller : ControllerBase
             if (createdDeadlinesForAct > 0)
             {
                 requiresDeadlineTaskSync = true;
-                newItems.Add($"процессуальные сроки по акту «{courtAct.Title}» ({createdDeadlinesForAct})");
+                newItems.Add($"процессуальные сроки по судебному событию «{courtAct.Title}» ({createdDeadlinesForAct})");
             }
         }
 
@@ -9451,7 +9456,7 @@ public partial class CasesV2Controller : ControllerBase
             .ToHashSet();
         foreach (var missingDocument in existingCourtActDocuments.Where(item => removedCourtActDocumentIds.Contains(item.Id)))
         {
-            removedItems.Add($"судебный акт «{missingDocument.OriginalFileName}»");
+            removedItems.Add($"сводка судебного события «{missingDocument.OriginalFileName}»");
             missingDocument.Status = "archived";
         }
 
@@ -9474,7 +9479,7 @@ public partial class CasesV2Controller : ControllerBase
 
         if (createdCourtActDocuments > 0)
         {
-            changedFields.Add("судебные акты");
+            changedFields.Add("сводки судебных событий");
         }
 
         if (createdProceduralDeadlines > 0)
@@ -9707,6 +9712,15 @@ public partial class CasesV2Controller : ControllerBase
     {
         var sourceText = $"{movement.Result} {movement.Reason}";
         var status = CourtSyncNormalization.ResolveMovementStatusFromResult(sourceText);
+        if (string.Equals(eventType, CourtSyncNormalization.EventTypes.Decision, StringComparison.OrdinalIgnoreCase)
+            && !CourtSyncNormalization.IsConfirmedDecisionMovement(movement.Title, movement.Result, movement.Reason))
+        {
+            return status is CourtSyncNormalization.MovementStatuses.Postponed
+                or CourtSyncNormalization.MovementStatuses.Cancelled
+                ? status
+                : CourtSyncNormalization.MovementStatuses.Scheduled;
+        }
+
         if (status != CourtSyncNormalization.MovementStatuses.Scheduled)
         {
             return status;
@@ -9817,7 +9831,7 @@ public partial class CasesV2Controller : ControllerBase
                 SourceUrl = Truncate(FirstNonEmpty(courtAct.SourceUrl, courtData.SourceUrl), 1000),
                 SourceCheckedAt = checkedAt,
                 SourceConfidence = "official-source",
-                Notes = $"Создано автоматически из ГАС «Правосудие». Документ: {courtAct.Title}.",
+                Notes = $"Создано автоматически по данным карточки ГАС «Правосудие». Текст судебного акта не загружен; проверьте срок по официальному документу. Событие: {courtAct.Title}.",
                 CreatedAt = checkedAt,
                 CreatedByUserId = actorUserId,
                 CreatedByUserName = Truncate(actorName, 256),
@@ -9843,7 +9857,7 @@ public partial class CasesV2Controller : ControllerBase
 
         if (created > 0)
         {
-            AppendCaseEvent(clientCase, $"Процессуальные сроки по судебному акту «{courtAct.Title}» добавлены из ГАС «Правосудие». Добавлено: {created}.");
+            AppendCaseEvent(clientCase, $"Предварительные процессуальные сроки по судебному событию «{courtAct.Title}» добавлены из ГАС «Правосудие». Текст судебного акта не загружен; проверьте срок по официальному документу. Добавлено: {created}.");
             await _db.SaveChangesAsync(ct);
 
             foreach (var deadline in createdDeadlines)
@@ -9876,7 +9890,7 @@ public partial class CasesV2Controller : ControllerBase
             yield return new SudrfCourtActDeadlineSpec(
                 "cassation",
                 "Срок кассационного обжалования",
-                $"Срок рассчитан от даты судебного акта «{title}» из ГАС «Правосудие».",
+                $"Предварительный срок рассчитан от даты судебного события «{title}» в ГАС «Правосудие». Проверьте по тексту судебного акта.",
                 dueAt);
             yield break;
         }
@@ -9887,7 +9901,7 @@ public partial class CasesV2Controller : ControllerBase
             yield return new SudrfCourtActDeadlineSpec(
                 "appeal",
                 "Срок апелляционного обжалования",
-                $"Срок рассчитан от даты судебного акта «{title}» из ГАС «Правосудие».",
+                $"Предварительный срок рассчитан от даты судебного события «{title}» в ГАС «Правосудие». Проверьте по тексту судебного акта.",
                 dueAt);
         }
     }
@@ -9932,7 +9946,7 @@ public partial class CasesV2Controller : ControllerBase
     private static string BuildSudrfCourtActFileName(SudrfCourtAct courtAct)
     {
         var date = courtAct.ActDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? "без-даты";
-        return $"{date} - {courtAct.Title}.html";
+        return $"{date} - Сводка - {courtAct.Title}.html";
     }
 
     private static string BuildSudrfCourtActHtml(ClientCase clientCase, SudrfCourtCaseData courtData, SudrfCourtAct courtAct)
@@ -9941,15 +9955,16 @@ public partial class CasesV2Controller : ControllerBase
            <html lang="ru">
            <head>
              <meta charset="utf-8">
-             <title>{Html(courtAct.Title)}</title>
+             <title>Сводка судебного события: {Html(courtAct.Title)}</title>
            </head>
            <body>
-             <h1>{Html(courtAct.Title)}</h1>
+             <h1>Сводка судебного события: {Html(courtAct.Title)}</h1>
+             <p><strong>Это автоматически составленная сводка сведений судебной карточки, а не опубликованный текст судебного акта.</strong></p>
              <p><strong>Дело CRM:</strong> {Html(clientCase.Title)}</p>
              <p><strong>Суд:</strong> {Html(courtData.CourtName)}</p>
              <p><strong>Номер дела в суде:</strong> {Html(courtData.CaseNumber)}</p>
-             <p><strong>Дата судебного акта:</strong> {Html(FormatTemplateDate(courtAct.ActDate))}</p>
-             <p><strong>Дата размещения:</strong> {Html(FormatTemplateDate(courtAct.PostedAt))}</p>
+             <p><strong>Дата судебного события:</strong> {Html(FormatTemplateDate(courtAct.ActDate))}</p>
+             <p><strong>Дата записи в карточке суда:</strong> {Html(FormatTemplateDate(courtAct.PostedAt))}</p>
              <p><strong>Результат:</strong> {Html(courtAct.Result)}</p>
              <p><strong>Источник:</strong> <a href="{Html(courtAct.SourceUrl)}">{Html(courtAct.SourceUrl)}</a></p>
              <hr>
@@ -9993,7 +10008,7 @@ public partial class CasesV2Controller : ControllerBase
 
         if (result.CreatedCourtActDocuments > 0)
         {
-            parts.Add($"добавлено судебных актов: {result.CreatedCourtActDocuments}");
+            parts.Add($"добавлено сводок судебных событий: {result.CreatedCourtActDocuments}");
         }
 
         if (result.CreatedProceduralDeadlines > 0)

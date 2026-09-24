@@ -68,6 +68,43 @@ public class SudrfCourtSyncServiceTests
     }
 
     [Fact]
+    public void ParseCaseHtml_DoesNotTurnScheduledDecisionIntoActOrDecisionDate()
+    {
+        var html = BuildCourtHtml()
+            .Replace(
+                "<tr><td>Вынесено решение</td><td>01.06.2026</td><td></td><td></td><td>Решение удовлетворено частично</td><td></td><td>02.06.2026</td></tr>",
+                "<tr><td>Назначено вынесение решения суда</td><td>01.06.2026</td><td></td><td></td><td></td><td></td><td>02.05.2026</td></tr>")
+            .Replace(
+                "<tr><th>Судья</th><td>Казарикова Оксана Витальевна</td></tr>",
+                "<tr><th>Судья</th><td>Казарикова Оксана Витальевна</td></tr><tr><th>Дата рассмотрения</th><td>01.06.2026</td></tr>");
+
+        var data = SudrfCourtSyncService.ParseCaseHtml(
+            html,
+            new Uri("https://kraevoy--hbr.sudrf.ru/modules.php?name=sud_delo&name_op=case&delo_id=42"),
+            new DateTime(2026, 5, 3, 0, 0, 0, DateTimeKind.Utc));
+
+        Assert.Null(data.DecisionAt);
+        Assert.DoesNotContain(data.CourtActs, item => item.Title == "Решение суда");
+        Assert.Contains(data.MovementEvents, item => item.Title == "Назначено вынесение решения суда");
+    }
+
+    [Fact]
+    public void ParseCaseHtml_DoesNotTurnScheduledAppealActIntoDocument()
+    {
+        var html = BuildCourtHtml().Replace(
+            "<tr><td>Вынесено решение</td><td>01.06.2026</td><td></td><td></td><td>Решение удовлетворено частично</td><td></td><td>02.06.2026</td></tr>",
+            "<tr><td>Апелляционное определение назначено</td><td>01.06.2026</td><td></td><td></td><td></td><td></td><td>02.05.2026</td></tr>");
+
+        var data = SudrfCourtSyncService.ParseCaseHtml(
+            html,
+            new Uri("https://kraevoy--hbr.sudrf.ru/modules.php?name=sud_delo&name_op=case&delo_id=42"),
+            new DateTime(2026, 5, 3, 0, 0, 0, DateTimeKind.Utc));
+
+        Assert.Null(data.DecisionAt);
+        Assert.Empty(data.CourtActs);
+    }
+
+    [Fact]
     public void ParseCaseHtml_ExtractsLiveSudrfIdBlocks()
     {
         var data = SudrfCourtSyncService.ParseCaseHtml(

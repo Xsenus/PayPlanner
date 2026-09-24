@@ -7439,6 +7439,12 @@ public sealed class NotificationService : INotificationService
     {
         var isScheduled = string.Equals(courtEvent.MovementStatus, "scheduled", StringComparison.OrdinalIgnoreCase)
             || string.Equals(courtEvent.MovementStatus, "pending", StringComparison.OrdinalIgnoreCase);
+        if (isScheduled
+            && string.Equals(courtEvent.EventType, CourtSyncNormalization.EventTypes.Decision, StringComparison.OrdinalIgnoreCase))
+        {
+            return UserNotificationTypes.CourtStatusChanged;
+        }
+
         if (string.Equals(courtEvent.EventType, CourtSyncNormalization.EventTypes.Decision, StringComparison.OrdinalIgnoreCase)
             && !isScheduled
             && (courtEvent.ClientCaseDocumentId.HasValue

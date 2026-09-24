@@ -487,7 +487,7 @@ function buildCourtSyncOverviewMessage(result: ClientCaseCourtSyncRun) {
   const parts = [
     [result.createdCourtEvents ?? 0, ['событие', 'события', 'событий'] as const],
     [result.createdCourtParties ?? 0, ['участник', 'участника', 'участников'] as const],
-    [result.createdCourtActDocuments ?? 0, ['судебный акт', 'судебных акта', 'судебных актов'] as const],
+    [result.createdCourtActDocuments ?? 0, ['сводка судебного события', 'сводки судебных событий', 'сводок судебных событий'] as const],
     [result.createdProceduralDeadlines ?? 0, ['процессуальный срок', 'процессуальных срока', 'процессуальных сроков'] as const],
   ]
     .filter(([count]) => Number(count) > 0)

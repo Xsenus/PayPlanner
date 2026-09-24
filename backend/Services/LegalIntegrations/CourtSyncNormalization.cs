@@ -43,6 +43,7 @@ public static class CourtSyncNormalization
     public static class DocumentTypes
     {
         public const string CourtAct = "Судебный акт";
+        public const string CourtEventSummary = "Сводка судебного события";
     }
 
     public static string NormalizeInstance(string? value)
@@ -135,6 +136,32 @@ public static class CourtSyncNormalization
             ? MovementStatuses.Scheduled
             : MovementStatuses.Held;
     }
+
+    public static bool IsConfirmedDecisionMovement(string? title, string? result, string? reason)
+    {
+        var sourceResult = $"{result} {reason}";
+        var status = ResolveMovementStatusFromResult(sourceResult);
+        if (status is MovementStatuses.Postponed or MovementStatuses.Cancelled
+            || (status == MovementStatuses.Scheduled && !string.IsNullOrWhiteSpace(sourceResult)))
+        {
+            return false;
+        }
+
+        return HasCompletedDecisionText(title) || HasCompletedDecisionText(sourceResult);
+    }
+
+    private static bool HasCompletedDecisionText(string? value)
+        => Contains(value, "вынесено решение")
+            || Contains(value, "изготовлено мотивированное решение")
+            || Contains(value, "иск удовлетвор")
+            || Contains(value, "заявление удовлетвор")
+            || Contains(value, "жалоба удовлетвор")
+            || (Contains(value, "требован") && Contains(value, "удовлетвор"))
+            || Contains(value, "в удовлетворении отказ")
+            || (Contains(value, "отказано")
+                && (Contains(value, "иск") || Contains(value, "заявлен") || Contains(value, "жалоб")))
+            || Contains(value, "производство прекращено")
+            || Contains(value, "оставлено без рассмотрения");
 
     public static string ResolvePartySideFromRole(string? role)
     {

@@ -36,6 +36,23 @@ public sealed class CourtSyncNormalizationTests
     public void ResolveMovementStatusFromResult_ReturnsCanonicalStatus(string result, string expected)
         => Assert.Equal(expected, CourtSyncNormalization.ResolveMovementStatusFromResult(result));
 
+    [Theory]
+    [InlineData("Вынесено решение", "", "", true)]
+    [InlineData("Изготовлено мотивированное решение", "", "", true)]
+    [InlineData("Решение суда", "Иск удовлетворен частично", "", true)]
+    [InlineData("Решение суда", "Требования удовлетворены частично", "", true)]
+    [InlineData("Решение суда", "В удовлетворении иска отказано", "", true)]
+    [InlineData("Решение суда", "", "", false)]
+    [InlineData("Назначено вынесение решения суда", "", "", false)]
+    [InlineData("Решение суда", "Ожидается решение", "", false)]
+    [InlineData("Вынесено решение", "Назначено оглашение", "", false)]
+    public void IsConfirmedDecisionMovement_RequiresCompletedOutcome(
+        string title,
+        string result,
+        string reason,
+        bool expected)
+        => Assert.Equal(expected, CourtSyncNormalization.IsConfirmedDecisionMovement(title, result, reason));
+
     [Fact]
     public void Labels_AreResolvedFromCanonicalValues()
     {

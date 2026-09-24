@@ -4756,6 +4756,7 @@ public class NotificationServiceTests
     [Theory]
     [InlineData("hearing", "completed", "Иск рассмотрен", UserNotificationTypes.CourtStatusChanged)]
     [InlineData("decision", "scheduled", "Ожидается решение", UserNotificationTypes.CourtStatusChanged)]
+    [InlineData("decision", "scheduled", "", UserNotificationTypes.CourtStatusChanged)]
     [InlineData("decision", "completed", "Иск удовлетворён частично", UserNotificationTypes.CourtDecisionRecorded)]
     public async Task NotifyCaseCourtEventAsync_DoesNotPresentHearingOrScheduledDecisionAsRenderedDecision(
         string eventType,
