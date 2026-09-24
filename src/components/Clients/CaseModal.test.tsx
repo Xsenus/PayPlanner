@@ -17,6 +17,8 @@ vi.mock('../../hooks/useDialog', () => ({
 vi.mock('../../services/api', () => ({
   apiService: {
     getCaseDocuments: vi.fn(),
+    getCaseHearingPreparation: vi.fn(),
+    updateCaseHearingPreparation: vi.fn(),
     reviewCasePosition: vi.fn(),
     confirmNextHearing: vi.fn(),
     getCurrentCaseAppealDecision: vi.fn(),
@@ -62,6 +64,13 @@ describe('CaseModal', () => {
     dialogMock.prompt.mockResolvedValue(null);
     vi.mocked(apiService.getCaseDocuments).mockReset();
     vi.mocked(apiService.getCaseDocuments).mockResolvedValue([]);
+    vi.mocked(apiService.getCaseHearingPreparation).mockReset();
+    vi.mocked(apiService.getCaseHearingPreparation).mockResolvedValue({
+      hearingAt: '2099-10-20T15:00:00Z', contractCheckedAt: null, contractCheckedByName: '',
+      authorityCheckedAt: null, authorityCheckedByName: '', materialsCheckedAt: null,
+      materialsCheckedByName: '', documentIds: [],
+    });
+    vi.mocked(apiService.updateCaseHearingPreparation).mockReset();
     vi.mocked(apiService.reviewCasePosition).mockReset();
     vi.mocked(apiService.reviewCasePosition).mockResolvedValue({ positionReviewedAt: '2026-09-23T10:00:00Z', positionReviewedByUserId: 7, positionReviewedByName: 'Юрист' });
     vi.mocked(apiService.confirmNextHearing).mockReset();

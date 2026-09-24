@@ -26,6 +26,8 @@ vi.mock('../../services/api', () => ({
     getLegalEntitiesPaged: vi.fn(),
     getContacts: vi.fn(),
     getCaseDocuments: vi.fn(),
+    getCaseHearingPreparation: vi.fn(),
+    updateCaseHearingPreparation: vi.fn(),
     getCaseDocumentTemplates: vi.fn(),
     getCaseDocumentTypes: vi.fn(),
     getDocumentStatuses: vi.fn(),
@@ -244,6 +246,13 @@ describe('CaseDetailPage', () => {
     vi.mocked(apiService.reviewCasePosition).mockReset();
     vi.mocked(apiService.reviewCasePosition).mockResolvedValue({ positionReviewedAt: '2026-09-23T10:00:00Z', positionReviewedByUserId: 7, positionReviewedByName: 'Юрист' });
     vi.mocked(apiService.confirmNextHearing).mockReset();
+    vi.mocked(apiService.getCaseHearingPreparation).mockReset();
+    vi.mocked(apiService.getCaseHearingPreparation).mockResolvedValue({
+      hearingAt: '2099-10-20T15:00:00Z', contractCheckedAt: null, contractCheckedByName: '',
+      authorityCheckedAt: null, authorityCheckedByName: '', materialsCheckedAt: null,
+      materialsCheckedByName: '', documentIds: [],
+    });
+    vi.mocked(apiService.updateCaseHearingPreparation).mockReset();
     vi.mocked(apiService.getCurrentCaseAppealDecision).mockReset();
     vi.mocked(apiService.getCurrentCaseAppealDecision).mockResolvedValue(null);
     vi.mocked(apiService.createCaseAppealTask).mockReset();

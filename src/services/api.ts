@@ -6655,6 +6655,22 @@ export class ApiService {
     return this.request<ClientCaseCourtEvent[]>(`/v2/cases/${caseId}/court-events`);
   }
 
+  async getCaseHearingPreparation(caseId: number) {
+    return this.request<ClientCaseHearingPreparation>(`/v2/cases/${caseId}/hearing-preparation`);
+  }
+
+  async updateCaseHearingPreparation(caseId: number, payload: {
+    hearingAt: string;
+    checkKind: 'contract' | 'authority' | 'materials';
+    checked: boolean;
+    documentIds?: number[];
+  }) {
+    return this.request<ClientCaseHearingPreparation>(`/v2/cases/${caseId}/hearing-preparation`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
   async createCaseCourtEvent(caseId: number, payload: UpsertClientCaseCourtEventPayload) {
     return this.request<ClientCaseCourtEvent>(`/v2/cases/${caseId}/court-events`, {
       method: 'POST',
@@ -8678,6 +8694,7 @@ import type {
   ClientCaseCourtSyncSearchResult,
   ClientCaseCourtSyncSettings,
   ClientCaseDocument,
+  ClientCaseHearingPreparation,
   ClientCaseDocumentTemplate,
   ClientCaseDocumentTemplateToken,
   RenderedCaseDocumentTemplate,

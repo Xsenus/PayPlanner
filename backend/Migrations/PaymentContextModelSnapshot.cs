@@ -2544,6 +2544,77 @@ namespace PayPlanner.Api.Migrations
                     b.ToTable("ClientCaseDocuments");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseHearingPreparation", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("AuthorityCheckedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AuthorityCheckedByName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("AuthorityCheckedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ClientCaseId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("ContractCheckedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ContractCheckedByName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("ContractCheckedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("HearingAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("MaterialsCheckedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("MaterialsCheckedByName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("MaterialsCheckedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClientCaseId", "HearingAt")
+                        .IsUnique();
+
+                    b.ToTable("ClientCaseHearingPreparations");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseHearingPreparationDocument", b =>
+                {
+                    b.Property<int>("ClientCaseHearingPreparationId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ClientCaseDocumentId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("ClientCaseHearingPreparationId", "ClientCaseDocumentId");
+
+                    b.HasIndex("ClientCaseDocumentId");
+
+                    b.ToTable("ClientCaseHearingPreparationDocuments");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseProceduralDeadline", b =>
                 {
                     b.Property<int>("Id")
@@ -11584,6 +11655,36 @@ namespace PayPlanner.Api.Migrations
                     b.Navigation("UploadedByUser");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseHearingPreparation", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.ClientCase", "ClientCase")
+                        .WithMany("HearingPreparations")
+                        .HasForeignKey("ClientCaseId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("ClientCase");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseHearingPreparationDocument", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.ClientCaseDocument", "Document")
+                        .WithMany()
+                        .HasForeignKey("ClientCaseDocumentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.ClientCaseHearingPreparation", "Preparation")
+                        .WithMany("Documents")
+                        .HasForeignKey("ClientCaseHearingPreparationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Document");
+
+                    b.Navigation("Preparation");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseProceduralDeadline", b =>
                 {
                     b.HasOne("PayPlanner.Api.Models.ClientCaseDocument", "ClientCaseDocument")
@@ -13254,6 +13355,8 @@ namespace PayPlanner.Api.Migrations
 
                     b.Navigation("Documents");
 
+                    b.Navigation("HearingPreparations");
+
                     b.Navigation("InvoiceClientCases");
 
                     b.Navigation("Payments");
@@ -13273,6 +13376,11 @@ namespace PayPlanner.Api.Migrations
             modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseCourtInstance", b =>
                 {
                     b.Navigation("Complaints");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseHearingPreparation", b =>
+                {
+                    b.Navigation("Documents");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseWorkOrder", b =>

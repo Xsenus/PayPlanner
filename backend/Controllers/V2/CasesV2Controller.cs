@@ -5758,6 +5758,17 @@ public partial class CasesV2Controller : ControllerBase
         }
 
         var storagePath = document.StoragePath;
+        var affectedPreparations = await _db.ClientCaseHearingPreparations
+            .Where(item => item.ClientCaseId == id && item.Documents.Any(link => link.ClientCaseDocumentId == documentId))
+            .ToListAsync(ct);
+        var deletedAt = DateTime.UtcNow;
+        foreach (var preparation in affectedPreparations)
+        {
+            preparation.MaterialsCheckedAt = null;
+            preparation.MaterialsCheckedByUserId = null;
+            preparation.MaterialsCheckedByName = string.Empty;
+            preparation.UpdatedAt = deletedAt;
+        }
         _db.ClientCaseDocuments.Remove(document);
         AppendCaseEvent(
             clientCase,

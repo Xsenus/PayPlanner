@@ -869,6 +869,17 @@ export interface ClientCaseCourtEvent {
   isOverdue: boolean;
 }
 
+export interface ClientCaseHearingPreparation {
+  hearingAt: string;
+  contractCheckedAt: string | null;
+  contractCheckedByName: string;
+  authorityCheckedAt: string | null;
+  authorityCheckedByName: string;
+  materialsCheckedAt: string | null;
+  materialsCheckedByName: string;
+  documentIds: number[];
+}
+
 export interface ClientCaseCourtEventHistory {
   id: number;
   clientCaseCourtEventId: number;

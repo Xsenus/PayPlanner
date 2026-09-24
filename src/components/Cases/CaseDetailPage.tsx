@@ -4,6 +4,7 @@ import { SystemSelect } from '../ui/SystemSelect';
 import { ClientPortalAccessPanel } from './ClientPortalAccessPanel';
 import { CaseAppealDecisionAction } from './CaseAppealDecisionAction';
 import { CasePreHearingActions } from './CasePreHearingActions';
+import { CaseHearingPreparationChecklist } from './CaseHearingPreparationChecklist';
 import { CourtRecoveryPanel } from './CourtRecoveryPanel';
 import { ExecutiveWritDocumentUpload } from './ExecutiveWritDocumentUpload';
 import { MessengerDocumentDeliveryModal } from './MessengerDocumentDeliveryModal';
@@ -4268,6 +4269,12 @@ export function CaseDetailPage({
               canCreateTask={canCreateCaseTask}
               onTaskCreated={() => setReloadToken((value) => value + 1)}
               onOpenTask={onOpenTask}
+            />
+            <CaseHearingPreparationChecklist
+              caseItem={caseItem}
+              timeZoneId={caseTimeZoneId}
+              canEdit={canEdit}
+              initialDocuments={documents}
             />
             <CourtPanel
               initialOverview={courtOverview}

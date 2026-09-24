@@ -1791,6 +1791,33 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => new { e.ClientCaseId, e.MovementStatus, e.ScheduledAt }).HasDatabaseName("IX_ClientCaseCourtEvents_Case_Status_ScheduledAt");
         });
 
+        modelBuilder.Entity<ClientCaseHearingPreparation>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.ContractCheckedByName).HasMaxLength(256);
+            entity.Property(e => e.AuthorityCheckedByName).HasMaxLength(256);
+            entity.Property(e => e.MaterialsCheckedByName).HasMaxLength(256);
+            entity.HasOne(e => e.ClientCase)
+                .WithMany(e => e.HearingPreparations)
+                .HasForeignKey(e => e.ClientCaseId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(e => new { e.ClientCaseId, e.HearingAt }).IsUnique();
+        });
+
+        modelBuilder.Entity<ClientCaseHearingPreparationDocument>(entity =>
+        {
+            entity.HasKey(e => new { e.ClientCaseHearingPreparationId, e.ClientCaseDocumentId });
+            entity.HasOne(e => e.Preparation)
+                .WithMany(e => e.Documents)
+                .HasForeignKey(e => e.ClientCaseHearingPreparationId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Document)
+                .WithMany()
+                .HasForeignKey(e => e.ClientCaseDocumentId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(e => e.ClientCaseDocumentId);
+        });
+
         // ------------------ ClientCaseCourt ------------------
         modelBuilder.Entity<ClientCaseCourt>(entity =>
         {
@@ -3702,6 +3729,11 @@ public class PaymentContext : DbContext
                 && ClientCaseCourtEvents.Any(parent => parent.Id == item.ClientCaseCourtEventId));
         modelBuilder.Entity<ClientCaseCourtInstance>()
             .HasQueryFilter(item => ClientCases.Any(parent => parent.Id == item.ClientCaseId));
+        modelBuilder.Entity<ClientCaseHearingPreparation>()
+            .HasQueryFilter(item => ClientCases.Any(parent => parent.Id == item.ClientCaseId));
+        modelBuilder.Entity<ClientCaseHearingPreparationDocument>()
+            .HasQueryFilter(item => ClientCaseHearingPreparations.Any(parent => parent.Id == item.ClientCaseHearingPreparationId)
+                && ClientCaseDocuments.Any(parent => parent.Id == item.ClientCaseDocumentId));
         modelBuilder.Entity<ClientCaseDocument>()
             .HasQueryFilter(item => ClientCases.Any(parent => parent.Id == item.ClientCaseId));
         modelBuilder.Entity<ClientCaseRelatedParty>()
@@ -4462,6 +4494,10 @@ public class PaymentContext : DbContext
     public DbSet<ClientCaseProceduralDeadline> ClientCaseProceduralDeadlines { get; set; }
 
     public DbSet<ClientCaseCourtEvent> ClientCaseCourtEvents { get; set; }
+
+    public DbSet<ClientCaseHearingPreparation> ClientCaseHearingPreparations { get; set; }
+
+    public DbSet<ClientCaseHearingPreparationDocument> ClientCaseHearingPreparationDocuments { get; set; }
 
     public DbSet<ClientCaseCourtEventHistory> ClientCaseCourtEventHistory { get; set; }
 

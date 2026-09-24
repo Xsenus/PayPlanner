@@ -3658,6 +3658,92 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task HearingPreparation_IsScopedToSavedHearingAndOwnDocumentsWithSeparateReadPermission()
+    {
+        await using var db = await CreateContextAsync();
+        var lawyer = await CreateUserAsync(db, "prep-lawyer@example.test", "Юрист");
+        var viewer = await CreateUserAsync(db, "prep-viewer@example.test", "Наблюдатель", DataVisibilityScope.All);
+        var outsider = await CreateUserAsync(db, "prep-outsider@example.test", "Другой юрист", DataVisibilityScope.Own);
+        await GrantSectionPermissionAsync(db, viewer, RolePermissionCatalog.Cases, canEdit: false);
+        var hearingAt = DateTime.UtcNow.AddDays(5);
+        var clientCase = new ClientCase
+        {
+            Client = new Client { Name = "Доверитель", IsActive = true, ResponsibleUserId = lawyer.Id },
+            Title = "Дело с подготовкой", Status = ClientCaseStatus.Open,
+            ResponsibleUserId = lawyer.Id, NextHearingAt = hearingAt,
+        };
+        var otherCase = new ClientCase
+        {
+            Client = new Client { Name = "Другой доверитель", IsActive = true, ResponsibleUserId = lawyer.Id },
+            Title = "Другое дело", Status = ClientCaseStatus.Open, ResponsibleUserId = lawyer.Id,
+        };
+        db.ClientCases.AddRange(clientCase, otherCase);
+        await db.SaveChangesAsync();
+        ClientCaseDocument MakeDocument(int caseId, string name) => new()
+        {
+            ClientCaseId = caseId, DocumentKey = name, Version = 1,
+            DocumentType = "Материал", Status = "ready", OriginalFileName = name,
+            StoredFileName = name, StoragePath = $"cases/{name}", ContentType = "application/pdf",
+            SizeBytes = 100, UploadedByName = lawyer.FullName,
+        };
+        var ownDocument = MakeDocument(clientCase.Id, "position.pdf");
+        var foreignDocument = MakeDocument(otherCase.Id, "foreign.pdf");
+        db.ClientCaseDocuments.AddRange(ownDocument, foreignDocument);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, lawyer);
+        Assert.IsType<ForbidResult>((await CreateController(db, viewer).UpdateHearingPreparation(
+            clientCase.Id, new() { HearingAt = hearingAt, CheckKind = "contract", Checked = true }, CancellationToken.None)).Result);
+        Assert.IsType<NotFoundResult>((await CreateController(db, outsider).GetHearingPreparation(clientCase.Id, CancellationToken.None)).Result);
+        Assert.IsType<BadRequestObjectResult>((await controller.UpdateHearingPreparation(
+            clientCase.Id, new() { HearingAt = hearingAt, CheckKind = null! }, CancellationToken.None)).Result);
+        Assert.IsType<BadRequestObjectResult>((await controller.UpdateHearingPreparation(
+            clientCase.Id, new() { HearingAt = hearingAt, CheckKind = "materials", Checked = true }, CancellationToken.None)).Result);
+        Assert.IsType<BadRequestObjectResult>((await controller.UpdateHearingPreparation(
+            clientCase.Id, new() { HearingAt = hearingAt, CheckKind = "materials", Checked = true, DocumentIds = [foreignDocument.Id] }, CancellationToken.None)).Result);
+
+        var contract = Assert.IsType<CasesV2Controller.HearingPreparationDto>(Assert.IsType<OkObjectResult>(
+            (await controller.UpdateHearingPreparation(clientCase.Id,
+                new() { HearingAt = hearingAt, CheckKind = "contract", Checked = true }, CancellationToken.None)).Result).Value);
+        var repeated = Assert.IsType<CasesV2Controller.HearingPreparationDto>(Assert.IsType<OkObjectResult>(
+            (await controller.UpdateHearingPreparation(clientCase.Id,
+                new() { HearingAt = hearingAt, CheckKind = "contract", Checked = true }, CancellationToken.None)).Result).Value);
+        Assert.Equal(contract.ContractCheckedAt, repeated.ContractCheckedAt);
+        Assert.Equal(lawyer.FullName, contract.ContractCheckedByName);
+
+        var materials = Assert.IsType<CasesV2Controller.HearingPreparationDto>(Assert.IsType<OkObjectResult>(
+            (await controller.UpdateHearingPreparation(clientCase.Id,
+                new() { HearingAt = hearingAt, CheckKind = "materials", Checked = true, DocumentIds = [ownDocument.Id] }, CancellationToken.None)).Result).Value);
+        Assert.Equal([ownDocument.Id], materials.DocumentIds);
+        var visible = Assert.IsType<CasesV2Controller.HearingPreparationDto>(Assert.IsType<OkObjectResult>(
+            (await CreateController(db, viewer).GetHearingPreparation(clientCase.Id, CancellationToken.None)).Result).Value);
+        Assert.Equal(materials.MaterialsCheckedAt, visible.MaterialsCheckedAt);
+
+        var cleared = Assert.IsType<CasesV2Controller.HearingPreparationDto>(Assert.IsType<OkObjectResult>(
+            (await controller.UpdateHearingPreparation(clientCase.Id,
+                new() { HearingAt = hearingAt, CheckKind = "materials", Checked = false, DocumentIds = [] }, CancellationToken.None)).Result).Value);
+        Assert.Null(cleared.MaterialsCheckedAt);
+        Assert.Empty(cleared.DocumentIds);
+        Assert.Empty(await db.ClientCaseHearingPreparationDocuments.ToListAsync());
+
+        clientCase.NextHearingAt = hearingAt.AddDays(2);
+        await db.SaveChangesAsync();
+        Assert.IsType<ConflictObjectResult>((await controller.UpdateHearingPreparation(
+            clientCase.Id, new() { HearingAt = hearingAt, CheckKind = "authority", Checked = true }, CancellationToken.None)).Result);
+        var newDate = Assert.IsType<CasesV2Controller.HearingPreparationDto>(Assert.IsType<OkObjectResult>(
+            (await controller.GetHearingPreparation(clientCase.Id, CancellationToken.None)).Result).Value);
+        Assert.Null(newDate.ContractCheckedAt);
+        Assert.Null(newDate.MaterialsCheckedAt);
+        Assert.Empty(newDate.DocumentIds);
+        Assert.Single(await db.ClientCaseHearingPreparations.ToListAsync());
+
+        clientCase.Status = ClientCaseStatus.Closed;
+        await db.SaveChangesAsync();
+        Assert.IsType<ConflictObjectResult>((await controller.UpdateHearingPreparation(
+            clientCase.Id, new() { HearingAt = clientCase.NextHearingAt!.Value, CheckKind = "authority", Checked = true }, CancellationToken.None)).Result);
+    }
+
+    [Fact]
     public async Task ExpiringCaseAppeals_ReturnsOnlyVisibleUnresolvedDecisionsInThreeDayWindow()
     {
         await using var db = await CreateContextAsync();
@@ -6710,11 +6796,22 @@ public class CasesV2ControllerTests
         Assert.Equal(first.Id, availableDocument.Id);
         Assert.True(availableDocument.IsLatestVersion);
 
+        clientCase.NextHearingAt = DateTime.UtcNow.AddDays(3);
+        await db.SaveChangesAsync();
+        var prepared = Assert.IsType<CasesV2Controller.HearingPreparationDto>(Assert.IsType<OkObjectResult>(
+            (await controller.UpdateHearingPreparation(clientCase.Id,
+                new() { HearingAt = clientCase.NextHearingAt.Value, CheckKind = "materials", Checked = true, DocumentIds = [first.Id] }, CancellationToken.None)).Result).Value);
+        Assert.NotNull(prepared.MaterialsCheckedAt);
+
         var deleteResult = await controller.DeleteDocument(clientCase.Id, first.Id, CancellationToken.None);
 
         Assert.IsType<NoContentResult>(deleteResult);
         Assert.DoesNotContain(await db.ClientCaseDocuments.ToListAsync(), item => item.Id == first.Id);
         Assert.Contains(await db.ClientCaseDocuments.ToListAsync(), item => item.Id == second.Id);
+        var afterDeletion = Assert.IsType<CasesV2Controller.HearingPreparationDto>(Assert.IsType<OkObjectResult>(
+            (await controller.GetHearingPreparation(clientCase.Id, CancellationToken.None)).Result).Value);
+        Assert.Null(afterDeletion.MaterialsCheckedAt);
+        Assert.Empty(afterDeletion.DocumentIds);
         var documentAuditEvents = await db.ObjectAuditEvents
             .Where(item => item.ObjectType == "client-case-document")
             .OrderBy(item => item.Id)

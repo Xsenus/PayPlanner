@@ -3,6 +3,7 @@ import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
 import { CaseAppealDecisionAction } from '../Cases/CaseAppealDecisionAction';
 import { CasePreHearingActions } from '../Cases/CasePreHearingActions';
+import { CaseHearingPreparationChecklist } from '../Cases/CaseHearingPreparationChecklist';
 import { CourtRecoveryPanel } from '../Cases/CourtRecoveryPanel';
 import { ExecutiveWritDocumentUpload } from '../Cases/ExecutiveWritDocumentUpload';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -1707,6 +1708,16 @@ export function CaseModal({
               datesSaved={nextHearingAt === toDateTimeInput(caseData.nextHearingAt) && responsibleUserId === String(caseData.responsibleUserId ?? '')}
               onTaskCreated={() => void refreshCaseTasks()}
               onOpenTask={onOpenTask}
+            />
+          </div>
+
+          <div className="md:col-span-2">
+            <CaseHearingPreparationChecklist
+              caseItem={caseData}
+              timeZoneId={timeZoneId}
+              canEdit={allowEdit}
+              datesSaved={nextHearingAt === toDateTimeInput(caseData.nextHearingAt)}
+              initialDocuments={caseDocuments}
             />
           </div>
 

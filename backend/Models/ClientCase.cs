@@ -495,6 +495,8 @@ namespace PayPlanner.Api.Models
 
         public ICollection<ClientCaseCourtEvent> CourtEvents { get; set; } = new List<ClientCaseCourtEvent>();
 
+        public ICollection<ClientCaseHearingPreparation> HearingPreparations { get; set; } = new List<ClientCaseHearingPreparation>();
+
         public ICollection<ClientCaseCourtParty> CourtParties { get; set; } = new List<ClientCaseCourtParty>();
 
         public ICollection<ClientCaseCourtEventHistory> CourtEventHistory { get; set; } = new List<ClientCaseCourtEventHistory>();
