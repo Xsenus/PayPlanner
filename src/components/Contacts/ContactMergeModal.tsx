@@ -58,8 +58,10 @@ export function ContactMergeModal({ onClose, onMerged }: Props) {
   const duplicate = byKey.get(duplicateKey);
   const differentKinds = Boolean(primary && duplicate && primary.contactType !== duplicate.contactType);
   const differentSources = Boolean(primary && duplicate && primary.sourceType !== duplicate.sourceType);
-  const unsupportedMixedPair = differentSources && !(duplicate?.sourceType === 'external'
-    && (primary?.sourceType === 'client' || primary?.sourceType === 'legal'));
+  const reverseMixedPair = primary?.sourceType === 'external'
+    && (duplicate?.sourceType === 'client' || duplicate?.sourceType === 'legal');
+  const unsupportedMixedPair = differentSources && !(reverseMixedPair || (duplicate?.sourceType === 'external'
+    && (primary?.sourceType === 'client' || primary?.sourceType === 'legal')));
   const sameRecord = Boolean(primaryKey && primaryKey === duplicateKey);
 
   useEffect(() => {
@@ -104,7 +106,7 @@ export function ContactMergeModal({ onClose, onMerged }: Props) {
     if (!primary || !duplicate || !preview?.canMerge || merging) return;
     const approved = await confirm({
       title: 'Объединить контакты?',
-      description: `Основной останется «${primary.fullName}» (#${primary.sourceId}). «${duplicate.fullName}» (#${duplicate.sourceId}) будет архивирован; ${preview.affectedLinks} связей будут перенесены. Отменить перенос связей одной кнопкой нельзя.`,
+      description: `Основной останется «${primary.fullName}» (#${primary.sourceId}). «${duplicate.fullName}» (#${duplicate.sourceId}) будет архивирован; ${preview.affectedLinks} связей будут перенесены.${reverseMixedPair ? ' Для выбранного быстрого контакта будет создана новая полная карточка, к ней перейдут дела и документы.' : ''} Отменить перенос связей одной кнопкой нельзя.`,
       confirmLabel: 'Объединить и архивировать',
       cancelLabel: 'Отмена',
       variant: 'danger',
@@ -171,7 +173,8 @@ export function ContactMergeModal({ onClose, onMerged }: Props) {
           </div>
           {sameRecord ? <p className="rounded-lg bg-amber-50 p-2 text-sm text-amber-800">Выберите две разные карточки.</p> : null}
           {differentKinds ? <p className="rounded-lg bg-amber-50 p-2 text-sm text-amber-800">Человека нельзя объединить с организацией.</p> : null}
-          {unsupportedMixedPair ? <p className="rounded-lg bg-amber-50 p-2 text-sm text-amber-800">Для смешанной пары выберите полную карточку основной, а быстрый контакт — дублем. Так связи дел и документов останутся на полной карточке.</p> : null}
+          {unsupportedMixedPair ? <p className="rounded-lg bg-amber-50 p-2 text-sm text-amber-800">Объединять можно карточки одного вида: человека с человеком или организацию с организацией.</p> : null}
+          {reverseMixedPair ? <p className="rounded-lg bg-blue-50 p-2 text-sm text-blue-800">Быстрый контакт останется основным. Система создаст для него новую полную карточку и перенесёт на неё связи архивируемой карточки.</p> : null}
           {previewing ? <p role="status" className="text-sm text-slate-600">Проверяем связи и права…</p> : null}
           {preview ? (
             <section className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm">

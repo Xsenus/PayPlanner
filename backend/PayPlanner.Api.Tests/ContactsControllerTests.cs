@@ -168,6 +168,153 @@ public class ContactsControllerTests
     }
 
     [Fact]
+    public async Task MergeContacts_QuickPersonAsPrimary_CreatesNewFullClientAndMovesCaseAndPayment()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateClientUserAsync(db, "merge-reverse-client", true, true, true, true, true);
+        var oldClient = await CreateClientAsync(db, user.Id, "Старая полная карточка", "79991110000");
+        oldClient.Address = "Адрес из старой карточки";
+        var quick = await CreateExternalContactAsync(db, user.Id, "Выбранный основной", "79992220000");
+        db.ClientCases.Add(new ClientCase { ClientId = oldClient.Id, Title = "Судебное дело" });
+        db.Payments.Add(new Payment { ClientId = oldClient.Id, Date = DateTime.UtcNow, Amount = 100m });
+        await db.SaveChangesAsync();
+        var request = new ContactMergeRequest
+        {
+            PrimarySourceType = "external", PrimarySourceId = quick.Id,
+            DuplicateSourceType = "client", DuplicateSourceId = oldClient.Id,
+        };
+
+        var preview = await CreateController(db, user.Id).PreviewMerge(request, CancellationToken.None);
+        var previewValue = Assert.IsType<ContactsController.ContactMergePreview>(Assert.IsType<OkObjectResult>(preview.Result).Value);
+        Assert.True(previewValue.CanMerge);
+        Assert.True(previewValue.AffectedLinks >= 2);
+        Assert.IsType<OkObjectResult>((await CreateController(db, user.Id).MergeContacts(request, CancellationToken.None)).Result);
+
+        db.ChangeTracker.Clear();
+        var survivingQuick = await db.ExternalContacts.SingleAsync(x => x.Id == quick.Id);
+        Assert.NotNull(survivingQuick.LinkedClientId);
+        Assert.NotEqual(oldClient.Id, survivingQuick.LinkedClientId);
+        var replacement = await db.Clients.SingleAsync(x => x.Id == survivingQuick.LinkedClientId);
+        Assert.Equal(quick.FullName, replacement.Name);
+        Assert.Equal(oldClient.Address, replacement.Address);
+        Assert.Contains("79992220000", replacement.Notes);
+        Assert.Contains("79991110000", replacement.Notes);
+        Assert.Equal(replacement.Id, (await db.ClientCases.SingleAsync()).ClientId);
+        Assert.Equal(replacement.Id, (await db.Payments.SingleAsync()).ClientId);
+        Assert.Null(await db.Clients.FirstOrDefaultAsync(x => x.Id == oldClient.Id));
+        Assert.NotNull(await db.Clients.IgnoreQueryFilters().FirstOrDefaultAsync(x => x.Id == oldClient.Id));
+        Assert.Contains(await db.ObjectAuditEvents.ToListAsync(), x => x.ObjectType == "contact-merge" && x.ObjectId == quick.Id);
+    }
+
+    [Fact]
+    public async Task MergeContacts_QuickPrimaryAlreadyLinkedToDuplicate_ReplacesLinkWithoutLosingHistory()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateClientUserAsync(db, "merge-reverse-linked", true, true, true, true, true);
+        var oldClient = await CreateClientAsync(db, user.Id);
+        var quick = await CreateExternalContactAsync(db, user.Id);
+        quick.LinkedClientId = oldClient.Id;
+        db.ClientCases.Add(new ClientCase { ClientId = oldClient.Id, Title = "История дела" });
+        await db.SaveChangesAsync();
+
+        var response = await CreateController(db, user.Id).MergeContacts(new ContactMergeRequest
+        {
+            PrimarySourceType = "external", PrimarySourceId = quick.Id,
+            DuplicateSourceType = "client", DuplicateSourceId = oldClient.Id,
+        }, CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(response.Result);
+        db.ChangeTracker.Clear();
+        var replacementId = (await db.ExternalContacts.SingleAsync(x => x.Id == quick.Id)).LinkedClientId;
+        Assert.NotNull(replacementId);
+        Assert.NotEqual(oldClient.Id, replacementId);
+        Assert.Equal(replacementId, (await db.ClientCases.SingleAsync()).ClientId);
+    }
+
+    [Fact]
+    public async Task MergeContacts_QuickOrganizationAsPrimary_PreservesFullDetailsAndMovesClient()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateClientUserAsync(db, "merge-reverse-legal", true, true, true, true, true,
+            legalEntityViewScope: DataVisibilityScope.All);
+        var oldLegal = await CreateLegalEntityAsync(db, user.Id, "Старая организация");
+        oldLegal.Inn = "5401000000";
+        oldLegal.BankAccountsJson = "[{\"number\":\"123\"}]";
+        var quick = await CreateExternalContactAsync(db, user.Id, "Новая организация", "79993330000");
+        quick.ContactType = "Organization";
+        quick.Inn = oldLegal.Inn;
+        var linkedClient = await CreateClientAsync(db, user.Id);
+        linkedClient.LegalEntityId = oldLegal.Id;
+        await db.SaveChangesAsync();
+
+        var response = await CreateController(db, user.Id).MergeContacts(new ContactMergeRequest
+        {
+            PrimarySourceType = "external", PrimarySourceId = quick.Id,
+            DuplicateSourceType = "legal", DuplicateSourceId = oldLegal.Id,
+        }, CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(response.Result);
+        db.ChangeTracker.Clear();
+        var replacementId = (await db.ExternalContacts.SingleAsync(x => x.Id == quick.Id)).LinkedLegalEntityId;
+        Assert.NotNull(replacementId);
+        Assert.NotEqual(oldLegal.Id, replacementId);
+        var replacement = await db.LegalEntities.SingleAsync(x => x.Id == replacementId);
+        Assert.Equal(quick.FullName, replacement.ShortName);
+        Assert.Equal(oldLegal.BankAccountsJson, replacement.BankAccountsJson);
+        Assert.Equal(oldLegal.Inn, replacement.Inn);
+        Assert.Equal(replacement.Id, (await db.Clients.SingleAsync(x => x.Id == linkedClient.Id)).LegalEntityId);
+        Assert.Null(await db.LegalEntities.FirstOrDefaultAsync(x => x.Id == oldLegal.Id));
+        Assert.NotNull(await db.LegalEntities.IgnoreQueryFilters().FirstOrDefaultAsync(x => x.Id == oldLegal.Id));
+    }
+
+    [Fact]
+    public async Task PreviewMerge_QuickPrimaryRejectsOtherAliasAndDifferentFullProfile()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateClientUserAsync(db, "merge-reverse-conflict", true, true, true, true, true);
+        var oldClient = await CreateClientAsync(db, user.Id);
+        var anotherClient = await CreateClientAsync(db, user.Id);
+        var quick = await CreateExternalContactAsync(db, user.Id);
+        quick.LinkedClientId = anotherClient.Id;
+        var otherAlias = await CreateExternalContactAsync(db, user.Id);
+        otherAlias.LinkedClientId = oldClient.Id;
+        await db.SaveChangesAsync();
+        var request = new ContactMergeRequest
+        {
+            PrimarySourceType = "external", PrimarySourceId = quick.Id,
+            DuplicateSourceType = "client", DuplicateSourceId = oldClient.Id,
+        };
+
+        var preview = await CreateController(db, user.Id).PreviewMerge(request, CancellationToken.None);
+        var details = Assert.IsType<ContactsController.ContactMergePreview>(Assert.IsType<OkObjectResult>(preview.Result).Value);
+        Assert.False(details.CanMerge);
+        Assert.Contains(details.Conflicts, x => x.Contains("другой полной карточкой", StringComparison.Ordinal));
+        Assert.Contains(details.Conflicts, x => x.Contains("другим быстрым контактом", StringComparison.Ordinal));
+        Assert.IsType<ConflictObjectResult>((await CreateController(db, user.Id).MergeContacts(request, CancellationToken.None)).Result);
+        Assert.Equal(oldClient.Id, (await db.ExternalContacts.SingleAsync(x => x.Id == otherAlias.Id)).LinkedClientId);
+    }
+
+    [Fact]
+    public async Task MergeContacts_QuickPrimaryRequiresPermissionToCreateFullProfile()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateClientUserAsync(db, "merge-reverse-owner", true, true, true, true, true);
+        var noCreate = await CreateClientUserAsync(db, "merge-reverse-no-create", true, false, true, true, true,
+            DataVisibilityScope.All);
+        var oldClient = await CreateClientAsync(db, owner.Id);
+        var quick = await CreateExternalContactAsync(db, owner.Id);
+
+        var response = await CreateController(db, noCreate.Id).MergeContacts(new ContactMergeRequest
+        {
+            PrimarySourceType = "external", PrimarySourceId = quick.Id,
+            DuplicateSourceType = "client", DuplicateSourceId = oldClient.Id,
+        }, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(response.Result);
+        Assert.Equal(1, await db.Clients.CountAsync());
+    }
+
+    [Fact]
     public async Task MergeContacts_RejectsQuickContactLinkedToDifferentFullProfile()
     {
         await using var db = await CreateContextAsync();

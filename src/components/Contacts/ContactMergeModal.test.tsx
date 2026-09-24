@@ -94,16 +94,33 @@ describe('contact merge dialog', () => {
     expect((screen.getByRole('button', { name: 'Объединить и архивировать' }) as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it('still blocks archiving a full profile when the user selects a quick contact as primary', async () => {
+  it('allows a quick contact as primary and explains the replacement full profile', async () => {
     vi.mocked(apiService.getContacts).mockResolvedValue([contact(1, 'external'), contact(2, 'client')]);
+    vi.mocked(apiService.previewContactMerge).mockResolvedValue({
+      canMerge: true, conflicts: [], affectedLinks: 4,
+      primaryName: 'Манаева Мария Михайловна', duplicateName: 'Манаева Мария Михайловна',
+      phones: ['89198106343'], emails: [],
+    });
+    vi.mocked(apiService.mergeContacts).mockResolvedValue({
+      canMerge: true, conflicts: [], affectedLinks: 4,
+      primaryName: 'Манаева Мария Михайловна', duplicateName: 'Манаева Мария Михайловна',
+      phones: ['89198106343'], emails: [],
+    });
     render(<ContactMergeModal onMerged={vi.fn()} onClose={vi.fn()} />);
 
     await screen.findByRole('button', { name: /2 записи/i });
     fireEvent.change(screen.getByRole('combobox', { name: 'Основная карточка' }), { target: { value: 'external:1' } });
     fireEvent.change(screen.getByRole('combobox', { name: 'Дубль в архив' }), { target: { value: 'client:2' } });
 
-    expect(await screen.findByText(/выберите полную карточку основной/)).toBeTruthy();
-    expect(apiService.previewContactMerge).not.toHaveBeenCalled();
-    expect((screen.getByRole('button', { name: 'Объединить и архивировать' }) as HTMLButtonElement).disabled).toBe(true);
+    await waitFor(() => expect(apiService.previewContactMerge).toHaveBeenCalledWith({
+      primarySourceType: 'external', primarySourceId: 1,
+      duplicateSourceType: 'client', duplicateSourceId: 2,
+    }));
+    expect(await screen.findByText(/новую полную карточку и перенесёт на неё связи/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Объединить и архивировать' }));
+    await waitFor(() => expect(apiService.mergeContacts).toHaveBeenCalledTimes(1));
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({
+      description: expect.stringContaining('будет создана новая полная карточка'),
+    }));
   });
 });
