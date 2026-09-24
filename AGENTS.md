@@ -1,5 +1,11 @@
 # Agent Instructions
 
+## YouGile: Draft Before Publishing
+
+For any YouGile work, prepare proposed replies and card updates locally, but do not post messages, edit card content, move cards between columns, or make any other YouGile changes until the user gives a separate, explicit command to publish or change them. An earlier broad request to answer all cards does not override this later approval requirement.
+
+Keep drafts in a local Markdown file under `docs/` with the card ID, proposed text or action, and current verification status. Show the drafts to the user for review before publishing. A command approving one card or one batch applies only to the identified scope; do not infer approval for other cards. Reading PayPlanner cards remains allowed. Do not touch cards from other YouGile companies.
+
 ## Release Notes
 
 When implementing a user-facing mechanism, changing business rules, permissions, integrations, data handling, or fixing a visible defect, prepare a human-readable release note for the "Что нового" module.
