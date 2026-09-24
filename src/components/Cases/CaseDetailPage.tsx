@@ -4101,7 +4101,7 @@ export function CaseDetailPage({
               ]} />
               <InfoSection title="Судебные суммы" rows={[
                 ['Сумма иска', caseItem.courtClaimAmount == null ? '—' : formatCurrencySmart(caseItem.courtClaimAmount).full],
-                ['Взыскано судом', caseItem.courtAwardedAmount == null ? '—' : formatCurrencySmart(caseItem.courtAwardedAmount).full],
+                ['Присуждено судом', caseItem.courtAwardedAmount == null ? '—' : formatCurrencySmart(caseItem.courtAwardedAmount).full],
                 ['Госпошлина', caseItem.courtStateFeeAmount == null ? '—' : formatCurrencySmart(caseItem.courtStateFeeAmount).full],
               ]} />
               <TextBlock title="Стратегия" value={caseItem.strategy || 'Стратегия по делу пока не заполнена.'} />
@@ -4964,8 +4964,8 @@ function CaseEditPage({
             <label className="text-sm font-medium text-slate-700">Сумма иска, ₽
               <input aria-label="Сумма иска" inputMode="decimal" value={draft.courtClaimAmount} onChange={(event) => setField('courtClaimAmount', event.target.value)} placeholder="Не указана" className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" />
             </label>
-            <label className="text-sm font-medium text-slate-700">Взыскано судом, ₽
-              <input aria-label="Взыскано судом" inputMode="decimal" value={draft.courtAwardedAmount} onChange={(event) => setField('courtAwardedAmount', event.target.value)} placeholder="Не указано" className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" />
+            <label className="text-sm font-medium text-slate-700">Присуждено судом, ₽
+              <input aria-label="Присуждено судом" inputMode="decimal" value={draft.courtAwardedAmount} onChange={(event) => setField('courtAwardedAmount', event.target.value)} placeholder="Не указано" className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" />
             </label>
             <label className="text-sm font-medium text-slate-700">Госпошлина, ₽
               <input aria-label="Госпошлина по делу" inputMode="decimal" value={draft.courtStateFeeAmount} onChange={(event) => setField('courtStateFeeAmount', event.target.value)} placeholder="Не указана" className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" />
@@ -7311,7 +7311,7 @@ function CourtPanel({
                   ['Судья', overviewInstance?.judgeName || caseItem.judgeName || '—'],
                   ['Наша роль', caseItem.ourCourtRole === 'claimant' ? 'Истец' : caseItem.ourCourtRole === 'respondent' ? 'Ответчик' : caseItem.ourCourtRole === 'third-party' ? 'Третье лицо' : 'Не указана'],
                   ['Сумма иска', caseItem.courtClaimAmount == null ? '—' : formatCurrencySmart(caseItem.courtClaimAmount).full],
-                  ['Взыскано судом', caseItem.courtAwardedAmount == null ? '—' : formatCurrencySmart(caseItem.courtAwardedAmount).full],
+                  ['Присуждено судом', caseItem.courtAwardedAmount == null ? '—' : formatCurrencySmart(caseItem.courtAwardedAmount).full],
                   ['Госпошлина', caseItem.courtStateFeeAmount == null ? '—' : formatCurrencySmart(caseItem.courtStateFeeAmount).full],
                   ['Ближайшее заседание', formatRuDateTime(caseItem.nextHearingAt) || 'Не назначено'],
                   ['Истец / заявитель', caseItem.claimant || '—'],

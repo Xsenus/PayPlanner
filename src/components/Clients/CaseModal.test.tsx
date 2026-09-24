@@ -388,7 +388,7 @@ describe('CaseModal', () => {
     fireEvent.change(screen.getByLabelText('Крайний срок'), { target: { value: '2026-06-15' } });
     fireEvent.change(screen.getByLabelText('Сумма гонорара'), { target: { value: '150000.50' } });
     fireEvent.change(screen.getByLabelText('Сумма иска'), { target: { value: '200000,50' } });
-    fireEvent.change(screen.getByLabelText('Взыскано судом'), { target: { value: '175000' } });
+    fireEvent.change(screen.getByLabelText('Присуждено судом'), { target: { value: '175000' } });
     fireEvent.change(screen.getByLabelText('Госпошлина по делу'), { target: { value: '3500.25' } });
     fireEvent.change(screen.getByLabelText('Суд'), { target: { value: 'Арбитражный суд Самарской области' } });
     fireEvent.change(screen.getByLabelText('Номер в суде'), { target: { value: 'А55-12345/2026' } });

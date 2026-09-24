@@ -1245,7 +1245,7 @@ describe('CaseDetailPage', () => {
     fireEvent.change(screen.getByLabelText('ИНН истца'), { target: { value: '1234567890' } });
     fireEvent.change(screen.getByLabelText('ОГРН/ОГРНИП ответчика'), { target: { value: '1234567890123' } });
     fireEvent.change(screen.getByLabelText('Сумма иска'), { target: { value: '100000,50' } });
-    fireEvent.change(screen.getByLabelText('Взыскано судом'), { target: { value: '75000' } });
+    fireEvent.change(screen.getByLabelText('Присуждено судом'), { target: { value: '75000' } });
     fireEvent.change(screen.getByLabelText('Госпошлина по делу'), { target: { value: '3500,25' } });
     fireEvent.click(screen.getAllByRole('button', { name: /Сохранить дело/u }).at(-1) as HTMLElement);
 

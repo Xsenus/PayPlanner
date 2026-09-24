@@ -1469,8 +1469,8 @@ export function CaseModal({
             <label className="text-sm text-gray-600">Сумма иска, ₽
               <input aria-label="Сумма иска" inputMode="decimal" value={courtClaimAmount} onChange={(event) => setCourtClaimAmount(event.target.value)} disabled={saving || !allowEdit} className="mt-1 w-full rounded-lg border px-3 py-2" placeholder="Не указана" />
             </label>
-            <label className="text-sm text-gray-600">Взыскано судом, ₽
-              <input aria-label="Взыскано судом" inputMode="decimal" value={courtAwardedAmount} onChange={(event) => setCourtAwardedAmount(event.target.value)} disabled={saving || !allowEdit} className="mt-1 w-full rounded-lg border px-3 py-2" placeholder="Не указано" />
+            <label className="text-sm text-gray-600">Присуждено судом, ₽
+              <input aria-label="Присуждено судом" inputMode="decimal" value={courtAwardedAmount} onChange={(event) => setCourtAwardedAmount(event.target.value)} disabled={saving || !allowEdit} className="mt-1 w-full rounded-lg border px-3 py-2" placeholder="Не указано" />
             </label>
             <label className="text-sm text-gray-600">Госпошлина, ₽
               <input aria-label="Госпошлина по делу" inputMode="decimal" value={courtStateFeeAmount} onChange={(event) => setCourtStateFeeAmount(event.target.value)} disabled={saving || !allowEdit} className="mt-1 w-full rounded-lg border px-3 py-2" placeholder="Не указана" />
