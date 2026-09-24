@@ -9151,6 +9151,62 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task RunCourtSync_DoesNotMergeHearingsAtSameTimeFromDifferentCourts()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "court-same-time-different-courts@example.com", "Юрист");
+        var hearingAt = DateTime.UtcNow.AddDays(7);
+        var clientCase = new ClientCase
+        {
+            Client = new Client { Name = "Контрагент", IsActive = true, ResponsibleUserId = owner.Id },
+            Title = "Дело с двумя судебными карточками",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = owner.Id,
+            CourtUrl = "https://appeal.sudrf.ru/modules.php?name=sud_delo&name_op=case&delo_id=52",
+            CourtCaseNumber = "33-52/2026",
+        };
+        var firstHearing = new ClientCaseCourtEvent
+        {
+            ClientCase = clientCase,
+            EventType = "hearing",
+            Title = "Судебное заседание",
+            ScheduledAt = hearingAt,
+            CourtInstance = "first",
+            CourtName = "Районный суд",
+            CourtCaseNumber = "2-52/2026",
+            SourceType = "sudrf",
+            SourceUrl = "https://first.sudrf.ru/modules.php?name=sud_delo&name_op=case&delo_id=52",
+        };
+        db.ClientCases.Add(clientCase);
+        db.ClientCaseCourtEvents.Add(firstHearing);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, owner,
+            sudrfCourtSyncService: new FixedSudrfCourtSyncService(new SudrfCourtCaseData
+            {
+                SourceUrl = clientCase.CourtUrl,
+                CourtName = "Областной суд",
+                CaseNumber = "33-52/2026",
+                Instance = "appeal",
+                MovementEvents =
+                [
+                    new() { Title = "Судебное заседание", ScheduledAt = hearingAt, Result = "Назначено" },
+                ],
+            }));
+
+        Assert.IsType<OkObjectResult>((await controller.RunCourtSync(clientCase.Id, null, CancellationToken.None)).Result);
+        var hearings = await db.ClientCaseCourtEvents
+            .Where(item => item.ClientCaseId == clientCase.Id && item.ScheduledAt == hearingAt)
+            .OrderBy(item => item.Id)
+            .ToListAsync();
+        Assert.Equal(2, hearings.Count);
+        Assert.Equal("first", hearings[0].CourtInstance);
+        Assert.Equal("Районный суд", hearings[0].CourtName);
+        Assert.Equal("appeal", hearings[1].CourtInstance);
+        Assert.Equal("Областной суд", hearings[1].CourtName);
+    }
+
+    [Fact]
     public async Task RunCourtSync_TreatsHearingAfterPastSessionAsNewNotRescheduled()
     {
         await using var db = await CreateContextAsync();

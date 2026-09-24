@@ -9510,6 +9510,17 @@ public partial class CasesV2Controller : ControllerBase
             return false;
         }
 
+        // Time and title are not an identity: separate courts or instances may
+        // schedule hearings for the same case at exactly the same moment.
+        if (ConflictingCourtSyncIdentity(existing.CourtInstance, courtData.Instance)
+            || ConflictingCourtSyncIdentity(existing.CourtCaseNumber, courtData.CaseNumber)
+            || ConflictingCourtSyncIdentity(existing.CourtName, courtData.CourtName)
+            || (string.Equals(existing.SourceType, "sudrf", StringComparison.OrdinalIgnoreCase)
+                && ConflictingCourtSyncIdentity(existing.SourceUrl, courtData.SourceUrl)))
+        {
+            return false;
+        }
+
         var existingTitle = NormalizeCourtSyncText(existing.Title);
         var sourceTitle = NormalizeCourtSyncText(title);
         if (string.Equals(existingTitle, sourceTitle, StringComparison.OrdinalIgnoreCase))
@@ -9534,6 +9545,15 @@ public partial class CasesV2Controller : ControllerBase
         return SameNormalizedCourtSyncText(existing.CourtCaseNumber, courtData.CaseNumber)
             || SameNormalizedCourtSyncText(existing.Courtroom, movement.Place)
             || SameNormalizedCourtSyncText(existing.CourtName, courtData.CourtName);
+    }
+
+    private static bool ConflictingCourtSyncIdentity(string? left, string? right)
+    {
+        var normalizedLeft = NormalizeCourtSyncText(left);
+        var normalizedRight = NormalizeCourtSyncText(right);
+        return normalizedLeft.Length > 0
+            && normalizedRight.Length > 0
+            && !string.Equals(normalizedLeft, normalizedRight, StringComparison.Ordinal);
     }
 
     private static string ResolveSudrfCourtEventType(SudrfCourtMovementEvent movement)
