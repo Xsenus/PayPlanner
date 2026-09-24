@@ -3129,6 +3129,7 @@ public class PaymentContext : DbContext
             entity.HasOne(item => item.CreatedTaskJournalItem).WithMany().HasForeignKey(item => item.CreatedTaskJournalItemId).OnDelete(DeleteBehavior.SetNull);
             entity.HasOne(item => item.PinnedByUser).WithMany().HasForeignKey(item => item.PinnedByUserId).OnDelete(DeleteBehavior.SetNull);
             entity.HasIndex(item => new { item.ThreadId, item.Id }).HasDatabaseName("IX_InternalChatMessages_Thread_Id");
+            entity.HasIndex(item => item.NextNoReplyReminderAt).HasDatabaseName("IX_InternalChatMessages_NextNoReplyReminderAt");
             entity.HasIndex(item => new { item.ThreadId, item.IsPinned, item.PinnedAt }).HasDatabaseName("IX_InternalChatMessages_Thread_Pinned");
             entity.HasIndex(item => item.AuthorUserId).HasDatabaseName("IX_InternalChatMessages_AuthorUserId");
             entity.HasIndex(item => item.CreatedTaskJournalItemId).HasDatabaseName("IX_InternalChatMessages_CreatedTaskJournalItemId");

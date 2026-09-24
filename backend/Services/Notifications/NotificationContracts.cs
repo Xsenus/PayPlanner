@@ -123,6 +123,7 @@ public static class UserNotificationDomains
             UserNotificationTypes.ChatMessage
                 or UserNotificationTypes.ChatMention
                 or UserNotificationTypes.ChatReply
+                or UserNotificationTypes.ChatNoReplyReminder
                 or UserNotificationTypes.ChatTaskCreated => Chat,
             UserNotificationTypes.CaseCourtEvent
                 or UserNotificationTypes.CourtHearing
@@ -244,6 +245,7 @@ public static class UserNotificationTypes
     public const string ChatMessage = "chatMessage";
     public const string ChatMention = "chatMention";
     public const string ChatReply = "chatReply";
+    public const string ChatNoReplyReminder = "chatNoReplyReminder";
     public const string ChatTaskCreated = "chatTaskCreated";
 
     private static readonly IReadOnlySet<string> SmsPreferenceTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -324,6 +326,7 @@ public static class UserNotificationTypes
         new(ChatMessage, "Новое сообщение", "Новое сообщение в командном, личном или связанном с задачей чате.", "emerald", "normal", NotificationChannels.All, true, true),
         new(ChatMention, "Упоминание в чате", "Сотрудника упомянули в сообщении.", "cyan", "high", NotificationChannels.All, true, false),
         new(ChatReply, "Ответ в чате", "Сотруднику ответили на его сообщение.", "violet", "high", NotificationChannels.All, true, false),
+        new(ChatNoReplyReminder, "Нет ответа в чате", "Автору сообщения напоминают об отсутствии ответа, если он включил колокольчик.", "amber", "normal", [NotificationChannels.InApp, NotificationChannels.Toast], true, false),
         new(ChatTaskCreated, "Задача из сообщения", "Из сообщения чата создали связанную задачу.", "blue", "high", NotificationChannels.All, true, false),
         new(SystemAdminWarning, "Системное предупреждение", "Администраторам требуется обратить внимание на фоновый процесс, интеграцию или настройку.", "rose", NotificationPriorities.Critical, NotificationChannels.All, true, false)
     ];

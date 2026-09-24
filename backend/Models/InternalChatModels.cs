@@ -98,6 +98,7 @@ public class InternalChatMessage
     public DateTime? PinnedAt { get; set; }
     public DateTime? EditedAt { get; set; }
     public DateTime? DeletedAt { get; set; }
+    public DateTime? NextNoReplyReminderAt { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     public ICollection<InternalChatAttachment> Attachments { get; set; } = new List<InternalChatAttachment>();

@@ -5432,6 +5432,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasColumnType("character varying(24)")
                         .HasDefaultValue("user");
 
+                    b.Property<DateTime?>("NextNoReplyReminderAt")
+                        .HasColumnType("timestamp without time zone");
+
                     b.Property<DateTime?>("PinnedAt")
                         .HasColumnType("timestamp without time zone");
 
@@ -5456,6 +5459,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.HasIndex("CreatedTaskJournalItemId")
                         .HasDatabaseName("IX_InternalChatMessages_CreatedTaskJournalItemId");
+
+                    b.HasIndex("NextNoReplyReminderAt")
+                        .HasDatabaseName("IX_InternalChatMessages_NextNoReplyReminderAt");
 
                     b.HasIndex("PinnedByUserId");
 

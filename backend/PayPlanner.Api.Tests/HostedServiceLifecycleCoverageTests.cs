@@ -11,6 +11,7 @@ public class HostedServiceLifecycleCoverageTests
         "PaymentStatusUpdater",
         "InvoicePaymentStateReconciliationService",
         "TaskJournalReminderNotificationService",
+        "InternalChatNoReplyReminderService",
         "NotificationRetrySchedulerService",
         "NotificationDeliveryRetentionService",
         "CalendarSyncLogRetentionService",

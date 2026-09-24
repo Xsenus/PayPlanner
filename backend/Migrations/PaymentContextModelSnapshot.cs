@@ -5307,6 +5307,9 @@ namespace PayPlanner.Api.Migrations
                         .HasColumnType("TEXT")
                         .HasDefaultValue("user");
 
+                    b.Property<DateTime?>("NextNoReplyReminderAt")
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime?>("PinnedAt")
                         .HasColumnType("TEXT");
 
@@ -5331,6 +5334,9 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasIndex("CreatedTaskJournalItemId")
                         .HasDatabaseName("IX_InternalChatMessages_CreatedTaskJournalItemId");
+
+                    b.HasIndex("NextNoReplyReminderAt")
+                        .HasDatabaseName("IX_InternalChatMessages_NextNoReplyReminderAt");
 
                     b.HasIndex("PinnedByUserId");
 

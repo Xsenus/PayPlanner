@@ -18,6 +18,7 @@ const chatApiMock = vi.hoisted(() => ({
   deleteMessage: vi.fn(),
   toggleReaction: vi.fn(),
   setPinned: vi.fn(),
+  setNoReplyReminder: vi.fn(),
   setNotificationMode: vi.fn(),
   createTask: vi.fn(),
   downloadAttachment: vi.fn(),
@@ -104,6 +105,25 @@ describe('InternalMessenger', () => {
 
     await waitFor(() => expect(chatApiMock.sendMessage).toHaveBeenCalledWith(12, 'Готово', [], undefined));
     expect(await screen.findByText('Готово')).toBeTruthy();
+  });
+
+  it('lets an author enable and disable a daily no-reply reminder in the shared chat', async () => {
+    const ownMessage = { ...message, authorUserId: 7, authorName: 'Я', noReplyReminderEnabled: false };
+    chatApiMock.getMessages.mockResolvedValue({ items: [ownMessage], hasMore: false });
+    chatApiMock.setNoReplyReminder.mockResolvedValueOnce({ ...ownMessage, noReplyReminderEnabled: true })
+      .mockResolvedValueOnce(ownMessage);
+    render(<InternalMessenger />);
+    await screen.findByText('документ');
+    expect(screen.getByRole('button', { name: 'Действия' }).className).not.toContain('hidden');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Действия' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Напомнить, если нет ответа' }));
+    await waitFor(() => expect(chatApiMock.setNoReplyReminder).toHaveBeenCalledWith(22, true));
+    expect(await screen.findByText('Напомнить, если нет ответа')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Действия' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Отключить напоминание' }));
+    await waitFor(() => expect(chatApiMock.setNoReplyReminder).toHaveBeenCalledWith(22, false));
   });
 
   it('keeps an unfinished message in this tab across a chat remount and clears it after sending', async () => {

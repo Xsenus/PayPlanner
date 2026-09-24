@@ -53,6 +53,7 @@ export interface InternalChatMessage {
   replyAuthorName?: string | null;
   createdTaskJournalItemId?: number | null;
   isPinned: boolean;
+  noReplyReminderEnabled: boolean;
   editedAt?: string | null;
   deletedAt?: string | null;
   createdAt: string;
@@ -139,6 +140,9 @@ export const internalChatApi = {
   }),
   setPinned: (messageId: number, pinned: boolean) => chatRequest<void>(`/messages/${messageId}/pin`, {
     method: 'POST', body: JSON.stringify({ pinned }),
+  }),
+  setNoReplyReminder: (messageId: number, enabled: boolean) => chatRequest<InternalChatMessage>(`/messages/${messageId}/no-reply-reminder`, {
+    method: 'POST', body: JSON.stringify({ enabled }),
   }),
   markRead: (threadId: number, messageId?: number) => chatRequest<void>(`/threads/${threadId}/read`, {
     method: 'POST', body: JSON.stringify({ messageId: messageId ?? null }),

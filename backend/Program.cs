@@ -270,6 +270,7 @@ else
 }
 
 builder.Services.AddSingleton<TaskJournalReminderNotificationService>();
+builder.Services.AddSingleton<InternalChatNoReplyReminderService>();
 builder.Services.AddSingleton<StickyNoteReminderNotificationService>();
 builder.Services.AddSingleton<NotificationRetrySchedulerService>();
 builder.Services.AddSingleton<NotificationDeliveryRetentionService>();
@@ -301,6 +302,7 @@ if (builder.Configuration.GetValue("BackgroundServices:Enabled", true))
     builder.Services.AddHostedService<PaymentStatusUpdater>();
     builder.Services.AddHostedService<InvoicePaymentStateReconciliationService>();
     builder.Services.AddHostedService(sp => sp.GetRequiredService<TaskJournalReminderNotificationService>());
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<InternalChatNoReplyReminderService>());
     builder.Services.AddHostedService(sp => sp.GetRequiredService<StickyNoteReminderNotificationService>());
     builder.Services.AddHostedService(sp => sp.GetRequiredService<NotificationRetrySchedulerService>());
     builder.Services.AddHostedService(sp => sp.GetRequiredService<NotificationDeliveryRetentionService>());

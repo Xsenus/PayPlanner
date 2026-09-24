@@ -406,7 +406,7 @@ public sealed partial class InternalChatController : ControllerBase
         InternalChatMessage? reply = null;
         if (request.ReplyToMessageId is > 0)
         {
-            reply = await _db.InternalChatMessages.AsNoTracking()
+            reply = await _db.InternalChatMessages
                 .FirstOrDefaultAsync(message => message.Id == request.ReplyToMessageId && message.ThreadId == threadId && message.DeletedAt == null, ct);
             if (reply is null) return BadRequest("Сообщение для ответа не найдено.");
         }
@@ -469,6 +469,12 @@ public sealed partial class InternalChatController : ControllerBase
             throw;
         }
 
+        if (reply?.AuthorUserId is int replyAuthorId && replyAuthorId != userId && reply.NextNoReplyReminderAt.HasValue)
+        {
+            reply.NextNoReplyReminderAt = null;
+            await _db.SaveChangesAsync(ct);
+        }
+
         await NotifyMessageRecipientsAsync(thread, message, reply, mentionIds, ct);
         await _realtime.PublishTaskJournalChangedAsync(ct);
         var loaded = await LoadMessageAsync(message.Id, ct);
@@ -506,6 +512,7 @@ public sealed partial class InternalChatController : ControllerBase
         if (message is null) return NotFound();
         if (message.AuthorUserId != userId || message.DeletedAt.HasValue || message.Kind != InternalChatMessageKinds.User) return Forbid();
         message.DeletedAt = DateTime.UtcNow;
+        message.NextNoReplyReminderAt = null;
         message.Text = string.Empty;
         message.IsPinned = false;
         foreach (var attachment in message.Attachments)
@@ -517,6 +524,36 @@ public sealed partial class InternalChatController : ControllerBase
         await _db.SaveChangesAsync(ct);
         await _realtime.PublishTaskJournalChangedAsync(ct);
         return NoContent();
+    }
+
+    [HttpPost("messages/{messageId:int}/no-reply-reminder")]
+    public async Task<ActionResult<InternalChatMessageDto>> SetNoReplyReminder(
+        int messageId, [FromBody] SetInternalChatNoReplyReminderRequest request, CancellationToken ct)
+    {
+        var userId = CurrentUserId();
+        if (userId is null) return Unauthorized();
+        var message = await _db.InternalChatMessages.FirstOrDefaultAsync(item => item.Id == messageId, ct);
+        if (message is null) return NotFound();
+        if (message.AuthorUserId != userId || message.DeletedAt.HasValue || message.Kind != InternalChatMessageKinds.User)
+            return Forbid();
+        if (!await IsMemberAsync(message.ThreadId, userId.Value, ct)) return Forbid();
+
+        if (request.Enabled)
+        {
+            var hasAnswer = await _db.InternalChatMessages.AnyAsync(item =>
+                item.ReplyToMessageId == messageId && item.DeletedAt == null && item.AuthorUserId != userId, ct);
+            if (hasAnswer) return BadRequest("На это сообщение уже ответили.");
+            if (!message.NextNoReplyReminderAt.HasValue)
+                message.NextNoReplyReminderAt = DateTime.UtcNow.AddDays(1);
+        }
+        else
+        {
+            message.NextNoReplyReminderAt = null;
+        }
+
+        await _db.SaveChangesAsync(ct);
+        await _realtime.PublishTaskJournalChangedAsync(ct);
+        return Ok(await MapMessageWithReadStateAsync((await LoadMessageAsync(messageId, ct))!, ct));
     }
 
     [HttpPost("messages/{messageId:int}/reactions")]
@@ -821,6 +858,7 @@ public sealed partial class InternalChatController : ControllerBase
             message.ReplyToMessage?.AuthorUser is null ? null : DisplayName(message.ReplyToMessage.AuthorUser),
             message.CreatedTaskJournalItemId,
             message.IsPinned,
+            message.NextNoReplyReminderAt.HasValue,
             AsUtc(message.EditedAt),
             AsUtc(message.DeletedAt),
             AsUtc(message.CreatedAt),
@@ -883,7 +921,7 @@ public sealed partial class InternalChatController : ControllerBase
 
 public sealed record InternalChatThreadDto(int Id, string Kind, string Name, int? TaskJournalItemId, string Role, string NotificationMode, bool IsArchived, IReadOnlyList<int> MemberUserIds, IReadOnlyList<int> GuestUserIds, int UnreadCount, string? LastMessagePreview, DateTime? LastMessageAt, DateTime CreatedAt, int? LastReadMessageId = null, int? FirstUnreadMessageId = null);
 public sealed record InternalChatMessagePageDto(IReadOnlyList<InternalChatMessageDto> Items, bool HasMore, int? NextBeforeId, bool HasNewer = false);
-public sealed record InternalChatMessageDto(int Id, int ThreadId, int? AuthorUserId, string AuthorName, string Kind, string Text, int? ReplyToMessageId, string? ReplyPreview, string? ReplyAuthorName, int? CreatedTaskJournalItemId, bool IsPinned, DateTime? EditedAt, DateTime? DeletedAt, DateTime CreatedAt, IReadOnlyList<InternalChatAttachmentDto> Attachments, IReadOnlyList<InternalChatReactionDto> Reactions, IReadOnlyList<int> MentionUserIds, IReadOnlyList<int> ReadByUserIds);
+public sealed record InternalChatMessageDto(int Id, int ThreadId, int? AuthorUserId, string AuthorName, string Kind, string Text, int? ReplyToMessageId, string? ReplyPreview, string? ReplyAuthorName, int? CreatedTaskJournalItemId, bool IsPinned, bool NoReplyReminderEnabled, DateTime? EditedAt, DateTime? DeletedAt, DateTime CreatedAt, IReadOnlyList<InternalChatAttachmentDto> Attachments, IReadOnlyList<InternalChatReactionDto> Reactions, IReadOnlyList<int> MentionUserIds, IReadOnlyList<int> ReadByUserIds);
 public sealed record InternalChatAttachmentDto(int Id, string FileName, string ContentType, long Size);
 public sealed record InternalChatReactionDto(string Emoji, int Count, IReadOnlyList<int> UserIds);
 public sealed record InternalChatPersonDto(int Id, string Name, string Email, string? PhotoUrl);
@@ -896,6 +934,7 @@ public sealed class SendInternalChatMessageRequest { public string? Text { get; 
 public sealed class EditInternalChatMessageRequest { public string? Text { get; set; } public List<int> MentionUserIds { get; set; } = []; }
 public sealed class ToggleInternalChatReactionRequest { public string? Emoji { get; set; } }
 public sealed class PinInternalChatMessageRequest { public bool Pinned { get; set; } }
+public sealed class SetInternalChatNoReplyReminderRequest { public bool Enabled { get; set; } }
 public sealed class MarkInternalChatReadRequest { public int? MessageId { get; set; } }
 public sealed class UpdateInternalChatNotificationModeRequest { public string? Mode { get; set; } }
 public sealed class CreateTaskFromInternalChatMessageRequest { public string Title { get; set; } = string.Empty; public string? Description { get; set; } public int? AssigneeUserId { get; set; } public DateTime DueAt { get; set; } }

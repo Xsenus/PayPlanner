@@ -5,6 +5,8 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
@@ -15,6 +17,93 @@ namespace PayPlanner.Api.Tests;
 
 public sealed class InternalChatControllerTests
 {
+    [Fact]
+    public async Task NoReplyReminder_OnlyAuthorCanEnable_AndAnotherPersonsReplyStopsIt()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var author = await fixture.AddUserAsync("reminder-author@example.test", "Автор");
+        var colleague = await fixture.AddUserAsync("reminder-colleague@example.test", "Коллега");
+        var outsider = await fixture.AddUserAsync("reminder-outsider@example.test", "Посторонний");
+        var created = await fixture.Controller(author).CreateChannel(new CreateInternalChatChannelRequest
+        {
+            Name = "Обсуждение", MemberUserIds = [colleague.Id]
+        }, CancellationToken.None);
+        var thread = Assert.IsType<InternalChatThreadDto>(Assert.IsType<CreatedAtActionResult>(created.Result).Value);
+        var sent = await fixture.Controller(author).SendMessage(thread.Id,
+            new SendInternalChatMessageRequest { Text = "Прошу ответить" }, CancellationToken.None);
+        var message = Assert.IsType<InternalChatMessageDto>(Assert.IsType<CreatedAtActionResult>(sent.Result).Value);
+
+        Assert.IsType<ForbidResult>((await fixture.Controller(outsider).SetNoReplyReminder(message.Id,
+            new SetInternalChatNoReplyReminderRequest { Enabled = true }, CancellationToken.None)).Result);
+        Assert.IsType<ForbidResult>((await fixture.Controller(colleague).SetNoReplyReminder(message.Id,
+            new SetInternalChatNoReplyReminderRequest { Enabled = true }, CancellationToken.None)).Result);
+        var enabled = await fixture.Controller(author).SetNoReplyReminder(message.Id,
+            new SetInternalChatNoReplyReminderRequest { Enabled = true }, CancellationToken.None);
+        Assert.True(Assert.IsType<InternalChatMessageDto>(Assert.IsType<OkObjectResult>(enabled.Result).Value).NoReplyReminderEnabled);
+        var dueAt = (await fixture.Db.InternalChatMessages.FindAsync(message.Id))!.NextNoReplyReminderAt;
+        Assert.InRange(dueAt!.Value, DateTime.UtcNow.AddHours(23), DateTime.UtcNow.AddHours(25));
+        await fixture.Controller(author).SetNoReplyReminder(message.Id,
+            new SetInternalChatNoReplyReminderRequest { Enabled = true }, CancellationToken.None);
+        Assert.Equal(dueAt, (await fixture.Db.InternalChatMessages.FindAsync(message.Id))!.NextNoReplyReminderAt);
+        await fixture.Controller(author).SetNoReplyReminder(message.Id,
+            new SetInternalChatNoReplyReminderRequest { Enabled = false }, CancellationToken.None);
+        Assert.Null((await fixture.Db.InternalChatMessages.FindAsync(message.Id))!.NextNoReplyReminderAt);
+        await fixture.Controller(author).SetNoReplyReminder(message.Id,
+            new SetInternalChatNoReplyReminderRequest { Enabled = true }, CancellationToken.None);
+
+        await fixture.Controller(author).SendMessage(thread.Id,
+            new SendInternalChatMessageRequest { Text = "Сам себе отвечаю", ReplyToMessageId = message.Id }, CancellationToken.None);
+        Assert.NotNull((await fixture.Db.InternalChatMessages.FindAsync(message.Id))!.NextNoReplyReminderAt);
+        await fixture.Controller(colleague).SendMessage(thread.Id,
+            new SendInternalChatMessageRequest { Text = "Ответ", ReplyToMessageId = message.Id }, CancellationToken.None);
+        Assert.Null((await fixture.Db.InternalChatMessages.FindAsync(message.Id))!.NextNoReplyReminderAt);
+        Assert.IsType<BadRequestObjectResult>((await fixture.Controller(author).SetNoReplyReminder(message.Id,
+            new SetInternalChatNoReplyReminderRequest { Enabled = true }, CancellationToken.None)).Result);
+    }
+
+    [Fact]
+    public async Task NoReplyReminder_SendsOnceWhenDue_AndStopsAfterAccessRevoked()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var author = await fixture.AddUserAsync("due-author@example.test", "Автор");
+        var colleague = await fixture.AddUserAsync("due-colleague@example.test", "Коллега");
+        var created = await fixture.Controller(author).CreateChannel(new CreateInternalChatChannelRequest
+        {
+            Name = "Обсуждение", MemberUserIds = [colleague.Id]
+        }, CancellationToken.None);
+        var thread = Assert.IsType<InternalChatThreadDto>(Assert.IsType<CreatedAtActionResult>(created.Result).Value);
+        var sent = await fixture.Controller(author).SendMessage(thread.Id,
+            new SendInternalChatMessageRequest { Text = "Ожидаю ответа" }, CancellationToken.None);
+        var message = Assert.IsType<InternalChatMessageDto>(Assert.IsType<CreatedAtActionResult>(sent.Result).Value);
+        await fixture.Controller(author).SetNoReplyReminder(message.Id,
+            new SetInternalChatNoReplyReminderRequest { Enabled = true }, CancellationToken.None);
+        var stored = (await fixture.Db.InternalChatMessages.FindAsync(message.Id))!;
+        stored.NextNoReplyReminderAt = DateTime.UtcNow.AddMinutes(-1);
+        await fixture.Db.SaveChangesAsync();
+
+        var notifications = DispatchProxy.Create<INotificationService, NotificationProxy>();
+        using var services = new ServiceCollection()
+            .AddSingleton(fixture.Db)
+            .AddSingleton(notifications)
+            .BuildServiceProvider();
+        var service = new InternalChatNoReplyReminderService(services.GetRequiredService<IServiceScopeFactory>(),
+            NullLogger<InternalChatNoReplyReminderService>.Instance);
+        Assert.Equal(1, await service.RunOnceAsync());
+        Assert.Equal(0, await service.RunOnceAsync());
+        var reminderEvents = ((NotificationProxy)(object)notifications).Events;
+        Assert.Single(reminderEvents);
+        Assert.Equal(UserNotificationTypes.ChatNoReplyReminder, reminderEvents[0].Type);
+        Assert.Equal(author.Id, reminderEvents[0].RecipientUserId);
+
+        stored.NextNoReplyReminderAt = DateTime.UtcNow.AddMinutes(-1);
+        var member = await fixture.Db.InternalChatMembers.SingleAsync(item => item.ThreadId == thread.Id && item.UserId == author.Id);
+        member.IsActive = false;
+        await fixture.Db.SaveChangesAsync();
+        Assert.Equal(0, await service.RunOnceAsync());
+        Assert.Null(stored.NextNoReplyReminderAt);
+        Assert.Single(reminderEvents);
+    }
+
     [Fact]
     public async Task OpenTaskChat_AllowsOnlyTaskParticipants_AndSynchronizesMembers()
     {
@@ -486,9 +575,13 @@ public sealed class InternalChatControllerTests
 
     private class NotificationProxy : DispatchProxy
     {
+        public List<NotificationEventEnvelope> Events { get; } = [];
+
         protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
         {
             if (targetMethod is null) return null;
+            if (targetMethod.Name == nameof(INotificationService.NotifyAsync) && args?[0] is NotificationEventEnvelope envelope)
+                Events.Add(envelope);
             var returnType = targetMethod.ReturnType;
             if (returnType == typeof(Task)) return Task.CompletedTask;
             if (returnType == typeof(Task<bool>)) return Task.FromResult(true);
