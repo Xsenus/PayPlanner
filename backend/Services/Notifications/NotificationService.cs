@@ -10,6 +10,7 @@ using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.LegalIntegrations;
 
 namespace PayPlanner.Api.Services.Notifications;
 
@@ -2369,20 +2370,22 @@ public sealed class NotificationService : INotificationService
         var title = BuildCourtEventSubject(clientCase, courtEvent, notificationType, action);
 
         var version = (courtEvent.UpdatedAt ?? courtEvent.CreatedAt).Ticks.ToString(CultureInfo.InvariantCulture);
+        var allowedChannels = notificationType == UserNotificationTypes.CourtDecisionPublished
+            ? new[] { NotificationChannels.InApp, NotificationChannels.Toast, NotificationChannels.ForcedModal, NotificationChannels.WebPush, NotificationChannels.Email }
+            : new[] { NotificationChannels.InApp, NotificationChannels.Toast, NotificationChannels.ForcedModal, NotificationChannels.WebPush };
         var recipientNotificationChannels = await ResolveUserNotificationChannelsAsync(
             visibleRecipientUserIds,
             notificationType,
-            [
-                NotificationChannels.InApp,
-                NotificationChannels.Toast,
-                NotificationChannels.ForcedModal,
-                NotificationChannels.WebPush,
-            ],
+            allowedChannels,
             cancellationToken);
         var recipientTimeZones = await CalendarTimeZoneHelper.ResolveUserTimeZonesAsync(
             _context,
             visibleRecipientUserIds,
             cancellationToken);
+        var emailRecipientIds = visibleRecipientUserIds
+            .Where(id => recipientNotificationChannels[id].Contains(NotificationChannels.Email))
+            .ToArray();
+        var recipientsById = await ResolveRecipientsAsync(emailRecipientIds, cancellationToken);
 
         foreach (var recipientUserId in visibleRecipientUserIds)
         {
@@ -2403,10 +2406,11 @@ public sealed class NotificationService : INotificationService
                 BuildCourtEventTemplateValues(clientCase, courtEvent, action, normalizedActorName, recipientTimeZone),
                 purpose: NotificationPurposes.TaskReminder,
                 cancellationToken: cancellationToken);
+            var eventKey = $"case:{clientCase.Id}:court-event:{courtEvent.Id}:{notificationType}:{version}:{recipientUserId}";
             await CreateUserNotificationAsync(
                 recipientUserId,
                 notificationType,
-                $"case:{clientCase.Id}:court-event:{courtEvent.Id}:{notificationType}:{version}:{recipientUserId}",
+                eventKey,
                 message.Subject,
                 message.Body,
                 ResolveCourtEventTone(notificationType),
@@ -2432,6 +2436,10 @@ public sealed class NotificationService : INotificationService
                 cancellationToken,
                 objectVisibilityValidated: true,
                 resolvedNotificationChannels: recipientNotificationChannels[recipientUserId]);
+            if (recipientsById.TryGetValue(recipientUserId, out var recipient))
+            {
+                await SendAsync(recipient, message, [NotificationChannels.Email], eventKey, cancellationToken);
+            }
         }
     }
 
@@ -2546,13 +2554,19 @@ public sealed class NotificationService : INotificationService
             + $"Дело: {BuildClientCaseTitle(clientCase)}\n"
             + (previousAt.HasValue ? $"Прежняя дата: {FormatCourtEventDate(previousAt.Value, allDay: true)}\n" : string.Empty)
             + (currentAt.HasValue ? $"Новая дата: {FormatCourtEventDate(currentAt.Value, allDay: true)}" : "Дата решения пока не указана.");
+        var emailRecipientIds = visibleRecipientUserIds
+            .Where(id => channelsByUserId[id].Contains(NotificationChannels.Email))
+            .ToArray();
+        var recipientsById = await ResolveRecipientsAsync(emailRecipientIds, cancellationToken);
+        var message = new NotificationMessage(title, body, Purpose: NotificationPurposes.TaskReminder);
 
         foreach (var recipientUserId in visibleRecipientUserIds)
         {
+            var eventKey = $"case:{clientCase.Id}:decision-date-changed:{changedAtUtc.Ticks}:{recipientUserId}";
             await CreateUserNotificationAsync(
                 recipientUserId,
                 UserNotificationTypes.CourtDecisionPublished,
-                $"case:{clientCase.Id}:decision-date-changed:{changedAtUtc.Ticks}:{recipientUserId}",
+                eventKey,
                 title,
                 body,
                 "emerald",
@@ -2564,6 +2578,10 @@ public sealed class NotificationService : INotificationService
                 cancellationToken,
                 objectVisibilityValidated: true,
                 resolvedNotificationChannels: channelsByUserId[recipientUserId]);
+            if (recipientsById.TryGetValue(recipientUserId, out var recipient))
+            {
+                await SendAsync(recipient, message, [NotificationChannels.Email], eventKey, cancellationToken);
+            }
         }
     }
 
@@ -7344,7 +7362,7 @@ public sealed class NotificationService : INotificationService
             ? $"Перенесено судебное заседание: {BuildClientCaseTitle(clientCase)}"
             : notificationType switch
             {
-                UserNotificationTypes.CourtDecisionPublished => $"Опубликован результат по суду: {BuildClientCaseTitle(clientCase)}",
+                UserNotificationTypes.CourtDecisionPublished => $"Зафиксировано судебное решение: {BuildClientCaseTitle(clientCase)}",
                 UserNotificationTypes.CourtStatusChanged => $"Изменился судебный статус: {BuildClientCaseTitle(clientCase)}",
                 _ => $"Судебное заседание: {BuildClientCaseTitle(clientCase)}"
             };
@@ -7417,16 +7435,19 @@ public sealed class NotificationService : INotificationService
 
     private static string ResolveCourtEventNotificationType(ClientCaseCourtEvent courtEvent)
     {
-        if (!string.IsNullOrWhiteSpace(courtEvent.ResultSummary)
-            || courtEvent.ClientCaseDocumentId.HasValue
-            || string.Equals(courtEvent.MovementStatus, "held", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(courtEvent.MovementStatus, "completed", StringComparison.OrdinalIgnoreCase))
+        var isScheduled = string.Equals(courtEvent.MovementStatus, "scheduled", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(courtEvent.MovementStatus, "pending", StringComparison.OrdinalIgnoreCase);
+        if (string.Equals(courtEvent.EventType, CourtSyncNormalization.EventTypes.Decision, StringComparison.OrdinalIgnoreCase)
+            && !isScheduled
+            && (courtEvent.ClientCaseDocumentId.HasValue
+                || !string.IsNullOrWhiteSpace(courtEvent.ResultSummary)
+                || string.Equals(courtEvent.MovementStatus, "held", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(courtEvent.MovementStatus, "completed", StringComparison.OrdinalIgnoreCase)))
         {
             return UserNotificationTypes.CourtDecisionPublished;
         }
 
-        if (!string.Equals(courtEvent.MovementStatus, "scheduled", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(courtEvent.MovementStatus, "pending", StringComparison.OrdinalIgnoreCase))
+        if (!isScheduled || !string.IsNullOrWhiteSpace(courtEvent.ResultSummary))
         {
             return UserNotificationTypes.CourtStatusChanged;
         }

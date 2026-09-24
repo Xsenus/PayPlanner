@@ -403,9 +403,9 @@ public static class NotificationTemplateCatalog
             CourtEventVariables),
         new(
             NotificationTemplateKeys.CourtDecisionPublished,
-            "Публикация судебного решения",
-            "Уведомление ответственным по делу при появлении результата, решения или судебного акта.",
-            "Опубликован результат по суду: {{case.title}}",
+            "Судебное решение",
+            "Уведомление ответственным по делу при фиксации судебного решения; наличие текста судебного акта проверяется отдельно.",
+            "Зафиксировано судебное решение: {{case.title}}",
             "{{actor.name}} {{courtEvent.action}} судебный результат по делу {{case.title}}.\n\nСобытие: {{courtEvent.title}}\nДата: {{courtEvent.scheduledAt}}\nСуд: {{courtEvent.courtName}}\nРезультат: {{courtEvent.result}}",
             CourtEventVariables),
         new(

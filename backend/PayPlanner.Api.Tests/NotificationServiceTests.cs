@@ -4753,6 +4753,69 @@ public class NotificationServiceTests
         Assert.Contains("\"action\":\"rescheduled\"", rescheduled.MetadataJson, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("hearing", "completed", "Иск рассмотрен", UserNotificationTypes.CourtStatusChanged)]
+    [InlineData("decision", "scheduled", "Ожидается решение", UserNotificationTypes.CourtStatusChanged)]
+    [InlineData("decision", "completed", "Иск удовлетворён частично", UserNotificationTypes.CourtDecisionPublished)]
+    public async Task NotifyCaseCourtEventAsync_DoesNotPresentHearingOrScheduledDecisionAsRenderedDecision(
+        string eventType,
+        string movementStatus,
+        string result,
+        string expectedType)
+    {
+        await using var db = await CreateContextAsync();
+        await SeedEmailSettingsAsync(db);
+        var recipient = await CreateUserAsync(db, $"court-stage-{eventType}-{movementStatus}@example.com");
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = recipient.Id,
+            Key = UserNotificationPreferenceSettings.SettingKey,
+            Value = UserNotificationPreferenceSettings.Serialize(new UserNotificationPreferenceSnapshot(
+                [], new Dictionary<string, IReadOnlyList<string>>())),
+        });
+        await db.SaveChangesAsync();
+        var client = new Client { Name = "Клиент", IsActive = true, ResponsibleUserId = recipient.Id };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Судебное дело",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = recipient.Id,
+        };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        var courtEvent = new ClientCaseCourtEvent
+        {
+            ClientCaseId = clientCase.Id,
+            EventType = eventType,
+            Title = "Судебное событие",
+            ScheduledAt = new DateTime(2026, 7, 10, 9, 30, 0, DateTimeKind.Utc),
+            MovementStatus = movementStatus,
+            ResultSummary = result,
+            SourceType = "manual",
+            CreatedAt = new DateTime(2026, 7, 10, 10, 0, 0, DateTimeKind.Utc),
+        };
+        db.ClientCaseCourtEvents.Add(courtEvent);
+        await db.SaveChangesAsync();
+
+        var emailService = new RecordingEmailService();
+        var service = CreateService(db, emailService, new RecordingTelegramService());
+        await service.NotifyCaseCourtEventAsync(clientCase, courtEvent, "created", "Сотрудник", 999, [recipient.Id]);
+
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal(expectedType, notification.Type);
+        Assert.DoesNotContain("Опубликован", notification.Title, StringComparison.OrdinalIgnoreCase);
+        if (expectedType == UserNotificationTypes.CourtDecisionPublished)
+        {
+            Assert.StartsWith("Зафиксировано судебное решение:", notification.Title, StringComparison.Ordinal);
+            Assert.Single(emailService.Messages, message => message.To == recipient.Email);
+        }
+        else
+        {
+            Assert.Empty(emailService.Messages);
+        }
+    }
+
     [Fact]
     public async Task NotifyCaseCourtEventAsync_LoadsVisibilityAndRecipientSettingsInSingleQueries()
     {
@@ -6887,6 +6950,7 @@ public class NotificationServiceTests
     public async Task NotifyCaseDecisionDateChangedAsync_RespectsVisibilityAndDeduplicates()
     {
         await using var db = await CreateContextAsync();
+        await SeedEmailSettingsAsync(db);
         var adminRole = new Role { Name = "admin", Description = "Администратор" };
         db.Roles.Add(adminRole);
         await db.SaveChangesAsync();
@@ -6914,6 +6978,14 @@ public class NotificationServiceTests
         };
         db.Users.AddRange(recipient, actor);
         await db.SaveChangesAsync();
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = recipient.Id,
+            Key = UserNotificationPreferenceSettings.SettingKey,
+            Value = UserNotificationPreferenceSettings.Serialize(new UserNotificationPreferenceSnapshot(
+                [], new Dictionary<string, IReadOnlyList<string>>())),
+        });
+        await db.SaveChangesAsync();
         var denied = await CreateUserWithoutSectionAccessAsync(db, "decision-denied@example.com", RolePermissionCatalog.Cases);
         var client = new Client { Name = "Клиент", IsActive = true, ResponsibleUserId = recipient.Id };
         var clientCase = new ClientCase
@@ -6925,7 +6997,8 @@ public class NotificationServiceTests
         };
         db.ClientCases.Add(clientCase);
         await db.SaveChangesAsync();
-        var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService());
+        var emailService = new RecordingEmailService();
+        var service = CreateService(db, emailService, new RecordingTelegramService());
         var changedAt = DateTime.UtcNow;
         var currentAt = new DateTime(2026, 10, 7);
         var recipients = new[] { recipient.Id, actor.Id, denied.Id };
@@ -6938,6 +7011,8 @@ public class NotificationServiceTests
         Assert.Equal(UserNotificationTypes.CourtDecisionPublished, notification.Type);
         Assert.Equal(clientCase.Id, notification.ObjectId);
         Assert.Contains("07.10.2026", notification.BodyPreview);
+        var email = Assert.Single(emailService.Messages);
+        Assert.Equal(recipient.Email, email.To);
     }
 
     [Fact]

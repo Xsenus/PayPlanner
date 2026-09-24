@@ -300,7 +300,7 @@ public static class UserNotificationTypes
         new(CaseCourtEvent, "Судебное событие", "По делу добавлено или обновлено судебное заседание, движение или судебный акт.", "cyan", "high", NotificationChannels.All, false, false),
         new(CourtHearing, "Судебное заседание", "Назначено, перенесено или обновлено судебное заседание по делу.", "cyan", "high", NotificationChannels.All, true, false),
         new(CourtStatusChanged, "Изменение судебного статуса", "Изменился статус судебного производства или движение дела в суде.", "blue", "high", NotificationChannels.All, true, false),
-        new(CourtDecisionPublished, "Судебное решение", "По делу вынесено, изменено или опубликовано решение, определение или другой судебный акт.", "emerald", "high", NotificationChannels.All, true, false),
+        new(CourtDecisionPublished, "Судебное решение", "По делу зафиксировано судебное решение. Наличие опубликованного текста акта проверяется в документах дела.", "emerald", "high", NotificationChannels.All, true, false),
         new(CourtSyncFailed, "Ошибка судебной синхронизации", "Судебный источник не удалось проверить или обновить автоматически.", "rose", NotificationPriorities.Critical, NotificationChannels.All, true, false),
         new(CaseProceduralDeadline, "Процессуальный срок", "По делу добавлен, перенесен, закрыт или приближается процессуальный срок.", "amber", "high", NotificationChannels.All, false, false),
         new(CaseConversation, "Переписка дела", "По делу добавлено сообщение или вложение во внутренней переписке.", "emerald", "normal", NotificationChannels.All, true, true),
