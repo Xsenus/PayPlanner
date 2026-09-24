@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { ClientCaseCourtEvent, ClientCaseCourtInstance, ClientCaseProceduralDeadline } from '../types';
-import { buildCourtCaseProcessSummary } from './courtCaseSummary';
+import { buildCourtCaseProcessSummary, buildCourtInstanceStage } from './courtCaseSummary';
 
 function courtEvent(overrides: Partial<ClientCaseCourtEvent> = {}): ClientCaseCourtEvent {
   return {
@@ -42,6 +42,67 @@ function proceduralDeadline(overrides: Partial<ClientCaseProceduralDeadline> = {
     ...overrides,
   };
 }
+
+describe('buildCourtInstanceStage', () => {
+  it('keeps a scheduled decision separate from an issued one', () => {
+    const stage = buildCourtInstanceStage([
+      courtEvent({
+        eventType: 'decision',
+        title: 'Оглашение решения',
+        movementStatus: 'scheduled',
+        resultSummary: 'Ожидается решение',
+      }),
+    ], 'first');
+
+    expect(stage.label).toBe('Событие назначено');
+    expect(stage.lastConfirmedResult).toBeNull();
+  });
+
+  it('shows the last confirmed result without treating later scheduled hearing as completed', () => {
+    const stage = buildCourtInstanceStage([
+      courtEvent({
+        eventType: 'decision',
+        resultSummary: 'Иск удовлетворён',
+      }),
+      courtEvent({
+        id: 2,
+        eventType: 'hearing',
+        scheduledAt: '2026-10-14T09:50:00Z',
+        movementStatus: 'scheduled',
+        resultSummary: 'Предполагаемый итог',
+      }),
+    ], 'first');
+
+    expect(stage.label).toBe('Заседание назначено');
+    expect(stage.lastConfirmedResult).toBe('Иск удовлетворён');
+  });
+
+  it('separates the stage and result of each instance', () => {
+    const events = [
+      courtEvent({ eventType: 'decision', resultSummary: 'Иск удовлетворён' }),
+      courtEvent({
+        id: 2,
+        eventType: 'hearing',
+        courtInstance: 'appeal',
+        hearingOutcome: 'considered',
+        hearingOutcomeNote: 'Рассмотрение окончено',
+        movementStatus: 'held',
+      }),
+    ];
+
+    expect(buildCourtInstanceStage(events, 'first').label).toBe('Решение зафиксировано');
+    expect(buildCourtInstanceStage(events, 'appeal').label).toBe('Рассмотрение завершено');
+    expect(buildCourtInstanceStage(events, 'appeal').lastConfirmedResult).toBe('Рассмотрение окончено');
+    expect(buildCourtInstanceStage(events, 'cassation').label).toBe('Движение не загружено');
+  });
+
+  it('ignores cancelled and archived movements', () => {
+    expect(buildCourtInstanceStage([
+      courtEvent({ movementStatus: 'cancelled', eventType: 'decision' }),
+      courtEvent({ id: 2, movementStatus: 'archived', eventType: 'decision' }),
+    ], 'first').label).toBe('Движение не загружено');
+  });
+});
 
 describe('buildCourtCaseProcessSummary', () => {
   it('recognizes a final result without mistaking claim acceptance for a decision', () => {

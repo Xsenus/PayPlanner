@@ -2996,6 +2996,8 @@ describe('CaseDetailPage', () => {
     expect(screen.getByText('до 20.06.2099 · весь день')).toBeTruthy();
     expect(screen.getByText(/Источник проверен 15\.09\.2026/u)).toBeTruthy();
     expect(screen.getByText('Инстанции и судебные карточки')).toBeTruthy();
+    expect(screen.getAllByText('Заседание назначено').length).toBeGreaterThan(0);
+    expect(screen.getByText('Стадия по событиям')).toBeTruthy();
     expect(screen.getByText('Заседания и движения')).toBeTruthy();
     expect(screen.getByText('Лента процессуальной истории')).toBeTruthy();
     expect(screen.getAllByText('13.06.2026 · весь день').length).toBeGreaterThan(0);
@@ -3518,7 +3520,7 @@ describe('CaseDetailPage', () => {
     expect(screen.getAllByText('Самарский областной суд').length).toBeGreaterThan(0);
     expect(screen.queryByText('UID-FIRST-ONLY')).toBeNull();
     expect(within(screen.getByText('Номер карточки').parentElement!).getByText('Не указан')).toBeTruthy();
-    expect(within(screen.getByText('Текущий результат').parentElement!).getByText('—')).toBeTruthy();
+    expect(within(screen.getByText('Последний зафиксированный итог').parentElement!).getByText('—')).toBeTruthy();
     expect(screen.queryByRole('link', { name: 'Открыть официальную карточку суда' })).toBeNull();
   });
 

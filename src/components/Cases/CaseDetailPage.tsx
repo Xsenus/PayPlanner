@@ -77,7 +77,7 @@ import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { formatCurrencySmart } from '../../utils/formatters';
 import { courtAmountToInput, hasInvalidCourtAmounts, parseCourtAmountInput } from '../../utils/courtAmounts';
 import { buildCaseTaskPayload, getCaseStageTaskTemplates, isPretrialCaseStage, type CaseStageTaskTemplate } from '../../utils/caseTaskPayload';
-import { buildCourtCaseProcessSummary, type CourtProcessSummaryTone } from '../../utils/courtCaseSummary';
+import { buildCourtCaseProcessSummary, buildCourtInstanceStage, type CourtProcessSummaryTone } from '../../utils/courtCaseSummary';
 import { formatDateTimeInTimeZone, fromTimeZoneDateTimeInput, getEffectiveScheduleTime, toTimeZoneDateKey, toTimeZoneDateTimeInput } from '../../utils/timeZoneDate';
 import { normalizeUserTimeZoneId, USER_TIME_ZONE_SETTING_KEY } from '../../utils/timeZoneOptions';
 import type { TaskJournalItem } from '../../utils/taskJournalStore';
@@ -7214,7 +7214,7 @@ function CourtPanel({
     const overviewEvents = selectedActiveCourtEvents
       .slice()
       .sort((left, right) => new Date(left.scheduledAt).getTime() - new Date(right.scheduledAt).getTime());
-    const latestEvent = overviewEvents.at(-1);
+    const selectedInstanceStage = buildCourtInstanceStage(courtEvents, activeCourtInstance);
     const processHistory = courtEvents
       .slice()
       .sort((left, right) => new Date(right.scheduledAt).getTime() - new Date(left.scheduledAt).getTime())
@@ -7337,7 +7337,7 @@ function CourtPanel({
                   ['ИНН / ОГРН истца', [caseItem.claimantInn, caseItem.claimantOgrn].filter(Boolean).join(' / ') || '—'],
                   ['Ответчик / должник', caseItem.defendant || '—'],
                   ['ИНН / ОГРН ответчика', [caseItem.defendantInn, caseItem.defendantOgrn].filter(Boolean).join(' / ') || '—'],
-                  ['Текущий результат', latestEvent?.resultSummary || latestEvent?.hearingOutcomeNote || '—'],
+                  ['Последний зафиксированный итог', selectedInstanceStage.lastConfirmedResult || '—'],
                 ].map(([label, value]) => <div key={label} className="min-w-0 rounded-lg bg-slate-50 px-3 py-2"><div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-400">{label}</div><div className={`mt-1 break-words text-sm font-semibold text-slate-800 ${label === 'UID' ? 'font-mono text-xs text-cyan-800' : ''}`}>{value}</div></div>)}
               </div>
               <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
@@ -7360,9 +7360,10 @@ function CourtPanel({
               <div className="flex flex-wrap items-center justify-between gap-2"><div><h3 className="font-bold text-slate-900">Инстанции и судебные карточки</h3><p className="mt-0.5 text-xs text-slate-500">Карточки одного дела объединяются по UID. Выберите инстанцию, чтобы увидеть её движение.</p></div><span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">{populatedInstances.length} заполнено</span></div>
               <div className="mt-3 flex gap-2 overflow-x-auto pb-1">{visibleInstances.map((tab) => {
                 const instanceData = courtInstances.find((item) => item.instance === tab.value);
-                return <button key={tab.value} type="button" onClick={() => onActiveCourtInstanceChange(tab.value)} className={`min-w-[170px] rounded-lg border px-3 py-2 text-left ${activeCourtInstance === tab.value ? 'border-blue-400 bg-blue-50 text-blue-800' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}><div className="text-sm font-bold">{tab.label}</div><div className="mt-0.5 truncate text-xs opacity-75">{instanceData?.courtCaseNumber || 'Номер не указан'}</div></button>;
+                const stage = buildCourtInstanceStage(courtEvents, tab.value);
+                return <button key={tab.value} type="button" onClick={() => onActiveCourtInstanceChange(tab.value)} className={`min-w-[170px] rounded-lg border px-3 py-2 text-left ${activeCourtInstance === tab.value ? 'border-blue-400 bg-blue-50 text-blue-800' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}><div className="text-sm font-bold">{tab.label}</div><div className="mt-0.5 truncate text-xs opacity-75">{instanceData?.courtCaseNumber || 'Номер не указан'}</div><div className="mt-1 text-xs font-semibold">{stage.label}</div></button>;
               })}</div>
-              <div className="mt-3 grid gap-2 rounded-lg border border-slate-200 bg-slate-50/60 p-3 sm:grid-cols-2"><div><div className="text-[11px] uppercase tracking-[0.1em] text-slate-400">Суд</div><div className="mt-1 text-sm font-semibold text-slate-800">{overviewCourtName || 'Не указан'}</div></div><div><div className="text-[11px] uppercase tracking-[0.1em] text-slate-400">Номер карточки</div><div className="mt-1 text-sm font-semibold text-slate-800">{overviewCourtCaseNumber || 'Не указан'}</div></div><div><div className="text-[11px] uppercase tracking-[0.1em] text-slate-400">Судья</div><div className="mt-1 text-sm font-semibold text-slate-800">{overviewJudgeName || 'Не указан'}</div></div><div><div className="text-[11px] uppercase tracking-[0.1em] text-slate-400">Статус</div><div className="mt-1 text-sm font-semibold text-slate-800">{latestEvent?.movementStatusLabel || latestEvent?.movementStatus || 'Нет данных'}</div></div></div>
+              <div className="mt-3 grid gap-2 rounded-lg border border-slate-200 bg-slate-50/60 p-3 sm:grid-cols-2"><div><div className="text-[11px] uppercase tracking-[0.1em] text-slate-400">Суд</div><div className="mt-1 text-sm font-semibold text-slate-800">{overviewCourtName || 'Не указан'}</div></div><div><div className="text-[11px] uppercase tracking-[0.1em] text-slate-400">Номер карточки</div><div className="mt-1 text-sm font-semibold text-slate-800">{overviewCourtCaseNumber || 'Не указан'}</div></div><div><div className="text-[11px] uppercase tracking-[0.1em] text-slate-400">Судья</div><div className="mt-1 text-sm font-semibold text-slate-800">{overviewJudgeName || 'Не указан'}</div></div><div><div className="text-[11px] uppercase tracking-[0.1em] text-slate-400">Стадия по событиям</div><div className="mt-1 text-sm font-semibold text-slate-800">{selectedInstanceStage.label}</div><div className="mt-0.5 text-xs text-slate-500">{selectedInstanceStage.detail}</div></div></div>
             </section>
 
             <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">

@@ -33,6 +33,13 @@ export interface CourtCaseProcessSummaryOptions {
   timeZoneId?: string | null;
 }
 
+export interface CourtInstanceStage {
+  label: string;
+  detail: string;
+  tone: CourtProcessSummaryTone;
+  lastConfirmedResult: string | null;
+}
+
 const TERMINAL_EVENT_STATUSES = new Set(['archived', 'cancelled', 'completed', 'held']);
 const INACTIVE_DEADLINE_STATUSES = new Set(['closed', 'cancelled', 'archived']);
 const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
@@ -99,6 +106,59 @@ function isActiveDeadline(deadline: ClientCaseProceduralDeadline) {
 
 function isActiveCourtEvent(event: ClientCaseCourtEvent) {
   return (event.movementStatus || '').trim().toLowerCase() !== 'archived';
+}
+
+export function buildCourtInstanceStage(
+  events: ClientCaseCourtEvent[],
+  courtInstance: string,
+): CourtInstanceStage {
+  const relevant = events
+    .filter((event) => event.courtInstance === courtInstance)
+    .filter((event) => !['archived', 'cancelled'].includes((event.movementStatus || '').trim().toLowerCase()))
+    .sort((left, right) => (getTime(right.scheduledAt) ?? 0) - (getTime(left.scheduledAt) ?? 0));
+  const confirmedResultEvent = relevant.find((event) => (
+    ['completed', 'held'].includes((event.movementStatus || '').trim().toLowerCase())
+    && (event.resultSummary?.trim() || event.hearingOutcomeNote?.trim())
+  ));
+  const lastConfirmedResult = confirmedResultEvent?.resultSummary?.trim()
+    || confirmedResultEvent?.hearingOutcomeNote?.trim()
+    || null;
+  const latest = relevant[0];
+
+  if (!latest) return {
+    label: 'Движение не загружено',
+    detail: 'Проверьте карточку суда или добавьте подтверждённое событие.',
+    tone: 'slate',
+    lastConfirmedResult: null,
+  };
+
+  if ((latest.movementStatus || '').trim().toLowerCase() === 'scheduled') return {
+    label: latest.eventType === 'hearing' ? 'Заседание назначено' : 'Событие назначено',
+    detail: 'Итог ещё не подтверждён. Проверьте событие после его даты.',
+    tone: 'amber',
+    lastConfirmedResult,
+  };
+
+  if (isDecisionEvent(latest)) return {
+    label: 'Решение зафиксировано',
+    detail: 'Публикация текста и вступление в силу требуют отдельного подтверждения.',
+    tone: 'emerald',
+    lastConfirmedResult,
+  };
+
+  if (['completed', 'held'].includes((latest.movementStatus || '').trim().toLowerCase()) && latest.hearingOutcome === 'considered') return {
+    label: 'Рассмотрение завершено',
+    detail: 'Решение в движении этой инстанции пока не зафиксировано.',
+    tone: 'blue',
+    lastConfirmedResult,
+  };
+
+  return {
+    label: 'Движение обновлено',
+    detail: 'По последнему событию нельзя подтвердить итог рассмотрения.',
+    tone: 'slate',
+    lastConfirmedResult,
+  };
 }
 
 function isUpcomingCourtEvent(event: ClientCaseCourtEvent, nowTime: number) {
