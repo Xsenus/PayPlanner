@@ -2935,6 +2935,42 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task UpdateTask_WhenAuthorAndDueAtChangeTogether_RoutesBothChangesAndFormerAuthor()
+    {
+        await using var db = await CreateContextAsync();
+        var admin = await CreateAdminUserAsync(db, "author-deadline-admin@example.com", "Администратор");
+        var oldAuthor = await CreateAdminUserAsync(db, "author-deadline-old@example.com", "Старый постановщик");
+        var newAuthor = await CreateAdminUserAsync(db, "author-deadline-new@example.com", "Новый постановщик");
+        var assignee = await CreateAdminUserAsync(db, "author-deadline-assignee@example.com", "Исполнитель");
+        var client = await CreateClientAsync(db, "Клиент изменения срока и постановщика");
+        var task = await CreateTaskAsync(db, oldAuthor.Id, client.Id, assignee.Id);
+        var newDueAt = task.DueAt.AddDays(1);
+        var notificationService = new RecordingNotificationService();
+        var controller = CreateController(db, notificationService, admin);
+
+        var result = await controller.UpdateTask(task.Id, new UpsertTaskJournalItemRequest
+        {
+            ClientId = client.Id,
+            Title = task.Title,
+            AssigneeUserId = assignee.Id,
+            AuthorUserId = newAuthor.Id,
+            DueAt = newDueAt,
+            Status = task.Status,
+        }, CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(result.Result);
+        var notification = Assert.Single(notificationService.ChangedTasks);
+        Assert.Empty(notificationService.ReassignedTasks);
+        Assert.Contains(oldAuthor.Id, notification.AdditionalRecipientUserIds);
+        Assert.Contains(notification.ChangeLabels, label => label.Contains("Постановщик", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(notification.ChangeLabels, label => label.StartsWith("Срок:", StringComparison.OrdinalIgnoreCase));
+        var stored = await db.TaskJournalItems.AsNoTracking().SingleAsync(item => item.Id == task.Id);
+        Assert.Equal(assignee.Id, stored.AssigneeUserId);
+        Assert.Equal(newAuthor.Id, stored.AuthorUserId);
+        Assert.Equal(newDueAt, stored.DueAt);
+    }
+
+    [Fact]
     public async Task UpdateTask_ForbidsNonAdminFromChangingAuthor()
     {
         await using var db = await CreateContextAsync();
