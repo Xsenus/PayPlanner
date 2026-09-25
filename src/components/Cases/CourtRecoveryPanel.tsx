@@ -113,6 +113,7 @@ export function CourtRecoveryPanel({ caseId, canEdit }: CourtRecoveryPanelProps)
         <span>Подтверждено платежами: <strong>{money(overview.receivedAmount)}</strong></span>
         <span>Осталось: <strong>{money(overview.remainingAmount)}</strong></span>
       </div>
+      {!overview.hasCompletePaymentVisibility ? <p className="mt-2 text-xs text-amber-700">Показаны только доступные вам платежи. Общая сумма поступлений и остаток скрыты, чтобы не показывать неполный итог.</p> : null}
       {overview.awardedAmount == null ? <p className="mt-2 text-amber-700">Сначала сохраните присуждённую сумму в карточке дела.</p> : null}
       {overview.linkedPayments.length > 0 ? <ul className="mt-3 space-y-2">{overview.linkedPayments.map((payment) =>
         <li key={payment.paymentId} className="rounded-lg border border-slate-200 bg-white p-2">

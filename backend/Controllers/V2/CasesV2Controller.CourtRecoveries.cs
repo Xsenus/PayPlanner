@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Services;
 
 namespace PayPlanner.Api.Controllers.V2;
 
@@ -19,11 +20,12 @@ public partial class CasesV2Controller
 
     public sealed record CourtRecoveryOverviewDto(
         decimal? AwardedAmount,
-        decimal ReceivedAmount,
+        decimal? ReceivedAmount,
         decimal? RemainingAmount,
         IReadOnlyList<CourtRecoveryPaymentDto> LinkedPayments,
         IReadOnlyList<CourtRecoveryPaymentDto> AvailablePayments,
-        bool HasMoreAvailablePayments);
+        bool HasMoreAvailablePayments,
+        bool HasCompletePaymentVisibility);
 
     public sealed record SetCourtRecoveryPaymentRequest(decimal Amount);
 
@@ -45,8 +47,13 @@ public partial class CasesV2Controller
         if (caseAmounts is null)
             return NotFound();
 
+        var paymentsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
+        if (paymentsVisibility is null)
+            return Forbid();
+        var visiblePayments = _db.Payments.AsNoTracking().ApplyPaymentVisibility(paymentsVisibility);
+
         var links = await _db.ClientCaseCourtRecoveryPayments.AsNoTracking()
-            .Where(item => item.ClientCaseId == id)
+            .Where(item => item.ClientCaseId == id && visiblePayments.Any(payment => payment.Id == item.PaymentId))
             .Include(item => item.Payment)
             .OrderByDescending(item => item.Payment.Date)
             .ToListAsync(ct);
@@ -67,7 +74,7 @@ public partial class CasesV2Controller
                 warning);
         }).ToArray();
 
-        var availableQuery = _db.Payments.AsNoTracking()
+        var availableQuery = visiblePayments
             .Where(payment => payment.Status != PaymentStatus.Cancelled &&
                 payment.Type == PaymentType.Income && payment.DocumentKind == DocumentKind.Payment &&
                 payment.PaidAmount > 0m &&
@@ -94,11 +101,13 @@ public partial class CasesV2Controller
         var received = linked.Sum(item => item.EffectiveAmount);
         return Ok(new CourtRecoveryOverviewDto(
             caseAmounts.CourtAwardedAmount,
-            received,
-            caseAmounts.CourtAwardedAmount.HasValue ? Math.Max(caseAmounts.CourtAwardedAmount.Value - received, 0m) : null,
+            paymentsVisibility.SeesAll ? received : null,
+            paymentsVisibility.SeesAll && caseAmounts.CourtAwardedAmount is decimal awarded
+                ? Math.Max(awarded - received, 0m) : null,
             linked,
             available,
-            availablePage.Count > 100));
+            availablePage.Count > 100,
+            paymentsVisibility.SeesAll));
     }
 
     [HttpPut("{id:int}/court-recoveries/{paymentId:int}")]
@@ -122,7 +131,11 @@ public partial class CasesV2Controller
         if (clientCase.CourtAwardedAmount is null or <= 0m)
             return BadRequest(new { message = "Сначала укажите присуждённую судом сумму в карточке дела." });
 
-        var payment = await _db.Payments
+        var paymentsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
+        if (paymentsVisibility is null)
+            return Forbid();
+
+        var payment = await _db.Payments.ApplyPaymentVisibility(paymentsVisibility)
             .FirstOrDefaultAsync(item => item.Id == paymentId &&
                 (item.ClientCaseId == id || item.InvoiceClientCases.Any(link => link.ClientCaseId == id)), ct);
         if (payment is null)
@@ -187,8 +200,14 @@ public partial class CasesV2Controller
         if (!await _db.ClientCases.ApplyClientCaseVisibility(visibility).AsNoTracking().AnyAsync(item => item.Id == id, ct))
             return NotFound();
 
+        var paymentsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
+        if (paymentsVisibility is null)
+            return Forbid();
+        var visiblePayments = _db.Payments.ApplyPaymentVisibility(paymentsVisibility);
+
         var link = await _db.ClientCaseCourtRecoveryPayments
-            .FirstOrDefaultAsync(item => item.ClientCaseId == id && item.PaymentId == paymentId, ct);
+            .FirstOrDefaultAsync(item => item.ClientCaseId == id && item.PaymentId == paymentId &&
+                visiblePayments.Any(payment => payment.Id == item.PaymentId), ct);
         if (link is null)
             return NotFound();
         _db.ClientCaseCourtRecoveryPayments.Remove(link);

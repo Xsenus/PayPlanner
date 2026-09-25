@@ -898,7 +898,7 @@ describe('CaseDetailPage', () => {
     });
     vi.mocked(apiService.getClientCaseFinanceSummaries).mockReset();
     vi.mocked(apiService.getCourtRecoveries).mockReset();
-    vi.mocked(apiService.getCourtRecoveries).mockResolvedValue({ awardedAmount: null, receivedAmount: 0, remainingAmount: null, linkedPayments: [], availablePayments: [], hasMoreAvailablePayments: false });
+    vi.mocked(apiService.getCourtRecoveries).mockResolvedValue({ awardedAmount: null, receivedAmount: 0, remainingAmount: null, linkedPayments: [], availablePayments: [], hasMoreAvailablePayments: false, hasCompletePaymentVisibility: true });
     vi.mocked(apiService.getClientCaseFinanceSummaries).mockResolvedValue([]);
     vi.mocked(apiService.getLegalEntityCaseFinanceSummaries).mockReset();
     vi.mocked(apiService.getLegalEntityCaseFinanceSummaries).mockResolvedValue([]);

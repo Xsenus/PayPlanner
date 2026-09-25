@@ -598,16 +598,16 @@ public partial class CasesV2Controller : ControllerBase
                     LegalEntityResponsibleUserId = item.LegalEntity != null ? item.LegalEntity.ResponsibleUserId : null,
                     item.CourtName,
                     Received = (from link in _db.ClientCaseCourtRecoveryPayments
-                        join payment in visiblePayments on link.PaymentId equals payment.Id
-                        where link.ClientCaseId == item.Id
-                            && link.AllocatedAmount > 0m
-                            && payment.Status != PaymentStatus.Cancelled
-                            && payment.Type == PaymentType.Income
-                            && payment.DocumentKind == DocumentKind.Payment
-                            && payment.PaidAmount >= link.AllocatedAmount
-                            && (payment.ClientCaseId == item.Id
-                                || payment.InvoiceClientCases.Any(paymentCase => paymentCase.ClientCaseId == item.Id))
-                        select (decimal?)link.AllocatedAmount).Sum() ?? 0m,
+                                join payment in visiblePayments on link.PaymentId equals payment.Id
+                                where link.ClientCaseId == item.Id
+                                    && link.AllocatedAmount > 0m
+                                    && payment.Status != PaymentStatus.Cancelled
+                                    && payment.Type == PaymentType.Income
+                                    && payment.DocumentKind == DocumentKind.Payment
+                                    && payment.PaidAmount >= link.AllocatedAmount
+                                    && (payment.ClientCaseId == item.Id
+                                        || payment.InvoiceClientCases.Any(paymentCase => paymentCase.ClientCaseId == item.Id))
+                                select (decimal?)link.AllocatedAmount).Sum() ?? 0m,
                 })
                 .AsAsyncEnumerable()
                 .WithCancellation(ct))

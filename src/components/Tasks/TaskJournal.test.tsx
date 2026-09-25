@@ -3119,7 +3119,7 @@ describe('TaskJournal', () => {
 
   it('shows only tasks without a client and assignee in the untriaged view', async () => {
     await renderJournal([
-      createTask({ id: 101, title: 'Разобрать срочную задачу', clientId: null, clientName: null, legalEntityId: null, assigneeUserId: null, assigneeName: '', participants: [] }),
+      createTask({ id: 101, title: 'Разобрать срочную задачу', clientId: null, clientName: undefined, legalEntityId: null, assigneeUserId: null, assigneeName: '', participants: [] }),
       createTask({ id: 102, title: 'Назначенная задача' }),
     ]);
 
@@ -3132,7 +3132,7 @@ describe('TaskJournal', () => {
 
   it('opens the dedicated untriaged section with independent saved filters', async () => {
     await renderJournal([
-      createTask({ id: 101, title: 'Нужно распределить', isInternal: true, clientId: null, clientName: null, clientCaseId: null, assigneeUserId: null, assigneeName: '', participants: [] }),
+      createTask({ id: 101, title: 'Нужно распределить', isInternal: true, clientId: null, clientName: undefined, clientCaseId: null, assigneeUserId: null, assigneeName: '', participants: [] }),
       createTask({ id: 102, title: 'Уже назначена' }),
     ], { mode: 'untriaged', waitForTitle: null });
 
@@ -3148,9 +3148,9 @@ describe('TaskJournal', () => {
     await renderJournal([createTask({
       isInternal: true,
       clientId: null,
-      clientName: null,
+      clientName: undefined,
       clientCaseId: null,
-      clientCaseTitle: null,
+      clientCaseTitle: undefined,
       legalEntityId: null,
       objectName: 'Внутренняя задача',
       assigneeUserId: null,

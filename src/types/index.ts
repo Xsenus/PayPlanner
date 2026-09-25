@@ -1170,11 +1170,12 @@ export interface CourtRecoveryPayment {
 
 export interface CourtRecoveryOverview {
   awardedAmount: number | null;
-  receivedAmount: number;
+  receivedAmount: number | null;
   remainingAmount: number | null;
   linkedPayments: CourtRecoveryPayment[];
   availablePayments: CourtRecoveryPayment[];
   hasMoreAvailablePayments: boolean;
+  hasCompletePaymentVisibility: boolean;
 }
 
 export interface ClientCaseFinanceTotals {

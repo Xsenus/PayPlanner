@@ -75,7 +75,8 @@ public sealed class CaseHearingPreparationMigrationTests
         var databaseName = "payplanner_hearing_prep_test_" + Guid.NewGuid().ToString("N");
         var adminConnection = new NpgsqlConnectionStringBuilder(rawConnection)
         {
-            Database = "postgres", Pooling = false,
+            Database = "postgres",
+            Pooling = false,
         };
         await using var admin = new NpgsqlConnection(adminConnection.ConnectionString);
         await admin.OpenAsync();
@@ -88,7 +89,8 @@ public sealed class CaseHearingPreparationMigrationTests
             }
             var testConnection = new NpgsqlConnectionStringBuilder(rawConnection)
             {
-                Database = databaseName, Pooling = false,
+                Database = databaseName,
+                Pooling = false,
             };
             var options = new DbContextOptionsBuilder<PostgreSqlPaymentContext>()
                 .UseNpgsql(testConnection.ConnectionString).Options;

@@ -259,6 +259,7 @@ describe('CasesRegistry', () => {
       linkedPayments: [],
       availablePayments: [],
       hasMoreAvailablePayments: false,
+      hasCompletePaymentVisibility: true,
     });
     vi.mocked(apiService.getTaskJournalItems).mockReset();
     vi.mocked(apiService.getTaskJournalItems).mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 10 });

@@ -27,7 +27,8 @@ public sealed class InternalChatControllerTests
         var outsider = await fixture.AddUserAsync("reminder-outsider@example.test", "Посторонний");
         var created = await fixture.Controller(author).CreateChannel(new CreateInternalChatChannelRequest
         {
-            Name = "Обсуждение", MemberUserIds = [colleague.Id]
+            Name = "Обсуждение",
+            MemberUserIds = [colleague.Id]
         }, CancellationToken.None);
         var thread = Assert.IsType<InternalChatThreadDto>(Assert.IsType<CreatedAtActionResult>(created.Result).Value);
         var sent = await fixture.Controller(author).SendMessage(thread.Id,
@@ -70,7 +71,8 @@ public sealed class InternalChatControllerTests
         var colleague = await fixture.AddUserAsync("due-colleague@example.test", "Коллега");
         var created = await fixture.Controller(author).CreateChannel(new CreateInternalChatChannelRequest
         {
-            Name = "Обсуждение", MemberUserIds = [colleague.Id]
+            Name = "Обсуждение",
+            MemberUserIds = [colleague.Id]
         }, CancellationToken.None);
         var thread = Assert.IsType<InternalChatThreadDto>(Assert.IsType<CreatedAtActionResult>(created.Result).Value);
         var sent = await fixture.Controller(author).SendMessage(thread.Id,
@@ -202,8 +204,11 @@ public sealed class InternalChatControllerTests
         await fixture.Db.SaveChangesAsync();
         var attachment = new InternalChatAttachment
         {
-            MessageId = attachmentMessage.Id, FileName = "report.txt", StoredFileName = "report.txt",
-            UploadedByUserId = author.Id, Size = 1
+            MessageId = attachmentMessage.Id,
+            FileName = "report.txt",
+            StoredFileName = "report.txt",
+            UploadedByUserId = author.Id,
+            Size = 1
         };
         fixture.Db.InternalChatAttachments.Add(attachment);
         await fixture.Db.SaveChangesAsync();
@@ -250,7 +255,8 @@ public sealed class InternalChatControllerTests
         var colleague = await fixture.AddUserAsync("hide-colleague@example.test", "Коллега");
         var created = await fixture.Controller(owner).CreateChannel(new CreateInternalChatChannelRequest
         {
-            Name = "Обсуждение", MemberUserIds = [colleague.Id]
+            Name = "Обсуждение",
+            MemberUserIds = [colleague.Id]
         }, CancellationToken.None);
         var thread = Assert.IsType<InternalChatThreadDto>(Assert.IsType<CreatedAtActionResult>(created.Result).Value);
         Assert.IsType<NoContentResult>(await fixture.Controller(owner).SetPersonalState(thread.Id,
@@ -389,11 +395,14 @@ public sealed class InternalChatControllerTests
             new InternalChatAttachment { MessageId = latestMessageId, FileName = "second.pdf", StoredFileName = "second-stored.pdf", UploadedByUserId = owner.Id });
         fixture.Db.InternalChatReactions.Add(new InternalChatReaction
         {
-            MessageId = latestMessageId, UserId = owner.Id, Emoji = "👍"
+            MessageId = latestMessageId,
+            UserId = owner.Id,
+            Emoji = "👍"
         });
         fixture.Db.InternalChatMentions.Add(new InternalChatMention
         {
-            MessageId = latestMessageId, UserId = owner.Id
+            MessageId = latestMessageId,
+            UserId = owner.Id
         });
         await fixture.Db.SaveChangesAsync();
         fixture.Db.ChangeTracker.Clear();
@@ -424,12 +433,15 @@ public sealed class InternalChatControllerTests
         var outsider = await fixture.AddUserAsync("unread-outsider@example.test", "Посторонний");
         var created = await fixture.Controller(owner).CreateChannel(new CreateInternalChatChannelRequest
         {
-            Name = "Много непрочитанных", MemberUserIds = [reader.Id]
+            Name = "Много непрочитанных",
+            MemberUserIds = [reader.Id]
         }, CancellationToken.None);
         var channel = Assert.IsType<InternalChatThreadDto>(Assert.IsType<CreatedAtActionResult>(created.Result).Value);
         fixture.Db.InternalChatMessages.AddRange(Enumerable.Range(1, 60).Select(index => new InternalChatMessage
         {
-            ThreadId = channel.Id, AuthorUserId = owner.Id, Text = $"Сообщение {index}"
+            ThreadId = channel.Id,
+            AuthorUserId = owner.Id,
+            Text = $"Сообщение {index}"
         }));
         await fixture.Db.SaveChangesAsync();
         var fifthId = await fixture.Db.InternalChatMessages.Where(item => item.ThreadId == channel.Id)

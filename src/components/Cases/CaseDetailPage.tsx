@@ -146,7 +146,6 @@ function courtMovementStatusClasses(status?: string | null) {
 interface CourtInstanceDraft {
   courtId: string;
   courtName: string;
-  ourCourtRole: string;
   courtCaseNumber: string;
   judicialUid: string;
   courtUrl: string;
@@ -183,6 +182,7 @@ interface CaseEditDraft {
   courtStateFeeAmount: string;
   priority: string;
   courtName: string;
+  ourCourtRole: NonNullable<ClientCase['ourCourtRole']>;
   courtCaseNumber: string;
   courtUrl: string;
   nextHearingAt: string;
@@ -4918,7 +4918,7 @@ function CaseEditPage({
           <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Суд и участники процесса</h2>
           <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             <label className="text-sm font-medium text-slate-700">Наша роль в деле
-              <SystemSelect aria-label="Наша роль в деле" value={draft.ourCourtRole} onChange={(event) => setField('ourCourtRole', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm"><option value="">Не указана</option><option value="claimant">Истец</option><option value="respondent">Ответчик</option><option value="third-party">Третье лицо</option></SystemSelect>
+              <SystemSelect aria-label="Наша роль в деле" value={draft.ourCourtRole} onChange={(event) => setField('ourCourtRole', event.target.value as NonNullable<ClientCase['ourCourtRole']>)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm"><option value="">Не указана</option><option value="claimant">Истец</option><option value="respondent">Ответчик</option><option value="third-party">Третье лицо</option></SystemSelect>
             </label>
             <label className="text-sm font-medium text-slate-700">
               Суд

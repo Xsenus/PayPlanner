@@ -121,7 +121,7 @@ public sealed class CancelledInvoiceBillingMigrationTests
     private static async Task<(int CancelledTaskId, int CancelledWorkflowTaskId, int ActiveTaskId, int ActiveInvoiceId)>
         SeedLinkedTasksAsync(PaymentContext context)
     {
-        var date = new DateTime(2026, 9, 25);
+        var date = new DateTime(2026, 9, 25, 0, 0, 0, DateTimeKind.Utc);
         var cancelled = CreateInvoice("INV-OLD-CANCELLED", date, PaymentStatus.Cancelled);
         var cancelledWorkflow = CreateInvoice("INV-OLD-WORKFLOW", date, PaymentStatus.Pending);
         cancelledWorkflow.InvoiceWorkflowStatus = InvoiceWorkflowStatus.Cancelled;

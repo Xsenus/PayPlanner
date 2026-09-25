@@ -869,8 +869,11 @@ public sealed partial class InternalChatController : ControllerBase
     private static bool IsTaskChatAlreadyCreated(DbUpdateException exception) =>
         exception.InnerException switch
         {
-            PostgresException { SqlState: PostgresErrorCodes.UniqueViolation,
-                ConstraintName: "IX_InternalChatThreads_TaskJournalItemId" } => true,
+            PostgresException
+            {
+                SqlState: PostgresErrorCodes.UniqueViolation,
+                ConstraintName: "IX_InternalChatThreads_TaskJournalItemId"
+            } => true,
             SqliteException { SqliteExtendedErrorCode: 2067 } sqlite =>
                 sqlite.Message.Contains("InternalChatThreads.TaskJournalItemId", StringComparison.Ordinal),
             _ => false
@@ -879,8 +882,11 @@ public sealed partial class InternalChatController : ControllerBase
     private static bool IsDirectChatAlreadyCreated(DbUpdateException exception) =>
         exception.InnerException switch
         {
-            PostgresException { SqlState: PostgresErrorCodes.UniqueViolation,
-                ConstraintName: "IX_InternalChatThreads_DirectKey" } => true,
+            PostgresException
+            {
+                SqlState: PostgresErrorCodes.UniqueViolation,
+                ConstraintName: "IX_InternalChatThreads_DirectKey"
+            } => true,
             SqliteException { SqliteExtendedErrorCode: 2067 } sqlite =>
                 sqlite.Message.Contains("InternalChatThreads.DirectKey", StringComparison.Ordinal),
             _ => false

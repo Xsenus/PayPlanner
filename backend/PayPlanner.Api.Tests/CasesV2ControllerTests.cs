@@ -2104,6 +2104,79 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task CourtRecoveries_RestrictPaymentsAndHideIncompleteTotalsForLimitedVisibility()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "court-recovery-limited@example.com", "Юрист", DataVisibilityScope.All);
+        var other = await CreateUserAsync(db, "court-recovery-other@example.com", "Другой", DataVisibilityScope.All);
+        await GrantSectionPermissionAsync(db, user, RolePermissionCatalog.Payments, viewScope: DataVisibilityScope.Own);
+        var visibleClient = new Client { Name = "Доступный плательщик", IsActive = true, ResponsibleUserId = user.Id };
+        var hiddenClient = new Client { Name = "Недоступный плательщик", IsActive = true, ResponsibleUserId = other.Id };
+        var clientCase = new ClientCase
+        {
+            Client = hiddenClient,
+            ResponsibleUserId = user.Id,
+            Title = "Взыскание",
+            Status = ClientCaseStatus.Open,
+            CourtAwardedAmount = 50_000m,
+        };
+        var visiblePayment = new Payment
+        {
+            Client = visibleClient,
+            ClientCase = clientCase,
+            DocumentKind = DocumentKind.Payment,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Completed,
+            Amount = 10_000m,
+            PaidAmount = 10_000m,
+            Date = DateTime.UtcNow,
+            PlannedDate = DateTime.UtcNow,
+            Description = "Доступный платёж",
+        };
+        var hiddenPayment = new Payment
+        {
+            Client = hiddenClient,
+            ClientCase = clientCase,
+            DocumentKind = DocumentKind.Payment,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Completed,
+            Amount = 20_000m,
+            PaidAmount = 20_000m,
+            Date = DateTime.UtcNow,
+            PlannedDate = DateTime.UtcNow,
+            Description = "Скрытый платёж",
+        };
+        db.Payments.AddRange(visiblePayment, hiddenPayment);
+        await db.SaveChangesAsync();
+        db.ClientCaseCourtRecoveryPayments.Add(new ClientCaseCourtRecoveryPayment
+        {
+            ClientCaseId = clientCase.Id,
+            PaymentId = hiddenPayment.Id,
+            AllocatedAmount = 15_000m,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, user);
+
+        var result = await controller.GetCourtRecoveries(clientCase.Id, null, CancellationToken.None);
+        var overview = Assert.IsType<CasesV2Controller.CourtRecoveryOverviewDto>(
+            Assert.IsType<OkObjectResult>(result.Result).Value);
+        Assert.False(overview.HasCompletePaymentVisibility);
+        Assert.Null(overview.ReceivedAmount);
+        Assert.Null(overview.RemainingAmount);
+        Assert.Empty(overview.LinkedPayments);
+        Assert.Equal(visiblePayment.Id, Assert.Single(overview.AvailablePayments).PaymentId);
+        Assert.IsType<NotFoundResult>(await controller.SetCourtRecoveryPayment(
+            clientCase.Id, hiddenPayment.Id, new(1_000m), CancellationToken.None));
+        Assert.IsType<NotFoundResult>(await controller.RemoveCourtRecoveryPayment(
+            clientCase.Id, hiddenPayment.Id, CancellationToken.None));
+        Assert.IsType<NoContentResult>(await controller.SetCourtRecoveryPayment(
+            clientCase.Id, visiblePayment.Id, new(5_000m), CancellationToken.None));
+        Assert.IsType<NoContentResult>(await controller.RemoveCourtRecoveryPayment(
+            clientCase.Id, visiblePayment.Id, CancellationToken.None));
+        Assert.Equal(1, await db.ClientCaseCourtRecoveryPayments.CountAsync());
+    }
+
+    [Fact]
     public async Task GetById_WithoutPaymentsViewPermission_HidesFinanceFieldsAndPayments()
     {
         await using var db = await CreateContextAsync();
@@ -3637,17 +3710,24 @@ public class CasesV2ControllerTests
 
         var hearingDocument = new ClientCaseDocument
         {
-            ClientCaseId = allDayCase.Id, DocumentKey = "tomorrow-hearing-material",
-            DocumentType = "Материал", Status = "Подготовлен",
-            OriginalFileName = "position.pdf", StoredFileName = "position.pdf",
-            StoragePath = "cases/tomorrow-position.pdf", ContentType = "application/pdf",
-            SizeBytes = 100, UploadedByName = lawyer.FullName,
+            ClientCaseId = allDayCase.Id,
+            DocumentKey = "tomorrow-hearing-material",
+            DocumentType = "Материал",
+            Status = "Подготовлен",
+            OriginalFileName = "position.pdf",
+            StoredFileName = "position.pdf",
+            StoragePath = "cases/tomorrow-position.pdf",
+            ContentType = "application/pdf",
+            SizeBytes = 100,
+            UploadedByName = lawyer.FullName,
         };
         db.ClientCaseDocuments.Add(hearingDocument);
         db.ClientCaseHearingPreparations.Add(new ClientCaseHearingPreparation
         {
-            ClientCaseId = allDayCase.Id, HearingAt = localDate,
-            MaterialsCheckedAt = DateTime.UtcNow, MaterialsCheckedByName = lawyer.FullName,
+            ClientCaseId = allDayCase.Id,
+            HearingAt = localDate,
+            MaterialsCheckedAt = DateTime.UtcNow,
+            MaterialsCheckedByName = lawyer.FullName,
             Documents = [new ClientCaseHearingPreparationDocument { Document = hearingDocument }],
         });
         await db.SaveChangesAsync();
@@ -3794,22 +3874,33 @@ public class CasesV2ControllerTests
         var clientCase = new ClientCase
         {
             Client = new Client { Name = "Доверитель", IsActive = true, ResponsibleUserId = lawyer.Id },
-            Title = "Дело с подготовкой", Status = ClientCaseStatus.Open,
-            ResponsibleUserId = lawyer.Id, NextHearingAt = hearingAt,
+            Title = "Дело с подготовкой",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = lawyer.Id,
+            NextHearingAt = hearingAt,
         };
         var otherCase = new ClientCase
         {
             Client = new Client { Name = "Другой доверитель", IsActive = true, ResponsibleUserId = lawyer.Id },
-            Title = "Другое дело", Status = ClientCaseStatus.Open, ResponsibleUserId = lawyer.Id,
+            Title = "Другое дело",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = lawyer.Id,
         };
         db.ClientCases.AddRange(clientCase, otherCase);
         await db.SaveChangesAsync();
         ClientCaseDocument MakeDocument(int caseId, string name) => new()
         {
-            ClientCaseId = caseId, DocumentKey = name, Version = 1,
-            DocumentType = "Материал", Status = "ready", OriginalFileName = name,
-            StoredFileName = name, StoragePath = $"cases/{name}", ContentType = "application/pdf",
-            SizeBytes = 100, UploadedByName = lawyer.FullName,
+            ClientCaseId = caseId,
+            DocumentKey = name,
+            Version = 1,
+            DocumentType = "Материал",
+            Status = "ready",
+            OriginalFileName = name,
+            StoredFileName = name,
+            StoragePath = $"cases/{name}",
+            ContentType = "application/pdf",
+            SizeBytes = 100,
+            UploadedByName = lawyer.FullName,
         };
         var ownDocument = MakeDocument(clientCase.Id, "position.pdf");
         var replacementDocument = MakeDocument(clientCase.Id, "updated-position.pdf");
@@ -5004,21 +5095,33 @@ public class CasesV2ControllerTests
         db.ClientCases.AddRange(
             new ClientCase
             {
-                Client = client, Title = "отбор по иску", Status = ClientCaseStatus.Open,
-                ResponsibleUserId = owner.Id, CaseType = "Гражданское дело", OurCourtRole = "claimant",
-                CourtClaimAmount = 5000m, CourtName = "Районный суд",
+                Client = client,
+                Title = "отбор по иску",
+                Status = ClientCaseStatus.Open,
+                ResponsibleUserId = owner.Id,
+                CaseType = "Гражданское дело",
+                OurCourtRole = "claimant",
+                CourtClaimAmount = 5000m,
+                CourtName = "Районный суд",
                 NextHearingAt = new DateTime(2027, 1, 10, 9, 0, 0, DateTimeKind.Utc),
             },
             new ClientCase
             {
-                Client = client, Title = "Другой спор", Status = ClientCaseStatus.Closed,
-                ResponsibleUserId = owner.Id, CaseType = "Арбитраж", OurCourtRole = "respondent",
-                CourtClaimAmount = 20000m, CourtName = "Арбитражный суд",
+                Client = client,
+                Title = "Другой спор",
+                Status = ClientCaseStatus.Closed,
+                ResponsibleUserId = owner.Id,
+                CaseType = "Арбитраж",
+                OurCourtRole = "respondent",
+                CourtClaimAmount = 20000m,
+                CourtName = "Арбитражный суд",
                 NextHearingAt = new DateTime(2027, 1, 11, 9, 0, 0, DateTimeKind.Utc),
             },
             new ClientCase
             {
-                Client = client, Title = "Внутреннее дело", Status = ClientCaseStatus.Open,
+                Client = client,
+                Title = "Внутреннее дело",
+                Status = ClientCaseStatus.Open,
                 ResponsibleUserId = owner.Id,
                 DueDate = new DateTime(2027, 1, 12, 0, 0, 0, DateTimeKind.Utc),
             });
@@ -5122,17 +5225,24 @@ public class CasesV2ControllerTests
 
         var material = new ClientCaseDocument
         {
-            ClientCaseId = clientCase.Id, DocumentKey = "calendar-hearing-material",
-            DocumentType = "Материал", Status = "Подготовлен",
-            OriginalFileName = "calendar-position.pdf", StoredFileName = "calendar-position.pdf",
-            StoragePath = "cases/calendar-position.pdf", ContentType = "application/pdf",
-            SizeBytes = 100, UploadedByName = owner.FullName,
+            ClientCaseId = clientCase.Id,
+            DocumentKey = "calendar-hearing-material",
+            DocumentType = "Материал",
+            Status = "Подготовлен",
+            OriginalFileName = "calendar-position.pdf",
+            StoredFileName = "calendar-position.pdf",
+            StoragePath = "cases/calendar-position.pdf",
+            ContentType = "application/pdf",
+            SizeBytes = 100,
+            UploadedByName = owner.FullName,
         };
         db.ClientCaseDocuments.Add(material);
         db.ClientCaseHearingPreparations.Add(new ClientCaseHearingPreparation
         {
-            ClientCaseId = clientCase.Id, HearingAt = hearingAt,
-            MaterialsCheckedAt = DateTime.UtcNow, MaterialsCheckedByName = owner.FullName,
+            ClientCaseId = clientCase.Id,
+            HearingAt = hearingAt,
+            MaterialsCheckedAt = DateTime.UtcNow,
+            MaterialsCheckedByName = owner.FullName,
             Documents = [new ClientCaseHearingPreparationDocument { Document = material }],
         });
         await db.SaveChangesAsync();
@@ -5153,17 +5263,24 @@ public class CasesV2ControllerTests
 
         var secondMaterial = new ClientCaseDocument
         {
-            ClientCaseId = clientCase.Id, DocumentKey = "calendar-second-hearing-material",
-            DocumentType = "Материал", Status = "Подготовлен",
-            OriginalFileName = "second-position.pdf", StoredFileName = "second-position.pdf",
-            StoragePath = "cases/second-position.pdf", ContentType = "application/pdf",
-            SizeBytes = 100, UploadedByName = owner.FullName,
+            ClientCaseId = clientCase.Id,
+            DocumentKey = "calendar-second-hearing-material",
+            DocumentType = "Материал",
+            Status = "Подготовлен",
+            OriginalFileName = "second-position.pdf",
+            StoredFileName = "second-position.pdf",
+            StoragePath = "cases/second-position.pdf",
+            ContentType = "application/pdf",
+            SizeBytes = 100,
+            UploadedByName = owner.FullName,
         };
         db.ClientCaseDocuments.Add(secondMaterial);
         db.ClientCaseHearingPreparations.Add(new ClientCaseHearingPreparation
         {
-            ClientCaseId = clientCase.Id, HearingAt = hearingAt.AddDays(7),
-            MaterialsCheckedAt = DateTime.UtcNow, MaterialsCheckedByName = owner.FullName,
+            ClientCaseId = clientCase.Id,
+            HearingAt = hearingAt.AddDays(7),
+            MaterialsCheckedAt = DateTime.UtcNow,
+            MaterialsCheckedByName = owner.FullName,
             Documents = [new ClientCaseHearingPreparationDocument { Document = secondMaterial }],
         });
         await db.SaveChangesAsync();
@@ -13409,8 +13526,10 @@ public class CasesV2ControllerTests
         var colleague = await CreateUserAsync(db, "position-colleague@example.com", "Коллега");
         var clientCase = new ClientCase
         {
-            Title = "Дело с сохранённой позицией", Status = ClientCaseStatus.Open,
-            Strategy = "Уже сохранённый текст", ResponsibleUserId = owner.Id,
+            Title = "Дело с сохранённой позицией",
+            Status = ClientCaseStatus.Open,
+            Strategy = "Уже сохранённый текст",
+            ResponsibleUserId = owner.Id,
             Client = new Client { Name = "Клиент шаблона", IsActive = true, ResponsibleUserId = owner.Id },
         };
         db.ClientCases.Add(clientCase);

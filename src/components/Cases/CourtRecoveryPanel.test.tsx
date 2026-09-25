@@ -28,6 +28,7 @@ const overview: CourtRecoveryOverview = {
     warning: null,
   }],
   hasMoreAvailablePayments: false,
+  hasCompletePaymentVisibility: true,
 };
 
 describe('CourtRecoveryPanel', () => {
@@ -73,5 +74,18 @@ describe('CourtRecoveryPanel', () => {
     render(<CourtRecoveryPanel caseId={3} canEdit={false} />);
     expect((await screen.findByRole('alert')).textContent).toContain('Оплаченная сумма платежа уменьшилась');
     expect(screen.getByText(/Подтверждено платежами:/)).toBeTruthy();
+  });
+
+  it('does not present partial payment visibility as a complete recovery total', async () => {
+    vi.mocked(apiService.getCourtRecoveries).mockResolvedValue({
+      ...overview,
+      receivedAmount: null,
+      remainingAmount: null,
+      hasCompletePaymentVisibility: false,
+    });
+    render(<CourtRecoveryPanel caseId={3} canEdit={false} />);
+    expect(await screen.findByText(/Показаны только доступные вам платежи/)).toBeTruthy();
+    expect(screen.getByText(/Подтверждено платежами:/).textContent).toContain('—');
+    expect(screen.getByText(/Осталось:/).textContent).toContain('—');
   });
 });
