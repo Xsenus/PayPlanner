@@ -2996,6 +2996,9 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.ClientId).HasDatabaseName("IX_TaskJournalItems_ClientId");
             entity.HasIndex(e => e.LegalEntityId).HasDatabaseName("IX_TaskJournalItems_LegalEntityId");
             entity.HasIndex(e => e.ClientCaseId).HasDatabaseName("IX_TaskJournalItems_ClientCaseId");
+            entity.HasIndex(e => new { e.ClientCaseId, e.IsCaseFinalReport })
+                .HasDatabaseName("IX_TaskJournalItems_ClientCaseId_IsCaseFinalReport");
+            entity.Property(e => e.IsCaseFinalReport).HasDefaultValue(false);
             entity.HasIndex(e => e.RecurrenceNextAt).HasDatabaseName("IX_TaskJournalItems_RecurrenceNextAt");
             entity.HasIndex(e => e.RecurrencePreviousTaskId)
                 .IsUnique()

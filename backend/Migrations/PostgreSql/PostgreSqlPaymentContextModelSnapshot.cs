@@ -9758,6 +9758,11 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<DateTime?>("InactivityControlNextCheckAt")
                         .HasColumnType("timestamp without time zone");
 
+                    b.Property<bool>("IsCaseFinalReport")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
                     b.Property<bool>("IsDeleted")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")
@@ -9951,6 +9956,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.HasIndex("UpdatedAt")
                         .HasDatabaseName("IX_TaskJournalItem_UpdatedAt_Audit");
+
+                    b.HasIndex("ClientCaseId", "IsCaseFinalReport")
+                        .HasDatabaseName("IX_TaskJournalItems_ClientCaseId_IsCaseFinalReport");
 
                     b.HasIndex("IsDeleted", "DueAt", "Id")
                         .HasDatabaseName("IX_TaskJournalItems_IsDeleted_DueAt_Id");

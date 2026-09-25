@@ -45,7 +45,8 @@ public static class ClientCaseTaskSyncService
             .Where(task => task.ClientCaseId.HasValue
                 && ids.Contains(task.ClientCaseId.Value)
                 && task.Status != "done"
-                && task.Status != "cancelled")
+                && task.Status != "cancelled"
+                && !task.IsCaseFinalReport)
             .ToListAsync(ct);
 
         foreach (var task in tasks)

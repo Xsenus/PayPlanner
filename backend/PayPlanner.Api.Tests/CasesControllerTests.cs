@@ -15,6 +15,35 @@ namespace PayPlanner.Api.Tests;
 public class CasesControllerTests
 {
     [Fact]
+    public async Task LegacyCourtCaseClosure_CreatesFinalReportForConfiguredOwner()
+    {
+        await using var db = await CreateContextAsync();
+        var lawyer = await CreateUserAsync(db, "legacy-final-lawyer@example.com");
+        var reportOwner = await CreateUserAsync(db, "legacy-final-owner@example.com", viewScope: DataVisibilityScope.All);
+        var clientCase = await CreateCaseAsync(db, lawyer.Id, "Судебное дело legacy");
+        clientCase.CourtName = "Районный суд";
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = ClientCaseFinalReportTaskService.AssigneeUserIdSettingKey,
+            Value = reportOwner.Id.ToString(),
+        });
+        await db.SaveChangesAsync();
+
+        var result = await CreateController(db, lawyer).Update(clientCase.Id, new ClientCase
+        {
+            ClientId = clientCase.ClientId,
+            Title = clientCase.Title,
+            CourtName = clientCase.CourtName,
+            Status = ClientCaseStatus.Closed,
+        }, CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(result);
+        var task = Assert.Single(await db.TaskJournalItems.Where(item => item.ClientCaseId == clientCase.Id).ToListAsync());
+        Assert.Equal("new", task.Status);
+        Assert.Equal(reportOwner.Id, task.AssigneeUserId);
+    }
+
+    [Fact]
     public async Task LegacyCases_ReturnForbidWithoutCaseViewPermission()
     {
         await using var db = await CreateContextAsync();

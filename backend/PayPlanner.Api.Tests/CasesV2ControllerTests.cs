@@ -6697,6 +6697,101 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task CourtCaseClosure_CreatesConfiguredFinalReportAndPreservesItUntilReopen()
+    {
+        await using var db = await CreateContextAsync();
+        var lawyer = await CreateUserAsync(db, "court-final-lawyer@example.com", "Юрист");
+        var reportOwner = await CreateUserAsync(db, "court-final-owner@example.com", "Руководитель", DataVisibilityScope.All);
+        var clientCase = new ClientCase
+        {
+            Client = new Client { Name = "Клиент отчёта", IsActive = true, ResponsibleUserId = lawyer.Id },
+            Title = "Судебный спор",
+            CourtName = "Районный суд",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = lawyer.Id,
+        };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, lawyer);
+        var closedModel = new ClientCase
+        {
+            ClientId = clientCase.ClientId,
+            Title = clientCase.Title,
+            CourtName = clientCase.CourtName,
+            Status = ClientCaseStatus.Closed,
+            ResponsibleUserId = lawyer.Id,
+        };
+
+        var missingAssignee = await controller.Update(clientCase.Id, closedModel, CancellationToken.None);
+        Assert.IsType<BadRequestObjectResult>(missingAssignee);
+        Assert.Equal(ClientCaseStatus.Open, clientCase.Status);
+
+        var reportAssigneeSetting = new SystemSetting
+        {
+            Key = ClientCaseFinalReportTaskService.AssigneeUserIdSettingKey,
+            Value = lawyer.Id.ToString(),
+        };
+        db.SystemSettings.Add(reportAssigneeSetting);
+        await db.SaveChangesAsync();
+        Assert.IsType<BadRequestObjectResult>(await controller.Update(clientCase.Id, closedModel, CancellationToken.None));
+        Assert.Equal(ClientCaseStatus.Open, clientCase.Status);
+
+        reportAssigneeSetting.Value = reportOwner.Id.ToString();
+        var userTaggedTask = new TaskJournalItem
+        {
+            ClientId = clientCase.ClientId,
+            ClientCaseId = clientCase.Id,
+            ObjectName = "Клиент отчёта - Судебный спор",
+            Title = "Обычная задача с совпадающей меткой",
+            AssigneeUserId = lawyer.Id,
+            AssigneeName = lawyer.FullName,
+            AuthorUserId = lawyer.Id,
+            AuthorName = lawyer.FullName,
+            DueAt = DateTime.UtcNow.AddDays(2),
+            Status = "new",
+            TagsJson = "[\"case-final-report\"]",
+        };
+        db.TaskJournalItems.Add(userTaggedTask);
+        await db.SaveChangesAsync();
+
+        var before = DateTime.UtcNow;
+        Assert.IsType<OkObjectResult>(await controller.Update(clientCase.Id, closedModel, CancellationToken.None));
+        var report = Assert.Single(await db.TaskJournalItems
+            .Include(item => item.Participants)
+            .Where(item => item.ClientCaseId == clientCase.Id
+                && item.IsCaseFinalReport)
+            .ToListAsync());
+        Assert.Equal("new", report.Status);
+        Assert.True(report.IsCaseFinalReport);
+        Assert.False(userTaggedTask.IsCaseFinalReport);
+        Assert.Equal("done", userTaggedTask.Status);
+        Assert.Equal(reportOwner.Id, report.AssigneeUserId);
+        Assert.Equal(reportOwner.Id, Assert.Single(report.Participants).UserId);
+        Assert.InRange(report.DueAt, before.AddDays(10), DateTime.UtcNow.AddDays(10).AddMinutes(1));
+
+        Assert.IsType<OkObjectResult>(await controller.Update(clientCase.Id, closedModel, CancellationToken.None));
+        Assert.Equal("new", report.Status);
+        Assert.Single(await db.TaskJournalItems.Where(item => item.ClientCaseId == clientCase.Id
+            && item.IsCaseFinalReport).ToListAsync());
+
+        Assert.IsType<OkObjectResult>(await controller.Update(clientCase.Id, new ClientCase
+        {
+            ClientId = clientCase.ClientId,
+            Title = clientCase.Title,
+            CourtName = clientCase.CourtName,
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = lawyer.Id,
+        }, CancellationToken.None));
+        Assert.Equal("cancelled", report.Status);
+
+        Assert.IsType<OkObjectResult>(await controller.Update(clientCase.Id, closedModel, CancellationToken.None));
+        Assert.Equal(2, await db.TaskJournalItems.CountAsync(item => item.ClientCaseId == clientCase.Id
+            && item.IsCaseFinalReport));
+        Assert.Equal(1, await db.TaskJournalItems.CountAsync(item => item.ClientCaseId == clientCase.Id
+            && item.IsCaseFinalReport && item.Status == "new"));
+    }
+
+    [Fact]
     public async Task Update_ToClosed_ClosesLinkedActiveTasksAndDoesNotRecreateDeadlineTasks()
     {
         await using var db = await CreateContextAsync();
@@ -6895,6 +6990,36 @@ public class CasesV2ControllerTests
             .EnumerateArray()
             .Single(item => item.GetProperty("field").GetString() == "InactivityRemindersDisabledReason");
         Assert.Equal("Ожидаем решение клиента", reasonChange.GetProperty("newValue").GetString());
+    }
+
+    [Fact]
+    public async Task BulkUpdate_ClosedCourtCasesCreateReportsButRegularCasesDoNot()
+    {
+        await using var db = await CreateContextAsync();
+        var lawyer = await CreateUserAsync(db, "bulk-final-lawyer@example.com", "Юрист");
+        var reportOwner = await CreateUserAsync(db, "bulk-final-owner@example.com", "Руководитель", DataVisibilityScope.All);
+        var client = new Client { Name = "Клиент массового закрытия", IsActive = true, ResponsibleUserId = lawyer.Id };
+        var courtCase = new ClientCase { Client = client, Title = "Судебный спор", CourtName = "Городской суд", Status = ClientCaseStatus.Open };
+        var regularCase = new ClientCase { Client = client, Title = "Обычное дело", Status = ClientCaseStatus.Open };
+        db.ClientCases.AddRange(courtCase, regularCase);
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = ClientCaseFinalReportTaskService.AssigneeUserIdSettingKey,
+            Value = reportOwner.Id.ToString(),
+        });
+        await db.SaveChangesAsync();
+
+        var result = await CreateController(db, lawyer).BulkUpdate(new CasesV2Controller.BulkUpdateCasesRequest
+        {
+            Ids = [courtCase.Id, regularCase.Id],
+            Status = ClientCaseStatus.Closed,
+        }, CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(result);
+        var task = Assert.Single(await db.TaskJournalItems.ToListAsync());
+        Assert.Equal(courtCase.Id, task.ClientCaseId);
+        Assert.Equal(reportOwner.Id, task.AssigneeUserId);
+        Assert.Equal("new", task.Status);
     }
 
     [Fact]

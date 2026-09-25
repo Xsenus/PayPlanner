@@ -331,6 +331,8 @@ public class TaskJournalSettingsDto
     public bool BirthdayClientUseSelectedAssignee { get; set; }
     public int? BirthdayTaskAssigneeUserId { get; set; }
     public string BirthdayTaskAssigneeUserName { get; set; } = string.Empty;
+    public int? CaseFinalReportAssigneeUserId { get; set; }
+    public string CaseFinalReportAssigneeUserName { get; set; } = string.Empty;
     public bool AllowAdminCompleteAnyTask { get; set; } = true;
     public int? FinancialDocumentsResponsibleUserId { get; set; }
     public string FinancialDocumentsResponsibleUserName { get; set; } = string.Empty;

@@ -14,6 +14,7 @@ public class TaskJournalSettingsRequest
     public int BirthdayTaskLeadDays { get; set; } = 7;
     public bool BirthdayClientUseSelectedAssignee { get; set; }
     public int? BirthdayTaskAssigneeUserId { get; set; }
+    public int? CaseFinalReportAssigneeUserId { get; set; }
     public bool AllowAdminCompleteAnyTask { get; set; } = true;
     public int? FinancialDocumentsResponsibleUserId { get; set; }
     public int ApprovalDueDays { get; set; } = 5;

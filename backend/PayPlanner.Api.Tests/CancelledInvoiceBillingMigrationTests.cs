@@ -129,13 +129,23 @@ public sealed class CancelledInvoiceBillingMigrationTests
         context.Payments.AddRange(cancelled, cancelledWorkflow, active);
         await context.SaveChangesAsync();
 
-        var cancelledTask = CreateTask(cancelled.Id, "Работа по отменённому счёту");
-        var cancelledWorkflowTask = CreateTask(cancelledWorkflow.Id, "Работа по аннулированному документу");
-        var activeTask = CreateTask(active.Id, "Работа по действующему счёту");
-        context.TaskJournalItems.AddRange(cancelledTask, cancelledWorkflowTask, activeTask);
-        await context.SaveChangesAsync();
+        // Seed against the migrated historical schema, not the current EF model: newer
+        // task columns do not exist yet at this point in an upgrade-path test.
+        var tasks = new[]
+        {
+            (Id: 1001, InvoiceId: cancelled.Id, Title: "Работа по отменённому счёту"),
+            (Id: 1002, InvoiceId: cancelledWorkflow.Id, Title: "Работа по аннулированному документу"),
+            (Id: 1003, InvoiceId: active.Id, Title: "Работа по действующему счёту"),
+        };
+        foreach (var task in tasks)
+        {
+            await context.Database.ExecuteSqlInterpolatedAsync($@"
+                INSERT INTO ""TaskJournalItems""
+                    (""Id"", ""ObjectName"", ""Title"", ""AssigneeName"", ""AuthorName"", ""ControlMarkedByUserName"", ""DueAt"", ""Status"", ""ClientBillingClassification"", ""BillingInvoiceId"")
+                VALUES ({task.Id}, {"Тестовое дело"}, {task.Title}, {"Исполнитель"}, {"Постановщик"}, {string.Empty}, {date}, {"done"}, {TaskClientBillingClassification.Billable}, {task.InvoiceId})");
+        }
         context.ChangeTracker.Clear();
-        return (cancelledTask.Id, cancelledWorkflowTask.Id, activeTask.Id, active.Id);
+        return (tasks[0].Id, tasks[1].Id, tasks[2].Id, active.Id);
     }
 
     private static Payment CreateInvoice(string number, DateTime date, PaymentStatus status)
@@ -149,19 +159,6 @@ public sealed class CancelledInvoiceBillingMigrationTests
             Status = status,
             Type = PaymentType.Income,
             DocumentKind = DocumentKind.Invoice,
-        };
-
-    private static TaskJournalItem CreateTask(int invoiceId, string title)
-        => new()
-        {
-            ObjectName = "Тестовое дело",
-            Title = title,
-            AssigneeName = "Исполнитель",
-            AuthorName = "Постановщик",
-            DueAt = new DateTime(2026, 9, 25),
-            Status = "done",
-            ClientBillingClassification = TaskClientBillingClassification.Billable,
-            BillingInvoiceId = invoiceId,
         };
 
     private static async Task AssertRepairedAsync(

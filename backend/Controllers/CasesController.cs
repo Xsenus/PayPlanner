@@ -141,6 +141,16 @@ public class CasesController : ControllerBase
         if (ClientCaseWritSubmissionRules.Validate(receivedAt, submittedAt, submittedTo) is { } writError) return BadRequest(writError);
 
         var shouldCloseLinkedTasks = !IsFinishedCaseStatus(e.Status) && IsFinishedCaseStatus(model.Status);
+        var shouldCancelFinalReport = IsFinishedCaseStatus(e.Status) && !IsFinishedCaseStatus(model.Status);
+        var isCourtCase = shouldCloseLinkedTasks && (ClientCaseFinalReportTaskService.HasCourtFields(model)
+            || (await ClientCaseFinalReportTaskService.FilterCourtCaseIdsAsync(_db, [e], ct)).Contains(e.Id));
+        var finalReportAssignee = isCourtCase
+            ? await ClientCaseFinalReportTaskService.ResolveAssigneeAsync(_db, ct)
+            : null;
+        if (isCourtCase && finalReportAssignee is null)
+        {
+            return BadRequest("Перед закрытием дела выберите в настройках журнала задач ответственного за итоговые отчёты с доступом ко всем делам.");
+        }
         var previousSubmittedAt = e.ExecutiveWritSubmittedAt;
         var previousSubmittedTo = e.ExecutiveWritSubmittedTo;
         e.Title = model.Title;
@@ -161,6 +171,14 @@ public class CasesController : ControllerBase
         if (shouldCloseLinkedTasks)
         {
             await ClientCaseTaskSyncService.CloseActiveTasksForClosedCaseAsync(_db, e.Id, User.GetUserId(), User.GetDisplayName(), ct);
+            if (isCourtCase)
+            {
+                await ClientCaseFinalReportTaskService.CreateForClosedCasesAsync(_db, [e.Id], finalReportAssignee!, User.GetUserId(), User.GetDisplayName(), ct);
+            }
+        }
+        if (shouldCancelFinalReport)
+        {
+            await ClientCaseFinalReportTaskService.CancelForReopenedCasesAsync(_db, [e.Id], User.GetUserId(), User.GetDisplayName(), ct);
         }
 
         await _db.SaveChangesAsync(ct);

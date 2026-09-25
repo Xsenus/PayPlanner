@@ -9535,6 +9535,11 @@ namespace PayPlanner.Api.Migrations
                     b.Property<DateTime?>("InactivityControlNextCheckAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<bool>("IsCaseFinalReport")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
+
                     b.Property<bool>("IsDeleted")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER")
@@ -9728,6 +9733,9 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasIndex("UpdatedAt")
                         .HasDatabaseName("IX_TaskJournalItem_UpdatedAt_Audit");
+
+                    b.HasIndex("ClientCaseId", "IsCaseFinalReport")
+                        .HasDatabaseName("IX_TaskJournalItems_ClientCaseId_IsCaseFinalReport");
 
                     b.HasIndex("IsDeleted", "DueAt", "Id")
                         .HasDatabaseName("IX_TaskJournalItems_IsDeleted_DueAt_Id");

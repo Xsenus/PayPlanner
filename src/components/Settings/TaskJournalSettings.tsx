@@ -34,6 +34,8 @@ const DEFAULT_SETTINGS: TaskJournalSettingsDto = {
   birthdayClientUseSelectedAssignee: false,
   birthdayTaskAssigneeUserId: null,
   birthdayTaskAssigneeUserName: '',
+  caseFinalReportAssigneeUserId: null,
+  caseFinalReportAssigneeUserName: '',
   allowAdminCompleteAnyTask: true,
   financialDocumentsResponsibleUserId: null,
   financialDocumentsResponsibleUserName: '',
@@ -635,6 +637,22 @@ export function TaskJournalSettings({
               <span className="mt-1 block text-xs text-gray-500">Нужен активный сотрудник. Если он станет недоступен, новые задачи не создаются до смены ответственного.</span>
             </label>
           </div>
+        </section>
+
+        <section className="rounded-xl border border-blue-200 bg-blue-50/50 p-3 text-sm text-gray-700">
+          <h5 className="font-semibold text-gray-900">Итоговый отчёт по закрытому делу</h5>
+          <p className="mt-1 text-xs text-gray-600">При закрытии судебного дела CRM создаст отдельную задачу «Закрыть дело, сформировать отчёт» со сроком через 10 дней. Она останется открытой, даже когда остальные задачи дела завершатся автоматически.</p>
+          <label className="mt-3 block">
+            <span className="block text-xs font-medium">Ответственный за итоговые отчёты</span>
+            <SystemSelect aria-label="Ответственный за итоговые отчёты" value={settings.caseFinalReportAssigneeUserId ?? ''}
+              onChange={(event) => setSettings((prev) => ({ ...prev, caseFinalReportAssigneeUserId: event.target.value ? Number(event.target.value) : null }))}
+              disabled={loading || saving}
+              className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm">
+              <option value="">Выберите сотрудника</option>
+              {assignees.map((assignee) => <option key={assignee.id} value={assignee.id}>{assignee.name}</option>)}
+            </SystemSelect>
+          </label>
+          <p className="mt-2 text-xs text-gray-600">Выбранному сотруднику нужен доступ ко всем делам. Пока он не назначен, закрытие судебного дела попросит настроить ответственного.</p>
         </section>
 
         <section className="rounded-2xl border border-emerald-200 bg-emerald-50/40 p-3 text-sm text-gray-700">

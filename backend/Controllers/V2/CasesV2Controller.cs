@@ -10275,6 +10275,16 @@ public partial class CasesV2Controller : ControllerBase
         model.InactivityRemindersDisabledReason = inactivityDisabledReason;
 
         var shouldCloseLinkedTasks = !IsFinishedCaseStatus(e.Status) && IsFinishedCaseStatus(model.Status);
+        var shouldCancelFinalReport = IsFinishedCaseStatus(e.Status) && !IsFinishedCaseStatus(model.Status);
+        var isCourtCase = shouldCloseLinkedTasks && (ClientCaseFinalReportTaskService.HasCourtFields(model)
+            || (await ClientCaseFinalReportTaskService.FilterCourtCaseIdsAsync(_db, [e], ct)).Contains(e.Id));
+        var finalReportAssignee = isCourtCase
+            ? await ClientCaseFinalReportTaskService.ResolveAssigneeAsync(_db, ct)
+            : null;
+        if (isCourtCase && finalReportAssignee is null)
+        {
+            return BadRequest("Перед закрытием дела выберите в настройках журнала задач ответственного за итоговые отчёты с доступом ко всем делам.");
+        }
         var previousNextHearingAt = e.NextHearingAt;
         var previousCourtDecisionAt = e.CourtDecisionAt;
         var previousWritSubmittedAt = e.ExecutiveWritSubmittedAt;
@@ -10317,6 +10327,14 @@ public partial class CasesV2Controller : ControllerBase
         if (shouldCloseLinkedTasks)
         {
             await ClientCaseTaskSyncService.CloseActiveTasksForClosedCaseAsync(_db, e.Id, User.GetUserId(), User.GetDisplayName(), ct);
+            if (isCourtCase)
+            {
+                await ClientCaseFinalReportTaskService.CreateForClosedCasesAsync(_db, [e.Id], finalReportAssignee!, User.GetUserId(), User.GetDisplayName(), ct);
+            }
+        }
+        if (shouldCancelFinalReport)
+        {
+            await ClientCaseFinalReportTaskService.CancelForReopenedCasesAsync(_db, [e.Id], User.GetUserId(), User.GetDisplayName(), ct);
         }
 
         await _db.SaveChangesAsync(ct);
@@ -10508,6 +10526,20 @@ public partial class CasesV2Controller : ControllerBase
             : string.Empty;
 
         var casesClosedByUpdate = new List<int>();
+        var casesReopenedByUpdate = new List<int>();
+        var courtCaseIds = request.Status.HasValue && IsFinishedCaseStatus(request.Status.Value)
+            ? await ClientCaseFinalReportTaskService.FilterCourtCaseIdsAsync(_db, cases, ct)
+            : [];
+        var requiresFinalReportAssignee = request.Status.HasValue && IsFinishedCaseStatus(request.Status.Value)
+            && cases.Any(item => !IsFinishedCaseStatus(item.Status) && courtCaseIds.Contains(item.Id));
+        var finalReportAssignee = request.Status.HasValue && IsFinishedCaseStatus(request.Status.Value)
+            && requiresFinalReportAssignee
+                ? await ClientCaseFinalReportTaskService.ResolveAssigneeAsync(_db, ct)
+                : null;
+        if (requiresFinalReportAssignee && finalReportAssignee is null)
+        {
+            return BadRequest("Перед закрытием дел выберите в настройках журнала задач ответственного за итоговые отчёты с доступом ко всем делам.");
+        }
         var changedCasesCount = 0;
         var actorUserId = User.GetUserId();
         var actorName = User.GetDisplayName();
@@ -10519,6 +10551,10 @@ public partial class CasesV2Controller : ControllerBase
                 if (!IsFinishedCaseStatus(item.Status) && IsFinishedCaseStatus(request.Status.Value))
                 {
                     casesClosedByUpdate.Add(item.Id);
+                }
+                if (IsFinishedCaseStatus(item.Status) && !IsFinishedCaseStatus(request.Status.Value))
+                {
+                    casesReopenedByUpdate.Add(item.Id);
                 }
 
                 if (item.Status != request.Status.Value)
@@ -10594,6 +10630,15 @@ public partial class CasesV2Controller : ControllerBase
         if (casesClosedByUpdate.Count > 0)
         {
             await ClientCaseTaskSyncService.CloseActiveTasksForClosedCasesAsync(_db, casesClosedByUpdate, User.GetUserId(), User.GetDisplayName(), ct);
+            var courtCasesClosedByUpdate = casesClosedByUpdate.Where(courtCaseIds.Contains).ToArray();
+            if (courtCasesClosedByUpdate.Length > 0)
+            {
+                await ClientCaseFinalReportTaskService.CreateForClosedCasesAsync(_db, courtCasesClosedByUpdate, finalReportAssignee!, actorUserId, actorName, ct);
+            }
+        }
+        if (casesReopenedByUpdate.Count > 0)
+        {
+            await ClientCaseFinalReportTaskService.CancelForReopenedCasesAsync(_db, casesReopenedByUpdate, actorUserId, actorName, ct);
         }
 
         await _db.SaveChangesAsync(ct);

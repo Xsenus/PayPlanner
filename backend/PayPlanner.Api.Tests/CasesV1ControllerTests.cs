@@ -14,6 +14,37 @@ namespace PayPlanner.Api.Tests;
 public class CasesV1ControllerTests
 {
     [Fact]
+    public async Task V1CourtCaseClosure_CreatesFinalReportForConfiguredOwner()
+    {
+        await using var db = await CreateContextAsync();
+        var lawyer = await CreateUserAsync(db, "v1-final-lawyer@example.com");
+        var reportOwner = await CreateUserAsync(db, "v1-final-owner@example.com", viewScope: DataVisibilityScope.All);
+        var clientCase = await CreateCaseAsync(db, lawyer.Id, "Судебное дело V1");
+        clientCase.CourtName = "Суд общей юрисдикции";
+        await db.SaveChangesAsync();
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = ClientCaseFinalReportTaskService.AssigneeUserIdSettingKey,
+            Value = reportOwner.Id.ToString(),
+        });
+        await db.SaveChangesAsync();
+
+        var result = await CreateController(db, lawyer).Update(clientCase.Id, new ClientCase
+        {
+            ClientId = clientCase.ClientId,
+            Title = clientCase.Title,
+            CourtName = clientCase.CourtName,
+            Status = ClientCaseStatus.Closed,
+        }, CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(result);
+        var task = Assert.Single(await db.TaskJournalItems.Where(item => item.ClientCaseId == clientCase.Id).ToListAsync());
+        Assert.Equal("new", task.Status);
+        Assert.Equal(reportOwner.Id, task.AssigneeUserId);
+        Assert.Contains(ClientCaseFinalReportTaskService.TaskTag, task.TagsJson);
+    }
+
+    [Fact]
     public async Task V1Cases_ReturnForbidWithoutCaseViewPermission()
     {
         await using var db = await CreateContextAsync();

@@ -101,6 +101,9 @@ public class TaskJournalItem
     public string ChannelsJson { get; set; } = "[]";
     public string TagsJson { get; set; } = "[]";
 
+    /// <summary>System-owned marker; unlike user-editable tags, it survives edits to the task.</summary>
+    public bool IsCaseFinalReport { get; set; }
+
     public bool RecurrenceEnabled { get; set; }
 
     [MaxLength(16)]

@@ -1952,6 +1952,8 @@ export interface TaskJournalSettingsDto {
   birthdayClientUseSelectedAssignee: boolean;
   birthdayTaskAssigneeUserId?: number | null;
   birthdayTaskAssigneeUserName?: string;
+  caseFinalReportAssigneeUserId?: number | null;
+  caseFinalReportAssigneeUserName?: string;
   allowAdminCompleteAnyTask: boolean;
   financialDocumentsResponsibleUserId?: number | null;
   financialDocumentsResponsibleUserName?: string;
@@ -2099,6 +2101,7 @@ export interface UpdateTaskJournalSettingsRequest {
   birthdayTaskLeadDays: number;
   birthdayClientUseSelectedAssignee: boolean;
   birthdayTaskAssigneeUserId?: number | null;
+  caseFinalReportAssigneeUserId?: number | null;
   allowAdminCompleteAnyTask: boolean;
   financialDocumentsResponsibleUserId?: number | null;
   approvalDueDays: number;

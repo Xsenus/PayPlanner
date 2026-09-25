@@ -94,6 +94,7 @@ public class CasesV1Controller : ControllerBase
 
         var validation = await ValidateCaseOwnerAsync(model.ClientId, model.LegalEntityId, visibility, ct);
         if (validation is not null) return validation;
+
         _db.ClientCases.Add(model);
         await _db.SaveChangesAsync(ct);
         return Created($"/api/v1/cases/{model.Id}", model);
@@ -120,11 +121,38 @@ public class CasesV1Controller : ControllerBase
         var validation = await ValidateCaseOwnerAsync(model.ClientId, model.LegalEntityId, visibility, ct);
         if (validation is not null) return validation;
 
+        var shouldCloseLinkedTasks = e.Status is not (ClientCaseStatus.Closed or ClientCaseStatus.Lost)
+            && model.Status is ClientCaseStatus.Closed or ClientCaseStatus.Lost;
+        var shouldCancelFinalReport = e.Status is ClientCaseStatus.Closed or ClientCaseStatus.Lost
+            && model.Status is not (ClientCaseStatus.Closed or ClientCaseStatus.Lost);
+        var isCourtCase = shouldCloseLinkedTasks && (ClientCaseFinalReportTaskService.HasCourtFields(model)
+            || (await ClientCaseFinalReportTaskService.FilterCourtCaseIdsAsync(_db, [e], ct)).Contains(e.Id));
+        var finalReportAssignee = isCourtCase
+            ? await ClientCaseFinalReportTaskService.ResolveAssigneeAsync(_db, ct)
+            : null;
+        if (isCourtCase && finalReportAssignee is null)
+        {
+            return BadRequest("Перед закрытием дела выберите в настройках журнала задач ответственного за итоговые отчёты с доступом ко всем делам.");
+        }
+
         e.Title = model.Title;
         e.Description = model.Description;
         e.Status = model.Status;
         e.ClientId = model.ClientId;
         e.LegalEntityId = model.LegalEntityId;
+
+        if (shouldCloseLinkedTasks)
+        {
+            await ClientCaseTaskSyncService.CloseActiveTasksForClosedCaseAsync(_db, e.Id, User.GetUserId(), User.GetDisplayName(), ct);
+            if (isCourtCase)
+            {
+                await ClientCaseFinalReportTaskService.CreateForClosedCasesAsync(_db, [e.Id], finalReportAssignee!, User.GetUserId(), User.GetDisplayName(), ct);
+            }
+        }
+        if (shouldCancelFinalReport)
+        {
+            await ClientCaseFinalReportTaskService.CancelForReopenedCasesAsync(_db, [e.Id], User.GetUserId(), User.GetDisplayName(), ct);
+        }
 
         await _db.SaveChangesAsync(ct);
         return Ok(e);

@@ -32,6 +32,8 @@ const settings: TaskJournalSettingsDto = {
   birthdayClientUseSelectedAssignee: false,
   birthdayTaskAssigneeUserId: null,
   birthdayTaskAssigneeUserName: '',
+  caseFinalReportAssigneeUserId: null,
+  caseFinalReportAssigneeUserName: '',
   allowAdminCompleteAnyTask: true,
   financialDocumentsResponsibleUserId: null,
   financialDocumentsResponsibleUserName: '',
@@ -171,6 +173,18 @@ describe('TaskJournalSettings', () => {
 
     await waitFor(() => expect(apiMock.updateTaskJournalSettings).toHaveBeenCalledWith(
       expect.objectContaining({ employeeBirthdayTaskAutomationEnabled: true, birthdayTaskLeadDays: 14, birthdayTaskAssigneeUserId: 8 }),
+    ));
+  });
+
+  it('lets an administrator appoint the owner of final court reports', async () => {
+    render(<TaskJournalSettings />);
+
+    fireEvent.click(await screen.findByRole('combobox', { name: /Ответственный за итоговые отчёты/u }));
+    fireEvent.click(screen.getByRole('option', { name: 'Иван Петров' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    await waitFor(() => expect(apiMock.updateTaskJournalSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ caseFinalReportAssigneeUserId: 8 }),
     ));
   });
 
