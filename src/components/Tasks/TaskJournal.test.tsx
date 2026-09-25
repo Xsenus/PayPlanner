@@ -119,6 +119,10 @@ vi.mock('../../services/api', () => ({
 
 vi.mock('../../services/offlineCalendarStore', () => offlineCalendarMock);
 
+vi.mock('../Messenger/InternalMessenger', () => ({
+  TaskChatPanel: ({ taskId }: { taskId: number }) => <div data-testid="task-chat-panel">Чат задачи {taskId}</div>,
+}));
+
 vi.mock('../../hooks/useToast', () => ({
   useToast: () => toastMock,
 }));
@@ -6441,6 +6445,20 @@ describe('TaskJournal', () => {
     expect(within(card).getByText(
       'Если календарь подключён, этот комментарий появится в описании события Google или Яндекс Календаря. Без отметки он останется только в CRM.',
     )).toBeTruthy();
+  });
+
+  it.each(['legacy', 'modern'] as const)('opens the current task chat in the %s task card', async (taskCardWindowMode) => {
+    await renderJournal([createTask({ id: 101 })], { settings: { taskCardWindowMode } });
+
+    fireEvent.click(screen.getByTitle('Просмотр'));
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    if (taskCardWindowMode === 'modern') {
+      fireEvent.click(within(card).getByRole('tab', { name: 'Чат' }));
+    } else {
+      fireEvent.click(within(card).getByRole('button', { name: /Чат задачи/ }));
+    }
+
+    expect(within(card).getByTestId('task-chat-panel').textContent).toBe('Чат задачи 101');
   });
 
   it.each(['legacy', 'modern'] as const)('explains hearing document readiness in the %s task card', async (taskCardWindowMode) => {
