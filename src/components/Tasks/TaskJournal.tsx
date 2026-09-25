@@ -6010,6 +6010,17 @@ export function TaskJournal({
           </div>
         </section>
 
+        {!untriagedOnly ? (
+          <details className="mb-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600" data-testid="task-role-guide">
+            <summary className="cursor-pointer font-semibold text-slate-700">Как работают наблюдатель и согласующий?</summary>
+            <div className="mt-2 grid gap-2 border-t border-slate-100 pt-2 sm:grid-cols-2">
+              <p><strong className="text-slate-800">Наблюдатель</strong> следит за доступной ему задачей и может получать общие уведомления о её изменениях. Эта роль сама по себе не даёт права редактировать или завершать задачу и не требует решения по согласованию.</p>
+              <p><strong className="text-slate-800">Согласующий</strong> получает запрос, когда наступает его очередь: тогда он может согласовать результат или вернуть задачу с замечанием. «Я согласую» показывает задачи, где вы указаны согласующим, а раздел «Согласования» — те, где решение требуется сейчас.</p>
+              <p className="sm:col-span-2">Уведомления зависят от каналов задачи и ваших личных настроек. «На контроле» — отметка задачи, а не отдельная роль и не право согласовать её.</p>
+            </div>
+          </details>
+        ) : null}
+
         <section className="mb-6 min-w-0 max-w-full space-y-3" data-testid="task-filters-panel">
           <div
             className="grid gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-[minmax(240px,1fr)_repeat(5,minmax(140px,190px))]"

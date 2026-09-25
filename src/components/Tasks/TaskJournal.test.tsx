@@ -3813,6 +3813,19 @@ describe('TaskJournal', () => {
     ));
   });
 
+  it('explains observer and approver roles without requiring hover', async () => {
+    await renderJournal([createTask()]);
+
+    const guide = screen.getByTestId('task-role-guide');
+    fireEvent.click(within(guide).getByText('Как работают наблюдатель и согласующий?'));
+
+    expect(guide.hasAttribute('open')).toBe(true);
+    expect(within(guide).getByText(/не даёт права редактировать или завершать задачу/)).toBeTruthy();
+    expect(within(guide).getByText(/когда наступает его очередь/)).toBeTruthy();
+    expect(within(guide).getByText(/раздел «Согласования» — те, где решение требуется сейчас/)).toBeTruthy();
+    expect(within(guide).getByText(/каналов задачи и ваших личных настроек/)).toBeTruthy();
+  });
+
   it('uses metric cards as task filters', async () => {
     window.localStorage.setItem('pp.task_journal.filters.v1.user:7', JSON.stringify({
       quickFilter: 'all',
