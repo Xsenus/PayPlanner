@@ -3119,6 +3119,78 @@ public class TasksControllerTests
         Assert.Equal(revisedDueAt, stored.DueAt);
     }
 
+    [Theory]
+    [InlineData("cancelled")]
+    [InlineData("approved")]
+    [InlineData("revision")]
+    [InlineData("waiting")]
+    [InlineData("new")]
+    [InlineData("overdueApproval")]
+    public async Task UpdateStatus_RestrictedExecutorCannotSetAdministrativeStatuses(string nextStatus)
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "restricted-status-author@example.com", "Постановщик");
+        var assignee = await CreateTaskUserAsync(db, "restricted-status-assignee@example.com", "Исполнитель", canEdit: false);
+        var client = await CreateClientAsync(db, "Клиент служебных статусов");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, assignee.Id, status: "inProgress");
+        var controller = CreateController(db, new RecordingNotificationService(), assignee);
+
+        var result = await controller.UpdateStatus(task.Id, new UpdateTaskJournalStatusRequest
+        {
+            Status = nextStatus,
+            Result = "Попытка обойти права на статус.",
+        }, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(result.Result);
+        var stored = await db.TaskJournalItems.AsNoTracking().SingleAsync(item => item.Id == task.Id);
+        Assert.Equal("inProgress", stored.Status);
+        Assert.Null(stored.Result);
+    }
+
+    [Theory]
+    [InlineData("new")]
+    [InlineData("waiting")]
+    [InlineData("revision")]
+    public async Task UpdateStatus_RestrictedExecutorCanAcceptOpenTask(string currentStatus)
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "accept-status-author@example.com", "Постановщик");
+        var assignee = await CreateTaskUserAsync(db, "accept-status-assignee@example.com", "Исполнитель", canEdit: false);
+        var client = await CreateClientAsync(db, "Клиент принятия задачи");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, assignee.Id, status: currentStatus);
+        var controller = CreateController(db, new RecordingNotificationService(), assignee);
+
+        var result = await controller.UpdateStatus(task.Id, new UpdateTaskJournalStatusRequest
+        {
+            Status = "inProgress",
+        }, CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(result.Result);
+        Assert.Equal("inProgress", (await db.TaskJournalItems.AsNoTracking().SingleAsync(item => item.Id == task.Id)).Status);
+    }
+
+    [Theory]
+    [InlineData("onApproval")]
+    [InlineData("done")]
+    [InlineData("cancelled")]
+    public async Task UpdateStatus_RestrictedExecutorCannotReopenClosedOrAwaitingTask(string currentStatus)
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "reopen-status-author@example.com", "Постановщик");
+        var assignee = await CreateTaskUserAsync(db, "reopen-status-assignee@example.com", "Исполнитель", canEdit: false);
+        var client = await CreateClientAsync(db, "Клиент повторного открытия");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, assignee.Id, status: currentStatus);
+        var controller = CreateController(db, new RecordingNotificationService(), assignee);
+
+        var result = await controller.UpdateStatus(task.Id, new UpdateTaskJournalStatusRequest
+        {
+            Status = "inProgress",
+        }, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(result.Result);
+        Assert.Equal(currentStatus, (await db.TaskJournalItems.AsNoTracking().SingleAsync(item => item.Id == task.Id)).Status);
+    }
+
     [Fact]
     public async Task UpdateTask_ForbidsObserverWithOwnScopeEvenWhenRoleCanEdit()
     {
@@ -8703,7 +8775,7 @@ public class TasksControllerTests
     public async Task UpdateStatus_DoneRequiresApprovedApprovers()
     {
         await using var db = await CreateContextAsync();
-        var author = await CreateTaskUserAsync(db, "author@example.com", "Автор", canEdit: false);
+        var author = await CreateTaskUserAsync(db, "author@example.com", "Автор", canEdit: true);
         var approver = await CreateAdminUserAsync(db, "approver@example.com", "Согласующий");
         var client = await CreateClientAsync(db, "Иванов Иван Иванович");
         var task = await CreateTaskAsync(db, author.Id, client.Id, author.Id, result: null);
@@ -8725,6 +8797,27 @@ public class TasksControllerTests
         }, CancellationToken.None);
 
         Assert.IsType<BadRequestObjectResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task UpdateStatus_AuthorWithoutEditPermissionCannotCompleteThroughCommentAccess()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateTaskUserAsync(db, "author-without-edit@example.com", "Постановщик", canEdit: false);
+        var client = await CreateClientAsync(db, "Клиент постановщика без права редактирования");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, author.Id);
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.UpdateStatus(task.Id, new UpdateTaskJournalStatusRequest
+        {
+            Status = "done",
+            Result = "Попытка завершения без права редактирования.",
+        }, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(result.Result);
+        var stored = await db.TaskJournalItems.AsNoTracking().SingleAsync(item => item.Id == task.Id);
+        Assert.Equal("new", stored.Status);
+        Assert.Null(stored.Result);
     }
 
     [Fact]

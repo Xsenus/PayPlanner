@@ -8002,7 +8002,15 @@ public class TasksController : ControllerBase
             return settings.ExecutorCompletionAllowedUserIds.Contains(access.UserId);
         }
 
-        return CanPostTaskComment(entity, access);
+        // A comment permission is not a general status-edit permission. A restricted
+        // executor may accept an open task, but approval decisions and cancellation
+        // must remain behind their dedicated actions or full edit permission.
+        return IsTaskExecutor(entity, access.UserId)
+            && string.Equals(nextStatus, "inProgress", StringComparison.OrdinalIgnoreCase)
+            && (string.Equals(entity.Status, "new", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(entity.Status, "waiting", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(entity.Status, "revision", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(entity.Status, "inProgress", StringComparison.OrdinalIgnoreCase));
     }
 
     private static bool CanUploadTaskFile(
