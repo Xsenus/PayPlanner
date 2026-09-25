@@ -162,6 +162,7 @@ public sealed partial class InternalChatController : ControllerBase
         };
         _db.InternalChatThreads.Add(thread);
         await _db.SaveChangesAsync(ct);
+        await _realtime.PublishTaskJournalChangedAsync(ct);
         return CreatedAtAction(nameof(GetMessages), new { threadId = thread.Id }, ToThreadDto(thread, "owner", InternalChatNotificationModes.All));
     }
 
@@ -190,6 +191,7 @@ public sealed partial class InternalChatController : ControllerBase
             thread.Members.Add(new InternalChatMember { UserId = id, Role = id == thread.CreatedByUserId ? "owner" : "member" });
         }
         await _db.SaveChangesAsync(ct);
+        await _realtime.PublishTaskJournalChangedAsync(ct);
         return NoContent();
     }
 
@@ -220,6 +222,7 @@ public sealed partial class InternalChatController : ControllerBase
         foreach (var guestId in desiredGuests.Where(id => thread.Members.All(member => member.UserId != id)))
             thread.Members.Add(new InternalChatMember { UserId = guestId, Role = "guest", JoinedAt = now });
         await _db.SaveChangesAsync(ct);
+        await _realtime.PublishTaskJournalChangedAsync(ct);
         return NoContent();
     }
 
@@ -281,6 +284,7 @@ public sealed partial class InternalChatController : ControllerBase
         };
         _db.InternalChatThreads.Add(thread);
         await _db.SaveChangesAsync(ct);
+        await _realtime.PublishTaskJournalChangedAsync(ct);
         return CreatedAtAction(nameof(GetMessages), new { threadId = thread.Id }, ToThreadDto(thread, "member", InternalChatNotificationModes.All, DisplayName(other)));
     }
 

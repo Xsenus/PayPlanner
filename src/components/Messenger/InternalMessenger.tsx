@@ -47,6 +47,7 @@ import {
 import {
   createNotificationsHubConnection,
   REALTIME_TASK_JOURNAL_CHANGED_EVENT,
+  REALTIME_USER_NOTIFICATION_CREATED_EVENT,
   stopNotificationsHubConnection,
 } from '../../services/realtimeNotifications';
 import { localChatDayKey } from '../../utils/chatDateTime';
@@ -68,6 +69,13 @@ function saveChatDraft(userId: number, threadId: number, value: string) {
     if (value) sessionStorage.setItem(chatDraftKey(userId, threadId), value);
     else sessionStorage.removeItem(chatDraftKey(userId, threadId));
   } catch { /* The chat still works when browser storage is unavailable. */ }
+}
+
+function mergeChatMessages(first: InternalChatMessage[], second: InternalChatMessage[]): InternalChatMessage[] {
+  const byId = new Map<number, InternalChatMessage>();
+  for (const message of first) byId.set(message.id, message);
+  for (const message of second) byId.set(message.id, message);
+  return [...byId.values()].sort((left, right) => left.id - right.id);
 }
 
 function formatMessageTime(value: string) {
@@ -284,7 +292,9 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
         };
       }
       setLoading(false);
-      setMessages((current) => appendEarlier ? [...page.items, ...current] : afterId !== undefined && !replaceWithUnread ? [...current, ...page.items] : page.items);
+      setMessages((current) => appendEarlier || afterId !== undefined && !replaceWithUnread
+        ? mergeChatMessages(current, page.items)
+        : page.items);
       hasLoadedMessagesRef.current = true;
       if (afterId === undefined || replaceWithUnread) setHasMore(page.hasMore);
       if (afterId !== undefined) setHasNewer(Boolean(page.hasNewer));
@@ -313,6 +323,7 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
   useEffect(() => {
     const connection = createNotificationsHubConnection();
     connection.on(REALTIME_TASK_JOURNAL_CHANGED_EVENT, () => { if (!hasNewer) void loadMessages(); });
+    connection.on(REALTIME_USER_NOTIFICATION_CREATED_EVENT, () => undefined);
     void connection.start().catch(() => undefined);
     return () => { void stopNotificationsHubConnection(connection); };
   }, [hasNewer, loadMessages]);
@@ -384,7 +395,7 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
         toast.success('Сообщение отправлено. Оно появится при переходе к новым сообщениям.');
       } else {
         scrollIntentRef.current = { mode: 'bottom', height: 0, top: 0 };
-        setMessages((current) => [...current, created]);
+        setMessages((current) => mergeChatMessages(current, [created]));
       }
       setText('');
       setFiles([]);
@@ -417,7 +428,7 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
         dueAt: new Date(taskDueAt).toISOString(),
         assigneeUserId: taskAssigneeId ? Number(taskAssigneeId) : null,
       });
-      setMessages((current) => [...current, created]);
+      setMessages((current) => mergeChatMessages(current, [created]));
       setTaskSource(null);
       setTaskTitle('');
       setTaskDescription('');
@@ -538,7 +549,7 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
         <div className="flex items-end gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2 focus-within:border-blue-300 focus-within:ring-2 focus-within:ring-blue-100">
           <input ref={fileInputRef} type="file" multiple className="hidden" onChange={(event) => setFiles(Array.from(event.target.files ?? []).slice(0, 10))} />
           <button type="button" onClick={() => fileInputRef.current?.click()} className="rounded-lg p-2 text-slate-500 hover:bg-white" title="Прикрепить файлы"><Paperclip className="h-4 w-4" /></button>
-          <textarea ref={textareaRef} value={text} onChange={(event) => setText(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit(); } }} rows={1} maxLength={8000} placeholder="Напишите сообщение…" className="max-h-32 min-h-9 flex-1 resize-y border-0 bg-transparent px-1 py-2 text-sm outline-none" />
+          <textarea ref={textareaRef} value={text} onChange={(event) => { setText(event.target.value); if (!editing) saveChatDraft(currentUserId, thread.id, event.target.value); }} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit(); } }} rows={1} maxLength={8000} placeholder="Напишите сообщение…" className="max-h-32 min-h-9 flex-1 resize-y border-0 bg-transparent px-1 py-2 text-sm outline-none" />
           <button type="button" onClick={() => void submit()} disabled={sending || (!text.trim() && files.length === 0)} className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-blue-600 text-white disabled:bg-slate-300" aria-label="Отправить">{sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}</button>
         </div>
         {text && !editing ? <p className="mt-1 text-[11px] text-slate-500">Черновик сохранён в этой вкладке до её закрытия.</p> : null}
@@ -583,6 +594,13 @@ export function InternalMessenger({ onOpenTask }: { onOpenTask?: (taskId: number
   }, [toast]);
 
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    const connection = createNotificationsHubConnection();
+    connection.on(REALTIME_TASK_JOURNAL_CHANGED_EVENT, () => { void load(); });
+    connection.on(REALTIME_USER_NOTIFICATION_CREATED_EVENT, () => undefined);
+    void connection.start().catch(() => undefined);
+    return () => { void stopNotificationsHubConnection(connection); };
+  }, [load]);
   const active = threads.find((thread) => thread.id === activeId) ?? null;
   const filtered = threads.filter((thread) =>
     (scope === 'archive' ? thread.isArchived : !thread.isArchived && (scope === 'all' || thread.kind === scope))

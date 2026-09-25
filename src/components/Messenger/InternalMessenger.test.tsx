@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { InternalMessenger, TaskChatPanel } from './InternalMessenger';
 import { localChatDayKey } from '../../utils/chatDateTime';
@@ -38,6 +38,7 @@ vi.mock('../../hooks/useRolePermissions', () => ({ useRolePermissions: () => ({ 
 vi.mock('../../hooks/useToast', () => ({ useToast: () => toastMock }));
 vi.mock('../../services/realtimeNotifications', () => ({
   REALTIME_TASK_JOURNAL_CHANGED_EVENT: 'taskJournalChanged',
+  REALTIME_USER_NOTIFICATION_CREATED_EVENT: 'userNotificationCreated',
   createNotificationsHubConnection: () => connectionMock,
   stopNotificationsHubConnection: (connection: { stop: () => Promise<void> }) => connection.stop(),
 }));
@@ -107,6 +108,38 @@ describe('InternalMessenger', () => {
     expect(await screen.findByText('Готово')).toBeTruthy();
   });
 
+  it('shows a newly created conversation when a colleague sends its first message', async () => {
+    chatApiMock.getThreads.mockResolvedValueOnce([]).mockResolvedValueOnce([thread]);
+    render(<InternalMessenger />);
+    expect(await screen.findByText('Чатов здесь пока нет.')).toBeTruthy();
+
+    const refresh = connectionMock.on.mock.calls.find(([event]) => event === 'taskJournalChanged')?.[1];
+    expect(refresh).toBeTypeOf('function');
+    act(() => { refresh(); });
+
+    expect((await screen.findAllByText('Судебная команда')).length).toBeGreaterThan(0);
+    expect(chatApiMock.getThreads.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('does not duplicate a sent message when realtime loads it before the send request returns', async () => {
+    const created = { ...message, id: 23, authorUserId: 7, authorName: 'Я', text: 'Готово' };
+    let finishSend: (value: typeof created) => void = () => undefined;
+    chatApiMock.sendMessage.mockImplementation(() => new Promise((resolve) => { finishSend = resolve; }));
+    render(<InternalMessenger />);
+    await screen.findByText('документ');
+
+    fireEvent.change(screen.getByPlaceholderText('Напишите сообщение…'), { target: { value: 'Готово' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Отправить' }));
+    await waitFor(() => expect(chatApiMock.sendMessage).toHaveBeenCalled());
+    chatApiMock.getMessages.mockResolvedValue({ items: [message, created], hasMore: false });
+    const handlers = connectionMock.on.mock.calls.filter(([name]) => name === 'taskJournalChanged').map(([, handler]) => handler);
+    await act(async () => { handlers.forEach((handler) => handler()); });
+    expect(await within(screen.getByLabelText('Сообщения чата')).findByText('Готово')).toBeTruthy();
+
+    await act(async () => { finishSend(created); });
+    expect(within(screen.getByLabelText('Сообщения чата')).getAllByText('Готово')).toHaveLength(1);
+  });
+
   it('lets an author enable and disable a daily no-reply reminder in the shared chat', async () => {
     const ownMessage = { ...message, authorUserId: 7, authorName: 'Я', noReplyReminderEnabled: false };
     chatApiMock.getMessages.mockResolvedValue({ items: [ownMessage], hasMore: false });
@@ -151,9 +184,9 @@ describe('InternalMessenger', () => {
     fireEvent.change(screen.getByPlaceholderText('Напишите сообщение…'), { target: { value: 'Пишу ответ' } });
     scrollHeight = 1200;
     chatApiMock.getMessages.mockResolvedValue({ items: [message, { ...message, id: 23, text: 'Новое сообщение' }], hasMore: false });
-    const realtimeHandler = connectionMock.on.mock.calls.find(([name]) => name === 'taskJournalChanged')?.[1];
-    expect(realtimeHandler).toBeTypeOf('function');
-    await act(async () => { realtimeHandler(); });
+    const realtimeHandlers = connectionMock.on.mock.calls.filter(([name]) => name === 'taskJournalChanged').map(([, handler]) => handler);
+    expect(realtimeHandlers.length).toBeGreaterThanOrEqual(2);
+    await act(async () => { realtimeHandlers.forEach((handler) => handler()); });
     expect(await screen.findByText('Новое сообщение')).toBeTruthy();
     expect(conversation.scrollTop).toBe(300);
     expect(screen.getByDisplayValue('Пишу ответ')).toBeTruthy();
