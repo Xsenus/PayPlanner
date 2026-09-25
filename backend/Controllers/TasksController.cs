@@ -3577,6 +3577,18 @@ public class TasksController : ControllerBase
             return Forbid();
         }
 
+        var requestedDueAt = request.DueAt.HasValue ? NormalizeUtcInstant(request.DueAt.Value) : entity.DueAt;
+        if (requestedDueAt != entity.DueAt
+            && !CanFullyModifyTask(
+                entity,
+                access,
+                access.Permission?.CanEdit == true,
+                access.Permission?.CanEditOthers == true,
+                settings))
+        {
+            return Forbid();
+        }
+
         var requestedResult = NormalizeOptional(request.Result);
         var nextResult = NormalizeCompletionResult(nextStatus, requestedResult ?? entity.Result);
         var authorApproverAdded = await AddAuthorAsApproverIfMissingAsync(entity, nextStatus, ct);
@@ -3596,7 +3608,6 @@ public class TasksController : ControllerBase
         var oldStatus = entity.Status;
         var oldResult = entity.Result;
         var oldDueAt = entity.DueAt;
-        var requestedDueAt = request.DueAt.HasValue ? NormalizeUtcInstant(request.DueAt.Value) : entity.DueAt;
         var revisionDueAtValidation = ValidateRevisionDueAt(nextStatus, requestedDueAt, DateTime.UtcNow);
         if (revisionDueAtValidation is not null)
         {

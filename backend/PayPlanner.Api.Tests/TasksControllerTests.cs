@@ -3060,6 +3060,66 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task UpdateStatus_RestrictedExecutorCannotChangeDeadlineWhileSubmittingForApproval()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "deadline-status-author@example.com", "Постановщик");
+        var assignee = await CreateTaskUserAsync(db, "deadline-status-assignee@example.com", "Исполнитель", canEdit: true);
+        var client = await CreateClientAsync(db, "Клиент срока задачи");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, assignee.Id);
+        var originalDueAt = task.DueAt;
+        var controller = CreateController(db, new RecordingNotificationService(), assignee);
+
+        var forbidden = await controller.UpdateStatus(task.Id, new UpdateTaskJournalStatusRequest
+        {
+            Status = "onApproval",
+            Result = "Работа выполнена.",
+            DueAt = originalDueAt.AddDays(1),
+        }, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(forbidden.Result);
+        var unchanged = await db.TaskJournalItems.AsNoTracking().SingleAsync(item => item.Id == task.Id);
+        Assert.Equal("new", unchanged.Status);
+        Assert.Equal(originalDueAt, unchanged.DueAt);
+        Assert.Null(unchanged.Result);
+
+        var submitted = await controller.UpdateStatus(task.Id, new UpdateTaskJournalStatusRequest
+        {
+            Status = "onApproval",
+            Result = "Работа выполнена.",
+            DueAt = originalDueAt,
+        }, CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(submitted.Result);
+        var stored = await db.TaskJournalItems.AsNoTracking().SingleAsync(item => item.Id == task.Id);
+        Assert.Equal("onApproval", stored.Status);
+        Assert.Equal(originalDueAt, stored.DueAt);
+        Assert.Equal("Работа выполнена.", stored.Result);
+    }
+
+    [Fact]
+    public async Task UpdateStatus_AuthorWithEditPermissionCanChangeDeadline()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateTaskUserAsync(db, "deadline-author@example.com", "Постановщик", canEdit: true);
+        var client = await CreateClientAsync(db, "Клиент изменяемого срока");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, author.Id);
+        var revisedDueAt = task.DueAt.AddDays(1);
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.UpdateStatus(task.Id, new UpdateTaskJournalStatusRequest
+        {
+            Status = "inProgress",
+            DueAt = revisedDueAt,
+        }, CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(result.Result);
+        var stored = await db.TaskJournalItems.AsNoTracking().SingleAsync(item => item.Id == task.Id);
+        Assert.Equal("inProgress", stored.Status);
+        Assert.Equal(revisedDueAt, stored.DueAt);
+    }
+
+    [Fact]
     public async Task UpdateTask_ForbidsObserverWithOwnScopeEvenWhenRoleCanEdit()
     {
         await using var db = await CreateContextAsync();
