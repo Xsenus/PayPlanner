@@ -1878,11 +1878,6 @@ public partial class CasesV2Controller : ControllerBase
         }
 
         var recipientUserIds = await ResolveCaseNotificationRecipientIdsAsync(clientCase.Id, ct);
-        if (recipientUserIds.Count == 0)
-        {
-            return;
-        }
-
         if (_notificationService is not null)
         {
             await _notificationService.NotifyCaseCourtEventAsync(
@@ -1893,6 +1888,11 @@ public partial class CasesV2Controller : ControllerBase
                 actorUserId ?? 0,
                 recipientUserIds,
                 ct);
+            return;
+        }
+
+        if (recipientUserIds.Count == 0)
+        {
             return;
         }
 

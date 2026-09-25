@@ -36,6 +36,8 @@ const DEFAULT_SETTINGS: TaskJournalSettingsDto = {
   birthdayTaskAssigneeUserName: '',
   caseFinalReportAssigneeUserId: null,
   caseFinalReportAssigneeUserName: '',
+  courtEventLeaderUserId: null,
+  courtEventLeaderUserName: '',
   allowAdminCompleteAnyTask: true,
   financialDocumentsResponsibleUserId: null,
   financialDocumentsResponsibleUserName: '',
@@ -653,6 +655,22 @@ export function TaskJournalSettings({
             </SystemSelect>
           </label>
           <p className="mt-2 text-xs text-gray-600">Выбранному сотруднику нужен доступ ко всем делам. Пока он не назначен, закрытие судебного дела попросит настроить ответственного.</p>
+        </section>
+
+        <section className="rounded-xl border border-cyan-200 bg-cyan-50/50 p-3 text-sm text-gray-700">
+          <h5 className="font-semibold text-gray-900">Уведомления руководителю по судебным делам</h5>
+          <p className="mt-1 text-xs text-gray-600">При переносе заседания или фиксации судебного решения выбранный руководитель получит уведомление дополнительно к ответственным за дело.</p>
+          <label className="mt-3 block">
+            <span className="block text-xs font-medium">Общий руководитель</span>
+            <SystemSelect aria-label="Руководитель для судебных уведомлений" value={settings.courtEventLeaderUserId ?? ''}
+              onChange={(event) => setSettings((prev) => ({ ...prev, courtEventLeaderUserId: event.target.value ? Number(event.target.value) : null }))}
+              disabled={loading || saving}
+              className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm">
+              <option value="">Не назначен</option>
+              {assignees.map((assignee) => <option key={assignee.id} value={assignee.id}>{assignee.name}</option>)}
+            </SystemSelect>
+          </label>
+          <p className="mt-2 text-xs text-gray-600">Нужен доступ ко всем делам. Если руководитель не назначен или потеряет доступ, дополнительные уведомления ему не отправляются.</p>
         </section>
 
         <section className="rounded-2xl border border-emerald-200 bg-emerald-50/40 p-3 text-sm text-gray-700">

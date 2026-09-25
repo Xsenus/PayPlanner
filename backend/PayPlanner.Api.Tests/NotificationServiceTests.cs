@@ -4753,6 +4753,90 @@ public class NotificationServiceTests
         Assert.Contains("\"action\":\"rescheduled\"", rescheduled.MetadataJson, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task CourtLeader_ReceivesRescheduleAndDecision_ButNotOrdinaryHearing()
+    {
+        await using var db = await CreateContextAsync();
+        var responsible = await CreateUserAsync(db, "court-leader-responsible@example.com");
+        var adminRole = new Role { Name = "admin", Description = "Администратор" };
+        var leader = new User
+        {
+            Email = "court-leader@example.com",
+            FullName = "Руководитель",
+            PasswordHash = "hash",
+            Role = adminRole,
+            IsActive = true,
+            IsApproved = true,
+        };
+        db.Users.Add(leader);
+        await db.SaveChangesAsync();
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = NotificationService.CourtEventLeaderUserIdSettingKey,
+            Value = leader.Id.ToString(),
+        });
+        var clientCase = new ClientCase
+        {
+            Client = new Client { Name = "Клиент", IsActive = true, ResponsibleUserId = responsible.Id },
+            Title = "Дело для руководителя",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = responsible.Id,
+        };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        var hearing = new ClientCaseCourtEvent
+        {
+            ClientCaseId = clientCase.Id,
+            EventType = "hearing",
+            Title = "Заседание",
+            ScheduledAt = new DateTime(2026, 7, 10, 9, 30, 0, DateTimeKind.Utc),
+            MovementStatus = "scheduled",
+            SourceType = "manual",
+        };
+        db.ClientCaseCourtEvents.Add(hearing);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService());
+
+        await service.NotifyCaseCourtEventAsync(clientCase, hearing, "created", "Сотрудник", 999, [responsible.Id]);
+        Assert.DoesNotContain(await db.UserNotifications.ToListAsync(), item => item.RecipientUserId == leader.Id);
+
+        hearing.ScheduledAt = hearing.ScheduledAt.AddDays(2);
+        hearing.UpdatedAt = DateTime.UtcNow.AddMinutes(1);
+        await db.SaveChangesAsync();
+        await service.NotifyCaseCourtEventAsync(clientCase, hearing, "rescheduled", "Сотрудник", 999, []);
+        Assert.Single(await db.UserNotifications.Where(item => item.RecipientUserId == leader.Id && item.Type == UserNotificationTypes.CourtHearing).ToListAsync());
+
+        var decision = new ClientCaseCourtEvent
+        {
+            ClientCaseId = clientCase.Id,
+            EventType = "decision",
+            Title = "Решение вынесено",
+            MovementStatus = "completed",
+            ResultSummary = "Иск удовлетворён",
+            SourceType = "manual",
+        };
+        db.ClientCaseCourtEvents.Add(decision);
+        await db.SaveChangesAsync();
+        await service.NotifyCaseCourtEventAsync(clientCase, decision, "created", "Сотрудник", 999, [responsible.Id]);
+        Assert.Single(await db.UserNotifications.Where(item => item.RecipientUserId == leader.Id && item.Type == UserNotificationTypes.CourtDecisionRecorded).ToListAsync());
+
+        await service.NotifyCaseHearingDateChangedAsync(clientCase,
+            new DateTime(2026, 7, 10, 9, 30, 0, DateTimeKind.Utc),
+            new DateTime(2026, 7, 12, 9, 30, 0, DateTimeKind.Utc), "Сотрудник", 999,
+            [responsible.Id], DateTime.UtcNow.AddMinutes(2), CancellationToken.None);
+        await service.NotifyCaseDecisionDateChangedAsync(clientCase, null,
+            new DateTime(2026, 7, 20, 0, 0, 0, DateTimeKind.Utc), "Сотрудник", 999,
+            [responsible.Id], DateTime.UtcNow.AddMinutes(3), CancellationToken.None);
+        Assert.Equal(4, await db.UserNotifications.CountAsync(item => item.RecipientUserId == leader.Id));
+
+        leader.IsActive = false;
+        await db.SaveChangesAsync();
+        await service.NotifyCaseDecisionDateChangedAsync(clientCase, null,
+            new DateTime(2026, 7, 21, 0, 0, 0, DateTimeKind.Utc), "Сотрудник", 999,
+            [responsible.Id], DateTime.UtcNow, CancellationToken.None);
+        Assert.Equal(4, await db.UserNotifications.CountAsync(item => item.RecipientUserId == leader.Id));
+    }
+
     [Theory]
     [InlineData("hearing", "completed", "Иск рассмотрен", UserNotificationTypes.CourtStatusChanged)]
     [InlineData("decision", "scheduled", "Ожидается решение", UserNotificationTypes.CourtStatusChanged)]

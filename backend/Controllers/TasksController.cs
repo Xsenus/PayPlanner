@@ -81,6 +81,7 @@ public class TasksController : ControllerBase
     private const string BirthdayClientUseSelectedAssigneeSettingKey = "tasks.automation.birthdays.clients.useSelectedAssignee";
     private const string BirthdayTaskAssigneeUserIdSettingKey = "tasks.automation.birthdays.assigneeUserId";
     private const string CaseFinalReportAssigneeUserIdSettingKey = ClientCaseFinalReportTaskService.AssigneeUserIdSettingKey;
+    private const string CourtEventLeaderUserIdSettingKey = NotificationService.CourtEventLeaderUserIdSettingKey;
     private const string AllowAdminCompleteAnyTaskSettingKey = "tasks.allowAdminCompleteAnyTask";
     private const string FinancialDocumentsResponsibleUserSettingKey = "tasks.financialDocumentsResponsibleUserId";
     private const string ApprovalDueDaysSettingKey = "tasks.approvalDueDays";
@@ -460,6 +461,7 @@ public class TasksController : ControllerBase
         var financialDocumentsResponsibleUserId = request.FinancialDocumentsResponsibleUserId.GetValueOrDefault();
         var birthdayAssigneeUserId = request.BirthdayTaskAssigneeUserId.GetValueOrDefault();
         var caseFinalReportAssigneeUserId = request.CaseFinalReportAssigneeUserId.GetValueOrDefault();
+        var courtEventLeaderUserId = request.CourtEventLeaderUserId.GetValueOrDefault();
         var birthdaySelectedAssigneeRequired = request.EmployeeBirthdayTaskAutomationEnabled ||
             (request.BirthdayTaskAutomationEnabled && request.BirthdayClientUseSelectedAssignee);
         if (birthdaySelectedAssigneeRequired && birthdayAssigneeUserId <= 0)
@@ -494,6 +496,22 @@ public class TasksController : ControllerBase
                      DataVisibilityScope.Normalize(casesPermission.ViewScope, DataVisibilityScope.Own) != DataVisibilityScope.All)))
             {
                 return BadRequest(new { message = "Ответственному за итоговые отчёты нужен доступ ко всем делам." });
+            }
+        }
+        if (courtEventLeaderUserId > 0)
+        {
+            var leader = await _db.Users.AsNoTracking()
+                .Where(user => user.Id == courtEventLeaderUserId && user.IsActive && user.IsApproved)
+                .Select(user => new { RoleName = user.Role != null ? user.Role.Name : string.Empty })
+                .FirstOrDefaultAsync(ct);
+            var casesPermission = await _db.GetUserSectionPermissionAsync(
+                courtEventLeaderUserId, RolePermissionCatalog.Cases, ct);
+            if (leader is null ||
+                (!string.Equals(leader.RoleName, "admin", StringComparison.OrdinalIgnoreCase) &&
+                    (casesPermission is not { CanView: true } ||
+                     DataVisibilityScope.Normalize(casesPermission.ViewScope, DataVisibilityScope.Own) != DataVisibilityScope.All)))
+            {
+                return BadRequest(new { message = "Руководителю для судебных уведомлений нужен доступ ко всем делам." });
             }
         }
         var executorCompletionAllowedUserIds = request.ExecutorCompletionAllowedUserIds
@@ -534,6 +552,7 @@ public class TasksController : ControllerBase
         await UpsertSystemSettingAsync(BirthdayClientUseSelectedAssigneeSettingKey, request.BirthdayClientUseSelectedAssignee ? "true" : "false", now, ct);
         await UpsertSystemSettingAsync(BirthdayTaskAssigneeUserIdSettingKey, birthdayAssigneeUserId.ToString(), now, ct);
         await UpsertSystemSettingAsync(CaseFinalReportAssigneeUserIdSettingKey, caseFinalReportAssigneeUserId.ToString(), now, ct);
+        await UpsertSystemSettingAsync(CourtEventLeaderUserIdSettingKey, courtEventLeaderUserId.ToString(), now, ct);
         await UpsertSystemSettingAsync(AllowAdminCompleteAnyTaskSettingKey, request.AllowAdminCompleteAnyTask ? "true" : "false", now, ct);
         await UpsertSystemSettingAsync(FinancialDocumentsResponsibleUserSettingKey, financialDocumentsResponsibleUserId.ToString(), now, ct);
         await UpsertSystemSettingAsync(ApprovalDueDaysSettingKey, approvalDueDays.ToString(), now, ct);
@@ -5256,6 +5275,7 @@ public class TasksController : ControllerBase
                 item.Key == BirthdayClientUseSelectedAssigneeSettingKey ||
                 item.Key == BirthdayTaskAssigneeUserIdSettingKey ||
                 item.Key == CaseFinalReportAssigneeUserIdSettingKey ||
+                item.Key == CourtEventLeaderUserIdSettingKey ||
                 item.Key == AllowAdminCompleteAnyTaskSettingKey ||
                 item.Key == FinancialDocumentsResponsibleUserSettingKey ||
                 item.Key == ApprovalDueDaysSettingKey ||
@@ -5277,6 +5297,7 @@ public class TasksController : ControllerBase
         var financialDocumentsResponsibleUserId = ParseIntSetting(settings.GetValueOrDefault(FinancialDocumentsResponsibleUserSettingKey), 0);
         var birthdayAssigneeUserId = ParseIntSetting(settings.GetValueOrDefault(BirthdayTaskAssigneeUserIdSettingKey), 0);
         var caseFinalReportAssigneeUserId = ParseIntSetting(settings.GetValueOrDefault(CaseFinalReportAssigneeUserIdSettingKey), 0);
+        var courtEventLeaderUserId = ParseIntSetting(settings.GetValueOrDefault(CourtEventLeaderUserIdSettingKey), 0);
         var birthdayAssigneeName = birthdayAssigneeUserId > 0
             ? await _db.Users.AsNoTracking()
                 .Where(user => user.Id == birthdayAssigneeUserId && user.IsActive && user.IsApproved)
@@ -5286,6 +5307,12 @@ public class TasksController : ControllerBase
         var caseFinalReportAssigneeName = caseFinalReportAssigneeUserId > 0
             ? await _db.Users.AsNoTracking()
                 .Where(user => user.Id == caseFinalReportAssigneeUserId && user.IsActive && user.IsApproved)
+                .Select(user => user.FullName ?? user.Email)
+                .FirstOrDefaultAsync(ct) ?? string.Empty
+            : string.Empty;
+        var courtEventLeaderName = courtEventLeaderUserId > 0
+            ? await _db.Users.AsNoTracking()
+                .Where(user => user.Id == courtEventLeaderUserId && user.IsActive && user.IsApproved)
                 .Select(user => user.FullName ?? user.Email)
                 .FirstOrDefaultAsync(ct) ?? string.Empty
             : string.Empty;
@@ -5315,6 +5342,8 @@ public class TasksController : ControllerBase
             BirthdayTaskAssigneeUserName = birthdayAssigneeName,
             CaseFinalReportAssigneeUserId = string.IsNullOrWhiteSpace(caseFinalReportAssigneeName) ? null : caseFinalReportAssigneeUserId,
             CaseFinalReportAssigneeUserName = caseFinalReportAssigneeName,
+            CourtEventLeaderUserId = string.IsNullOrWhiteSpace(courtEventLeaderName) ? null : courtEventLeaderUserId,
+            CourtEventLeaderUserName = courtEventLeaderName,
             AllowAdminCompleteAnyTask = ParseBoolSetting(settings.GetValueOrDefault(AllowAdminCompleteAnyTaskSettingKey), true),
             FinancialDocumentsResponsibleUserId = effectiveFinancialDocumentsResponsibleUserId > 0 ? effectiveFinancialDocumentsResponsibleUserId : null,
             FinancialDocumentsResponsibleUserName = financialDocumentsResponsibleUserName,

@@ -34,6 +34,8 @@ const settings: TaskJournalSettingsDto = {
   birthdayTaskAssigneeUserName: '',
   caseFinalReportAssigneeUserId: null,
   caseFinalReportAssigneeUserName: '',
+  courtEventLeaderUserId: null,
+  courtEventLeaderUserName: '',
   allowAdminCompleteAnyTask: true,
   financialDocumentsResponsibleUserId: null,
   financialDocumentsResponsibleUserName: '',
@@ -185,6 +187,18 @@ describe('TaskJournalSettings', () => {
 
     await waitFor(() => expect(apiMock.updateTaskJournalSettings).toHaveBeenCalledWith(
       expect.objectContaining({ caseFinalReportAssigneeUserId: 8 }),
+    ));
+  });
+
+  it('lets an administrator appoint a shared leader for court notifications', async () => {
+    render(<TaskJournalSettings />);
+
+    fireEvent.click(await screen.findByRole('combobox', { name: /Руководитель для судебных уведомлений/u }));
+    fireEvent.click(screen.getByRole('option', { name: 'Иван Петров' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    await waitFor(() => expect(apiMock.updateTaskJournalSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ courtEventLeaderUserId: 8 }),
     ));
   });
 

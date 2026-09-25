@@ -539,6 +539,45 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task UpdateSettings_RejectsCourtLeaderWithoutAllCasesAccess()
+    {
+        await using var db = await CreateContextAsync();
+        var admin = await CreateAdminUserAsync(db, "court-leader-settings-admin@example.com", "Администратор");
+        var restricted = new User
+        {
+            Email = "court-leader-settings-own@example.com",
+            FullName = "Ограниченный юрист",
+            PasswordHash = "test",
+            IsActive = true,
+            IsApproved = true,
+            Role = new Role
+            {
+                Name = $"court-leader-own-{Guid.NewGuid():N}",
+                Permissions =
+                [
+                    new RolePermission
+                    {
+                        Section = RolePermissionCatalog.Cases,
+                        CanView = true,
+                        ViewScope = DataVisibilityScope.Own,
+                    },
+                ],
+            },
+        };
+        db.Users.Add(restricted);
+        await db.SaveChangesAsync();
+
+        var result = await CreateController(db, new RecordingNotificationService(), admin)
+            .UpdateSettings(new TaskJournalSettingsRequest
+            {
+                CourtEventLeaderUserId = restricted.Id,
+            }, CancellationToken.None);
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+        Assert.False(await db.SystemSettings.AnyAsync(item => item.Key == NotificationService.CourtEventLeaderUserIdSettingKey));
+    }
+
+    [Fact]
     public async Task UpdateSettings_PersistsCaseInactivityAutomationSettings()
     {
         await using var db = await CreateContextAsync();
@@ -559,6 +598,7 @@ public class TasksControllerTests
             BirthdayClientUseSelectedAssignee = true,
             BirthdayTaskAssigneeUserId = fallbackAssignee.Id,
             CaseFinalReportAssigneeUserId = fallbackAssignee.Id,
+            CourtEventLeaderUserId = fallbackAssignee.Id,
             AllowAdminCompleteAnyTask = true,
             FinancialDocumentsResponsibleUserId = fallbackAssignee.Id,
             ApprovalDueDays = 400,
@@ -589,6 +629,8 @@ public class TasksControllerTests
         Assert.Equal(fallbackAssignee.Id, dto.BirthdayTaskAssigneeUserId);
         Assert.Equal(fallbackAssignee.Id, dto.CaseFinalReportAssigneeUserId);
         Assert.Equal("Резервный исполнитель", dto.CaseFinalReportAssigneeUserName);
+        Assert.Equal(fallbackAssignee.Id, dto.CourtEventLeaderUserId);
+        Assert.Equal("Резервный исполнитель", dto.CourtEventLeaderUserName);
         Assert.True(dto.AllowAdminCompleteAnyTask);
         Assert.Equal(fallbackAssignee.Id, dto.FinancialDocumentsResponsibleUserId);
         Assert.Equal("Резервный исполнитель", dto.FinancialDocumentsResponsibleUserName);

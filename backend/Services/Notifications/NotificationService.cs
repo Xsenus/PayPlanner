@@ -16,6 +16,7 @@ namespace PayPlanner.Api.Services.Notifications;
 
 public sealed class NotificationService : INotificationService
 {
+    public const string CourtEventLeaderUserIdSettingKey = "notifications.courtEventLeaderUserId";
     private static readonly SemaphoreSlim SmsRateLimitGate = new(1, 1);
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly CultureInfo RuCulture = CultureInfo.GetCultureInfo("ru-RU");
@@ -2345,14 +2346,23 @@ public sealed class NotificationService : INotificationService
         IReadOnlyCollection<int> recipientUserIds,
         CancellationToken cancellationToken = default)
     {
-        if (clientCase.Id <= 0 || courtEvent.Id <= 0 || recipientUserIds.Count == 0)
+        if (clientCase.Id <= 0 || courtEvent.Id <= 0)
         {
             return;
         }
 
+        var isRescheduled = string.Equals(action, "rescheduled", StringComparison.OrdinalIgnoreCase);
+        var notificationType = isRescheduled
+            ? UserNotificationTypes.CourtHearing
+            : ResolveCourtEventNotificationType(courtEvent);
+        var recipients = await IncludeConfiguredCourtLeaderAsync(
+            recipientUserIds,
+            isRescheduled || notificationType == UserNotificationTypes.CourtDecisionRecorded,
+            cancellationToken);
+        if (recipients.Count == 0) return;
         var visibleRecipientUserIds = await ResolveVisibleCaseNotificationRecipientIdsAsync(
             clientCase,
-            recipientUserIds,
+            recipients,
             actorUserId,
             cancellationToken);
         if (visibleRecipientUserIds.Count == 0)
@@ -2361,10 +2371,7 @@ public sealed class NotificationService : INotificationService
         }
 
         var normalizedActorName = NormalizeNotificationText(actorName, "Сотрудник");
-        var notificationType = string.Equals(action, "rescheduled", StringComparison.OrdinalIgnoreCase)
-            ? UserNotificationTypes.CourtHearing
-            : ResolveCourtEventNotificationType(courtEvent);
-        var templateKey = string.Equals(action, "rescheduled", StringComparison.OrdinalIgnoreCase)
+        var templateKey = isRescheduled
             ? NotificationTemplateKeys.CourtHearingRescheduled
             : ResolveCourtEventTemplateKey(notificationType);
         var title = BuildCourtEventSubject(clientCase, courtEvent, notificationType, action);
@@ -2453,14 +2460,16 @@ public sealed class NotificationService : INotificationService
         DateTime changedAtUtc,
         CancellationToken cancellationToken = default)
     {
-        if (clientCase.Id <= 0 || previousAt == currentAt || recipientUserIds.Count == 0)
+        if (clientCase.Id <= 0 || previousAt == currentAt)
         {
             return;
         }
 
+        var recipients = await IncludeConfiguredCourtLeaderAsync(recipientUserIds, previousAt.HasValue, cancellationToken);
+        if (recipients.Count == 0) return;
         var visibleRecipientUserIds = await ResolveVisibleCaseNotificationRecipientIdsAsync(
             clientCase,
-            recipientUserIds,
+            recipients,
             actorUserId,
             cancellationToken);
         if (visibleRecipientUserIds.Count == 0)
@@ -2524,14 +2533,16 @@ public sealed class NotificationService : INotificationService
         DateTime changedAtUtc,
         CancellationToken cancellationToken = default)
     {
-        if (clientCase.Id <= 0 || previousAt?.Date == currentAt?.Date || recipientUserIds.Count == 0)
+        if (clientCase.Id <= 0 || previousAt?.Date == currentAt?.Date)
         {
             return;
         }
 
+        var recipients = await IncludeConfiguredCourtLeaderAsync(recipientUserIds, currentAt.HasValue, cancellationToken);
+        if (recipients.Count == 0) return;
         var visibleRecipientUserIds = await ResolveVisibleCaseNotificationRecipientIdsAsync(
             clientCase,
-            recipientUserIds,
+            recipients,
             actorUserId,
             cancellationToken);
         if (visibleRecipientUserIds.Count == 0)
@@ -6605,6 +6616,21 @@ public sealed class NotificationService : INotificationService
                 .ApplyContractVisibility(access)
                 .AnyAsync(ct),
             cancellationToken);
+
+    private async Task<IReadOnlyCollection<int>> IncludeConfiguredCourtLeaderAsync(
+        IReadOnlyCollection<int> recipientUserIds,
+        bool includeLeader,
+        CancellationToken cancellationToken)
+    {
+        if (!includeLeader) return recipientUserIds;
+        var configuredValue = await _context.SystemSettings.AsNoTracking()
+            .Where(setting => setting.Key == CourtEventLeaderUserIdSettingKey)
+            .Select(setting => setting.Value)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (!int.TryParse(configuredValue, out var leaderUserId) || leaderUserId <= 0 || recipientUserIds.Contains(leaderUserId))
+            return recipientUserIds;
+        return recipientUserIds.Append(leaderUserId).ToArray();
+    }
 
     private async Task<IReadOnlyList<int>> ResolveVisibleCaseNotificationRecipientIdsAsync(
         ClientCase clientCase,
