@@ -444,6 +444,8 @@ public partial class CasesV2Controller : ControllerBase
         decimal StateFeeTotal,
         int StateFeeCases);
 
+    public sealed record CourtRecoverySummaryDto(decimal MarkedReceivedTotal, decimal RemainingTotal);
+
     public sealed record CourtReportGroupDto(
         string Name,
         int Total,
@@ -451,13 +453,15 @@ public partial class CasesV2Controller : ControllerBase
         int Completed,
         int DecisionDurationSampleCount,
         double? AverageDaysFromClaimToDecision,
-        CourtAmountSummaryDto Amounts);
+        CourtAmountSummaryDto Amounts,
+        CourtRecoverySummaryDto? Recovery);
 
     public sealed record CourtReportOverviewDto(
         int Total,
         int Active,
         int Completed,
         CourtAmountSummaryDto Amounts,
+        CourtRecoverySummaryDto? Recovery,
         IReadOnlyList<CourtReportGroupDto> ByResponsible,
         IReadOnlyList<CourtReportGroupDto> ByCourt,
         int OtherResponsibleCases,
@@ -573,6 +577,63 @@ public partial class CasesV2Controller : ControllerBase
         var durationByCourt = new Dictionary<string, (long Days, int Count)>(StringComparer.Ordinal);
         var visibleResponsibleIds = responsibleRows.Select(row => row.UserId ?? 0).ToHashSet();
         var visibleCourtNames = courtRows.Select(row => row.Name).ToHashSet(StringComparer.Ordinal);
+
+        CourtRecoverySummaryDto? recoveryTotal = null;
+        var recoveryByResponsible = new Dictionary<int, (decimal Received, decimal Remaining)>();
+        var recoveryByCourt = new Dictionary<string, (decimal Received, decimal Remaining)>(StringComparer.Ordinal);
+        var paymentsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
+        if (paymentsVisibility?.SeesAll == true && await CanViewCaseFinanceAsync(ct))
+        {
+            var visiblePayments = _db.Payments.AsNoTracking().ApplyPaymentVisibility(paymentsVisibility);
+            decimal receivedTotal = 0m;
+            decimal remainingTotal = 0m;
+            await foreach (var row in query.AsNoTracking()
+                .Where(item => item.CourtAwardedAmount.HasValue)
+                .Select(item => new
+                {
+                    item.Id,
+                    item.CourtAwardedAmount,
+                    item.ResponsibleUserId,
+                    ClientResponsibleUserId = item.Client != null ? item.Client.ResponsibleUserId : null,
+                    LegalEntityResponsibleUserId = item.LegalEntity != null ? item.LegalEntity.ResponsibleUserId : null,
+                    item.CourtName,
+                    Received = (from link in _db.ClientCaseCourtRecoveryPayments
+                        join payment in visiblePayments on link.PaymentId equals payment.Id
+                        where link.ClientCaseId == item.Id
+                            && link.AllocatedAmount > 0m
+                            && payment.Status != PaymentStatus.Cancelled
+                            && payment.Type == PaymentType.Income
+                            && payment.DocumentKind == DocumentKind.Payment
+                            && payment.PaidAmount >= link.AllocatedAmount
+                            && (payment.ClientCaseId == item.Id
+                                || payment.InvoiceClientCases.Any(paymentCase => paymentCase.ClientCaseId == item.Id))
+                        select (decimal?)link.AllocatedAmount).Sum() ?? 0m,
+                })
+                .AsAsyncEnumerable()
+                .WithCancellation(ct))
+            {
+                var received = row.Received;
+                var remaining = Math.Max(row.CourtAwardedAmount!.Value - received, 0m);
+                receivedTotal += received;
+                remainingTotal += remaining;
+
+                var responsibleId = row.ResponsibleUserId ?? row.ClientResponsibleUserId ?? row.LegalEntityResponsibleUserId ?? 0;
+                if (visibleResponsibleIds.Contains(responsibleId))
+                {
+                    var current = recoveryByResponsible.GetValueOrDefault(responsibleId);
+                    recoveryByResponsible[responsibleId] = (current.Received + received, current.Remaining + remaining);
+                }
+
+                var courtName = string.IsNullOrEmpty(row.CourtName) ? "Суд не указан" : row.CourtName;
+                if (visibleCourtNames.Contains(courtName))
+                {
+                    var current = recoveryByCourt.GetValueOrDefault(courtName);
+                    recoveryByCourt[courtName] = (current.Received + received, current.Remaining + remaining);
+                }
+            }
+            recoveryTotal = new CourtRecoverySummaryDto(receivedTotal, remainingTotal);
+        }
+
         await foreach (var row in query.AsNoTracking()
             .Where(item => item.ClaimFiledAt.HasValue && item.CourtDecisionAt.HasValue)
             .Select(item => new
@@ -615,21 +676,26 @@ public partial class CasesV2Controller : ControllerBase
                 totals?.ClaimTotal ?? 0m, totals?.ClaimCases ?? 0,
                 totals?.AwardedTotal ?? 0m, totals?.AwardedCases ?? 0,
                 totals?.StateFeeTotal ?? 0m, totals?.StateFeeCases ?? 0),
+            recoveryTotal,
             responsibleRows.Select(row =>
             {
                 var duration = durationByResponsible.GetValueOrDefault(row.UserId ?? 0);
+                var recovery = recoveryByResponsible.GetValueOrDefault(row.UserId ?? 0);
                 return new CourtReportGroupDto(
                     row.UserId.HasValue ? userNames.GetValueOrDefault(row.UserId.Value, "Сотрудник не найден") : "Не назначен",
                     row.Total, row.Active, row.Total - row.Active, duration.Count,
                     duration.Count > 0 ? Math.Round((double)duration.Days / duration.Count, 1) : null,
-                    new CourtAmountSummaryDto(row.ClaimTotal, row.ClaimCases, row.AwardedTotal, row.AwardedCases, row.StateFeeTotal, row.StateFeeCases));
+                    new CourtAmountSummaryDto(row.ClaimTotal, row.ClaimCases, row.AwardedTotal, row.AwardedCases, row.StateFeeTotal, row.StateFeeCases),
+                    recoveryTotal is null ? null : new CourtRecoverySummaryDto(recovery.Received, recovery.Remaining));
             }).ToArray(),
             courtRows.Select(row =>
             {
                 var duration = durationByCourt.GetValueOrDefault(row.Name);
+                var recovery = recoveryByCourt.GetValueOrDefault(row.Name);
                 return new CourtReportGroupDto(row.Name, row.Total, row.Active, row.Total - row.Active,
                     duration.Count, duration.Count > 0 ? Math.Round((double)duration.Days / duration.Count, 1) : null,
-                    new CourtAmountSummaryDto(row.ClaimTotal, row.ClaimCases, row.AwardedTotal, row.AwardedCases, row.StateFeeTotal, row.StateFeeCases));
+                    new CourtAmountSummaryDto(row.ClaimTotal, row.ClaimCases, row.AwardedTotal, row.AwardedCases, row.StateFeeTotal, row.StateFeeCases),
+                    recoveryTotal is null ? null : new CourtRecoverySummaryDto(recovery.Received, recovery.Remaining));
             }).ToArray(),
             total - responsibleRows.Sum(row => row.Total),
             total - courtRows.Sum(row => row.Total));

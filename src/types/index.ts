@@ -634,10 +634,16 @@ export interface CourtReportOverview {
   active: number;
   completed: number;
   amounts: CourtAmountSummary;
+  recovery?: CourtRecoverySummary | null;
   byResponsible: CourtReportGroup[];
   byCourt: CourtReportGroup[];
   otherResponsibleCases: number;
   otherCourtCases: number;
+}
+
+export interface CourtRecoverySummary {
+  markedReceivedTotal: number;
+  remainingTotal: number;
 }
 
 export interface CourtAmountSummary {
@@ -657,6 +663,7 @@ export interface CourtReportGroup {
   decisionDurationSampleCount: number;
   averageDaysFromClaimToDecision: number | null;
   amounts: CourtAmountSummary;
+  recovery?: CourtRecoverySummary | null;
 }
 
 export interface CourtWorkload {

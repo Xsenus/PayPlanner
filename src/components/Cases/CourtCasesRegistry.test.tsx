@@ -84,6 +84,7 @@ describe('CourtCasesRegistry', () => {
     expect(screen.getAllByText('Дел с заполненным полем: 1')).toHaveLength(3);
     expect(screen.getAllByText(/100\s?000,50\s?₽/u).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/0\s?₽/u).length).toBeGreaterThan(0);
+    expect(screen.queryByText('Отмечено поступлений по взысканию')).toBeNull();
     expect(apiService.getCourtReportOverview).toHaveBeenCalledWith(
       expect.objectContaining({ courtState: 'all' }),
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
@@ -94,6 +95,25 @@ describe('CourtCasesRegistry', () => {
       expect.objectContaining({ from: '2026-09-01T17:00:00.000Z', toExclusive: '2026-09-02T17:00:00.000Z' }),
       expect.any(Object),
     ));
+  });
+
+  it('shows marked recovery and per-case remaining debt only when the API grants financial access', async () => {
+    const amounts = { claimTotal: 100000, claimCases: 1, awardedTotal: 75000, awardedCases: 1, stateFeeTotal: 0, stateFeeCases: 0 };
+    const recovery = { markedReceivedTotal: 25000, remainingTotal: 50000 };
+    vi.mocked(apiService.getCourtReportOverview).mockResolvedValue({
+      total: 1, active: 1, completed: 0, amounts, recovery,
+      byResponsible: [{ name: 'Юрист', total: 1, active: 1, completed: 0, decisionDurationSampleCount: 0, averageDaysFromClaimToDecision: null, amounts, recovery }],
+      byCourt: [{ name: 'Суд', total: 1, active: 1, completed: 0, decisionDurationSampleCount: 0, averageDaysFromClaimToDecision: null, amounts, recovery }],
+      otherResponsibleCases: 0, otherCourtCases: 0,
+    });
+    render(<CourtCasesRegistry onOpenCaseCourt={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Сводка по делам' }));
+
+    expect(await screen.findByText('Отмечено поступлений по взысканию')).toBeTruthy();
+    expect(screen.getAllByText('Осталось к взысканию')).toHaveLength(3);
+    expect(screen.getAllByText(/25\s?000\s?₽/u).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/50\s?000\s?₽/u).length).toBeGreaterThan(0);
+    expect(screen.getByText(/это не новый доход фирмы/)).toBeTruthy();
   });
 
   it('shows a complete court card and opens the court tab', async () => {

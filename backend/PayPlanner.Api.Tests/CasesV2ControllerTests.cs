@@ -14,6 +14,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Npgsql;
 using PayPlanner.Api.Controllers.V2;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
@@ -3121,6 +3122,108 @@ public class CasesV2ControllerTests
         lawyer.Role!.Permissions.Single().CanView = false;
         await db.SaveChangesAsync();
         Assert.IsType<ForbidResult>((await CreateController(db, lawyer).GetCourtReportOverview(ct: CancellationToken.None)).Result);
+    }
+
+    [Fact]
+    public async Task CourtReportOverview_UsesOnlyValidRecoveryLinksAndHidesPaymentsWithoutPermission()
+    {
+        await using var db = await CreateContextAsync();
+        var lawyer = await CreateUserAsync(db, "court-report-recovery@example.com", "Юрист");
+        var outsider = await CreateUserAsync(db, "court-report-other@example.com", "Другой юрист");
+        await GrantSectionPermissionAsync(db, lawyer, RolePermissionCatalog.Payments);
+        var client = new Client { Name = "Клиент", IsActive = true, ResponsibleUserId = lawyer.Id };
+        var caseA = new ClientCase { Client = client, ResponsibleUserId = lawyer.Id, Title = "Дело А", CourtName = "Суд А", CourtCaseNumber = "A-1", Status = ClientCaseStatus.Open, CourtAwardedAmount = 100_000m };
+        var caseB = new ClientCase { Client = client, ResponsibleUserId = lawyer.Id, Title = "Дело Б", CourtName = "Суд Б", Status = ClientCaseStatus.Open, CourtAwardedAmount = 50_000m };
+        var hiddenClient = new Client { Name = "Чужой клиент", IsActive = true, ResponsibleUserId = outsider.Id };
+        var hiddenCase = new ClientCase { Client = hiddenClient, ResponsibleUserId = outsider.Id, Title = "Чужое дело", CourtName = "Суд В", Status = ClientCaseStatus.Open, CourtAwardedAmount = 200_000m };
+        var paymentA = new Payment { Client = client, ClientCase = caseA, DocumentKind = DocumentKind.Payment, Type = PaymentType.Income, Status = PaymentStatus.Completed, Amount = 30_000m, PaidAmount = 30_000m, Date = DateTime.UtcNow, PlannedDate = DateTime.UtcNow };
+        var paymentB = new Payment { Client = client, ClientCase = caseB, DocumentKind = DocumentKind.Payment, Type = PaymentType.Income, Status = PaymentStatus.Completed, Amount = 70_000m, PaidAmount = 70_000m, Date = DateTime.UtcNow, PlannedDate = DateTime.UtcNow };
+        var reducedPayment = new Payment { Client = client, ClientCase = caseA, DocumentKind = DocumentKind.Payment, Type = PaymentType.Income, Status = PaymentStatus.Completed, Amount = 10_000m, PaidAmount = 5_000m, Date = DateTime.UtcNow, PlannedDate = DateTime.UtcNow };
+        var hiddenPayment = new Payment { Client = hiddenClient, ClientCase = hiddenCase, DocumentKind = DocumentKind.Payment, Type = PaymentType.Income, Status = PaymentStatus.Completed, Amount = 100_000m, PaidAmount = 100_000m, Date = DateTime.UtcNow, PlannedDate = DateTime.UtcNow };
+        db.Payments.AddRange(paymentA, paymentB, reducedPayment, hiddenPayment);
+        await db.SaveChangesAsync();
+        db.ClientCaseCourtRecoveryPayments.AddRange(
+            new ClientCaseCourtRecoveryPayment { ClientCaseId = caseA.Id, PaymentId = paymentA.Id, AllocatedAmount = 25_000m },
+            new ClientCaseCourtRecoveryPayment { ClientCaseId = caseB.Id, PaymentId = paymentB.Id, AllocatedAmount = 60_000m },
+            new ClientCaseCourtRecoveryPayment { ClientCaseId = caseA.Id, PaymentId = reducedPayment.Id, AllocatedAmount = 10_000m },
+            new ClientCaseCourtRecoveryPayment { ClientCaseId = hiddenCase.Id, PaymentId = hiddenPayment.Id, AllocatedAmount = 100_000m });
+        await db.SaveChangesAsync();
+
+        var report = (await CreateController(db, lawyer).GetCourtReportOverview(ct: CancellationToken.None)).Value!;
+        Assert.Equal(2, report.Total);
+        Assert.Equal(new CasesV2Controller.CourtRecoverySummaryDto(85_000m, 75_000m), report.Recovery);
+        Assert.Equal(new CasesV2Controller.CourtRecoverySummaryDto(25_000m, 75_000m), Assert.Single(report.ByCourt, item => item.Name == "Суд А").Recovery);
+        Assert.Equal(new CasesV2Controller.CourtRecoverySummaryDto(60_000m, 0m), Assert.Single(report.ByCourt, item => item.Name == "Суд Б").Recovery);
+        Assert.Equal(new CasesV2Controller.CourtRecoverySummaryDto(85_000m, 75_000m), Assert.Single(report.ByResponsible).Recovery);
+        Assert.Equal(30_000m, paymentA.PaidAmount);
+        Assert.Equal(4, await db.Payments.CountAsync());
+
+        var filtered = (await CreateController(db, lawyer).GetCourtReportOverview(
+            search: "A-1", ct: CancellationToken.None)).Value!;
+        Assert.Equal(1, filtered.Total);
+        Assert.Equal(new CasesV2Controller.CourtRecoverySummaryDto(25_000m, 75_000m), filtered.Recovery);
+
+        await GrantSectionPermissionAsync(db, lawyer, RolePermissionCatalog.Payments, canView: false);
+        var withoutFinance = (await CreateController(db, lawyer).GetCourtReportOverview(ct: CancellationToken.None)).Value!;
+        Assert.Null(withoutFinance.Recovery);
+        Assert.All(withoutFinance.ByCourt, row => Assert.Null(row.Recovery));
+        Assert.Equal(150_000m, withoutFinance.Amounts.AwardedTotal);
+
+        var manager = await CreateUserAsync(db, "court-report-recovery-manager@example.com", "Руководитель", DataVisibilityScope.All);
+        await GrantSectionPermissionAsync(db, manager, RolePermissionCatalog.Payments, viewScope: DataVisibilityScope.Own);
+        var limitedPayments = (await CreateController(db, manager).GetCourtReportOverview(ct: CancellationToken.None)).Value!;
+        Assert.Equal(3, limitedPayments.Total);
+        Assert.Null(limitedPayments.Recovery);
+
+        await GrantSectionPermissionAsync(db, manager, RolePermissionCatalog.Payments, viewScope: DataVisibilityScope.All);
+        var allPayments = (await CreateController(db, manager).GetCourtReportOverview(ct: CancellationToken.None)).Value!;
+        Assert.Equal(new CasesV2Controller.CourtRecoverySummaryDto(185_000m, 175_000m), allPayments.Recovery);
+    }
+
+    [Fact]
+    public async Task CourtReportOverview_RecoveryProjectionWorksOnDisposablePostgreSqlDatabase()
+    {
+        var raw = Environment.GetEnvironmentVariable("PAYPLANNER_TEST_POSTGRES");
+        if (string.IsNullOrWhiteSpace(raw)) return;
+        var baseConnection = new NpgsqlConnectionStringBuilder(raw);
+        Assert.Contains(baseConnection.Host, new[] { "127.0.0.1", "localhost" });
+        var databaseName = "pp_recovery_report_" + Guid.NewGuid().ToString("N");
+        var adminConnection = new NpgsqlConnectionStringBuilder(raw) { Database = "postgres", Pooling = false };
+        await using var admin = new NpgsqlConnection(adminConnection.ConnectionString);
+        await admin.OpenAsync();
+        try
+        {
+            await using (var create = admin.CreateCommand())
+            {
+                create.CommandText = $"CREATE DATABASE \"{databaseName}\"";
+                await create.ExecuteNonQueryAsync();
+            }
+
+            var testConnection = new NpgsqlConnectionStringBuilder(raw) { Database = databaseName, Pooling = false };
+            var options = new DbContextOptionsBuilder<PostgreSqlPaymentContext>()
+                .UseNpgsql(testConnection.ConnectionString).Options;
+            await using var db = new PostgreSqlPaymentContext(options);
+            await db.Database.MigrateAsync();
+            var user = await CreateUserAsync(db, "recovery-report-pg@example.com", "Юрист", DataVisibilityScope.All);
+            await GrantSectionPermissionAsync(db, user, RolePermissionCatalog.Payments);
+            var client = new Client { Name = "Клиент", IsActive = true, ResponsibleUserId = user.Id };
+            var clientCase = new ClientCase { Client = client, ResponsibleUserId = user.Id, Title = "Взыскание", CourtName = "Суд", Status = ClientCaseStatus.Open, CourtAwardedAmount = 12_000m };
+            var payment = new Payment { Client = client, ClientCase = clientCase, DocumentKind = DocumentKind.Payment, Type = PaymentType.Income, Status = PaymentStatus.Completed, Amount = 5_000m, PaidAmount = 5_000m, Date = DateTime.UtcNow, PlannedDate = DateTime.UtcNow };
+            db.Payments.Add(payment);
+            await db.SaveChangesAsync();
+            db.ClientCaseCourtRecoveryPayments.Add(new ClientCaseCourtRecoveryPayment { ClientCaseId = clientCase.Id, PaymentId = payment.Id, AllocatedAmount = 4_000m });
+            await db.SaveChangesAsync();
+
+            var report = (await CreateController(db, user).GetCourtReportOverview(ct: CancellationToken.None)).Value!;
+            Assert.Equal(new CasesV2Controller.CourtRecoverySummaryDto(4_000m, 8_000m), report.Recovery);
+            Assert.Equal(report.Recovery, Assert.Single(report.ByCourt).Recovery);
+        }
+        finally
+        {
+            await using var drop = admin.CreateCommand();
+            drop.CommandText = $"DROP DATABASE IF EXISTS \"{databaseName}\" WITH (FORCE)";
+            await drop.ExecuteNonQueryAsync();
+        }
     }
 
     [Fact]
