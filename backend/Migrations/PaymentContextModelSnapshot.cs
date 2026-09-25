@@ -757,6 +757,60 @@ namespace PayPlanner.Api.Migrations
                     b.ToTable("BaseCurrencies");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.CasePositionTemplate", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("CreatedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsArchived")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("OwnerUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("UpdatedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("UpdatedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UpdatedAt")
+                        .HasDatabaseName("IX_CasePositionTemplate_UpdatedAt_Audit");
+
+                    b.HasIndex("IsArchived", "Title");
+
+                    b.HasIndex("OwnerUserId", "IsArchived", "Title");
+
+                    b.ToTable("CasePositionTemplates");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.CashInventory", b =>
                 {
                     b.Property<int>("Id")
@@ -11339,6 +11393,16 @@ namespace PayPlanner.Api.Migrations
                     b.Navigation("Batch");
 
                     b.Navigation("MoneyOperation");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.CasePositionTemplate", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.User", "OwnerUser")
+                        .WithMany()
+                        .HasForeignKey("OwnerUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("OwnerUser");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.CashInventory", b =>

@@ -4,6 +4,7 @@ import { SystemSelect } from '../ui/SystemSelect';
 import { CaseAppealDecisionAction } from '../Cases/CaseAppealDecisionAction';
 import { CasePreHearingActions } from '../Cases/CasePreHearingActions';
 import { CaseHearingPreparationChecklist } from '../Cases/CaseHearingPreparationChecklist';
+import { CasePositionTemplatePicker } from '../Cases/CasePositionTemplatePicker';
 import { CourtRecoveryPanel } from '../Cases/CourtRecoveryPanel';
 import { ExecutiveWritDocumentUpload } from '../Cases/ExecutiveWritDocumentUpload';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -2124,6 +2125,7 @@ export function CaseModal({
               placeholder="Позиция, риски, ближайшие шаги"
               disabled={saving}
             />
+            <CasePositionTemplatePicker text={strategy} onChange={setStrategy} disabled={!allowEdit || saving} />
             <p className="mt-1 text-xs text-gray-600">
               {strategy.trim() !== (caseData.strategy ?? '').trim()
                 ? 'Позиция изменена: сохраните дело, прежняя отметка проверки будет сброшена.'

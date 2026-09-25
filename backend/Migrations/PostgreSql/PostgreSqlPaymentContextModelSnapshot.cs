@@ -782,6 +782,62 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.ToTable("BaseCurrencies");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.CasePositionTemplate", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CreatedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<bool>("IsArchived")
+                        .HasColumnType("boolean");
+
+                    b.Property<int?>("OwnerUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("UpdatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("UpdatedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UpdatedAt")
+                        .HasDatabaseName("IX_CasePositionTemplate_UpdatedAt_Audit");
+
+                    b.HasIndex("IsArchived", "Title");
+
+                    b.HasIndex("OwnerUserId", "IsArchived", "Title");
+
+                    b.ToTable("CasePositionTemplates");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.CashInventory", b =>
                 {
                     b.Property<int>("Id")
@@ -11597,6 +11653,16 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("Batch");
 
                     b.Navigation("MoneyOperation");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.CasePositionTemplate", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.User", "OwnerUser")
+                        .WithMany()
+                        .HasForeignKey("OwnerUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("OwnerUser");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.CashInventory", b =>

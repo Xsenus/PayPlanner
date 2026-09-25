@@ -145,6 +145,7 @@ public class PaymentContext : DbContext
         typeof(ClientCaseCourtEvent),
         typeof(ClientCaseCourtParty),
         typeof(ClientCaseCourt),
+        typeof(CasePositionTemplate),
         typeof(Role),
         typeof(User),
     };
@@ -1835,6 +1836,19 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.Instance).HasDatabaseName("IX_ClientCaseCourts_Instance");
             entity.HasIndex(e => e.IsActive).HasDatabaseName("IX_ClientCaseCourts_IsActive");
             entity.HasIndex(e => new { e.IsActive, e.SortOrder, e.Name }).HasDatabaseName("IX_ClientCaseCourts_Active_Sort_Name");
+        });
+
+        modelBuilder.Entity<CasePositionTemplate>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Title).HasMaxLength(160).IsRequired();
+            entity.Property(e => e.Text).HasMaxLength(4000).IsRequired();
+            entity.HasOne(e => e.OwnerUser)
+                .WithMany()
+                .HasForeignKey(e => e.OwnerUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(e => new { e.OwnerUserId, e.IsArchived, e.Title });
+            entity.HasIndex(e => new { e.IsArchived, e.Title });
         });
 
         // ------------------ ClientCaseCourtInstance ------------------
@@ -3681,6 +3695,7 @@ public class PaymentContext : DbContext
             ConfigureAudit<ClientCaseCourtEvent>(modelBuilder);
             ConfigureAudit<ClientCaseCourtParty>(modelBuilder);
             ConfigureAudit<ClientCaseCourt>(modelBuilder);
+            ConfigureAudit<CasePositionTemplate>(modelBuilder, enableSoftDelete: false);
             ConfigureAudit<ClientPassport>(modelBuilder);
             ConfigureAudit<Contract>(modelBuilder);
             ConfigureAudit<ExternalContact>(modelBuilder);
@@ -4642,6 +4657,7 @@ public class PaymentContext : DbContext
     public DbSet<TaskJournalDeadlineChangeRequest> TaskJournalDeadlineChangeRequests { get; set; }
     public DbSet<TaskJournalFile> TaskJournalFiles { get; set; }
     public DbSet<TaskJournalTemplate> TaskJournalTemplates { get; set; }
+    public DbSet<CasePositionTemplate> CasePositionTemplates { get; set; }
     public DbSet<TaskJournalTemplateParticipant> TaskJournalTemplateParticipants { get; set; }
     public DbSet<NotificationDelivery> NotificationDeliveries { get; set; }
     public DbSet<UserNotification> UserNotifications { get; set; }

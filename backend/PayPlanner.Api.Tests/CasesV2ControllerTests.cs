@@ -13173,6 +13173,106 @@ public class CasesV2ControllerTests
         throw new InvalidOperationException("No test timezone with a local date different from UTC was found.");
     }
 
+    [Fact]
+    public async Task PositionTemplates_PersonalIsPrivateAndEditingTemplateDoesNotRewriteCase()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "position-owner@example.com", "Владелец");
+        var colleague = await CreateUserAsync(db, "position-colleague@example.com", "Коллега");
+        var clientCase = new ClientCase
+        {
+            Title = "Дело с сохранённой позицией", Status = ClientCaseStatus.Open,
+            Strategy = "Уже сохранённый текст", ResponsibleUserId = owner.Id,
+            Client = new Client { Name = "Клиент шаблона", IsActive = true, ResponsibleUserId = owner.Id },
+        };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+
+        var ownerController = CreateController(db, owner);
+        var created = await ownerController.CreatePositionTemplate(
+            new CasesV2Controller.UpsertCasePositionTemplateRequest("Личная", "Первая версия", "personal"),
+            CancellationToken.None);
+        var template = Assert.IsType<CasesV2Controller.CasePositionTemplateDto>(
+            Assert.IsType<CreatedResult>(created.Result).Value);
+        Assert.Equal("personal", template.Scope);
+
+        var colleagueController = CreateController(db, colleague);
+        var visible = await colleagueController.GetPositionTemplates(CancellationToken.None);
+        var list = Assert.IsType<CasesV2Controller.CasePositionTemplateListDto>(
+            Assert.IsType<OkObjectResult>(visible.Result).Value);
+        Assert.Empty(list.Items);
+        var denied = await colleagueController.UpdatePositionTemplate(template.Id,
+            new CasesV2Controller.UpsertCasePositionTemplateRequest("Чужая", "Подмена", "personal"),
+            CancellationToken.None);
+        Assert.IsType<ForbidResult>(denied.Result);
+
+        var updated = await ownerController.UpdatePositionTemplate(template.Id,
+            new CasesV2Controller.UpsertCasePositionTemplateRequest("Личная", "Вторая версия", "personal"),
+            CancellationToken.None);
+        Assert.Equal("Вторая версия", Assert.IsType<CasesV2Controller.CasePositionTemplateDto>(
+            Assert.IsType<OkObjectResult>(updated.Result).Value).Text);
+        Assert.Equal("Уже сохранённый текст", (await db.ClientCases.AsNoTracking()
+            .SingleAsync(item => item.Id == clientCase.Id)).Strategy);
+
+        Assert.IsType<NoContentResult>(await ownerController.ArchivePositionTemplate(template.Id, CancellationToken.None));
+        var afterArchive = await ownerController.GetPositionTemplates(CancellationToken.None);
+        Assert.Empty(Assert.IsType<CasesV2Controller.CasePositionTemplateListDto>(
+            Assert.IsType<OkObjectResult>(afterArchive.Result).Value).Items);
+    }
+
+    [Fact]
+    public async Task PositionTemplates_SharedManagementRequiresRealAdministratorRole()
+    {
+        await using var db = await CreateContextAsync();
+        var admin = await CreateUserAsync(db, "position-admin@example.com", "Администратор");
+        admin.Role!.Name = "admin";
+        var lawyer = await CreateUserAsync(db, "position-lawyer@example.com", "Юрист");
+        await db.SaveChangesAsync();
+
+        var lawyerController = CreateController(db, lawyer, includeAdminRoleClaim: true);
+        var denied = await lawyerController.CreatePositionTemplate(
+            new CasesV2Controller.UpsertCasePositionTemplateRequest("Общий", "Текст", "shared"),
+            CancellationToken.None);
+        Assert.IsType<ForbidResult>(denied.Result);
+
+        var adminController = CreateController(db, admin);
+        var created = await adminController.CreatePositionTemplate(
+            new CasesV2Controller.UpsertCasePositionTemplateRequest("Общий", "Текст", "shared"),
+            CancellationToken.None);
+        var template = Assert.IsType<CasesV2Controller.CasePositionTemplateDto>(
+            Assert.IsType<CreatedResult>(created.Result).Value);
+        var visible = await lawyerController.GetPositionTemplates(CancellationToken.None);
+        var list = Assert.IsType<CasesV2Controller.CasePositionTemplateListDto>(
+            Assert.IsType<OkObjectResult>(visible.Result).Value);
+        Assert.False(list.CanManageShared);
+        Assert.Single(list.Items);
+        Assert.False(list.Items[0].CanManage);
+        Assert.IsType<ForbidResult>((await lawyerController.UpdatePositionTemplate(template.Id,
+            new CasesV2Controller.UpsertCasePositionTemplateRequest("Чужой", "Текст", "shared"),
+            CancellationToken.None)).Result);
+        Assert.IsType<NoContentResult>(await adminController.ArchivePositionTemplate(template.Id, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task PositionTemplates_ViewOnlyUserCannotWriteAndInvalidTextIsRejected()
+    {
+        await using var db = await CreateContextAsync();
+        var viewer = await CreateUserAsync(db, "position-viewer@example.com", "Наблюдатель");
+        viewer.Role!.Permissions.Single(item => item.Section == RolePermissionCatalog.Cases).CanEdit = false;
+        var editor = await CreateUserAsync(db, "position-editor@example.com", "Юрист");
+        await db.SaveChangesAsync();
+
+        var denied = await CreateController(db, viewer).CreatePositionTemplate(
+            new CasesV2Controller.UpsertCasePositionTemplateRequest("Личная", "Текст", "personal"),
+            CancellationToken.None);
+        Assert.IsType<ForbidResult>(denied.Result);
+        var invalid = await CreateController(db, editor).CreatePositionTemplate(
+            new CasesV2Controller.UpsertCasePositionTemplateRequest("Название", new string('x', 4001), "personal"),
+            CancellationToken.None);
+        Assert.IsType<BadRequestObjectResult>(invalid.Result);
+        Assert.Empty(db.CasePositionTemplates);
+    }
+
     private static CasesV2Controller CreateController(
         PaymentContext db,
         User user,

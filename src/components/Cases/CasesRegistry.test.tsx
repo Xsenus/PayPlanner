@@ -69,6 +69,7 @@ vi.mock('../../services/api', () => ({
     updateCaseV2: vi.fn(),
     updateCaseControl: vi.fn(),
     getCaseDocumentTemplates: vi.fn(),
+    getCasePositionTemplates: vi.fn(),
     getCaseDocuments: vi.fn(),
     getTaskJournalItems: vi.fn(),
     getClientCaseFinanceSummaries: vi.fn(),
@@ -247,6 +248,7 @@ describe('CasesRegistry', () => {
     vi.mocked(apiService.updateCaseControl).mockResolvedValue(createCase({ isUnderControl: true }));
     vi.mocked(apiService.getCaseDocumentTemplates).mockReset();
     vi.mocked(apiService.getCaseDocumentTemplates).mockResolvedValue([]);
+    vi.mocked(apiService.getCasePositionTemplates).mockResolvedValue({ items: [], canManageShared: false });
     vi.mocked(apiService.getCaseDocuments).mockReset();
     vi.mocked(apiService.getCaseDocuments).mockResolvedValue([]);
     vi.mocked(apiService.getCourtRecoveries).mockReset();

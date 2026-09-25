@@ -16,6 +16,10 @@ vi.mock('../../services/api', () => ({
     getCaseV2: vi.fn(),
     updateCaseV2: vi.fn(),
     reviewCasePosition: vi.fn(),
+    getCasePositionTemplates: vi.fn(),
+    createCasePositionTemplate: vi.fn(),
+    updateCasePositionTemplate: vi.fn(),
+    archiveCasePositionTemplate: vi.fn(),
     confirmNextHearing: vi.fn(),
     getCurrentCaseAppealDecision: vi.fn(),
     createCaseAppealTask: vi.fn(),
@@ -244,6 +248,7 @@ describe('CaseDetailPage', () => {
     vi.mocked(apiService.updateCaseV2).mockReset();
     vi.mocked(apiService.updateCaseV2).mockImplementation(async (id, payload) => createCase({ ...payload, id }));
     vi.mocked(apiService.reviewCasePosition).mockReset();
+    vi.mocked(apiService.getCasePositionTemplates).mockResolvedValue({ items: [], canManageShared: false });
     vi.mocked(apiService.reviewCasePosition).mockResolvedValue({ positionReviewedAt: '2026-09-23T10:00:00Z', positionReviewedByUserId: 7, positionReviewedByName: 'Юрист' });
     vi.mocked(apiService.confirmNextHearing).mockReset();
     vi.mocked(apiService.getCaseHearingPreparation).mockReset();
@@ -982,6 +987,24 @@ describe('CaseDetailPage', () => {
     await waitFor(() => expect(apiService.reviewCasePosition).toHaveBeenCalledWith(15));
     expect(await screen.findByText(/Проверена.*Юрист/)).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Подтвердить проверку позиции' })).toBeNull();
+  });
+
+  it('copies a selected position template into the new case card draft before saving', async () => {
+    vi.mocked(apiService.getCasePositionTemplates).mockResolvedValue({
+      items: [{ id: 4, title: 'Возражения', text: 'Проверить доказательства', scope: 'shared', updatedAt: '2026-09-25T00:00:00Z', canManage: false }],
+      canManageShared: false,
+    });
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Редактировать дело' }));
+    await screen.findByRole('option', { name: 'Общий · Возражения' });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Шаблон позиции' }), { target: { value: '4' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Вставить в позицию' }));
+    expect((screen.getByLabelText('Стратегия и план действий') as HTMLTextAreaElement).value).toContain('Проверить доказательства');
+    fireEvent.click(screen.getAllByRole('button', { name: /Сохранить дело/u }).at(-1) as HTMLElement);
+    await waitFor(() => expect(apiService.updateCaseV2).toHaveBeenCalledWith(
+      15, expect.objectContaining({ strategy: expect.stringContaining('Проверить доказательства') }),
+    ));
   });
 
   it('shows the next hearing confirmation on the court tab and records it once', async () => {

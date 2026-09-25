@@ -222,6 +222,20 @@ export interface AppVersionLatestDto {
   seenByCurrentUser: boolean;
 }
 
+export interface CasePositionTemplateDto {
+  id: number;
+  title: string;
+  text: string;
+  scope: 'shared' | 'personal';
+  updatedAt: string;
+  canManage: boolean;
+}
+
+export interface CasePositionTemplateListDto {
+  items: CasePositionTemplateDto[];
+  canManageShared: boolean;
+}
+
 export interface LegalIntegrationDiagnosticsDto {
   generatedAt: string;
   hasEnabledExternalLegalFlags: boolean;
@@ -5851,6 +5865,26 @@ export class ApiService {
     return this.request<{ positionReviewedAt: string; positionReviewedByUserId: number | null; positionReviewedByName: string }>(`/v2/cases/${id}/position-review`, {
       method: 'POST',
     });
+  }
+
+  async getCasePositionTemplates() {
+    return this.request<CasePositionTemplateListDto>('/v2/cases/position-templates');
+  }
+
+  async createCasePositionTemplate(payload: { title: string; text: string; scope: 'shared' | 'personal' }) {
+    return this.request<CasePositionTemplateDto>('/v2/cases/position-templates', {
+      method: 'POST', body: JSON.stringify(payload),
+    });
+  }
+
+  async updateCasePositionTemplate(id: number, payload: { title: string; text: string; scope: 'shared' | 'personal' }) {
+    return this.request<CasePositionTemplateDto>(`/v2/cases/position-templates/${id}`, {
+      method: 'PUT', body: JSON.stringify(payload),
+    });
+  }
+
+  async archiveCasePositionTemplate(id: number) {
+    return this.request<void>(`/v2/cases/position-templates/${id}`, { method: 'DELETE' });
   }
 
   async confirmNextHearing(id: number) {

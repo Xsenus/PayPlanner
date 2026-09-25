@@ -5,6 +5,7 @@ import { ClientPortalAccessPanel } from './ClientPortalAccessPanel';
 import { CaseAppealDecisionAction } from './CaseAppealDecisionAction';
 import { CasePreHearingActions } from './CasePreHearingActions';
 import { CaseHearingPreparationChecklist } from './CaseHearingPreparationChecklist';
+import { CasePositionTemplatePicker } from './CasePositionTemplatePicker';
 import { CourtRecoveryPanel } from './CourtRecoveryPanel';
 import { ExecutiveWritDocumentUpload } from './ExecutiveWritDocumentUpload';
 import { MessengerDocumentDeliveryModal } from './MessengerDocumentDeliveryModal';
@@ -5015,10 +5016,13 @@ function CaseEditPage({
         <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Рабочие материалы</h2>
           <div className="mt-4 grid gap-4 lg:grid-cols-3">
-            <label className="text-sm font-medium text-slate-700">
-              Стратегия и план действий
-              <textarea value={draft.strategy} onChange={(event) => setField('strategy', event.target.value)} rows={6} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
-            </label>
+            <div>
+              <label className="text-sm font-medium text-slate-700">
+                Стратегия и план действий
+                <textarea value={draft.strategy} onChange={(event) => setField('strategy', event.target.value)} rows={6} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+              </label>
+              <CasePositionTemplatePicker text={draft.strategy} onChange={(value) => setField('strategy', value)} />
+            </div>
             <label className="text-sm font-medium text-slate-700">
               Документы
               <textarea value={draft.documentsSummary} onChange={(event) => setField('documentsSummary', event.target.value)} rows={6} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />

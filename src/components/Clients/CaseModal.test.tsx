@@ -20,6 +20,10 @@ vi.mock('../../services/api', () => ({
     getCaseHearingPreparation: vi.fn(),
     updateCaseHearingPreparation: vi.fn(),
     reviewCasePosition: vi.fn(),
+    getCasePositionTemplates: vi.fn(),
+    createCasePositionTemplate: vi.fn(),
+    updateCasePositionTemplate: vi.fn(),
+    archiveCasePositionTemplate: vi.fn(),
     confirmNextHearing: vi.fn(),
     getCurrentCaseAppealDecision: vi.fn(),
     createCaseAppealTask: vi.fn(),
@@ -72,6 +76,7 @@ describe('CaseModal', () => {
     });
     vi.mocked(apiService.updateCaseHearingPreparation).mockReset();
     vi.mocked(apiService.reviewCasePosition).mockReset();
+    vi.mocked(apiService.getCasePositionTemplates).mockResolvedValue({ items: [], canManageShared: false });
     vi.mocked(apiService.reviewCasePosition).mockResolvedValue({ positionReviewedAt: '2026-09-23T10:00:00Z', positionReviewedByUserId: 7, positionReviewedByName: 'Юрист' });
     vi.mocked(apiService.confirmNextHearing).mockReset();
     vi.mocked(apiService.getCurrentCaseAppealDecision).mockReset();
@@ -197,6 +202,23 @@ describe('CaseModal', () => {
     expect(screen.getByText(/Позиция изменена: сохраните дело/)).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Подтвердить проверку позиции' }).hasAttribute('disabled')).toBe(true);
     expect(apiService.reviewCasePosition).not.toHaveBeenCalled();
+  });
+
+  it('copies a selected position template into the legacy card and saves the edited text', async () => {
+    vi.mocked(apiService.getCasePositionTemplates).mockResolvedValue({
+      items: [{ id: 5, title: 'Личная позиция', text: 'Изучить материалы', scope: 'personal', updatedAt: '2026-09-25T00:00:00Z', canManage: true }],
+      canManageShared: false,
+    });
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    render(<CaseModal isOpen onClose={vi.fn()} caseData={createCase({ strategy: 'Исходная позиция' })} onSave={onSave} />);
+    await screen.findByRole('option', { name: 'Личный · Личная позиция' });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Шаблон позиции' }), { target: { value: '5' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Вставить в позицию' }));
+    expect((screen.getByLabelText('Стратегия и план действий') as HTMLTextAreaElement).value).toBe('Исходная позиция\n\nИзучить материалы');
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+      strategy: 'Исходная позиция\n\nИзучить материалы',
+    })));
   });
 
   it('requires a saved hearing date and shows who confirmed it', async () => {
