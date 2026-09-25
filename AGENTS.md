@@ -6,6 +6,8 @@ For any YouGile work, prepare proposed replies and card updates locally, but do 
 
 Keep drafts in a local Markdown file under `docs/` with the card ID, proposed text or action, and current verification status. Show the drafts to the user for review before publishing. A command approving one card or one batch applies only to the identified scope; do not infer approval for other cards. Reading PayPlanner cards remains allowed. Do not touch cards from other YouGile companies.
 
+Publish a new reply only for a card with a substantive change since its last reply. Do not send duplicate summaries, status-only updates, or replies to deferred or unchanged cards. Write briefly in plain language: what changed, where it is available, and any material limitation. Do not add generic requests such as "please check" or "please test". When the user explicitly authorizes replies and asks to move cards to testing, move only the cards that actually received a new reply, after confirming that the message was posted. An incomplete larger task must be described honestly even if the current changes are sent to testing.
+
 ## Release Notes
 
 When implementing a user-facing mechanism, changing business rules, permissions, integrations, data handling, or fixing a visible defect, prepare a human-readable release note for the "Что нового" module.
