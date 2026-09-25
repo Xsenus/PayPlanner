@@ -241,6 +241,26 @@ describe('InternalMessenger', () => {
     expect(await screen.findByText('Чат задачи · Участники: Анна')).toBeTruthy();
     expect((await screen.findAllByText('@Анна')).length).toBe(2);
     expect(screen.queryByText('@[8]')).toBeNull();
+    fireEvent.click(screen.getAllByRole('button', { name: '@Анна' })[0]);
+    const profile = screen.getByRole('dialog', { name: 'Профиль: Анна' });
+    expect(within(profile).getByText('anna@example.test')).toBeTruthy();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: 'Профиль: Анна' })).toBeNull();
+    fireEvent.click(screen.getAllByRole('button', { name: '@Анна' })[1]);
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Профиль: Анна' })).getByRole('button', { name: 'Закрыть профиль' }));
+    expect(screen.queryByRole('dialog', { name: 'Профиль: Анна' })).toBeNull();
+  });
+
+  it('does not open a profile for a mention whose user is unavailable', async () => {
+    chatApiMock.getMessages.mockResolvedValue({
+      items: [{ ...message, text: 'Проверьте @[999]' }],
+      hasMore: false,
+    });
+    render(<InternalMessenger />);
+
+    expect(await screen.findByText('@участник #999')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '@участник #999' })).toBeNull();
+    expect(screen.queryByRole('dialog', { name: /Профиль:/ })).toBeNull();
   });
 
   it('renders bulleted and numbered lists with inline formatting without interpreting HTML', async () => {

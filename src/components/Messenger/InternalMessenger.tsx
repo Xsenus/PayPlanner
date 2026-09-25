@@ -92,14 +92,14 @@ function formatFileSize(value: number) {
   return `${(value / 1024 / 1024).toFixed(1)} МБ`;
 }
 
-function renderInlineFormattedText(text: string, peopleById: Map<number, InternalChatPerson>, onOpenTask?: (taskId: number) => void): ReactNode {
+function renderInlineFormattedText(text: string, peopleById: Map<number, InternalChatPerson>, onOpenTask?: (taskId: number) => void, onOpenPerson?: (person: InternalChatPerson) => void): ReactNode {
   const mentions = text.split(/(@\[\d+\]|@\d+\b)/g);
   return mentions.map((part, partIndex) => {
     const mention = /^@(?:\[(\d+)\]|(\d+))$/.exec(part);
     if (mention) {
       const person = peopleById.get(Number(mention[1] || mention[2]));
       return person
-        ? <span key={partIndex} className="rounded bg-blue-100 px-1 font-semibold text-blue-800" title={person.email}>@{person.name}</span>
+        ? <button key={partIndex} type="button" onClick={() => onOpenPerson?.(person)} className="rounded bg-blue-100 px-1 font-semibold text-blue-800 underline-offset-2 hover:underline" title={`Открыть профиль: ${person.name}`}>@{person.name}</button>
         : <span key={partIndex} className="rounded bg-slate-100 px-1 text-slate-600">@участник #{mention[1] || mention[2]}</span>;
     }
     return <span key={partIndex}>{renderPlainFormattedText(part, onOpenTask)}</span>;
@@ -114,7 +114,7 @@ function parseListItem(line: string) {
   return null;
 }
 
-function renderFormattedText(text: string, peopleById: Map<number, InternalChatPerson>, onOpenTask?: (taskId: number) => void): ReactNode {
+function renderFormattedText(text: string, peopleById: Map<number, InternalChatPerson>, onOpenTask?: (taskId: number) => void, onOpenPerson?: (person: InternalChatPerson) => void): ReactNode {
   const lines = text.split(/\r?\n/);
   const blocks: ReactNode[] = [];
   for (let index = 0; index < lines.length;) {
@@ -126,7 +126,7 @@ function renderFormattedText(text: string, peopleById: Map<number, InternalChatP
         const item = parseListItem(lines[index]);
         if (!item || item.kind !== firstItem.kind) break;
         if (item.kind === 'numbered' && item.start !== firstItem.start + items.length) break;
-        items.push(<li key={index}>{renderInlineFormattedText(item.text, peopleById, onOpenTask)}</li>);
+        items.push(<li key={index}>{renderInlineFormattedText(item.text, peopleById, onOpenTask, onOpenPerson)}</li>);
         index += 1;
       }
       blocks.push(firstItem.kind === 'bullet'
@@ -136,7 +136,7 @@ function renderFormattedText(text: string, peopleById: Map<number, InternalChatP
     }
     const line = lines[index];
     const hasNextPlainLine = index < lines.length - 1 && !parseListItem(lines[index + 1]);
-    blocks.push(<span key={index}>{renderInlineFormattedText(line, peopleById, onOpenTask)}{hasNextPlainLine || !line ? <br /> : null}</span>);
+    blocks.push(<span key={index}>{renderInlineFormattedText(line, peopleById, onOpenTask, onOpenPerson)}{hasNextPlainLine || !line ? <br /> : null}</span>);
     index += 1;
   }
   return blocks;
@@ -228,6 +228,7 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
   const [taskAssigneeId, setTaskAssigneeId] = useState('');
   const [taskSaving, setTaskSaving] = useState(false);
   const [membersOpen, setMembersOpen] = useState(false);
+  const [profilePerson, setProfilePerson] = useState<InternalChatPerson | null>(null);
   const [memberUserIds, setMemberUserIds] = useState<number[]>(thread.memberUserIds ?? []);
   const [membersSaving, setMembersSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -256,6 +257,15 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
   useEffect(() => {
     if (!editing) saveChatDraft(currentUserId, thread.id, text);
   }, [currentUserId, editing, text, thread.id]);
+
+  useEffect(() => {
+    if (!profilePerson) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setProfilePerson(null);
+    };
+    document.addEventListener('keydown', closeOnEscape);
+    return () => document.removeEventListener('keydown', closeOnEscape);
+  }, [profilePerson]);
 
   useLayoutEffect(() => {
     const container = messagesContainerRef.current;
@@ -567,7 +577,7 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
                       {mine && message.noReplyReminderEnabled ? <div className="mb-1 flex items-center gap-1 text-[11px] font-semibold text-blue-100" title="Первое напоминание через 24 часа, затем раз в сутки до ответа"><BellRing className="h-3 w-3" />Напомнить, если нет ответа</div> : null}
                       {!mine && !deleted ? <div className="mb-1 text-xs font-semibold text-slate-900">{message.authorName}</div> : null}
                       {message.replyToMessageId ? <div className={`mb-2 rounded-lg border-l-2 px-2 py-1 text-xs ${mine ? 'border-blue-200 bg-blue-500/40 text-blue-50' : 'border-slate-300 bg-slate-50 text-slate-500'}`} title="Ответ виден всем участникам этого чата"><strong>{message.replyAuthorName}</strong><div className="truncate">{message.replyPreview}</div></div> : null}
-                      {deleted ? <span>Сообщение удалено</span> : <div className="whitespace-pre-wrap break-words">{renderFormattedText(message.text, peopleById, onOpenTask)}</div>}
+                      {deleted ? <span>Сообщение удалено</span> : <div className="whitespace-pre-wrap break-words">{renderFormattedText(message.text, peopleById, onOpenTask, setProfilePerson)}</div>}
                       {!deleted && message.attachments.length ? <div className="mt-2 space-y-1.5">{message.attachments.map((attachment) => attachment.contentType.startsWith('image/') ? <SecureImageAttachment key={attachment.id} attachment={attachment} onError={showError} /> : <button key={attachment.id} type="button" onClick={() => void internalChatApi.downloadAttachment(attachment).catch(showError)} className={`flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs ${mine ? 'bg-blue-500/60 text-white' : 'bg-slate-100 text-slate-700'}`}><Paperclip className="h-4 w-4" /><span className="min-w-0 flex-1 truncate">{attachment.fileName}</span><span>{formatFileSize(attachment.size)}</span><Download className="h-3.5 w-3.5" /></button>)}</div> : null}
                       {message.createdTaskJournalItemId ? <button type="button" onClick={() => onOpenTask?.(message.createdTaskJournalItemId!)} className="mt-2 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white">Открыть задачу #{message.createdTaskJournalItemId}</button> : null}
                       {!deleted && message.reactions.length ? <div className="mt-2 flex flex-wrap gap-1">{message.reactions.map((reaction) => <button key={reaction.emoji} type="button" onClick={() => void internalChatApi.toggleReaction(message.id, reaction.emoji).then(refreshMessage).catch((error) => toast.error(errorMessage(error)))} className={`rounded-full px-2 py-0.5 text-xs ring-1 ${reaction.userIds.includes(currentUserId) ? 'bg-amber-100 text-amber-900 ring-amber-300' : 'bg-white text-slate-700 ring-slate-200'}`}>{reaction.emoji} {reaction.count}</button>)}</div> : null}
@@ -613,6 +623,20 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
         {text && !editing ? <p className="mt-1 text-[11px] text-slate-500">Черновик сохранён в этой вкладке до её закрытия.</p> : null}
       </footer>
 
+      {profilePerson ? (
+        <div role="dialog" aria-modal="true" aria-label={`Профиль: ${profilePerson.name}`} className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/40 p-4" onClick={() => setProfilePerson(null)}>
+          <div className="w-full max-w-sm rounded-2xl bg-white p-4 shadow-xl" onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-3">
+                {profilePerson.photoUrl ? <img src={profilePerson.photoUrl} alt="" className="h-11 w-11 shrink-0 rounded-full object-cover" /> : <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-blue-50 text-blue-700"><UserRound className="h-5 w-5" /></span>}
+                <div className="min-w-0"><h2 className="truncate font-semibold text-slate-900">{profilePerson.name}</h2><p className="text-xs text-slate-500">Участник чата</p></div>
+              </div>
+              <button type="button" onClick={() => setProfilePerson(null)} aria-label="Закрыть профиль" className="rounded-lg p-1 text-slate-500 hover:bg-slate-100"><X className="h-5 w-5" /></button>
+            </div>
+            <a href={`mailto:${profilePerson.email}`} className="mt-4 block break-all text-sm text-blue-700 hover:underline">{profilePerson.email}</a>
+          </div>
+        </div>
+      ) : null}
       {taskSource ? <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/40 p-4"><div className="w-full max-w-md rounded-2xl bg-white p-4 shadow-2xl"><div className="flex items-center justify-between"><h2 className="font-semibold text-slate-900">Задача из сообщения</h2><button type="button" onClick={() => setTaskSource(null)}><X className="h-5 w-5" /></button></div><label className="mt-4 block text-xs font-semibold text-slate-600">Название<input value={taskTitle} onChange={(event) => setTaskTitle(event.target.value)} maxLength={500} placeholder="Кратко назовите задачу" className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /></label><label className="mt-3 block text-xs font-semibold text-slate-600">Описание<textarea value={taskDescription} onChange={(event) => setTaskDescription(event.target.value)} maxLength={4000} rows={3} className="mt-1 max-h-36 w-full resize-y rounded-lg border border-slate-200 px-3 py-2 text-sm" /></label><label className="mt-3 block text-xs font-semibold text-slate-600">Срок<input type="datetime-local" value={taskDueAt} onChange={(event) => setTaskDueAt(event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /></label><label className="mt-3 block text-xs font-semibold text-slate-600">Исполнитель<select value={taskAssigneeId} onChange={(event) => setTaskAssigneeId(event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm"><option value="">Не назначен</option>{people.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}</select></label><button type="button" onClick={() => void submitTask()} disabled={taskSaving || !taskTitle.trim() || !taskDueAt} className="mt-4 w-full rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white disabled:bg-slate-300">{taskSaving ? 'Создаём...' : 'Создать задачу'}</button></div></div> : null}
       {membersOpen ? <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/40 p-4"><div className="w-full max-w-md rounded-2xl bg-white p-4 shadow-2xl"><div className="flex items-center justify-between"><h2 className="font-semibold text-slate-900">Участники чата</h2><button type="button" onClick={() => setMembersOpen(false)}><X className="h-5 w-5" /></button></div>{thread.kind === 'task' ? <p className="mt-2 text-xs text-slate-600">Участники задачи отмечены автоматически. Приглашённый сотрудник получает доступ только к переписке и файлам этого чата. Снятие отметки сразу закрывает ему доступ.</p> : null}<div className="mt-3 max-h-72 overflow-y-auto rounded-xl border border-slate-200 p-2">{people.map((person) => { const selected = memberUserIds.includes(person.id); const owner = person.id === currentUserId; const automatic = thread.kind === 'task' && selected && !thread.guestUserIds?.includes(person.id); return <label key={person.id} className="flex cursor-pointer items-center gap-3 rounded-lg px-2 py-2 hover:bg-slate-50"><input type="checkbox" checked={selected} disabled={owner || automatic} onChange={() => setMemberUserIds((current) => selected ? current.filter((id) => id !== person.id) : [...current, person.id])} /><span className="min-w-0"><span className="block truncate text-sm font-medium text-slate-800">{person.name}{owner ? ' · постановщик' : automatic ? ' · участник задачи' : selected && thread.kind === 'task' ? ' · приглашён в чат' : ''}</span><span className="block truncate text-xs text-slate-500">{person.email}</span></span></label>; })}</div><button type="button" disabled={membersSaving} onClick={() => void saveMembers()} className="mt-4 w-full rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white disabled:bg-slate-300">{membersSaving ? 'Сохраняем...' : 'Сохранить участников'}</button></div></div> : null}
     </section>
