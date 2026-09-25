@@ -2123,7 +2123,7 @@ export function CaseModal({
               value={strategy}
               onChange={(e) => setStrategy(e.target.value)}
               placeholder="Позиция, риски, ближайшие шаги"
-              disabled={saving}
+              disabled={saving || !allowEdit}
             />
             <CasePositionTemplatePicker text={strategy} onChange={setStrategy} disabled={!allowEdit || saving} />
             <p className="mt-1 text-xs text-gray-600">

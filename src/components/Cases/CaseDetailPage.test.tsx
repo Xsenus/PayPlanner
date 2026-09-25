@@ -2066,6 +2066,7 @@ describe('CaseDetailPage', () => {
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit={false} />);
 
     expect(await screen.findByText('Клиент по делу')).toBeTruthy();
+    expect(screen.queryByRole('combobox', { name: 'Шаблон позиции' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Показать' })).toBeNull();
     expect(screen.getByText('Скрыто по роли')).toBeTruthy();
     expect(screen.queryByText('89332428978')).toBeNull();

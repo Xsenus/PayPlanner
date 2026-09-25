@@ -76,6 +76,7 @@ describe('CaseModal', () => {
     });
     vi.mocked(apiService.updateCaseHearingPreparation).mockReset();
     vi.mocked(apiService.reviewCasePosition).mockReset();
+    vi.mocked(apiService.getCasePositionTemplates).mockReset();
     vi.mocked(apiService.getCasePositionTemplates).mockResolvedValue({ items: [], canManageShared: false });
     vi.mocked(apiService.reviewCasePosition).mockResolvedValue({ positionReviewedAt: '2026-09-23T10:00:00Z', positionReviewedByUserId: 7, positionReviewedByName: 'Юрист' });
     vi.mocked(apiService.confirmNextHearing).mockReset();
@@ -219,6 +220,14 @@ describe('CaseModal', () => {
     await waitFor(() => expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
       strategy: 'Исходная позиция\n\nИзучить материалы',
     })));
+  });
+
+  it('does not offer position editing or templates in a read-only legacy card', () => {
+    render(<CaseModal isOpen onClose={vi.fn()} caseData={createCase({ strategy: 'Сохранённая позиция' })} onSave={vi.fn()} allowEdit={false} />);
+
+    expect((screen.getByLabelText('Стратегия и план действий') as HTMLTextAreaElement).disabled).toBe(true);
+    expect(screen.queryByRole('combobox', { name: 'Шаблон позиции' })).toBeNull();
+    expect(apiService.getCasePositionTemplates).not.toHaveBeenCalled();
   });
 
   it('requires a saved hearing date and shows who confirmed it', async () => {
