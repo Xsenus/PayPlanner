@@ -297,6 +297,43 @@ public sealed class InternalChatControllerTests
     }
 
     [Fact]
+    public async Task OpenDirect_UsesThreadCreatedByConcurrentRequest()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var first = await fixture.AddUserAsync("direct-race-first@example.test", "Первый");
+        var second = await fixture.AddUserAsync("direct-race-second@example.test", "Второй");
+        var directKey = first.Id < second.Id ? $"{first.Id}:{second.Id}" : $"{second.Id}:{first.Id}";
+
+        var connection = fixture.Db.Database.GetDbConnection();
+        var winnerOptions = new DbContextOptionsBuilder<PaymentContext>().UseSqlite(connection).Options;
+        await using var winnerDb = new PaymentContext(winnerOptions);
+        var interceptor = new ConcurrentTaskChatCreationInterceptor(async () =>
+        {
+            winnerDb.InternalChatThreads.Add(new InternalChatThread
+            {
+                Kind = InternalChatThreadKinds.Direct,
+                Name = "Первый / Второй",
+                DirectKey = directKey,
+                CreatedByUserId = second.Id,
+                Members =
+                [
+                    new InternalChatMember { UserId = first.Id, Role = "member" },
+                    new InternalChatMember { UserId = second.Id, Role = "member" }
+                ]
+            });
+            await winnerDb.SaveChangesAsync();
+        });
+        var contenderOptions = new DbContextOptionsBuilder<PaymentContext>()
+            .UseSqlite(connection).AddInterceptors(interceptor).Options;
+        await using var contenderDb = new PaymentContext(contenderOptions);
+
+        var result = await fixture.Controller(first, contenderDb).OpenDirect(second.Id, CancellationToken.None);
+        var dto = Assert.IsType<InternalChatThreadDto>(Assert.IsType<OkObjectResult>(result.Result).Value);
+        Assert.Equal(2, dto.MemberUserIds.Count);
+        Assert.Equal(1, await winnerDb.InternalChatThreads.CountAsync(item => item.DirectKey == directKey));
+    }
+
+    [Fact]
     public async Task Messages_EnforceOwnershipMembershipAndPinLimit()
     {
         await using var fixture = await Fixture.CreateAsync();

@@ -285,7 +285,26 @@ public sealed partial class InternalChatController : ControllerBase
             ]
         };
         _db.InternalChatThreads.Add(thread);
-        await _db.SaveChangesAsync(ct);
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException exception) when (IsDirectChatAlreadyCreated(exception))
+        {
+            // The other participant opened the same conversation after our lookup.
+            _db.ChangeTracker.Clear();
+            existing = await _db.InternalChatThreads.Include(item => item.Members)
+                .FirstOrDefaultAsync(item => item.DirectKey == directKey, ct);
+            if (existing is null) throw;
+            foreach (var member in existing.Members) member.IsActive = true;
+            var mine = existing.Members.First(member => member.UserId == userId);
+            mine.HiddenAfterMessageId = null;
+            mine.IsArchived = false;
+            await _db.SaveChangesAsync(ct);
+            var (unreadCount, firstUnreadMessageId) = await GetUnreadSummaryAsync(existing.Id, userId.Value, mine.LastReadMessageId, ct);
+            return Ok(ToThreadDto(existing, mine.Role, mine.NotificationMode, DisplayName(other),
+                lastReadMessageId: mine.LastReadMessageId, unreadCount: unreadCount, firstUnreadMessageId: firstUnreadMessageId));
+        }
         await _realtime.PublishTaskJournalChangedAsync(ct);
         return CreatedAtAction(nameof(GetMessages), new { threadId = thread.Id }, ToThreadDto(thread, "member", InternalChatNotificationModes.All, DisplayName(other)));
     }
@@ -852,6 +871,16 @@ public sealed partial class InternalChatController : ControllerBase
                 ConstraintName: "IX_InternalChatThreads_TaskJournalItemId" } => true,
             SqliteException { SqliteExtendedErrorCode: 2067 } sqlite =>
                 sqlite.Message.Contains("InternalChatThreads.TaskJournalItemId", StringComparison.Ordinal),
+            _ => false
+        };
+
+    private static bool IsDirectChatAlreadyCreated(DbUpdateException exception) =>
+        exception.InnerException switch
+        {
+            PostgresException { SqlState: PostgresErrorCodes.UniqueViolation,
+                ConstraintName: "IX_InternalChatThreads_DirectKey" } => true,
+            SqliteException { SqliteExtendedErrorCode: 2067 } sqlite =>
+                sqlite.Message.Contains("InternalChatThreads.DirectKey", StringComparison.Ordinal),
             _ => false
         };
 
