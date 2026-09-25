@@ -386,6 +386,26 @@ describe('InvoiceModal integration', () => {
     }
   });
 
+  it('keeps invoice cancellation in the dedicated action instead of status selectors', () => {
+    const { container } = render(
+      <InvoiceModal
+        open
+        mode="create"
+        invoice={null}
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        submitting={false}
+        clients={[]}
+        responsibles={[]}
+        lookupsLoading={false}
+        relatedPayments={[]}
+      />,
+    );
+
+    expect(container.querySelectorAll('option[value="Cancelled"]')).toHaveLength(0);
+    expect(screen.getByText(/Для аннулирования используйте действие «Отмена счёта»/)).toBeTruthy();
+  });
+
   it('shows available client balance in the invoice form', async () => {
     vi.mocked(apiService.getClientBalance).mockResolvedValue({ clientId: 69, balance: 7_100 });
 

@@ -325,6 +325,130 @@ public class InvoicesControllerCrudTests
     }
 
     [Fact]
+    public async Task Cancel_ReleasesBillableTaskForAnotherInvoice_AndRecordsHistory()
+    {
+        await using var db = await CreateContextAsync();
+        var actorUserId = await CreateUserAsync(db, "Billing Admin", roleName: "admin");
+        var clientId = await CreateClientAsync(db, "Billing Client");
+        var caseId = await CreateClientCaseAsync(db, clientId, "Billing Case");
+        var task = new TaskJournalItem
+        {
+            ClientId = clientId,
+            ClientCaseId = caseId,
+            ObjectName = "Billing Client",
+            Title = "Completed billable work",
+            Status = "done",
+            AssigneeName = "Billing Admin",
+            AuthorUserId = actorUserId,
+            AuthorName = "Billing Admin",
+            DueAt = DateTime.UtcNow.AddDays(-1),
+            ClientBillingClassification = TaskClientBillingClassification.Billable,
+            BillingModeSnapshot = ContractBillingMode.Actual,
+            BillingDecisionAt = DateTime.UtcNow,
+        };
+        db.TaskJournalItems.Add(task);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, isAdmin: true, userId: actorUserId);
+        var request = CreateRequest("INV-TASK-CANCEL", clientId, new DateTime(2026, 7, 15), 0m);
+        request.ClientCaseIds = [caseId];
+        request.BillingTaskIds = [task.Id];
+        request.Status = PaymentStatus.Cancelled;
+        Assert.IsType<BadRequestObjectResult>((await controller.Create(request, CancellationToken.None)).Result);
+        Assert.Null((await db.TaskJournalItems.SingleAsync(item => item.Id == task.Id)).BillingInvoiceId);
+        request.Status = PaymentStatus.Pending;
+        var created = Assert.IsType<CreatedResult>((await controller.Create(request, CancellationToken.None)).Result);
+        var invoice = Assert.IsType<InvoiceDto>(created.Value);
+        Assert.Equal(invoice.Id, (await db.TaskJournalItems.SingleAsync(item => item.Id == task.Id)).BillingInvoiceId);
+
+        var shortcut = await controller.UpdateWorkflowStatus(
+            invoice.Id,
+            new UpdateNamedStatusRequest { Status = InvoiceWorkflowStatus.Cancelled },
+            CancellationToken.None);
+        Assert.IsType<BadRequestObjectResult>(shortcut.Result);
+        var directUpdate = CreateRequest("INV-TASK-CANCEL", clientId, new DateTime(2026, 7, 15), 0m);
+        directUpdate.ClientCaseIds = [caseId];
+        directUpdate.Status = PaymentStatus.Cancelled;
+        Assert.IsType<BadRequestObjectResult>((await controller.Update(invoice.Id, directUpdate, CancellationToken.None)).Result);
+        Assert.Equal(invoice.Id, (await db.TaskJournalItems.SingleAsync(item => item.Id == task.Id)).BillingInvoiceId);
+
+        var cancelled = await controller.Cancel(
+            invoice.Id,
+            new CancelInvoiceRequest { Reason = "Ошибочный счёт" },
+            CancellationToken.None);
+        Assert.IsType<OkObjectResult>(cancelled.Result);
+
+        db.ChangeTracker.Clear();
+        var releasedTask = await db.TaskJournalItems
+            .Include(item => item.Comments)
+            .SingleAsync(item => item.Id == task.Id);
+        Assert.Null(releasedTask.BillingInvoiceId);
+        Assert.Equal("done", releasedTask.Status);
+        Assert.Equal(TaskClientBillingClassification.Billable, releasedTask.ClientBillingClassification);
+        Assert.Contains(releasedTask.Comments, comment =>
+            comment.Kind == "history"
+            && comment.Text.Contains("Ошибочный счёт")
+            && comment.Text.Contains("снова ожидает выставления счёта"));
+
+        var reopen = await controller.UpdateWorkflowStatus(
+            invoice.Id,
+            new UpdateNamedStatusRequest { Status = InvoiceWorkflowStatus.Draft },
+            CancellationToken.None);
+        Assert.IsType<BadRequestObjectResult>(reopen.Result);
+
+        var replacement = CreateRequest("INV-TASK-REPLACEMENT", clientId, new DateTime(2026, 7, 16), 0m);
+        replacement.ClientCaseIds = [caseId];
+        replacement.BillingTaskIds = [task.Id];
+        var replacementResult = Assert.IsType<CreatedResult>((await controller.Create(replacement, CancellationToken.None)).Result);
+        Assert.Equal(Assert.IsType<InvoiceDto>(replacementResult.Value).Id,
+            (await db.TaskJournalItems.SingleAsync(item => item.Id == task.Id)).BillingInvoiceId);
+    }
+
+    [Fact]
+    public async Task Cancel_RejectsPaidInvoiceWithoutMoneyDecision_AndKeepsTaskLinked()
+    {
+        await using var db = await CreateContextAsync();
+        var actorUserId = await CreateUserAsync(db, "Billing Admin", roleName: "admin");
+        var clientId = await CreateClientAsync(db, "Billing Client");
+        var caseId = await CreateClientCaseAsync(db, clientId, "Billing Case");
+        var task = new TaskJournalItem
+        {
+            ClientId = clientId,
+            ClientCaseId = caseId,
+            ObjectName = "Billing Client",
+            Title = "Paid billable work",
+            AssigneeName = "Billing Admin",
+            AuthorUserId = actorUserId,
+            AuthorName = "Billing Admin",
+            DueAt = DateTime.UtcNow,
+            ClientBillingClassification = TaskClientBillingClassification.Billable,
+            BillingModeSnapshot = ContractBillingMode.Actual,
+            BillingDecisionAt = DateTime.UtcNow,
+        };
+        db.TaskJournalItems.Add(task);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, isAdmin: true, userId: actorUserId);
+        var request = CreateRequest("INV-TASK-PAID", clientId, new DateTime(2026, 7, 15), 100m);
+        request.ClientCaseIds = [caseId];
+        request.BillingTaskIds = [task.Id];
+        request.Status = PaymentStatus.Completed;
+        request.PaidDate = new DateTime(2026, 7, 16);
+        var created = Assert.IsType<CreatedResult>((await controller.Create(request, CancellationToken.None)).Result);
+        var invoice = Assert.IsType<InvoiceDto>(created.Value);
+
+        var rejected = await controller.Cancel(
+            invoice.Id,
+            new CancelInvoiceRequest { Reason = "Ошибка" },
+            CancellationToken.None);
+        Assert.IsType<BadRequestObjectResult>(rejected.Result);
+
+        db.ChangeTracker.Clear();
+        Assert.Equal(invoice.Id, (await db.TaskJournalItems.SingleAsync(item => item.Id == task.Id)).BillingInvoiceId);
+        Assert.Equal(PaymentStatus.Completed, (await db.Payments.SingleAsync(item => item.Id == invoice.Id)).Status);
+    }
+
+    [Fact]
     public async Task Create_RejectsInternalClientTaskFromInvoice()
     {
         await using var db = await CreateContextAsync();
@@ -1149,10 +1273,27 @@ public class InvoicesControllerCrudTests
         var actorUserId = await CreateUserAsync(db, "Admin User", roleName: "admin");
         var clientId = await CreateClientAsync(db, "Client Keep Paid Installment");
         var caseId = await CreateClientCaseAsync(db, clientId, "Installment Case");
+        var billableTask = new TaskJournalItem
+        {
+            ClientId = clientId,
+            ClientCaseId = caseId,
+            ObjectName = "Client Keep Paid Installment - Installment Case",
+            Title = "Billable installment work",
+            AssigneeName = "Admin User",
+            AuthorUserId = actorUserId,
+            AuthorName = "Admin User",
+            DueAt = DateTime.UtcNow.AddDays(1),
+            ClientBillingClassification = TaskClientBillingClassification.Billable,
+            BillingModeSnapshot = ContractBillingMode.Actual,
+            BillingDecisionAt = DateTime.UtcNow,
+        };
+        db.TaskJournalItems.Add(billableTask);
+        await db.SaveChangesAsync();
         var controller = CreateController(db, isAdmin: true, userId: actorUserId);
         var invoiceDate = DateTime.UtcNow.Date.AddDays(5);
         var request = CreateRequest("INV-CANCEL-UNPAID-INST", clientId, invoiceDate, 12_000m);
         request.ClientCaseIds = [caseId];
+        request.BillingTaskIds = [billableTask.Id];
         request.InstallmentPlan = CreateInstallmentPlanRequest(
             total: 12_000m,
             startDate: invoiceDate,
@@ -1198,6 +1339,8 @@ public class InvoicesControllerCrudTests
         Assert.Equal(0m, dto.OutstandingAmount);
         Assert.Null(dto.CancelledAt);
         Assert.Null(dto.CancelledReason);
+        Assert.Equal(createdDto.Id,
+            (await db.TaskJournalItems.AsNoTracking().SingleAsync(item => item.Id == billableTask.Id)).BillingInvoiceId);
 
         db.ChangeTracker.Clear();
         var storedUpdatedParent = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == createdDto.Id);

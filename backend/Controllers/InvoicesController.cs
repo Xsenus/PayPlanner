@@ -812,6 +812,10 @@ public class InvoicesController : ControllerBase
         {
             return BadRequest("Only document signing workflow statuses can be changed through this endpoint.");
         }
+        if (workflowStatus == InvoiceWorkflowStatus.Cancelled)
+        {
+            return BadRequest("Аннулируйте счёт через действие «Отмена счёта» с указанием причины и порядка обработки оплаты.");
+        }
 
         var payment = await BuildEditableInvoicePaymentsQuery(visibility).FirstOrDefaultAsync(p => p.Id == id, ct);
         if (payment is null)
@@ -822,6 +826,10 @@ public class InvoicesController : ControllerBase
         if (payment.DocumentKind != DocumentKind.Invoice)
         {
             return BadRequest("Only invoice documents can change workflow status through this endpoint.");
+        }
+        if (payment.Status == PaymentStatus.Cancelled || payment.InvoiceWorkflowStatus == InvoiceWorkflowStatus.Cancelled)
+        {
+            return BadRequest("Аннулированный счёт нельзя вернуть в работу сменой статуса.");
         }
 
         var reason = Normalize(request.Reason);
@@ -1146,6 +1154,8 @@ public class InvoicesController : ControllerBase
         payment.PaidDate = null;
         payment.LastPaymentDate = null;
 
+        await ReleaseCancelledInvoiceBillingTasksAsync(payment, reason, now, actorId, actor, ct);
+
         var advanceNote = refundOperation is not null
             ? $" Полученная оплата возвращена клиенту денежной операцией #{refundOperation.Id}: {receivedAmount:N2}."
             : hasReceivedMoney && reallocatedAmount > 0m
@@ -1191,6 +1201,41 @@ public class InvoicesController : ControllerBase
             act.CancelledReason = reason;
             act.Comment = AppendActCancellationComment(act.Comment, invoiceNumber, reason, now);
             act.UpdatedAt = now;
+        }
+    }
+
+    private async Task ReleaseCancelledInvoiceBillingTasksAsync(
+        Payment invoicePayment,
+        string reason,
+        DateTime now,
+        int? actorId,
+        string actor,
+        CancellationToken ct)
+    {
+        var tasks = await _db.TaskJournalItems
+            .Where(task => task.BillingInvoiceId == invoicePayment.Id)
+            .ToListAsync(ct);
+        if (tasks.Count == 0)
+        {
+            return;
+        }
+
+        var number = Normalize(invoicePayment.Invoice?.Number)
+            ?? Normalize(invoicePayment.Account)
+            ?? invoicePayment.Id.ToString(CultureInfo.InvariantCulture);
+        foreach (var task in tasks)
+        {
+            task.BillingInvoiceId = null;
+            task.UpdatedAt = now;
+            _db.TaskJournalComments.Add(new TaskJournalComment
+            {
+                TaskJournalItemId = task.Id,
+                Kind = "history",
+                AuthorUserId = actorId,
+                AuthorName = actor,
+                Text = $"Счёт №{number} аннулирован. Причина: {reason}. Платная задача снова ожидает выставления счёта.",
+                CreatedAt = now,
+            });
         }
     }
 
@@ -1311,6 +1356,10 @@ public class InvoicesController : ControllerBase
         if (workflowStatus is null)
         {
             return BadRequest("Unknown invoice workflow status.");
+        }
+        if (request.Status == PaymentStatus.Cancelled || workflowStatus == InvoiceWorkflowStatus.Cancelled)
+        {
+            return BadRequest("Аннулируйте счёт через действие «Отмена счёта» с указанием причины и порядка обработки оплаты.");
         }
 
         var counterpartyValidationError = await ValidateCounterpartyAsync(request.ClientId, request.LegalEntityId, "counterparty", ct);
@@ -1535,6 +1584,10 @@ public class InvoicesController : ControllerBase
         {
             return BadRequest("Unknown invoice workflow status.");
         }
+        if (request.Status == PaymentStatus.Cancelled || workflowStatus == InvoiceWorkflowStatus.Cancelled)
+        {
+            return BadRequest("Аннулируйте счёт через действие «Отмена счёта» с указанием причины и порядка обработки оплаты.");
+        }
 
         var payment = await BuildEditableInvoicePaymentsQuery(visibility)
             .Include(p => p.Responsibles)
@@ -1544,6 +1597,11 @@ public class InvoicesController : ControllerBase
         if (payment is null)
         {
             return NotFound();
+        }
+
+        if (payment.Status == PaymentStatus.Cancelled || payment.InvoiceWorkflowStatus == InvoiceWorkflowStatus.Cancelled)
+        {
+            return BadRequest("Аннулированный счёт нельзя изменить или вернуть в работу.");
         }
 
         var counterpartyValidationError = await ValidateCounterpartyAsync(request.ClientId, request.LegalEntityId, "counterparty", ct);

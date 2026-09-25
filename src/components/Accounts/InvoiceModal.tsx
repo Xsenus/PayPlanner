@@ -4498,7 +4498,7 @@ export function InvoiceModal({
                                   <option value="Completed">{t('invoicePaidBadge') ?? t('completedStatus') ?? 'Оплачен'}</option>
                                   <option value="Overdue">{t('invoiceOverdueBadge') ?? t('overdue') ?? 'Просрочен'}</option>
                                   <option value="Processing">Частично оплачен</option>
-                                  <option value="Cancelled">{t('cancelledStatus') ?? 'Отменён'}</option>
+                                  {form.status === 'Cancelled' && <option value="Cancelled">{t('cancelledStatus') ?? 'Отменён'}</option>}
                                 </SystemSelect>
                               </label>
 
@@ -4518,8 +4518,9 @@ export function InvoiceModal({
                                   <option value="NeedsCorrection">Требует исправления</option>
                                   <option value="OnSigning">На подписании</option>
                                   <option value="SignedByClient">Подписан клиентом</option>
-                                  <option value="Cancelled">Аннулирован</option>
+                                  {form.workflowStatus === 'Cancelled' && <option value="Cancelled">Аннулирован</option>}
                                 </SystemSelect>
+                                <span className="text-xs font-normal text-slate-500">Для аннулирования используйте действие «Отмена счёта» с указанием причины.</span>
                               </label>
 
                               <LookupSelect
