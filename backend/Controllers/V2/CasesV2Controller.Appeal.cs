@@ -101,6 +101,10 @@ public partial class CasesV2Controller
         [FromQuery] DateOnly? localDate = null,
         CancellationToken ct = default)
     {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanView, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
         var visibility = await ResolveCasesVisibilityAsync(ct);
         if (visibility is null)
         {
@@ -157,6 +161,7 @@ public partial class CasesV2Controller
         var outcomes = await _db.ClientCaseCourtEvents.AsNoTracking()
             .Where(item => caseIds.Contains(item.ClientCaseId)
                 && item.EventType == "decision"
+                && (item.MovementStatus == "held" || item.MovementStatus == "completed")
                 && item.ResultSummary != "")
             .OrderByDescending(item => item.ScheduledAt)
             .ThenByDescending(item => item.Id)
@@ -431,6 +436,14 @@ public partial class CasesV2Controller
         if (!assigneeId.HasValue || assigneeId.Value == User.GetUserId())
         {
             return BadRequest(new { message = "Назначьте другого ответственного по делу, которому нужно отправить напоминание." });
+        }
+        var canDecideAppeal = await _db.Users.AsNoTracking().AnyAsync(item => item.Id == assigneeId.Value
+            && item.IsActive && item.IsApproved && item.Role != null
+            && (item.Role.Name == "admin" || item.Role.Permissions.Any(permission => permission.Section == RolePermissionCatalog.Cases
+                && permission.CanView && permission.CanEdit)), ct);
+        if (!canDecideAppeal)
+        {
+            return Conflict(new { message = "Ответственный не может работать с судебным делом. Назначьте юриста с правом редактирования." });
         }
         var recipients = await ResolveCaseNotificationRecipientIdsAsync(id, ct);
         if (!recipients.Contains(assigneeId.Value))

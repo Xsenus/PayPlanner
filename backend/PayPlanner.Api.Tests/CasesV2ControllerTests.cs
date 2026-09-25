@@ -3801,7 +3801,16 @@ public class CasesV2ControllerTests
                     EventType = "decision",
                     Title = "Решение суда",
                     ScheduledAt = decisionAt,
+                    MovementStatus = "held",
                     ResultSummary = "Иск удовлетворён частично",
+                },
+                new ClientCaseCourtEvent
+                {
+                    EventType = "decision",
+                    Title = "Назначено решение",
+                    ScheduledAt = decisionAt,
+                    MovementStatus = "scheduled",
+                    ResultSummary = "Решение назначено",
                 },
             ],
         };
@@ -3871,6 +3880,27 @@ public class CasesV2ControllerTests
         Assert.Equal("Иск удовлетворён частично", item.DecisionSummary);
         Assert.Empty(Assert.IsType<List<CasesV2Controller.ExpiringCaseAppealDto>>(
             Assert.IsType<OkObjectResult>((await CreateController(db, lawyer).GetExpiringCaseAppeals(new DateOnly(2026, 10, 15), CancellationToken.None)).Result).Value));
+    }
+
+    [Fact]
+    public async Task ExpiringCaseAppeals_RequiresCaseViewPermissionEvenForOwnCase()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "appeal-without-view@example.test", "Без права просмотра");
+        await GrantSectionPermissionAsync(db, user, RolePermissionCatalog.Cases, canView: false);
+        db.ClientCases.Add(new ClientCase
+        {
+            Client = new Client { Name = "Доверитель", IsActive = true, ResponsibleUserId = user.Id },
+            Title = "Собственное дело без права просмотра",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = user.Id,
+            CourtDecisionAt = new DateTime(2026, 10, 1),
+            AppealDeadlineAt = new DateTime(2026, 10, 13),
+        });
+        await db.SaveChangesAsync();
+
+        Assert.IsType<ForbidResult>((await CreateController(db, user)
+            .GetExpiringCaseAppeals(new DateOnly(2026, 10, 10), CancellationToken.None)).Result);
     }
 
     [Fact]
@@ -4135,6 +4165,37 @@ public class CasesV2ControllerTests
         Assert.Single(await db.UserNotifications.ToListAsync());
         Assert.IsType<BadRequestObjectResult>((await CreateController(db, lawyer)
             .RemindCaseAppealAssignee(clientCase.Id, request, CancellationToken.None)).Result);
+    }
+
+    [Fact]
+    public async Task RemindCaseAppealAssignee_DoesNotAskObserverToDecideAppeal()
+    {
+        await using var db = await CreateContextAsync();
+        var manager = await CreateUserAsync(db, "appeal-observer-manager@example.test", "Руководитель", DataVisibilityScope.All);
+        var observer = await CreateUserAsync(db, "appeal-observer-recipient@example.test", "Наблюдатель");
+        await GrantSectionPermissionAsync(db, observer, RolePermissionCatalog.Cases, canEdit: false);
+        var decisionAt = DateTime.UtcNow.Date.AddDays(-20);
+        var deadlineAt = DateTime.UtcNow.Date.AddDays(2);
+        var clientCase = new ClientCase
+        {
+            Client = new Client { Name = "Доверитель", IsActive = true, ResponsibleUserId = observer.Id },
+            Title = "Дело с наблюдателем",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = observer.Id,
+            CourtDecisionAt = decisionAt,
+            AppealDeadlineAt = deadlineAt,
+        };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+
+        Assert.IsType<ConflictObjectResult>((await CreateController(db, manager,
+                notificationService: CreateNotificationService(db))
+            .RemindCaseAppealAssignee(clientCase.Id, new CasesV2Controller.DecideCaseAppealRequest
+            {
+                CourtDecisionAt = decisionAt,
+                AppealDeadlineAt = deadlineAt,
+            }, CancellationToken.None)).Result);
+        Assert.Empty(await db.UserNotifications.ToListAsync());
     }
 
     [Fact]
