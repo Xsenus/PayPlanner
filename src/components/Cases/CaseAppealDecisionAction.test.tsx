@@ -72,4 +72,16 @@ describe('CaseAppealDecisionAction', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Открыть задачу' }));
     expect(onOpenTask).toHaveBeenCalledExactlyOnceWith(91);
   });
+
+  it('shows a server refusal when the assigned lawyer cannot access the case', async () => {
+    vi.mocked(apiService.createCaseAppealTask).mockRejectedValueOnce(
+      new Error('Ответственный не видит это судебное дело. Откройте ему доступ или назначьте другого сотрудника.'),
+    );
+    render(<CaseAppealDecisionAction clientCase={clientCase} canEdit />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Обжаловать — создать задачу' }));
+
+    expect((await screen.findByRole('alert')).textContent).toContain('Ответственный не видит это судебное дело');
+    expect(screen.queryByText(/Решено обжаловать/)).toBeNull();
+  });
 });

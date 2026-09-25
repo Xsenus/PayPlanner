@@ -4053,6 +4053,49 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task DecideCaseAppeal_DoesNotAssignFilingTaskToObserverOrUserWhoCannotSeeCase()
+    {
+        await using var db = await CreateContextAsync();
+        var manager = await CreateUserAsync(db, "appeal-assignee-manager@example.test", "Руководитель", DataVisibilityScope.All);
+        var assignee = await CreateUserAsync(db, "appeal-assignee-observer@example.test", "Наблюдатель");
+        await GrantSectionPermissionAsync(db, assignee, RolePermissionCatalog.Cases, canEdit: false);
+        var decisionAt = DateTime.UtcNow.Date.AddDays(-1);
+        var deadlineAt = DateTime.UtcNow.Date.AddDays(20);
+        var clientCase = new ClientCase
+        {
+            Client = new Client { Name = "Доверитель", IsActive = true, ResponsibleUserId = assignee.Id },
+            Title = "Дело для проверки исполнителя жалобы",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = assignee.Id,
+            CourtDecisionAt = decisionAt,
+            AppealDeadlineAt = deadlineAt,
+        };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        var request = new CasesV2Controller.DecideCaseAppealRequest
+        {
+            CourtDecisionAt = decisionAt,
+            AppealDeadlineAt = deadlineAt,
+            Choice = "appeal",
+        };
+
+        Assert.IsType<ConflictObjectResult>((await CreateController(db, manager)
+            .DecideCaseAppeal(clientCase.Id, request, CancellationToken.None)).Result);
+        Assert.Empty(await db.ClientCaseAppealDecisions.ToListAsync());
+        Assert.Empty(await db.TaskJournalItems.Where(item => item.ClientCaseId == clientCase.Id).ToListAsync());
+
+        await GrantSectionPermissionAsync(db, assignee, RolePermissionCatalog.Cases,
+            canEdit: true, viewScope: DataVisibilityScope.Own);
+        clientCase.IsHiddenFromExecutor = true;
+        await db.SaveChangesAsync();
+
+        Assert.IsType<ConflictObjectResult>((await CreateController(db, manager)
+            .DecideCaseAppeal(clientCase.Id, request, CancellationToken.None)).Result);
+        Assert.Empty(await db.ClientCaseAppealDecisions.ToListAsync());
+        Assert.Empty(await db.TaskJournalItems.Where(item => item.ClientCaseId == clientCase.Id).ToListAsync());
+    }
+
+    [Fact]
     public async Task RemindCaseAppealAssignee_SendsOnceToVisibleLawyer()
     {
         await using var db = await CreateContextAsync();

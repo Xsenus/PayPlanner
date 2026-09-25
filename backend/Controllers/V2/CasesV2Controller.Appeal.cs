@@ -260,11 +260,24 @@ public partial class CasesV2Controller
             ?? clientCase.LegalEntity?.ResponsibleUserId
             ?? actorId;
         var assignee = assigneeId.HasValue
-            ? await _db.Users.AsNoTracking().FirstOrDefaultAsync(item => item.Id == assigneeId.Value && item.IsActive && item.IsApproved, ct)
+            ? await _db.Users.AsNoTracking()
+                .Where(item => item.Id == assigneeId.Value && item.IsActive && item.IsApproved
+                    && item.Role != null && (item.Role.Name == "admin"
+                        || item.Role.Permissions.Any(permission => permission.Section == RolePermissionCatalog.Cases
+                            && permission.CanView && permission.CanEdit)))
+                .FirstOrDefaultAsync(ct)
             : null;
         if (assignee is null)
         {
-            return Conflict(new { message = "Для задачи на обжалование не найден действующий исполнитель. Назначьте ответственного по делу." });
+            return Conflict(new { message = "Для задачи на обжалование нужен действующий ответственный с правом работать с судебными делами. Назначьте его по делу." });
+        }
+        var assigneeVisibility = (await _db.ResolveDataVisibilitiesForUsersAsync(
+            [assignee.Id], RolePermissionCatalog.Cases, ct)).GetValueOrDefault(assignee.Id);
+        if (assigneeVisibility is null || !await _db.ClientCases.AsNoTracking()
+            .ApplyClientCaseVisibility(assigneeVisibility)
+            .AnyAsync(item => item.Id == id, ct))
+        {
+            return Conflict(new { message = "Ответственный не видит это судебное дело. Откройте ему доступ или назначьте другого сотрудника." });
         }
 
         var now = DateTime.UtcNow;
