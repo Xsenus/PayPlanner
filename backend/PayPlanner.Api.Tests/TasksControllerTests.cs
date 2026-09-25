@@ -3476,6 +3476,40 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task UpdateStatus_RestrictedExecutorCannotResubmitAlreadyApprovedTask()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "approved-task-author@example.com", "Постановщик");
+        var assignee = await CreateTaskUserAsync(db, "approved-task-assignee@example.com", "Исполнитель", canEdit: false);
+        var approver = await CreateAdminUserAsync(db, "approved-task-approver@example.com", "Согласующий");
+        var client = await CreateClientAsync(db, "Клиент согласованной задачи");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, assignee.Id, result: "Работа согласована.", status: "approved");
+        task.Participants.Add(new TaskJournalParticipant
+        {
+            UserId = approver.Id,
+            Role = "approver",
+            DisplayName = approver.FullName,
+            Email = approver.Email,
+            ApprovalStatus = "approved",
+        });
+        await db.SaveChangesAsync();
+        var notifications = new RecordingNotificationService();
+        var controller = CreateController(db, notifications, assignee);
+
+        var result = await controller.UpdateStatus(task.Id, new UpdateTaskJournalStatusRequest
+        {
+            Status = "onApproval",
+            Result = "Повторная отправка согласованной задачи.",
+        }, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(result.Result);
+        var stored = await db.TaskJournalItems.AsNoTracking().SingleAsync(item => item.Id == task.Id);
+        Assert.Equal("approved", stored.Status);
+        Assert.Equal("Работа согласована.", stored.Result);
+        Assert.Empty(notifications.ApprovalRequestedTaskIds);
+    }
+
+    [Fact]
     public async Task UpdateStatus_ForbidsExecutorCompletionWithoutPersonalAccess()
     {
         await using var db = await CreateContextAsync();

@@ -1885,6 +1885,7 @@ function canSubmitTaskForApprovalForCurrentUser(
   if (!currentUserId
     || task.status === 'done'
     || task.status === 'cancelled'
+    || task.status === 'approved'
     || isTaskAwaitingApproval(task)
     || !isTaskExecutorForUser(task, currentUserId)) {
     return false;

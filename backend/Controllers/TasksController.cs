@@ -7860,6 +7860,7 @@ public class TasksController : ControllerBase
         => IsTaskExecutor(entity, userId)
            && !string.Equals(entity.Status, "done", StringComparison.OrdinalIgnoreCase)
            && !string.Equals(entity.Status, "cancelled", StringComparison.OrdinalIgnoreCase)
+           && !string.Equals(entity.Status, "approved", StringComparison.OrdinalIgnoreCase)
            && !IsApprovalActiveStatus(entity.Status);
 
     private async Task<(TaskParticipantsResolution Participants, bool Added)> AddAuthorAsApproverIfMissingAsync(

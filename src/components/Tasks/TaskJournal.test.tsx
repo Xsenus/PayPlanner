@@ -6332,6 +6332,32 @@ describe('TaskJournal', () => {
     expect(apiMock.updateTaskJournalItem).not.toHaveBeenCalled();
   });
 
+  it.each(['legacy', 'modern'] as const)('does not offer resubmission of an already approved task in the %s card', async (taskCardWindowMode) => {
+    authState.isAdmin = false;
+    authState.user = { id: 7, fullName: 'Исполнитель', email: 'assignee@example.com' };
+    await renderJournal([
+      createTask({
+        status: 'approved',
+        result: 'Результат согласован.',
+        assigneeUserId: 7,
+        assigneeName: 'Исполнитель',
+        authorUserId: 9,
+        authorName: 'Постановщик',
+        participants: [
+          { userId: 7, role: 'assignee', displayName: 'Исполнитель', approvalStatus: 'pending' },
+          { userId: 8, role: 'approver', displayName: 'Согласующий', approvalStatus: 'approved' },
+        ],
+      }),
+    ], {
+      settings: { taskCardWindowMode, executorCompletionAllowedUserIds: [] },
+    });
+
+    fireEvent.click(screen.getByTitle('Просмотр'));
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    expect(within(card).queryByRole('button', { name: 'Отправить на согласование' })).toBeNull();
+    expect(apiMock.updateTaskJournalStatus).not.toHaveBeenCalled();
+  });
+
   it('opens observed own-scope task in view mode even when role can edit tasks', async () => {
     authState.isAdmin = false;
     authState.user = { id: 7, fullName: 'Observer', email: 'observer@example.com' };
