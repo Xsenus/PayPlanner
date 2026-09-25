@@ -3003,7 +3003,7 @@ describe('CaseDetailPage', () => {
     expect(screen.getAllByText('Будущее судебное заседание').length).toBeGreaterThan(0);
     expect(screen.getByText(/Дата: 20\.06\.2099, \d{2}:\d{2}/u)).toBeTruthy();
     expect(screen.getByText('до 20.06.2099 · весь день')).toBeTruthy();
-    expect(screen.getByText(/Источник проверен 15\.09\.2026/u)).toBeTruthy();
+    expect(await screen.findByText(/Источник проверен 15\.09\.2026/u)).toBeTruthy();
     expect(screen.getByText('Инстанции и судебные карточки')).toBeTruthy();
     expect(screen.getAllByText('Заседание назначено').length).toBeGreaterThan(0);
     expect(screen.getByText('Стадия по событиям')).toBeTruthy();
@@ -3608,6 +3608,29 @@ describe('CaseDetailPage', () => {
     const courtTabs = within(section!);
     expect(courtTabs.getByRole('button', { name: /1-я инстанция/u })).toBeTruthy();
     expect(courtTabs.getByRole('button', { name: /Апелляция/u })).toBeTruthy();
+  });
+
+  it('counts a first-instance UID as recorded data even without a court number', async () => {
+    vi.mocked(apiService.getCaseCourtEvents).mockResolvedValue([]);
+    vi.mocked(apiService.getCaseCourtInstances).mockResolvedValueOnce([
+      {
+        id: 81, clientCaseId: 15, instance: 'first', instanceLabel: '1-я инстанция', judicialUid: 'UID-FIRST',
+        createdAt: '2026-05-20T00:00:00Z', complaints: [],
+      },
+      {
+        id: 82, clientCaseId: 15, instance: 'appeal', instanceLabel: 'Апелляция', courtName: 'Апелляционный суд',
+        courtCaseNumber: '33-42/2026', createdAt: '2026-05-21T00:00:00Z', complaints: [],
+      },
+    ]);
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Суд' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Вернуться к обзору' }));
+    const section = screen.getByText('Инстанции и судебные карточки').closest('section');
+    expect(section).toBeTruthy();
+    const courtTabs = within(section!);
+    expect(courtTabs.getByText('2 заполнено')).toBeTruthy();
+    expect(courtTabs.queryByRole('note')).toBeNull();
   });
 
   it('does not include another instance details when searching an appeal court card', async () => {

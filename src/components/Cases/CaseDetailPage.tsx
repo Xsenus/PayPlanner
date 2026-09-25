@@ -7228,10 +7228,19 @@ function CourtPanel({
       .slice(0, 20);
     const populatedInstances = COURT_INSTANCE_TABS.filter((tab) => {
       const instanceData = courtInstances.find((item) => item.instance === tab.value);
+      const instanceUid = instanceData?.judicialUid?.trim().toLowerCase();
+      const hasDistinctUid = Boolean(instanceUid && !courtInstances.some((item) => item.instance !== tab.value
+        && item.judicialUid?.trim().toLowerCase() === instanceUid));
       return Boolean(
         instanceData?.courtName
         || instanceData?.courtCaseNumber
         || instanceData?.courtUrl
+        || hasDistinctUid
+        || instanceData?.judgeName
+        || instanceData?.courtroom
+        || instanceData?.secretaryName
+        || instanceData?.notes
+        || (instanceData?.complaints?.length ?? 0) > 0
         || courtEvents.some((event) => event.courtInstance === tab.value),
       );
     });
