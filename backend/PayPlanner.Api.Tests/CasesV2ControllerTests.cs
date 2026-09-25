@@ -4400,6 +4400,17 @@ public class CasesV2ControllerTests
         await ClientCaseDeadlineTaskSyncService.SyncAsync(db, futureCase.Id, lawyer.Id, lawyer.FullName, CancellationToken.None);
         var futureTask = await db.TaskJournalItems.SingleAsync(item => item.ClientCaseId == futureCase.Id);
         Assert.Equal("Срок кассации", futureTask.Title);
+
+        var scheduledDecision = futureCase.CourtEvents.Single();
+        scheduledDecision.ScheduledAt = DateTime.UtcNow.Date.AddDays(-2);
+        await db.SaveChangesAsync();
+        await ClientCaseDeadlineTaskSyncService.SyncAsync(db, futureCase.Id, lawyer.Id, lawyer.FullName, CancellationToken.None);
+        Assert.Equal("Срок кассации", futureTask.Title);
+
+        scheduledDecision.MovementStatus = "completed";
+        await db.SaveChangesAsync();
+        await ClientCaseDeadlineTaskSyncService.SyncAsync(db, futureCase.Id, lawyer.Id, lawyer.FullName, CancellationToken.None);
+        Assert.Equal("Оценить кассацию, подготовить жалобу", futureTask.Title);
     }
 
     [Fact]

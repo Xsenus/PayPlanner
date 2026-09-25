@@ -423,8 +423,8 @@ public static class ClientCaseDeadlineTaskSyncService
         => clientCase.CourtEvents
             .Where(item => item.EventType == CourtSyncNormalization.EventTypes.Decision
                 && item.CourtInstance == "appeal"
-                && item.MovementStatus is not CourtSyncNormalization.MovementStatuses.Cancelled
-                    and not CourtSyncNormalization.MovementStatuses.Archived
+                && item.MovementStatus is CourtSyncNormalization.MovementStatuses.Held
+                    or CourtSyncNormalization.MovementStatuses.Completed
                 && item.ScheduledAt.Date <= DateTime.UtcNow.Date)
             .Select(item => (DateTime?)item.ScheduledAt)
             .OrderByDescending(item => item)
