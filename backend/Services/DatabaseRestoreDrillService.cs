@@ -168,12 +168,14 @@ public sealed class DatabaseRestoreDrillService(
         var target = new NpgsqlConnectionStringBuilder(settings.PostgreSqlTargetConnectionString);
         var active = activeDatabase.IsPostgreSql ? new NpgsqlConnectionStringBuilder(activeDatabase.ConnectionString) : null;
         if (string.IsNullOrWhiteSpace(target.Database)
-            || (active is not null && string.Equals(active.Host, target.Host, StringComparison.OrdinalIgnoreCase)
-                && active.Port == target.Port && string.Equals(active.Database, target.Database, StringComparison.OrdinalIgnoreCase)))
+            || (active is not null && string.Equals(active.Database, target.Database, StringComparison.OrdinalIgnoreCase)))
             throw new InvalidOperationException("Restore drill запрещён для активной PostgreSQL базы.");
         var allowed = settings.AllowedPostgreSqlDatabases.Any(item => string.Equals(item, target.Database, StringComparison.OrdinalIgnoreCase));
         if (!allowed && !target.Database.StartsWith("payplanner_restore_", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Целевая PostgreSQL база отсутствует в allowlist и не имеет префикс payplanner_restore_.");
+
+        // A drill must never clean or overwrite an already populated database, even if its name is allowlisted.
+        await EnsureEmptyPostgreSqlTargetAsync(target.ConnectionString, cancellationToken);
 
         var executable = string.Equals(manifest.BackupFormat, "sql", StringComparison.OrdinalIgnoreCase)
             ? (string.IsNullOrWhiteSpace(settings.PsqlPath) ? "psql" : settings.PsqlPath)
@@ -196,7 +198,6 @@ public sealed class DatabaseRestoreDrillService(
         }
         else
         {
-            startInfo.ArgumentList.Add("--clean"); startInfo.ArgumentList.Add("--if-exists");
             startInfo.ArgumentList.Add("--no-owner"); startInfo.ArgumentList.Add("--no-privileges");
             startInfo.ArgumentList.Add(backupPath);
         }
@@ -205,9 +206,23 @@ public sealed class DatabaseRestoreDrillService(
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromMinutes(Math.Clamp(settings.TimeoutMinutes, 1, 240)));
         using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Не удалось запустить PostgreSQL restore tool.");
-        var errorTask = process.StandardError.ReadToEndAsync(timeout.Token);
-        var outputTask = process.StandardOutput.ReadToEndAsync(timeout.Token);
-        await process.WaitForExitAsync(timeout.Token);
+        var errorTask = process.StandardError.ReadToEndAsync();
+        var outputTask = process.StandardOutput.ReadToEndAsync();
+        try
+        {
+            await process.WaitForExitAsync(timeout.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            if (!process.HasExited)
+            {
+                try { process.Kill(entireProcessTree: true); }
+                catch (InvalidOperationException) { /* The process exited while cancellation was handled. */ }
+                using var stopTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                await process.WaitForExitAsync(stopTimeout.Token);
+            }
+            throw;
+        }
         var error = (await errorTask).Trim();
         _ = await outputTask;
         if (process.ExitCode != 0) throw new InvalidOperationException(string.IsNullOrWhiteSpace(error) ? $"Restore tool exit code: {process.ExitCode}." : error);
@@ -217,6 +232,8 @@ public sealed class DatabaseRestoreDrillService(
         var tableCount = 0;
         await using (var count = new NpgsqlCommand("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE';", connection))
             tableCount = Convert.ToInt32(await count.ExecuteScalarAsync(cancellationToken));
+        if (tableCount == 0)
+            throw new InvalidDataException("Восстановление PostgreSQL завершилось без таблиц приложения.");
         await using (var disableEmail = new NpgsqlCommand("UPDATE \"SystemSettings\" SET \"Value\" = 'false', \"UpdatedAt\" = CURRENT_TIMESTAMP WHERE \"Key\" = 'notifications.email.enabled';", connection))
             await disableEmail.ExecuteNonQueryAsync(cancellationToken);
         await RestoreFilePartsAsync(manifest, targetDirectory, cancellationToken);
@@ -225,6 +242,28 @@ public sealed class DatabaseRestoreDrillService(
             Path.GetFileName(targetDirectory), "restored", manifest.BackupId, manifest.BackupRelativePath,
             manifest.DatabaseProvider, manifest.BackupFormat, $"{target.Host}:{target.Port}/{target.Database}", tableCount, 0,
             "restore completed; outbound email database flag disabled", started, DateTime.UtcNow, stopwatch.ElapsedMilliseconds, string.Empty);
+    }
+
+    public static async Task EnsureEmptyPostgreSqlTargetAsync(string connectionString, CancellationToken cancellationToken)
+    {
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var command = new NpgsqlCommand("""
+            SELECT EXISTS (
+                SELECT 1 FROM pg_namespace
+                WHERE nspname NOT IN ('pg_catalog', 'information_schema', 'public')
+                  AND nspname NOT LIKE 'pg_toast%'
+                  AND nspname NOT LIKE 'pg_temp_%'
+                UNION ALL
+                SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+                WHERE n.nspname = 'public'
+                UNION ALL
+                SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+                WHERE n.nspname = 'public'
+            );
+            """, connection);
+        if (Convert.ToBoolean(await command.ExecuteScalarAsync(cancellationToken)))
+            throw new InvalidOperationException("Restore drill разрешён только в пустую отдельную PostgreSQL базу.");
     }
 
     private string ResolveRoot()
