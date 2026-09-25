@@ -382,12 +382,32 @@ public sealed class InternalChatControllerTests
             CreatedAt = DateTime.UtcNow.AddSeconds(index)
         }));
         await fixture.Db.SaveChangesAsync();
+        var latestMessageId = await fixture.Db.InternalChatMessages.Where(item => item.ThreadId == channel.Id)
+            .MaxAsync(item => item.Id);
+        fixture.Db.InternalChatAttachments.AddRange(
+            new InternalChatAttachment { MessageId = latestMessageId, FileName = "first.pdf", StoredFileName = "first-stored.pdf", UploadedByUserId = owner.Id },
+            new InternalChatAttachment { MessageId = latestMessageId, FileName = "second.pdf", StoredFileName = "second-stored.pdf", UploadedByUserId = owner.Id });
+        fixture.Db.InternalChatReactions.Add(new InternalChatReaction
+        {
+            MessageId = latestMessageId, UserId = owner.Id, Emoji = "👍"
+        });
+        fixture.Db.InternalChatMentions.Add(new InternalChatMention
+        {
+            MessageId = latestMessageId, UserId = owner.Id
+        });
+        await fixture.Db.SaveChangesAsync();
+        fixture.Db.ChangeTracker.Clear();
 
         var firstResult = await fixture.Controller(owner).GetMessages(channel.Id, null, null, null, null, null, false, 50, CancellationToken.None);
         var first = Assert.IsType<InternalChatMessagePageDto>(Assert.IsType<OkObjectResult>(firstResult.Result).Value);
         Assert.Equal(50, first.Items.Count);
         Assert.True(first.HasMore);
         Assert.NotNull(first.NextBeforeId);
+        var latest = first.Items[^1];
+        Assert.Equal(latestMessageId, latest.Id);
+        Assert.Equal(2, latest.Attachments.Count);
+        Assert.Equal("👍", Assert.Single(latest.Reactions).Emoji);
+        Assert.Contains(owner.Id, latest.MentionUserIds);
 
         var secondResult = await fixture.Controller(owner).GetMessages(channel.Id, first.NextBeforeId, null, null, null, null, false, 50, CancellationToken.None);
         var second = Assert.IsType<InternalChatMessagePageDto>(Assert.IsType<OkObjectResult>(secondResult.Result).Value);

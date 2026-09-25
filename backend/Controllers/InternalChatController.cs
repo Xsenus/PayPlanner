@@ -410,7 +410,9 @@ public sealed partial class InternalChatController : ControllerBase
         if (to.HasValue) query = query.Where(message => message.CreatedAt <= to.Value.ToUniversalTime());
         if (mentionedMe) query = query.Where(message => message.Mentions.Any(mention => mention.UserId == userId));
 
-        var loaded = query
+        // Load the bounded page's collections separately to avoid multiplying rows
+        // across attachments, reactions and mentions in a single joined result.
+        var loaded = query.AsSplitQuery()
             .Include(message => message.AuthorUser)
             .Include(message => message.ReplyToMessage)!.ThenInclude(message => message!.AuthorUser)
             .Include(message => message.Attachments)
