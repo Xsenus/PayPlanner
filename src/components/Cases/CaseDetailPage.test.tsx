@@ -3597,6 +3597,19 @@ describe('CaseDetailPage', () => {
     expect(courtTabs.queryByText('UID-APPEAL')).toBeNull();
   });
 
+  it('keeps a selected empty appeal visible in the court overview', async () => {
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Суд' }));
+    fireEvent.click(screen.getByRole('button', { name: /Апелляция/u }));
+    fireEvent.click(screen.getByRole('button', { name: 'Вернуться к обзору' }));
+
+    const section = screen.getByText('Инстанции и судебные карточки').closest('section');
+    expect(section).toBeTruthy();
+    const courtTabs = within(section!);
+    expect(courtTabs.getByRole('button', { name: /1-я инстанция/u })).toBeTruthy();
+    expect(courtTabs.getByRole('button', { name: /Апелляция/u })).toBeTruthy();
+  });
+
   it('does not include another instance details when searching an appeal court card', async () => {
     vi.mocked(apiService.getCaseV2).mockResolvedValueOnce(createCase({ judicialUid: 'UID-FIRST-ONLY' }));
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);

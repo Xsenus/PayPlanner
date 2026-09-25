@@ -7238,9 +7238,8 @@ function CourtPanel({
     const lastPopulatedInstanceIndex = populatedInstances.length > 0
       ? Math.max(...populatedInstances.map((tab) => COURT_INSTANCE_TABS.indexOf(tab)))
       : -1;
-    const visibleInstances = lastPopulatedInstanceIndex >= 0
-      ? COURT_INSTANCE_TABS.slice(0, lastPopulatedInstanceIndex + 1)
-      : [selectedCourtInstanceMeta];
+    const lastVisibleInstanceIndex = Math.max(lastPopulatedInstanceIndex, COURT_INSTANCE_TABS.indexOf(selectedCourtInstanceMeta));
+    const visibleInstances = COURT_INSTANCE_TABS.slice(0, lastVisibleInstanceIndex + 1);
     const firstInstanceUnconfirmed = lastPopulatedInstanceIndex > 0
       && !populatedInstances.some((tab) => tab.value === 'first');
     const ownerName = caseItem.client?.name || caseItem.legalEntity?.shortName || caseItem.legalEntity?.fullName || 'Владелец не указан';
