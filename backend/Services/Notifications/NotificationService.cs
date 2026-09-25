@@ -7439,20 +7439,11 @@ public sealed class NotificationService : INotificationService
     {
         var isScheduled = string.Equals(courtEvent.MovementStatus, "scheduled", StringComparison.OrdinalIgnoreCase)
             || string.Equals(courtEvent.MovementStatus, "pending", StringComparison.OrdinalIgnoreCase);
-        if (isScheduled
-            && string.Equals(courtEvent.EventType, CourtSyncNormalization.EventTypes.Decision, StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(courtEvent.EventType, CourtSyncNormalization.EventTypes.Decision, StringComparison.OrdinalIgnoreCase))
         {
-            return UserNotificationTypes.CourtStatusChanged;
-        }
-
-        if (string.Equals(courtEvent.EventType, CourtSyncNormalization.EventTypes.Decision, StringComparison.OrdinalIgnoreCase)
-            && !isScheduled
-            && (courtEvent.ClientCaseDocumentId.HasValue
-                || !string.IsNullOrWhiteSpace(courtEvent.ResultSummary)
-                || string.Equals(courtEvent.MovementStatus, "held", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(courtEvent.MovementStatus, "completed", StringComparison.OrdinalIgnoreCase)))
-        {
-            return UserNotificationTypes.CourtDecisionRecorded;
+            var decisionRecorded = string.Equals(courtEvent.MovementStatus, CourtSyncNormalization.MovementStatuses.Held, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(courtEvent.MovementStatus, CourtSyncNormalization.MovementStatuses.Completed, StringComparison.OrdinalIgnoreCase);
+            return decisionRecorded ? UserNotificationTypes.CourtDecisionRecorded : UserNotificationTypes.CourtStatusChanged;
         }
 
         if (!isScheduled || !string.IsNullOrWhiteSpace(courtEvent.ResultSummary))
