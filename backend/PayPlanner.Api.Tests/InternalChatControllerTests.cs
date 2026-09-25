@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using PayPlanner.Api.Controllers;
@@ -133,6 +134,46 @@ public sealed class InternalChatControllerTests
         var unread = Assert.IsType<InternalChatThreadDto>(Assert.IsType<OkObjectResult>(reopened.Result).Value);
         Assert.Equal(1, unread.UnreadCount);
         Assert.Equal(message.Id, unread.FirstUnreadMessageId);
+    }
+
+    [Fact]
+    public async Task OpenTaskChat_UsesThreadCreatedByConcurrentRequest()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var author = await fixture.AddUserAsync("race-author@example.test", "Постановщик");
+        var assignee = await fixture.AddUserAsync("race-assignee@example.test", "Исполнитель");
+        var observer = await fixture.AddUserAsync("race-observer@example.test", "Наблюдатель");
+        var task = await fixture.AddTaskAsync(author.Id, assignee.Id, observer.Id);
+
+        var connection = fixture.Db.Database.GetDbConnection();
+        var winnerOptions = new DbContextOptionsBuilder<PaymentContext>().UseSqlite(connection).Options;
+        await using var winnerDb = new PaymentContext(winnerOptions);
+        var interceptor = new ConcurrentTaskChatCreationInterceptor(async () =>
+        {
+            winnerDb.InternalChatThreads.Add(new InternalChatThread
+            {
+                Kind = InternalChatThreadKinds.Task,
+                Name = task.Title,
+                TaskJournalItemId = task.Id,
+                CreatedByUserId = author.Id,
+                Members =
+                [
+                    new InternalChatMember { UserId = author.Id, Role = "owner" },
+                    new InternalChatMember { UserId = assignee.Id },
+                    new InternalChatMember { UserId = observer.Id }
+                ]
+            });
+            await winnerDb.SaveChangesAsync();
+        });
+        var contenderOptions = new DbContextOptionsBuilder<PaymentContext>()
+            .UseSqlite(connection).AddInterceptors(interceptor).Options;
+        await using var contenderDb = new PaymentContext(contenderOptions);
+
+        var result = await fixture.Controller(assignee, contenderDb).OpenTaskChat(task.Id, CancellationToken.None);
+        var dto = Assert.IsType<InternalChatThreadDto>(Assert.IsType<OkObjectResult>(result.Result).Value);
+        Assert.Equal(task.Id, dto.TaskJournalItemId);
+        Assert.Equal(3, dto.MemberUserIds.Count);
+        Assert.Equal(1, await winnerDb.InternalChatThreads.CountAsync(item => item.TaskJournalItemId == task.Id));
     }
 
     [Fact]
@@ -546,10 +587,10 @@ public sealed class InternalChatControllerTests
             return task;
         }
 
-        public InternalChatController Controller(User user)
+        public InternalChatController Controller(User user, PaymentContext? db = null)
         {
             var notifications = DispatchProxy.Create<INotificationService, NotificationProxy>();
-            var controller = new InternalChatController(Db, notifications, NoOpRealtimeNotificationPublisher.Instance)
+            var controller = new InternalChatController(db ?? Db, notifications, NoOpRealtimeNotificationPublisher.Instance)
             {
                 ControllerContext = new ControllerContext
                 {
@@ -570,6 +611,23 @@ public sealed class InternalChatControllerTests
         {
             await Db.DisposeAsync();
             await _connection.DisposeAsync();
+        }
+    }
+
+    private sealed class ConcurrentTaskChatCreationInterceptor(Func<Task> createWinner) : SaveChangesInterceptor
+    {
+        private bool _created;
+
+        public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            if (!_created && eventData.Context?.ChangeTracker.Entries<InternalChatThread>()
+                    .Any(entry => entry.State == EntityState.Added) == true)
+            {
+                _created = true;
+                await createWinner();
+            }
+            return result;
         }
     }
 

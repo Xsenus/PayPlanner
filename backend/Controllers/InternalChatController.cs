@@ -2,7 +2,9 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
@@ -304,6 +306,7 @@ public sealed partial class InternalChatController : ControllerBase
             .FirstOrDefaultAsync(item => item.TaskJournalItemId == taskId, ct);
         if (!memberIds.Contains(userId.Value) && thread?.Members.Any(member => member.UserId == userId && member.IsActive && member.Role == "guest") != true)
             return Forbid();
+        var creatingThread = thread is null;
         if (thread is null)
         {
             thread = new InternalChatThread
@@ -325,7 +328,31 @@ public sealed partial class InternalChatController : ControllerBase
         SyncTaskMembers(thread, memberIds, task.AuthorUserId, now);
         var currentMember = thread.Members.First(member => member.UserId == userId);
         currentMember.HiddenAfterMessageId = null;
-        await _db.SaveChangesAsync(ct);
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException exception) when (creatingThread && IsTaskChatAlreadyCreated(exception))
+        {
+            // Another request created this task's chat after our initial lookup.
+            _db.ChangeTracker.Clear();
+            task = await _db.TaskJournalItems.Include(item => item.Participants)
+                .FirstOrDefaultAsync(item => item.Id == taskId, ct);
+            if (task is null) return NotFound();
+            memberIds = TaskMemberIds(task);
+            thread = await _db.InternalChatThreads.Include(item => item.Members)
+                .FirstOrDefaultAsync(item => item.TaskJournalItemId == taskId, ct);
+            if (thread is null) throw;
+            if (!memberIds.Contains(userId.Value) && !thread.Members.Any(member => member.UserId == userId && member.IsActive && member.Role == "guest"))
+                return Forbid();
+            thread.Name = task.Title;
+            var recoveredAt = DateTime.UtcNow;
+            thread.UpdatedAt = recoveredAt;
+            SyncTaskMembers(thread, memberIds, task.AuthorUserId, recoveredAt);
+            currentMember = thread.Members.First(member => member.UserId == userId);
+            currentMember.HiddenAfterMessageId = null;
+            await _db.SaveChangesAsync(ct);
+        }
         var (unreadCount, firstUnreadMessageId) = await GetUnreadSummaryAsync(thread.Id, userId.Value, currentMember.LastReadMessageId, ct);
         return Ok(ToThreadDto(thread, currentMember.Role, currentMember.NotificationMode, isArchived: currentMember.IsArchived,
             lastReadMessageId: currentMember.LastReadMessageId, unreadCount: unreadCount, firstUnreadMessageId: firstUnreadMessageId));
@@ -817,6 +844,16 @@ public sealed partial class InternalChatController : ControllerBase
         if (task.AssigneeUserId.HasValue) ids.Add(task.AssigneeUserId.Value);
         return ids;
     }
+
+    private static bool IsTaskChatAlreadyCreated(DbUpdateException exception) =>
+        exception.InnerException switch
+        {
+            PostgresException { SqlState: PostgresErrorCodes.UniqueViolation,
+                ConstraintName: "IX_InternalChatThreads_TaskJournalItemId" } => true,
+            SqliteException { SqliteExtendedErrorCode: 2067 } sqlite =>
+                sqlite.Message.Contains("InternalChatThreads.TaskJournalItemId", StringComparison.Ordinal),
+            _ => false
+        };
 
     private static void SyncTaskMembers(InternalChatThread thread, IReadOnlySet<int> desiredIds, int? authorId, DateTime now)
     {
