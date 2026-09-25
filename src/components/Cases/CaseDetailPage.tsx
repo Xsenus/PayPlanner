@@ -7235,7 +7235,14 @@ function CourtPanel({
         || courtEvents.some((event) => event.courtInstance === tab.value),
       );
     });
-    const visibleInstances = populatedInstances.length > 0 ? populatedInstances : [selectedCourtInstanceMeta];
+    const lastPopulatedInstanceIndex = populatedInstances.length > 0
+      ? Math.max(...populatedInstances.map((tab) => COURT_INSTANCE_TABS.indexOf(tab)))
+      : -1;
+    const visibleInstances = lastPopulatedInstanceIndex >= 0
+      ? COURT_INSTANCE_TABS.slice(0, lastPopulatedInstanceIndex + 1)
+      : [selectedCourtInstanceMeta];
+    const firstInstanceUnconfirmed = lastPopulatedInstanceIndex > 0
+      && !populatedInstances.some((tab) => tab.value === 'first');
     const ownerName = caseItem.client?.name || caseItem.legalEntity?.shortName || caseItem.legalEntity?.fullName || 'Владелец не указан';
     const successfulSourceChecks = logs
       .filter((log) => (log.status || '').trim().toLowerCase() === 'external-sync-completed')
@@ -7364,12 +7371,13 @@ function CourtPanel({
             </section>
 
             <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-              <div className="flex flex-wrap items-center justify-between gap-2"><div><h3 className="font-bold text-slate-900">Инстанции и судебные карточки</h3><p className="mt-0.5 text-xs text-slate-500">Карточки одного дела объединяются по UID. Выберите инстанцию, чтобы увидеть её движение.</p></div><span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">{populatedInstances.length} заполнено</span></div>
+              <div className="flex flex-wrap items-center justify-between gap-2"><div><h3 className="font-bold text-slate-900">Инстанции и судебные карточки</h3><p className="mt-0.5 text-xs text-slate-500">Инстанции показаны по порядку. Выберите одну из них, чтобы увидеть её подтверждённые сведения и движение.</p></div><span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">{populatedInstances.length} заполнено</span></div>
               <div className="mt-3 flex gap-2 overflow-x-auto pb-1">{visibleInstances.map((tab) => {
                 const instanceData = courtInstances.find((item) => item.instance === tab.value);
                 const stage = buildCourtInstanceStage(courtEvents, tab.value);
                 return <button key={tab.value} type="button" onClick={() => onActiveCourtInstanceChange(tab.value)} className={`min-w-[170px] rounded-lg border px-3 py-2 text-left ${activeCourtInstance === tab.value ? 'border-blue-400 bg-blue-50 text-blue-800' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}><div className="text-sm font-bold">{tab.label}</div><div className="mt-0.5 truncate text-xs opacity-75">{instanceData?.courtCaseNumber || 'Номер не указан'}</div><div className="mt-1 text-xs font-semibold">{stage.label}</div></button>;
               })}</div>
+              {firstInstanceUnconfirmed && activeCourtInstance === 'first' ? <p role="note" className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900">Данные и результат первой инстанции пока не подтверждены. Если известна официальная карточка суда, добавьте её ссылку в редактировании инстанции; результат апелляции сюда не переносится.</p> : null}
               <div className="mt-3 grid gap-2 rounded-lg border border-slate-200 bg-slate-50/60 p-3 sm:grid-cols-2"><div><div className="text-[11px] uppercase tracking-[0.1em] text-slate-400">Суд</div><div className="mt-1 text-sm font-semibold text-slate-800">{overviewCourtName || 'Не указан'}</div></div><div><div className="text-[11px] uppercase tracking-[0.1em] text-slate-400">Номер карточки</div><div className="mt-1 text-sm font-semibold text-slate-800">{overviewCourtCaseNumber || 'Не указан'}</div></div><div><div className="text-[11px] uppercase tracking-[0.1em] text-slate-400">Судья</div><div className="mt-1 text-sm font-semibold text-slate-800">{overviewJudgeName || 'Не указан'}</div></div><div><div className="text-[11px] uppercase tracking-[0.1em] text-slate-400">Стадия по событиям</div><div className="mt-1 text-sm font-semibold text-slate-800">{selectedInstanceStage.label}</div><div className="mt-0.5 text-xs text-slate-500">{selectedInstanceStage.detail}</div></div></div>
             </section>
 
