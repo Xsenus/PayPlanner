@@ -243,6 +243,57 @@ describe('InternalMessenger', () => {
     expect(screen.queryByText('@[8]')).toBeNull();
   });
 
+  it('renders bulleted and numbered lists with inline formatting without interpreting HTML', async () => {
+    chatApiMock.getMessages.mockResolvedValue({
+      items: [{ ...message, text: 'План:\n- Проверить **иск**\n- Написать @[8]\n1. Подготовить *отзыв*\n2. Изучить `акт`\n<script>не код</script>' }],
+      hasMore: false,
+    });
+    const { container } = render(<InternalMessenger />);
+
+    expect(await screen.findByText('План:')).toBeTruthy();
+    expect([...container.querySelectorAll('ul.list-disc li')].map((item) => item.textContent)).toEqual([
+      'Проверить иск',
+      'Написать @Анна',
+    ]);
+    expect([...container.querySelectorAll('ol.list-decimal li')].map((item) => item.textContent)).toEqual([
+      'Подготовить отзыв',
+      'Изучить акт',
+    ]);
+    expect(screen.getByText('иск').tagName).toBe('STRONG');
+    expect(screen.getByText('отзыв').tagName).toBe('EM');
+    expect(screen.getByText('акт').tagName).toBe('CODE');
+    expect(container.querySelector('script')).toBeNull();
+    expect(screen.getByText('<script>не код</script>')).toBeTruthy();
+  });
+
+  it('preserves an intentional gap in numbered list items', async () => {
+    chatApiMock.getMessages.mockResolvedValue({
+      items: [{ ...message, text: '1. Первый шаг\n3. Третий шаг' }],
+      hasMore: false,
+    });
+    const { container } = render(<InternalMessenger />);
+
+    expect(await screen.findByText('Первый шаг')).toBeTruthy();
+    expect([...container.querySelectorAll<HTMLOListElement>('ol.list-decimal')].map((list) => list.start)).toEqual([1, 3]);
+  });
+
+  it('adds list markers at the current line and keeps toolbar edits in the chat draft', async () => {
+    render(<InternalMessenger />);
+    const editor = await screen.findByPlaceholderText('Напишите сообщение…') as HTMLTextAreaElement;
+    fireEvent.change(editor, { target: { value: 'Первая строка\nВторая' } });
+    editor.setSelectionRange('Первая строка\n'.length, 'Первая строка\n'.length);
+    fireEvent.click(screen.getByTitle('Маркированный список'));
+    expect(editor.value).toBe('Первая строка\n- Вторая');
+
+    fireEvent.click(screen.getByTitle('Жирный'));
+    expect(editor.value).toContain('**');
+    editor.setSelectionRange(0, 0);
+    fireEvent.click(screen.getByTitle('Нумерованный список'));
+    expect(editor.value.startsWith('1. Первая строка')).toBe(true);
+    const savedDrafts = Array.from({ length: sessionStorage.length }, (_, index) => sessionStorage.getItem(sessionStorage.key(index)!));
+    expect(savedDrafts).toContain(editor.value);
+  });
+
   it('links task references and the task chat title to the task card', async () => {
     const onOpenTask = vi.fn();
     chatApiMock.getThreads.mockResolvedValue([{ ...thread, kind: 'task', taskJournalItemId: 101, name: 'Сверка по делу' }]);

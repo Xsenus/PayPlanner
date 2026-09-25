@@ -92,7 +92,7 @@ function formatFileSize(value: number) {
   return `${(value / 1024 / 1024).toFixed(1)} МБ`;
 }
 
-function renderFormattedText(text: string, peopleById: Map<number, InternalChatPerson>, onOpenTask?: (taskId: number) => void): ReactNode {
+function renderInlineFormattedText(text: string, peopleById: Map<number, InternalChatPerson>, onOpenTask?: (taskId: number) => void): ReactNode {
   const mentions = text.split(/(@\[\d+\]|@\d+\b)/g);
   return mentions.map((part, partIndex) => {
     const mention = /^@(?:\[(\d+)\]|(\d+))$/.exec(part);
@@ -104,6 +104,42 @@ function renderFormattedText(text: string, peopleById: Map<number, InternalChatP
     }
     return <span key={partIndex}>{renderPlainFormattedText(part, onOpenTask)}</span>;
   });
+}
+
+function parseListItem(line: string) {
+  const bullet = /^ {0,3}[-*] +(.+)$/.exec(line);
+  if (bullet) return { kind: 'bullet' as const, text: bullet[1], start: 1 };
+  const numbered = /^ {0,3}(\d{1,6})[.)] +(.+)$/.exec(line);
+  if (numbered) return { kind: 'numbered' as const, text: numbered[2], start: Number(numbered[1]) };
+  return null;
+}
+
+function renderFormattedText(text: string, peopleById: Map<number, InternalChatPerson>, onOpenTask?: (taskId: number) => void): ReactNode {
+  const lines = text.split(/\r?\n/);
+  const blocks: ReactNode[] = [];
+  for (let index = 0; index < lines.length;) {
+    const firstItem = parseListItem(lines[index]);
+    if (firstItem) {
+      const startIndex = index;
+      const items: ReactNode[] = [];
+      while (index < lines.length) {
+        const item = parseListItem(lines[index]);
+        if (!item || item.kind !== firstItem.kind) break;
+        if (item.kind === 'numbered' && item.start !== firstItem.start + items.length) break;
+        items.push(<li key={index}>{renderInlineFormattedText(item.text, peopleById, onOpenTask)}</li>);
+        index += 1;
+      }
+      blocks.push(firstItem.kind === 'bullet'
+        ? <ul key={startIndex} className="my-1 list-disc space-y-0.5 pl-5">{items}</ul>
+        : <ol key={startIndex} start={firstItem.start} className="my-1 list-decimal space-y-0.5 pl-5">{items}</ol>);
+      continue;
+    }
+    const line = lines[index];
+    const hasNextPlainLine = index < lines.length - 1 && !parseListItem(lines[index + 1]);
+    blocks.push(<span key={index}>{renderInlineFormattedText(line, peopleById, onOpenTask)}{hasNextPlainLine || !line ? <br /> : null}</span>);
+    index += 1;
+  }
+  return blocks;
 }
 
 function renderPlainFormattedText(text: string, onOpenTask?: (taskId: number) => void): ReactNode {
@@ -365,8 +401,28 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
     if (!element) return;
     const start = element.selectionStart;
     const end = element.selectionEnd;
-    setText((value) => `${value.slice(0, start)}${left}${value.slice(start, end)}${right}${value.slice(end)}`);
+    setText((value) => {
+      const next = `${value.slice(0, start)}${left}${value.slice(start, end)}${right}${value.slice(end)}`;
+      if (!editing) saveChatDraft(currentUserId, thread.id, next);
+      return next;
+    });
     window.setTimeout(() => element.focus(), 0);
+  };
+
+  const insertListMarker = (marker: string) => {
+    const element = textareaRef.current;
+    if (!element) return;
+    const cursor = element.selectionStart;
+    const lineStart = cursor > 0 ? text.lastIndexOf('\n', cursor - 1) + 1 : 0;
+    setText((value) => {
+      const next = `${value.slice(0, lineStart)}${marker}${value.slice(lineStart)}`;
+      if (!editing) saveChatDraft(currentUserId, thread.id, next);
+      return next;
+    });
+    window.setTimeout(() => {
+      element.focus();
+      element.setSelectionRange(cursor + marker.length, cursor + marker.length);
+    }, 0);
   };
 
   const insertMention = (person: InternalChatPerson) => {
@@ -540,10 +596,12 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
       <footer className="border-t border-slate-200 bg-white p-3">
         {replyTo || editing ? <div className="mb-2 flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600"><Reply className="h-3.5 w-3.5" /><span className="min-w-0 flex-1 truncate">{editing ? 'Редактирование сообщения' : `Ответ на сообщение ${replyTo?.authorName} (виден всем участникам чата): ${replyTo?.text}`}</span><button type="button" onClick={() => { setReplyTo(null); if (editing) { setEditing(null); setText(draftBeforeEditRef.current); } }} aria-label="Отменить ответ или редактирование"><X className="h-4 w-4" /></button></div> : null}
         {files.length ? <div className="mb-2 flex flex-wrap gap-1.5">{files.map((file, index) => <span key={`${file.name}-${index}`} className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-1 text-xs text-blue-700"><Paperclip className="h-3 w-3" />{file.name}<button type="button" onClick={() => setFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}><X className="h-3 w-3" /></button></span>)}</div> : null}
-        <div className="mb-1 flex items-center gap-1 text-xs text-slate-500">
+        <div className="mb-1 flex flex-wrap items-center gap-1 text-xs text-slate-500">
           <button type="button" onClick={() => insertMarkup('**')} className="rounded px-2 py-1 font-bold hover:bg-slate-100" title="Жирный">B</button>
           <button type="button" onClick={() => insertMarkup('*')} className="rounded px-2 py-1 italic hover:bg-slate-100" title="Курсив">I</button>
           <button type="button" onClick={() => insertMarkup('`')} className="rounded px-2 py-1 font-mono hover:bg-slate-100" title="Код">&lt;/&gt;</button>
+          <button type="button" onClick={() => insertListMarker('- ')} className="rounded px-2 py-1 hover:bg-slate-100" title="Маркированный список">• Список</button>
+          <button type="button" onClick={() => insertListMarker('1. ')} className="rounded px-2 py-1 hover:bg-slate-100" title="Нумерованный список">1. Список</button>
           <details className="relative"><summary className="list-none rounded px-2 py-1 hover:bg-slate-100" title="Упоминание уведомит участника, но сообщение увидят все в этом чате">@</summary><div className="absolute bottom-8 left-0 z-30 max-h-48 w-64 overflow-y-auto rounded-xl border border-slate-200 bg-white p-1 shadow-xl"><div className="px-2 py-1 text-[11px] text-slate-500">Сообщение увидят все участники чата</div>{people.filter((person) => thread.memberUserIds.includes(person.id)).map((person) => <button key={person.id} type="button" onClick={() => insertMention(person)} className="block w-full truncate rounded-lg px-2 py-2 text-left hover:bg-slate-50">{person.name}</button>)}</div></details>
         </div>
         <div className="flex items-end gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2 focus-within:border-blue-300 focus-within:ring-2 focus-within:ring-blue-100">
