@@ -5997,7 +5997,7 @@ function FinancePanel({
       <div className="grid gap-4 xl:grid-cols-2">
         <section className="rounded-xl border border-slate-200 p-4">
           <h3 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Связанные договоры</h3>
-          {contracts.length === 0 ? <FinanceEmpty label="Договоры по делу пока не найдены." /> : null}
+          {contracts.length === 0 ? <FinanceEmpty label="Доступные вам договоры по делу не найдены." /> : null}
           <div className="mt-3 space-y-2">
             {contracts.map((contract) => (
               <a key={contract.id} href={`/contracts/${contract.id}`} className="block rounded-lg border border-slate-100 bg-slate-50 p-3 hover:border-blue-200 hover:bg-blue-50">

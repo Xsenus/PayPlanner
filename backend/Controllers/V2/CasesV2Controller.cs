@@ -4867,6 +4867,7 @@ public partial class CasesV2Controller : ControllerBase
         {
             return Forbid();
         }
+        var contractsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Contracts, ct);
 
         var visibility = await ResolveCasesVisibilityAsync(ct);
         if (visibility is null)
@@ -4905,7 +4906,6 @@ public partial class CasesV2Controller : ControllerBase
             .AsNoTracking()
             .ApplyPaymentVisibility(paymentsVisibility)
             .Include(payment => payment.InvoiceClientCases)
-            .Include(payment => payment.Contract)
             .Include(payment => payment.PaymentSource)
             .Where(payment => payment.Status != PaymentStatus.Cancelled)
             .Where(payment =>
@@ -4932,7 +4932,8 @@ public partial class CasesV2Controller : ControllerBase
             .Distinct()
             .ToArray();
 
-        var linkedContracts = await LoadFinanceContractsAsync(id, visiblePayments, linkedInvoicePaymentIds, paymentIds, ct);
+        var linkedContracts = await LoadFinanceContractsAsync(
+            id, visiblePayments, linkedInvoicePaymentIds, paymentIds, contractsVisibility, ct);
         var statusClock = await ResolveCaseStatusClockAsync(ct);
 
         return Ok(new ClientCaseFinanceDetailDto
@@ -4944,7 +4945,7 @@ public partial class CasesV2Controller : ControllerBase
             Totals = BuildFinanceTotals(clientCase, visiblePayments),
             Calendar = BuildFinanceCalendar(visiblePayments, statusClock.TodayDate),
             Invoices = BuildFinanceInvoices(visiblePayments, linkedContracts, statusClock.TodayDate),
-            Payments = visiblePayments.Select(payment => MapFinancePayment(payment, statusClock.TodayDate)).ToList(),
+            Payments = visiblePayments.Select(payment => MapFinancePayment(payment, linkedContracts, statusClock.TodayDate)).ToList(),
             Contracts = linkedContracts.Values
                 .OrderByDescending(contract => contract.Date)
                 .ThenBy(contract => contract.Number)
@@ -12537,36 +12538,41 @@ public partial class CasesV2Controller : ControllerBase
         IReadOnlyCollection<Payment> visiblePayments,
         IReadOnlyCollection<int> invoicePaymentIds,
         IReadOnlyCollection<int> paymentIds,
+        DataVisibilityAccess? contractsVisibility,
         CancellationToken ct)
     {
-        var contractsById = visiblePayments
-            .Where(payment => payment.Contract is not null)
-            .Select(payment => payment.Contract!)
-            .GroupBy(contract => contract.Id)
-            .ToDictionary(group => group.Key, group => group.First());
+        if (contractsVisibility is null)
+        {
+            return new Dictionary<int, Contract>();
+        }
 
-        // Все таблицы связей имеют одинаковый результат — договор. UNION ALL позволяет
-        // получить их одним запросом; дубликаты безопасно устраняются словарём в памяти.
-        var linkedContracts = await _db.ClientCaseContracts
+        var directContractIds = visiblePayments
+            .Where(payment => payment.ContractId.HasValue)
+            .Select(payment => payment.ContractId!.Value)
+            .Distinct()
+            .ToArray();
+
+        var linkedContractIds = _db.ClientCaseContracts
             .AsNoTracking()
             .Where(link => link.ClientCaseId == clientCaseId)
-            .Select(link => link.Contract)
+            .Select(link => link.ContractId)
             .Concat(_db.ContractInvoices
                 .AsNoTracking()
                 .Where(link => invoicePaymentIds.Contains(link.InvoiceId))
-                .Select(link => link.Contract))
+                .Select(link => link.ContractId))
             .Concat(_db.ContractPayments
                 .AsNoTracking()
                 .Where(link => paymentIds.Contains(link.PaymentId))
-                .Select(link => link.Contract))
+                .Select(link => link.ContractId));
+
+        // Проверка доступа к договору выполняется до материализации; связь с видимым
+        // платежом сама по себе не открывает скрытый договор.
+        var linkedContracts = await _db.Contracts
+            .AsNoTracking()
+            .ApplyContractVisibility(contractsVisibility)
+            .Where(contract => directContractIds.Contains(contract.Id) || linkedContractIds.Contains(contract.Id))
             .ToListAsync(ct);
-
-        foreach (var contract in linkedContracts)
-        {
-            contractsById.TryAdd(contract.Id, contract);
-        }
-
-        return contractsById;
+        return linkedContracts.ToDictionary(contract => contract.Id);
     }
 
     private static ClientCaseFinanceTotalsDto BuildFinanceTotals(ClientCase clientCase, IReadOnlyCollection<Payment> payments)
@@ -12702,8 +12708,8 @@ public partial class CasesV2Controller : ControllerBase
             OutstandingAmount = outstandingAmount,
             Status = ResolveFinanceGroupStatus(group, today),
             WorkflowStatus = representative.InvoiceWorkflowStatus,
-            ContractId = contract?.Id ?? representative.ContractId,
-            ContractNumber = contract?.Number ?? representative.Contract?.Number,
+            ContractId = contract?.Id,
+            ContractNumber = contract?.Number,
         };
     }
 
@@ -12735,7 +12741,10 @@ public partial class CasesV2Controller : ControllerBase
         return payments.First().Status.ToString();
     }
 
-    private static ClientCaseFinancePaymentDto MapFinancePayment(Payment payment, DateTime today)
+    private static ClientCaseFinancePaymentDto MapFinancePayment(
+        Payment payment,
+        IReadOnlyDictionary<int, Contract> visibleContracts,
+        DateTime today)
         => new()
         {
             Id = payment.Id,
@@ -12751,8 +12760,12 @@ public partial class CasesV2Controller : ControllerBase
             InvoiceId = payment.DocumentKind == DocumentKind.Invoice ? payment.Id : null,
             InvoiceNumber = IsFinanceInvoiceCandidate(payment) ? ResolveFinanceInvoiceNumber(payment) : null,
             InvoiceDate = IsFinanceInvoiceCandidate(payment) ? payment.LegacyAccountDate ?? payment.AccountDate ?? payment.Date : null,
-            ContractId = payment.ContractId,
-            ContractNumber = payment.Contract?.Number,
+            ContractId = payment.ContractId.HasValue && visibleContracts.ContainsKey(payment.ContractId.Value)
+                ? payment.ContractId
+                : null,
+            ContractNumber = payment.ContractId.HasValue && visibleContracts.TryGetValue(payment.ContractId.Value, out var contract)
+                ? contract.Number
+                : null,
             PaymentSourceName = payment.PaymentSource?.Name,
             PaymentOrderNumber = payment.PaymentOrderNumber,
             PaymentDocumentDate = payment.PaymentDocumentDate,

@@ -1784,6 +1784,7 @@ public class CasesV2ControllerTests
         await using var db = await CreateContextAsync(interceptor);
         var owner = await CreateUserAsync(db, "owner@example.com", "Owner", DataVisibilityScope.All);
         await GrantSectionPermissionAsync(db, owner, RolePermissionCatalog.Payments, viewScope: DataVisibilityScope.All);
+        await GrantSectionPermissionAsync(db, owner, RolePermissionCatalog.Contracts, viewScope: DataVisibilityScope.All);
         var client = new Client
         {
             Name = "Земцов Виктор Александрович",
@@ -1922,7 +1923,7 @@ public class CasesV2ControllerTests
 
         Assert.Equal(clientCase.Id, dto.CaseId);
         // Payment visibility is checked independently of the case access check.
-        Assert.Equal(7, interceptor.Commands.Count);
+        Assert.Equal(9, interceptor.Commands.Count);
         var linkedContractsCommand = Assert.Single(interceptor.Commands, command =>
             command.Contains("ClientCaseContracts", StringComparison.OrdinalIgnoreCase) &&
             command.Contains("ContractInvoices", StringComparison.OrdinalIgnoreCase) &&
@@ -1949,6 +1950,31 @@ public class CasesV2ControllerTests
         Assert.Contains(dto.Contracts, linkedContract => linkedContract.Id == directlyLinkedContract.Id && linkedContract.Number == "2-2026");
         Assert.Equal(2, dto.Payments.Count);
         Assert.All(dto.Payments, payment => Assert.Equal("Касса", payment.PaymentSourceName));
+
+        await GrantSectionPermissionAsync(db, owner, RolePermissionCatalog.Contracts, viewScope: DataVisibilityScope.Own);
+        var ownContractsResult = await CreateController(db, owner).GetFinance(clientCase.Id, CancellationToken.None);
+        var ownContractsDto = Assert.IsType<CasesV2Controller.ClientCaseFinanceDetailDto>(
+            Assert.IsType<OkObjectResult>(ownContractsResult.Result).Value);
+        Assert.Equal(contract.Id, Assert.Single(ownContractsDto.Contracts).Id);
+        Assert.DoesNotContain(ownContractsDto.Contracts, item => item.Id == directlyLinkedContract.Id);
+        Assert.Equal(2, ownContractsDto.Payments.Count);
+
+        await GrantSectionPermissionAsync(db, owner, RolePermissionCatalog.Contracts, canView: false);
+        var noContractsResult = await CreateController(db, owner).GetFinance(clientCase.Id, CancellationToken.None);
+        var noContractsDto = Assert.IsType<CasesV2Controller.ClientCaseFinanceDetailDto>(
+            Assert.IsType<OkObjectResult>(noContractsResult.Result).Value);
+        Assert.Empty(noContractsDto.Contracts);
+        Assert.All(noContractsDto.Payments, payment =>
+        {
+            Assert.Null(payment.ContractId);
+            Assert.Null(payment.ContractNumber);
+        });
+        Assert.All(noContractsDto.Invoices, invoice =>
+        {
+            Assert.Null(invoice.ContractId);
+            Assert.Null(invoice.ContractNumber);
+        });
+        Assert.Equal(dto.Totals.IncomeTotal, noContractsDto.Totals.IncomeTotal);
     }
 
     [Fact]
