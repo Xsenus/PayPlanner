@@ -1358,6 +1358,11 @@ export function CaseModal({
                   <span className="text-xs text-emerald-700">Обновляем...</span>
                 ) : null}
               </div>
+              {financeSummary?.hasCompletePaymentVisibility === false ? (
+                <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900" role="note">
+                  Показаны только доступные вам платежи. Суммы и долг по делу могут быть неполными.
+                </p>
+              ) : null}
               {financeError ? (
                 <div className="mt-3 rounded-lg border border-red-200 bg-white px-3 py-2 text-sm text-red-600">
                   {financeError}

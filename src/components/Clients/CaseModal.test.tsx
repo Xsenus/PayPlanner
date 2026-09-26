@@ -741,6 +741,28 @@ describe('CaseModal', () => {
     expect(screen.getByText((text) => text.includes('10') && text.includes('000'))).toBeTruthy();
   });
 
+  it('explains that a limited finance summary is incomplete', async () => {
+    vi.mocked(apiService.getClientCaseFinanceSummaries).mockResolvedValue([{
+      caseId: 1,
+      hasCompletePaymentVisibility: false,
+      incomeTotal: 10_000,
+      incomePaid: 10_000,
+      incomeOutstanding: 0,
+      incomeCount: 1,
+      expenseTotal: 0,
+      expensePaid: 0,
+      expenseOutstanding: 0,
+      expenseCount: 0,
+      plannedMargin: 10_000,
+      paidMargin: 10_000,
+      outstandingBalance: 0,
+    }]);
+
+    render(<CaseModal isOpen onClose={vi.fn()} caseData={createCase()} onSave={vi.fn()} />);
+
+    expect(await screen.findByText(/Показаны только доступные вам платежи/u)).toBeTruthy();
+  });
+
   it('shows tasks linked to the case', async () => {
     vi.mocked(apiService.getTaskJournalItems).mockResolvedValue({
       items: [

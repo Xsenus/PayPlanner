@@ -337,6 +337,19 @@ describe('CasesRegistry', () => {
     );
   });
 
+  it('warns when registry financial totals include only visible payments', async () => {
+    vi.mocked(apiService.getCasesV2).mockResolvedValue({
+      items: [createCase({ hasCompletePaymentVisibility: false })],
+      total: 1,
+      page: 1,
+      pageSize: 25,
+    });
+
+    render(<CasesRegistry />);
+
+    expect((await screen.findByRole('status')).textContent).toMatch(/суммы.*могут быть неполными/i);
+  });
+
   it('shows the last activity, next control and exclusion reason in the registry', async () => {
     const futureControlAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
     const dueControlAt = new Date(Date.now() - 60 * 60 * 1000).toISOString();

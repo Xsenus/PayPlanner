@@ -1890,6 +1890,7 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
             item => new ClientCaseFinanceSummaryDto
             {
                 CaseId = item.Id,
+                HasCompletePaymentVisibility = paymentsVisibility.SeesAll,
                 CaseTitle = item.Title,
                 CaseStatus = item.Status.ToString(),
                 CaseCreatedAt = item.CreatedAt,

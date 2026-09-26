@@ -318,6 +318,9 @@ namespace PayPlanner.Api.Models
         public decimal IncomeTotal { get; set; }
 
         [NotMapped]
+        public bool? HasCompletePaymentVisibility { get; set; }
+
+        [NotMapped]
         public decimal IncomePaid { get; set; }
 
         [NotMapped]

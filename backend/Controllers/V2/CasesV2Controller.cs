@@ -306,7 +306,8 @@ public partial class CasesV2Controller : ControllerBase
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, MaxRegistryPageSize);
 
-        var canViewFinance = await CanViewCaseFinanceAsync(ct);
+        var paymentsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
+        var canViewFinance = paymentsVisibility is not null;
         var effectiveInactiveDays = await ResolveRegistryInactiveDaysAsync(activity, inactiveDays, ct);
         var q = BuildRegistryQuery(
             visibility,
@@ -344,7 +345,7 @@ public partial class CasesV2Controller : ControllerBase
         }
         if (canViewFinance)
         {
-            await ApplyFinanceSummaryAsync(items, ct);
+            await ApplyFinanceSummaryAsync(items, ct, paymentsVisibility);
         }
         else
         {
@@ -1256,7 +1257,8 @@ public partial class CasesV2Controller : ControllerBase
             return (null, false, Unauthorized());
         }
 
-        var canViewFinance = await CanViewCaseFinanceAsync(ct);
+        var paymentsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
+        var canViewFinance = paymentsVisibility is not null;
         var effectiveInactiveDays = await ResolveRegistryInactiveDaysAsync(activity, inactiveDays, ct);
         var registryQuery = BuildRegistryQuery(
                 visibility,
@@ -1282,7 +1284,7 @@ public partial class CasesV2Controller : ControllerBase
             .ToListAsync(ct);
         if (canViewFinance)
         {
-            await ApplyFinanceSummaryAsync(items, ct);
+            await ApplyFinanceSummaryAsync(items, ct, paymentsVisibility);
         }
         else
         {
@@ -3360,17 +3362,24 @@ public partial class CasesV2Controller : ControllerBase
             return Unauthorized();
         }
 
-        var canViewFinance = await CanViewCaseFinanceAsync(ct);
+        var paymentsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
         var entity = await _db.ClientCases
-            .WithCaseIncludes(includePayments: canViewFinance)
+            .WithCaseIncludes(includePayments: paymentsVisibility?.SeesAll == true)
             .ApplyClientCaseVisibility(visibility)
             .AsNoTracking()
             .FirstOrDefaultAsync(c => c.Id == id, ct);
         if (entity is not null)
         {
-            if (canViewFinance)
+            if (paymentsVisibility is not null)
             {
-                await ApplyFinanceSummaryAsync([entity], ct);
+                if (!paymentsVisibility.SeesAll)
+                {
+                    entity.Payments = await _db.Payments.AsNoTracking()
+                        .ApplyPaymentVisibility(paymentsVisibility)
+                        .Where(payment => payment.ClientCaseId == id)
+                        .ToListAsync(ct);
+                }
+                await ApplyFinanceSummaryAsync([entity], ct, paymentsVisibility);
             }
             else
             {
@@ -4768,7 +4777,8 @@ public partial class CasesV2Controller : ControllerBase
             return Unauthorized();
         }
 
-        var canViewFinance = await CanViewCaseFinanceAsync(ct);
+        var paymentsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
+        var canViewFinance = paymentsVisibility is not null;
         var clientCase = await _db.ClientCases
             .ApplyClientCaseVisibility(visibility)
             .AsNoTracking()
@@ -4817,7 +4827,7 @@ public partial class CasesV2Controller : ControllerBase
 
         if (canViewFinance)
         {
-            await ApplyFinanceSummaryAsync([clientCase], ct);
+            await ApplyFinanceSummaryAsync([clientCase], ct, paymentsVisibility);
         }
         else
         {
@@ -4840,7 +4850,8 @@ public partial class CasesV2Controller : ControllerBase
         {
             return forbidden;
         }
-        if (!await CanViewCaseFinanceAsync(ct))
+        var paymentsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
+        if (paymentsVisibility is null)
         {
             return Forbid();
         }
@@ -4880,6 +4891,7 @@ public partial class CasesV2Controller : ControllerBase
 
         var payments = await _db.Payments
             .AsNoTracking()
+            .ApplyPaymentVisibility(paymentsVisibility)
             .Include(payment => payment.InvoiceClientCases)
             .Include(payment => payment.Contract)
             .Include(payment => payment.PaymentSource)
@@ -4916,6 +4928,7 @@ public partial class CasesV2Controller : ControllerBase
             CaseId = clientCase.Id,
             CaseTitle = clientCase.Title,
             OwnerName = ResolveCaseOwnerName(clientCase),
+            HasCompletePaymentVisibility = paymentsVisibility.SeesAll,
             Totals = BuildFinanceTotals(clientCase, visiblePayments),
             Calendar = BuildFinanceCalendar(visiblePayments, statusClock.TodayDate),
             Invoices = BuildFinanceInvoices(visiblePayments, linkedContracts, statusClock.TodayDate),
@@ -10926,8 +10939,23 @@ public partial class CasesV2Controller : ControllerBase
     private static bool SameDate(DateTime? left, DateTime? right)
         => left.HasValue == right.HasValue && (!left.HasValue || left.Value.Date == right!.Value.Date);
 
-    private async Task ApplyFinanceSummaryAsync(IReadOnlyCollection<ClientCase> cases, CancellationToken ct)
+    private async Task ApplyFinanceSummaryAsync(
+        IReadOnlyCollection<ClientCase> cases,
+        CancellationToken ct,
+        DataVisibilityAccess? paymentsVisibility = null)
     {
+        paymentsVisibility ??= await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
+        if (paymentsVisibility is null)
+        {
+            HideCaseFinanceData(cases);
+            return;
+        }
+
+        foreach (var clientCase in cases)
+        {
+            clientCase.HasCompletePaymentVisibility = paymentsVisibility.SeesAll;
+        }
+
         var caseIds = cases
             .Select(item => item.Id)
             .Where(id => id > 0)
@@ -10942,6 +10970,7 @@ public partial class CasesV2Controller : ControllerBase
         var caseIdSet = caseIds.ToHashSet();
         var payments = await _db.Payments
             .AsNoTracking()
+            .ApplyPaymentVisibility(paymentsVisibility)
             .Where(payment => payment.Status != PaymentStatus.Cancelled)
             .Where(payment =>
                 (payment.ClientCaseId.HasValue && caseIds.Contains(payment.ClientCaseId.Value)) ||
@@ -12430,6 +12459,7 @@ public partial class CasesV2Controller : ControllerBase
         return new ClientCaseSummaryDto
         {
             Id = clientCase.Id,
+            HasCompletePaymentVisibility = clientCase.HasCompletePaymentVisibility,
             Title = clientCase.Title,
             CaseNumber = clientCase.CaseNumber,
             Status = clientCase.Status.ToString(),
@@ -15697,6 +15727,7 @@ public partial class CasesV2Controller : ControllerBase
     public sealed class ClientCaseSummaryDto
     {
         public int Id { get; set; }
+        public bool? HasCompletePaymentVisibility { get; set; }
         public string Title { get; set; } = string.Empty;
         public string CaseNumber { get; set; } = string.Empty;
         public string Status { get; set; } = string.Empty;
@@ -15729,6 +15760,7 @@ public partial class CasesV2Controller : ControllerBase
         public int CaseId { get; set; }
         public string CaseTitle { get; set; } = string.Empty;
         public string OwnerName { get; set; } = string.Empty;
+        public bool HasCompletePaymentVisibility { get; set; } = true;
         public ClientCaseFinanceTotalsDto Totals { get; set; } = new();
         public ClientCaseFinanceCalendarDto Calendar { get; set; } = new();
         public IReadOnlyList<ClientCaseFinanceInvoiceDto> Invoices { get; set; } = [];

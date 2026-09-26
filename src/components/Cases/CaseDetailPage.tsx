@@ -4058,6 +4058,10 @@ export function CaseDetailPage({
           <SummaryCard label="Судебная проверка" value={courtSyncSummary.value} tone={courtSyncSummary.tone} />
         </div>
 
+        {canViewFinance && caseItem.hasCompletePaymentVisibility === false ? (
+          <p className="text-xs text-amber-800" role="note">Финансовые суммы выше учитывают только доступные вам платежи и могут быть неполными.</p>
+        ) : null}
+
         {proceduralDeadlinesError && !proceduralDeadlinesLoading ? (
           <div role="alert" className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
             {proceduralDeadlinesError} Нажмите «Обновить», чтобы повторить проверку.
@@ -5965,6 +5969,12 @@ function FinancePanel({
           ) : null}
         </div>
       </div>
+
+      {detail?.hasCompletePaymentVisibility === false ? (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900" role="note">
+          Показаны только доступные вам платежи. Итоги, долг и маржа по делу могут быть неполными.
+        </div>
+      ) : null}
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <SummaryCard label="Гонорар" value={formatMoney(totals.feeAmount)} />

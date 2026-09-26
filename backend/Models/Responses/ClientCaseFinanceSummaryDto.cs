@@ -14,6 +14,8 @@ public class ClientCaseFinanceSummaryDto
 
     public DateTime? CaseCreatedAt { get; set; }
 
+    public bool HasCompletePaymentVisibility { get; set; } = true;
+
     public decimal IncomeTotal { get; set; }
 
     public decimal IncomePaid { get; set; }

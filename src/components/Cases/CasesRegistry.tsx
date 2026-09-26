@@ -1756,6 +1756,12 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
           </section>
         ) : null}
 
+        {canViewFinance && items.some((item) => item.hasCompletePaymentVisibility === false) ? (
+          <div role="status" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+            В реестре показаны только доступные вам платежи. Суммы по отдельным делам и выбранной группе могут быть неполными.
+          </div>
+        ) : null}
+
         {selectedIds.length > 0 ? (
           <div className="rounded-xl border border-blue-100 bg-blue-50/60 p-4 shadow-sm">
             <div className="flex flex-col gap-3 xl:flex-row xl:flex-wrap xl:items-center">

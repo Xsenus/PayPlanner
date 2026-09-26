@@ -468,6 +468,7 @@ public class ClientsController : ControllerBase
                 return new ClientCaseFinanceSummaryDto
                 {
                     CaseId = caseId,
+                    HasCompletePaymentVisibility = paymentsVisibility.SeesAll,
                     ClientId = meta.ClientId,
                     ClientName = meta.ClientName,
                     CaseTitle = meta.Title,
@@ -717,6 +718,7 @@ public class ClientsController : ControllerBase
                     summary = new ClientCaseFinanceSummaryDto
                     {
                         CaseId = clientCase.Id,
+                        HasCompletePaymentVisibility = paymentsVisibility.SeesAll,
                         ClientId = clientCase.ClientId,
                         ClientName = clientCase.Client?.Name,
                         CaseTitle = clientCase.Title,

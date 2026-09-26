@@ -144,12 +144,13 @@ public class CasesV2ControllerTests
         Assert.Equal(clientCase.ActivityConfirmedAt, detailsItem.LastMeaningfulActivityAt);
         Assert.Equal(clientCase.ActivityConfirmedAt.Value.AddDays(14), detailsItem.NextInactivityControlAt);
         Assert.Empty(detailsItem.InactivityControlExclusionReason);
-        Assert.Equal(8, interceptor.Commands.Count);
+        // The case card now resolves payment visibility before loading its finance section.
+        Assert.Equal(9, interceptor.Commands.Count);
 
         interceptor.Commands.Clear();
         var summary = await CreateController(db, owner).GetSummary(clientCase.Id, CancellationToken.None);
         Assert.IsType<OkObjectResult>(summary.Result);
-        Assert.Equal(5, interceptor.Commands.Count);
+        Assert.Equal(6, interceptor.Commands.Count);
         Assert.DoesNotContain(
             interceptor.Commands,
             command => command.Contains("Description", StringComparison.OrdinalIgnoreCase));
@@ -1596,7 +1597,9 @@ public class CasesV2ControllerTests
             && command.Contains("ClientCaseDocuments", StringComparison.Ordinal)
             && command.Contains("ClientCaseCourtEvents", StringComparison.Ordinal));
         Assert.Contains("UNION ALL", activityCommand, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal(10, interceptor.Commands.Count);
+        // Проверка области видимости платежей требует один дополнительный запрос к роли;
+        // остальные запросы реестра по-прежнему выполняются пакетно, без N+1.
+        Assert.Equal(11, interceptor.Commands.Count);
     }
 
     [Fact]
@@ -1915,7 +1918,8 @@ public class CasesV2ControllerTests
         var dto = Assert.IsType<CasesV2Controller.ClientCaseFinanceDetailDto>(ok.Value);
 
         Assert.Equal(clientCase.Id, dto.CaseId);
-        Assert.Equal(6, interceptor.Commands.Count);
+        // Payment visibility is checked independently of the case access check.
+        Assert.Equal(7, interceptor.Commands.Count);
         var linkedContractsCommand = Assert.Single(interceptor.Commands, command =>
             command.Contains("ClientCaseContracts", StringComparison.OrdinalIgnoreCase) &&
             command.Contains("ContractInvoices", StringComparison.OrdinalIgnoreCase) &&
@@ -2229,6 +2233,84 @@ public class CasesV2ControllerTests
         Assert.Equal(0m, dto.IncomePaid);
         Assert.Equal(0m, dto.IncomeOutstanding);
         Assert.Empty(dto.Payments);
+    }
+
+    [Fact]
+    public async Task CaseFinanceRoutes_RespectLimitedPaymentVisibility()
+    {
+        await using var db = await CreateContextAsync();
+        var viewer = await CreateUserAsync(db, "case-finance-limited@example.com", "Юрист", DataVisibilityScope.All);
+        var other = await CreateUserAsync(db, "case-finance-other@example.com", "Другой", DataVisibilityScope.All);
+        await GrantSectionPermissionAsync(db, viewer, RolePermissionCatalog.Payments, viewScope: DataVisibilityScope.Own);
+
+        var visibleClient = new Client { Name = "Мой плательщик", IsActive = true, ResponsibleUserId = viewer.Id };
+        var hiddenClient = new Client { Name = "Чужой плательщик", IsActive = true, ResponsibleUserId = other.Id };
+        var clientCase = new ClientCase
+        {
+            Client = hiddenClient,
+            ResponsibleUserId = viewer.Id,
+            Title = "Дело с частичным доступом к платежам",
+            Status = ClientCaseStatus.Open,
+        };
+        db.Clients.Add(visibleClient);
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+
+        var visiblePayment = new Payment
+        {
+            Client = visibleClient,
+            ClientCase = clientCase,
+            DocumentKind = DocumentKind.Payment,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Completed,
+            Amount = 10_000m,
+            PaidAmount = 10_000m,
+            Date = DateTime.UtcNow.Date,
+            PlannedDate = DateTime.UtcNow.Date,
+        };
+        var hiddenPayment = new Payment
+        {
+            Client = hiddenClient,
+            ClientCase = clientCase,
+            DocumentKind = DocumentKind.Payment,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Completed,
+            Amount = 20_000m,
+            PaidAmount = 20_000m,
+            Date = DateTime.UtcNow.Date,
+            PlannedDate = DateTime.UtcNow.Date,
+        };
+        db.Payments.AddRange(visiblePayment, hiddenPayment);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        var controller = CreateController(db, viewer);
+
+        var detail = Assert.IsType<ClientCase>(Assert.IsType<OkObjectResult>(
+            await controller.GetById(clientCase.Id, CancellationToken.None)).Value);
+        Assert.False(detail.HasCompletePaymentVisibility);
+        Assert.Equal(10_000m, detail.IncomeTotal);
+        Assert.Equal(visiblePayment.Id, Assert.Single(detail.Payments).Id);
+
+        var finance = Assert.IsType<CasesV2Controller.ClientCaseFinanceDetailDto>(Assert.IsType<OkObjectResult>(
+            (await controller.GetFinance(clientCase.Id, CancellationToken.None)).Result).Value);
+        Assert.False(finance.HasCompletePaymentVisibility);
+        Assert.Equal(10_000m, finance.Totals.IncomeTotal);
+        Assert.Equal(visiblePayment.Id, Assert.Single(finance.Payments).Id);
+
+        var registry = await controller.Get(
+            clientId: null, legalEntityId: null, status: null, search: null,
+            responsibleUserId: null, caseType: null, priority: null,
+            from: null, to: null, minFee: null, maxFee: null,
+            sortBy: null, sortDir: null, page: 1, pageSize: 50,
+            ct: CancellationToken.None);
+        var registryCase = Assert.Single(GetAnonymousItems(Assert.IsType<OkObjectResult>(registry).Value));
+        Assert.False(registryCase.HasCompletePaymentVisibility);
+        Assert.Equal(10_000m, registryCase.IncomeTotal);
+
+        var summary = Assert.IsType<CasesV2Controller.ClientCaseSummaryDto>(Assert.IsType<OkObjectResult>(
+            (await controller.GetSummary(clientCase.Id, CancellationToken.None)).Result).Value);
+        Assert.False(summary.HasCompletePaymentVisibility);
+        Assert.Equal(10_000m, summary.PaidAmount);
     }
 
     [Fact]

@@ -1715,6 +1715,22 @@ describe('CaseDetailPage', () => {
     expect(screen.getByText(/115\s*000\s*₽/u)).toBeTruthy();
   });
 
+  it('warns when finance totals include only visible payments', async () => {
+    const fullFinance = await apiService.getCaseFinance(15);
+    vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({ hasCompletePaymentVisibility: false }));
+    vi.mocked(apiService.getCaseFinance).mockResolvedValue({
+      ...fullFinance,
+      hasCompletePaymentVisibility: false,
+    });
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    expect(await screen.findByText(/Финансовые суммы выше учитывают только доступные вам платежи/u)).toBeTruthy();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Финансы' }).at(-1)!);
+
+    expect(await screen.findByText(/Показаны только доступные вам платежи/u)).toBeTruthy();
+  });
+
   it('hides finance tab and skips finance loading without finance permission', async () => {
     window.sessionStorage.setItem(
       'pp.case-detail.15.view.v1',

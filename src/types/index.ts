@@ -502,6 +502,7 @@ export interface CleanedAddress {
 
 export interface ClientCase {
   id: number;
+  hasCompletePaymentVisibility?: boolean | null;
   clientId?: number | null;
   legalEntityId?: number | null;
   client?: Client | null;
@@ -1098,6 +1099,7 @@ export interface ClientCaseConversationAttachment {
 
 export interface ClientCaseSummary {
   id: number;
+  hasCompletePaymentVisibility?: boolean | null;
   title: string;
   caseNumber: string;
   status: string;
@@ -1149,6 +1151,7 @@ export interface ClientCaseAccessRequestResolution {
 
 export interface ClientCaseFinanceDetail {
   caseId: number;
+  hasCompletePaymentVisibility?: boolean;
   caseTitle: string;
   ownerName: string;
   totals: ClientCaseFinanceTotals;
@@ -3927,6 +3930,7 @@ export interface ClientStats {
 
 export interface ClientCaseFinanceSummary {
   caseId: number;
+  hasCompletePaymentVisibility?: boolean;
   clientId?: number | null;
   clientName?: string | null;
   caseTitle?: string | null;
