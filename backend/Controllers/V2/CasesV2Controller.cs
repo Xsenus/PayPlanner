@@ -2359,6 +2359,7 @@ public partial class CasesV2Controller : ControllerBase
 
     private static byte[] BuildRegistryCsv(IReadOnlyCollection<ClientCase> items, TimeZoneInfo timeZone, bool canViewFinance)
     {
+        var hasPartialFinance = canViewFinance && items.Any(item => item.HasCompletePaymentVisibility == false);
         var header = new List<string>
         {
             "№ дела",
@@ -2387,7 +2388,9 @@ public partial class CasesV2Controller : ControllerBase
         };
         if (canViewFinance)
         {
-            header.InsertRange(15, ["Гонорар", "Счета", "Оплачено", "Долг"]);
+            header.InsertRange(15, hasPartialFinance
+                ? ["Гонорар", "Счета (доступные)", "Оплачено (доступные платежи)", "Долг (расчёт по доступным платежам)"]
+                : ["Гонорар", "Счета", "Оплачено", "Долг"]);
         }
 
         var lines = new List<string>
@@ -2447,6 +2450,7 @@ public partial class CasesV2Controller : ControllerBase
 
     private static byte[] BuildRegistryExcel(IReadOnlyCollection<ClientCase> items, DateTime generatedAtLocal, TimeZoneInfo timeZone, bool canViewFinance)
     {
+        var hasPartialFinance = canViewFinance && items.Any(item => item.HasCompletePaymentVisibility == false);
         var generatedAt = FormatUserGeneratedAt(generatedAtLocal);
         var totalFee = items.Sum(item => item.FeeAmount);
         var totalIncome = items.Sum(item => item.IncomeTotal);
@@ -2462,14 +2466,18 @@ public partial class CasesV2Controller : ControllerBase
         AppendExcelRow(builder, "Реестр дел");
         AppendExcelRow(builder, "Сформировано", generatedAt);
         AppendExcelRow(builder, "Ограничение выгрузки", $"Первые {MaxRegistryExportRows} строк текущей выборки");
+        if (hasPartialFinance)
+        {
+            AppendExcelRow(builder, "Доступ к платежам", "Финансовые суммы рассчитаны только по доступным платежам и могут быть неполными.");
+        }
         AppendExcelRow(builder);
         AppendExcelRow(builder, "Дел", items.Count.ToString(CultureInfo.InvariantCulture));
         if (canViewFinance)
         {
             AppendExcelRow(builder, "Гонорар", FormatMoney(totalFee));
-            AppendExcelRow(builder, "Счета", FormatMoney(totalIncome));
-            AppendExcelRow(builder, "Оплачено", FormatMoney(totalPaid));
-            AppendExcelRow(builder, "Долг", FormatMoney(totalDebt));
+            AppendExcelRow(builder, hasPartialFinance ? "Счета (доступные)" : "Счета", FormatMoney(totalIncome));
+            AppendExcelRow(builder, hasPartialFinance ? "Оплачено (доступные платежи)" : "Оплачено", FormatMoney(totalPaid));
+            AppendExcelRow(builder, hasPartialFinance ? "Долг (расчёт по доступным платежам)" : "Долг", FormatMoney(totalDebt));
         }
         AppendExcelRow(builder);
         var header = new List<string?>
@@ -2500,7 +2508,9 @@ public partial class CasesV2Controller : ControllerBase
         };
         if (canViewFinance)
         {
-            header.InsertRange(15, ["Гонорар", "Счета", "Оплачено", "Долг"]);
+            header.InsertRange(15, hasPartialFinance
+                ? ["Гонорар", "Счета (доступные)", "Оплачено (доступные платежи)", "Долг (расчёт по доступным платежам)"]
+                : ["Гонорар", "Счета", "Оплачено", "Долг"]);
         }
         AppendExcelRow(builder, header.ToArray());
 
@@ -2559,6 +2569,7 @@ public partial class CasesV2Controller : ControllerBase
 
     private static string BuildRegistryPrintHtml(IReadOnlyCollection<ClientCase> items, DateTime generatedAtLocal, TimeZoneInfo timeZone, bool canViewFinance)
     {
+        var hasPartialFinance = canViewFinance && items.Any(item => item.HasCompletePaymentVisibility == false);
         var generatedAt = FormatUserGeneratedAt(generatedAtLocal);
         var totalFee = items.Sum(item => item.FeeAmount);
         var totalIncome = items.Sum(item => item.IncomeTotal);
@@ -2568,17 +2579,17 @@ public partial class CasesV2Controller : ControllerBase
         var financeSummary = canViewFinance
             ? $"""
                 <div><span>Гонорар</span><strong>{Html(FormatMoney(totalFee))}</strong></div>
-                <div><span>Счета</span><strong>{Html(FormatMoney(totalIncome))}</strong></div>
-                <div><span>Оплачено</span><strong>{Html(FormatMoney(totalPaid))}</strong></div>
-                <div><span>Долг</span><strong>{Html(FormatMoney(totalDebt))}</strong></div>
+                <div><span>{(hasPartialFinance ? "Счета (доступные)" : "Счета")}</span><strong>{Html(FormatMoney(totalIncome))}</strong></div>
+                <div><span>{(hasPartialFinance ? "Оплачено (доступные платежи)" : "Оплачено")}</span><strong>{Html(FormatMoney(totalPaid))}</strong></div>
+                <div><span>{(hasPartialFinance ? "Долг (расчёт по доступным платежам)" : "Долг")}</span><strong>{Html(FormatMoney(totalDebt))}</strong></div>
               """
             : string.Empty;
         var financeHeaders = canViewFinance
             ? """
                     <th>Гонорар</th>
-                    <th>Счета</th>
-                    <th>Оплачено</th>
-                    <th>Долг</th>
+                    <th>{(hasPartialFinance ? "Счета (доступные)" : "Счета")}</th>
+                    <th>{(hasPartialFinance ? "Оплачено (доступные платежи)" : "Оплачено")}</th>
+                    <th>{(hasPartialFinance ? "Долг (расчёт по доступным платежам)" : "Долг")}</th>
               """
             : string.Empty;
         var rows = string.Join('\n', items.Select(item => $"""
@@ -2634,6 +2645,7 @@ public partial class CasesV2Controller : ControllerBase
             <body>
               <h1>Реестр дел</h1>
               <div class="meta">Сформировано: {{Html(generatedAt)}}. В печатную форму попали первые {{MaxRegistryExportRows}} строк текущей выборки.</div>
+              {{(hasPartialFinance ? "<div class=\"meta\">Финансовые суммы рассчитаны только по доступным платежам и могут быть неполными.</div>" : string.Empty)}}
               <section class="summary">
                 <div><span>Дел</span><strong>{{items.Count}}</strong></div>
                 {{financeSummary}}

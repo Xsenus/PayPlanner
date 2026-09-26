@@ -1217,6 +1217,7 @@ public class CasesV2ControllerTests
         Assert.Contains("№ дела", csv);
         Assert.Contains("CASE-001", csv);
         Assert.Contains("Видимое дело", csv);
+        Assert.DoesNotContain("Оплачено (доступные платежи)", csv);
         Assert.Contains("В работе", csv);
         Assert.Contains("05.06.2026 16:00", csv);
         Assert.DoesNotContain("05.06.2026 12:00", csv);
@@ -1248,6 +1249,7 @@ public class CasesV2ControllerTests
         Assert.Contains("Excel.Sheet", excel);
         Assert.Contains("CASE-001", excel);
         Assert.Contains("Видимое дело", excel);
+        Assert.DoesNotContain("Финансовые суммы рассчитаны только по доступным платежам", excel);
         Assert.Contains("05.06.2026 16:00", excel);
         Assert.DoesNotContain("05.06.2026 12:00", excel);
         Assert.DoesNotContain("CASE-002", excel);
@@ -1300,6 +1302,7 @@ public class CasesV2ControllerTests
         var print = Assert.IsType<ContentResult>(printResult);
         Assert.Equal("text/html; charset=utf-8", print.ContentType);
         Assert.Contains("Реестр дел", print.Content);
+        Assert.DoesNotContain("Финансовые суммы рассчитаны только по доступным платежам", print.Content);
         Assert.Contains("CASE-001", print.Content);
         Assert.Contains("05.06.2026 16:00", print.Content);
         Assert.DoesNotContain("05.06.2026 12:00", print.Content);
@@ -2311,6 +2314,34 @@ public class CasesV2ControllerTests
             (await controller.GetSummary(clientCase.Id, CancellationToken.None)).Result).Value);
         Assert.False(summary.HasCompletePaymentVisibility);
         Assert.Equal(10_000m, summary.PaidAmount);
+
+        var csvResult = await controller.ExportRegistryCsv(
+            clientId: null, legalEntityId: null, status: null, search: null,
+            responsibleUserId: null, caseType: null, priority: null,
+            from: null, to: null, minFee: null, maxFee: null,
+            sortBy: null, sortDir: null, scope: null,
+            ct: CancellationToken.None);
+        var csv = Encoding.UTF8.GetString(Assert.IsType<FileContentResult>(csvResult).FileContents);
+        Assert.Contains("Оплачено (доступные платежи)", csv);
+        Assert.Contains("Долг (расчёт по доступным платежам)", csv);
+
+        var excelResult = await controller.ExportRegistryExcel(
+            clientId: null, legalEntityId: null, status: null, search: null,
+            responsibleUserId: null, caseType: null, priority: null,
+            from: null, to: null, minFee: null, maxFee: null,
+            sortBy: null, sortDir: null, scope: null,
+            ct: CancellationToken.None);
+        var excel = Encoding.UTF8.GetString(Assert.IsType<FileContentResult>(excelResult).FileContents);
+        Assert.Contains("Финансовые суммы рассчитаны только по доступным платежам", excel);
+
+        var printResult = await controller.PrintRegistry(
+            clientId: null, legalEntityId: null, status: null, search: null,
+            responsibleUserId: null, caseType: null, priority: null,
+            from: null, to: null, minFee: null, maxFee: null,
+            sortBy: null, sortDir: null, scope: null,
+            ct: CancellationToken.None);
+        var html = Assert.IsType<ContentResult>(printResult).Content;
+        Assert.Contains("Финансовые суммы рассчитаны только по доступным платежам", html);
     }
 
     [Fact]
