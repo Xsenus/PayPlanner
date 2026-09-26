@@ -9,6 +9,22 @@ afterEach(() => {
   sessionStorage.clear();
 });
 
+describe('apiService task invoice link', () => {
+  it('passes the explicit work-in-invoice confirmation to the server', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({ id: 42 }), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await apiService.linkTaskBillingInvoice(42, 901, true);
+
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/tasks/42/billing-invoice');
+    expect(options?.method).toBe('PUT');
+    expect(options?.body).toBe(JSON.stringify({ invoiceId: 901, confirmedIncludedInInvoice: true }));
+  });
+});
+
 describe('apiService public messenger document', () => {
   it('sends the one-time token only in a no-referrer POST body', async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response('pdf', {

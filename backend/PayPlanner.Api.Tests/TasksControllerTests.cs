@@ -2310,8 +2310,13 @@ public class TasksControllerTests
             Assert.IsType<OkObjectResult>(optionsResult.Result).Value);
         Assert.Equal(invoice.Id, Assert.Single(options).Id);
 
-        var result = await controller.LinkTaskBillingInvoice(task.Id,
+        var unconfirmed = await controller.LinkTaskBillingInvoice(task.Id,
             new LinkTaskBillingInvoiceRequest { InvoiceId = invoice.Id }, CancellationToken.None);
+        Assert.IsType<BadRequestObjectResult>(unconfirmed.Result);
+        Assert.Null((await db.TaskJournalItems.SingleAsync(item => item.Id == task.Id)).BillingInvoiceId);
+
+        var result = await controller.LinkTaskBillingInvoice(task.Id,
+            new LinkTaskBillingInvoiceRequest { InvoiceId = invoice.Id, ConfirmedIncludedInInvoice = true }, CancellationToken.None);
         var dto = Assert.IsType<TaskJournalItemDto>(Assert.IsType<OkObjectResult>(result.Result).Value);
         Assert.Equal("invoiced", dto.BillingStatus);
         Assert.Equal("INV-OLD-16", dto.BillingInvoiceNumber);
@@ -2347,9 +2352,9 @@ public class TasksControllerTests
         var controller = CreateController(db, new RecordingNotificationService(), author);
 
         var foreignResult = await controller.LinkTaskBillingInvoice(task.Id,
-            new LinkTaskBillingInvoiceRequest { InvoiceId = foreignInvoice.Id }, CancellationToken.None);
+            new LinkTaskBillingInvoiceRequest { InvoiceId = foreignInvoice.Id, ConfirmedIncludedInInvoice = true }, CancellationToken.None);
         var cancelledResult = await controller.LinkTaskBillingInvoice(task.Id,
-            new LinkTaskBillingInvoiceRequest { InvoiceId = cancelledInvoice.Id }, CancellationToken.None);
+            new LinkTaskBillingInvoiceRequest { InvoiceId = cancelledInvoice.Id, ConfirmedIncludedInInvoice = true }, CancellationToken.None);
 
         Assert.IsType<BadRequestObjectResult>(foreignResult.Result);
         Assert.IsType<BadRequestObjectResult>(cancelledResult.Result);
@@ -2370,7 +2375,7 @@ public class TasksControllerTests
 
         var options = await controller.GetTaskBillingInvoices(task.Id, null, CancellationToken.None);
         var linked = await controller.LinkTaskBillingInvoice(task.Id,
-            new LinkTaskBillingInvoiceRequest { InvoiceId = 1 }, CancellationToken.None);
+            new LinkTaskBillingInvoiceRequest { InvoiceId = 1, ConfirmedIncludedInInvoice = true }, CancellationToken.None);
 
         Assert.IsType<ForbidResult>(options.Result);
         Assert.IsType<ForbidResult>(linked.Result);

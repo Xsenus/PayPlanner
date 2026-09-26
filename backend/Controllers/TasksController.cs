@@ -3466,6 +3466,11 @@ public class TasksController : ControllerBase
             return BadRequest(new { message = "Выберите счёт." });
         }
 
+        if (!request.ConfirmedIncludedInInvoice)
+        {
+            return BadRequest(new { message = "Подтвердите, что работа по задаче уже учтена в выбранном счёте." });
+        }
+
         if (!await _db.HasUserSectionPermissionAsync(User, RolePermissionCatalog.Accounts,
                 permission => permission.CanEdit, ct))
         {

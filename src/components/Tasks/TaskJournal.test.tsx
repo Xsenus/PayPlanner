@@ -1472,7 +1472,7 @@ describe('TaskJournal', () => {
     fireEvent.click(within(dialog).getByRole('checkbox', { name: /Подтверждаю, что работа по задаче/ }));
     fireEvent.click(linkButton);
 
-    await waitFor(() => expect(apiMock.linkTaskBillingInvoice).toHaveBeenCalledWith(task.id, 901));
+    await waitFor(() => expect(apiMock.linkTaskBillingInvoice).toHaveBeenCalledWith(task.id, 901, true));
   });
 
   it('shows court hearing and meeting types in filters and the task form', async () => {

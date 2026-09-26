@@ -5097,10 +5097,10 @@ export class ApiService {
     return this.request<TaskBillingInvoiceOption[]>(`/tasks/${id}/billing-invoices${query}`);
   }
 
-  async linkTaskBillingInvoice(id: number, invoiceId: number) {
+  async linkTaskBillingInvoice(id: number, invoiceId: number, confirmedIncludedInInvoice: boolean) {
     return this.request<TaskJournalItem>(`/tasks/${id}/billing-invoice`, {
       method: 'PUT',
-      body: JSON.stringify({ invoiceId }),
+      body: JSON.stringify({ invoiceId, confirmedIncludedInInvoice }),
     });
   }
 

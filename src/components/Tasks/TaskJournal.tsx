@@ -8517,7 +8517,7 @@ function TaskBillingEditDialog({
     setSaving(true);
     setError('');
     try {
-      const updated = await apiService.linkTaskBillingInvoice(task.id, Number(invoiceId));
+      const updated = await apiService.linkTaskBillingInvoice(task.id, Number(invoiceId), confirmedInvoiceContents);
       await onUpdated(updated);
       toast.success('Задача связана со счётом. Сумма счёта не менялась.', 'Журнал задач');
       onClose();

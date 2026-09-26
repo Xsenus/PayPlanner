@@ -83,4 +83,5 @@ public sealed class UpdateTaskBillingClassificationRequest
 public sealed class LinkTaskBillingInvoiceRequest
 {
     public int InvoiceId { get; set; }
+    public bool ConfirmedIncludedInInvoice { get; set; }
 }
