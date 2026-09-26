@@ -22,7 +22,7 @@ public class ProviderSpecificSqlTests
     }
 
     [Fact]
-    public void Repository_DoesNotContainUnguardedForUpdateSqlOutsideInvoiceLock()
+    public void Repository_ForUpdateSqlIsLimitedToGuardedInvoiceAndTaskLocks()
     {
         var root = FindRepositoryRoot();
         var files = Directory
@@ -38,8 +38,24 @@ public class ProviderSpecificSqlTests
             .Select(item => $"{Path.GetRelativePath(root, item.Path)}:{item.Line}:{item.Text.Trim()}")
             .ToList();
 
-        var match = Assert.Single(matches);
-        Assert.Contains("InvoicesController.cs", match, StringComparison.Ordinal);
+        Assert.Equal(4, matches.Count);
+        Assert.Single(matches, match => match.Contains("InvoicesController.cs", StringComparison.Ordinal));
+        Assert.Equal(3, matches.Count(match => match.Contains("TasksController.cs", StringComparison.Ordinal)));
+
+        var taskSource = File.ReadAllText(Path.Combine(root, "backend", "Controllers", "TasksController.cs"));
+        var classificationStart = taskSource.IndexOf("public async Task<ActionResult<TaskJournalItemDto>> UpdateTaskBillingClassification", StringComparison.Ordinal);
+        var classificationEnd = taskSource.IndexOf("[HttpGet(\"{id:int}/billing-invoices\")]", classificationStart, StringComparison.Ordinal);
+        Assert.True(classificationStart >= 0 && classificationEnd > classificationStart);
+        var classificationMethod = taskSource[classificationStart..classificationEnd];
+        Assert.Contains("if (_db.Database.IsNpgsql())", classificationMethod, StringComparison.Ordinal);
+        Assert.Equal(1, classificationMethod.Split("FOR UPDATE", StringSplitOptions.None).Length - 1);
+
+        var linkStart = taskSource.IndexOf("public async Task<ActionResult<TaskJournalItemDto>> LinkTaskBillingInvoice", StringComparison.Ordinal);
+        var linkEnd = taskSource.IndexOf("private IQueryable<Payment> EligibleTaskBillingInvoices", linkStart, StringComparison.Ordinal);
+        Assert.True(linkStart >= 0 && linkEnd > linkStart);
+        var linkMethod = taskSource[linkStart..linkEnd];
+        Assert.Contains("if (_db.Database.IsNpgsql())", linkMethod, StringComparison.Ordinal);
+        Assert.Equal(2, linkMethod.Split("FOR UPDATE", StringSplitOptions.None).Length - 1);
     }
 
     private static string FindRepositoryRoot()

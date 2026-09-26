@@ -2212,6 +2212,171 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task UpdateTaskBillingClassification_ReclassifiesUnbilledTaskAndRecordsHistory()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "billing-reclassify@example.com", "Постановщик");
+        var client = await CreateClientAsync(db, "Клиент");
+        var clientCase = await CreateCaseAsync(db, client.Id, "Дело");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, author.Id, clientCase.Id);
+        task.ClientBillingClassification = TaskClientBillingClassification.Billable;
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.UpdateTaskBillingClassification(task.Id,
+            new UpdateTaskBillingClassificationRequest { Classification = TaskClientBillingClassification.Internal },
+            CancellationToken.None);
+
+        var dto = Assert.IsType<TaskJournalItemDto>(Assert.IsType<OkObjectResult>(result.Result).Value);
+        Assert.Equal("internal", dto.BillingStatus);
+        Assert.Null(dto.BillingInvoiceId);
+        Assert.Equal(TaskClientBillingClassification.Internal,
+            (await db.TaskJournalItems.SingleAsync(item => item.Id == task.Id)).ClientBillingClassification);
+        Assert.Contains(await db.TaskJournalComments.Where(item => item.TaskJournalItemId == task.Id).ToListAsync(),
+            item => item.Text.Contains("платная без счёта → неоплачиваемая", StringComparison.Ordinal));
+
+        var restored = await controller.UpdateTaskBillingClassification(task.Id,
+            new UpdateTaskBillingClassificationRequest { Classification = TaskClientBillingClassification.Billable },
+            CancellationToken.None);
+        Assert.Equal("unbilled", Assert.IsType<TaskJournalItemDto>(Assert.IsType<OkObjectResult>(restored.Result).Value).BillingStatus);
+    }
+
+    [Fact]
+    public async Task UpdateTaskBillingClassification_DoesNotHideTaskFromIssuedInvoice()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "billing-invoiced@example.com", "Постановщик");
+        var client = await CreateClientAsync(db, "Клиент");
+        var clientCase = await CreateCaseAsync(db, client.Id, "Дело");
+        var invoice = new Payment { Account = "INV-16", DocumentKind = DocumentKind.Invoice, Type = PaymentType.Income, Date = DateTime.UtcNow.Date };
+        db.Payments.Add(invoice);
+        await db.SaveChangesAsync();
+        var task = await CreateTaskAsync(db, author.Id, client.Id, author.Id, clientCase.Id);
+        task.ClientBillingClassification = TaskClientBillingClassification.Billable;
+        task.BillingInvoiceId = invoice.Id;
+        await db.SaveChangesAsync();
+
+        var result = await CreateController(db, new RecordingNotificationService(), author)
+            .UpdateTaskBillingClassification(task.Id,
+                new UpdateTaskBillingClassificationRequest { Classification = TaskClientBillingClassification.Internal },
+                CancellationToken.None);
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+        var stored = await db.TaskJournalItems.SingleAsync(item => item.Id == task.Id);
+        Assert.Equal(TaskClientBillingClassification.Billable, stored.ClientBillingClassification);
+        Assert.Equal(invoice.Id, stored.BillingInvoiceId);
+    }
+
+    [Fact]
+    public async Task UpdateTaskBillingClassification_RejectsBillableTaskWithoutClientAndCase()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "billing-internal@example.com", "Постановщик");
+        var task = await CreateTaskAsync(db, author.Id, null, author.Id);
+        task.ClientBillingClassification = TaskClientBillingClassification.Internal;
+        await db.SaveChangesAsync();
+
+        var result = await CreateController(db, new RecordingNotificationService(), author)
+            .UpdateTaskBillingClassification(task.Id,
+                new UpdateTaskBillingClassificationRequest { Classification = TaskClientBillingClassification.Billable },
+                CancellationToken.None);
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+        Assert.Equal(TaskClientBillingClassification.Internal,
+            (await db.TaskJournalItems.SingleAsync(item => item.Id == task.Id)).ClientBillingClassification);
+    }
+
+    [Fact]
+    public async Task LinkTaskBillingInvoice_LinksPreviouslyIssuedInvoiceWithoutChangingItsAmount()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "billing-link@example.com", "Постановщик");
+        var client = await CreateClientAsync(db, "Клиент");
+        var clientCase = await CreateCaseAsync(db, client.Id, "Дело");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, author.Id, clientCase.Id);
+        task.ClientBillingClassification = TaskClientBillingClassification.Billable;
+        var invoice = new Payment
+        {
+            Account = "INV-OLD-16", ClientId = client.Id, ClientCaseId = clientCase.Id,
+            DocumentKind = DocumentKind.Invoice, Type = PaymentType.Income,
+            Date = DateTime.UtcNow.Date, Amount = 4200m,
+        };
+        db.Payments.Add(invoice);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var optionsResult = await controller.GetTaskBillingInvoices(task.Id, null, CancellationToken.None);
+        var options = Assert.IsAssignableFrom<IReadOnlyList<TaskBillingInvoiceOptionDto>>(
+            Assert.IsType<OkObjectResult>(optionsResult.Result).Value);
+        Assert.Equal(invoice.Id, Assert.Single(options).Id);
+
+        var result = await controller.LinkTaskBillingInvoice(task.Id,
+            new LinkTaskBillingInvoiceRequest { InvoiceId = invoice.Id }, CancellationToken.None);
+        var dto = Assert.IsType<TaskJournalItemDto>(Assert.IsType<OkObjectResult>(result.Result).Value);
+        Assert.Equal("invoiced", dto.BillingStatus);
+        Assert.Equal("INV-OLD-16", dto.BillingInvoiceNumber);
+        Assert.Equal(invoice.Id, (await db.TaskJournalItems.SingleAsync(item => item.Id == task.Id)).BillingInvoiceId);
+        Assert.Equal(4200m, (await db.Payments.SingleAsync(item => item.Id == invoice.Id)).Amount);
+        Assert.Contains(await db.TaskJournalComments.Where(item => item.TaskJournalItemId == task.Id).ToListAsync(),
+            item => item.Text.Contains("Сумма и состав счёта не изменены", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task LinkTaskBillingInvoice_RejectsForeignAndCancelledInvoices()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "billing-link-invalid@example.com", "Постановщик");
+        var client = await CreateClientAsync(db, "Клиент");
+        var otherClient = await CreateClientAsync(db, "Другой клиент");
+        var clientCase = await CreateCaseAsync(db, client.Id, "Дело");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, author.Id, clientCase.Id);
+        task.ClientBillingClassification = TaskClientBillingClassification.Billable;
+        var foreignInvoice = new Payment
+        {
+            Account = "INV-FOREIGN", ClientId = otherClient.Id,
+            DocumentKind = DocumentKind.Invoice, Type = PaymentType.Income, Date = DateTime.UtcNow.Date,
+        };
+        var cancelledInvoice = new Payment
+        {
+            Account = "INV-CANCELLED", ClientId = client.Id,
+            DocumentKind = DocumentKind.Invoice, Type = PaymentType.Income,
+            Status = PaymentStatus.Cancelled, Date = DateTime.UtcNow.Date,
+        };
+        db.Payments.AddRange(foreignInvoice, cancelledInvoice);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var foreignResult = await controller.LinkTaskBillingInvoice(task.Id,
+            new LinkTaskBillingInvoiceRequest { InvoiceId = foreignInvoice.Id }, CancellationToken.None);
+        var cancelledResult = await controller.LinkTaskBillingInvoice(task.Id,
+            new LinkTaskBillingInvoiceRequest { InvoiceId = cancelledInvoice.Id }, CancellationToken.None);
+
+        Assert.IsType<BadRequestObjectResult>(foreignResult.Result);
+        Assert.IsType<BadRequestObjectResult>(cancelledResult.Result);
+        Assert.Null((await db.TaskJournalItems.SingleAsync(item => item.Id == task.Id)).BillingInvoiceId);
+    }
+
+    [Fact]
+    public async Task LinkTaskBillingInvoice_RequiresAccountsPermission()
+    {
+        await using var db = await CreateContextAsync();
+        var employee = await CreateTaskUserAsync(db, "billing-no-accounts@example.com", "Сотрудник", canEdit: true);
+        var client = await CreateClientAsync(db, "Клиент");
+        var clientCase = await CreateCaseAsync(db, client.Id, "Дело");
+        var task = await CreateTaskAsync(db, employee.Id, client.Id, employee.Id, clientCase.Id);
+        task.ClientBillingClassification = TaskClientBillingClassification.Billable;
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), employee);
+
+        var options = await controller.GetTaskBillingInvoices(task.Id, null, CancellationToken.None);
+        var linked = await controller.LinkTaskBillingInvoice(task.Id,
+            new LinkTaskBillingInvoiceRequest { InvoiceId = 1 }, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(options.Result);
+        Assert.IsType<ForbidResult>(linked.Result);
+    }
+
+    [Fact]
     public async Task CreateTask_PersistsApprovalDueAt()
     {
         await using var db = await CreateContextAsync();

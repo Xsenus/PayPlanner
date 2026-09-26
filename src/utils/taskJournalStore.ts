@@ -87,6 +87,14 @@ export type TaskJournalTemplateUpsertPayload = Omit<TaskJournalTemplate, 'id' | 
   participants?: TaskJournalTemplateParticipantUpsertPayload[];
 };
 
+export interface TaskBillingInvoiceOption {
+  id: number;
+  number: string;
+  date: string;
+  amount: number;
+  workflowStatus: string;
+}
+
 export interface TaskJournalItem {
   id: number;
   clientId?: number | null;

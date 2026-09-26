@@ -1664,6 +1664,26 @@ public class InvoicesController : ControllerBase
 
         await using var updateTransaction = await _db.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct);
 
+        if (existingInvoiceEntityId.HasValue && existingInvoiceEntityId.Value > 0)
+        {
+            await LockInvoiceAggregateAsync(existingInvoiceEntityId.Value, ct);
+        }
+
+        var linkedTaskBindings = await _db.TaskJournalItems
+            .AsNoTracking()
+            .Where(task => task.BillingInvoiceId == payment.Id)
+            .Select(task => new { task.ClientId, task.LegalEntityId, task.ClientCaseId })
+            .ToListAsync(ct);
+        if (linkedTaskBindings.Any(task =>
+                task.ClientId != request.ClientId
+                || task.LegalEntityId != request.LegalEntityId
+                || (clientCaseValidation.ClientCaseIds.Count > 0
+                    && (!task.ClientCaseId.HasValue
+                        || !clientCaseValidation.ClientCaseIds.Contains(task.ClientCaseId.Value)))))
+        {
+            return BadRequest("Сначала исправьте связи платных задач: новый контрагент или набор дел счёта не совпадает с ними.");
+        }
+
         var resolvedDueDate = ResolveInvoiceDueDate(request, payment, invoiceDate);
         var resolvedExpenseClientId = ResolveInvoiceExpenseClientId(request);
         var resolvedExpenseLegalEntityId = ResolveInvoiceExpenseLegalEntityId(request);
@@ -2035,6 +2055,26 @@ public class InvoicesController : ControllerBase
         foreach (var contractLink in contractLinks)
         {
             contractLink.InvoiceId = clonedRepresentative.Id;
+        }
+
+        var linkedTasks = await _db.TaskJournalItems
+            .Where(task => task.BillingInvoiceId == payment.Id)
+            .ToListAsync(ct);
+        var now = DateTime.UtcNow;
+        foreach (var task in linkedTasks)
+        {
+            task.BillingInvoiceId = clonedRepresentative.Id;
+            task.UpdatedAt = now;
+            _db.TaskJournalComments.Add(new TaskJournalComment
+            {
+                TaskJournalItemId = task.Id,
+                Kind = "history",
+                AuthorUserId = User.GetUserId(),
+                AuthorName = User.GetDisplayName(),
+                Text = $"Связь со счётом №{clonedRepresentative.Account} сохранена после обновления счёта.",
+                CreatedAt = now,
+                UpdatedAt = now,
+            });
         }
 
         await _db.SaveChangesAsync(ct);

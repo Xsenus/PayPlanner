@@ -325,6 +325,54 @@ public class InvoicesControllerCrudTests
     }
 
     [Fact]
+    public async Task Update_RejectsChangingInvoiceOwnerOrCaseWhileTaskIsLinked()
+    {
+        await using var db = await CreateContextAsync();
+        var actorUserId = await CreateUserAsync(db, "Billing Admin", roleName: "admin");
+        var clientId = await CreateClientAsync(db, "Billing Client");
+        var otherClientId = await CreateClientAsync(db, "Other Client");
+        var caseId = await CreateClientCaseAsync(db, clientId, "Billing Case");
+        var otherCaseId = await CreateClientCaseAsync(db, clientId, "Other Case");
+        var task = new TaskJournalItem
+        {
+            ClientId = clientId,
+            ClientCaseId = caseId,
+            ObjectName = "Billing Client - Billing Case",
+            Title = "Paid work",
+            AssigneeName = "Billing Admin",
+            AuthorUserId = actorUserId,
+            AuthorName = "Billing Admin",
+            DueAt = DateTime.UtcNow.AddDays(1),
+            ClientBillingClassification = TaskClientBillingClassification.Billable,
+            BillingModeSnapshot = ContractBillingMode.Actual,
+            BillingDecisionAt = DateTime.UtcNow,
+        };
+        db.TaskJournalItems.Add(task);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, isAdmin: true, userId: actorUserId);
+        var createRequest = CreateRequest("INV-TASK-OWNER", clientId, new DateTime(2026, 7, 15), 0m);
+        createRequest.ClientCaseId = caseId;
+        createRequest.ClientCaseIds = [caseId];
+        createRequest.BillingTaskIds = [task.Id];
+        createRequest.LineItems = [new InvoiceLineItemRequest { Name = "Paid work", Quantity = 1, Unit = "service", Price = 0 }];
+        var created = Assert.IsType<CreatedResult>((await controller.Create(createRequest, CancellationToken.None)).Result);
+        var invoice = Assert.IsType<InvoiceDto>(created.Value);
+
+        var otherCaseRequest = CreateRequest("INV-TASK-OWNER", clientId, new DateTime(2026, 7, 15), 0m);
+        otherCaseRequest.ClientCaseId = otherCaseId;
+        otherCaseRequest.ClientCaseIds = [otherCaseId];
+        Assert.IsType<BadRequestObjectResult>((await controller.Update(invoice.Id, otherCaseRequest, CancellationToken.None)).Result);
+
+        var otherClientRequest = CreateRequest("INV-TASK-OWNER", otherClientId, new DateTime(2026, 7, 15), 0m);
+        Assert.IsType<BadRequestObjectResult>((await controller.Update(invoice.Id, otherClientRequest, CancellationToken.None)).Result);
+
+        db.ChangeTracker.Clear();
+        Assert.Equal(invoice.Id, (await db.TaskJournalItems.AsNoTracking().SingleAsync(item => item.Id == task.Id)).BillingInvoiceId);
+        Assert.Equal(clientId, (await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == invoice.Id)).ClientId);
+    }
+
+    [Fact]
     public async Task Cancel_ReleasesBillableTaskForAnotherInvoice_AndRecordsHistory()
     {
         await using var db = await CreateContextAsync();
@@ -2299,6 +2347,7 @@ public class InvoicesControllerCrudTests
         };
         legacyRepresentative.Responsibles.Add(new PaymentResponsible { UserId = responsibleId1 });
         legacyRepresentative.InvoiceClientCases.Add(new InvoiceClientCase { ClientCaseId = caseId1 });
+        legacyRepresentative.InvoiceClientCases.Add(new InvoiceClientCase { ClientCaseId = caseId2 });
         legacyRepresentative.InvoiceLineItems.Add(new InvoiceLineItem
         {
             ServiceId = serviceId1,
@@ -2311,6 +2360,24 @@ public class InvoicesControllerCrudTests
         });
 
         db.Payments.Add(legacyRepresentative);
+        await db.SaveChangesAsync();
+
+        var linkedTask = new TaskJournalItem
+        {
+            ClientId = clientId,
+            ClientCaseId = caseId2,
+            ObjectName = "Client Legacy - Updated Case",
+            Title = "Previously billed work",
+            AssigneeName = "Admin User",
+            AuthorUserId = actorUserId,
+            AuthorName = "Admin User",
+            DueAt = DateTime.UtcNow.AddDays(1),
+            ClientBillingClassification = TaskClientBillingClassification.Billable,
+            BillingModeSnapshot = ContractBillingMode.Actual,
+            BillingInvoiceId = legacyRepresentative.Id,
+            BillingDecisionAt = DateTime.UtcNow,
+        };
+        db.TaskJournalItems.Add(linkedTask);
         await db.SaveChangesAsync();
 
         db.Payments.Add(new Payment
@@ -2383,6 +2450,11 @@ public class InvoicesControllerCrudTests
         var updatedRepresentative = await db.Payments
             .AsNoTracking()
             .SingleAsync(payment => payment.Id == updatedDto.Id);
+        var updatedTask = await db.TaskJournalItems.AsNoTracking()
+            .Include(item => item.Comments)
+            .SingleAsync(item => item.Id == linkedTask.Id);
+        Assert.Equal(updatedDto.Id, updatedTask.BillingInvoiceId);
+        Assert.Contains(updatedTask.Comments, comment => comment.Kind == "history" && comment.Text.Contains("сохранена после обновления счёта"));
         Assert.Equal(DocumentKind.Invoice, updatedRepresentative.DocumentKind);
         Assert.Equal(25_000m, updatedRepresentative.Amount);
         Assert.Equal(contractId2, updatedRepresentative.ContractId);

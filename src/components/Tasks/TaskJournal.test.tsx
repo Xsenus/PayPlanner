@@ -38,6 +38,9 @@ const apiMock = vi.hoisted(() => ({
   getCaseCalendarSummary: vi.fn(),
   getTaskJournalItem: vi.fn(),
   getTaskBillingContext: vi.fn(),
+  getTaskBillingInvoices: vi.fn(),
+  updateTaskBillingClassification: vi.fn(),
+  linkTaskBillingInvoice: vi.fn(),
   createTaskJournalItem: vi.fn(),
   updateTaskJournalItem: vi.fn(),
   updateTaskJournalStatus: vi.fn(),
@@ -598,6 +601,9 @@ describe('TaskJournal', () => {
       clientCaseId: 100,
       contracts: [{ id: 501, number: '15/26', title: 'Юридические услуги', billingMode: 'Actual', status: 'Concluded' }],
     });
+    apiMock.getTaskBillingInvoices.mockResolvedValue([]);
+    apiMock.updateTaskBillingClassification.mockResolvedValue(createTask({ clientBillingClassification: 'internal', billingStatus: 'internal' }));
+    apiMock.linkTaskBillingInvoice.mockResolvedValue(createTask({ billingStatus: 'invoiced', billingInvoiceId: 901, billingInvoiceNumber: 'INV-901' }));
     apiMock.getTaskJournalItem.mockReset();
     apiMock.getTaskJournalItem.mockResolvedValue(createTask());
     apiMock.getTaskJournalCaseAutomationCandidates.mockResolvedValue([]);
@@ -1431,6 +1437,42 @@ describe('TaskJournal', () => {
       clientBillingClassification: 'billable',
       title: 'Связаться с клиентом',
     }));
+  });
+
+  it.each(['legacy', 'modern'] as const)('changes the billing decision from the %s task card', async (taskCardWindowMode) => {
+    const task = createTask({ clientBillingClassification: 'billable', billingStatus: 'unbilled' });
+    await renderJournal([task], { settings: { taskCardWindowMode } });
+
+    fireEvent.click(screen.getAllByTitle('Просмотр')[0]);
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    fireEvent.click(within(card).getByRole('button', { name: 'Учёт и счёт' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Учёт задачи и счёт' });
+    fireEvent.click(within(dialog).getByRole('combobox', { name: /^Тип оплаты задачи/ }));
+    fireEvent.click(screen.getByRole('option', { name: 'Неоплачиваемая / внутренняя' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Сохранить тип оплаты' }));
+
+    await waitFor(() => expect(apiMock.updateTaskBillingClassification).toHaveBeenCalledWith(task.id, 'internal', null));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Учёт задачи и счёт' })).toBeNull());
+  });
+
+  it.each(['legacy', 'modern'] as const)('links an earlier invoice from the %s task card only after confirmation', async (taskCardWindowMode) => {
+    const task = createTask({ clientBillingClassification: 'billable', billingStatus: 'unbilled' });
+    apiMock.getTaskBillingInvoices.mockResolvedValue([{ id: 901, number: 'INV-901', date: todayAt(9), amount: 4200, workflowStatus: 'Draft' }]);
+    await renderJournal([task], { settings: { taskCardWindowMode } });
+
+    fireEvent.click(screen.getAllByTitle('Просмотр')[0]);
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    fireEvent.click(within(card).getByRole('button', { name: 'Учёт и счёт' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Учёт задачи и счёт' });
+    await waitFor(() => expect(apiMock.getTaskBillingInvoices).toHaveBeenCalledWith(task.id));
+    fireEvent.click(within(dialog).getByRole('combobox', { name: /^Ранее выставленный счёт/ }));
+    fireEvent.click(screen.getByRole('option', { name: /INV-901/ }));
+    const linkButton = within(dialog).getByRole('button', { name: 'Привязать счёт' });
+    expect((linkButton as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: /Подтверждаю, что работа по задаче/ }));
+    fireEvent.click(linkButton);
+
+    await waitFor(() => expect(apiMock.linkTaskBillingInvoice).toHaveBeenCalledWith(task.id, 901));
   });
 
   it('shows court hearing and meeting types in filters and the task form', async () => {

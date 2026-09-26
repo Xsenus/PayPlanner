@@ -5085,6 +5085,25 @@ export class ApiService {
     });
   }
 
+  async updateTaskBillingClassification(id: number, classification: 'billable' | 'internal', billingContractId: number | null) {
+    return this.request<TaskJournalItem>(`/tasks/${id}/billing-classification`, {
+      method: 'PUT',
+      body: JSON.stringify({ classification, billingContractId }),
+    });
+  }
+
+  async getTaskBillingInvoices(id: number, search = '') {
+    const query = search.trim() ? `?search=${encodeURIComponent(search.trim())}` : '';
+    return this.request<TaskBillingInvoiceOption[]>(`/tasks/${id}/billing-invoices${query}`);
+  }
+
+  async linkTaskBillingInvoice(id: number, invoiceId: number) {
+    return this.request<TaskJournalItem>(`/tasks/${id}/billing-invoice`, {
+      method: 'PUT',
+      body: JSON.stringify({ invoiceId }),
+    });
+  }
+
   async updateTaskJournalControl(id: number, isUnderControl: boolean) {
     return this.request<TaskJournalItem>(`/tasks/${id}/control`, {
       method: 'PATCH',
@@ -8836,6 +8855,7 @@ import type {
   TaskJournalCaseAutomationCandidate,
   TaskJournalCaseAutomationSummary,
   TaskBillingContext,
+  TaskBillingInvoiceOption,
   TaskJournalComment,
   TaskJournalDeadlineChangeRequest,
   TaskJournalFile,

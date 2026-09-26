@@ -65,6 +65,15 @@ public class TaskJournalItemDto
     public string? UpdatedAt { get; set; }
 }
 
+public sealed class TaskBillingInvoiceOptionDto
+{
+    public int Id { get; set; }
+    public string Number { get; set; } = string.Empty;
+    public string Date { get; set; } = string.Empty;
+    public decimal Amount { get; set; }
+    public string WorkflowStatus { get; set; } = string.Empty;
+}
+
 public sealed class TaskBillingContextDto
 {
     public int? ClientId { get; set; }

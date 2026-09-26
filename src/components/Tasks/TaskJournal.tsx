@@ -115,6 +115,7 @@ import {
   type TaskJournalCaseAutomationCandidate,
   type TaskJournalCaseAutomationSummary,
   type TaskBillingContext,
+  type TaskBillingInvoiceOption,
   type TaskJournalChannel,
   type TaskJournalComment,
   type TaskJournalDeadlineChangeRequest,
@@ -4927,6 +4928,12 @@ export function TaskJournal({
     }
   };
 
+  const handleBillingUpdated = async (updated: TaskJournalItem) => {
+    setModal((current) => current?.task?.id === updated.id ? { ...current, task: updated } : current);
+    await refreshTasks();
+    emitTaskChange();
+  };
+
   const handleQuickTaskCreate = async ({
     title,
     description,
@@ -5726,6 +5733,7 @@ export function TaskJournal({
             onClose={closeTaskModal}
             onEnableEdit={() => setModal((current) => current?.task ? { ...current, mode: 'edit' } : current)}
             onSave={handleSave}
+            onBillingUpdated={handleBillingUpdated}
             onResultSave={handleResultSave}
             onApprovalDecision={handleApprovalDecision}
             onReviewDeadlineChange={(task, request) => {
@@ -6650,6 +6658,7 @@ export function TaskJournal({
           onClose={closeTaskModal}
           onEnableEdit={() => setModal((current) => current?.task ? { ...current, mode: 'edit' } : current)}
           onSave={handleSave}
+          onBillingUpdated={handleBillingUpdated}
           onResultSave={handleResultSave}
           onApprovalDecision={handleApprovalDecision}
           onReviewDeadlineChange={(task, request) => {
@@ -8414,6 +8423,166 @@ function TaskBillingBadge({
       testId={`task-billing-badge-${task.id}`}
       icon={<WalletCards className={`${compact ? 'h-3 w-3' : 'h-3.5 w-3.5'} shrink-0`} />}
     />
+  );
+}
+
+function TaskBillingEditDialog({
+  task,
+  onClose,
+  onUpdated,
+}: {
+  task: TaskJournalItem;
+  onClose: () => void;
+  onUpdated: (updated: TaskJournalItem) => void | Promise<void>;
+}) {
+  const toast = useToast();
+  const [classification, setClassification] = useState<'billable' | 'internal'>(
+    task.clientBillingClassification === 'billable' ? 'billable' : 'internal',
+  );
+  const [contractId, setContractId] = useState(task.billingContractId ? String(task.billingContractId) : '');
+  const [context, setContext] = useState<TaskBillingContext | null>(null);
+  const [contextLoading, setContextLoading] = useState(Boolean(task.clientCaseId));
+  const [invoiceOptions, setInvoiceOptions] = useState<TaskBillingInvoiceOption[]>([]);
+  const [invoiceLoading, setInvoiceLoading] = useState(task.billingStatus === 'unbilled');
+  const [invoiceSearch, setInvoiceSearch] = useState('');
+  const [invoiceId, setInvoiceId] = useState('');
+  const [invoiceAccessError, setInvoiceAccessError] = useState('');
+  const [confirmedInvoiceContents, setConfirmedInvoiceContents] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const isInvoiced = task.billingStatus === 'invoiced';
+
+  useEffect(() => {
+    if (!task.clientCaseId) return;
+    let active = true;
+    apiService.getTaskBillingContext({
+      clientId: task.clientId ?? undefined,
+      legalEntityId: task.legalEntityId ?? undefined,
+      clientCaseId: task.clientCaseId,
+    }).then((result) => {
+      if (active) setContext(result);
+    }).catch((loadError) => {
+      if (active) setError(extractDisplayErrorMessage(loadError, 'Не удалось загрузить договоры по делу.'));
+    }).finally(() => {
+      if (active) setContextLoading(false);
+    });
+    return () => { active = false; };
+  }, [task.clientId, task.clientCaseId, task.legalEntityId]);
+
+  useEffect(() => {
+    if (task.billingStatus !== 'unbilled') return;
+    let active = true;
+    apiService.getTaskBillingInvoices(task.id).then((items) => {
+      if (active) setInvoiceOptions(items);
+    }).catch((loadError) => {
+      if (active) setInvoiceAccessError(extractDisplayErrorMessage(loadError, 'Нет доступа к списку счетов.'));
+    }).finally(() => {
+      if (active) setInvoiceLoading(false);
+    });
+    return () => { active = false; };
+  }, [task.billingStatus, task.id]);
+
+  const searchInvoices = async () => {
+    setInvoiceLoading(true);
+    setInvoiceAccessError('');
+    setInvoiceId('');
+    try {
+      setInvoiceOptions(await apiService.getTaskBillingInvoices(task.id, invoiceSearch));
+    } catch (loadError) {
+      setInvoiceAccessError(extractDisplayErrorMessage(loadError, 'Не удалось найти счета.'));
+    } finally {
+      setInvoiceLoading(false);
+    }
+  };
+
+  const saveClassification = async () => {
+    setSaving(true);
+    setError('');
+    try {
+      const updated = await apiService.updateTaskBillingClassification(
+        task.id, classification, classification === 'billable' && contractId ? Number(contractId) : null,
+      );
+      await onUpdated(updated);
+      toast.success('Учёт задачи обновлён.', 'Журнал задач');
+      onClose();
+    } catch (saveError) {
+      setError(extractDisplayErrorMessage(saveError, 'Не удалось изменить учёт задачи.'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const linkInvoice = async () => {
+    if (!invoiceId || !confirmedInvoiceContents) return;
+    setSaving(true);
+    setError('');
+    try {
+      const updated = await apiService.linkTaskBillingInvoice(task.id, Number(invoiceId));
+      await onUpdated(updated);
+      toast.success('Задача связана со счётом. Сумма счёта не менялась.', 'Журнал задач');
+      onClose();
+    } catch (saveError) {
+      setError(extractDisplayErrorMessage(saveError, 'Не удалось связать задачу со счётом.'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const nextContractId = classification === 'billable' && contractId ? Number(contractId) : null;
+  const classificationChanged = classification !== task.clientBillingClassification
+    || nextContractId !== (task.billingContractId ?? null);
+
+  return (
+    <div className="fixed inset-0 z-[2500] flex items-center justify-center bg-slate-950/50 p-3" role="dialog" aria-modal="true" aria-label="Учёт задачи и счёт">
+      <div className="max-h-[calc(100vh-1.5rem)] w-full max-w-xl space-y-3 overflow-y-auto rounded-2xl bg-white p-4 shadow-2xl sm:p-5">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-bold text-slate-900">Учёт задачи и счёт</h3>
+            <p className="mt-1 text-sm text-slate-600">{task.title}</p>
+          </div>
+          <button type="button" onClick={onClose} disabled={saving} aria-label="Закрыть учёт задачи" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100"><X className="h-4 w-4" /></button>
+        </div>
+        {isInvoiced ? (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+            Задача уже включена в счёт №{task.billingInvoiceNumber || task.billingInvoiceId}. Чтобы изменить её оплату, сначала исправьте или аннулируйте счёт в финансовом разделе.
+          </div>
+        ) : (
+          <section className="space-y-2 rounded-xl border border-slate-200 p-3">
+            <div className="text-sm font-semibold text-slate-800">Изменить тип оплаты</div>
+            <SystemSelect aria-label="Тип оплаты задачи" value={classification} onChange={(event) => setClassification(event.target.value as 'billable' | 'internal')} className="form-input w-full">
+              <option value="internal">Неоплачиваемая / внутренняя</option>
+              <option value="billable" disabled={!task.clientCaseId}>Платная</option>
+            </SystemSelect>
+            {classification === 'billable' && task.clientCaseId ? (
+              <SystemSelect aria-label="Договор для оплаты задачи" value={contractId} onChange={(event) => setContractId(event.target.value)} disabled={contextLoading || !context} className="form-input w-full">
+                <option value="">Без договора — выставить счёт по факту</option>
+                {context?.contracts.map((contract) => <option key={contract.id} value={contract.id}>№{contract.number} · {contract.billingMode === 'Fixed' ? 'фиксированная оплата' : 'по факту'}</option>)}
+              </SystemSelect>
+            ) : null}
+            {!task.clientCaseId ? <p className="text-xs text-amber-700">Чтобы сделать задачу платной, сначала привяжите её к клиенту и делу.</p> : null}
+            <button type="button" onClick={() => void saveClassification()} disabled={!classificationChanged || saving || (classification === 'billable' && (contextLoading || !context))} className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">Сохранить тип оплаты</button>
+          </section>
+        )}
+        {task.billingStatus === 'unbilled' ? (
+          <section className="space-y-2 rounded-xl border border-slate-200 p-3">
+            <div className="text-sm font-semibold text-slate-800">Привязать ранее выставленный счёт</div>
+            <p className="text-xs text-slate-600">Привязка помечает задачу как учтённую, но не меняет сумму или услуги в счёте. Убедитесь, что работа уже входит в выбранный счёт.</p>
+            <div className="flex gap-2">
+              <input aria-label="Номер счёта" value={invoiceSearch} onChange={(event) => setInvoiceSearch(event.target.value)} className="form-input min-w-0 flex-1" placeholder="Номер счёта" />
+              <button type="button" onClick={() => void searchInvoices()} disabled={invoiceLoading} className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold disabled:opacity-50">Найти</button>
+            </div>
+            {invoiceAccessError ? <p className="text-xs text-amber-700">{invoiceAccessError} Для привязки нужны права на работу со счетами.</p> : null}
+            <SystemSelect aria-label="Ранее выставленный счёт" value={invoiceId} onChange={(event) => { setInvoiceId(event.target.value); setConfirmedInvoiceContents(false); }} disabled={invoiceLoading || invoiceOptions.length === 0} className="form-input w-full">
+              <option value="">{invoiceLoading ? 'Загружаем счета…' : invoiceOptions.length ? 'Выберите счёт' : 'Подходящих счетов нет'}</option>
+              {invoiceOptions.map((invoice) => <option key={invoice.id} value={invoice.id}>№{invoice.number} · {new Intl.NumberFormat('ru-RU').format(invoice.amount)} ₽</option>)}
+            </SystemSelect>
+            <label className="flex items-start gap-2 text-xs text-slate-700"><input type="checkbox" checked={confirmedInvoiceContents} onChange={(event) => setConfirmedInvoiceContents(event.target.checked)} disabled={!invoiceId} />Подтверждаю, что работа по задаче уже учтена в этом счёте</label>
+            <button type="button" onClick={() => void linkInvoice()} disabled={!invoiceId || !confirmedInvoiceContents || saving} className="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">Привязать счёт</button>
+          </section>
+        ) : null}
+        {error ? <div role="alert" className="rounded-lg bg-rose-50 p-2 text-sm text-rose-700">{error}</div> : null}
+      </div>
+    </div>
   );
 }
 
@@ -10523,6 +10692,7 @@ type TaskModalProps = {
   onClose: () => void;
   onEnableEdit: () => void;
   onSave: (form: TaskForm, taskId?: number, creationMaterials?: TaskCreationMaterials) => void | Promise<void>;
+  onBillingUpdated: (task: TaskJournalItem) => void | Promise<void>;
   onOpenClient?: (clientId: number, caseId?: number | null) => void | Promise<void>;
   onOpenCase?: (caseId: number, clientId?: number | null) => void | Promise<void>;
   onOpenLegalEntity?: (legalEntityId: number) => void | Promise<void>;
@@ -10568,6 +10738,7 @@ function TaskModal({
   onClose,
   onEnableEdit,
   onSave,
+  onBillingUpdated,
   onOpenClient,
   onOpenCase,
   onOpenLegalEntity,
@@ -10677,6 +10848,7 @@ function TaskModal({
   });
   const [resultError, setResultError] = useState<string | null>(null);
   const [billingWizardForm, setBillingWizardForm] = useState<TaskForm | null>(null);
+  const [billingEditOpen, setBillingEditOpen] = useState(false);
   const [approvalResultPrompt, setApprovalResultPrompt] = useState<{ form: TaskForm; taskId?: number } | null>(null);
   const [approvalResultPromptResult, setApprovalResultPromptResult] = useState('');
   const [approvalResultPromptError, setApprovalResultPromptError] = useState<string | null>(null);
@@ -11210,6 +11382,14 @@ function TaskModal({
         setBillingWizardForm(null);
         void saveTask(nextForm, state.task!.id);
       }}
+    />
+  ) : null;
+
+  const billingEditDialog = billingEditOpen && state?.task ? (
+    <TaskBillingEditDialog
+      task={state.task}
+      onClose={() => setBillingEditOpen(false)}
+      onUpdated={onBillingUpdated}
     />
   ) : null;
 
@@ -12470,6 +12650,9 @@ function TaskModal({
                       icon={<WalletCards className="h-3.5 w-3.5 shrink-0" />}
                     />
                   ) : null}
+                  {state?.task && canSwitchToEdit ? (
+                    <button type="button" onClick={() => setBillingEditOpen(true)} className="rounded-full border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50">Учёт и счёт</button>
+                  ) : null}
                 </div>
                 <h2 className="sr-only">{titleText}</h2>
                 <input
@@ -13193,6 +13376,7 @@ function TaskModal({
         </div>
         {approvalChoiceDialog}
         {billingWizardDialog}
+        {billingEditDialog}
         {revisionReviewDialog}
         {deadlineRequestReasonDialog}
         {approvalResultPromptDialog}
@@ -13357,7 +13541,10 @@ function TaskModal({
         </div>
 
         {state?.task ? (
-          <div className="px-6 pt-4"><TaskBillingBadge task={state.task} /></div>
+          <div className="flex flex-wrap items-center gap-2 px-6 pt-4">
+            <TaskBillingBadge task={state.task} />
+            {canSwitchToEdit ? <button type="button" onClick={() => setBillingEditOpen(true)} className="rounded-lg border border-amber-200 px-3 py-1.5 text-xs font-semibold text-amber-900 hover:bg-amber-50">Учёт и счёт</button> : null}
+          </div>
         ) : form.clientBillingClassification ? (
           <div className={`mx-6 mt-4 rounded-xl border p-3 text-sm font-semibold ${form.clientBillingClassification === 'billable' ? 'border-rose-200 bg-rose-50 text-rose-800' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
             {form.clientBillingClassification === 'billable'
@@ -14262,6 +14449,7 @@ function TaskModal({
       </div>
       {approvalChoiceDialog}
       {billingWizardDialog}
+      {billingEditDialog}
       {revisionReviewDialog}
       {deadlineRequestReasonDialog}
       {approvalResultPromptDialog}

@@ -73,3 +73,14 @@ public class UpdateTaskJournalControlRequest
 {
     public bool IsUnderControl { get; set; }
 }
+
+public sealed class UpdateTaskBillingClassificationRequest
+{
+    public string? Classification { get; set; }
+    public int? BillingContractId { get; set; }
+}
+
+public sealed class LinkTaskBillingInvoiceRequest
+{
+    public int InvoiceId { get; set; }
+}
