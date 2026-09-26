@@ -2189,11 +2189,11 @@ function CaseSuccessReportSection({
         <div>
           <div className="inline-flex items-center gap-2 rounded-full border border-blue-100 bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-blue-700">
             <CheckCircle2 className="h-3.5 w-3.5" />
-            Исходы дел
+            Статусы дел
           </div>
-          <h2 className="mt-3 text-xl font-semibold text-slate-950">Статистика успешности дел</h2>
+          <h2 className="mt-3 text-xl font-semibold text-slate-950">Статусы завершения дел</h2>
           <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-500">
-            Первая версия считает исходы по текущим статусам дел: закрытые без отрицательного результата, проигранные и незавершенные.
+            Сводка по статусам CRM. Закрытие дела не означает победу в суде; подтверждённый судебный исход здесь пока не учитывается.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -2211,25 +2211,25 @@ function CaseSuccessReportSection({
 
       {loading ? (
         <div className="mt-6 rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500">
-          Загрузка статистики успешности дел...
+          Загрузка статусов дел...
         </div>
       ) : error || !report ? (
         <div className="mt-6 rounded-3xl border border-rose-100 bg-rose-50/70 p-6">
-          <div className="font-semibold text-rose-700">Не удалось загрузить статистику успешности дел</div>
+          <div className="font-semibold text-rose-700">Не удалось загрузить статусы дел</div>
           <div className="mt-2 text-sm text-rose-600">{error ?? 'Нет данных для отчета.'}</div>
         </div>
       ) : (
         <>
           <div className="mt-6 grid grid-cols-1 gap-4 xl:grid-cols-4">
             <MetricCard
-              title="Успешность"
+              title="Доля закрытых"
               value={`${report.successRate}%`}
               icon={CheckCircle2}
-              tone="profit"
-              subtitle={`${report.successfulCases} из ${report.completedCases} завершенных`}
+              tone="rate"
+              subtitle={`${report.successfulCases} из ${report.completedCases} завершённых без статуса «Проиграно»`}
             />
             <MetricCard
-              title="Отрицательные исходы"
+              title="Статус «Проиграно»"
               value={String(report.lostCases)}
               icon={AlertTriangle}
               tone="expense"
@@ -2268,8 +2268,8 @@ function CaseSuccessReportSection({
                           <div className="mt-1 text-xs text-slate-500">{item.completedCases} завершено · {item.inProgressCases} в работе</div>
                         </div>
                         <div className="text-right text-sm">
-                          <div className="font-semibold text-slate-900">{item.successRate}%</div>
-                          <div className="text-slate-500">{item.successfulCases}/{item.lostCases}</div>
+                          <div className="font-semibold text-slate-900">Закрыто: {item.successRate}%</div>
+                          <div className="text-slate-500">{item.successfulCases} закрыто · {item.lostCases} со статусом «Проиграно»</div>
                         </div>
                       </div>
                     </div>
@@ -2291,8 +2291,8 @@ function CaseSuccessReportSection({
                         <div className="mt-1 text-xs text-slate-500">{item.totalCases} дел · завершено {item.completedCases}</div>
                       </div>
                       <div className="text-right text-sm">
-                        <div className="font-semibold text-slate-900">{item.successRate}%</div>
-                        <div className="text-slate-500">{item.successfulCases}/{item.lostCases}</div>
+                        <div className="font-semibold text-slate-900">Закрыто: {item.successRate}%</div>
+                        <div className="text-slate-500">{item.successfulCases} закрыто · {item.lostCases} со статусом «Проиграно»</div>
                       </div>
                     </div>
                   )) : (
@@ -2329,7 +2329,7 @@ function CaseSuccessReportSection({
                   <tr>
                     <th className="px-4 py-3 font-semibold">Дело</th>
                     <th className="px-4 py-3 font-semibold">Ответственный</th>
-                    <th className="px-4 py-3 font-semibold">Исход</th>
+                    <th className="px-4 py-3 font-semibold">Статус CRM</th>
                     <th className="px-4 py-3 text-right font-semibold">Дней</th>
                     <th className="px-4 py-3 font-semibold">Срок</th>
                   </tr>
@@ -2351,7 +2351,7 @@ function CaseSuccessReportSection({
                       </td>
                       <td className="px-4 py-3 text-slate-600">{row.responsibleName}</td>
                       <td className="px-4 py-3">
-                        <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${row.outcomeCategory === 'successful' ? 'bg-emerald-50 text-emerald-700' : row.outcomeCategory === 'lost' ? 'bg-rose-50 text-rose-700' : 'bg-slate-100 text-slate-700'}`}>
+                        <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${row.outcomeCategory === 'lost' ? 'bg-rose-50 text-rose-700' : 'bg-slate-100 text-slate-700'}`}>
                           {row.outcomeLabel}
                         </span>
                       </td>

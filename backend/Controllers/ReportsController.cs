@@ -2500,7 +2500,7 @@ public class ReportsController : ControllerBase
             SuccessRate = CalculatePercent(successfulCases, completedCases),
             LossRate = CalculatePercent(lostCases, completedCases),
             CompletionRate = CalculatePercent(completedCases, rows.Count),
-            FormulaNote = "Первая версия считает успешность по текущим статусам: Closed = закрыто без отрицательного результата, Lost = отрицательный исход. Открытые и приостановленные дела не входят в процент успешности.",
+            FormulaNote = "Показаны статусы дел в CRM: доля закрытых без статуса «Проиграно» считается только среди завершённых. Это не подтверждённый результат судебного рассмотрения. Открытые и приостановленные дела в долю не входят.",
             ByStatus = rows
                 .GroupBy(item => new { item.Status, item.StatusLabel })
                 .OrderBy(group => group.Key.Status)
@@ -2596,8 +2596,8 @@ public class ReportsController : ControllerBase
     private static (string Category, string Label) ResolveCaseSuccessOutcome(ClientCaseStatus status)
         => status switch
         {
-            ClientCaseStatus.Closed => ("successful", "Закрыто без отрицательного результата"),
-            ClientCaseStatus.Lost => ("lost", "Отрицательный исход"),
+            ClientCaseStatus.Closed => ("successful", "Закрыто в CRM"),
+            ClientCaseStatus.Lost => ("lost", "Статус «Проиграно» в CRM"),
             ClientCaseStatus.OnHold => ("onHold", "Приостановлено"),
             _ => ("inProgress", "В работе"),
         };
@@ -3467,20 +3467,20 @@ public class ReportsController : ControllerBase
     private static ReportExportDocument BuildCaseSuccessExportDocument(CaseSuccessReportDto report)
         => new(
             "case-success-report",
-            "Статистика успешности дел",
+            "Статусы завершения дел",
             $"Период: {DateCell(report.From)} - {DateCell(report.To)}. {report.FormulaNote}",
             [
                 new("Всего дел", report.TotalCases.ToString(CultureInfo.InvariantCulture)),
                 new("Завершено", report.CompletedCases.ToString(CultureInfo.InvariantCulture)),
-                new("Успешно", report.SuccessfulCases.ToString(CultureInfo.InvariantCulture)),
-                new("Отрицательный исход", report.LostCases.ToString(CultureInfo.InvariantCulture)),
+                new("Закрыто", report.SuccessfulCases.ToString(CultureInfo.InvariantCulture)),
+                new("Статус «Проиграно»", report.LostCases.ToString(CultureInfo.InvariantCulture)),
                 new("В работе", report.InProgressCases.ToString(CultureInfo.InvariantCulture)),
                 new("На паузе", report.OnHoldCases.ToString(CultureInfo.InvariantCulture)),
-                new("Успешность", PercentCell(report.SuccessRate)),
+                new("Доля закрытых среди завершённых", PercentCell(report.SuccessRate)),
                 new("Доля завершенных", PercentCell(report.CompletionRate)),
             ],
             [
-                new("Дела", ["Дело", "Клиент", "Ответственный", "Тип", "Статус", "Исход", "Дней в работе", "Дата начала", "Срок дела"], report.Items.Select(item => new ReportExportRow([
+                new("Дела", ["Дело", "Клиент", "Ответственный", "Тип", "Статус", "Состояние по статусу CRM", "Дней в работе", "Дата начала", "Срок дела"], report.Items.Select(item => new ReportExportRow([
                     BuildCaseTitle(item.CaseNumber, item.CaseTitle),
                     item.ClientName,
                     item.ResponsibleName,
@@ -3491,7 +3491,7 @@ public class ReportsController : ControllerBase
                     DateCell(item.StartDate),
                     DateCell(item.DueDate),
                 ])).ToList()),
-                new("По ответственным", ["Ответственный", "Всего", "Завершено", "Успешно", "Отрицательный исход", "В работе", "Успешность"], report.ByResponsible.Select(item => new ReportExportRow([
+                new("По ответственным", ["Ответственный", "Всего", "Завершено", "Закрыто", "Статус «Проиграно»", "В работе", "Доля закрытых"], report.ByResponsible.Select(item => new ReportExportRow([
                     item.ResponsibleName,
                     item.TotalCases.ToString(CultureInfo.InvariantCulture),
                     item.CompletedCases.ToString(CultureInfo.InvariantCulture),
@@ -3500,7 +3500,7 @@ public class ReportsController : ControllerBase
                     item.InProgressCases.ToString(CultureInfo.InvariantCulture),
                     PercentCell(item.SuccessRate),
                 ])).ToList()),
-                new("По типам дел", ["Тип", "Всего", "Завершено", "Успешно", "Отрицательный исход", "Успешность"], report.ByType.Select(item => new ReportExportRow([
+                new("По типам дел", ["Тип", "Всего", "Завершено", "Закрыто", "Статус «Проиграно»", "Доля закрытых"], report.ByType.Select(item => new ReportExportRow([
                     item.CaseType,
                     item.TotalCases.ToString(CultureInfo.InvariantCulture),
                     item.CompletedCases.ToString(CultureInfo.InvariantCulture),

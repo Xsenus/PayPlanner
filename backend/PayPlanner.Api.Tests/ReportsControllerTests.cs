@@ -3902,6 +3902,7 @@ public class ReportsControllerTests
                 RoleId = role.Id,
                 Section = RolePermissionCatalog.Reports,
                 CanView = true,
+                CanExport = true,
                 ViewScope = DataVisibilityScope.All,
             },
             new RolePermission
@@ -3983,8 +3984,10 @@ public class ReportsControllerTests
         Assert.Equal(50m, report.SuccessRate);
         Assert.Equal(50m, report.LossRate);
         Assert.Equal(66.7m, report.CompletionRate);
-        Assert.Contains("Closed", report.FormulaNote, StringComparison.Ordinal);
+        Assert.Contains("не подтверждённый результат судебного рассмотрения", report.FormulaNote, StringComparison.Ordinal);
         Assert.DoesNotContain(report.Items, item => item.CaseId == hiddenCase.Id);
+        Assert.Contains(report.Items, item => item.CaseId == closedCase.Id && item.OutcomeLabel == "Закрыто в CRM");
+        Assert.Contains(report.Items, item => item.CaseId == lostCase.Id && item.OutcomeLabel == "Статус «Проиграно» в CRM");
 
         Assert.Contains(report.ByStatus, item => item.Status == nameof(ClientCaseStatus.Closed) && item.CaseCount == 1);
         Assert.Contains(report.ByType, item =>
@@ -4001,6 +4004,16 @@ public class ReportsControllerTests
         Assert.Equal(1, responsible.LostCases);
         Assert.Equal(1, responsible.InProgressCases);
         Assert.Equal(50m, responsible.SuccessRate);
+
+        var exportAction = await controller.ExportManagementReportCsv(
+            "case-success", today.AddDays(-30), today.AddDays(30),
+            null, null, null, null, null, null, null, null, null, null, null,
+            null, null, null, null, null, null, 20, CancellationToken.None);
+        var export = Assert.IsType<FileContentResult>(exportAction);
+        var exportText = Encoding.UTF8.GetString(export.FileContents);
+        Assert.Contains("Статусы завершения дел", exportText, StringComparison.Ordinal);
+        Assert.Contains("Доля закрытых", exportText, StringComparison.Ordinal);
+        Assert.DoesNotContain("Успешность", exportText, StringComparison.Ordinal);
 
         var filteredAction = await controller.CaseSuccess(
             today.AddDays(-30),
