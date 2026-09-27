@@ -2165,6 +2165,7 @@ export interface LegalWorkReport {
   statusFilter: string;
   responsibleUserIdFilter?: number | null;
   caseTypeFilter: string;
+  hasCompletePaymentVisibility: boolean;
   totalCases: number;
   activeCases: number;
   closedCases: number;

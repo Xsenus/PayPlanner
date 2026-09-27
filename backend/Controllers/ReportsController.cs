@@ -27,6 +27,7 @@ public class ReportsController : ControllerBase
         RolePermissionCatalog.Cases,
         RolePermissionCatalog.Tasks,
         RolePermissionCatalog.Accounts,
+        RolePermissionCatalog.Payments,
     ];
     private static readonly string[] CaseFinanceVisibilitySections =
     [
@@ -207,14 +208,15 @@ public class ReportsController : ControllerBase
         var casesVisibility = visibilityBySection[RolePermissionCatalog.Cases];
         var tasksVisibility = visibilityBySection[RolePermissionCatalog.Tasks];
         var accountsVisibility = visibilityBySection[RolePermissionCatalog.Accounts];
-        if (casesVisibility is null || tasksVisibility is null || accountsVisibility is null)
+        var paymentsVisibility = visibilityBySection[RolePermissionCatalog.Payments];
+        if (casesVisibility is null || tasksVisibility is null || accountsVisibility is null || paymentsVisibility is null)
         {
             return Unauthorized();
         }
 
         var filters = new LegalWorkReportFilters(NormalizeOptional(status), responsibleUserId, NormalizeOptional(caseType));
         var report = await SqliteRetryHelper.ExecuteAsync(
-            cancellationToken => BuildLegalWorkReportAsync(start, end, reportToday, timeZone, filters, casesVisibility, tasksVisibility, accountsVisibility, cancellationToken),
+            cancellationToken => BuildLegalWorkReportAsync(start, end, reportToday, timeZone, filters, casesVisibility, tasksVisibility, accountsVisibility, paymentsVisibility, cancellationToken),
             _logger,
             ct);
 
@@ -639,7 +641,8 @@ public class ReportsController : ControllerBase
         var casesVisibility = visibilityBySection[RolePermissionCatalog.Cases];
         var tasksVisibility = visibilityBySection[RolePermissionCatalog.Tasks];
         var accountsVisibility = visibilityBySection[RolePermissionCatalog.Accounts];
-        if (casesVisibility is null || tasksVisibility is null || accountsVisibility is null)
+        var paymentsVisibility = visibilityBySection[RolePermissionCatalog.Payments];
+        if (casesVisibility is null || tasksVisibility is null || accountsVisibility is null || paymentsVisibility is null)
         {
             return (null, Unauthorized());
         }
@@ -649,7 +652,7 @@ public class ReportsController : ControllerBase
         var (start, end) = ResolveReportPeriod(from, to, reportToday);
         var filters = new LegalWorkReportFilters(NormalizeOptional(status), responsibleUserId, NormalizeOptional(caseType));
         var report = await SqliteRetryHelper.ExecuteAsync(
-            cancellationToken => BuildLegalWorkReportAsync(start, end, reportToday, timeZone, filters, casesVisibility, tasksVisibility, accountsVisibility, cancellationToken),
+            cancellationToken => BuildLegalWorkReportAsync(start, end, reportToday, timeZone, filters, casesVisibility, tasksVisibility, accountsVisibility, paymentsVisibility, cancellationToken),
             _logger,
             ct);
 
@@ -2050,6 +2053,7 @@ public class ReportsController : ControllerBase
         DataVisibilityAccess casesVisibility,
         DataVisibilityAccess tasksVisibility,
         DataVisibilityAccess accountsVisibility,
+        DataVisibilityAccess paymentsVisibility,
         CancellationToken ct)
     {
         var endExclusiveUtc = CalendarTimeZoneHelper.FromUserLocalToUtc(end.Date.AddDays(1), timeZone);
@@ -2120,7 +2124,7 @@ public class ReportsController : ControllerBase
                     item.PlannedDurationMinutes))
                 .ToListAsync(ct);
 
-        var payments = await BuildLegalWorkPaymentRowsAsync(caseIds, accountsVisibility, PaymentType.Income, ct);
+        var payments = await BuildLegalWorkPaymentRowsAsync(caseIds, accountsVisibility, paymentsVisibility, PaymentType.Income, ct);
         var paidByCase = payments
             .GroupBy(item => item.CaseId)
             .ToDictionary(
@@ -2188,6 +2192,7 @@ public class ReportsController : ControllerBase
             StatusFilter = filters.Status ?? string.Empty,
             ResponsibleUserIdFilter = filters.ResponsibleUserId,
             CaseTypeFilter = filters.CaseType ?? string.Empty,
+            HasCompletePaymentVisibility = accountsVisibility.SeesAll && paymentsVisibility.SeesAll,
             TotalCases = cases.Count,
             ActiveCases = activeCases.Count(item => item.Status == ClientCaseStatus.Open),
             ClosedCases = cases.Count(item => item.Status == ClientCaseStatus.Closed),
@@ -3941,7 +3946,8 @@ public class ReportsController : ControllerBase
             string.Empty,
             string.Empty,
             string.Empty,
-            $"{report.From:yyyy-MM-dd} - {report.To:yyyy-MM-dd}",
+            $"{report.From:yyyy-MM-dd} - {report.To:yyyy-MM-dd}"
+                + (report.HasCompletePaymentVisibility ? string.Empty : ". Суммы по доступным платежам; итог может быть неполным."),
             report.FeeTotal.ToString("0.##"),
             report.PaidTotal.ToString("0.##"),
             report.OutstandingTotal.ToString("0.##"),
@@ -4031,6 +4037,10 @@ public class ReportsController : ControllerBase
 
         AppendLegalWorkExcelRow(builder, ["Отчет по юридической работе"], header: true);
         AppendLegalWorkExcelRow(builder, ["Период", $"{report.From:dd.MM.yyyy} - {report.To:dd.MM.yyyy}"]);
+        if (!report.HasCompletePaymentVisibility)
+        {
+            AppendLegalWorkExcelRow(builder, ["Важно", "Суммы по доступным платежам; итог может быть неполным."]);
+        }
         AppendLegalWorkExcelRow(builder, ["Сформировано", GeneratedAtCell(generatedAtUtc, timeZone)]);
         AppendLegalWorkExcelRow(builder, ["Всего дел", report.TotalCases.ToString(CultureInfo.InvariantCulture)]);
         AppendLegalWorkExcelRow(builder, ["Дел в работе", report.ActiveCases.ToString(CultureInfo.InvariantCulture)]);
@@ -4184,6 +4194,11 @@ public class ReportsController : ControllerBase
             .Append(" · Сформировано: ")
             .Append(Html(GeneratedAtCell(generatedAtUtc, timeZone)))
             .AppendLine("</div>");
+
+        if (!report.HasCompletePaymentVisibility)
+        {
+            builder.AppendLine("<p>Суммы по доступным платежам; итог может быть неполным.</p>");
+        }
 
         builder.AppendLine("<div class=\"summary\">");
         AppendLegalWorkMetric(builder, "Всего дел", report.TotalCases.ToString(CultureInfo.InvariantCulture));
@@ -4368,6 +4383,7 @@ public class ReportsController : ControllerBase
     private async Task<IReadOnlyList<LegalWorkPaymentRow>> BuildLegalWorkPaymentRowsAsync(
         IReadOnlyCollection<int> caseIds,
         DataVisibilityAccess accountsVisibility,
+        DataVisibilityAccess paymentsVisibility,
         PaymentType paymentType,
         CancellationToken ct)
     {
@@ -4379,6 +4395,7 @@ public class ReportsController : ControllerBase
         var paymentQuery = _db.Payments
             .AsNoTracking()
             .ApplyPaymentVisibility(accountsVisibility)
+            .ApplyPaymentVisibility(paymentsVisibility)
             .ExcludeInstallmentParentInvoices(_db)
             .Where(item => item.Type == paymentType && item.Status != PaymentStatus.Cancelled);
 

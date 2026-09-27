@@ -81,7 +81,7 @@ import {
   normalizeYmRange,
 } from '../../utils/reportPresentation';
 import type { ActStatusReport, AdvanceReport, BankStatementImportReport, CaseActivityReport, CaseFinanceReport, CaseSuccessReport, CashBookSummary, CashFlowForecastReport, CashFlowReport, CashOrderReport, Client, ClientCase, Contract, ContractStatusReport, CounterpartyReport, CurrencyReport, CurrentCasesReport, DirectionReport, IncomeType, InvoiceStatusReport, JournalStatusReport, LawyerWorkloadReport, LegalWorkReport, MatchStatusReport, MoneyAccount, MoneyCategoryReport, MoneyOperationSource, OverdueProceduralDeadlinesReport, PaidAccountReport, PaidInvoiceReport, PaymentOrderReport, PaymentPurposeReport, PaymentPriorityReport, PlanFactReport, ProjectReport, SalesPointReport, SpreadsheetImportReport, TaskReport, VatReport } from '../../types';
-import { buildVisibleReportGroups, canViewCaseFinanceReport, isReportGroupEnabled, type ReportGroupId, type ReportSectionAccess } from './reportAccess';
+import { buildVisibleReportGroups, canViewCaseFinanceReport, canViewLegalWorkReport, isReportGroupEnabled, type ReportGroupId, type ReportSectionAccess } from './reportAccess';
 import type { ManagementReportKind } from './reportKinds';
 
 const statusMeta: Record<
@@ -1630,6 +1630,11 @@ function LegalWorkReportSection({
         </div>
       ) : (
         <>
+          {!report.hasCompletePaymentVisibility && (
+            <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900" role="status">
+              Оплата и остаток рассчитаны по доступным вам платежам; итог может быть неполным.
+            </div>
+          )}
           <div className="mt-6 grid grid-cols-1 gap-4 xl:grid-cols-4">
               <MetricCard
                 title="Дел в работе"
@@ -6347,7 +6352,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     }),
     [bankReportFilters, canExportPaymentReports],
   );
-  const canViewLegalWorkReports = canViewCaseReports && canViewTaskReports && canViewAccountReports;
+  const canViewLegalWorkReports = canViewLegalWorkReport(reportAccess);
   const canViewCaseFinanceReports = canViewCaseFinanceReport(reportAccess);
   const canViewCaseTaskReports = canViewCaseReports && canViewTaskReports;
   const {

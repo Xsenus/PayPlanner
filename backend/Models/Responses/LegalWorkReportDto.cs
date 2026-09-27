@@ -7,6 +7,7 @@ public sealed class LegalWorkReportDto
     public string StatusFilter { get; init; } = string.Empty;
     public int? ResponsibleUserIdFilter { get; init; }
     public string CaseTypeFilter { get; init; } = string.Empty;
+    public bool HasCompletePaymentVisibility { get; init; }
     public int TotalCases { get; init; }
     public int ActiveCases { get; init; }
     public int ClosedCases { get; init; }

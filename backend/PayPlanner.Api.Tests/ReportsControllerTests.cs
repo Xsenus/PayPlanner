@@ -843,6 +843,13 @@ public class ReportsControllerTests
                 Section = RolePermissionCatalog.Accounts,
                 CanView = true,
                 ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                RoleId = role.Id,
+                Section = RolePermissionCatalog.Payments,
+                CanView = true,
+                ViewScope = DataVisibilityScope.All,
             });
         db.UserSettings.Add(new UserSetting
         {
@@ -928,6 +935,13 @@ public class ReportsControllerTests
             {
                 RoleId = role.Id,
                 Section = RolePermissionCatalog.Accounts,
+                CanView = true,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                RoleId = role.Id,
+                Section = RolePermissionCatalog.Payments,
                 CanView = true,
                 ViewScope = DataVisibilityScope.All,
             });
@@ -3300,6 +3314,13 @@ public class ReportsControllerTests
                 Section = RolePermissionCatalog.Accounts,
                 CanView = true,
                 ViewScope = DataVisibilityScope.Own,
+            },
+            new RolePermission
+            {
+                RoleId = role.Id,
+                Section = RolePermissionCatalog.Payments,
+                CanView = true,
+                ViewScope = DataVisibilityScope.Own,
             });
 
         var today = DateTime.UtcNow.Date;
@@ -3411,6 +3432,77 @@ public class ReportsControllerTests
     }
 
     [Fact]
+    public async Task LegalWork_RequiresPaymentAccessAndLabelsPartialExports()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role { Name = "legal-work-payment-scope", Description = "Legal work payment scope" };
+        var viewer = new User { Email = "legal-work-viewer@example.test", FullName = "Case Viewer", IsActive = true, Role = role };
+        var clientOwner = new User { Email = "legal-work-owner@example.test", FullName = "Client Owner", IsActive = true, Role = role };
+        var client = new Client { Name = "Shared Client", ResponsibleUser = clientOwner };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            ResponsibleUser = viewer,
+            CaseNumber = "LEGAL-SCOPE",
+            Title = "Visible case with private payment",
+            Status = ClientCaseStatus.Open,
+            CreatedAt = DateTime.UtcNow.AddDays(-2),
+            FeeAmount = 10_000m,
+        };
+        db.Roles.Add(role);
+        db.Users.AddRange(viewer, clientOwner);
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        db.RolePermissions.AddRange(
+            new RolePermission { Role = role, Section = RolePermissionCatalog.Reports, CanView = true, CanExport = true, ViewScope = DataVisibilityScope.All },
+            new RolePermission { Role = role, Section = RolePermissionCatalog.Cases, CanView = true, ViewScope = DataVisibilityScope.Own },
+            new RolePermission { Role = role, Section = RolePermissionCatalog.Tasks, CanView = true, ViewScope = DataVisibilityScope.All },
+            new RolePermission { Role = role, Section = RolePermissionCatalog.Accounts, CanView = true, ViewScope = DataVisibilityScope.All });
+        db.Payments.Add(new Payment
+        {
+            Client = client,
+            ClientCase = clientCase,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Completed,
+            Amount = 5_000m,
+            PaidAmount = 5_000m,
+            Date = DateTime.UtcNow.Date,
+        });
+        await db.SaveChangesAsync();
+
+        var pdfService = new FakeInvoiceDocumentPdfService([0x25, 0x50, 0x44, 0x46]);
+        var controller = CreateController(db, CreateUserPrincipal(viewer.Id), pdfService);
+        var withoutPayments = await controller.LegalWork(null, null, null, null, null, CancellationToken.None);
+        Assert.IsType<UnauthorizedResult>(withoutPayments.Result);
+        Assert.IsType<UnauthorizedResult>(await controller.ExportLegalWorkCsv(null, null, null, null, null, CancellationToken.None));
+
+        db.RolePermissions.Add(new RolePermission
+        {
+            RoleId = role.Id,
+            Section = RolePermissionCatalog.Payments,
+            CanView = true,
+            ViewScope = DataVisibilityScope.Own,
+        });
+        await db.SaveChangesAsync();
+
+        var limited = await controller.LegalWork(null, null, null, null, null, CancellationToken.None);
+        var report = Assert.IsType<LegalWorkReportDto>(Assert.IsType<OkObjectResult>(limited.Result).Value);
+        Assert.Equal(1, report.TotalCases);
+        Assert.False(report.HasCompletePaymentVisibility);
+        Assert.Equal(0m, report.PaidTotal);
+        Assert.Equal(0m, Assert.Single(report.Cases).PaidTotal);
+
+        var csv = Assert.IsType<FileContentResult>(await controller.ExportLegalWorkCsv(null, null, null, null, null, CancellationToken.None));
+        Assert.Contains("Суммы по доступным платежам", System.Text.Encoding.UTF8.GetString(csv.FileContents));
+        var excel = Assert.IsType<FileContentResult>(await controller.ExportLegalWorkExcel(null, null, null, null, null, CancellationToken.None));
+        Assert.Contains("Суммы по доступным платежам", System.Text.Encoding.UTF8.GetString(excel.FileContents));
+        var print = Assert.IsType<ContentResult>(await controller.PrintLegalWork(null, null, null, null, null, CancellationToken.None));
+        Assert.Contains("Суммы по доступным платежам", print.Content);
+        Assert.IsType<FileContentResult>(await controller.ExportLegalWorkPdf(null, null, null, null, null, CancellationToken.None));
+        Assert.Contains("Суммы по доступным платежам", pdfService.LastHtml);
+    }
+
+    [Fact]
     public async Task LegalWork_ProjectsOnlyRequiredCaseColumns()
     {
         var interceptor = new RecordingCommandInterceptor();
@@ -3486,6 +3578,13 @@ public class ReportsControllerTests
                 Section = RolePermissionCatalog.Accounts,
                 CanView = true,
                 ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                Role = role,
+                Section = RolePermissionCatalog.Payments,
+                CanView = true,
+                ViewScope = DataVisibilityScope.All,
             });
         await db.SaveChangesAsync();
         interceptor.Commands.Clear();
@@ -3503,6 +3602,7 @@ public class ReportsControllerTests
         var item = Assert.Single(report.Cases);
         Assert.Equal("Projection Legal Client", item.ClientName);
         Assert.Equal("Projection Legal Lawyer", item.ResponsibleName);
+        Assert.True(report.HasCompletePaymentVisibility);
         Assert.Equal(50_000m, item.FeeAmount);
         Assert.Equal(6, report.UpcomingDeadlineCount);
 

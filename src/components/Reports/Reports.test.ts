@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { buildBankReportFilters } from './reportFilters';
-import { buildVisibleReportGroups, canViewCaseFinanceReport, isReportGroupEnabled } from './reportAccess';
+import { buildVisibleReportGroups, canViewCaseFinanceReport, canViewLegalWorkReport, isReportGroupEnabled } from './reportAccess';
 import { MANAGEMENT_REPORT_KINDS } from './reportKinds';
 
 describe('Reports bank filters', () => {
@@ -40,6 +40,13 @@ describe('Reports access matrix', () => {
     expect(canViewCaseFinanceReport({ ...access, payments: false })).toBe(false);
     expect(canViewCaseFinanceReport({ ...access, accounts: false })).toBe(false);
     expect(canViewCaseFinanceReport({ ...access, cases: false })).toBe(false);
+  });
+
+  it('requires task access as well for the legal work report', () => {
+    const access = { payments: true, tasks: true, cases: true, accounts: true, acts: false, contracts: false };
+    expect(canViewLegalWorkReport(access)).toBe(true);
+    expect(canViewLegalWorkReport({ ...access, tasks: false })).toBe(false);
+    expect(canViewLegalWorkReport({ ...access, payments: false })).toBe(false);
   });
 
   it('shows report groups only for sections available to the role', () => {

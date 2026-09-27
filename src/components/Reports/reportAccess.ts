@@ -13,6 +13,10 @@ export function canViewCaseFinanceReport(access: ReportSectionAccess): boolean {
   return access.cases && access.accounts && access.payments;
 }
 
+export function canViewLegalWorkReport(access: ReportSectionAccess): boolean {
+  return access.cases && access.tasks && access.accounts && access.payments;
+}
+
 export function buildVisibleReportGroups(access: ReportSectionAccess): ReportGroupId[] {
   const groups: ReportGroupId[] = [];
 
