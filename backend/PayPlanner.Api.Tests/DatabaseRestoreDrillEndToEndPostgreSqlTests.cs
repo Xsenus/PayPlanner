@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
@@ -65,12 +66,23 @@ public sealed class DatabaseRestoreDrillEndToEndPostgreSqlTests
             Directory.CreateDirectory(backupRoot);
             var backupPath = Path.Combine(backupRoot, "test.sql");
             await RunPgDumpAsync(sourceBuilder, backupPath);
+            var filesetPath = backupPath + ".fileset";
+            using (var archive = ZipFile.Open(filesetPath, ZipArchiveMode.Create))
+            using (var writer = new StreamWriter(archive.CreateEntry("file-storage/evidence.txt").Open()))
+                await writer.WriteAsync("restored file evidence");
+            string filesetHash;
+            await using (var filesetStream = File.OpenRead(filesetPath))
+                filesetHash = Convert.ToHexString(await SHA256.HashDataAsync(filesetStream)).ToLowerInvariant();
             await using (var stream = File.OpenRead(backupPath))
             {
                 var hash = Convert.ToHexString(await SHA256.HashDataAsync(stream)).ToLowerInvariant();
                 var manifest = new DatabaseBackupManifest(
                     1, Guid.NewGuid().ToString("N"), "test.sql", "test.sql", "postgresql", "sql",
-                    stream.Length, hash, "manual", DateTime.UtcNow, "test");
+                    stream.Length, hash, "manual", DateTime.UtcNow, "test", Parts:
+                    [
+                        new DatabaseBackupPartManifest("database", "test.sql", stream.Length, hash, true),
+                        new DatabaseBackupPartManifest("file-storage", "test.sql.fileset", new FileInfo(filesetPath).Length, filesetHash, true),
+                    ], RecoveryKeyReference: "external-test-key-reference");
                 await File.WriteAllTextAsync(backupPath + ".manifest.json",
                     JsonSerializer.Serialize(manifest, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
             }
@@ -98,11 +110,31 @@ public sealed class DatabaseRestoreDrillEndToEndPostgreSqlTests
             services.AddSingleton<DatabaseRestoreDrillService>();
             using var provider = services.BuildServiceProvider();
 
+            var backups = provider.GetRequiredService<DatabaseBackupService>();
+            var missingFilesetPath = filesetPath + ".temporarily-missing";
+            File.Move(filesetPath, missingFilesetPath);
+            try
+            {
+                Assert.False((await backups.VerifyBackupAsync("test.sql")).Verified);
+                await Assert.ThrowsAsync<InvalidDataException>(() =>
+                    provider.GetRequiredService<DatabaseRestoreDrillService>()
+                        .RunAsync("test.sql", executePostgreSql: true, "one-time-test-token", CancellationToken.None));
+                await DatabaseRestoreDrillService.EnsureEmptyPostgreSqlTargetAsync(
+                    targetBuilder.ConnectionString, CancellationToken.None);
+            }
+            finally
+            {
+                File.Move(missingFilesetPath, filesetPath);
+            }
+
             var report = await provider.GetRequiredService<DatabaseRestoreDrillService>()
                 .RunAsync("test.sql", executePostgreSql: true, "one-time-test-token", CancellationToken.None);
             Assert.Equal("restored", report.Status);
+            Assert.Equal("externalNotVerified", report.RecoveryKeyStatus);
             Assert.True(report.TableCount >= 3);
             Assert.True(File.Exists(report.ReportPath));
+            Assert.Equal("restored file evidence", await File.ReadAllTextAsync(
+                Path.Combine(Path.GetDirectoryName(report.ReportPath)!, "files", "file-storage", "evidence.txt")));
 
             await using var target = new NpgsqlConnection(targetBuilder.ConnectionString);
             await target.OpenAsync();

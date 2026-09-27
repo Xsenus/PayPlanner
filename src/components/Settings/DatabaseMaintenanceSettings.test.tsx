@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   retryDatabaseBackupYandexDiskUploadMock: vi.fn(),
   verifyDatabaseBackupMock: vi.fn(),
   runDatabaseRestoreDrillMock: vi.fn(),
+  dialogConfirmMock: vi.fn(),
   getUserSettingMock: vi.fn(),
 }));
 
@@ -42,7 +43,7 @@ vi.mock('../../hooks/useRolePermissions', () => ({
 
 vi.mock('../../hooks/useDialog', () => ({
   useDialog: () => ({
-    confirm: vi.fn(),
+    confirm: mocks.dialogConfirmMock,
   }),
 }));
 
@@ -187,6 +188,34 @@ describe('DatabaseMaintenanceSettings', () => {
       backupId: 'backup-1',
       actualSizeBytes: 1024,
     });
+    mocks.dialogConfirmMock.mockResolvedValue(true);
+  });
+
+  it('reports actual PostgreSQL restoration and the unverified external keys', async () => {
+    mocks.getDatabaseBackupOverviewMock.mockResolvedValue({
+      ...buildBackupOverview(),
+      items: [{
+        fileName: 'backup.zip',
+        relativePath: '2026/06/backup.zip',
+        sizeBytes: 1024,
+        createdAt: '2026-06-01T10:00:00+07:00',
+        trigger: 'manual',
+      }],
+    });
+    mocks.runDatabaseRestoreDrillMock.mockResolvedValue({
+      status: 'restored',
+      databaseProvider: 'postgresql',
+      tableCount: 42,
+      recoveryKeyStatus: 'externalNotVerified',
+    });
+
+    render(<DatabaseMaintenanceSettings />);
+    await waitFor(() => expect(mocks.getDatabaseBackupOverviewMock).toHaveBeenCalled());
+    fireEvent.click(screen.getAllByRole('button')[4]);
+    fireEvent.click(await screen.findByRole('button', { name: 'Тест восстановления' }));
+
+    await waitFor(() => expect(mocks.runDatabaseRestoreDrillMock).toHaveBeenCalledWith('2026/06/backup.zip'));
+    expect(await screen.findByText(/PostgreSQL восстановлена в отдельной базе, таблиц: 42.*доступность этим тестом не подтверждена/)).toBeTruthy();
   });
 
   it('verifies a backup set from the backup list', async () => {

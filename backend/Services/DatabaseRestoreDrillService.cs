@@ -35,7 +35,8 @@ public sealed record DatabaseRestoreDrillReport(
     DateTime CompletedAtUtc,
     long DurationMilliseconds,
     string ReportPath,
-    string? Error = null);
+    string? Error = null,
+    string RecoveryKeyStatus = "notDeclared");
 
 public sealed class DatabaseRestoreDrillService(
     DatabaseBackupService backups,
@@ -79,7 +80,13 @@ public sealed class DatabaseRestoreDrillService(
         }
 
         var reportPath = Path.Combine(targetDirectory, "restore-drill-report.json");
-        report = report with { ReportPath = reportPath };
+        report = report with
+        {
+            ReportPath = reportPath,
+            RecoveryKeyStatus = string.IsNullOrWhiteSpace(manifest.RecoveryKeyReference)
+                ? "notDeclared"
+                : "externalNotVerified",
+        };
         var tempPath = reportPath + ".tmp";
         await File.WriteAllTextAsync(tempPath, JsonSerializer.Serialize(report, JsonOptions), cancellationToken);
         File.Move(tempPath, reportPath, overwrite: true);

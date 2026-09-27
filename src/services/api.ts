@@ -1539,6 +1539,7 @@ export interface DatabaseRestoreDrillReportDto {
   durationMilliseconds: number;
   reportPath: string;
   error?: string | null;
+  recoveryKeyStatus: 'notDeclared' | 'externalNotVerified';
 }
 
 export interface DatabaseBackupFormatOptionDto {

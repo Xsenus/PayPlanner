@@ -490,8 +490,13 @@ export function DatabaseMaintenanceSettings() {
       }
       const details = result.databaseProvider === 'sqlite'
         ? `таблиц: ${result.tableCount}, нарушений связей: ${result.foreignKeyViolationCount}`
-        : 'структура и комплект проверены; фактическое восстановление PostgreSQL не запускалось';
-      setDatabaseBackupMessage(`Тест восстановления завершён: ${details}.`);
+        : result.status === 'restored'
+          ? `PostgreSQL восстановлена в отдельной базе, таблиц: ${result.tableCount}`
+          : 'структура и комплект проверены; фактическое восстановление PostgreSQL не запускалось';
+      const keyNotice = result.recoveryKeyStatus === 'externalNotVerified'
+        ? 'Ключи шифрования указаны отдельно, но их доступность этим тестом не подтверждена.'
+        : 'Наличие отдельной копии ключей шифрования этим тестом не подтверждено.';
+      setDatabaseBackupMessage(`Тест восстановления завершён: ${details}. ${keyNotice}`);
     } catch (error) {
       setDatabaseBackupError(getErrorMessage(error, 'Не удалось выполнить тестовое восстановление.'));
     } finally {
