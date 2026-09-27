@@ -161,7 +161,12 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       }
 
       const next = [...prev, toast];
-      const visible = next.slice(-MAX_VISIBLE_TOASTS);
+      const latestTimedIds = new Set(next
+        .filter((item) => item.durationMs > 0)
+        .slice(-MAX_VISIBLE_TOASTS)
+        .map((item) => item.id));
+      // A toast awaiting an explicit decision must not disappear when short-lived toasts arrive.
+      const visible = next.filter((item) => item.durationMs === 0 || latestTimedIds.has(item.id));
       const visibleIds = new Set(visible.map((item) => item.id));
       next.forEach((item) => {
         if (!visibleIds.has(item.id)) {
@@ -228,7 +233,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       {children}
       {typeof document !== 'undefined'
         ? createPortal(
-            <div className="pointer-events-none fixed bottom-3 left-3 right-3 z-[2000] flex flex-col-reverse gap-3 sm:left-auto sm:right-4 sm:bottom-4 sm:w-[min(100vw-2rem,26rem)]" aria-live="polite" aria-atomic="true">
+            <div className="pointer-events-auto fixed bottom-3 left-3 right-3 z-[2000] flex max-h-[80vh] flex-col-reverse gap-3 overflow-y-auto sm:left-auto sm:right-4 sm:bottom-4 sm:w-[min(100vw-2rem,26rem)]" aria-live="polite" aria-atomic="true">
               {toasts.map((toast) => {
                 const styles = toastStyles(toast.variant);
                 const domainStyles = toastDomainStyles(toast.domain);
@@ -240,7 +245,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                     data-testid="toast-card"
                     data-toast-variant={toast.variant}
                     data-toast-domain={toast.domain ?? 'general'}
-                    className={`pp-toast-card pointer-events-auto ${styles.className} ${toast.variant === 'info' ? domainStyles.className ?? '' : ''}`}
+                    className={`pp-toast-card pointer-events-auto shrink-0 ${styles.className} ${toast.variant === 'info' ? domainStyles.className ?? '' : ''}`}
                   >
                     <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 px-3.5 py-3.5 sm:px-4">
                       <div className="min-w-0">

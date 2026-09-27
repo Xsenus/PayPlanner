@@ -43,11 +43,22 @@ function ToastHarness({
         type="button"
         onClick={() => {
           ['Первое', 'Второе', 'Третье', 'Четвертое'].forEach((title) => {
-            toast.showToast({ title, description: title, durationMs: 0 });
+            toast.showToast({ title, description: title, durationMs: 60_000 });
           });
         }}
       >
         Flood
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          toast.showToast({ title: 'Ждёт решения', description: 'Завершённая задача', durationMs: 0 });
+          ['Короткое 1', 'Короткое 2', 'Короткое 3', 'Короткое 4'].forEach((title) => {
+            toast.showToast({ title, description: title, durationMs: 60_000 });
+          });
+        }}
+      >
+        PersistentFlood
       </button>
       <button
         type="button"
@@ -124,6 +135,26 @@ describe('ToastProvider', () => {
     expect(screen.getAllByText('Второе').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Третье').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Четвертое').length).toBeGreaterThan(0);
+  });
+
+  it('keeps a toast awaiting a decision when later short-lived toasts arrive', () => {
+    render(
+      <ToastProvider>
+        <ToastHarness />
+      </ToastProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'PersistentFlood' }));
+
+    expect(screen.getByText('Ждёт решения')).toBeTruthy();
+    expect(screen.queryByText('Короткое 1')).toBeNull();
+    expect(screen.getAllByText('Короткое 2').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Короткое 3').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Короткое 4').length).toBeGreaterThan(0);
+    const stack = screen.getAllByTestId('toast-card')[0].parentElement;
+    expect(stack?.className).toContain('max-h-[80vh]');
+    expect(stack?.className).toContain('overflow-y-auto');
+    expect(screen.getAllByTestId('toast-card').every((card) => card.className.includes('shrink-0'))).toBe(true);
   });
 
   it('positions notification stack in the bottom-right corner and grows upward', () => {
