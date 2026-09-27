@@ -18,7 +18,10 @@ export function ExecutiveWritDocumentUpload({ caseId, canUpload, documents, onUp
   const [uploading, setUploading] = useState(false);
   const [downloadingId, setDownloadingId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const scans = documents.filter((document) => document.documentType?.trim() === EXECUTIVE_WRIT_DOCUMENT_TYPE && document.isLatestVersion !== false);
+  const scans = documents.filter((document) =>
+    document.documentType?.trim() === EXECUTIVE_WRIT_DOCUMENT_TYPE
+    && document.status?.trim() === 'Получен'
+    && document.isLatestVersion !== false);
 
   const download = async (document: ClientCaseDocument) => {
     if (downloadingId !== null || caseId <= 0) return;

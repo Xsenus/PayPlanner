@@ -57,11 +57,15 @@ describe('ExecutiveWritDocumentUpload', () => {
 
     render(<ExecutiveWritDocumentUpload caseId={15} canUpload={false} documents={[
       { ...scan, id: 6, version: 1, originalFileName: 'Старый скан.pdf', isLatestVersion: false },
+      { ...scan, id: 8, documentKey: 'cancelled-writ', status: 'Аннулирован', originalFileName: 'Аннулированный лист.pdf' },
+      { ...scan, id: 9, documentKey: 'draft-writ', status: 'Подготовлен', originalFileName: 'Черновик листа.pdf' },
       scan,
     ]} onUploaded={vi.fn()} />);
 
     expect(screen.queryByLabelText('Загрузить скан исполнительного листа')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Скачать скан Старый скан.pdf' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Скачать скан Аннулированный лист.pdf' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Скачать скан Черновик листа.pdf' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Скачать скан Исполнительный лист.pdf' }));
 
     await waitFor(() => expect(apiService.downloadCaseDocument).toHaveBeenCalledWith(15, 7));
