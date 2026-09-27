@@ -24,13 +24,15 @@ namespace PayPlanner.Api.Services
         /// Рассчитать сводную статистику по платежам с фильтрами.
         /// </summary>
         public async Task<StatsSummary> GetAsync(int? clientId, int? caseId, DateTime? from, DateTime? to,
-            string? period, PaymentType? type, PaymentStatus? status, string? q, string? clientRole, CancellationToken ct,
+            string? period, PaymentType? type, PaymentStatus? status, string? q, string? clientRole,
+            DataVisibilityAccess visibility, CancellationToken ct,
             string? timeZoneId = null, DateTime? nowUtc = null)
         {
             var (f, t) = PeriodHelper.Resolve(from, to, period, tzId: timeZoneId, nowUtc: nowUtc);
 
             var qry = _db.Payments
                 .AsNoTracking()
+                .ApplyPaymentVisibility(visibility)
                 .ExcludeInstallmentParentInvoices(_db)
                 .Where(x => x.Date >= f && x.Date <= t);
 
@@ -132,6 +134,7 @@ namespace PayPlanner.Api.Services
 
             return new StatsSummary
             {
+                IsPartial = !visibility.SeesAll,
                 From = f,
                 To = t,
                 ClientId = clientId,

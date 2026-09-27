@@ -3981,6 +3981,7 @@ export interface ClientCaseExpenseDetail {
 }
 
 export interface MonthlyStats {
+  isPartial?: boolean;
   income: number;
   expense: number;
   profit: number;
@@ -4084,6 +4085,7 @@ export type SummaryBucket = {
 };
 
 export type SummaryStats = {
+  isPartial?: boolean;
   from: string;
   to: string;
   clientId?: number;

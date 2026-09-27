@@ -6880,6 +6880,11 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
 
             {activeGroup === 'payments' && stats && types ? (
               <>
+            {stats.isPartial ? (
+              <p role="status" className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                Финансовые итоги рассчитаны только по доступным вам платежам и могут быть неполными.
+              </p>
+            ) : null}
             <section className="mt-8 grid grid-cols-1 gap-4 xl:grid-cols-4">
               <MetricCard
                 title="Поступило"

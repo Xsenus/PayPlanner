@@ -6,6 +6,9 @@
     /// </summary>
     public class StatsSummary
     {
+        /// <summary>Итог может быть неполным из-за ограниченной видимости платежей.</summary>
+        public bool IsPartial { get; set; }
+
         /// <summary>
         /// Идентификатор дела (если применён фильтр).
         /// </summary>

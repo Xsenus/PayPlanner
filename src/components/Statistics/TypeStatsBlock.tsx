@@ -280,6 +280,11 @@ export function TypeStatsBlock({
 
   return (
     <div className={`flex flex-col gap-3 ${className}`}>
+      {data?.isPartial ? (
+        <p role="status" className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          Показаны только доступные вам платежи; общие суммы и количество операций могут быть больше.
+        </p>
+      ) : null}
       <div className="min-h-[120px]">
         <StatsCards items={items} loading={showLoading} lgCols={items.length} />
       </div>

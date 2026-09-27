@@ -2,8 +2,10 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Filters;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Services;
 
 namespace PayPlanner.Api.Controllers;
 
@@ -19,10 +21,17 @@ public class StatsController : ControllerBase
     [HttpGet("month")]
     public async Task<IActionResult> Month([FromQuery] int year, [FromQuery] int month, CancellationToken ct)
     {
+        var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
+        if (visibility is null)
+        {
+            return Forbid();
+        }
+
         var startDate = new DateTime(year, month, 1);
         var endDate = startDate.AddMonths(1).AddDays(-1);
 
         var payments = await _db.Payments
+            .ApplyPaymentVisibility(visibility)
             .Where(p => p.Date >= startDate && p.Date <= endDate)
             .AsNoTracking()
             .ToListAsync(ct);
@@ -44,6 +53,7 @@ public class StatsController : ControllerBase
 
         return Ok(new MonthlyStats
         {
+            IsPartial = !visibility.SeesAll,
             Income = income,
             Expense = expense,
             Profit = profit,

@@ -9,6 +9,9 @@ namespace PayPlanner.Api.Tests;
 
 public class StatsSummaryServiceTests
 {
+    private static readonly DataVisibilityAccess FullPaymentVisibility =
+        new(0, true, RolePermissionCatalog.Payments, DataVisibilityScope.All, Array.Empty<int>());
+
     [Fact]
     public async Task GetAsync_ExcludesRepresentativeInvoice_WhenInstallmentsExist()
     {
@@ -106,6 +109,7 @@ public class StatsSummaryServiceTests
             null,
             null,
             null,
+            FullPaymentVisibility,
             CancellationToken.None);
 
         Assert.Equal(115_000m, summary.Income.CompletedAmount);
@@ -218,6 +222,7 @@ public class StatsSummaryServiceTests
             PaymentStatus.Completed,
             null,
             null,
+            FullPaymentVisibility,
             CancellationToken.None);
 
         Assert.Equal(37_000m, summary.Income.CompletedAmount);
@@ -282,6 +287,7 @@ public class StatsSummaryServiceTests
             null,
             null,
             "counterparty",
+            FullPaymentVisibility,
             CancellationToken.None);
 
         var expenseClientSummary = await service.GetAsync(
@@ -294,6 +300,7 @@ public class StatsSummaryServiceTests
             null,
             null,
             "expenseClient",
+            FullPaymentVisibility,
             CancellationToken.None);
 
         Assert.Equal(5_000m, supplierSummary.Expense.TotalAmount);
@@ -349,6 +356,7 @@ public class StatsSummaryServiceTests
             null,
             null,
             null,
+            FullPaymentVisibility,
             CancellationToken.None,
             timeZoneId: selectedZone.TimeZoneId,
             nowUtc: selectedZone.NowUtc);

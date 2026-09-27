@@ -7327,6 +7327,7 @@ export class ApiService {
   }) {
     const q = buildQuery(params);
     return this.request<{
+      isPartial?: boolean;
       start: { year: number; month: number };
       end: { year: number; month: number };
       items: Array<{

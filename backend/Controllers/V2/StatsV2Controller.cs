@@ -39,8 +39,14 @@ public class StatsV2Controller : ControllerBase
         [FromQuery] string? clientRole,
         CancellationToken ct)
     {
+        var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
+        if (visibility is null)
+        {
+            return Forbid();
+        }
+
         var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
-        var res = await _svc.GetAsync(clientId, caseId, from, to, period, type, status, q, clientRole, ct, timeZone.Id);
+        var res = await _svc.GetAsync(clientId, caseId, from, to, period, type, status, q, clientRole, visibility, ct, timeZone.Id);
         return Ok(res);
     }
 
@@ -53,6 +59,12 @@ public class StatsV2Controller : ControllerBase
         [FromQuery] int endMonth,
         CancellationToken ct = default)
     {
+        var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
+        if (visibility is null)
+        {
+            return Forbid();
+        }
+
         var start = new DateTime(startYear, startMonth, 1);
         var end = new DateTime(endYear, endMonth, 1);
         if (end < start) (start, end) = (end, start);
@@ -64,6 +76,7 @@ public class StatsV2Controller : ControllerBase
             var mEnd = mStart.AddMonths(1).AddDays(-1);
 
             var payments = await _db.Payments
+                .ApplyPaymentVisibility(visibility)
                 .Where(p => p.Date >= mStart && p.Date <= mEnd)
                 .AsNoTracking()
                 .ToListAsync(ct);
@@ -100,6 +113,7 @@ public class StatsV2Controller : ControllerBase
 
         return Ok(new
         {
+            isPartial = !visibility.SeesAll,
             start = new { year = start.Year, month = start.Month },
             end = new { year = end.Year, month = end.Month },
             items

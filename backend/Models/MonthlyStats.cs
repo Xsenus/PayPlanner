@@ -5,6 +5,9 @@ namespace PayPlanner.Api.Models
     /// </summary>
     public class MonthlyStats
     {
+        /// <summary>Итог может быть неполным из-за ограниченной видимости платежей.</summary>
+        public bool IsPartial { get; set; }
+
         /// <summary>
         /// Share of completed payments (0 to 100).
         /// </summary>

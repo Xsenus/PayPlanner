@@ -3821,6 +3821,83 @@ public class PaymentsControllerTests
     }
 
     [Fact]
+    public async Task PaymentStatistics_WithOwnScope_ExcludeHiddenPaymentsInAllRoutes()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateBalanceUserAsync(db, canEditPayments: true, viewScope: DataVisibilityScope.Own);
+        var otherUser = await CreateBalanceUserAsync(db, canEditPayments: true, viewScope: DataVisibilityScope.Own);
+        var visible = CreatePayment(new DateTime(2026, 4, 28), 100m, "Доступный платёж");
+        visible.PaidAmount = 100m;
+        visible.Status = PaymentStatus.Completed;
+        visible.Responsibles.Add(new PaymentResponsible { UserId = user.Id });
+        var hidden = CreatePayment(new DateTime(2026, 4, 28), 900m, "Скрытый платёж");
+        hidden.PaidAmount = 900m;
+        hidden.Status = PaymentStatus.Completed;
+        hidden.Responsibles.Add(new PaymentResponsible { UserId = otherUser.Id });
+        db.Payments.AddRange(visible, hidden);
+        await db.SaveChangesAsync();
+
+        var context = CreateClientBalancesController(db, user.Id).ControllerContext;
+        var monthController = new StatsController(db) { ControllerContext = context };
+        var v2Controller = new StatsV2Controller(new StatsSummaryService(db), db) { ControllerContext = context };
+
+        var month = Assert.IsType<MonthlyStats>(Assert.IsType<OkObjectResult>(
+            await monthController.Month(2026, 4, CancellationToken.None)).Value);
+        Assert.Equal(100m, month.Income);
+        Assert.Equal(1, month.Counts.Total);
+        Assert.True(month.IsPartial);
+
+        var summary = Assert.IsType<StatsSummary>(Assert.IsType<OkObjectResult>(await v2Controller.Summary(
+            null, null, new DateTime(2026, 4, 1), new DateTime(2026, 4, 30),
+            null, null, null, null, null, CancellationToken.None)).Value);
+        Assert.Equal(100m, summary.Income.CollectedAmount);
+        Assert.Equal(1, summary.Income.TotalCount);
+        Assert.True(summary.IsPartial);
+
+        var months = Assert.IsType<OkObjectResult>(await v2Controller.Months(2026, 4, 2026, 4, CancellationToken.None));
+        using var json = JsonDocument.Parse(JsonSerializer.Serialize(months.Value));
+        Assert.True(json.RootElement.GetProperty("isPartial").GetBoolean());
+        var april = Assert.Single(json.RootElement.GetProperty("items").EnumerateArray());
+        Assert.Equal(100m, april.GetProperty("income").GetDecimal());
+        Assert.Equal(1, april.GetProperty("counts").GetProperty("total").GetInt32());
+
+        var fullUser = await CreateBalanceUserAsync(db, canEditPayments: true, viewScope: DataVisibilityScope.All);
+        var fullContext = CreateClientBalancesController(db, fullUser.Id).ControllerContext;
+        var fullMonthController = new StatsController(db) { ControllerContext = fullContext };
+        var fullV2Controller = new StatsV2Controller(new StatsSummaryService(db), db) { ControllerContext = fullContext };
+        var fullMonth = Assert.IsType<MonthlyStats>(Assert.IsType<OkObjectResult>(
+            await fullMonthController.Month(2026, 4, CancellationToken.None)).Value);
+        Assert.Equal(1_000m, fullMonth.Income);
+        Assert.False(fullMonth.IsPartial);
+        var fullSummary = Assert.IsType<StatsSummary>(Assert.IsType<OkObjectResult>(await fullV2Controller.Summary(
+            null, null, new DateTime(2026, 4, 1), new DateTime(2026, 4, 30),
+            null, null, null, null, null, CancellationToken.None)).Value);
+        Assert.Equal(1_000m, fullSummary.Income.CollectedAmount);
+        Assert.False(fullSummary.IsPartial);
+        var fullMonths = Assert.IsType<OkObjectResult>(await fullV2Controller.Months(2026, 4, 2026, 4, CancellationToken.None));
+        using var fullJson = JsonDocument.Parse(JsonSerializer.Serialize(fullMonths.Value));
+        Assert.False(fullJson.RootElement.GetProperty("isPartial").GetBoolean());
+        Assert.Equal(1_000m, Assert.Single(fullJson.RootElement.GetProperty("items").EnumerateArray())
+            .GetProperty("income").GetDecimal());
+    }
+
+    [Fact]
+    public async Task PaymentStatistics_WithoutPaymentView_ReturnForbid()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateBalanceUserAsync(
+            db, canEditPayments: true, viewScope: DataVisibilityScope.All, canViewPayments: false);
+        var context = CreateClientBalancesController(db, user.Id).ControllerContext;
+        var monthController = new StatsController(db) { ControllerContext = context };
+        var v2Controller = new StatsV2Controller(new StatsSummaryService(db), db) { ControllerContext = context };
+
+        Assert.IsType<ForbidResult>(await monthController.Month(2026, 4, CancellationToken.None));
+        Assert.IsType<ForbidResult>(await v2Controller.Summary(
+            null, null, null, null, null, null, null, null, null, CancellationToken.None));
+        Assert.IsType<ForbidResult>(await v2Controller.Months(2026, 4, 2026, 4, CancellationToken.None));
+    }
+
+    [Fact]
     public async Task ApplyCredit_WithSourcePaymentId_UsesOnlySelectedAdvanceRemainder()
     {
         await using var db = await CreateContextAsync();

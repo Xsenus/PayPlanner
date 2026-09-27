@@ -17,6 +17,7 @@ export function toMonthlyStats(s: SummaryStats): MonthlyStats {
   const profit = s.netCollected;
 
   return {
+    isPartial: s.isPartial,
     income,
     expense,
     profit,

@@ -58,6 +58,18 @@ describe('usePeriodStats', () => {
     vi.useRealTimers();
   });
 
+  it('preserves the warning when totals include only visible payments', async () => {
+    getSummaryStatsMock.mockResolvedValue({
+      ...summary('2026-04-01', '2026-04-30', 100),
+      isPartial: true,
+    });
+
+    const { result } = renderHook(() => usePeriodStats('2026-04', '2026-04'));
+
+    await waitFor(() => expect(result.current.stats?.income).toBe(100));
+    expect(result.current.stats?.isPartial).toBe(true);
+  });
+
   it('aborts the previous period and keeps the latest aggregation', async () => {
     const oldRequest = deferred<SummaryStats>();
     const newRequest = deferred<SummaryStats>();
