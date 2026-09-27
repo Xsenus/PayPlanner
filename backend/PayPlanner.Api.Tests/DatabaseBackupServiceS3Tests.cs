@@ -648,6 +648,38 @@ public sealed class DatabaseBackupServiceS3Tests
             Path.Combine(Path.GetDirectoryName(report.Target)!, "files", "file-storage", "task-files", "evidence.txt")));
     }
 
+    [Fact]
+    public async Task CreateManualBackupAsync_RejectsMissingConfiguredFileRootWithoutLeavingIncompleteBackup()
+    {
+        await using var scope = await CreateScopeAsync();
+        Directory.Move(Path.Combine(scope.Root, "files"), Path.Combine(scope.Root, "files-unavailable"));
+        var service = scope.Provider.GetRequiredService<DatabaseBackupService>();
+
+        await Assert.ThrowsAsync<DirectoryNotFoundException>(() => service.CreateManualBackupAsync());
+
+        Assert.Empty(Directory.EnumerateFiles(Path.Combine(scope.Root, "backups"), "*.manifest.json", SearchOption.AllDirectories));
+        Assert.Empty(Directory.EnumerateFiles(Path.Combine(scope.Root, "backups"), "*.zip", SearchOption.AllDirectories));
+    }
+
+    [Fact]
+    public async Task CreateManualBackupAsync_RejectsInaccessibleFileSubdirectoryWithoutLeavingIncompleteBackup()
+    {
+        var directoryReader = new FaultingBackupDirectoryReader();
+        await using var scope = await CreateScopeAsync(directoryReader);
+        var inaccessibleDirectory = Path.Combine(scope.Root, "files", "task-files");
+        Directory.CreateDirectory(inaccessibleDirectory);
+        await File.WriteAllTextAsync(Path.Combine(inaccessibleDirectory, "evidence.txt"), "must not be skipped");
+        directoryReader.DeniedFilesDirectory = inaccessibleDirectory;
+        var service = scope.Provider.GetRequiredService<DatabaseBackupService>();
+
+        await Assert.ThrowsAsync<IOException>(() => service.CreateManualBackupAsync());
+
+        Assert.Equal(1, directoryReader.DeniedFilesCount);
+        Assert.Empty(Directory.EnumerateFiles(Path.Combine(scope.Root, "backups"), "*.manifest.json", SearchOption.AllDirectories));
+        Assert.Empty(Directory.EnumerateFiles(Path.Combine(scope.Root, "backups"), "*.zip", SearchOption.AllDirectories));
+        Assert.Empty(Directory.EnumerateFiles(Path.Combine(scope.Root, "backups"), "*.fileset", SearchOption.AllDirectories));
+    }
+
     private static async Task<TestScope> CreateScopeAsync(IBackupDirectoryReader? directoryReader = null)
     {
         var root = Path.Combine(Path.GetTempPath(), $"payplanner-backup-s3-{Guid.NewGuid():N}");

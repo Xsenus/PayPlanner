@@ -672,8 +672,23 @@ public sealed class DatabaseBackupService
                 ? await CreateSqliteBackupAsync(targetDirectory, settings.Format, nowLocal, trigger, scheduleSlot, cancellationToken)
                 : await CreatePostgreSqlBackupAsync(targetDirectory, settings.Format, settings.ToolCommand, nowLocal, trigger, scheduleSlot, cancellationToken);
 
-            var additionalParts = await CreateFileStorageArchiveAsync(fileInfo, cancellationToken);
-            await WriteBackupManifestAsync(fileInfo, settings.Format.Key, additionalParts, cancellationToken);
+            try
+            {
+                var additionalParts = await CreateFileStorageArchiveAsync(fileInfo, cancellationToken);
+                await WriteBackupManifestAsync(fileInfo, settings.Format.Key, additionalParts, cancellationToken);
+            }
+            catch
+            {
+                // A database dump without its required file part or manifest is not a restorable backup set.
+                var incompletePath = ResolveBackupPath(fileInfo.RelativePath);
+                if (incompletePath is not null)
+                {
+                    TryDeleteFile($"{incompletePath}.fileset");
+                    TryDeleteFile(GetManifestPath(incompletePath));
+                    TryDeleteFile(incompletePath);
+                }
+                throw;
+            }
 
             await CleanupExpiredBackupsAsync(settings.RetentionDays, cancellationToken);
             var s3UploadResults = await UploadBackupToS3Async(fileInfo, settings.S3Upload, nowLocal, cancellationToken);
@@ -1672,9 +1687,13 @@ public sealed class DatabaseBackupService
         }
         .Where(item => !string.IsNullOrWhiteSpace(item.Path))
         .Select(item => (item.Name, Path: Path.GetFullPath(item.Path!)))
-        .Where(item => Directory.Exists(item.Path))
         .OrderBy(item => item.Path.Length)
         .ToList();
+        foreach (var root in configuredRoots)
+        {
+            if (!Directory.Exists(root.Path))
+                throw new DirectoryNotFoundException($"Каталог файлов для резервного копирования недоступен: {root.Name}.");
+        }
         if (configuredRoots.Count == 0)
         {
             return [];
@@ -1760,15 +1779,15 @@ public sealed class DatabaseBackupService
             var directory = pending.Pop();
             try
             {
-                files.AddRange(Directory.GetFiles(directory, "*", SearchOption.TopDirectoryOnly));
-                foreach (var child in Directory.GetDirectories(directory, "*", SearchOption.TopDirectoryOnly))
+                files.AddRange(_directoryReader.GetFiles(directory, "*"));
+                foreach (var child in _directoryReader.GetDirectories(directory))
                 {
                     if (!IsReparsePoint(child)) pending.Push(child);
                 }
             }
             catch (Exception ex) when (IsRecoverableFileSystemEnumerationError(ex))
             {
-                _logger.LogWarning(ex, "Skipping inaccessible file-storage backup directory {Directory}.", directory);
+                throw new IOException($"Не удалось полностью прочитать каталог файлов для резервной копии: {directory}.", ex);
             }
         }
         return files;
