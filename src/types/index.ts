@@ -2246,6 +2246,7 @@ export interface CaseFinanceReport {
   responsibleUserIdFilter?: number | null;
   caseTypeFilter: string;
   limit: number;
+  hasCompletePaymentVisibility: boolean;
   totalCases: number;
   activeCases: number;
   closedCases: number;

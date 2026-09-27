@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { buildBankReportFilters } from './reportFilters';
-import { buildVisibleReportGroups, isReportGroupEnabled } from './reportAccess';
+import { buildVisibleReportGroups, canViewCaseFinanceReport, isReportGroupEnabled } from './reportAccess';
 import { MANAGEMENT_REPORT_KINDS } from './reportKinds';
 
 describe('Reports bank filters', () => {
@@ -34,6 +34,14 @@ describe('Reports bank filters', () => {
 });
 
 describe('Reports access matrix', () => {
+  it('requires case, invoice and payment access for the case finance report', () => {
+    const access = { payments: true, tasks: false, cases: true, accounts: true, acts: false, contracts: false };
+    expect(canViewCaseFinanceReport(access)).toBe(true);
+    expect(canViewCaseFinanceReport({ ...access, payments: false })).toBe(false);
+    expect(canViewCaseFinanceReport({ ...access, accounts: false })).toBe(false);
+    expect(canViewCaseFinanceReport({ ...access, cases: false })).toBe(false);
+  });
+
   it('shows report groups only for sections available to the role', () => {
     expect(buildVisibleReportGroups({
       payments: false,

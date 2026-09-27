@@ -3567,6 +3567,13 @@ public class ReportsControllerTests
                 Section = RolePermissionCatalog.Accounts,
                 CanView = true,
                 ViewScope = DataVisibilityScope.Own,
+            },
+            new RolePermission
+            {
+                RoleId = role.Id,
+                Section = RolePermissionCatalog.Payments,
+                CanView = true,
+                ViewScope = DataVisibilityScope.Own,
             });
 
         var today = DateTime.UtcNow.Date;
@@ -3702,6 +3709,72 @@ public class ReportsControllerTests
     }
 
     [Fact]
+    public async Task CaseFinance_RequiresPaymentAccessAndRespectsItsNarrowerScope()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role { Name = "case-finance-payment-scope", Description = "Case finance payment scope" };
+        var viewer = new User { Email = "case-finance-viewer@example.test", FullName = "Case Viewer", IsActive = true, Role = role };
+        var clientOwner = new User { Email = "case-finance-owner@example.test", FullName = "Client Owner", IsActive = true, Role = role };
+        var client = new Client { Name = "Shared Client", ResponsibleUser = clientOwner };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            ResponsibleUser = viewer,
+            CaseNumber = "FIN-SCOPE",
+            Title = "Visible case with private payment",
+            Status = ClientCaseStatus.Open,
+            CreatedAt = DateTime.UtcNow.AddDays(-2),
+            FeeAmount = 10_000m,
+        };
+        db.Roles.Add(role);
+        db.Users.AddRange(viewer, clientOwner);
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        db.RolePermissions.AddRange(
+            new RolePermission { Role = role, Section = RolePermissionCatalog.Reports, CanView = true, CanExport = true, ViewScope = DataVisibilityScope.All },
+            new RolePermission { Role = role, Section = RolePermissionCatalog.Cases, CanView = true, ViewScope = DataVisibilityScope.Own },
+            new RolePermission { Role = role, Section = RolePermissionCatalog.Accounts, CanView = true, ViewScope = DataVisibilityScope.All });
+        db.Payments.Add(new Payment
+        {
+            Client = client,
+            ClientCase = clientCase,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Completed,
+            Amount = 5_000m,
+            PaidAmount = 5_000m,
+            Date = DateTime.UtcNow.Date,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, CreateUserPrincipal(viewer.Id));
+        var withoutPayments = await controller.CaseFinance(null, null, null, null, null, 10, CancellationToken.None);
+        Assert.IsType<UnauthorizedResult>(withoutPayments.Result);
+
+        db.RolePermissions.Add(new RolePermission
+        {
+            RoleId = role.Id,
+            Section = RolePermissionCatalog.Payments,
+            CanView = true,
+            ViewScope = DataVisibilityScope.Own,
+        });
+        await db.SaveChangesAsync();
+
+        var limited = await controller.CaseFinance(null, null, null, null, null, 10, CancellationToken.None);
+        var report = Assert.IsType<CaseFinanceReportDto>(Assert.IsType<OkObjectResult>(limited.Result).Value);
+        Assert.Equal(1, report.TotalCases);
+        Assert.False(report.HasCompletePaymentVisibility);
+        Assert.Equal(0m, report.PaidTotal);
+        Assert.Equal(0m, Assert.Single(report.Items).PaidTotal);
+
+        var exportAction = await controller.ExportManagementReportCsv(
+            "case-finance", null, null, null, null, null, null, null, null, null,
+            null, null, null, null, null, null, null, null, null, null,
+            10, CancellationToken.None);
+        var export = Assert.IsType<FileContentResult>(exportAction);
+        Assert.Contains("Суммы рассчитаны по доступным платежам", System.Text.Encoding.UTF8.GetString(export.FileContents));
+    }
+
+    [Fact]
     public async Task CaseFinance_ProjectsRequiredColumnsAndLoadsBothPaymentTypesTogether()
     {
         var interceptor = new RecordingCommandInterceptor();
@@ -3765,6 +3838,13 @@ public class ReportsControllerTests
                 Section = RolePermissionCatalog.Accounts,
                 CanView = true,
                 ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                Role = role,
+                Section = RolePermissionCatalog.Payments,
+                CanView = true,
+                ViewScope = DataVisibilityScope.All,
             });
         await db.SaveChangesAsync();
 
@@ -3813,6 +3893,7 @@ public class ReportsControllerTests
             CancellationToken.None);
 
         var report = Assert.IsType<CaseFinanceReportDto>(Assert.IsType<OkObjectResult>(action.Result).Value);
+        Assert.True(report.HasCompletePaymentVisibility);
         var item = Assert.Single(report.Items);
         Assert.Equal("Projection Finance Client", item.ClientName);
         Assert.Equal("Projection Finance Lawyer", item.ResponsibleName);
@@ -4145,6 +4226,13 @@ public class ReportsControllerTests
             {
                 RoleId = user.RoleId,
                 Section = RolePermissionCatalog.Accounts,
+                CanView = true,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                RoleId = user.RoleId,
+                Section = RolePermissionCatalog.Payments,
                 CanView = true,
                 ViewScope = DataVisibilityScope.All,
             });

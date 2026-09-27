@@ -9,6 +9,10 @@ export interface ReportSectionAccess {
   contracts: boolean;
 }
 
+export function canViewCaseFinanceReport(access: ReportSectionAccess): boolean {
+  return access.cases && access.accounts && access.payments;
+}
+
 export function buildVisibleReportGroups(access: ReportSectionAccess): ReportGroupId[] {
   const groups: ReportGroupId[] = [];
 

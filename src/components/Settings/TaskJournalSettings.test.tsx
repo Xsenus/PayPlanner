@@ -107,8 +107,8 @@ describe('TaskJournalSettings', () => {
     render(<TaskJournalSettings />);
 
     const accessList = await screen.findByTestId('executor-completion-access-list');
-    const natalia = within(accessList).getByRole('checkbox', { name: /Наталья Кузьминова/i });
-    const ivan = within(accessList).getByRole('checkbox', { name: /Иван Петров/i });
+    const natalia = await within(accessList).findByRole('checkbox', { name: /Наталья Кузьминова/i });
+    const ivan = await within(accessList).findByRole('checkbox', { name: /Иван Петров/i });
     expect(screen.getByText(/Исполнитель по-прежнему может добавлять комментарии и файлы/u)).toBeTruthy();
     expect(screen.getByText(/Все назначенные исполнители могут приложить результат и отправить задачу/u)).toBeTruthy();
     expect((natalia as HTMLInputElement).checked).toBe(true);

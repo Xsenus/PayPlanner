@@ -9,6 +9,7 @@ public sealed class CaseFinanceReportDto
     public int? ResponsibleUserIdFilter { get; init; }
     public string CaseTypeFilter { get; init; } = string.Empty;
     public int Limit { get; init; }
+    public bool HasCompletePaymentVisibility { get; init; }
     public int TotalCases { get; init; }
     public int ActiveCases { get; init; }
     public int ClosedCases { get; init; }

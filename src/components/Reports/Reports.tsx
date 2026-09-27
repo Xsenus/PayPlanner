@@ -81,7 +81,7 @@ import {
   normalizeYmRange,
 } from '../../utils/reportPresentation';
 import type { ActStatusReport, AdvanceReport, BankStatementImportReport, CaseActivityReport, CaseFinanceReport, CaseSuccessReport, CashBookSummary, CashFlowForecastReport, CashFlowReport, CashOrderReport, Client, ClientCase, Contract, ContractStatusReport, CounterpartyReport, CurrencyReport, CurrentCasesReport, DirectionReport, IncomeType, InvoiceStatusReport, JournalStatusReport, LawyerWorkloadReport, LegalWorkReport, MatchStatusReport, MoneyAccount, MoneyCategoryReport, MoneyOperationSource, OverdueProceduralDeadlinesReport, PaidAccountReport, PaidInvoiceReport, PaymentOrderReport, PaymentPurposeReport, PaymentPriorityReport, PlanFactReport, ProjectReport, SalesPointReport, SpreadsheetImportReport, TaskReport, VatReport } from '../../types';
-import { buildVisibleReportGroups, isReportGroupEnabled, type ReportGroupId, type ReportSectionAccess } from './reportAccess';
+import { buildVisibleReportGroups, canViewCaseFinanceReport, isReportGroupEnabled, type ReportGroupId, type ReportSectionAccess } from './reportAccess';
 import type { ManagementReportKind } from './reportKinds';
 
 const statusMeta: Record<
@@ -1942,7 +1942,7 @@ function CaseFinanceReportSection({
           </div>
           <h2 className="mt-3 text-xl font-semibold text-slate-950">Финансовый отчет по делам</h2>
           <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-500">
-            Показывает гонорар, оплату, остаток и финансовый статус по делам с учетом доступа к делам и платежам.
+            Показывает гонорар, оплату, остаток и финансовый статус по делам с учётом доступа к делам, счетам и платежам.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -1969,6 +1969,11 @@ function CaseFinanceReportSection({
         </div>
       ) : (
         <>
+          {!report.hasCompletePaymentVisibility && (
+            <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900" role="status">
+              Финансовые итоги рассчитаны только по доступным вам платежам и могут быть неполными.
+            </div>
+          )}
           <div className="mt-6 grid grid-cols-1 gap-4 xl:grid-cols-5">
             <MetricCard
               title="Гонорар"
@@ -6343,7 +6348,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     [bankReportFilters, canExportPaymentReports],
   );
   const canViewLegalWorkReports = canViewCaseReports && canViewTaskReports && canViewAccountReports;
-  const canViewCaseFinanceReports = canViewCaseReports && canViewAccountReports;
+  const canViewCaseFinanceReports = canViewCaseFinanceReport(reportAccess);
   const canViewCaseTaskReports = canViewCaseReports && canViewTaskReports;
   const {
     report: bankReport,

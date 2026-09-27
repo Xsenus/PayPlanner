@@ -32,6 +32,7 @@ public class ReportsController : ControllerBase
     [
         RolePermissionCatalog.Cases,
         RolePermissionCatalog.Accounts,
+        RolePermissionCatalog.Payments,
     ];
 
     private readonly PaymentContext _db;
@@ -567,7 +568,8 @@ public class ReportsController : ControllerBase
         var visibilityBySection = await _db.ResolveDataVisibilitiesAsync(User, CaseFinanceVisibilitySections, ct);
         var casesVisibility = visibilityBySection[RolePermissionCatalog.Cases];
         var accountsVisibility = visibilityBySection[RolePermissionCatalog.Accounts];
-        if (casesVisibility is null || accountsVisibility is null)
+        var paymentsVisibility = visibilityBySection[RolePermissionCatalog.Payments];
+        if (casesVisibility is null || accountsVisibility is null || paymentsVisibility is null)
         {
             return Unauthorized();
         }
@@ -578,7 +580,7 @@ public class ReportsController : ControllerBase
         var effectiveLimit = Math.Clamp(limit ?? 100, 1, 500);
 
         var report = await SqliteRetryHelper.ExecuteAsync(
-            cancellationToken => BuildCaseFinanceReportAsync(start, end, timeZone, filters, effectiveLimit, casesVisibility, accountsVisibility, cancellationToken),
+            cancellationToken => BuildCaseFinanceReportAsync(start, end, timeZone, filters, effectiveLimit, casesVisibility, accountsVisibility, paymentsVisibility, cancellationToken),
             _logger,
             ct);
 
@@ -708,7 +710,8 @@ public class ReportsController : ControllerBase
                     var visibilityBySection = await _db.ResolveDataVisibilitiesAsync(User, CaseFinanceVisibilitySections, ct);
                     var casesVisibility = visibilityBySection[RolePermissionCatalog.Cases];
                     var accountsVisibility = visibilityBySection[RolePermissionCatalog.Accounts];
-                    if (casesVisibility is null || accountsVisibility is null)
+                    var paymentsVisibility = visibilityBySection[RolePermissionCatalog.Payments];
+                    if (casesVisibility is null || accountsVisibility is null || paymentsVisibility is null)
                     {
                         return (null, Unauthorized());
                     }
@@ -716,7 +719,7 @@ public class ReportsController : ControllerBase
                     var (start, end) = ResolveReportPeriod(from, to, reportToday);
                     var filters = new LegalWorkReportFilters(NormalizeOptional(status), responsibleUserId, NormalizeOptional(caseType));
                     var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                        cancellationToken => BuildCaseFinanceReportAsync(start, end, timeZone, filters, effectiveLimit, casesVisibility, accountsVisibility, cancellationToken),
+                        cancellationToken => BuildCaseFinanceReportAsync(start, end, timeZone, filters, effectiveLimit, casesVisibility, accountsVisibility, paymentsVisibility, cancellationToken),
                         _logger,
                         ct);
                     return (BuildCaseFinanceExportDocument(reportDto), null);
@@ -2268,6 +2271,7 @@ public class ReportsController : ControllerBase
         int limit,
         DataVisibilityAccess casesVisibility,
         DataVisibilityAccess accountsVisibility,
+        DataVisibilityAccess paymentsVisibility,
         CancellationToken ct)
     {
         var endExclusiveUtc = CalendarTimeZoneHelper.FromUserLocalToUtc(end.Date.AddDays(1), timeZone);
@@ -2313,7 +2317,7 @@ public class ReportsController : ControllerBase
                 item.FeeAmount))
             .ToListAsync(ct);
         var caseIds = cases.Select(item => item.Id).Distinct().ToArray();
-        var payments = await BuildCaseFinancePaymentRowsAsync(caseIds, accountsVisibility, ct);
+        var payments = await BuildCaseFinancePaymentRowsAsync(caseIds, accountsVisibility, paymentsVisibility, ct);
         var paidByCase = payments
             .Where(item => item.Type == PaymentType.Income)
             .GroupBy(item => item.CaseId)
@@ -2349,6 +2353,7 @@ public class ReportsController : ControllerBase
             ResponsibleUserIdFilter = filters.ResponsibleUserId,
             CaseTypeFilter = filters.CaseType ?? string.Empty,
             Limit = limit,
+            HasCompletePaymentVisibility = accountsVisibility.SeesAll && paymentsVisibility.SeesAll,
             TotalCases = rows.Count,
             ActiveCases = rows.Count(item => item.Status == nameof(ClientCaseStatus.Open) || item.Status == nameof(ClientCaseStatus.OnHold)),
             ClosedCases = rows.Count(item => item.Status == nameof(ClientCaseStatus.Closed) || item.Status == nameof(ClientCaseStatus.Lost)),
@@ -2705,7 +2710,8 @@ public class ReportsController : ControllerBase
         => new(
             "case-finance-report",
             "Финансовый отчет по делам",
-            $"Период: {DateCell(report.From)} - {DateCell(report.To)}",
+            $"Период: {DateCell(report.From)} - {DateCell(report.To)}"
+                + (report.HasCompletePaymentVisibility ? string.Empty : ". Суммы рассчитаны по доступным платежам и могут быть неполными."),
             [
                 new("Всего дел", report.TotalCases.ToString(CultureInfo.InvariantCulture)),
                 new("В работе", report.ActiveCases.ToString(CultureInfo.InvariantCulture)),
@@ -4411,6 +4417,7 @@ public class ReportsController : ControllerBase
     private async Task<IReadOnlyList<CaseFinancePaymentRow>> BuildCaseFinancePaymentRowsAsync(
         IReadOnlyCollection<int> caseIds,
         DataVisibilityAccess accountsVisibility,
+        DataVisibilityAccess paymentsVisibility,
         CancellationToken ct)
     {
         if (caseIds.Count == 0)
@@ -4421,6 +4428,7 @@ public class ReportsController : ControllerBase
         var paymentQuery = _db.Payments
             .AsNoTracking()
             .ApplyPaymentVisibility(accountsVisibility)
+            .ApplyPaymentVisibility(paymentsVisibility)
             .ExcludeInstallmentParentInvoices(_db)
             .Where(item =>
                 (item.Type == PaymentType.Income || item.Type == PaymentType.Expense)
