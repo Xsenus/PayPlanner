@@ -1217,6 +1217,43 @@ describe('RealtimeNotificationToasts', () => {
     window.removeEventListener(USER_NOTIFICATIONS_EVENT, listener);
   });
 
+  it('shows a link to the inbox when more missed notifications exist than can be replayed', async () => {
+    const createdAt = new Date(Date.now() + 1000).toISOString();
+    apiMock.getUserNotifications.mockResolvedValue({
+      items: Array.from({ length: 26 }, (_, index) => ({
+        id: index + 1,
+        type: 'taskChanged',
+        eventKey: `task:${index + 1}:changed`,
+        title: `Задача ${index + 1}`,
+        bodyPreview: 'Изменение задачи.',
+        tone: 'blue',
+        objectType: 'task',
+        objectId: index + 1,
+        taskId: index + 1,
+        createdAt,
+      })),
+      total: 26,
+      page: 1,
+      pageSize: 50,
+    });
+    const openNotifications = vi.fn();
+
+    const { unmount } = render(<RealtimeNotificationToasts userId={5} onOpenNotifications={openNotifications} />);
+    try {
+      await waitFor(() => expect(toastMock.showToast).toHaveBeenCalledWith(expect.objectContaining({
+        title: 'Есть другие новые уведомления',
+        actionLabel: 'К уведомлениям',
+      })));
+      const overflow = toastMock.showToast.mock.calls
+        .map(([options]) => options)
+        .find((options) => options.title === 'Есть другие новые уведомления');
+      act(() => overflow.onAction());
+      expect(openNotifications).toHaveBeenCalledTimes(1);
+    } finally {
+      unmount();
+    }
+  });
+
   it('spaces accumulated replay notifications so they can be read one by one', async () => {
     vi.useFakeTimers();
     window.localStorage.setItem(
@@ -1353,6 +1390,130 @@ describe('RealtimeNotificationToasts', () => {
     );
 
     unmount();
+  });
+
+  it('continues fallback polling past the first page of recent notifications', async () => {
+    const createdAt = new Date(Date.now() + 1000).toISOString();
+    const makeNotification = (id: number) => ({
+      id,
+      type: 'taskChanged',
+      eventKey: `task:${id}:changed`,
+      title: `Изменена задача ${id}`,
+      bodyPreview: 'Изменён срок задачи.',
+      tone: 'amber',
+      objectType: 'task',
+      objectId: id,
+      taskId: id,
+      isRead: false,
+      isArchived: false,
+      createdAt,
+    });
+    apiMock.getUserNotifications.mockImplementation(async ({ page }: { page: number }) => ({
+      items: page === 1
+        ? Array.from({ length: 15 }, (_, index) => makeNotification(index + 2))
+        : [makeNotification(1)],
+      total: 16,
+      page,
+      pageSize: 15,
+    }));
+    connectionState.start.mockRejectedValue(new TypeError('Failed to fetch'));
+    const changedEvents: CustomEvent<UserNotificationsChangedDetail>[] = [];
+    const handleChanged = (event: Event) => changedEvents.push(event as CustomEvent<UserNotificationsChangedDetail>);
+    window.addEventListener(USER_NOTIFICATIONS_EVENT, handleChanged);
+
+    const { unmount } = render(<RealtimeNotificationToasts userId={5} onOpenTask={vi.fn()} />);
+    try {
+      await waitFor(() => expect(apiMock.getUserNotifications).toHaveBeenCalledWith({
+        status: 'unread', page: 2, pageSize: 15,
+      }));
+      await waitFor(() => expect(changedEvents.filter((event) => event.detail.reason === 'fallback-poll')).toHaveLength(16));
+      expect(changedEvents.map((event) => event.detail.notificationId)).toContain(1);
+      expect(toastMock.showToast).toHaveBeenCalledWith(expect.objectContaining({ title: 'Изменена задача 1' }));
+    } finally {
+      window.removeEventListener(USER_NOTIFICATIONS_EVENT, handleChanged);
+      unmount();
+    }
+  });
+
+  it('points to the notification center when a fallback burst exceeds the toast queue', async () => {
+    const createdAt = new Date(Date.now() + 1000).toISOString();
+    apiMock.getUserNotifications.mockImplementation(async ({ page }: { page: number }) => ({
+      items: Array.from({ length: 15 }, (_, index) => {
+        const id = 31 - ((page - 1) * 15 + index + 1);
+        return {
+          id,
+          type: 'taskChanged',
+          eventKey: `task:${id}:changed`,
+          title: `Задача ${id}`,
+          bodyPreview: 'Изменение задачи.',
+          tone: 'blue',
+          objectType: 'task',
+          objectId: id,
+          taskId: id,
+          createdAt,
+        };
+      }),
+      total: 30,
+      page,
+      pageSize: 15,
+    }));
+    connectionState.start.mockRejectedValue(new TypeError('Failed to fetch'));
+    const openNotifications = vi.fn();
+    const changedEvents: CustomEvent<UserNotificationsChangedDetail>[] = [];
+    const handleChanged = (event: Event) => changedEvents.push(event as CustomEvent<UserNotificationsChangedDetail>);
+    window.addEventListener(USER_NOTIFICATIONS_EVENT, handleChanged);
+
+    const { unmount } = render(<RealtimeNotificationToasts userId={5} onOpenNotifications={openNotifications} />);
+    try {
+      await waitFor(() => expect(changedEvents.filter((event) => event.detail.reason === 'fallback-poll')).toHaveLength(25));
+      const overflow = toastMock.showToast.mock.calls
+        .map(([options]) => options)
+        .find((options) => options.title === 'Есть другие новые уведомления');
+      expect(overflow).toMatchObject({ actionLabel: 'К уведомлениям' });
+      act(() => overflow.onAction());
+      expect(openNotifications).toHaveBeenCalledTimes(1);
+    } finally {
+      window.removeEventListener(USER_NOTIFICATIONS_EVENT, handleChanged);
+      unmount();
+    }
+  });
+
+  it('bounds fallback requests when the recent unread backlog spans many pages', async () => {
+    const createdAt = new Date(Date.now() + 1000).toISOString();
+    apiMock.getUserNotifications.mockImplementation(async ({ page }: { page: number }) => ({
+      items: Array.from({ length: 15 }, (_, index) => {
+        const id = 120 - ((page - 1) * 15 + index);
+        return {
+          id,
+          type: 'taskChanged',
+          eventKey: `task:${id}:changed`,
+          title: `Задача ${id}`,
+          bodyPreview: 'Изменение задачи.',
+          tone: 'blue',
+          objectType: 'task',
+          objectId: id,
+          taskId: id,
+          createdAt,
+        };
+      }),
+      total: 120,
+      page,
+      pageSize: 15,
+    }));
+    connectionState.start.mockRejectedValue(new TypeError('Failed to fetch'));
+
+    const { unmount } = render(<RealtimeNotificationToasts userId={5} />);
+    try {
+      await waitFor(() => expect(apiMock.getUserNotifications).toHaveBeenCalledWith({
+        status: 'unread', page: 7, pageSize: 15,
+      }));
+      expect(apiMock.getUserNotifications).toHaveBeenCalledTimes(7);
+      expect(toastMock.showToast).toHaveBeenCalledWith(expect.objectContaining({
+        title: 'Есть другие новые уведомления',
+      }));
+    } finally {
+      unmount();
+    }
   });
 
   it('does not show accumulated old unread notifications as fallback toasts', async () => {

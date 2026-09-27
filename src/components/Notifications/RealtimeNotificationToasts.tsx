@@ -23,6 +23,7 @@ import {
 
 const FALLBACK_POLL_INTERVAL_MS = 30_000;
 const FALLBACK_PAGE_SIZE = 15;
+const FALLBACK_MAX_PAGES = 7;
 const MISSED_REPLAY_PAGE_SIZE = 50;
 const MISSED_REPLAY_MAX_ITEMS = 25;
 const MISSED_REPLAY_SPACING_MS = 2500;
@@ -451,6 +452,7 @@ export function RealtimeNotificationToasts({
   const fallbackKnownNotificationIdsRef = useRef<Set<number>>(new Set());
   const fallbackBaselineReadyRef = useRef(false);
   const fallbackNoticeShownRef = useRef(false);
+  const overflowNoticeShownRef = useRef(false);
   const queuedToastNotificationsRef = useRef<RealtimeUserNotification[]>([]);
   const queuedToastTimerRef = useRef<number | null>(null);
   const handlersRef = useRef({
@@ -498,6 +500,7 @@ export function RealtimeNotificationToasts({
     let fallbackTimer: number | null = null;
     let fallbackPollingActive = false;
     let fallbackPollInFlight = false;
+    let lastFallbackPollStartedAtMs: number | null = null;
     let missedReplayInFlight = false;
     const mountedAtMs = Date.now();
     const initialMissedSinceMs = readLastSeenMs(userId, mountedAtMs) ?? mountedAtMs;
@@ -506,6 +509,7 @@ export function RealtimeNotificationToasts({
     fallbackKnownNotificationIdsRef.current.clear();
     fallbackBaselineReadyRef.current = false;
     fallbackNoticeShownRef.current = false;
+    overflowNoticeShownRef.current = false;
     queuedToastNotificationsRef.current = [];
     const persistReplayFrontier = () => {
       const now = Date.now();
@@ -708,6 +712,23 @@ export function RealtimeNotificationToasts({
       persistReplayFrontier();
     };
 
+    const showOverflowNotice = () => {
+      if (overflowNoticeShownRef.current) {
+        return;
+      }
+      overflowNoticeShownRef.current = true;
+      toast.showToast({
+        title: 'Есть другие новые уведомления',
+        description: 'Показана часть новых сообщений. Остальные доступны в разделе «Уведомления».',
+        variant: 'info',
+        durationMs: 16000,
+        actionLabel: 'К уведомлениям',
+        onAction: handlersRef.current.onOpenNotifications,
+        dedupeKey: 'notifications:replay-overflow',
+        domain: 'system',
+      });
+    };
+
     const replayMissedNotifications = async (
       sinceMs: number | null,
       reason: 'missed-replay' | 'visibility-resume',
@@ -729,7 +750,7 @@ export function RealtimeNotificationToasts({
           return;
         }
 
-        const replayItems = page.items
+        const recentItems = page.items
           .filter((item) => {
             const createdAtMs = parseCreatedAtMs(item.createdAt);
             return createdAtMs !== null && createdAtMs >= sinceMs - 1000;
@@ -738,11 +759,20 @@ export function RealtimeNotificationToasts({
             const leftCreatedAtMs = parseCreatedAtMs(left.createdAt) ?? 0;
             const rightCreatedAtMs = parseCreatedAtMs(right.createdAt) ?? 0;
             return leftCreatedAtMs - rightCreatedAtMs || left.id - right.id;
-          })
-          .slice(-MISSED_REPLAY_MAX_ITEMS);
+          });
+        const replayItems = recentItems.slice(-MISSED_REPLAY_MAX_ITEMS);
 
         for (const item of replayItems) {
           showIncomingNotification(toRealtimeNotification(item, userId), reason, 'queued');
+        }
+        const oldestPageItemMs = page.items.length > 0
+          ? parseCreatedAtMs(page.items[page.items.length - 1].createdAt)
+          : null;
+        if (recentItems.length > MISSED_REPLAY_MAX_ITEMS
+            || (page.total > MISSED_REPLAY_PAGE_SIZE
+              && oldestPageItemMs !== null
+              && oldestPageItemMs >= sinceMs - 1000)) {
+          showOverflowNotice();
         }
         pendingReplaySinceMs = null;
         persistReplayFrontier();
@@ -777,39 +807,59 @@ export function RealtimeNotificationToasts({
       }
 
       fallbackPollInFlight = true;
+      const pollStartedAtMs = Date.now();
       try {
-        const page = await apiService.getUserNotifications({
-          status: 'unread',
-          page: 1,
-          pageSize: FALLBACK_PAGE_SIZE,
-        });
-        if (disposed || !fallbackPollingActive) {
-          return;
+        const firstPoll = !fallbackBaselineReadyRef.current;
+        const activationThresholdMs = (lastFallbackPollStartedAtMs ?? initialMissedSinceMs) - 1000;
+        const freshItems: UserNotificationDto[] = [];
+        const seenThisPoll = new Set<number>();
+        let moreRecentItemsRemain = false;
+
+        for (let pageNumber = 1; pageNumber <= FALLBACK_MAX_PAGES; pageNumber += 1) {
+          const page = await apiService.getUserNotifications({
+            status: 'unread',
+            page: pageNumber,
+            pageSize: FALLBACK_PAGE_SIZE,
+          });
+          if (disposed || !fallbackPollingActive) {
+            return;
+          }
+
+          for (const item of page.items) {
+            const createdAtMs = parseCreatedAtMs(item.createdAt);
+            const isKnown = fallbackKnownNotificationIdsRef.current.has(item.id) || seenThisPoll.has(item.id);
+            seenThisPoll.add(item.id);
+            if (!isKnown && createdAtMs !== null && createdAtMs >= activationThresholdMs) {
+              freshItems.push(item);
+            }
+          }
+
+          const oldestCreatedAtMs = page.items.length > 0
+            ? parseCreatedAtMs(page.items[page.items.length - 1].createdAt)
+            : null;
+          const hasNextPage = pageNumber * FALLBACK_PAGE_SIZE < page.total;
+          moreRecentItemsRemain = hasNextPage
+            && oldestCreatedAtMs !== null
+            && oldestCreatedAtMs >= activationThresholdMs;
+          if (!moreRecentItemsRemain) {
+            break;
+          }
         }
 
-        const firstPoll = !fallbackBaselineReadyRef.current;
-        const activationThresholdMs = initialMissedSinceMs - 1000;
-
-        for (const item of page.items) {
-          const notificationCreatedAtMs = parseCreatedAtMs(item.createdAt);
-          const isKnown = fallbackKnownNotificationIdsRef.current.has(item.id);
-          const isFreshForFallback =
-            notificationCreatedAtMs !== null && notificationCreatedAtMs >= activationThresholdMs;
-
-          fallbackKnownNotificationIdsRef.current.add(item.id);
-
-          if (isKnown) {
-            continue;
-          }
-
-          if (firstPoll && !isFreshForFallback) {
-            continue;
-          }
-
+        freshItems.sort((left, right) =>
+          (parseCreatedAtMs(left.createdAt) ?? 0) - (parseCreatedAtMs(right.createdAt) ?? 0) || left.id - right.id);
+        fallbackKnownNotificationIdsRef.current = seenThisPoll;
+        for (const item of freshItems.slice(-MISSED_REPLAY_MAX_ITEMS)) {
           showIncomingNotification(toRealtimeNotification(item, userId), 'fallback-poll', firstPoll ? 'queued' : 'immediate');
+        }
+        if (freshItems.length > MISSED_REPLAY_MAX_ITEMS || moreRecentItemsRemain) {
+          showOverflowNotice();
+        } else {
+          overflowNoticeShownRef.current = false;
         }
 
         fallbackBaselineReadyRef.current = true;
+        lastFallbackPollStartedAtMs = pollStartedAtMs;
         if (!missedReplayInFlight) {
           pendingReplaySinceMs = null;
           persistReplayFrontier();
@@ -829,6 +879,8 @@ export function RealtimeNotificationToasts({
       }
 
       fallbackPollingActive = true;
+      lastFallbackPollStartedAtMs = readLastSeenMs(userId) ?? initialMissedSinceMs;
+      overflowNoticeShownRef.current = false;
       fallbackBaselineReadyRef.current = false;
       fallbackKnownNotificationIdsRef.current.clear();
       updateRealtimeNotificationDiagnostics({
