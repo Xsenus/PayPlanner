@@ -564,6 +564,45 @@ describe('RealtimeNotificationToasts', () => {
     expect(toastMock.showToast.mock.calls[0][0].durationMs).toBe(0);
   });
 
+  it('shows changed deadline and author before a long task description in the toast', async () => {
+    render(<RealtimeNotificationToasts userId={5} onOpenTask={vi.fn()} />);
+    await waitFor(() => expect(connectionState.start).toHaveBeenCalledTimes(1));
+    const handler = connectionState.handlers.get(REALTIME_USER_NOTIFICATION_CREATED_EVENT);
+    act(() => {
+      handler?.({
+        id: 83,
+        recipientUserId: 5,
+        type: 'taskChanged',
+        eventKey: 'task:778:due-at:3',
+        title: 'Изменён срок задачи',
+        bodyPreview: [
+          `Задача: ${'Подготовить документы по делу '.repeat(10)}`,
+          'Автор изменения: Андрей',
+          `Клиент/дело: ${'Длинное наименование '.repeat(10)}`,
+          'Текущий срок: 22.09.2026 10:00',
+          '',
+          'Изменения:',
+          '- Описание: старое -> новое',
+          '- Срок: 21.09.2026 10:00 -> 22.09.2026 10:00',
+          '- Постановщик: Анна -> Андрей',
+        ].join('\n'),
+        tone: 'amber',
+        objectType: 'task',
+        objectId: 778,
+        taskJournalItemId: 778,
+        createdAt: '2026-09-27T10:00:00Z',
+      });
+    });
+
+    expect(toastMock.showToast).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'Изменён срок задачи',
+      description: expect.stringContaining('Срок: 21.09.2026 10:00 -> 22.09.2026 10:00'),
+    }));
+    const description = toastMock.showToast.mock.calls[0][0].description as string;
+    expect(description).toContain('Постановщик: Анна -> Андрей');
+    expect(description).not.toContain('Задача:');
+  });
+
   it('offers persistent snooze and activity confirmation for case inactivity', async () => {
     render(<RealtimeNotificationToasts userId={5} onOpenCase={vi.fn()} />);
 

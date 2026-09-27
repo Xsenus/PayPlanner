@@ -48,6 +48,22 @@ type RealtimeNotificationToastsProps = {
 
 function buildToastDescription(notification: RealtimeUserNotification): string {
   const value = notification.bodyPreview?.trim() || notification.title.trim();
+  if (notification.type === 'taskChanged') {
+    const changes = value.match(/(?:^|\r?\n)Изменения:[ \t]*\r?\n([\s\S]*?)(?:\r?\n[ \t]*\r?\n|$)/i)?.[1]
+      ?.split(/\r?\n/)
+      .map((line) => line.trim().replace(/^-\s*/, ''))
+      .filter(Boolean);
+    if (changes?.length) {
+      const priority = (change: string) => /^(Постановщик|Срок|Исполнитель):/i.test(change) ? 0 : 1;
+      const summary = changes
+        .map((change, index) => ({ change, index }))
+        .sort((left, right) => priority(left.change) - priority(right.change) || left.index - right.index)
+        .slice(0, 3)
+        .map(({ change }) => change.length > 95 ? `${change.slice(0, 92)}...` : change)
+        .join('\n');
+      return summary.length > 220 ? `${summary.slice(0, 217)}...` : summary;
+    }
+  }
   return value.length > 220 ? `${value.slice(0, 217)}...` : value;
 }
 

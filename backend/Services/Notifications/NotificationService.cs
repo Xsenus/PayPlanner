@@ -944,7 +944,7 @@ public sealed class NotificationService : INotificationService
                     BuildTaskTemplateValues(task, recipientTimeZone, actorName),
                     new Dictionary<string, string?>
                     {
-                        ["task.changes"] = string.Join(Environment.NewLine, recipientChangeLabels.Select(label => $"- {label}")),
+                        ["task.changes"] = string.Join(Environment.NewLine, OrderTaskChangeLabels(recipientChangeLabels).Select(label => $"- {label}")),
                         ["task.commentBlock"] = string.IsNullOrWhiteSpace(comment) ? string.Empty : $"Комментарий: {comment.Trim()}",
                         ["task.changeSubject"] = subject,
                     }),
@@ -994,7 +994,7 @@ public sealed class NotificationService : INotificationService
                     BuildTaskTemplateValues(task, recipientTimeZone, actorName),
                     new Dictionary<string, string?>
                     {
-                        ["task.changes"] = string.Join(Environment.NewLine, recipientChangeLabels.Select(label => $"- {label}")),
+                        ["task.changes"] = string.Join(Environment.NewLine, OrderTaskChangeLabels(recipientChangeLabels).Select(label => $"- {label}")),
                         ["task.commentBlock"] = string.IsNullOrWhiteSpace(comment) ? string.Empty : $"Комментарий: {comment.Trim()}",
                         ["task.changeSubject"] = subject,
                     }),
@@ -4087,7 +4087,7 @@ public sealed class NotificationService : INotificationService
                     BuildTaskTemplateValues(task, recipientTimeZone, actorName),
                     new Dictionary<string, string?>
                     {
-                        ["task.changes"] = string.Join(Environment.NewLine, recipientChangeLabels.Select(label => $"- {label}")),
+                        ["task.changes"] = string.Join(Environment.NewLine, OrderTaskChangeLabels(recipientChangeLabels).Select(label => $"- {label}")),
                         ["task.commentBlock"] = string.IsNullOrWhiteSpace(comment) ? string.Empty : $"Комментарий: {comment.Trim()}",
                         ["task.changeSubject"] = taskChangedSubject,
                     }),
@@ -6469,23 +6469,22 @@ public sealed class NotificationService : INotificationService
         TimeZoneInfo timeZone)
     {
         var dueText = FormatTaskDueAt(task.DueAt, timeZone);
-        var lines = new List<string>
-        {
-            $"Задача: {task.Title}",
-            $"Автор изменения: {actorName}",
-            $"Клиент/дело: {task.ObjectName}",
-            $"Текущий срок: {dueText}",
-        };
+        var lines = new List<string>();
 
         if (changeLabels.Count > 0)
         {
-            lines.Add(string.Empty);
             lines.Add("Изменения:");
-            foreach (var changeLabel in changeLabels)
+            foreach (var changeLabel in OrderTaskChangeLabels(changeLabels))
             {
                 lines.Add($"- {changeLabel}");
             }
+            lines.Add(string.Empty);
         }
+
+        lines.Add($"Задача: {task.Title}");
+        lines.Add($"Автор изменения: {actorName}");
+        lines.Add($"Клиент/дело: {task.ObjectName}");
+        lines.Add($"Текущий срок: {dueText}");
 
         if (!string.IsNullOrWhiteSpace(comment))
         {
@@ -6495,6 +6494,18 @@ public sealed class NotificationService : INotificationService
 
         return string.Join('\n', lines);
     }
+
+    private static bool IsImportantTaskChangeLabel(string label)
+        => label.StartsWith("Срок:", StringComparison.OrdinalIgnoreCase)
+           || label.StartsWith("Постановщик:", StringComparison.OrdinalIgnoreCase)
+           || label.StartsWith("Исполнитель:", StringComparison.OrdinalIgnoreCase);
+
+    private static IEnumerable<string> OrderTaskChangeLabels(IReadOnlyList<string> labels)
+        => labels
+            .Select((label, index) => new { label, index })
+            .OrderBy(item => IsImportantTaskChangeLabel(item.label) ? 0 : 1)
+            .ThenBy(item => item.index)
+            .Select(item => item.label);
 
     private static void AppendTaskChangeDetails(List<string> lines, IReadOnlyList<string> changeLabels, string? comment)
     {

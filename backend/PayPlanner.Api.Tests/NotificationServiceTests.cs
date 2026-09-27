@@ -2469,7 +2469,7 @@ public class NotificationServiceTests
         var task = new TaskJournalItem
         {
             ObjectName = "Дело клиента",
-            Title = "Уточнить срок",
+            Title = new string('З', 980),
             AuthorUserId = newAuthor.Id,
             AuthorName = newAuthor.FullName,
             AssigneeUserId = assignee.Id,
@@ -2563,7 +2563,7 @@ public class NotificationServiceTests
         Assert.Equal(UserNotificationTypes.TaskChanged, notification.Type);
         Assert.Equal("rose", notification.Tone);
         Assert.Equal("Изменён срок задачи", notification.Title);
-        Assert.StartsWith("Задача: Подготовить заявление", notification.BodyPreview, StringComparison.Ordinal);
+        Assert.StartsWith("Изменения:", notification.BodyPreview, StringComparison.Ordinal);
         Assert.Contains($"Автор изменения: {author.FullName}", notification.BodyPreview, StringComparison.Ordinal);
         Assert.Contains("Срок: 04.06.2026 16:00 -> 04.06.2026 17:00", notification.BodyPreview, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("04.06.2026 11:00", notification.BodyPreview, StringComparison.OrdinalIgnoreCase);
