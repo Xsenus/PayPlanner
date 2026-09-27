@@ -150,6 +150,47 @@ public sealed class DatabaseBackupServiceS3Tests
         Assert.DoesNotContain(scope.S3.UploadedPaths, path => path.EndsWith(".manifest.json", StringComparison.Ordinal));
     }
 
+    [Theory]
+    [InlineData(".zip")]
+    [InlineData(".fileset")]
+    [InlineData(".manifest.json")]
+    public async Task CreateManualBackupAsync_DoesNotMarkCorruptS3CopyAsVerified(string corruptSuffix)
+    {
+        await using var scope = await CreateScopeAsync();
+        scope.S3.CorruptReadPathSuffix = corruptSuffix;
+        var service = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        await service.UpdateSettingsAsync(true, "03:00", 14, "zip",
+            s3UploadEnabled: true, s3ConnectionIds: ["s3-main"], cancellationToken: CancellationToken.None);
+
+        var created = await service.CreateManualBackupAsync();
+
+        var failed = Assert.Single(created.S3UploadResults);
+        Assert.Equal("failed", failed.Status);
+        Assert.Contains("Контрольная сумма", failed.Error);
+        if (corruptSuffix != ".manifest.json")
+            Assert.DoesNotContain(scope.S3.UploadedPaths, path => path.EndsWith(".manifest.json", StringComparison.Ordinal));
+
+        scope.S3.CorruptReadPathSuffix = null;
+        var retry = await service.RetryS3UploadAsync(failed.Id);
+        Assert.Equal("success", retry.Status);
+    }
+
+    [Fact]
+    public async Task CreateManualBackupAsync_RejectsTruncatedS3Readback()
+    {
+        await using var scope = await CreateScopeAsync();
+        scope.S3.TruncateReadPathSuffix = ".fileset";
+        var service = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        await service.UpdateSettingsAsync(true, "03:00", 14, "zip",
+            s3UploadEnabled: true, s3ConnectionIds: ["s3-main"], cancellationToken: CancellationToken.None);
+
+        var created = await service.CreateManualBackupAsync();
+
+        var failed = Assert.Single(created.S3UploadResults);
+        Assert.Equal("failed", failed.Status);
+        Assert.Contains("Размер облачной части", failed.Error);
+    }
+
     [Fact]
     public async Task CreateManualBackupAsync_UploadsBackupToYandexDiskWhenEnabled()
     {
@@ -251,6 +292,47 @@ public sealed class DatabaseBackupServiceS3Tests
         var created = await service.CreateManualBackupAsync();
 
         Assert.Equal("failed", Assert.Single(created.YandexDiskUploadResults).Status);
+    }
+
+    [Theory]
+    [InlineData(".zip")]
+    [InlineData(".fileset")]
+    [InlineData(".manifest.json")]
+    public async Task CreateManualBackupAsync_DoesNotMarkCorruptYandexCopyAsVerified(string corruptSuffix)
+    {
+        await using var scope = await CreateScopeAsync();
+        scope.YandexDisk.CorruptReadPathSuffix = corruptSuffix;
+        var service = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        await service.UpdateSettingsAsync(true, "03:00", 14, "zip",
+            yandexDiskUploadEnabled: true, cancellationToken: CancellationToken.None);
+
+        var created = await service.CreateManualBackupAsync();
+
+        var failed = Assert.Single(created.YandexDiskUploadResults);
+        Assert.Equal("failed", failed.Status);
+        Assert.Contains("Контрольная сумма", failed.Error);
+        if (corruptSuffix != ".manifest.json")
+            Assert.DoesNotContain(scope.YandexDisk.UploadedPaths, path => path.EndsWith(".manifest.json", StringComparison.Ordinal));
+
+        scope.YandexDisk.CorruptReadPathSuffix = null;
+        var retry = await service.RetryYandexDiskUploadAsync(failed.Id);
+        Assert.Equal("success", retry.Status);
+    }
+
+    [Fact]
+    public async Task CreateManualBackupAsync_RejectsTruncatedYandexReadback()
+    {
+        await using var scope = await CreateScopeAsync();
+        scope.YandexDisk.TruncateReadPathSuffix = ".fileset";
+        var service = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        await service.UpdateSettingsAsync(true, "03:00", 14, "zip",
+            yandexDiskUploadEnabled: true, cancellationToken: CancellationToken.None);
+
+        var created = await service.CreateManualBackupAsync();
+
+        var failed = Assert.Single(created.YandexDiskUploadResults);
+        Assert.Equal("failed", failed.Status);
+        Assert.Contains("Размер облачной части", failed.Error);
     }
 
     [Fact]
@@ -798,6 +880,9 @@ public sealed class DatabaseBackupServiceS3Tests
     {
         public bool ThrowOnUpload { get; set; }
         public string? FailResultPathSuffix { get; set; }
+        public string? CorruptReadPathSuffix { get; set; }
+        public string? TruncateReadPathSuffix { get; set; }
+        private readonly Dictionary<string, byte[]> _objects = new(StringComparer.Ordinal);
         public List<string> UploadedPaths { get; } = [];
         public long UploadedBytes { get; private set; }
 
@@ -830,6 +915,7 @@ public sealed class DatabaseBackupServiceS3Tests
             using var memory = new MemoryStream();
             await content.CopyToAsync(memory, cancellationToken);
             UploadedBytes = memory.Length;
+            _objects[path ?? string.Empty] = memory.ToArray();
             return new S3StorageOperationResultDto
             {
                 Success = FailResultPathSuffix is null || !(path?.EndsWith(FailResultPathSuffix, StringComparison.Ordinal) ?? false),
@@ -840,6 +926,19 @@ public sealed class DatabaseBackupServiceS3Tests
 
         public Task<S3StorageDownloadResult> DownloadAsync(string id, string? path, CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
+
+        public Task<S3StorageStreamDownloadResult> OpenReadAsync(string id, string? path, CancellationToken cancellationToken = default)
+        {
+            if (!_objects.TryGetValue(path ?? string.Empty, out var stored)) throw new FileNotFoundException();
+            var bytes = stored.ToArray();
+            if (bytes.Length > 0 && TruncateReadPathSuffix is not null
+                && (path?.EndsWith(TruncateReadPathSuffix, StringComparison.Ordinal) ?? false)) bytes = bytes[..^1];
+            if (bytes.Length > 0 && CorruptReadPathSuffix is not null
+                && (path?.EndsWith(CorruptReadPathSuffix, StringComparison.Ordinal) ?? false)) bytes[0] ^= 0xff;
+            var stream = new MemoryStream(bytes, writable: false);
+            return Task.FromResult(new S3StorageStreamDownloadResult(stream, "application/octet-stream",
+                Path.GetFileName(path ?? string.Empty), path ?? string.Empty, path ?? string.Empty, bytes.Length, stream));
+        }
 
         public Task<S3StorageOperationResultDto> DeleteObjectAsync(string id, string? path, bool recursive, CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
@@ -861,6 +960,9 @@ public sealed class DatabaseBackupServiceS3Tests
     {
         public bool ThrowOnUpload { get; set; }
         public string? FailResultPathSuffix { get; set; }
+        public string? CorruptReadPathSuffix { get; set; }
+        public string? TruncateReadPathSuffix { get; set; }
+        private readonly Dictionary<string, byte[]> _objects = new(StringComparer.Ordinal);
         public List<string> UploadedPaths { get; } = [];
         public long UploadedBytes { get; private set; }
 
@@ -899,6 +1001,7 @@ public sealed class DatabaseBackupServiceS3Tests
             using var memory = new MemoryStream();
             await content.CopyToAsync(memory, cancellationToken);
             UploadedBytes = memory.Length;
+            _objects[path ?? string.Empty] = memory.ToArray();
             return new YandexDiskOperationResultDto
             {
                 Success = FailResultPathSuffix is null || !(path?.EndsWith(FailResultPathSuffix, StringComparison.Ordinal) ?? false),
@@ -908,6 +1011,19 @@ public sealed class DatabaseBackupServiceS3Tests
 
         public Task<YandexDiskDownload> DownloadAsync(string? path, CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
+
+        public Task<YandexDiskStreamDownload> OpenReadAsync(string? path, CancellationToken cancellationToken = default)
+        {
+            if (!_objects.TryGetValue(path ?? string.Empty, out var stored)) throw new FileNotFoundException();
+            var bytes = stored.ToArray();
+            if (bytes.Length > 0 && TruncateReadPathSuffix is not null
+                && (path?.EndsWith(TruncateReadPathSuffix, StringComparison.Ordinal) ?? false)) bytes = bytes[..^1];
+            if (bytes.Length > 0 && CorruptReadPathSuffix is not null
+                && (path?.EndsWith(CorruptReadPathSuffix, StringComparison.Ordinal) ?? false)) bytes[0] ^= 0xff;
+            var stream = new MemoryStream(bytes, writable: false);
+            return Task.FromResult(new YandexDiskStreamDownload(Path.GetFileName(path ?? string.Empty), "application/octet-stream",
+                stream, bytes.Length, stream));
+        }
 
         public Task<YandexDiskTextFileDto> GetTextFileAsync(string? path, CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
