@@ -450,6 +450,7 @@ describe('CaseModal', () => {
     fireEvent.change(screen.getByLabelText('Зал / кабинет'), { target: { value: ' зал 12 ' } });
     fireEvent.change(screen.getByLabelText('Контакты секретаря суда'), { target: { value: ' secretary@example.test ' } });
     fireEvent.change(screen.getByLabelText('Дата подачи заявления'), { target: { value: '2026-05-11' } });
+    fireEvent.change(screen.getByLabelText('Дата регистрации в суде'), { target: { value: '2026-05-13' } });
     fireEvent.change(screen.getByLabelText('Дата решения суда'), { target: { value: '2026-04-01' } });
     fireEvent.change(screen.getByLabelText('Дата вступления решения в силу'), { target: { value: '2026-05-06' } });
     fireEvent.change(screen.getByLabelText('Дата получения исполнительного листа'), { target: { value: '2026-05-10' } });
@@ -495,6 +496,8 @@ describe('CaseModal', () => {
       judgeName: 'Иванова И.И.',
       courtroom: 'зал 12',
       courtSecretaryContacts: 'secretary@example.test',
+      courtRegisteredAt: '2026-05-13',
+      clearCourtRegisteredAt: false,
       courtDecisionAt: '2026-04-01',
       courtDecisionEffectiveAt: '2026-05-06',
       executiveWritReceivedAt: '2026-05-10',

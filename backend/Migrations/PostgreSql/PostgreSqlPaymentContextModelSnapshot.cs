@@ -1417,6 +1417,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
+                    b.Property<DateTime?>("CourtRegisteredAt")
+                        .HasColumnType("timestamp without time zone");
+
                     b.Property<string>("CourtSecretaryContacts")
                         .IsRequired()
                         .HasMaxLength(500)

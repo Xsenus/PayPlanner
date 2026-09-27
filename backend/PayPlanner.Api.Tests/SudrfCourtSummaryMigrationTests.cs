@@ -26,6 +26,9 @@ public sealed class SudrfCourtSummaryMigrationTests
             .UseSqlite(connection).UsePayPlannerSqliteMigrations().Options;
         await using var context = new PaymentContext(options);
         await context.Database.MigrateAsync(SqlitePreviousMigration);
+        // The test seeds the old schema through the current entity model. Remove this
+        // temporary compatibility column before testing the actual upgrade path.
+        await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"ClientCases\" ADD COLUMN \"CourtRegisteredAt\" TEXT");
 
         var clientCase = new ClientCase
         {
@@ -41,6 +44,7 @@ public sealed class SudrfCourtSummaryMigrationTests
             CreateDocument(clientCase.Id, "sudrf-other", "sudrf"));
         await context.SaveChangesAsync();
         context.ChangeTracker.Clear();
+        await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"ClientCases\" DROP COLUMN \"CourtRegisteredAt\"");
 
         await context.Database.MigrateAsync();
 
@@ -119,6 +123,7 @@ public sealed class SudrfCourtSummaryMigrationTests
             if (upgrade)
             {
                 await context.Database.MigrateAsync(PostgresPreviousMigration);
+                await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"ClientCases\" ADD COLUMN \"CourtRegisteredAt\" timestamp without time zone");
                 var clientCase = new ClientCase
                 {
                     Client = new Client { Name = "Тестовый клиент", IsActive = true },
@@ -132,6 +137,7 @@ public sealed class SudrfCourtSummaryMigrationTests
                     CreateDocument(clientCase.Id, "manual-act", "manual"));
                 await context.SaveChangesAsync();
                 context.ChangeTracker.Clear();
+                await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"ClientCases\" DROP COLUMN \"CourtRegisteredAt\"");
             }
 
             await context.Database.MigrateAsync();

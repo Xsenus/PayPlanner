@@ -303,6 +303,7 @@ export function CaseModal({
   const [courtroom, setCourtroom] = useState(caseData.courtroom ?? '');
   const [courtSecretaryContacts, setCourtSecretaryContacts] = useState(caseData.courtSecretaryContacts ?? '');
   const [claimFiledAt, setClaimFiledAt] = useState(toDateInput(caseData.claimFiledAt));
+  const [courtRegisteredAt, setCourtRegisteredAt] = useState(toDateInput(caseData.courtRegisteredAt));
   const [courtDecisionAt, setCourtDecisionAt] = useState(toDateInput(caseData.courtDecisionAt));
   const [courtDecisionEffectiveAt, setCourtDecisionEffectiveAt] = useState(toDateInput(caseData.courtDecisionEffectiveAt));
   const [executiveWritReceivedAt, setExecutiveWritReceivedAt] = useState(toDateInput(caseData.executiveWritReceivedAt));
@@ -444,6 +445,7 @@ export function CaseModal({
     setCourtroom(caseData.courtroom ?? '');
     setCourtSecretaryContacts(caseData.courtSecretaryContacts ?? '');
     setClaimFiledAt(toDateInput(caseData.claimFiledAt));
+    setCourtRegisteredAt(toDateInput(caseData.courtRegisteredAt));
     setCourtDecisionAt(toDateInput(caseData.courtDecisionAt));
     setCourtDecisionEffectiveAt(toDateInput(caseData.courtDecisionEffectiveAt));
     setExecutiveWritReceivedAt(toDateInput(caseData.executiveWritReceivedAt));
@@ -812,6 +814,8 @@ export function CaseModal({
         courtroom: courtroom.trim(),
         courtSecretaryContacts: courtSecretaryContacts.trim(),
         claimFiledAt: fromDateInput(claimFiledAt),
+        courtRegisteredAt: fromDateInput(courtRegisteredAt),
+        clearCourtRegisteredAt: !courtRegisteredAt,
         courtDecisionAt: fromDateInput(courtDecisionAt),
         courtDecisionEffectiveAt: fromDateInput(courtDecisionEffectiveAt),
         clearCourtDecisionEffectiveAt: !courtDecisionEffectiveAt,
@@ -1769,6 +1773,18 @@ export function CaseModal({
               className="mt-1 w-full border rounded-lg px-3 py-2"
               value={claimFiledAt}
               onChange={(e) => setClaimFiledAt(e.target.value)}
+              disabled={saving}
+            />
+          </div>
+
+          <div>
+            <label className="text-sm text-gray-600">Дата регистрации в суде</label>
+            <SystemDateInput
+              aria-label="Дата регистрации в суде"
+              type="date"
+              className="mt-1 w-full border rounded-lg px-3 py-2"
+              value={courtRegisteredAt}
+              onChange={(e) => setCourtRegisteredAt(e.target.value)}
               disabled={saving}
             />
           </div>

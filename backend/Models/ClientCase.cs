@@ -215,6 +215,14 @@ namespace PayPlanner.Api.Models
         /// </summary>
         public DateTime? ClaimFiledAt { get; set; }
 
+        /// <summary>
+        /// Дата регистрации заявления судом; не подменяется датой подачи или создания карточки CRM.
+        /// </summary>
+        public DateTime? CourtRegisteredAt { get; set; }
+
+        [NotMapped]
+        public bool ClearCourtRegisteredAt { get; set; }
+
         public DateTime? CourtDecisionAt { get; set; }
 
         /// <summary>

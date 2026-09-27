@@ -1380,6 +1380,9 @@ namespace PayPlanner.Api.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTime?>("CourtRegisteredAt")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("CourtSecretaryContacts")
                         .IsRequired()
                         .HasMaxLength(500)

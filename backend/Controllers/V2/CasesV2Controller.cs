@@ -90,6 +90,7 @@ public partial class CasesV2Controller : ControllerBase
         new("judge.name", "Суд", "Судья."),
         new("nextHearingAt", "Сроки", "Дата и время ближайшего заседания."),
         new("claimFiledAt", "Сроки", "Дата подачи заявления."),
+        new("courtRegisteredAt", "Сроки", "Дата регистрации заявления судом."),
         new("courtDecisionAt", "Сроки", "Дата судебного решения."),
         new("courtDecisionEffectiveAt", "Сроки", "Дата вступления решения в силу, указанная сотрудником."),
         new("executiveWritReceivedAt", "Сроки", "Дата получения исполнительного листа."),
@@ -1556,6 +1557,7 @@ public partial class CasesV2Controller : ControllerBase
             Courtroom = item.Courtroom,
             CourtSecretaryContacts = item.CourtSecretaryContacts,
             ClaimFiledAt = item.ClaimFiledAt,
+            CourtRegisteredAt = item.CourtRegisteredAt,
             CourtDecisionAt = item.CourtDecisionAt,
             CourtDecisionEffectiveAt = item.CourtDecisionEffectiveAt,
             ExecutiveWritReceivedAt = item.ExecutiveWritReceivedAt,
@@ -10753,6 +10755,8 @@ public partial class CasesV2Controller : ControllerBase
         target.Courtroom = source.Courtroom?.Trim() ?? string.Empty;
         target.CourtSecretaryContacts = source.CourtSecretaryContacts?.Trim() ?? string.Empty;
         target.ClaimFiledAt = source.ClaimFiledAt;
+        if (source.CourtRegisteredAt.HasValue) target.CourtRegisteredAt = source.CourtRegisteredAt;
+        else if (source.ClearCourtRegisteredAt) target.CourtRegisteredAt = null;
         target.CourtDecisionAt = source.CourtDecisionAt;
         if (source.CourtDecisionEffectiveAt.HasValue) target.CourtDecisionEffectiveAt = source.CourtDecisionEffectiveAt;
         else if (source.ClearCourtDecisionEffectiveAt) target.CourtDecisionEffectiveAt = null;
@@ -11979,6 +11983,7 @@ public partial class CasesV2Controller : ControllerBase
         AppendTemplateRow(html, "Судья", clientCase.JudgeName);
         AppendTemplateRow(html, "Ближайшее заседание", FormatTemplateDateTime(clientCase.NextHearingAt, timeZone));
         AppendTemplateRow(html, "Дата подачи заявления", FormatTemplateDate(clientCase.ClaimFiledAt));
+        AppendTemplateRow(html, "Дата регистрации в суде", FormatTemplateDate(clientCase.CourtRegisteredAt));
         AppendTemplateRow(html, "Дата решения суда", FormatTemplateDate(clientCase.CourtDecisionAt));
         AppendTemplateRow(html, "Решение вступило в силу", FormatTemplateDate(clientCase.CourtDecisionEffectiveAt));
         AppendTemplateRow(html, "Исполнительный лист получен", FormatTemplateDate(clientCase.ExecutiveWritReceivedAt));
@@ -12108,6 +12113,7 @@ public partial class CasesV2Controller : ControllerBase
             ["{{judge.name}}"] = clientCase.JudgeName ?? string.Empty,
             ["{{nextHearingAt}}"] = FormatTemplateDateTime(clientCase.NextHearingAt, timeZone),
             ["{{claimFiledAt}}"] = FormatTemplateDate(clientCase.ClaimFiledAt),
+            ["{{courtRegisteredAt}}"] = FormatTemplateDate(clientCase.CourtRegisteredAt),
             ["{{courtDecisionAt}}"] = FormatTemplateDate(clientCase.CourtDecisionAt),
             ["{{courtDecisionEffectiveAt}}"] = FormatTemplateDate(clientCase.CourtDecisionEffectiveAt),
             ["{{executiveWritReceivedAt}}"] = FormatTemplateDate(clientCase.ExecutiveWritReceivedAt),

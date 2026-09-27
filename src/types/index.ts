@@ -546,6 +546,8 @@ export interface ClientCase {
   courtroom?: string | null;
   courtSecretaryContacts?: string | null;
   claimFiledAt?: string | null;
+  courtRegisteredAt?: string | null;
+  clearCourtRegisteredAt?: boolean;
   courtDecisionAt?: string | null;
   courtDecisionEffectiveAt?: string | null;
   clearCourtDecisionEffectiveAt?: boolean;

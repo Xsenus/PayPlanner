@@ -198,6 +198,7 @@ interface CaseEditDraft {
   courtroom: string;
   courtSecretaryContacts: string;
   claimFiledAt: string;
+  courtRegisteredAt: string;
   courtDecisionAt: string;
   courtDecisionEffectiveAt: string;
   executiveWritReceivedAt: string;
@@ -1254,6 +1255,7 @@ function buildCaseEditDraft(caseItem: ClientCase): CaseEditDraft {
     courtroom: caseItem.courtroom ?? '',
     courtSecretaryContacts: caseItem.courtSecretaryContacts ?? '',
     claimFiledAt: toDateInput(caseItem.claimFiledAt),
+    courtRegisteredAt: toDateInput(caseItem.courtRegisteredAt),
     courtDecisionAt: toDateInput(caseItem.courtDecisionAt),
     courtDecisionEffectiveAt: toDateInput(caseItem.courtDecisionEffectiveAt),
     executiveWritReceivedAt: toDateInput(caseItem.executiveWritReceivedAt),
@@ -1308,6 +1310,8 @@ function buildCasePatchFromEditDraft(draft: CaseEditDraft): Partial<ClientCase> 
     courtroom: draft.courtroom.trim(),
     courtSecretaryContacts: draft.courtSecretaryContacts.trim(),
     claimFiledAt: fromDateInput(draft.claimFiledAt),
+    courtRegisteredAt: fromDateInput(draft.courtRegisteredAt),
+    clearCourtRegisteredAt: !draft.courtRegisteredAt,
     courtDecisionAt: fromDateInput(draft.courtDecisionAt),
     courtDecisionEffectiveAt: fromDateInput(draft.courtDecisionEffectiveAt),
     clearCourtDecisionEffectiveAt: !draft.courtDecisionEffectiveAt,
@@ -1372,6 +1376,8 @@ function buildCaseUpdatePayload(base: ClientCase, patch: Partial<ClientCase>): O
     courtroom: patch.courtroom ?? base.courtroom ?? '',
     courtSecretaryContacts: patch.courtSecretaryContacts ?? base.courtSecretaryContacts ?? '',
     claimFiledAt: patch.claimFiledAt ?? base.claimFiledAt ?? null,
+    courtRegisteredAt: patch.courtRegisteredAt !== undefined ? patch.courtRegisteredAt : base.courtRegisteredAt ?? null,
+    clearCourtRegisteredAt: patch.clearCourtRegisteredAt ?? false,
     courtDecisionAt: patch.courtDecisionAt ?? base.courtDecisionAt ?? null,
     courtDecisionEffectiveAt: patch.courtDecisionEffectiveAt !== undefined ? patch.courtDecisionEffectiveAt : base.courtDecisionEffectiveAt ?? null,
     clearCourtDecisionEffectiveAt: patch.clearCourtDecisionEffectiveAt ?? false,
@@ -5003,6 +5009,7 @@ function CaseEditPage({
           <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Процессуальные даты</h2>
           <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
             <label className="text-sm font-medium text-slate-700">Иск подан<SystemDateInput type="date" value={draft.claimFiledAt} onChange={(event) => setField('claimFiledAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /></label>
+            <label className="text-sm font-medium text-slate-700">Зарегистрирован судом<SystemDateInput aria-label="Дата регистрации в суде" type="date" value={draft.courtRegisteredAt} onChange={(event) => setField('courtRegisteredAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /></label>
             <label className="text-sm font-medium text-slate-700">Решение суда<SystemDateInput type="date" value={draft.courtDecisionAt} onChange={(event) => setField('courtDecisionAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /></label>
             <label className="text-sm font-medium text-slate-700">Решение вступило в силу<SystemDateInput aria-label="Дата вступления решения в силу" type="date" value={draft.courtDecisionEffectiveAt} onChange={(event) => setField('courtDecisionEffectiveAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /><span className="mt-1 block text-xs font-normal text-slate-500">Дата указывается вручную; CRM её не рассчитывает.</span></label>
             <div><label className="text-sm font-medium text-slate-700">Исполнительный лист получен<SystemDateInput aria-label="Дата получения исполнительного листа" type="date" value={draft.executiveWritReceivedAt} onChange={(event) => setField('executiveWritReceivedAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /></label><div className="mt-2"><ExecutiveWritDocumentUpload caseId={caseItem.id} canUpload documents={documents} onUploaded={onWritUploaded} /></div></div>
@@ -6732,6 +6739,13 @@ function buildCourtTimeline(caseItem: ClientCase, logs: ClientCaseCourtSyncLog[]
       state: getCourtTimelineState(caseItem.claimFiledAt),
     },
     {
+      id: 'court-registered',
+      label: 'Зарегистрировано судом',
+      value: caseItem.courtRegisteredAt,
+      kind: 'milestone' as CourtTimelineKind,
+      state: getCourtTimelineState(caseItem.courtRegisteredAt),
+    },
+    {
       id: 'next-hearing',
       label: 'Ближайшее заседание',
       value: caseItem.nextHearingAt,
@@ -7105,6 +7119,7 @@ function CourtPanel({
   const isPretrialCase = isPretrialCaseStage(caseItem);
   const deadlines = [
     ['Подача заявления', caseItem.claimFiledAt],
+    ['Регистрация в суде', caseItem.courtRegisteredAt],
     ['Ближайшее заседание', caseItem.nextHearingAt],
     ['Решение суда', caseItem.courtDecisionAt],
     ['Решение вступило в силу', caseItem.courtDecisionEffectiveAt],

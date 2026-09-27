@@ -2969,6 +2969,7 @@ public class CasesV2ControllerTests
             Courtroom = " зал 12 ",
             CourtSecretaryContacts = " secretary@example.test ",
             ClaimFiledAt = new DateTime(2026, 5, 11, 0, 0, 0, DateTimeKind.Utc),
+            CourtRegisteredAt = new DateTime(2026, 5, 13, 0, 0, 0, DateTimeKind.Utc),
             AppealDeadlineAt = new DateTime(2026, 7, 1, 0, 0, 0, DateTimeKind.Utc),
             MotionDeadlineAt = new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc),
             ObjectionDeadlineAt = new DateTime(2026, 6, 5, 0, 0, 0, DateTimeKind.Utc),
@@ -3000,12 +3001,64 @@ public class CasesV2ControllerTests
         Assert.Equal("зал 12", createdCase.Courtroom);
         Assert.Equal("secretary@example.test", createdCase.CourtSecretaryContacts);
         Assert.Equal(new DateTime(2026, 5, 11, 0, 0, 0, DateTimeKind.Utc), createdCase.ClaimFiledAt);
+        Assert.Equal(new DateTime(2026, 5, 13, 0, 0, 0, DateTimeKind.Utc), createdCase.CourtRegisteredAt);
         Assert.Equal(new DateTime(2026, 7, 1, 0, 0, 0, DateTimeKind.Utc), createdCase.AppealDeadlineAt);
         Assert.Equal(new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc), createdCase.MotionDeadlineAt);
         Assert.Equal(new DateTime(2026, 6, 5, 0, 0, 0, DateTimeKind.Utc), createdCase.ObjectionDeadlineAt);
         Assert.Equal("Паспорт, договор", createdCase.DocumentsSummary);
         Assert.Equal("Заявление принято", createdCase.EventHistory);
         Assert.Equal("Подать ходатайство", createdCase.Strategy);
+    }
+
+    [Fact]
+    public async Task Update_CourtRegistrationDateCanBeChangedClearedAndSurvivesOlderClient()
+    {
+        await using var db = await CreateContextAsync();
+        var editor = await CreateUserAsync(db, "court-registration@example.com", "Юрист");
+        var clientCase = new ClientCase
+        {
+            Client = new Client { Name = "Клиент", IsActive = true, ResponsibleUserId = editor.Id },
+            Title = "Судебное дело",
+            Status = ClientCaseStatus.Open,
+            ClaimFiledAt = new DateTime(2026, 5, 11),
+        };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, editor);
+        var registeredAt = new DateTime(2026, 5, 13);
+
+        Assert.IsType<OkObjectResult>(await controller.Update(clientCase.Id, new ClientCase
+        {
+            ClientId = clientCase.ClientId,
+            Title = clientCase.Title,
+            Status = ClientCaseStatus.Open,
+            ClaimFiledAt = clientCase.ClaimFiledAt,
+            CourtRegisteredAt = registeredAt,
+        }, CancellationToken.None));
+        Assert.IsType<OkObjectResult>(await controller.Update(clientCase.Id, new ClientCase
+        {
+            ClientId = clientCase.ClientId,
+            Title = clientCase.Title,
+            Status = ClientCaseStatus.Open,
+            ClaimFiledAt = clientCase.ClaimFiledAt,
+        }, CancellationToken.None));
+        await db.Entry(clientCase).ReloadAsync();
+        Assert.Equal(registeredAt, clientCase.CourtRegisteredAt);
+        var details = Assert.IsType<ClientCase>(Assert.IsType<OkObjectResult>(
+            await controller.GetById(clientCase.Id, CancellationToken.None)).Value);
+        Assert.Equal(registeredAt, details.CourtRegisteredAt);
+
+        Assert.IsType<OkObjectResult>(await controller.Update(clientCase.Id, new ClientCase
+        {
+            ClientId = clientCase.ClientId,
+            Title = clientCase.Title,
+            Status = ClientCaseStatus.Open,
+            ClaimFiledAt = clientCase.ClaimFiledAt,
+            ClearCourtRegisteredAt = true,
+        }, CancellationToken.None));
+        await db.Entry(clientCase).ReloadAsync();
+        Assert.Null(clientCase.CourtRegisteredAt);
+        Assert.Equal(new DateTime(2026, 5, 11), clientCase.ClaimFiledAt);
     }
 
     [Fact]

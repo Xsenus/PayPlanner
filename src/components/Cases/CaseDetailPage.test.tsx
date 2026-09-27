@@ -998,12 +998,13 @@ describe('CaseDetailPage', () => {
     await screen.findByText('ЗЕМЦОВ - банкротство');
     fireEvent.click(screen.getByRole('button', { name: 'Редактировать дело' }));
     await screen.findByRole('option', { name: 'Общий · Возражения' });
+    fireEvent.change(screen.getByLabelText('Дата регистрации в суде'), { target: { value: '2026-05-13' } });
     fireEvent.change(screen.getByRole('combobox', { name: 'Шаблон позиции' }), { target: { value: '4' } });
     fireEvent.click(screen.getByRole('button', { name: 'Вставить в позицию' }));
     expect((screen.getByLabelText('Стратегия и план действий') as HTMLTextAreaElement).value).toContain('Проверить доказательства');
     fireEvent.click(screen.getAllByRole('button', { name: /Сохранить дело/u }).at(-1) as HTMLElement);
     await waitFor(() => expect(apiService.updateCaseV2).toHaveBeenCalledWith(
-      15, expect.objectContaining({ strategy: expect.stringContaining('Проверить доказательства') }),
+      15, expect.objectContaining({ strategy: expect.stringContaining('Проверить доказательства'), courtRegisteredAt: '2026-05-13', clearCourtRegisteredAt: false }),
     ));
   });
 
