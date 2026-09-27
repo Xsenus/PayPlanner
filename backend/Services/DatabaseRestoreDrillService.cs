@@ -234,14 +234,36 @@ public sealed class DatabaseRestoreDrillService(
             tableCount = Convert.ToInt32(await count.ExecuteScalarAsync(cancellationToken));
         if (tableCount == 0)
             throw new InvalidDataException("Восстановление PostgreSQL завершилось без таблиц приложения.");
-        await using (var disableEmail = new NpgsqlCommand("UPDATE \"SystemSettings\" SET \"Value\" = 'false', \"UpdatedAt\" = CURRENT_TIMESTAMP WHERE \"Key\" = 'notifications.email.enabled';", connection))
-            await disableEmail.ExecuteNonQueryAsync(cancellationToken);
+        await SanitizeRestoredPostgreSqlAsync(connection, cancellationToken);
         await RestoreFilePartsAsync(manifest, targetDirectory, cancellationToken);
 
         return new DatabaseRestoreDrillReport(
             Path.GetFileName(targetDirectory), "restored", manifest.BackupId, manifest.BackupRelativePath,
             manifest.DatabaseProvider, manifest.BackupFormat, $"{target.Host}:{target.Port}/{target.Database}", tableCount, 0,
-            "restore completed; outbound email database flag disabled", started, DateTime.UtcNow, stopwatch.ElapsedMilliseconds, string.Empty);
+            "restore completed; outbound email disabled and queued email isolated", started, DateTime.UtcNow, stopwatch.ElapsedMilliseconds, string.Empty);
+    }
+
+    public static async Task SanitizeRestoredPostgreSqlAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
+    {
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await using var command = new NpgsqlCommand("""
+            INSERT INTO "SystemSettings" ("Key", "Value", "CreatedAt", "UpdatedAt")
+            VALUES ('notifications.email.enabled', 'false', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ON CONFLICT ("Key") DO UPDATE
+            SET "Value" = 'false', "UpdatedAt" = CURRENT_TIMESTAMP;
+
+            UPDATE "SystemSettings"
+            SET "Value" = '', "UpdatedAt" = CURRENT_TIMESTAMP
+            WHERE "Key" IN (
+                'notifications.email.smtpHost', 'notifications.email.smtpUsername',
+                'notifications.email.smtpPassword', 'notifications.email.fromEmail');
+
+            UPDATE "NotificationDeliveries"
+            SET "Status" = 'skipped', "Error" = 'Email delivery disabled for restore drill'
+            WHERE "Channel" = 'email' AND "Status" IN ('pending', 'failed');
+            """, connection, transaction);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
     }
 
     public static async Task EnsureEmptyPostgreSqlTargetAsync(string connectionString, CancellationToken cancellationToken)
