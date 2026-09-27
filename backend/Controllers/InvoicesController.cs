@@ -2781,6 +2781,7 @@ public class InvoicesController : ControllerBase
             return forbidden;
         }
 
+        await using var deletionTransaction = await _db.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct);
         var payment = await BuildEditableInvoiceDeletionTargetsQuery(visibility)
             .Include(p => p.Invoice)
             .FirstOrDefaultAsync(p => p.Id == id, ct);
@@ -2791,6 +2792,7 @@ public class InvoicesController : ControllerBase
 
         var invoiceIdsToDelete = GetInvoiceEntityIdsToDelete(new[] { payment });
         var paymentsToDelete = await ExpandInvoiceAggregatePaymentsAsync(new[] { payment }, ct);
+        await LockInvoiceDeletionPaymentsAsync(paymentsToDelete, ct);
         var deletionError = await ValidateInvoiceCanBeDeletedAsync(paymentsToDelete, ct);
         if (deletionError is not null)
         {
@@ -2811,6 +2813,7 @@ public class InvoicesController : ControllerBase
         }
 
         await _db.SaveChangesAsync(ct);
+        await deletionTransaction.CommitAsync(ct);
         return NoContent();
     }
 
@@ -2833,6 +2836,7 @@ public class InvoicesController : ControllerBase
             return forbidden;
         }
 
+        await using var deletionTransaction = await _db.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct);
         var paymentsQuery = BuildEditableInvoiceDeletionTargetsQuery(visibility);
 
         var payments = await paymentsQuery
@@ -2853,6 +2857,7 @@ public class InvoicesController : ControllerBase
 
         var invoiceIdsToDelete = GetInvoiceEntityIdsToDelete(payments);
         var paymentsToDelete = await ExpandInvoiceAggregatePaymentsAsync(payments, ct);
+        await LockInvoiceDeletionPaymentsAsync(paymentsToDelete, ct);
         var deletionError = await ValidateInvoiceCanBeDeletedAsync(paymentsToDelete, ct);
         if (deletionError is not null)
         {
@@ -2873,8 +2878,27 @@ public class InvoicesController : ControllerBase
         }
 
         await _db.SaveChangesAsync(ct);
+        await deletionTransaction.CommitAsync(ct);
 
         return Ok(new { deleted = paymentsToDelete.Count });
+    }
+
+    private async Task LockInvoiceDeletionPaymentsAsync(IEnumerable<Payment> payments, CancellationToken ct)
+    {
+        if (!_db.Database.IsNpgsql())
+        {
+            return;
+        }
+
+        var ids = payments.Select(payment => payment.Id).Distinct().ToArray();
+        if (ids.Length == 0)
+        {
+            return;
+        }
+
+        await _db.Database
+            .SqlQuery<int>($"SELECT \"Id\" FROM \"Payments\" WHERE \"Id\" = ANY({ids}) ORDER BY \"Id\" FOR UPDATE")
+            .ToListAsync(ct);
     }
 
     private static List<int> GetInvoiceEntityIdsToDelete(IEnumerable<Payment> payments)
@@ -2930,8 +2954,10 @@ public class InvoicesController : ControllerBase
             ? 0
             : await _db.MoneyOperations
                 .CountAsync(operation => operation.LinkedInvoiceId.HasValue && invoiceEntityIds.Contains(operation.LinkedInvoiceId.Value), ct);
+        var linkedTaskCount = await _db.TaskJournalItems
+            .CountAsync(task => task.BillingInvoiceId.HasValue && paymentIds.Contains(task.BillingInvoiceId.Value), ct);
 
-        if (linkedContractCount == 0 && linkedMoneyOperationCount == 0)
+        if (linkedContractCount == 0 && linkedMoneyOperationCount == 0 && linkedTaskCount == 0)
         {
             return null;
         }
@@ -2947,9 +2973,14 @@ public class InvoicesController : ControllerBase
             linkedParts.Add($"движения денег: {linkedMoneyOperationCount}");
         }
 
+        if (linkedTaskCount > 0)
+        {
+            linkedParts.Add($"платные задачи: {linkedTaskCount}");
+        }
+
         return BadRequest(new
         {
-            message = $"Нельзя удалить счёт, пока к нему привязаны документы ({string.Join(", ", linkedParts)}). Сначала отвяжите связанные документы или аннулируйте счёт.",
+            message = $"Нельзя удалить счёт, пока к нему привязаны записи ({string.Join(", ", linkedParts)}). Сначала отвяжите связанные записи или аннулируйте счёт с указанием причины.",
         });
     }
 

@@ -38,9 +38,17 @@ public class ProviderSpecificSqlTests
             .Select(item => $"{Path.GetRelativePath(root, item.Path)}:{item.Line}:{item.Text.Trim()}")
             .ToList();
 
-        Assert.Equal(4, matches.Count);
-        Assert.Single(matches, match => match.Contains("InvoicesController.cs", StringComparison.Ordinal));
+        Assert.Equal(5, matches.Count);
+        Assert.Equal(2, matches.Count(match => match.Contains("InvoicesController.cs", StringComparison.Ordinal)));
         Assert.Equal(3, matches.Count(match => match.Contains("TasksController.cs", StringComparison.Ordinal)));
+
+        var invoiceSource = File.ReadAllText(Path.Combine(root, "backend", "Controllers", "InvoicesController.cs"));
+        var deletionLockStart = invoiceSource.IndexOf("private async Task LockInvoiceDeletionPaymentsAsync", StringComparison.Ordinal);
+        var deletionLockEnd = invoiceSource.IndexOf("private static List<int> GetInvoiceEntityIdsToDelete", deletionLockStart, StringComparison.Ordinal);
+        Assert.True(deletionLockStart >= 0 && deletionLockEnd > deletionLockStart);
+        var deletionLockMethod = invoiceSource[deletionLockStart..deletionLockEnd];
+        Assert.Contains("if (!_db.Database.IsNpgsql())", deletionLockMethod, StringComparison.Ordinal);
+        Assert.Equal(1, deletionLockMethod.Split("FOR UPDATE", StringSplitOptions.None).Length - 1);
 
         var taskSource = File.ReadAllText(Path.Combine(root, "backend", "Controllers", "TasksController.cs"));
         var classificationStart = taskSource.IndexOf("public async Task<ActionResult<TaskJournalItemDto>> UpdateTaskBillingClassification", StringComparison.Ordinal);

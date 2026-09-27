@@ -2835,6 +2835,43 @@ public class InvoicesControllerCrudTests
     }
 
     [Fact]
+    public async Task Delete_RejectsInvoiceLinkedToBillableTask_WithoutLosingBillingHistory()
+    {
+        await using var db = await CreateContextAsync();
+        var actorUserId = await CreateUserAsync(db, "Billing Admin", roleName: "admin");
+        var clientId = await CreateClientAsync(db, "Billing Client");
+        var controller = CreateController(db, isAdmin: true, userId: actorUserId);
+        var created = Assert.IsType<CreatedResult>((await controller.Create(
+            CreateRequest("INV-LINKED-TASK", clientId, new DateTime(2026, 9, 27), 1_000m),
+            CancellationToken.None)).Result);
+        var invoice = Assert.IsType<InvoiceDto>(created.Value);
+        var task = new TaskJournalItem
+        {
+            ClientId = clientId,
+            ObjectName = "Billing Client",
+            Title = "Paid work",
+            AssigneeName = "Billing Admin",
+            AuthorUserId = actorUserId,
+            AuthorName = "Billing Admin",
+            DueAt = DateTime.UtcNow.AddDays(1),
+            ClientBillingClassification = TaskClientBillingClassification.Billable,
+            BillingModeSnapshot = ContractBillingMode.Actual,
+            BillingInvoiceId = invoice.Id,
+            BillingDecisionAt = DateTime.UtcNow,
+        };
+        db.TaskJournalItems.Add(task);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var result = await controller.Delete(invoice.Id, CancellationToken.None);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+        Assert.Contains("платные задачи: 1", badRequest.Value?.ToString());
+        Assert.Equal(invoice.Id, (await db.TaskJournalItems.AsNoTracking().SingleAsync(item => item.Id == task.Id)).BillingInvoiceId);
+        Assert.NotNull(await db.Payments.AsNoTracking().SingleOrDefaultAsync(payment => payment.Id == invoice.Id));
+    }
+
+    [Fact]
     public async Task Update_NormalizesInstallmentRowsThatStillUseInvoiceDocumentKind()
     {
         await using var db = await CreateContextAsync();
@@ -3109,6 +3146,45 @@ public class InvoicesControllerCrudTests
             Assert.Null(act.InvoiceId);
             Assert.Null(act.InvoiceNumber);
         });
+    }
+
+    [Fact]
+    public async Task BulkDelete_RejectsEntireBatch_WhenOneInvoiceHasBillableTask()
+    {
+        await using var db = await CreateContextAsync();
+        var actorUserId = await CreateUserAsync(db, "Billing Admin", roleName: "admin");
+        var clientId = await CreateClientAsync(db, "Billing Client");
+        var controller = CreateController(db, isAdmin: true, userId: actorUserId);
+        var linked = Assert.IsType<InvoiceDto>(Assert.IsType<CreatedResult>((await controller.Create(
+            CreateRequest("INV-BULK-LINKED", clientId, new DateTime(2026, 9, 27), 1_000m),
+            CancellationToken.None)).Result).Value);
+        var unlinked = Assert.IsType<InvoiceDto>(Assert.IsType<CreatedResult>((await controller.Create(
+            CreateRequest("INV-BULK-OTHER", clientId, new DateTime(2026, 9, 28), 2_000m),
+            CancellationToken.None)).Result).Value);
+        db.TaskJournalItems.Add(new TaskJournalItem
+        {
+            ClientId = clientId,
+            ObjectName = "Billing Client",
+            Title = "Paid work",
+            AssigneeName = "Billing Admin",
+            AuthorUserId = actorUserId,
+            AuthorName = "Billing Admin",
+            DueAt = DateTime.UtcNow.AddDays(1),
+            ClientBillingClassification = TaskClientBillingClassification.Billable,
+            BillingModeSnapshot = ContractBillingMode.Actual,
+            BillingInvoiceId = linked.Id,
+            BillingDecisionAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var result = await controller.BulkDelete(
+            new BulkIdsRequest { Ids = [linked.Id, unlinked.Id] },
+            CancellationToken.None);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+        Assert.Contains("платные задачи: 1", badRequest.Value?.ToString());
+        Assert.Equal(2, await db.Payments.AsNoTracking().CountAsync(payment => payment.Id == linked.Id || payment.Id == unlinked.Id));
     }
 
     [Fact]
