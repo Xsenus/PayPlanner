@@ -406,6 +406,92 @@ public sealed class DatabaseBackupServiceS3Tests
     }
 
     [Fact]
+    public async Task BackupDirectoryLease_WaitsForReleaseAndHonorsCancellation()
+    {
+        await using var scope = await CreateScopeAsync();
+        var backupRoot = Path.Combine(scope.Root, "backups");
+        var first = await BackupDirectoryLease.AcquireAsync(
+            backupRoot, TimeSpan.FromSeconds(2), CancellationToken.None);
+        try
+        {
+            using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                BackupDirectoryLease.AcquireAsync(backupRoot, TimeSpan.FromSeconds(2), cancellation.Token));
+            await Assert.ThrowsAsync<IOException>(() =>
+                BackupDirectoryLease.AcquireAsync(backupRoot, TimeSpan.FromMilliseconds(50), CancellationToken.None));
+        }
+        finally
+        {
+            await first.DisposeAsync();
+        }
+
+        await using var next = await BackupDirectoryLease.AcquireAsync(
+            backupRoot, TimeSpan.FromSeconds(2), CancellationToken.None);
+        Assert.True(next.CanRead);
+    }
+
+    [Fact]
+    public async Task EnsureScheduledBackupsAsync_TwoServiceInstancesShareOneSlot()
+    {
+        await using var scope = await CreateScopeAsync();
+        var first = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        var second = ActivatorUtilities.CreateInstance<DatabaseBackupService>(scope.Provider);
+        await first.UpdateSettingsAsync(
+            automaticEnabled: true, scheduleLocal: "00:00", retentionDays: 14,
+            backupFormat: "sqlite", cancellationToken: CancellationToken.None);
+        var backupRoot = Path.Combine(scope.Root, "backups");
+        var externalLock = await BackupDirectoryLease.AcquireAsync(
+            backupRoot, TimeSpan.FromSeconds(2), CancellationToken.None);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        Task<int[]> pending;
+        try
+        {
+            pending = Task.WhenAll(
+                first.EnsureScheduledBackupsAsync(timeout.Token),
+                second.EnsureScheduledBackupsAsync(timeout.Token));
+            await Task.Delay(250, timeout.Token);
+            Assert.False(pending.IsCompleted);
+        }
+        finally
+        {
+            await externalLock.DisposeAsync();
+        }
+
+        var counts = await pending;
+        Assert.Equal(1, counts.Sum());
+        var automatic = Assert.Single((await first.GetOverviewAsync()).Items, item => item.Trigger == "auto");
+        Assert.True((await first.VerifyBackupAsync(automatic.RelativePath)).Verified);
+    }
+
+    [Fact]
+    public async Task DeleteBackupAsync_WaitsForSharedDirectoryLock()
+    {
+        await using var scope = await CreateScopeAsync();
+        var service = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        var created = await service.CreateManualBackupAsync(CancellationToken.None);
+        var fullPath = service.ResolveBackupPath(created.Backup.RelativePath)!;
+        var backupRoot = Path.Combine(scope.Root, "backups");
+        var externalLock = await BackupDirectoryLease.AcquireAsync(
+            backupRoot, TimeSpan.FromSeconds(2), CancellationToken.None);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        Task<DatabaseBackupDeleteResult> pending;
+        try
+        {
+            pending = service.DeleteBackupAsync(created.Backup.RelativePath, timeout.Token);
+            await Task.Delay(250, timeout.Token);
+            Assert.False(pending.IsCompleted);
+            Assert.True(File.Exists(fullPath));
+        }
+        finally
+        {
+            await externalLock.DisposeAsync();
+        }
+
+        Assert.Equal(1, (await pending).DeletedCount);
+        Assert.False(File.Exists(fullPath));
+    }
+
+    [Fact]
     public async Task EnsureScheduledBackupsAsync_RetriesSlotWhenOnlyCopyIsCorrupt()
     {
         await using var scope = await CreateScopeAsync();

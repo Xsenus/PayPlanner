@@ -153,6 +153,7 @@ public sealed class DatabaseBackupService
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IBackupDirectoryReader _directoryReader;
     private readonly SemaphoreSlim _backupSemaphore = new(1, 1);
+    private static readonly TimeSpan RootLockTimeout = TimeSpan.FromMinutes(30);
     private string? _cachedVerifiedBackupPath;
     private string? _cachedVerifiedBackupStamp;
     private DateTime _cachedVerifiedBackupAtUtc;
@@ -383,47 +384,63 @@ public sealed class DatabaseBackupService
         return completedResult;
     }
 
-    public Task<DatabaseBackupDeleteResult> DeleteBackupAsync(string? relativePath, CancellationToken cancellationToken = default)
+    public async Task<DatabaseBackupDeleteResult> DeleteBackupAsync(string? relativePath, CancellationToken cancellationToken = default)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-
-        var resolvedPath = ResolveBackupPath(relativePath);
-        if (string.IsNullOrWhiteSpace(resolvedPath))
+        await _backupSemaphore.WaitAsync(cancellationToken);
+        try
         {
-            throw new FileNotFoundException("Резервная копия не найдена.");
-        }
+            await using var rootLock = await BackupDirectoryLease.AcquireAsync(
+                _backupRootDirectory, RootLockTimeout, cancellationToken);
+            var resolvedPath = ResolveBackupPath(relativePath);
+            if (string.IsNullOrWhiteSpace(resolvedPath))
+            {
+                throw new FileNotFoundException("Резервная копия не найдена.");
+            }
 
-        DeleteManifestParts(resolvedPath);
-        if (!TryDeleteFile(resolvedPath))
-        {
-            throw new IOException("Не удалось удалить резервную копию.");
+            if (!TryDeleteFile(resolvedPath))
+            {
+                throw new IOException("Не удалось удалить резервную копию.");
+            }
+            DeleteManifestParts(resolvedPath);
+            TryDeleteFile(GetManifestPath(resolvedPath));
+            CleanupEmptyDirectories(cancellationToken);
+            return new DatabaseBackupDeleteResult(1, DeletedAll: false);
         }
-        TryDeleteFile(GetManifestPath(resolvedPath));
-        CleanupEmptyDirectories();
-        return Task.FromResult(new DatabaseBackupDeleteResult(1, DeletedAll: false));
+        finally
+        {
+            _backupSemaphore.Release();
+        }
     }
 
-    public Task<DatabaseBackupDeleteResult> DeleteAllBackupsAsync(CancellationToken cancellationToken = default)
+    public async Task<DatabaseBackupDeleteResult> DeleteAllBackupsAsync(CancellationToken cancellationToken = default)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-
-        var deletedCount = 0;
-        foreach (var pattern in GetBackupSearchPatterns())
+        await _backupSemaphore.WaitAsync(cancellationToken);
+        try
         {
-            foreach (var filePath in EnumerateBackupFiles(pattern, cancellationToken))
+            await using var rootLock = await BackupDirectoryLease.AcquireAsync(
+                _backupRootDirectory, RootLockTimeout, cancellationToken);
+            var deletedCount = 0;
+            foreach (var pattern in GetBackupSearchPatterns())
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (TryDeleteFile(filePath))
+                foreach (var filePath in EnumerateBackupFiles(pattern, cancellationToken))
                 {
-                    DeleteManifestParts(filePath);
-                    TryDeleteFile(GetManifestPath(filePath));
-                    deletedCount++;
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (TryDeleteFile(filePath))
+                    {
+                        DeleteManifestParts(filePath);
+                        TryDeleteFile(GetManifestPath(filePath));
+                        deletedCount++;
+                    }
                 }
             }
-        }
 
-        CleanupEmptyDirectories();
-        return Task.FromResult(new DatabaseBackupDeleteResult(deletedCount, DeletedAll: true));
+            CleanupEmptyDirectories(cancellationToken);
+            return new DatabaseBackupDeleteResult(deletedCount, DeletedAll: true);
+        }
+        finally
+        {
+            _backupSemaphore.Release();
+        }
     }
 
     public async Task<int> EnsureScheduledBackupsAsync(CancellationToken cancellationToken = default)
@@ -432,6 +449,8 @@ public sealed class DatabaseBackupService
         await _backupSemaphore.WaitAsync(cancellationToken);
         try
         {
+            await using var rootLock = await BackupDirectoryLease.AcquireAsync(
+                _backupRootDirectory, RootLockTimeout, cancellationToken);
             await CleanupExpiredBackupsAsync(settings.RetentionDays, cancellationToken);
         }
         finally
@@ -633,7 +652,8 @@ public sealed class DatabaseBackupService
 
         try
         {
-            Directory.CreateDirectory(settings.RootDirectory);
+            await using var rootLock = await BackupDirectoryLease.AcquireAsync(
+                settings.RootDirectory, RootLockTimeout, cancellationToken);
 
             var nowLocal = DateTimeOffset.Now;
             if (scheduleSlot is not null && await HasVerifiedBackupForSlotAsync(
