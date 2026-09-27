@@ -24,6 +24,7 @@ const {
   invoiceModalPropsSpy,
   toastErrorMock,
   toastSuccessMock,
+  paymentScopeState,
 } = vi.hoisted(() => ({
   confirmMock: vi.fn(),
   createInvoiceMock: vi.fn(),
@@ -45,6 +46,15 @@ const {
   invoiceModalPropsSpy: vi.fn(),
   toastErrorMock: vi.fn(),
   toastSuccessMock: vi.fn(),
+  paymentScopeState: { value: 'all' as 'all' | 'own' },
+}));
+
+vi.mock('../../contexts/AuthContext', () => ({
+  useAuth: () => ({ user: { role: { id: 1 } }, isAdmin: () => false }),
+}));
+
+vi.mock('../../hooks/useRolePermissions', () => ({
+  useRolePermissions: () => ({ payments: { canView: true, viewScope: paymentScopeState.value } }),
 }));
 
 vi.mock('../../hooks/useClients', () => ({
@@ -256,6 +266,7 @@ function getLastPrintHtml(): string {
 
 describe('PaymentModal integration', () => {
   beforeEach(() => {
+    paymentScopeState.value = 'all';
     confirmMock.mockReset();
     createInvoiceMock.mockReset();
     getActResponsiblesMock.mockReset();
@@ -2315,6 +2326,30 @@ describe('PaymentModal integration', () => {
     expect(await screen.findByText('9 000,00')).toBeTruthy();
     expect(getLegalEntityBalanceMock).toHaveBeenCalledWith(301);
     expect(getClientBalanceMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { owner: 'client', defaultClientId: 69, defaultLegalEntityId: undefined },
+    { owner: 'legal entity', defaultClientId: undefined, defaultLegalEntityId: 301 },
+  ])('does not request or offer shared $owner balance with limited payment visibility', async ({ defaultClientId, defaultLegalEntityId }) => {
+    paymentScopeState.value = 'own';
+
+    render(
+      <PaymentModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        type="Income"
+        defaultClientId={defaultClientId}
+        defaultLegalEntityId={defaultLegalEntityId}
+        availableClientBalance={900}
+      />,
+    );
+
+    expect(getClientBalanceMock).not.toHaveBeenCalled();
+    expect(getLegalEntityBalanceMock).not.toHaveBeenCalled();
+    expect(screen.queryByText(/Доступно на балансе/)).toBeNull();
+    expect(screen.queryByText('900,00')).toBeNull();
   });
 
   it('restores existing balance credit as minimum paid amount', async () => {

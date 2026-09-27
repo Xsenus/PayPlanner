@@ -3609,6 +3609,82 @@ public class PaymentsControllerTests
     }
 
     [Fact]
+    public async Task ClientBalance_WithLimitedPaymentVisibility_DoesNotExposeOrSpendSharedCredit()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateBalanceUserAsync(db, canEditPayments: true, viewScope: DataVisibilityScope.Own);
+        var otherUser = await CreateBalanceUserAsync(db, canEditPayments: true, viewScope: DataVisibilityScope.Own);
+        var client = new Client { Name = "Клиент с общим авансом", ResponsibleUserId = user.Id, CreatedAt = DateTime.UtcNow };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+
+        var payment = CreatePayment(new DateTime(2026, 4, 28), 1_000m, "Счёт клиента");
+        payment.ClientId = client.Id;
+        payment.PaidAmount = 0m;
+        payment.Status = PaymentStatus.Pending;
+        payment.Responsibles.Add(new PaymentResponsible { UserId = otherUser.Id });
+        db.Payments.Add(payment);
+        db.ClientBalanceTransactions.Add(new ClientBalanceTransaction
+        {
+            ClientId = client.Id,
+            Amount = 800m,
+            Type = ClientBalanceTransactionType.Overpayment,
+            Direction = ClientBalanceDirection.Credit,
+            Description = "Аванс другого сотрудника",
+            CreatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = CreateClientBalancesController(db, user.Id);
+        Assert.IsType<ForbidResult>(await controller.GetSummary(client.Id, CancellationToken.None));
+        Assert.IsType<ForbidResult>(await controller.GetTransactions(client.Id, CancellationToken.None));
+        Assert.IsType<ForbidResult>(await controller.ApplyCredit(
+            client.Id,
+            new ApplyClientBalanceRequest { PaymentId = payment.Id, Amount = 800m },
+            CancellationToken.None));
+        db.ChangeTracker.Clear();
+        Assert.Equal(0m, (await db.Payments.AsNoTracking().SingleAsync(item => item.Id == payment.Id)).PaidAmount);
+        Assert.Single(await db.ClientBalanceTransactions.AsNoTracking().ToListAsync());
+    }
+
+    [Fact]
+    public async Task ClientBalance_WithFullPaymentVisibility_CanReadAndApplyCredit()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateBalanceUserAsync(db, canEditPayments: true, viewScope: DataVisibilityScope.All);
+        var client = new Client { Name = "Клиент с доступным авансом", CreatedAt = DateTime.UtcNow };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+
+        var payment = CreatePayment(new DateTime(2026, 4, 28), 1_000m, "Счёт клиента");
+        payment.ClientId = client.Id;
+        payment.PaidAmount = 0m;
+        payment.Status = PaymentStatus.Pending;
+        db.Payments.Add(payment);
+        db.ClientBalanceTransactions.Add(new ClientBalanceTransaction
+        {
+            ClientId = client.Id,
+            Amount = 800m,
+            Type = ClientBalanceTransactionType.Overpayment,
+            Direction = ClientBalanceDirection.Credit,
+            Description = "Общий аванс",
+            CreatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = CreateClientBalancesController(db, user.Id);
+        Assert.IsType<OkObjectResult>(await controller.GetSummary(client.Id, CancellationToken.None));
+        Assert.IsType<OkObjectResult>(await controller.GetTransactions(client.Id, CancellationToken.None));
+        Assert.IsType<OkObjectResult>(await controller.ApplyCredit(
+            client.Id,
+            new ApplyClientBalanceRequest { PaymentId = payment.Id, Amount = 800m },
+            CancellationToken.None));
+        db.ChangeTracker.Clear();
+        Assert.Equal(800m, (await db.Payments.AsNoTracking().SingleAsync(item => item.Id == payment.Id)).PaidAmount);
+        Assert.Equal(2, await db.ClientBalanceTransactions.CountAsync());
+    }
+
+    [Fact]
     public async Task Get_WithoutPaymentViewPermission_ReturnsForbidInsteadOfUnauthorized()
     {
         await using var db = await CreateContextAsync();
@@ -3664,6 +3740,84 @@ public class PaymentsControllerTests
 
         Assert.IsType<ForbidResult>(summaryResult);
         Assert.IsType<ForbidResult>(transactionsResult);
+    }
+
+    [Fact]
+    public async Task LegalEntityBalance_WithLimitedPaymentVisibility_DoesNotExposeOrSpendSharedCredit()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateBalanceUserAsync(db, canEditPayments: true, viewScope: DataVisibilityScope.Own);
+        var otherUser = await CreateBalanceUserAsync(db, canEditPayments: true, viewScope: DataVisibilityScope.Own);
+        var legalEntity = new LegalEntity { ShortName = "ООО Общий аванс", ResponsibleUserId = user.Id };
+        db.LegalEntities.Add(legalEntity);
+        await db.SaveChangesAsync();
+
+        var payment = CreatePayment(new DateTime(2026, 4, 28), 1_000m, "Счёт организации");
+        payment.ClientId = null;
+        payment.LegalEntityId = legalEntity.Id;
+        payment.PaidAmount = 0m;
+        payment.Status = PaymentStatus.Pending;
+        payment.Responsibles.Add(new PaymentResponsible { UserId = otherUser.Id });
+        db.Payments.Add(payment);
+        db.ClientBalanceTransactions.Add(new ClientBalanceTransaction
+        {
+            LegalEntityId = legalEntity.Id,
+            Amount = 800m,
+            Type = ClientBalanceTransactionType.Overpayment,
+            Direction = ClientBalanceDirection.Credit,
+            Description = "Аванс другого сотрудника",
+            CreatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = CreateLegalEntityBalancesController(db, user.Id);
+        Assert.IsType<ForbidResult>(await controller.GetSummary(legalEntity.Id, CancellationToken.None));
+        Assert.IsType<ForbidResult>(await controller.GetTransactions(legalEntity.Id, CancellationToken.None));
+        Assert.IsType<ForbidResult>(await controller.ApplyCredit(
+            legalEntity.Id,
+            new ApplyClientBalanceRequest { PaymentId = payment.Id, Amount = 800m },
+            CancellationToken.None));
+        db.ChangeTracker.Clear();
+        Assert.Equal(0m, (await db.Payments.AsNoTracking().SingleAsync(item => item.Id == payment.Id)).PaidAmount);
+        Assert.Single(await db.ClientBalanceTransactions.AsNoTracking().ToListAsync());
+    }
+
+    [Fact]
+    public async Task LegalEntityBalance_WithFullPaymentVisibility_CanReadAndApplyCredit()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateBalanceUserAsync(db, canEditPayments: true, viewScope: DataVisibilityScope.All);
+        var legalEntity = new LegalEntity { ShortName = "ООО Доступный аванс" };
+        db.LegalEntities.Add(legalEntity);
+        await db.SaveChangesAsync();
+
+        var payment = CreatePayment(new DateTime(2026, 4, 28), 1_000m, "Счёт организации");
+        payment.ClientId = null;
+        payment.LegalEntityId = legalEntity.Id;
+        payment.PaidAmount = 0m;
+        payment.Status = PaymentStatus.Pending;
+        db.Payments.Add(payment);
+        db.ClientBalanceTransactions.Add(new ClientBalanceTransaction
+        {
+            LegalEntityId = legalEntity.Id,
+            Amount = 800m,
+            Type = ClientBalanceTransactionType.Overpayment,
+            Direction = ClientBalanceDirection.Credit,
+            Description = "Общий аванс",
+            CreatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = CreateLegalEntityBalancesController(db, user.Id);
+        Assert.IsType<OkObjectResult>(await controller.GetSummary(legalEntity.Id, CancellationToken.None));
+        Assert.IsType<OkObjectResult>(await controller.GetTransactions(legalEntity.Id, CancellationToken.None));
+        Assert.IsType<OkObjectResult>(await controller.ApplyCredit(
+            legalEntity.Id,
+            new ApplyClientBalanceRequest { PaymentId = payment.Id, Amount = 800m },
+            CancellationToken.None));
+        db.ChangeTracker.Clear();
+        Assert.Equal(800m, (await db.Payments.AsNoTracking().SingleAsync(item => item.Id == payment.Id)).PaidAmount);
+        Assert.Equal(2, await db.ClientBalanceTransactions.CountAsync());
     }
 
     [Fact]

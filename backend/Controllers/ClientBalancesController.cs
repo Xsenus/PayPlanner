@@ -25,12 +25,11 @@ public class ClientBalancesController : ControllerBase
     private Task<DataVisibilityAccess?> ResolveClientVisibilityAsync(CancellationToken ct)
         => _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Clients, ct);
 
-    private Task<bool> CanViewPaymentsAsync(CancellationToken ct)
-        => _db.HasUserSectionPermissionAsync(
-            User,
-            RolePermissionCatalog.Payments,
-            permission => permission.CanView,
-            ct);
+    private async Task<bool> CanViewFullBalanceAsync(CancellationToken ct)
+    {
+        var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
+        return visibility?.SeesAll == true;
+    }
 
     private Task<bool> CanEditPaymentsAsync(CancellationToken ct)
         => _db.HasUserSectionPermissionAsync(
@@ -58,14 +57,14 @@ public class ClientBalancesController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> GetSummary(int clientId, CancellationToken ct)
     {
-        if (!await CanViewPaymentsAsync(ct))
-        {
-            return Forbid();
-        }
-
         if (await RequireVisibleClientAsync(clientId, ct) is { } forbidden)
         {
             return forbidden;
+        }
+
+        if (!await CanViewFullBalanceAsync(ct))
+        {
+            return Forbid();
         }
 
         var balance = await ClientBalanceService.GetBalanceAsync(_db, clientId, ct);
@@ -79,14 +78,14 @@ public class ClientBalancesController : ControllerBase
     [HttpGet("transactions")]
     public async Task<IActionResult> GetTransactions(int clientId, CancellationToken ct)
     {
-        if (!await CanViewPaymentsAsync(ct))
-        {
-            return Forbid();
-        }
-
         if (await RequireVisibleClientAsync(clientId, ct) is { } forbidden)
         {
             return forbidden;
+        }
+
+        if (!await CanViewFullBalanceAsync(ct))
+        {
+            return Forbid();
         }
 
         var items = await _db.ClientBalanceTransactions
@@ -125,7 +124,7 @@ public class ClientBalancesController : ControllerBase
             return forbidden;
         }
 
-        if (!await CanEditPaymentsAsync(ct))
+        if (!await CanEditPaymentsAsync(ct) || !await CanViewFullBalanceAsync(ct))
         {
             return Forbid();
         }

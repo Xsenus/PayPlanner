@@ -107,7 +107,7 @@ function createPermissions() {
     accounts: { canView: true, canCreate: false, canEdit: false, canDelete: false },
     acts: { canView: true, canCreate: false, canEdit: false, canDelete: false },
     contracts: { canView: true, canCreate: false, canEdit: false, canDelete: false },
-    payments: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+    payments: { canView: true, canCreate: false, canEdit: false, canDelete: false, viewScope: 'all' },
     tasks: { canView: true, canCreate: false, canEdit: false, canDelete: false, canExport: false },
     audit: { canView: false, canCreate: false, canEdit: false, canDelete: false, canExport: false },
   };
@@ -738,6 +738,17 @@ describe('ClientDetail integration', () => {
     expect(apiService.getClientBalance).not.toHaveBeenCalled();
     expect(apiService.getClientCaseFinanceSummaries).not.toHaveBeenCalled();
     expect(apiService.getPaymentsV2).not.toHaveBeenCalled();
+  });
+
+  it('does not request or show the shared advance with limited payment visibility', async () => {
+    Object.assign(permissionsResult.payments, { canView: true, viewScope: 'own' });
+
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
+
+    await screen.findByRole('heading', { name: 'Иванов Иван Иванович' });
+    expect(screen.queryByRole('button', { name: /История баланса/ })).toBeNull();
+    expect(apiService.getClientBalance).not.toHaveBeenCalled();
+    expect(apiService.getClientBalanceTransactions).not.toHaveBeenCalled();
   });
 
   it('hides client case actions and keeps the case section disabled without case rights', async () => {

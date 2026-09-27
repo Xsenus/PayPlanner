@@ -1423,7 +1423,9 @@ export function ClientDetail({
       sectionPermissions,
     ],
   );
-  const canViewClientFinancialSummary = paymentPermissions.canView;
+  const canViewClientFinancialSummary = userIsAdmin || (
+    paymentPermissions.canView && paymentPermissions.viewScope === "all"
+  );
   const canViewClientCaseFinancialSummary =
     casePermissions.canView && paymentPermissions.canView;
   const clientViewStateKey = useMemo(

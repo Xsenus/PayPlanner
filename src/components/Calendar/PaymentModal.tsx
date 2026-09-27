@@ -43,6 +43,8 @@ import { parseInstallmentPaymentMetadata } from '../../utils/installmentPlan';
 import { buildCancelledPaymentPayload } from '../../utils/paymentActions';
 import { CounterpartyPickerModal } from '../ui/CounterpartyPickerModal';
 import { useUserTimeZone } from '../../hooks/useUserTimeZone';
+import { useAuth } from '../../contexts/AuthContext';
+import { useRolePermissions } from '../../hooks/useRolePermissions';
 
 type PaymentKind = 'Income' | 'Expense';
 type LinkedInvoiceContext = {
@@ -344,6 +346,11 @@ export function PaymentModal({
   const { t } = useTranslation();
   const { confirm } = useDialog();
   const toast = useToast();
+  const { user, isAdmin } = useAuth();
+  const paymentPermissions = useRolePermissions(user?.role?.id).payments;
+  const canViewSharedBalance = isAdmin() || (
+    paymentPermissions.canView && paymentPermissions.viewScope === 'all'
+  );
   const { isRequired } = useFormRequirements('payments', isOpen);
   const profileTimeZoneId = useUserTimeZone();
   const defaultDate = todayYMDInTimeZone(profileTimeZoneId);
@@ -1060,7 +1067,7 @@ export function PaymentModal({
   };
 
   useEffect(() => {
-    if (!isOpen || availableClientBalance !== undefined) return;
+    if (!isOpen || !canViewSharedBalance || availableClientBalance !== undefined) return;
     const clientId = Number(formData.clientId || 0);
     const legalEntityId = Number(formData.legalEntityId || 0);
     if (formData.type !== 'Income' || (!clientId && !legalEntityId)) {
@@ -1088,7 +1095,7 @@ export function PaymentModal({
     return () => {
       cancelled = true;
     };
-  }, [availableClientBalance, formData.clientId, formData.legalEntityId, formData.type, isOpen]);
+  }, [availableClientBalance, canViewSharedBalance, formData.clientId, formData.legalEntityId, formData.type, isOpen]);
 
   useEffect(() => {
     if (!isOpen || !formData.invoiceId) {
@@ -2718,8 +2725,9 @@ export function PaymentModal({
   const overpaymentAmount = Math.max(paidAmountNum - amountNum, 0);
   const overpaid = paidAmountNum > amountNum + 0.005;
   const hasPartial = paidAmountNum > 0 && remainingAmount > 0;
-  const effectiveClientBalance =
-    localClientBalance ?? availableClientBalance ?? fetchedClientBalance;
+  const effectiveClientBalance = canViewSharedBalance
+    ? localClientBalance ?? availableClientBalance ?? fetchedClientBalance
+    : 0;
   const visibleAvailableBalance = Math.max(Number(effectiveClientBalance || 0), 0);
   const selectedBalanceOwnerLabel = formData.legalEntityId ? 'юрлица' : 'клиента';
   const showAvailableBalanceNotice = formData.type === 'Income'
