@@ -6227,6 +6227,7 @@ public class CasesV2ControllerTests
             CancellationToken.None);
         var saved = Assert.IsType<CasesV2Controller.ClientCaseCourtEventDto>(Assert.IsType<OkObjectResult>(result.Result).Value);
         Assert.Equal("considered", saved.HearingOutcome);
+        Assert.True(saved.CanRecordHearingOutcome);
         Assert.Equal("Решение оглашено", saved.HearingOutcomeNote);
         Assert.Equal(lawyer.Id, saved.HearingOutcomeRecordedByUserId);
         Assert.Equal("Данные суда", hearing.ResultSummary);
@@ -6243,11 +6244,13 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
-    public async Task RecordHearingOutcome_RejectsFutureAndNonHearingEvents()
+    public async Task RecordHearingOutcome_RejectsFutureCancelledArchivedAndNonHearingEvents()
     {
         await using var db = await CreateContextAsync();
         var lawyer = await CreateUserAsync(db, "hearing-outcome-invalid@example.com", "Юрист");
         var futureHearing = new ClientCaseCourtEvent { EventType = "hearing", Title = "Будущее заседание", ScheduledAt = DateTime.UtcNow.AddDays(1) };
+        var cancelledHearing = new ClientCaseCourtEvent { EventType = "hearing", Title = "Отменённое заседание", ScheduledAt = DateTime.UtcNow.AddDays(-1), MovementStatus = "cancelled" };
+        var archivedHearing = new ClientCaseCourtEvent { EventType = "hearing", Title = "Архивное заседание", ScheduledAt = DateTime.UtcNow.AddDays(-1), MovementStatus = "archived" };
         var decision = new ClientCaseCourtEvent { EventType = "decision", Title = "Решение", ScheduledAt = DateTime.UtcNow.AddDays(-1) };
         var clientCase = new ClientCase
         {
@@ -6255,18 +6258,68 @@ public class CasesV2ControllerTests
             Title = "Проверка результата",
             Status = ClientCaseStatus.Open,
             ResponsibleUserId = lawyer.Id,
-            CourtEvents = [futureHearing, decision],
+            CourtEvents = [futureHearing, cancelledHearing, archivedHearing, decision],
         };
         db.ClientCases.Add(clientCase);
         await db.SaveChangesAsync();
         var controller = CreateController(db, lawyer);
         var request = new CasesV2Controller.RecordHearingOutcomeRequest { Outcome = "postponed" };
 
+        var eventsResult = await controller.GetCourtEvents(clientCase.Id, CancellationToken.None);
+        var events = Assert.IsAssignableFrom<IReadOnlyList<CasesV2Controller.ClientCaseCourtEventDto>>(
+            Assert.IsType<OkObjectResult>(eventsResult.Result).Value);
+        Assert.All(events, item => Assert.False(item.CanRecordHearingOutcome));
+
         Assert.IsType<ConflictObjectResult>((await controller.RecordHearingOutcome(clientCase.Id, futureHearing.Id, request, CancellationToken.None)).Result);
+        Assert.IsType<ConflictObjectResult>((await controller.RecordHearingOutcome(clientCase.Id, cancelledHearing.Id, request, CancellationToken.None)).Result);
+        Assert.IsType<ConflictObjectResult>((await controller.RecordHearingOutcome(clientCase.Id, archivedHearing.Id, request, CancellationToken.None)).Result);
         Assert.IsType<BadRequestObjectResult>((await controller.RecordHearingOutcome(clientCase.Id, decision.Id, request, CancellationToken.None)).Result);
+        Assert.IsType<BadRequestObjectResult>((await controller.RecordHearingOutcome(clientCase.Id, decision.Id,
+            new CasesV2Controller.RecordHearingOutcomeRequest { Outcome = null! }, CancellationToken.None)).Result);
         Assert.IsType<NotFoundResult>((await controller.RecordHearingOutcome(clientCase.Id, -1, request, CancellationToken.None)).Result);
         Assert.Null(futureHearing.HearingOutcome);
+        Assert.Null(cancelledHearing.HearingOutcome);
+        Assert.Null(archivedHearing.HearingOutcome);
         Assert.Null(decision.HearingOutcome);
+    }
+
+    [Fact]
+    public async Task GetCourtEvents_OffersOutcomeOnUserLocalDayForAllDayHearing()
+    {
+        await using var db = await CreateContextAsync();
+        var lawyer = await CreateUserAsync(db, "hearing-outcome-timezone@example.com", "Юрист");
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = lawyer.Id,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = "Asia/Novosibirsk",
+        });
+        var today = CalendarTimeZoneHelper.ToUserLocal(DateTime.UtcNow,
+            CalendarTimeZoneHelper.ResolveTimeZone("Asia/Novosibirsk")).Date;
+        var todayHearing = new ClientCaseCourtEvent
+        {
+            EventType = "hearing", Title = "Сегодня весь день", ScheduledAt = today, AllDay = true,
+            MovementStatus = "scheduled",
+        };
+        var tomorrowHearing = new ClientCaseCourtEvent
+        {
+            EventType = "hearing", Title = "Завтра весь день", ScheduledAt = today.AddDays(1), AllDay = true,
+            MovementStatus = "scheduled",
+        };
+        var clientCase = new ClientCase
+        {
+            Client = new Client { Name = "Клиент", IsActive = true, ResponsibleUserId = lawyer.Id },
+            Title = "Заседания с учётом часового пояса", Status = ClientCaseStatus.Open,
+            ResponsibleUserId = lawyer.Id, CourtEvents = [todayHearing, tomorrowHearing],
+        };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+
+        var response = await CreateController(db, lawyer).GetCourtEvents(clientCase.Id, CancellationToken.None);
+        var events = Assert.IsAssignableFrom<IReadOnlyList<CasesV2Controller.ClientCaseCourtEventDto>>(
+            Assert.IsType<OkObjectResult>(response.Result).Value);
+        Assert.True(Assert.Single(events, item => item.Id == todayHearing.Id).CanRecordHearingOutcome);
+        Assert.False(Assert.Single(events, item => item.Id == tomorrowHearing.Id).CanRecordHearingOutcome);
     }
 
     [Fact]

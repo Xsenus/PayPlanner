@@ -27,7 +27,7 @@ public partial class CasesV2Controller
             return forbidden;
         }
 
-        var outcome = request?.Outcome.Trim().ToLowerInvariant();
+        var outcome = request?.Outcome?.Trim().ToLowerInvariant();
         var outcomeLabel = outcome switch
         {
             "postponed" => "Заседание отложено",
@@ -70,15 +70,17 @@ public partial class CasesV2Controller
         {
             return BadRequest(new { message = "Итог заседания можно записать только для события типа «Заседание»." });
         }
+        if (IsUnavailableHearingOutcomeStatus(courtEvent.MovementStatus))
+        {
+            return Conflict(new { message = "Отменённому или архивному заседанию нельзя записать итог. Проверьте актуальное событие суда." });
+        }
 
-        var now = DateTime.UtcNow;
-        var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
-        if (courtEvent.AllDay
-            ? courtEvent.ScheduledAt.Date > CalendarTimeZoneHelper.ToUserLocal(now, timeZone).Date
-            : CalendarTimeZoneHelper.NormalizeUtcInstant(courtEvent.ScheduledAt) > now)
+        var clock = await ResolveCaseStatusClockAsync(ct);
+        if (!CanRecordHearingOutcome(courtEvent, clock))
         {
             return Conflict(new { message = "Итог можно записать после наступления даты заседания." });
         }
+        var now = clock.NowInstantUtc;
 
         if (string.Equals(courtEvent.HearingOutcome, outcome, StringComparison.Ordinal)
             && string.Equals(courtEvent.HearingOutcomeNote ?? string.Empty, note, StringComparison.Ordinal))

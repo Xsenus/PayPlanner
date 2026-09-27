@@ -7999,7 +7999,7 @@ function CourtPanel({
                     {event.hearingOutcomeRecordedByUserName ? <div className="mt-1 text-emerald-700">Записал(а): {event.hearingOutcomeRecordedByUserName}</div> : null}
                   </div>
                 ) : null}
-                {canEdit && event.eventType === 'hearing' ? (
+                {canEdit && event.canRecordHearingOutcome ? (
                   editingHearingOutcomeId === event.id ? (
                     <div className="mt-3 space-y-2 rounded-lg border border-blue-200 bg-white p-2">
                       <label className="block text-xs font-medium text-slate-700">Результат заседания

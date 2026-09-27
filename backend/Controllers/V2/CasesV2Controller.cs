@@ -13441,6 +13441,7 @@ public partial class CasesV2Controller : ControllerBase
             HearingOutcomeRecordedAt = item.HearingOutcomeRecordedAt,
             HearingOutcomeRecordedByUserId = item.HearingOutcomeRecordedByUserId,
             HearingOutcomeRecordedByUserName = item.HearingOutcomeRecordedByUserName,
+            CanRecordHearingOutcome = CanRecordHearingOutcome(item, clock),
             SourceType = item.SourceType,
             SourceUrl = item.SourceUrl,
             SourceCheckedAt = item.SourceCheckedAt.HasValue
@@ -13459,6 +13460,17 @@ public partial class CasesV2Controller : ControllerBase
                 && item.MovementStatus is not "held" and not "completed" and not "cancelled" and not "archived"
                 && IsCaseStatusOverdue(item.ScheduledAt, item.AllDay, clock),
         };
+
+    private static bool CanRecordHearingOutcome(ClientCaseCourtEvent item, CaseStatusClock clock)
+        => string.Equals(item.EventType, CourtSyncNormalization.EventTypes.Hearing, StringComparison.OrdinalIgnoreCase)
+            && !IsUnavailableHearingOutcomeStatus(item.MovementStatus)
+            && (item.AllDay
+                ? item.ScheduledAt.Date <= clock.TodayDate
+                : CalendarTimeZoneHelper.NormalizeUtcInstant(item.ScheduledAt) <= clock.NowInstantUtc);
+
+    private static bool IsUnavailableHearingOutcomeStatus(string? status)
+        => string.Equals(status, "cancelled", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(status, "archived", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsCaseStatusOverdue(DateTime value, bool allDay, CaseStatusClock clock)
         => allDay
@@ -15541,6 +15553,7 @@ public partial class CasesV2Controller : ControllerBase
         public DateTime? HearingOutcomeRecordedAt { get; set; }
         public int? HearingOutcomeRecordedByUserId { get; set; }
         public string? HearingOutcomeRecordedByUserName { get; set; }
+        public bool CanRecordHearingOutcome { get; set; }
         public string SourceType { get; set; } = string.Empty;
         public string SourceUrl { get; set; } = string.Empty;
         public DateTime? SourceCheckedAt { get; set; }

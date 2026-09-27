@@ -500,6 +500,7 @@ describe('CaseDetailPage', () => {
       sourceType: 'manual',
       createdAt: '2026-05-21T00:00:00Z',
       isOverdue: false,
+      canRecordHearingOutcome: true,
     });
     vi.mocked(apiService.getCaseCourtParties).mockReset();
     vi.mocked(apiService.getCaseCourtParties).mockResolvedValue([
@@ -951,6 +952,32 @@ describe('CaseDetailPage', () => {
     vi.mocked(apiService.deleteCaseRelatedParty).mockResolvedValue(undefined);
   });
 
+  it('does not offer a result action for a hearing that has not occurred or was cancelled', async () => {
+    vi.mocked(apiService.getCaseCourtEvents).mockResolvedValue([
+      {
+        id: 42, clientCaseId: 15, eventType: 'hearing', eventTypeLabel: 'Заседание',
+        title: 'Будущее заседание', scheduledAt: '2027-06-12T09:30:00Z', allDay: false,
+        courtInstance: 'first', courtInstanceLabel: 'Первая инстанция',
+        movementStatus: 'scheduled', movementStatusLabel: 'Назначено', sourceType: 'sudrf',
+        createdAt: '2026-05-21T00:00:00Z', isOverdue: false, canRecordHearingOutcome: false,
+      },
+      {
+        id: 43, clientCaseId: 15, eventType: 'hearing', eventTypeLabel: 'Заседание',
+        title: 'Отменённое заседание', scheduledAt: '2026-06-12T09:30:00Z', allDay: false,
+        courtInstance: 'first', courtInstanceLabel: 'Первая инстанция',
+        movementStatus: 'cancelled', movementStatusLabel: 'Отменено', sourceType: 'sudrf',
+        createdAt: '2026-05-21T00:00:00Z', isOverdue: false, canRecordHearingOutcome: false,
+      },
+    ]);
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Суд' }));
+    await screen.findByText('Будущее заседание');
+    expect(screen.getAllByText('Отменённое заседание').length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: 'Зафиксировать результат' })).toBeNull();
+  });
+
   it('shows saved judicial amounts as currency without mixing them with the fee', async () => {
     vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({
       courtClaimAmount: 100000.5,
@@ -1321,6 +1348,7 @@ describe('CaseDetailPage', () => {
       sourceType: 'sudrf',
       createdAt: '2026-05-21T00:00:00Z',
       isOverdue: false,
+      canRecordHearingOutcome: true,
     } as const;
     const savedHearing = {
       ...hearing,

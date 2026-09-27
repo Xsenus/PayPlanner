@@ -866,6 +866,7 @@ export interface ClientCaseCourtEvent {
   hearingOutcomeRecordedAt?: string | null;
   hearingOutcomeRecordedByUserId?: number | null;
   hearingOutcomeRecordedByUserName?: string | null;
+  canRecordHearingOutcome: boolean;
   sourceType: string;
   sourceUrl?: string | null;
   sourceCheckedAt?: string | null;
