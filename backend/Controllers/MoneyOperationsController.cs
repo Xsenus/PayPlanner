@@ -773,6 +773,14 @@ public class MoneyOperationsController : ControllerBase
             return forbidden;
         }
 
+        // Saved reconciliations contain the full account balance, not just the
+        // operations visible to a particular employee.
+        var visibility = await ResolveMoneyVisibilityAsync(ct);
+        if (visibility is null || !visibility.SeesAll)
+        {
+            return Forbid();
+        }
+
         var results = await SqliteRetryHelper.ExecuteAsync(async cancellationToken =>
         {
             var query = _db.MoneyBalanceReconciliationResults.AsNoTracking().AsQueryable();
@@ -823,9 +831,9 @@ public class MoneyOperationsController : ControllerBase
         }
 
         var visibility = await ResolveMoneyVisibilityAsync(ct);
-        if (visibility is null)
+        if (visibility is null || !visibility.SeesAll)
         {
-            return Unauthorized();
+            return Forbid();
         }
 
         var result = await SqliteRetryHelper.ExecuteAsync(async cancellationToken =>

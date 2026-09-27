@@ -1503,6 +1503,49 @@ public class MoneyOperationsControllerTests
     }
 
     [Fact]
+    public async Task BalanceReconciliation_RequiresFullPaymentVisibility()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "restricted-reconciliation@example.test", "Restricted Reconciliation");
+        db.RolePermissions.Add(new RolePermission
+        {
+            RoleId = user.RoleId,
+            Section = RolePermissionCatalog.Payments,
+            CanView = true,
+            CanEdit = true,
+            ViewScope = DataVisibilityScope.Own,
+        });
+        db.MoneyBalanceReconciliationResults.Add(new MoneyBalanceReconciliationResult
+        {
+            Date = new DateTime(2026, 5, 1),
+            Source = MoneyOperationSource.Bank,
+            AccountName = "Main bank",
+            OpeningBalance = 10_000m,
+            ClosingBalance = 10_000m,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, user.Id, isAdminClaim: false);
+        var listAction = await controller.GetBalanceReconciliationResults(
+            from: new DateTime(2026, 5, 1),
+            to: new DateTime(2026, 5, 1),
+            source: MoneyOperationSource.Bank,
+            accountName: "Main bank");
+        Assert.IsType<ForbidResult>(listAction.Result);
+
+        var runAction = await controller.RunBalanceReconciliation(
+            from: new DateTime(2026, 5, 1),
+            to: new DateTime(2026, 5, 1),
+            source: MoneyOperationSource.Bank,
+            accountName: "Main bank");
+        Assert.IsType<ForbidResult>(runAction.Result);
+
+        var saved = Assert.Single(await db.MoneyBalanceReconciliationResults.AsNoTracking().ToListAsync());
+        Assert.Equal(10_000m, saved.ClosingBalance);
+        Assert.Equal(0, saved.IncomeCount);
+    }
+
+    [Fact]
     public async Task RunBalanceReconciliation_PersistsAndUpdatesDailyResults()
     {
         await using var db = await CreateContextAsync();

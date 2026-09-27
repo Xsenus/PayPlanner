@@ -2287,6 +2287,7 @@ export function MoneyOperations({
   const canCreateMoneyOperations = permissions.payments.canCreate;
   const canEditMoneyOperations = permissions.payments.canEdit;
   const canDeleteMoneyOperations = permissions.payments.canDelete;
+  const canViewFullMoneyBalance = permissions.payments.viewScope === 'all';
   const canOpenLinkedAccounts = permissions.accounts?.canView === true;
   const canOpenLinkedClients = permissions.clients?.canView === true;
   const canViewAudit = permissions.audit?.canView === true;
@@ -2791,7 +2792,9 @@ export function MoneyOperations({
     Promise.all([
       apiService.getMoneyOperationAccountSummaries({ from, to, source }),
       apiService.getMoneyOperationDailyBalances({ from, to, source }),
-      apiService.getMoneyBalanceReconciliationResults({ from, to, source }),
+      canViewFullMoneyBalance
+        ? apiService.getMoneyBalanceReconciliationResults({ from, to, source }).catch(() => [])
+        : Promise.resolve([]),
       apiService.getMoneyAccounts({ activeOnly: true }),
     ])
       .then(([accounts, balances, reconciliationResults, moneyAccountItems]) => {
@@ -2814,7 +2817,7 @@ export function MoneyOperations({
     return () => {
       cancelled = true;
     };
-  }, [from, source, to]);
+  }, [canViewFullMoneyBalance, from, source, to]);
 
   useEffect(() => {
     let cancelled = false;
@@ -3193,8 +3196,8 @@ export function MoneyOperations({
       return;
     }
 
-    if (!canEditMoneyOperations) {
-      toast.error('У вас нет прав на изменение операций денег.', 'Сверка остатков');
+    if (!canEditMoneyOperations || !canViewFullMoneyBalance) {
+      toast.error('Для сохранения общей сверки нужны право изменения и полный доступ к платежам.', 'Сверка остатков');
       return;
     }
 
@@ -5059,10 +5062,16 @@ export function MoneyOperations({
         <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4">
           <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
             <div>
-              <div className="text-sm font-medium text-slate-800">Сверка остатков</div>
-              <div className="mt-1 text-xs text-slate-500">Начало + приход - расход = конец</div>
+              <div className="text-sm font-medium text-slate-800">
+                {canViewFullMoneyBalance ? 'Сверка остатков' : 'Движение доступных операций'}
+              </div>
+              <div className="mt-1 text-xs text-slate-500">
+                {canViewFullMoneyBalance
+                  ? 'Начало + приход - расход = конец'
+                  : 'Доступ к платежам ограничен: общий остаток может отличаться от показанного.'}
+              </div>
             </div>
-            {renderBalanceCheckBadge(summary)}
+            {canViewFullMoneyBalance && renderBalanceCheckBadge(summary)}
           </div>
           {permissions.payments.canView ? (
             <div className="rounded-lg border border-rose-100 bg-rose-50 px-3 py-2">
@@ -5217,9 +5226,13 @@ export function MoneyOperations({
         <div className="mt-6 rounded-xl border border-slate-200 bg-white">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
             <div>
-              <div className="text-sm font-semibold text-slate-800">Дневная сверка остатков</div>
+              <div className="text-sm font-semibold text-slate-800">
+                {canViewFullMoneyBalance ? 'Дневная сверка остатков' : 'Дневное движение доступных операций'}
+              </div>
               <div className="mt-1 text-xs text-slate-500">
-                Начало дня + приход - расход = конец дня
+                {canViewFullMoneyBalance
+                  ? 'Начало дня + приход - расход = конец дня'
+                  : 'Общий остаток и сохранённая сверка доступны только при полном доступе к платежам.'}
                 {latestBalanceReconciliation && (
                   <span className="ml-2 text-slate-400">
                     · сохранено {formatDate(latestBalanceReconciliation.checkedAt, profileTimeZoneId)}
@@ -5231,14 +5244,16 @@ export function MoneyOperations({
               <div className="text-xs text-slate-500">
                 {accountName || SOURCE_LABELS[source]} · {formatDate(from)} - {formatDate(to)}
               </div>
-              <button
-                type="button"
-                onClick={() => void handleRunBalanceReconciliation()}
-                disabled={balanceReconciliationRunning}
-                className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60">
-                <CheckCircle2 className={`h-4 w-4 ${balanceReconciliationRunning ? 'animate-pulse' : ''}`} />
-                {balanceReconciliationRunning ? 'Сверка...' : 'Запустить сверку'}
-              </button>
+              {canViewFullMoneyBalance && (
+                <button
+                  type="button"
+                  onClick={() => void handleRunBalanceReconciliation()}
+                  disabled={balanceReconciliationRunning}
+                  className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60">
+                  <CheckCircle2 className={`h-4 w-4 ${balanceReconciliationRunning ? 'animate-pulse' : ''}`} />
+                  {balanceReconciliationRunning ? 'Сверка...' : 'Запустить сверку'}
+                </button>
+              )}
             </div>
           </div>
           <div className="overflow-x-auto">
@@ -5251,7 +5266,7 @@ export function MoneyOperations({
                   <th className="px-4 py-2 text-right font-medium">Приход</th>
                   <th className="px-4 py-2 text-right font-medium">Расход</th>
                   <th className="px-4 py-2 text-right font-medium">Конец</th>
-                  <th className="px-4 py-2 text-right font-medium">Сверка</th>
+                  <th className="px-4 py-2 text-right font-medium">{canViewFullMoneyBalance ? 'Сверка' : 'Расчёт'}</th>
                   <th className="px-4 py-2 text-right font-medium">Сохранено</th>
                 </tr>
               </thead>
@@ -5280,11 +5295,15 @@ export function MoneyOperations({
                           className={`inline-flex rounded-full px-2 py-1 text-xs font-medium ${
                             item.isBalanced ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
                           }`}>
-                          {item.isBalanced ? 'Сходится' : 'Расхождение'}
+                          {canViewFullMoneyBalance
+                            ? item.isBalanced ? 'Сходится' : 'Расхождение'
+                            : 'По доступным операциям'}
                         </span>
                       </td>
                       <td className="px-4 py-2 text-right">
-                        {renderSavedBalanceReconciliationBadge(item, savedResult, profileTimeZoneId)}
+                        {canViewFullMoneyBalance
+                          ? renderSavedBalanceReconciliationBadge(item, savedResult, profileTimeZoneId)
+                          : '—'}
                       </td>
                     </tr>
                   );

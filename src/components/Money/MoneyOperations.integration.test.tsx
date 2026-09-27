@@ -121,6 +121,7 @@ const permissionsState = vi.hoisted(() => ({
   paymentsCanEdit: true,
   paymentsCanDelete: true,
   paymentsCanExport: true,
+  paymentsViewScope: 'all',
 }));
 
 const expectAbortOptions = () => expect.objectContaining({ signal: expect.any(AbortSignal) });
@@ -156,6 +157,7 @@ vi.mock('../../hooks/useRolePermissions', () => ({
         canEdit: permissionsState.paymentsCanEdit,
         canDelete: permissionsState.paymentsCanDelete,
         canExport: permissionsState.paymentsCanExport,
+        viewScope: permissionsState.paymentsViewScope,
       },
       contracts: { ...section },
       dictionaries: { ...section },
@@ -425,6 +427,7 @@ describe('MoneyOperations integration', () => {
     permissionsState.paymentsCanEdit = true;
     permissionsState.paymentsCanDelete = true;
     permissionsState.paymentsCanExport = true;
+    permissionsState.paymentsViewScope = 'all';
     window.localStorage.clear();
     window.sessionStorage.clear();
     if (!URL.createObjectURL) {
@@ -1038,6 +1041,34 @@ describe('MoneyOperations integration', () => {
     expect(getMoneyOperationDailyBalancesMock).toHaveBeenCalledWith(
       expect.objectContaining({ source: 'Bank', from: '2026-01-01', to: '2026-12-31' }),
     );
+  });
+
+  it('does not load or offer the shared reconciliation with limited payment visibility', async () => {
+    permissionsState.paymentsViewScope = 'own';
+    operations = [createOperation({ accountName: 'Основной банк', amount: 500 })];
+    getMoneyOperationDailyBalancesMock.mockResolvedValueOnce([
+      {
+        date: '2026-05-01',
+        accountName: 'Основной банк',
+        source: 'Bank',
+        openingBalance: 1000,
+        income: 500,
+        expense: 0,
+        closingBalance: 1500,
+        incomeCount: 1,
+        expenseCount: 0,
+        isBalanced: true,
+      },
+    ]);
+
+    render(<MoneyOperations source="Bank" />);
+
+    expect(await screen.findByText('Дневное движение доступных операций')).toBeTruthy();
+    expect(screen.getByText('Общий остаток и сохранённая сверка доступны только при полном доступе к платежам.')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Запустить сверку' })).toBeNull();
+    expect(screen.queryByText('Сходится')).toBeNull();
+    expect(getMoneyBalanceReconciliationResultsMock).not.toHaveBeenCalled();
+    expect(runMoneyBalanceReconciliationMock).not.toHaveBeenCalled();
   });
 
   it('runs and stores daily balance reconciliation rows', async () => {
