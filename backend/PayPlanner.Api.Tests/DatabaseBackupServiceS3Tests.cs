@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.FileProviders;
+using System.Text.Json;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
@@ -282,6 +283,139 @@ public sealed class DatabaseBackupServiceS3Tests
     }
 
     [Fact]
+    public async Task EnsureScheduledBackupsAsync_PreservesLatestVerifiedBackupWhenNewestIsCorrupt()
+    {
+        await using var scope = await CreateScopeAsync();
+        var service = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        var oldest = await service.CreateManualBackupAsync(CancellationToken.None);
+        var latestVerified = await service.CreateManualBackupAsync(CancellationToken.None);
+        var newestCorrupt = await service.CreateManualBackupAsync(CancellationToken.None);
+        var oldestPath = service.ResolveBackupPath(oldest.Backup.RelativePath)!;
+        var verifiedPath = service.ResolveBackupPath(latestVerified.Backup.RelativePath)!;
+        var corruptPath = service.ResolveBackupPath(newestCorrupt.Backup.RelativePath)!;
+        await File.AppendAllTextAsync(corruptPath, "tampered");
+        File.SetLastWriteTimeUtc(oldestPath, DateTime.UtcNow.AddDays(-11));
+        File.SetLastWriteTimeUtc(verifiedPath, DateTime.UtcNow.AddDays(-10));
+        File.SetLastWriteTimeUtc(corruptPath, DateTime.UtcNow.AddDays(-9));
+        await service.UpdateSettingsAsync(
+            automaticEnabled: false, scheduleLocal: "03:00", retentionDays: 1,
+            backupFormat: "sqlite", cancellationToken: CancellationToken.None);
+
+        await service.EnsureScheduledBackupsAsync(CancellationToken.None);
+
+        Assert.False(File.Exists(oldestPath));
+        Assert.True(File.Exists(verifiedPath));
+        Assert.True((await service.VerifyBackupAsync(latestVerified.Backup.RelativePath)).Verified);
+        Assert.True(File.Exists(corruptPath));
+    }
+
+    [Fact]
+    public async Task EnsureScheduledBackupsAsync_DoesNotDeleteExpiredFilesWithoutVerifiedBackup()
+    {
+        await using var scope = await CreateScopeAsync();
+        var service = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        var first = await service.CreateManualBackupAsync(CancellationToken.None);
+        var second = await service.CreateManualBackupAsync(CancellationToken.None);
+        var firstPath = service.ResolveBackupPath(first.Backup.RelativePath)!;
+        var secondPath = service.ResolveBackupPath(second.Backup.RelativePath)!;
+        File.Delete($"{firstPath}.manifest.json");
+        File.Delete($"{secondPath}.manifest.json");
+        File.SetLastWriteTimeUtc(firstPath, DateTime.UtcNow.AddDays(-10));
+        File.SetLastWriteTimeUtc(secondPath, DateTime.UtcNow.AddDays(-9));
+        await service.UpdateSettingsAsync(
+            automaticEnabled: false, scheduleLocal: "03:00", retentionDays: 1,
+            backupFormat: "sqlite", cancellationToken: CancellationToken.None);
+
+        await service.EnsureScheduledBackupsAsync(CancellationToken.None);
+
+        Assert.True(File.Exists(firstPath));
+        Assert.True(File.Exists(secondPath));
+    }
+
+    [Fact]
+    public async Task EnsureScheduledBackupsAsync_ConcurrentRunsCreateOneVerifiedSlot()
+    {
+        await using var scope = await CreateScopeAsync();
+        var service = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        await service.UpdateSettingsAsync(
+            automaticEnabled: true, scheduleLocal: "00:00", retentionDays: 14,
+            backupFormat: "sqlite", cancellationToken: CancellationToken.None);
+
+        var counts = await Task.WhenAll(Enumerable.Range(0, 3)
+            .Select(_ => service.EnsureScheduledBackupsAsync(CancellationToken.None)));
+
+        Assert.Equal(1, counts.Sum());
+        var automatic = Assert.Single((await service.GetOverviewAsync()).Items, item => item.Trigger == "auto");
+        Assert.True((await service.VerifyBackupAsync(automatic.RelativePath)).Verified);
+    }
+
+    [Fact]
+    public async Task EnsureScheduledBackupsAsync_RetriesSlotWhenOnlyCopyIsCorrupt()
+    {
+        await using var scope = await CreateScopeAsync();
+        var service = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        await service.UpdateSettingsAsync(
+            automaticEnabled: true, scheduleLocal: "00:00", retentionDays: 14,
+            backupFormat: "sqlite", cancellationToken: CancellationToken.None);
+        Assert.Equal(1, await service.EnsureScheduledBackupsAsync(CancellationToken.None));
+        var first = Assert.Single((await service.GetOverviewAsync()).Items, item => item.Trigger == "auto");
+        var firstPath = service.ResolveBackupPath(first.RelativePath)!;
+        await File.AppendAllTextAsync(firstPath, "tampered");
+
+        Assert.Equal(1, await service.EnsureScheduledBackupsAsync(CancellationToken.None));
+        var backups = (await service.GetOverviewAsync()).Items.Where(item => item.Trigger == "auto").ToList();
+        Assert.Equal(2, backups.Count);
+        var replacement = Assert.Single(backups, item => item.RelativePath != first.RelativePath);
+        Assert.True((await service.VerifyBackupAsync(replacement.RelativePath)).Verified);
+        Assert.False((await service.VerifyBackupAsync(first.RelativePath)).Verified);
+    }
+
+    [Fact]
+    public async Task EnsureScheduledBackupsAsync_RechecksRequiredFilePartAfterCachedVerification()
+    {
+        await using var scope = await CreateScopeAsync();
+        var service = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        await service.UpdateSettingsAsync(
+            automaticEnabled: true, scheduleLocal: "00:00", retentionDays: 14,
+            backupFormat: "sqlite", cancellationToken: CancellationToken.None);
+        Assert.Equal(1, await service.EnsureScheduledBackupsAsync(CancellationToken.None));
+        Assert.Equal(0, await service.EnsureScheduledBackupsAsync(CancellationToken.None));
+        var first = Assert.Single((await service.GetOverviewAsync()).Items, item => item.Trigger == "auto");
+        var firstPath = service.ResolveBackupPath(first.RelativePath)!;
+        await File.AppendAllTextAsync($"{firstPath}.fileset", "tampered");
+
+        Assert.Equal(1, await service.EnsureScheduledBackupsAsync(CancellationToken.None));
+        var replacement = Assert.Single((await service.GetOverviewAsync()).Items,
+            item => item.Trigger == "auto" && item.RelativePath != first.RelativePath);
+        Assert.True((await service.VerifyBackupAsync(replacement.RelativePath)).Verified);
+        Assert.False((await service.VerifyBackupAsync(first.RelativePath)).Verified);
+    }
+
+    [Fact]
+    public async Task EnsureScheduledBackupsAsync_ReplacesIncompleteSlotEvenAfterCachedVerification()
+    {
+        await using var scope = await CreateScopeAsync();
+        var service = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        await service.UpdateSettingsAsync(
+            automaticEnabled: true, scheduleLocal: "00:00", retentionDays: 14,
+            backupFormat: "sqlite", cancellationToken: CancellationToken.None);
+        Assert.Equal(1, await service.EnsureScheduledBackupsAsync(CancellationToken.None));
+        Assert.Equal(0, await service.EnsureScheduledBackupsAsync(CancellationToken.None));
+        var first = Assert.Single((await service.GetOverviewAsync()).Items, item => item.Trigger == "auto");
+        var manifestPath = $"{service.ResolveBackupPath(first.RelativePath)}.manifest.json";
+        var jsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        var manifest = JsonSerializer.Deserialize<DatabaseBackupManifest>(
+            await File.ReadAllTextAsync(manifestPath), jsonOptions)!;
+        await File.WriteAllTextAsync(manifestPath,
+            JsonSerializer.Serialize(manifest with { Status = "incomplete" }, jsonOptions));
+
+        Assert.Equal(1, await service.EnsureScheduledBackupsAsync(CancellationToken.None));
+        var replacement = Assert.Single((await service.GetOverviewAsync()).Items,
+            item => item.Trigger == "auto" && item.RelativePath != first.RelativePath);
+        Assert.True((await service.VerifyBackupAsync(replacement.RelativePath)).Verified);
+    }
+
+    [Fact]
     public async Task VerifyBackupAsync_ValidatesManifestAndDetectsTampering()
     {
         await using var scope = await CreateScopeAsync();
@@ -321,6 +455,26 @@ public sealed class DatabaseBackupServiceS3Tests
         Assert.False(result.Verified);
         Assert.Equal("legacyUnverified", result.Status);
         Assert.Null(result.ExpectedSha256);
+    }
+
+    [Fact]
+    public async Task VerifyBackupAsync_RejectsIncompleteManifestBeforeRestore()
+    {
+        await using var scope = await CreateScopeAsync();
+        var service = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        var created = await service.CreateManualBackupAsync(CancellationToken.None);
+        var manifestPath = $"{service.ResolveBackupPath(created.Backup.RelativePath)}.manifest.json";
+        var jsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        var manifest = JsonSerializer.Deserialize<DatabaseBackupManifest>(
+            await File.ReadAllTextAsync(manifestPath), jsonOptions)!;
+        await File.WriteAllTextAsync(manifestPath,
+            JsonSerializer.Serialize(manifest with { Status = "incomplete" }, jsonOptions));
+
+        var result = await service.VerifyBackupAsync(created.Backup.RelativePath);
+
+        Assert.False(result.Verified);
+        Assert.Equal("invalidManifest", result.Status);
+        await Assert.ThrowsAsync<InvalidDataException>(() => service.ReadVerifiedManifestAsync(created.Backup.RelativePath));
     }
 
     [Fact]

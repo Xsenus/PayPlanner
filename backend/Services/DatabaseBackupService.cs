@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO.Compression;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -151,6 +152,9 @@ public sealed class DatabaseBackupService
     private readonly ILogger<DatabaseBackupService> _logger;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly SemaphoreSlim _backupSemaphore = new(1, 1);
+    private string? _cachedVerifiedBackupPath;
+    private string? _cachedVerifiedBackupStamp;
+    private DateTime _cachedVerifiedBackupAtUtc;
     private readonly string _backupRootDirectory;
 
     public DatabaseBackupService(
@@ -280,7 +284,8 @@ public sealed class DatabaseBackupService
 
     public async Task<DatabaseBackupCreateResult> CreateManualBackupAsync(CancellationToken cancellationToken = default)
     {
-        var (backup, s3UploadResults, yandexDiskUploadResults) = await CreateBackupAsync("manual", null, cancellationToken);
+        var (backup, s3UploadResults, yandexDiskUploadResults) = await CreateBackupAsync("manual", null, cancellationToken)
+            ?? throw new InvalidOperationException("Не удалось создать резервную копию по ручному запросу.");
         return new DatabaseBackupCreateResult(
             backup,
             $"/api/database/backups/download?relativePath={Uri.EscapeDataString(backup.RelativePath)}",
@@ -421,7 +426,15 @@ public sealed class DatabaseBackupService
     public async Task<int> EnsureScheduledBackupsAsync(CancellationToken cancellationToken = default)
     {
         var settings = await LoadSettingsAsync(cancellationToken);
-        await CleanupExpiredBackupsAsync(settings.RetentionDays, cancellationToken);
+        await _backupSemaphore.WaitAsync(cancellationToken);
+        try
+        {
+            await CleanupExpiredBackupsAsync(settings.RetentionDays, cancellationToken);
+        }
+        finally
+        {
+            _backupSemaphore.Release();
+        }
 
         if (!settings.AutomaticEnabled || settings.Schedule.Count == 0)
         {
@@ -442,12 +455,10 @@ public sealed class DatabaseBackupService
             }
 
             var slotKey = scheduledTime.ToString("HHmm", CultureInfo.InvariantCulture);
-            if (HasBackupForSlot(settings.RootDirectory, nowLocal.Date, slotKey))
+            if (await CreateBackupAsync("auto", slotKey, cancellationToken) is null)
             {
                 continue;
             }
-
-            await CreateBackupAsync("auto", slotKey, cancellationToken);
             createdCount++;
         }
 
@@ -512,6 +523,19 @@ public sealed class DatabaseBackupService
                 null,
                 manifest?.Sha256,
                 "Manifest отсутствует или имеет неподдерживаемую версию.");
+        }
+        if (!string.Equals(manifest.Status, "complete", StringComparison.OrdinalIgnoreCase))
+        {
+            return new DatabaseBackupVerificationResult(
+                "invalidManifest",
+                false,
+                Path.GetRelativePath(_backupRootDirectory, resolvedPath).Replace('\\', '/'),
+                manifest.BackupId,
+                actualSize,
+                manifest.SizeBytes,
+                null,
+                manifest.Sha256,
+                "Резервная копия не помечена как завершённая.");
         }
 
         var actualSha256 = await ComputeSha256Async(resolvedPath, cancellationToken);
@@ -596,7 +620,7 @@ public sealed class DatabaseBackupService
     private async Task<(
         DatabaseBackupFileInfo Backup,
         IReadOnlyList<DatabaseBackupS3UploadResult> S3UploadResults,
-        IReadOnlyList<DatabaseBackupYandexDiskUploadResult> YandexDiskUploadResults)> CreateBackupAsync(
+        IReadOnlyList<DatabaseBackupYandexDiskUploadResult> YandexDiskUploadResults)?> CreateBackupAsync(
         string trigger,
         string? scheduleSlot,
         CancellationToken cancellationToken)
@@ -609,6 +633,11 @@ public sealed class DatabaseBackupService
             Directory.CreateDirectory(settings.RootDirectory);
 
             var nowLocal = DateTimeOffset.Now;
+            if (scheduleSlot is not null && await HasVerifiedBackupForSlotAsync(
+                settings.RootDirectory, nowLocal.Date, scheduleSlot, cancellationToken))
+            {
+                return null;
+            }
             var targetDirectory = Path.Combine(
                 settings.RootDirectory,
                 nowLocal.ToString("yyyy", CultureInfo.InvariantCulture),
@@ -804,7 +833,8 @@ public sealed class DatabaseBackupService
             ?? throw new InvalidOperationException("PostgreSQL backup was created but could not be indexed.");
     }
 
-    private bool HasBackupForSlot(string rootDirectory, DateTime localDate, string slotKey)
+    private async Task<bool> HasVerifiedBackupForSlotAsync(
+        string rootDirectory, DateTime localDate, string slotKey, CancellationToken cancellationToken)
     {
         var dayDirectory = Path.Combine(
             rootDirectory,
@@ -818,17 +848,36 @@ public sealed class DatabaseBackupService
         }
 
         var pattern = $"*_{_databaseProvider.Key}_*_auto_{slotKey}.*";
-        return Directory.EnumerateFiles(dayDirectory, pattern, SearchOption.TopDirectoryOnly)
-            .Any(filePath => GetBackupSearchPatterns().Any(searchPattern =>
-                IsFileMatchingPattern(filePath, searchPattern)));
+        foreach (var filePath in Directory.EnumerateFiles(dayDirectory, pattern, SearchOption.TopDirectoryOnly))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!GetBackupSearchPatterns().Any(searchPattern => IsFileMatchingPattern(filePath, searchPattern)))
+            {
+                continue;
+            }
+
+            try
+            {
+                if (await IsVerifiedBackupCachedAsync(filePath, cancellationToken))
+                {
+                    return true;
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                _logger.LogWarning(ex, "Could not verify scheduled database backup: {BackupPath}.", filePath);
+            }
+        }
+
+        return false;
     }
 
-    private Task CleanupExpiredBackupsAsync(int retentionDays, CancellationToken cancellationToken)
+    private async Task CleanupExpiredBackupsAsync(int retentionDays, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (retentionDays <= 0 || !Directory.Exists(_backupRootDirectory))
         {
-            return Task.CompletedTask;
+            return;
         }
 
         var thresholdUtc = DateTimeOffset.UtcNow.AddDays(-retentionDays).UtcDateTime;
@@ -836,14 +885,51 @@ public sealed class DatabaseBackupService
             .SelectMany(pattern => EnumerateBackupFiles(pattern, cancellationToken))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
-        var newestBackupPath = backupFiles
-            .OrderByDescending(TryGetLastWriteTimeUtc)
-            .FirstOrDefault();
+        var orderedBackupFiles = backupFiles
+            .Select(filePath => new { FilePath = filePath, LastWriteTimeUtc = TryGetLastWriteTimeUtc(filePath) })
+            .OrderByDescending(item => item.LastWriteTimeUtc)
+            .ToList();
+        var newestBackupPath = orderedBackupFiles.FirstOrDefault()?.FilePath;
+        if (newestBackupPath is null)
+        {
+            return;
+        }
+        if (!orderedBackupFiles.Any(item => !string.Equals(item.FilePath, newestBackupPath, StringComparison.OrdinalIgnoreCase)
+            && item.LastWriteTimeUtc.HasValue && item.LastWriteTimeUtc.Value <= thresholdUtc))
+        {
+            return;
+        }
+
+        string? newestVerifiedBackupPath = null;
+        foreach (var filePath in orderedBackupFiles.Select(item => item.FilePath))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                var relativePath = Path.GetRelativePath(_backupRootDirectory, filePath);
+                if ((await VerifyBackupAsync(relativePath, cancellationToken)).Verified)
+                {
+                    newestVerifiedBackupPath = filePath;
+                    break;
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                _logger.LogWarning(ex, "Could not verify database backup before retention cleanup: {BackupPath}.", filePath);
+            }
+        }
+
+        if (newestVerifiedBackupPath is null)
+        {
+            _logger.LogWarning("Database backup retention skipped: no verified local backup is available.");
+            return;
+        }
 
         foreach (var filePath in backupFiles)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (string.Equals(filePath, newestBackupPath, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(filePath, newestBackupPath, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(filePath, newestVerifiedBackupPath, StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
@@ -862,8 +948,63 @@ public sealed class DatabaseBackupService
         }
 
         CleanupEmptyDirectories(cancellationToken);
+    }
 
-        return Task.CompletedTask;
+    // The scheduler calls this under _backupSemaphore once per minute. Metadata
+    // detects changes in the database file, manifest and required parts without
+    // rehashing a large backup at every poll. Retention and restore never use
+    // this cache: they always perform full checksum verification before acting.
+    private async Task<bool> IsVerifiedBackupCachedAsync(string filePath, CancellationToken cancellationToken)
+    {
+        var stamp = BuildBackupVerificationStamp(filePath);
+        if (stamp is not null
+            && string.Equals(filePath, _cachedVerifiedBackupPath, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(stamp, _cachedVerifiedBackupStamp, StringComparison.Ordinal)
+            && DateTime.UtcNow - _cachedVerifiedBackupAtUtc < TimeSpan.FromHours(1))
+        {
+            return true;
+        }
+
+        var relativePath = Path.GetRelativePath(_backupRootDirectory, filePath);
+        var verified = (await VerifyBackupAsync(relativePath, cancellationToken)).Verified;
+        if (verified && stamp is not null && string.Equals(stamp, BuildBackupVerificationStamp(filePath), StringComparison.Ordinal))
+        {
+            _cachedVerifiedBackupPath = filePath;
+            _cachedVerifiedBackupStamp = stamp;
+            _cachedVerifiedBackupAtUtc = DateTime.UtcNow;
+        }
+        else if (string.Equals(filePath, _cachedVerifiedBackupPath, StringComparison.OrdinalIgnoreCase))
+        {
+            _cachedVerifiedBackupPath = null;
+            _cachedVerifiedBackupStamp = null;
+            _cachedVerifiedBackupAtUtc = default;
+        }
+
+        return verified;
+    }
+
+    private string? BuildBackupVerificationStamp(string filePath)
+    {
+        var manifestPath = GetManifestPath(filePath);
+        var manifest = TryReadManifest(filePath);
+        if (manifest is null || !string.Equals(manifest.Status, "complete", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var stamp = new StringBuilder();
+        foreach (var path in new[] { filePath, manifestPath }
+            .Concat(manifest.Parts?.Where(part => part.Required)
+                .Select(part => ResolveBackupPath(part.RelativePath)) ?? []))
+        {
+            if (path is null) return null;
+            var info = new FileInfo(path);
+            if (!info.Exists) return null;
+            stamp.Append(path).Append('|').Append(info.Length).Append('|')
+                .Append(info.LastWriteTimeUtc.Ticks).Append(';');
+        }
+
+        return stamp.ToString();
     }
 
     private async Task<IReadOnlyList<DatabaseBackupS3UploadResult>> UploadBackupToS3Async(
