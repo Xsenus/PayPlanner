@@ -13,6 +13,8 @@ public static class ClientCaseDeadlineTaskSyncService
     private const string CassationReviewTaskTitle = "Оценить кассацию, подготовить жалобу";
     private const string AppealObjectionTaskTitle = "Подготовить возражения на апелляцию";
     private const string AppealHearingFollowupTaskTitle = "Отслеживать назначение заседания";
+    private const string AppealHearingScheduledResult = "Заседание апелляционной инстанции назначено. Проверьте его дату в карточке дела.";
+    private const string AppealHearingCompletedResult = "Апелляционное заседание проведено. Проверьте итог в карточке дела.";
     private const string RescheduledHearingTaskTitle = "Учесть новую дату, проверить готовность";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly HashSet<string> ClosedTaskStatuses = new(StringComparer.OrdinalIgnoreCase)
@@ -95,7 +97,7 @@ public static class ClientCaseDeadlineTaskSyncService
                         : writSubmitted
                             ? $"Исполнительный лист подан {clientCase.ExecutiveWritSubmittedAt!.Value:dd.MM.yyyy} в {(clientCase.ExecutiveWritSubmittedTo == "bank" ? "банк" : "ФССП")}."
                         : appealHearingScheduled
-                            ? "Заседание апелляционной инстанции назначено. Проверьте его дату в карточке дела."
+                            ? deadline.CompletionResult ?? AppealHearingScheduledResult
                         : isAppealComplaintTask
                             ? "Жалоба или заседание больше не требуют этого действия. Проверьте карточку дела."
                         : isCourtHearing
@@ -107,7 +109,9 @@ public static class ClientCaseDeadlineTaskSyncService
                         : writSubmitted
                             ? "Подача исполнительного листа отмечена в карточке дела, задача выполнена."
                         : appealHearingScheduled
-                            ? "Заседание апелляционной инстанции назначено, задача отслеживания выполнена."
+                            ? deadline.CompletionResult == AppealHearingCompletedResult
+                                ? "Апелляционное заседание проведено, задача отслеживания выполнена."
+                                : "Заседание апелляционной инстанции назначено, задача отслеживания выполнена."
                         : isAppealComplaintTask
                             ? "Связанная жалоба или заседание изменены, задача отменена."
                         : isCourtHearing
@@ -127,6 +131,17 @@ public static class ClientCaseDeadlineTaskSyncService
                         AddHistory(db, activeTask, actorUserId, normalizedActorName, "Сведения о подаче исполнительного листа исправлены в карточке дела.", now);
                         taskJournalChanged = true;
                     }
+                }
+                else if (deadline.Key.StartsWith("appeal-followup-", StringComparison.Ordinal)
+                    && deadline.CompletionResult == AppealHearingCompletedResult
+                    && activeTask?.Status == "done"
+                    && activeTask.Result == AppealHearingScheduledResult)
+                {
+                    activeTask.Result = AppealHearingCompletedResult;
+                    activeTask.UpdatedAt = now;
+                    AddHistory(db, activeTask, actorUserId, normalizedActorName,
+                        "Судебное заседание проведено, итог задачи отслеживания уточнён.", now);
+                    taskJournalChanged = true;
                 }
 
                 continue;
@@ -166,7 +181,9 @@ public static class ClientCaseDeadlineTaskSyncService
             }
             if (deadline.Key.StartsWith("appeal-followup-", StringComparison.Ordinal)
                 && activeTask?.Status == "done"
-                && activeTask.DueAt == dueAt)
+                && activeTask.DueAt == dueAt
+                && !(deadline.ResumeOnInvalidatedHearing
+                    && activeTask.Result is AppealHearingScheduledResult or AppealHearingCompletedResult))
             {
                 continue;
             }
@@ -384,12 +401,7 @@ public static class ClientCaseDeadlineTaskSyncService
             null));
         var appealHearings = clientCase.CourtEvents
             .Where(item => item.CourtInstance == "appeal"
-                && item.EventType == CourtSyncNormalization.EventTypes.Hearing
-                && item.MovementStatus is not CourtSyncNormalization.MovementStatuses.Held
-                    and not CourtSyncNormalization.MovementStatuses.Postponed
-                    and not CourtSyncNormalization.MovementStatuses.Cancelled
-                    and not CourtSyncNormalization.MovementStatuses.Completed
-                    and not CourtSyncNormalization.MovementStatuses.Archived)
+                && item.EventType == CourtSyncNormalization.EventTypes.Hearing)
             .OrderBy(item => item.ScheduledAt)
             .ThenBy(item => item.Id)
             .ToArray();
@@ -400,13 +412,34 @@ public static class ClientCaseDeadlineTaskSyncService
                 && complaint.Status is ("filed" or "accepted");
             var ourFiledAppeal = filed && complaint.FiledBy == "ours";
             var opponentFiledAppeal = filed && complaint.FiledBy == "opponent";
-            var hearing = appealHearings.FirstOrDefault(item => !complaint.FiledAt.HasValue || item.ScheduledAt.Date >= complaint.FiledAt.Value.Date);
+            var matchingHearings = appealHearings
+                .Where(item => !complaint.FiledAt.HasValue || item.ScheduledAt.Date >= complaint.FiledAt.Value.Date)
+                .ToArray();
+            var hearing = matchingHearings.FirstOrDefault(item => item.HearingOutcome is null
+                && item.MovementStatus is not CourtSyncNormalization.MovementStatuses.Held
+                    and not CourtSyncNormalization.MovementStatuses.Postponed
+                    and not CourtSyncNormalization.MovementStatuses.Cancelled
+                    and not CourtSyncNormalization.MovementStatuses.Completed
+                    and not CourtSyncNormalization.MovementStatuses.Suspended
+                    and not CourtSyncNormalization.MovementStatuses.Archived);
+            var latestHearing = matchingHearings.LastOrDefault();
+            var appealAlreadyHeard = hearing is null
+                && (latestHearing?.HearingOutcome is "considered" or "interim"
+                    || latestHearing?.MovementStatus is CourtSyncNormalization.MovementStatuses.Held
+                        or CourtSyncNormalization.MovementStatuses.Completed);
+            var resumeOnInvalidatedHearing = hearing is null
+                && (latestHearing?.HearingOutcome == "postponed"
+                    || latestHearing?.MovementStatus is CourtSyncNormalization.MovementStatuses.Postponed
+                        or CourtSyncNormalization.MovementStatuses.Cancelled
+                        or CourtSyncNormalization.MovementStatuses.Suspended);
             result.Add(new CaseDeadline(
                 $"appeal-followup-{complaint.Id}",
                 AppealHearingFollowupTaskTitle,
-                ourFiledAppeal && hearing is null ? complaint.FiledAt!.Value.Date.AddDays(10) : null,
+                ourFiledAppeal && hearing is null && !appealAlreadyHeard ? complaint.FiledAt!.Value.Date.AddDays(10) : null,
                 true, 60, "control", "апелляция", null, null,
-                ourFiledAppeal && hearing is not null, complaint.FiledAt));
+                ourFiledAppeal && (hearing is not null || appealAlreadyHeard), complaint.FiledAt,
+                ourFiledAppeal && resumeOnInvalidatedHearing,
+                appealAlreadyHeard ? AppealHearingCompletedResult : null));
             result.Add(new CaseDeadline(
                 $"appeal-objection-{complaint.Id}",
                 AppealObjectionTaskTitle,
@@ -722,6 +755,8 @@ public static class ClientCaseDeadlineTaskSyncService
         ClientCaseCourtEvent? CourtEvent,
         DateTime? HearingAt,
         bool CompleteOnHearing = false,
-        DateTime? ReferenceDate = null);
+        DateTime? ReferenceDate = null,
+        bool ResumeOnInvalidatedHearing = false,
+        string? CompletionResult = null);
     private readonly record struct CaseOwner(int? ClientId, int? LegalEntityId, string Name);
 }

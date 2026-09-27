@@ -9900,8 +9900,11 @@ public class CasesV2ControllerTests
         Assert.True(archived.IsArchived);
     }
 
-    [Fact]
-    public async Task FiledAppealComplaint_CreatesSideSpecificTasksAndTracksHearingChanges()
+    [Theory]
+    [InlineData("suspended")]
+    [InlineData("postponed")]
+    [InlineData("cancelled")]
+    public async Task FiledAppealComplaint_CreatesSideSpecificTasksAndTracksHearingChanges(string invalidatedHearingStatus)
     {
         await using var db = await CreateContextAsync();
         var lawyer = await CreateUserAsync(db, "appeal-lawyer@example.com", "Юрист");
@@ -10002,9 +10005,16 @@ public class CasesV2ControllerTests
             EventType = "hearing",
             Title = "Заседание апелляции",
             ScheduledAt = filedAt.AddDays(20).AddHours(10),
-            MovementStatus = "scheduled",
+            MovementStatus = invalidatedHearingStatus,
         };
         db.ClientCaseCourtEvents.Add(hearing);
+        await db.SaveChangesAsync();
+        await ClientCaseDeadlineTaskSyncService.SyncAsync(db, clientCase.Id, lawyer.Id, lawyer.FullName, CancellationToken.None);
+        Assert.Equal("new", followup.Status);
+        Assert.DoesNotContain(await db.TaskJournalItems.Where(item => item.ClientCaseId == clientCase.Id).ToListAsync(),
+            item => item.Title == "Подготовить возражения на апелляцию");
+
+        hearing.MovementStatus = "scheduled";
         await db.SaveChangesAsync();
         await ClientCaseDeadlineTaskSyncService.SyncAsync(db, clientCase.Id, lawyer.Id, lawyer.FullName, CancellationToken.None);
         Assert.Equal("done", followup.Status);
@@ -10016,9 +10026,75 @@ public class CasesV2ControllerTests
         await ClientCaseDeadlineTaskSyncService.SyncAsync(db, clientCase.Id, lawyer.Id, lawyer.FullName, CancellationToken.None);
         Assert.Equal(hearing.ScheduledAt, objections.DueAt);
 
+        hearing.MovementStatus = "completed";
+        await db.SaveChangesAsync();
+        await ClientCaseDeadlineTaskSyncService.SyncAsync(db, clientCase.Id, lawyer.Id, lawyer.FullName, CancellationToken.None);
+        Assert.Equal("done", followup.Status);
+        Assert.Contains("проведено", followup.Result ?? string.Empty);
+        Assert.Equal(1, await db.TaskJournalItems.CountAsync(item => item.ClientCaseId == clientCase.Id && item.Title == "Отслеживать назначение заседания"));
+        Assert.Equal("cancelled", objections.Status);
+
+        hearing.MovementStatus = invalidatedHearingStatus;
+        await db.SaveChangesAsync();
+        await ClientCaseDeadlineTaskSyncService.SyncAsync(db, clientCase.Id, lawyer.Id, lawyer.FullName, CancellationToken.None);
+        Assert.Equal("cancelled", objections.Status);
+        var resumedFollowup = Assert.Single(await db.TaskJournalItems
+            .Where(item => item.ClientCaseId == clientCase.Id && item.Title == "Отслеживать назначение заседания" && item.Status == "new")
+            .ToListAsync());
+        Assert.NotEqual(followup.Id, resumedFollowup.Id);
+
+        resumedFollowup.Status = "done";
+        resumedFollowup.Result = "Проверено юристом";
+        await db.SaveChangesAsync();
+        await ClientCaseDeadlineTaskSyncService.SyncAsync(db, clientCase.Id, lawyer.Id, lawyer.FullName, CancellationToken.None);
+        Assert.Equal(2, await db.TaskJournalItems.CountAsync(item => item.ClientCaseId == clientCase.Id && item.Title == "Отслеживать назначение заседания"));
+
         await controller.ArchiveCourtComplaint(clientCase.Id, "first", opponentComplaint.Id, CancellationToken.None);
         Assert.Equal("cancelled", objections.Status);
-        Assert.Equal("done", followup.Status);
+        Assert.Equal("done", resumedFollowup.Status);
+    }
+
+    [Fact]
+    public async Task FiledAppealComplaint_DoesNotCreateFollowupForAlreadyCompletedHearing()
+    {
+        await using var db = await CreateContextAsync();
+        var lawyer = await CreateUserAsync(db, "appeal-import-lawyer@example.com", "Юрист");
+        var filedAt = DateTime.UtcNow.Date.AddDays(-20);
+        var clientCase = new ClientCase
+        {
+            Client = new Client { Name = "Клиент", IsActive = true, ResponsibleUserId = lawyer.Id },
+            Title = "Дело с проведённой апелляцией",
+            Stage = "Суд",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = lawyer.Id,
+        };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        db.ClientCaseCourtEvents.Add(new ClientCaseCourtEvent
+        {
+            ClientCaseId = clientCase.Id,
+            CourtInstance = "appeal",
+            EventType = "hearing",
+            Title = "Апелляция рассмотрена",
+            ScheduledAt = filedAt.AddDays(10),
+            MovementStatus = "completed",
+        });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, lawyer);
+        var result = await controller.CreateCourtComplaint(clientCase.Id, "first", new CasesV2Controller.UpsertClientCaseCourtComplaintRequest
+        {
+            ComplaintType = "appealComplaint",
+            Title = "Наша жалоба",
+            TargetInstance = "appeal",
+            FiledAt = filedAt,
+            FiledBy = "ours",
+            Status = "filed",
+        }, CancellationToken.None);
+
+        Assert.IsType<CreatedResult>(result.Result);
+        Assert.DoesNotContain(await db.TaskJournalItems.Where(item => item.ClientCaseId == clientCase.Id).ToListAsync(),
+            item => item.Title == "Отслеживать назначение заседания");
     }
 
     [Theory]
