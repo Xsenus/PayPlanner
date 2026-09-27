@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Loader2, UploadCloud } from 'lucide-react';
+import { Download, Loader2, UploadCloud } from 'lucide-react';
 
 import { apiService } from '../../services/api';
 import type { ClientCaseDocument } from '../../types';
@@ -16,8 +16,33 @@ interface ExecutiveWritDocumentUploadProps {
 
 export function ExecutiveWritDocumentUpload({ caseId, canUpload, documents, onUploaded }: ExecutiveWritDocumentUploadProps) {
   const [uploading, setUploading] = useState(false);
+  const [downloadingId, setDownloadingId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const scans = documents.filter((document) => document.documentType?.trim() === EXECUTIVE_WRIT_DOCUMENT_TYPE && document.isLatestVersion !== false);
+
+  const download = async (document: ClientCaseDocument) => {
+    if (downloadingId !== null || caseId <= 0) return;
+    setDownloadingId(document.id);
+    setError(null);
+    try {
+      const result = await apiService.downloadCaseDocument(caseId, document.id);
+      const url = URL.createObjectURL(result.blob);
+      try {
+        const link = window.document.createElement('a');
+        link.href = url;
+        link.download = result.fileName || document.originalFileName;
+        window.document.body.appendChild(link);
+        link.click();
+        link.remove();
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+    } catch (downloadError) {
+      setError(extractDisplayErrorMessage(downloadError, 'Не удалось скачать скан исполнительного листа.'));
+    } finally {
+      setDownloadingId(null);
+    }
+  };
 
   const upload = async (file: File | null, input: HTMLInputElement) => {
     if (!file || uploading || !canUpload || caseId <= 0) return;
@@ -46,7 +71,12 @@ export function ExecutiveWritDocumentUpload({ caseId, canUpload, documents, onUp
 
   return <div className="rounded-lg border border-blue-100 bg-blue-50/40 p-2.5 text-xs text-slate-700">
     <div className="font-semibold text-slate-800">Скан исполнительного листа</div>
-    {scans.length > 0 ? <ul className="mt-1 space-y-0.5">{scans.map((document) => <li key={document.id} className="truncate" title={document.originalFileName}>{document.originalFileName}</li>)}</ul>
+    {scans.length > 0 ? <ul className="mt-1 space-y-0.5">{scans.map((document) => <li key={document.id}>
+      <button type="button" onClick={() => void download(document)} disabled={downloadingId !== null} aria-label={`Скачать скан ${document.originalFileName}`} title={document.originalFileName} className="inline-flex max-w-full items-center gap-1 text-left font-medium text-blue-700 hover:underline disabled:opacity-60">
+        {downloadingId === document.id ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" /> : <Download className="h-3.5 w-3.5 shrink-0" />}
+        <span className="truncate">{document.originalFileName}</span>
+      </button>
+    </li>)}</ul>
       : <p className="mt-1 text-slate-500">Скан пока не прикреплён.</p>}
     {canUpload && caseId > 0 ? <label className="mt-2 inline-flex cursor-pointer items-center gap-1 rounded-md border border-blue-200 bg-white px-2 py-1.5 font-semibold text-blue-700 hover:bg-blue-50">
       {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UploadCloud className="h-3.5 w-3.5" />}

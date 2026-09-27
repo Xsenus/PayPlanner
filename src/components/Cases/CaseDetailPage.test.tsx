@@ -1389,9 +1389,16 @@ describe('CaseDetailPage', () => {
   });
 
   it('uploads the executive writ scan from the full case editor', async () => {
+    vi.mocked(apiService.getCaseDocuments).mockResolvedValue([{
+      id: 27, clientCaseId: 15, documentKey: 'writ', version: 1,
+      documentType: 'Исполнительный лист', status: 'Получен', originalFileName: 'Лист.pdf',
+      contentType: 'application/pdf', sizeBytes: 1024, uploadedByName: 'Юрист',
+      uploadedAt: '2026-09-27T10:00:00Z', isLatestVersion: true,
+    }]);
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
     expect(await screen.findByText('ЗЕМЦОВ - банкротство')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Редактировать дело' }));
+    expect(await screen.findByRole('button', { name: 'Скачать скан Лист.pdf' })).toBeTruthy();
 
     const file = new File(['writ'], 'Лист.pdf', { type: 'application/pdf' });
     fireEvent.change(screen.getByLabelText('Загрузить скан исполнительного листа'), { target: { files: [file] } });

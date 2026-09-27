@@ -599,7 +599,14 @@ describe('CaseModal', () => {
   });
 
   it('uploads an executive writ scan directly from the case workflow', async () => {
+    vi.mocked(apiService.getCaseDocuments).mockResolvedValue([{
+      id: 7, clientCaseId: 1, documentKey: 'writ', version: 1,
+      documentType: 'Исполнительный лист', status: 'Получен', originalFileName: 'Лист.pdf',
+      contentType: 'application/pdf', sizeBytes: 1024, uploadedByName: 'Юрист',
+      uploadedAt: '2026-09-27T10:00:00Z', isLatestVersion: true,
+    }]);
     render(<CaseModal isOpen onClose={vi.fn()} caseData={createCase()} onSave={vi.fn()} />);
+    expect(await screen.findByRole('button', { name: 'Скачать скан Лист.pdf' })).toBeTruthy();
 
     const file = new File(['writ'], 'Исполнительный лист.pdf', { type: 'application/pdf' });
     fireEvent.change(screen.getByLabelText('Загрузить скан исполнительного листа'), { target: { files: [file] } });
