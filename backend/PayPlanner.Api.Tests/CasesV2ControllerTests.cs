@@ -6298,19 +6298,27 @@ public class CasesV2ControllerTests
             CalendarTimeZoneHelper.ResolveTimeZone("Asia/Novosibirsk")).Date;
         var todayHearing = new ClientCaseCourtEvent
         {
-            EventType = "hearing", Title = "Сегодня весь день", ScheduledAt = today, AllDay = true,
+            EventType = "hearing",
+            Title = "Сегодня весь день",
+            ScheduledAt = today,
+            AllDay = true,
             MovementStatus = "scheduled",
         };
         var tomorrowHearing = new ClientCaseCourtEvent
         {
-            EventType = "hearing", Title = "Завтра весь день", ScheduledAt = today.AddDays(1), AllDay = true,
+            EventType = "hearing",
+            Title = "Завтра весь день",
+            ScheduledAt = today.AddDays(1),
+            AllDay = true,
             MovementStatus = "scheduled",
         };
         var clientCase = new ClientCase
         {
             Client = new Client { Name = "Клиент", IsActive = true, ResponsibleUserId = lawyer.Id },
-            Title = "Заседания с учётом часового пояса", Status = ClientCaseStatus.Open,
-            ResponsibleUserId = lawyer.Id, CourtEvents = [todayHearing, tomorrowHearing],
+            Title = "Заседания с учётом часового пояса",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = lawyer.Id,
+            CourtEvents = [todayHearing, tomorrowHearing],
         };
         db.ClientCases.Add(clientCase);
         await db.SaveChangesAsync();

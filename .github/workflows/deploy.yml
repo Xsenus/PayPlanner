@@ -64,9 +64,22 @@ jobs:
             echo "Backend package audit reported advisories or could not complete; continuing deploy after reporting."
           }
 
+      - name: Install PostgreSQL 17 client for restore drill
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl ca-certificates
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl --fail --silent --show-error -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          . /etc/os-release
+          printf 'Types: deb\nURIs: https://apt.postgresql.org/pub/repos/apt\nSuites: %s-pgdg\nComponents: main\nSigned-By: /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc\n' "$VERSION_CODENAME" | sudo tee /etc/apt/sources.list.d/pgdg.sources > /dev/null
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-17
+
       - name: Test backend
         env:
           PAYPLANNER_TEST_POSTGRES: Host=127.0.0.1;Port=5432;Database=postgres;Username=postgres;Password=postgres;Pooling=false
+          PAYPLANNER_TEST_PG_DUMP: /usr/lib/postgresql/17/bin/pg_dump
+          PAYPLANNER_TEST_PSQL: /usr/lib/postgresql/17/bin/psql
         run: dotnet test backend/PayPlanner.Api.Tests/PayPlanner.Api.Tests.csproj --no-restore
 
       - name: Test deploy backup retention

@@ -2297,9 +2297,13 @@ public class TasksControllerTests
         task.ClientBillingClassification = TaskClientBillingClassification.Billable;
         var invoice = new Payment
         {
-            Account = "INV-OLD-16", ClientId = client.Id, ClientCaseId = clientCase.Id,
-            DocumentKind = DocumentKind.Invoice, Type = PaymentType.Income,
-            Date = DateTime.UtcNow.Date, Amount = 4200m,
+            Account = "INV-OLD-16",
+            ClientId = client.Id,
+            ClientCaseId = clientCase.Id,
+            DocumentKind = DocumentKind.Invoice,
+            Type = PaymentType.Income,
+            Date = DateTime.UtcNow.Date,
+            Amount = 4200m,
         };
         db.Payments.Add(invoice);
         await db.SaveChangesAsync();
@@ -2338,14 +2342,20 @@ public class TasksControllerTests
         task.ClientBillingClassification = TaskClientBillingClassification.Billable;
         var foreignInvoice = new Payment
         {
-            Account = "INV-FOREIGN", ClientId = otherClient.Id,
-            DocumentKind = DocumentKind.Invoice, Type = PaymentType.Income, Date = DateTime.UtcNow.Date,
+            Account = "INV-FOREIGN",
+            ClientId = otherClient.Id,
+            DocumentKind = DocumentKind.Invoice,
+            Type = PaymentType.Income,
+            Date = DateTime.UtcNow.Date,
         };
         var cancelledInvoice = new Payment
         {
-            Account = "INV-CANCELLED", ClientId = client.Id,
-            DocumentKind = DocumentKind.Invoice, Type = PaymentType.Income,
-            Status = PaymentStatus.Cancelled, Date = DateTime.UtcNow.Date,
+            Account = "INV-CANCELLED",
+            ClientId = client.Id,
+            DocumentKind = DocumentKind.Invoice,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Cancelled,
+            Date = DateTime.UtcNow.Date,
         };
         db.Payments.AddRange(foreignInvoice, cancelledInvoice);
         await db.SaveChangesAsync();

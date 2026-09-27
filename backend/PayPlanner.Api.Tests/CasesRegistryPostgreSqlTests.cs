@@ -80,6 +80,13 @@ public sealed class CasesRegistryPostgreSqlTests
                     Section = RolePermissionCatalog.Payments,
                     CanView = true,
                     ViewScope = DataVisibilityScope.All,
+                },
+                new RolePermission
+                {
+                    RoleId = role.Id,
+                    Section = RolePermissionCatalog.Contracts,
+                    CanView = true,
+                    ViewScope = DataVisibilityScope.All,
                 });
             var user = new User
             {
@@ -241,7 +248,9 @@ public sealed class CasesRegistryPostgreSqlTests
             interceptor.Commands.Clear();
             var financeResult = await CreateController(db, principal).GetFinance(clientCase.Id, CancellationToken.None);
             Assert.IsType<OkObjectResult>(financeResult.Result);
-            Assert.Equal(6, interceptor.Commands.Count);
+            // Five permission lookups and one bounded query each for the case,
+            // payments, contracts and user time zone. No per-item contract loads.
+            Assert.Equal(9, interceptor.Commands.Count);
             var linkedContractsCommand = Assert.Single(interceptor.Commands, command =>
                 command.Contains("ContractInvoices", StringComparison.OrdinalIgnoreCase) &&
                 command.Contains("ContractPayments", StringComparison.OrdinalIgnoreCase));
