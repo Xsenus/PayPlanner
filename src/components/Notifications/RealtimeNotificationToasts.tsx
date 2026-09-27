@@ -68,7 +68,7 @@ function toRealtimeNotification(item: UserNotificationDto, recipientUserId: numb
   };
 }
 
-function buildToastDedupeKey(notification: RealtimeUserNotification): string {
+function buildToastSnoozeKey(notification: RealtimeUserNotification): string {
   if (notification.taskJournalItemId) {
     return `task:${notification.taskJournalItemId}`;
   }
@@ -78,6 +78,14 @@ function buildToastDedupeKey(notification: RealtimeUserNotification): string {
   }
 
   return notification.eventKey || `notification:${notification.id}`;
+}
+
+function buildToastDedupeKey(notification: RealtimeUserNotification): string {
+  const snoozeKey = buildToastSnoozeKey(notification);
+  // Different changes to the same task must not replace each other's toast.
+  return notification.taskJournalItemId
+    ? `${snoozeKey}:notification:${notification.id}`
+    : snoozeKey;
 }
 
 function getPaymentTypeFromNotification(metadataJson?: string | null): 'Income' | 'Expense' | undefined {
@@ -527,7 +535,8 @@ export function RealtimeNotificationToasts({
       }
 
       const dedupeKey = buildToastDedupeKey(notification);
-      if (isToastSnoozed(dedupeKey)) {
+      const snoozeKey = buildToastSnoozeKey(notification);
+      if (isToastSnoozed(snoozeKey)) {
         return;
       }
 
@@ -579,7 +588,7 @@ export function RealtimeNotificationToasts({
               notificationId: notification.id,
             });
           }
-          snoozeToast(dedupeKey);
+          snoozeToast(snoozeKey);
         } catch (error) {
           toast.error(
             error instanceof Error ? error.message : 'Не удалось отложить напоминание.',

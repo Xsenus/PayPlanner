@@ -141,7 +141,7 @@ describe('RealtimeNotificationToasts', () => {
     expect(toastMock.showToast).toHaveBeenCalledWith(expect.objectContaining({
       title: 'Новая задача: Проверить документы',
       actionLabel: 'Открыть задачу',
-      dedupeKey: 'task:123',
+      dedupeKey: 'task:123:notification:42',
       domain: 'task',
     }));
 
@@ -534,6 +534,34 @@ describe('RealtimeNotificationToasts', () => {
     });
 
     expect(toastMock.showToast).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps separate task changes from replacing each other or a completion toast', async () => {
+    render(<RealtimeNotificationToasts userId={5} onOpenTask={vi.fn()} />);
+
+    await waitFor(() => expect(connectionState.start).toHaveBeenCalledTimes(1));
+    const handler = connectionState.handlers.get(REALTIME_USER_NOTIFICATION_CREATED_EVENT);
+    const first = {
+      recipientUserId: 5,
+      tone: 'blue',
+      objectType: 'task',
+      objectId: 778,
+      taskJournalItemId: 778,
+      createdAt: '2026-09-27T10:00:00Z',
+    };
+
+    act(() => {
+      handler?.({ ...first, id: 80, type: 'taskCompleted', eventKey: 'task:778:completed', title: 'Задача выполнена', bodyPreview: 'Готово.' });
+      handler?.({ ...first, id: 81, type: 'taskChanged', eventKey: 'task:778:changed:1', title: 'Сменился постановщик', bodyPreview: 'Новый постановщик.' });
+      handler?.({ ...first, id: 82, type: 'taskChanged', eventKey: 'task:778:due-at:2', title: 'Изменён срок задачи', bodyPreview: 'Новый срок.' });
+    });
+
+    expect(toastMock.showToast.mock.calls.map(([options]) => options.dedupeKey)).toEqual([
+      'task:778:notification:80',
+      'task:778:notification:81',
+      'task:778:notification:82',
+    ]);
+    expect(toastMock.showToast.mock.calls[0][0].durationMs).toBe(0);
   });
 
   it('offers persistent snooze and activity confirmation for case inactivity', async () => {
@@ -1176,7 +1204,7 @@ describe('RealtimeNotificationToasts', () => {
       expect(toastMock.showToast).toHaveBeenCalledWith(
         expect.objectContaining({
           title: 'Missed task from closed browser',
-          dedupeKey: 'task:710',
+          dedupeKey: 'task:710:notification:710',
           domain: 'task',
         }),
       ),
@@ -1318,7 +1346,7 @@ describe('RealtimeNotificationToasts', () => {
       expect(toastMock.showToast).toHaveBeenCalledWith(
         expect.objectContaining({
           title: 'Новая задача через fallback',
-          dedupeKey: 'task:701',
+          dedupeKey: 'task:701:notification:701',
           domain: 'task',
         }),
       ),
