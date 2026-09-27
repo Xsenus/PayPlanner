@@ -151,6 +151,7 @@ public sealed class DatabaseBackupService
     private readonly DatabaseProviderInfo _databaseProvider;
     private readonly ILogger<DatabaseBackupService> _logger;
     private readonly IServiceScopeFactory _scopeFactory;
+    private readonly IBackupDirectoryReader _directoryReader;
     private readonly SemaphoreSlim _backupSemaphore = new(1, 1);
     private string? _cachedVerifiedBackupPath;
     private string? _cachedVerifiedBackupStamp;
@@ -162,13 +163,15 @@ public sealed class DatabaseBackupService
         IConfiguration configuration,
         DatabaseProviderInfo databaseProvider,
         ILogger<DatabaseBackupService> logger,
-        IServiceScopeFactory scopeFactory)
+        IServiceScopeFactory scopeFactory,
+        IBackupDirectoryReader? directoryReader = null)
     {
         _contextFactory = contextFactory;
         _configuration = configuration;
         _databaseProvider = databaseProvider;
         _logger = logger;
         _scopeFactory = scopeFactory;
+        _directoryReader = directoryReader ?? new PhysicalBackupDirectoryReader();
         _backupRootDirectory = ResolveBackupRootDirectory();
         Directory.CreateDirectory(_backupRootDirectory);
     }
@@ -1799,7 +1802,7 @@ public sealed class DatabaseBackupService
 
             try
             {
-                files.AddRange(Directory.GetFiles(directory, searchPattern, SearchOption.TopDirectoryOnly));
+                files.AddRange(_directoryReader.GetFiles(directory, searchPattern));
             }
             catch (Exception ex) when (IsRecoverableFileSystemEnumerationError(ex))
             {
@@ -1809,7 +1812,7 @@ public sealed class DatabaseBackupService
 
             try
             {
-                foreach (var childDirectory in Directory.GetDirectories(directory, "*", SearchOption.TopDirectoryOnly))
+                foreach (var childDirectory in _directoryReader.GetDirectories(directory))
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     if (!IsReparsePoint(childDirectory))
@@ -1844,7 +1847,7 @@ public sealed class DatabaseBackupService
             var directory = pending.Pop();
             try
             {
-                foreach (var childDirectory in Directory.GetDirectories(directory, "*", SearchOption.TopDirectoryOnly))
+                foreach (var childDirectory in _directoryReader.GetDirectories(directory))
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     if (IsReparsePoint(childDirectory))
@@ -1878,7 +1881,7 @@ public sealed class DatabaseBackupService
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                if (!Directory.EnumerateFileSystemEntries(directory).Any())
+                if (_directoryReader.IsEmpty(directory))
                 {
                     Directory.Delete(directory, false);
                 }

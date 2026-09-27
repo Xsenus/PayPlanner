@@ -333,6 +333,62 @@ public sealed class DatabaseBackupServiceS3Tests
     }
 
     [Fact]
+    public async Task EnsureScheduledBackupsAsync_SkipsDeniedChildDirectoryAndCleansAccessibleBackups()
+    {
+        var reader = new FaultingBackupDirectoryReader();
+        await using var scope = await CreateScopeAsync(reader);
+        var service = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        var oldest = await service.CreateManualBackupAsync(CancellationToken.None);
+        var latest = await service.CreateManualBackupAsync(CancellationToken.None);
+        var oldestPath = service.ResolveBackupPath(oldest.Backup.RelativePath)!;
+        var latestPath = service.ResolveBackupPath(latest.Backup.RelativePath)!;
+        File.SetLastWriteTimeUtc(oldestPath, DateTime.UtcNow.AddDays(-10));
+        File.SetLastWriteTimeUtc(latestPath, DateTime.UtcNow.AddDays(-9));
+        var deniedDirectory = Path.Combine(scope.Root, "backups", "denied-child");
+        Directory.CreateDirectory(deniedDirectory);
+        var inaccessibleFile = Path.Combine(deniedDirectory, "unavailable.zip");
+        await File.WriteAllTextAsync(inaccessibleFile, "not inspected or deleted");
+        reader.DeniedFilesDirectory = deniedDirectory;
+        reader.DeniedSubdirectoriesDirectory = deniedDirectory;
+        await service.UpdateSettingsAsync(
+            automaticEnabled: false, scheduleLocal: "03:00", retentionDays: 1,
+            backupFormat: "zip", cancellationToken: CancellationToken.None);
+
+        Assert.Equal(0, await service.EnsureScheduledBackupsAsync(CancellationToken.None));
+
+        Assert.True(reader.DeniedFilesCount > 0);
+        Assert.True(reader.DeniedSubdirectoriesCount > 0);
+        Assert.False(File.Exists(oldestPath));
+        Assert.True(File.Exists(latestPath));
+        Assert.True((await service.VerifyBackupAsync(latest.Backup.RelativePath)).Verified);
+        Assert.True(File.Exists(inaccessibleFile));
+    }
+
+    [Fact]
+    public async Task EnsureScheduledBackupsAsync_DoesNotPruneWhenRootListingFails()
+    {
+        var reader = new FaultingBackupDirectoryReader();
+        await using var scope = await CreateScopeAsync(reader);
+        var service = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        var oldest = await service.CreateManualBackupAsync(CancellationToken.None);
+        var latest = await service.CreateManualBackupAsync(CancellationToken.None);
+        var oldestPath = service.ResolveBackupPath(oldest.Backup.RelativePath)!;
+        var latestPath = service.ResolveBackupPath(latest.Backup.RelativePath)!;
+        File.SetLastWriteTimeUtc(oldestPath, DateTime.UtcNow.AddDays(-10));
+        File.SetLastWriteTimeUtc(latestPath, DateTime.UtcNow.AddDays(-9));
+        reader.DeniedSubdirectoriesDirectory = Path.Combine(scope.Root, "backups");
+        await service.UpdateSettingsAsync(
+            automaticEnabled: false, scheduleLocal: "03:00", retentionDays: 1,
+            backupFormat: "zip", cancellationToken: CancellationToken.None);
+
+        Assert.Equal(0, await service.EnsureScheduledBackupsAsync(CancellationToken.None));
+
+        Assert.True(reader.DeniedSubdirectoriesCount > 0);
+        Assert.True(File.Exists(oldestPath));
+        Assert.True(File.Exists(latestPath));
+    }
+
+    [Fact]
     public async Task EnsureScheduledBackupsAsync_ConcurrentRunsCreateOneVerifiedSlot()
     {
         await using var scope = await CreateScopeAsync();
@@ -506,7 +562,7 @@ public sealed class DatabaseBackupServiceS3Tests
             Path.Combine(Path.GetDirectoryName(report.Target)!, "files", "file-storage", "task-files", "evidence.txt")));
     }
 
-    private static async Task<TestScope> CreateScopeAsync()
+    private static async Task<TestScope> CreateScopeAsync(IBackupDirectoryReader? directoryReader = null)
     {
         var root = Path.Combine(Path.GetTempPath(), $"payplanner-backup-s3-{Guid.NewGuid():N}");
         Directory.CreateDirectory(root);
@@ -520,6 +576,7 @@ public sealed class DatabaseBackupServiceS3Tests
         var yandexDisk = new FakeYandexDiskService();
         var services = new ServiceCollection();
         services.AddSingleton(providerInfo);
+        if (directoryReader is not null) services.AddSingleton(directoryReader);
         services.AddSingleton<IConfiguration>(new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
@@ -705,6 +762,37 @@ public sealed class DatabaseBackupServiceS3Tests
                 Directory.Delete(Root, recursive: true);
             }
         }
+    }
+
+    private sealed class FaultingBackupDirectoryReader : IBackupDirectoryReader
+    {
+        private readonly PhysicalBackupDirectoryReader _physical = new();
+        public string? DeniedFilesDirectory { get; set; }
+        public string? DeniedSubdirectoriesDirectory { get; set; }
+        public int DeniedFilesCount { get; private set; }
+        public int DeniedSubdirectoriesCount { get; private set; }
+
+        public IReadOnlyList<string> GetFiles(string directory, string pattern)
+        {
+            if (string.Equals(directory, DeniedFilesDirectory, StringComparison.OrdinalIgnoreCase))
+            {
+                DeniedFilesCount++;
+                throw new UnauthorizedAccessException("Simulated inaccessible backup files.");
+            }
+            return _physical.GetFiles(directory, pattern);
+        }
+
+        public IReadOnlyList<string> GetDirectories(string directory)
+        {
+            if (string.Equals(directory, DeniedSubdirectoriesDirectory, StringComparison.OrdinalIgnoreCase))
+            {
+                DeniedSubdirectoriesCount++;
+                throw new UnauthorizedAccessException("Simulated inaccessible backup subdirectories.");
+            }
+            return _physical.GetDirectories(directory);
+        }
+
+        public bool IsEmpty(string directory) => _physical.IsEmpty(directory);
     }
 
     private sealed class TestWebHostEnvironment(string root) : IWebHostEnvironment
