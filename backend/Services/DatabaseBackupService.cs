@@ -323,6 +323,8 @@ public sealed class DatabaseBackupService
             throw new FileNotFoundException("Локальная резервная копия для повторной отправки не найдена.");
         }
 
+        await ReadVerifiedManifestAsync(storedResult.BackupRelativePath, cancellationToken);
+
         var fileInfo = new FileInfo(resolvedPath);
         var pendingResult = storedResult with
         {
@@ -366,6 +368,8 @@ public sealed class DatabaseBackupService
         {
             throw new FileNotFoundException("Локальная резервная копия для повторной отправки не найдена.");
         }
+
+        await ReadVerifiedManifestAsync(storedResult.BackupRelativePath, cancellationToken);
 
         var fileInfo = new FileInfo(resolvedPath);
         var pendingResult = storedResult with
@@ -1112,6 +1116,7 @@ public sealed class DatabaseBackupService
                 "application/octet-stream",
                 overwrite: true,
                 cancellationToken);
+            EnsureCloudUploadSucceeded(upload.Success, result.TargetPath);
             var manifestPath = GetManifestPath(resolvedPath);
             if (!File.Exists(manifestPath))
             {
@@ -1125,24 +1130,26 @@ public sealed class DatabaseBackupService
                 var partPath = ResolveBackupPath(part.RelativePath)
                     ?? throw new FileNotFoundException($"Часть backup set не найдена: {part.RelativePath}.");
                 await using var partStream = File.OpenRead(partPath);
-                await s3StorageService.UploadAsync(
+                var partUpload = await s3StorageService.UploadAsync(
                     result.ConnectionId,
                     $"{result.TargetPath}.{Path.GetFileName(partPath)}",
                     partStream,
                     "application/octet-stream",
                     overwrite: true,
                     cancellationToken);
+                EnsureCloudUploadSucceeded(partUpload.Success, part.RelativePath);
             }
 
             await using (var manifestStream = File.OpenRead(manifestPath))
             {
-                await s3StorageService.UploadAsync(
+                var manifestUpload = await s3StorageService.UploadAsync(
                     result.ConnectionId,
                     $"{result.TargetPath}.manifest.json",
                     manifestStream,
                     "application/json",
                     overwrite: true,
                     cancellationToken);
+                EnsureCloudUploadSucceeded(manifestUpload.Success, "manifest.json");
             }
 
             return result with
@@ -1221,6 +1228,7 @@ public sealed class DatabaseBackupService
                 "application/octet-stream",
                 overwrite: true,
                 cancellationToken);
+            EnsureCloudUploadSucceeded(upload.Success, result.TargetPath);
             var manifestPath = GetManifestPath(resolvedPath);
             if (!File.Exists(manifestPath))
             {
@@ -1234,22 +1242,24 @@ public sealed class DatabaseBackupService
                 var partPath = ResolveBackupPath(part.RelativePath)
                     ?? throw new FileNotFoundException($"Часть backup set не найдена: {part.RelativePath}.");
                 await using var partStream = File.OpenRead(partPath);
-                await yandexDiskService.UploadAsync(
+                var partUpload = await yandexDiskService.UploadAsync(
                     $"{result.TargetPath}.{Path.GetFileName(partPath)}",
                     partStream,
                     "application/octet-stream",
                     overwrite: true,
                     cancellationToken);
+                EnsureCloudUploadSucceeded(partUpload.Success, part.RelativePath);
             }
 
             await using (var manifestStream = File.OpenRead(manifestPath))
             {
-                await yandexDiskService.UploadAsync(
+                var manifestUpload = await yandexDiskService.UploadAsync(
                     $"{result.TargetPath}.manifest.json",
                     manifestStream,
                     "application/json",
                     overwrite: true,
                     cancellationToken);
+                EnsureCloudUploadSucceeded(manifestUpload.Success, "manifest.json");
             }
 
             return result with
@@ -1270,6 +1280,12 @@ public sealed class DatabaseBackupService
                 UpdatedAt = DateTime.UtcNow,
             };
         }
+    }
+
+    private static void EnsureCloudUploadSucceeded(bool success, string partName)
+    {
+        if (!success)
+            throw new IOException($"Облачное хранилище не подтвердило загрузку части резервной копии: {Path.GetFileName(partName)}.");
     }
 
     private async Task<IReadOnlyList<DatabaseBackupS3UploadResult>> LoadS3UploadResultsAsync(CancellationToken cancellationToken)

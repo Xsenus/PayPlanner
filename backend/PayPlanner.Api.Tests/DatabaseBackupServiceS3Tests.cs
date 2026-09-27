@@ -115,6 +115,42 @@ public sealed class DatabaseBackupServiceS3Tests
     }
 
     [Fact]
+    public async Task RetryS3UploadAsync_RejectsCorruptLocalFilePartBeforeSending()
+    {
+        await using var scope = await CreateScopeAsync();
+        scope.S3.ThrowOnUpload = true;
+        var service = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        await service.UpdateSettingsAsync(true, "03:00", 14, "sqlite",
+            s3UploadEnabled: true, s3ConnectionIds: ["s3-main"], cancellationToken: CancellationToken.None);
+        var created = await service.CreateManualBackupAsync();
+        var failedUpload = Assert.Single(created.S3UploadResults);
+        Assert.Equal("failed", failedUpload.Status);
+        await File.AppendAllTextAsync($"{service.ResolveBackupPath(created.Backup.RelativePath)}.fileset", "corrupt");
+        scope.S3.ThrowOnUpload = false;
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => service.RetryS3UploadAsync(failedUpload.Id));
+
+        Assert.Empty(scope.S3.UploadedPaths);
+        Assert.Equal("failed", Assert.Single((await service.GetOverviewAsync()).S3UploadResults).Status);
+    }
+
+    [Fact]
+    public async Task CreateManualBackupAsync_DoesNotMarkS3CopySuccessfulWhenFilePartIsRejected()
+    {
+        await using var scope = await CreateScopeAsync();
+        scope.S3.FailResultPathSuffix = ".fileset";
+        var service = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        await service.UpdateSettingsAsync(true, "03:00", 14, "sqlite",
+            s3UploadEnabled: true, s3ConnectionIds: ["s3-main"], cancellationToken: CancellationToken.None);
+
+        var created = await service.CreateManualBackupAsync();
+
+        var result = Assert.Single(created.S3UploadResults);
+        Assert.Equal("failed", result.Status);
+        Assert.DoesNotContain(scope.S3.UploadedPaths, path => path.EndsWith(".manifest.json", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task CreateManualBackupAsync_UploadsBackupToYandexDiskWhenEnabled()
     {
         await using var scope = await CreateScopeAsync();
@@ -181,6 +217,40 @@ public sealed class DatabaseBackupServiceS3Tests
         var stored = Assert.Single(overview.YandexDiskUploadResults);
         Assert.Equal(failedUpload.Id, stored.Id);
         Assert.Equal("success", stored.Status);
+    }
+
+    [Fact]
+    public async Task RetryYandexDiskUploadAsync_RejectsCorruptLocalFilePartBeforeSending()
+    {
+        await using var scope = await CreateScopeAsync();
+        scope.YandexDisk.ThrowOnUpload = true;
+        var service = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        await service.UpdateSettingsAsync(true, "03:00", 14, "sqlite",
+            yandexDiskUploadEnabled: true, cancellationToken: CancellationToken.None);
+        var created = await service.CreateManualBackupAsync();
+        var failedUpload = Assert.Single(created.YandexDiskUploadResults);
+        Assert.Equal("failed", failedUpload.Status);
+        await File.AppendAllTextAsync($"{service.ResolveBackupPath(created.Backup.RelativePath)}.fileset", "corrupt");
+        scope.YandexDisk.ThrowOnUpload = false;
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => service.RetryYandexDiskUploadAsync(failedUpload.Id));
+
+        Assert.Empty(scope.YandexDisk.UploadedPaths);
+        Assert.Equal("failed", Assert.Single((await service.GetOverviewAsync()).YandexDiskUploadResults).Status);
+    }
+
+    [Fact]
+    public async Task CreateManualBackupAsync_DoesNotMarkYandexCopySuccessfulWhenManifestIsRejected()
+    {
+        await using var scope = await CreateScopeAsync();
+        scope.YandexDisk.FailResultPathSuffix = ".manifest.json";
+        var service = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        await service.UpdateSettingsAsync(true, "03:00", 14, "sqlite",
+            yandexDiskUploadEnabled: true, cancellationToken: CancellationToken.None);
+
+        var created = await service.CreateManualBackupAsync();
+
+        Assert.Equal("failed", Assert.Single(created.YandexDiskUploadResults).Status);
     }
 
     [Fact]
@@ -727,6 +797,7 @@ public sealed class DatabaseBackupServiceS3Tests
     private sealed class FakeS3StorageService : IS3StorageService
     {
         public bool ThrowOnUpload { get; set; }
+        public string? FailResultPathSuffix { get; set; }
         public List<string> UploadedPaths { get; } = [];
         public long UploadedBytes { get; private set; }
 
@@ -761,7 +832,7 @@ public sealed class DatabaseBackupServiceS3Tests
             UploadedBytes = memory.Length;
             return new S3StorageOperationResultDto
             {
-                Success = true,
+                Success = FailResultPathSuffix is null || !(path?.EndsWith(FailResultPathSuffix, StringComparison.Ordinal) ?? false),
                 Path = path ?? string.Empty,
                 Key = path?.TrimStart('/') ?? string.Empty,
             };
@@ -789,6 +860,7 @@ public sealed class DatabaseBackupServiceS3Tests
     private sealed class FakeYandexDiskService : IYandexDiskService
     {
         public bool ThrowOnUpload { get; set; }
+        public string? FailResultPathSuffix { get; set; }
         public List<string> UploadedPaths { get; } = [];
         public long UploadedBytes { get; private set; }
 
@@ -829,7 +901,7 @@ public sealed class DatabaseBackupServiceS3Tests
             UploadedBytes = memory.Length;
             return new YandexDiskOperationResultDto
             {
-                Success = true,
+                Success = FailResultPathSuffix is null || !(path?.EndsWith(FailResultPathSuffix, StringComparison.Ordinal) ?? false),
                 Path = path ?? string.Empty,
             };
         }
