@@ -1,9 +1,49 @@
+using System.Reflection;
+using Microsoft.EntityFrameworkCore;
+using Npgsql;
+using PayPlanner.Api.Controllers;
+using PayPlanner.Api.Data;
+using PayPlanner.Api.Models;
 using Xunit;
 
 namespace PayPlanner.Api.Tests;
 
 public class ProviderSpecificSqlTests
 {
+    [Fact]
+    public async Task InvoiceDeletionLock_ExecutesAgainstPostgreSql()
+    {
+        var connectionString = Environment.GetEnvironmentVariable("PAYPLANNER_TEST_POSTGRES");
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            Assert.False(string.Equals(Environment.GetEnvironmentVariable("CI"), "true", StringComparison.OrdinalIgnoreCase),
+                "PAYPLANNER_TEST_POSTGRES must be configured in CI.");
+            return;
+        }
+
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync();
+        await using (var create = connection.CreateCommand())
+        {
+            create.CommandText = "CREATE TEMP TABLE \"Payments\" (\"Id\" integer PRIMARY KEY); INSERT INTO \"Payments\" (\"Id\") VALUES (1)";
+            await create.ExecuteNonQueryAsync();
+        }
+
+        var options = new DbContextOptionsBuilder<PostgreSqlPaymentContext>()
+            .UseNpgsql(connection)
+            .Options;
+        await using var db = new PostgreSqlPaymentContext(options);
+        var controller = new InvoicesController(db, null!, null!);
+        var method = typeof(InvoicesController).GetMethod("LockInvoiceDeletionPaymentsAsync", BindingFlags.NonPublic | BindingFlags.Instance);
+        Assert.NotNull(method);
+
+        await using var transaction = await db.Database.BeginTransactionAsync();
+        var lockTask = Assert.IsAssignableFrom<Task>(method.Invoke(controller,
+            [new[] { new Payment { Id = 1 } }, CancellationToken.None]));
+        await lockTask;
+        await transaction.RollbackAsync();
+    }
+
     [Fact]
     public void InvoiceAggregateLock_UsesPostgreSqlOnlyForUpdateSql()
     {
