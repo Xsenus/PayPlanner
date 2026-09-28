@@ -11,6 +11,54 @@ namespace PayPlanner.Api.Tests;
 public sealed class DatabaseBackupSnapshotInventoryTests
 {
     [Theory]
+    [InlineData(false, "none")]
+    [InlineData(true, "none")]
+    [InlineData(false, "native-size")]
+    [InlineData(true, "native-size")]
+    [InlineData(false, "hold")]
+    [InlineData(true, "hold")]
+    [InlineData(false, "replica")]
+    [InlineData(true, "replica")]
+    public async Task VerifierMatchesAllNativeClassesAndHeldGenerationsAgainstOneDatabaseView(bool postgres, string corruption)
+    {
+        await using var fixture = await Fixture.CreateAsync(postgres);
+        if (fixture is null) return;
+        await SeedFilesAsync(fixture.Db);
+        var owner = new StorageObject { CurrentGeneration = 1, IsDeleted = true };
+        var generation = Generation(owner, 1);
+        generation.Replicas.Add(new StorageReplica
+        {
+            ProviderKey = "local",
+            Locator = "held.bin",
+            Status = StorageReplicaStatuses.DeletePending
+        });
+        fixture.Db.AddRange(generation, new StorageTombstone { StorageObject = owner, Generation = 1, LegalHold = true });
+        await fixture.Db.SaveChangesAsync();
+        await using var snapshot = await fixture.SnapshotAsync();
+        var files = await CollectAsync(DatabaseBackupSnapshotInventory.ReadStoredFilesAsync(snapshot));
+        var replicas = await CollectAsync(DatabaseBackupSnapshotInventory.ReadStorageReplicasAsync(snapshot));
+        if (corruption == "native-size") files[0] = files[0] with { SizeBytes = 999 };
+        if (corruption == "hold") replicas[0] = replicas[0] with { LegalHold = false };
+        if (corruption == "replica") replicas[0] = replicas[0] with { Locator = "substituted.bin" };
+        using var inventory = new MemoryStream(System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            formatVersion = 1,
+            storedFiles = files,
+            storageReplicas = replicas,
+            storedFileCount = files.Count,
+            storageReplicaCount = replicas.Count
+        }, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)));
+        if (corruption == "none")
+            await DatabaseBackupInventoryVerifier.VerifyAsync(inventory, snapshot, CancellationToken.None);
+        else
+            await Assert.ThrowsAsync<InvalidDataException>(() =>
+                DatabaseBackupInventoryVerifier.VerifyAsync(inventory, snapshot, CancellationToken.None));
+        Assert.True(inventory.CanRead);
+        await using var command = snapshot.CreateCommand("SELECT 1");
+        Assert.Equal(1, Convert.ToInt32(await command.ExecuteScalarAsync()));
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task ReadsEveryNativeClassAndOldVersionsFromTheSnapshotNotLaterWrites(bool postgres)

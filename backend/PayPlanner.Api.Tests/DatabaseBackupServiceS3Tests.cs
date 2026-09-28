@@ -20,6 +20,63 @@ namespace PayPlanner.Api.Tests;
 public sealed class DatabaseBackupServiceS3Tests
 {
     [Theory]
+    [InlineData("path")]
+    [InlineData("missing")]
+    [InlineData("extra")]
+    [InlineData("version")]
+    public async Task RestoreRejectsInventoryFactsThatDifferFromDatabaseEvenWithFreshChecksums(string corruption)
+    {
+        await using var scope = await CreateScopeAsync();
+        await using (var db = await scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContextAsync())
+        {
+            db.Users.Add(new User
+            {
+                Email = "restore-compare@local.test",
+                PasswordHash = "test",
+                Role = new Role { Name = "compare" },
+                PhotoUrl = "https://external.example.test/original.png"
+            });
+            await db.SaveChangesAsync();
+        }
+        var backups = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        var created = await backups.CreateManualBackupAsync();
+        var manifest = await backups.ReadVerifiedManifestAsync(created.Backup.RelativePath);
+        var part = Assert.Single(manifest.Parts!, item => item.Kind == "file-references");
+        var path = backups.ResolveBackupPath(part.RelativePath)!;
+        var node = System.Text.Json.Nodes.JsonNode.Parse(await File.ReadAllTextAsync(path))!;
+        var files = node["storedFiles"]!.AsArray();
+        Assert.Single(files);
+        switch (corruption)
+        {
+            case "path": files[0]!["storedPath"] = "https://external.example.test/changed.png"; break;
+            case "version": files[0]!["version"] = 99; break;
+            case "missing": files.Clear(); node["storedFileCount"] = 0; break;
+            default:
+                var extra = files[0]!.DeepClone();
+                extra["sourceId"] = 999999;
+                files.Add(extra);
+                node["storedFileCount"] = 2;
+                break;
+        }
+        await File.WriteAllTextAsync(path, node.ToJsonString());
+        var changedPart = part with
+        {
+            SizeBytes = new FileInfo(path).Length,
+            Sha256 = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(path)))
+        };
+        await File.WriteAllTextAsync(backups.ResolveBackupPath(created.Backup.RelativePath)! + ".manifest.json",
+            JsonSerializer.Serialize(manifest with { Parts = manifest.Parts!.Select(item => item == part ? changedPart : item).ToArray() },
+                new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+        Assert.True((await backups.VerifyBackupAsync(created.Backup.RelativePath)).Verified);
+        var report = await scope.Provider.GetRequiredService<DatabaseRestoreDrillService>()
+            .RunAsync(created.Backup.RelativePath, false, null, CancellationToken.None);
+        Assert.Equal("failed", report.Status);
+        Assert.Contains("не соответствует", report.Error!, StringComparison.Ordinal);
+        await using var original = await scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContextAsync();
+        Assert.Equal("https://external.example.test/original.png", (await original.Users.SingleAsync()).PhotoUrl);
+    }
+
+    [Theory]
     [InlineData("missing")]
     [InlineData("count")]
     [InlineData("version")]

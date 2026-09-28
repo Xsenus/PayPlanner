@@ -149,6 +149,13 @@ public sealed class DatabaseRestoreDrillService(
         if (foreignKeyViolations > 0)
             throw new InvalidDataException($"В восстановленной SQLite обнаружено нарушений внешних ключей: {foreignKeyViolations}.");
         await SanitizeRestoredSqliteAsync(connection, cancellationToken);
+        if (manifest.FormatVersion >= 2)
+        {
+            var livePath = activeDatabase.IsSqlite
+                ? Path.GetFullPath(new SqliteConnectionStringBuilder(activeDatabase.ConnectionString).DataSource) : backupPath;
+            await using var snapshot = await DatabaseBackupSnapshotSession.OpenSqliteCopyAsync(targetPath, livePath, cancellationToken);
+            await VerifyRestoredInventoryAsync(manifest, snapshot, cancellationToken);
+        }
         await RestoreFilePartsAsync(manifest, targetDirectory, cancellationToken);
 
         return new DatabaseRestoreDrillReport(
@@ -252,6 +259,11 @@ public sealed class DatabaseRestoreDrillService(
         if (tableCount == 0)
             throw new InvalidDataException("Восстановление PostgreSQL завершилось без таблиц приложения.");
         await SanitizeRestoredPostgreSqlAsync(connection, cancellationToken);
+        if (manifest.FormatVersion >= 2)
+        {
+            await using var snapshot = await DatabaseBackupSnapshotSession.OpenPostgreSqlAsync(target.ConnectionString, cancellationToken);
+            await VerifyRestoredInventoryAsync(manifest, snapshot, cancellationToken);
+        }
         await RestoreFilePartsAsync(manifest, targetDirectory, cancellationToken);
 
         return new DatabaseRestoreDrillReport(
@@ -365,6 +377,19 @@ public sealed class DatabaseRestoreDrillService(
         return root;
     }
 
+    private async Task VerifyRestoredInventoryAsync(DatabaseBackupManifest manifest,
+        DatabaseBackupSnapshotSession snapshot, CancellationToken cancellationToken)
+    {
+        var part = manifest.Parts!.Single(item => item.Kind == "file-references");
+        var path = backups.ResolveBackupPath(part.RelativePath)
+            ?? throw new FileNotFoundException("Перечень документов резервной копии недоступен.");
+        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, true);
+        await VerifyPartStreamAsync(stream, part, cancellationToken);
+        stream.Position = 0;
+        await DatabaseBackupInventoryVerifier.VerifyAsync(stream, snapshot, cancellationToken);
+        await VerifyPartStreamAsync(stream, part, cancellationToken);
+    }
+
     private async Task RestoreFilePartsAsync(
         DatabaseBackupManifest manifest,
         string targetDirectory,
@@ -379,7 +404,7 @@ public sealed class DatabaseRestoreDrillService(
             var archivePath = backups.ResolveBackupPath(part.RelativePath)
                 ?? throw new FileNotFoundException($"Часть backup set не найдена: {part.RelativePath}.");
             await using var archiveStream = new FileStream(archivePath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, true);
-            await VerifyArchiveStreamAsync(archiveStream, part, cancellationToken);
+            await VerifyPartStreamAsync(archiveStream, part, cancellationToken);
             archiveStream.Position = 0;
             using var archive = new ZipArchive(archiveStream, ZipArchiveMode.Read, leaveOpen: true);
             foreach (var entry in archive.Entries)
@@ -425,17 +450,17 @@ public sealed class DatabaseRestoreDrillService(
             }
             // A read-sharing handle prevents writes on Windows. Unix permits concurrent
             // writes, so also verify the same handle after extraction before reporting success.
-            await VerifyArchiveStreamAsync(archiveStream, part, cancellationToken);
+            await VerifyPartStreamAsync(archiveStream, part, cancellationToken);
         }
     }
 
-    private static async Task VerifyArchiveStreamAsync(FileStream stream, DatabaseBackupPartManifest part,
+    private static async Task VerifyPartStreamAsync(FileStream stream, DatabaseBackupPartManifest part,
         CancellationToken cancellationToken)
     {
         stream.Position = 0;
         var hash = Convert.ToHexString(await SHA256.HashDataAsync(stream, cancellationToken));
         if (stream.Length != part.SizeBytes || !string.Equals(hash, part.Sha256, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidDataException("Размер или SHA-256 файлового архива изменился после проверки резервной копии.");
+            throw new InvalidDataException("Размер или SHA-256 части резервной копии изменился после её проверки.");
     }
 
     private void EnsureNotActiveSqliteDatabase(string targetPath)

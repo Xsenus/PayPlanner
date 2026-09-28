@@ -17,8 +17,10 @@ namespace PayPlanner.Api.Tests;
 
 public sealed class DatabaseRestoreDrillEndToEndPostgreSqlTests
 {
-    [Fact]
-    public async Task RestoresRealDumpIntoEmptyDatabase_AndIsolatesEmail()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RestoresRealDumpIntoEmptyDatabase_AndIsolatesEmail(bool withInventory)
     {
         var connectionString = Environment.GetEnvironmentVariable("PAYPLANNER_TEST_POSTGRES");
         if (string.IsNullOrWhiteSpace(connectionString))
@@ -65,6 +67,27 @@ public sealed class DatabaseRestoreDrillEndToEndPostgreSqlTests
                     INSERT INTO public.restore_evidence (id, label) VALUES (42, 'restored');
                     """;
                 await seed.ExecuteNonQueryAsync();
+                if (withInventory)
+                {
+                    // Only the columns consumed by the inventory queries are needed here;
+                    // full application schemas are covered by snapshot inventory tests.
+                    seed.CommandText = """
+                        CREATE TABLE "TaskJournalFiles" ("Id" integer, "StoragePath" text, "SizeBytes" bigint, "Version" integer);
+                        CREATE TABLE "ClientCaseDocuments" ("Id" integer, "StoragePath" text, "SizeBytes" bigint, "Version" integer);
+                        CREATE TABLE "InternalChatAttachments" ("Id" integer, "StoredFileName" text, "Size" bigint, "MessageId" integer);
+                        CREATE TABLE "InternalChatMessages" ("Id" integer, "ThreadId" integer);
+                        CREATE TABLE "MessengerDocumentDeliveries" ("Id" integer, "SnapshotPath" text, "SizeBytes" bigint, "ChecksumSha256" text, "DocumentVersion" integer);
+                        CREATE TABLE "ElectronicSignatureEnvelopes" ("Id" integer, "SnapshotPath" text, "SizeBytes" bigint, "ChecksumSha256" text, "DocumentVersion" integer);
+                        CREATE TABLE "ElectronicSignatureArtifacts" ("Id" integer, "StoragePath" text, "SizeBytes" bigint, "ChecksumSha256" text, "EnvelopeId" integer);
+                        CREATE TABLE "Users" ("Id" integer, "PhotoUrl" text);
+                        INSERT INTO "Users" VALUES (1, 'https://external.invalid/photo.png');
+                        CREATE TABLE "StorageObjects" ("Id" uuid, "CurrentGeneration" bigint, "IsDeleted" boolean);
+                        CREATE TABLE "StorageObjectGenerations" ("Id" uuid, "StorageObjectId" uuid, "Generation" bigint, "SizeBytes" bigint, "Sha256" text);
+                        CREATE TABLE "StorageTombstones" ("StorageObjectId" uuid, "LegalHold" boolean, "RetainUntil" timestamp);
+                        CREATE TABLE "StorageReplicas" ("Id" bigint, "StorageObjectGenerationId" uuid, "ProviderKey" text, "ConnectionId" text, "Locator" text, "Status" text);
+                        """;
+                    await seed.ExecuteNonQueryAsync();
+                }
             }
 
             var backupRoot = Path.Combine(root, "backups");
@@ -81,13 +104,31 @@ public sealed class DatabaseRestoreDrillEndToEndPostgreSqlTests
             await using (var stream = File.OpenRead(backupPath))
             {
                 var hash = Convert.ToHexString(await SHA256.HashDataAsync(stream)).ToLowerInvariant();
+                var parts = new List<DatabaseBackupPartManifest>
+                {
+                    new("database", "test.sql", stream.Length, hash, true),
+                    new("file-storage", "test.sql.fileset", new FileInfo(filesetPath).Length, filesetHash, true),
+                };
+                if (withInventory)
+                {
+                    var inventoryPath = backupPath + ".references";
+                    await File.WriteAllTextAsync(inventoryPath, JsonSerializer.Serialize(new
+                    {
+                        formatVersion = 1,
+                        storedFiles = new[] { new DatabaseBackupStoredFileReference(
+                            "profile-photo", 1, "https://external.invalid/photo.png", null, null, null, null) },
+                        storageReplicas = Array.Empty<DatabaseBackupStorageReplicaReference>(),
+                        storedFileCount = 1,
+                        storageReplicaCount = 0,
+                    }, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+                    await using var inventory = File.OpenRead(inventoryPath);
+                    var inventoryHash = Convert.ToHexString(await SHA256.HashDataAsync(inventory)).ToLowerInvariant();
+                    parts.Add(new("file-references", "test.sql.references", inventory.Length, inventoryHash, true));
+                }
                 var manifest = new DatabaseBackupManifest(
-                    1, Guid.NewGuid().ToString("N"), "test.sql", "test.sql", "postgresql", "sql",
+                    withInventory ? 2 : 1, Guid.NewGuid().ToString("N"), "test.sql", "test.sql", "postgresql", "sql",
                     stream.Length, hash, "manual", DateTime.UtcNow, "test", Parts:
-                    [
-                        new DatabaseBackupPartManifest("database", "test.sql", stream.Length, hash, true),
-                        new DatabaseBackupPartManifest("file-storage", "test.sql.fileset", new FileInfo(filesetPath).Length, filesetHash, true),
-                    ], RecoveryKeyReference: "external-test-key-reference");
+                    parts, RecoveryKeyReference: "external-test-key-reference");
                 await File.WriteAllTextAsync(backupPath + ".manifest.json",
                     JsonSerializer.Serialize(manifest, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
             }
@@ -154,6 +195,11 @@ public sealed class DatabaseRestoreDrillEndToEndPostgreSqlTests
             Assert.Equal("skipped", await verify.ExecuteScalarAsync());
             verify.CommandText = "SELECT \"ConfigJson\" FROM \"NotificationSenders\" WHERE \"Id\" = 1 AND NOT \"IsEnabled\"";
             Assert.Equal("{}", await verify.ExecuteScalarAsync());
+            if (withInventory)
+            {
+                verify.CommandText = "SELECT \"PhotoUrl\" FROM \"Users\" WHERE \"Id\" = 1";
+                Assert.Equal("https://external.invalid/photo.png", await verify.ExecuteScalarAsync());
+            }
             Assert.True((await backups.VerifyBackupAsync("test.sql")).Verified);
 
             await using var sourceCheck = new NpgsqlConnection(sourceBuilder.ConnectionString);
