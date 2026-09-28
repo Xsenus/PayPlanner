@@ -636,7 +636,7 @@ public sealed class DatabaseBackupService
                 ex.Message));
         }
 
-        if (manifest is null || manifest.FormatVersion is not (1 or 2 or 3 or 4))
+        if (manifest is null || manifest.FormatVersion is not (1 or 2 or 3 or 4 or 5))
         {
             return Select(new DatabaseBackupVerificationResult(
                 "invalidManifest",
@@ -684,6 +684,15 @@ public sealed class DatabaseBackupService
             }
             else if (nativeBindings.Length != 0)
                 throw new InvalidDataException("Сопоставление архивных документов требует нового формата комплекта.");
+            var managedBindings = manifest.Parts?.Where(part => part?.Kind == "managed-file-bindings").ToArray() ?? [];
+            if (manifest.FormatVersion >= 5)
+            {
+                if (managedBindings.Length != 1 || !managedBindings[0].Required
+                    || managedBindings[0].RelativePath != manifest.BackupRelativePath + ".managedfiles")
+                    throw new InvalidDataException("Новый комплект должен включать обязательное сопоставление поколений.");
+            }
+            else if (managedBindings.Length != 0)
+                throw new InvalidDataException("Сопоставление поколений требует нового формата комплекта.");
             foreach (var part in manifest.Parts ?? [])
             {
                 if (part is null) throw new InvalidDataException("Manifest содержит пустую часть комплекта.");
@@ -785,7 +794,11 @@ public sealed class DatabaseBackupService
         }
         if (verified && manifest.FormatVersion >= 4)
         {
-            try { await VerifyNativeBindingCoverageAsync(manifest, cancellationToken); }
+            try
+            {
+                await VerifyNativeBindingCoverageAsync(manifest, cancellationToken);
+                if (manifest.FormatVersion >= 5) await VerifyNativeBindingCoverageAsync(manifest, cancellationToken, managed: true);
+            }
             catch (Exception ex) when (ex is IOException or InvalidDataException or JsonException)
             {
                 verified = false;
@@ -2440,7 +2453,8 @@ public sealed class DatabaseBackupService
             await ComputeSha256Async(resolvedPath, cancellationToken),
             true);
         var manifest = new DatabaseBackupManifest(
-            additionalParts.Any(part => part.Kind == "native-file-bindings") ? 4 : 3,
+            additionalParts.Any(part => part.Kind == "managed-file-bindings") ? 5
+                : additionalParts.Any(part => part.Kind == "native-file-bindings") ? 4 : 3,
             Guid.NewGuid().ToString("N"),
             backup.FileName,
             backup.RelativePath.Replace('\\', '/'),
@@ -2584,6 +2598,7 @@ public sealed class DatabaseBackupService
             bindingPublished = true;
             result.Add(new("native-file-bindings", Path.GetRelativePath(_backupRootDirectory, bindingPath).Replace('\\', '/'),
                 bindingSize, bindingHash, true));
+            result.AddRange(await CreateManagedArchiveAsync(backup, referencePart, layout, scope.ServiceProvider, cancellationToken));
             return result;
         }
         catch
@@ -2597,6 +2612,95 @@ public sealed class DatabaseBackupService
             if (temporaryCreated) TryDeleteFile(temporaryPath);
             if (bindingTemporaryCreated) TryDeleteFile(bindingTemporaryPath);
             if (planCreated) TryDeleteFile(planPath);
+        }
+    }
+
+    private async Task<IReadOnlyList<DatabaseBackupPartManifest>> CreateManagedArchiveAsync(DatabaseBackupFileInfo backup,
+        DatabaseBackupPartManifest references, DatabaseBackupFileLayout layout, IServiceProvider services, CancellationToken token)
+    {
+        var basePath = ResolveBackupPath(backup.RelativePath) ?? throw new FileNotFoundException("Созданная копия недоступна.");
+        var archivePath = basePath + ".managedset";
+        var mappingPath = basePath + ".managedfiles";
+        var archiveTemporary = archivePath + $".{Guid.NewGuid():N}.tmp";
+        var mappingTemporary = mappingPath + $".{Guid.NewGuid():N}.tmp";
+        var archiveCreated = false;
+        var mappingCreated = false;
+        var archivePublished = false;
+        var mappingPublished = false;
+        var resolver = new DatabaseBackupFileBindingResolver(layout);
+        var partPath = Path.GetRelativePath(_backupRootDirectory, archivePath).Replace('\\', '/');
+        try
+        {
+            long count;
+            await using (var inventory = new FileStream(ResolveBackupPath(references.RelativePath)
+                ?? throw new FileNotFoundException("Перечень копии недоступен."), FileMode.Open, FileAccess.Read, FileShare.Read, 81920, true))
+            {
+                await VerifyPartStreamAsync(inventory, references, token);
+                inventory.Position = 0;
+                await using (var output = new FileStream(archiveTemporary, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, true))
+                {
+                    archiveCreated = true;
+                    using var archive = new ZipArchive(output, ZipArchiveMode.Create, leaveOpen: true);
+                    await using var mapping = new FileStream(mappingTemporary, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, true);
+                    mappingCreated = true;
+                    count = await DatabaseBackupManagedBindings.WriteAsync(inventory, mapping, archive, partPath,
+                        references.Sha256, Path.GetDirectoryName(basePath)!, OpenReplicaAsync, token);
+                }
+                await VerifyPartStreamAsync(inventory, references, token);
+            }
+            var result = new List<DatabaseBackupPartManifest>();
+            if (count > 0)
+            {
+                var size = new FileInfo(archiveTemporary).Length;
+                var hash = await ComputeSha256Async(archiveTemporary, token);
+                File.Move(archiveTemporary, archivePath, overwrite: false);
+                archivePublished = true;
+                result.Add(new("file-storage", partPath, size, hash, true, FileEntryHashFormat: DatabaseBackupArchiveHash.Format));
+            }
+            var mappingSize = new FileInfo(mappingTemporary).Length;
+            var mappingHash = await ComputeSha256Async(mappingTemporary, token);
+            File.Move(mappingTemporary, mappingPath, overwrite: false);
+            mappingPublished = true;
+            result.Add(new("managed-file-bindings", Path.GetRelativePath(_backupRootDirectory, mappingPath).Replace('\\', '/'), mappingSize, mappingHash, true));
+            return result;
+        }
+        catch
+        {
+            if (archivePublished) TryDeleteFile(archivePath);
+            if (mappingPublished) TryDeleteFile(mappingPath);
+            throw;
+        }
+        finally
+        {
+            if (archiveCreated) TryDeleteFile(archiveTemporary);
+            if (mappingCreated) TryDeleteFile(mappingTemporary);
+        }
+
+        async Task<PayPlanner.Api.Services.Storage.StorageReadResult> OpenReplicaAsync(DatabaseBackupStorageReplicaReference reference, CancellationToken cancellationToken)
+        {
+            if (reference.ProviderKey is "local" or "legacy-local")
+            {
+                var resolved = resolver.ResolveLocalReplica(reference);
+                var path = resolved.PhysicalPath!;
+                // Pinned roots must not permit an inner directory/file link to redirect reads.
+                for (var current = path; !string.IsNullOrEmpty(current); current = Path.GetDirectoryName(current))
+                    if ((File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
+                        throw new InvalidDataException("Локальная реплика проходит через файловую ссылку.");
+                var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, true);
+                return new(PayPlanner.Api.Services.Storage.StorageOperationStatus.Succeeded, reference.Locator!, stream, stream.Length);
+            }
+            if (reference.ProviderKey is not ("s3" or "yandex-disk"))
+                return new(PayPlanner.Api.Services.Storage.StorageOperationStatus.Unavailable, reference.Locator!, null, 0);
+            (string ConnectionId, string Path) address;
+            try { address = PayPlanner.Api.Services.Storage.ConnectedStorageLocator.Parse(reference.Locator!); }
+            catch (ArgumentException)
+            { return new(PayPlanner.Api.Services.Storage.StorageOperationStatus.Unavailable, reference.Locator!, null, 0); }
+            if (reference.ConnectionId is not null && address.ConnectionId != reference.ConnectionId)
+                throw new InvalidDataException("Соединение реплики не соответствует её адресу.");
+            var registry = services.GetRequiredService<PayPlanner.Api.Services.Storage.IStorageProviderRegistry>();
+            if (!registry.TryGet(reference.ProviderKey, out var provider))
+                return new(PayPlanner.Api.Services.Storage.StorageOperationStatus.Unavailable, reference.Locator!, null, 0);
+            return await provider.OpenReadAsync(reference.Locator!, cancellationToken);
         }
     }
 
@@ -2627,10 +2731,10 @@ public sealed class DatabaseBackupService
         }
     }
 
-    private async Task VerifyNativeBindingCoverageAsync(DatabaseBackupManifest manifest, CancellationToken cancellationToken)
+    private async Task VerifyNativeBindingCoverageAsync(DatabaseBackupManifest manifest, CancellationToken cancellationToken, bool managed = false)
     {
         var references = manifest.Parts!.Single(part => part.Kind == "file-references");
-        var mapping = manifest.Parts!.Single(part => part.Kind == "native-file-bindings");
+        var mapping = manifest.Parts!.Single(part => part.Kind == (managed ? "managed-file-bindings" : "native-file-bindings"));
         var archiveParts = new Dictionary<string, DatabaseBackupPartManifest>(StringComparer.Ordinal);
         foreach (var part in manifest.Parts!.Where(part => part.Kind == "file-storage"))
             if (!archiveParts.TryAdd(part.RelativePath, part)) throw new InvalidDataException("Дублируется файловая часть комплекта.");
@@ -2645,7 +2749,9 @@ public sealed class DatabaseBackupService
         DatabaseBackupPartManifest? currentPart = null;
         try
         {
-            await DatabaseBackupNativeBindings.VerifyAsync(inventoryStream, bindingStream, references.Sha256, ReadArchivedFileAsync, cancellationToken);
+            if (managed)
+                await DatabaseBackupManagedBindings.VerifyAsync(inventoryStream, bindingStream, references.Sha256, ReadArchivedFileAsync, cancellationToken);
+            else await DatabaseBackupNativeBindings.VerifyAsync(inventoryStream, bindingStream, references.Sha256, ReadArchivedFileAsync, cancellationToken);
             if (archiveStream is not null) await VerifyPartStreamAsync(archiveStream, currentPart!, cancellationToken);
             await VerifyPartStreamAsync(inventoryStream, references, cancellationToken);
             await VerifyPartStreamAsync(bindingStream, mapping, cancellationToken);

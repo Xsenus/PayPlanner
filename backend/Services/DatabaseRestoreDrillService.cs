@@ -158,6 +158,7 @@ public sealed class DatabaseRestoreDrillService(
         }
         await RestoreFilePartsAsync(manifest, targetDirectory, cancellationToken);
         await VerifyRestoredNativeBindingsAsync(manifest, targetDirectory, cancellationToken);
+        if (manifest.FormatVersion >= 5) await VerifyRestoredNativeBindingsAsync(manifest, targetDirectory, cancellationToken, managed: true);
 
         return new DatabaseRestoreDrillReport(
             Path.GetFileName(targetDirectory), "restored", manifest.BackupId, manifest.BackupRelativePath,
@@ -267,6 +268,7 @@ public sealed class DatabaseRestoreDrillService(
         }
         await RestoreFilePartsAsync(manifest, targetDirectory, cancellationToken);
         await VerifyRestoredNativeBindingsAsync(manifest, targetDirectory, cancellationToken);
+        if (manifest.FormatVersion >= 5) await VerifyRestoredNativeBindingsAsync(manifest, targetDirectory, cancellationToken, managed: true);
 
         return new DatabaseRestoreDrillReport(
             Path.GetFileName(targetDirectory), "restored", manifest.BackupId, manifest.BackupRelativePath,
@@ -453,11 +455,11 @@ public sealed class DatabaseRestoreDrillService(
         }
     }
 
-    private async Task VerifyRestoredNativeBindingsAsync(DatabaseBackupManifest manifest, string targetDirectory, CancellationToken cancellationToken)
+    private async Task VerifyRestoredNativeBindingsAsync(DatabaseBackupManifest manifest, string targetDirectory, CancellationToken cancellationToken, bool managed = false)
     {
         if (manifest.FormatVersion < 4) return;
         var references = manifest.Parts!.Single(part => part.Kind == "file-references");
-        var bindings = manifest.Parts!.Single(part => part.Kind == "native-file-bindings");
+        var bindings = manifest.Parts!.Single(part => part.Kind == (managed ? "managed-file-bindings" : "native-file-bindings"));
         var fileParts = manifest.Parts!.Where(part => part.Kind == "file-storage")
             .Select(part => part.RelativePath).ToHashSet(StringComparer.Ordinal);
         var filesRoot = Path.GetFullPath(Path.Combine(targetDirectory, "files"));
@@ -467,7 +469,9 @@ public sealed class DatabaseRestoreDrillService(
         await VerifyPartStreamAsync(mapping, bindings, cancellationToken);
         inventory.Position = 0;
         mapping.Position = 0;
-        await DatabaseBackupNativeBindings.VerifyAsync(inventory, mapping, references.Sha256, ReadRestoredFileAsync, cancellationToken);
+        if (managed)
+            await DatabaseBackupManagedBindings.VerifyAsync(inventory, mapping, references.Sha256, ReadRestoredFileAsync, cancellationToken);
+        else await DatabaseBackupNativeBindings.VerifyAsync(inventory, mapping, references.Sha256, ReadRestoredFileAsync, cancellationToken);
         await VerifyPartStreamAsync(inventory, references, cancellationToken);
         await VerifyPartStreamAsync(mapping, bindings, cancellationToken);
 

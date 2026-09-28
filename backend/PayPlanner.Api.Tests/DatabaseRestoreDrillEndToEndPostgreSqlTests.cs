@@ -22,6 +22,7 @@ public sealed class DatabaseRestoreDrillEndToEndPostgreSqlTests
     [InlineData(2)]
     [InlineData(3)]
     [InlineData(4)]
+    [InlineData(5)]
     public async Task RestoresRealDumpIntoEmptyDatabase_AndIsolatesEmail(int manifestVersion)
     {
         var withInventory = manifestVersion >= 2;
@@ -165,6 +166,19 @@ public sealed class DatabaseRestoreDrillEndToEndPostgreSqlTests
                         var bindingHash = Convert.ToHexString(await SHA256.HashDataAsync(binding)).ToLowerInvariant();
                         parts.Add(new("native-file-bindings", "test.sql.nativefiles", binding.Length, bindingHash, true));
                         File.Delete(sourcePhoto);
+                    }
+                    if (manifestVersion >= 5)
+                    {
+                        inventory.Position = 0;
+                        var managedPath = backupPath + ".managedfiles";
+                        using var managedArchiveBytes = new MemoryStream();
+                        await using (var mapping = File.Create(managedPath))
+                        using (var managedArchive = new ZipArchive(managedArchiveBytes, ZipArchiveMode.Create, true))
+                            await DatabaseBackupManagedBindings.WriteAsync(inventory, mapping, managedArchive,
+                                "test.sql.managedset", inventoryHash, root, (_, _) => throw new InvalidOperationException("Unexpected replica"), CancellationToken.None);
+                        await using var managed = File.OpenRead(managedPath);
+                        var managedHash = Convert.ToHexString(await SHA256.HashDataAsync(managed)).ToLowerInvariant();
+                        parts.Add(new("managed-file-bindings", "test.sql.managedfiles", managed.Length, managedHash, true));
                     }
                 }
                 var manifest = new DatabaseBackupManifest(

@@ -20,6 +20,87 @@ namespace PayPlanner.Api.Tests;
 public sealed class DatabaseBackupServiceS3Tests
 {
     [Theory]
+    [InlineData("legacy-local")]
+    [InlineData("s3")]
+    public async Task ManagedGenerationIsBackedUpAndRestoredWithoutOriginalReplica(string provider)
+    {
+        await using var scope = await CreateScopeAsync();
+        var payload = System.Text.Encoding.UTF8.GetBytes("удержанная версия документа");
+        var sourcePath = Path.Combine(scope.Root, "files", "version.bin");
+        if (provider == "legacy-local") await File.WriteAllBytesAsync(sourcePath, payload);
+        else
+        {
+            using var content = new MemoryStream(payload);
+            await scope.S3.UploadAsync("conn", "version.bin", content, "application/octet-stream", false);
+        }
+        var generationId = Guid.NewGuid();
+        await using (var db = await scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContextAsync())
+        {
+            var item = new StorageObject { IsDeleted = true, CurrentGeneration = 1, LogicalName = "document" };
+            var generation = new StorageObjectGeneration
+            {
+                Id = generationId,
+                Generation = 1,
+                SizeBytes = payload.Length,
+                Sha256 = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(payload))
+            };
+            generation.Replicas.Add(new StorageReplica { ProviderKey = "legacy-local", Locator = "files/missing.bin", Status = "available" });
+            generation.Replicas.Add(new StorageReplica
+            {
+                ProviderKey = provider,
+                ConnectionId = provider == "s3" ? "conn" : null,
+                Locator = provider == "s3" ? "conn/version.bin" : "files/version.bin",
+                Status = "available"
+            });
+            item.Generations.Add(generation);
+            item.Tombstones.Add(new StorageTombstone { Generation = 1, LegalHold = true });
+            db.StorageObjects.Add(item);
+            await db.SaveChangesAsync();
+        }
+        var backups = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        var created = await backups.CreateManualBackupAsync();
+        var manifest = await backups.ReadVerifiedManifestAsync(created.Backup.RelativePath);
+        Assert.Equal(5, manifest.FormatVersion);
+        var mapPart = Assert.Single(manifest.Parts!, part => part.Kind == "managed-file-bindings");
+        await using (var mapping = File.OpenRead(backups.ResolveBackupPath(mapPart.RelativePath)!))
+        {
+            var bindings = new List<DatabaseBackupManagedBinding>();
+            await foreach (var binding in DatabaseBackupManagedBindings.ReadAsync(mapping,
+                manifest.Parts!.Single(part => part.Kind == "file-references").Sha256, CancellationToken.None)) bindings.Add(binding);
+            var saved = Assert.Single(bindings);
+            Assert.Equal(provider, saved.SelectedReplica.ProviderKey);
+            Assert.True(saved.SelectedReplica.LegalHold);
+            Assert.True(saved.SelectedReplica.ObjectIsDeleted);
+        }
+        if (provider == "legacy-local") File.Delete(sourcePath);
+        else scope.S3.CorruptReadPathSuffix = "version.bin";
+        var report = await scope.Provider.GetRequiredService<DatabaseRestoreDrillService>()
+            .RunAsync(created.Backup.RelativePath, false, null, CancellationToken.None);
+        Assert.Equal("restored", report.Status);
+        Assert.Equal(payload, await File.ReadAllBytesAsync(Path.Combine(Path.GetDirectoryName(report.Target)!,
+            "files", "managed-generations", $"{generationId:D}.bin")));
+    }
+
+    [Theory]
+    [InlineData("absent")]
+    [InlineData("optional")]
+    [InlineData("duplicate")]
+    public async Task ManagedMappingIsMandatoryForNewFormat(string corruption)
+    {
+        await using var scope = await CreateScopeAsync();
+        var backups = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        var created = await backups.CreateManualBackupAsync();
+        var manifest = await backups.ReadVerifiedManifestAsync(created.Backup.RelativePath);
+        var map = manifest.Parts!.Single(part => part.Kind == "managed-file-bindings");
+        var parts = manifest.Parts!.Where(part => part != map).ToList();
+        if (corruption == "optional") parts.Add(map with { Required = false });
+        if (corruption == "duplicate") { parts.Add(map); parts.Add(map); }
+        await File.WriteAllTextAsync(backups.ResolveBackupPath(created.Backup.RelativePath)! + ".manifest.json",
+            JsonSerializer.Serialize(manifest with { Parts = parts }, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+        Assert.False((await backups.VerifyBackupAsync(created.Backup.RelativePath)).Verified);
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task VerifiedSelectionKeepsCheckedManifestWhenDescriptionIsReplaced(bool deleteDescription)
@@ -140,7 +221,7 @@ public sealed class DatabaseBackupServiceS3Tests
         var backups = scope.Provider.GetRequiredService<DatabaseBackupService>();
         var created = await backups.CreateManualBackupAsync();
         var manifest = await backups.ReadVerifiedManifestAsync(created.Backup.RelativePath);
-        Assert.Equal(4, manifest.FormatVersion);
+        Assert.Equal(5, manifest.FormatVersion);
         Assert.True(Assert.Single(manifest.Parts!, part => part.Kind == "native-file-bindings").Required);
         File.Delete(originalPhoto);
         scope.Provider.GetRequiredService<IConfiguration>()[ApplicationFileStoragePaths.RootPathConfigurationKey]
@@ -288,7 +369,7 @@ public sealed class DatabaseBackupServiceS3Tests
             {
                 FormatVersion = 3,
                 Parts = manifest.Parts!
-                .Where(item => item.Kind != "native-file-bindings").Select(item => item == part ? changedPart : item).ToArray()
+                .Where(item => item.Kind is not ("native-file-bindings" or "managed-file-bindings")).Select(item => item == part ? changedPart : item).ToArray()
             },
                 new JsonSerializerOptions(JsonSerializerDefaults.Web)));
         Assert.True((await backups.VerifyBackupAsync(created.Backup.RelativePath)).Verified);
@@ -353,7 +434,7 @@ public sealed class DatabaseBackupServiceS3Tests
         var historical = manifest with
         {
             FormatVersion = version,
-            Parts = manifest.Parts!.Where(item => item.Kind != "native-file-bindings" && (version != 1 || item.Kind != "file-references"))
+            Parts = manifest.Parts!.Where(item => item.Kind is not ("native-file-bindings" or "managed-file-bindings") && (version != 1 || item.Kind != "file-references"))
                 .Select(item => item == part ? historicalPart : item).ToArray()
         };
         var node = System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(historical,
@@ -541,7 +622,7 @@ public sealed class DatabaseBackupServiceS3Tests
         var historical = manifest with
         {
             FormatVersion = 1,
-            Parts = manifest.Parts!.Where(item => item.Kind is not ("file-references" or "native-file-bindings")).ToArray()
+            Parts = manifest.Parts!.Where(item => item.Kind is not ("file-references" or "native-file-bindings" or "managed-file-bindings")).ToArray()
         };
         var path = backups.ResolveBackupPath(created.Backup.RelativePath)!;
         await File.WriteAllTextAsync(path + ".manifest.json",
@@ -561,7 +642,7 @@ public sealed class DatabaseBackupServiceS3Tests
         var backups = scope.Provider.GetRequiredService<DatabaseBackupService>();
         var created = await backups.CreateManualBackupAsync();
         var manifest = await backups.ReadVerifiedManifestAsync(created.Backup.RelativePath);
-        Assert.Equal(4, manifest.FormatVersion);
+        Assert.Equal(5, manifest.FormatVersion);
         var reference = Assert.Single(manifest.Parts!, item => item.Kind == "file-references");
         var parts = manifest.Parts!.Where(item => item.Kind != "file-references").ToList();
         if (corruption != "absent") parts.Add(corruption switch
@@ -2478,6 +2559,9 @@ public sealed class DatabaseBackupServiceS3Tests
         services.AddDbContextFactory<PaymentContext>(options => options.UseSqlite(providerInfo.ConnectionString));
         services.AddScoped<IS3StorageService>(_ => s3);
         services.AddScoped<IYandexDiskService>(_ => yandexDisk);
+        services.AddScoped<PayPlanner.Api.Services.Storage.IStorageProvider, PayPlanner.Api.Services.Storage.S3StorageProvider>();
+        services.AddScoped<PayPlanner.Api.Services.Storage.IStorageProvider, PayPlanner.Api.Services.Storage.YandexDiskStorageProvider>();
+        services.AddScoped<PayPlanner.Api.Services.Storage.IStorageProviderRegistry, PayPlanner.Api.Services.Storage.StorageProviderRegistry>();
         services.AddSingleton(s3);
         services.AddSingleton(yandexDisk);
         services.AddSingleton<ILogger<DatabaseBackupService>>(NullLogger<DatabaseBackupService>.Instance);

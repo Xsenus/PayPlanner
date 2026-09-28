@@ -228,6 +228,19 @@ public sealed class DatabaseBackupManagedArchiveTests : IDisposable
     }
 
     [Fact]
+    public async Task UnknownCloudContentLengthStillRequiresMatchingActualBytes()
+    {
+        using var inventory = Inventory([Replica(1)]);
+        using var bytes = new MemoryStream();
+        Directory.CreateDirectory(root);
+        using var archive = new ZipArchive(bytes, ZipArchiveMode.Create, true);
+        var bindings = new List<DatabaseBackupManagedBinding>();
+        Assert.Equal(1, await DatabaseBackupManagedArchive.WriteAsync(inventory, archive, "set.managedset", root,
+            (_, _) => Read(Payload, 0), (binding, _) => { bindings.Add(binding); return Task.CompletedTask; }, CancellationToken.None));
+        Assert.Equal(Payload.Length, Assert.Single(bindings).ActualSizeBytes);
+    }
+
+    [Fact]
     public async Task SizeBoundStopsWritingBeforeOverflowingStagingBudget()
     {
         using var source = new MemoryStream(new byte[90000]);
@@ -245,6 +258,55 @@ public sealed class DatabaseBackupManagedArchiveTests : IDisposable
     private static Task<StorageReadResult> Read(byte[] bytes, long? advertisedSize = null)
         => Task.FromResult(new StorageReadResult(StorageOperationStatus.Succeeded, "test", new MemoryStream(bytes),
             advertisedSize ?? Payload.Length));
+
+    [Theory]
+    [InlineData("valid")]
+    [InlineData("hold")]
+    [InlineData("selected-replica")]
+    [InlineData("footer")]
+    [InlineData("count")]
+    [InlineData("duplicate-property")]
+    [InlineData("inventory-hash")]
+    [InlineData("archive-hash")]
+    [InlineData("archive-missing")]
+    public async Task ManagedMappingChecksSnapshotAndArchivedBytes(string scenario)
+    {
+        var rows = new[] { Replica(1), Replica(2) };
+        var inventoryHash = new string('a', 64);
+        using var inventory = Inventory(rows);
+        using var bytes = new MemoryStream();
+        using var mapping = new MemoryStream();
+        Directory.CreateDirectory(root);
+        using (var archive = new ZipArchive(bytes, ZipArchiveMode.Create, true))
+            Assert.Equal(2, await DatabaseBackupManagedBindings.WriteAsync(inventory, mapping, archive,
+                "set.managedset", inventoryHash, root, (_, _) => Read(Payload), CancellationToken.None));
+        var text = System.Text.Encoding.UTF8.GetString(mapping.ToArray());
+        text = scenario switch
+        {
+            "hold" => text.Replace("\"legalHold\":true", "\"legalHold\":false", StringComparison.Ordinal),
+            "selected-replica" => text.Replace("\"replicaId\":1", "\"replicaId\":9", StringComparison.Ordinal),
+            "footer" => text[..text.LastIndexOf("{\"kind\":\"footer\"", StringComparison.Ordinal)],
+            "count" => text.Replace("\"bindingCount\":2", "\"bindingCount\":1", StringComparison.Ordinal),
+            "duplicate-property" => text.Replace("\"legalHold\":true", "\"legalHold\":true,\"legalHold\":true", StringComparison.Ordinal),
+            _ => text
+        };
+        using var changed = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(text));
+        inventory.Position = 0;
+        bytes.Position = 0;
+        using var restored = new ZipArchive(bytes, ZipArchiveMode.Read, true);
+        Task<DatabaseBackupArchiveFileHash?> ReadArchived(string part, string entryPath, CancellationToken token)
+        {
+            Assert.Equal("set.managedset", part);
+            var entry = restored.GetEntry(entryPath)!;
+            return Task.FromResult<DatabaseBackupArchiveFileHash?>(scenario == "archive-missing" ? null
+                : new(entry.Length, scenario == "archive-hash" ? new string('b', 64) : DatabaseBackupArchiveHash.FromComment(entry.Comment)));
+        }
+        var verification = DatabaseBackupManagedBindings.VerifyAsync(inventory, changed,
+            scenario == "inventory-hash" ? new string('b', 64) : inventoryHash, ReadArchived, CancellationToken.None);
+        if (scenario == "valid") await verification;
+        else await Assert.ThrowsAsync<InvalidDataException>(() => verification);
+        Assert.True(changed.CanRead);
+    }
 
     private static MemoryStream Inventory(DatabaseBackupStorageReplicaReference[] replicas)
         => new(JsonSerializer.SerializeToUtf8Bytes(new

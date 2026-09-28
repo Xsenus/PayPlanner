@@ -63,7 +63,9 @@ public static class DatabaseBackupManagedArchive
             {
                 await using var read = await openReplica(replica, cancellationToken);
                 if (read.Status != StorageOperationStatus.Succeeded || read.Content is null) continue;
-                if (read.SizeBytes != replica.SizeBytes) continue;
+                // Cloud adapters use zero when HTTP Content-Length is absent. The
+                // immutable snapshot size still bounds and validates the actual read.
+                if (read.SizeBytes != 0 && read.SizeBytes != replica.SizeBytes) continue;
                 var hash = await DatabaseBackupArchiveHash.CopyAsync(read.Content, spool, cancellationToken, replica.SizeBytes);
                 if (hash.SizeBytes != replica.SizeBytes
                     || !string.Equals(hash.Sha256, replica.Sha256, StringComparison.OrdinalIgnoreCase)) continue;
@@ -102,7 +104,7 @@ public static class DatabaseBackupManagedArchive
         }
     }
 
-    private static DatabaseBackupStorageReplicaReference GenerationFacts(DatabaseBackupStorageReplicaReference value)
+    internal static DatabaseBackupStorageReplicaReference GenerationFacts(DatabaseBackupStorageReplicaReference value)
         => value with { ReplicaId = null, ProviderKey = null, ConnectionId = null, Locator = null, ReplicaStatus = null };
 
     private static void ValidatePath(string path)

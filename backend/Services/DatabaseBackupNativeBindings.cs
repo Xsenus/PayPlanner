@@ -158,7 +158,7 @@ public static class DatabaseBackupNativeBindings
         CheckExpected(reference, new(binding.ActualSizeBytes.Value, binding.ActualSha256));
     }
 
-    private static void ValidatePortablePath(string? path)
+    internal static void ValidatePortablePath(string? path)
     {
         if (string.IsNullOrWhiteSpace(path) || path.Length > 4096 || path.Contains('\\')
             || path.Split('/').Any(segment => segment.Length == 0 || segment is "." or ".." || segment.Contains(':') || segment.Contains('\0')))
@@ -172,7 +172,7 @@ public static class DatabaseBackupNativeBindings
             throw new InvalidDataException("Архивный документ не соответствует размеру или SHA-256 снимка базы.");
     }
 
-    private static async Task WriteLineAsync<T>(Stream output, T value, CancellationToken cancellationToken)
+    internal static async Task WriteLineAsync<T>(Stream output, T value, CancellationToken cancellationToken)
     {
         var bytes = JsonSerializer.SerializeToUtf8Bytes(value, Options);
         if (bytes.Length >= LineLimit) throw new InvalidDataException("Запись сопоставления архивных файлов превышает допустимый размер.");
@@ -180,7 +180,7 @@ public static class DatabaseBackupNativeBindings
         await output.WriteAsync(Newline, cancellationToken);
     }
 
-    private static async IAsyncEnumerable<ReadOnlyMemory<byte>> ReadLinesAsync(Stream source,
+    internal static async IAsyncEnumerable<ReadOnlyMemory<byte>> ReadLinesAsync(Stream source,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         var buffer = ArrayPool<byte>.Shared.Rent(LineLimit);
@@ -227,7 +227,7 @@ public static class DatabaseBackupNativeBindings
         finally { ArrayPool<byte>.Shared.Return(buffer, clearArray: true); }
     }
 
-    private static void RejectDuplicateProperties(ReadOnlySpan<byte> bytes)
+    internal static void RejectDuplicateProperties(ReadOnlySpan<byte> bytes)
     {
         var reader = new Utf8JsonReader(bytes, new JsonReaderOptions { MaxDepth = 8 });
         var objects = new Stack<HashSet<string>>();
