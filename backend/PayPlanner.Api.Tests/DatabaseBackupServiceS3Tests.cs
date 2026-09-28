@@ -20,6 +20,53 @@ namespace PayPlanner.Api.Tests;
 public sealed class DatabaseBackupServiceS3Tests
 {
     [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task CloudUploadDoesNotPublishManifestWhenOpenedSourceChanges(bool yandex, bool changeManifest)
+    {
+        await using var scope = await CreateScopeAsync();
+        var service = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        await service.UpdateSettingsAsync(true, "03:00", 14, "sqlite", s3UploadEnabled: !yandex,
+            s3ConnectionIds: yandex ? [] : ["s3-main"], yandexDiskUploadEnabled: yandex);
+        var attempted = false;
+        void ChangeSource()
+        {
+            if (attempted) return;
+            attempted = true;
+            var description = Assert.Single(Directory.EnumerateFiles(Path.Combine(scope.Root, "backups"),
+                "*.manifest.json", SearchOption.AllDirectories));
+            // Windows rejects this write while the selected descriptor is open.
+            // On Unix it succeeds; the descriptor checksum must reject the change.
+            var path = changeManifest ? description : description[..^".manifest.json".Length];
+            if (changeManifest)
+            {
+                var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+                var manifest = JsonSerializer.Deserialize<DatabaseBackupManifest>(File.ReadAllText(path), options)!;
+                File.WriteAllText(path, JsonSerializer.Serialize(manifest with
+                {
+                    ApplicationVersion = "valid but unselected description during upload",
+                }, options));
+            }
+            else File.WriteAllText(path, "changed during cloud upload");
+        }
+        scope.S3.OnUpload = ChangeSource;
+        scope.YandexDisk.OnUpload = ChangeSource;
+
+        var created = await service.CreateManualBackupAsync();
+
+        Assert.True(attempted);
+        Assert.Equal("failed", yandex ? Assert.Single(created.YandexDiskUploadResults).Status
+            : Assert.Single(created.S3UploadResults).Status);
+        var paths = yandex ? scope.YandexDisk.UploadedPaths : scope.S3.UploadedPaths;
+        Assert.DoesNotContain(paths, path => path.EndsWith(".manifest.json", StringComparison.Ordinal));
+        await using var db = await scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContextAsync();
+        Assert.DoesNotContain(await db.DatabaseBackupCopies.ToListAsync(),
+            copy => copy.ProviderKey != "local" && copy.Status == DatabaseBackupCopyStatuses.Verified);
+    }
+
+    [Theory]
     [InlineData("legacy-local")]
     [InlineData("s3")]
     public async Task ManagedGenerationIsBackedUpAndRestoredWithoutOriginalReplica(string provider)
@@ -119,6 +166,7 @@ public sealed class DatabaseBackupServiceS3Tests
 
         var manifestPath = backups.ResolveBackupPath(created.Backup.RelativePath)! + ".manifest.json";
         Assert.True(File.Exists(manifestPath));
+        var checkedHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(manifestPath))).ToLowerInvariant();
         if (deleteDescription) File.Delete(manifestPath);
         else await File.WriteAllTextAsync(manifestPath, JsonSerializer.Serialize(expected with
         {
@@ -131,6 +179,7 @@ public sealed class DatabaseBackupServiceS3Tests
         Assert.Equal(expected.BackupId, selected.BackupId);
         Assert.Equal(expected.RecoveryKeyReference, selected.RecoveryKeyReference);
         Assert.Equal(JsonSerializer.Serialize(expected.Parts), JsonSerializer.Serialize(selected.Parts));
+        Assert.Equal(checkedHash, selection.GetType().GetProperty("ManifestSha256")!.GetValue(selection));
         await Assert.ThrowsAsync<InvalidDataException>(() => backups.ReadVerifiedManifestAsync(created.Backup.RelativePath));
     }
 
@@ -149,7 +198,50 @@ public sealed class DatabaseBackupServiceS3Tests
         var verification = (DatabaseBackupVerificationResult)selection.GetType().GetProperty("Verification")!.GetValue(selection)!;
         Assert.False(verification.Verified);
         Assert.Null(selection.GetType().GetProperty("Manifest")!.GetValue(selection));
+        Assert.Null(selection.GetType().GetProperty("ManifestSha256")!.GetValue(selection));
         await Assert.ThrowsAsync<InvalidDataException>(() => backups.ReadVerifiedManifestAsync(created.Backup.RelativePath));
+    }
+
+    [Fact]
+    public async Task CatalogStoresChecksumOfCheckedDescriptionNotLaterReplacement()
+    {
+        await using var scope = await CreateScopeAsync();
+        var factory = scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>();
+        var backups = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        var created = await backups.CreateManualBackupAsync();
+        var manifest = await backups.ReadVerifiedManifestAsync(created.Backup.RelativePath);
+        var path = backups.ResolveBackupPath(created.Backup.RelativePath)! + ".manifest.json";
+        var expectedHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(path))).ToLowerInvariant();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.DatabaseBackupSets.RemoveRange(await db.DatabaseBackupSets.ToListAsync());
+            await db.SaveChangesAsync();
+        }
+        var changed = false;
+        var replacing = new ReplacingContextFactory(factory, () =>
+        {
+            if (changed) return;
+            changed = true;
+            File.WriteAllText(path, JsonSerializer.Serialize(manifest with { ApplicationVersion = "later unselected description" },
+                new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+        });
+        var service = new DatabaseBackupService(replacing, scope.Provider.GetRequiredService<IConfiguration>(),
+            scope.Provider.GetRequiredService<DatabaseProviderInfo>(), NullLogger<DatabaseBackupService>.Instance,
+            scope.Provider.GetRequiredService<IServiceScopeFactory>());
+        var imported = await service.ImportCatalogAsync([created.Backup.RelativePath], false);
+        Assert.Equal("imported", Assert.Single(imported.Items).Status);
+        Assert.True(changed);
+        await using (var db = await factory.CreateDbContextAsync())
+            Assert.Equal(expectedHash, (await db.DatabaseBackupSets.SingleAsync()).ManifestSha256);
+        Assert.NotEqual(expectedHash, Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(path))).ToLowerInvariant());
+        Assert.Equal("failed", Assert.Single((await service.ImportCatalogAsync([created.Backup.RelativePath], false)).Items).Status);
+    }
+
+    private sealed class ReplacingContextFactory(IDbContextFactory<PaymentContext> inner, Action onCreate) : IDbContextFactory<PaymentContext>
+    {
+        public PaymentContext CreateDbContext() { onCreate(); return inner.CreateDbContext(); }
+        public Task<PaymentContext> CreateDbContextAsync(CancellationToken cancellationToken = default)
+        { onCreate(); return inner.CreateDbContextAsync(cancellationToken); }
     }
 
     [Theory]

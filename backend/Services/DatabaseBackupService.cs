@@ -584,15 +584,17 @@ public sealed class DatabaseBackupService
 
     private sealed record VerifiedBackupSelection(
         DatabaseBackupVerificationResult Verification,
-        DatabaseBackupManifest? Manifest);
+        DatabaseBackupManifest? Manifest,
+        string? ManifestSha256);
 
     private async Task<VerifiedBackupSelection> VerifyBackupCoreAsync(
         string? relativePath,
         CancellationToken cancellationToken)
     {
         VerifiedBackupSelection Select(DatabaseBackupVerificationResult verification,
-            DatabaseBackupManifest? selectedManifest = null)
-            => new(verification, verification.Verified ? selectedManifest : null);
+            DatabaseBackupManifest? selectedManifest = null, string? selectedManifestSha256 = null)
+            => new(verification, verification.Verified ? selectedManifest : null,
+                verification.Verified ? selectedManifestSha256 : null);
 
         var resolvedPath = ResolveBackupPath(relativePath);
         if (string.IsNullOrWhiteSpace(resolvedPath))
@@ -616,13 +618,23 @@ public sealed class DatabaseBackupService
                 "Для legacy-копии отсутствует manifest с контрольной суммой."));
         }
 
+        FileStream manifestStream;
+        try { manifestStream = File.OpenRead(manifestPath); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        { return InvalidManifest(ex); }
+        await using var selectedManifestStream = manifestStream;
         DatabaseBackupManifest? manifest;
+        string manifestSha256;
         try
         {
-            await using var manifestStream = File.OpenRead(manifestPath);
+            manifestSha256 = Convert.ToHexString(await SHA256.HashDataAsync(manifestStream, cancellationToken)).ToLowerInvariant();
+            manifestStream.Position = 0;
             manifest = await JsonSerializer.DeserializeAsync<DatabaseBackupManifest>(manifestStream, JsonOptions, cancellationToken);
         }
         catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
+        { return InvalidManifest(ex); }
+
+        VerifiedBackupSelection InvalidManifest(Exception error)
         {
             return Select(new DatabaseBackupVerificationResult(
                 "invalidManifest",
@@ -633,7 +645,7 @@ public sealed class DatabaseBackupService
                 null,
                 null,
                 null,
-                ex.Message));
+                error.Message));
         }
 
         if (manifest is null || manifest.FormatVersion is not (1 or 2 or 3 or 4 or 5))
@@ -805,6 +817,16 @@ public sealed class DatabaseBackupService
                 partError = ex.Message;
             }
         }
+        if (verified)
+        {
+            manifestStream.Position = 0;
+            var finalManifestHash = Convert.ToHexString(await SHA256.HashDataAsync(manifestStream, cancellationToken));
+            if (!string.Equals(finalManifestHash, manifestSha256, StringComparison.OrdinalIgnoreCase))
+            {
+                verified = false;
+                partError = "Описание комплекта изменилось во время проверки.";
+            }
+        }
         return Select(new DatabaseBackupVerificationResult(
             verified ? "verified" : "mismatch",
             verified,
@@ -814,12 +836,16 @@ public sealed class DatabaseBackupService
             manifest.SizeBytes,
             actualSha256,
             manifest.Sha256,
-            verified ? null : partError ?? "Размер, имя файла или контрольная сумма не совпадают с manifest."), manifest);
+            verified ? null : partError ?? "Размер, имя файла или контрольная сумма не совпадают с manifest."), manifest, manifestSha256);
     }
 
     public async Task<DatabaseBackupManifest> ReadVerifiedManifestAsync(
         string? relativePath,
         CancellationToken cancellationToken = default)
+        => (await ReadVerifiedSelectionAsync(relativePath, cancellationToken)).Manifest
+            ?? throw new InvalidDataException("Manifest резервной копии пуст.");
+
+    private async Task<VerifiedBackupSelection> ReadVerifiedSelectionAsync(string? relativePath, CancellationToken cancellationToken)
     {
         var selection = await VerifyBackupCoreAsync(relativePath, cancellationToken);
         if (!selection.Verification.Verified)
@@ -828,8 +854,7 @@ public sealed class DatabaseBackupService
         }
 
         // Return the exact description whose parts were checked, never a second path read.
-        return selection.Manifest
-            ?? throw new InvalidDataException("Manifest резервной копии пуст.");
+        return selection;
     }
 
     private async Task<bool> EnsureBackupSetCatalogedAsync(
@@ -839,20 +864,20 @@ public sealed class DatabaseBackupService
             ?? throw new FileNotFoundException("Резервная копия не найдена.");
         EnsureDirectBackupPath(backupPath);
         if (File.Exists(GetManifestPath(backupPath))) EnsureDirectBackupPath(GetManifestPath(backupPath));
-        var preview = TryReadManifest(backupPath);
-        foreach (var part in preview?.Parts?.Where(item => item.Required) ?? [])
+        var selection = await ReadVerifiedSelectionAsync(relativePath, cancellationToken);
+        var manifest = selection.Manifest ?? throw new InvalidDataException("Проверенное описание отсутствует.");
+        foreach (var part in manifest.Parts?.Where(item => item.Required) ?? [])
         {
             var partPath = ResolveBackupPath(part.RelativePath);
             if (partPath is not null) EnsureDirectBackupPath(partPath);
         }
-        var manifest = await ReadVerifiedManifestAsync(relativePath, cancellationToken);
         var canonicalPath = Path.GetRelativePath(_backupRootDirectory, backupPath).Replace('\\', '/');
         if (!string.Equals(canonicalPath, manifest.BackupRelativePath?.Replace('\\', '/'), StringComparison.Ordinal)
             || string.IsNullOrWhiteSpace(manifest.BackupId) || manifest.BackupId.Length > 64
             || string.IsNullOrWhiteSpace(manifest.DatabaseProvider) || manifest.DatabaseProvider.Length > 64
             || string.IsNullOrWhiteSpace(manifest.BackupFormat) || manifest.BackupFormat.Length > 32)
             throw new InvalidDataException("Путь или идентификаторы в описании комплекта не соответствуют резервной копии.");
-        var manifestSha256 = await ComputeSha256Async(GetManifestPath(backupPath), cancellationToken);
+        var manifestSha256 = selection.ManifestSha256 ?? throw new InvalidDataException("Контрольная сумма проверенного описания отсутствует.");
         await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
         var existing = await context.DatabaseBackupSets.AsNoTracking()
             .FirstOrDefaultAsync(item => item.Id == manifest.BackupId, cancellationToken);
@@ -1744,7 +1769,14 @@ public sealed class DatabaseBackupService
 
         try
         {
+            var selection = await ReadVerifiedSelectionAsync(result.BackupRelativePath, cancellationToken);
+            var manifest = selection.Manifest!;
+            var manifestSha256 = selection.ManifestSha256!;
+            await using var manifestStream = File.OpenRead(GetManifestPath(resolvedPath));
+            var manifestSize = manifestStream.Length;
+            await VerifyCloudSourceStreamAsync(manifestStream, manifestSize, manifestSha256, cancellationToken);
             await using var stream = File.OpenRead(resolvedPath);
+            await VerifyCloudSourceStreamAsync(stream, manifest.SizeBytes, manifest.Sha256, cancellationToken);
             var upload = await s3StorageService.UploadAsync(
                 result.ConnectionId,
                 result.TargetPath,
@@ -1753,14 +1785,7 @@ public sealed class DatabaseBackupService
                 overwrite: true,
                 cancellationToken);
             EnsureCloudUploadSucceeded(upload.Success, result.TargetPath);
-            var manifestPath = GetManifestPath(resolvedPath);
-            if (!File.Exists(manifestPath))
-            {
-                throw new InvalidOperationException("Manifest резервной копии отсутствует.");
-            }
-
-            var manifest = TryReadManifest(resolvedPath)
-                ?? throw new InvalidDataException("Manifest резервной копии не читается.");
+            await VerifyCloudSourceStreamAsync(stream, manifest.SizeBytes, manifest.Sha256, cancellationToken);
             await VerifyS3RemotePartAsync(s3StorageService, result.ConnectionId, result.TargetPath,
                 manifest.SizeBytes, manifest.Sha256, cancellationToken);
             foreach (var part in manifest.Parts?.Where(item => item.Kind != "database") ?? [])
@@ -1768,6 +1793,7 @@ public sealed class DatabaseBackupService
                 var partPath = ResolveBackupPath(part.RelativePath)
                     ?? throw new FileNotFoundException($"Часть backup set не найдена: {part.RelativePath}.");
                 await using var partStream = File.OpenRead(partPath);
+                await VerifyCloudSourceStreamAsync(partStream, part.SizeBytes, part.Sha256, cancellationToken);
                 var remotePartPath = $"{result.TargetPath}.{Path.GetFileName(partPath)}";
                 var partUpload = await s3StorageService.UploadAsync(
                     result.ConnectionId,
@@ -1777,13 +1803,13 @@ public sealed class DatabaseBackupService
                     overwrite: true,
                     cancellationToken);
                 EnsureCloudUploadSucceeded(partUpload.Success, part.RelativePath);
+                await VerifyCloudSourceStreamAsync(partStream, part.SizeBytes, part.Sha256, cancellationToken);
                 await VerifyS3RemotePartAsync(s3StorageService, result.ConnectionId, remotePartPath,
                     part.SizeBytes, part.Sha256, cancellationToken);
             }
 
-            var manifestSha256 = await ComputeSha256Async(manifestPath, cancellationToken);
             var remoteManifestPath = $"{result.TargetPath}.manifest.json";
-            await using (var manifestStream = File.OpenRead(manifestPath))
+            await VerifyCloudSourceStreamAsync(manifestStream, manifestSize, manifestSha256, cancellationToken);
             {
                 var manifestUpload = await s3StorageService.UploadAsync(
                     result.ConnectionId,
@@ -1794,8 +1820,9 @@ public sealed class DatabaseBackupService
                     cancellationToken);
                 EnsureCloudUploadSucceeded(manifestUpload.Success, "manifest.json");
             }
+            await VerifyCloudSourceStreamAsync(manifestStream, manifestSize, manifestSha256, cancellationToken);
             await VerifyS3RemotePartAsync(s3StorageService, result.ConnectionId, remoteManifestPath,
-                new FileInfo(manifestPath).Length, manifestSha256, cancellationToken);
+                manifestSize, manifestSha256, cancellationToken);
 
             return result with
             {
@@ -1892,7 +1919,14 @@ public sealed class DatabaseBackupService
 
         try
         {
+            var selection = await ReadVerifiedSelectionAsync(result.BackupRelativePath, cancellationToken);
+            var manifest = selection.Manifest!;
+            var manifestSha256 = selection.ManifestSha256!;
+            await using var manifestStream = File.OpenRead(GetManifestPath(resolvedPath));
+            var manifestSize = manifestStream.Length;
+            await VerifyCloudSourceStreamAsync(manifestStream, manifestSize, manifestSha256, cancellationToken);
             await using var stream = File.OpenRead(resolvedPath);
+            await VerifyCloudSourceStreamAsync(stream, manifest.SizeBytes, manifest.Sha256, cancellationToken);
             var upload = await yandexDiskService.UploadAsync(
                 result.TargetPath,
                 stream,
@@ -1900,14 +1934,7 @@ public sealed class DatabaseBackupService
                 overwrite: true,
                 cancellationToken);
             EnsureCloudUploadSucceeded(upload.Success, result.TargetPath);
-            var manifestPath = GetManifestPath(resolvedPath);
-            if (!File.Exists(manifestPath))
-            {
-                throw new InvalidOperationException("Manifest резервной копии отсутствует.");
-            }
-
-            var manifest = TryReadManifest(resolvedPath)
-                ?? throw new InvalidDataException("Manifest резервной копии не читается.");
+            await VerifyCloudSourceStreamAsync(stream, manifest.SizeBytes, manifest.Sha256, cancellationToken);
             await VerifyYandexRemotePartAsync(yandexDiskService, result.TargetPath,
                 manifest.SizeBytes, manifest.Sha256, cancellationToken);
             foreach (var part in manifest.Parts?.Where(item => item.Kind != "database") ?? [])
@@ -1915,6 +1942,7 @@ public sealed class DatabaseBackupService
                 var partPath = ResolveBackupPath(part.RelativePath)
                     ?? throw new FileNotFoundException($"Часть backup set не найдена: {part.RelativePath}.");
                 await using var partStream = File.OpenRead(partPath);
+                await VerifyCloudSourceStreamAsync(partStream, part.SizeBytes, part.Sha256, cancellationToken);
                 var remotePartPath = $"{result.TargetPath}.{Path.GetFileName(partPath)}";
                 var partUpload = await yandexDiskService.UploadAsync(
                     remotePartPath,
@@ -1923,13 +1951,13 @@ public sealed class DatabaseBackupService
                     overwrite: true,
                     cancellationToken);
                 EnsureCloudUploadSucceeded(partUpload.Success, part.RelativePath);
+                await VerifyCloudSourceStreamAsync(partStream, part.SizeBytes, part.Sha256, cancellationToken);
                 await VerifyYandexRemotePartAsync(yandexDiskService, remotePartPath,
                     part.SizeBytes, part.Sha256, cancellationToken);
             }
 
-            var manifestSha256 = await ComputeSha256Async(manifestPath, cancellationToken);
             var remoteManifestPath = $"{result.TargetPath}.manifest.json";
-            await using (var manifestStream = File.OpenRead(manifestPath))
+            await VerifyCloudSourceStreamAsync(manifestStream, manifestSize, manifestSha256, cancellationToken);
             {
                 var manifestUpload = await yandexDiskService.UploadAsync(
                     remoteManifestPath,
@@ -1939,8 +1967,9 @@ public sealed class DatabaseBackupService
                     cancellationToken);
                 EnsureCloudUploadSucceeded(manifestUpload.Success, "manifest.json");
             }
+            await VerifyCloudSourceStreamAsync(manifestStream, manifestSize, manifestSha256, cancellationToken);
             await VerifyYandexRemotePartAsync(yandexDiskService, remoteManifestPath,
-                new FileInfo(manifestPath).Length, manifestSha256, cancellationToken);
+                manifestSize, manifestSha256, cancellationToken);
 
             return result with
             {
@@ -1960,6 +1989,16 @@ public sealed class DatabaseBackupService
                 UpdatedAt = DateTime.UtcNow,
             };
         }
+    }
+
+    private static async Task VerifyCloudSourceStreamAsync(FileStream stream, long expectedSize, string expectedSha256,
+        CancellationToken cancellationToken)
+    {
+        stream.Position = 0;
+        var hash = Convert.ToHexString(await SHA256.HashDataAsync(stream, cancellationToken));
+        if (stream.Length != expectedSize || !string.Equals(hash, expectedSha256, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("Источник облачной резервной копии изменился после проверки.");
+        stream.Position = 0;
     }
 
     private static void EnsureCloudUploadSucceeded(bool success, string partName)

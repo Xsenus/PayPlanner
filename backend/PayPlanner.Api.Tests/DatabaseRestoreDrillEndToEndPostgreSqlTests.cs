@@ -18,12 +18,15 @@ namespace PayPlanner.Api.Tests;
 public sealed class DatabaseRestoreDrillEndToEndPostgreSqlTests
 {
     [Theory]
-    [InlineData(1)]
-    [InlineData(2)]
-    [InlineData(3)]
-    [InlineData(4)]
-    [InlineData(5)]
-    public async Task RestoresRealDumpIntoEmptyDatabase_AndIsolatesEmail(int manifestVersion)
+    [InlineData(1, false, "none")]
+    [InlineData(2, false, "none")]
+    [InlineData(3, false, "none")]
+    [InlineData(4, false, "none")]
+    [InlineData(5, false, "none")]
+    [InlineData(5, true, "none")]
+    [InlineData(5, true, "missing")]
+    [InlineData(5, true, "hash")]
+    public async Task RestoresRealDumpIntoEmptyDatabase_AndIsolatesEmail(int manifestVersion, bool withManaged, string corruption)
     {
         var withInventory = manifestVersion >= 2;
         var connectionString = Environment.GetEnvironmentVariable("PAYPLANNER_TEST_POSTGRES");
@@ -38,6 +41,24 @@ public sealed class DatabaseRestoreDrillEndToEndPostgreSqlTests
         var sourceName = "payplanner_restore_source_" + Guid.NewGuid().ToString("N");
         var targetName = "payplanner_restore_target_" + Guid.NewGuid().ToString("N");
         Directory.CreateDirectory(root);
+        var objectId = Guid.Parse("10000000-0000-0000-0000-000000000001");
+        var firstId = Guid.Parse("00000000-0000-0000-0000-000000000001");
+        var secondId = Guid.Parse("00000000-0000-0000-0000-000000000002");
+        var payloads = new Dictionary<string, byte[]>
+        {
+            ["generation-1.bin"] = System.Text.Encoding.UTF8.GetBytes("Прежняя удержанная версия"),
+            ["generation-2.bin"] = Enumerable.Range(0, 81921).Select(value => (byte)(value % 251)).ToArray()
+        };
+        var sourceFiles = Path.Combine(root, "managed-source");
+        DatabaseBackupStorageReplicaReference Reference(Guid id, long generation, long replicaId, string file)
+            => new(id, objectId, generation, payloads[$"generation-{generation}.bin"].Length,
+                Convert.ToHexString(SHA256.HashData(payloads[$"generation-{generation}.bin"])),
+                true, true, new DateTime(2030, 1, 1), replicaId, "local", null, file, "available");
+        var managedReferences = withManaged ? new[]
+        {
+            Reference(firstId, 1, 1, "missing.bin"), Reference(firstId, 1, 2, "generation-1.bin"),
+            Reference(secondId, 2, 3, "generation-2.bin")
+        } : Array.Empty<DatabaseBackupStorageReplicaReference>();
         var adminBuilder = new NpgsqlConnectionStringBuilder(connectionString) { Database = "postgres", Pooling = false };
         var sourceBuilder = new NpgsqlConnectionStringBuilder(adminBuilder.ConnectionString) { Database = sourceName };
         var targetBuilder = new NpgsqlConnectionStringBuilder(adminBuilder.ConnectionString) { Database = targetName };
@@ -91,6 +112,28 @@ public sealed class DatabaseRestoreDrillEndToEndPostgreSqlTests
                         CREATE TABLE "StorageReplicas" ("Id" bigint, "StorageObjectGenerationId" uuid, "ProviderKey" text, "ConnectionId" text, "Locator" text, "Status" text);
                         """;
                     await seed.ExecuteNonQueryAsync();
+                    if (withManaged)
+                    {
+                        seed.CommandText = """
+                            INSERT INTO "StorageObjects" VALUES (@object, 2, true);
+                            INSERT INTO "StorageTombstones" VALUES (@object, true, TIMESTAMP '2030-01-01');
+                            INSERT INTO "StorageObjectGenerations" VALUES (@first, @object, 1, @size1, @hash1), (@second, @object, 2, @size2, @hash2);
+                            INSERT INTO "StorageReplicas" VALUES
+                              (1, @first, 'local', NULL, 'missing.bin', 'available'),
+                              (2, @first, 'local', NULL, 'generation-1.bin', 'available'),
+                              (3, @second, 'local', NULL, 'generation-2.bin', 'available');
+                            """;
+                        seed.Parameters.AddWithValue("object", objectId);
+                        seed.Parameters.AddWithValue("first", firstId);
+                        seed.Parameters.AddWithValue("second", secondId);
+                        seed.Parameters.AddWithValue("size1", (long)payloads["generation-1.bin"].Length);
+                        seed.Parameters.AddWithValue("size2", (long)payloads["generation-2.bin"].Length);
+                        seed.Parameters.AddWithValue("hash1", managedReferences[0].Sha256);
+                        seed.Parameters.AddWithValue("hash2", managedReferences[2].Sha256);
+                        await seed.ExecuteNonQueryAsync();
+                        Directory.CreateDirectory(sourceFiles);
+                        foreach (var item in payloads) await File.WriteAllBytesAsync(Path.Combine(sourceFiles, item.Key), item.Value);
+                    }
                 }
             }
 
@@ -127,9 +170,9 @@ public sealed class DatabaseRestoreDrillEndToEndPostgreSqlTests
                         formatVersion = 1,
                         storedFiles = new[] { new DatabaseBackupStoredFileReference(
                             "profile-photo", 1, "/user-photos/photo.png", null, null, null, null) },
-                        storageReplicas = Array.Empty<DatabaseBackupStorageReplicaReference>(),
+                        storageReplicas = managedReferences,
                         storedFileCount = 1,
-                        storageReplicaCount = 0,
+                        storageReplicaCount = managedReferences.Length,
                     }, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
                     await using var inventory = File.OpenRead(inventoryPath);
                     var inventoryHash = Convert.ToHexString(await SHA256.HashDataAsync(inventory)).ToLowerInvariant();
@@ -171,11 +214,30 @@ public sealed class DatabaseRestoreDrillEndToEndPostgreSqlTests
                     {
                         inventory.Position = 0;
                         var managedPath = backupPath + ".managedfiles";
-                        using var managedArchiveBytes = new MemoryStream();
+                        var managedArchivePath = backupPath + ".managedset";
+                        using var managedArchiveBytes = File.Create(managedArchivePath);
                         await using (var mapping = File.Create(managedPath))
                         using (var managedArchive = new ZipArchive(managedArchiveBytes, ZipArchiveMode.Create, true))
                             await DatabaseBackupManagedBindings.WriteAsync(inventory, mapping, managedArchive,
-                                "test.sql.managedset", inventoryHash, root, (_, _) => throw new InvalidOperationException("Unexpected replica"), CancellationToken.None);
+                                "test.sql.managedset", inventoryHash, root, (reference, _) =>
+                                {
+                                    if (!withManaged) throw new InvalidOperationException("Unexpected replica");
+                                    var path = Path.Combine(sourceFiles, reference.Locator!);
+                                    if (!File.Exists(path)) return Task.FromResult(new PayPlanner.Api.Services.Storage.StorageReadResult(
+                                        PayPlanner.Api.Services.Storage.StorageOperationStatus.NotFound, reference.Locator!, null, 0));
+                                    var content = File.OpenRead(path);
+                                    return Task.FromResult(new PayPlanner.Api.Services.Storage.StorageReadResult(
+                                        PayPlanner.Api.Services.Storage.StorageOperationStatus.Succeeded, reference.Locator!, content, content.Length));
+                                }, CancellationToken.None);
+                        await managedArchiveBytes.DisposeAsync();
+                        if (withManaged)
+                        {
+                            await using var archiveBytes = File.OpenRead(managedArchivePath);
+                            var archiveHash = Convert.ToHexString(await SHA256.HashDataAsync(archiveBytes)).ToLowerInvariant();
+                            parts.Add(new("file-storage", "test.sql.managedset", archiveBytes.Length, archiveHash, true,
+                                FileEntryHashFormat: DatabaseBackupArchiveHash.Format));
+                            foreach (var item in payloads) File.Delete(Path.Combine(sourceFiles, item.Key));
+                        }
                         await using var managed = File.OpenRead(managedPath);
                         var managedHash = Convert.ToHexString(await SHA256.HashDataAsync(managed)).ToLowerInvariant();
                         parts.Add(new("managed-file-bindings", "test.sql.managedfiles", managed.Length, managedHash, true));
@@ -229,6 +291,35 @@ public sealed class DatabaseRestoreDrillEndToEndPostgreSqlTests
                 File.Move(missingFilesetPath, filesetPath);
             }
 
+            if (corruption != "none")
+            {
+                var checkedManifest = await backups.ReadVerifiedManifestAsync("test.sql");
+                var managedPart = checkedManifest.Parts!.Single(part => part.RelativePath == "test.sql.managedset");
+                var managedPath = backupPath + ".managedset";
+                if (corruption == "missing") File.Delete(managedPath);
+                else
+                {
+                    using (var archive = ZipFile.Open(managedPath, ZipArchiveMode.Update))
+                    {
+                        var entry = archive.GetEntry($"managed-generations/{firstId:D}.bin")!;
+                        var changedBytes = System.Text.Encoding.UTF8.GetBytes("different retained bytes");
+                        using (var output = entry.Open()) { output.SetLength(0); output.Write(changedBytes); }
+                        entry.Comment = DatabaseBackupArchiveHash.ToComment(Convert.ToHexString(SHA256.HashData(changedBytes)));
+                    }
+                    await using var bytes = File.OpenRead(managedPath);
+                    var changedPart = managedPart with { SizeBytes = bytes.Length, Sha256 = Convert.ToHexString(await SHA256.HashDataAsync(bytes)).ToLowerInvariant() };
+                    await File.WriteAllTextAsync(backupPath + ".manifest.json", JsonSerializer.Serialize(checkedManifest with
+                    {
+                        Parts = checkedManifest.Parts!.Select(part => part == managedPart ? changedPart : part).ToArray()
+                    }, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+                }
+                Assert.False((await backups.VerifyBackupAsync("test.sql")).Verified);
+                await Assert.ThrowsAsync<InvalidDataException>(() => provider.GetRequiredService<DatabaseRestoreDrillService>()
+                    .RunAsync("test.sql", true, "one-time-test-token", CancellationToken.None));
+                await DatabaseRestoreDrillService.EnsureEmptyPostgreSqlTargetAsync(targetBuilder.ConnectionString, CancellationToken.None);
+                return;
+            }
+
             var report = await provider.GetRequiredService<DatabaseRestoreDrillService>()
                 .RunAsync("test.sql", executePostgreSql: true, "one-time-test-token", CancellationToken.None);
             Assert.Equal("restored", report.Status);
@@ -238,6 +329,14 @@ public sealed class DatabaseRestoreDrillEndToEndPostgreSqlTests
             Assert.Equal("restored file evidence", await File.ReadAllTextAsync(
                 Path.Combine(Path.GetDirectoryName(report.ReportPath)!, "files",
                     manifestVersion >= 4 ? "profile-photos/photo.png" : withInventory ? "file-storage/user-photos/photo.png" : "file-storage/evidence.txt")));
+            if (withManaged)
+            {
+                Assert.Empty(Directory.EnumerateFiles(sourceFiles));
+                Assert.Equal(payloads["generation-1.bin"], await File.ReadAllBytesAsync(Path.Combine(
+                    Path.GetDirectoryName(report.ReportPath)!, "files", "managed-generations", $"{firstId:D}.bin")));
+                Assert.Equal(payloads["generation-2.bin"], await File.ReadAllBytesAsync(Path.Combine(
+                    Path.GetDirectoryName(report.ReportPath)!, "files", "managed-generations", $"{secondId:D}.bin")));
+            }
 
             await using var target = new NpgsqlConnection(targetBuilder.ConnectionString);
             await target.OpenAsync();
