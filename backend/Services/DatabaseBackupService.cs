@@ -2170,20 +2170,39 @@ public sealed class DatabaseBackupService
             return [];
         }
 
-        var configuredRoots = new[]
+        using var scope = _scopeFactory.CreateScope();
+        var environment = scope.ServiceProvider.GetRequiredService<IWebHostEnvironment>();
+        var candidates = new[]
         {
-            (Name: "file-storage", Path: _configuration["FileStorage:RootPath"]),
-            (Name: "profile-photos", Path: _configuration["ProfilePhotos:StorageRoot"]),
-            (Name: "electronic-signatures", Path: _configuration["ElectronicSignature:StorageRoot"]),
+            (Name: "file-storage", Path: ApplicationFileStoragePaths.ResolveRoot(environment, _configuration),
+                Required: !string.IsNullOrWhiteSpace(_configuration[ApplicationFileStoragePaths.RootPathConfigurationKey])),
+            (Name: "profile-photos", Path: UserPhotoStoragePaths.ResolveRoot(environment, _configuration),
+                Required: !string.IsNullOrWhiteSpace(_configuration[UserPhotoStoragePaths.StorageRootConfigurationKey])),
+            (Name: "electronic-signatures", Path: ElectronicSignatureStoragePaths.ResolveRoot(environment, _configuration),
+                Required: !string.IsNullOrWhiteSpace(_configuration[ElectronicSignatureStoragePaths.StorageRootConfigurationKey])),
+            (Name: "local-objects", Path: PayPlanner.Api.Services.Storage.LocalStoragePaths.ResolveRoot(environment, _configuration),
+                Required: !string.IsNullOrWhiteSpace(_configuration[PayPlanner.Api.Services.Storage.LocalStoragePaths.RootConfigurationKey])),
+            (Name: "profile-photos-legacy", Path: UserPhotoStoragePaths.ResolveLegacyRoot(environment), Required: false),
+            (Name: "electronic-signatures-legacy", Path: ElectronicSignatureStoragePaths.ResolveLegacyRoot(environment), Required: false),
         }
-        .Where(item => !string.IsNullOrWhiteSpace(item.Path))
-        .Select(item => (item.Name, Path: Path.GetFullPath(item.Path!)))
         .OrderBy(item => item.Path.Length)
         .ToList();
-        foreach (var root in configuredRoots)
+        var configuredRoots = new List<(string Name, string Path)>();
+        foreach (var root in candidates)
         {
-            if (!Directory.Exists(root.Path))
-                throw new DirectoryNotFoundException($"Каталог файлов для резервного копирования недоступен: {root.Name}.");
+            try
+            {
+                // Unlike Directory.Exists, attribute access does not conceal access failures.
+                if ((File.GetAttributes(root.Path) & FileAttributes.Directory) == 0)
+                    throw new IOException($"Путь файлов для резервного копирования не является каталогом: {root.Name}.");
+                configuredRoots.Add((root.Name, root.Path));
+            }
+            catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+            {
+                if (root.Required)
+                    throw new DirectoryNotFoundException($"Каталог файлов для резервного копирования недоступен: {root.Name}.", ex);
+                // An unused default/legacy location is allowed to be absent; an unreadable one is not.
+            }
         }
         if (configuredRoots.Count == 0)
         {

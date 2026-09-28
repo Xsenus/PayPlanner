@@ -17,11 +17,9 @@ public sealed class LegacyLocalStorageProvider : IStorageProvider, ILegacyLocalS
         {
             ["files"] = ApplicationFileStoragePaths.ResolveRoot(environment, configuration),
             ["profile-current"] = UserPhotoStoragePaths.ResolveRoot(environment, configuration),
-            ["profile-legacy"] = Path.Combine(environment.WebRootPath ?? Path.Combine(environment.ContentRootPath, "wwwroot"), "user-photos"),
-            ["esign-current"] = string.IsNullOrWhiteSpace(configuration["ElectronicSignature:StorageRoot"])
-                ? Path.Combine(ApplicationFileStoragePaths.ResolveRoot(environment, configuration), "electronic-signatures")
-                : ResolveConfigured(environment.ContentRootPath, configuration["ElectronicSignature:StorageRoot"]!),
-            ["esign-legacy"] = Path.Combine(environment.ContentRootPath, "storage", "electronic-signatures"),
+            ["profile-legacy"] = UserPhotoStoragePaths.ResolveLegacyRoot(environment),
+            ["esign-current"] = ElectronicSignatureStoragePaths.ResolveRoot(environment, configuration),
+            ["esign-legacy"] = ElectronicSignatureStoragePaths.ResolveLegacyRoot(environment),
         };
         _roots = candidates
             .Select(item => new KeyValuePair<string, string>(item.Key, Path.GetFullPath(item.Value)))
@@ -133,6 +131,4 @@ public sealed class LegacyLocalStorageProvider : IStorageProvider, ILegacyLocalS
         return string.Equals(fullPath, fullRoot, comparison) || fullPath.StartsWith(fullRoot + Path.DirectorySeparatorChar, comparison);
     }
 
-    private static string ResolveConfigured(string contentRoot, string configured)
-        => Path.IsPathRooted(configured) ? configured : Path.Combine(contentRoot, configured);
 }

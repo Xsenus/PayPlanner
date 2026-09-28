@@ -8,12 +8,7 @@ public sealed class LocalStorageProvider : IStorageProvider
 
     public LocalStorageProvider(IWebHostEnvironment environment, IConfiguration configuration)
     {
-        var configuredRoot = configuration["StorageOrchestration:LocalRoot"]?.Trim();
-        _root = Path.GetFullPath(string.IsNullOrWhiteSpace(configuredRoot)
-            ? Path.Combine(ApplicationFileStoragePaths.ResolveRoot(environment, configuration), "objects")
-            : Path.IsPathRooted(configuredRoot)
-                ? configuredRoot
-                : Path.Combine(environment.ContentRootPath, configuredRoot));
+        _root = LocalStoragePaths.ResolveRoot(environment, configuration);
     }
 
     public string Key => "local";

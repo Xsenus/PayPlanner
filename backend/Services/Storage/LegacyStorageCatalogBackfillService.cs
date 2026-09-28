@@ -209,20 +209,16 @@ public sealed class LegacyStorageCatalogBackfillService(
             "chat-attachment" => SafeCombine(Path.Combine(fileRoot, "internal-chat-files"),
                 Path.Combine(item.ParentId!.Value.ToString(), Path.GetFileName(item.StoredPath))),
             "messenger-delivery" => SafeCombine(Path.Combine(fileRoot, "messenger-document-deliveries"), item.StoredPath),
-            "esign-artifact" => ResolveElectronicSignaturePath(item.StoredPath, fileRoot),
+            "esign-artifact" => ResolveElectronicSignaturePath(item.StoredPath),
             "profile-photo" => ResolveProfilePhotoPath(item.StoredPath),
             _ => throw new InvalidOperationException("Unsupported legacy owner type."),
         };
     }
 
-    private string ResolveElectronicSignaturePath(string value, string fileRoot)
+    private string ResolveElectronicSignaturePath(string value)
     {
         if (Path.IsPathRooted(value)) return Path.GetFullPath(value);
-        var configured = configuration["ElectronicSignature:StorageRoot"];
-        var root = string.IsNullOrWhiteSpace(configured)
-            ? Path.Combine(fileRoot, "electronic-signatures")
-            : Path.IsPathRooted(configured) ? configured : Path.Combine(environment.ContentRootPath, configured);
-        return SafeCombine(root, value);
+        return SafeCombine(ElectronicSignatureStoragePaths.ResolveRoot(environment, configuration), value);
     }
 
     private string ResolveProfilePhotoPath(string value)

@@ -163,16 +163,8 @@ public sealed class ElectronicSignatureService : IElectronicSignatureService
         _db = db;
         _configuration = configuration;
         _contactProtector = dataProtectionProvider.CreateProtector("PayPlanner.ElectronicSignature.Contact.v1");
-        var configuredRoot = configuration["ElectronicSignature:StorageRoot"];
-        _storageRoot = Path.GetFullPath(string.IsNullOrWhiteSpace(configuredRoot)
-            ? Path.Combine(ApplicationFileStoragePaths.ResolveRoot(environment, configuration), "electronic-signatures")
-            : Path.IsPathRooted(configuredRoot)
-                ? configuredRoot
-                : Path.Combine(environment.ContentRootPath, configuredRoot));
-        _legacyStorageRoot = Path.GetFullPath(Path.Combine(
-            environment.ContentRootPath,
-            "storage",
-            "electronic-signatures"));
+        _storageRoot = ElectronicSignatureStoragePaths.ResolveRoot(environment, configuration);
+        _legacyStorageRoot = ElectronicSignatureStoragePaths.ResolveLegacyRoot(environment);
     }
 
     public async Task<ElectronicSignatureEnvelope> PrepareAsync(

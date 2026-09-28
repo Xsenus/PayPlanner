@@ -20,6 +20,132 @@ namespace PayPlanner.Api.Tests;
 public sealed class DatabaseBackupServiceS3Tests
 {
     [Fact]
+    public async Task FileArchiveIncludesDefaultAndDualReadLegacyRootsWithoutDuplicates()
+    {
+        await using var scope = await CreateScopeAsync();
+        var configuration = scope.Provider.GetRequiredService<IConfiguration>();
+        configuration["FileStorage:RootPath"] = "";
+        var expected = new Dictionary<string, string>
+        {
+            ["file-storage/task-files/evidence.txt"] = Path.Combine(scope.Root, "App_Data", "task-files", "evidence.txt"),
+            ["file-storage/user-photos/photo.png"] = Path.Combine(scope.Root, "App_Data", "user-photos", "photo.png"),
+            ["file-storage/electronic-signatures/sign.pdf"] = Path.Combine(scope.Root, "App_Data", "electronic-signatures", "sign.pdf"),
+            ["file-storage/objects/object.bin"] = Path.Combine(scope.Root, "App_Data", "objects", "object.bin"),
+            ["profile-photos-legacy/old.png"] = Path.Combine(scope.Root, "wwwroot", "user-photos", "old.png"),
+            ["electronic-signatures-legacy/old.pdf"] = Path.Combine(scope.Root, "storage", "electronic-signatures", "old.pdf"),
+        };
+        foreach (var item in expected)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(item.Value)!);
+            await File.WriteAllTextAsync(item.Value, item.Key);
+        }
+
+        var backups = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        var result = await backups.CreateManualBackupAsync();
+        using var archive = System.IO.Compression.ZipFile.OpenRead($"{backups.ResolveBackupPath(result.Backup.RelativePath)}.fileset");
+        Assert.Equal(expected.Keys.Order(), archive.Entries.Select(entry => entry.FullName).Order());
+        foreach (var entry in archive.Entries)
+        {
+            using var reader = new StreamReader(entry.Open());
+            Assert.Equal(entry.FullName, await reader.ReadToEndAsync());
+        }
+        Assert.True((await backups.VerifyBackupAsync(result.Backup.RelativePath)).Verified);
+    }
+
+    [Fact]
+    public async Task FileArchiveResolvesRelativeAndSeparateManagedRootsAgainstContentRoot()
+    {
+        await using var scope = await CreateScopeAsync();
+        var configuration = scope.Provider.GetRequiredService<IConfiguration>();
+        var roots = new[]
+        {
+            (Key: "FileStorage:RootPath", Folder: "relative-files", Prefix: "file-storage"),
+            (Key: "ProfilePhotos:StorageRoot", Folder: "relative-photos", Prefix: "profile-photos"),
+            (Key: "ElectronicSignature:StorageRoot", Folder: "relative-signatures", Prefix: "electronic-signatures"),
+            (Key: "StorageOrchestration:LocalRoot", Folder: "relative-objects", Prefix: "local-objects"),
+        };
+        foreach (var root in roots)
+        {
+            configuration[root.Key] = root.Folder;
+            Directory.CreateDirectory(Path.Combine(scope.Root, root.Folder));
+            await File.WriteAllTextAsync(Path.Combine(scope.Root, root.Folder, "content.txt"), root.Prefix);
+        }
+
+        var backups = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        var result = await backups.CreateManualBackupAsync();
+        using var archive = System.IO.Compression.ZipFile.OpenRead($"{backups.ResolveBackupPath(result.Backup.RelativePath)}.fileset");
+        Assert.Equal(roots.Select(root => $"{root.Prefix}/content.txt").Order(), archive.Entries.Select(entry => entry.FullName).Order());
+        foreach (var root in roots)
+        {
+            using var reader = new StreamReader(archive.GetEntry($"{root.Prefix}/content.txt")!.Open());
+            Assert.Equal(root.Prefix, await reader.ReadToEndAsync());
+        }
+    }
+
+    [Theory]
+    [InlineData("ProfilePhotos:StorageRoot")]
+    [InlineData("ElectronicSignature:StorageRoot")]
+    [InlineData("StorageOrchestration:LocalRoot")]
+    public async Task FileArchiveRejectsMissingExplicitSecondaryRoot(string key)
+    {
+        await using var scope = await CreateScopeAsync();
+        scope.Provider.GetRequiredService<IConfiguration>()[key] = "missing-root";
+        var backups = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        await Assert.ThrowsAsync<DirectoryNotFoundException>(() => backups.CreateManualBackupAsync());
+        Assert.Empty(Directory.EnumerateFiles(Path.Combine(scope.Root, "backups"), "*.manifest.json", SearchOption.AllDirectories));
+    }
+
+    [Fact]
+    public async Task FileArchiveDoesNotRequireUnusedDefaultOrLegacyDirectories()
+    {
+        await using var scope = await CreateScopeAsync();
+        scope.Provider.GetRequiredService<IConfiguration>()["FileStorage:RootPath"] = "";
+        var backups = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        var result = await backups.CreateManualBackupAsync();
+        Assert.True((await backups.VerifyBackupAsync(result.Backup.RelativePath)).Verified);
+        Assert.False(File.Exists($"{backups.ResolveBackupPath(result.Backup.RelativePath)}.fileset"));
+    }
+
+    [Fact]
+    public async Task FileArchiveRejectsDefaultPathThatIsAFile()
+    {
+        await using var scope = await CreateScopeAsync();
+        scope.Provider.GetRequiredService<IConfiguration>()["FileStorage:RootPath"] = "";
+        await File.WriteAllTextAsync(Path.Combine(scope.Root, "App_Data"), "not a directory");
+        var backups = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        await Assert.ThrowsAsync<IOException>(() => backups.CreateManualBackupAsync());
+        Assert.Empty(Directory.EnumerateFiles(Path.Combine(scope.Root, "backups"), "*.manifest.json", SearchOption.AllDirectories));
+    }
+
+    [Fact]
+    public async Task FileArchiveDisabledDoesNotAccessMissingConfiguredRoots()
+    {
+        await using var scope = await CreateScopeAsync();
+        var configuration = scope.Provider.GetRequiredService<IConfiguration>();
+        configuration["DatabaseBackup:IncludeFileStorage"] = "false";
+        configuration["FileStorage:RootPath"] = "missing-root";
+        var backups = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        var result = await backups.CreateManualBackupAsync();
+        Assert.True((await backups.VerifyBackupAsync(result.Backup.RelativePath)).Verified);
+        Assert.False(File.Exists($"{backups.ResolveBackupPath(result.Backup.RelativePath)}.fileset"));
+    }
+
+    [Fact]
+    public async Task FileArchiveDeduplicatesExplicitNestedRootsAndExcludesBackupDirectory()
+    {
+        await using var scope = await CreateScopeAsync();
+        var configuration = scope.Provider.GetRequiredService<IConfiguration>();
+        configuration["DatabaseBackup:Directory"] = Path.Combine(scope.Root, "files", "backups");
+        foreach (var key in new[] { "ProfilePhotos:StorageRoot", "ElectronicSignature:StorageRoot", "StorageOrchestration:LocalRoot" })
+            configuration[key] = Path.Combine(scope.Root, "files");
+        await File.WriteAllTextAsync(Path.Combine(scope.Root, "files", "only.txt"), "one");
+        var backups = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        var result = await backups.CreateManualBackupAsync();
+        using var archive = System.IO.Compression.ZipFile.OpenRead($"{backups.ResolveBackupPath(result.Backup.RelativePath)}.fileset");
+        Assert.Equal("file-storage/only.txt", Assert.Single(archive.Entries).FullName);
+    }
+
+    [Fact]
     public async Task BackupAttemptDatabaseDumpFailureKeepsHistoryWithoutAReadySetOrSensitivePath()
     {
         await using var scope = await CreateScopeAsync();
