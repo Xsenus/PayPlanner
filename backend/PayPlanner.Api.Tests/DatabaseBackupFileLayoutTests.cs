@@ -15,6 +15,105 @@ public sealed class DatabaseBackupFileLayoutTests : IDisposable
     }
 
     [Fact]
+    public void ParentReleaseLinkIsPinnedEvenWhenDeploymentSwitchesAlias()
+    {
+        var first = DirectoryPath("release-a");
+        var second = DirectoryPath("release-b");
+        Directory.CreateDirectory(Path.Combine(first, "files"));
+        Directory.CreateDirectory(Path.Combine(second, "files"));
+        File.WriteAllText(Path.Combine(first, "files", "evidence.txt"), "first");
+        File.WriteAllText(Path.Combine(second, "files", "evidence.txt"), "second");
+        var alias = Path.Combine(root, "current");
+        CreateDirectoryLink(alias, first);
+        try
+        {
+            var layout = DatabaseBackupFileLayout.Create([new("files", Path.Combine(alias, "files"), true)],
+                DirectoryPath("backups"));
+            Directory.Delete(alias);
+            CreateDirectoryLink(alias, second);
+            var pinned = layout.GetPhysicalFilePath("files", "evidence.txt");
+            Assert.Equal(Path.GetFullPath(Path.Combine(first, "files", "evidence.txt")), pinned);
+            Assert.Equal("first", File.ReadAllText(pinned));
+            Assert.Equal("files/evidence.txt", layout.GetArchiveEntryPath(Path.Combine(alias, "files", "evidence.txt")));
+            Assert.Equal(Path.GetFullPath(Path.Combine(first, "files")), Assert.Single(layout.ArchiveRoots).Path);
+        }
+        finally { Directory.Delete(alias); }
+    }
+
+    [Fact]
+    public void ExcludedBackupDirectoryIsComparedByPinnedPhysicalPath()
+    {
+        var release = DirectoryPath("release");
+        var physicalFiles = Path.Combine(release, "files");
+        var physicalBackups = Path.Combine(physicalFiles, "backups");
+        Directory.CreateDirectory(physicalBackups);
+        var alias = Path.Combine(root, "current");
+        CreateDirectoryLink(alias, release);
+        try
+        {
+            var layout = DatabaseBackupFileLayout.Create([new("files", Path.Combine(alias, "files"), true)],
+                Path.Combine(alias, "files", "backups"));
+            Assert.True(layout.IsExcludedPhysicalPath(Path.Combine(physicalBackups, "old.backup")));
+            Assert.False(layout.IsExcludedPhysicalPath(Path.Combine(physicalFiles, "evidence.txt")));
+            Assert.Throws<InvalidDataException>(() => layout.GetArchiveEntryPath(Path.Combine(alias, "files", "backups", "old.backup")));
+        }
+        finally { Directory.Delete(alias); }
+    }
+
+    [Fact]
+    public void LinkedAncestorsInsideReleaseTargetArePinnedRecursively()
+    {
+        var first = DirectoryPath("target-a");
+        var second = DirectoryPath("target-b");
+        Directory.CreateDirectory(Path.Combine(first, "app", "files"));
+        Directory.CreateDirectory(Path.Combine(second, "app", "files"));
+        File.WriteAllText(Path.Combine(first, "app", "files", "evidence.txt"), "first");
+        File.WriteAllText(Path.Combine(second, "app", "files", "evidence.txt"), "second");
+        var parent = Path.Combine(root, "target-parent");
+        var current = Path.Combine(root, "current");
+        CreateDirectoryLink(parent, first);
+        CreateDirectoryLink(current, Path.Combine(parent, "app"));
+        try
+        {
+            var layout = DatabaseBackupFileLayout.Create([new("files", Path.Combine(current, "files"), true)],
+                DirectoryPath("backups"));
+            Directory.Delete(parent);
+            CreateDirectoryLink(parent, second);
+            var path = layout.GetPhysicalFilePath("files", "evidence.txt");
+            Assert.Equal(Path.GetFullPath(Path.Combine(first, "app", "files", "evidence.txt")), path);
+            Assert.Equal("first", File.ReadAllText(path));
+        }
+        finally { Directory.Delete(current); Directory.Delete(parent); }
+    }
+
+    [Fact]
+    public void RootItselfCannotBeReplacedWithDirectoryLink()
+    {
+        var target = DirectoryPath("target");
+        var alias = Path.Combine(root, "root-link");
+        CreateDirectoryLink(alias, target);
+        try
+        {
+            Assert.Throws<IOException>(() => DatabaseBackupFileLayout.Create([new("files", alias, true)], DirectoryPath("backups")));
+        }
+        finally { Directory.Delete(alias); }
+    }
+
+    private static void CreateDirectoryLink(string alias, string target)
+    {
+        if (!OperatingSystem.IsWindows()) { Directory.CreateSymbolicLink(alias, target); return; }
+        // Junctions exercise Windows parent-link resolution without requiring symlink privileges.
+        var startInfo = new System.Diagnostics.ProcessStartInfo("cmd.exe")
+        { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
+        foreach (var argument in new[] { "/c", "mklink", "/J", alias, target }) startInfo.ArgumentList.Add(argument);
+        using var process = System.Diagnostics.Process.Start(startInfo)!;
+        var output = process.StandardOutput.ReadToEnd();
+        var error = process.StandardError.ReadToEnd();
+        Assert.True(process.WaitForExit(5000), "Directory link creation timed out.");
+        Assert.True(process.ExitCode == 0, output + error);
+    }
+
+    [Fact]
     public void NestedAndEqualRootsKeepEveryLogicalMappingWithoutDuplicateArchives()
     {
         var files = DirectoryPath("files");

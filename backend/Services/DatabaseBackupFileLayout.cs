@@ -10,17 +10,20 @@ public sealed class DatabaseBackupFileLayout
     private readonly string excludedDirectory;
     private readonly IReadOnlyDictionary<string, DatabaseBackupFileRoot> archiveRootsByName;
     private readonly IReadOnlyDictionary<string, string> logicalRootPaths;
+    private readonly IReadOnlyList<(string Alias, string Physical)> rootAliases;
     public IReadOnlyList<DatabaseBackupFileRoot> ArchiveRoots { get; }
     public IReadOnlyList<DatabaseBackupFileRootMapping> RootMappings { get; }
 
     private DatabaseBackupFileLayout(string excludedDirectory,
         IReadOnlyList<DatabaseBackupFileRoot> roots, IReadOnlyList<DatabaseBackupFileRootMapping> mappings,
-        IReadOnlyDictionary<string, string> logicalRootPaths)
+        IReadOnlyDictionary<string, string> logicalRootPaths,
+        IReadOnlyList<(string Alias, string Physical)> rootAliases)
     {
         this.excludedDirectory = excludedDirectory;
         ArchiveRoots = roots;
         RootMappings = mappings;
         this.logicalRootPaths = logicalRootPaths;
+        this.rootAliases = rootAliases;
         archiveRootsByName = roots.ToDictionary(root => root.Name, StringComparer.Ordinal);
     }
 
@@ -28,11 +31,12 @@ public sealed class DatabaseBackupFileLayout
         string excludedDirectory)
     {
         ArgumentNullException.ThrowIfNull(candidates);
-        var excludedPath = NormalizeAbsolutePath(excludedDirectory);
+        var excludedPath = ResolveParentLinks(NormalizeAbsolutePath(excludedDirectory), includeLeaf: true);
         var items = candidates.Take(33).ToArray();
         if (items.Length > 32) throw new ArgumentException("Too many backup file roots.", nameof(candidates));
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var present = new List<DatabaseBackupFileRoot>();
+        var aliases = new List<(string Alias, string Physical)>();
         foreach (var item in items)
         {
             ArgumentNullException.ThrowIfNull(item);
@@ -40,7 +44,8 @@ public sealed class DatabaseBackupFileLayout
                 || item.Name.Any(character => !char.IsAsciiLetterOrDigit(character) && character != '-')
                 || !names.Add(item.Name))
                 throw new ArgumentException("Backup root names must be unique safe archive prefixes.", nameof(candidates));
-            var path = NormalizeAbsolutePath(item.Path);
+            var alias = NormalizeAbsolutePath(item.Path);
+            var path = ResolveParentLinks(alias, includeLeaf: false);
             if (IsWithin(path, excludedPath)
                 || string.Equals(path, Path.TrimEndingDirectorySeparator(Path.GetPathRoot(path)!),
                     OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
@@ -53,6 +58,8 @@ public sealed class DatabaseBackupFileLayout
                 if ((attributes & FileAttributes.ReparsePoint) != 0)
                     throw new IOException($"Символическая ссылка не может быть файловым корнем резервной копии: {item.Name}.");
                 present.Add(item with { Path = path });
+                if (!string.Equals(alias, path, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+                    aliases.Add((alias, path));
             }
             catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
             {
@@ -72,7 +79,8 @@ public sealed class DatabaseBackupFileLayout
         }).ToArray();
         ValidateRootMappings(mappings);
         return new DatabaseBackupFileLayout(excludedPath, selected.AsReadOnly(), Array.AsReadOnly(mappings),
-            present.ToDictionary(item => item.Name, item => item.Path, StringComparer.Ordinal));
+            present.ToDictionary(item => item.Name, item => item.Path, StringComparer.Ordinal),
+            aliases.OrderByDescending(item => item.Alias.Length).ToArray());
     }
 
     public string GetPhysicalFilePath(string logicalRootName, string relativePath)
@@ -91,9 +99,18 @@ public sealed class DatabaseBackupFileLayout
         return path;
     }
 
+    public bool IsExcludedPhysicalPath(string path)
+        => IsWithin(NormalizeAbsolutePath(path), excludedDirectory);
+
     public string GetArchiveEntryPath(string physicalFilePath, string? archiveRootName = null)
     {
         var path = NormalizeAbsolutePath(physicalFilePath);
+        foreach (var alias in rootAliases)
+        {
+            if (!IsWithin(path, alias.Alias)) continue;
+            path = Path.GetFullPath(Path.Combine(alias.Physical, Path.GetRelativePath(alias.Alias, path)));
+            break;
+        }
         if (IsWithin(path, excludedDirectory))
             throw new InvalidDataException("Обязательный файл находится в исключённом каталоге резервных копий.");
         var root = archiveRootName is null
@@ -126,6 +143,33 @@ public sealed class DatabaseBackupFileLayout
         }
         if (mappings.Any(mapping => !archiveRoots.Contains(mapping.ArchivePrefix.Split('/')[0])))
             throw new InvalidDataException("Сопоставление ссылается на неописанный архивный корень.");
+    }
+
+    private static string ResolveParentLinks(string path, bool includeLeaf, int linkBudget = 32)
+    {
+        if (linkBudget < 0) throw new IOException("Слишком длинная цепочка ссылок файлового корня.");
+        var volume = Path.GetPathRoot(path)!;
+        var segments = Path.GetRelativePath(volume, path).Split(Path.DirectorySeparatorChar,
+            StringSplitOptions.RemoveEmptyEntries);
+        var resolved = volume;
+        for (var index = 0; index < segments.Length; index++)
+        {
+            if (segments[index] == ".") continue;
+            resolved = Path.Combine(resolved, segments[index]);
+            if (!includeLeaf && index == segments.Length - 1) continue;
+            FileAttributes attributes;
+            try { attributes = File.GetAttributes(resolved); }
+            catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException) { continue; }
+            if ((attributes & FileAttributes.ReparsePoint) == 0) continue;
+            var target = new DirectoryInfo(resolved).ResolveLinkTarget(returnFinalTarget: true)
+                ?? throw new IOException("Не удалось закрепить физический каталог резервного копирования.");
+            if ((target.Attributes & FileAttributes.Directory) == 0)
+                throw new IOException("Родитель файлового корня не является каталогом.");
+            // ResolveLinkTarget follows links on the leaf itself, but a target can still
+            // contain linked ancestors (especially on Unix). Pin those as well.
+            resolved = ResolveParentLinks(NormalizeAbsolutePath(target.FullName), includeLeaf: true, linkBudget - 1);
+        }
+        return NormalizeAbsolutePath(resolved);
     }
 
     private static string ToArchiveRelativePath(string relative)

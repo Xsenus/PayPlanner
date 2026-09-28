@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO.Compression;
+using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Options;
@@ -377,21 +378,64 @@ public sealed class DatabaseRestoreDrillService(
         {
             var archivePath = backups.ResolveBackupPath(part.RelativePath)
                 ?? throw new FileNotFoundException($"Часть backup set не найдена: {part.RelativePath}.");
-            using var archive = ZipFile.OpenRead(archivePath);
+            await using var archiveStream = new FileStream(archivePath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, true);
+            await VerifyArchiveStreamAsync(archiveStream, part, cancellationToken);
+            archiveStream.Position = 0;
+            using var archive = new ZipArchive(archiveStream, ZipArchiveMode.Read, leaveOpen: true);
             foreach (var entry in archive.Entries)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 if (string.IsNullOrEmpty(entry.Name)) continue;
+                var expectedHash = part.FileEntryHashFormat == DatabaseBackupArchiveHash.Format
+                    ? DatabaseBackupArchiveHash.FromComment(entry.Comment) : null;
                 var targetPath = Path.GetFullPath(Path.Combine(filesRoot, entry.FullName.Replace('/', Path.DirectorySeparatorChar)));
                 var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
                 if (!targetPath.StartsWith(filesRoot + Path.DirectorySeparatorChar, comparison))
                     throw new InvalidDataException("File backup set содержит небезопасный путь.");
                 Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
-                await using var source = entry.Open();
-                await using var destination = new FileStream(targetPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, true);
-                await source.CopyToAsync(destination, cancellationToken);
+                var created = false;
+                try
+                {
+                    DatabaseBackupArchiveFileHash actual;
+                    await using (var source = entry.Open())
+                    await using (var destination = new FileStream(targetPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, true))
+                    {
+                        created = true;
+                        if (expectedHash is null)
+                        {
+                            await source.CopyToAsync(destination, cancellationToken);
+                            actual = new(destination.Position, string.Empty);
+                        }
+                        else actual = await DatabaseBackupArchiveHash.CopyAsync(source, destination, cancellationToken);
+                    }
+                    if (actual.SizeBytes != entry.Length || expectedHash is not null
+                        && !string.Equals(actual.Sha256, expectedHash, StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidDataException("Размер или SHA-256 восстановленного документа не совпадает с архивом.");
+                }
+                catch
+                {
+                    if (created)
+                    {
+                        try { File.Delete(targetPath); }
+                        catch (Exception cleanupError) when (cleanupError is IOException or UnauthorizedAccessException)
+                        { logger.LogWarning(cleanupError, "Could not remove failed restored document {Path}.", targetPath); }
+                    }
+                    throw;
+                }
             }
+            // A read-sharing handle prevents writes on Windows. Unix permits concurrent
+            // writes, so also verify the same handle after extraction before reporting success.
+            await VerifyArchiveStreamAsync(archiveStream, part, cancellationToken);
         }
+    }
+
+    private static async Task VerifyArchiveStreamAsync(FileStream stream, DatabaseBackupPartManifest part,
+        CancellationToken cancellationToken)
+    {
+        stream.Position = 0;
+        var hash = Convert.ToHexString(await SHA256.HashDataAsync(stream, cancellationToken));
+        if (stream.Length != part.SizeBytes || !string.Equals(hash, part.Sha256, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("Размер или SHA-256 файлового архива изменился после проверки резервной копии.");
     }
 
     private void EnsureNotActiveSqliteDatabase(string targetPath)

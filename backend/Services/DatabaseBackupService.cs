@@ -114,7 +114,8 @@ public sealed record DatabaseBackupPartManifest(
     long SizeBytes,
     string Sha256,
     bool Required,
-    IReadOnlyList<DatabaseBackupFileRootMapping>? FileRoots = null);
+    IReadOnlyList<DatabaseBackupFileRootMapping>? FileRoots = null,
+    string? FileEntryHashFormat = null);
 
 public sealed record DatabaseBackupVerificationResult(
     string Status,
@@ -160,6 +161,7 @@ public sealed class DatabaseBackupService
     private string? _cachedVerifiedBackupPath;
     private string? _cachedVerifiedBackupStamp;
     private DateTime _cachedVerifiedBackupAtUtc;
+    private string? _cachedVerifiedFilePartHash;
     private readonly string _backupRootDirectory;
 
     public DatabaseBackupService(
@@ -621,7 +623,7 @@ public sealed class DatabaseBackupService
                 ex.Message);
         }
 
-        if (manifest is null || manifest.FormatVersion is not (1 or 2))
+        if (manifest is null || manifest.FormatVersion is not (1 or 2 or 3))
         {
             return new DatabaseBackupVerificationResult(
                 "invalidManifest",
@@ -650,7 +652,7 @@ public sealed class DatabaseBackupService
 
         try
         {
-            if (manifest.FormatVersion == 2)
+            if (manifest.FormatVersion >= 2)
             {
                 var databaseParts = manifest.Parts?.Where(part => part?.Kind == "database").ToArray() ?? [];
                 var referenceParts = manifest.Parts?.Where(part => part?.Kind == "file-references").ToArray() ?? [];
@@ -663,6 +665,12 @@ public sealed class DatabaseBackupService
             foreach (var part in manifest.Parts ?? [])
             {
                 if (part is null) throw new InvalidDataException("Manifest содержит пустую часть комплекта.");
+                if (manifest.FormatVersion >= 3 && part.Kind == "file-storage"
+                    && (!part.Required || part.FileEntryHashFormat != DatabaseBackupArchiveHash.Format))
+                    throw new InvalidDataException("Новый файловый архив должен содержать обязательные хеши документов.");
+                if (part.FileEntryHashFormat is not null
+                    && (part.Kind != "file-storage" || part.FileEntryHashFormat != DatabaseBackupArchiveHash.Format))
+                    throw new InvalidDataException("Некорректный формат хешей файловой части комплекта.");
                 if (part.FileRoots is null) continue; // Historical manifests did not declare this layout.
                 if (part.Kind != "file-storage" || part.FileRoots.Count == 0)
                     throw new InvalidDataException("Сопоставления файловых корней указаны для неподходящей части комплекта.");
@@ -693,13 +701,34 @@ public sealed class DatabaseBackupService
                     break;
                 }
 
-                var partInfo = new FileInfo(partPath);
-                var partHash = await ComputeSha256Async(partPath, cancellationToken);
-                if (partInfo.Length != part.SizeBytes || !string.Equals(partHash, part.Sha256, StringComparison.OrdinalIgnoreCase))
+                await using var partStream = new FileStream(partPath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, true);
+                var partHash = Convert.ToHexString(await SHA256.HashDataAsync(partStream, cancellationToken)).ToLowerInvariant();
+                if (partStream.Length != part.SizeBytes || !string.Equals(partHash, part.Sha256, StringComparison.OrdinalIgnoreCase))
                 {
                     verified = false;
                     partError = $"Обязательная часть backup set повреждена: {part.RelativePath}.";
                     break;
+                }
+                if (part.FileEntryHashFormat == DatabaseBackupArchiveHash.Format)
+                {
+                    try
+                    {
+                        // One bounded proof cache, keyed by freshly computed content SHA,
+                        // never by filename, timestamp, or a caller's declared hash.
+                        if (!string.Equals(Volatile.Read(ref _cachedVerifiedFilePartHash), partHash, StringComparison.Ordinal))
+                        {
+                            partStream.Position = 0;
+                            using var archive = new ZipArchive(partStream, ZipArchiveMode.Read, leaveOpen: true);
+                            await DatabaseBackupArchiveHash.ValidateEntriesAsync(archive, cancellationToken);
+                            Volatile.Write(ref _cachedVerifiedFilePartHash, partHash);
+                        }
+                    }
+                    catch (Exception ex) when (ex is IOException or InvalidDataException)
+                    {
+                        verified = false;
+                        partError = ex.Message;
+                        break;
+                    }
                 }
             }
         }
@@ -2348,7 +2377,7 @@ public sealed class DatabaseBackupService
             await ComputeSha256Async(resolvedPath, cancellationToken),
             true);
         var manifest = new DatabaseBackupManifest(
-            2,
+            3,
             Guid.NewGuid().ToString("N"),
             backup.FileName,
             backup.RelativePath.Replace('\\', '/'),
@@ -2424,14 +2453,16 @@ public sealed class DatabaseBackupService
             {
                 foreach (var root in layout.ArchiveRoots)
                 {
-                    foreach (var filePath in EnumerateFilesSafely(root.Path, cancellationToken))
+                    foreach (var filePath in EnumerateFilesSafely(root.Path, layout, cancellationToken))
                     {
                         cancellationToken.ThrowIfCancellationRequested();
-                        if (IsPathWithin(filePath, _backupRootDirectory)) continue;
+                        if (layout.IsExcludedPhysicalPath(filePath)) continue;
                         var entry = archive.CreateEntry(layout.GetArchiveEntryPath(filePath, root.Name), CompressionLevel.Fastest);
                         await using var source = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 81920, true);
-                        await using var destination = entry.Open();
-                        await source.CopyToAsync(destination, cancellationToken);
+                        DatabaseBackupArchiveFileHash hash;
+                        await using (var destination = entry.Open())
+                            hash = await DatabaseBackupArchiveHash.CopyAsync(source, destination, cancellationToken);
+                        entry.Comment = DatabaseBackupArchiveHash.ToComment(hash.Sha256);
                     }
                 }
             }
@@ -2450,7 +2481,7 @@ public sealed class DatabaseBackupService
                 Path.GetRelativePath(_backupRootDirectory, archivePath).Replace('\\', '/'),
                 info.Length,
                 await ComputeSha256Async(archivePath, cancellationToken),
-                true, layout.RootMappings),
+                true, layout.RootMappings, DatabaseBackupArchiveHash.Format),
         ];
     }
 
@@ -2470,7 +2501,7 @@ public sealed class DatabaseBackupService
                || fullPath.StartsWith(fullRoot + Path.DirectorySeparatorChar, comparison);
     }
 
-    private IEnumerable<string> EnumerateFilesSafely(string root, CancellationToken cancellationToken)
+    private IEnumerable<string> EnumerateFilesSafely(string root, DatabaseBackupFileLayout layout, CancellationToken cancellationToken)
     {
         var pending = new Stack<string>();
         pending.Push(root);
@@ -2478,14 +2509,14 @@ public sealed class DatabaseBackupService
         {
             cancellationToken.ThrowIfCancellationRequested();
             var directory = pending.Pop();
-            if (IsPathWithin(directory, _backupRootDirectory)) continue;
+            if (layout.IsExcludedPhysicalPath(directory)) continue;
             IReadOnlyList<string> files;
             try
             {
                 files = _directoryReader.GetFiles(directory, "*");
                 foreach (var child in _directoryReader.GetDirectories(directory))
                 {
-                    if (!IsPathWithin(child, _backupRootDirectory) && !IsReparsePoint(child)) pending.Push(child);
+                    if (!layout.IsExcludedPhysicalPath(child) && !IsReparsePoint(child)) pending.Push(child);
                 }
             }
             catch (Exception ex) when (IsRecoverableFileSystemEnumerationError(ex))
@@ -2495,6 +2526,8 @@ public sealed class DatabaseBackupService
             foreach (var file in files)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                if (IsReparsePoint(file))
+                    throw new IOException("Файловая ссылка не может быть включена в резервный архив вместо исходных байтов.");
                 yield return file;
             }
         }

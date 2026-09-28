@@ -19,6 +19,207 @@ namespace PayPlanner.Api.Tests;
 
 public sealed class DatabaseBackupServiceS3Tests
 {
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task HistoricalFileArchivesWithoutEntryHashesStillRestore(int version)
+    {
+        await using var scope = await CreateScopeAsync();
+        await File.WriteAllTextAsync(Path.Combine(scope.Root, "files", "legacy.txt"), "legacy");
+        var backups = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        var created = await backups.CreateManualBackupAsync();
+        var manifest = await backups.ReadVerifiedManifestAsync(created.Backup.RelativePath);
+        var part = Assert.Single(manifest.Parts!, item => item.Kind == "file-storage");
+        var path = backups.ResolveBackupPath(part.RelativePath)!;
+        using (var archive = System.IO.Compression.ZipFile.Open(path, System.IO.Compression.ZipArchiveMode.Update))
+            foreach (var entry in archive.Entries) entry.Comment = string.Empty;
+        var historicalPart = part with
+        {
+            FileEntryHashFormat = null,
+            SizeBytes = new FileInfo(path).Length,
+            Sha256 = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(path))).ToLowerInvariant()
+        };
+        var historical = manifest with
+        {
+            FormatVersion = version,
+            Parts = manifest.Parts!.Where(item => version != 1 || item.Kind != "file-references")
+                .Select(item => item == part ? historicalPart : item).ToArray()
+        };
+        var node = System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(historical,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web)))!;
+        foreach (var item in node["parts"]!.AsArray()) item!.AsObject().Remove("fileEntryHashFormat");
+        await File.WriteAllTextAsync(backups.ResolveBackupPath(created.Backup.RelativePath)! + ".manifest.json", node.ToJsonString());
+        Assert.True((await backups.VerifyBackupAsync(created.Backup.RelativePath)).Verified);
+        var report = await scope.Provider.GetRequiredService<DatabaseRestoreDrillService>()
+            .RunAsync(created.Backup.RelativePath, false, null, CancellationToken.None);
+        Assert.Equal("restored", report.Status);
+        Assert.Equal("legacy", await File.ReadAllTextAsync(Path.Combine(Path.GetDirectoryName(report.Target)!, "files", "file-storage", "legacy.txt")));
+    }
+
+    [Fact]
+    public async Task ArchiveEntriesDeclareExactBinaryHashAndRestoreBytes()
+    {
+        await using var scope = await CreateScopeAsync();
+        var bytes = Enumerable.Range(0, 131073).Select(index => (byte)(index % 251)).ToArray();
+        await File.WriteAllBytesAsync(Path.Combine(scope.Root, "files", "binary.bin"), bytes);
+        var backups = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        var created = await backups.CreateManualBackupAsync();
+        var manifest = await backups.ReadVerifiedManifestAsync(created.Backup.RelativePath);
+        var part = Assert.Single(manifest.Parts!, item => item.Kind == "file-storage");
+        Assert.Equal(DatabaseBackupArchiveHash.Format, part.FileEntryHashFormat);
+        using (var archive = System.IO.Compression.ZipFile.OpenRead(backups.ResolveBackupPath(part.RelativePath)!))
+        {
+            var entry = Assert.Single(archive.Entries);
+            Assert.Equal(Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)).ToLowerInvariant(),
+                DatabaseBackupArchiveHash.FromComment(entry.Comment));
+        }
+        var report = await scope.Provider.GetRequiredService<DatabaseRestoreDrillService>()
+            .RunAsync(created.Backup.RelativePath, false, null, CancellationToken.None);
+        Assert.Equal("restored", report.Status);
+        Assert.Equal(bytes, await File.ReadAllBytesAsync(Path.Combine(Path.GetDirectoryName(report.Target)!, "files", "file-storage", "binary.bin")));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("payplanner-sha256-v1:short")]
+    [InlineData("payplanner-sha256-v1:0000000000000000000000000000000000000000000000000000000000000000")]
+    public async Task FileChecksumMetadataCannotBeHiddenByRefreshingOuterChecksum(string comment)
+    {
+        await using var scope = await CreateScopeAsync();
+        await File.WriteAllTextAsync(Path.Combine(scope.Root, "files", "evidence.txt"), "original");
+        var backups = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        var created = await backups.CreateManualBackupAsync();
+        var manifest = await backups.ReadVerifiedManifestAsync(created.Backup.RelativePath);
+        var part = Assert.Single(manifest.Parts!, item => item.Kind == "file-storage");
+        var path = backups.ResolveBackupPath(part.RelativePath)!;
+        var timestamp = File.GetLastWriteTimeUtc(path);
+        using (var archive = System.IO.Compression.ZipFile.Open(path, System.IO.Compression.ZipArchiveMode.Update))
+            Assert.Single(archive.Entries).Comment = comment;
+        File.SetLastWriteTimeUtc(path, timestamp);
+        var changedPart = part with
+        {
+            SizeBytes = new FileInfo(path).Length,
+            Sha256 = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(path))).ToLowerInvariant()
+        };
+        Assert.NotEqual(part.Sha256, changedPart.Sha256);
+        await File.WriteAllTextAsync(backups.ResolveBackupPath(created.Backup.RelativePath)! + ".manifest.json",
+            JsonSerializer.Serialize(manifest with { Parts = manifest.Parts!.Select(item => item == part ? changedPart : item).ToArray() },
+                new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+        Assert.False((await backups.VerifyBackupAsync(created.Backup.RelativePath)).Verified);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RestoreDetectsChangedArchiveAfterPreflightEvenWithUpdatedEntryHash(bool updateEntryHash)
+    {
+        await using var scope = await CreateScopeAsync();
+        await File.WriteAllTextAsync(Path.Combine(scope.Root, "files", "evidence.txt"), "original");
+        var backups = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        var created = await backups.CreateManualBackupAsync();
+        var manifest = await backups.ReadVerifiedManifestAsync(created.Backup.RelativePath);
+        var part = Assert.Single(manifest.Parts!, item => item.Kind == "file-storage");
+        var path = backups.ResolveBackupPath(part.RelativePath)!;
+        var changed = false;
+        var settings = new CallbackDrillOptions(Path.Combine(scope.Root, "race-drills"), () =>
+        {
+            if (changed) return;
+            changed = true;
+            using var archive = System.IO.Compression.ZipFile.Open(path, System.IO.Compression.ZipArchiveMode.Update);
+            var entry = Assert.Single(archive.Entries);
+            var bytes = System.Text.Encoding.UTF8.GetBytes("tampered");
+            using (var output = entry.Open())
+            {
+                output.SetLength(0);
+                output.Write(bytes);
+            }
+            if (updateEntryHash) entry.Comment = DatabaseBackupArchiveHash.ToComment(
+                Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)));
+        });
+        var drill = new DatabaseRestoreDrillService(backups, scope.Provider.GetRequiredService<DatabaseProviderInfo>(),
+            scope.Provider.GetRequiredService<IWebHostEnvironment>(), settings, NullLogger<DatabaseRestoreDrillService>.Instance);
+        var report = await drill.RunAsync(created.Backup.RelativePath, false, null, CancellationToken.None);
+        Assert.True(changed);
+        Assert.Equal("failed", report.Status);
+        Assert.Contains("SHA-256", report.Error!, StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Combine(report.Target, "files", "file-storage", "evidence.txt")));
+        Assert.Equal("original", await File.ReadAllTextAsync(Path.Combine(scope.Root, "files", "evidence.txt")));
+    }
+
+    [Theory]
+    [InlineData("missing-format")]
+    [InlineData("unknown-format")]
+    [InlineData("optional")]
+    [InlineData("wrong-kind")]
+    public async Task NewManifestCannotBypassFileEntryHashDeclaration(string corruption)
+    {
+        await using var scope = await CreateScopeAsync();
+        await File.WriteAllTextAsync(Path.Combine(scope.Root, "files", "evidence.txt"), "original");
+        var backups = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        var created = await backups.CreateManualBackupAsync();
+        var manifest = await backups.ReadVerifiedManifestAsync(created.Backup.RelativePath);
+        var part = Assert.Single(manifest.Parts!, item => item.Kind == "file-storage");
+        var corruptedPart = corruption switch
+        {
+            "missing-format" => part with { FileEntryHashFormat = null },
+            "unknown-format" => part with { FileEntryHashFormat = "unknown" },
+            "optional" => part with { Required = false },
+            _ => part with { Kind = "unexpected" }
+        };
+        await File.WriteAllTextAsync(backups.ResolveBackupPath(created.Backup.RelativePath)! + ".manifest.json",
+            JsonSerializer.Serialize(manifest with { Parts = manifest.Parts!.Select(item => item == part ? corruptedPart : item).ToArray() },
+                new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+        var verification = await backups.VerifyBackupAsync(created.Backup.RelativePath);
+        Assert.False(verification.Verified);
+        Assert.Equal("invalidManifest", verification.Status);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FailedEntryExtractionRemovesOnlyItsOwnFile(bool existingTarget)
+    {
+        await using var scope = await CreateScopeAsync();
+        await File.WriteAllTextAsync(Path.Combine(scope.Root, "files", "evidence.txt"), "original");
+        var backups = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        var created = await backups.CreateManualBackupAsync();
+        var manifest = await backups.ReadVerifiedManifestAsync(created.Backup.RelativePath);
+        var part = Assert.Single(manifest.Parts!, item => item.Kind == "file-storage");
+        var path = backups.ResolveBackupPath(part.RelativePath)!;
+        using (var archive = System.IO.Compression.ZipFile.Open(path, System.IO.Compression.ZipArchiveMode.Update))
+            Assert.Single(archive.Entries).Comment = DatabaseBackupArchiveHash.ToComment(new string('0', 64));
+        var changedPart = part with
+        {
+            SizeBytes = new FileInfo(path).Length,
+            Sha256 = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(path)))
+        };
+        var targetRoot = Path.Combine(scope.Root, "entry-drill");
+        var targetFile = Path.Combine(targetRoot, "files", "file-storage", "evidence.txt");
+        if (existingTarget)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(targetFile)!);
+            await File.WriteAllTextAsync(targetFile, "foreign");
+        }
+        // Exercise the post-preflight extraction boundary directly: the public verifier
+        // correctly rejects this archive before reaching the partial-file cleanup branch.
+        var method = typeof(DatabaseRestoreDrillService).GetMethod("RestoreFilePartsAsync",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        var drill = scope.Provider.GetRequiredService<DatabaseRestoreDrillService>();
+        var task = (Task)method.Invoke(drill,
+            [manifest with { Parts = [changedPart] }, targetRoot, CancellationToken.None])!;
+        if (existingTarget)
+        {
+            await Assert.ThrowsAnyAsync<IOException>(() => task);
+            Assert.Equal("foreign", await File.ReadAllTextAsync(targetFile));
+        }
+        else
+        {
+            await Assert.ThrowsAsync<InvalidDataException>(() => task);
+            Assert.False(File.Exists(targetFile));
+        }
+        Assert.Equal("original", await File.ReadAllTextAsync(Path.Combine(scope.Root, "files", "evidence.txt")));
+    }
+
     [Fact]
     public async Task HistoricalVersionOneManifestWithoutInventoryRemainsVerifiable()
     {
@@ -49,7 +250,7 @@ public sealed class DatabaseBackupServiceS3Tests
         var backups = scope.Provider.GetRequiredService<DatabaseBackupService>();
         var created = await backups.CreateManualBackupAsync();
         var manifest = await backups.ReadVerifiedManifestAsync(created.Backup.RelativePath);
-        Assert.Equal(2, manifest.FormatVersion);
+        Assert.Equal(3, manifest.FormatVersion);
         var reference = Assert.Single(manifest.Parts!, item => item.Kind == "file-references");
         var parts = manifest.Parts!.Where(item => item.Kind != "file-references").ToList();
         if (corruption != "absent") parts.Add(corruption switch
