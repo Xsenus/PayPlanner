@@ -467,7 +467,7 @@ public sealed class DatabaseBackupService
         {
             await using var rootLock = await BackupDirectoryLease.AcquireAsync(
                 _backupRootDirectory, RootLockTimeout, cancellationToken);
-            await CleanupExpiredBackupsAsync(settings.RetentionDays, cancellationToken);
+            await CleanupExpiredBackupsAsync(settings, cancellationToken);
         }
         finally
         {
@@ -750,9 +750,9 @@ public sealed class DatabaseBackupService
 
             await EnsureBackupSetCatalogedAsync(fileInfo.RelativePath, cancellationToken);
 
-            await CleanupExpiredBackupsAsync(settings.RetentionDays, cancellationToken);
             var s3UploadResults = await UploadBackupToS3Async(fileInfo, settings.S3Upload, nowLocal, cancellationToken);
             var yandexDiskUploadResults = await UploadBackupToYandexDiskAsync(fileInfo, settings.YandexDiskUpload, nowLocal, cancellationToken);
+            await CleanupExpiredBackupsAsync(settings, cancellationToken);
             return (fileInfo, s3UploadResults, yandexDiskUploadResults);
         }
         finally
@@ -970,8 +970,9 @@ public sealed class DatabaseBackupService
         return false;
     }
 
-    private async Task CleanupExpiredBackupsAsync(int retentionDays, CancellationToken cancellationToken)
+    private async Task CleanupExpiredBackupsAsync(BackupSettings settings, CancellationToken cancellationToken)
     {
+        var retentionDays = settings.RetentionDays;
         cancellationToken.ThrowIfCancellationRequested();
         if (retentionDays <= 0 || !Directory.Exists(_backupRootDirectory))
         {
@@ -1023,12 +1024,25 @@ public sealed class DatabaseBackupService
             return;
         }
 
+        string? replicatedBackupPath = null;
+        if (settings.S3Upload.Enabled || settings.YandexDiskUpload.Enabled)
+        {
+            replicatedBackupPath = await FindProtectedReplicatedBackupAsync(
+                orderedBackupFiles.Select(item => item.FilePath), settings, cancellationToken);
+            if (replicatedBackupPath is null)
+            {
+                _logger.LogWarning("Database backup retention skipped: no verified set covers all configured destinations.");
+                return;
+            }
+        }
+
         var deletedRelativePaths = new List<string>();
         foreach (var filePath in backupFiles)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (string.Equals(filePath, newestBackupPath, StringComparison.OrdinalIgnoreCase)
-                || string.Equals(filePath, newestVerifiedBackupPath, StringComparison.OrdinalIgnoreCase))
+                || string.Equals(filePath, newestVerifiedBackupPath, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(filePath, replicatedBackupPath, StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
@@ -1049,6 +1063,51 @@ public sealed class DatabaseBackupService
 
         await MarkLocalBackupCopiesDeletedAsync(deletedRelativePaths, cancellationToken);
         CleanupEmptyDirectories(cancellationToken);
+    }
+
+    private async Task<string?> FindProtectedReplicatedBackupAsync(
+        IEnumerable<string> orderedPaths, BackupSettings settings, CancellationToken cancellationToken)
+    {
+        // An enabled but unconfigured destination cannot constitute a successful replica.
+        if (settings.S3Upload.Enabled && settings.S3Upload.ConnectionIds.Count == 0)
+            return null;
+
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        foreach (var batch in orderedPaths.Chunk(400))
+        {
+            var relativePaths = batch.Select(path => Path.GetRelativePath(_backupRootDirectory, path).Replace('\\', '/')).ToArray();
+            var sets = await context.DatabaseBackupSets.AsNoTracking().Include(item => item.Copies).AsSplitQuery()
+                .Where(item => relativePaths.Contains(item.BackupRelativePath))
+                .ToDictionaryAsync(item => item.BackupRelativePath, cancellationToken);
+            foreach (var path in batch)
+            {
+                var relativePath = Path.GetRelativePath(_backupRootDirectory, path).Replace('\\', '/');
+                if (!sets.TryGetValue(relativePath, out var set)
+                    || !set.Copies.Any(copy => copy.ProviderKey == "local" && copy.Status == DatabaseBackupCopyStatuses.Verified)
+                    || (settings.S3Upload.Enabled && settings.S3Upload.ConnectionIds.Any(connectionId =>
+                        !set.Copies.Any(copy => copy.ProviderKey == "s3" && copy.ConnectionId == connectionId
+                            && copy.Status == DatabaseBackupCopyStatuses.Verified)))
+                    || (settings.YandexDiskUpload.Enabled && !set.Copies.Any(copy => copy.ProviderKey == "yandexDisk"
+                        && copy.Status == DatabaseBackupCopyStatuses.Verified)))
+                    continue;
+
+                try
+                {
+                    // Historical cloud success belongs to the exact registered manifest, not a modified file.
+                    var manifest = TryReadManifest(path);
+                    if (manifest?.BackupId == set.Id
+                        && string.Equals(await ComputeSha256Async(GetManifestPath(path), cancellationToken),
+                            set.ManifestSha256, StringComparison.OrdinalIgnoreCase)
+                        && (await VerifyBackupAsync(relativePath, cancellationToken)).Verified)
+                        return path;
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    _logger.LogWarning(ex, "Could not verify replicated backup before retention: {BackupPath}.", path);
+                }
+            }
+        }
+        return null;
     }
 
     // The scheduler calls this under _backupSemaphore once per minute. Metadata

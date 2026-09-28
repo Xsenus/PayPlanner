@@ -506,6 +506,108 @@ public sealed class DatabaseBackupServiceS3Tests
                 && item.Locator == first.Backup.RelativePath).Select(item => item.Status).SingleAsync());
     }
 
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task Retention_PreservesReplicatedSetUntilNewConfiguredCopiesSucceed(bool s3, bool yandex)
+    {
+        await using var scope = await CreateScopeAsync();
+        var service = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        await service.UpdateSettingsAsync(false, "03:00", 1, "sqlite",
+            s3UploadEnabled: s3, s3ConnectionIds: ["s3-main", "s3-second"],
+            yandexDiskUploadEnabled: yandex, cancellationToken: CancellationToken.None);
+        var previous = await service.CreateManualBackupAsync();
+        var previousPath = service.ResolveBackupPath(previous.Backup.RelativePath)!;
+        File.SetLastWriteTimeUtc(previousPath, DateTime.UtcNow.AddDays(-10));
+        // With both destinations enabled, only Yandex fails: S3 success alone is insufficient.
+        scope.S3.ThrowOnUpload = s3 && !yandex;
+        scope.YandexDisk.ThrowOnUpload = yandex;
+
+        await service.CreateManualBackupAsync();
+        await service.EnsureScheduledBackupsAsync();
+
+        Assert.True(File.Exists(previousPath));
+        Assert.True((await service.VerifyBackupAsync(previous.Backup.RelativePath)).Verified);
+        scope.S3.ThrowOnUpload = false;
+        scope.YandexDisk.ThrowOnUpload = false;
+        await service.CreateManualBackupAsync();
+        Assert.False(File.Exists(previousPath));
+    }
+
+    [Fact]
+    public async Task Retention_SkipsCleanupWhenNewDestinationHasNoVerifiedCopy()
+    {
+        await using var scope = await CreateScopeAsync();
+        var service = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        var previous = await service.CreateManualBackupAsync();
+        var previousPath = service.ResolveBackupPath(previous.Backup.RelativePath)!;
+        File.SetLastWriteTimeUtc(previousPath, DateTime.UtcNow.AddDays(-10));
+        await service.UpdateSettingsAsync(false, "03:00", 1, "sqlite",
+            s3UploadEnabled: true, s3ConnectionIds: ["s3-main"], cancellationToken: CancellationToken.None);
+        scope.S3.ThrowOnUpload = true;
+        await service.CreateManualBackupAsync();
+        await service.EnsureScheduledBackupsAsync();
+        Assert.True(File.Exists(previousPath));
+    }
+
+    [Fact]
+    public async Task Retention_DoesNotTrustCloudHistoryForChangedManifest()
+    {
+        await using var scope = await CreateScopeAsync();
+        var service = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        await service.UpdateSettingsAsync(false, "03:00", 1, "sqlite",
+            s3UploadEnabled: true, s3ConnectionIds: ["s3-main"], cancellationToken: CancellationToken.None);
+        var previous = await service.CreateManualBackupAsync();
+        var previousPath = service.ResolveBackupPath(previous.Backup.RelativePath)!;
+        var replicated = await service.CreateManualBackupAsync();
+        var replicatedPath = service.ResolveBackupPath(replicated.Backup.RelativePath)!;
+        File.SetLastWriteTimeUtc(previousPath, DateTime.UtcNow.AddDays(-11));
+        File.SetLastWriteTimeUtc(replicatedPath, DateTime.UtcNow.AddDays(-10));
+        // Valid JSON still verifies its parts, but is no longer the remotely verified manifest.
+        await File.AppendAllTextAsync($"{replicatedPath}.manifest.json", " ");
+        scope.S3.ThrowOnUpload = true;
+        await service.CreateManualBackupAsync();
+        Assert.True(File.Exists(previousPath));
+        Assert.False(File.Exists(replicatedPath));
+    }
+
+    [Fact]
+    public async Task Retention_RequiresEveryConfiguredS3Connection()
+    {
+        await using var scope = await CreateScopeAsync();
+        var service = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        await service.UpdateSettingsAsync(false, "03:00", 1, "sqlite",
+            s3UploadEnabled: true, s3ConnectionIds: ["s3-main", "s3-second"], cancellationToken: CancellationToken.None);
+        var previous = await service.CreateManualBackupAsync();
+        var previousPath = service.ResolveBackupPath(previous.Backup.RelativePath)!;
+        File.SetLastWriteTimeUtc(previousPath, DateTime.UtcNow.AddDays(-10));
+        scope.S3.FailedConnectionId = "s3-second";
+        var next = await service.CreateManualBackupAsync();
+        Assert.Contains(next.S3UploadResults, item => item.ConnectionId == "s3-main" && item.Status == "success");
+        Assert.Contains(next.S3UploadResults, item => item.ConnectionId == "s3-second" && item.Status != "success");
+        await service.EnsureScheduledBackupsAsync();
+        Assert.True(File.Exists(previousPath));
+        scope.S3.FailedConnectionId = null;
+        await service.CreateManualBackupAsync();
+        Assert.False(File.Exists(previousPath));
+    }
+
+    [Fact]
+    public async Task Retention_SkipsCleanupForEnabledS3WithoutConnections()
+    {
+        await using var scope = await CreateScopeAsync();
+        var service = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        var previous = await service.CreateManualBackupAsync();
+        var previousPath = service.ResolveBackupPath(previous.Backup.RelativePath)!;
+        File.SetLastWriteTimeUtc(previousPath, DateTime.UtcNow.AddDays(-10));
+        await service.UpdateSettingsAsync(false, "03:00", 1, "sqlite",
+            s3UploadEnabled: true, s3ConnectionIds: [], cancellationToken: CancellationToken.None);
+        await service.CreateManualBackupAsync();
+        await service.EnsureScheduledBackupsAsync();
+        Assert.True(File.Exists(previousPath));
+    }
+
     [Fact]
     public async Task EnsureScheduledBackupsAsync_PreservesLatestVerifiedBackupWhenNewestIsCorrupt()
     {
@@ -951,6 +1053,7 @@ public sealed class DatabaseBackupServiceS3Tests
     private sealed class FakeS3StorageService : IS3StorageService
     {
         public bool ThrowOnUpload { get; set; }
+        public string? FailedConnectionId { get; set; }
         public string UploadErrorMessage { get; set; } = "S3 unavailable";
         public string? FailResultPathSuffix { get; set; }
         public string? CorruptReadPathSuffix { get; set; }
@@ -979,7 +1082,7 @@ public sealed class DatabaseBackupServiceS3Tests
 
         public async Task<S3StorageOperationResultDto> UploadAsync(string id, string? path, Stream content, string? contentType, bool overwrite, CancellationToken cancellationToken = default)
         {
-            if (ThrowOnUpload)
+            if (ThrowOnUpload || id == FailedConnectionId)
             {
                 throw new S3StorageOperationException(503, UploadErrorMessage);
             }
