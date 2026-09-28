@@ -19,6 +19,125 @@ namespace PayPlanner.Api.Tests;
 
 public sealed class DatabaseBackupServiceS3Tests
 {
+    [Fact]
+    public async Task BackupAttemptDatabaseDumpFailureKeepsHistoryWithoutAReadySetOrSensitivePath()
+    {
+        await using var scope = await CreateScopeAsync();
+        var unavailablePath = Path.Combine(scope.Root, "not-a-database.sqlite");
+        var unavailableSource = new DatabaseProviderInfo(DatabaseProviderKind.Sqlite,
+            new SqliteConnectionStringBuilder { DataSource = unavailablePath }.ConnectionString);
+        var service = ActivatorUtilities.CreateInstance<DatabaseBackupService>(scope.Provider, unavailableSource);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.CreateManualBackupAsync());
+        await using var db = await scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContextAsync();
+        var attempt = await db.DatabaseBackupAttempts.SingleAsync();
+        Assert.Equal(DatabaseBackupAttemptStatuses.Failed, attempt.Status);
+        Assert.Equal("database", attempt.Stage);
+        Assert.Null(attempt.BackupSetId);
+        Assert.NotNull(attempt.CompletedAt);
+        Assert.NotNull(attempt.Error);
+        Assert.DoesNotContain(unavailablePath, attempt.Error, StringComparison.Ordinal);
+        Assert.Empty(await db.DatabaseBackupSets.ToListAsync());
+        Assert.False(File.Exists(unavailablePath));
+    }
+
+    [Fact]
+    public async Task BackupAttemptIsRecordedBeforeUploadAndLinkedOnlyToVerifiedSet()
+    {
+        await using var scope = await CreateScopeAsync();
+        await scope.Provider.GetRequiredService<DatabaseBackupService>().UpdateSettingsAsync(true, "03:00", 14, "sqlite",
+            s3UploadEnabled: true, s3ConnectionIds: ["main"]);
+        scope.S3.BeforeUploadAsync = async () =>
+        {
+            await using var during = await scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContextAsync();
+            var running = await during.DatabaseBackupAttempts.SingleAsync();
+            Assert.Equal(DatabaseBackupAttemptStatuses.Running, running.Status);
+            Assert.Equal("uploading", running.Stage);
+            Assert.NotNull(running.BackupSetId);
+            Assert.Null(running.CompletedAt);
+        };
+        var result = await scope.Provider.GetRequiredService<DatabaseBackupService>().CreateManualBackupAsync();
+        await using var db = await scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContextAsync();
+        var attempt = await db.DatabaseBackupAttempts.SingleAsync();
+        Assert.Equal(DatabaseBackupAttemptStatuses.Succeeded, attempt.Status);
+        Assert.Equal("completed", attempt.Stage);
+        Assert.Equal("manual", attempt.Trigger);
+        Assert.Null(attempt.ScheduleSlot);
+        Assert.NotNull(attempt.CompletedAt);
+        Assert.Equal(result.Backup.RelativePath.Replace('\\', '/'), (await db.DatabaseBackupSets.SingleAsync()).BackupRelativePath);
+        Assert.Equal((await db.DatabaseBackupSets.SingleAsync()).Id, attempt.BackupSetId);
+    }
+
+    [Fact]
+    public async Task BackupAttemptCloudFailureKeepsVerifiedLocalSetAndDegradedAttempt()
+    {
+        await using var scope = await CreateScopeAsync();
+        await scope.Provider.GetRequiredService<DatabaseBackupService>().UpdateSettingsAsync(true, "03:00", 14, "sqlite",
+            s3UploadEnabled: true, s3ConnectionIds: ["main"]);
+        scope.S3.ThrowOnUpload = true;
+        await scope.Provider.GetRequiredService<DatabaseBackupService>().CreateManualBackupAsync();
+        await using var db = await scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContextAsync();
+        var attempt = await db.DatabaseBackupAttempts.SingleAsync();
+        Assert.Equal(DatabaseBackupAttemptStatuses.Degraded, attempt.Status);
+        Assert.NotNull(attempt.BackupSetId);
+        Assert.NotNull(attempt.CompletedAt);
+        Assert.Null(attempt.Error);
+    }
+
+    [Fact]
+    public async Task BackupAttemptCancellationKeepsStageAndUsesIndependentRecordingToken()
+    {
+        await using var scope = await CreateScopeAsync();
+        await scope.Provider.GetRequiredService<DatabaseBackupService>().UpdateSettingsAsync(true, "03:00", 14, "sqlite",
+            s3UploadEnabled: true, s3ConnectionIds: ["main"]);
+        using var cancellation = new CancellationTokenSource();
+        scope.S3.BeforeUploadAsync = () => { cancellation.Cancel(); return Task.CompletedTask; };
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => scope.Provider.GetRequiredService<DatabaseBackupService>().CreateManualBackupAsync(cancellation.Token));
+        await using var db = await scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContextAsync();
+        var attempt = await db.DatabaseBackupAttempts.SingleAsync();
+        Assert.Equal(DatabaseBackupAttemptStatuses.Cancelled, attempt.Status);
+        Assert.Equal("uploading", attempt.Stage);
+        Assert.NotNull(attempt.BackupSetId);
+        Assert.NotNull(attempt.CompletedAt);
+    }
+
+    [Fact]
+    public async Task BackupAttemptNextLeaseMarksOnlySameRootStaleRunsInterrupted()
+    {
+        await using var scope = await CreateScopeAsync();
+        var service = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        await service.CreateManualBackupAsync();
+        await using (var db = await scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContextAsync())
+        {
+            var previous = await db.DatabaseBackupAttempts.SingleAsync();
+            db.DatabaseBackupAttempts.Add(new DatabaseBackupAttempt
+            {
+                Id = "stale",
+                RootIdentity = previous.RootIdentity,
+                Trigger = "auto",
+                ScheduleSlot = "unfinished",
+                Stage = "database",
+                StartedAt = DateTime.UtcNow.AddMinutes(-20),
+            });
+            db.DatabaseBackupAttempts.Add(new DatabaseBackupAttempt
+            {
+                Id = "other-root",
+                RootIdentity = new string('0', 64),
+                Trigger = "manual",
+            });
+            await db.SaveChangesAsync();
+        }
+        await service.CreateManualBackupAsync();
+        await using var after = await scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContextAsync();
+        var stale = await after.DatabaseBackupAttempts.SingleAsync(item => item.Id == "stale");
+        Assert.Equal(DatabaseBackupAttemptStatuses.Interrupted, stale.Status);
+        Assert.Equal("database", stale.Stage);
+        Assert.NotNull(stale.CompletedAt);
+        Assert.Null(stale.BackupSetId);
+        Assert.Equal(DatabaseBackupAttemptStatuses.Running,
+            (await after.DatabaseBackupAttempts.SingleAsync(item => item.Id == "other-root")).Status);
+        Assert.Equal(2, await after.DatabaseBackupAttempts.CountAsync(item => item.Status == DatabaseBackupAttemptStatuses.Succeeded));
+    }
+
     [Theory]
     [InlineData("sqlite")]
     [InlineData("zip")]
@@ -1155,6 +1274,12 @@ public sealed class DatabaseBackupServiceS3Tests
         Assert.Equal(1, counts.Sum());
         var automatic = Assert.Single((await service.GetOverviewAsync()).Items, item => item.Trigger == "auto");
         Assert.True((await service.VerifyBackupAsync(automatic.RelativePath)).Verified);
+        Assert.Equal(0, await service.EnsureScheduledBackupsAsync());
+        await using var db = await scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContextAsync();
+        var attempt = await db.DatabaseBackupAttempts.SingleAsync();
+        Assert.Equal("auto", attempt.Trigger);
+        Assert.NotNull(attempt.ScheduleSlot);
+        Assert.Equal(DatabaseBackupAttemptStatuses.Succeeded, attempt.Status);
     }
 
     [Fact]
@@ -1411,6 +1536,13 @@ public sealed class DatabaseBackupServiceS3Tests
 
         Assert.Empty(Directory.EnumerateFiles(Path.Combine(scope.Root, "backups"), "*.manifest.json", SearchOption.AllDirectories));
         Assert.Empty(Directory.EnumerateFiles(Path.Combine(scope.Root, "backups"), "*.zip", SearchOption.AllDirectories));
+        await using var db = await scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContextAsync();
+        var attempt = await db.DatabaseBackupAttempts.SingleAsync();
+        Assert.Equal(DatabaseBackupAttemptStatuses.Failed, attempt.Status);
+        Assert.Equal("files", attempt.Stage);
+        Assert.Null(attempt.BackupSetId);
+        Assert.NotNull(attempt.CompletedAt);
+        Assert.Empty(await db.DatabaseBackupSets.ToListAsync());
     }
 
     [Fact]

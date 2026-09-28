@@ -24,6 +24,7 @@ import { formatDateTimeInTimeZone } from '../../utils/timeZoneDate';
 import { ObjectAuditDeletedObjectsSettings } from './ObjectAuditDeletedObjectsSettings';
 import { SystemJobDiagnosticsSettings } from './SystemJobDiagnosticsSettings';
 import { DatabaseBackupCatalog } from './DatabaseBackupCatalog';
+import { DatabaseBackupAttempts } from './DatabaseBackupAttempts';
 
 type MaintenanceTab = 'overview' | 'activity' | 'operations' | 'backups' | 'jobs' | 'deleted';
 
@@ -1379,6 +1380,7 @@ export function DatabaseMaintenanceSettings() {
 
             <DatabaseBackupCatalog key={databaseBackupCatalogRevision} timeZoneId={timeZoneId}
               connectionNames={Object.fromEntries(s3StorageConnections.map(connection => [connection.id, connection.name]))} />
+            <DatabaseBackupAttempts key={`attempts-${databaseBackupCatalogRevision}`} timeZoneId={timeZoneId} />
 
             <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
               <div className="flex flex-wrap items-start justify-between gap-3">

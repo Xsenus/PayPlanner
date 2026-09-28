@@ -3856,6 +3856,64 @@ namespace PayPlanner.Api.Migrations
                     b.ToTable("Countries");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.DatabaseBackupAttempt", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("BackupSetId")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Error")
+                        .HasMaxLength(2000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RootIdentity")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ScheduleSlot")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Stage")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("StartedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Trigger")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BackupSetId");
+
+                    b.HasIndex("RootIdentity", "Status");
+
+                    b.HasIndex("StartedAt", "Id");
+
+                    b.ToTable("DatabaseBackupAttempts");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.DatabaseBackupCopy", b =>
                 {
                     b.Property<long>("Id")
@@ -12124,6 +12182,16 @@ namespace PayPlanner.Api.Migrations
                     b.Navigation("Contract");
 
                     b.Navigation("Payment");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.DatabaseBackupAttempt", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.DatabaseBackupSet", "BackupSet")
+                        .WithMany()
+                        .HasForeignKey("BackupSetId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("BackupSet");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.DatabaseBackupCopy", b =>

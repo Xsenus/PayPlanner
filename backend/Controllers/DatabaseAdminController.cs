@@ -101,6 +101,29 @@ public class DatabaseAdminController : ControllerBase, IAsyncActionFilter
         }
     }
 
+    [HttpGet("backups/attempts")]
+    public async Task<ActionResult<DatabaseBackupAttemptPageDto>> GetBackupAttemptsAsync(
+        CancellationToken cancellationToken, [FromQuery] string? after = null, [FromQuery] int pageSize = 20)
+    {
+        // MVC normalizes whitespace-only query values to null; do not silently
+        // interpret an explicitly malformed cursor as the first page.
+        if (Request.Query.ContainsKey("after") && string.IsNullOrWhiteSpace(Request.Query["after"]))
+            return BadRequest(new { message = "Некорректная позиция в истории запусков." });
+        try
+        {
+            var page = await new DatabaseBackupCatalogReader(_db).ReadAttemptsAsync(after, pageSize, cancellationToken);
+            return Ok(new DatabaseBackupAttemptPageDto(page.Items.Select(item => new DatabaseBackupAttemptDto(
+                item.Id, item.Trigger, item.ScheduleSlot, item.Status, item.Stage, item.BackupSetId, item.Error,
+                DateTime.SpecifyKind(item.StartedAt, DateTimeKind.Utc),
+                DateTime.SpecifyKind(item.UpdatedAt, DateTimeKind.Utc),
+                item.CompletedAt.HasValue ? DateTime.SpecifyKind(item.CompletedAt.Value, DateTimeKind.Utc) : null)).ToList(), page.NextCursor));
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
     [HttpGet("backups/catalog")]
     public async Task<ActionResult<DatabaseBackupCatalogPageDto>> GetBackupCatalogAsync(
         CancellationToken cancellationToken, [FromQuery] string? after = null, [FromQuery] int pageSize = 20)

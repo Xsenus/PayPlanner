@@ -56,6 +56,29 @@ public sealed class DatabaseBackupCatalogMigrationTests
         Assert.DoesNotContain("DROP TABLE \"StorageObjects\"", script, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void AttemptMigrationsAreAdditiveAndDiscoverableForBothProviders()
+    {
+        var sqliteId = Assert.Single(typeof(AddDatabaseBackupAttempts)
+            .GetCustomAttributes(typeof(MigrationAttribute), false).Cast<MigrationAttribute>()).Id;
+        var postgresId = Assert.Single(typeof(AddDatabaseBackupAttemptsPostgres)
+            .GetCustomAttributes(typeof(MigrationAttribute), false).Cast<MigrationAttribute>()).Id;
+        using var sqlite = new PaymentContext(new DbContextOptionsBuilder<PaymentContext>()
+            .UseSqlite("Data Source=:memory:").UsePayPlannerSqliteMigrations().Options);
+        using var postgres = new PostgreSqlPaymentContext(new DbContextOptionsBuilder<PostgreSqlPaymentContext>()
+            .UseNpgsql("Host=localhost;Database=unused;Username=test;Password=test").Options, useObjectAuditModel: false);
+        foreach (var script in new[]
+        {
+            sqlite.GetService<IMigrator>().GenerateScript("20260928004324_IndexDatabaseBackupCatalogPaging", sqliteId),
+            postgres.GetService<IMigrator>().GenerateScript("20260928004704_IndexDatabaseBackupCatalogPagingPostgres", postgresId),
+        })
+        {
+            Assert.Contains("CREATE TABLE \"DatabaseBackupAttempts\"", script, StringComparison.Ordinal);
+            Assert.Contains("ON DELETE SET NULL", script, StringComparison.Ordinal);
+            Assert.DoesNotContain("DROP TABLE", script, StringComparison.Ordinal);
+        }
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -120,6 +143,35 @@ public sealed class DatabaseBackupCatalogMigrationTests
                 CreatedAt = set.CreatedAt,
             });
         await context.SaveChangesAsync();
+
+        context.DatabaseBackupAttempts.Add(new DatabaseBackupAttempt
+        {
+            Id = "attempt-linked",
+            RootIdentity = new string('a', 64),
+            Trigger = "manual",
+            BackupSetId = set.Id,
+            Status = DatabaseBackupAttemptStatuses.Succeeded,
+            Stage = "completed",
+            CompletedAt = DateTime.UtcNow,
+        });
+        context.DatabaseBackupAttempts.Add(new DatabaseBackupAttempt
+        {
+            Id = "attempt-failed",
+            RootIdentity = new string('a', 64),
+            Trigger = "auto",
+            ScheduleSlot = "2026-09-28-03:00",
+            Status = DatabaseBackupAttemptStatuses.Failed,
+            Stage = "database",
+            Error = "Ошибка создания",
+            CompletedAt = DateTime.UtcNow,
+        });
+        await context.SaveChangesAsync();
+        var attempts = await context.DatabaseBackupAttempts.AsNoTracking().OrderBy(item => item.Id).ToListAsync();
+        Assert.Equal(2, attempts.Count);
+        Assert.Null(attempts[0].BackupSetId);
+        Assert.Equal(DatabaseBackupAttemptStatuses.Failed, attempts[0].Status);
+        Assert.Equal(set.Id, attempts[1].BackupSetId);
+        Assert.NotNull(attempts[1].CompletedAt);
 
         Assert.Equal(1, await context.DatabaseBackupCopies.CountAsync(item => item.BackupSetId == set.Id));
         var reader = new DatabaseBackupCatalogReader(context);

@@ -2,6 +2,32 @@ using System.ComponentModel.DataAnnotations;
 
 namespace PayPlanner.Api.Models;
 
+public static class DatabaseBackupAttemptStatuses
+{
+    public const string Running = "running";
+    public const string Succeeded = "succeeded";
+    public const string Degraded = "degraded";
+    public const string Failed = "failed";
+    public const string Cancelled = "cancelled";
+    public const string Interrupted = "interrupted";
+}
+
+public sealed class DatabaseBackupAttempt
+{
+    [MaxLength(64)] public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    [MaxLength(64)] public string RootIdentity { get; set; } = string.Empty;
+    [MaxLength(32)] public string Trigger { get; set; } = string.Empty;
+    [MaxLength(64)] public string? ScheduleSlot { get; set; }
+    [MaxLength(32)] public string Status { get; set; } = DatabaseBackupAttemptStatuses.Running;
+    [MaxLength(32)] public string Stage { get; set; } = "preparing";
+    [MaxLength(64)] public string? BackupSetId { get; set; }
+    public DatabaseBackupSet? BackupSet { get; set; }
+    [MaxLength(2000)] public string? Error { get; set; }
+    public DateTime StartedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? CompletedAt { get; set; }
+}
+
 public static class DatabaseBackupSetStatuses
 {
     public const string LocalVerified = "localVerified";

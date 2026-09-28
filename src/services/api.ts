@@ -1587,6 +1587,24 @@ export interface DatabaseBackupYandexDiskUploadResultDto {
   updatedAt: string;
 }
 
+export interface DatabaseBackupAttemptDto {
+  id: string;
+  trigger: string;
+  scheduleSlot: string | null;
+  status: string;
+  stage: string;
+  backupSetId: string | null;
+  error: string | null;
+  startedAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+}
+
+export interface DatabaseBackupAttemptPageDto {
+  items: DatabaseBackupAttemptDto[];
+  nextCursor: string | null;
+}
+
 export interface DatabaseBackupCatalogCopyDto {
   providerKey: string;
   connectionId: string;
@@ -3868,6 +3886,12 @@ export class ApiService {
     const query = new URLSearchParams({ pageSize: String(pageSize) });
     if (after) query.set('after', after);
     return this.request<DatabaseBackupCatalogPageDto>(`/database/backups/catalog?${query.toString()}`);
+  }
+
+  async getDatabaseBackupAttempts(after?: string, pageSize = 20) {
+    const query = new URLSearchParams({ pageSize: String(pageSize) });
+    if (after) query.set('after', after);
+    return this.request<DatabaseBackupAttemptPageDto>(`/database/backups/attempts?${query.toString()}`);
   }
 
   async importDatabaseBackupCatalog(relativePaths: string[], dryRun = true) {

@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   getUserActivityMaintenanceMock: vi.fn(),
   getDatabaseBackupOverviewMock: vi.fn(),
   getDatabaseBackupCatalogMock: vi.fn(),
+  getDatabaseBackupAttemptsMock: vi.fn(),
   getS3StorageConnectionsMock: vi.fn(),
   getYandexDiskSettingsMock: vi.fn(),
   retryDatabaseBackupS3UploadMock: vi.fn(),
@@ -66,6 +67,7 @@ vi.mock('../../services/api', () => ({
     getUserActivityMaintenance: mocks.getUserActivityMaintenanceMock,
     getDatabaseBackupOverview: mocks.getDatabaseBackupOverviewMock,
     getDatabaseBackupCatalog: mocks.getDatabaseBackupCatalogMock,
+    getDatabaseBackupAttempts: mocks.getDatabaseBackupAttemptsMock,
     getS3StorageConnections: mocks.getS3StorageConnectionsMock,
     getYandexDiskSettings: mocks.getYandexDiskSettingsMock,
     updateDatabaseBackupSettings: mocks.updateDatabaseBackupSettingsMock,
@@ -147,6 +149,7 @@ describe('DatabaseMaintenanceSettings', () => {
     });
     mocks.getDatabaseBackupOverviewMock.mockResolvedValue(buildBackupOverview());
     mocks.getDatabaseBackupCatalogMock.mockResolvedValue({ items: [], nextCursor: null });
+    mocks.getDatabaseBackupAttemptsMock.mockResolvedValue({ items: [], nextCursor: null });
     mocks.getS3StorageConnectionsMock.mockResolvedValue({
       providerPresets: [],
       connections: [

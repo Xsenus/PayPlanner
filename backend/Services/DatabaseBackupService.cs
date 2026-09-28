@@ -815,17 +815,22 @@ public sealed class DatabaseBackupService
         var settings = await LoadSettingsAsync(cancellationToken);
         await _backupSemaphore.WaitAsync(cancellationToken);
 
+        string? attemptId = null;
         try
         {
             await using var rootLock = await BackupDirectoryLease.AcquireAsync(
                 settings.RootDirectory, RootLockTimeout, cancellationToken);
 
+            // The shared directory lease proves that an older running attempt for this root
+            // is no longer active. A stale record must never count as a successful slot.
+            await MarkInterruptedAttemptsAsync(settings.RootDirectory, cancellationToken);
             var nowLocal = DateTimeOffset.Now;
             if (scheduleSlot is not null && await HasVerifiedBackupForSlotAsync(
                 settings.RootDirectory, nowLocal.Date, scheduleSlot, cancellationToken))
             {
                 return null;
             }
+            attemptId = await StartBackupAttemptAsync(settings.RootDirectory, trigger, scheduleSlot, cancellationToken);
             var targetDirectory = Path.Combine(
                 settings.RootDirectory,
                 nowLocal.ToString("yyyy", CultureInfo.InvariantCulture),
@@ -833,13 +838,16 @@ public sealed class DatabaseBackupService
                 nowLocal.ToString("dd", CultureInfo.InvariantCulture));
             Directory.CreateDirectory(targetDirectory);
 
+            await UpdateBackupAttemptAsync(attemptId, "database", cancellationToken);
             DatabaseBackupFileInfo fileInfo = _databaseProvider.IsSqlite
                 ? await CreateSqliteBackupAsync(targetDirectory, settings.Format, nowLocal, trigger, scheduleSlot, cancellationToken)
                 : await CreatePostgreSqlBackupAsync(targetDirectory, settings.Format, settings.ToolCommand, nowLocal, trigger, scheduleSlot, cancellationToken);
 
             try
             {
+                await UpdateBackupAttemptAsync(attemptId, "files", cancellationToken);
                 var additionalParts = await CreateFileStorageArchiveAsync(fileInfo, cancellationToken);
+                await UpdateBackupAttemptAsync(attemptId, "verifying", cancellationToken);
                 await WriteBackupManifestAsync(fileInfo, settings.Format.Key, additionalParts, cancellationToken);
             }
             catch
@@ -856,16 +864,96 @@ public sealed class DatabaseBackupService
             }
 
             await EnsureBackupSetCatalogedAsync(fileInfo.RelativePath, cancellationToken);
+            await using (var context = await _contextFactory.CreateDbContextAsync(cancellationToken))
+            {
+                var backupSetId = await context.DatabaseBackupSets.Where(item => item.BackupRelativePath == fileInfo.RelativePath.Replace('\\', '/'))
+                    .Select(item => item.Id).SingleAsync(cancellationToken);
+                await UpdateBackupAttemptAsync(attemptId, "uploading", cancellationToken, backupSetId: backupSetId);
+            }
 
             var s3UploadResults = await UploadBackupToS3Async(fileInfo, settings.S3Upload, nowLocal, cancellationToken);
             var yandexDiskUploadResults = await UploadBackupToYandexDiskAsync(fileInfo, settings.YandexDiskUpload, nowLocal, cancellationToken);
+            await UpdateBackupAttemptAsync(attemptId, "cleanup", cancellationToken);
             await CleanupExpiredBackupsAsync(settings, cancellationToken);
+            var status = s3UploadResults.Any(item => item.Status != "success")
+                || yandexDiskUploadResults.Any(item => item.Status != "success")
+                || (settings.S3Upload.Enabled && settings.S3Upload.ConnectionIds.Count == 0)
+                ? DatabaseBackupAttemptStatuses.Degraded : DatabaseBackupAttemptStatuses.Succeeded;
+            await UpdateBackupAttemptAsync(attemptId, "completed", cancellationToken, status);
             return (fileInfo, s3UploadResults, yandexDiskUploadResults);
+        }
+        catch (Exception ex)
+        {
+            if (attemptId is not null)
+            {
+                // Preserve cancellation/original failure even if the database is unavailable.
+                using var recordingTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                try
+                {
+                    await UpdateBackupAttemptAsync(attemptId, null, recordingTimeout.Token,
+                        ex is OperationCanceledException ? DatabaseBackupAttemptStatuses.Cancelled : DatabaseBackupAttemptStatuses.Failed,
+                        error: ex is OperationCanceledException
+                            ? "Запуск отменён. Готовность копии проверяйте отдельно в журнале комплектов."
+                            : "Запуск завершился ошибкой. Подробности доступны в серверном журнале.");
+                }
+                catch (Exception recordingError)
+                {
+                    _logger.LogWarning(recordingError, "Could not record backup attempt {AttemptId} failure", attemptId);
+                }
+            }
+            throw;
         }
         finally
         {
             _backupSemaphore.Release();
         }
+    }
+
+    private async Task MarkInterruptedAttemptsAsync(string root, CancellationToken cancellationToken)
+    {
+        var identity = GetBackupRootIdentity(root);
+        var now = DateTime.UtcNow;
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await context.DatabaseBackupAttempts.Where(item => item.RootIdentity == identity
+                && item.Status == DatabaseBackupAttemptStatuses.Running)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(item => item.Status, DatabaseBackupAttemptStatuses.Interrupted)
+                .SetProperty(item => item.CompletedAt, now)
+                .SetProperty(item => item.UpdatedAt, now)
+                .SetProperty(item => item.Error, "Предыдущий запуск прерван. Готовность копии не подтверждена."), cancellationToken);
+    }
+
+    private static string GetBackupRootIdentity(string root)
+    {
+        var normalized = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (OperatingSystem.IsWindows()) normalized = normalized.ToUpperInvariant();
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(normalized)));
+    }
+
+    private async Task<string> StartBackupAttemptAsync(string root, string trigger, string? slot, CancellationToken cancellationToken)
+    {
+        var attempt = new DatabaseBackupAttempt { RootIdentity = GetBackupRootIdentity(root), Trigger = trigger, ScheduleSlot = slot };
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        context.DatabaseBackupAttempts.Add(attempt);
+        await context.SaveChangesAsync(cancellationToken);
+        return attempt.Id;
+    }
+
+    private async Task UpdateBackupAttemptAsync(string id, string? stage, CancellationToken cancellationToken,
+        string? status = null, string? backupSetId = null, string? error = null)
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        var attempt = await context.DatabaseBackupAttempts.SingleAsync(item => item.Id == id, cancellationToken);
+        if (stage is not null) attempt.Stage = stage;
+        if (backupSetId is not null) attempt.BackupSetId = backupSetId;
+        if (status is not null)
+        {
+            attempt.Status = status;
+            attempt.CompletedAt = DateTime.UtcNow;
+        }
+        attempt.Error = error;
+        attempt.UpdatedAt = DateTime.UtcNow;
+        await context.SaveChangesAsync(cancellationToken);
     }
 
     private async Task<DatabaseBackupFileInfo> CreateSqliteBackupAsync(

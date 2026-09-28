@@ -31,6 +31,7 @@ public class DatabaseAdminControllerSpreadsheetImportTests
     [Theory]
     [InlineData("/api/database/status", false)]
     [InlineData("/api/database/backups/catalog", false)]
+    [InlineData("/api/database/backups/attempts", false)]
     [InlineData("/api/database/backups/catalog/import", true)]
     [InlineData("/api/database/backups/discovery", true)]
     public async Task DatabaseAdminEndpoints_ForbidUserWithoutAdminRoleInDatabase(string endpoint, bool post)
@@ -53,6 +54,74 @@ public class DatabaseAdminControllerSpreadsheetImportTests
         {
             TryDeleteDirectory(backupDirectory);
         }
+    }
+
+    [Fact]
+    public async Task BackupAttemptsPagesEqualTimestampsWithoutExposingInternalRootIdentity()
+    {
+        await using var connection = await CreateOpenConnectionAsync();
+        var directory = CreateTempDirectory();
+        try
+        {
+            using var server = await CreateServerAsync(connection, directory);
+            await using (var scope = server.Services.CreateAsyncScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<PaymentContext>();
+                var at = new DateTime(2026, 9, 28, 0, 0, 0, DateTimeKind.Utc);
+                foreach (var id in new[] { "001", "002", "003" })
+                    db.DatabaseBackupAttempts.Add(new DatabaseBackupAttempt
+                    {
+                        Id = id,
+                        RootIdentity = new string('b', 64),
+                        Trigger = "auto",
+                        ScheduleSlot = "03:00",
+                        Status = DatabaseBackupAttemptStatuses.Failed,
+                        Stage = "database",
+                        Error = "Ошибка создания",
+                        StartedAt = at,
+                        UpdatedAt = at,
+                        CompletedAt = at,
+                    });
+                await db.SaveChangesAsync();
+            }
+            using var client = server.CreateClient();
+            using var response = await client.GetAsync("/api/database/backups/attempts?pageSize=1");
+            var json = await response.Content.ReadAsStringAsync();
+            Assert.DoesNotContain("rootIdentity", json, StringComparison.OrdinalIgnoreCase);
+            var first = await response.Content.ReadFromJsonAsync<DatabaseBackupAttemptPageDto>();
+            var item = Assert.Single(first!.Items);
+            Assert.Equal("003", item.Id);
+            Assert.Equal("003", first.NextCursor);
+            Assert.Equal(DateTimeKind.Utc, item.StartedAt.Kind);
+            Assert.Equal(DateTimeKind.Utc, item.CompletedAt!.Value.Kind);
+            Assert.Equal("database", item.Stage);
+            Assert.Null(item.BackupSetId);
+            var next = await client.GetFromJsonAsync<DatabaseBackupAttemptPageDto>("/api/database/backups/attempts?pageSize=1&after=003");
+            Assert.Equal("002", Assert.Single(next!.Items).Id);
+            var last = await client.GetFromJsonAsync<DatabaseBackupAttemptPageDto>("/api/database/backups/attempts?pageSize=1&after=002");
+            Assert.Equal("001", Assert.Single(last!.Items).Id);
+            Assert.Null(last.NextCursor);
+        }
+        finally { TryDeleteDirectory(directory); }
+    }
+
+    [Theory]
+    [InlineData("pageSize=0")]
+    [InlineData("pageSize=101")]
+    [InlineData("after=missing")]
+    [InlineData("after=%20")]
+    public async Task BackupAttemptsRejectsInvalidPaging(string query)
+    {
+        await using var connection = await CreateOpenConnectionAsync();
+        var directory = CreateTempDirectory();
+        try
+        {
+            using var server = await CreateServerAsync(connection, directory);
+            using var client = server.CreateClient();
+            using var response = await client.GetAsync($"/api/database/backups/attempts?{query}");
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        }
+        finally { TryDeleteDirectory(directory); }
     }
 
     [Theory]

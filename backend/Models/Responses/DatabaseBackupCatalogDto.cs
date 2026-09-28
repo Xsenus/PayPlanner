@@ -1,5 +1,10 @@
 namespace PayPlanner.Api.Models.Responses;
 
+public sealed record DatabaseBackupAttemptDto(string Id, string Trigger, string? ScheduleSlot,
+    string Status, string Stage, string? BackupSetId, string? Error,
+    DateTime StartedAt, DateTime UpdatedAt, DateTime? CompletedAt);
+public sealed record DatabaseBackupAttemptPageDto(IReadOnlyList<DatabaseBackupAttemptDto> Items, string? NextCursor);
+
 public sealed record DatabaseBackupCatalogImportItem(string RelativePath, string Status, string? Error = null);
 public sealed record DatabaseBackupCatalogImportResult(bool DryRun, IReadOnlyList<DatabaseBackupCatalogImportItem> Items);
 public sealed record DatabaseBackupDiscoveryItem(string RelativePath, bool HasManifest, bool AlreadyRegistered = false);

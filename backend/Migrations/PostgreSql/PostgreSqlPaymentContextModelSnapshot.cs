@@ -3939,6 +3939,64 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.ToTable("Countries");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.DatabaseBackupAttempt", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("BackupSetId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("Error")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<string>("RootIdentity")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("ScheduleSlot")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Stage")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<DateTime>("StartedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("Trigger")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BackupSetId");
+
+                    b.HasIndex("RootIdentity", "Status");
+
+                    b.HasIndex("StartedAt", "Id");
+
+                    b.ToTable("DatabaseBackupAttempts");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.DatabaseBackupCopy", b =>
                 {
                     b.Property<long>("Id")
@@ -12386,6 +12444,16 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("Contract");
 
                     b.Navigation("Payment");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.DatabaseBackupAttempt", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.DatabaseBackupSet", "BackupSet")
+                        .WithMany()
+                        .HasForeignKey("BackupSetId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("BackupSet");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.DatabaseBackupCopy", b =>

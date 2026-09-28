@@ -9,6 +9,20 @@ afterEach(() => {
   sessionStorage.clear();
 });
 
+describe('apiService backup attempt history', () => {
+  it('requests only the selected page with an encoded cursor', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({ items: [], nextCursor: null }), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    await apiService.getDatabaseBackupAttempts('cursor/with space', 10);
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/database/backups/attempts?pageSize=10&after=cursor%2Fwith+space');
+    expect(options?.method ?? 'GET').toBe('GET');
+    expect(options?.body).toBeUndefined();
+  });
+});
+
 describe('apiService task invoice link', () => {
   it('passes the explicit work-in-invoice confirmation to the server', async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({ id: 42 }), {

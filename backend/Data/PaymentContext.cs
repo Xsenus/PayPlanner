@@ -3822,6 +3822,14 @@ public class PaymentContext : DbContext
             entity.HasIndex(item => new { item.OwnerType, item.OwnerId, item.DataClass });
             entity.HasIndex(item => new { item.DataClass, item.IsDeleted, item.UpdatedAt });
         });
+        modelBuilder.Entity<DatabaseBackupAttempt>(entity =>
+        {
+            entity.HasKey(item => item.Id);
+            entity.HasIndex(item => new { item.StartedAt, item.Id });
+            entity.HasIndex(item => new { item.RootIdentity, item.Status });
+            entity.HasOne(item => item.BackupSet).WithMany().HasForeignKey(item => item.BackupSetId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
         modelBuilder.Entity<DatabaseBackupSet>(entity =>
         {
             entity.HasKey(item => item.Id);
@@ -4714,6 +4722,7 @@ public class PaymentContext : DbContext
     public DbSet<ExternalCalendarTaskSyncRequest> ExternalCalendarTaskSyncRequests { get; set; }
     public DbSet<StorageObject> StorageObjects { get; set; }
     public DbSet<DatabaseBackupSet> DatabaseBackupSets { get; set; }
+    public DbSet<DatabaseBackupAttempt> DatabaseBackupAttempts { get; set; }
     public DbSet<DatabaseBackupCopy> DatabaseBackupCopies { get; set; }
     public DbSet<StorageObjectGeneration> StorageObjectGenerations { get; set; }
     public DbSet<StorageReplica> StorageReplicas { get; set; }
