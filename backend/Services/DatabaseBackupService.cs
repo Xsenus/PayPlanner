@@ -857,6 +857,21 @@ public sealed class DatabaseBackupService
         return selection;
     }
 
+    private async Task<VerifiedBackupSelection> ReadCatalogedCloudSelectionAsync(string relativePath, CancellationToken cancellationToken)
+    {
+        var selection = await ReadVerifiedSelectionAsync(relativePath, cancellationToken);
+        var manifest = selection.Manifest ?? throw new InvalidDataException("Проверенное описание отсутствует.");
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        var registeredSha = await context.DatabaseBackupSets.AsNoTracking()
+            .Where(item => item.Id == manifest.BackupId && item.BackupRelativePath == manifest.BackupRelativePath)
+            .Select(item => item.ManifestSha256)
+            .SingleOrDefaultAsync(cancellationToken);
+        if (string.IsNullOrWhiteSpace(registeredSha)
+            || !string.Equals(registeredSha, selection.ManifestSha256, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("Описание отправляемой резервной копии не совпадает с зарегистрированным комплектом.");
+        return selection;
+    }
+
     private async Task<bool> EnsureBackupSetCatalogedAsync(
         string relativePath, CancellationToken cancellationToken, bool dryRun = false)
     {
@@ -1769,7 +1784,7 @@ public sealed class DatabaseBackupService
 
         try
         {
-            var selection = await ReadVerifiedSelectionAsync(result.BackupRelativePath, cancellationToken);
+            var selection = await ReadCatalogedCloudSelectionAsync(result.BackupRelativePath, cancellationToken);
             var manifest = selection.Manifest!;
             var manifestSha256 = selection.ManifestSha256!;
             await using var manifestStream = File.OpenRead(GetManifestPath(resolvedPath));
@@ -1919,7 +1934,7 @@ public sealed class DatabaseBackupService
 
         try
         {
-            var selection = await ReadVerifiedSelectionAsync(result.BackupRelativePath, cancellationToken);
+            var selection = await ReadCatalogedCloudSelectionAsync(result.BackupRelativePath, cancellationToken);
             var manifest = selection.Manifest!;
             var manifestSha256 = selection.ManifestSha256!;
             await using var manifestStream = File.OpenRead(GetManifestPath(resolvedPath));

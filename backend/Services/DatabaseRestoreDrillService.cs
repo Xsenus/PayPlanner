@@ -1,10 +1,14 @@
 using System.Diagnostics;
+using System.Data.Common;
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Options;
 using Npgsql;
+using PayPlanner.Api.Data;
 
 namespace PayPlanner.Api.Services;
 
@@ -19,6 +23,7 @@ public sealed class DatabaseRestoreDrillOptions
     public string PgRestorePath { get; set; } = string.Empty;
     public string PsqlPath { get; set; } = string.Empty;
     public int TimeoutMinutes { get; set; } = 30;
+    public bool PrepareLocalRuntime { get; set; }
 }
 
 public sealed record DatabaseRestoreDrillReport(
@@ -160,6 +165,8 @@ public sealed class DatabaseRestoreDrillService(
         await VerifyRestoredNativeBindingsAsync(manifest, targetDirectory, cancellationToken);
         if (manifest.FormatVersion >= 5) await VerifyRestoredNativeBindingsAsync(manifest, targetDirectory, cancellationToken, managed: true);
 
+        await PrepareLocalRuntimeAsync(manifest, targetDirectory, connection, cancellationToken);
+
         return new DatabaseRestoreDrillReport(
             Path.GetFileName(targetDirectory), "restored", manifest.BackupId, manifest.BackupRelativePath,
             manifest.DatabaseProvider, manifest.BackupFormat, targetPath, tableCount, foreignKeyViolations,
@@ -270,10 +277,120 @@ public sealed class DatabaseRestoreDrillService(
         await VerifyRestoredNativeBindingsAsync(manifest, targetDirectory, cancellationToken);
         if (manifest.FormatVersion >= 5) await VerifyRestoredNativeBindingsAsync(manifest, targetDirectory, cancellationToken, managed: true);
 
+        await PrepareLocalRuntimeAsync(manifest, targetDirectory, connection, cancellationToken);
+
         return new DatabaseRestoreDrillReport(
             Path.GetFileName(targetDirectory), "restored", manifest.BackupId, manifest.BackupRelativePath,
             manifest.DatabaseProvider, manifest.BackupFormat, $"{target.Host}:{target.Port}/{target.Database}", tableCount, 0,
             "restore completed; outbound email disabled and queued email isolated", started, DateTime.UtcNow, stopwatch.ElapsedMilliseconds, string.Empty);
+    }
+
+    private async Task PrepareLocalRuntimeAsync(DatabaseBackupManifest manifest, string targetDirectory,
+        DbConnection connection, CancellationToken token)
+    {
+        if (!options.CurrentValue.PrepareLocalRuntime) return;
+        if (manifest.FormatVersion < 5)
+            throw new InvalidDataException("Для локальной проверки рабочих реплик требуется комплект формата 5 или новее.");
+        var dbOptions = new DbContextOptionsBuilder<PaymentContext>();
+        if (connection is SqliteConnection sqlite) dbOptions.UseSqlite(sqlite);
+        else if (connection is NpgsqlConnection postgres) dbOptions.UseNpgsql(postgres);
+        else throw new InvalidOperationException("Неизвестный провайдер восстановленной базы.");
+        await using var restored = new PaymentContext(dbOptions.Options);
+        var references = manifest.Parts!.Single(part => part.Kind == "file-references");
+        var mappingPart = manifest.Parts!.Single(part => part.Kind == "managed-file-bindings");
+        await using var mapping = new FileStream(backups.ResolveBackupPath(mappingPart.RelativePath)
+            ?? throw new FileNotFoundException("Сопоставление реплик отсутствует."),
+            FileMode.Open, FileAccess.Read, FileShare.Read, 81920, true);
+        var nativePart = manifest.Parts!.Single(part => part.Kind == "native-file-bindings");
+        await using var native = new FileStream(backups.ResolveBackupPath(nativePart.RelativePath)
+            ?? throw new FileNotFoundException("Сопоставление обычных документов отсутствует."),
+            FileMode.Open, FileAccess.Read, FileShare.Read, 81920, true);
+        await using var transaction = await restored.Database.BeginTransactionAsync(token);
+        var storageSettings = await DatabaseRestoreNativeRuntime.PrepareAsync(restored, manifest, native, nativePart,
+            references.Sha256, Path.Combine(targetDirectory, "files"), Path.Combine(targetDirectory, "runtime-native"), token);
+        await DatabaseRestoreManagedReplicas.PrepareAsync(restored, mapping, mappingPart, references.Sha256,
+            Path.Combine(targetDirectory, "files"), token);
+        await IsolateRuntimeNotificationsAsync(connection, transaction.GetDbTransaction(), token);
+        // Storage paths only: this artifact is deliberately not an application launch configuration.
+        var settingsPath = Path.Combine(targetDirectory, "restored-storage-paths.json");
+        var settingsCreated = false;
+        try
+        {
+            await using (var settingsOutput = new FileStream(settingsPath, FileMode.CreateNew,
+                FileAccess.Write, FileShare.None, 81920, true))
+            {
+                settingsCreated = true;
+                await JsonSerializer.SerializeAsync(settingsOutput, new
+                {
+                    formatVersion = 1, completeRuntimeConfiguration = false, storageSettings,
+                }, JsonOptions, token);
+            }
+            await transaction.CommitAsync(token);
+        }
+        catch
+        {
+            if (settingsCreated) File.Delete(settingsPath);
+            throw;
+        }
+    }
+
+    // Runs inside the same transaction as local runtime preparation. This is not
+    // a complete launch configuration: workers and other integrations remain separate gates.
+    public static async Task IsolateRuntimeNotificationsAsync(DbConnection connection, DbTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT INTO "SystemSettings" ("Key", "Value", "CreatedAt", "UpdatedAt")
+            VALUES
+                ('notifications.telegram.enabled', 'false', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+                ('auth.telegram.enabled', 'false', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+                ('notifications.max.enabled', 'false', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+                ('notifications.max.emergencyStop', 'true', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+                ('notifications.sms.enabled', 'false', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+                ('notifications.sms.emergencyStop', 'true', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ON CONFLICT ("Key") DO UPDATE
+            SET "Value" = excluded."Value", "UpdatedAt" = CURRENT_TIMESTAMP;
+
+            UPDATE "SystemSettings"
+            SET "Value" = '', "UpdatedAt" = CURRENT_TIMESTAMP
+            WHERE "Key" IN (
+                'notifications.telegram.botToken', 'auth.telegram.botToken',
+                'notifications.max.botToken', 'notifications.max.webhookSecret', 'notifications.sms.apiToken');
+
+            UPDATE "NotificationSenders"
+            SET "IsEnabled" = @disabled, "ConfigJson" = '{}', "UpdatedAt" = CURRENT_TIMESTAMP
+            WHERE "Channel" IN ('email', 'telegram', 'max', 'sms');
+
+            UPDATE "NotificationDeliveries"
+            SET "Status" = 'skipped', "Error" = 'External delivery disabled for local restored runtime'
+            WHERE "Channel" IN ('email', 'telegram', 'max', 'sms') AND "Status" IN ('pending', 'failed');
+
+            UPDATE "MaxOutboxMessages"
+            SET "Status" = 'cancelled', "LastErrorCode" = 'restored_runtime_isolated', "UpdatedAt" = CURRENT_TIMESTAMP
+            WHERE "Status" IN ('queued', 'processing', 'failed');
+
+            UPDATE "MessengerDocumentDeliveries"
+            SET "Status" = 'cancelled', "NextAttemptAt" = NULL,
+                "CancelledAt" = COALESCE("CancelledAt", CURRENT_TIMESTAMP), "UpdatedAt" = CURRENT_TIMESTAMP,
+                "LastError" = 'External delivery disabled for local restored runtime'
+            WHERE "Status" IN ('prepared', 'queued', 'processing', 'failed');
+
+            UPDATE "MessengerDocumentDeliveries"
+            SET "LinkTokenHash" = NULL, "ProtectedLinkToken" = NULL, "LinkExpiresAt" = NULL
+            WHERE "LinkTokenHash" IS NOT NULL OR "ProtectedLinkToken" IS NOT NULL OR "LinkExpiresAt" IS NOT NULL;
+
+            UPDATE "ExternalCalendarTaskSyncRequests"
+            SET "Status" = 'failed', "UpdatedAt" = CURRENT_TIMESTAMP,
+                "LastError" = 'External calendar sync disabled for local restored runtime'
+            WHERE "Status" IN ('queued', 'failed');
+            """;
+        var disabled = command.CreateParameter();
+        disabled.ParameterName = "disabled";
+        disabled.Value = false;
+        command.Parameters.Add(disabled);
+        await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     public static async Task SanitizeRestoredPostgreSqlAsync(NpgsqlConnection connection, CancellationToken cancellationToken)

@@ -7,18 +7,275 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Options;
+using Microsoft.AspNetCore.DataProtection;
+using System.IO.Compression;
 using System.Text.Json;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Storage;
 using Xunit;
 
 namespace PayPlanner.Api.Tests;
 
 public sealed class DatabaseBackupServiceS3Tests
 {
+    [Theory]
+    [InlineData(false, "none")]
+    [InlineData(true, "none")]
+    [InlineData(false, "native-file")]
+    [InlineData(false, "managed-file")]
+    [InlineData(false, "settings")]
+    public async Task PreparedNativeRuntimeReadsSignaturesPhotosAndCaseDocumentsWithoutOriginals(bool legacyPhoto, string failure)
+    {
+        await using var scope = await CreateScopeAsync();
+        scope.Provider.GetRequiredService<IOptionsMonitor<DatabaseRestoreDrillOptions>>().CurrentValue.PrepareLocalRuntime = true;
+        var sourceConfig = scope.Provider.GetRequiredService<IConfiguration>();
+        var sourceEnvironment = scope.Provider.GetRequiredService<IWebHostEnvironment>();
+        var signaturePath = Path.Combine(ElectronicSignatureStoragePaths.ResolveRoot(sourceEnvironment, sourceConfig), "original.pdf");
+        var artifactPath = Path.Combine(ElectronicSignatureStoragePaths.ResolveLegacyRoot(sourceEnvironment), "artifact.pdf");
+        var photoPath = Path.Combine(legacyPhoto ? UserPhotoStoragePaths.ResolveLegacyRoot(sourceEnvironment)
+            : UserPhotoStoragePaths.ResolveRoot(sourceEnvironment, sourceConfig), "photo.png");
+        var casePath = Path.Combine(ApplicationFileStoragePaths.ResolveRoot(sourceEnvironment, sourceConfig), "case-documents", "case.pdf");
+        var paths = new[] { signaturePath, artifactPath, photoPath, casePath };
+        var payload = "перенесённые байты документа"u8.ToArray();
+        foreach (var path in paths)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            await File.WriteAllBytesAsync(path, payload);
+        }
+        var sha = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(payload));
+        Guid publicId;
+        await using (var db = await scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContextAsync())
+        {
+            var user = new User
+            {
+                Email = "runtime@example.test",
+                PasswordHash = "test",
+                Role = new Role { Name = "runtime" },
+                PhotoUrl = "https://old-host.example.test/user-photos/photo.png"
+            };
+            var clientCase = new ClientCase { Client = new Client { Name = "Runtime" } };
+            db.AddRange(user, clientCase);
+            await db.SaveChangesAsync();
+            var envelope = new ElectronicSignatureEnvelope
+            {
+                CreatedByUserId = user.Id,
+                SnapshotPath = signaturePath,
+                ChecksumSha256 = sha,
+                SizeBytes = payload.Length,
+            };
+            envelope.Artifacts.Add(new ElectronicSignatureArtifact
+            {
+                StoragePath = artifactPath,
+                ChecksumSha256 = sha,
+                SizeBytes = payload.Length,
+                FileName = "artifact.pdf",
+            });
+            db.AddRange(envelope, new ClientCaseDocument
+            {
+                ClientCase = clientCase,
+                DocumentKey = "runtime",
+                StoragePath = "case.pdf",
+                SizeBytes = payload.Length,
+            });
+            var managed = new StorageObject { CurrentGeneration = 1, DataClass = "document" };
+            var generation = new StorageObjectGeneration { Generation = 1, SizeBytes = payload.Length, Sha256 = sha };
+            generation.Replicas.Add(new StorageReplica
+            {
+                ProviderKey = "legacy-local",
+                Locator = "files/case-documents/case.pdf",
+                Status = StorageReplicaStatuses.Available,
+            });
+            managed.Generations.Add(generation);
+            db.StorageObjects.Add(managed);
+            await db.SaveChangesAsync();
+            publicId = envelope.PublicId;
+        }
+        var created = await scope.Provider.GetRequiredService<DatabaseBackupService>().CreateManualBackupAsync();
+        foreach (var path in paths) File.Delete(path);
+        var drillRoot = Path.Combine(scope.Root, "native-runtime-drills");
+        var options = new PreparingRuntimeOptions(drillRoot, () =>
+        {
+            if (failure == "none") return;
+            var target = Assert.Single(Directory.EnumerateDirectories(drillRoot));
+            if (failure == "settings")
+            {
+                File.WriteAllText(Path.Combine(target, "restored-storage-paths.json"), "keep existing artifact");
+                return;
+            }
+            var path = failure == "managed-file"
+                ? Assert.Single(Directory.EnumerateFiles(Path.Combine(target, "files", "managed-generations")))
+                : Assert.Single(Directory.EnumerateFiles(Path.Combine(target, "files"), "original.pdf", SearchOption.AllDirectories));
+            File.WriteAllText(path, "changed after verification");
+        });
+        var drill = new DatabaseRestoreDrillService(scope.Provider.GetRequiredService<DatabaseBackupService>(),
+            scope.Provider.GetRequiredService<DatabaseProviderInfo>(), sourceEnvironment, options, NullLogger<DatabaseRestoreDrillService>.Instance);
+        var report = await drill.RunAsync(created.Backup.RelativePath, false, null, CancellationToken.None);
+        Assert.Equal(2, options.ReadCount);
+        if (failure != "none")
+        {
+            Assert.Equal("failed", report.Status);
+            if (failure == "settings")
+                Assert.Equal("keep existing artifact", await File.ReadAllTextAsync(Path.Combine(report.Target, "restored-storage-paths.json")));
+            else Assert.False(File.Exists(Path.Combine(report.Target, "restored-storage-paths.json")));
+            await using var failedDb = new PaymentContext(new DbContextOptionsBuilder<PaymentContext>()
+                .UseSqlite($"Data Source={Path.Combine(report.Target, "restored.sqlite")}").Options);
+            Assert.Equal(signaturePath, (await failedDb.ElectronicSignatureEnvelopes.SingleAsync()).SnapshotPath);
+            Assert.Equal(artifactPath, (await failedDb.ElectronicSignatureArtifacts.SingleAsync()).StoragePath);
+            Assert.Equal("https://old-host.example.test/user-photos/photo.png", (await failedDb.Users.SingleAsync()).PhotoUrl);
+            Assert.Equal("legacy-local", (await failedDb.StorageReplicas.SingleAsync()).ProviderKey);
+            return;
+        }
+        Assert.True(report.Status == "restored", JsonSerializer.Serialize(report));
+        var restoredRoot = Path.GetDirectoryName(report.ReportPath)!;
+        using var settings = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(restoredRoot, "restored-storage-paths.json")));
+        Assert.False(settings.RootElement.GetProperty("completeRuntimeConfiguration").GetBoolean());
+        var restoredConfig = new ConfigurationBuilder().AddInMemoryCollection(settings.RootElement.GetProperty("storageSettings")
+            .EnumerateObject().ToDictionary(item => item.Name, item => item.Value.GetString())).Build();
+        await using var restored = new PaymentContext(new DbContextOptionsBuilder<PaymentContext>().UseSqlite($"Data Source={report.Target}").Options);
+        var environment = new TestWebHostEnvironment(restoredRoot);
+        var signatures = new ElectronicSignatureService(restored, restoredConfig, new EphemeralDataProtectionProvider(), environment);
+        var package = await signatures.CreateEvidencePackageAsync(publicId, CancellationToken.None);
+        Assert.NotNull(package);
+        using (var archive = ZipFile.OpenRead(package!.FullPath))
+        {
+            foreach (var name in new[] { "original/document.pdf", "artifacts/001-artifact.pdf" })
+            {
+                using var input = archive.GetEntry(name)!.Open();
+                using var bytes = new MemoryStream();
+                await input.CopyToAsync(bytes);
+                Assert.Equal(payload, bytes.ToArray());
+            }
+        }
+        var photo = (await restored.Users.SingleAsync()).PhotoUrl;
+        Assert.StartsWith(UserPhotoStoragePaths.RequestPath + "/", photo);
+        Assert.Equal(payload, await File.ReadAllBytesAsync(UserPhotoStoragePaths.ResolvePhotoPath(
+            UserPhotoStoragePaths.ResolveRoot(environment, restoredConfig), photo)!));
+        var caseStorage = new LocalCaseDocumentStorage(environment, restoredConfig);
+        Assert.Equal(payload, await File.ReadAllBytesAsync(caseStorage.ResolvePath((await restored.ClientCaseDocuments.SingleAsync()).StoragePath)));
+        await using var original = await scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContextAsync();
+        Assert.Equal(signaturePath, (await original.ElectronicSignatureEnvelopes.SingleAsync()).SnapshotPath);
+        Assert.Equal(artifactPath, (await original.ElectronicSignatureArtifacts.SingleAsync()).StoragePath);
+        Assert.Equal("https://old-host.example.test/user-photos/photo.png", (await original.Users.SingleAsync()).PhotoUrl);
+    }
+
+    private sealed class PreparingRuntimeOptions(string root, Action beforePrepare) : IOptionsMonitor<DatabaseRestoreDrillOptions>
+    {
+        public int ReadCount { get; private set; }
+        public DatabaseRestoreDrillOptions CurrentValue
+        {
+            get
+            {
+                if (++ReadCount == 2) beforePrepare();
+                return new DatabaseRestoreDrillOptions { RootDirectory = root, PrepareLocalRuntime = true };
+            }
+        }
+        public DatabaseRestoreDrillOptions Get(string? name) => CurrentValue;
+        public IDisposable? OnChange(Action<DatabaseRestoreDrillOptions, string?> listener) => null;
+    }
+
+    [Theory]
+    [InlineData("legacy-local", false)]
+    [InlineData("s3", false)]
+    [InlineData("legacy-local", true)]
+    [InlineData("s3", true)]
+    public async Task RestoredGenerationReadPreservesDeletionWithoutOriginalProvider(string provider, bool deleted)
+    {
+        await using var scope = await CreateScopeAsync();
+        scope.Provider.GetRequiredService<IOptionsMonitor<DatabaseRestoreDrillOptions>>().CurrentValue.PrepareLocalRuntime = true;
+        var payload = System.Text.Encoding.UTF8.GetBytes("живой документ на другом сервере");
+        var sourcePath = Path.Combine(scope.Root, "files", "live-version.bin");
+        if (provider == "legacy-local") await File.WriteAllBytesAsync(sourcePath, payload);
+        else
+        {
+            using var content = new MemoryStream(payload);
+            await scope.S3.UploadAsync("conn", "live-version.bin", content, "application/octet-stream", false);
+        }
+        var objectId = Guid.NewGuid();
+        await using (var db = await scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContextAsync())
+        {
+            var item = new StorageObject
+            {
+                Id = objectId,
+                DataClass = "document",
+                LogicalName = "Документ.txt",
+                ContentType = "text/plain",
+                CurrentGeneration = 1,
+                IsDeleted = deleted,
+            };
+            var generation = new StorageObjectGeneration
+            {
+                Generation = 1,
+                SizeBytes = payload.Length,
+                Sha256 = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(payload)),
+            };
+            generation.Replicas.Add(new StorageReplica
+            {
+                ProviderKey = provider,
+                ConnectionId = provider == "s3" ? "conn" : null,
+                Locator = provider == "s3" ? "conn/live-version.bin" : "files/live-version.bin",
+                Status = "available",
+            });
+            item.Generations.Add(generation);
+            if (deleted) item.Tombstones.Add(new StorageTombstone { Generation = 1, LegalHold = true });
+            db.StorageObjects.Add(item);
+            db.StorageOperations.Add(new StorageOperation
+            {
+                StorageObject = item,
+                StorageObjectGeneration = generation,
+                ProviderKey = provider,
+                OperationType = StorageOperationTypes.Replicate,
+                Status = StorageOperationStatuses.Pending,
+                IdempotencyKey = "isolated-runtime-" + objectId.ToString("N"),
+            });
+            await db.SaveChangesAsync();
+        }
+        var backups = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        var created = await backups.CreateManualBackupAsync();
+        if (provider == "legacy-local") File.Delete(sourcePath);
+        else scope.S3.CorruptReadPathSuffix = "live-version.bin";
+        var report = await scope.Provider.GetRequiredService<DatabaseRestoreDrillService>()
+            .RunAsync(created.Backup.RelativePath, false, null, CancellationToken.None);
+        Assert.Equal("restored", report.Status);
+        var restoredRoot = Path.GetDirectoryName(report.Target)!;
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            [LocalStoragePaths.RootConfigurationKey] = Path.Combine(restoredRoot, "files"),
+        }).Build();
+        var local = new LocalStorageProvider(new TestWebHostEnvironment(restoredRoot), configuration);
+        var registry = new StorageProviderRegistry([local]);
+        var monitor = new RestoreStorageOptions(new StorageOrchestrationOptions());
+        await using var restoredDb = new PaymentContext(new DbContextOptionsBuilder<PaymentContext>()
+            .UseSqlite($"Data Source={report.Target}").Options);
+        var service = new StorageObjectService(restoredDb, new StoragePolicyService(monitor, registry), registry, monitor);
+        await using var read = await service.OpenReadAsync(objectId, CancellationToken.None);
+        if (deleted) Assert.Null(read);
+        else
+        {
+            Assert.NotNull(read);
+            using var bytes = new MemoryStream();
+            await read!.Content.CopyToAsync(bytes);
+            Assert.Equal(payload, bytes.ToArray());
+            Assert.Equal("local", read.ProviderKey);
+        }
+        Assert.Equal(deleted, (await restoredDb.StorageObjects.SingleAsync()).IsDeleted);
+        Assert.Equal(deleted, await restoredDb.StorageTombstones.AnyAsync(item => item.LegalHold));
+        Assert.Equal(StorageOperationStatuses.DeadLetter, (await restoredDb.StorageOperations.SingleAsync()).Status);
+        await using var source = await scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContextAsync();
+        Assert.Equal(provider, (await source.StorageReplicas.SingleAsync()).ProviderKey);
+        Assert.Equal(StorageOperationStatuses.Pending, (await source.StorageOperations.SingleAsync()).Status);
+    }
+
+    private sealed class RestoreStorageOptions(StorageOrchestrationOptions value) : IOptionsMonitor<StorageOrchestrationOptions>
+    {
+        public StorageOrchestrationOptions CurrentValue => value;
+        public StorageOrchestrationOptions Get(string? name) => value;
+        public IDisposable? OnChange(Action<StorageOrchestrationOptions, string?> listener) => null;
+    }
+
     [Theory]
     [InlineData(false, false)]
     [InlineData(false, true)]
@@ -242,6 +499,50 @@ public sealed class DatabaseBackupServiceS3Tests
         public PaymentContext CreateDbContext() { onCreate(); return inner.CreateDbContext(); }
         public Task<PaymentContext> CreateDbContextAsync(CancellationToken cancellationToken = default)
         { onCreate(); return inner.CreateDbContextAsync(cancellationToken); }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CloudRetryRejectsDescriptionReplacedAfterCatalogVerification(bool yandex)
+    {
+        await using var scope = await CreateScopeAsync();
+        var backups = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        await backups.UpdateSettingsAsync(true, "03:00", 14, "sqlite", s3UploadEnabled: !yandex,
+            s3ConnectionIds: yandex ? [] : ["s3-main"], yandexDiskUploadEnabled: yandex);
+        scope.S3.ThrowOnUpload = true;
+        scope.YandexDisk.ThrowOnUpload = true;
+        var created = await backups.CreateManualBackupAsync();
+        var id = yandex ? Assert.Single(created.YandexDiskUploadResults).Id : Assert.Single(created.S3UploadResults).Id;
+        var manifest = await backups.ReadVerifiedManifestAsync(created.Backup.RelativePath);
+        var path = backups.ResolveBackupPath(created.Backup.RelativePath)! + ".manifest.json";
+        var factory = scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>();
+        string originalSha;
+        await using (var db = await factory.CreateDbContextAsync())
+            originalSha = (await db.DatabaseBackupSets.SingleAsync()).ManifestSha256;
+        var calls = 0;
+        var replacing = new ReplacingContextFactory(factory, () =>
+        {
+            // First context loads retry history; second registers the already checked description.
+            if (++calls != 2) return;
+            File.WriteAllText(path, JsonSerializer.Serialize(manifest with { ApplicationVersion = "different valid description" },
+                new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+        });
+        var service = new DatabaseBackupService(replacing, scope.Provider.GetRequiredService<IConfiguration>(),
+            scope.Provider.GetRequiredService<DatabaseProviderInfo>(), NullLogger<DatabaseBackupService>.Instance,
+            scope.Provider.GetRequiredService<IServiceScopeFactory>());
+        scope.S3.ThrowOnUpload = false;
+        scope.YandexDisk.ThrowOnUpload = false;
+        var status = yandex ? (await service.RetryYandexDiskUploadAsync(id)).Status : (await service.RetryS3UploadAsync(id)).Status;
+
+        Assert.Equal("failed", status);
+        Assert.True(calls >= 2);
+        var paths = yandex ? scope.YandexDisk.UploadedPaths : scope.S3.UploadedPaths;
+        Assert.Empty(paths);
+        await using var restoredCatalog = await factory.CreateDbContextAsync();
+        Assert.Equal(originalSha, (await restoredCatalog.DatabaseBackupSets.SingleAsync()).ManifestSha256);
+        Assert.DoesNotContain(await restoredCatalog.DatabaseBackupCopies.ToListAsync(),
+            copy => copy.ProviderKey != "local" && copy.Status == DatabaseBackupCopyStatuses.Verified);
     }
 
     [Theory]
