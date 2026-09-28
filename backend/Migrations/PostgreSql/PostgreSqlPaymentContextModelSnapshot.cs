@@ -3939,6 +3939,112 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.ToTable("Countries");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.DatabaseBackupCopy", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("BackupSetId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("ConnectionId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<DateTime?>("LastVerifiedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("Locator")
+                        .IsRequired()
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)");
+
+                    b.Property<string>("ProviderKey")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BackupSetId", "ProviderKey", "ConnectionId")
+                        .IsUnique();
+
+                    b.HasIndex("ProviderKey", "Status", "UpdatedAt");
+
+                    b.ToTable("DatabaseBackupCopies");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.DatabaseBackupSet", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("BackupFormat")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("BackupRelativePath")
+                        .IsRequired()
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("DatabaseProvider")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("ManifestSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BackupRelativePath")
+                        .IsUnique();
+
+                    b.HasIndex("Status", "CreatedAt");
+
+                    b.ToTable("DatabaseBackupSets");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.DealType", b =>
                 {
                     b.Property<int>("Id")
@@ -12280,6 +12386,17 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("Payment");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.DatabaseBackupCopy", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.DatabaseBackupSet", "BackupSet")
+                        .WithMany("Copies")
+                        .HasForeignKey("BackupSetId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("BackupSet");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.ElectronicSignatureArtifact", b =>
                 {
                     b.HasOne("PayPlanner.Api.Models.ElectronicSignatureEnvelope", "Envelope")
@@ -13752,6 +13869,11 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("LegalEntityContracts");
 
                     b.Navigation("Payments");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.DatabaseBackupSet", b =>
+                {
+                    b.Navigation("Copies");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.DealType", b =>

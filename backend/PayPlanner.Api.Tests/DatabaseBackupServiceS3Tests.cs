@@ -8,6 +8,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.FileProviders;
 using System.Text.Json;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
@@ -45,6 +46,16 @@ public sealed class DatabaseBackupServiceS3Tests
         Assert.Contains($"{upload.TargetPath}.manifest.json", scope.S3.UploadedPaths);
         Assert.True(scope.S3.UploadedBytes > 0);
 
+        await using (var db = await scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContextAsync())
+        {
+            var set = await db.DatabaseBackupSets.Include(item => item.Copies).SingleAsync();
+            Assert.Equal(result.Backup.RelativePath, set.BackupRelativePath);
+            Assert.Equal(2, set.Copies.Count);
+            Assert.Contains(set.Copies, item => item.ProviderKey == "local" && item.Status == DatabaseBackupCopyStatuses.Verified);
+            Assert.Contains(set.Copies, item => item.ProviderKey == "s3" && item.Status == DatabaseBackupCopyStatuses.Verified
+                && item.ConnectionId == "s3-main" && item.AttemptCount == 1 && item.LastVerifiedAt.HasValue);
+        }
+
         var overview = await service.GetOverviewAsync(CancellationToken.None);
         var stored = Assert.Single(overview.S3UploadResults);
         Assert.Equal(upload.Id, stored.Id);
@@ -58,6 +69,7 @@ public sealed class DatabaseBackupServiceS3Tests
     {
         await using var scope = await CreateScopeAsync();
         scope.S3.ThrowOnUpload = true;
+        scope.S3.UploadErrorMessage = "S3 unavailable " + new string('x', 3000);
         var service = scope.Provider.GetRequiredService<DatabaseBackupService>();
         await service.UpdateSettingsAsync(
             automaticEnabled: true,
@@ -75,6 +87,13 @@ public sealed class DatabaseBackupServiceS3Tests
         var upload = Assert.Single(result.S3UploadResults);
         Assert.Equal("failed", upload.Status);
         Assert.Contains("S3 unavailable", upload.Error);
+
+        await using var db = await scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContextAsync();
+        var copy = await db.DatabaseBackupCopies.SingleAsync(item => item.ProviderKey == "s3");
+        Assert.Equal(DatabaseBackupCopyStatuses.Failed, copy.Status);
+        Assert.Equal(1, copy.AttemptCount);
+        Assert.Null(copy.LastVerifiedAt);
+        Assert.Equal(2000, copy.LastError!.Length);
     }
 
     [Fact]
@@ -112,6 +131,38 @@ public sealed class DatabaseBackupServiceS3Tests
         var stored = Assert.Single(overview.S3UploadResults);
         Assert.Equal(failedUpload.Id, stored.Id);
         Assert.Equal("success", stored.Status);
+
+        await using (var db = await scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContextAsync())
+        {
+            var copy = await db.DatabaseBackupCopies.SingleAsync(item => item.ProviderKey == "s3");
+            Assert.Equal(DatabaseBackupCopyStatuses.Verified, copy.Status);
+            Assert.Equal(2, copy.AttemptCount);
+        }
+    }
+
+    [Fact]
+    public async Task RetryS3UploadAsync_RejectsChangedManifestForCatalogedBackupIdentity()
+    {
+        await using var scope = await CreateScopeAsync();
+        scope.S3.ThrowOnUpload = true;
+        var service = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        await service.UpdateSettingsAsync(true, "03:00", 14, "sqlite",
+            s3UploadEnabled: true, s3ConnectionIds: ["s3-main"], cancellationToken: CancellationToken.None);
+        var created = await service.CreateManualBackupAsync();
+        var failedUpload = Assert.Single(created.S3UploadResults);
+        var manifestPath = $"{service.ResolveBackupPath(created.Backup.RelativePath)}.manifest.json";
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        var manifest = JsonSerializer.Deserialize<DatabaseBackupManifest>(await File.ReadAllTextAsync(manifestPath), options)!;
+        await File.WriteAllTextAsync(manifestPath,
+            JsonSerializer.Serialize(manifest with { ApplicationVersion = "changed" }, options));
+        scope.S3.ThrowOnUpload = false;
+
+        var error = await Assert.ThrowsAsync<InvalidDataException>(() => service.RetryS3UploadAsync(failedUpload.Id));
+
+        Assert.Contains("изменилось", error.Message);
+        Assert.Empty(scope.S3.UploadedPaths);
+        await using var db = await scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContextAsync();
+        Assert.Equal(1, (await db.DatabaseBackupCopies.SingleAsync(item => item.ProviderKey == "s3")).AttemptCount);
     }
 
     [Fact]
@@ -216,6 +267,14 @@ public sealed class DatabaseBackupServiceS3Tests
         Assert.Contains(upload.TargetPath, scope.YandexDisk.UploadedPaths);
         Assert.Contains($"{upload.TargetPath}.manifest.json", scope.YandexDisk.UploadedPaths);
         Assert.True(scope.YandexDisk.UploadedBytes > 0);
+
+        await using (var db = await scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContextAsync())
+        {
+            var copy = await db.DatabaseBackupCopies.SingleAsync(item => item.ProviderKey == "yandexDisk");
+            Assert.Equal(DatabaseBackupCopyStatuses.Verified, copy.Status);
+            Assert.Equal(1, copy.AttemptCount);
+            Assert.True(copy.LastVerifiedAt.HasValue);
+        }
 
         var overview = await service.GetOverviewAsync(CancellationToken.None);
         var stored = Assert.Single(overview.YandexDiskUploadResults);
@@ -352,6 +411,11 @@ public sealed class DatabaseBackupServiceS3Tests
         Assert.False(File.Exists(fullPath));
         Assert.False(File.Exists($"{fullPath}.fileset"));
         Assert.Null(service.ResolveBackupPath(created.Backup.RelativePath));
+
+        await using var db = await scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContextAsync();
+        var set = await db.DatabaseBackupSets.Include(item => item.Copies).SingleAsync();
+        Assert.Equal(DatabaseBackupSetStatuses.NoLocalCopy, set.Status);
+        Assert.Equal(DatabaseBackupCopyStatuses.Deleted, Assert.Single(set.Copies).Status);
     }
 
     [Fact]
@@ -382,6 +446,9 @@ public sealed class DatabaseBackupServiceS3Tests
         Assert.Equal(2, result.DeletedCount);
         Assert.Null(service.ResolveBackupPath(first.Backup.RelativePath));
         Assert.Null(service.ResolveBackupPath(second.Backup.RelativePath));
+
+        await using var db = await scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContextAsync();
+        Assert.Equal(2, await db.DatabaseBackupSets.CountAsync(item => item.Status == DatabaseBackupSetStatuses.NoLocalCopy));
     }
 
     [Fact]
@@ -432,6 +499,11 @@ public sealed class DatabaseBackupServiceS3Tests
 
         Assert.False(File.Exists(firstPath));
         Assert.True(File.Exists(secondPath));
+
+        await using var db = await scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContextAsync();
+        Assert.Equal(DatabaseBackupCopyStatuses.Deleted,
+            await db.DatabaseBackupCopies.Where(item => item.ProviderKey == "local"
+                && item.Locator == first.Backup.RelativePath).Select(item => item.Status).SingleAsync());
     }
 
     [Fact]
@@ -879,6 +951,7 @@ public sealed class DatabaseBackupServiceS3Tests
     private sealed class FakeS3StorageService : IS3StorageService
     {
         public bool ThrowOnUpload { get; set; }
+        public string UploadErrorMessage { get; set; } = "S3 unavailable";
         public string? FailResultPathSuffix { get; set; }
         public string? CorruptReadPathSuffix { get; set; }
         public string? TruncateReadPathSuffix { get; set; }
@@ -908,7 +981,7 @@ public sealed class DatabaseBackupServiceS3Tests
         {
             if (ThrowOnUpload)
             {
-                throw new S3StorageOperationException(503, "S3 unavailable");
+                throw new S3StorageOperationException(503, UploadErrorMessage);
             }
 
             UploadedPaths.Add(path ?? string.Empty);

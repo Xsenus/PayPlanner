@@ -324,7 +324,7 @@ public sealed class DatabaseBackupService
             throw new FileNotFoundException("Локальная резервная копия для повторной отправки не найдена.");
         }
 
-        await ReadVerifiedManifestAsync(storedResult.BackupRelativePath, cancellationToken);
+        await EnsureBackupSetCatalogedAsync(storedResult.BackupRelativePath, cancellationToken);
 
         var fileInfo = new FileInfo(resolvedPath);
         var pendingResult = storedResult with
@@ -370,7 +370,7 @@ public sealed class DatabaseBackupService
             throw new FileNotFoundException("Локальная резервная копия для повторной отправки не найдена.");
         }
 
-        await ReadVerifiedManifestAsync(storedResult.BackupRelativePath, cancellationToken);
+        await EnsureBackupSetCatalogedAsync(storedResult.BackupRelativePath, cancellationToken);
 
         var fileInfo = new FileInfo(resolvedPath);
         var pendingResult = storedResult with
@@ -408,6 +408,7 @@ public sealed class DatabaseBackupService
             }
             DeleteManifestParts(resolvedPath);
             TryDeleteFile(GetManifestPath(resolvedPath));
+            await MarkLocalBackupCopiesDeletedAsync([Path.GetRelativePath(_backupRootDirectory, resolvedPath).Replace('\\', '/')], cancellationToken);
             CleanupEmptyDirectories(cancellationToken);
             return new DatabaseBackupDeleteResult(1, DeletedAll: false);
         }
@@ -425,6 +426,7 @@ public sealed class DatabaseBackupService
             await using var rootLock = await BackupDirectoryLease.AcquireAsync(
                 _backupRootDirectory, RootLockTimeout, cancellationToken);
             var deletedCount = 0;
+            var deletedRelativePaths = new List<string>();
             foreach (var pattern in GetBackupSearchPatterns())
             {
                 foreach (var filePath in EnumerateBackupFiles(pattern, cancellationToken))
@@ -434,11 +436,13 @@ public sealed class DatabaseBackupService
                     {
                         DeleteManifestParts(filePath);
                         TryDeleteFile(GetManifestPath(filePath));
+                        deletedRelativePaths.Add(Path.GetRelativePath(_backupRootDirectory, filePath).Replace('\\', '/'));
                         deletedCount++;
                     }
                 }
             }
 
+            await MarkLocalBackupCopiesDeletedAsync(deletedRelativePaths, cancellationToken);
             CleanupEmptyDirectories(cancellationToken);
             return new DatabaseBackupDeleteResult(deletedCount, DeletedAll: true);
         }
@@ -621,6 +625,48 @@ public sealed class DatabaseBackupService
             ?? throw new InvalidDataException("Manifest резервной копии пуст.");
     }
 
+    private async Task EnsureBackupSetCatalogedAsync(string relativePath, CancellationToken cancellationToken)
+    {
+        var manifest = await ReadVerifiedManifestAsync(relativePath, cancellationToken);
+        var backupPath = ResolveBackupPath(relativePath)
+            ?? throw new FileNotFoundException("Резервная копия не найдена.");
+        var manifestSha256 = await ComputeSha256Async(GetManifestPath(backupPath), cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        var existing = await context.DatabaseBackupSets.AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == manifest.BackupId, cancellationToken);
+        if (existing is not null)
+        {
+            if (!string.Equals(existing.ManifestSha256, manifestSha256, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("Описание комплекта резервной копии изменилось после регистрации в каталоге.");
+            return;
+        }
+
+        var now = DateTime.UtcNow;
+        var set = new DatabaseBackupSet
+        {
+            Id = manifest.BackupId,
+            BackupRelativePath = manifest.BackupRelativePath,
+            DatabaseProvider = manifest.DatabaseProvider,
+            BackupFormat = manifest.BackupFormat,
+            ManifestSha256 = manifestSha256,
+            Status = DatabaseBackupSetStatuses.LocalVerified,
+            CreatedAt = manifest.CreatedAtUtc,
+            UpdatedAt = now,
+        };
+        set.Copies.Add(new DatabaseBackupCopy
+        {
+            ProviderKey = "local",
+            ConnectionId = string.Empty,
+            Locator = manifest.BackupRelativePath,
+            Status = DatabaseBackupCopyStatuses.Verified,
+            LastVerifiedAt = now,
+            CreatedAt = now,
+            UpdatedAt = now,
+        });
+        context.DatabaseBackupSets.Add(set);
+        await context.SaveChangesAsync(cancellationToken);
+    }
+
     public string? ResolveBackupPath(string? relativePath)
     {
         var normalizedRelativePath = relativePath?.Trim();
@@ -694,6 +740,8 @@ public sealed class DatabaseBackupService
                 }
                 throw;
             }
+
+            await EnsureBackupSetCatalogedAsync(fileInfo.RelativePath, cancellationToken);
 
             await CleanupExpiredBackupsAsync(settings.RetentionDays, cancellationToken);
             var s3UploadResults = await UploadBackupToS3Async(fileInfo, settings.S3Upload, nowLocal, cancellationToken);
@@ -968,6 +1016,7 @@ public sealed class DatabaseBackupService
             return;
         }
 
+        var deletedRelativePaths = new List<string>();
         foreach (var filePath in backupFiles)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -987,9 +1036,11 @@ public sealed class DatabaseBackupService
             {
                 DeleteManifestParts(filePath);
                 TryDeleteFile(GetManifestPath(filePath));
+                deletedRelativePaths.Add(Path.GetRelativePath(_backupRootDirectory, filePath).Replace('\\', '/'));
             }
         }
 
+        await MarkLocalBackupCopiesDeletedAsync(deletedRelativePaths, cancellationToken);
         CleanupEmptyDirectories(cancellationToken);
     }
 
@@ -1396,6 +1447,8 @@ public sealed class DatabaseBackupService
             setting.UpdatedAt = now;
         }
 
+        await UpsertBackupCopyAsync(context, result.BackupRelativePath, "s3", result.ConnectionId,
+            result.TargetKey ?? result.TargetPath, result.Status, result.Error, now, cancellationToken);
         await context.SaveChangesAsync(cancellationToken);
     }
 
@@ -1457,7 +1510,73 @@ public sealed class DatabaseBackupService
             setting.UpdatedAt = now;
         }
 
+        await UpsertBackupCopyAsync(context, result.BackupRelativePath, "yandexDisk", string.Empty,
+            result.TargetPath, result.Status, result.Error, now, cancellationToken);
         await context.SaveChangesAsync(cancellationToken);
+    }
+
+    private static async Task UpsertBackupCopyAsync(
+        PaymentContext context, string backupRelativePath, string providerKey, string connectionId,
+        string locator, string uploadStatus, string? error, DateTime now, CancellationToken cancellationToken)
+    {
+        var set = await context.DatabaseBackupSets
+            .FirstOrDefaultAsync(item => item.BackupRelativePath == backupRelativePath, cancellationToken)
+            ?? throw new InvalidOperationException("Комплект резервной копии отсутствует в каталоге.");
+        var copy = await context.DatabaseBackupCopies.FirstOrDefaultAsync(item =>
+            item.BackupSetId == set.Id && item.ProviderKey == providerKey && item.ConnectionId == connectionId,
+            cancellationToken);
+        if (copy is null)
+        {
+            copy = new DatabaseBackupCopy
+            {
+                BackupSetId = set.Id,
+                ProviderKey = providerKey,
+                ConnectionId = connectionId,
+                CreatedAt = now,
+            };
+            context.DatabaseBackupCopies.Add(copy);
+        }
+
+        if (string.Equals(uploadStatus, "pending", StringComparison.OrdinalIgnoreCase))
+            copy.AttemptCount++;
+        copy.Locator = locator;
+        copy.Status = uploadStatus switch
+        {
+            "success" => DatabaseBackupCopyStatuses.Verified,
+            "failed" => DatabaseBackupCopyStatuses.Failed,
+            _ => DatabaseBackupCopyStatuses.Pending,
+        };
+        copy.LastError = error is { Length: > 2000 } ? error[..2000] : error;
+        copy.LastVerifiedAt = copy.Status == DatabaseBackupCopyStatuses.Verified ? now : null;
+        copy.UpdatedAt = now;
+        set.UpdatedAt = now;
+    }
+
+    private async Task MarkLocalBackupCopiesDeletedAsync(
+        IReadOnlyCollection<string> backupRelativePaths, CancellationToken cancellationToken)
+    {
+        if (backupRelativePaths.Count == 0) return;
+
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        var now = DateTime.UtcNow;
+        foreach (var batch in backupRelativePaths.Distinct(StringComparer.Ordinal).Chunk(400))
+        {
+            var sets = await context.DatabaseBackupSets
+                .Include(item => item.Copies)
+                .Where(item => batch.Contains(item.BackupRelativePath))
+                .ToListAsync(cancellationToken);
+            foreach (var set in sets)
+            {
+                var local = set.Copies.FirstOrDefault(item => item.ProviderKey == "local");
+                if (local is null) continue;
+                local.Status = DatabaseBackupCopyStatuses.Deleted;
+                local.UpdatedAt = now;
+                set.Status = DatabaseBackupSetStatuses.NoLocalCopy;
+                set.UpdatedAt = now;
+            }
+            await context.SaveChangesAsync(cancellationToken);
+            context.ChangeTracker.Clear();
+        }
     }
 
     private static IReadOnlyList<DatabaseBackupYandexDiskUploadResult> DeserializeYandexDiskUploadResults(string? raw)

@@ -3822,6 +3822,22 @@ public class PaymentContext : DbContext
             entity.HasIndex(item => new { item.OwnerType, item.OwnerId, item.DataClass });
             entity.HasIndex(item => new { item.DataClass, item.IsDeleted, item.UpdatedAt });
         });
+        modelBuilder.Entity<DatabaseBackupSet>(entity =>
+        {
+            entity.HasKey(item => item.Id);
+            entity.HasIndex(item => item.BackupRelativePath).IsUnique();
+            entity.HasIndex(item => new { item.Status, item.CreatedAt });
+        });
+        modelBuilder.Entity<DatabaseBackupCopy>(entity =>
+        {
+            entity.HasKey(item => item.Id);
+            entity.HasIndex(item => new { item.BackupSetId, item.ProviderKey, item.ConnectionId }).IsUnique();
+            entity.HasIndex(item => new { item.ProviderKey, item.Status, item.UpdatedAt });
+            entity.HasOne(item => item.BackupSet)
+                .WithMany(item => item.Copies)
+                .HasForeignKey(item => item.BackupSetId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
         modelBuilder.Entity<StorageObjectGeneration>(entity =>
         {
             entity.HasKey(item => item.Id);
@@ -4696,6 +4712,8 @@ public class PaymentContext : DbContext
     public DbSet<YandexCalendarSyncLog> YandexCalendarSyncLogs { get; set; }
     public DbSet<ExternalCalendarTaskSyncRequest> ExternalCalendarTaskSyncRequests { get; set; }
     public DbSet<StorageObject> StorageObjects { get; set; }
+    public DbSet<DatabaseBackupSet> DatabaseBackupSets { get; set; }
+    public DbSet<DatabaseBackupCopy> DatabaseBackupCopies { get; set; }
     public DbSet<StorageObjectGeneration> StorageObjectGenerations { get; set; }
     public DbSet<StorageReplica> StorageReplicas { get; set; }
     public DbSet<StorageOperation> StorageOperations { get; set; }
