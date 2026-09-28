@@ -2,6 +2,7 @@ namespace PayPlanner.Api.Services;
 
 public interface IBackupDirectoryReader
 {
+    IEnumerable<string> EnumerateEntries(string directory) => GetFiles(directory, "*").Concat(GetDirectories(directory));
     IReadOnlyList<string> GetFiles(string directory, string pattern);
     IReadOnlyList<string> GetDirectories(string directory);
     bool IsEmpty(string directory);
@@ -9,6 +10,7 @@ public interface IBackupDirectoryReader
 
 public sealed class PhysicalBackupDirectoryReader : IBackupDirectoryReader
 {
+    public IEnumerable<string> EnumerateEntries(string directory) => Directory.EnumerateFileSystemEntries(directory);
     public IReadOnlyList<string> GetFiles(string directory, string pattern)
         => Directory.GetFiles(directory, pattern, SearchOption.TopDirectoryOnly);
 

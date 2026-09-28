@@ -1618,6 +1618,12 @@ export interface DatabaseBackupCatalogImportResult {
   items: Array<{ relativePath: string; status: 'ready' | 'imported' | 'alreadyRegistered' | 'failed'; error?: string | null }>;
 }
 
+export interface DatabaseBackupDiscoveryPage {
+  items: Array<{ relativePath: string; hasManifest: boolean; alreadyRegistered: boolean }>;
+  issues: Array<{ relativePath: string; error: string }>;
+  nextCursor?: string | null;
+}
+
 export interface DatabaseBackupOverviewDto {
   provider: string;
   providerDisplayName: string;
@@ -3867,6 +3873,12 @@ export class ApiService {
   async importDatabaseBackupCatalog(relativePaths: string[], dryRun = true) {
     return this.request<DatabaseBackupCatalogImportResult>('/database/backups/catalog/import', {
       method: 'POST', body: JSON.stringify({ relativePaths, dryRun }),
+    });
+  }
+
+  async discoverDatabaseBackups(cursor?: string) {
+    return this.request<DatabaseBackupDiscoveryPage>('/database/backups/discovery', {
+      method: 'POST', body: JSON.stringify({ cursor, pageSize: 20 }),
     });
   }
 

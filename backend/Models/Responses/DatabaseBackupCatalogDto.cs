@@ -2,6 +2,10 @@ namespace PayPlanner.Api.Models.Responses;
 
 public sealed record DatabaseBackupCatalogImportItem(string RelativePath, string Status, string? Error = null);
 public sealed record DatabaseBackupCatalogImportResult(bool DryRun, IReadOnlyList<DatabaseBackupCatalogImportItem> Items);
+public sealed record DatabaseBackupDiscoveryItem(string RelativePath, bool HasManifest, bool AlreadyRegistered = false);
+public sealed record DatabaseBackupDiscoveryIssue(string RelativePath, string Error);
+public sealed record DatabaseBackupDiscoveryPage(
+    IReadOnlyList<DatabaseBackupDiscoveryItem> Items, IReadOnlyList<DatabaseBackupDiscoveryIssue> Issues, string? NextCursor);
 
 public sealed class DatabaseBackupCatalogPageDto
 {

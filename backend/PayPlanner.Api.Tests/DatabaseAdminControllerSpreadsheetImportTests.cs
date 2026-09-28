@@ -32,6 +32,7 @@ public class DatabaseAdminControllerSpreadsheetImportTests
     [InlineData("/api/database/status", false)]
     [InlineData("/api/database/backups/catalog", false)]
     [InlineData("/api/database/backups/catalog/import", true)]
+    [InlineData("/api/database/backups/discovery", true)]
     public async Task DatabaseAdminEndpoints_ForbidUserWithoutAdminRoleInDatabase(string endpoint, bool post)
     {
         await using var connection = await CreateOpenConnectionAsync();
@@ -129,6 +130,12 @@ public class DatabaseAdminControllerSpreadsheetImportTests
             Assert.Equal(created, item.CreatedAt);
             Assert.Equal(DateTimeKind.Utc, item.CreatedAt.Kind);
             Assert.Equal("local", Assert.Single(item.Copies).ProviderKey);
+            using var discovery = await client.PostAsJsonAsync("/api/database/backups/discovery", new { pageSize = 20 });
+            Assert.Equal(HttpStatusCode.OK, discovery.StatusCode);
+            var found = Assert.Single((await discovery.Content.ReadFromJsonAsync<DatabaseBackupDiscoveryPage>())!.Items);
+            Assert.Equal(relativePath, found.RelativePath);
+            Assert.True(found.AlreadyRegistered);
+            Assert.True(found.HasManifest);
             Assert.Equal(bytes, await File.ReadAllBytesAsync(path));
         }
         finally { TryDeleteDirectory(directory); }

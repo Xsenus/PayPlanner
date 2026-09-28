@@ -3,6 +3,7 @@ import { apiService } from '../../services/api';
 import type { DatabaseBackupCatalogImportResult } from '../../services/api';
 import { useDialog } from '../../hooks/useDialog';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import { DatabaseBackupDiscovery } from './DatabaseBackupDiscovery';
 
 const labels = { ready: 'Можно добавить', imported: 'Добавлено', alreadyRegistered: 'Уже есть в журнале', failed: 'Не добавлено' };
 
@@ -54,6 +55,9 @@ export function DatabaseBackupCatalogImport({ onImported }: { onImported: () => 
   return <details className="mt-3 rounded-xl border border-slate-200 p-3">
     <summary className="cursor-pointer text-sm font-medium">Добавить старые локальные копии</summary>
     <p className="mt-2 text-xs text-gray-600">Скопируйте относительные пути из списка файлов ниже, по одному на строку. До 20 копий за раз. Сначала проверка без записи, затем добавление подтверждённых комплектов. Копии без полного описания и обязательных частей не добавляются.</p>
+    <DatabaseBackupDiscovery disabled={busy} onSelect={values => {
+      revision.current++; setText(values.join('\n')); setResult(null); setError(null);
+    }} />
     <label className="mt-2 block text-sm" htmlFor="backup-import-paths">Пути старых копий</label>
     <textarea id="backup-import-paths" value={text} disabled={busy} rows={3} maxLength={40980}
       className="mt-1 w-full rounded-lg border border-slate-300 p-2 text-sm disabled:opacity-60"

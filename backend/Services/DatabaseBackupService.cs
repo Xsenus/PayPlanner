@@ -271,6 +271,24 @@ public sealed class DatabaseBackupService
         }
     }
 
+    public async Task<DatabaseBackupDiscoveryPage> DiscoverBackupsAsync(
+        string? cursor = null, int pageSize = 20, CancellationToken cancellationToken = default)
+    {
+        await _backupSemaphore.WaitAsync(cancellationToken);
+        try
+        {
+            await using var rootLock = await BackupDirectoryLease.AcquireAsync(_backupRootDirectory, RootLockTimeout, cancellationToken);
+            var page = new DatabaseBackupInventoryScanner(_backupRootDirectory, _directoryReader).Read(cursor, pageSize, cancellationToken);
+            if (page.Items.Count == 0) return page;
+            var paths = page.Items.Select(item => item.RelativePath).ToArray();
+            await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+            var registered = (await context.DatabaseBackupSets.AsNoTracking().Where(item => paths.Contains(item.BackupRelativePath))
+                .Select(item => item.BackupRelativePath).ToListAsync(cancellationToken)).ToHashSet(StringComparer.Ordinal);
+            return page with { Items = page.Items.Select(item => item with { AlreadyRegistered = registered.Contains(item.RelativePath) }).ToArray() };
+        }
+        finally { _backupSemaphore.Release(); }
+    }
+
     public async Task<DatabaseBackupOverview> UpdateSettingsAsync(
         bool automaticEnabled,
         string? scheduleLocal,

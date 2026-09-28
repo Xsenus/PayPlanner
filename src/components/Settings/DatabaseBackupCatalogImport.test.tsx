@@ -2,8 +2,8 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DatabaseBackupCatalogImport } from './DatabaseBackupCatalogImport';
 
-const { importCatalog, confirm } = vi.hoisted(() => ({ importCatalog: vi.fn(), confirm: vi.fn() }));
-vi.mock('../../services/api', () => ({ apiService: { importDatabaseBackupCatalog: importCatalog } }));
+const { importCatalog, discover, confirm } = vi.hoisted(() => ({ importCatalog: vi.fn(), discover: vi.fn(), confirm: vi.fn() }));
+vi.mock('../../services/api', () => ({ apiService: { importDatabaseBackupCatalog: importCatalog, discoverDatabaseBackups: discover } }));
 vi.mock('../../hooks/useDialog', () => ({ useDialog: () => ({ confirm }) }));
 
 function setup() {
@@ -16,7 +16,24 @@ function setup() {
 }
 
 describe('DatabaseBackupCatalogImport', () => {
-  beforeEach(() => { importCatalog.mockReset(); confirm.mockReset(); confirm.mockResolvedValue(true); });
+  beforeEach(() => { importCatalog.mockReset(); discover.mockReset(); confirm.mockReset(); confirm.mockResolvedValue(true); });
+
+  it('requires a new preview after discovered paths replace a verified manual selection', async () => {
+    importCatalog.mockResolvedValue({ dryRun: true, items: [{ relativePath: 'manual.zip', status: 'ready' }] });
+    discover.mockResolvedValue({ items: [{ relativePath: 'found.zip', hasManifest: true, alreadyRegistered: false }], issues: [], nextCursor: null });
+    const view = setup();
+    fireEvent.change(view.input, { target: { value: 'manual.zip' } });
+    fireEvent.click(view.preview());
+    await waitFor(() => expect(view.apply().hasAttribute('disabled')).toBe(false));
+    fireEvent.click(screen.getByRole('button', { name: 'Найти копии в каталоге' }));
+    await screen.findByText(/found.zip/);
+    fireEvent.click(screen.getByRole('button', { name: /Передать найденные/ }));
+    expect((view.input as HTMLTextAreaElement).value).toBe('found.zip');
+    expect(screen.queryByText('Можно добавить')).toBeNull();
+    expect(view.apply().hasAttribute('disabled')).toBe(true);
+    expect(importCatalog).toHaveBeenCalledTimes(1);
+    expect(confirm).not.toHaveBeenCalled();
+  });
 
   it('previews without writes and applies only ready files after confirmation', async () => {
     importCatalog.mockResolvedValueOnce({ dryRun: true, items: [

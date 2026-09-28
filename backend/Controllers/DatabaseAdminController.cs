@@ -155,6 +155,14 @@ public class DatabaseAdminController : ControllerBase, IAsyncActionFilter
         }
     }
 
+    [HttpPost("backups/discovery")]
+    public async Task<ActionResult<DatabaseBackupDiscoveryPage>> DiscoverBackupsAsync(
+        [FromBody] DiscoverDatabaseBackupsRequest request, CancellationToken cancellationToken)
+    {
+        try { return Ok(await _databaseBackupService.DiscoverBackupsAsync(request.Cursor, request.PageSize, cancellationToken)); }
+        catch (ArgumentException ex) { return BadRequest(new { message = ex.Message }); }
+    }
+
     [HttpPost("backups")]
     public async Task<ActionResult<DatabaseBackupCreateResultDto>> CreateBackupAsync(CancellationToken cancellationToken)
     {
