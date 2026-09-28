@@ -157,6 +157,7 @@ public sealed class DatabaseRestoreDrillService(
             await VerifyRestoredInventoryAsync(manifest, snapshot, cancellationToken);
         }
         await RestoreFilePartsAsync(manifest, targetDirectory, cancellationToken);
+        await VerifyRestoredNativeBindingsAsync(manifest, targetDirectory, cancellationToken);
 
         return new DatabaseRestoreDrillReport(
             Path.GetFileName(targetDirectory), "restored", manifest.BackupId, manifest.BackupRelativePath,
@@ -265,6 +266,7 @@ public sealed class DatabaseRestoreDrillService(
             await VerifyRestoredInventoryAsync(manifest, snapshot, cancellationToken);
         }
         await RestoreFilePartsAsync(manifest, targetDirectory, cancellationToken);
+        await VerifyRestoredNativeBindingsAsync(manifest, targetDirectory, cancellationToken);
 
         return new DatabaseRestoreDrillReport(
             Path.GetFileName(targetDirectory), "restored", manifest.BackupId, manifest.BackupRelativePath,
@@ -413,10 +415,7 @@ public sealed class DatabaseRestoreDrillService(
                 if (string.IsNullOrEmpty(entry.Name)) continue;
                 var expectedHash = part.FileEntryHashFormat == DatabaseBackupArchiveHash.Format
                     ? DatabaseBackupArchiveHash.FromComment(entry.Comment) : null;
-                var targetPath = Path.GetFullPath(Path.Combine(filesRoot, entry.FullName.Replace('/', Path.DirectorySeparatorChar)));
-                var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-                if (!targetPath.StartsWith(filesRoot + Path.DirectorySeparatorChar, comparison))
-                    throw new InvalidDataException("File backup set содержит небезопасный путь.");
+                var targetPath = GetSafeExtractionPath(filesRoot, entry.FullName);
                 Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
                 var created = false;
                 try
@@ -454,6 +453,38 @@ public sealed class DatabaseRestoreDrillService(
         }
     }
 
+    private async Task VerifyRestoredNativeBindingsAsync(DatabaseBackupManifest manifest, string targetDirectory, CancellationToken cancellationToken)
+    {
+        if (manifest.FormatVersion < 4) return;
+        var references = manifest.Parts!.Single(part => part.Kind == "file-references");
+        var bindings = manifest.Parts!.Single(part => part.Kind == "native-file-bindings");
+        var fileParts = manifest.Parts!.Where(part => part.Kind == "file-storage")
+            .Select(part => part.RelativePath).ToHashSet(StringComparer.Ordinal);
+        var filesRoot = Path.GetFullPath(Path.Combine(targetDirectory, "files"));
+        await using var inventory = OpenPart(references);
+        await using var mapping = OpenPart(bindings);
+        await VerifyPartStreamAsync(inventory, references, cancellationToken);
+        await VerifyPartStreamAsync(mapping, bindings, cancellationToken);
+        inventory.Position = 0;
+        mapping.Position = 0;
+        await DatabaseBackupNativeBindings.VerifyAsync(inventory, mapping, references.Sha256, ReadRestoredFileAsync, cancellationToken);
+        await VerifyPartStreamAsync(inventory, references, cancellationToken);
+        await VerifyPartStreamAsync(mapping, bindings, cancellationToken);
+
+        async Task<DatabaseBackupArchiveFileHash?> ReadRestoredFileAsync(string partPath, string entryPath, CancellationToken token)
+        {
+            if (!fileParts.Contains(partPath)) return null;
+            var path = GetSafeExtractionPath(filesRoot, entryPath);
+            if (!File.Exists(path)) return null;
+            await using var source = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, true);
+            return await DatabaseBackupArchiveHash.CopyAsync(source, Stream.Null, token);
+        }
+
+        FileStream OpenPart(DatabaseBackupPartManifest part)
+            => new(backups.ResolveBackupPath(part.RelativePath) ?? throw new FileNotFoundException("Обязательная часть комплекта недоступна."),
+                FileMode.Open, FileAccess.Read, FileShare.Read, 81920, true);
+    }
+
     private static async Task VerifyPartStreamAsync(FileStream stream, DatabaseBackupPartManifest part,
         CancellationToken cancellationToken)
     {
@@ -461,6 +492,15 @@ public sealed class DatabaseRestoreDrillService(
         var hash = Convert.ToHexString(await SHA256.HashDataAsync(stream, cancellationToken));
         if (stream.Length != part.SizeBytes || !string.Equals(hash, part.Sha256, StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException("Размер или SHA-256 части резервной копии изменился после её проверки.");
+    }
+
+    private static string GetSafeExtractionPath(string filesRoot, string entryPath)
+    {
+        var path = Path.GetFullPath(Path.Combine(filesRoot, entryPath.Replace('/', Path.DirectorySeparatorChar)));
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        if (!path.StartsWith(filesRoot + Path.DirectorySeparatorChar, comparison))
+            throw new InvalidDataException("File backup set содержит небезопасный путь.");
+        return path;
     }
 
     private void EnsureNotActiveSqliteDatabase(string targetPath)

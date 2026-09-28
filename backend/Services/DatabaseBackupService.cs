@@ -623,7 +623,7 @@ public sealed class DatabaseBackupService
                 ex.Message);
         }
 
-        if (manifest is null || manifest.FormatVersion is not (1 or 2 or 3))
+        if (manifest is null || manifest.FormatVersion is not (1 or 2 or 3 or 4))
         {
             return new DatabaseBackupVerificationResult(
                 "invalidManifest",
@@ -662,6 +662,15 @@ public sealed class DatabaseBackupService
                     || referenceParts[0].RelativePath != manifest.BackupRelativePath + ".references")
                     throw new InvalidDataException("Новый комплект должен включать обязательные базу и перечень файловых ссылок.");
             }
+            var nativeBindings = manifest.Parts?.Where(part => part?.Kind == "native-file-bindings").ToArray() ?? [];
+            if (manifest.FormatVersion >= 4)
+            {
+                if (nativeBindings.Length != 1 || !nativeBindings[0].Required
+                    || nativeBindings[0].RelativePath != manifest.BackupRelativePath + ".nativefiles")
+                    throw new InvalidDataException("Новый комплект должен включать обязательное сопоставление архивных документов.");
+            }
+            else if (nativeBindings.Length != 0)
+                throw new InvalidDataException("Сопоставление архивных документов требует нового формата комплекта.");
             foreach (var part in manifest.Parts ?? [])
             {
                 if (part is null) throw new InvalidDataException("Manifest содержит пустую часть комплекта.");
@@ -723,6 +732,21 @@ public sealed class DatabaseBackupService
                         break;
                     }
                 }
+                if (part.Kind == "native-file-bindings")
+                {
+                    try
+                    {
+                        partStream.Position = 0;
+                        var referenceHash = manifest.Parts!.Single(item => item.Kind == "file-references").Sha256;
+                        await foreach (var _ in DatabaseBackupNativeBindings.ReadAsync(partStream, referenceHash, true, cancellationToken)) { }
+                    }
+                    catch (InvalidDataException ex)
+                    {
+                        verified = false;
+                        partError = ex.Message;
+                        break;
+                    }
+                }
                 if (part.FileEntryHashFormat == DatabaseBackupArchiveHash.Format)
                 {
                     try
@@ -744,6 +768,15 @@ public sealed class DatabaseBackupService
                         break;
                     }
                 }
+            }
+        }
+        if (verified && manifest.FormatVersion >= 4)
+        {
+            try { await VerifyNativeBindingCoverageAsync(manifest, cancellationToken); }
+            catch (Exception ex) when (ex is IOException or InvalidDataException or JsonException)
+            {
+                verified = false;
+                partError = ex.Message;
             }
         }
         return new DatabaseBackupVerificationResult(
@@ -2396,7 +2429,7 @@ public sealed class DatabaseBackupService
             await ComputeSha256Async(resolvedPath, cancellationToken),
             true);
         var manifest = new DatabaseBackupManifest(
-            3,
+            additionalParts.Any(part => part.Kind == "native-file-bindings") ? 4 : 3,
             Guid.NewGuid().ToString("N"),
             backup.FileName,
             backup.RelativePath.Replace('\\', '/'),
@@ -2457,20 +2490,32 @@ public sealed class DatabaseBackupService
             new("electronic-signatures-legacy", ElectronicSignatureStoragePaths.ResolveLegacyRoot(environment)),
         };
         var layout = DatabaseBackupFileLayout.Create(candidates, _backupRootDirectory);
-        if (layout.ArchiveRoots.Count == 0)
-        {
-            await ValidateNativeFileCoverageAsync(referencePart, layout, null, cancellationToken);
-            return [];
-        }
-
         var backupPath = ResolveBackupPath(backup.RelativePath)
             ?? throw new InvalidOperationException("Созданная резервная копия недоступна для file backup set.");
         var archivePath = $"{backupPath}.fileset";
         var temporaryPath = $"{archivePath}.{Guid.NewGuid():N}.tmp";
+        var bindingPath = $"{backupPath}.nativefiles";
+        var bindingTemporaryPath = $"{bindingPath}.{Guid.NewGuid():N}.tmp";
+        var planPath = $"{bindingPath}.{Guid.NewGuid():N}.plan";
         var published = false;
         var temporaryCreated = false;
+        var bindingPublished = false;
+        var bindingTemporaryCreated = false;
+        var planCreated = false;
         try
         {
+            // Freeze current/legacy selection before reading any file payload. The plan
+            // stays open through sealing; its original hash is checked again afterwards.
+            await using var plan = new FileStream(planPath, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None, 81920, true);
+            planCreated = true;
+            await WriteNativeFilePlanAsync(referencePart, layout, plan,
+                Path.GetRelativePath(_backupRootDirectory, archivePath).Replace('\\', '/'), cancellationToken);
+            await plan.FlushAsync(cancellationToken);
+            plan.Position = 0;
+            var planHash = Convert.ToHexString(await SHA256.HashDataAsync(plan, cancellationToken));
+            plan.Position = 0;
+            if (layout.ArchiveRoots.Count != 0)
+            {
             await using (var output = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, true))
             {
                 temporaryCreated = true;
@@ -2490,30 +2535,57 @@ public sealed class DatabaseBackupService
                     }
                 }
             }
-            await using (var archiveStream = new FileStream(temporaryPath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, true))
-            using (var archive = new ZipArchive(archiveStream, ZipArchiveMode.Read))
-                await ValidateNativeFileCoverageAsync(referencePart, layout, archive, cancellationToken);
-            File.Move(temporaryPath, archivePath, overwrite: false);
-            published = true;
-            var info = new FileInfo(archivePath);
-            return
-            [
-                new DatabaseBackupPartManifest(
+            }
+            long bindingSize;
+            string bindingHash;
+            await using (var output = new FileStream(bindingTemporaryPath, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None, 81920, true))
+            {
+                bindingTemporaryCreated = true;
+                if (temporaryCreated)
+                {
+                    await using var archiveStream = new FileStream(temporaryPath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, true);
+                    using var archive = new ZipArchive(archiveStream, ZipArchiveMode.Read);
+                    await DatabaseBackupNativeBindings.SealAsync(plan, output, archive, referencePart.Sha256, cancellationToken);
+                }
+                else await DatabaseBackupNativeBindings.SealAsync(plan, output, null, referencePart.Sha256, cancellationToken);
+                await output.FlushAsync(cancellationToken);
+                output.Position = 0;
+                bindingSize = output.Length;
+                bindingHash = Convert.ToHexString(await SHA256.HashDataAsync(output, cancellationToken));
+            }
+            plan.Position = 0;
+            if (planHash != Convert.ToHexString(await SHA256.HashDataAsync(plan, cancellationToken)))
+                throw new InvalidDataException("План сопоставления документов изменился во время упаковки.");
+            var result = new List<DatabaseBackupPartManifest>();
+            if (temporaryCreated)
+            {
+                File.Move(temporaryPath, archivePath, overwrite: false);
+                published = true;
+                var info = new FileInfo(archivePath);
+                result.Add(new DatabaseBackupPartManifest(
                     "file-storage",
                     Path.GetRelativePath(_backupRootDirectory, archivePath).Replace('\\', '/'),
                     info.Length,
                     await ComputeSha256Async(archivePath, cancellationToken),
-                    true, layout.RootMappings, DatabaseBackupArchiveHash.Format),
-            ];
+                    true, layout.RootMappings, DatabaseBackupArchiveHash.Format));
+            }
+            File.Move(bindingTemporaryPath, bindingPath, overwrite: false);
+            bindingPublished = true;
+            result.Add(new("native-file-bindings", Path.GetRelativePath(_backupRootDirectory, bindingPath).Replace('\\', '/'),
+                bindingSize, bindingHash, true));
+            return result;
         }
         catch
         {
             if (published) TryDeleteFile(archivePath);
+            if (bindingPublished) TryDeleteFile(bindingPath);
             throw;
         }
         finally
         {
             if (temporaryCreated) TryDeleteFile(temporaryPath);
+            if (bindingTemporaryCreated) TryDeleteFile(bindingTemporaryPath);
+            if (planCreated) TryDeleteFile(planPath);
         }
     }
 
@@ -2524,15 +2596,15 @@ public sealed class DatabaseBackupService
         return Convert.ToHexString(hash).ToLowerInvariant();
     }
 
-    private async Task ValidateNativeFileCoverageAsync(DatabaseBackupPartManifest referencePart,
-        DatabaseBackupFileLayout layout, ZipArchive? archive, CancellationToken cancellationToken)
+    private async Task WriteNativeFilePlanAsync(DatabaseBackupPartManifest referencePart,
+        DatabaseBackupFileLayout layout, Stream destination, string archivePartRelativePath, CancellationToken cancellationToken)
     {
         var path = ResolveBackupPath(referencePart.RelativePath)
             ?? throw new FileNotFoundException("Перечень документов резервной копии недоступен.");
         await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, true);
         await VerifyInventoryStreamAsync();
         stream.Position = 0;
-        await DatabaseBackupNativeFileCoverage.ValidateAsync(stream, archive, new(layout), cancellationToken);
+        await DatabaseBackupNativeBindings.WritePlanAsync(stream, destination, new(layout), archivePartRelativePath, referencePart.Sha256, cancellationToken);
         await VerifyInventoryStreamAsync();
 
         async Task VerifyInventoryStreamAsync()
@@ -2542,6 +2614,72 @@ public sealed class DatabaseBackupService
             if (stream.Length != referencePart.SizeBytes || !string.Equals(hash, referencePart.Sha256, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidDataException("Перечень документов изменился после чтения снимка базы.");
         }
+    }
+
+    private async Task VerifyNativeBindingCoverageAsync(DatabaseBackupManifest manifest, CancellationToken cancellationToken)
+    {
+        var references = manifest.Parts!.Single(part => part.Kind == "file-references");
+        var mapping = manifest.Parts!.Single(part => part.Kind == "native-file-bindings");
+        var archiveParts = new Dictionary<string, DatabaseBackupPartManifest>(StringComparer.Ordinal);
+        foreach (var part in manifest.Parts!.Where(part => part.Kind == "file-storage"))
+            if (!archiveParts.TryAdd(part.RelativePath, part)) throw new InvalidDataException("Дублируется файловая часть комплекта.");
+        await using var inventoryStream = OpenPart(references);
+        await using var bindingStream = OpenPart(mapping);
+        await VerifyPartStreamAsync(inventoryStream, references, cancellationToken);
+        await VerifyPartStreamAsync(bindingStream, mapping, cancellationToken);
+        inventoryStream.Position = 0;
+        bindingStream.Position = 0;
+        FileStream? archiveStream = null;
+        ZipArchive? archive = null;
+        DatabaseBackupPartManifest? currentPart = null;
+        try
+        {
+            await DatabaseBackupNativeBindings.VerifyAsync(inventoryStream, bindingStream, references.Sha256, ReadArchivedFileAsync, cancellationToken);
+            if (archiveStream is not null) await VerifyPartStreamAsync(archiveStream, currentPart!, cancellationToken);
+            await VerifyPartStreamAsync(inventoryStream, references, cancellationToken);
+            await VerifyPartStreamAsync(bindingStream, mapping, cancellationToken);
+        }
+        finally
+        {
+            archive?.Dispose();
+            if (archiveStream is not null) await archiveStream.DisposeAsync();
+        }
+
+        async Task<DatabaseBackupArchiveFileHash?> ReadArchivedFileAsync(string partPath, string entryPath, CancellationToken token)
+        {
+            if (!archiveParts.TryGetValue(partPath, out var part)) return null;
+            // Keep one open archive. The current producer has one part; this also
+            // bounds handles when split archives are introduced later.
+            if (currentPart != part)
+            {
+                if (archiveStream is not null)
+                {
+                    await VerifyPartStreamAsync(archiveStream, currentPart!, token);
+                    archive?.Dispose();
+                    await archiveStream.DisposeAsync();
+                }
+                archiveStream = OpenPart(part);
+                currentPart = part;
+                await VerifyPartStreamAsync(archiveStream, part, token);
+                archiveStream.Position = 0;
+                archive = new ZipArchive(archiveStream, ZipArchiveMode.Read, leaveOpen: true);
+            }
+            var entry = archive!.GetEntry(entryPath);
+            return entry is null || string.IsNullOrEmpty(entry.Name)
+                ? null : new(entry.Length, DatabaseBackupArchiveHash.FromComment(entry.Comment));
+        }
+
+        FileStream OpenPart(DatabaseBackupPartManifest part)
+            => new(ResolveBackupPath(part.RelativePath) ?? throw new FileNotFoundException("Обязательная часть комплекта недоступна."),
+                FileMode.Open, FileAccess.Read, FileShare.Read, 81920, true);
+    }
+
+    private static async Task VerifyPartStreamAsync(FileStream stream, DatabaseBackupPartManifest part, CancellationToken cancellationToken)
+    {
+        stream.Position = 0;
+        var hash = Convert.ToHexString(await SHA256.HashDataAsync(stream, cancellationToken));
+        if (stream.Length != part.SizeBytes || !string.Equals(hash, part.Sha256, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("Обязательная часть комплекта изменилась после предварительной проверки.");
     }
 
     private static bool IsPathWithin(string path, string root)

@@ -19,6 +19,111 @@ namespace PayPlanner.Api.Tests;
 
 public sealed class DatabaseBackupServiceS3Tests
 {
+    [Theory]
+    [InlineData("entry")]
+    [InlineData("identity")]
+    [InlineData("hash")]
+    public async Task NativeBindingMismatchCannotBeHiddenByFreshArtifactChecksum(string corruption)
+    {
+        await using var scope = await CreateScopeAsync();
+        var photoDirectory = Path.Combine(scope.Root, "files", "user-photos");
+        Directory.CreateDirectory(photoDirectory);
+        await File.WriteAllTextAsync(Path.Combine(photoDirectory, "photo.png"), "photo payload");
+        await using (var db = await scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContextAsync())
+        {
+            db.Users.Add(new User
+            {
+                Email = "binding-check@local.test",
+                PasswordHash = "test",
+                Role = new Role { Name = "binding-check" },
+                PhotoUrl = "/user-photos/photo.png"
+            });
+            await db.SaveChangesAsync();
+        }
+        var backups = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        var created = await backups.CreateManualBackupAsync();
+        var manifest = await backups.ReadVerifiedManifestAsync(created.Backup.RelativePath);
+        var part = Assert.Single(manifest.Parts!, item => item.Kind == "native-file-bindings");
+        var path = backups.ResolveBackupPath(part.RelativePath)!;
+        var lines = (await File.ReadAllTextAsync(path)).Split('\n');
+        var binding = System.Text.Json.Nodes.JsonNode.Parse(lines[1])!;
+        if (corruption == "entry") binding["archiveEntryPath"] = "file-storage/user-photos/missing.png";
+        else if (corruption == "identity") binding["reference"]!["sourceId"] = 999999;
+        else binding["actualSha256"] = new string('a', 64);
+        lines[1] = binding.ToJsonString();
+        await File.WriteAllTextAsync(path, string.Join('\n', lines));
+        var changed = part with
+        {
+            SizeBytes = new FileInfo(path).Length,
+            Sha256 = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(path)))
+        };
+        await File.WriteAllTextAsync(backups.ResolveBackupPath(created.Backup.RelativePath)! + ".manifest.json",
+            JsonSerializer.Serialize(manifest with { Parts = manifest.Parts!.Select(item => item == part ? changed : item).ToArray() },
+                new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+        var verification = await backups.VerifyBackupAsync(created.Backup.RelativePath);
+        Assert.False(verification.Verified);
+        Assert.Equal("mismatch", verification.Status);
+        await Assert.ThrowsAsync<InvalidDataException>(() => scope.Provider.GetRequiredService<DatabaseRestoreDrillService>()
+            .RunAsync(created.Backup.RelativePath, false, null, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task NativeBindingRestoresPhotoAfterSourceStorageConfigurationChanges()
+    {
+        await using var scope = await CreateScopeAsync();
+        var originalPhoto = Path.Combine(scope.Root, "files", "user-photos", "photo.png");
+        Directory.CreateDirectory(Path.GetDirectoryName(originalPhoto)!);
+        await File.WriteAllTextAsync(originalPhoto, "portable photo bytes");
+        await using (var db = await scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContextAsync())
+        {
+            db.Users.Add(new User
+            {
+                Email = "portable-photo@local.test",
+                PasswordHash = "test",
+                Role = new Role { Name = "portable" },
+                PhotoUrl = "/user-photos/photo.png"
+            });
+            await db.SaveChangesAsync();
+        }
+        var backups = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        var created = await backups.CreateManualBackupAsync();
+        var manifest = await backups.ReadVerifiedManifestAsync(created.Backup.RelativePath);
+        Assert.Equal(4, manifest.FormatVersion);
+        Assert.True(Assert.Single(manifest.Parts!, part => part.Kind == "native-file-bindings").Required);
+        File.Delete(originalPhoto);
+        scope.Provider.GetRequiredService<IConfiguration>()[ApplicationFileStoragePaths.RootPathConfigurationKey]
+            = Path.Combine(scope.Root, "empty-new-storage");
+        var report = await scope.Provider.GetRequiredService<DatabaseRestoreDrillService>()
+            .RunAsync(created.Backup.RelativePath, false, null, CancellationToken.None);
+        Assert.Equal("restored", report.Status);
+        Assert.Equal("portable photo bytes", await File.ReadAllTextAsync(Path.Combine(
+            Path.GetDirectoryName(report.Target)!, "files", "file-storage", "user-photos", "photo.png")));
+    }
+
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("optional")]
+    [InlineData("duplicate")]
+    public async Task NativeBindingArtifactIsMandatoryAndUnique(string corruption)
+    {
+        await using var scope = await CreateScopeAsync();
+        var backups = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        var created = await backups.CreateManualBackupAsync();
+        var manifest = await backups.ReadVerifiedManifestAsync(created.Backup.RelativePath);
+        var part = Assert.Single(manifest.Parts!, item => item.Kind == "native-file-bindings");
+        if (corruption == "missing") File.Delete(backups.ResolveBackupPath(part.RelativePath)!);
+        else
+        {
+            var parts = corruption == "duplicate" ? manifest.Parts!.Append(part).ToArray()
+                : manifest.Parts!.Select(item => item == part ? part with { Required = false } : item).ToArray();
+            await File.WriteAllTextAsync(backups.ResolveBackupPath(created.Backup.RelativePath)! + ".manifest.json",
+                JsonSerializer.Serialize(manifest with { Parts = parts }, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+        }
+        Assert.False((await backups.VerifyBackupAsync(created.Backup.RelativePath)).Verified);
+        await Assert.ThrowsAsync<InvalidDataException>(() => scope.Provider.GetRequiredService<DatabaseRestoreDrillService>()
+            .RunAsync(created.Backup.RelativePath, false, null, CancellationToken.None));
+    }
+
     [Fact]
     public async Task RefusedArchivePublicationDoesNotDeleteForeignDestination()
     {
@@ -125,7 +230,14 @@ public sealed class DatabaseBackupServiceS3Tests
             Sha256 = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(path)))
         };
         await File.WriteAllTextAsync(backups.ResolveBackupPath(created.Backup.RelativePath)! + ".manifest.json",
-            JsonSerializer.Serialize(manifest with { Parts = manifest.Parts!.Select(item => item == part ? changedPart : item).ToArray() },
+            // Historical v3 has an inventory but no binding artifact. Keep exercising
+            // the restored-database boundary independently of the new v4 preflight.
+            JsonSerializer.Serialize(manifest with
+            {
+                FormatVersion = 3,
+                Parts = manifest.Parts!
+                .Where(item => item.Kind != "native-file-bindings").Select(item => item == part ? changedPart : item).ToArray()
+            },
                 new JsonSerializerOptions(JsonSerializerDefaults.Web)));
         Assert.True((await backups.VerifyBackupAsync(created.Backup.RelativePath)).Verified);
         var report = await scope.Provider.GetRequiredService<DatabaseRestoreDrillService>()
@@ -189,7 +301,7 @@ public sealed class DatabaseBackupServiceS3Tests
         var historical = manifest with
         {
             FormatVersion = version,
-            Parts = manifest.Parts!.Where(item => version != 1 || item.Kind != "file-references")
+            Parts = manifest.Parts!.Where(item => item.Kind != "native-file-bindings" && (version != 1 || item.Kind != "file-references"))
                 .Select(item => item == part ? historicalPart : item).ToArray()
         };
         var node = System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(historical,
@@ -377,7 +489,7 @@ public sealed class DatabaseBackupServiceS3Tests
         var historical = manifest with
         {
             FormatVersion = 1,
-            Parts = manifest.Parts!.Where(item => item.Kind != "file-references").ToArray()
+            Parts = manifest.Parts!.Where(item => item.Kind is not ("file-references" or "native-file-bindings")).ToArray()
         };
         var path = backups.ResolveBackupPath(created.Backup.RelativePath)!;
         await File.WriteAllTextAsync(path + ".manifest.json",
@@ -397,7 +509,7 @@ public sealed class DatabaseBackupServiceS3Tests
         var backups = scope.Provider.GetRequiredService<DatabaseBackupService>();
         var created = await backups.CreateManualBackupAsync();
         var manifest = await backups.ReadVerifiedManifestAsync(created.Backup.RelativePath);
-        Assert.Equal(3, manifest.FormatVersion);
+        Assert.Equal(4, manifest.FormatVersion);
         var reference = Assert.Single(manifest.Parts!, item => item.Kind == "file-references");
         var parts = manifest.Parts!.Where(item => item.Kind != "file-references").ToList();
         if (corruption != "absent") parts.Add(corruption switch

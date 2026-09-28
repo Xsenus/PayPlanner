@@ -18,10 +18,13 @@ namespace PayPlanner.Api.Tests;
 public sealed class DatabaseRestoreDrillEndToEndPostgreSqlTests
 {
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task RestoresRealDumpIntoEmptyDatabase_AndIsolatesEmail(bool withInventory)
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    public async Task RestoresRealDumpIntoEmptyDatabase_AndIsolatesEmail(int manifestVersion)
     {
+        var withInventory = manifestVersion >= 2;
         var connectionString = Environment.GetEnvironmentVariable("PAYPLANNER_TEST_POSTGRES");
         if (string.IsNullOrWhiteSpace(connectionString))
         {
@@ -80,7 +83,7 @@ public sealed class DatabaseRestoreDrillEndToEndPostgreSqlTests
                         CREATE TABLE "ElectronicSignatureEnvelopes" ("Id" integer, "SnapshotPath" text, "SizeBytes" bigint, "ChecksumSha256" text, "DocumentVersion" integer);
                         CREATE TABLE "ElectronicSignatureArtifacts" ("Id" integer, "StoragePath" text, "SizeBytes" bigint, "ChecksumSha256" text, "EnvelopeId" integer);
                         CREATE TABLE "Users" ("Id" integer, "PhotoUrl" text);
-                        INSERT INTO "Users" VALUES (1, 'https://external.invalid/photo.png');
+                        INSERT INTO "Users" VALUES (1, '/user-photos/photo.png');
                         CREATE TABLE "StorageObjects" ("Id" uuid, "CurrentGeneration" bigint, "IsDeleted" boolean);
                         CREATE TABLE "StorageObjectGenerations" ("Id" uuid, "StorageObjectId" uuid, "Generation" bigint, "SizeBytes" bigint, "Sha256" text);
                         CREATE TABLE "StorageTombstones" ("StorageObjectId" uuid, "LegalHold" boolean, "RetainUntil" timestamp);
@@ -96,8 +99,13 @@ public sealed class DatabaseRestoreDrillEndToEndPostgreSqlTests
             await RunPgDumpAsync(sourceBuilder, backupPath);
             var filesetPath = backupPath + ".fileset";
             using (var archive = ZipFile.Open(filesetPath, ZipArchiveMode.Create))
-            using (var writer = new StreamWriter(archive.CreateEntry("file-storage/evidence.txt").Open()))
-                await writer.WriteAsync("restored file evidence");
+            {
+                var entry = archive.CreateEntry(withInventory ? "file-storage/user-photos/photo.png" : "file-storage/evidence.txt");
+                using (var writer = new StreamWriter(entry.Open())) await writer.WriteAsync("restored file evidence");
+                if (manifestVersion >= 3)
+                    entry.Comment = DatabaseBackupArchiveHash.ToComment(Convert.ToHexString(SHA256.HashData(
+                        System.Text.Encoding.UTF8.GetBytes("restored file evidence"))));
+            }
             string filesetHash;
             await using (var filesetStream = File.OpenRead(filesetPath))
                 filesetHash = Convert.ToHexString(await SHA256.HashDataAsync(filesetStream)).ToLowerInvariant();
@@ -107,7 +115,8 @@ public sealed class DatabaseRestoreDrillEndToEndPostgreSqlTests
                 var parts = new List<DatabaseBackupPartManifest>
                 {
                     new("database", "test.sql", stream.Length, hash, true),
-                    new("file-storage", "test.sql.fileset", new FileInfo(filesetPath).Length, filesetHash, true),
+                    new("file-storage", "test.sql.fileset", new FileInfo(filesetPath).Length, filesetHash, true,
+                        FileEntryHashFormat: manifestVersion >= 3 ? DatabaseBackupArchiveHash.Format : null),
                 };
                 if (withInventory)
                 {
@@ -116,7 +125,7 @@ public sealed class DatabaseRestoreDrillEndToEndPostgreSqlTests
                     {
                         formatVersion = 1,
                         storedFiles = new[] { new DatabaseBackupStoredFileReference(
-                            "profile-photo", 1, "https://external.invalid/photo.png", null, null, null, null) },
+                            "profile-photo", 1, "/user-photos/photo.png", null, null, null, null) },
                         storageReplicas = Array.Empty<DatabaseBackupStorageReplicaReference>(),
                         storedFileCount = 1,
                         storageReplicaCount = 0,
@@ -124,9 +133,42 @@ public sealed class DatabaseRestoreDrillEndToEndPostgreSqlTests
                     await using var inventory = File.OpenRead(inventoryPath);
                     var inventoryHash = Convert.ToHexString(await SHA256.HashDataAsync(inventory)).ToLowerInvariant();
                     parts.Add(new("file-references", "test.sql.references", inventory.Length, inventoryHash, true));
+                    if (manifestVersion >= 4)
+                    {
+                        var sourcePhotos = Path.Combine(root, "source-photos");
+                        Directory.CreateDirectory(sourcePhotos);
+                        var sourcePhoto = Path.Combine(sourcePhotos, "photo.png");
+                        await File.WriteAllTextAsync(sourcePhoto, "restored file evidence");
+                        var layout = DatabaseBackupFileLayout.Create([new("profile-photos", sourcePhotos)], backupRoot);
+                        // This fixture's archive prefix is profile-photos for the binding;
+                        // rename the manually created entry to use that exact producer layout.
+                        using (var zip = ZipFile.Open(filesetPath, ZipArchiveMode.Update))
+                        {
+                            var originalEntry = zip.GetEntry("file-storage/user-photos/photo.png")!;
+                            var entry = zip.CreateEntry("profile-photos/photo.png");
+                            using (var input = originalEntry.Open()) using (var output = entry.Open()) input.CopyTo(output);
+                            entry.Comment = originalEntry.Comment;
+                            originalEntry.Delete();
+                        }
+                        await using (var zipSource = File.OpenRead(filesetPath))
+                            filesetHash = Convert.ToHexString(await SHA256.HashDataAsync(zipSource)).ToLowerInvariant();
+                        parts[1] = parts[1] with { SizeBytes = new FileInfo(filesetPath).Length, Sha256 = filesetHash, FileRoots = layout.RootMappings };
+                        inventory.Position = 0;
+                        using var plan = new MemoryStream();
+                        await DatabaseBackupNativeBindings.WritePlanAsync(inventory, plan, new(layout), "test.sql.fileset", inventoryHash, CancellationToken.None);
+                        plan.Position = 0;
+                        var bindingPath = backupPath + ".nativefiles";
+                        await using (var output = File.Create(bindingPath))
+                        using (var zip = ZipFile.OpenRead(filesetPath))
+                            await DatabaseBackupNativeBindings.SealAsync(plan, output, zip, inventoryHash, CancellationToken.None);
+                        await using var binding = File.OpenRead(bindingPath);
+                        var bindingHash = Convert.ToHexString(await SHA256.HashDataAsync(binding)).ToLowerInvariant();
+                        parts.Add(new("native-file-bindings", "test.sql.nativefiles", binding.Length, bindingHash, true));
+                        File.Delete(sourcePhoto);
+                    }
                 }
                 var manifest = new DatabaseBackupManifest(
-                    withInventory ? 2 : 1, Guid.NewGuid().ToString("N"), "test.sql", "test.sql", "postgresql", "sql",
+                    manifestVersion, Guid.NewGuid().ToString("N"), "test.sql", "test.sql", "postgresql", "sql",
                     stream.Length, hash, "manual", DateTime.UtcNow, "test", Parts:
                     parts, RecoveryKeyReference: "external-test-key-reference");
                 await File.WriteAllTextAsync(backupPath + ".manifest.json",
@@ -180,7 +222,8 @@ public sealed class DatabaseRestoreDrillEndToEndPostgreSqlTests
             Assert.True(report.TableCount >= 3);
             Assert.True(File.Exists(report.ReportPath));
             Assert.Equal("restored file evidence", await File.ReadAllTextAsync(
-                Path.Combine(Path.GetDirectoryName(report.ReportPath)!, "files", "file-storage", "evidence.txt")));
+                Path.Combine(Path.GetDirectoryName(report.ReportPath)!, "files",
+                    manifestVersion >= 4 ? "profile-photos/photo.png" : withInventory ? "file-storage/user-photos/photo.png" : "file-storage/evidence.txt")));
 
             await using var target = new NpgsqlConnection(targetBuilder.ConnectionString);
             await target.OpenAsync();
@@ -198,7 +241,7 @@ public sealed class DatabaseRestoreDrillEndToEndPostgreSqlTests
             if (withInventory)
             {
                 verify.CommandText = "SELECT \"PhotoUrl\" FROM \"Users\" WHERE \"Id\" = 1";
-                Assert.Equal("https://external.invalid/photo.png", await verify.ExecuteScalarAsync());
+                Assert.Equal("/user-photos/photo.png", await verify.ExecuteScalarAsync());
             }
             Assert.True((await backups.VerifyBackupAsync("test.sql")).Verified);
 
