@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.Options;
 using System.Text.Json;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
@@ -18,6 +19,156 @@ namespace PayPlanner.Api.Tests;
 
 public sealed class DatabaseBackupServiceS3Tests
 {
+    [Theory]
+    [InlineData("sqlite")]
+    [InlineData("zip")]
+    public async Task RestoreDrillIsolatesSqliteEmailWithoutChangingSourceOrBackup(string format)
+    {
+        await using var scope = await CreateScopeAsync();
+        await using (var source = await scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContextAsync())
+        {
+            foreach (var key in new[] { "enabled", "smtpHost", "smtpUsername", "smtpPassword", "fromEmail" })
+                source.SystemSettings.Add(new SystemSetting { Key = $"notifications.email.{key}", Value = key == "enabled" ? "true" : "test-only.invalid" });
+            foreach (var (channel, status) in new[] { ("email", "pending"), ("email", "failed"), ("email", "sent"), ("telegram", "failed") })
+                source.NotificationDeliveries.Add(new NotificationDelivery { EventKey = $"test:{channel}:{status}", Channel = channel, Status = status });
+            source.NotificationSenders.Add(new NotificationSender { Channel = "email", Name = "Test email", ConfigJson = "{\"smtpHost\":\"test-only.invalid\"}" });
+            source.NotificationSenders.Add(new NotificationSender { Channel = "telegram", Name = "Test non-email", ConfigJson = "{\"test\":true}" });
+            await source.SaveChangesAsync();
+        }
+        var backups = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        await backups.UpdateSettingsAsync(false, "03:00", 14, format);
+        var created = await backups.CreateManualBackupAsync();
+        var sourcePath = Path.Combine(scope.Root, "payplanner.db");
+        var backupPath = backups.ResolveBackupPath(created.Backup.RelativePath)!;
+        async Task<byte[]> Hash(string path)
+        {
+            await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 81920, true);
+            return await System.Security.Cryptography.SHA256.HashDataAsync(stream);
+        }
+        var sourceHash = await Hash(sourcePath);
+        var backupHash = await Hash(backupPath);
+        var report = await scope.Provider.GetRequiredService<DatabaseRestoreDrillService>().RunAsync(created.Backup.RelativePath, false, null, CancellationToken.None);
+        Assert.Equal("restored", report.Status);
+        await using (var restored = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = report.Target, Mode = SqliteOpenMode.ReadWrite, Pooling = false }.ConnectionString))
+        {
+            await restored.OpenAsync();
+            await using var command = restored.CreateCommand();
+            command.CommandText = "SELECT Value FROM SystemSettings WHERE Key = 'notifications.email.enabled'";
+            Assert.Equal("false", await command.ExecuteScalarAsync());
+            command.CommandText = "SELECT COUNT(*) FROM SystemSettings WHERE Key LIKE 'notifications.email.smtp%' OR Key = 'notifications.email.fromEmail'";
+            Assert.Equal(4L, await command.ExecuteScalarAsync());
+            command.CommandText = "SELECT COUNT(*) FROM SystemSettings WHERE (Key LIKE 'notifications.email.smtp%' OR Key = 'notifications.email.fromEmail') AND Value <> ''";
+            Assert.Equal(0L, await command.ExecuteScalarAsync());
+            command.CommandText = "SELECT Status FROM NotificationDeliveries ORDER BY Id";
+            await using (var reader = await command.ExecuteReaderAsync())
+            {
+                var statuses = new List<string>();
+                while (await reader.ReadAsync()) statuses.Add(reader.GetString(0));
+                Assert.Equal(["skipped", "skipped", "sent", "failed"], statuses);
+            }
+            command.CommandText = "PRAGMA integrity_check;";
+            Assert.Equal("ok", await command.ExecuteScalarAsync());
+            command.CommandText = "SELECT ConfigJson FROM NotificationSenders WHERE Channel = 'email' AND IsEnabled = 0";
+            Assert.Equal("{}", await command.ExecuteScalarAsync());
+            command.CommandText = "SELECT ConfigJson FROM NotificationSenders WHERE Channel = 'telegram' AND IsEnabled = 1";
+            Assert.Equal("{\"test\":true}", await command.ExecuteScalarAsync());
+            await DatabaseRestoreDrillService.SanitizeRestoredSqliteAsync(restored, CancellationToken.None);
+            command.CommandText = "SELECT Value FROM SystemSettings WHERE Key = 'notifications.email.enabled'";
+            Assert.Equal("false", await command.ExecuteScalarAsync());
+        }
+        Assert.Equal(sourceHash, await Hash(sourcePath));
+        Assert.Equal(backupHash, await Hash(backupPath));
+        await using var original = await scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContextAsync();
+        Assert.Equal("true", (await original.SystemSettings.SingleAsync(item => item.Key == "notifications.email.enabled")).Value);
+        Assert.Equal(2, await original.NotificationDeliveries.CountAsync(item => item.Channel == "email" && (item.Status == "pending" || item.Status == "failed")));
+        Assert.True((await original.NotificationSenders.SingleAsync(item => item.Channel == "email")).IsEnabled);
+        Assert.Contains("test-only.invalid", (await original.NotificationSenders.SingleAsync(item => item.Channel == "email")).ConfigJson);
+        Assert.True((await backups.VerifyBackupAsync(created.Backup.RelativePath)).Verified);
+    }
+
+    [Fact]
+    public async Task RestoreDrillWaitsForDirectoryLeaseAndCancellationCreatesNoReport()
+    {
+        await using var scope = await CreateScopeAsync();
+        var backups = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        var created = await backups.CreateManualBackupAsync();
+        var drill = scope.Provider.GetRequiredService<DatabaseRestoreDrillService>();
+        await using (var lease = await BackupDirectoryLease.AcquireAsync(Path.Combine(scope.Root, "backups"), TimeSpan.FromSeconds(2), CancellationToken.None))
+        {
+            using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => drill.RunAsync(created.Backup.RelativePath, false, null, cancellation.Token));
+            Assert.False(Directory.Exists(Path.Combine(scope.Root, "restore-drills")));
+            Assert.True(File.Exists(backups.ResolveBackupPath(created.Backup.RelativePath)));
+        }
+        var report = await drill.RunAsync(created.Backup.RelativePath, false, null, CancellationToken.None);
+        Assert.Equal("restored", report.Status);
+        Assert.True((await backups.VerifyBackupAsync(created.Backup.RelativePath)).Verified);
+    }
+
+    [Theory]
+    [InlineData(false, "delete")]
+    [InlineData(true, "delete")]
+    [InlineData(false, "cleanup")]
+    [InlineData(true, "cleanup")]
+    [InlineData(false, "create")]
+    [InlineData(true, "create")]
+    [InlineData(false, "retryS3")]
+    [InlineData(true, "retryS3")]
+    [InlineData(false, "retryYandex")]
+    [InlineData(true, "retryYandex")]
+    public async Task RestoreDrillHoldsLeaseAgainstConcurrentOperationsBeforeReadingSource(bool separateInstance, string action)
+    {
+        await using var scope = await CreateScopeAsync();
+        var backups = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        if (action == "retryS3")
+        {
+            scope.S3.ThrowOnUpload = true;
+            await backups.UpdateSettingsAsync(false, "03:00", 14, "sqlite", s3UploadEnabled: true, s3ConnectionIds: ["s3-main"]);
+        }
+        if (action == "retryYandex")
+        {
+            scope.YandexDisk.ThrowOnUpload = true;
+            await backups.UpdateSettingsAsync(false, "03:00", 14, "sqlite", yandexDiskUploadEnabled: true);
+        }
+        var created = await backups.CreateManualBackupAsync();
+        var other = separateInstance ? ActivatorUtilities.CreateInstance<DatabaseBackupService>(scope.Provider) : backups;
+        var monitor = new CallbackDrillOptions(Path.Combine(scope.Root, "restore-drills"), () =>
+        {
+            Assert.Throws<IOException>(() =>
+            {
+                using var lease = new FileStream(Path.Combine(scope.Root, "backups", ".database-backup.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            });
+            using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+            Func<Task> operation = action switch
+            {
+                "delete" => () => other.DeleteBackupAsync(created.Backup.RelativePath, cancellation.Token),
+                "cleanup" => () => other.EnsureScheduledBackupsAsync(cancellation.Token),
+                "create" => () => other.CreateManualBackupAsync(cancellation.Token),
+                "retryS3" => () => other.RetryS3UploadAsync(Assert.Single(created.S3UploadResults).Id, cancellation.Token),
+                "retryYandex" => () => other.RetryYandexDiskUploadAsync(Assert.Single(created.YandexDiskUploadResults).Id, cancellation.Token),
+                _ => throw new ArgumentOutOfRangeException(nameof(action)),
+            };
+            Assert.ThrowsAny<OperationCanceledException>(() => Task.Run(operation).GetAwaiter().GetResult());
+        });
+        var drill = ActivatorUtilities.CreateInstance<DatabaseRestoreDrillService>(scope.Provider, monitor);
+        var report = await drill.RunAsync(created.Backup.RelativePath, false, null, CancellationToken.None);
+        Assert.Equal("restored", report.Status);
+        Assert.True(monitor.ReadCount > 0);
+        Assert.True(File.Exists(backups.ResolveBackupPath(created.Backup.RelativePath)));
+        Assert.Equal(1, (await backups.DeleteBackupAsync(created.Backup.RelativePath)).DeletedCount);
+    }
+
+    private sealed class CallbackDrillOptions(string root, Action onRead) : IOptionsMonitor<DatabaseRestoreDrillOptions>
+    {
+        public int ReadCount { get; private set; }
+        public DatabaseRestoreDrillOptions CurrentValue
+        {
+            get { ReadCount++; onRead(); return new DatabaseRestoreDrillOptions { RootDirectory = root }; }
+        }
+        public DatabaseRestoreDrillOptions Get(string? name) => CurrentValue;
+        public IDisposable? OnChange(Action<DatabaseRestoreDrillOptions, string?> listener) => null;
+    }
+
     [Theory]
     [InlineData(false, false)]
     [InlineData(true, false)]

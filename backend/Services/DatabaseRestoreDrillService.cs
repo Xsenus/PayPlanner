@@ -52,6 +52,14 @@ public sealed class DatabaseRestoreDrillService(
         bool executePostgreSql,
         string? confirmationToken,
         CancellationToken cancellationToken)
+        => await backups.WithBackupDirectoryLeaseAsync(
+            () => RunCoreAsync(relativePath, executePostgreSql, confirmationToken, cancellationToken), cancellationToken);
+
+    private async Task<DatabaseRestoreDrillReport> RunCoreAsync(
+        string relativePath,
+        bool executePostgreSql,
+        string? confirmationToken,
+        CancellationToken cancellationToken)
     {
         var started = DateTime.UtcNow;
         var stopwatch = Stopwatch.StartNew();
@@ -128,7 +136,7 @@ public sealed class DatabaseRestoreDrillService(
         }
 
         EnsureNotActiveSqliteDatabase(targetPath);
-        var builder = new SqliteConnectionStringBuilder { DataSource = targetPath, Mode = SqliteOpenMode.ReadOnly, Pooling = false };
+        var builder = new SqliteConnectionStringBuilder { DataSource = targetPath, Mode = SqliteOpenMode.ReadWrite, Pooling = false };
         await using var connection = new SqliteConnection(builder.ConnectionString);
         await connection.OpenAsync(cancellationToken);
         var integrity = await ExecuteScalarStringAsync(connection, "PRAGMA integrity_check;", cancellationToken);
@@ -139,6 +147,7 @@ public sealed class DatabaseRestoreDrillService(
         var foreignKeyViolations = await CountRowsAsync(connection, "PRAGMA foreign_key_check;", cancellationToken);
         if (foreignKeyViolations > 0)
             throw new InvalidDataException($"В восстановленной SQLite обнаружено нарушений внешних ключей: {foreignKeyViolations}.");
+        await SanitizeRestoredSqliteAsync(connection, cancellationToken);
         await RestoreFilePartsAsync(manifest, targetDirectory, cancellationToken);
 
         return new DatabaseRestoreDrillReport(
@@ -268,8 +277,57 @@ public sealed class DatabaseRestoreDrillService(
             UPDATE "NotificationDeliveries"
             SET "Status" = 'skipped', "Error" = 'Email delivery disabled for restore drill'
             WHERE "Channel" = 'email' AND "Status" IN ('pending', 'failed');
+
+            DO $$ BEGIN
+                IF to_regclass('public."NotificationSenders"') IS NOT NULL THEN
+                    UPDATE "NotificationSenders"
+                    SET "IsEnabled" = false, "ConfigJson" = '{}', "UpdatedAt" = CURRENT_TIMESTAMP
+                    WHERE "Channel" = 'email';
+                END IF;
+            END $$;
             """, connection, transaction);
         await command.ExecuteNonQueryAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    public static async Task SanitizeRestoredSqliteAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT INTO "SystemSettings" ("Key", "Value", "CreatedAt", "UpdatedAt")
+            VALUES ('notifications.email.enabled', 'false', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ON CONFLICT ("Key") DO UPDATE
+            SET "Value" = 'false', "UpdatedAt" = CURRENT_TIMESTAMP;
+
+            UPDATE "SystemSettings"
+            SET "Value" = '', "UpdatedAt" = CURRENT_TIMESTAMP
+            WHERE "Key" IN (
+                'notifications.email.smtpHost', 'notifications.email.smtpUsername',
+                'notifications.email.smtpPassword', 'notifications.email.fromEmail');
+            """;
+        await command.ExecuteNonQueryAsync(cancellationToken);
+        command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'NotificationDeliveries';";
+        if (Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken)) > 0)
+        {
+            command.CommandText = """
+                UPDATE "NotificationDeliveries"
+                SET "Status" = 'skipped', "Error" = 'Email delivery disabled for restore drill'
+                WHERE "Channel" = 'email' AND "Status" IN ('pending', 'failed');
+                """;
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+        command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'NotificationSenders';";
+        if (Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken)) > 0)
+        {
+            command.CommandText = """
+                UPDATE "NotificationSenders"
+                SET "IsEnabled" = 0, "ConfigJson" = '{}', "UpdatedAt" = CURRENT_TIMESTAMP
+                WHERE "Channel" = 'email';
+                """;
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
         await transaction.CommitAsync(cancellationToken);
     }
 

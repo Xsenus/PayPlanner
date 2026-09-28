@@ -456,7 +456,7 @@ public sealed class DatabaseBackupService
         return await UploadAndRecordYandexAsync(pendingResult, resolvedPath, cancellationToken);
     }
 
-    private async Task<T> WithBackupDirectoryLeaseAsync<T>(Func<Task<T>> operation, CancellationToken token)
+    internal async Task<T> WithBackupDirectoryLeaseAsync<T>(Func<Task<T>> operation, CancellationToken token)
     {
         await _backupSemaphore.WaitAsync(token);
         try

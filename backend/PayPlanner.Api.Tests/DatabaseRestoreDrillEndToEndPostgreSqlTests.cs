@@ -53,6 +53,11 @@ public sealed class DatabaseRestoreDrillEndToEndPostgreSqlTests
                     CREATE TABLE "NotificationDeliveries" (
                         "Id" integer PRIMARY KEY, "Channel" text NOT NULL,
                         "Status" text NOT NULL, "Error" text NULL);
+                    CREATE TABLE "NotificationSenders" (
+                        "Id" integer PRIMARY KEY, "Channel" text NOT NULL,
+                        "IsEnabled" boolean NOT NULL, "ConfigJson" text NOT NULL, "UpdatedAt" timestamp NULL);
+                    INSERT INTO "NotificationSenders" ("Id", "Channel", "IsEnabled", "ConfigJson")
+                    VALUES (1, 'email', true, '{"smtpHost":"test-only.invalid"}');
                     CREATE TABLE public.restore_evidence (id integer PRIMARY KEY, label text NOT NULL);
                     INSERT INTO "SystemSettings" ("Key", "Value", "CreatedAt", "UpdatedAt")
                     VALUES ('notifications.email.smtpPassword', 'copied-secret', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
@@ -147,12 +152,17 @@ public sealed class DatabaseRestoreDrillEndToEndPostgreSqlTests
             Assert.Equal(string.Empty, await verify.ExecuteScalarAsync());
             verify.CommandText = "SELECT \"Status\" FROM \"NotificationDeliveries\" WHERE \"Id\" = 1";
             Assert.Equal("skipped", await verify.ExecuteScalarAsync());
+            verify.CommandText = "SELECT \"ConfigJson\" FROM \"NotificationSenders\" WHERE \"Id\" = 1 AND NOT \"IsEnabled\"";
+            Assert.Equal("{}", await verify.ExecuteScalarAsync());
+            Assert.True((await backups.VerifyBackupAsync("test.sql")).Verified);
 
             await using var sourceCheck = new NpgsqlConnection(sourceBuilder.ConnectionString);
             await sourceCheck.OpenAsync();
             await using var original = sourceCheck.CreateCommand();
             original.CommandText = "SELECT \"Value\" FROM \"SystemSettings\" WHERE \"Key\" = 'notifications.email.smtpPassword'";
             Assert.Equal("copied-secret", await original.ExecuteScalarAsync());
+            original.CommandText = "SELECT \"ConfigJson\" FROM \"NotificationSenders\" WHERE \"Id\" = 1 AND \"IsEnabled\"";
+            Assert.Equal("{\"smtpHost\":\"test-only.invalid\"}", await original.ExecuteScalarAsync());
         }
         finally
         {

@@ -56,6 +56,11 @@ public sealed class DatabaseRestoreDrillPostgreSqlTests
                     CREATE TABLE "NotificationDeliveries" (
                         "Id" integer PRIMARY KEY, "Channel" text NOT NULL,
                         "Status" text NOT NULL, "Error" text NULL);
+                    CREATE TABLE "NotificationSenders" (
+                        "Id" integer PRIMARY KEY, "Channel" text NOT NULL, "IsEnabled" boolean NOT NULL,
+                        "ConfigJson" text NOT NULL, "UpdatedAt" timestamp NULL);
+                    INSERT INTO "NotificationSenders" ("Id", "Channel", "IsEnabled", "ConfigJson")
+                    VALUES (1, 'email', true, '{"smtpHost":"test-only.invalid"}'), (2, 'telegram', true, '{"test":true}');
                     INSERT INTO "SystemSettings" ("Key", "Value", "CreatedAt", "UpdatedAt")
                     VALUES ('notifications.email.smtpPassword', 'secret', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
                     INSERT INTO "NotificationDeliveries" ("Id", "Channel", "Status")
@@ -72,6 +77,10 @@ public sealed class DatabaseRestoreDrillPostgreSqlTests
                 Assert.Equal("false", await readSettings.ExecuteScalarAsync());
                 readSettings.CommandText = "SELECT \"Value\" FROM \"SystemSettings\" WHERE \"Key\" = 'notifications.email.smtpPassword'";
                 Assert.Equal(string.Empty, await readSettings.ExecuteScalarAsync());
+                readSettings.CommandText = "SELECT \"ConfigJson\" FROM \"NotificationSenders\" WHERE \"Channel\" = 'email' AND NOT \"IsEnabled\"";
+                Assert.Equal("{}", await readSettings.ExecuteScalarAsync());
+                readSettings.CommandText = "SELECT \"ConfigJson\" FROM \"NotificationSenders\" WHERE \"Channel\" = 'telegram' AND \"IsEnabled\"";
+                Assert.Equal("{\"test\":true}", await readSettings.ExecuteScalarAsync());
             }
             await using (var readDeliveries = target.CreateCommand())
             {
