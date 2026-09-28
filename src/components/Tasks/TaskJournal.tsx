@@ -10112,7 +10112,8 @@ function TaskWeekScheduleDialog({
   const hasAssignees = assigneeConflictKeys.length > 0;
 
   useEffect(() => {
-    if (!open) return;
+    // Prepare the selected week while closed too, so opening does not first
+    // request a stale week left over from the initial mount or previous visit.
     const nextDate = parseLocalInputDate(selectedDueAt) ?? new Date();
     setDraftDate(nextDate);
     setDraftDuration(normalizeTaskDuration(plannedDurationMinutes));

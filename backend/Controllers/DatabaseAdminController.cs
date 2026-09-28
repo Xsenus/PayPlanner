@@ -101,6 +101,46 @@ public class DatabaseAdminController : ControllerBase, IAsyncActionFilter
         }
     }
 
+    [HttpGet("backups/catalog")]
+    public async Task<ActionResult<DatabaseBackupCatalogPageDto>> GetBackupCatalogAsync(
+        CancellationToken cancellationToken, [FromQuery] string? after = null, [FromQuery] int pageSize = 20)
+    {
+        try
+        {
+            var page = await _databaseBackupService.GetCatalogAsync(after, pageSize, cancellationToken);
+            return Ok(new DatabaseBackupCatalogPageDto
+            {
+                NextCursor = page.NextCursor,
+                Items = page.Items.Select(item => new DatabaseBackupCatalogItemDto
+                {
+                    Id = item.Id,
+                    BackupRelativePath = item.BackupRelativePath,
+                    DatabaseProvider = item.DatabaseProvider,
+                    BackupFormat = item.BackupFormat,
+                    Status = item.Status,
+                    CreatedAt = DateTime.SpecifyKind(item.CreatedAt, DateTimeKind.Utc),
+                    Copies = item.Copies.OrderBy(copy => copy.ProviderKey).ThenBy(copy => copy.ConnectionId)
+                        .Select(copy => new DatabaseBackupCatalogCopyDto
+                        {
+                            ProviderKey = copy.ProviderKey,
+                            ConnectionId = copy.ConnectionId,
+                            Locator = copy.Locator,
+                            Status = copy.Status,
+                            AttemptCount = copy.AttemptCount,
+                            LastError = copy.LastError,
+                            LastVerifiedAt = copy.LastVerifiedAt.HasValue
+                                ? DateTime.SpecifyKind(copy.LastVerifiedAt.Value, DateTimeKind.Utc) : null,
+                            UpdatedAt = DateTime.SpecifyKind(copy.UpdatedAt, DateTimeKind.Utc),
+                        }).ToList(),
+                }).ToList(),
+            });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
     [HttpPost("backups")]
     public async Task<ActionResult<DatabaseBackupCreateResultDto>> CreateBackupAsync(CancellationToken cancellationToken)
     {

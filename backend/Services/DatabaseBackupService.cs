@@ -207,6 +207,13 @@ public sealed class DatabaseBackupService
             items);
     }
 
+    public async Task<DatabaseBackupCatalogPage> GetCatalogAsync(
+        string? after = null, int pageSize = 20, CancellationToken cancellationToken = default)
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        return await new DatabaseBackupCatalogReader(context).ReadAsync(after, pageSize, cancellationToken);
+    }
+
     public Task<IReadOnlyList<DatabaseBackupFileInfo>> ListBackupsAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();

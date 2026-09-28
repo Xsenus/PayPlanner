@@ -28,8 +28,10 @@ namespace PayPlanner.Api.Tests;
 
 public class DatabaseAdminControllerSpreadsheetImportTests
 {
-    [Fact]
-    public async Task DatabaseAdminEndpoints_ForbidUserWithoutAdminRoleInDatabase()
+    [Theory]
+    [InlineData("/api/database/status")]
+    [InlineData("/api/database/backups/catalog")]
+    public async Task DatabaseAdminEndpoints_ForbidUserWithoutAdminRoleInDatabase(string endpoint)
     {
         await using var connection = await CreateOpenConnectionAsync();
         var backupDirectory = CreateTempDirectory();
@@ -39,7 +41,7 @@ public class DatabaseAdminControllerSpreadsheetImportTests
             using var server = await CreateServerAsync(connection, backupDirectory, userRoleName: "user");
             using var client = server.CreateClient();
 
-            using var response = await client.GetAsync("/api/database/status");
+            using var response = await client.GetAsync(endpoint);
 
             Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
         }
@@ -47,6 +49,79 @@ public class DatabaseAdminControllerSpreadsheetImportTests
         {
             TryDeleteDirectory(backupDirectory);
         }
+    }
+
+    [Fact]
+    public async Task BackupCatalog_PagesEqualTimestampsAndPreservesCopyStatesAsUtc()
+    {
+        await using var connection = await CreateOpenConnectionAsync();
+        var backupDirectory = CreateTempDirectory();
+        try
+        {
+            using var server = await CreateServerAsync(connection, backupDirectory);
+            await using (var scope = server.Services.CreateAsyncScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<PaymentContext>();
+                var createdAt = new DateTime(2026, 9, 28, 0, 0, 0, DateTimeKind.Utc);
+                foreach (var id in new[] { "001", "002", "003" })
+                {
+                    var set = new DatabaseBackupSet
+                    {
+                        Id = id,
+                        BackupRelativePath = $"catalog/{id}.zip",
+                        CreatedAt = createdAt,
+                        Status = DatabaseBackupSetStatuses.NoLocalCopy,
+                    };
+                    set.Copies.Add(new DatabaseBackupCopy
+                    {
+                        ProviderKey = "local",
+                        Status = DatabaseBackupCopyStatuses.Deleted,
+                    });
+                    set.Copies.Add(new DatabaseBackupCopy
+                    {
+                        ProviderKey = "s3",
+                        ConnectionId = "main",
+                        Status = DatabaseBackupCopyStatuses.Verified,
+                        LastVerifiedAt = createdAt,
+                        AttemptCount = 2,
+                    });
+                    db.DatabaseBackupSets.Add(set);
+                }
+                await db.SaveChangesAsync();
+            }
+            using var client = server.CreateClient();
+            var first = await client.GetFromJsonAsync<DatabaseBackupCatalogPageDto>("/api/database/backups/catalog?pageSize=1");
+            Assert.Equal("003", Assert.Single(first!.Items).Id);
+            Assert.Equal(DateTimeKind.Utc, first.Items[0].CreatedAt.Kind);
+            Assert.Equal("003", first.NextCursor);
+            Assert.Contains(first.Items[0].Copies, copy => copy.ProviderKey == "local" && copy.Status == "deleted");
+            Assert.Contains(first.Items[0].Copies, copy => copy.ProviderKey == "s3" && copy.AttemptCount == 2
+                && copy.LastVerifiedAt!.Value.Kind == DateTimeKind.Utc);
+            var second = await client.GetFromJsonAsync<DatabaseBackupCatalogPageDto>("/api/database/backups/catalog?pageSize=1&after=003");
+            Assert.Equal("002", Assert.Single(second!.Items).Id);
+            var last = await client.GetFromJsonAsync<DatabaseBackupCatalogPageDto>("/api/database/backups/catalog?pageSize=1&after=002");
+            Assert.Equal("001", Assert.Single(last!.Items).Id);
+            Assert.Null(last.NextCursor);
+        }
+        finally { TryDeleteDirectory(backupDirectory); }
+    }
+
+    [Theory]
+    [InlineData("pageSize=0")]
+    [InlineData("pageSize=101")]
+    [InlineData("after=missing")]
+    public async Task BackupCatalog_RejectsInvalidPaging(string query)
+    {
+        await using var connection = await CreateOpenConnectionAsync();
+        var backupDirectory = CreateTempDirectory();
+        try
+        {
+            using var server = await CreateServerAsync(connection, backupDirectory);
+            using var client = server.CreateClient();
+            using var response = await client.GetAsync($"/api/database/backups/catalog?{query}");
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        }
+        finally { TryDeleteDirectory(backupDirectory); }
     }
 
     [Fact]

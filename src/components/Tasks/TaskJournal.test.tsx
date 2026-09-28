@@ -4081,6 +4081,8 @@ describe('TaskJournal', () => {
   });
 
   it.each(['legacy', 'modern'] as const)('detects a week-boundary overlap in the profile time zone in the %s card', async (taskCardWindowMode) => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date('2026-09-28T08:00:00.000Z'));
     apiMock.getUserSetting.mockImplementation(async (key: string) => (
       key === 'profile.timeZoneId' ? { key, value: 'Europe/Samara' } : null
     ));
@@ -4097,8 +4099,9 @@ describe('TaskJournal', () => {
     expect(await within(dialog).findByText('Найдено пересечений: 1')).toBeTruthy();
     expect(within(dialog).getByRole('alert').textContent).toContain('Занято в понедельник');
     expect((within(dialog).getByRole('button', { name: 'Применить расписание' }) as HTMLButtonElement).disabled).toBe(true);
-    const scheduleRequest = apiMock.getTaskJournalItems.mock.calls.find(([params]) => params.assigneeUserId === 7 && params.from && params.to);
-    expect(scheduleRequest?.[0]).toMatchObject({
+    const scheduleRequests = apiMock.getTaskJournalItems.mock.calls.filter(([params]) => params.assigneeUserId === 7 && params.from && params.to);
+    expect(scheduleRequests).toHaveLength(1);
+    expect(scheduleRequests[0][0]).toMatchObject({
       from: '2026-09-20T12:00:00.000Z',
       to: '2026-09-28T03:59:59.999Z',
     });

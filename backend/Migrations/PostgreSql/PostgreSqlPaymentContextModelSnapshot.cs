@@ -4040,6 +4040,8 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.HasIndex("BackupRelativePath")
                         .IsUnique();
 
+                    b.HasIndex("CreatedAt", "Id");
+
                     b.HasIndex("Status", "CreatedAt");
 
                     b.ToTable("DatabaseBackupSets");

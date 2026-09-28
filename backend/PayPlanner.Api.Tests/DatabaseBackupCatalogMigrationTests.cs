@@ -7,6 +7,7 @@ using PayPlanner.Api.Data;
 using PayPlanner.Api.Migrations;
 using PayPlanner.Api.Migrations.PostgreSql;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Services;
 using Xunit;
 
 namespace PayPlanner.Api.Tests;
@@ -97,7 +98,7 @@ public sealed class DatabaseBackupCatalogMigrationTests
     {
         var set = new DatabaseBackupSet
         {
-            Id = Guid.NewGuid().ToString("N"),
+            Id = "catalog-003",
             BackupRelativePath = "2026/09/catalog-test.zip",
             DatabaseProvider = context.Database.IsNpgsql() ? "postgresql" : "sqlite",
             BackupFormat = "zip",
@@ -111,9 +112,25 @@ public sealed class DatabaseBackupCatalogMigrationTests
             Status = DatabaseBackupCopyStatuses.Verified,
         });
         context.DatabaseBackupSets.Add(set);
+        foreach (var id in new[] { "catalog-001", "catalog-002" })
+            context.DatabaseBackupSets.Add(new DatabaseBackupSet
+            {
+                Id = id,
+                BackupRelativePath = $"2026/09/{id}.zip",
+                CreatedAt = set.CreatedAt,
+            });
         await context.SaveChangesAsync();
 
         Assert.Equal(1, await context.DatabaseBackupCopies.CountAsync(item => item.BackupSetId == set.Id));
+        var reader = new DatabaseBackupCatalogReader(context);
+        var first = await reader.ReadAsync(pageSize: 1);
+        Assert.Equal(set.Id, Assert.Single(first.Items).Id);
+        Assert.Single(first.Items[0].Copies);
+        var second = await reader.ReadAsync(first.NextCursor, pageSize: 1);
+        Assert.Equal("catalog-002", Assert.Single(second.Items).Id);
+        var last = await reader.ReadAsync(second.NextCursor, pageSize: 1);
+        Assert.Equal("catalog-001", Assert.Single(last.Items).Id);
+        Assert.Null(last.NextCursor);
         context.DatabaseBackupCopies.Add(new DatabaseBackupCopy
         {
             BackupSetId = set.Id,

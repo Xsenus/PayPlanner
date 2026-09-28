@@ -3827,6 +3827,7 @@ public class PaymentContext : DbContext
             entity.HasKey(item => item.Id);
             entity.HasIndex(item => item.BackupRelativePath).IsUnique();
             entity.HasIndex(item => new { item.Status, item.CreatedAt });
+            entity.HasIndex(item => new { item.CreatedAt, item.Id });
         });
         modelBuilder.Entity<DatabaseBackupCopy>(entity =>
         {

@@ -1587,6 +1587,32 @@ export interface DatabaseBackupYandexDiskUploadResultDto {
   updatedAt: string;
 }
 
+export interface DatabaseBackupCatalogCopyDto {
+  providerKey: string;
+  connectionId: string;
+  locator: string;
+  status: string;
+  attemptCount: number;
+  lastError?: string | null;
+  lastVerifiedAt?: string | null;
+  updatedAt: string;
+}
+
+export interface DatabaseBackupCatalogItemDto {
+  id: string;
+  backupRelativePath: string;
+  databaseProvider: string;
+  backupFormat: string;
+  status: string;
+  createdAt: string;
+  copies: DatabaseBackupCatalogCopyDto[];
+}
+
+export interface DatabaseBackupCatalogPageDto {
+  items: DatabaseBackupCatalogItemDto[];
+  nextCursor?: string | null;
+}
+
 export interface DatabaseBackupOverviewDto {
   provider: string;
   providerDisplayName: string;
@@ -3825,6 +3851,12 @@ export class ApiService {
 
   async getDatabaseBackupOverview() {
     return this.request<DatabaseBackupOverviewDto>('/database/backups');
+  }
+
+  async getDatabaseBackupCatalog(after?: string, pageSize = 20) {
+    const query = new URLSearchParams({ pageSize: String(pageSize) });
+    if (after) query.set('after', after);
+    return this.request<DatabaseBackupCatalogPageDto>(`/database/backups/catalog?${query.toString()}`);
   }
 
   async getSystemJobDiagnostics() {

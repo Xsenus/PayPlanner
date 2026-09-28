@@ -3955,6 +3955,8 @@ namespace PayPlanner.Api.Migrations
                     b.HasIndex("BackupRelativePath")
                         .IsUnique();
 
+                    b.HasIndex("CreatedAt", "Id");
+
                     b.HasIndex("Status", "CreatedAt");
 
                     b.ToTable("DatabaseBackupSets");

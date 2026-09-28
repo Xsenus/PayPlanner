@@ -23,6 +23,7 @@ import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { formatDateTimeInTimeZone } from '../../utils/timeZoneDate';
 import { ObjectAuditDeletedObjectsSettings } from './ObjectAuditDeletedObjectsSettings';
 import { SystemJobDiagnosticsSettings } from './SystemJobDiagnosticsSettings';
+import { DatabaseBackupCatalog } from './DatabaseBackupCatalog';
 
 type MaintenanceTab = 'overview' | 'activity' | 'operations' | 'backups' | 'jobs' | 'deleted';
 
@@ -147,6 +148,7 @@ export function DatabaseMaintenanceSettings() {
     useState<InvoiceOrphanCleanupResultDto | null>(null);
 
   const [databaseBackupOverview, setDatabaseBackupOverview] = useState<DatabaseBackupOverviewDto | null>(null);
+  const [databaseBackupCatalogRevision, setDatabaseBackupCatalogRevision] = useState(0);
   const [databaseBackupAutomaticEnabled, setDatabaseBackupAutomaticEnabled] = useState(true);
   const [databaseBackupScheduleLocal, setDatabaseBackupScheduleLocal] = useState('00:00,06:00,12:00,18:00');
   const [databaseBackupRetentionDays, setDatabaseBackupRetentionDays] = useState(8);
@@ -177,6 +179,7 @@ export function DatabaseMaintenanceSettings() {
 
   const applyDatabaseBackupOverview = (overview: DatabaseBackupOverviewDto | null) => {
     setDatabaseBackupOverview(overview);
+    setDatabaseBackupCatalogRevision(value => value + 1);
     setDatabaseBackupAutomaticEnabled(overview?.automaticEnabled ?? true);
     setDatabaseBackupScheduleLocal(overview?.scheduleLocal ?? '00:00,06:00,12:00,18:00');
     setDatabaseBackupRetentionDays(Math.max(1, Number(overview?.retentionDays ?? 8) || 8));
@@ -1355,6 +1358,9 @@ export function DatabaseMaintenanceSettings() {
                 </div>
               </div>
             </div>
+
+            <DatabaseBackupCatalog key={databaseBackupCatalogRevision} timeZoneId={timeZoneId}
+              connectionNames={Object.fromEntries(s3StorageConnections.map(connection => [connection.id, connection.name]))} />
 
             <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
               <div className="flex flex-wrap items-start justify-between gap-3">
