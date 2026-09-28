@@ -1048,6 +1048,7 @@ public sealed class DatabaseBackupService
         var fileName = BuildBackupFileName(databaseName, nowLocal, trigger, scheduleSlot, format.FileExtension);
         var outputPath = Path.Combine(targetDirectory, fileName);
         var pgDumpExecutable = ResolvePgDumpExecutable(toolCommand);
+        var applicationName = $"payplanner-backup-{Guid.NewGuid():N}";
 
         _logger.LogInformation("Creating PostgreSQL backup at {OutputPath} using {Command}", outputPath, pgDumpExecutable);
 
@@ -1060,6 +1061,7 @@ public sealed class DatabaseBackupService
             RedirectStandardOutput = true,
             CreateNoWindow = true,
         };
+        startInfo.Environment["PGAPPNAME"] = applicationName;
 
         startInfo.ArgumentList.Add("--host");
         startInfo.ArgumentList.Add(string.IsNullOrWhiteSpace(connectionBuilder.Host) ? "127.0.0.1" : connectionBuilder.Host);
@@ -1105,25 +1107,99 @@ public sealed class DatabaseBackupService
 
         using (process)
         {
-            var stdErrTask = process.StandardError.ReadToEndAsync(cancellationToken);
-            var stdOutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
-            await process.WaitForExitAsync(cancellationToken);
-
-            var stdErr = (await stdErrTask).Trim();
-            _ = await stdOutTask;
-
-            if (process.ExitCode != 0)
+            _logger.LogInformation("Started PostgreSQL backup process {ProcessId} ({ApplicationName}).", process.Id, applicationName);
+            // Drain both pipes until the child exits, including cancellation cleanup.
+            var stdErrTask = process.StandardError.ReadToEndAsync();
+            var stdOutTask = process.StandardOutput.ReadToEndAsync();
+            try
             {
-                TryDeleteFile(outputPath);
-                var detail = string.IsNullOrWhiteSpace(stdErr)
-                    ? $"pg_dump exited with code {process.ExitCode}."
-                    : stdErr;
-                throw new InvalidOperationException(detail);
+                await process.WaitForExitAsync(cancellationToken);
+                var stdErr = (await stdErrTask).Trim();
+                _ = await stdOutTask;
+                if (process.ExitCode != 0)
+                {
+                    var detail = string.IsNullOrWhiteSpace(stdErr)
+                        ? $"pg_dump exited with code {process.ExitCode}."
+                        : stdErr;
+                    throw new InvalidOperationException(detail);
+                }
+            }
+            catch
+            {
+                // Disposing Process alone does not stop pg_dump. Keep the root lease
+                // until this owned child and its redirected streams have finished.
+                try
+                {
+                    Exception? serverCancellationError = null;
+                    var producerWasRunning = !process.HasExited;
+                    if (producerWasRunning)
+                    {
+                        try
+                        {
+                            using var queryTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                            await CancelOwnedPostgreSqlDumpAsync(applicationName, queryTimeout.Token);
+                        }
+                        catch (Exception serverError)
+                        {
+                            serverCancellationError = serverError;
+                        }
+                        try { process.Kill(entireProcessTree: true); }
+                        catch (InvalidOperationException) when (process.HasExited) { }
+                    }
+                    using var stopTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                    await process.WaitForExitAsync(stopTimeout.Token);
+                    await Task.WhenAll(stdErrTask, stdOutTask).WaitAsync(stopTimeout.Token);
+                    if (serverCancellationError is not null)
+                        throw new InvalidOperationException("Не удалось отменить серверный запрос своего дампа PostgreSQL.", serverCancellationError);
+                    if (producerWasRunning)
+                    {
+                        using var confirmationTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                        await ConfirmOwnedPostgreSqlDumpStoppedAsync(applicationName, confirmationTimeout.Token);
+                    }
+                }
+                catch (Exception stopError)
+                {
+                    _logger.LogError(stopError, "Could not confirm PostgreSQL backup process {ProcessId} stopped.", process.Id);
+                    throw new InvalidOperationException("Не удалось подтвердить остановку процесса резервирования PostgreSQL. Подробности доступны в серверном журнале.", stopError);
+                }
+                finally
+                {
+                    if (process.HasExited) TryDeleteFile(outputPath);
+                }
+                throw;
             }
         }
 
         return BuildFileInfo(outputPath, _backupRootDirectory)
             ?? throw new InvalidOperationException("PostgreSQL backup was created but could not be indexed.");
+    }
+
+    private async Task CancelOwnedPostgreSqlDumpAsync(string applicationName, CancellationToken cancellationToken)
+    {
+        await using var connection = new NpgsqlConnection(_databaseProvider.ConnectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var command = new NpgsqlCommand("""
+            SELECT pg_cancel_backend(pid) FROM pg_stat_activity
+            WHERE datname = current_database() AND usename = session_user
+              AND application_name = @applicationName AND pid <> pg_backend_pid()
+            """, connection);
+        command.Parameters.AddWithValue("applicationName", applicationName);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken)) { }
+    }
+
+    private async Task ConfirmOwnedPostgreSqlDumpStoppedAsync(string applicationName, CancellationToken cancellationToken)
+    {
+        await using var connection = new NpgsqlConnection(_databaseProvider.ConnectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var command = new NpgsqlCommand("""
+            SELECT COUNT(*) FROM pg_stat_activity
+            WHERE datname = current_database() AND usename = session_user
+              AND application_name = @applicationName
+            """, connection);
+        command.Parameters.AddWithValue("applicationName", applicationName);
+        while (Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken)) > 0)
+            await Task.Delay(100, cancellationToken);
     }
 
     private async Task<bool> HasVerifiedBackupForSlotAsync(
