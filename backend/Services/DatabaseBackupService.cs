@@ -113,7 +113,8 @@ public sealed record DatabaseBackupPartManifest(
     string RelativePath,
     long SizeBytes,
     string Sha256,
-    bool Required);
+    bool Required,
+    IReadOnlyList<DatabaseBackupFileRootMapping>? FileRoots = null);
 
 public sealed record DatabaseBackupVerificationResult(
     string Status,
@@ -645,6 +646,24 @@ public sealed class DatabaseBackupService
                 null,
                 manifest.Sha256,
                 "Резервная копия не помечена как завершённая.");
+        }
+
+        try
+        {
+            foreach (var part in manifest.Parts ?? [])
+            {
+                if (part is null) throw new InvalidDataException("Manifest содержит пустую часть комплекта.");
+                if (part.FileRoots is null) continue; // Historical manifests did not declare this layout.
+                if (part.Kind != "file-storage" || part.FileRoots.Count == 0)
+                    throw new InvalidDataException("Сопоставления файловых корней указаны для неподходящей части комплекта.");
+                DatabaseBackupFileLayout.ValidateRootMappings(part.FileRoots);
+            }
+        }
+        catch (InvalidDataException ex)
+        {
+            return new DatabaseBackupVerificationResult("invalidManifest", false,
+                Path.GetRelativePath(_backupRootDirectory, resolvedPath).Replace('\\', '/'), manifest.BackupId,
+                actualSize, manifest.SizeBytes, null, manifest.Sha256, ex.Message);
         }
 
         var actualSha256 = await ComputeSha256Async(resolvedPath, cancellationToken);
@@ -2248,51 +2267,23 @@ public sealed class DatabaseBackupService
 
         using var scope = _scopeFactory.CreateScope();
         var environment = scope.ServiceProvider.GetRequiredService<IWebHostEnvironment>();
-        var candidates = new[]
+        var candidates = new DatabaseBackupFileRoot[]
         {
-            (Name: "file-storage", Path: ApplicationFileStoragePaths.ResolveRoot(environment, _configuration),
-                Required: !string.IsNullOrWhiteSpace(_configuration[ApplicationFileStoragePaths.RootPathConfigurationKey])),
-            (Name: "profile-photos", Path: UserPhotoStoragePaths.ResolveRoot(environment, _configuration),
-                Required: !string.IsNullOrWhiteSpace(_configuration[UserPhotoStoragePaths.StorageRootConfigurationKey])),
-            (Name: "electronic-signatures", Path: ElectronicSignatureStoragePaths.ResolveRoot(environment, _configuration),
-                Required: !string.IsNullOrWhiteSpace(_configuration[ElectronicSignatureStoragePaths.StorageRootConfigurationKey])),
-            (Name: "local-objects", Path: PayPlanner.Api.Services.Storage.LocalStoragePaths.ResolveRoot(environment, _configuration),
-                Required: !string.IsNullOrWhiteSpace(_configuration[PayPlanner.Api.Services.Storage.LocalStoragePaths.RootConfigurationKey])),
-            (Name: "profile-photos-legacy", Path: UserPhotoStoragePaths.ResolveLegacyRoot(environment), Required: false),
-            (Name: "electronic-signatures-legacy", Path: ElectronicSignatureStoragePaths.ResolveLegacyRoot(environment), Required: false),
-        }
-        .OrderBy(item => item.Path.Length)
-        .ToList();
-        var configuredRoots = new List<(string Name, string Path)>();
-        foreach (var root in candidates)
-        {
-            try
-            {
-                // Unlike Directory.Exists, attribute access does not conceal access failures.
-                if ((File.GetAttributes(root.Path) & FileAttributes.Directory) == 0)
-                    throw new IOException($"Путь файлов для резервного копирования не является каталогом: {root.Name}.");
-                configuredRoots.Add((root.Name, root.Path));
-            }
-            catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
-            {
-                if (root.Required)
-                    throw new DirectoryNotFoundException($"Каталог файлов для резервного копирования недоступен: {root.Name}.", ex);
-                // An unused default/legacy location is allowed to be absent; an unreadable one is not.
-            }
-        }
-        if (configuredRoots.Count == 0)
+            new("file-storage", ApplicationFileStoragePaths.ResolveRoot(environment, _configuration),
+                !string.IsNullOrWhiteSpace(_configuration[ApplicationFileStoragePaths.RootPathConfigurationKey])),
+            new("profile-photos", UserPhotoStoragePaths.ResolveRoot(environment, _configuration),
+                !string.IsNullOrWhiteSpace(_configuration[UserPhotoStoragePaths.StorageRootConfigurationKey])),
+            new("electronic-signatures", ElectronicSignatureStoragePaths.ResolveRoot(environment, _configuration),
+                !string.IsNullOrWhiteSpace(_configuration[ElectronicSignatureStoragePaths.StorageRootConfigurationKey])),
+            new("local-objects", PayPlanner.Api.Services.Storage.LocalStoragePaths.ResolveRoot(environment, _configuration),
+                !string.IsNullOrWhiteSpace(_configuration[PayPlanner.Api.Services.Storage.LocalStoragePaths.RootConfigurationKey])),
+            new("profile-photos-legacy", UserPhotoStoragePaths.ResolveLegacyRoot(environment)),
+            new("electronic-signatures-legacy", ElectronicSignatureStoragePaths.ResolveLegacyRoot(environment)),
+        };
+        var layout = DatabaseBackupFileLayout.Create(candidates, _backupRootDirectory);
+        if (layout.ArchiveRoots.Count == 0)
         {
             return [];
-        }
-
-        // Nested configured roots are already covered by their parent and must not be archived twice.
-        var selectedRoots = new List<(string Name, string Path)>();
-        foreach (var candidate in configuredRoots)
-        {
-            if (!selectedRoots.Any(parent => IsPathWithin(candidate.Path, parent.Path)))
-            {
-                selectedRoots.Add(candidate);
-            }
         }
 
         var backupPath = ResolveBackupPath(backup.RelativePath)
@@ -2304,15 +2295,13 @@ public sealed class DatabaseBackupService
             await using (var output = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, true))
             using (var archive = new ZipArchive(output, ZipArchiveMode.Create, leaveOpen: false))
             {
-                foreach (var root in selectedRoots)
+                foreach (var root in layout.ArchiveRoots)
                 {
                     foreach (var filePath in EnumerateFilesSafely(root.Path, cancellationToken))
                     {
                         cancellationToken.ThrowIfCancellationRequested();
                         if (IsPathWithin(filePath, _backupRootDirectory)) continue;
-                        var relative = Path.GetRelativePath(root.Path, filePath).Replace('\\', '/');
-                        if (relative.StartsWith("../", StringComparison.Ordinal) || relative == "..") continue;
-                        var entry = archive.CreateEntry($"{root.Name}/{relative}", CompressionLevel.Fastest);
+                        var entry = archive.CreateEntry(layout.GetArchiveEntryPath(filePath, root.Name), CompressionLevel.Fastest);
                         await using var source = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 81920, true);
                         await using var destination = entry.Open();
                         await source.CopyToAsync(destination, cancellationToken);
@@ -2334,7 +2323,7 @@ public sealed class DatabaseBackupService
                 Path.GetRelativePath(_backupRootDirectory, archivePath).Replace('\\', '/'),
                 info.Length,
                 await ComputeSha256Async(archivePath, cancellationToken),
-                true),
+                true, layout.RootMappings),
         ];
     }
 
@@ -2354,29 +2343,34 @@ public sealed class DatabaseBackupService
                || fullPath.StartsWith(fullRoot + Path.DirectorySeparatorChar, comparison);
     }
 
-    private IReadOnlyList<string> EnumerateFilesSafely(string root, CancellationToken cancellationToken)
+    private IEnumerable<string> EnumerateFilesSafely(string root, CancellationToken cancellationToken)
     {
-        var files = new List<string>();
         var pending = new Stack<string>();
         pending.Push(root);
         while (pending.Count > 0)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var directory = pending.Pop();
+            if (IsPathWithin(directory, _backupRootDirectory)) continue;
+            IReadOnlyList<string> files;
             try
             {
-                files.AddRange(_directoryReader.GetFiles(directory, "*"));
+                files = _directoryReader.GetFiles(directory, "*");
                 foreach (var child in _directoryReader.GetDirectories(directory))
                 {
-                    if (!IsReparsePoint(child)) pending.Push(child);
+                    if (!IsPathWithin(child, _backupRootDirectory) && !IsReparsePoint(child)) pending.Push(child);
                 }
             }
             catch (Exception ex) when (IsRecoverableFileSystemEnumerationError(ex))
             {
                 throw new IOException($"Не удалось полностью прочитать каталог файлов для резервной копии: {directory}.", ex);
             }
+            foreach (var file in files)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                yield return file;
+            }
         }
-        return files;
     }
 
     private DatabaseBackupManifest? TryReadManifest(string backupPath)

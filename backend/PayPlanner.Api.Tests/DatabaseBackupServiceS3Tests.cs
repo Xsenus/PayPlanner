@@ -50,6 +50,13 @@ public sealed class DatabaseBackupServiceS3Tests
             Assert.Equal(entry.FullName, await reader.ReadToEndAsync());
         }
         Assert.True((await backups.VerifyBackupAsync(result.Backup.RelativePath)).Verified);
+        var manifest = await backups.ReadVerifiedManifestAsync(result.Backup.RelativePath);
+        var mappings = Assert.Single(manifest.Parts!, part => part.Kind == "file-storage").FileRoots!;
+        Assert.Equal(6, mappings.Count);
+        Assert.Equal("file-storage/user-photos", Assert.Single(mappings, item => item.Name == "profile-photos").ArchivePrefix);
+        Assert.Equal("file-storage/electronic-signatures", Assert.Single(mappings, item => item.Name == "electronic-signatures").ArchivePrefix);
+        Assert.Equal("file-storage/objects", Assert.Single(mappings, item => item.Name == "local-objects").ArchivePrefix);
+        Assert.Equal("profile-photos-legacy", Assert.Single(mappings, item => item.Name == "profile-photos-legacy").ArchivePrefix);
     }
 
     [Fact]
@@ -80,6 +87,10 @@ public sealed class DatabaseBackupServiceS3Tests
             using var reader = new StreamReader(archive.GetEntry($"{root.Prefix}/content.txt")!.Open());
             Assert.Equal(root.Prefix, await reader.ReadToEndAsync());
         }
+        var manifest = await backups.ReadVerifiedManifestAsync(result.Backup.RelativePath);
+        var mappings = Assert.Single(manifest.Parts!, part => part.Kind == "file-storage").FileRoots!;
+        Assert.Equal(4, mappings.Count);
+        Assert.All(mappings, mapping => Assert.Equal(mapping.Name, mapping.ArchivePrefix));
     }
 
     [Theory]
@@ -143,6 +154,109 @@ public sealed class DatabaseBackupServiceS3Tests
         var result = await backups.CreateManualBackupAsync();
         using var archive = System.IO.Compression.ZipFile.OpenRead($"{backups.ResolveBackupPath(result.Backup.RelativePath)}.fileset");
         Assert.Equal("file-storage/only.txt", Assert.Single(archive.Entries).FullName);
+        var manifest = await backups.ReadVerifiedManifestAsync(result.Backup.RelativePath);
+        var mappings = Assert.Single(manifest.Parts!, part => part.Kind == "file-storage").FileRoots!;
+        Assert.Equal(4, mappings.Count);
+        Assert.All(mappings, mapping => Assert.Equal("file-storage", mapping.ArchivePrefix));
+    }
+
+    [Fact]
+    public async Task FileArchiveHistoricalManifestWithoutMappingsStillVerifiesAndRestores()
+    {
+        await using var scope = await CreateScopeAsync();
+        await File.WriteAllTextAsync(Path.Combine(scope.Root, "files", "evidence.txt"), "legacy bytes");
+        var backups = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        var backup = await backups.CreateManualBackupAsync();
+        var path = $"{backups.ResolveBackupPath(backup.Backup.RelativePath)}.manifest.json";
+        var json = System.Text.Json.Nodes.JsonNode.Parse(await File.ReadAllTextAsync(path))!;
+        foreach (var part in json["parts"]!.AsArray()) part!.AsObject().Remove("fileRoots");
+        await File.WriteAllTextAsync(path, json.ToJsonString());
+        Assert.True((await backups.VerifyBackupAsync(backup.Backup.RelativePath)).Verified);
+        var drill = await scope.Provider.GetRequiredService<DatabaseRestoreDrillService>()
+            .RunAsync(backup.Backup.RelativePath, false, null, CancellationToken.None);
+        Assert.Equal("restored", drill.Status);
+        Assert.Equal("legacy bytes", await File.ReadAllTextAsync(Path.Combine(Path.GetDirectoryName(drill.ReportPath)!,
+            "files", "file-storage", "evidence.txt")));
+    }
+
+    [Fact]
+    public async Task FileArchiveDoesNotReadExcludedBackupDirectory()
+    {
+        var reader = new FaultingBackupDirectoryReader();
+        await using var scope = await CreateScopeAsync(reader);
+        var backupDirectory = Path.Combine(scope.Root, "files", "backups");
+        scope.Provider.GetRequiredService<IConfiguration>()["DatabaseBackup:Directory"] = backupDirectory;
+        reader.DeniedFilesDirectory = backupDirectory;
+        reader.DeniedSubdirectoriesDirectory = backupDirectory;
+        await File.WriteAllTextAsync(Path.Combine(scope.Root, "files", "evidence.txt"), "working document");
+        var backups = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        var result = await backups.CreateManualBackupAsync();
+        using var archive = System.IO.Compression.ZipFile.OpenRead($"{backups.ResolveBackupPath(result.Backup.RelativePath)}.fileset");
+        var entry = Assert.Single(archive.Entries);
+        Assert.Equal("file-storage/evidence.txt", entry.FullName);
+        using var content = new StreamReader(entry.Open());
+        Assert.Equal("working document", await content.ReadToEndAsync());
+        // Cleanup legitimately reads the backup directory. A denial here must not spoil the file archive.
+        Assert.True((await backups.VerifyBackupAsync(result.Backup.RelativePath)).Verified);
+    }
+
+    [Theory]
+    [InlineData("../outside")]
+    [InlineData("/absolute")]
+    [InlineData("unknown/photos")]
+    [InlineData("file-storage//photos")]
+    [InlineData("file-storage\\photos")]
+    public async Task VerifyRejectsUnsafeFileRootMappingsBeforeAcceptingTheSet(string prefix)
+    {
+        await using var scope = await CreateScopeAsync();
+        var backups = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        var backup = await backups.CreateManualBackupAsync();
+        var path = $"{backups.ResolveBackupPath(backup.Backup.RelativePath)}.manifest.json";
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        var manifest = JsonSerializer.Deserialize<DatabaseBackupManifest>(await File.ReadAllTextAsync(path), options)!;
+        var parts = manifest.Parts!.Select(part => part.Kind == "file-storage"
+            ? part with { FileRoots = [new("file-storage", prefix)] } : part).ToArray();
+        await File.WriteAllTextAsync(path, JsonSerializer.Serialize(manifest with { Parts = parts }, options));
+        var verification = await backups.VerifyBackupAsync(backup.Backup.RelativePath);
+        Assert.False(verification.Verified);
+        Assert.Equal("invalidManifest", verification.Status);
+        await Assert.ThrowsAsync<InvalidDataException>(() => backups.ReadVerifiedManifestAsync(backup.Backup.RelativePath));
+    }
+
+    [Theory]
+    [InlineData("empty")]
+    [InlineData("null-item")]
+    [InlineData("wrong-kind")]
+    public async Task VerifyRejectsMalformedFileRootDeclarations(string corruption)
+    {
+        await using var scope = await CreateScopeAsync();
+        var backups = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        var backup = await backups.CreateManualBackupAsync();
+        var path = $"{backups.ResolveBackupPath(backup.Backup.RelativePath)}.manifest.json";
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        var manifest = JsonSerializer.Deserialize<DatabaseBackupManifest>(await File.ReadAllTextAsync(path), options)!;
+        var parts = manifest.Parts!.Select(part => part.Kind != "file-storage" ? part : corruption switch
+        {
+            "empty" => part with { FileRoots = [] },
+            "null-item" => part with { FileRoots = [null!] },
+            "wrong-kind" => part with { Kind = "unknown" },
+            _ => throw new InvalidOperationException("Unknown fixture corruption."),
+        }).ToArray();
+        await File.WriteAllTextAsync(path, JsonSerializer.Serialize(manifest with { Parts = parts }, options));
+        var verification = await backups.VerifyBackupAsync(backup.Backup.RelativePath);
+        Assert.False(verification.Verified);
+        Assert.Equal("invalidManifest", verification.Status);
+        await Assert.ThrowsAsync<InvalidDataException>(() => backups.ReadVerifiedManifestAsync(backup.Backup.RelativePath));
+    }
+
+    [Fact]
+    public async Task FileArchiveRejectsWholeVolumeBeforeEnumeratingUnrelatedData()
+    {
+        await using var scope = await CreateScopeAsync();
+        scope.Provider.GetRequiredService<IConfiguration>()["FileStorage:RootPath"] = Path.GetPathRoot(scope.Root)!;
+        var backups = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        await Assert.ThrowsAsync<IOException>(() => backups.CreateManualBackupAsync());
+        Assert.Empty(Directory.EnumerateFiles(Path.Combine(scope.Root, "backups"), "*.manifest.json", SearchOption.AllDirectories));
     }
 
     [Fact]
