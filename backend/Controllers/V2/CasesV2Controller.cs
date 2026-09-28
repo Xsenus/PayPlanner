@@ -5283,10 +5283,9 @@ public partial class CasesV2Controller : ControllerBase
         var relativePath = _caseDocumentStorage.BuildRelativePath(id, storedFileName);
 
         var content = Encoding.UTF8.GetBytes(template.Html);
-        try
+        var result = await SaveCaseDocumentAtomicallyAsync(relativePath,
+            () => _caseDocumentStorage.SaveAsync(relativePath, content, ct), async () =>
         {
-            await _caseDocumentStorage.SaveAsync(relativePath, content, ct);
-
             var document = new ClientCaseDocument
             {
                 ClientCaseId = id,
@@ -5318,15 +5317,11 @@ public partial class CasesV2Controller : ControllerBase
                 User.GetDisplayName(),
                 ct);
             await _db.SaveChangesAsync(ct);
-            await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
 
             return Created($"/api/v2/cases/{id}/documents/{document.Id}", MapDocument(document, true, [templateDefinitionResult.Template]));
-        }
-        catch
-        {
-            _caseDocumentStorage.DeleteIfExists(relativePath);
-            throw;
-        }
+        }, ct);
+        await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
+        return result;
     }
 
     [HttpGet("{id:int}/documents/{documentId:int}/download")]
@@ -5534,11 +5529,12 @@ public partial class CasesV2Controller : ControllerBase
         var storedFileName = BuildStoredFileName(normalizedDocumentKey!, version, safeFileName);
         var relativePath = _caseDocumentStorage.BuildRelativePath(clientCase.Id, storedFileName);
 
-        try
+        var result = await SaveCaseDocumentAtomicallyAsync(relativePath, async () =>
         {
             await using var stream = uploadFile.OpenReadStream();
             await _caseDocumentStorage.SaveAsync(relativePath, stream, ct);
-
+        }, async () =>
+        {
             var document = new ClientCaseDocument
             {
                 ClientCaseId = clientCase.Id,
@@ -5579,14 +5575,47 @@ public partial class CasesV2Controller : ControllerBase
                 User.GetDisplayName(),
                 ct);
             await _db.SaveChangesAsync(ct);
-            await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
 
             return Created($"/api/case-documents/{document.Id}", MapDocument(document, true));
+        }, ct);
+        await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
+        return result;
+    }
+
+    private async Task<T> SaveCaseDocumentAtomicallyAsync<T>(
+        string relativePath, Func<Task> saveFile, Func<Task<T>> saveRecords, CancellationToken ct)
+    {
+        Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction? transaction = null;
+        var fileSaved = false;
+        var commitStarted = false;
+        try
+        {
+            await saveFile();
+            fileSaved = true;
+            transaction = await _db.Database.BeginTransactionAsync(ct);
+            var result = await saveRecords();
+            commitStarted = true;
+            await transaction.CommitAsync(ct);
+            return result;
         }
         catch
         {
-            _caseDocumentStorage.DeleteIfExists(relativePath);
+            // Never remove bytes after commit was attempted: a lost acknowledgement can
+            // leave a committed reference. Retaining an orphan is safer than losing a document.
+            if (!commitStarted)
+            {
+                if (transaction is not null)
+                {
+                    using var rollbackTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                    await transaction.RollbackAsync(rollbackTimeout.Token);
+                }
+                if (fileSaved) _caseDocumentStorage.DeleteIfExists(relativePath);
+            }
             throw;
+        }
+        finally
+        {
+            if (transaction is not null) await transaction.DisposeAsync();
         }
     }
 
@@ -5737,10 +5766,9 @@ public partial class CasesV2Controller : ControllerBase
         var relativePath = _caseDocumentStorage.BuildRelativePath(clientCase.Id, storedFileName);
         var content = Encoding.UTF8.GetBytes(html);
 
-        try
+        var savedDocument = await SaveCaseDocumentAtomicallyAsync(relativePath,
+            () => _caseDocumentStorage.SaveAsync(relativePath, content, ct), async () =>
         {
-            await _caseDocumentStorage.SaveAsync(relativePath, content, ct);
-
             var document = new ClientCaseDocument
             {
                 ClientCaseId = clientCase.Id,
@@ -5770,18 +5798,13 @@ public partial class CasesV2Controller : ControllerBase
                 User.GetDisplayName(),
                 ct);
             await _db.SaveChangesAsync(ct);
-            if (publishTaskJournalChanged)
-            {
-                await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
-            }
-
             return document;
-        }
-        catch
+        }, ct);
+        if (publishTaskJournalChanged)
         {
-            _caseDocumentStorage.DeleteIfExists(relativePath);
-            throw;
+            await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
         }
+        return savedDocument;
     }
 
     private async Task<ClientCaseDocumentDto> UpdateDocumentCore(

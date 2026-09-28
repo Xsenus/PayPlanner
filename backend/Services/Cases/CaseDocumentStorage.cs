@@ -69,17 +69,25 @@ public class LocalCaseDocumentStorage : ICaseDocumentStorage
         var fullPath = ResolvePath(storagePath);
         Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
 
-        await using var stream = new FileStream(fullPath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
-        await content.CopyToAsync(stream, cancellationToken);
+        var created = false;
+        try
+        {
+            await using var stream = new FileStream(fullPath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+            created = true;
+            await content.CopyToAsync(stream, cancellationToken);
+        }
+        catch
+        {
+            // A failed CreateNew does not give this operation ownership of an existing file.
+            if (created) DeleteIfExists(storagePath);
+            throw;
+        }
     }
 
     public async Task SaveAsync(string storagePath, byte[] content, CancellationToken cancellationToken)
     {
-        var fullPath = ResolvePath(storagePath);
-        Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
-
-        await using var stream = new FileStream(fullPath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
-        await stream.WriteAsync(content, cancellationToken);
+        using var stream = new MemoryStream(content, writable: false);
+        await SaveAsync(storagePath, stream, cancellationToken);
     }
 
     public bool Exists(string storagePath)
