@@ -48,8 +48,9 @@ public static class DatabaseBackupArchiveHash
     }
 
     public static async Task<DatabaseBackupArchiveFileHash> CopyAsync(
-        Stream source, Stream destination, CancellationToken cancellationToken)
+        Stream source, Stream destination, CancellationToken cancellationToken, long? maximumSizeBytes = null)
     {
+        if (maximumSizeBytes is < 0) throw new ArgumentOutOfRangeException(nameof(maximumSizeBytes));
         cancellationToken.ThrowIfCancellationRequested();
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         var buffer = ArrayPool<byte>.Shared.Rent(81920);
@@ -60,6 +61,8 @@ public static class DatabaseBackupArchiveHash
             {
                 var count = await source.ReadAsync(buffer.AsMemory(0, 81920), cancellationToken);
                 if (count == 0) break;
+                if (maximumSizeBytes is { } maximum && count > maximum - size)
+                    throw new InvalidDataException("Документ превышает размер, сохранённый в снимке базы.");
                 await destination.WriteAsync(buffer.AsMemory(0, count), cancellationToken);
                 hash.AppendData(buffer, 0, count);
                 size = checked(size + count);
