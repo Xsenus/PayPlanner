@@ -5,6 +5,7 @@ import type { DatabaseBackupCatalogItemDto } from '../../services/api';
 
 const { getCatalog } = vi.hoisted(() => ({ getCatalog: vi.fn() }));
 vi.mock('../../services/api', () => ({ apiService: { getDatabaseBackupCatalog: getCatalog } }));
+vi.mock('../../hooks/useDialog', () => ({ useDialog: () => ({ confirm: vi.fn() }) }));
 
 function item(id: string): DatabaseBackupCatalogItemDto {
   return {

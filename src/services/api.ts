@@ -1613,6 +1613,11 @@ export interface DatabaseBackupCatalogPageDto {
   nextCursor?: string | null;
 }
 
+export interface DatabaseBackupCatalogImportResult {
+  dryRun: boolean;
+  items: Array<{ relativePath: string; status: 'ready' | 'imported' | 'alreadyRegistered' | 'failed'; error?: string | null }>;
+}
+
 export interface DatabaseBackupOverviewDto {
   provider: string;
   providerDisplayName: string;
@@ -3857,6 +3862,12 @@ export class ApiService {
     const query = new URLSearchParams({ pageSize: String(pageSize) });
     if (after) query.set('after', after);
     return this.request<DatabaseBackupCatalogPageDto>(`/database/backups/catalog?${query.toString()}`);
+  }
+
+  async importDatabaseBackupCatalog(relativePaths: string[], dryRun = true) {
+    return this.request<DatabaseBackupCatalogImportResult>('/database/backups/catalog/import', {
+      method: 'POST', body: JSON.stringify({ relativePaths, dryRun }),
+    });
   }
 
   async getSystemJobDiagnostics() {

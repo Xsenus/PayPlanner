@@ -19,6 +19,97 @@ namespace PayPlanner.Api.Tests;
 public sealed class DatabaseBackupServiceS3Tests
 {
     [Fact]
+    public async Task ImportCatalogAsync_PreviewsThenImportsLegacySetWithoutClaimingCloudVerification()
+    {
+        await using var scope = await CreateScopeAsync();
+        var service = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        await service.UpdateSettingsAsync(false, "03:00", 14, "sqlite", s3UploadEnabled: true,
+            s3ConnectionIds: ["s3-main"], cancellationToken: CancellationToken.None);
+        var backup = await service.CreateManualBackupAsync();
+        await ClearBackupCatalogAsync(scope);
+        var uploadCount = scope.S3.UploadedPaths.Count;
+        var path = service.ResolveBackupPath(backup.Backup.RelativePath)!;
+        var originalBytes = await File.ReadAllBytesAsync(path);
+
+        var preview = await service.ImportCatalogAsync([backup.Backup.RelativePath]);
+        Assert.True(preview.DryRun);
+        Assert.Equal("ready", Assert.Single(preview.Items).Status);
+        await using (var db = await scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContextAsync())
+            Assert.Empty(await db.DatabaseBackupSets.ToListAsync());
+
+        var applied = await service.ImportCatalogAsync([backup.Backup.RelativePath, backup.Backup.RelativePath], false);
+        Assert.Equal(new[] { "imported", "alreadyRegistered" }, applied.Items.Select(item => item.Status));
+        await using (var db = await scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContextAsync())
+        {
+            var set = await db.DatabaseBackupSets.Include(item => item.Copies).SingleAsync();
+            var copy = Assert.Single(set.Copies);
+            Assert.Equal("local", copy.ProviderKey);
+            Assert.Equal(DatabaseBackupCopyStatuses.Verified, copy.Status);
+            Assert.Equal(backup.Backup.RelativePath, set.BackupRelativePath);
+        }
+        Assert.Equal(uploadCount, scope.S3.UploadedPaths.Count);
+        Assert.Equal(originalBytes, await File.ReadAllBytesAsync(path));
+    }
+
+    [Fact]
+    public async Task ImportCatalogAsync_ReportsInvalidSetsAndContinuesWithValidFiles()
+    {
+        await using var scope = await CreateScopeAsync();
+        var service = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        var valid = await service.CreateManualBackupAsync();
+        var missingPart = await service.CreateManualBackupAsync();
+        var legacy = await service.CreateManualBackupAsync();
+        await ClearBackupCatalogAsync(scope);
+        File.Delete($"{service.ResolveBackupPath(missingPart.Backup.RelativePath)}.fileset");
+        File.Delete($"{service.ResolveBackupPath(legacy.Backup.RelativePath)}.manifest.json");
+
+        var result = await service.ImportCatalogAsync([
+            "../outside.zip", valid.Backup.RelativePath, missingPart.Backup.RelativePath,
+            legacy.Backup.RelativePath, "missing.zip"], false);
+        Assert.Equal(new[] { "failed", "imported", "failed", "failed", "failed" }, result.Items.Select(item => item.Status));
+        Assert.All(result.Items.Where(item => item.Status == "failed"), item => Assert.False(string.IsNullOrWhiteSpace(item.Error)));
+        await using var db = await scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContextAsync();
+        Assert.Equal(valid.Backup.RelativePath, (await db.DatabaseBackupSets.SingleAsync()).BackupRelativePath);
+    }
+
+    [Fact]
+    public async Task ImportCatalogAsync_RechecksAfterPreviewAndRejectsManifestPathMismatch()
+    {
+        await using var scope = await CreateScopeAsync();
+        var service = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        var backup = await service.CreateManualBackupAsync();
+        await ClearBackupCatalogAsync(scope);
+        Assert.Equal("ready", Assert.Single((await service.ImportCatalogAsync([backup.Backup.RelativePath])).Items).Status);
+        var manifestPath = $"{service.ResolveBackupPath(backup.Backup.RelativePath)}.manifest.json";
+        var manifest = System.Text.Json.Nodes.JsonNode.Parse(await File.ReadAllTextAsync(manifestPath))!;
+        manifest["backupRelativePath"] = "different/file.zip";
+        await File.WriteAllTextAsync(manifestPath, manifest.ToJsonString());
+
+        Assert.Equal("failed", Assert.Single((await service.ImportCatalogAsync([backup.Backup.RelativePath], false)).Items).Status);
+        await using var db = await scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContextAsync();
+        Assert.Empty(await db.DatabaseBackupSets.ToListAsync());
+    }
+
+    [Fact]
+    public async Task ImportCatalogAsync_ValidatesBatchLimitAndCancellation()
+    {
+        await using var scope = await CreateScopeAsync();
+        var service = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        await Assert.ThrowsAsync<ArgumentException>(() => service.ImportCatalogAsync([]));
+        await Assert.ThrowsAsync<ArgumentException>(() => service.ImportCatalogAsync(Enumerable.Repeat("file.zip", 21).ToArray()));
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.ImportCatalogAsync(["file.zip"], false, cancellation.Token));
+    }
+
+    private static async Task ClearBackupCatalogAsync(TestScope scope)
+    {
+        await using var db = await scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContextAsync();
+        db.DatabaseBackupSets.RemoveRange(await db.DatabaseBackupSets.Include(item => item.Copies).ToListAsync());
+        await db.SaveChangesAsync();
+    }
+
+    [Fact]
     public async Task CreateManualBackupAsync_UploadsBackupToConfiguredS3Connection()
     {
         await using var scope = await CreateScopeAsync();

@@ -1,5 +1,8 @@
 namespace PayPlanner.Api.Models.Responses;
 
+public sealed record DatabaseBackupCatalogImportItem(string RelativePath, string Status, string? Error = null);
+public sealed record DatabaseBackupCatalogImportResult(bool DryRun, IReadOnlyList<DatabaseBackupCatalogImportItem> Items);
+
 public sealed class DatabaseBackupCatalogPageDto
 {
     public List<DatabaseBackupCatalogItemDto> Items { get; init; } = [];

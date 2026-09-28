@@ -12,6 +12,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Models.Responses;
 
 namespace PayPlanner.Api.Services;
 
@@ -230,6 +231,44 @@ public sealed class DatabaseBackupService
             .ToList();
 
         return Task.FromResult<IReadOnlyList<DatabaseBackupFileInfo>>(items);
+    }
+
+    public async Task<DatabaseBackupCatalogImportResult> ImportCatalogAsync(
+        IReadOnlyList<string> relativePaths, bool dryRun = true, CancellationToken cancellationToken = default)
+    {
+        if (relativePaths.Count is < 1 or > 20)
+            throw new ArgumentException("Выберите от 1 до 20 резервных копий за один импорт.");
+
+        await _backupSemaphore.WaitAsync(cancellationToken);
+        try
+        {
+            await using var rootLock = await BackupDirectoryLease.AcquireAsync(
+                _backupRootDirectory, RootLockTimeout, cancellationToken);
+            var items = new List<DatabaseBackupCatalogImportItem>();
+            foreach (var relativePath in relativePaths)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                try
+                {
+                    if (string.IsNullOrWhiteSpace(relativePath) || relativePath.Length > 2048
+                        || Path.IsPathRooted(relativePath)
+                        || relativePath.Replace('\\', '/').Split('/').Any(part => part is "." or ".."))
+                        throw new ArgumentException("Нужен относительный путь внутри каталога резервных копий.");
+
+                    var created = await EnsureBackupSetCatalogedAsync(relativePath, cancellationToken, dryRun);
+                    items.Add(new(relativePath, created ? dryRun ? "ready" : "imported" : "alreadyRegistered"));
+                }
+                catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or ArgumentException)
+                {
+                    items.Add(new(relativePath ?? string.Empty, "failed", ex.Message));
+                }
+            }
+            return new(dryRun, items);
+        }
+        finally
+        {
+            _backupSemaphore.Release();
+        }
     }
 
     public async Task<DatabaseBackupOverview> UpdateSettingsAsync(
@@ -632,11 +671,26 @@ public sealed class DatabaseBackupService
             ?? throw new InvalidDataException("Manifest резервной копии пуст.");
     }
 
-    private async Task EnsureBackupSetCatalogedAsync(string relativePath, CancellationToken cancellationToken)
+    private async Task<bool> EnsureBackupSetCatalogedAsync(
+        string relativePath, CancellationToken cancellationToken, bool dryRun = false)
     {
-        var manifest = await ReadVerifiedManifestAsync(relativePath, cancellationToken);
         var backupPath = ResolveBackupPath(relativePath)
             ?? throw new FileNotFoundException("Резервная копия не найдена.");
+        EnsureDirectBackupPath(backupPath);
+        if (File.Exists(GetManifestPath(backupPath))) EnsureDirectBackupPath(GetManifestPath(backupPath));
+        var preview = TryReadManifest(backupPath);
+        foreach (var part in preview?.Parts?.Where(item => item.Required) ?? [])
+        {
+            var partPath = ResolveBackupPath(part.RelativePath);
+            if (partPath is not null) EnsureDirectBackupPath(partPath);
+        }
+        var manifest = await ReadVerifiedManifestAsync(relativePath, cancellationToken);
+        var canonicalPath = Path.GetRelativePath(_backupRootDirectory, backupPath).Replace('\\', '/');
+        if (!string.Equals(canonicalPath, manifest.BackupRelativePath?.Replace('\\', '/'), StringComparison.Ordinal)
+            || string.IsNullOrWhiteSpace(manifest.BackupId) || manifest.BackupId.Length > 64
+            || string.IsNullOrWhiteSpace(manifest.DatabaseProvider) || manifest.DatabaseProvider.Length > 64
+            || string.IsNullOrWhiteSpace(manifest.BackupFormat) || manifest.BackupFormat.Length > 32)
+            throw new InvalidDataException("Путь или идентификаторы в описании комплекта не соответствуют резервной копии.");
         var manifestSha256 = await ComputeSha256Async(GetManifestPath(backupPath), cancellationToken);
         await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
         var existing = await context.DatabaseBackupSets.AsNoTracking()
@@ -645,14 +699,16 @@ public sealed class DatabaseBackupService
         {
             if (!string.Equals(existing.ManifestSha256, manifestSha256, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidDataException("Описание комплекта резервной копии изменилось после регистрации в каталоге.");
-            return;
+            return false;
         }
+
+        if (dryRun) return true;
 
         var now = DateTime.UtcNow;
         var set = new DatabaseBackupSet
         {
             Id = manifest.BackupId,
-            BackupRelativePath = manifest.BackupRelativePath,
+            BackupRelativePath = canonicalPath,
             DatabaseProvider = manifest.DatabaseProvider,
             BackupFormat = manifest.BackupFormat,
             ManifestSha256 = manifestSha256,
@@ -664,7 +720,7 @@ public sealed class DatabaseBackupService
         {
             ProviderKey = "local",
             ConnectionId = string.Empty,
-            Locator = manifest.BackupRelativePath,
+            Locator = canonicalPath,
             Status = DatabaseBackupCopyStatuses.Verified,
             LastVerifiedAt = now,
             CreatedAt = now,
@@ -672,6 +728,22 @@ public sealed class DatabaseBackupService
         });
         context.DatabaseBackupSets.Add(set);
         await context.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
+    private void EnsureDirectBackupPath(string path)
+    {
+        var root = Path.GetFullPath(_backupRootDirectory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var current = path;
+        while (current is not null)
+        {
+            if (IsReparsePoint(current))
+                throw new InvalidDataException("Комплект нельзя регистрировать через символическую ссылку или недоступный путь.");
+            if (string.Equals(current.TrimEnd(Path.DirectorySeparatorChar), root,
+                OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)) return;
+            current = Path.GetDirectoryName(current);
+        }
+        throw new InvalidDataException("Путь комплекта находится вне каталога резервных копий.");
     }
 
     public string? ResolveBackupPath(string? relativePath)

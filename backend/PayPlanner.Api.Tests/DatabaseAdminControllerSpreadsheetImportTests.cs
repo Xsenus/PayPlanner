@@ -29,9 +29,10 @@ namespace PayPlanner.Api.Tests;
 public class DatabaseAdminControllerSpreadsheetImportTests
 {
     [Theory]
-    [InlineData("/api/database/status")]
-    [InlineData("/api/database/backups/catalog")]
-    public async Task DatabaseAdminEndpoints_ForbidUserWithoutAdminRoleInDatabase(string endpoint)
+    [InlineData("/api/database/status", false)]
+    [InlineData("/api/database/backups/catalog", false)]
+    [InlineData("/api/database/backups/catalog/import", true)]
+    public async Task DatabaseAdminEndpoints_ForbidUserWithoutAdminRoleInDatabase(string endpoint, bool post)
     {
         await using var connection = await CreateOpenConnectionAsync();
         var backupDirectory = CreateTempDirectory();
@@ -41,7 +42,9 @@ public class DatabaseAdminControllerSpreadsheetImportTests
             using var server = await CreateServerAsync(connection, backupDirectory, userRoleName: "user");
             using var client = server.CreateClient();
 
-            using var response = await client.GetAsync(endpoint);
+            using var response = post
+                ? await client.PostAsJsonAsync(endpoint, new { relativePaths = new[] { "file.zip" }, dryRun = false })
+                : await client.GetAsync(endpoint);
 
             Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
         }
@@ -49,6 +52,86 @@ public class DatabaseAdminControllerSpreadsheetImportTests
         {
             TryDeleteDirectory(backupDirectory);
         }
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(21)]
+    public async Task BackupCatalogImport_RejectsInvalidBatchSize(int count)
+    {
+        await using var connection = await CreateOpenConnectionAsync();
+        var directory = CreateTempDirectory();
+        try
+        {
+            using var server = await CreateServerAsync(connection, directory);
+            using var client = server.CreateClient();
+            using var response = await client.PostAsJsonAsync("/api/database/backups/catalog/import",
+                new { relativePaths = Enumerable.Repeat("file.zip", count).ToArray() });
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        }
+        finally { TryDeleteDirectory(directory); }
+    }
+
+    [Fact]
+    public async Task BackupCatalogImport_DefaultsToDryRunAndReportsPerFileFailure()
+    {
+        await using var connection = await CreateOpenConnectionAsync();
+        var directory = CreateTempDirectory();
+        try
+        {
+            using var server = await CreateServerAsync(connection, directory);
+            using var client = server.CreateClient();
+            using var response = await client.PostAsJsonAsync("/api/database/backups/catalog/import",
+                new { relativePaths = new[] { "missing.zip" } });
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var result = await response.Content.ReadFromJsonAsync<DatabaseBackupCatalogImportResult>();
+            Assert.True(result!.DryRun);
+            Assert.Equal("failed", Assert.Single(result.Items).Status);
+        }
+        finally { TryDeleteDirectory(directory); }
+    }
+
+    [Fact]
+    public async Task BackupCatalogImport_RegistersVerifiedLegacyFileThroughHttpAndPreservesOriginalDate()
+    {
+        await using var connection = await CreateOpenConnectionAsync();
+        var directory = CreateTempDirectory();
+        try
+        {
+            using var server = await CreateServerAsync(connection, directory);
+            const string relativePath = "old.sqlite";
+            var path = Path.Combine(directory, relativePath);
+            await using (var target = new SqliteConnection($"Data Source={path};Pooling=false"))
+            {
+                await target.OpenAsync();
+                connection.BackupDatabase(target);
+            }
+            var bytes = await File.ReadAllBytesAsync(path);
+            var created = new DateTime(2025, 1, 2, 3, 4, 5, DateTimeKind.Utc);
+            var manifest = new DatabaseBackupManifest(1, "legacy-http", relativePath, relativePath,
+                "sqlite", "sqlite", bytes.Length, Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)),
+                "manual", created, "test");
+            await File.WriteAllTextAsync($"{path}.manifest.json",
+                System.Text.Json.JsonSerializer.Serialize(manifest, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)));
+            using var client = server.CreateClient();
+            using var preview = await client.PostAsJsonAsync("/api/database/backups/catalog/import", new { relativePaths = new[] { relativePath } });
+            Assert.Equal(HttpStatusCode.OK, preview.StatusCode);
+            Assert.Equal("ready", Assert.Single((await preview.Content.ReadFromJsonAsync<DatabaseBackupCatalogImportResult>())!.Items).Status);
+            Assert.Empty((await client.GetFromJsonAsync<DatabaseBackupCatalogPageDto>("/api/database/backups/catalog"))!.Items);
+
+            using var apply = await client.PostAsJsonAsync("/api/database/backups/catalog/import",
+                new { relativePaths = new[] { relativePath, relativePath }, dryRun = false });
+            Assert.Equal(HttpStatusCode.OK, apply.StatusCode);
+            Assert.Equal(new[] { "imported", "alreadyRegistered" },
+                (await apply.Content.ReadFromJsonAsync<DatabaseBackupCatalogImportResult>())!.Items.Select(item => item.Status));
+            var item = Assert.Single((await client.GetFromJsonAsync<DatabaseBackupCatalogPageDto>("/api/database/backups/catalog"))!.Items);
+            Assert.Equal("legacy-http", item.Id);
+            Assert.Equal(created, item.CreatedAt);
+            Assert.Equal(DateTimeKind.Utc, item.CreatedAt.Kind);
+            Assert.Equal("local", Assert.Single(item.Copies).ProviderKey);
+            Assert.Equal(bytes, await File.ReadAllBytesAsync(path));
+        }
+        finally { TryDeleteDirectory(directory); }
     }
 
     [Fact]

@@ -3,9 +3,10 @@ import { apiService } from '../../services/api';
 import type { DatabaseBackupCatalogCopyDto, DatabaseBackupCatalogPageDto } from '../../services/api';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { formatDateTimeInTimeZone } from '../../utils/timeZoneDate';
+import { DatabaseBackupCatalogImport } from './DatabaseBackupCatalogImport';
 
 function copyLabel(copy: DatabaseBackupCatalogCopyDto) {
-  if (copy.status === 'verified') return copy.providerKey === 'local' ? 'Проверено при создании' : 'Проверено после отправки';
+  if (copy.status === 'verified') return copy.providerKey === 'local' ? 'Локальная целостность подтверждена' : 'Проверено после отправки';
   if (copy.status === 'pending') return 'Загрузка не подтверждена';
   if (copy.status === 'failed') return 'Ошибка';
   if (copy.status === 'deleted') return 'Удалено';
@@ -62,7 +63,7 @@ export function DatabaseBackupCatalog({ timeZoneId, connectionNames = {} }: {
       {loading && <p className="mt-3 text-sm text-gray-600" role="status">Загрузка журнала…</p>}
       {error && <p role="alert" className="mt-3 text-sm text-red-700">{error}</p>}
       {!loading && !error && page?.items.length === 0 && (
-        <p className="mt-3 text-sm text-gray-600">Зарегистрированных комплектов пока нет. Журнал учитывает новые копии; старые появятся при проверенной повторной отправке.</p>
+        <p className="mt-3 text-sm text-gray-600">Зарегистрированных комплектов пока нет. Старые локальные копии можно проверить и добавить ниже.</p>
       )}
       {!!page?.items.length && (
         <div className="mt-3 max-h-[32rem] overflow-auto rounded-xl border border-gray-200">
@@ -103,6 +104,7 @@ export function DatabaseBackupCatalog({ timeZoneId, connectionNames = {} }: {
         }} className="rounded-xl border px-3 py-2 disabled:opacity-50">Следующие копии</button>
       </div>
       <p className="mt-3 text-xs text-gray-500">Это результаты последней выполненной проверки, а не подтверждение текущей доступности или восстановления. Ключи шифрования проверяются отдельно.</p>
+      <DatabaseBackupCatalogImport onImported={refresh} />
     </section>
   );
 }

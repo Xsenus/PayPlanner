@@ -141,6 +141,20 @@ public class DatabaseAdminController : ControllerBase, IAsyncActionFilter
         }
     }
 
+    [HttpPost("backups/catalog/import")]
+    public async Task<ActionResult<DatabaseBackupCatalogImportResult>> ImportBackupCatalogAsync(
+        [FromBody] ImportDatabaseBackupCatalogRequest request, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await _databaseBackupService.ImportCatalogAsync(request.RelativePaths, request.DryRun, cancellationToken));
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
     [HttpPost("backups")]
     public async Task<ActionResult<DatabaseBackupCreateResultDto>> CreateBackupAsync(CancellationToken cancellationToken)
     {
