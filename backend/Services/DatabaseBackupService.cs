@@ -212,7 +212,12 @@ public sealed class DatabaseBackupService
         string? after = null, int pageSize = 20, CancellationToken cancellationToken = default)
     {
         await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
-        return await new DatabaseBackupCatalogReader(context).ReadAsync(after, pageSize, cancellationToken);
+        var page = await new DatabaseBackupCatalogReader(context).ReadAsync(after, pageSize, cancellationToken);
+        var settings = await LoadSettingsAsync(context, cancellationToken);
+        foreach (var set in page.Items)
+            set.Status = DatabaseBackupSetStateEvaluator.Evaluate(set.Copies, settings.S3Upload.Enabled,
+                settings.S3Upload.ConnectionIds, settings.YandexDiskUpload.Enabled);
+        return page;
     }
 
     public Task<IReadOnlyList<DatabaseBackupFileInfo>> ListBackupsAsync(CancellationToken cancellationToken = default)
@@ -362,7 +367,10 @@ public sealed class DatabaseBackupService
             yandexDiskUploadResults);
     }
 
-    public async Task<DatabaseBackupS3UploadResult> RetryS3UploadAsync(string? uploadResultId, CancellationToken cancellationToken = default)
+    public Task<DatabaseBackupS3UploadResult> RetryS3UploadAsync(string? uploadResultId, CancellationToken cancellationToken = default)
+        => WithBackupDirectoryLeaseAsync(() => RetryS3UploadCoreAsync(uploadResultId, cancellationToken), cancellationToken);
+
+    private async Task<DatabaseBackupS3UploadResult> RetryS3UploadCoreAsync(string? uploadResultId, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(uploadResultId))
         {
@@ -377,9 +385,10 @@ public sealed class DatabaseBackupService
             throw new FileNotFoundException("S3-выгрузка резервной копии не найдена.");
         }
 
-        if (!string.Equals(storedResult.Status, "failed", StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(storedResult.Status, "failed", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(storedResult.Status, "pending", StringComparison.OrdinalIgnoreCase))
         {
-            throw new ArgumentException("Повторить можно только S3-выгрузку, которая завершилась ошибкой.");
+            throw new ArgumentException("Повторить можно только ошибочную или неподтверждённую S3-выгрузку. Успешная отправка повторно не выполняется.");
         }
 
         var resolvedPath = ResolveBackupPath(storedResult.BackupRelativePath);
@@ -400,15 +409,13 @@ public sealed class DatabaseBackupService
             Error = null,
             UpdatedAt = DateTime.UtcNow,
         };
-        await SaveS3UploadResultAsync(pendingResult, cancellationToken);
-
-        var completedResult = await UploadBackupFileToS3Async(pendingResult, resolvedPath, cancellationToken);
-        await SaveS3UploadResultAsync(completedResult, cancellationToken);
-
-        return completedResult;
+        return await UploadAndRecordS3Async(pendingResult, resolvedPath, cancellationToken);
     }
 
-    public async Task<DatabaseBackupYandexDiskUploadResult> RetryYandexDiskUploadAsync(string? uploadResultId, CancellationToken cancellationToken = default)
+    public Task<DatabaseBackupYandexDiskUploadResult> RetryYandexDiskUploadAsync(string? uploadResultId, CancellationToken cancellationToken = default)
+        => WithBackupDirectoryLeaseAsync(() => RetryYandexDiskUploadCoreAsync(uploadResultId, cancellationToken), cancellationToken);
+
+    private async Task<DatabaseBackupYandexDiskUploadResult> RetryYandexDiskUploadCoreAsync(string? uploadResultId, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(uploadResultId))
         {
@@ -423,9 +430,10 @@ public sealed class DatabaseBackupService
             throw new FileNotFoundException("Выгрузка резервной копии на Яндекс.Диск не найдена.");
         }
 
-        if (!string.Equals(storedResult.Status, "failed", StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(storedResult.Status, "failed", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(storedResult.Status, "pending", StringComparison.OrdinalIgnoreCase))
         {
-            throw new ArgumentException("Повторить можно только выгрузку на Яндекс.Диск, которая завершилась ошибкой.");
+            throw new ArgumentException("Повторить можно только ошибочную или неподтверждённую выгрузку на Яндекс.Диск. Успешная отправка повторно не выполняется.");
         }
 
         var resolvedPath = ResolveBackupPath(storedResult.BackupRelativePath);
@@ -445,12 +453,18 @@ public sealed class DatabaseBackupService
             Error = null,
             UpdatedAt = DateTime.UtcNow,
         };
-        await SaveYandexDiskUploadResultAsync(pendingResult, cancellationToken);
+        return await UploadAndRecordYandexAsync(pendingResult, resolvedPath, cancellationToken);
+    }
 
-        var completedResult = await UploadBackupFileToYandexDiskAsync(pendingResult, resolvedPath, cancellationToken);
-        await SaveYandexDiskUploadResultAsync(completedResult, cancellationToken);
-
-        return completedResult;
+    private async Task<T> WithBackupDirectoryLeaseAsync<T>(Func<Task<T>> operation, CancellationToken token)
+    {
+        await _backupSemaphore.WaitAsync(token);
+        try
+        {
+            await using var rootLock = await BackupDirectoryLease.AcquireAsync(_backupRootDirectory, RootLockTimeout, token);
+            return await operation();
+        }
+        finally { _backupSemaphore.Release(); }
     }
 
     public async Task<DatabaseBackupDeleteResult> DeleteBackupAsync(string? relativePath, CancellationToken cancellationToken = default)
@@ -744,6 +758,9 @@ public sealed class DatabaseBackupService
             CreatedAt = now,
             UpdatedAt = now,
         });
+        var settings = await LoadSettingsAsync(context, cancellationToken);
+        set.Status = DatabaseBackupSetStateEvaluator.Evaluate(set.Copies, settings.S3Upload.Enabled,
+            settings.S3Upload.ConnectionIds, settings.YandexDiskUpload.Enabled);
         context.DatabaseBackupSets.Add(set);
         await context.SaveChangesAsync(cancellationToken);
         return true;
@@ -1295,11 +1312,7 @@ public sealed class DatabaseBackupService
                 startedAt,
                 startedAt);
 
-            await SaveS3UploadResultAsync(result, cancellationToken);
-
-            result = await UploadBackupFileToS3Async(result, resolvedPath, cancellationToken);
-
-            await SaveS3UploadResultAsync(result, cancellationToken);
+            result = await UploadAndRecordS3Async(result, resolvedPath, cancellationToken);
             results.Add(result);
         }
 
@@ -1420,12 +1433,38 @@ public sealed class DatabaseBackupService
             startedAt,
             startedAt);
 
-        await SaveYandexDiskUploadResultAsync(result, cancellationToken);
-
-        result = await UploadBackupFileToYandexDiskAsync(result, resolvedPath, cancellationToken);
-
-        await SaveYandexDiskUploadResultAsync(result, cancellationToken);
+        result = await UploadAndRecordYandexAsync(result, resolvedPath, cancellationToken);
         return [result];
+    }
+
+    private Task<DatabaseBackupS3UploadResult> UploadAndRecordS3Async(
+        DatabaseBackupS3UploadResult result, string path, CancellationToken token) => UploadAndRecordAsync(result,
+        SaveS3UploadResultAsync, (pending, ct) => UploadBackupFileToS3Async(pending, path, ct),
+        pending => pending with { Status = "failed", Error = "Отправка отменена или прервана. Облачная копия не подтверждена.", UpdatedAt = DateTime.UtcNow }, token);
+
+    private Task<DatabaseBackupYandexDiskUploadResult> UploadAndRecordYandexAsync(
+        DatabaseBackupYandexDiskUploadResult result, string path, CancellationToken token) => UploadAndRecordAsync(result,
+        SaveYandexDiskUploadResultAsync, (pending, ct) => UploadBackupFileToYandexDiskAsync(pending, path, ct),
+        pending => pending with { Status = "failed", Error = "Отправка отменена или прервана. Облачная копия не подтверждена.", UpdatedAt = DateTime.UtcNow }, token);
+
+    private async Task<T> UploadAndRecordAsync<T>(T pending, Func<T, CancellationToken, Task> save,
+        Func<T, CancellationToken, Task<T>> upload, Func<T, T> cancelled, CancellationToken token)
+    {
+        try
+        {
+            await save(pending, token);
+            var result = await upload(pending, token);
+            await save(result, token);
+            return result;
+        }
+        catch (OperationCanceledException)
+        {
+            // The caller's cancelled token cannot persist the terminal state. Do not mask cancellation.
+            using var persistenceTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            try { await save(cancelled(pending), persistenceTimeout.Token); }
+            catch (Exception failure) { _logger.LogWarning(failure, "Could not record interrupted backup upload."); }
+            throw;
+        }
     }
 
     private async Task<DatabaseBackupYandexDiskUploadResult> UploadBackupFileToYandexDiskAsync(
@@ -1671,16 +1710,14 @@ public sealed class DatabaseBackupService
         await context.SaveChangesAsync(cancellationToken);
     }
 
-    private static async Task UpsertBackupCopyAsync(
+    private async Task UpsertBackupCopyAsync(
         PaymentContext context, string backupRelativePath, string providerKey, string connectionId,
         string locator, string uploadStatus, string? error, DateTime now, CancellationToken cancellationToken)
     {
-        var set = await context.DatabaseBackupSets
+        var set = await context.DatabaseBackupSets.Include(item => item.Copies)
             .FirstOrDefaultAsync(item => item.BackupRelativePath == backupRelativePath, cancellationToken)
             ?? throw new InvalidOperationException("Комплект резервной копии отсутствует в каталоге.");
-        var copy = await context.DatabaseBackupCopies.FirstOrDefaultAsync(item =>
-            item.BackupSetId == set.Id && item.ProviderKey == providerKey && item.ConnectionId == connectionId,
-            cancellationToken);
+        var copy = set.Copies.FirstOrDefault(item => item.ProviderKey == providerKey && item.ConnectionId == connectionId);
         if (copy is null)
         {
             copy = new DatabaseBackupCopy
@@ -1705,6 +1742,9 @@ public sealed class DatabaseBackupService
         copy.LastError = error is { Length: > 2000 } ? error[..2000] : error;
         copy.LastVerifiedAt = copy.Status == DatabaseBackupCopyStatuses.Verified ? now : null;
         copy.UpdatedAt = now;
+        var settings = await LoadSettingsAsync(context, cancellationToken);
+        set.Status = DatabaseBackupSetStateEvaluator.Evaluate(set.Copies, settings.S3Upload.Enabled,
+            settings.S3Upload.ConnectionIds, settings.YandexDiskUpload.Enabled);
         set.UpdatedAt = now;
     }
 
@@ -1755,6 +1795,11 @@ public sealed class DatabaseBackupService
     private async Task<BackupSettings> LoadSettingsAsync(CancellationToken cancellationToken)
     {
         await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        return await LoadSettingsAsync(context, cancellationToken);
+    }
+
+    private async Task<BackupSettings> LoadSettingsAsync(PaymentContext context, CancellationToken cancellationToken)
+    {
         var settings = await context.SystemSettings
             .AsNoTracking()
             .Where(x =>

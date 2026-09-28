@@ -20,13 +20,28 @@ function item(id: string): DatabaseBackupCatalogItemDto {
 }
 
 describe('DatabaseBackupCatalog', () => {
-  beforeEach(() => getCatalog.mockReset());
+  beforeEach(() => { getCatalog.mockReset(); });
+
+  it.each([
+    ['localVerified', 'Подтверждена локальная целостность'],
+    ['replicating', 'Отправка не завершена'],
+    ['awaitingCopies', 'Нет всех выбранных копий'],
+    ['verifiedConfigured', 'Выбранные копии подтверждены'],
+    ['degraded', 'Есть ошибка или неполная настройка'],
+    ['unknown', 'Состояние комплекта не определено'],
+  ])('shows the configured-destination state %s separately from individual history', async (status, label) => {
+    getCatalog.mockResolvedValue({ items: [{ ...item('state'), status }], nextCursor: null });
+    render(<DatabaseBackupCatalog />);
+    expect(await screen.findByText(label)).toBeTruthy();
+    expect(screen.getByText('Проверено после отправки')).toBeTruthy();
+    expect(screen.getByText(/не подтверждение текущей доступности/)).toBeTruthy();
+  });
 
   it('shows per-copy verification without claiming a deleted local file is available', async () => {
     getCatalog.mockResolvedValue({ items: [item('first')], nextCursor: null });
     render(<DatabaseBackupCatalog timeZoneId="Europe/Samara" connectionNames={{ main: 'Основной архив' }} />);
     expect(await screen.findByText('first.zip')).toBeTruthy();
-    expect(screen.getByText('Локальная копия удалена')).toBeTruthy();
+    expect(screen.getByText('Нет подтверждённой локальной копии')).toBeTruthy();
     expect(screen.getByText('S3: Основной архив')).toBeTruthy();
     expect(screen.getByText('Проверено после отправки')).toBeTruthy();
     expect(screen.getByText(/Попыток: 2/).textContent).toContain('04:00');

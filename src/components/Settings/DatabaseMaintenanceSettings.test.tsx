@@ -297,7 +297,8 @@ describe('DatabaseMaintenanceSettings', () => {
     })));
   });
 
-  it('retries failed S3 upload for database backup', async () => {
+  it.each([['failed', true], ['pending', true], ['pending', false]])('retries %s S3 upload only when approved=%s', async (status, approved) => {
+    mocks.dialogConfirmMock.mockResolvedValue(approved);
     const failedOverview = {
       ...buildBackupOverview(),
       s3Upload: {
@@ -311,7 +312,7 @@ describe('DatabaseMaintenanceSettings', () => {
           backupRelativePath: '2026/06/backup.zip',
           backupFileName: 'backup.zip',
           connectionId: 'hostkey-main',
-          status: 'failed',
+          status,
           targetPath: '/backups/database/2026/06/backup.zip',
           targetKey: null,
           sizeBytes: 1024,
@@ -339,11 +340,19 @@ describe('DatabaseMaintenanceSettings', () => {
     fireEvent.click(screen.getAllByRole('button')[4]);
     fireEvent.click(await screen.findByRole('button', { name: /Повторить/i }));
 
+    if (!approved) {
+      await waitFor(() => expect(mocks.dialogConfirmMock).toHaveBeenCalled());
+      await waitFor(() => expect((screen.getByRole('button', { name: /Повторить/i }) as HTMLButtonElement).disabled).toBe(false));
+      expect(mocks.retryDatabaseBackupS3UploadMock).not.toHaveBeenCalled();
+      return;
+    }
     await waitFor(() => expect(mocks.retryDatabaseBackupS3UploadMock).toHaveBeenCalledWith('failed-result'));
+    if (status === 'pending') expect(mocks.dialogConfirmMock).toHaveBeenCalledWith(expect.objectContaining({ title: 'Повторить неподтверждённую отправку' }));
     expect(await screen.findByText('S3-выгрузка резервной копии повторена.')).toBeTruthy();
   });
 
-  it('retries failed Yandex Disk upload for database backup', async () => {
+  it.each([['failed', true], ['pending', true], ['pending', false]])('retries %s Yandex Disk upload only when approved=%s', async (status, approved) => {
+    mocks.dialogConfirmMock.mockResolvedValue(approved);
     const failedOverview = {
       ...buildBackupOverview(),
       yandexDiskUpload: {
@@ -355,7 +364,7 @@ describe('DatabaseMaintenanceSettings', () => {
           id: 'yandex-failed-result',
           backupRelativePath: '2026/06/backup.zip',
           backupFileName: 'backup.zip',
-          status: 'failed',
+          status,
           targetPath: '/backups/database/2026/06/backup.zip',
           sizeBytes: 1024,
           error: 'Yandex Disk unavailable',
@@ -382,7 +391,14 @@ describe('DatabaseMaintenanceSettings', () => {
     fireEvent.click(screen.getAllByRole('button')[4]);
     fireEvent.click(await screen.findByRole('button', { name: /Повторить/i }));
 
+    if (!approved) {
+      await waitFor(() => expect(mocks.dialogConfirmMock).toHaveBeenCalled());
+      await waitFor(() => expect((screen.getByRole('button', { name: /Повторить/i }) as HTMLButtonElement).disabled).toBe(false));
+      expect(mocks.retryDatabaseBackupYandexDiskUploadMock).not.toHaveBeenCalled();
+      return;
+    }
     await waitFor(() => expect(mocks.retryDatabaseBackupYandexDiskUploadMock).toHaveBeenCalledWith('yandex-failed-result'));
+    if (status === 'pending') expect(mocks.dialogConfirmMock).toHaveBeenCalledWith(expect.objectContaining({ title: 'Повторить неподтверждённую отправку' }));
     expect(await screen.findByText('Выгрузка резервной копии на Яндекс.Диск повторена.')).toBeTruthy();
   });
 

@@ -18,6 +18,187 @@ namespace PayPlanner.Api.Tests;
 
 public sealed class DatabaseBackupServiceS3Tests
 {
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task RetryRecoversAbandonedPendingAttemptOnlyForIntactLocalSet(bool yandex, bool corrupt)
+    {
+        await using var scope = await CreateScopeAsync();
+        var service = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        await service.UpdateSettingsAsync(true, "03:00", 14, "sqlite", s3UploadEnabled: !yandex,
+            s3ConnectionIds: yandex ? [] : ["s3-main"], yandexDiskUploadEnabled: yandex);
+        scope.S3.ThrowOnUpload = true;
+        scope.YandexDisk.ThrowOnUpload = true;
+        var failed = await service.CreateManualBackupAsync();
+        var id = yandex ? Assert.Single(failed.YandexDiskUploadResults).Id : Assert.Single(failed.S3UploadResults).Id;
+        await using (var db = await scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContextAsync())
+        {
+            var key = yandex ? "database-backup.yandex-disk.results" : "database-backup.s3.results";
+            var setting = await db.SystemSettings.SingleAsync(item => item.Key == key);
+            var results = System.Text.Json.Nodes.JsonNode.Parse(setting.Value!)!.AsArray();
+            Assert.Single(results);
+            results[0]!["status"] = "pending";
+            setting.Value = results.ToJsonString();
+            (await db.DatabaseBackupCopies.SingleAsync(item => item.ProviderKey != "local")).Status = DatabaseBackupCopyStatuses.Pending;
+            (await db.DatabaseBackupSets.SingleAsync()).Status = DatabaseBackupSetStatuses.Replicating;
+            await db.SaveChangesAsync();
+        }
+        scope.S3.ThrowOnUpload = false;
+        scope.YandexDisk.ThrowOnUpload = false;
+        async Task<string> Retry() => yandex ? (await service.RetryYandexDiskUploadAsync(id)).Status
+            : (await service.RetryS3UploadAsync(id)).Status;
+        if (corrupt)
+        {
+            await File.AppendAllTextAsync($"{service.ResolveBackupPath(failed.Backup.RelativePath)}.fileset", "corrupt");
+            await Assert.ThrowsAsync<InvalidDataException>(() => Retry());
+            Assert.Empty(scope.S3.UploadedPaths);
+            Assert.Empty(scope.YandexDisk.UploadedPaths);
+            await using var rejectedDb = await scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContextAsync();
+            var rejectedCopy = await rejectedDb.DatabaseBackupCopies.SingleAsync(item => item.ProviderKey != "local");
+            Assert.Equal(1, rejectedCopy.AttemptCount);
+            Assert.Null(rejectedCopy.LastVerifiedAt);
+            return;
+        }
+        Assert.Equal("success", await Retry());
+        var uploadCount = yandex ? scope.YandexDisk.UploadedPaths.Count : scope.S3.UploadedPaths.Count;
+        await Assert.ThrowsAsync<ArgumentException>(() => Retry());
+        Assert.Equal(uploadCount, yandex ? scope.YandexDisk.UploadedPaths.Count : scope.S3.UploadedPaths.Count);
+        await using var finalDb = await scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContextAsync();
+        var copy = await finalDb.DatabaseBackupCopies.SingleAsync(item => item.ProviderKey != "local");
+        Assert.Equal(2, copy.AttemptCount);
+        Assert.Equal(DatabaseBackupCopyStatuses.Verified, copy.Status);
+        Assert.NotNull(copy.LastVerifiedAt);
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task RetryHoldsDirectoryLeaseAndCancelledQueuedOperationsDoNotChangeTheActiveAttempt(bool yandex, bool separateInstance)
+    {
+        await using var scope = await CreateScopeAsync();
+        var service = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        await service.UpdateSettingsAsync(true, "03:00", 14, "sqlite", s3UploadEnabled: !yandex,
+            s3ConnectionIds: yandex ? [] : ["s3-main"], yandexDiskUploadEnabled: yandex);
+        scope.S3.ThrowOnUpload = true;
+        scope.YandexDisk.ThrowOnUpload = true;
+        var failed = await service.CreateManualBackupAsync();
+        var id = yandex ? Assert.Single(failed.YandexDiskUploadResults).Id : Assert.Single(failed.S3UploadResults).Id;
+        scope.S3.ThrowOnUpload = false;
+        scope.YandexDisk.ThrowOnUpload = false;
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        async Task PauseUpload()
+        {
+            entered.TrySetResult();
+            await release.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        }
+        scope.S3.BeforeUploadAsync = PauseUpload;
+        scope.YandexDisk.BeforeUploadAsync = PauseUpload;
+        async Task<string> Retry(DatabaseBackupService instance, CancellationToken token) => yandex
+            ? (await instance.RetryYandexDiskUploadAsync(id, token)).Status
+            : (await instance.RetryS3UploadAsync(id, token)).Status;
+        var active = Retry(service, CancellationToken.None);
+        try
+        {
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(30));
+            Assert.Throws<IOException>(() =>
+            {
+                using var lease = new FileStream(Path.Combine(scope.Root, "backups", ".database-backup.lock"),
+                    FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            });
+            var other = separateInstance ? ActivatorUtilities.CreateInstance<DatabaseBackupService>(scope.Provider) : service;
+            using (var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(100)))
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Retry(other, cancellation.Token));
+            using (var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(100)))
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(() => other.DeleteBackupAsync(failed.Backup.RelativePath, cancellation.Token));
+            Assert.True(File.Exists(service.ResolveBackupPath(failed.Backup.RelativePath)));
+            await using var db = await scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContextAsync();
+            var copy = await db.DatabaseBackupCopies.SingleAsync(item => item.ProviderKey != "local");
+            Assert.Equal(DatabaseBackupCopyStatuses.Pending, copy.Status);
+            Assert.Equal(2, copy.AttemptCount);
+        }
+        finally
+        {
+            release.TrySetResult();
+            await active;
+        }
+        Assert.Equal("success", await active);
+        await using var finalDb = await scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContextAsync();
+        Assert.Equal(DatabaseBackupSetStatuses.VerifiedConfigured, (await finalDb.DatabaseBackupSets.SingleAsync()).Status);
+        Assert.Equal(2, (await finalDb.DatabaseBackupCopies.SingleAsync(item => item.ProviderKey != "local")).AttemptCount);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CancelledManualAndRetryUploadsRemainRetryableWithoutClaimingVerification(bool yandex)
+    {
+        await using var scope = await CreateScopeAsync();
+        var service = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        await service.UpdateSettingsAsync(true, "03:00", 14, "sqlite", s3UploadEnabled: !yandex,
+            s3ConnectionIds: yandex ? [] : ["s3-main"], yandexDiskUploadEnabled: yandex);
+        using var initialCancellation = new CancellationTokenSource();
+        scope.S3.OnUpload = initialCancellation.Cancel;
+        scope.YandexDisk.OnUpload = initialCancellation.Cancel;
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.CreateManualBackupAsync(initialCancellation.Token));
+        var overview = await service.GetOverviewAsync();
+        var id = yandex ? Assert.Single(overview.YandexDiskUploadResults).Id : Assert.Single(overview.S3UploadResults).Id;
+        Assert.Equal("failed", yandex ? overview.YandexDiskUploadResults[0].Status : overview.S3UploadResults[0].Status);
+        Assert.Contains("отменена", yandex ? overview.YandexDiskUploadResults[0].Error : overview.S3UploadResults[0].Error);
+        await using (var db = await scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContextAsync())
+        {
+            var set = await db.DatabaseBackupSets.Include(item => item.Copies).SingleAsync();
+            Assert.Equal(DatabaseBackupSetStatuses.Degraded, set.Status);
+            Assert.Equal(DatabaseBackupCopyStatuses.Verified, set.Copies.Single(item => item.ProviderKey == "local").Status);
+            var cloud = set.Copies.Single(item => item.ProviderKey != "local");
+            Assert.Equal(DatabaseBackupCopyStatuses.Failed, cloud.Status);
+            Assert.Null(cloud.LastVerifiedAt);
+            Assert.Equal(1, cloud.AttemptCount);
+        }
+        using var retryCancellation = new CancellationTokenSource();
+        scope.S3.OnUpload = retryCancellation.Cancel;
+        scope.YandexDisk.OnUpload = retryCancellation.Cancel;
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+        {
+            if (yandex) await service.RetryYandexDiskUploadAsync(id, retryCancellation.Token);
+            else await service.RetryS3UploadAsync(id, retryCancellation.Token);
+        });
+        scope.S3.OnUpload = null;
+        scope.YandexDisk.OnUpload = null;
+        if (yandex) Assert.Equal("success", (await service.RetryYandexDiskUploadAsync(id)).Status);
+        else Assert.Equal("success", (await service.RetryS3UploadAsync(id)).Status);
+        await using var finalDb = await scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContextAsync();
+        Assert.Equal(DatabaseBackupSetStatuses.VerifiedConfigured, (await finalDb.DatabaseBackupSets.SingleAsync()).Status);
+        var finalCopy = await finalDb.DatabaseBackupCopies.SingleAsync(item => item.ProviderKey != "local");
+        Assert.Equal(3, finalCopy.AttemptCount);
+        Assert.Equal(DatabaseBackupCopyStatuses.Verified, finalCopy.Status);
+        Assert.NotNull(finalCopy.LastVerifiedAt);
+    }
+
+    [Fact]
+    public async Task GetCatalogAsync_ReevaluatesConfiguredDestinationsWithoutOverwritingHistory()
+    {
+        await using var scope = await CreateScopeAsync();
+        var service = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        await service.CreateManualBackupAsync();
+        await service.UpdateSettingsAsync(true, "03:00", 14, "sqlite", s3UploadEnabled: true, s3ConnectionIds: ["new-destination"]);
+        Assert.Equal(DatabaseBackupSetStatuses.AwaitingCopies, Assert.Single((await service.GetCatalogAsync()).Items).Status);
+        await using (var db = await scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContextAsync())
+        {
+            var set = await db.DatabaseBackupSets.Include(item => item.Copies).SingleAsync();
+            Assert.Equal(DatabaseBackupSetStatuses.LocalVerified, set.Status);
+            Assert.Equal(DatabaseBackupCopyStatuses.Verified, Assert.Single(set.Copies).Status);
+        }
+        await service.UpdateSettingsAsync(true, "03:00", 14, "sqlite", s3UploadEnabled: true, s3ConnectionIds: []);
+        Assert.Equal(DatabaseBackupSetStatuses.Degraded, Assert.Single((await service.GetCatalogAsync()).Items).Status);
+        await service.UpdateSettingsAsync(true, "03:00", 14, "sqlite", s3UploadEnabled: false);
+        Assert.Equal(DatabaseBackupSetStatuses.LocalVerified, Assert.Single((await service.GetCatalogAsync()).Items).Status);
+    }
+
     [Fact]
     public async Task ImportCatalogAsync_PreviewsThenImportsLegacySetWithoutClaimingCloudVerification()
     {
@@ -141,6 +322,7 @@ public sealed class DatabaseBackupServiceS3Tests
         {
             var set = await db.DatabaseBackupSets.Include(item => item.Copies).SingleAsync();
             Assert.Equal(result.Backup.RelativePath, set.BackupRelativePath);
+            Assert.Equal(DatabaseBackupSetStatuses.VerifiedConfigured, set.Status);
             Assert.Equal(2, set.Copies.Count);
             Assert.Contains(set.Copies, item => item.ProviderKey == "local" && item.Status == DatabaseBackupCopyStatuses.Verified);
             Assert.Contains(set.Copies, item => item.ProviderKey == "s3" && item.Status == DatabaseBackupCopyStatuses.Verified
@@ -185,6 +367,7 @@ public sealed class DatabaseBackupServiceS3Tests
         Assert.Equal(1, copy.AttemptCount);
         Assert.Null(copy.LastVerifiedAt);
         Assert.Equal(2000, copy.LastError!.Length);
+        Assert.Equal(DatabaseBackupSetStatuses.Degraded, (await db.DatabaseBackupSets.SingleAsync()).Status);
     }
 
     [Fact]
@@ -228,6 +411,7 @@ public sealed class DatabaseBackupServiceS3Tests
             var copy = await db.DatabaseBackupCopies.SingleAsync(item => item.ProviderKey == "s3");
             Assert.Equal(DatabaseBackupCopyStatuses.Verified, copy.Status);
             Assert.Equal(2, copy.AttemptCount);
+            Assert.Equal(DatabaseBackupSetStatuses.VerifiedConfigured, (await db.DatabaseBackupSets.SingleAsync()).Status);
         }
     }
 
@@ -1143,6 +1327,8 @@ public sealed class DatabaseBackupServiceS3Tests
 
     private sealed class FakeS3StorageService : IS3StorageService
     {
+        public Action? OnUpload { get; set; }
+        public Func<Task>? BeforeUploadAsync { get; set; }
         public bool ThrowOnUpload { get; set; }
         public string? FailedConnectionId { get; set; }
         public string UploadErrorMessage { get; set; } = "S3 unavailable";
@@ -1173,6 +1359,9 @@ public sealed class DatabaseBackupServiceS3Tests
 
         public async Task<S3StorageOperationResultDto> UploadAsync(string id, string? path, Stream content, string? contentType, bool overwrite, CancellationToken cancellationToken = default)
         {
+            if (BeforeUploadAsync is not null) await BeforeUploadAsync();
+            OnUpload?.Invoke();
+            cancellationToken.ThrowIfCancellationRequested();
             if (ThrowOnUpload || id == FailedConnectionId)
             {
                 throw new S3StorageOperationException(503, UploadErrorMessage);
@@ -1225,6 +1414,8 @@ public sealed class DatabaseBackupServiceS3Tests
 
     private sealed class FakeYandexDiskService : IYandexDiskService
     {
+        public Action? OnUpload { get; set; }
+        public Func<Task>? BeforeUploadAsync { get; set; }
         public bool ThrowOnUpload { get; set; }
         public string? FailResultPathSuffix { get; set; }
         public string? CorruptReadPathSuffix { get; set; }
@@ -1259,6 +1450,9 @@ public sealed class DatabaseBackupServiceS3Tests
 
         public async Task<YandexDiskOperationResultDto> UploadAsync(string? path, Stream content, string? contentType, bool overwrite, CancellationToken cancellationToken = default)
         {
+            if (BeforeUploadAsync is not null) await BeforeUploadAsync();
+            OnUpload?.Invoke();
+            cancellationToken.ThrowIfCancellationRequested();
             if (ThrowOnUpload)
             {
                 throw new YandexDiskOperationException(503, "Yandex Disk unavailable");

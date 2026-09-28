@@ -83,7 +83,7 @@ function getS3UploadStatusLabel(status: string) {
     case 'failed':
       return 'Ошибка';
     case 'pending':
-      return 'Ожидает загрузки';
+      return 'Отправка не подтверждена';
     default:
       return status || '—';
   }
@@ -528,6 +528,15 @@ export function DatabaseMaintenanceSettings() {
     setDatabaseBackupError(null);
     setDatabaseBackupMessage(null);
     try {
+      if (databaseBackupOverview?.s3UploadResults.find((result) => result.id === uploadResultId)?.status === 'pending') {
+        const approved = await confirm({
+          title: 'Повторить неподтверждённую отправку',
+          description: 'Сервер дождётся окончания действующей операции и проверит локальный комплект перед повторной отправкой. Если прежняя отправка уже подтверждена, повтор не выполняется.',
+          confirmLabel: 'Повторить',
+          cancelLabel: 'Отмена',
+        });
+        if (!approved) return;
+      }
       const overview = await apiService.retryDatabaseBackupS3Upload(uploadResultId);
       applyDatabaseBackupOverview(overview);
       setDatabaseBackupMessage('S3-выгрузка резервной копии повторена.');
@@ -543,6 +552,15 @@ export function DatabaseMaintenanceSettings() {
     setDatabaseBackupError(null);
     setDatabaseBackupMessage(null);
     try {
+      if (databaseBackupOverview?.yandexDiskUploadResults.find((result) => result.id === uploadResultId)?.status === 'pending') {
+        const approved = await confirm({
+          title: 'Повторить неподтверждённую отправку',
+          description: 'Сервер дождётся окончания действующей операции и проверит локальный комплект перед повторной отправкой. Если прежняя отправка уже подтверждена, повтор не выполняется.',
+          confirmLabel: 'Повторить',
+          cancelLabel: 'Отмена',
+        });
+        if (!approved) return;
+      }
       const overview = await apiService.retryDatabaseBackupYandexDiskUpload(uploadResultId);
       applyDatabaseBackupOverview(overview);
       setDatabaseBackupMessage('Выгрузка резервной копии на Яндекс.Диск повторена.');
@@ -1243,7 +1261,7 @@ export function DatabaseMaintenanceSettings() {
                             <span className="min-w-0 truncate font-medium text-slate-900">{result.backupFileName}</span>
                             <div className="flex flex-wrap items-center gap-2">
                               <StatusBadge value={getS3UploadStatusLabel(result.status)} tone={getS3UploadStatusTone(result.status)} />
-                              {result.status === 'failed' ? (
+                              {result.status === 'failed' || result.status === 'pending' ? (
                                 <button
                                   type="button"
                                   onClick={() => void retryDatabaseBackupS3Upload(result.id)}
@@ -1301,7 +1319,7 @@ export function DatabaseMaintenanceSettings() {
                             <span className="min-w-0 truncate font-medium text-slate-900">{result.backupFileName}</span>
                             <div className="flex flex-wrap items-center gap-2">
                               <StatusBadge value={getS3UploadStatusLabel(result.status)} tone={getS3UploadStatusTone(result.status)} />
-                              {result.status === 'failed' ? (
+                              {result.status === 'failed' || result.status === 'pending' ? (
                                 <button
                                   type="button"
                                   onClick={() => void retryDatabaseBackupYandexDiskUpload(result.id)}

@@ -13,6 +13,15 @@ function copyLabel(copy: DatabaseBackupCatalogCopyDto) {
   return 'Неизвестное состояние';
 }
 
+const setLabels: Record<string, string> = {
+  localVerified: 'Подтверждена локальная целостность',
+  replicating: 'Отправка не завершена',
+  awaitingCopies: 'Нет всех выбранных копий',
+  verifiedConfigured: 'Выбранные копии подтверждены',
+  degraded: 'Есть ошибка или неполная настройка',
+  noLocalCopy: 'Нет подтверждённой локальной копии',
+};
+
 export function DatabaseBackupCatalog({ timeZoneId, connectionNames = {} }: {
   timeZoneId?: string | null;
   connectionNames?: Record<string, string>;
@@ -77,7 +86,9 @@ export function DatabaseBackupCatalog({ timeZoneId, connectionNames = {} }: {
                   <div className="break-all font-medium text-gray-900">{item.backupRelativePath}</div>
                   <div className="mt-1 text-xs text-gray-500">{date(item.createdAt)} · {item.databaseProvider} · {item.backupFormat}</div>
                   <div className="mt-1 break-all text-xs text-gray-500">ID: {item.id}</div>
-                  {item.status === 'noLocalCopy' && <p className="mt-1 text-xs text-amber-700">Локальная копия удалена</p>}
+                  <p className={`mt-1 text-xs ${item.status === 'verifiedConfigured' || item.status === 'localVerified' ? 'text-emerald-700' : 'text-amber-700'}`}>
+                    {setLabels[item.status] || 'Состояние комплекта не определено'}
+                  </p>
                 </td>
                 <td className="p-3 align-top"><ul className="space-y-2">{item.copies.map(copy => (
                   <li key={`${copy.providerKey}:${copy.connectionId}`}>

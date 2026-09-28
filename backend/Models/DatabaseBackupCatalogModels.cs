@@ -6,6 +6,7 @@ public static class DatabaseBackupSetStatuses
 {
     public const string LocalVerified = "localVerified";
     public const string Replicating = "replicating";
+    public const string AwaitingCopies = "awaitingCopies";
     public const string VerifiedConfigured = "verifiedConfigured";
     public const string Degraded = "degraded";
     public const string NoLocalCopy = "noLocalCopy";
