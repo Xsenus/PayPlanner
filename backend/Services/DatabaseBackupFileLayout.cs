@@ -9,15 +9,18 @@ public sealed class DatabaseBackupFileLayout
 {
     private readonly string excludedDirectory;
     private readonly IReadOnlyDictionary<string, DatabaseBackupFileRoot> archiveRootsByName;
+    private readonly IReadOnlyDictionary<string, string> logicalRootPaths;
     public IReadOnlyList<DatabaseBackupFileRoot> ArchiveRoots { get; }
     public IReadOnlyList<DatabaseBackupFileRootMapping> RootMappings { get; }
 
     private DatabaseBackupFileLayout(string excludedDirectory,
-        IReadOnlyList<DatabaseBackupFileRoot> roots, IReadOnlyList<DatabaseBackupFileRootMapping> mappings)
+        IReadOnlyList<DatabaseBackupFileRoot> roots, IReadOnlyList<DatabaseBackupFileRootMapping> mappings,
+        IReadOnlyDictionary<string, string> logicalRootPaths)
     {
         this.excludedDirectory = excludedDirectory;
         ArchiveRoots = roots;
         RootMappings = mappings;
+        this.logicalRootPaths = logicalRootPaths;
         archiveRootsByName = roots.ToDictionary(root => root.Name, StringComparer.Ordinal);
     }
 
@@ -68,7 +71,24 @@ public sealed class DatabaseBackupFileLayout
                 relative == "." ? parent.Name : $"{parent.Name}/{relative}");
         }).ToArray();
         ValidateRootMappings(mappings);
-        return new DatabaseBackupFileLayout(excludedPath, selected.AsReadOnly(), Array.AsReadOnly(mappings));
+        return new DatabaseBackupFileLayout(excludedPath, selected.AsReadOnly(), Array.AsReadOnly(mappings),
+            present.ToDictionary(item => item.Name, item => item.Path, StringComparer.Ordinal));
+    }
+
+    public string GetPhysicalFilePath(string logicalRootName, string relativePath)
+    {
+        if (!logicalRootPaths.TryGetValue(logicalRootName, out var root))
+            throw new InvalidDataException("Файловый корень ссылки не включён в снимок.");
+        if (string.IsNullOrWhiteSpace(relativePath) || relativePath.Length > 4096)
+            throw new InvalidDataException("Некорректный относительный путь файловой ссылки.");
+        // Stored relative paths can originate from either OS; normalize before the containment check.
+        var normalized = relativePath.Replace('\\', '/');
+        var segments = normalized.Split('/');
+        if (segments.Any(segment => segment.Length == 0 || segment is "." or ".." || segment.Contains(':')))
+            throw new InvalidDataException("Файловая ссылка содержит небезопасные сегменты пути.");
+        var path = Path.GetFullPath(Path.Combine(root, Path.Combine(segments)));
+        _ = GetArchiveEntryPath(path); // Also rejects references into the excluded backup directory.
+        return path;
     }
 
     public string GetArchiveEntryPath(string physicalFilePath, string? archiveRootName = null)

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -54,7 +55,17 @@ public sealed class DatabaseBackupPostgreSqlCancellationTests
             await using var provider = services.BuildServiceProvider();
             var factory = provider.GetRequiredService<IDbContextFactory<PaymentContext>>();
             await using (var db = await factory.CreateDbContextAsync())
+            {
                 await db.Database.EnsureCreatedAsync();
+                db.Users.Add(new User
+                {
+                    Email = "snapshot@local.test",
+                    PasswordHash = "test",
+                    Role = new Role { Name = "snapshot" },
+                    PhotoUrl = "https://external.example.test/original.png"
+                });
+                await db.SaveChangesAsync();
+            }
 
             await using var blocker = new NpgsqlConnection(source.ConnectionString);
             await blocker.OpenAsync();
@@ -99,6 +110,8 @@ public sealed class DatabaseBackupPostgreSqlCancellationTests
             Assert.Equal(1L, await CountDumpSessionsAsync(admin, databaseName, unrelatedSettings.ApplicationName));
             Assert.Empty(Directory.EnumerateFiles(Path.Combine(root, "backups"), "*.backup", SearchOption.AllDirectories));
             Assert.Empty(Directory.EnumerateFiles(Path.Combine(root, "backups"), "*.sql", SearchOption.AllDirectories));
+            Assert.Empty(Directory.EnumerateFiles(Path.Combine(root, "backups"), "*.partial", SearchOption.AllDirectories));
+            Assert.Empty(Directory.EnumerateFiles(Path.Combine(root, "backups"), "*.references", SearchOption.AllDirectories));
             Assert.Empty(Directory.EnumerateFiles(Path.Combine(root, "backups"), "*.manifest.json", SearchOption.AllDirectories));
             await using (var db = await factory.CreateDbContextAsync())
             {
@@ -109,8 +122,49 @@ public sealed class DatabaseBackupPostgreSqlCancellationTests
             }
             await transaction.RollbackAsync();
             Assert.Equal(0L, Convert.ToInt64(await unrelatedRead.WaitAsync(TimeSpan.FromSeconds(10))));
-            var retried = await backups.CreateManualBackupAsync();
+            await using var secondBlock = await blocker.BeginTransactionAsync();
+            await using (var hold = new NpgsqlCommand("LOCK TABLE public.dump_cancellation_evidence IN ACCESS EXCLUSIVE MODE", blocker, secondBlock))
+                await hold.ExecuteNonQueryAsync();
+            var retryTask = backups.CreateManualBackupAsync();
+            started.Restart();
+            while (logger.ApplicationName == applicationName && started.Elapsed < TimeSpan.FromSeconds(30))
+                await Task.Delay(100);
+            var retryApplication = Assert.IsType<string>(logger.ApplicationName);
+            Assert.NotEqual(applicationName, retryApplication);
+            await WaitForDumpAsync(admin, databaseName, retryApplication, waitingForLock: true);
+            await using (var update = new NpgsqlCommand(
+                "UPDATE public.\"Users\" SET \"PhotoUrl\" = 'https://external.example.test/new.png'", unrelated))
+                await update.ExecuteNonQueryAsync();
+            await secondBlock.RollbackAsync();
+            var retried = await retryTask.WaitAsync(TimeSpan.FromSeconds(30));
             Assert.True((await backups.VerifyBackupAsync(retried.Backup.RelativePath)).Verified);
+            var manifest = await backups.ReadVerifiedManifestAsync(retried.Backup.RelativePath);
+            var referencePart = Assert.Single(manifest.Parts!, item => item.Kind == "file-references");
+            using var inventory = JsonDocument.Parse(await File.ReadAllTextAsync(backups.ResolveBackupPath(referencePart.RelativePath)!));
+            Assert.Equal("https://external.example.test/original.png",
+                Assert.Single(inventory.RootElement.GetProperty("storedFiles").EnumerateArray())
+                    .GetProperty("storedPath").GetString());
+            var restoreExecutable = Path.Combine(Path.GetDirectoryName(Environment.GetEnvironmentVariable("PAYPLANNER_TEST_PG_DUMP"))!,
+                OperatingSystem.IsWindows() ? "pg_restore.exe" : "pg_restore");
+            var restoreInfo = new ProcessStartInfo(restoreExecutable)
+            { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
+            restoreInfo.ArgumentList.Add("--data-only");
+            restoreInfo.ArgumentList.Add("--table=Users");
+            restoreInfo.ArgumentList.Add("--file=-");
+            restoreInfo.ArgumentList.Add(backups.ResolveBackupPath(retried.Backup.RelativePath)!);
+            using (var restore = Process.Start(restoreInfo)!)
+            {
+                var stdout = restore.StandardOutput.ReadToEndAsync();
+                var stderr = restore.StandardError.ReadToEndAsync();
+                try { await restore.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(30)); }
+                finally { if (!restore.HasExited) restore.Kill(entireProcessTree: true); }
+                Assert.Equal(0, restore.ExitCode);
+                Assert.Empty((await stderr).Trim());
+                var restoredSql = await stdout;
+                Assert.Contains("https://external.example.test/original.png", restoredSql, StringComparison.Ordinal);
+                Assert.DoesNotContain("https://external.example.test/new.png", restoredSql, StringComparison.Ordinal);
+            }
+            Assert.Empty(Directory.EnumerateFiles(Path.Combine(root, "backups"), "*.partial", SearchOption.AllDirectories));
             await using (var db = await factory.CreateDbContextAsync())
                 Assert.Equal(2, await db.DatabaseBackupAttempts.CountAsync());
         }

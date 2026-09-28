@@ -20,6 +20,142 @@ namespace PayPlanner.Api.Tests;
 public sealed class DatabaseBackupServiceS3Tests
 {
     [Fact]
+    public async Task HistoricalVersionOneManifestWithoutInventoryRemainsVerifiable()
+    {
+        await using var scope = await CreateScopeAsync();
+        var backups = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        var created = await backups.CreateManualBackupAsync();
+        var manifest = await backups.ReadVerifiedManifestAsync(created.Backup.RelativePath);
+        var historical = manifest with
+        {
+            FormatVersion = 1,
+            Parts = manifest.Parts!.Where(item => item.Kind != "file-references").ToArray()
+        };
+        var path = backups.ResolveBackupPath(created.Backup.RelativePath)!;
+        await File.WriteAllTextAsync(path + ".manifest.json",
+            JsonSerializer.Serialize(historical, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+        File.Delete(path + ".references");
+        Assert.True((await backups.VerifyBackupAsync(created.Backup.RelativePath)).Verified);
+    }
+
+    [Theory]
+    [InlineData("absent")]
+    [InlineData("optional")]
+    [InlineData("duplicate")]
+    [InlineData("wrong-path")]
+    public async Task NewManifestRequiresExactlyOneMandatorySnapshotInventory(string corruption)
+    {
+        await using var scope = await CreateScopeAsync();
+        var backups = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        var created = await backups.CreateManualBackupAsync();
+        var manifest = await backups.ReadVerifiedManifestAsync(created.Backup.RelativePath);
+        Assert.Equal(2, manifest.FormatVersion);
+        var reference = Assert.Single(manifest.Parts!, item => item.Kind == "file-references");
+        var parts = manifest.Parts!.Where(item => item.Kind != "file-references").ToList();
+        if (corruption != "absent") parts.Add(corruption switch
+        {
+            "optional" => reference with { Required = false },
+            "wrong-path" => reference with { RelativePath = created.Backup.RelativePath },
+            _ => reference
+        });
+        if (corruption == "duplicate") parts.Add(reference);
+        var manifestPath = backups.ResolveBackupPath(created.Backup.RelativePath)! + ".manifest.json";
+        await File.WriteAllTextAsync(manifestPath,
+            JsonSerializer.Serialize(manifest with { Parts = parts }, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+        var verification = await backups.VerifyBackupAsync(created.Backup.RelativePath);
+        Assert.False(verification.Verified);
+        Assert.Equal("invalidManifest", verification.Status);
+    }
+
+    [Theory]
+    [InlineData("sqlite")]
+    [InlineData("zip")]
+    public async Task CreatedBackupIncludesRequiredInventoryFromCopiedDatabase(string format)
+    {
+        await using var scope = await CreateScopeAsync();
+        var factory = scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>();
+        int userId;
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var user = new User
+            {
+                Email = "snapshot@local.test",
+                PasswordHash = "test",
+                Role = new Role { Name = "snapshot" },
+                PhotoUrl = "https://external.example.test/original.png"
+            };
+            db.Users.Add(user);
+            await db.SaveChangesAsync();
+            userId = user.Id;
+        }
+        var backups = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        await backups.UpdateSettingsAsync(false, "03:00", 14, format, cancellationToken: CancellationToken.None);
+        var created = await backups.CreateManualBackupAsync();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var user = await db.Users.SingleAsync(item => item.Id == userId);
+            user.PhotoUrl = "https://external.example.test/new.png";
+            await db.SaveChangesAsync();
+        }
+        var manifest = await backups.ReadVerifiedManifestAsync(created.Backup.RelativePath);
+        var part = Assert.Single(manifest.Parts!, item => item.Kind == "file-references");
+        Assert.True(part.Required);
+        var inventoryPath = backups.ResolveBackupPath(part.RelativePath)!;
+        using var inventory = JsonDocument.Parse(await File.ReadAllTextAsync(inventoryPath));
+        Assert.Equal(1, inventory.RootElement.GetProperty("formatVersion").GetInt32());
+        Assert.Equal(1L, inventory.RootElement.GetProperty("storedFileCount").GetInt64());
+        Assert.Equal("https://external.example.test/original.png",
+            Assert.Single(inventory.RootElement.GetProperty("storedFiles").EnumerateArray())
+                .GetProperty("storedPath").GetString());
+        var drill = await scope.Provider.GetRequiredService<DatabaseRestoreDrillService>()
+            .RunAsync(created.Backup.RelativePath, false, null, CancellationToken.None);
+        await using (var restored = new SqliteConnection($"Data Source={drill.Target};Mode=ReadOnly;Pooling=False"))
+        {
+            await restored.OpenAsync();
+            await using var command = restored.CreateCommand();
+            command.CommandText = "SELECT PhotoUrl FROM Users WHERE Id = $id";
+            command.Parameters.AddWithValue("$id", userId);
+            Assert.Equal("https://external.example.test/original.png", await command.ExecuteScalarAsync());
+        }
+        await File.AppendAllTextAsync(inventoryPath, "corrupt");
+        Assert.False((await backups.VerifyBackupAsync(created.Backup.RelativePath)).Verified);
+    }
+
+    [Fact]
+    public async Task RepeatedBackupNamesAtSameInstantAreUniqueAndKeepScheduleAndExtension()
+    {
+        await using var scope = await CreateScopeAsync();
+        var backups = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        var method = typeof(DatabaseBackupService).GetMethod("BuildBackupFileName",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        var instant = new DateTimeOffset(2026, 9, 28, 9, 0, 0, TimeSpan.Zero);
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        for (var index = 0; index < 1000; index++)
+        {
+            var name = (string)method.Invoke(backups, ["crm", instant, "auto", "0900", ".backup"])!;
+            Assert.True(names.Add(name));
+            Assert.EndsWith("_auto_0900.backup", name, StringComparison.Ordinal);
+            Assert.EndsWith(".backup", name, StringComparison.Ordinal);
+            Assert.Contains(Path.GetFileNameWithoutExtension(name).Split('_'), part => Guid.TryParseExact(part, "N", out _));
+        }
+    }
+
+    [Fact]
+    public async Task RepeatedManualBackupsPreserveEarlierVerifiedBytes()
+    {
+        await using var scope = await CreateScopeAsync();
+        var backups = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        var first = await backups.CreateManualBackupAsync();
+        var firstPath = backups.ResolveBackupPath(first.Backup.RelativePath)!;
+        var originalBytes = await File.ReadAllBytesAsync(firstPath);
+        var second = await backups.CreateManualBackupAsync();
+        Assert.NotEqual(first.Backup.RelativePath, second.Backup.RelativePath);
+        Assert.Equal(originalBytes, await File.ReadAllBytesAsync(firstPath));
+        Assert.True((await backups.VerifyBackupAsync(first.Backup.RelativePath)).Verified);
+        Assert.True((await backups.VerifyBackupAsync(second.Backup.RelativePath)).Verified);
+    }
+
+    [Fact]
     public async Task FileArchiveIncludesDefaultAndDualReadLegacyRootsWithoutDuplicates()
     {
         await using var scope = await CreateScopeAsync();

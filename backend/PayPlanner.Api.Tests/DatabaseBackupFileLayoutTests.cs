@@ -70,6 +70,40 @@ public sealed class DatabaseBackupFileLayoutTests : IDisposable
     }
 
     [Fact]
+    public void LogicalAliasesResolveAgainstFrozenPhysicalPathsWithoutDuplicateBytes()
+    {
+        var files = DirectoryPath("files");
+        var photos = DirectoryPath("files/photos");
+        var layout = DatabaseBackupFileLayout.Create([
+            new("file-storage", files), new("profile-photos", photos), new("local-objects", files)],
+            Path.Combine(files, "backups"));
+        var photo = layout.GetPhysicalFilePath("profile-photos", "41\\image.png");
+        Assert.Equal(Path.GetFullPath(Path.Combine(photos, "41", "image.png")), photo);
+        Assert.Equal("file-storage/photos/41/image.png", layout.GetArchiveEntryPath(photo));
+        Assert.Equal(layout.GetPhysicalFilePath("file-storage", "objects/file.bin"),
+            layout.GetPhysicalFilePath("local-objects", "objects/file.bin"));
+        Assert.Throws<InvalidDataException>(() => layout.GetPhysicalFilePath("profile-photos-legacy", "image.png"));
+        Assert.Throws<InvalidDataException>(() => layout.GetPhysicalFilePath("file-storage", "backups/dump.sqlite"));
+    }
+
+    [Theory]
+    [InlineData("../outside")]
+    [InlineData("folder/../outside")]
+    [InlineData("folder\\..\\outside")]
+    [InlineData("/absolute")]
+    [InlineData("C:\\absolute")]
+    [InlineData("\\\\server\\share\\file")]
+    [InlineData("folder//file")]
+    [InlineData(".")]
+    [InlineData("file:stream")]
+    public void LogicalReferencesCannotEscapeOrCreateAmbiguousPaths(string relative)
+    {
+        var files = DirectoryPath("files");
+        var layout = DatabaseBackupFileLayout.Create([new("file-storage", files)], Path.Combine(root, "backups"));
+        Assert.Throws<InvalidDataException>(() => layout.GetPhysicalFilePath("file-storage", relative));
+    }
+
+    [Fact]
     public void InvalidOrDuplicatePrefixAndRelativeRootAreRejected()
     {
         var files = DirectoryPath("files");

@@ -621,7 +621,7 @@ public sealed class DatabaseBackupService
                 ex.Message);
         }
 
-        if (manifest is null || manifest.FormatVersion != 1)
+        if (manifest is null || manifest.FormatVersion is not (1 or 2))
         {
             return new DatabaseBackupVerificationResult(
                 "invalidManifest",
@@ -650,6 +650,16 @@ public sealed class DatabaseBackupService
 
         try
         {
+            if (manifest.FormatVersion == 2)
+            {
+                var databaseParts = manifest.Parts?.Where(part => part?.Kind == "database").ToArray() ?? [];
+                var referenceParts = manifest.Parts?.Where(part => part?.Kind == "file-references").ToArray() ?? [];
+                if (databaseParts.Length != 1 || referenceParts.Length != 1
+                    || !databaseParts[0].Required || !referenceParts[0].Required
+                    || databaseParts[0].RelativePath != manifest.BackupRelativePath
+                    || referenceParts[0].RelativePath != manifest.BackupRelativePath + ".references")
+                    throw new InvalidDataException("Новый комплект должен включать обязательные базу и перечень файловых ссылок.");
+            }
             foreach (var part in manifest.Parts ?? [])
             {
                 if (part is null) throw new InvalidDataException("Manifest содержит пустую часть комплекта.");
@@ -858,16 +868,17 @@ public sealed class DatabaseBackupService
             Directory.CreateDirectory(targetDirectory);
 
             await UpdateBackupAttemptAsync(attemptId, "database", cancellationToken);
+            var snapshotParts = new List<DatabaseBackupPartManifest>();
             DatabaseBackupFileInfo fileInfo = _databaseProvider.IsSqlite
-                ? await CreateSqliteBackupAsync(targetDirectory, settings.Format, nowLocal, trigger, scheduleSlot, cancellationToken)
-                : await CreatePostgreSqlBackupAsync(targetDirectory, settings.Format, settings.ToolCommand, nowLocal, trigger, scheduleSlot, cancellationToken);
+                ? await CreateSqliteBackupAsync(targetDirectory, settings.Format, nowLocal, trigger, scheduleSlot, snapshotParts, cancellationToken)
+                : await CreatePostgreSqlBackupAsync(targetDirectory, settings.Format, settings.ToolCommand, nowLocal, trigger, scheduleSlot, snapshotParts, cancellationToken);
 
             try
             {
                 await UpdateBackupAttemptAsync(attemptId, "files", cancellationToken);
                 var additionalParts = await CreateFileStorageArchiveAsync(fileInfo, cancellationToken);
                 await UpdateBackupAttemptAsync(attemptId, "verifying", cancellationToken);
-                await WriteBackupManifestAsync(fileInfo, settings.Format.Key, additionalParts, cancellationToken);
+                await WriteBackupManifestAsync(fileInfo, settings.Format.Key, [.. snapshotParts, .. additionalParts], cancellationToken);
             }
             catch
             {
@@ -876,6 +887,7 @@ public sealed class DatabaseBackupService
                 if (incompletePath is not null)
                 {
                     TryDeleteFile($"{incompletePath}.fileset");
+                    TryDeleteFile($"{incompletePath}.references");
                     TryDeleteFile(GetManifestPath(incompletePath));
                     TryDeleteFile(incompletePath);
                 }
@@ -981,6 +993,7 @@ public sealed class DatabaseBackupService
         DateTimeOffset nowLocal,
         string trigger,
         string? scheduleSlot,
+        List<DatabaseBackupPartManifest> snapshotParts,
         CancellationToken cancellationToken)
     {
         var connectionBuilder = new SqliteConnectionStringBuilder(_databaseProvider.ConnectionString);
@@ -1006,6 +1019,8 @@ public sealed class DatabaseBackupService
         var tempCopyPath = Path.Combine(targetDirectory, $"{Guid.NewGuid():N}.sqlite");
 
         _logger.LogInformation("Creating SQLite backup at {OutputPath}", outputPath);
+        var published = false;
+        DatabaseBackupPartManifest? referencePart = null;
 
         try
         {
@@ -1027,21 +1042,40 @@ public sealed class DatabaseBackupService
                 }
             }
 
+            await using (var snapshot = await DatabaseBackupSnapshotSession.OpenSqliteCopyAsync(
+                tempCopyPath, databasePath, cancellationToken))
+            {
+                referencePart = await WriteSnapshotInventoryAsync(snapshot, outputPath, cancellationToken);
+                snapshotParts.Add(referencePart);
+            }
+
             if (string.Equals(format.Key, "sqlite", StringComparison.OrdinalIgnoreCase))
             {
-                File.Move(tempCopyPath, outputPath, overwrite: true);
+                File.Move(tempCopyPath, outputPath, overwrite: false);
+                published = true;
                 return BuildFileInfo(outputPath, _backupRootDirectory)
                     ?? throw new InvalidOperationException("SQLite backup was created but could not be indexed.");
             }
 
-            using (var archive = ZipFile.Open(outputPath, ZipArchiveMode.Create))
+            var outputCreated = false;
+            try
             {
+                using var output = new FileStream(outputPath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+                outputCreated = true;
+                using var archive = new ZipArchive(output, ZipArchiveMode.Create);
                 archive.CreateEntryFromFile(tempCopyPath, $"{baseName}.db", CompressionLevel.Optimal);
             }
+            catch
+            {
+                if (outputCreated) TryDeleteFile(outputPath);
+                throw;
+            }
+            published = true;
         }
         finally
         {
             TryDeleteFile(tempCopyPath);
+            if (!published && referencePart is not null) TryDeleteFile($"{outputPath}.references");
         }
 
         return BuildFileInfo(outputPath, _backupRootDirectory)
@@ -1055,6 +1089,7 @@ public sealed class DatabaseBackupService
         DateTimeOffset nowLocal,
         string trigger,
         string? scheduleSlot,
+        List<DatabaseBackupPartManifest> snapshotParts,
         CancellationToken cancellationToken)
     {
         var connectionBuilder = new NpgsqlConnectionStringBuilder(_databaseProvider.ConnectionString);
@@ -1067,7 +1102,10 @@ public sealed class DatabaseBackupService
         var fileName = BuildBackupFileName(databaseName, nowLocal, trigger, scheduleSlot, format.FileExtension);
         var outputPath = Path.Combine(targetDirectory, fileName);
         var pgDumpExecutable = ResolvePgDumpExecutable(toolCommand);
+        var partialPath = Path.Combine(targetDirectory, $"{Guid.NewGuid():N}.partial");
         var applicationName = $"payplanner-backup-{Guid.NewGuid():N}";
+        await using var snapshot = await DatabaseBackupSnapshotSession.OpenPostgreSqlAsync(
+            _databaseProvider.ConnectionString, cancellationToken);
 
         _logger.LogInformation("Creating PostgreSQL backup at {OutputPath} using {Command}", outputPath, pgDumpExecutable);
 
@@ -1099,14 +1137,30 @@ public sealed class DatabaseBackupService
             startInfo.ArgumentList.Add("--blobs");
         }
         startInfo.ArgumentList.Add("--no-password");
+        startInfo.ArgumentList.Add("--snapshot");
+        startInfo.ArgumentList.Add(snapshot.PostgreSqlSnapshotId!);
         startInfo.ArgumentList.Add("--file");
-        startInfo.ArgumentList.Add(outputPath);
+        startInfo.ArgumentList.Add(partialPath);
 
         if (!string.IsNullOrWhiteSpace(connectionBuilder.Password))
         {
             startInfo.Environment["PGPASSWORD"] = connectionBuilder.Password;
         }
 
+        // Reserve an exclusively owned staging file. pg_dump may truncate this file,
+        // but never a previously published backup, even after a clock rollback.
+        using (new FileStream(partialPath, FileMode.CreateNew, FileAccess.Write, FileShare.None)) { }
+        DatabaseBackupPartManifest referencePart;
+        try
+        {
+            referencePart = await WriteSnapshotInventoryAsync(snapshot, outputPath, cancellationToken);
+            snapshotParts.Add(referencePart);
+        }
+        catch
+        {
+            TryDeleteFile(partialPath);
+            throw;
+        }
         Process process;
         try
         {
@@ -1116,12 +1170,14 @@ public sealed class DatabaseBackupService
                 throw new InvalidOperationException("Failed to start pg_dump process.");
             }
         }
-        catch (Win32Exception ex)
+        catch (Exception ex)
         {
-            TryDeleteFile(outputPath);
-            throw new InvalidOperationException(
-                $"Не удалось запустить pg_dump по пути '{pgDumpExecutable}'. {ex.Message}",
-                ex);
+            TryDeleteFile(partialPath);
+            TryDeleteFile($"{outputPath}.references");
+            if (ex is Win32Exception)
+                throw new InvalidOperationException(
+                    $"Не удалось запустить pg_dump по пути '{pgDumpExecutable}'. {ex.Message}", ex);
+            throw;
         }
 
         using (process)
@@ -1183,14 +1239,85 @@ public sealed class DatabaseBackupService
                 }
                 finally
                 {
-                    if (process.HasExited) TryDeleteFile(outputPath);
+                    if (process.HasExited)
+                    {
+                        TryDeleteFile(partialPath);
+                        TryDeleteFile($"{outputPath}.references");
+                    }
                 }
                 throw;
             }
         }
 
+        try
+        {
+            File.Move(partialPath, outputPath, overwrite: false);
+        }
+        catch
+        {
+            TryDeleteFile($"{outputPath}.references");
+            throw;
+        }
+        finally
+        {
+            TryDeleteFile(partialPath);
+        }
+
         return BuildFileInfo(outputPath, _backupRootDirectory)
             ?? throw new InvalidOperationException("PostgreSQL backup was created but could not be indexed.");
+    }
+
+    private async Task<DatabaseBackupPartManifest> WriteSnapshotInventoryAsync(
+        DatabaseBackupSnapshotSession snapshot, string backupPath, CancellationToken cancellationToken)
+    {
+        var inventoryPath = $"{backupPath}.references";
+        var temporaryPath = $"{inventoryPath}.{Guid.NewGuid():N}.tmp";
+        var published = false;
+        try
+        {
+            await using (var output = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write,
+                FileShare.None, 81920, true))
+            {
+                using var writer = new Utf8JsonWriter(output);
+                writer.WriteStartObject();
+                writer.WriteNumber("formatVersion", 1);
+                writer.WriteStartArray("storedFiles");
+                long storedCount = 0;
+                await foreach (var reference in DatabaseBackupSnapshotInventory.ReadStoredFilesAsync(snapshot, cancellationToken))
+                {
+                    JsonSerializer.Serialize(writer, reference, JsonOptions);
+                    if (++storedCount % 128 == 0) await writer.FlushAsync(cancellationToken);
+                }
+                writer.WriteEndArray();
+                writer.WriteStartArray("storageReplicas");
+                long replicaCount = 0;
+                await foreach (var reference in DatabaseBackupSnapshotInventory.ReadStorageReplicasAsync(snapshot, cancellationToken))
+                {
+                    JsonSerializer.Serialize(writer, reference, JsonOptions);
+                    if (++replicaCount % 128 == 0) await writer.FlushAsync(cancellationToken);
+                }
+                writer.WriteEndArray();
+                writer.WriteNumber("storedFileCount", storedCount);
+                writer.WriteNumber("storageReplicaCount", replicaCount);
+                writer.WriteEndObject();
+                await writer.FlushAsync(cancellationToken);
+                await output.FlushAsync(cancellationToken);
+            }
+            File.Move(temporaryPath, inventoryPath, overwrite: false);
+            published = true;
+            return new DatabaseBackupPartManifest("file-references",
+                Path.GetRelativePath(_backupRootDirectory, inventoryPath).Replace('\\', '/'),
+                new FileInfo(inventoryPath).Length, await ComputeSha256Async(inventoryPath, cancellationToken), true);
+        }
+        catch
+        {
+            if (published) TryDeleteFile(inventoryPath);
+            throw;
+        }
+        finally
+        {
+            TryDeleteFile(temporaryPath);
+        }
     }
 
     private async Task CancelOwnedPostgreSqlDumpAsync(string applicationName, CancellationToken cancellationToken)
@@ -2221,7 +2348,7 @@ public sealed class DatabaseBackupService
             await ComputeSha256Async(resolvedPath, cancellationToken),
             true);
         var manifest = new DatabaseBackupManifest(
-            1,
+            2,
             Guid.NewGuid().ToString("N"),
             backup.FileName,
             backup.RelativePath.Replace('\\', '/'),
@@ -2830,7 +2957,7 @@ public sealed class DatabaseBackupService
     private string BuildBackupFileName(string baseName, DateTimeOffset nowLocal, string trigger, string? scheduleSlot, string extension)
     {
         var scheduleSuffix = string.IsNullOrWhiteSpace(scheduleSlot) ? string.Empty : $"_{scheduleSlot}";
-        return $"{baseName}_{_databaseProvider.Key}_{nowLocal:yyyyMMdd_HHmmss_fff}_{trigger}{scheduleSuffix}{extension}";
+        return $"{baseName}_{_databaseProvider.Key}_{nowLocal:yyyyMMdd_HHmmss_fff}_{Guid.NewGuid():N}_{trigger}{scheduleSuffix}{extension}";
     }
 
     private static DatabaseBackupFileInfo? BuildFileInfo(string filePath, string rootDirectory)
