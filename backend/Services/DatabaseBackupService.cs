@@ -709,6 +709,20 @@ public sealed class DatabaseBackupService
                     partError = $"Обязательная часть backup set повреждена: {part.RelativePath}.";
                     break;
                 }
+                if (part.Kind == "file-references" && manifest.FormatVersion >= 2)
+                {
+                    try
+                    {
+                        partStream.Position = 0;
+                        await foreach (var _ in DatabaseBackupInventoryReader.ReadAsync(partStream, cancellationToken)) { }
+                    }
+                    catch (Exception ex) when (ex is JsonException or InvalidDataException)
+                    {
+                        verified = false;
+                        partError = ex.Message;
+                        break;
+                    }
+                }
                 if (part.FileEntryHashFormat == DatabaseBackupArchiveHash.Format)
                 {
                     try

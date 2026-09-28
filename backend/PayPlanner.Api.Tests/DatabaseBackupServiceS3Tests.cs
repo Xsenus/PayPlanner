@@ -20,6 +20,36 @@ namespace PayPlanner.Api.Tests;
 public sealed class DatabaseBackupServiceS3Tests
 {
     [Theory]
+    [InlineData("missing")]
+    [InlineData("count")]
+    [InlineData("version")]
+    public async Task SnapshotInventorySchemaCannotBeBypassedWithUpdatedPartChecksum(string corruption)
+    {
+        await using var scope = await CreateScopeAsync();
+        var backups = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        var created = await backups.CreateManualBackupAsync();
+        var manifest = await backups.ReadVerifiedManifestAsync(created.Backup.RelativePath);
+        var part = Assert.Single(manifest.Parts!, item => item.Kind == "file-references");
+        var path = backups.ResolveBackupPath(part.RelativePath)!;
+        var node = System.Text.Json.Nodes.JsonNode.Parse(await File.ReadAllTextAsync(path))!;
+        if (corruption == "missing") node.AsObject().Remove("storedFiles");
+        else if (corruption == "count") node["storedFileCount"] = 1;
+        else node["formatVersion"] = 2;
+        await File.WriteAllTextAsync(path, node.ToJsonString());
+        var changedPart = part with
+        {
+            SizeBytes = new FileInfo(path).Length,
+            Sha256 = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(path)))
+        };
+        await File.WriteAllTextAsync(backups.ResolveBackupPath(created.Backup.RelativePath)! + ".manifest.json",
+            JsonSerializer.Serialize(manifest with { Parts = manifest.Parts!.Select(item => item == part ? changedPart : item).ToArray() },
+                new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+        var verification = await backups.VerifyBackupAsync(created.Backup.RelativePath);
+        Assert.False(verification.Verified);
+        Assert.Equal("mismatch", verification.Status);
+    }
+
+    [Theory]
     [InlineData(1)]
     [InlineData(2)]
     public async Task HistoricalFileArchivesWithoutEntryHashesStillRestore(int version)
