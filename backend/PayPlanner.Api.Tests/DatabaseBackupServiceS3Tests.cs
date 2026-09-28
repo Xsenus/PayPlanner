@@ -20,6 +20,58 @@ namespace PayPlanner.Api.Tests;
 public sealed class DatabaseBackupServiceS3Tests
 {
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task VerifiedSelectionKeepsCheckedManifestWhenDescriptionIsReplaced(bool deleteDescription)
+    {
+        await using var scope = await CreateScopeAsync();
+        var backups = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        var created = await backups.CreateManualBackupAsync();
+        var expected = await backups.ReadVerifiedManifestAsync(created.Backup.RelativePath);
+        var core = typeof(DatabaseBackupService).GetMethod("VerifyBackupCoreAsync",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        var operation = (Task)core.Invoke(backups, [created.Backup.RelativePath, CancellationToken.None])!;
+        await operation;
+        var selection = operation.GetType().GetProperty("Result")!.GetValue(operation)!;
+        var verification = (DatabaseBackupVerificationResult)selection.GetType().GetProperty("Verification")!.GetValue(selection)!;
+        Assert.True(verification.Verified);
+
+        var manifestPath = backups.ResolveBackupPath(created.Backup.RelativePath)! + ".manifest.json";
+        Assert.True(File.Exists(manifestPath));
+        if (deleteDescription) File.Delete(manifestPath);
+        else await File.WriteAllTextAsync(manifestPath, JsonSerializer.Serialize(expected with
+        {
+            BackupId = "unverified replacement",
+            RecoveryKeyReference = "unverified key",
+            Parts = []
+        }, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+
+        var selected = (DatabaseBackupManifest)selection.GetType().GetProperty("Manifest")!.GetValue(selection)!;
+        Assert.Equal(expected.BackupId, selected.BackupId);
+        Assert.Equal(expected.RecoveryKeyReference, selected.RecoveryKeyReference);
+        Assert.Equal(JsonSerializer.Serialize(expected.Parts), JsonSerializer.Serialize(selected.Parts));
+        await Assert.ThrowsAsync<InvalidDataException>(() => backups.ReadVerifiedManifestAsync(created.Backup.RelativePath));
+    }
+
+    [Fact]
+    public async Task FailedVerificationNeverExposesSelectedManifest()
+    {
+        await using var scope = await CreateScopeAsync();
+        var backups = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        var created = await backups.CreateManualBackupAsync();
+        await File.AppendAllTextAsync(backups.ResolveBackupPath(created.Backup.RelativePath)!, "corruption");
+        var core = typeof(DatabaseBackupService).GetMethod("VerifyBackupCoreAsync",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        var operation = (Task)core.Invoke(backups, [created.Backup.RelativePath, CancellationToken.None])!;
+        await operation;
+        var selection = operation.GetType().GetProperty("Result")!.GetValue(operation)!;
+        var verification = (DatabaseBackupVerificationResult)selection.GetType().GetProperty("Verification")!.GetValue(selection)!;
+        Assert.False(verification.Verified);
+        Assert.Null(selection.GetType().GetProperty("Manifest")!.GetValue(selection));
+        await Assert.ThrowsAsync<InvalidDataException>(() => backups.ReadVerifiedManifestAsync(created.Backup.RelativePath));
+    }
+
+    [Theory]
     [InlineData("entry")]
     [InlineData("identity")]
     [InlineData("hash")]

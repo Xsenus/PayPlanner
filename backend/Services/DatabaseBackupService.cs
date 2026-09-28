@@ -580,7 +580,20 @@ public sealed class DatabaseBackupService
     public async Task<DatabaseBackupVerificationResult> VerifyBackupAsync(
         string? relativePath,
         CancellationToken cancellationToken = default)
+        => (await VerifyBackupCoreAsync(relativePath, cancellationToken)).Verification;
+
+    private sealed record VerifiedBackupSelection(
+        DatabaseBackupVerificationResult Verification,
+        DatabaseBackupManifest? Manifest);
+
+    private async Task<VerifiedBackupSelection> VerifyBackupCoreAsync(
+        string? relativePath,
+        CancellationToken cancellationToken)
     {
+        VerifiedBackupSelection Select(DatabaseBackupVerificationResult verification,
+            DatabaseBackupManifest? selectedManifest = null)
+            => new(verification, verification.Verified ? selectedManifest : null);
+
         var resolvedPath = ResolveBackupPath(relativePath);
         if (string.IsNullOrWhiteSpace(resolvedPath))
         {
@@ -591,7 +604,7 @@ public sealed class DatabaseBackupService
         var manifestPath = GetManifestPath(resolvedPath);
         if (!File.Exists(manifestPath))
         {
-            return new DatabaseBackupVerificationResult(
+            return Select(new DatabaseBackupVerificationResult(
                 "legacyUnverified",
                 false,
                 Path.GetRelativePath(_backupRootDirectory, resolvedPath).Replace('\\', '/'),
@@ -600,7 +613,7 @@ public sealed class DatabaseBackupService
                 null,
                 null,
                 null,
-                "Для legacy-копии отсутствует manifest с контрольной суммой.");
+                "Для legacy-копии отсутствует manifest с контрольной суммой."));
         }
 
         DatabaseBackupManifest? manifest;
@@ -611,7 +624,7 @@ public sealed class DatabaseBackupService
         }
         catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
         {
-            return new DatabaseBackupVerificationResult(
+            return Select(new DatabaseBackupVerificationResult(
                 "invalidManifest",
                 false,
                 Path.GetRelativePath(_backupRootDirectory, resolvedPath).Replace('\\', '/'),
@@ -620,12 +633,12 @@ public sealed class DatabaseBackupService
                 null,
                 null,
                 null,
-                ex.Message);
+                ex.Message));
         }
 
         if (manifest is null || manifest.FormatVersion is not (1 or 2 or 3 or 4))
         {
-            return new DatabaseBackupVerificationResult(
+            return Select(new DatabaseBackupVerificationResult(
                 "invalidManifest",
                 false,
                 Path.GetRelativePath(_backupRootDirectory, resolvedPath).Replace('\\', '/'),
@@ -634,11 +647,11 @@ public sealed class DatabaseBackupService
                 manifest?.SizeBytes,
                 null,
                 manifest?.Sha256,
-                "Manifest отсутствует или имеет неподдерживаемую версию.");
+                "Manifest отсутствует или имеет неподдерживаемую версию."));
         }
         if (!string.Equals(manifest.Status, "complete", StringComparison.OrdinalIgnoreCase))
         {
-            return new DatabaseBackupVerificationResult(
+            return Select(new DatabaseBackupVerificationResult(
                 "invalidManifest",
                 false,
                 Path.GetRelativePath(_backupRootDirectory, resolvedPath).Replace('\\', '/'),
@@ -647,7 +660,7 @@ public sealed class DatabaseBackupService
                 manifest.SizeBytes,
                 null,
                 manifest.Sha256,
-                "Резервная копия не помечена как завершённая.");
+                "Резервная копия не помечена как завершённая."));
         }
 
         try
@@ -688,9 +701,9 @@ public sealed class DatabaseBackupService
         }
         catch (InvalidDataException ex)
         {
-            return new DatabaseBackupVerificationResult("invalidManifest", false,
+            return Select(new DatabaseBackupVerificationResult("invalidManifest", false,
                 Path.GetRelativePath(_backupRootDirectory, resolvedPath).Replace('\\', '/'), manifest.BackupId,
-                actualSize, manifest.SizeBytes, null, manifest.Sha256, ex.Message);
+                actualSize, manifest.SizeBytes, null, manifest.Sha256, ex.Message));
         }
 
         var actualSha256 = await ComputeSha256Async(resolvedPath, cancellationToken);
@@ -779,7 +792,7 @@ public sealed class DatabaseBackupService
                 partError = ex.Message;
             }
         }
-        return new DatabaseBackupVerificationResult(
+        return Select(new DatabaseBackupVerificationResult(
             verified ? "verified" : "mismatch",
             verified,
             Path.GetRelativePath(_backupRootDirectory, resolvedPath).Replace('\\', '/'),
@@ -788,23 +801,21 @@ public sealed class DatabaseBackupService
             manifest.SizeBytes,
             actualSha256,
             manifest.Sha256,
-            verified ? null : partError ?? "Размер, имя файла или контрольная сумма не совпадают с manifest.");
+            verified ? null : partError ?? "Размер, имя файла или контрольная сумма не совпадают с manifest."), manifest);
     }
 
     public async Task<DatabaseBackupManifest> ReadVerifiedManifestAsync(
         string? relativePath,
         CancellationToken cancellationToken = default)
     {
-        var verification = await VerifyBackupAsync(relativePath, cancellationToken);
-        if (!verification.Verified)
+        var selection = await VerifyBackupCoreAsync(relativePath, cancellationToken);
+        if (!selection.Verification.Verified)
         {
-            throw new InvalidDataException(verification.Error ?? "Резервная копия не прошла проверку manifest.");
+            throw new InvalidDataException(selection.Verification.Error ?? "Резервная копия не прошла проверку manifest.");
         }
 
-        var resolvedPath = ResolveBackupPath(relativePath)
-            ?? throw new FileNotFoundException("Резервная копия не найдена.");
-        await using var stream = File.OpenRead(GetManifestPath(resolvedPath));
-        return await JsonSerializer.DeserializeAsync<DatabaseBackupManifest>(stream, JsonOptions, cancellationToken)
+        // Return the exact description whose parts were checked, never a second path read.
+        return selection.Manifest
             ?? throw new InvalidDataException("Manifest резервной копии пуст.");
     }
 
