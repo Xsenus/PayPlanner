@@ -23,8 +23,6 @@ public sealed class LegacyLocalStorageProvider : IStorageProvider, ILegacyLocalS
         };
         _roots = candidates
             .Select(item => new KeyValuePair<string, string>(item.Key, Path.GetFullPath(item.Value)))
-            .GroupBy(item => item.Value, OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal)
-            .Select(group => group.First())
             .ToDictionary(item => item.Key, item => item.Value, StringComparer.OrdinalIgnoreCase);
     }
 
