@@ -19,6 +19,66 @@ namespace PayPlanner.Api.Tests;
 
 public sealed class DatabaseBackupServiceS3Tests
 {
+    [Fact]
+    public async Task RefusedArchivePublicationDoesNotDeleteForeignDestination()
+    {
+        var reader = new FaultingBackupDirectoryReader();
+        await using var scope = await CreateScopeAsync(reader);
+        string? foreignPath = null;
+        reader.OnFilesRead = directory =>
+        {
+            if (foreignPath is not null || directory != Path.Combine(scope.Root, "files")) return;
+            var dump = Directory.EnumerateFiles(Path.Combine(scope.Root, "backups"), "*", SearchOption.AllDirectories)
+                .Single(path => path.EndsWith(".sqlite", StringComparison.Ordinal) || path.EndsWith(".zip", StringComparison.Ordinal));
+            foreignPath = dump + ".fileset";
+            File.WriteAllText(foreignPath, "foreign destination must survive");
+        };
+        var backups = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        await Assert.ThrowsAsync<IOException>(() => backups.CreateManualBackupAsync());
+        Assert.NotNull(foreignPath);
+        Assert.Equal("foreign destination must survive", await File.ReadAllTextAsync(foreignPath!));
+        Assert.Empty((await backups.GetOverviewAsync()).Items);
+        Assert.Empty(Directory.EnumerateFiles(Path.Combine(scope.Root, "backups"), "*.references", SearchOption.AllDirectories));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task NativePhotoMustBePresentBeforeBackupIsPublished(bool present)
+    {
+        await using var scope = await CreateScopeAsync();
+        var photoDirectory = Path.Combine(scope.Root, "files", "user-photos");
+        Directory.CreateDirectory(photoDirectory);
+        if (present) await File.WriteAllTextAsync(Path.Combine(photoDirectory, "photo.png"), "photo evidence");
+        await using (var db = await scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContextAsync())
+        {
+            db.Users.Add(new User
+            {
+                Email = "photo-coverage@local.test",
+                PasswordHash = "test",
+                Role = new Role { Name = "coverage" },
+                PhotoUrl = "/user-photos/photo.png"
+            });
+            await db.SaveChangesAsync();
+        }
+        var backups = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        if (present)
+        {
+            var created = await backups.CreateManualBackupAsync();
+            Assert.True((await backups.VerifyBackupAsync(created.Backup.RelativePath)).Verified);
+        }
+        else
+        {
+            var error = await Assert.ThrowsAsync<InvalidDataException>(() => backups.CreateManualBackupAsync());
+            Assert.Contains("отсутствует", error.Message, StringComparison.Ordinal);
+            Assert.Empty((await backups.GetOverviewAsync()).Items);
+            Assert.Empty(Directory.EnumerateFiles(Path.Combine(scope.Root, "backups"), "*.references", SearchOption.AllDirectories));
+            Assert.Empty(Directory.EnumerateFiles(Path.Combine(scope.Root, "backups"), "*.fileset", SearchOption.AllDirectories));
+        }
+        await using var original = await scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContextAsync();
+        Assert.Equal("/user-photos/photo.png", (await original.Users.SingleAsync()).PhotoUrl);
+    }
+
     [Theory]
     [InlineData("path")]
     [InlineData("missing")]
@@ -2485,9 +2545,11 @@ public sealed class DatabaseBackupServiceS3Tests
         public string? DeniedSubdirectoriesDirectory { get; set; }
         public int DeniedFilesCount { get; private set; }
         public int DeniedSubdirectoriesCount { get; private set; }
+        public Action<string>? OnFilesRead { get; set; }
 
         public IReadOnlyList<string> GetFiles(string directory, string pattern)
         {
+            OnFilesRead?.Invoke(directory);
             if (string.Equals(directory, DeniedFilesDirectory, StringComparison.OrdinalIgnoreCase))
             {
                 DeniedFilesCount++;

@@ -916,10 +916,11 @@ public sealed class DatabaseBackupService
                 ? await CreateSqliteBackupAsync(targetDirectory, settings.Format, nowLocal, trigger, scheduleSlot, snapshotParts, cancellationToken)
                 : await CreatePostgreSqlBackupAsync(targetDirectory, settings.Format, settings.ToolCommand, nowLocal, trigger, scheduleSlot, snapshotParts, cancellationToken);
 
+            IReadOnlyList<DatabaseBackupPartManifest> additionalParts = [];
             try
             {
                 await UpdateBackupAttemptAsync(attemptId, "files", cancellationToken);
-                var additionalParts = await CreateFileStorageArchiveAsync(fileInfo, cancellationToken);
+                additionalParts = await CreateFileStorageArchiveAsync(fileInfo, snapshotParts.Single(part => part.Kind == "file-references"), cancellationToken);
                 await UpdateBackupAttemptAsync(attemptId, "verifying", cancellationToken);
                 await WriteBackupManifestAsync(fileInfo, settings.Format.Key, [.. snapshotParts, .. additionalParts], cancellationToken);
             }
@@ -929,7 +930,11 @@ public sealed class DatabaseBackupService
                 var incompletePath = ResolveBackupPath(fileInfo.RelativePath);
                 if (incompletePath is not null)
                 {
-                    TryDeleteFile($"{incompletePath}.fileset");
+                    foreach (var part in additionalParts)
+                    {
+                        var ownedPartPath = ResolveBackupPath(part.RelativePath);
+                        if (ownedPartPath is not null) TryDeleteFile(ownedPartPath);
+                    }
                     TryDeleteFile($"{incompletePath}.references");
                     TryDeleteFile(GetManifestPath(incompletePath));
                     TryDeleteFile(incompletePath);
@@ -2428,6 +2433,7 @@ public sealed class DatabaseBackupService
 
     private async Task<IReadOnlyList<DatabaseBackupPartManifest>> CreateFileStorageArchiveAsync(
         DatabaseBackupFileInfo backup,
+        DatabaseBackupPartManifest referencePart,
         CancellationToken cancellationToken)
     {
         if (!_configuration.GetValue("DatabaseBackup:IncludeFileStorage", true))
@@ -2453,6 +2459,7 @@ public sealed class DatabaseBackupService
         var layout = DatabaseBackupFileLayout.Create(candidates, _backupRootDirectory);
         if (layout.ArchiveRoots.Count == 0)
         {
+            await ValidateNativeFileCoverageAsync(referencePart, layout, null, cancellationToken);
             return [];
         }
 
@@ -2460,11 +2467,14 @@ public sealed class DatabaseBackupService
             ?? throw new InvalidOperationException("Созданная резервная копия недоступна для file backup set.");
         var archivePath = $"{backupPath}.fileset";
         var temporaryPath = $"{archivePath}.{Guid.NewGuid():N}.tmp";
+        var published = false;
+        var temporaryCreated = false;
         try
         {
             await using (var output = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, true))
-            using (var archive = new ZipArchive(output, ZipArchiveMode.Create, leaveOpen: false))
             {
+                temporaryCreated = true;
+                using var archive = new ZipArchive(output, ZipArchiveMode.Create, leaveOpen: false);
                 foreach (var root in layout.ArchiveRoots)
                 {
                     foreach (var filePath in EnumerateFilesSafely(root.Path, layout, cancellationToken))
@@ -2480,23 +2490,31 @@ public sealed class DatabaseBackupService
                     }
                 }
             }
-            File.Move(temporaryPath, archivePath, overwrite: true);
+            await using (var archiveStream = new FileStream(temporaryPath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, true))
+            using (var archive = new ZipArchive(archiveStream, ZipArchiveMode.Read))
+                await ValidateNativeFileCoverageAsync(referencePart, layout, archive, cancellationToken);
+            File.Move(temporaryPath, archivePath, overwrite: false);
+            published = true;
+            var info = new FileInfo(archivePath);
+            return
+            [
+                new DatabaseBackupPartManifest(
+                    "file-storage",
+                    Path.GetRelativePath(_backupRootDirectory, archivePath).Replace('\\', '/'),
+                    info.Length,
+                    await ComputeSha256Async(archivePath, cancellationToken),
+                    true, layout.RootMappings, DatabaseBackupArchiveHash.Format),
+            ];
+        }
+        catch
+        {
+            if (published) TryDeleteFile(archivePath);
+            throw;
         }
         finally
         {
-            TryDeleteFile(temporaryPath);
+            if (temporaryCreated) TryDeleteFile(temporaryPath);
         }
-
-        var info = new FileInfo(archivePath);
-        return
-        [
-            new DatabaseBackupPartManifest(
-                "file-storage",
-                Path.GetRelativePath(_backupRootDirectory, archivePath).Replace('\\', '/'),
-                info.Length,
-                await ComputeSha256Async(archivePath, cancellationToken),
-                true, layout.RootMappings, DatabaseBackupArchiveHash.Format),
-        ];
     }
 
     private static async Task<string> ComputeSha256Async(string path, CancellationToken cancellationToken)
@@ -2504,6 +2522,26 @@ public sealed class DatabaseBackupService
         await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, true);
         var hash = await SHA256.HashDataAsync(stream, cancellationToken);
         return Convert.ToHexString(hash).ToLowerInvariant();
+    }
+
+    private async Task ValidateNativeFileCoverageAsync(DatabaseBackupPartManifest referencePart,
+        DatabaseBackupFileLayout layout, ZipArchive? archive, CancellationToken cancellationToken)
+    {
+        var path = ResolveBackupPath(referencePart.RelativePath)
+            ?? throw new FileNotFoundException("Перечень документов резервной копии недоступен.");
+        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, true);
+        await VerifyInventoryStreamAsync();
+        stream.Position = 0;
+        await DatabaseBackupNativeFileCoverage.ValidateAsync(stream, archive, new(layout), cancellationToken);
+        await VerifyInventoryStreamAsync();
+
+        async Task VerifyInventoryStreamAsync()
+        {
+            stream.Position = 0;
+            var hash = Convert.ToHexString(await SHA256.HashDataAsync(stream, cancellationToken));
+            if (stream.Length != referencePart.SizeBytes || !string.Equals(hash, referencePart.Sha256, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("Перечень документов изменился после чтения снимка базы.");
+        }
     }
 
     private static bool IsPathWithin(string path, string root)

@@ -35,6 +35,8 @@ public sealed class DatabaseBackupFileLayoutTests : IDisposable
             Assert.Equal(Path.GetFullPath(Path.Combine(first, "files", "evidence.txt")), pinned);
             Assert.Equal("first", File.ReadAllText(pinned));
             Assert.Equal("files/evidence.txt", layout.GetArchiveEntryPath(Path.Combine(alias, "files", "evidence.txt")));
+            Assert.True(layout.TryGetRelativeFilePath("files", Path.Combine(alias, "files", "evidence.txt"), out var relative));
+            Assert.Equal("evidence.txt", relative);
             Assert.Equal(Path.GetFullPath(Path.Combine(first, "files")), Assert.Single(layout.ArchiveRoots).Path);
         }
         finally { Directory.Delete(alias); }

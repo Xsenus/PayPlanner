@@ -102,15 +102,26 @@ public sealed class DatabaseBackupFileLayout
     public bool IsExcludedPhysicalPath(string path)
         => IsWithin(NormalizeAbsolutePath(path), excludedDirectory);
 
+    public bool ContainsLogicalRoot(string name) => logicalRootPaths.ContainsKey(name);
+
+    /// <summary>Maps an original absolute alias only within the requested logical root.</summary>
+    public bool TryGetRelativeFilePath(string logicalRootName, string absolutePath, out string relativePath)
+    {
+        relativePath = string.Empty;
+        if (!logicalRootPaths.TryGetValue(logicalRootName, out var root)) return false;
+        if (!Path.IsPathFullyQualified(absolutePath))
+            throw new InvalidDataException("Ожидался абсолютный путь файловой ссылки.");
+        var path = ResolveFileAlias(absolutePath);
+        if (!IsWithin(path, root)) return false;
+        relativePath = ToArchiveRelativePath(Path.GetRelativePath(root, path));
+        // Reuse the relative-path and excluded-directory boundary, including root-as-file rejection.
+        _ = GetPhysicalFilePath(logicalRootName, relativePath);
+        return true;
+    }
+
     public string GetArchiveEntryPath(string physicalFilePath, string? archiveRootName = null)
     {
-        var path = NormalizeAbsolutePath(physicalFilePath);
-        foreach (var alias in rootAliases)
-        {
-            if (!IsWithin(path, alias.Alias)) continue;
-            path = Path.GetFullPath(Path.Combine(alias.Physical, Path.GetRelativePath(alias.Alias, path)));
-            break;
-        }
+        var path = ResolveFileAlias(physicalFilePath);
         if (IsWithin(path, excludedDirectory))
             throw new InvalidDataException("Обязательный файл находится в исключённом каталоге резервных копий.");
         var root = archiveRootName is null
@@ -121,6 +132,18 @@ public sealed class DatabaseBackupFileLayout
         var relative = ToArchiveRelativePath(Path.GetRelativePath(root.Path, path));
         if (relative == ".") throw new InvalidDataException("Вместо файла указан файловый корень.");
         return $"{root.Name}/{relative}";
+    }
+
+    private string ResolveFileAlias(string physicalFilePath)
+    {
+        var path = NormalizeAbsolutePath(physicalFilePath);
+        foreach (var alias in rootAliases)
+        {
+            if (!IsWithin(path, alias.Alias)) continue;
+            path = Path.GetFullPath(Path.Combine(alias.Physical, Path.GetRelativePath(alias.Alias, path)));
+            break;
+        }
+        return path;
     }
 
     public static void ValidateRootMappings(IReadOnlyList<DatabaseBackupFileRootMapping> mappings)
