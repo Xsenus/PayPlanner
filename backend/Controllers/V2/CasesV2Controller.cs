@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -18,10 +19,12 @@ using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.Documents;
+using static PayPlanner.Api.Services.Documents.CaseDocumentTemplateCatalog;
 using PayPlanner.Api.Services.Invoices;
 using PayPlanner.Api.Services.LegalIntegrations;
 using PayPlanner.Api.Services.LegalIntegrations.Models;
 using PayPlanner.Api.Services.Notifications;
+using PayPlanner.Api.Services.Storage;
 
 namespace PayPlanner.Api.Controllers.V2;
 
@@ -42,7 +45,6 @@ public partial class CasesV2Controller : ControllerBase
     private const string CaseConversationDocumentStatus = "Прикреплен к сообщению";
     private const string CaseHistoryCommentPrefix = "Комментарий по делу:";
     private const string CaseHistoryAuthorMarker = "Автор:";
-    private const string CaseDocumentTemplatesSettingKey = "cases.documentTemplates";
     private const int CaseDocumentTemplateHistoryObjectId = 4;
     private const string CaseProductionCalendarSettingKey = "cases.productionCalendar";
     private const string CaseInactivityAutomationEnabledSettingKey = "tasks.automation.caseControl.enabled";
@@ -52,7 +54,6 @@ public partial class CasesV2Controller : ControllerBase
     [
         "new", "inProgress", "waiting", "onApproval", "approved", "revision", "overdueApproval"
     ];
-    private static readonly JsonSerializerOptions CaseDocumentTemplateJsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly HashSet<string> AllowedCasePriorities = new(StringComparer.OrdinalIgnoreCase)
     {
         "low",
@@ -60,17 +61,6 @@ public partial class CasesV2Controller : ControllerBase
         "high",
         "urgent",
     };
-    private static readonly CaseDocumentTemplateDefinition[] CaseDocumentTemplateDefinitions =
-    [
-        new("case-summary", "Справка по делу", "Карточка дела", "Справка по делу"),
-        new("claim", "Исковое заявление", "Иск", "Исковое заявление"),
-        new("motion", "Ходатайство", "Ходатайство", "Ходатайство"),
-        new("objection", "Возражение", "Возражение", "Возражение"),
-        new("court-letter", "Письмо в суд", "Переписка", "Письмо в суд"),
-        new("power-of-attorney", "Доверенность", "Доверенность", "Доверенность"),
-        new("application", "Заявление", "Заявление", "Заявление"),
-        new("procedural-document", "Процессуальный документ", "Процессуальный документ", "Процессуальный документ"),
-    ];
     private static readonly CaseDocumentTemplateTokenDefinition[] CaseDocumentTemplateTokens =
     [
         new("case.id", "Дело", "Внутренний ID дела."),
@@ -134,6 +124,12 @@ public partial class CasesV2Controller : ControllerBase
     private readonly CourtSyncMetrics? _courtSyncMetrics;
     private readonly IExternalWorkOrderApprovalService? _externalWorkOrderApprovalService;
     private readonly IRealtimeNotificationPublisher _realtimePublisher;
+    private readonly IProductStorageReader? _productStorageReader;
+    private readonly IProductStorageDeletionService? _productStorageDeletion;
+    private readonly IManagedCaseDocumentUploadService? _managedCaseUploads;
+    private readonly ICaseDocumentUploadStatusReader? _caseUploadStatusReader;
+    private readonly CaseDocumentUploadRetirementService _caseUploadRetirement;
+    private readonly GeneratedFinancialDocumentPublication? _financialDocumentPublication;
     private Task<SectionAccessContext?>? _casesAccessTask;
     private Task<bool>? _canViewCaseFinanceTask;
     private CaseStatusClock? _caseStatusClock;
@@ -150,9 +146,21 @@ public partial class CasesV2Controller : ControllerBase
         INotificationService? notificationService = null,
         CourtSyncMetrics? courtSyncMetrics = null,
         IExternalWorkOrderApprovalService? externalWorkOrderApprovalService = null,
-        IRealtimeNotificationPublisher? realtimePublisher = null)
+        IRealtimeNotificationPublisher? realtimePublisher = null,
+        IProductStorageReader? productStorageReader = null,
+        IProductStorageDeletionService? productStorageDeletion = null,
+        IManagedCaseDocumentUploadService? managedCaseUploads = null,
+        ICaseDocumentUploadStatusReader? caseUploadStatusReader = null,
+        CaseDocumentUploadRetirementService? caseUploadRetirement = null,
+        GeneratedFinancialDocumentPublication? financialDocumentPublication = null)
     {
         _db = db;
+        _productStorageReader = productStorageReader;
+        _productStorageDeletion = productStorageDeletion;
+        _managedCaseUploads = managedCaseUploads;
+        _caseUploadStatusReader = caseUploadStatusReader;
+        _caseUploadRetirement = caseUploadRetirement ?? new CaseDocumentUploadRetirementService(db);
+        _financialDocumentPublication = financialDocumentPublication;
         _caseDocumentStorage = caseDocumentStorage ?? new LocalCaseDocumentStorage(environment, configuration);
         _pdfService = pdfService;
         _sudrfCourtSyncService = sudrfCourtSyncService;
@@ -1799,74 +1807,8 @@ public partial class CasesV2Controller : ControllerBase
             : clientCase.Title;
     }
 
-    private async Task<IReadOnlyCollection<int>> ResolveCaseNotificationRecipientIdsAsync(int clientCaseId, CancellationToken ct)
-    {
-        var caseAccess = await _db.ClientCases
-            .AsNoTracking()
-            .Where(clientCase => clientCase.Id == clientCaseId)
-            .Select(clientCase => new
-            {
-                clientCase.ResponsibleUserId,
-                ClientResponsibleUserId = clientCase.Client != null ? clientCase.Client.ResponsibleUserId : null,
-                LegalEntityResponsibleUserId = clientCase.LegalEntity != null ? clientCase.LegalEntity.ResponsibleUserId : null,
-                clientCase.IsHiddenFromExecutor,
-            })
-            .SingleOrDefaultAsync(ct);
-        if (caseAccess is null)
-        {
-            return Array.Empty<int>();
-        }
-
-        var responsibleUserIds = new[]
-            {
-                caseAccess.ResponsibleUserId,
-                caseAccess.ClientResponsibleUserId,
-                caseAccess.LegalEntityResponsibleUserId,
-            }
-            .Where(userId => userId.HasValue && userId.Value > 0)
-            .Select(userId => userId!.Value)
-            .Distinct()
-            .ToArray();
-        if (responsibleUserIds.Length == 0)
-        {
-            return Array.Empty<int>();
-        }
-
-        var allowedUserIds = await _db.Users
-            .AsNoTracking()
-            .Where(user => responsibleUserIds.Contains(user.Id)
-                && user.IsActive
-                && user.IsApproved
-                && user.Role != null
-                && (user.Role.Name == "admin"
-                    || user.Role.Permissions.Any(permission =>
-                        permission.Section == RolePermissionCatalog.Cases
-                        && permission.CanView)))
-            .Select(user => user.Id)
-            .ToListAsync(ct);
-
-        var visibilityByUserId = await _db.ResolveDataVisibilitiesForUsersAsync(
-            allowedUserIds,
-            RolePermissionCatalog.Cases,
-            ct);
-        var result = new List<int>(allowedUserIds.Count);
-        foreach (var userId in allowedUserIds)
-        {
-            if (!visibilityByUserId.TryGetValue(userId, out var visibility) || visibility is null)
-            {
-                continue;
-            }
-
-            var canOpenCase = visibility.SeesAll
-                || (!caseAccess.IsHiddenFromExecutor && responsibleUserIds.Any(visibility.CanSeeUser));
-            if (canOpenCase)
-            {
-                result.Add(userId);
-            }
-        }
-
-        return result;
-    }
+    private Task<IReadOnlyCollection<int>> ResolveCaseNotificationRecipientIdsAsync(int clientCaseId, CancellationToken ct)
+        => CaseNotificationRecipients.ResolveAsync(_db, clientCaseId, ct);
 
     private async Task AddCourtEventUserNotificationsAsync(
         ClientCase clientCase,
@@ -2167,110 +2109,12 @@ public partial class CasesV2Controller : ControllerBase
             .ToString("dd.MM.yyyy HH:mm", culture);
     }
 
-    private async Task AddCaseDocumentUserNotificationsAsync(
-        ClientCase clientCase,
-        ClientCaseDocument document,
-        string action,
-        int? actorUserId,
-        string actorName,
-        CancellationToken ct)
-    {
-        var recipientUserIds = await ResolveCaseNotificationRecipientIdsAsync(clientCase.Id, ct);
-        if (recipientUserIds.Count == 0)
-        {
-            return;
-        }
+    private Task AddCaseDocumentUserNotificationsAsync(ClientCase clientCase, ClientCaseDocument document,
+        string action, int? actorUserId, string actorName, CancellationToken ct)
+        => CreateCaseDocumentNotifications().NotifyAsync(clientCase, document, action, actorUserId, actorName, ct);
 
-        if (_notificationService is not null)
-        {
-            await _notificationService.NotifyCaseDocumentAsync(
-                clientCase,
-                document,
-                action,
-                actorName,
-                actorUserId ?? 0,
-                recipientUserIds,
-                ct);
-            return;
-        }
-
-        var title = action switch
-        {
-            "uploaded" => $"Загружен документ: {BuildCaseNotificationTitle(clientCase)}",
-            "version-created" => $"Новая версия документа: {BuildCaseNotificationTitle(clientCase)}",
-            "generated" => $"Сформирован документ: {BuildCaseNotificationTitle(clientCase)}",
-            "updated" => $"Обновлен документ: {BuildCaseNotificationTitle(clientCase)}",
-            "deleted" => $"Удален документ: {BuildCaseNotificationTitle(clientCase)}",
-            _ => $"Документ дела: {BuildCaseNotificationTitle(clientCase)}",
-        };
-        var body = BuildCaseDocumentNotificationBody(clientCase, document, action, actorName);
-        var eventKey = $"case:{clientCase.Id}:document:{document.Id}:{action}:{DateTime.UtcNow.Ticks}";
-        var metadata = new
-        {
-            clientCaseId = clientCase.Id,
-            clientCaseDocumentId = document.Id,
-            action,
-            actorUserId,
-            documentKey = document.DocumentKey,
-            version = document.Version,
-            documentType = document.DocumentType,
-            status = document.Status,
-            fileName = document.OriginalFileName,
-        };
-
-        foreach (var recipientUserId in recipientUserIds.OrderBy(static id => id))
-        {
-            await AddCaseUserNotificationAsync(
-                recipientUserId,
-                UserNotificationTypes.CaseDocument,
-                eventKey,
-                title,
-                body,
-                "emerald",
-                clientCase,
-                metadata,
-                ct);
-        }
-    }
-
-    private static string BuildCaseDocumentNotificationBody(
-        ClientCase clientCase,
-        ClientCaseDocument document,
-        string action,
-        string actorName)
-    {
-        var actionText = action switch
-        {
-            "uploaded" => "В дело загружен документ.",
-            "version-created" => "В дело загружена новая версия документа.",
-            "generated" => "В деле сформирован документ.",
-            "updated" => "В деле обновлена карточка документа.",
-            "deleted" => "Из дела удален документ.",
-            _ => "В деле изменен документ.",
-        };
-
-        return new StringBuilder()
-            .Append(actionText)
-            .AppendLine()
-            .Append("Дело: ")
-            .Append(BuildCaseNotificationTitle(clientCase))
-            .AppendLine()
-            .Append("Документ: ")
-            .Append(document.OriginalFileName)
-            .AppendLine()
-            .Append("Тип: ")
-            .Append(document.DocumentType)
-            .AppendLine()
-            .Append("Статус: ")
-            .Append(document.Status)
-            .AppendLine()
-            .Append("Версия: ")
-            .Append(document.Version.ToString(CultureInfo.InvariantCulture))
-            .AppendLine()
-            .Append("Автор: ")
-            .Append(actorName)
-            .ToString();
-    }
+    private CaseDocumentNotificationService CreateCaseDocumentNotifications()
+        => new(_db, _notificationService, CreateFallbackNotificationService);
 
     private async Task AddCaseConversationUserNotificationsAsync(
         ClientCase clientCase,
@@ -5148,8 +4992,61 @@ public partial class CasesV2Controller : ControllerBase
         return Ok(MapDocument(document, document.Version == latestVersion, templates));
     }
 
+    [HttpGet("{id:int}/documents/uploads")]
+    public async Task<ActionResult<IReadOnlyList<CaseDocumentUploadState>>> GetDocumentUploads(int id,
+        [FromQuery] Guid[]? uploadKeys, CancellationToken ct)
+    {
+        Response.Headers.CacheControl = "no-store";
+        if (uploadKeys is null || uploadKeys.Length is < 1 or > 50 || uploadKeys.Contains(Guid.Empty))
+            return BadRequest(new { message = "Укажите от 1 до 50 корректных идентификаторов загрузки." });
+        var actor = User.GetUserId();
+        if (actor is null or <= 0) return Unauthorized();
+        if (_caseUploadStatusReader is null) return StatusCode(503);
+        var states = await _caseUploadStatusReader.ReadAsync(id, actor.Value, uploadKeys, ct);
+        return states is null ? Forbid() : Ok(states);
+    }
+
+    [HttpPost("{id:int}/documents/uploads/{uploadKey:guid}/retire")]
+    public async Task<ActionResult<CaseDocumentUploadState>> RetireDocumentUpload(int id, Guid uploadKey, CancellationToken ct)
+    {
+        Response.Headers.CacheControl = "no-store";
+        var actor = User.GetUserId();
+        if (actor is null or <= 0) return Unauthorized();
+        if (id <= 0 || uploadKey == Guid.Empty)
+            return BadRequest(new { message = "Некорректный идентификатор попытки загрузки." });
+        // A retirement result must be independently readable before exposing
+        // this action. No file/provider I/O or new upload occurs here.
+        if (_caseUploadStatusReader is null) return StatusCode(503);
+        var outcome = await _caseUploadRetirement.RetireAsync(id, actor.Value, uploadKey, ct);
+        if (outcome == "forbidden") return Forbid();
+        if (outcome is "unknown" or "notFound") return NotFound();
+        if (outcome is not ("retired" or "published")) return Conflict();
+        var states = await _caseUploadStatusReader.ReadAsync(id, actor.Value, [uploadKey], ct);
+        if (states is null) return Forbid();
+        var state = states.SingleOrDefault(item => item.UploadKey == uploadKey);
+        // Published intent alone is not a receipt. An uncertain response cannot
+        // authorize the browser to release its old retry identity.
+        return state?.Status is "retired" or "uploaded" ? Ok(state) : Conflict(state);
+    }
+
+    [HttpGet("{id:int}/documents/uploads/pending")]
+    public async Task<ActionResult<CaseDocumentUploadPage>> GetPendingDocumentUploads(int id,
+        CancellationToken ct, [FromQuery] string? after = null)
+    {
+        Response.Headers.CacheControl = "no-store";
+        var actor = User.GetUserId();
+        if (actor is null or <= 0) return Unauthorized();
+        if (_caseUploadStatusReader is null) return StatusCode(503);
+        try
+        {
+            var page = await _caseUploadStatusReader.ListPageAsync(id, actor.Value, ct, after);
+            return page is null ? Forbid() : Ok(page);
+        }
+        catch (ArgumentException) { return BadRequest(new { message = "Некорректный указатель страницы загрузок." }); }
+    }
+
     [HttpPost("{id:int}/documents")]
-    [RequestSizeLimit(MaxCaseDocumentBytes)]
+    [RequestSizeLimit(MaxCaseDocumentBytes + 1024 * 1024)]
     public async Task<ActionResult<ClientCaseDocumentDto>> UploadDocument(
         int id,
         [FromForm] IFormFile? file,
@@ -5188,7 +5085,7 @@ public partial class CasesV2Controller : ControllerBase
     }
 
     [HttpPost("/api/case-documents/{documentId:int}/versions")]
-    [RequestSizeLimit(MaxCaseDocumentBytes)]
+    [RequestSizeLimit(MaxCaseDocumentBytes + 1024 * 1024)]
     public async Task<ActionResult<ClientCaseDocumentDto>> UploadDocumentVersionById(
         int documentId,
         [FromForm] IFormFile? file,
@@ -5259,6 +5156,20 @@ public partial class CasesV2Controller : ControllerBase
             return NotFound();
         }
 
+        if (_managedCaseUploads?.Enabled == true)
+            return await GenerateManagedDocumentTemplateAsync(clientCase, request, ct);
+
+        Guid? legacyUploadKey = null;
+        var legacyActorId = User.GetUserId();
+        var legacyHeader = Request.Headers["X-Upload-Key"];
+        if (legacyActorId is > 0 && legacyHeader.Count == 1 && Guid.TryParse(legacyHeader[0], out var suppliedKey)
+            && suppliedKey != Guid.Empty)
+        {
+            legacyUploadKey = suppliedKey;
+            var blocked = await GetLegacyCaseUploadBlockAsync(clientCase.Id, legacyActorId.Value, suppliedKey, ct);
+            if (blocked is not null) return LegacyCaseUploadBlockedResult(blocked);
+        }
+
         var templateDefinitionResult = await ResolveCaseDocumentTemplateDefinitionAsync(request, ct);
         if (templateDefinitionResult.Error is not null)
         {
@@ -5283,7 +5194,7 @@ public partial class CasesV2Controller : ControllerBase
         var relativePath = _caseDocumentStorage.BuildRelativePath(id, storedFileName);
 
         var content = Encoding.UTF8.GetBytes(template.Html);
-        var result = await SaveCaseDocumentAtomicallyAsync(relativePath,
+        var result = await SaveLegacyCaseUploadAtomicallyAsync(clientCase.Id, legacyActorId, legacyUploadKey, relativePath,
             () => _caseDocumentStorage.SaveAsync(relativePath, content, ct), async () =>
         {
             var document = new ClientCaseDocument
@@ -5324,6 +5235,87 @@ public partial class CasesV2Controller : ControllerBase
         return result;
     }
 
+    private static readonly JsonSerializerOptions ManagedGeneratedDocumentJsonOptions = new(JsonSerializerDefaults.Web);
+
+    private async Task<ActionResult<ClientCaseDocumentDto>> GenerateManagedDocumentTemplateAsync(
+        ClientCase clientCase, GenerateCaseDocumentTemplateRequest? request, CancellationToken ct)
+    {
+        var header = Request.Headers["X-Upload-Key"];
+        if (header.Count != 1 || !Guid.TryParse(header[0], out var uploadKey) || uploadKey == Guid.Empty)
+            return BadRequest(new { message = "Для формирования документа требуется корректный идентификатор попытки." });
+        var actorId = User.GetUserId();
+        if (actorId is not > 0) return Unauthorized();
+        var normalized = new GenerateCaseDocumentTemplateRequest
+        {
+            TemplateKey = NormalizeOptional(request?.TemplateKey),
+            DocumentType = NormalizeOptional(request?.DocumentType),
+            Status = NormalizeRequired(request?.Status, "Подготовлен")
+        };
+        if (normalized.TemplateKey is { Length: > 64 } || normalized.DocumentType is { Length: > 120 }
+            || normalized.Status is { Length: > 120 })
+            return BadRequest(new { message = "Проверьте код шаблона, тип и статус документа." });
+        var requestJson = JsonSerializer.Serialize(new
+        {
+            version = 1,
+            caseId = clientCase.Id,
+            templateKey = normalized.TemplateKey,
+            documentType = normalized.DocumentType,
+            status = normalized.Status
+        }, ManagedGeneratedDocumentJsonOptions);
+        var requestHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(requestJson))).ToLowerInvariant();
+        var notifications = CreateCaseDocumentNotifications();
+        var templates = new GeneratedTemplateDocumentPublication(_db, new CaseDocumentPublicationRecords(_db, notifications));
+        ManagedCaseDocumentPublication atomic = (path, publish, token) => SaveCaseDocumentAtomicallyAsync(path,
+            () => Task.CompletedTask, publish, token, preserveFileOnFailure: true);
+        var managed = _managedCaseUploads!;
+        var result = await managed.TryResumeGeneratedAsync(clientCase.Id, actorId.Value, uploadKey,
+            "template", requestHash, (_, _, _) => Task.FromResult(true), templates.PersistAsync, atomic, ct,
+            templates.CanPublishAsync);
+        if (result is null)
+        {
+            var selected = await ResolveCaseDocumentTemplateDefinitionAsync(normalized, ct);
+            if (selected.Error is not null)
+                return selected.NotFound ? NotFound(new { message = selected.Error }) : BadRequest(new { message = selected.Error });
+            if (!IsCaseDocumentTemplateApplicableToCase(selected.Template, clientCase))
+                return BadRequest(new { message = "Шаблон документа не привязан к типу этого дела." });
+            var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, actorId, ct);
+            var rendered = BuildCaseDocumentTemplate(clientCase, normalized, selected.Template, timeZone);
+            var name = SanitizeFileName(rendered.FileName);
+            var bytes = Encoding.UTF8.GetBytes(rendered.Html);
+            var snapshot = new GeneratedTemplateDocumentSnapshot(1, clientCase.Id, selected.Template.Key,
+                selected.Template.Version, normalized.TemplateKey, normalized.DocumentType,
+                name, rendered.DocumentType, rendered.Status);
+            var generation = new ManagedCaseDocumentGeneration("template", requestHash,
+                JsonSerializer.Serialize(snapshot, ManagedGeneratedDocumentJsonOptions));
+            using var input = new MemoryStream(bytes, writable: false);
+            var file = new FormFile(input, 0, bytes.Length, "file", name)
+            { Headers = new HeaderDictionary(), ContentType = "text/html; charset=utf-8" };
+            result = await managed.GenerateAsync(new(clientCase.Id, actorId.Value, User.GetDisplayName(), uploadKey,
+                file, name, rendered.DocumentType, rendered.Status, rendered.DocumentKey), generation,
+                (_, _, _) => Task.FromResult(true), templates.PersistAsync, atomic, ct, templates.CanPublishAsync);
+        }
+        if (result.Status == "uploaded" && result.DocumentId.HasValue)
+        {
+            var saved = await _db.ClientCaseDocuments.AsNoTracking()
+                .SingleOrDefaultAsync(d => d.Id == result.DocumentId && d.ClientCaseId == clientCase.Id, ct);
+            if (saved is null) return NotFound();
+            var latest = !await _db.ClientCaseDocuments.AsNoTracking().AnyAsync(d =>
+                d.ClientCaseId == clientCase.Id && d.DocumentKey == saved.DocumentKey && d.Version > saved.Version, ct);
+            await notifications.FlushCommittedAsync(ct);
+            await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
+            Response.Headers["X-Upload-Key"] = uploadKey.ToString("D");
+            return Created($"/api/v2/cases/{clientCase.Id}/documents/{saved.Id}",
+                MapDocument(saved, latest, await GetCaseDocumentTemplateLibraryAsync(ct)));
+        }
+        if (result.Status == "forbidden") return Forbid();
+        if (result.Status == "notFound") return NotFound();
+        if (result.Status == "invalid") return BadRequest(new { message = "Проверьте шаблон, тип, статус и размер документа." });
+        if (result.Status == "conflict") return Conflict(new { message = "Данные этой попытки формирования документа изменились. Обновите карточку перед новой попыткой." });
+        if (result.Status == "retired") return Conflict(new { message = "Эта попытка прекращена. Начните отдельную новую попытку формирования документа." });
+        Response.Headers["Retry-After"] = "5";
+        return StatusCode(503, new { message = "Обязательные копии документа ещё не готовы или хранилище недоступно. Документ пока не добавлен; повторите тот же запрос позже." });
+    }
+
     [HttpGet("{id:int}/documents/{documentId:int}/download")]
     public async Task<IActionResult> DownloadDocument(int id, int documentId, CancellationToken ct)
     {
@@ -5353,6 +5345,9 @@ public partial class CasesV2Controller : ControllerBase
         {
             return NotFound();
         }
+
+        if (await TryDownloadManagedDocumentAsync(clientCase, document, ct) is { } managedDownload)
+            return managedDownload;
 
         if (!_caseDocumentStorage.Exists(document.StoragePath))
         {
@@ -5391,7 +5386,11 @@ public partial class CasesV2Controller : ControllerBase
         var clientCase = await _db.ClientCases
             .ApplyClientCaseVisibility(visibility)
             .FirstOrDefaultAsync(item => item.Id == document.ClientCaseId, ct);
-        if (clientCase is null || !_caseDocumentStorage.Exists(document.StoragePath))
+        if (clientCase is null)
+            return NotFound();
+        if (await TryDownloadManagedDocumentAsync(clientCase, document, ct) is { } managedDownload)
+            return managedDownload;
+        if (!_caseDocumentStorage.Exists(document.StoragePath))
         {
             return NotFound();
         }
@@ -5401,6 +5400,33 @@ public partial class CasesV2Controller : ControllerBase
 
         var fullPath = _caseDocumentStorage.ResolvePath(document.StoragePath);
         return PhysicalFile(fullPath, document.ContentType, document.OriginalFileName);
+    }
+
+    private async Task<IActionResult?> TryDownloadManagedDocumentAsync(ClientCase clientCase, ClientCaseDocument document, CancellationToken ct)
+    {
+        if (_productStorageReader is null) return null;
+        var managed = await _productStorageReader.OpenReadAsync(LegacyStorageSources.CaseDocuments,
+            document.Id, document.OriginalFileName, document.ContentType, ct);
+        if (managed.Status == ProductStorageReadStatus.Legacy) return null;
+        if (managed.Status == ProductStorageReadStatus.Deleted) return NotFound();
+        if (managed.Status != ProductStorageReadStatus.Available || managed.File is not { } file)
+            return StatusCode(StatusCodes.Status503ServiceUnavailable,
+                new { message = "Проверенная копия документа временно недоступна. Повторите скачивание позже." });
+        try
+        {
+            AddCaseDocumentAuditEvent(clientCase, document, "Downloaded", $"Документ «{document.OriginalFileName}» скачан.");
+            await _db.SaveChangesAsync(ct);
+            return new FileStreamResult(file.Content, document.ContentType)
+            {
+                FileDownloadName = document.OriginalFileName,
+                EnableRangeProcessing = true,
+            };
+        }
+        catch
+        {
+            await file.DisposeAsync();
+            throw;
+        }
     }
 
     [HttpPatch("/api/case-documents/{documentId:int}")]
@@ -5496,10 +5522,58 @@ public partial class CasesV2Controller : ControllerBase
         }
         var uploadFile = file!;
 
-        var normalizedDocumentKey = NormalizeDocumentKey(documentKey);
+        var normalizedDocumentKey = CaseDocumentKeys.Normalize(documentKey);
         if (documentKey is not null && normalizedDocumentKey is null)
         {
             return BadRequest(new { message = "Некорректный ключ документа." });
+        }
+
+        if (_managedCaseUploads?.Enabled == true)
+        {
+            if (requireExistingDocument && normalizedDocumentKey is null)
+                return BadRequest(new { message = "Документ для новой версии не найден." });
+            var header = Request.Headers["X-Upload-Key"];
+            if (header.Count != 1 || !Guid.TryParse(header[0], out var uploadKey) || uploadKey == Guid.Empty)
+                return BadRequest(new { message = "Для проверенной загрузки требуется корректный идентификатор попытки." });
+            var actorId = User.GetUserId();
+            if (actorId is null) return Unauthorized();
+            var managed = await _managedCaseUploads.UploadAsync(new(clientCase.Id, actorId.Value, User.GetDisplayName(), uploadKey,
+                uploadFile, SanitizeFileName(uploadFile.FileName), NormalizeRequired(documentType, "Документ"),
+                NormalizeRequired(status, "Подготовлен"), normalizedDocumentKey), async (document, token) =>
+            {
+                await new CaseDocumentPublicationRecords(_db, CreateCaseDocumentNotifications())
+                    .PersistUploadAsync(clientCase, document, normalizedDocumentKey is null,
+                        actorId.Value, User.GetDisplayName(), ResolveCaseStatusClock().NowLocal, token);
+            }, (path, publish, token) => SaveCaseDocumentAtomicallyAsync(path, () => Task.CompletedTask, publish, token,
+                preserveFileOnFailure: true), ct);
+            if (managed.Status == "uploaded" && managed.DocumentId.HasValue)
+            {
+                var saved = await _db.ClientCaseDocuments.AsNoTracking()
+                    .SingleOrDefaultAsync(d => d.Id == managed.DocumentId && d.ClientCaseId == clientCase.Id, ct);
+                if (saved is null) return NotFound();
+                var latest = !await _db.ClientCaseDocuments.AsNoTracking().AnyAsync(d =>
+                    d.ClientCaseId == clientCase.Id && d.DocumentKey == saved.DocumentKey && d.Version > saved.Version, ct);
+                await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
+                return Created($"/api/case-documents/{saved.Id}", MapDocument(saved, latest));
+            }
+            if (managed.Status == "forbidden") return Forbid();
+            if (managed.Status == "notFound") return NotFound();
+            if (managed.Status == "invalid") return BadRequest(new { message = "Проверьте файл (до 25 МБ), тип, статус и версию документа." });
+            if (managed.Status == "conflict") return Conflict(new { message = "Документ или содержимое этой попытки изменились. Обновите карточку перед новой загрузкой." });
+            if (managed.Status == "retired") return Conflict(new { message = "От этой попытки загрузки отказались. Она больше не добавит документ; начните отдельную новую загрузку." });
+            Response.Headers["Retry-After"] = "5";
+            return StatusCode(503, new { message = "Обязательные копии документа ещё не готовы или хранилище недоступно. Документ пока не добавлен; повторите отправку того же файла позже." });
+        }
+
+        Guid? legacyUploadKey = null;
+        var legacyActorId = User.GetUserId();
+        var legacyHeader = Request.Headers["X-Upload-Key"];
+        if (legacyActorId is > 0 && legacyHeader.Count == 1 && Guid.TryParse(legacyHeader[0], out var suppliedKey)
+            && suppliedKey != Guid.Empty)
+        {
+            legacyUploadKey = suppliedKey;
+            var blocked = await GetLegacyCaseUploadBlockAsync(clientCase.Id, legacyActorId.Value, suppliedKey, ct);
+            if (blocked is not null) return LegacyCaseUploadBlockedResult(blocked);
         }
 
         var isNewDocument = normalizedDocumentKey is null;
@@ -5529,7 +5603,7 @@ public partial class CasesV2Controller : ControllerBase
         var storedFileName = BuildStoredFileName(normalizedDocumentKey!, version, safeFileName);
         var relativePath = _caseDocumentStorage.BuildRelativePath(clientCase.Id, storedFileName);
 
-        var result = await SaveCaseDocumentAtomicallyAsync(relativePath, async () =>
+        var result = await SaveLegacyCaseUploadAtomicallyAsync(clientCase.Id, legacyActorId, legacyUploadKey, relativePath, async () =>
         {
             await using var stream = uploadFile.OpenReadStream();
             await _caseDocumentStorage.SaveAsync(relativePath, stream, ct);
@@ -5578,45 +5652,75 @@ public partial class CasesV2Controller : ControllerBase
 
             return Created($"/api/case-documents/{document.Id}", MapDocument(document, true));
         }, ct);
-        await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
+        if (result.Result is CreatedResult) await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
         return result;
     }
 
-    private async Task<T> SaveCaseDocumentAtomicallyAsync<T>(
-        string relativePath, Func<Task> saveFile, Func<Task<T>> saveRecords, CancellationToken ct)
+    private async Task<string?> GetLegacyCaseUploadBlockAsync(int caseId, int actorId, Guid key, CancellationToken ct)
     {
-        Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction? transaction = null;
-        var fileSaved = false;
-        var commitStarted = false;
+        var attempt = $"case-document:{caseId}:{actorId}:{key:N}";
+        var commitKey = StorageObjectService.GetCommitOperationKey(attempt);
+        var capacityKey = StorageObjectService.GetCapacityReservationKey(attempt);
+        var localResource = StorageCapacityAdmission.ResourceKey("local", null);
+        var row = await _db.ClientCases.AsNoTracking().TagWith("case-upload-legacy-fence")
+            .Where(item => item.Id == caseId).Select(item => new
+            {
+                Retired = _db.CaseDocumentUploadRetirements.Any(retired => retired.CaseId == caseId
+                    && retired.ActorId == actorId && retired.UploadKey == key),
+                Managed = _db.StorageOperations.Any(operation => operation.OperationType == "commit" && operation.IdempotencyKey == commitKey)
+                    || _db.StorageCapacityReservations.Any(reserve => reserve.IdempotencyKey == capacityKey
+                        && reserve.ResourceKey == localResource && reserve.Status == StorageCapacityReservationStatuses.Pending)
+                    || _db.GeneratedFinancialDocumentAttempts.Any(financial => financial.ClientCaseId == caseId
+                        && financial.ActorId == actorId && financial.UploadKey == key)
+            }).SingleOrDefaultAsync(ct);
+        return row is null ? "notFound" : row.Retired ? "retired" : row.Managed ? "managed" : null;
+    }
+
+    private ActionResult<ClientCaseDocumentDto> LegacyCaseUploadBlockedResult(string status)
+        => status == "retired" ? Conflict(new { message = "От этой попытки загрузки отказались. Начните отдельную новую загрузку." })
+            : status == "notFound" ? NotFound()
+            : status == "forbidden" ? Forbid()
+            : StatusCode(503, new { message = "Эта попытка начата в проверенном хранилище. Она не может перейти в прежний режим записи; проверьте её состояние после восстановления режима хранения." });
+
+    private sealed class LegacyCaseUploadBlockedException(string status) : Exception
+    {
+        public string Status { get; } = status;
+    }
+
+    private async Task<ActionResult<ClientCaseDocumentDto>> SaveLegacyCaseUploadAtomicallyAsync(int caseId, int? actorId, Guid? uploadKey,
+        string relativePath, Func<Task> saveFile, Func<Task<ActionResult<ClientCaseDocumentDto>>> saveRecords, CancellationToken ct)
+    {
         try
         {
-            await saveFile();
-            fileSaved = true;
-            transaction = await _db.Database.BeginTransactionAsync(ct);
-            var result = await saveRecords();
-            commitStarted = true;
-            await transaction.CommitAsync(ct);
-            return result;
-        }
-        catch
-        {
-            // Never remove bytes after commit was attempted: a lost acknowledgement can
-            // leave a committed reference. Retaining an orphan is safer than losing a document.
-            if (!commitStarted)
+            return await SaveCaseDocumentAtomicallyAsync(relativePath, saveFile, async () =>
             {
-                if (transaction is not null)
+                if (actorId is > 0 && uploadKey.HasValue)
                 {
-                    using var rollbackTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-                    await transaction.RollbackAsync(rollbackTimeout.Token);
+                    await RequireLegacyCaseUploadAttemptAsync(caseId, actorId.Value, uploadKey.Value, ct);
                 }
-                if (fileSaved) _caseDocumentStorage.DeleteIfExists(relativePath);
-            }
-            throw;
+                return await saveRecords();
+            }, ct);
         }
-        finally
-        {
-            if (transaction is not null) await transaction.DisposeAsync();
-        }
+        catch (LegacyCaseUploadBlockedException failure) { return LegacyCaseUploadBlockedResult(failure.Status); }
+    }
+
+    private async Task RequireLegacyCaseUploadAttemptAsync(int caseId, int actorId, Guid key, CancellationToken ct)
+    {
+        if (await _db.ClientCases.Where(item => item.Id == caseId)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.Title, item => item.Title), ct) != 1)
+            throw new LegacyCaseUploadBlockedException("notFound");
+        if (!await CaseDocumentUploadAuthorization.CanPublishAsync(_db, actorId, caseId, ct))
+            throw new LegacyCaseUploadBlockedException("forbidden");
+        var blocked = await GetLegacyCaseUploadBlockAsync(caseId, actorId, key, ct);
+        if (blocked is not null) throw new LegacyCaseUploadBlockedException(blocked);
+    }
+
+    private async Task<T> SaveCaseDocumentAtomicallyAsync<T>(
+        string relativePath, Func<Task> saveFile, Func<Task<T>> saveRecords, CancellationToken ct, bool preserveFileOnFailure = false)
+    {
+        var result = await CaseDocumentAtomicSave.SaveAsync(_db, _caseDocumentStorage, relativePath, saveFile, saveRecords, ct, preserveFileOnFailure);
+        await CreateCaseDocumentNotifications().FlushCommittedAsync(ct);
+        return result;
     }
 
     private async Task<ActionResult<IReadOnlyList<ClientCaseConversationEntryDto>>> AddConversationEntryCore(
@@ -5642,7 +5746,8 @@ public partial class CasesV2Controller : ControllerBase
         }
 
         var storedPaths = new List<string>();
-        await using var transaction = await _db.Database.BeginTransactionAsync(ct);
+        Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction? transaction = null;
+        var commitStarted = false;
         try
         {
             var documents = new List<ClientCaseDocument>();
@@ -5653,6 +5758,8 @@ public partial class CasesV2Controller : ControllerBase
                 storedPaths.Add(document.StoragePath);
             }
 
+            // Do not hold a database transaction while clients stream their files.
+            transaction = await _db.Database.BeginTransactionAsync(ct);
             if (documents.Count > 0)
             {
                 await _db.SaveChangesAsync(ct);
@@ -5687,21 +5794,37 @@ public partial class CasesV2Controller : ControllerBase
                 ct);
 
             await _db.SaveChangesAsync(ct);
+            commitStarted = true;
             await transaction.CommitAsync(ct);
-            if (documents.Count > 0)
-            {
-                await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
-            }
         }
         catch
         {
-            await transaction.RollbackAsync(ct);
-            foreach (var path in storedPaths)
+            // A failed commit acknowledgement can follow a successful commit.
+            // Never remove files that may already have committed document links.
+            if (!commitStarted)
             {
-                _caseDocumentStorage.DeleteIfExists(path);
+                if (transaction is not null)
+                {
+                    using var rollbackTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                    await transaction.RollbackAsync(rollbackTimeout.Token);
+                }
+                foreach (var path in storedPaths)
+                {
+                    _caseDocumentStorage.DeleteIfExists(path);
+                }
+                _db.ChangeTracker.Clear();
             }
 
             throw;
+        }
+        finally
+        {
+            if (transaction is not null) await transaction.DisposeAsync();
+        }
+
+        if (storedPaths.Count > 0)
+        {
+            await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
         }
 
         var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
@@ -5755,7 +5878,7 @@ public partial class CasesV2Controller : ControllerBase
         string auditDescription,
         string caseEventText,
         CancellationToken ct,
-        bool publishTaskJournalChanged = true)
+        bool publishTaskJournalChanged = true, Guid? legacyUploadKey = null)
     {
         var latestVersion = await _db.ClientCaseDocuments
             .Where(item => item.ClientCaseId == clientCase.Id && item.DocumentKey == documentKey)
@@ -5769,6 +5892,8 @@ public partial class CasesV2Controller : ControllerBase
         var savedDocument = await SaveCaseDocumentAtomicallyAsync(relativePath,
             () => _caseDocumentStorage.SaveAsync(relativePath, content, ct), async () =>
         {
+            if (legacyUploadKey.HasValue && User.GetUserId() is { } actorId)
+                await RequireLegacyCaseUploadAttemptAsync(clientCase.Id, actorId, legacyUploadKey.Value, ct);
             var document = new ClientCaseDocument
             {
                 ClientCaseId = clientCase.Id,
@@ -5805,6 +5930,38 @@ public partial class CasesV2Controller : ControllerBase
             await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
         }
         return savedDocument;
+    }
+
+    private async Task<ManagedCaseDocumentUploadResult> GenerateManagedCourtDocumentAsync(
+        CourtDocumentSourceReceipt receipt, CancellationToken ct)
+    {
+        if (_managedCaseUploads is null) return new("disabled");
+        var registry = new CourtDocumentSourceRegistry(_db);
+        var notifications = CreateCaseDocumentNotifications();
+        var publication = new GeneratedCourtDocumentPublication(_db,
+            new CaseDocumentPublicationRecords(_db, notifications), registry);
+        var snapshot = receipt.Snapshot;
+        ManagedCaseDocumentPublication atomic = (path, publish, token) => SaveCaseDocumentAtomicallyAsync(path,
+            () => Task.CompletedTask, publish, token, preserveFileOnFailure: true);
+        var result = await _managedCaseUploads.TryResumeGeneratedAsync(snapshot.CaseId, snapshot.ActorId,
+            snapshot.AttemptId, receipt.Generation.Kind, receipt.Generation.RequestSha256,
+            (_, _, _) => Task.FromResult(true), publication.PersistAsync, atomic, ct, publication.CanPublishAsync);
+        if (result is null)
+        {
+            var source = GeneratedCourtDocumentPublication.GenerationSource(receipt.Generation);
+            if (source is null) return new("invalid");
+            var bytes = await registry.ReadContentAsync(source, ct);
+            if (bytes is null) return new("forbidden");
+            using var stream = new MemoryStream(bytes, writable: false);
+            var file = new FormFile(stream, 0, bytes.Length, "file", source.FileName)
+            { Headers = new HeaderDictionary(), ContentType = source.ContentType };
+            result = await _managedCaseUploads.GenerateAsync(new(source.CaseId, source.ActorId, snapshot.ActorName,
+                source.UploadKey, file, source.FileName, source.DocumentType, source.Status, source.DocumentKey),
+                receipt.Generation, (_, _, _) => Task.FromResult(true), publication.PersistAsync, atomic, ct,
+                publication.CanPublishAsync);
+        }
+        if (result.Status == "uploaded") await notifications.FlushCommittedAsync(ct);
+        return result;
     }
 
     private async Task<ClientCaseDocumentDto> UpdateDocumentCore(
@@ -5886,6 +6043,17 @@ public partial class CasesV2Controller : ControllerBase
         }
 
         var storagePath = document.StoragePath;
+        await using var deleteTransaction = await _db.Database.BeginTransactionAsync(ct);
+        if (await _db.ClientCases.Where(c => c.Id == id).ExecuteUpdateAsync(s => s.SetProperty(c => c.Title, c => c.Title), ct) != 1)
+            return NotFound();
+        await _db.Entry(document).ReloadAsync(ct);
+        if (_db.Entry(document).State == EntityState.Detached) return NotFound();
+        storagePath = document.StoragePath;
+        var deletion = _productStorageDeletion is null ? "legacy" : await _productStorageDeletion.DeleteAsync(
+            LegacyStorageSources.CaseDocuments, document.Id, document.OriginalFileName, document.ContentType,
+            _caseDocumentStorage.ResolvePath(storagePath), User.GetUserId(), ct);
+        if (deletion is not ("legacy" or "deleted"))
+            return StatusCode(deletion == "conflict" ? 409 : 503, new { message = "Не удалось безопасно удалить документ. Запись сохранена." });
         var affectedPreparations = await _db.ClientCaseHearingPreparations
             .Where(item => item.ClientCaseId == id && item.Documents.Any(link => link.ClientCaseDocumentId == documentId))
             .ToListAsync(ct);
@@ -5910,39 +6078,16 @@ public partial class CasesV2Controller : ControllerBase
             User.GetDisplayName(),
             ct);
         await _db.SaveChangesAsync(ct);
-        _caseDocumentStorage.DeleteIfExists(storagePath);
+        await deleteTransaction.CommitAsync(ct);
+        if (deletion == "legacy") _caseDocumentStorage.DeleteIfExists(storagePath);
         await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
 
         return NoContent();
     }
 
-    private void AddCaseDocumentAuditEvent(
-        ClientCase clientCase,
-        ClientCaseDocument document,
-        string action,
-        string description)
-    {
-        _db.ObjectAuditEvents.Add(new ObjectAuditEvent
-        {
-            ObjectType = "client-case-document",
-            ObjectId = document.Id,
-            Action = action,
-            Description = description,
-            ActorUserId = User.GetUserId(),
-            ActorUserName = User.GetDisplayName(),
-            MetadataJson = JsonSerializer.Serialize(new
-            {
-                clientCaseId = clientCase.Id,
-                caseTitle = clientCase.Title,
-                documentKey = document.DocumentKey,
-                version = document.Version,
-                documentType = document.DocumentType,
-                status = document.Status,
-                fileName = document.OriginalFileName,
-            }, CaseDocumentTemplateJsonOptions),
-            CreatedAt = DateTime.UtcNow,
-        });
-    }
+    private void AddCaseDocumentAuditEvent(ClientCase clientCase, ClientCaseDocument document, string action, string description)
+        => CaseDocumentPublicationRecords.AddAuditEvent(_db, clientCase, document, action, description,
+            User.GetUserId(), User.GetDisplayName());
 
     private readonly record struct CaseCalendarDateRange(
         DateTime FromDate,
@@ -7324,6 +7469,20 @@ public partial class CasesV2Controller : ControllerBase
             return NotFound();
         }
 
+        if (_managedCaseUploads?.Enabled == true)
+            return await GenerateManagedWorkOrderDocumentAsync(clientCase, ct);
+
+        Guid? legacyUploadKey = null;
+        var legacyActorId = User.GetUserId();
+        var legacyHeader = Request.Headers["X-Upload-Key"];
+        if (legacyActorId is > 0 && legacyHeader.Count == 1 && Guid.TryParse(legacyHeader[0], out var suppliedKey)
+            && suppliedKey != Guid.Empty)
+        {
+            legacyUploadKey = suppliedKey;
+            var blocked = await GetLegacyCaseUploadBlockAsync(id, legacyActorId.Value, suppliedKey, ct);
+            if (blocked is not null) return LegacyCaseUploadBlockedResult(blocked);
+        }
+
         var workOrder = await _db.ClientCaseWorkOrders
             .Include(item => item.Items)
             .FirstOrDefaultAsync(item => item.ClientCaseId == id, ct);
@@ -7332,19 +7491,78 @@ public partial class CasesV2Controller : ControllerBase
             return NotFound(new { message = "По делу еще нет заказ-наряда." });
         }
 
-        var document = await SaveGeneratedCaseDocumentAsync(
-            clientCase,
-            BuildWorkOrderDocumentKey(workOrder.Id),
-            "Заказ-наряд",
-            NormalizeWorkOrderStatus(workOrder.Status) == "approved" ? "Согласован" : "Подготовлен",
-            $"case-{id}-work-order.html",
-            BuildWorkOrderPrintHtml(clientCase, workOrder, (await ResolveCaseStatusClockAsync(ct)).NowLocal),
-            "Generated",
-            $"Сформирована печатная форма заказ-наряда «{workOrder.Title}».",
-            $"Заказ-наряд «{workOrder.Title}» сохранен в документы дела. Автор: {User.GetDisplayName()}.",
-            ct);
+        try
+        {
+            var document = await SaveGeneratedCaseDocumentAsync(
+                clientCase,
+                BuildWorkOrderDocumentKey(workOrder.Id),
+                "Заказ-наряд",
+                NormalizeWorkOrderStatus(workOrder.Status) == "approved" ? "Согласован" : "Подготовлен",
+                $"case-{id}-work-order.html",
+                BuildWorkOrderPrintHtml(clientCase, workOrder, (await ResolveCaseStatusClockAsync(ct)).NowLocal),
+                "Generated",
+                $"Сформирована печатная форма заказ-наряда «{workOrder.Title}».",
+                $"Заказ-наряд «{workOrder.Title}» сохранен в документы дела. Автор: {User.GetDisplayName()}.",
+                ct, legacyUploadKey: legacyUploadKey);
 
-        return Created($"/api/v2/cases/{id}/documents/{document.Id}", MapDocument(document, true));
+            return Created($"/api/v2/cases/{id}/documents/{document.Id}", MapDocument(document, true));
+        }
+        catch (LegacyCaseUploadBlockedException failure) { return LegacyCaseUploadBlockedResult(failure.Status); }
+    }
+
+    private async Task<ActionResult<ClientCaseDocumentDto>> GenerateManagedWorkOrderDocumentAsync(ClientCase clientCase, CancellationToken ct)
+    {
+        var header = Request.Headers["X-Upload-Key"];
+        if (header.Count != 1 || !Guid.TryParse(header[0], out var uploadKey) || uploadKey == Guid.Empty)
+            return BadRequest(new { message = "Для формирования заказ-наряда требуется корректный идентификатор попытки." });
+        var actorId = User.GetUserId();
+        if (actorId is not > 0) return Unauthorized();
+        var requestJson = JsonSerializer.Serialize(new { version = 1, caseId = clientCase.Id, kind = "work-order" }, ManagedGeneratedDocumentJsonOptions);
+        var requestHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(requestJson))).ToLowerInvariant();
+        var notifications = CreateCaseDocumentNotifications();
+        var orders = new GeneratedWorkOrderDocumentPublication(_db, new CaseDocumentPublicationRecords(_db, notifications));
+        ManagedCaseDocumentPublication atomic = (path, publish, token) => SaveCaseDocumentAtomicallyAsync(path,
+            () => Task.CompletedTask, publish, token, preserveFileOnFailure: true);
+        var managed = _managedCaseUploads!;
+        var result = await managed.TryResumeGeneratedAsync(clientCase.Id, actorId.Value, uploadKey,
+            "work-order", requestHash, (_, _, _) => Task.FromResult(true), orders.PersistAsync, atomic, ct, orders.CanPublishAsync);
+        if (result is null)
+        {
+            var workOrder = await _db.ClientCaseWorkOrders.Include(item => item.Items)
+                .FirstOrDefaultAsync(item => item.ClientCaseId == clientCase.Id, ct);
+            if (workOrder is null) return NotFound(new { message = "По делу еще нет заказ-наряда." });
+            var status = NormalizeWorkOrderStatus(workOrder.Status) == "approved" ? "Согласован" : "Подготовлен";
+            var name = $"case-{clientCase.Id}-work-order.html";
+            var bytes = Encoding.UTF8.GetBytes(BuildWorkOrderPrintHtml(clientCase, workOrder, (await ResolveCaseStatusClockAsync(ct)).NowLocal));
+            var snapshot = new GeneratedWorkOrderDocumentSnapshot(1, clientCase.Id, workOrder.Id, workOrder.Title, status);
+            var generation = new ManagedCaseDocumentGeneration("work-order", requestHash,
+                JsonSerializer.Serialize(snapshot, ManagedGeneratedDocumentJsonOptions));
+            using var input = new MemoryStream(bytes, writable: false);
+            var file = new FormFile(input, 0, bytes.Length, "file", name)
+            { Headers = new HeaderDictionary(), ContentType = "text/html; charset=utf-8" };
+            result = await managed.GenerateAsync(new(clientCase.Id, actorId.Value, User.GetDisplayName(), uploadKey,
+                file, name, "Заказ-наряд", status, BuildWorkOrderDocumentKey(workOrder.Id)), generation,
+                (_, _, _) => Task.FromResult(true), orders.PersistAsync, atomic, ct, orders.CanPublishAsync);
+        }
+        if (result.Status == "uploaded" && result.DocumentId.HasValue)
+        {
+            var saved = await _db.ClientCaseDocuments.AsNoTracking()
+                .SingleOrDefaultAsync(d => d.Id == result.DocumentId && d.ClientCaseId == clientCase.Id, ct);
+            if (saved is null) return NotFound();
+            var latest = !await _db.ClientCaseDocuments.AsNoTracking().AnyAsync(d =>
+                d.ClientCaseId == clientCase.Id && d.DocumentKey == saved.DocumentKey && d.Version > saved.Version, ct);
+            await notifications.FlushCommittedAsync(ct);
+            await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
+            Response.Headers["X-Upload-Key"] = uploadKey.ToString("D");
+            return Created($"/api/v2/cases/{clientCase.Id}/documents/{saved.Id}", MapDocument(saved, latest));
+        }
+        if (result.Status == "forbidden") return Forbid();
+        if (result.Status == "notFound") return NotFound();
+        if (result.Status == "invalid") return BadRequest(new { message = "Проверьте данные и размер заказ-наряда." });
+        if (result.Status == "conflict") return Conflict(new { message = "Данные этой попытки формирования изменились. Обновите карточку перед новой попыткой." });
+        if (result.Status == "retired") return Conflict(new { message = "Эта попытка прекращена. Начните отдельное новое формирование." });
+        Response.Headers["Retry-After"] = "5";
+        return StatusCode(503, new { message = "Обязательные копии заказ-наряда ещё не готовы или хранилище недоступно. Документ пока не добавлен; повторите тот же запрос позже." });
     }
 
     [HttpPost("{id:int}/work-order")]
@@ -7662,6 +7880,10 @@ public partial class CasesV2Controller : ControllerBase
             return accountsForbidden;
         }
 
+        if (_managedCaseUploads?.Enabled == true)
+            return await GenerateManagedFinancialDocumentAsync(id, GeneratedFinancialDocumentKind.Invoice, request, null, null, ct);
+        if (await GuardFinancialLegacyAttemptAsync(id, ct) is { } blocked) return blocked;
+
         var loadResult = await LoadEditableWorkOrderAsync(id, ct);
         if (loadResult.Result is not null)
         {
@@ -7669,6 +7891,9 @@ public partial class CasesV2Controller : ControllerBase
         }
 
         var (clientCase, workOrder) = loadResult.Value;
+        var legacyAdmission = await BeginLegacyFinancialAsync(clientCase, workOrder, GeneratedFinancialDocumentKind.Invoice, ct);
+        if (legacyAdmission.Blocked is { } admissionBlocked) return admissionBlocked;
+        await using var legacyFinancialTransaction = legacyAdmission.Transaction!;
         RecalculateWorkOrder(workOrder);
         if (workOrder.TotalAmount <= 0m || workOrder.Items.Count == 0)
         {
@@ -7752,6 +7977,9 @@ public partial class CasesV2Controller : ControllerBase
 
         _db.Payments.Add(payment);
         await _db.SaveChangesAsync(ct);
+        if (await GuardLegacyFinancialSourceAsync(id, workOrder.Id, GeneratedFinancialDocumentKind.Invoice, ct) is { } lateBlocked) return lateBlocked;
+        await legacyFinancialTransaction.CommitAsync(ct);
+        await legacyFinancialTransaction.DisposeAsync();
 
         var invoiceDocument = await SaveGeneratedCaseDocumentAsync(
             clientCase,
@@ -7794,6 +8022,10 @@ public partial class CasesV2Controller : ControllerBase
             return actsForbidden;
         }
 
+        if (_managedCaseUploads?.Enabled == true)
+            return await GenerateManagedFinancialDocumentAsync(id, GeneratedFinancialDocumentKind.Act, null, request, null, ct);
+        if (await GuardFinancialLegacyAttemptAsync(id, ct) is { } blocked) return blocked;
+
         var loadResult = await LoadEditableWorkOrderAsync(id, ct);
         if (loadResult.Result is not null)
         {
@@ -7801,6 +8033,9 @@ public partial class CasesV2Controller : ControllerBase
         }
 
         var (clientCase, workOrder) = loadResult.Value;
+        var legacyAdmission = await BeginLegacyFinancialAsync(clientCase, workOrder, GeneratedFinancialDocumentKind.Act, ct);
+        if (legacyAdmission.Blocked is { } admissionBlocked) return admissionBlocked;
+        await using var legacyFinancialTransaction = legacyAdmission.Transaction!;
         RecalculateWorkOrder(workOrder);
         if (workOrder.TotalAmount <= 0m || workOrder.Items.Count == 0)
         {
@@ -7878,6 +8113,9 @@ public partial class CasesV2Controller : ControllerBase
         _db.SetAuditReason($"По предварительному расчету дела #{id} создан акт №{number}.");
         AppendCaseEvent(clientCase, $"По предварительному расчету «{workOrder.Title}» создан акт №{number} на сумму {amount:0.##} {workOrder.Currency}. Создал: {User.GetDisplayName()}.");
         await _db.SaveChangesAsync(ct);
+        if (await GuardLegacyFinancialSourceAsync(id, workOrder.Id, GeneratedFinancialDocumentKind.Act, ct) is { } lateBlocked) return lateBlocked;
+        await legacyFinancialTransaction.CommitAsync(ct);
+        await legacyFinancialTransaction.DisposeAsync();
 
         var actDocument = await SaveGeneratedCaseDocumentAsync(
             clientCase,
@@ -7919,6 +8157,10 @@ public partial class CasesV2Controller : ControllerBase
             return contractsForbidden;
         }
 
+        if (_managedCaseUploads?.Enabled == true)
+            return await GenerateManagedFinancialDocumentAsync(id, GeneratedFinancialDocumentKind.Contract, null, null, request, ct);
+        if (await GuardFinancialLegacyAttemptAsync(id, ct) is { } blocked) return blocked;
+
         var loadResult = await LoadEditableWorkOrderAsync(id, ct);
         if (loadResult.Result is not null)
         {
@@ -7926,6 +8168,9 @@ public partial class CasesV2Controller : ControllerBase
         }
 
         var (clientCase, workOrder) = loadResult.Value;
+        var legacyAdmission = await BeginLegacyFinancialAsync(clientCase, workOrder, GeneratedFinancialDocumentKind.Contract, ct);
+        if (legacyAdmission.Blocked is { } admissionBlocked) return admissionBlocked;
+        await using var legacyFinancialTransaction = legacyAdmission.Transaction!;
         RecalculateWorkOrder(workOrder);
         if (workOrder.TotalAmount <= 0m || workOrder.Items.Count == 0)
         {
@@ -7997,6 +8242,9 @@ public partial class CasesV2Controller : ControllerBase
         _db.SetAuditReason($"По предварительному расчету дела #{id} создан договор №{number}.");
         AppendCaseEvent(clientCase, $"По предварительному расчету «{workOrder.Title}» создан договор №{number} на сумму {workOrder.TotalAmount:0.##} {workOrder.Currency}. Создал: {User.GetDisplayName()}.");
         await _db.SaveChangesAsync(ct);
+        if (await GuardLegacyFinancialSourceAsync(id, workOrder.Id, GeneratedFinancialDocumentKind.Contract, ct) is { } lateBlocked) return lateBlocked;
+        await legacyFinancialTransaction.CommitAsync(ct);
+        await legacyFinancialTransaction.DisposeAsync();
 
         var contractDocument = await SaveGeneratedCaseDocumentAsync(
             clientCase,
@@ -8705,12 +8953,6 @@ public partial class CasesV2Controller : ControllerBase
         AppendCaseEvent(clientCase, $"Привязана судебная карточка «{ResolveCourtInstanceLabel(normalizedInstance)}» через {provider.Label}. Суд: {FormatCaseTextValue(courtName)}; № в суде: {FormatCaseTextValue(courtCaseNumber)}.{externalIdSuffix} {syncMessage} Автор: {actorName}.");
         _db.SetAuditReason($"Привязана судебная карточка дела через {provider.Label}.");
         await _db.SaveChangesAsync(ct);
-        // Always run the idempotent task synchronizer after a successful read.
-        // This also backfills tasks for hearings imported before hearing-task automation existed.
-        if (syncResult.HasValue)
-        {
-            await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, clientCase.Id, actorUserId, actorName, ct);
-        }
         if (syncResult is { HasChanges: true })
         {
             await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
@@ -8735,6 +8977,7 @@ public partial class CasesV2Controller : ControllerBase
             UpdatedCourtEvents = syncResult?.UpdatedCourtEvents ?? 0,
             CreatedCourtParties = syncResult?.CreatedCourtParties ?? 0,
             CreatedCourtActDocuments = syncResult?.CreatedCourtActDocuments ?? 0,
+            PendingCourtActDocuments = syncResult?.PendingCourtActDocuments ?? 0,
             CreatedProceduralDeadlines = syncResult?.CreatedProceduralDeadlines ?? 0,
             NewItems = syncResult?.NewItems ?? [],
             ChangedItems = syncResult?.ChangedItems ?? [],
@@ -8847,7 +9090,6 @@ public partial class CasesV2Controller : ControllerBase
                 AppendCaseEvent(clientCase, $"{syncMessage} Инициатор: {actorName}.");
                 _db.SetAuditReason($"Обновление дела #{clientCase.Id} из судебного источника {courtSyncProvider.Label}.");
                 await _db.SaveChangesAsync(ct);
-                await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, clientCase.Id, User.GetUserId(), actorName, ct);
                 if (syncResult.HasChanges)
                 {
                     await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
@@ -8872,6 +9114,7 @@ public partial class CasesV2Controller : ControllerBase
                     UpdatedCourtEvents = syncResult.UpdatedCourtEvents,
                     CreatedCourtParties = syncResult.CreatedCourtParties,
                     CreatedCourtActDocuments = syncResult.CreatedCourtActDocuments,
+                    PendingCourtActDocuments = syncResult.PendingCourtActDocuments,
                     CreatedProceduralDeadlines = syncResult.CreatedProceduralDeadlines,
                     NewItems = syncResult.NewItems,
                     ChangedItems = syncResult.ChangedItems,
@@ -9026,6 +9269,7 @@ public partial class CasesV2Controller : ControllerBase
         var updatedCourtEvents = 0;
         var createdCourtParties = 0;
         var createdCourtActDocuments = 0;
+        var pendingCourtActDocumentKeys = new HashSet<string>(StringComparer.Ordinal);
         var createdProceduralDeadlines = 0;
         var newItems = new List<string>();
         var changedItems = new List<string>();
@@ -9481,11 +9725,13 @@ public partial class CasesV2Controller : ControllerBase
             .Where(static item => item.DocumentType is CourtSyncNormalization.DocumentTypes.CourtAct
                 or CourtSyncNormalization.DocumentTypes.CourtEventSummary)
             .GroupBy(static item => item.OriginalFileName, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(static group => group.Key, static group => group.First(), StringComparer.OrdinalIgnoreCase);
+            .ToDictionary(static group => group.Key, static group => group.ToArray(), StringComparer.OrdinalIgnoreCase);
         var existingCourtActDeadlines = await _db.ClientCaseProceduralDeadlines
             .Where(item => item.ClientCaseId == clientCase.Id && item.SourceType == "sudrf")
             .ToListAsync(ct);
         var currentDeadlineIdentities = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var preparedCourtActs = new List<(SudrfCourtAct Act, string Key, string LegacyKey, string FileName,
+            ClientCaseDocument? Document, IReadOnlyList<ClientCaseProceduralDeadline> Deadlines, bool FileConflict)>();
 
         foreach (var courtActWithKey in courtActsWithKeys)
         {
@@ -9493,59 +9739,37 @@ public partial class CasesV2Controller : ControllerBase
             var documentKey = courtActWithKey.DocumentKey;
             var documentByKnownKey = existingCourtActDocumentsByKey.GetValueOrDefault(documentKey)
                 ?? existingCourtActDocumentsByKey.GetValueOrDefault(courtActWithKey.LegacyDocumentKey);
-            var document = documentByKnownKey
-                ?? existingCourtActDocumentsByFileName.GetValueOrDefault(courtActWithKey.FileName);
-            if (document is not null
+            var fileNameCandidates = existingCourtActDocumentsByFileName.GetValueOrDefault(SanitizeCourtSummaryFileName(courtActWithKey.FileName))
+                ?? existingCourtActDocumentsByFileName.GetValueOrDefault(courtActWithKey.FileName)
+                ?? [];
+            // Only an older summary from the same source may use the name fallback.
+            // A different canonical key identifies another event, even if its name is identical.
+            var documentByFileName = (existingCourtActDocumentsByFileName.GetValueOrDefault(courtActWithKey.FileName) ?? [])
+                .FirstOrDefault(item =>
+                    string.Equals(item.SourceType, "sudrf", StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(NormalizeOptional(item.SourceUrl),
+                        NormalizeOptional(FirstNonEmpty(courtAct.SourceUrl, courtData.SourceUrl)), StringComparison.Ordinal)
+                    && item.DocumentKey.Length == 34 && item.DocumentKey.StartsWith("sudrf-act-", StringComparison.Ordinal)
+                    && item.DocumentKey.Skip(10).All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f'))
+                ?? fileNameCandidates.FirstOrDefault(item => !string.Equals(item.SourceType, "sudrf", StringComparison.OrdinalIgnoreCase));
+            var document = documentByKnownKey ?? documentByFileName;
+            var fileConflict = document is not null
                 && documentByKnownKey is null
-                && !string.Equals(document.SourceType, "sudrf", StringComparison.OrdinalIgnoreCase))
+                && !string.Equals(document.SourceType, "sudrf", StringComparison.OrdinalIgnoreCase);
+            if (fileConflict)
             {
-                conflictItems.Add($"ручной документ «{document.OriginalFileName}» совпал с судебным актом «{courtAct.Title}»");
-                continue;
+                conflictItems.Add($"ручной документ «{document!.OriginalFileName}» совпал с судебным актом «{courtAct.Title}»");
+                // File-name ambiguity cannot cancel controls from accepted court evidence.
+                document = null;
             }
 
-            if (document is null)
-            {
-                document = await SaveGeneratedCaseDocumentAsync(
-                    clientCase,
-                    documentKey,
-                    CourtSyncNormalization.DocumentTypes.CourtEventSummary,
-                    "received",
-                    courtActWithKey.FileName,
-                    BuildSudrfCourtActHtml(clientCase, courtData, courtAct),
-                    "Created",
-                    $"Сводка судебного события «{courtAct.Title}» добавлена из ГАС «Правосудие»; текст акта не загружен.",
-                    $"Сводка судебного события «{courtAct.Title}» добавлена из ГАС «Правосудие»; текст акта не загружен.",
-                    ct,
-                    publishTaskJournalChanged: false);
-                createdCourtActDocuments++;
-                _courtSyncMetrics?.RecordDocument(document.SizeBytes);
-                newItems.Add($"сводка судебного события «{courtAct.Title}»");
-            }
-            else if (!string.Equals(document.DocumentKey, documentKey, StringComparison.Ordinal))
-            {
-                document.DocumentKey = documentKey;
-                changedItems.Add($"сводка судебного события «{courtAct.Title}»");
-            }
-
-            if (string.Equals(document.Status, "archived", StringComparison.OrdinalIgnoreCase))
-            {
-                document.Status = "received";
-                changedItems.Add($"сводка судебного события «{courtAct.Title}» восстановлена из архива");
-            }
-
-            document.SourceType = "sudrf";
-            document.DocumentType = CourtSyncNormalization.DocumentTypes.CourtEventSummary;
-            document.OriginalFileName = courtActWithKey.FileName;
-            document.SourceUrl = Truncate(FirstNonEmpty(courtAct.SourceUrl, courtData.SourceUrl), 1000);
-            document.SourceCheckedAt = checkedAt;
-            document.SourceConfidence = "official-source";
-            existingCourtActDocumentsByKey[documentKey] = document;
-            existingCourtActDocumentsByFileName[courtActWithKey.FileName] = document;
-
+            var associatedDeadlines = new List<ClientCaseProceduralDeadline>();
             var createdDeadlinesForAct = await SyncSudrfCourtActDeadlinesAsync(
                 clientCase,
                 courtData,
                 courtAct,
+                documentKey,
+                courtActWithKey.LegacyDocumentKey,
                 document,
                 actorUserId,
                 actorName,
@@ -9553,8 +9777,13 @@ public partial class CasesV2Controller : ControllerBase
                 existingCourtActDeadlines,
                 currentDeadlineIdentities,
                 changedItems,
+                conflictItems,
                 restoredDeadlineIds,
+                associatedDeadlines,
                 ct);
+            var legacyDocumentKey = document is not null && document.DocumentKey.Length == 34
+                ? document.DocumentKey : courtActWithKey.LegacyDocumentKey;
+            preparedCourtActs.Add((courtAct, documentKey, legacyDocumentKey, courtActWithKey.FileName, document, associatedDeadlines, fileConflict));
             createdProceduralDeadlines += createdDeadlinesForAct;
             if (createdDeadlinesForAct > 0)
             {
@@ -9563,27 +9792,14 @@ public partial class CasesV2Controller : ControllerBase
             }
         }
 
-        var removedCourtActDocumentIds = existingCourtActDocuments
-            .Where(item =>
-                string.Equals(item.SourceType, "sudrf", StringComparison.OrdinalIgnoreCase)
-                && IsCurrentCourtSyncSource(item.SourceUrl)
-                && !string.Equals(item.Status, "archived", StringComparison.OrdinalIgnoreCase)
-                && !currentCourtActDocumentKeys.Contains(item.DocumentKey))
-            .Select(static item => item.Id)
-            .ToHashSet();
-        foreach (var missingDocument in existingCourtActDocuments.Where(item => removedCourtActDocumentIds.Contains(item.Id)))
-        {
-            removedItems.Add($"сводка судебного события «{missingDocument.OriginalFileName}»");
-            missingDocument.Status = "archived";
-        }
-
         foreach (var missingDeadline in existingCourtActDeadlines.Where(item =>
                      IsCurrentCourtSyncSource(item.SourceUrl)
                      && !string.Equals(item.Status, "archived", StringComparison.OrdinalIgnoreCase)
-                     && item.ClientCaseDocumentId.HasValue
-                     && !currentDeadlineIdentities.Contains(BuildCourtDeadlineIdentity(
-                         item.ClientCaseDocumentId.Value,
-                         item.DeadlineType))))
+                     && (item.SourceDocumentKey is not null || item.ClientCaseDocumentId.HasValue)
+                     && !(item.SourceDocumentKey is not null && currentDeadlineIdentities.Contains(
+                         BuildCourtDeadlineIdentity(item.SourceDocumentKey, item.DeadlineType)))
+                     && !(item.ClientCaseDocumentId.HasValue && currentDeadlineIdentities.Contains(
+                         BuildCourtDeadlineIdentity(item.ClientCaseDocumentId.Value, item.DeadlineType)))))
         {
             removedItems.Add($"процессуальный срок «{missingDeadline.Title}»");
             missingDeadline.Status = "archived";
@@ -9593,6 +9809,117 @@ public partial class CasesV2Controller : ControllerBase
             requiresDeadlineTaskSync = true;
         }
         requiresDeadlineTaskSync |= restoredDeadlineIds.Count > 0 || courtEventTaskSyncChanged;
+
+        // All accepted source deadlines and their control tasks must be committed
+        // before any summary file can fail or wait for its mandatory copies.
+        await _db.SaveChangesAsync(ct);
+        var taskJournalChanged = await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, clientCase.Id, actorUserId, actorName, ct);
+        if (taskJournalChanged) await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
+
+        // Keep existing durable attempts behind the copy gate even when routing is disabled.
+        var useCourtSourceRegistry = _managedCaseUploads?.Enabled == true
+            || await _db.CourtDocumentSources.AsNoTracking().AnyAsync(s => s.ClientCaseId == clientCase.Id, ct);
+        CourtDocumentSourceBatchResult? courtSourceBatch = null;
+        if (useCourtSourceRegistry && actorUserId is > 0)
+        {
+            courtSourceBatch = await new CourtDocumentSourceRegistry(_db).RecordAcceptedBatchAsync(
+                clientCase.Id, actorUserId.Value, actorName, clientCase.CourtUrl, checkedAt,
+                preparedCourtActs.Where(p => !p.FileConflict).Select(p => new CourtDocumentSourceInput(p.Key, SanitizeCourtSummaryFileName(p.FileName),
+                    p.Act.Title, FirstNonEmpty(p.Act.SourceUrl, courtData.SourceUrl),
+                    BuildSudrfCourtActHtml(clientCase, courtData, p.Act), p.LegacyKey)).ToArray(), ct);
+        }
+        var courtReceipts = courtSourceBatch?.Sources.ToDictionary(r => r.Snapshot.DocumentKey, StringComparer.Ordinal)
+            ?? new Dictionary<string, CourtDocumentSourceReceipt>(StringComparer.Ordinal);
+        var existingCourtDocumentIds = existingCourtActDocuments.Select(d => (long)d.Id).ToArray();
+        var managedCourtDocumentIds = (await _db.StorageProductBindings.AsNoTracking()
+            .Where(b => b.Source == LegacyStorageSources.CaseDocuments
+                && existingCourtDocumentIds.Contains(b.SourceId))
+            .Select(b => b.SourceId).ToListAsync(ct)).ToHashSet();
+
+        foreach (var prepared in preparedCourtActs)
+        {
+            // Excluded from publication eligibility, not from deadline synchronization.
+            if (prepared.FileConflict) continue;
+            var courtAct = prepared.Act;
+            var documentKey = prepared.Key;
+            // Repeated source rows share the outcome created earlier in this pass.
+            var document = existingCourtActDocumentsByKey.GetValueOrDefault(documentKey) ?? prepared.Document;
+            if (document is null)
+            {
+                if (useCourtSourceRegistry)
+                {
+                    if (!courtReceipts.TryGetValue(documentKey, out var receipt))
+                    {
+                        conflictItems.Add($"сводка судебного события «{courtAct.Title}» требует проверки источника ({courtSourceBatch?.Status ?? "forbidden"})");
+                        continue;
+                    }
+                    // Earlier legacy metadata/link changes must not enter the writer's transaction.
+                    await _db.SaveChangesAsync(ct);
+                    var outcome = await GenerateManagedCourtDocumentAsync(receipt, ct);
+                    if (outcome.Status != "uploaded" || !outcome.DocumentId.HasValue)
+                    {
+                        if (outcome.Status is "pending" or "disabled" or "unavailable")
+                            pendingCourtActDocumentKeys.Add(documentKey);
+                        else conflictItems.Add($"сводка судебного события «{courtAct.Title}» не добавлена ({outcome.Status})");
+                        continue;
+                    }
+                    document = await _db.ClientCaseDocuments.SingleAsync(d => d.Id == outcome.DocumentId
+                        && d.ClientCaseId == clientCase.Id, ct);
+                    managedCourtDocumentIds.Add(document.Id);
+                    if (!outcome.IsReplay)
+                    {
+                        createdCourtActDocuments++;
+                        _courtSyncMetrics?.RecordDocument(document.SizeBytes);
+                        newItems.Add($"сводка судебного события «{courtAct.Title}»");
+                    }
+                }
+                else
+                {
+                    document = await SaveGeneratedCaseDocumentAsync(clientCase, documentKey,
+                        CourtSyncNormalization.DocumentTypes.CourtEventSummary, "received", prepared.FileName,
+                        BuildSudrfCourtActHtml(clientCase, courtData, courtAct), "Created",
+                        $"Сводка судебного события «{courtAct.Title}» добавлена из ГАС «Правосудие»; текст акта не загружен.",
+                        $"Сводка судебного события «{courtAct.Title}» добавлена из ГАС «Правосудие»; текст акта не загружен.",
+                        ct, publishTaskJournalChanged: false);
+                    createdCourtActDocuments++;
+                    _courtSyncMetrics?.RecordDocument(document.SizeBytes);
+                    newItems.Add($"сводка судебного события «{courtAct.Title}»");
+                }
+            }
+            else if (!string.Equals(document.DocumentKey, documentKey, StringComparison.Ordinal))
+            {
+                document.DocumentKey = documentKey;
+                changedItems.Add($"сводка судебного события «{courtAct.Title}»");
+            }
+            if (string.Equals(document.Status, "archived", StringComparison.OrdinalIgnoreCase))
+            {
+                document.Status = "received";
+                changedItems.Add($"сводка судебного события «{courtAct.Title}» восстановлена из архива");
+            }
+            if (!managedCourtDocumentIds.Contains(document.Id))
+            {
+                document.SourceType = "sudrf";
+                document.DocumentType = CourtSyncNormalization.DocumentTypes.CourtEventSummary;
+                document.OriginalFileName = prepared.FileName;
+                document.SourceUrl = Truncate(FirstNonEmpty(courtAct.SourceUrl, courtData.SourceUrl), 1000);
+                document.SourceCheckedAt = checkedAt;
+                document.SourceConfidence = "official-source";
+            }
+            existingCourtActDocumentsByKey[documentKey] = document;
+            foreach (var deadline in prepared.Deadlines) deadline.ClientCaseDocumentId = document.Id;
+        }
+
+        var removedCourtActDocumentIds = existingCourtActDocuments
+            .Where(item => string.Equals(item.SourceType, "sudrf", StringComparison.OrdinalIgnoreCase)
+                && IsCurrentCourtSyncSource(item.SourceUrl)
+                && !string.Equals(item.Status, "archived", StringComparison.OrdinalIgnoreCase)
+                && !currentCourtActDocumentKeys.Contains(item.DocumentKey))
+            .Select(static item => item.Id).ToHashSet();
+        foreach (var missingDocument in existingCourtActDocuments.Where(item => removedCourtActDocumentIds.Contains(item.Id)))
+        {
+            removedItems.Add($"сводка судебного события «{missingDocument.OriginalFileName}»");
+            missingDocument.Status = "archived";
+        }
 
         if (createdCourtActDocuments > 0)
         {
@@ -9610,6 +9937,7 @@ public partial class CasesV2Controller : ControllerBase
             updatedCourtEvents,
             createdCourtParties,
             createdCourtActDocuments,
+            pendingCourtActDocumentKeys.Count,
             createdProceduralDeadlines,
             newItems.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
             changedItems.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
@@ -9882,14 +10210,18 @@ public partial class CasesV2Controller : ControllerBase
         ClientCase clientCase,
         SudrfCourtCaseData courtData,
         SudrfCourtAct courtAct,
-        ClientCaseDocument document,
+        string documentKey,
+        string legacyDocumentKey,
+        ClientCaseDocument? document,
         int? actorUserId,
         string actorName,
         DateTime checkedAt,
         IList<ClientCaseProceduralDeadline> existingDeadlines,
         ISet<string> currentDeadlineIdentities,
         ICollection<string> changedItems,
+        ICollection<string> conflictItems,
         ISet<int> restoredDeadlineIds,
+        ICollection<ClientCaseProceduralDeadline> associatedDeadlines,
         CancellationToken ct)
     {
         if (!courtAct.ActDate.HasValue)
@@ -9905,18 +10237,34 @@ public partial class CasesV2Controller : ControllerBase
 
         foreach (var spec in deadlineSpecs)
         {
-            currentDeadlineIdentities.Add(BuildCourtDeadlineIdentity(document.Id, spec.DeadlineType));
+            currentDeadlineIdentities.Add(BuildCourtDeadlineIdentity(documentKey, spec.DeadlineType));
+            currentDeadlineIdentities.Add(BuildCourtDeadlineIdentity(legacyDocumentKey, spec.DeadlineType));
+            if (document is not null)
+                currentDeadlineIdentities.Add(BuildCourtDeadlineIdentity(document.Id, spec.DeadlineType));
         }
 
         var created = 0;
         var createdDeadlines = new List<ClientCaseProceduralDeadline>();
         foreach (var spec in deadlineSpecs)
         {
-            var existing = existingDeadlines.FirstOrDefault(item =>
-                item.ClientCaseDocumentId == document.Id
-                && item.DeadlineType == spec.DeadlineType);
+            // A deadline can outlive its optional summary link. Preserve historical
+            // duplicates instead of choosing one and claiming their source silently.
+            var matches = existingDeadlines.Where(item => item.DeadlineType == spec.DeadlineType
+                && (item.SourceDocumentKey == documentKey || item.SourceDocumentKey == legacyDocumentKey
+                    || document is not null && item.ClientCaseDocumentId == document.Id)).Take(2).ToArray();
+            if (matches.Length > 1 || matches is [var inconsistent]
+                && inconsistent.SourceDocumentKey is not null
+                && inconsistent.SourceDocumentKey != documentKey && inconsistent.SourceDocumentKey != legacyDocumentKey)
+            {
+                conflictItems.Add($"неоднозначный источник процессуального срока «{spec.Title}» по судебному событию «{courtAct.Title}»");
+                continue;
+            }
+            var existing = matches.SingleOrDefault();
             if (existing is not null)
             {
+                associatedDeadlines.Add(existing);
+                existing.SourceDocumentKey = documentKey;
+                if (document is not null) existing.ClientCaseDocumentId = document.Id;
                 existing.SourceUrl = Truncate(FirstNonEmpty(courtAct.SourceUrl, courtData.SourceUrl), 1000);
                 existing.SourceCheckedAt = checkedAt;
                 existing.SourceConfidence = "official-source";
@@ -9943,8 +10291,9 @@ public partial class CasesV2Controller : ControllerBase
                 AllDay = true,
                 Status = "active",
                 WarningDaysBefore = 7,
-                ClientCaseDocumentId = document.Id,
+                ClientCaseDocumentId = document?.Id,
                 SourceType = "sudrf",
+                SourceDocumentKey = documentKey,
                 SourceUrl = Truncate(FirstNonEmpty(courtAct.SourceUrl, courtData.SourceUrl), 1000),
                 SourceCheckedAt = checkedAt,
                 SourceConfidence = "official-source",
@@ -9959,6 +10308,7 @@ public partial class CasesV2Controller : ControllerBase
             _db.ClientCaseProceduralDeadlines.Add(deadline);
             existingDeadlines.Add(deadline);
             createdDeadlines.Add(deadline);
+            associatedDeadlines.Add(deadline);
             created++;
 
             if (spec.DeadlineType == "appeal")
@@ -9988,6 +10338,9 @@ public partial class CasesV2Controller : ControllerBase
 
     private static string BuildCourtDeadlineIdentity(int documentId, string deadlineType)
         => $"{documentId}:{NormalizeOptional(deadlineType)?.ToLowerInvariant()}";
+
+    private static string BuildCourtDeadlineIdentity(string documentKey, string deadlineType)
+        => $"source:{documentKey}:{NormalizeOptional(deadlineType)?.ToLowerInvariant()}";
 
     private static IEnumerable<SudrfCourtActDeadlineSpec> BuildSudrfCourtActDeadlineSpecs(
         SudrfCourtCaseData courtData,
@@ -10066,6 +10419,9 @@ public partial class CasesV2Controller : ControllerBase
         return $"{date} - Сводка - {courtAct.Title}.html";
     }
 
+    private static string SanitizeCourtSummaryFileName(string fileName)
+        => SanitizeFileName(new string(fileName.Select(c => char.IsControl(c) || "<>:\"/\\|?*".Contains(c) ? '_' : c).ToArray()));
+
     private static string BuildSudrfCourtActHtml(ClientCase clientCase, SudrfCourtCaseData courtData, SudrfCourtAct courtAct)
         => $"""
            <!doctype html>
@@ -10132,6 +10488,9 @@ public partial class CasesV2Controller : ControllerBase
         {
             parts.Add($"добавлено процессуальных сроков: {result.CreatedProceduralDeadlines}");
         }
+
+        if (result.PendingCourtActDocuments > 0)
+            parts.Add($"ожидают обязательных копий сводки судебных событий: {result.PendingCourtActDocuments}; сроки и напоминания сохранены");
 
         if (result.RemovedItems.Count > 0)
         {
@@ -10479,17 +10838,55 @@ public partial class CasesV2Controller : ControllerBase
             return Unauthorized();
         }
 
+        await using var deleteTransaction = await _db.Database.BeginTransactionAsync(ct);
+        if (!await _db.ClientCases.ApplyClientCaseVisibility(visibility).AnyAsync(c => c.Id == id, ct)) return NotFound();
+        if (await _db.ClientCases.Where(c => c.Id == id)
+            .ExecuteUpdateAsync(s => s.SetProperty(c => c.Title, c => c.Title), ct) != 1)
+            return NotFound();
         var e = await _db.ClientCases
             .ApplyClientCaseVisibility(visibility)
             .FirstOrDefaultAsync(item => item.Id == id, ct);
         if (e is null) return NotFound();
 
+        // Soft-deleted cases can be restored from the audit; their document
+        // objects must stay intact. A hard delete follows attachment retention.
+        if (!_db.UseObjectAuditModel && _productStorageDeletion is not null)
+        {
+            var lastId = 0;
+            while (true)
+            {
+                var documents = await _db.ClientCaseDocuments.AsNoTracking().Where(d => d.ClientCaseId == id && d.Id > lastId)
+                    .OrderBy(d => d.Id).Take(128).ToListAsync(ct);
+                if (documents.Count == 0) break;
+                foreach (var document in documents)
+                {
+                    var deletion = await _productStorageDeletion.DeleteAsync(LegacyStorageSources.CaseDocuments,
+                        document.Id, document.OriginalFileName, document.ContentType,
+                        _caseDocumentStorage.ResolvePath(document.StoragePath), User.GetUserId(), ct);
+                    if (deletion is not ("legacy" or "deleted"))
+                        return StatusCode(deletion == "conflict" ? 409 : 503,
+                            new { message = "Не удалось безопасно удалить документы. Дело и связи платежей сохранены." });
+                    lastId = document.Id;
+                }
+            }
+        }
+
         var payments = await _db.Payments.Where(p => p.ClientCaseId == id).ToListAsync(ct);
         foreach (var p in payments) p.ClientCaseId = null;
         await _db.SaveChangesAsync(ct);
 
-        _db.ClientCases.Remove(e);
-        await _db.SaveChangesAsync(ct);
+        var cascadeTiming = _db.ChangeTracker.CascadeDeleteTiming;
+        try
+        {
+            if (_db.UseObjectAuditModel) _db.ChangeTracker.CascadeDeleteTiming = CascadeTiming.OnSaveChanges;
+            _db.ClientCases.Remove(e);
+            await _db.SaveChangesAsync(ct);
+        }
+        finally
+        {
+            _db.ChangeTracker.CascadeDeleteTiming = cascadeTiming;
+        }
+        await deleteTransaction.CommitAsync(ct);
         await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
         return NoContent();
     }
@@ -11355,51 +11752,6 @@ public partial class CasesV2Controller : ControllerBase
            ?? clientCase.Client?.ResponsibleUserId
            ?? clientCase.LegalEntity?.ResponsibleUserId;
 
-    private async Task<(CaseDocumentTemplateDefinition Template, string? Error, bool NotFound)> ResolveCaseDocumentTemplateDefinitionAsync(
-        GenerateCaseDocumentTemplateRequest? request,
-        CancellationToken ct)
-    {
-        var templates = await GetCaseDocumentTemplateLibraryAsync(ct);
-        var requestedTemplateKey = NormalizeOptional(request?.TemplateKey);
-        if (requestedTemplateKey is not null)
-        {
-            var normalizedKey = NormalizeDocumentTemplateCode(requestedTemplateKey);
-            if (normalizedKey is null)
-            {
-                return (default, "Некорректный код шаблона.", false);
-            }
-
-            var template = templates.FirstOrDefault(item =>
-                item.IsActive && string.Equals(item.Key, normalizedKey, StringComparison.OrdinalIgnoreCase));
-            if (!string.IsNullOrWhiteSpace(template.Key))
-            {
-                return (template, null, false);
-            }
-
-            var legacyKey = NormalizeCaseDocumentTemplateKey(requestedTemplateKey, request?.DocumentType);
-            if (!string.Equals(legacyKey, normalizedKey, StringComparison.OrdinalIgnoreCase))
-            {
-                template = templates.FirstOrDefault(item =>
-                    item.IsActive && string.Equals(item.Key, legacyKey, StringComparison.OrdinalIgnoreCase));
-                if (!string.IsNullOrWhiteSpace(template.Key))
-                {
-                    return (template, null, false);
-                }
-            }
-
-            return (default, "Активный шаблон документа не найден.", true);
-        }
-
-        var inferredKey = NormalizeCaseDocumentTemplateKey(null, request?.DocumentType);
-        var inferredTemplate = templates.FirstOrDefault(item =>
-            item.IsActive && string.Equals(item.Key, inferredKey, StringComparison.OrdinalIgnoreCase));
-        if (!string.IsNullOrWhiteSpace(inferredTemplate.Key))
-        {
-            return (inferredTemplate, null, false);
-        }
-
-        return (CaseDocumentTemplateDefinitions[0], null, false);
-    }
 
     private static CaseDocumentTemplate BuildCaseDocumentTemplate(
         ClientCase clientCase,
@@ -11422,21 +11774,13 @@ public partial class CasesV2Controller : ControllerBase
             BuildCaseDocumentTemplateHtml(clientCase, definition, documentType, timeZone));
     }
 
-    private async Task<IReadOnlyList<CaseDocumentTemplateDefinition>> GetCaseDocumentTemplateLibraryAsync(CancellationToken ct)
-    {
-        var rawJson = await _db.SystemSettings
-            .AsNoTracking()
-            .Where(setting => setting.Key == CaseDocumentTemplatesSettingKey)
-            .Select(setting => setting.Value)
-            .FirstOrDefaultAsync(ct);
 
-        var templates = DeserializeCaseDocumentTemplateDefinitions(rawJson);
+    private Task<IReadOnlyList<CaseDocumentTemplateDefinition>> GetCaseDocumentTemplateLibraryAsync(CancellationToken ct)
+        => new CaseDocumentTemplateCatalog(_db).ReadAsync(ct);
 
-        return NormalizeCaseDocumentTemplateLibrary(
-            templates is { Count: > 0 }
-                ? templates
-                : CaseDocumentTemplateDefinitions.ToList());
-    }
+    private async Task<(CaseDocumentTemplateDefinition Template, string? Error, bool NotFound)> ResolveCaseDocumentTemplateDefinitionAsync(
+        GenerateCaseDocumentTemplateRequest? request, CancellationToken ct)
+        => CaseDocumentTemplateCatalog.Resolve(await GetCaseDocumentTemplateLibraryAsync(ct), request?.TemplateKey, request?.DocumentType);
 
     private async Task SaveCaseDocumentTemplateLibraryAsync(
         IReadOnlyCollection<CaseDocumentTemplateDefinition> templates,
@@ -11472,48 +11816,7 @@ public partial class CasesV2Controller : ControllerBase
         await _db.SaveChangesAsync(ct);
     }
 
-    private static string SerializeCaseDocumentTemplateLibrary(
-        IEnumerable<CaseDocumentTemplateDefinition> templates,
-        DateTime? defaultUpdatedAt)
-    {
-        var storage = new CaseDocumentTemplateLibraryStorage
-        {
-            Templates = NormalizeCaseDocumentTemplateLibrary(templates)
-                .Select(template => new CaseDocumentTemplateStorage
-                {
-                    Key = template.Key,
-                    Label = template.Title,
-                    DocumentType = template.DocumentType,
-                    Heading = template.Heading,
-                    CaseTypes = NormalizeCaseDocumentTemplateCaseTypes(template.CaseTypes),
-                    Description = template.Description,
-                    Content = template.Content,
-                    Version = template.Version <= 0 ? 1 : template.Version,
-                    IsActive = template.IsActive,
-                    UpdatedAt = template.UpdatedAt ?? defaultUpdatedAt,
-                })
-                .ToList(),
-        };
-        return JsonSerializer.Serialize(storage, CaseDocumentTemplateJsonOptions);
-    }
 
-    private static List<CaseDocumentTemplateDefinition>? DeserializeCaseDocumentTemplateDefinitions(string? rawJson)
-    {
-        var storage = DeserializeCaseDocumentTemplateLibrary(rawJson);
-        return storage?.Templates
-            .Select(static item => new CaseDocumentTemplateDefinition(
-                item.Key,
-                item.Label,
-                item.DocumentType,
-                item.Heading,
-                NormalizeCaseDocumentTemplateCaseTypes(item.CaseTypes),
-                item.Description,
-                item.Content,
-                item.Version <= 0 ? 1 : item.Version,
-                item.IsActive,
-                item.UpdatedAt))
-            .ToList();
-    }
 
     private static DocumentTemplateHistoryService.DocumentTemplateVersionSummary ReadCaseDocumentTemplateVersionSummary(string settingsJson)
     {
@@ -11757,84 +12060,9 @@ public partial class CasesV2Controller : ControllerBase
             UpdatedAt = storage.UpdatedAt,
         };
 
-    private static CaseDocumentTemplateLibraryStorage? DeserializeCaseDocumentTemplateLibrary(string? rawJson)
-    {
-        if (string.IsNullOrWhiteSpace(rawJson))
-        {
-            return null;
-        }
 
-        try
-        {
-            return JsonSerializer.Deserialize<CaseDocumentTemplateLibraryStorage>(rawJson, CaseDocumentTemplateJsonOptions);
-        }
-        catch
-        {
-            return null;
-        }
-    }
 
-    private static IReadOnlyList<CaseDocumentTemplateDefinition> NormalizeCaseDocumentTemplateLibrary(
-        IEnumerable<CaseDocumentTemplateDefinition> templates)
-    {
-        var result = new List<CaseDocumentTemplateDefinition>();
-        var usedKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var template in templates)
-        {
-            var key = NormalizeDocumentTemplateCode(template.Key);
-            if (key is null || !usedKeys.Add(key))
-            {
-                continue;
-            }
 
-            var title = NormalizeRequired(template.Title, template.Heading);
-            title = NormalizeRequired(title, key);
-            var documentType = NormalizeRequired(template.DocumentType, "Документ");
-            result.Add(template with
-            {
-                Key = key,
-                Title = title,
-                DocumentType = documentType,
-                Heading = NormalizeRequired(template.Heading, title),
-                CaseTypes = NormalizeCaseDocumentTemplateCaseTypes(template.CaseTypes),
-                Version = template.Version <= 0 ? 1 : template.Version,
-                IsActive = template.IsActive,
-            });
-        }
-
-        return result.Count > 0
-            ? result
-            : CaseDocumentTemplateDefinitions.ToList();
-    }
-
-    private static List<string> NormalizeCaseDocumentTemplateCaseTypes(IEnumerable<string>? values)
-    {
-        if (values is null)
-        {
-            return new List<string>();
-        }
-
-        return values
-            .SelectMany(static value => (value ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-            .Select(NormalizeOptional)
-            .Where(static value => value is not null)
-            .Select(static value => value!)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(value => value, StringComparer.Create(new CultureInfo("ru-RU"), ignoreCase: true))
-            .ToList();
-    }
-
-    private static bool IsCaseDocumentTemplateApplicableToCase(CaseDocumentTemplateDefinition template, ClientCase clientCase)
-    {
-        var caseTypes = NormalizeCaseDocumentTemplateCaseTypes(template.CaseTypes);
-        if (caseTypes.Count == 0)
-        {
-            return true;
-        }
-
-        var caseType = NormalizeOptional(clientCase.CaseType);
-        return caseType is not null && caseTypes.Contains(caseType, StringComparer.OrdinalIgnoreCase);
-    }
 
     private static (CaseDocumentTemplateDefinition Template, string? Error) BuildCaseDocumentTemplateDefinition(
         UpsertCaseDocumentTemplateRequest? request,
@@ -11895,41 +12123,7 @@ public partial class CasesV2Controller : ControllerBase
         return string.IsNullOrWhiteSpace(definition.Key) ? CaseDocumentTemplateDefinitions[0] : definition;
     }
 
-    private static string NormalizeCaseDocumentTemplateKey(string? templateKey, string? documentType)
-    {
-        var normalized = templateKey?.Trim().ToLowerInvariant();
-        if (!string.IsNullOrWhiteSpace(normalized))
-        {
-            return normalized switch
-            {
-                "claim" or "isk" => "claim",
-                "motion" => "motion",
-                "objection" => "objection",
-                "court-letter" or "letter" => "court-letter",
-                _ => "case-summary",
-            };
-        }
 
-        var type = documentType?.Trim().ToLowerInvariant() ?? string.Empty;
-        if (type.Contains("иск", StringComparison.OrdinalIgnoreCase)) return "claim";
-        if (type.Contains("ходатай", StringComparison.OrdinalIgnoreCase)) return "motion";
-        if (type.Contains("возраж", StringComparison.OrdinalIgnoreCase)) return "objection";
-        if (type.Contains("переписк", StringComparison.OrdinalIgnoreCase) || type.Contains("письм", StringComparison.OrdinalIgnoreCase)) return "court-letter";
-        return "case-summary";
-    }
-
-    private static string? NormalizeDocumentTemplateCode(string? value)
-    {
-        var normalized = value?.Trim().ToLowerInvariant();
-        if (string.IsNullOrWhiteSpace(normalized) || normalized.Length > 64)
-        {
-            return null;
-        }
-
-        return normalized.All(ch => char.IsLetterOrDigit(ch) || ch is '-' or '_')
-            ? normalized
-            : null;
-    }
 
     private static string BuildCaseDocumentTemplateHtml(
         ClientCase clientCase,
@@ -13285,7 +13479,7 @@ public partial class CasesV2Controller : ControllerBase
     private static string BuildWorkOrderContractDescription(
         ClientCase clientCase,
         ClientCaseWorkOrder workOrder,
-        IReadOnlyCollection<ClientCaseWorkOrderItem> items)
+        IReadOnlyCollection<ClientCaseWorkOrderItem> items, decimal? totalAmount = null)
     {
         var builder = new StringBuilder();
         builder.AppendLine($"Договор сформирован из заказ-наряда «{workOrder.Title}» по делу {clientCase.Title}.");
@@ -13302,7 +13496,7 @@ public partial class CasesV2Controller : ControllerBase
         }
 
         builder.AppendLine();
-        builder.AppendLine($"Итого: {FormatMoney(workOrder.TotalAmount)}.");
+        builder.AppendLine($"Итого: {FormatMoney(totalAmount ?? workOrder.TotalAmount)}.");
         return builder.ToString().Trim();
     }
 
@@ -14263,18 +14457,7 @@ public partial class CasesV2Controller : ControllerBase
     }
 
     private static string NormalizeWorkOrderStatus(string? value)
-    {
-        var normalized = NormalizeOptional(value)?.ToLowerInvariant();
-        return normalized switch
-        {
-            "approved" or "согласован" or "согласовано" => "approved",
-            "pending_approval" or "pending-approval" or "on_approval" or "on-approval" or "на согласовании" => "pending_approval",
-            "revision_required" or "revision-required" or "returned" or "returned_for_revision" or "на доработке" or "доработка" => "revision_required",
-            "invoice_created" or "invoice-created" or "счет создан" or "счёт создан" => "invoice_created",
-            "cancelled" or "canceled" or "отменен" or "отменён" => "cancelled",
-            _ => "draft",
-        };
-    }
+        => WorkOrderStatusRules.Normalize(value);
 
     private static string FormatWorkOrderStatus(string? value)
         => NormalizeWorkOrderStatus(value) switch
@@ -14302,77 +14485,32 @@ public partial class CasesV2Controller : ControllerBase
             _ => "Заказ-наряд недоступен для редактирования в текущем статусе.",
         };
 
-    private async Task<string> BuildWorkOrderInvoiceNumberAsync(
+    private Task<string> BuildWorkOrderInvoiceNumberAsync(
         int clientCaseId,
         int workOrderId,
         DateTime invoiceDate,
         string? requestedNumber,
         CancellationToken ct)
-    {
-        var baseNumber = NormalizeOptional(requestedNumber) ?? $"WO-{clientCaseId}-{workOrderId}";
-        var candidate = baseNumber.Length > 120 ? baseNumber[..120] : baseNumber;
-        var suffix = 1;
-        while (await _db.Invoices.AsNoTracking().AnyAsync(
-            invoice => invoice.Number == candidate && invoice.Date.Date == invoiceDate.Date,
-            ct))
-        {
-            suffix++;
-            var suffixText = $"-{suffix}";
-            var maxBaseLength = Math.Max(1, 120 - suffixText.Length);
-            var truncatedBase = baseNumber.Length > maxBaseLength ? baseNumber[..maxBaseLength] : baseNumber;
-            candidate = $"{truncatedBase}{suffixText}";
-        }
+        => new GeneratedFinancialClaims(_db).NextNumberAsync(GeneratedFinancialDocumentKind.Invoice,
+            clientCaseId, workOrderId, invoiceDate, requestedNumber, ct);
 
-        return candidate;
-    }
-
-    private async Task<string> BuildWorkOrderActNumberAsync(
+    private Task<string> BuildWorkOrderActNumberAsync(
         int clientCaseId,
         int workOrderId,
         DateTime actDate,
         string? requestedNumber,
         CancellationToken ct)
-    {
-        var baseNumber = NormalizeOptional(requestedNumber) ?? $"WO-ACT-{clientCaseId}-{workOrderId}";
-        var candidate = baseNumber.Length > 120 ? baseNumber[..120] : baseNumber;
-        var suffix = 1;
-        while (await _db.Acts.AsNoTracking().AnyAsync(
-            act => act.Number == candidate && act.Date.Date == actDate.Date,
-            ct))
-        {
-            suffix++;
-            var suffixText = $"-{suffix}";
-            var maxBaseLength = Math.Max(1, 120 - suffixText.Length);
-            var truncatedBase = baseNumber.Length > maxBaseLength ? baseNumber[..maxBaseLength] : baseNumber;
-            candidate = $"{truncatedBase}{suffixText}";
-        }
+        => new GeneratedFinancialClaims(_db).NextNumberAsync(GeneratedFinancialDocumentKind.Act,
+            clientCaseId, workOrderId, actDate, requestedNumber, ct);
 
-        return candidate;
-    }
-
-    private async Task<string> BuildWorkOrderContractNumberAsync(
+    private Task<string> BuildWorkOrderContractNumberAsync(
         int clientCaseId,
         int workOrderId,
         DateTime contractDate,
         string? requestedNumber,
         CancellationToken ct)
-    {
-        var baseNumber = NormalizeOptional(requestedNumber) ?? $"WO-CONTRACT-{clientCaseId}-{workOrderId}";
-        var candidate = baseNumber.Length > 120 ? baseNumber[..120] : baseNumber;
-        var suffix = 1;
-        while (await _db.Contracts.AsNoTracking().AnyAsync(
-            contract => contract.Number == candidate && contract.Date.Date == contractDate.Date,
-            ct))
-        {
-            suffix++;
-            var suffixText = $"-{suffix}";
-            var maxBaseLength = Math.Max(1, 120 - suffixText.Length);
-            var truncatedBase = baseNumber.Length > maxBaseLength ? baseNumber[..maxBaseLength] : baseNumber;
-            candidate = $"{truncatedBase}{suffixText}";
-        }
-
-        return candidate;
-    }
+        => new GeneratedFinancialClaims(_db).NextNumberAsync(GeneratedFinancialDocumentKind.Contract,
+            clientCaseId, workOrderId, contractDate, requestedNumber, ct);
 
     private static string NormalizeCurrency(string? value)
     {
@@ -14602,17 +14740,7 @@ public partial class CasesV2Controller : ControllerBase
     }
 
     private static void AppendCaseEvent(ClientCase clientCase, string eventText, DateTime localNow)
-    {
-        var line = $"{FormatUserGeneratedAt(localNow)}: {eventText}";
-        var existing = clientCase.EventHistory?.Trim();
-        var next = string.IsNullOrWhiteSpace(existing)
-            ? line
-            : $"{existing}{Environment.NewLine}{line}";
-
-        clientCase.EventHistory = next.Length <= 4000
-            ? next
-            : next[^4000..].TrimStart();
-    }
+        => CaseDocumentPublicationRecords.AppendEvent(clientCase, eventText, localNow);
 
     private static IReadOnlyList<string> SplitCaseHistory(string? value)
         => string.IsNullOrWhiteSpace(value)
@@ -15937,6 +16065,7 @@ public partial class CasesV2Controller : ControllerBase
         public int UpdatedCourtEvents { get; set; }
         public int CreatedCourtParties { get; set; }
         public int CreatedCourtActDocuments { get; set; }
+        public int PendingCourtActDocuments { get; set; }
         public int CreatedProceduralDeadlines { get; set; }
         public IReadOnlyList<string> NewItems { get; set; } = [];
         public IReadOnlyList<string> ChangedItems { get; set; } = [];
@@ -16011,6 +16140,7 @@ public partial class CasesV2Controller : ControllerBase
         public int UpdatedCourtEvents { get; set; }
         public int CreatedCourtParties { get; set; }
         public int CreatedCourtActDocuments { get; set; }
+        public int PendingCourtActDocuments { get; set; }
         public int CreatedProceduralDeadlines { get; set; }
         public IReadOnlyList<string> NewItems { get; set; } = [];
         public IReadOnlyList<string> ChangedItems { get; set; } = [];
@@ -16150,24 +16280,7 @@ public partial class CasesV2Controller : ControllerBase
         public string Html { get; set; } = string.Empty;
     }
 
-    private sealed class CaseDocumentTemplateLibraryStorage
-    {
-        public List<CaseDocumentTemplateStorage> Templates { get; set; } = new();
-    }
 
-    private sealed class CaseDocumentTemplateStorage
-    {
-        public string Key { get; set; } = string.Empty;
-        public string Label { get; set; } = string.Empty;
-        public string DocumentType { get; set; } = string.Empty;
-        public string Heading { get; set; } = string.Empty;
-        public List<string> CaseTypes { get; set; } = new();
-        public string? Description { get; set; }
-        public string? Content { get; set; }
-        public int Version { get; set; } = 1;
-        public bool IsActive { get; set; } = true;
-        public DateTime? UpdatedAt { get; set; }
-    }
 
     private sealed class ProductionCalendarSettingsStorage
     {
@@ -16246,6 +16359,7 @@ public partial class CasesV2Controller : ControllerBase
         int UpdatedCourtEvents,
         int CreatedCourtParties,
         int CreatedCourtActDocuments,
+        int PendingCourtActDocuments,
         int CreatedProceduralDeadlines,
         IReadOnlyList<string> NewItems,
         IReadOnlyList<string> ChangedItems,
@@ -16257,6 +16371,7 @@ public partial class CasesV2Controller : ControllerBase
             NewItems.Count > 0
             || ChangedItems.Count > 0
             || RemovedItems.Count > 0
+            || PendingCourtActDocuments > 0
             || ConflictItems.Count > 0;
     }
 
@@ -16307,17 +16422,6 @@ public partial class CasesV2Controller : ControllerBase
         bool IsActive = true,
         int SortOrder = 0);
 
-    private readonly record struct CaseDocumentTemplateDefinition(
-        string Key,
-        string Title,
-        string DocumentType,
-        string Heading,
-        IReadOnlyList<string>? CaseTypes = null,
-        string? Description = null,
-        string? Content = null,
-        int Version = 1,
-        bool IsActive = true,
-        DateTime? UpdatedAt = null);
 
     private readonly record struct CaseDocumentTemplateTokenDefinition(
         string Key,

@@ -19,6 +19,7 @@ public sealed class TelegramBotUpdateService : ITelegramBotUpdateService
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<TelegramBotUpdateService> _logger;
     private readonly ExternalAuthService? _externalAuthService;
+    private readonly IConfiguration? _configuration;
 
     private static readonly Regex CommandRegex = new("^[a-z0-9_]{1,32}$", RegexOptions.Compiled);
 
@@ -41,12 +42,14 @@ public sealed class TelegramBotUpdateService : ITelegramBotUpdateService
         PaymentContext context,
         IHttpClientFactory httpClientFactory,
         ILogger<TelegramBotUpdateService> logger,
-        ExternalAuthService? externalAuthService)
+        ExternalAuthService? externalAuthService,
+        IConfiguration? configuration = null)
     {
         _context = context;
         _httpClientFactory = httpClientFactory;
         _logger = logger;
         _externalAuthService = externalAuthService;
+        _configuration = configuration;
     }
 
     public async Task<TelegramWebhookSyncResultDto> SyncWebhookAsync(
@@ -68,7 +71,7 @@ public sealed class TelegramBotUpdateService : ITelegramBotUpdateService
         }
 
         var webhookUrl = BuildWebhookUrl(request, sender.Id);
-        using var client = TelegramBotApiHttpClientFactory.Create(_httpClientFactory, config.ToConnectionSettings());
+        using var client = TelegramBotApiHttpClientFactory.Create(_httpClientFactory, config.ToConnectionSettings(), _configuration);
         using var response = await client.PostAsync(
             $"https://api.telegram.org/bot{config.BotToken.Trim()}/setWebhook",
             new FormUrlEncodedContent(new Dictionary<string, string>
@@ -218,7 +221,7 @@ public sealed class TelegramBotUpdateService : ITelegramBotUpdateService
             throw new InvalidOperationException("TelegramBotTokenMissing");
         }
 
-        using var client = TelegramBotApiHttpClientFactory.Create(_httpClientFactory, config.ToConnectionSettings());
+        using var client = TelegramBotApiHttpClientFactory.Create(_httpClientFactory, config.ToConnectionSettings(), _configuration);
         var me = await CallTelegramAsync(client, config.BotToken, "getMe", null, cancellationToken);
         if (!me.Success)
         {
@@ -316,7 +319,7 @@ public sealed class TelegramBotUpdateService : ITelegramBotUpdateService
             };
         }
 
-        using var client = TelegramBotApiHttpClientFactory.Create(_httpClientFactory, config.ToConnectionSettings());
+        using var client = TelegramBotApiHttpClientFactory.Create(_httpClientFactory, config.ToConnectionSettings(), _configuration);
         var calls = new[]
         {
             ("setMyName", new Dictionary<string, string> { ["name"] = normalized.Name }),
@@ -365,7 +368,7 @@ public sealed class TelegramBotUpdateService : ITelegramBotUpdateService
             return null;
         }
 
-        using var client = TelegramBotApiHttpClientFactory.Create(_httpClientFactory, config.ToConnectionSettings());
+        using var client = TelegramBotApiHttpClientFactory.Create(_httpClientFactory, config.ToConnectionSettings(), _configuration);
         var file = await CallTelegramAsync(
             client,
             config.BotToken,
@@ -410,7 +413,7 @@ public sealed class TelegramBotUpdateService : ITelegramBotUpdateService
         CancellationToken cancellationToken)
     {
         var previousLastUpdateId = config.LastUpdateId;
-        using var client = TelegramBotApiHttpClientFactory.Create(_httpClientFactory, config.ToConnectionSettings());
+        using var client = TelegramBotApiHttpClientFactory.Create(_httpClientFactory, config.ToConnectionSettings(), _configuration);
         var query = new Dictionary<string, string>
         {
             ["timeout"] = "0",
@@ -656,7 +659,7 @@ public sealed class TelegramBotUpdateService : ITelegramBotUpdateService
             return;
         }
 
-        using var client = TelegramBotApiHttpClientFactory.Create(_httpClientFactory, config.ToConnectionSettings());
+        using var client = TelegramBotApiHttpClientFactory.Create(_httpClientFactory, config.ToConnectionSettings(), _configuration);
         using var content = new FormUrlEncodedContent(new Dictionary<string, string>
         {
             ["chat_id"] = chatId.ToString(CultureInfo.InvariantCulture),
@@ -721,7 +724,7 @@ public sealed class TelegramBotUpdateService : ITelegramBotUpdateService
         TelegramSenderConfig config,
         CancellationToken cancellationToken)
     {
-        using var client = TelegramBotApiHttpClientFactory.Create(_httpClientFactory, config.ToConnectionSettings());
+        using var client = TelegramBotApiHttpClientFactory.Create(_httpClientFactory, config.ToConnectionSettings(), _configuration);
         using var response = await client.PostAsync(
             $"https://api.telegram.org/bot{config.BotToken.Trim()}/deleteWebhook",
             new FormUrlEncodedContent(new Dictionary<string, string>

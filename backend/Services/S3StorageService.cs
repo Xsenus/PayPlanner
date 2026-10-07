@@ -1010,10 +1010,11 @@ public sealed class S3StorageService : IS3StorageService
     }
 }
 
-public sealed class S3StorageClientFactory : IS3StorageClientFactory
+public sealed class S3StorageClientFactory(IConfiguration? configuration = null) : IS3StorageClientFactory
 {
     public IS3StorageClient Create(S3StorageConnectionSettings settings)
     {
+        RestoredRuntimeIsolation.ThrowIfEnabled(configuration);
         var credentials = new BasicAWSCredentials(settings.AccessKeyId, settings.SecretAccessKey);
         var config = new AmazonS3Config
         {
@@ -1133,13 +1134,40 @@ public sealed class AwsS3StorageClient : IS3StorageClient
     {
         try
         {
-            await _client.PutObjectAsync(new PutObjectRequest
+            var request = new PutObjectRequest
             {
                 BucketName = bucket,
                 Key = key,
                 InputStream = content,
                 ContentType = contentType,
-            }, cancellationToken);
+            };
+            // A streaming wrapper can know its size without supporting rewinds.
+            // Preserve that information for S3 without buffering the entire file.
+            if (!content.CanSeek)
+            {
+                long? remainingLength = null;
+                try
+                {
+                    remainingLength = checked(content.Length - content.Position);
+                }
+                catch (NotSupportedException)
+                {
+                    // Unknown-length inputs retain the SDK's fail-closed behavior.
+                }
+                if (remainingLength is < 0)
+                    throw new InvalidDataException("The stream position exceeds its declared length.");
+                if (remainingLength.HasValue)
+                    request.Headers.ContentLength = remainingLength.Value;
+                if (remainingLength == 0)
+                {
+                    // The SDK needs a seekable input to checksum an empty body.
+                    // Verify EOF first so an incorrect zero length cannot discard data.
+                    if (await content.ReadAsync(new byte[1], cancellationToken) != 0)
+                        throw new InvalidDataException("The stream contains bytes beyond its declared length.");
+                    request.InputStream = Stream.Null;
+                }
+            }
+            await _client.PutObjectAsync(request, cancellationToken);
         }
         catch (AmazonS3Exception ex)
         {

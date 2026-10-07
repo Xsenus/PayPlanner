@@ -4,11 +4,13 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Configuration;
 using PayPlanner.Api.Controllers.V2;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.Notifications;
+using PayPlanner.Api.Services.Storage;
 
 namespace PayPlanner.Api.Services.LegalIntegrations;
 
@@ -199,6 +201,8 @@ public sealed class ClientCaseCourtSyncSchedulerService : BackgroundService
             notificationService: scope.ServiceProvider.GetService<INotificationService>(),
             courtSyncProviderRegistry: registry,
             courtSyncMetrics: metrics,
+            configuration: scope.ServiceProvider.GetService<IConfiguration>(),
+            managedCaseUploads: scope.ServiceProvider.GetService<IManagedCaseDocumentUploadService>(),
             realtimePublisher: realtimePublisher)
         {
             ControllerContext = new ControllerContext

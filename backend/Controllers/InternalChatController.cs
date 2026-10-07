@@ -1,15 +1,19 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Runtime.ExceptionServices;
+using System.Security.Cryptography;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.Notifications;
+using PayPlanner.Api.Services.Storage;
 
 namespace PayPlanner.Api.Controllers;
 
@@ -30,17 +34,38 @@ public sealed partial class InternalChatController : ControllerBase
     private readonly INotificationService _notifications;
     private readonly IRealtimeNotificationPublisher _realtime;
     private readonly string _filesRoot;
+    private readonly IProductStorageReader? _productStorageReader;
+    private readonly IProductStorageDeletionService? _productStorageDeletion;
+    private readonly ILogger<InternalChatController> _logger;
+    private readonly InternalChatOriginalWriter? _chatWriter;
+    private readonly IStoragePolicyService? _chatPolicies;
+    private readonly IProductStorageBindingService? _chatBindings;
+    private readonly StorageWorkerAvailability _storageWorkerAvailability;
 
     public InternalChatController(
         PaymentContext db,
         INotificationService notifications,
         IRealtimeNotificationPublisher realtime,
         IWebHostEnvironment? environment = null,
-        IConfiguration? configuration = null)
+        IConfiguration? configuration = null,
+        IProductStorageReader? productStorageReader = null,
+        ILogger<InternalChatController>? logger = null,
+        IProductStorageDeletionService? productStorageDeletion = null,
+        InternalChatOriginalWriter? chatWriter = null,
+        IStoragePolicyService? chatPolicies = null,
+        IProductStorageBindingService? chatBindings = null,
+        StorageWorkerAvailability? storageWorkerAvailability = null)
     {
         _db = db;
+        _productStorageReader = productStorageReader;
+        _productStorageDeletion = productStorageDeletion;
         _notifications = notifications;
         _realtime = realtime;
+        _logger = logger ?? NullLogger<InternalChatController>.Instance;
+        _chatWriter = chatWriter;
+        _chatPolicies = chatPolicies;
+        _chatBindings = chatBindings;
+        _storageWorkerAvailability = storageWorkerAvailability ?? new(false);
         _filesRoot = Path.Combine(
             ApplicationFileStoragePaths.ResolveRoot(environment, configuration, AppContext.BaseDirectory),
             "internal-chat-files");
@@ -454,6 +479,14 @@ public sealed partial class InternalChatController : ControllerBase
         if (text.Length == 0 && request.Files.Count == 0) return BadRequest("Введите сообщение или прикрепите файл.");
         var fileProblem = ValidateFiles(request.Files);
         if (fileProblem is not null) return BadRequest(fileProblem);
+        if (request.ClientRequestId == Guid.Empty) return BadRequest("Некорректный идентификатор отправки.");
+        if (request.ClientRequestId is { } clientRequestId)
+        {
+            if (await HasManagedSendAsync(threadId, userId.Value, clientRequestId, ct))
+                return await SendManagedMessageAsync(threadId, userId.Value, text, request, ct);
+            var earlier = await FindExistingSendAsync(threadId, userId.Value, clientRequestId, text, request, ct);
+            if (earlier is not null) return earlier;
+        }
 
         InternalChatMessage? reply = null;
         if (request.ReplyToMessageId is > 0)
@@ -470,12 +503,18 @@ public sealed partial class InternalChatController : ControllerBase
             if (validMentionCount != mentionIds.Count) return BadRequest("Упоминать можно только участников этого чата.");
         }
 
+        if (request.Files.Count > 0 && _chatWriter?.Enabled == true)
+            return await SendManagedMessageAsync(threadId, userId.Value, text, request, ct);
+
         var now = DateTime.UtcNow;
         var message = new InternalChatMessage
         {
             ThreadId = threadId,
             AuthorUserId = userId,
             Text = text,
+            ClientRequestId = request.ClientRequestId,
+            NotificationDispatchPending = true,
+            LastNotificationDispatchAttemptAt = now,
             ReplyToMessageId = reply?.Id,
             CreatedAt = now,
             Mentions = mentionIds.Select(id => new InternalChatMention { UserId = id }).ToList()
@@ -484,9 +523,10 @@ public sealed partial class InternalChatController : ControllerBase
         var thread = await _db.InternalChatThreads.FirstAsync(item => item.Id == threadId, ct);
         thread.LastMessageAt = now;
         thread.UpdatedAt = now;
-        await _db.SaveChangesAsync(ct);
-
         var savedPaths = new List<string>();
+        Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction? transaction = null;
+        var commitStarted = false;
+        Exception? saveError = null;
         try
         {
             if (request.Files.Count > 0)
@@ -498,7 +538,8 @@ public sealed partial class InternalChatController : ControllerBase
                     var extension = Path.GetExtension(file.FileName);
                     var storedName = $"{Guid.NewGuid():N}{extension.ToLowerInvariant()}";
                     var path = Path.Combine(directory, storedName);
-                    await using (var stream = System.IO.File.Create(path)) await file.CopyToAsync(stream, ct);
+                    await ExclusiveUploadFileWriter.WriteNewAsync(path,
+                        (stream, token) => file.CopyToAsync(stream, token), ct);
                     savedPaths.Add(path);
                     message.Attachments.Add(new InternalChatAttachment
                     {
@@ -510,27 +551,171 @@ public sealed partial class InternalChatController : ControllerBase
                         CreatedAt = now
                     });
                 }
-                await _db.SaveChangesAsync(ct);
             }
-        }
-        catch
-        {
-            foreach (var path in savedPaths) if (System.IO.File.Exists(path)) System.IO.File.Delete(path);
-            _db.InternalChatMessages.Remove(message);
-            await _db.SaveChangesAsync(CancellationToken.None);
-            throw;
-        }
 
-        if (reply?.AuthorUserId is int replyAuthorId && replyAuthorId != userId && reply.NextNoReplyReminderAt.HasValue)
-        {
-            reply.NextNoReplyReminderAt = null;
+            if (reply?.AuthorUserId is int replyAuthorId && replyAuthorId != userId && reply.NextNoReplyReminderAt.HasValue)
+                reply.NextNoReplyReminderAt = null;
+
+            // File transfer is complete before taking a database transaction.
+            // The message, its attachments, thread activity and reply reminder
+            // then become visible in one commit.
+            transaction = await _db.Database.BeginTransactionAsync(ct);
+            // Capture uses this same thread-row lock. A flags reload or a
+            // concurrent capture must not turn a managed intent into a legacy send.
+            if (await _db.InternalChatThreads.Where(item => item.Id == threadId)
+                    .ExecuteUpdateAsync(set => set.SetProperty(item => item.UpdatedAt, item => item.UpdatedAt), ct) != 1
+                || !await IsMemberAsync(threadId, userId.Value, ct)) throw new ChatSendAccessRevokedException();
+            if (request.ClientRequestId is { } guardedKey && await HasManagedSendAsync(threadId, userId.Value, guardedKey, ct))
+                throw new ChatSendNamespaceConflictException();
             await _db.SaveChangesAsync(ct);
+            commitStarted = true;
+            await transaction.CommitAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            // Once commit was attempted, losing its acknowledgement is not
+            // permission to erase bytes that may already have live DB links.
+            if (!commitStarted)
+            {
+                if (transaction is not null)
+                {
+                    using var rollbackTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                    await transaction.RollbackAsync(rollbackTimeout.Token);
+                }
+                foreach (var path in savedPaths) if (System.IO.File.Exists(path)) System.IO.File.Delete(path);
+                _db.ChangeTracker.Clear();
+            }
+            saveError = ex;
+        }
+        finally
+        {
+            if (transaction is not null) await transaction.DisposeAsync();
         }
 
-        await NotifyMessageRecipientsAsync(thread, message, reply, mentionIds, ct);
-        await _realtime.PublishTaskJournalChangedAsync(ct);
+        if (saveError is not null)
+        {
+            if (saveError is ChatSendAccessRevokedException) return Forbid();
+            if (saveError is ChatSendNamespaceConflictException)
+                return Conflict(new { message = "У этой отправки уже есть сохранённая попытка. Обновите её состояние и продолжите отправку." });
+            if (request.ClientRequestId is { } retryRequestId)
+            {
+                // A concurrent send can win the unique key, or the commit can
+                // succeed while its acknowledgement is lost. Query only after
+                // disposing the failed transaction.
+                var earlier = await FindExistingSendAsync(threadId, userId.Value, retryRequestId, text, request, ct);
+                if (earlier is not null) return earlier;
+            }
+            ExceptionDispatchInfo.Capture(saveError).Throw();
+        }
+
+        try
+        {
+            await InternalChatNotificationRecoveryService.DispatchMessageAsync(_db, _notifications, message.Id, ct);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            // A notification failure after commit is not a failed send.
+            _logger.LogWarning(ex, "Chat message {MessageId} was saved but recipient notification failed.", message.Id);
+        }
+        try
+        {
+            await _realtime.PublishTaskJournalChangedAsync(ct);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "Chat message {MessageId} was saved but realtime update failed.", message.Id);
+        }
         var loaded = await LoadMessageAsync(message.Id, ct);
         return CreatedAtAction(nameof(GetMessages), new { threadId }, await MapMessageWithReadStateAsync(loaded!, ct));
+    }
+
+    private async Task<ActionResult<InternalChatMessageDto>?> FindExistingSendAsync(
+        int threadId, int authorUserId, Guid requestId, string text,
+        SendInternalChatMessageRequest request, CancellationToken ct)
+    {
+        var existing = await _db.InternalChatMessages.AsNoTracking()
+            .Where(item => item.ThreadId == threadId && item.AuthorUserId == authorUserId && item.ClientRequestId == requestId)
+            .Select(item => new { item.Id, item.DeletedAt })
+            .SingleOrDefaultAsync(ct);
+        if (existing is null) return null;
+        if (existing.DeletedAt is not null) return Conflict("Сообщение этой отправки уже удалено.");
+        var loaded = await LoadMessageAsync(existing.Id, ct) ?? throw new InvalidDataException("Сообщение отправки исчезло.");
+        var savedFiles = loaded.Attachments.OrderBy(item => item.Id).ToArray();
+        if (loaded.Text != text || loaded.ReplyToMessageId != request.ReplyToMessageId
+            || savedFiles.Length != request.Files.Count
+            || savedFiles.Where((item, index) => item.FileName != SafeFileName(request.Files[index].FileName)
+                || item.Size != request.Files[index].Length).Any()
+            || !ParseMentionIds(text, request.MentionUserIds).SetEquals(loaded.Mentions.Select(item => item.UserId)))
+            return Conflict("Идентификатор отправки уже использован для другого сообщения.");
+        for (var index = 0; index < savedFiles.Length; index++)
+        {
+            string requestedHash;
+            try
+            {
+                requestedHash = await UploadValidationHelper.CopyValidatedAndHashAsync(
+                    request.Files[index], Stream.Null, MaximumFileSize, ct);
+            }
+            catch (InvalidDataException)
+            {
+                return BadRequest("Размер полученного вложения не совпадает с заявленным.");
+            }
+            var savedHash = await ReadReplayAttachmentHashAsync(threadId, savedFiles[index], ct);
+            if (savedHash is null)
+                return StatusCode(StatusCodes.Status503ServiceUnavailable,
+                    new { message = "Проверенная копия вложения временно недоступна. Повторите отправку позже." });
+            if (!string.Equals(requestedHash, savedHash, StringComparison.OrdinalIgnoreCase))
+                return Conflict("Идентификатор отправки уже использован для другого сообщения.");
+        }
+        // Reading copies can outlive membership or message deletion. A receipt
+        // still requires the original product authority after those reads.
+        if (!await IsMemberAsync(threadId, authorUserId, ct)) return Forbid();
+        if (!await _db.InternalChatMessages.AsNoTracking().AnyAsync(item => item.Id == loaded.Id
+                && item.DeletedAt == null, ct))
+            return Conflict("Сообщение этой отправки уже удалено.");
+        return CreatedAtAction(nameof(GetMessages), new { threadId }, await MapMessageWithReadStateAsync(loaded, ct));
+    }
+
+    private async Task<string?> ReadReplayAttachmentHashAsync(int threadId, InternalChatAttachment attachment, CancellationToken ct)
+    {
+        if (_productStorageReader is not null)
+        {
+            var managed = await _productStorageReader.OpenReadAsync(LegacyStorageSources.InternalChat,
+                attachment.Id, attachment.FileName, attachment.ContentType, ct);
+            if (managed.Status == ProductStorageReadStatus.Available && managed.File is { } file)
+            {
+                await using (file)
+                {
+                    if (file.SizeBytes != attachment.Size) return null;
+                    return await HashSavedAttachmentAsync(file.Content, attachment, ct);
+                }
+            }
+            // A registered copy must not fall back to unverified legacy bytes.
+            if (managed.Status != ProductStorageReadStatus.Legacy) return null;
+        }
+        try
+        {
+            await using var stream = new FileStream(AttachmentPath(threadId, attachment.StoredFileName),
+                FileMode.Open, FileAccess.Read, FileShare.Read, 81920, FileOptions.Asynchronous | FileOptions.SequentialScan);
+            return await HashSavedAttachmentAsync(stream, attachment, ct);
+        }
+        catch (FileNotFoundException) { return null; }
+        catch (DirectoryNotFoundException) { return null; }
+    }
+
+    private static async Task<string?> HashSavedAttachmentAsync(Stream stream, InternalChatAttachment attachment, CancellationToken ct)
+    {
+        if (attachment.Size <= 0 || attachment.Size > MaximumFileSize) return null;
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        var buffer = new byte[81920];
+        long size = 0;
+        int read;
+        while ((read = await stream.ReadAsync(buffer, ct)) > 0)
+        {
+            if (read > attachment.Size - size) return null;
+            hash.AppendData(buffer.AsSpan(0, read));
+            size += read;
+        }
+        return size == attachment.Size ? Convert.ToHexString(hash.GetHashAndReset()) : null;
     }
 
     [HttpPut("messages/{messageId:int}")]
@@ -560,20 +745,48 @@ public sealed partial class InternalChatController : ControllerBase
     {
         var userId = CurrentUserId();
         if (userId is null) return Unauthorized();
-        var message = await _db.InternalChatMessages.Include(item => item.Attachments).FirstOrDefaultAsync(item => item.Id == messageId, ct);
+        var message = await _db.InternalChatMessages.AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == messageId, ct);
         if (message is null) return NotFound();
         if (message.AuthorUserId != userId || message.DeletedAt.HasValue || message.Kind != InternalChatMessageKinds.User) return Forbid();
+        await using var transaction = await _db.Database.BeginTransactionAsync(ct);
+        // Serialize deletion against another request before resolving attachments.
+        if (await _db.InternalChatMessages.Where(item => item.Id == messageId && item.DeletedAt == null)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.Text, item => item.Text), ct) != 1)
+            return NotFound();
+        message = await _db.InternalChatMessages.Include(item => item.Attachments)
+            .FirstOrDefaultAsync(item => item.Id == messageId, ct);
+        if (message is null || message.DeletedAt.HasValue) return NotFound();
+        if (message.AuthorUserId != userId || message.Kind != InternalChatMessageKinds.User) return Forbid();
+        var legacyPaths = new List<string>();
+        foreach (var attachment in message.Attachments)
+        {
+            var path = AttachmentPath(message.ThreadId, attachment.StoredFileName);
+            var deletion = _productStorageDeletion is null ? "legacy" : await _productStorageDeletion.DeleteAsync(
+                LegacyStorageSources.InternalChat, attachment.Id, attachment.FileName, attachment.ContentType,
+                path, userId, ct);
+            if (deletion is not ("legacy" or "deleted"))
+                return StatusCode(deletion == "conflict" ? 409 : 503,
+                    new { message = "Не удалось безопасно удалить вложение. Сообщение сохранено." });
+            if (deletion == "legacy") legacyPaths.Add(path);
+        }
         message.DeletedAt = DateTime.UtcNow;
         message.NextNoReplyReminderAt = null;
         message.Text = string.Empty;
         message.IsPinned = false;
-        foreach (var attachment in message.Attachments)
-        {
-            var path = AttachmentPath(message.ThreadId, attachment.StoredFileName);
-            if (System.IO.File.Exists(path)) System.IO.File.Delete(path);
-        }
         _db.InternalChatAttachments.RemoveRange(message.Attachments);
         await _db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
+        // A failed/ambiguous commit must never erase bytes still linked by the DB.
+        // Managed copies are removed later by the existing tombstone worker.
+        foreach (var path in legacyPaths)
+        {
+            try { System.IO.File.Delete(path); }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                _logger.LogWarning(exception, "Chat attachment cleanup remains pending after deleting message {MessageId}", messageId);
+            }
+        }
         await _realtime.PublishTaskJournalChangedAsync(ct);
         return NoContent();
     }
@@ -698,6 +911,21 @@ public sealed partial class InternalChatController : ControllerBase
             .FirstOrDefaultAsync(item => item.Id == attachmentId && item.Message.DeletedAt == null, ct);
         if (attachment is null) return NotFound();
         if (!await IsMemberAsync(attachment.Message.ThreadId, userId.Value, ct)) return Forbid();
+        if (_productStorageReader is not null)
+        {
+            var managed = await _productStorageReader.OpenReadAsync(LegacyStorageSources.InternalChat,
+                attachment.Id, attachment.FileName, attachment.ContentType, ct);
+            if (managed.Status == ProductStorageReadStatus.Available && managed.File is { } file)
+                return new FileStreamResult(file.Content, attachment.ContentType)
+                {
+                    FileDownloadName = attachment.FileName,
+                    EnableRangeProcessing = true,
+                };
+            if (managed.Status == ProductStorageReadStatus.Deleted) return NotFound();
+            if (managed.Status != ProductStorageReadStatus.Legacy)
+                return StatusCode(StatusCodes.Status503ServiceUnavailable,
+                    new { message = "Проверенная копия вложения временно недоступна. Повторите скачивание позже." });
+        }
         var path = AttachmentPath(attachment.Message.ThreadId, attachment.StoredFileName);
         if (!System.IO.File.Exists(path)) return NotFound();
         return PhysicalFile(path, attachment.ContentType, attachment.FileName, enableRangeProcessing: true);
@@ -820,39 +1048,6 @@ public sealed partial class InternalChatController : ControllerBase
                 thread.Id,
                 task.Id,
                 Metadata: new { threadId = thread.Id, messageId = message.Id, taskId = task.Id },
-                Channels: null,
-                ActionUrl: $"/?ppTab=messenger&thread={thread.Id}"), ct);
-        }
-    }
-
-    private async Task NotifyMessageRecipientsAsync(
-        InternalChatThread thread,
-        InternalChatMessage message,
-        InternalChatMessage? reply,
-        IReadOnlyCollection<int> mentionIds,
-        CancellationToken ct)
-    {
-        var members = await ActiveAuthorizedMembers()
-            .Where(member => member.ThreadId == thread.Id && member.UserId != message.AuthorUserId)
-            .ToListAsync(ct);
-        foreach (var member in members)
-        {
-            var isMention = mentionIds.Contains(member.UserId);
-            var isReply = reply?.AuthorUserId == member.UserId;
-            if (member.NotificationMode == InternalChatNotificationModes.Muted) continue;
-            if (member.NotificationMode == InternalChatNotificationModes.Mentions && !isMention && !isReply) continue;
-            var type = isMention ? UserNotificationTypes.ChatMention : isReply ? UserNotificationTypes.ChatReply : UserNotificationTypes.ChatMessage;
-            var title = isMention ? $"Вас упомянули: {thread.Name}" : isReply ? $"Ответ в чате: {thread.Name}" : $"Новое сообщение: {thread.Name}";
-            await _notifications.NotifyAsync(new NotificationEventEnvelope(
-                member.UserId,
-                type,
-                $"chat:{message.Id}:{member.UserId}:{type}",
-                title,
-                MessagePreview(message.Text),
-                "internalChat",
-                thread.Id,
-                thread.TaskJournalItemId,
-                Metadata: new { threadId = thread.Id, messageId = message.Id },
                 Channels: null,
                 ActionUrl: $"/?ppTab=messenger&thread={thread.Id}"), ct);
         }
@@ -1008,7 +1203,7 @@ public sealed class CreateInternalChatChannelRequest { public string Name { get;
 public sealed class UpdateInternalChatMembersRequest { public List<int> MemberUserIds { get; set; } = []; }
 public sealed class UpdateInternalChatGuestsRequest { public List<int> GuestUserIds { get; set; } = []; }
 public sealed class UpdateInternalChatPersonalStateRequest { public string State { get; set; } = string.Empty; }
-public sealed class SendInternalChatMessageRequest { public string? Text { get; set; } public int? ReplyToMessageId { get; set; } public List<int> MentionUserIds { get; set; } = []; public List<IFormFile> Files { get; set; } = []; }
+public sealed class SendInternalChatMessageRequest { public string? Text { get; set; } public int? ReplyToMessageId { get; set; } public Guid? ClientRequestId { get; set; } public List<int> MentionUserIds { get; set; } = []; public List<IFormFile> Files { get; set; } = []; }
 public sealed class EditInternalChatMessageRequest { public string? Text { get; set; } public List<int> MentionUserIds { get; set; } = []; }
 public sealed class ToggleInternalChatReactionRequest { public string? Emoji { get; set; } }
 public sealed class PinInternalChatMessageRequest { public bool Pinned { get; set; } }

@@ -27,11 +27,18 @@ using System.Text;
 using System.Text.Json.Serialization;
 
 var builder = WebApplication.CreateBuilder(args);
+var urlsEnv = Environment.GetEnvironmentVariable("ASPNETCORE_URLS");
+var urlsCfg = builder.Configuration["urls"] ?? builder.Configuration["Urls"];
+var effectiveUrls = !string.IsNullOrWhiteSpace(urlsEnv)
+    ? urlsEnv
+    : (!string.IsNullOrWhiteSpace(urlsCfg) ? urlsCfg : "http://127.0.0.1:5080");
+RestoredRuntimeLaunchSafety.Validate(builder.Configuration, effectiveUrls);
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<IStorageProvider, LocalStorageProvider>();
 builder.Services.AddSingleton<LegacyLocalStorageProvider>();
 builder.Services.AddSingleton<ILegacyLocalStorageLocator>(sp => sp.GetRequiredService<LegacyLocalStorageProvider>());
 builder.Services.AddSingleton<IStorageProvider>(sp => sp.GetRequiredService<LegacyLocalStorageProvider>());
+builder.Services.AddScoped<IStorageProvider, ManagedCompatibilityStorageProvider>();
 builder.Services.AddScoped<IStorageProvider, S3StorageProvider>();
 builder.Services.AddScoped<IStorageProvider, YandexDiskStorageProvider>();
 builder.Services.AddScoped<IStorageProviderRegistry, StorageProviderRegistry>();
@@ -41,9 +48,31 @@ builder.Services.Configure<StorageOrchestrationOptions>(
 builder.Services.AddScoped<IStoragePolicyService, StoragePolicyService>();
 builder.Services.AddScoped<IStorageOperationProcessor, StorageOperationProcessor>();
 builder.Services.AddScoped<IStorageObjectService, StorageObjectService>();
+builder.Services.AddScoped<StorageStageCapacityService>();
+builder.Services.AddScoped<IStorageStageCapacityService>(services => services.GetRequiredService<StorageStageCapacityService>());
+builder.Services.AddScoped<IStorageStageWriterMarkerRecoveryService>(services => services.GetRequiredService<StorageStageCapacityService>());
+builder.Services.AddSingleton<StorageStageMarkerMaintenance>();
+builder.Services.AddScoped<IStorageOriginalReadStagingService, StorageOriginalReadStagingService>();
+builder.Services.AddScoped<IProductStorageReader, ProductStorageReader>();
+builder.Services.AddScoped<IProductStorageBindingService, ProductStorageBindingService>();
+builder.Services.AddScoped<IProductStorageDeletionService, ProductStorageDeletionService>();
+builder.Services.AddScoped<IManagedProfilePhotoUploadService, ManagedProfilePhotoUploadService>();
+builder.Services.AddScoped<IManagedTaskFileUploadService, ManagedTaskFileUploadService>();
+builder.Services.AddScoped<IManagedCaseDocumentUploadService, ManagedCaseDocumentUploadService>();
+builder.Services.AddScoped<ITaskFilePublicationAuthorizationService, TaskFilePublicationAuthorizationService>();
+builder.Services.AddScoped<ITaskFilePublicationProcessor, TaskFilePublicationProcessor>();
+builder.Services.AddScoped<ICaseDocumentPublicationProcessor, CaseDocumentPublicationProcessor>();
+builder.Services.AddScoped<ITaskFileUploadStatusReader, TaskFileUploadStatusReader>();
+builder.Services.AddScoped<ICaseDocumentUploadStatusReader, CaseDocumentUploadStatusReader>();
+builder.Services.AddScoped<CaseDocumentUploadRetirementService>();
+builder.Services.AddScoped<GeneratedFinancialAttemptRecovery>();
+builder.Services.AddInternalChatStorageRecovery();
 builder.Services.AddScoped<IStorageReconciliationService, StorageReconciliationService>();
 builder.Services.AddScoped<ILegacyStorageCatalogBackfillService, LegacyStorageCatalogBackfillService>();
+builder.Services.AddScoped<ILegacyStorageReplicaMigrationService, LegacyStorageReplicaMigrationService>();
 var databaseProvider = DatabaseProviderResolver.Resolve(builder.Configuration);
+await RestoredRuntimeDatabaseIdentity.VerifyAsync(builder.Configuration, databaseProvider, CancellationToken.None);
+RestoredRuntimeAuthentication.Configure(builder.Configuration);
 
 builder.Services.AddControllers(options =>
 {
@@ -55,6 +84,7 @@ builder.Services.AddControllers(options =>
     options.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
 });
 builder.Services.AddSignalR();
+var restoredDataProtection = RestoredRuntimeDataProtection.ReadConfiguration(builder.Configuration);
 var dataProtectionBuilder = builder.Services.AddDataProtection();
 var dataProtectionApplicationName = builder.Configuration["DataProtection:ApplicationName"];
 if (!string.IsNullOrWhiteSpace(dataProtectionApplicationName))
@@ -64,9 +94,16 @@ if (!string.IsNullOrWhiteSpace(dataProtectionApplicationName))
 
 var dataProtectionKeysPath = builder.Configuration["DataProtection:KeysPath"]
     ?? builder.Configuration["DataProtection:KeysDirectory"];
+if (restoredDataProtection is not null)
+{
+    dataProtectionBuilder.DisableAutomaticKeyGeneration();
+    builder.Services.Configure<DataProtectionOptions>(options =>
+        options.ApplicationDiscriminator = restoredDataProtection.Expected.ApplicationDiscriminator);
+    dataProtectionKeysPath = restoredDataProtection.KeysPath;
+}
 if (!string.IsNullOrWhiteSpace(dataProtectionKeysPath))
 {
-    Directory.CreateDirectory(dataProtectionKeysPath);
+    if (restoredDataProtection is null) Directory.CreateDirectory(dataProtectionKeysPath);
     dataProtectionBuilder.PersistKeysToFileSystem(new DirectoryInfo(dataProtectionKeysPath));
 }
 
@@ -175,6 +212,8 @@ builder.Services.AddScoped<ITelegramBotUpdateService, TelegramBotUpdateService>(
 builder.Services.AddScoped<IRealtimeNotificationPublisher, SignalRRealtimeNotificationPublisher>();
 builder.Services.AddScoped<IWebPushNotificationService, WebPushNotificationService>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
+builder.Services.AddScoped<ICaseDocumentNotificationLiveDispatcher>(sp => (ICaseDocumentNotificationLiveDispatcher)sp.GetRequiredService<INotificationService>());
+builder.Services.AddScoped<CaseDocumentNotificationDispatchProcessor>();
 builder.Services.AddScoped<ISmsChannelWarningPublisher, SmsChannelWarningPublisher>();
 builder.Services.AddScoped<ISmsProviderCredentialStore, SmsProviderCredentialStore>();
 builder.Services.AddHttpClient<SmsRuProvider>(client =>
@@ -211,6 +250,14 @@ builder.Services.AddScoped<InstallmentService>();
 builder.Services.AddScoped<StatsSummaryService>();
 builder.Services.AddScoped<IFormRequirementsService, FormRequirementsService>();
 builder.Services.AddSingleton<ICaseDocumentStorage, LocalCaseDocumentStorage>();
+builder.Services.AddScoped<CaseDocumentNotificationService>();
+builder.Services.AddScoped<CaseDocumentPublicationRecords>();
+builder.Services.AddScoped<GeneratedWorkOrderDocumentPublication>();
+builder.Services.AddScoped<GeneratedTemplateDocumentPublication>();
+builder.Services.AddScoped<CourtDocumentSourceRegistry>();
+builder.Services.AddScoped<GeneratedCourtDocumentPublication>();
+builder.Services.AddScoped<GeneratedFinancialDocumentRegistry>();
+builder.Services.AddScoped<GeneratedFinancialDocumentPublication>();
 builder.Services.AddScoped<IMessengerDocumentDeliveryService, MessengerDocumentDeliveryService>();
 builder.Services.AddScoped<IMessengerDocumentProvider, TelegramMessengerDocumentProvider>();
 builder.Services.AddScoped<IMessengerDocumentProvider, MaxMessengerDocumentProvider>();
@@ -226,6 +273,7 @@ builder.Services.AddSingleton<IClientPassportEncryptionDualWriteService, ClientP
 builder.Services.AddScoped<IClientPassportEncryptionBackfillService, ClientPassportEncryptionBackfillService>();
 builder.Services.AddSingleton<IInvoiceDocumentPdfService, InvoiceDocumentPdfService>();
 builder.Services.AddSingleton<DatabaseBackupService>();
+builder.Services.AddSingleton<DataProtectionRecoveryInventory>();
 builder.Services.Configure<DatabaseRestoreDrillOptions>(
     builder.Configuration.GetSection(DatabaseRestoreDrillOptions.SectionName));
 builder.Services.AddSingleton<DatabaseRestoreDrillService>();
@@ -244,6 +292,7 @@ builder.Services.AddHttpClient<ILegalEntityEnrichmentService, DadataLegalEntityE
 builder.Services.AddHttpClient<ISudrfCourtSyncService, SudrfCourtSyncService>();
 builder.Services.AddHttpClient<IYandexDiskService, YandexDiskService>();
 builder.Services.AddHttpClient();
+builder.Services.AddRestoredRuntimeIsolation();
 builder.Services.AddScoped<IExternalCalendarSyncCoordinator, ExternalCalendarSyncCoordinator>();
 builder.Services.AddScoped<IExternalCalendarTaskSyncOutbox, ExternalCalendarTaskSyncOutbox>();
 builder.Services.AddScoped<IExternalCalendarTaskSyncOutboxProcessor, ExternalCalendarTaskSyncOutboxProcessor>();
@@ -271,6 +320,7 @@ else
 
 builder.Services.AddSingleton<TaskJournalReminderNotificationService>();
 builder.Services.AddSingleton<InternalChatNoReplyReminderService>();
+builder.Services.AddSingleton<InternalChatNotificationRecoveryService>();
 builder.Services.AddSingleton<StickyNoteReminderNotificationService>();
 builder.Services.AddSingleton<NotificationRetrySchedulerService>();
 builder.Services.AddSingleton<NotificationDeliveryRetentionService>();
@@ -297,12 +347,14 @@ if (builder.Configuration.GetValue("BackgroundServices:Enabled", true))
     builder.Services.AddHostedService<StorageOperationWorker>();
     builder.Services.AddHostedService<MessengerDocumentOutboxWorker>();
     builder.Services.AddHostedService<MaxOutboxWorker>();
+    builder.Services.AddHostedService<CaseDocumentNotificationDispatchWorker>();
     builder.Services.AddHostedService<ExternalCalendarTaskSyncOutboxWorker>();
     builder.Services.AddHostedService<ExternalWorkOrderApprovalExpirationService>();
     builder.Services.AddHostedService<PaymentStatusUpdater>();
     builder.Services.AddHostedService<InvoicePaymentStateReconciliationService>();
     builder.Services.AddHostedService(sp => sp.GetRequiredService<TaskJournalReminderNotificationService>());
     builder.Services.AddHostedService(sp => sp.GetRequiredService<InternalChatNoReplyReminderService>());
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<InternalChatNotificationRecoveryService>());
     builder.Services.AddHostedService(sp => sp.GetRequiredService<StickyNoteReminderNotificationService>());
     builder.Services.AddHostedService(sp => sp.GetRequiredService<NotificationRetrySchedulerService>());
     builder.Services.AddHostedService(sp => sp.GetRequiredService<NotificationDeliveryRetentionService>());
@@ -343,6 +395,8 @@ builder.Services.Configure<GzipCompressionProviderOptions>(options =>
 {
     options.Level = CompressionLevel.Fastest;
 });
+
+builder.Services.AddSingleton(StorageWorkerAvailability.Capture(builder.Services));
 
 var jwtSection = builder.Configuration.GetSection("Jwt");
 var jwtSecret = JwtConfiguration.GetRequiredSecret(builder.Configuration);
@@ -415,12 +469,6 @@ builder.Services.AddRateLimiter(options =>
     AnonymousIntegrationRateLimitPolicies.AddPolicies(options);
 });
 
-var urlsEnv = Environment.GetEnvironmentVariable("ASPNETCORE_URLS");
-var urlsCfg = builder.Configuration["urls"] ?? builder.Configuration["Urls"];
-var effectiveUrls = !string.IsNullOrWhiteSpace(urlsEnv)
-    ? urlsEnv
-    : (!string.IsNullOrWhiteSpace(urlsCfg) ? urlsCfg : "http://127.0.0.1:5080");
-
 builder.WebHost.UseUrls(effectiveUrls);
 Console.WriteLine(
     $"[Startup] Effective URLs: {effectiveUrls} " +
@@ -428,8 +476,10 @@ Console.WriteLine(
     $"configUrls={(string.IsNullOrWhiteSpace(urlsCfg) ? "<empty>" : urlsCfg)})");
 
 var app = builder.Build();
+await RestoredRuntimeDataProtection.VerifyAsync(app.Services, builder.Configuration, databaseProvider,
+    restoredDataProtection, CancellationToken.None);
 
-if (app.Environment.IsDevelopment())
+if (app.Environment.IsDevelopment() && !builder.Configuration.GetValue(RestoredRuntimeIsolation.EnabledKey, false))
 {
     app.UseSwagger();
     app.UseSwaggerUI();
@@ -440,11 +490,13 @@ app.UseApiErrorContract(app.Environment);
 app.UseRouting();
 app.UseMiddleware<SlowRequestLoggingMiddleware>();
 app.UseCors();
+app.UseMiddleware<RestoredRuntimeRequestGuard>();
 app.UseResponseCompression();
 app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 
+app.UseMiddleware<ManagedProfilePhotoMiddleware>();
 app.UseDefaultFiles();
 app.UseStaticFiles();
 var userPhotoStorageRoot = UserPhotoStoragePaths.ResolveRoot(app.Environment, app.Configuration);
@@ -455,8 +507,10 @@ app.UseStaticFiles(new StaticFileOptions
     RequestPath = UserPhotoStoragePaths.RequestPath,
 });
 
-using (var scope = app.Services.CreateScope())
+// Prepared clones must not be changed by production startup migrations/seed/backfills.
+if (!builder.Configuration.GetValue(RestoredRuntimeIsolation.EnabledKey, false))
 {
+    using var scope = app.Services.CreateScope();
     var cfg = scope.ServiceProvider.GetRequiredService<IConfiguration>();
     var startupLogger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("StartupDataMaintenance");
     var dataProtectionProvider = scope.ServiceProvider.GetRequiredService<IDataProtectionProvider>();

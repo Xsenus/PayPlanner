@@ -76,6 +76,8 @@ public interface IFieldEncryptor
     Task<string> EncryptAsync(string plaintext, string authenticatedContext, CancellationToken ct);
     Task<string> DecryptAsync(string ciphertext, string authenticatedContext, CancellationToken ct);
     Task<string> ComputeBlindIndexAsync(string exactValue, string fieldContext, CancellationToken ct);
+    Task<string> ComputeBlindIndexForCiphertextAsync(string ciphertext, string exactValue, string fieldContext, CancellationToken ct)
+        => throw new InvalidOperationException("Хранилище не поддерживает проверку сохранённого поискового индекса.");
 }
 
 public sealed class AeadFieldEncryptor : IFieldEncryptor
@@ -130,20 +132,7 @@ public sealed class AeadFieldEncryptor : IFieldEncryptor
     public async Task<string> DecryptAsync(string ciphertext, string authenticatedContext, CancellationToken ct)
     {
         ValidateContext(authenticatedContext);
-        if (string.IsNullOrWhiteSpace(ciphertext) || !ciphertext.StartsWith(Prefix, StringComparison.Ordinal))
-            throw new InvalidOperationException("Неизвестный или устаревший формат зашифрованного поля.");
-        CipherPayload payload;
-        try
-        {
-            var json = Convert.FromBase64String(ciphertext[Prefix.Length..]);
-            payload = JsonSerializer.Deserialize<CipherPayload>(json)
-                ?? throw new InvalidOperationException("Пустой контейнер зашифрованного поля.");
-        }
-        catch (Exception error) when (error is FormatException or JsonException)
-        {
-            throw new InvalidOperationException("Повреждён контейнер зашифрованного поля.", error);
-        }
-
+        var payload = ReadPayload(ciphertext);
         var key = await _keyStore.GetKeyAsync(payload.KeyId, ct);
         ValidateKey(key);
         var dataKey = new byte[32];
@@ -182,11 +171,44 @@ public sealed class AeadFieldEncryptor : IFieldEncryptor
         }
     }
 
+    private static CipherPayload ReadPayload(string ciphertext)
+    {
+        if (string.IsNullOrWhiteSpace(ciphertext) || !ciphertext.StartsWith(Prefix, StringComparison.Ordinal))
+            throw new InvalidOperationException("Неизвестный или устаревший формат зашифрованного поля.");
+        CipherPayload payload;
+        try
+        {
+            var json = Convert.FromBase64String(ciphertext[Prefix.Length..]);
+            payload = JsonSerializer.Deserialize<CipherPayload>(json)
+                ?? throw new InvalidOperationException("Пустой контейнер зашифрованного поля.");
+        }
+        catch (Exception error) when (error is FormatException or JsonException)
+        {
+            throw new InvalidOperationException("Повреждён контейнер зашифрованного поля.", error);
+        }
+
+        return payload;
+    }
+
     public async Task<string> ComputeBlindIndexAsync(string exactValue, string fieldContext, CancellationToken ct)
     {
         ValidateContext(fieldContext);
         ArgumentNullException.ThrowIfNull(exactValue);
         var key = await _keyStore.GetActiveKeyAsync(ct);
+        return ComputeBlindIndex(key, exactValue, fieldContext);
+    }
+
+    public async Task<string> ComputeBlindIndexForCiphertextAsync(string ciphertext, string exactValue, string fieldContext, CancellationToken ct)
+    {
+        ValidateContext(fieldContext);
+        ArgumentNullException.ThrowIfNull(exactValue);
+        var payload = ReadPayload(ciphertext);
+        var key = await _keyStore.GetKeyAsync(payload.KeyId, ct);
+        return ComputeBlindIndex(key, exactValue, fieldContext);
+    }
+
+    private static string ComputeBlindIndex(FieldEncryptionKeyMaterial key, string exactValue, string fieldContext)
+    {
         ValidateKey(key);
         var normalized = exactValue.Normalize(NormalizationForm.FormKC).Trim().ToLowerInvariant();
         var input = Encoding.UTF8.GetBytes($"{fieldContext}\0{normalized}");

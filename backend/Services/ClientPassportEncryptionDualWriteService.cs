@@ -99,16 +99,17 @@ public sealed class ClientPassportEncryptionDualWriteService : IClientPassportEn
 
         if (needsCiphertext)
         {
-            var ciphertext = await _encryptor.EncryptAsync(
+            currentCiphertext = await _encryptor.EncryptAsync(
                 plaintext,
                 $"ClientPassport:{fieldName}:{passportId}",
                 ct);
-            setCiphertext(ciphertext);
+            setCiphertext(currentCiphertext);
         }
 
         if (needsBlindIndex)
         {
-            var blindIndex = await _encryptor.ComputeBlindIndexAsync(
+            var blindIndex = await _encryptor.ComputeBlindIndexForCiphertextAsync(
+                currentCiphertext ?? throw new InvalidOperationException("Индекс паспорта требует зашифрованную запись."),
                 plaintext,
                 $"ClientPassport:{fieldName}",
                 ct);

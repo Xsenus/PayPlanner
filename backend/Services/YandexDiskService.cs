@@ -19,6 +19,8 @@ namespace PayPlanner.Api.Services;
 
 public interface IYandexDiskService
 {
+    Task<YandexDiskCapacity> GetCapacityAsync(string id, CancellationToken cancellationToken = default)
+        => throw new NotSupportedException();
     Task<YandexDiskConnectionsOverviewDto> GetConnectionsOverviewAsync(CancellationToken cancellationToken = default)
         => throw new NotSupportedException();
     string GetOAuthCallbackUrl(HttpRequest httpRequest)
@@ -85,6 +87,8 @@ public interface IYandexDiskService
 
 public sealed record YandexDiskDownload(string FileName, string ContentType, byte[] Content);
 
+public sealed record YandexDiskCapacity(string AccountUid, long TotalBytes, long UsedBytes);
+
 public sealed record YandexDiskStreamDownload(
     string FileName,
     string ContentType,
@@ -119,6 +123,9 @@ public sealed class YandexDiskOperationException : Exception
     }
 
     public int StatusCode { get; }
+    // Only a transfer that has reached the blob PUT can have committed bytes
+    // without a reliable acknowledgement. REST/link failures remain unavailable.
+    public bool OutcomeUnknown { get; init; }
 }
 
 public sealed class YandexDiskService : IYandexDiskService
@@ -184,6 +191,26 @@ public sealed class YandexDiskService : IYandexDiskService
         _httpClient = httpClient;
         _configuration = configuration;
         _tokenProtector = dataProtectionProvider.CreateProtector("PayPlanner.YandexDisk.Tokens.v1");
+    }
+
+    public async Task<YandexDiskCapacity> GetCapacityAsync(string id, CancellationToken cancellationToken = default)
+    {
+        var settings = await LoadConfiguredConnectionAsync(id, cancellationToken);
+        using var payload = await SendJsonAsync<JsonDocument>(HttpMethod.Get,
+            $"{ApiBaseUrl}?fields=total_space,used_space,user.uid", settings.OAuthToken!, null, cancellationToken);
+        var root = payload.RootElement;
+        // Missing values must never deserialize into a plausible zero-byte quota.
+        if (root.ValueKind != JsonValueKind.Object
+            || !root.TryGetProperty("total_space", out var totalValue) || totalValue.ValueKind != JsonValueKind.Number
+            || !totalValue.TryGetInt64(out var total) || total < 0
+            || !root.TryGetProperty("used_space", out var usedValue) || usedValue.ValueKind != JsonValueKind.Number
+            || !usedValue.TryGetInt64(out var used) || used < 0
+            || !root.TryGetProperty("user", out var user) || user.ValueKind != JsonValueKind.Object
+            || !user.TryGetProperty("uid", out var uidValue) || uidValue.ValueKind != JsonValueKind.String
+            || uidValue.GetString() is not { Length: > 0 and <= 128 } uid
+            || uid.Any(c => c is < '0' or > '9'))
+            throw new YandexDiskOperationException(502, "Яндекс.Диск не подтвердил квоту и владельца диска.");
+        return new(uid, total, used);
     }
 
     public async Task<YandexDiskSettingsDto> GetSettingsAsync(CancellationToken cancellationToken = default)
@@ -792,8 +819,23 @@ public sealed class YandexDiskService : IYandexDiskService
             streamContent.Headers.ContentType = MediaTypeHeaderValue.Parse(contentType);
         }
 
-        using var uploadResponse = await _httpClient.PutAsync(link.Href, streamContent, cancellationToken);
-        await EnsureSuccessAsync(uploadResponse, cancellationToken);
+        try
+        {
+            using var uploadResponse = await _httpClient.PutAsync(link.Href, streamContent, cancellationToken);
+            await EnsureSuccessAsync(uploadResponse, cancellationToken);
+        }
+        catch (HttpRequestException)
+        {
+            throw new YandexDiskOperationException(502, "Ответ на загрузку Яндекс.Диска не получен. Файл мог сохраниться; перед повторной загрузкой нужно проверить его.") { OutcomeUnknown = true };
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new YandexDiskOperationException(504, "Время ожидания ответа на загрузку Яндекс.Диска истекло. Файл мог сохраниться; перед повторной загрузкой нужно проверить его.") { OutcomeUnknown = true };
+        }
+        catch (YandexDiskOperationException ex) when (ex.StatusCode is 408 or 425 or 429 or >= 500)
+        {
+            throw new YandexDiskOperationException(ex.StatusCode, ex.Message) { OutcomeUnknown = true };
+        }
         return BuildResult(relativePath);
     }
 
@@ -849,6 +891,17 @@ public sealed class YandexDiskService : IYandexDiskService
         try
         {
             await EnsureSuccessAsync(response, cancellationToken);
+            var size = response.Content.Headers.ContentLength;
+            if (size is null)
+            {
+                // Chunked downloads do not declare a length. Do not turn an unknown
+                // size into zero: use the existing authenticated resource metadata API.
+                var resource = await SendJsonAsync<YandexDiskResourcePayload>(HttpMethod.Get,
+                    $"{ApiBaseUrl}/resources?path={Uri.EscapeDataString(fullPath)}&fields=size,type", settings.OAuthToken!, null, cancellationToken);
+                if (resource.Size is null or < 0 || resource.Type != "file")
+                    throw new YandexDiskOperationException(502, "Яндекс.Диск не подтвердил размер скачиваемого файла.");
+                size = resource.Size;
+            }
             var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
             var fileName = Path.GetFileName(relativePath.Replace('\\', '/'));
             var ownedContent = new Storage.OwnedProviderStream(stream, new DelegateAsyncDisposable(response.Dispose));
@@ -856,7 +909,7 @@ public sealed class YandexDiskService : IYandexDiskService
                 string.IsNullOrWhiteSpace(fileName) ? "yandex-disk-file" : fileName,
                 response.Content.Headers.ContentType?.ToString() ?? "application/octet-stream",
                 ownedContent,
-                response.Content.Headers.ContentLength ?? 0,
+                size.Value,
                 ownedContent);
         }
         catch

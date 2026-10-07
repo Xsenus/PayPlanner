@@ -2,7 +2,7 @@ using System.Security.Cryptography;
 
 namespace PayPlanner.Api.Services.Storage;
 
-public sealed class LocalStorageProvider : IStorageProvider
+public sealed class LocalStorageProvider : IStorageProvider, IStorageRepairDestinationProvider, IStorageCapacityProvider
 {
     private readonly string _root;
 
@@ -12,6 +12,21 @@ public sealed class LocalStorageProvider : IStorageProvider
     }
 
     public string Key => "local";
+    public StorageCapacityDomain CapacityDomain => StorageCapacityDomain.Native;
+
+    public Task<StorageCapacityResource> ObserveCapacityAsync(string resourceKey, string? connectionId,
+        long minimumFreeBytes, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        return Task.FromResult(connectionId is null ? LocalStorageCapacityProbe.Observe(_root, resourceKey, minimumFreeBytes)
+            : new StorageCapacityResource(resourceKey, "", null, minimumFreeBytes, DateTimeOffset.UtcNow));
+    }
+
+    public string CreateRepairLocator(string originalLocator, Guid generationId, string idempotencyKey)
+    {
+        _ = ResolvePath(originalLocator);
+        return StorageRepairDestination.Path(generationId, idempotencyKey);
+    }
 
     public StorageProviderCapabilities Capabilities { get; } = new(
         SupportsStreaming: true,
@@ -26,8 +41,10 @@ public sealed class LocalStorageProvider : IStorageProvider
 
     public async Task<StorageWriteResult> PutAsync(StorageWriteRequest request, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (request.ExpectedSizeBytes is < 0)
+            return new(StorageOperationStatus.Conflict, request.Locator, 0, null, Error: "Expected size must be non-negative.");
         var destinationPath = ResolvePath(request.Locator);
-        Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
         if (!request.Overwrite && File.Exists(destinationPath))
         {
             return new StorageWriteResult(StorageOperationStatus.Conflict, request.Locator, 0, null, Error: "Object already exists.");
@@ -38,15 +55,30 @@ public sealed class LocalStorageProvider : IStorageProvider
             $".{Path.GetFileName(destinationPath)}.{Guid.NewGuid():N}.tmp");
         try
         {
+            Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
+            RejectLinkedPath(destinationPath);
             long size = 0;
             string sha256;
-            await using (var output = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, true))
+            // Ask supported filesystems for space before reading the source. This
+            // is not a quota/capacity certificate: unsupported platforms may ignore it.
+            await using (var output = new FileStream(temporaryPath, new FileStreamOptions
+            {
+                Mode = FileMode.CreateNew,
+                Access = FileAccess.Write,
+                Share = FileShare.None,
+                BufferSize = 81920,
+                Options = FileOptions.Asynchronous | FileOptions.SequentialScan,
+                PreallocationSize = request.ExpectedSizeBytes.GetValueOrDefault()
+            }))
             using (var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256))
             {
                 var buffer = new byte[81920];
                 int read;
                 while ((read = await request.Content.ReadAsync(buffer, cancellationToken)) > 0)
                 {
+                    if (request.ExpectedSizeBytes.HasValue && read > request.ExpectedSizeBytes.Value - size)
+                        return new(StorageOperationStatus.Conflict, request.Locator, size, null,
+                            Error: "Object exceeds the expected size.");
                     size += read;
                     hash.AppendData(buffer.AsSpan(0, read));
                     await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
@@ -69,6 +101,7 @@ public sealed class LocalStorageProvider : IStorageProvider
 
             try
             {
+                RejectLinkedPath(destinationPath);
                 File.Move(temporaryPath, destinationPath, request.Overwrite);
             }
             catch (IOException) when (!request.Overwrite && File.Exists(destinationPath))
@@ -177,7 +210,26 @@ public sealed class LocalStorageProvider : IStorageProvider
             throw new ArgumentException("Storage locator is outside the configured root.", nameof(locator));
         }
 
+        RejectLinkedPath(fullPath);
+
         return fullPath;
+    }
+
+    private void RejectLinkedPath(string fullPath)
+    {
+        var root = _root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        for (var current = fullPath; !string.Equals(current, root, comparison); current = Path.GetDirectoryName(current)!)
+        {
+            if (current is null || current.Length < root.Length) break;
+            try
+            {
+                if ((File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
+                    throw new ArgumentException("Storage locator crosses a linked path.", nameof(fullPath));
+            }
+            catch (FileNotFoundException) { }
+            catch (DirectoryNotFoundException) { }
+        }
     }
 
     private static void TryDelete(string path)

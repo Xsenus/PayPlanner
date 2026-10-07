@@ -530,14 +530,16 @@ public sealed class PublicMessengerDocumentDeliveriesController : ControllerBase
     }
 
     /// <summary>Формирует ответ без кэширования, range-повторов и передачи referrer.</summary>
-    private PhysicalFileResult CreateDownloadResult(MessengerDocumentDownload download)
+    private IActionResult CreateDownloadResult(MessengerDocumentDownload download)
     {
         Response.Headers["X-Content-Type-Options"] = "nosniff";
         Response.Headers["Cache-Control"] = "no-store, private";
         Response.Headers["Content-Security-Policy"] = "default-src 'none'";
         Response.Headers["Referrer-Policy"] = "no-referrer";
         Response.Headers["X-Robots-Tag"] = "noindex, nofollow, noarchive";
-        return PhysicalFile(download.FullPath, download.ContentType, download.FileName, enableRangeProcessing: false);
+        return download.Content is { } content
+            ? new FileStreamResult(content, download.ContentType) { FileDownloadName = download.FileName, EnableRangeProcessing = false }
+            : PhysicalFile(download.FullPath, download.ContentType, download.FileName, enableRangeProcessing: false);
     }
 
     private static bool FixedTimeEquals(string left, string right)

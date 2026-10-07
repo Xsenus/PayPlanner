@@ -7,7 +7,7 @@ public interface ILegacyLocalStorageLocator
     bool TryCreateLocator(string path, out string locator);
 }
 
-public sealed class LegacyLocalStorageProvider : IStorageProvider, ILegacyLocalStorageLocator
+public sealed class LegacyLocalStorageProvider : IStorageProvider, ILegacyLocalStorageLocator, IStorageCapacityProvider
 {
     private readonly IReadOnlyDictionary<string, string> _roots;
 
@@ -27,7 +27,20 @@ public sealed class LegacyLocalStorageProvider : IStorageProvider, ILegacyLocalS
     }
 
     public string Key => "legacy-local";
+    public StorageCapacityDomain CapacityDomain => StorageCapacityDomain.Native;
     public StorageProviderCapabilities Capabilities { get; } = new(true, true, false, false, false, false, false, false, false);
+
+    public Task<StorageCapacityResource> ObserveCapacityAsync(string resourceKey, string? connectionId,
+        long minimumFreeBytes, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        // The alias is an exact configured legacy root, not a caller-supplied
+        // path. Unknown aliases have no trustworthy capacity authority.
+        var capacity = connectionId is not null && _roots.TryGetValue(connectionId, out var root)
+            ? LocalStorageCapacityProbe.Observe(root, resourceKey, minimumFreeBytes)
+            : new StorageCapacityResource(resourceKey, "", null, minimumFreeBytes, DateTimeOffset.UtcNow);
+        return Task.FromResult(capacity);
+    }
 
     public bool TryCreateLocator(string path, out string locator)
     {
@@ -90,6 +103,8 @@ public sealed class LegacyLocalStorageProvider : IStorageProvider, ILegacyLocalS
         return Task.FromResult(new StorageDeleteResult(StorageOperationStatus.Conflict, locator,
             "Physical deletion of legacy files is disabled until migration acceptance."));
     }
+
+    internal string ResolveValidatedPath(string locator) => Resolve(locator);
 
     private string Resolve(string locator)
     {

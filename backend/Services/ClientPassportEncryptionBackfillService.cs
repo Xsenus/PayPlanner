@@ -140,7 +140,7 @@ public sealed class ClientPassportEncryptionBackfillService : IClientPassportEnc
 
         if (getBlindIndex is not null && setBlindIndex is not null)
         {
-            var expected = await _encryptor.ComputeBlindIndexAsync(plaintext, $"ClientPassport:{fieldName}", ct);
+            var expected = await _encryptor.ComputeBlindIndexForCiphertextAsync(ciphertext, plaintext, $"ClientPassport:{fieldName}", ct);
             if (blindIndex is null)
             {
                 setBlindIndex(expected);

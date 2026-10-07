@@ -4,6 +4,11 @@ namespace PayPlanner.Api.Services.Storage;
 
 internal static class ConnectedStorageLocator
 {
+    public static bool TryGetConnectionId(string locator, out string connectionId)
+    {
+        try { connectionId = Parse(locator).ConnectionId; return true; }
+        catch (ArgumentException) { connectionId = string.Empty; return false; }
+    }
     public static (string ConnectionId, string Path) Parse(string locator)
     {
         var normalized = (locator ?? string.Empty).Trim().Replace('\\', '/').Trim('/');
@@ -23,9 +28,13 @@ internal static class ConnectedStorageLocator
     }
 }
 
-public sealed class S3StorageProvider(IS3StorageService service) : IStorageProvider
+public sealed class S3StorageProvider(IS3StorageService service) : IStorageProvider, IStorageRepairDestinationProvider, IStorageConnectedLocatorProvider
 {
     public string Key => "s3";
+    public StorageCapacityDomain CapacityDomain => StorageCapacityDomain.Remote;
+    public bool TryGetConnectionId(string locator, out string connectionId) => ConnectedStorageLocator.TryGetConnectionId(locator, out connectionId);
+    public string CreateRepairLocator(string originalLocator, Guid generationId, string idempotencyKey)
+        => ConnectedStorageLocator.Parse(originalLocator).ConnectionId + "/" + StorageRepairDestination.Path(generationId, idempotencyKey);
     public StorageProviderCapabilities Capabilities { get; } = new(
         SupportsStreaming: true,
         SupportsRangeReads: false,
@@ -42,7 +51,7 @@ public sealed class S3StorageProvider(IS3StorageService service) : IStorageProvi
         var (connectionId, path) = ConnectedStorageLocator.Parse(request.Locator);
         try
         {
-            await using var hashing = new HashingReadStream(request.Content);
+            await using var hashing = new HashingReadStream(request.Content, request.ExpectedSizeBytes);
             await service.UploadAsync(connectionId, path, hashing, request.ContentType, request.Overwrite, cancellationToken);
             var hash = hashing.GetSha256();
             return ValidateWrite(request, hashing.BytesRead, hash);
@@ -116,9 +125,33 @@ public sealed class S3StorageProvider(IS3StorageService service) : IStorageProvi
     };
 }
 
-public sealed class YandexDiskStorageProvider(IYandexDiskService service) : IStorageProvider
+public sealed class YandexDiskStorageProvider(IYandexDiskService service) : IStorageProvider, IStorageRepairDestinationProvider, IStorageConnectedLocatorProvider, IStorageCapacityProvider
 {
     public string Key => "yandex-disk";
+    public StorageCapacityDomain CapacityDomain => StorageCapacityDomain.Remote;
+    public async Task<StorageCapacityResource> ObserveCapacityAsync(string resourceKey, string? connectionId,
+        long minimumFreeBytes, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        StorageCapacityResource Unknown() => new(resourceKey, "", null, minimumFreeBytes, DateTimeOffset.UtcNow);
+        if (string.IsNullOrWhiteSpace(connectionId) || minimumFreeBytes < 0) return Unknown();
+        try
+        {
+            var capacity = await service.GetCapacityAsync(connectionId, ct);
+            // Different connections/folders on one account consume the same quota.
+            // Trash is already part of used_space and must not be subtracted twice.
+            return new(resourceKey, "yandex-disk-account:" + capacity.AccountUid,
+                capacity.UsedBytes >= capacity.TotalBytes ? 0 : capacity.TotalBytes - capacity.UsedBytes,
+                minimumFreeBytes, DateTimeOffset.UtcNow);
+        }
+        catch (Exception ex) when (ex is YandexDiskOperationException or System.Text.Json.JsonException
+            or HttpRequestException or IOException or NotSupportedException
+            || ex is OperationCanceledException && !ct.IsCancellationRequested)
+        { return Unknown(); }
+    }
+    public bool TryGetConnectionId(string locator, out string connectionId) => ConnectedStorageLocator.TryGetConnectionId(locator, out connectionId);
+    public string CreateRepairLocator(string originalLocator, Guid generationId, string idempotencyKey)
+        => ConnectedStorageLocator.Parse(originalLocator).ConnectionId + "/" + StorageRepairDestination.Path(generationId, idempotencyKey);
     public StorageProviderCapabilities Capabilities { get; } = new(
         SupportsStreaming: true,
         SupportsRangeReads: false,
@@ -147,7 +180,7 @@ public sealed class YandexDiskStorageProvider(IYandexDiskService service) : ISto
         }
         catch (YandexDiskOperationException ex)
         {
-            return new(Map(ex.StatusCode), request.Locator, 0, null, Error: ex.Message);
+            return new(ex.OutcomeUnknown ? StorageOperationStatus.Unknown : Map(ex.StatusCode), request.Locator, 0, null, Error: ex.Message);
         }
     }
 
@@ -158,9 +191,22 @@ public sealed class YandexDiskStorageProvider(IYandexDiskService service) : ISto
         {
             if (read.Status != StorageOperationStatus.Succeeded || read.Content is null)
                 return new(read.Status, locator, 0, null, null, Error: read.Error);
-            var hash = await SHA256.HashDataAsync(read.Content, cancellationToken);
-            return new(StorageOperationStatus.Succeeded, locator, read.SizeBytes,
-                Convert.ToHexString(hash).ToLowerInvariant(), null);
+            try
+            {
+                using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+                var buffer = System.Buffers.ArrayPool<byte>.Shared.Rent(81920);
+                long size = 0;
+                try
+                {
+                    int count;
+                    while ((count = await read.Content.ReadAsync(buffer.AsMemory(), cancellationToken)) > 0)
+                    { size = checked(size + count); hash.AppendData(buffer.AsSpan(0, count)); }
+                    return new(StorageOperationStatus.Succeeded, locator, size, Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant(), null);
+                }
+                finally { System.Buffers.ArrayPool<byte>.Shared.Return(buffer); }
+            }
+            catch (Exception ex) when (ex is HttpRequestException or IOException || ex is OperationCanceledException && !cancellationToken.IsCancellationRequested)
+            { return new(StorageOperationStatus.Unavailable, locator, 0, null, null, Error: "Yandex.Disk download could not be verified."); }
         }
     }
 
@@ -176,6 +222,8 @@ public sealed class YandexDiskStorageProvider(IYandexDiskService service) : ISto
         {
             return new(Map(ex.StatusCode), locator, null, 0, ex.Message);
         }
+        catch (Exception ex) when (ex is HttpRequestException or IOException || ex is OperationCanceledException && !cancellationToken.IsCancellationRequested)
+        { return new(StorageOperationStatus.Unavailable, locator, null, 0, "Yandex.Disk download is unavailable."); }
     }
 
     public async Task<StorageDeleteResult> DeleteAsync(string locator, CancellationToken cancellationToken)
@@ -201,7 +249,7 @@ public sealed class YandexDiskStorageProvider(IYandexDiskService service) : ISto
     };
 }
 
-internal sealed class HashingReadStream(Stream inner) : Stream, IAsyncDisposable
+internal sealed class HashingReadStream(Stream inner, long? expectedLength = null) : Stream, IAsyncDisposable
 {
     private readonly IncrementalHash _hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
     private bool _finalized;
@@ -243,14 +291,20 @@ internal sealed class HashingReadStream(Stream inner) : Stream, IAsyncDisposable
 
     // StreamContent used by native integrations may dispose this wrapper before
     // the adapter reads the final checksum. The caller owns the underlying stream;
-    // the hash is finalized and disposed by GetSha256 instead.
-    protected override void Dispose(bool disposing) => base.Dispose(disposing);
+    // disposal finalizes/caches the hash without closing the caller-owned stream.
+    protected override void Dispose(bool disposing)
+    {
+        // Native StreamContent may dispose the wrapper before its caller asks for
+        // the checksum. Cache the final hash and release it on failed transfers too.
+        if (disposing) GetSha256();
+        base.Dispose(disposing);
+    }
 
     public override bool CanRead => inner.CanRead;
     public override bool CanSeek => false;
     public override bool CanWrite => false;
-    public override long Length => throw new NotSupportedException();
-    public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+    public override long Length => expectedLength ?? throw new NotSupportedException();
+    public override long Position { get => BytesRead; set => throw new NotSupportedException(); }
     public override void Flush() => throw new NotSupportedException();
     public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
     public override void SetLength(long value) => throw new NotSupportedException();

@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.ComponentModel;
+using System.Data;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO.Compression;
@@ -13,6 +14,7 @@ using Npgsql;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
+using PayPlanner.Api.Services.Storage;
 
 namespace PayPlanner.Api.Services;
 
@@ -39,7 +41,8 @@ public sealed record DatabaseBackupS3UploadResult(
     long SizeBytes,
     string? Error,
     DateTime CreatedAt,
-    DateTime UpdatedAt);
+    DateTime UpdatedAt,
+    string? ManifestSha256 = null);
 
 public sealed record DatabaseBackupYandexDiskUploadSettings(
     bool Enabled,
@@ -54,7 +57,8 @@ public sealed record DatabaseBackupYandexDiskUploadResult(
     long SizeBytes,
     string? Error,
     DateTime CreatedAt,
-    DateTime UpdatedAt);
+    DateTime UpdatedAt,
+    string? ManifestSha256 = null);
 
 public sealed record DatabaseBackupFormatOption(
     string Key,
@@ -106,7 +110,8 @@ public sealed record DatabaseBackupManifest(
     string ApplicationVersion,
     string Status = "complete",
     IReadOnlyList<DatabaseBackupPartManifest>? Parts = null,
-    string? RecoveryKeyReference = null);
+    string? RecoveryKeyReference = null,
+    DataProtectionRecoveryMetadata? DataProtectionRecovery = null);
 
 public sealed record DatabaseBackupPartManifest(
     string Kind,
@@ -156,6 +161,7 @@ public sealed class DatabaseBackupService
     private readonly ILogger<DatabaseBackupService> _logger;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IBackupDirectoryReader _directoryReader;
+    private readonly DataProtectionRecoveryInventory? _dataProtectionInventory;
     private readonly SemaphoreSlim _backupSemaphore = new(1, 1);
     private static readonly TimeSpan RootLockTimeout = TimeSpan.FromMinutes(30);
     private string? _cachedVerifiedBackupPath;
@@ -170,7 +176,8 @@ public sealed class DatabaseBackupService
         DatabaseProviderInfo databaseProvider,
         ILogger<DatabaseBackupService> logger,
         IServiceScopeFactory scopeFactory,
-        IBackupDirectoryReader? directoryReader = null)
+        IBackupDirectoryReader? directoryReader = null,
+        DataProtectionRecoveryInventory? dataProtectionInventory = null)
     {
         _contextFactory = contextFactory;
         _configuration = configuration;
@@ -178,6 +185,7 @@ public sealed class DatabaseBackupService
         _logger = logger;
         _scopeFactory = scopeFactory;
         _directoryReader = directoryReader ?? new PhysicalBackupDirectoryReader();
+        _dataProtectionInventory = dataProtectionInventory;
         _backupRootDirectory = ResolveBackupRootDirectory();
         Directory.CreateDirectory(_backupRootDirectory);
     }
@@ -661,6 +669,11 @@ public sealed class DatabaseBackupService
                 manifest?.Sha256,
                 "Manifest отсутствует или имеет неподдерживаемую версию."));
         }
+        if (manifest.DataProtectionRecovery is not null)
+        {
+            try { DataProtectionRecoveryInventory.ValidateMetadata(manifest.DataProtectionRecovery); }
+            catch (InvalidDataException ex) { return InvalidManifest(ex); }
+        }
         if (!string.Equals(manifest.Status, "complete", StringComparison.OrdinalIgnoreCase))
         {
             return Select(new DatabaseBackupVerificationResult(
@@ -1008,6 +1021,7 @@ public sealed class DatabaseBackupService
             Directory.CreateDirectory(targetDirectory);
 
             await UpdateBackupAttemptAsync(attemptId, "database", cancellationToken);
+            var keyInventoryBeforeSnapshot = _dataProtectionInventory?.Capture();
             var snapshotParts = new List<DatabaseBackupPartManifest>();
             DatabaseBackupFileInfo fileInfo = _databaseProvider.IsSqlite
                 ? await CreateSqliteBackupAsync(targetDirectory, settings.Format, nowLocal, trigger, scheduleSlot, snapshotParts, cancellationToken)
@@ -1019,7 +1033,8 @@ public sealed class DatabaseBackupService
                 await UpdateBackupAttemptAsync(attemptId, "files", cancellationToken);
                 additionalParts = await CreateFileStorageArchiveAsync(fileInfo, snapshotParts.Single(part => part.Kind == "file-references"), cancellationToken);
                 await UpdateBackupAttemptAsync(attemptId, "verifying", cancellationToken);
-                await WriteBackupManifestAsync(fileInfo, settings.Format.Key, [.. snapshotParts, .. additionalParts], cancellationToken);
+                await WriteBackupManifestAsync(fileInfo, settings.Format.Key, [.. snapshotParts, .. additionalParts],
+                    keyInventoryBeforeSnapshot, cancellationToken);
             }
             catch
             {
@@ -1257,7 +1272,9 @@ public sealed class DatabaseBackupService
         var startInfo = new ProcessStartInfo
         {
             FileName = pgDumpExecutable,
-            WorkingDirectory = targetDirectory,
+            // CreateProcess rejects long working directories even when pg_dump
+            // accepts its absolute extended output path. No relative output is used.
+            WorkingDirectory = OperatingSystem.IsWindows() ? Environment.SystemDirectory : targetDirectory,
             UseShellExecute = false,
             RedirectStandardError = true,
             RedirectStandardOutput = true,
@@ -1285,7 +1302,7 @@ public sealed class DatabaseBackupService
         startInfo.ArgumentList.Add("--snapshot");
         startInfo.ArgumentList.Add(snapshot.PostgreSqlSnapshotId!);
         startInfo.ArgumentList.Add("--file");
-        startInfo.ArgumentList.Add(partialPath);
+        startInfo.ArgumentList.Add(WindowsStoragePath.ForNativeCall(partialPath));
 
         if (!string.IsNullOrWhiteSpace(connectionBuilder.Password))
         {
@@ -1844,6 +1861,7 @@ public sealed class DatabaseBackupService
                 Status = "success",
                 TargetPath = upload.Path,
                 TargetKey = upload.Key,
+                ManifestSha256 = manifestSha256,
                 Error = null,
                 UpdatedAt = DateTime.UtcNow,
             };
@@ -1904,15 +1922,14 @@ public sealed class DatabaseBackupService
         SaveYandexDiskUploadResultAsync, (pending, ct) => UploadBackupFileToYandexDiskAsync(pending, path, ct),
         pending => pending with { Status = "failed", Error = "Отправка отменена или прервана. Облачная копия не подтверждена.", UpdatedAt = DateTime.UtcNow }, token);
 
-    private async Task<T> UploadAndRecordAsync<T>(T pending, Func<T, CancellationToken, Task> save,
+    private async Task<T> UploadAndRecordAsync<T>(T pending, Func<T, CancellationToken, Task<T>> save,
         Func<T, CancellationToken, Task<T>> upload, Func<T, T> cancelled, CancellationToken token)
     {
         try
         {
-            await save(pending, token);
+            pending = await save(pending, token);
             var result = await upload(pending, token);
-            await save(result, token);
-            return result;
+            return await save(result, token);
         }
         catch (OperationCanceledException)
         {
@@ -1990,6 +2007,7 @@ public sealed class DatabaseBackupService
             {
                 Status = "success",
                 TargetPath = upload.Path,
+                ManifestSha256 = manifestSha256,
                 Error = null,
                 UpdatedAt = DateTime.UtcNow,
             };
@@ -2082,9 +2100,14 @@ public sealed class DatabaseBackupService
         return DeserializeS3UploadResults(raw);
     }
 
-    private async Task SaveS3UploadResultAsync(DatabaseBackupS3UploadResult result, CancellationToken cancellationToken)
+    private async Task<DatabaseBackupS3UploadResult> SaveS3UploadResultAsync(DatabaseBackupS3UploadResult result, CancellationToken cancellationToken)
     {
         await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await context.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+        var backupSet = await LoadBackupSetForUploadAsync(context, result.BackupRelativePath, cancellationToken);
+        if (string.Equals(result.Status, "success", StringComparison.OrdinalIgnoreCase)
+            && !MatchesRegisteredManifest(backupSet, result.ManifestSha256))
+            result = result with { Status = "failed", Error = "Описание резервного комплекта изменилось во время облачной отправки. Копия не подтверждена." };
         var now = DateTime.UtcNow;
         var setting = await context.SystemSettings.FirstOrDefaultAsync(item => item.Key == S3UploadResultsSettingKey, cancellationToken);
         var results = DeserializeS3UploadResults(setting?.Value)
@@ -2111,9 +2134,11 @@ public sealed class DatabaseBackupService
             setting.UpdatedAt = now;
         }
 
-        await UpsertBackupCopyAsync(context, result.BackupRelativePath, "s3", result.ConnectionId,
+        await UpsertBackupCopyAsync(context, backupSet, "s3", result.ConnectionId,
             result.TargetKey ?? result.TargetPath, result.Status, result.Error, now, cancellationToken);
         await context.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return result;
     }
 
     private static IReadOnlyList<DatabaseBackupS3UploadResult> DeserializeS3UploadResults(string? raw)
@@ -2145,9 +2170,14 @@ public sealed class DatabaseBackupService
         return DeserializeYandexDiskUploadResults(raw);
     }
 
-    private async Task SaveYandexDiskUploadResultAsync(DatabaseBackupYandexDiskUploadResult result, CancellationToken cancellationToken)
+    private async Task<DatabaseBackupYandexDiskUploadResult> SaveYandexDiskUploadResultAsync(DatabaseBackupYandexDiskUploadResult result, CancellationToken cancellationToken)
     {
         await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await context.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+        var backupSet = await LoadBackupSetForUploadAsync(context, result.BackupRelativePath, cancellationToken);
+        if (string.Equals(result.Status, "success", StringComparison.OrdinalIgnoreCase)
+            && !MatchesRegisteredManifest(backupSet, result.ManifestSha256))
+            result = result with { Status = "failed", Error = "Описание резервного комплекта изменилось во время облачной отправки. Копия не подтверждена." };
         var now = DateTime.UtcNow;
         var setting = await context.SystemSettings.FirstOrDefaultAsync(item => item.Key == YandexDiskUploadResultsSettingKey, cancellationToken);
         var results = DeserializeYandexDiskUploadResults(setting?.Value)
@@ -2174,18 +2204,27 @@ public sealed class DatabaseBackupService
             setting.UpdatedAt = now;
         }
 
-        await UpsertBackupCopyAsync(context, result.BackupRelativePath, "yandexDisk", string.Empty,
+        await UpsertBackupCopyAsync(context, backupSet, "yandexDisk", string.Empty,
             result.TargetPath, result.Status, result.Error, now, cancellationToken);
         await context.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return result;
     }
 
+    private static async Task<DatabaseBackupSet> LoadBackupSetForUploadAsync(
+        PaymentContext context, string backupRelativePath, CancellationToken cancellationToken)
+        => await context.DatabaseBackupSets.Include(item => item.Copies)
+            .SingleOrDefaultAsync(item => item.BackupRelativePath == backupRelativePath, cancellationToken)
+            ?? throw new InvalidOperationException("Комплект резервной копии отсутствует в каталоге.");
+
+    private static bool MatchesRegisteredManifest(DatabaseBackupSet backupSet, string? uploadedManifestSha256)
+        => !string.IsNullOrWhiteSpace(uploadedManifestSha256)
+            && string.Equals(backupSet.ManifestSha256, uploadedManifestSha256, StringComparison.OrdinalIgnoreCase);
+
     private async Task UpsertBackupCopyAsync(
-        PaymentContext context, string backupRelativePath, string providerKey, string connectionId,
+        PaymentContext context, DatabaseBackupSet set, string providerKey, string connectionId,
         string locator, string uploadStatus, string? error, DateTime now, CancellationToken cancellationToken)
     {
-        var set = await context.DatabaseBackupSets.Include(item => item.Copies)
-            .FirstOrDefaultAsync(item => item.BackupRelativePath == backupRelativePath, cancellationToken)
-            ?? throw new InvalidOperationException("Комплект резервной копии отсутствует в каталоге.");
         var copy = set.Copies.FirstOrDefault(item => item.ProviderKey == providerKey && item.ConnectionId == connectionId);
         if (copy is null)
         {
@@ -2496,6 +2535,7 @@ public sealed class DatabaseBackupService
         DatabaseBackupFileInfo backup,
         string backupFormat,
         IReadOnlyList<DatabaseBackupPartManifest> additionalParts,
+        DataProtectionRecoveryMetadata? keyInventoryBeforeSnapshot,
         CancellationToken cancellationToken)
     {
         var resolvedPath = ResolveBackupPath(backup.RelativePath)
@@ -2521,7 +2561,9 @@ public sealed class DatabaseBackupService
             typeof(DatabaseBackupService).Assembly.GetName().Version?.ToString() ?? "unknown",
             "complete",
             [databasePart, .. additionalParts],
-            _configuration["DatabaseBackup:RecoveryKeyReference"]);
+            _configuration["DatabaseBackup:RecoveryKeyReference"],
+            keyInventoryBeforeSnapshot is null ? null : DataProtectionRecoveryInventory.CompleteCapture(
+                keyInventoryBeforeSnapshot, _dataProtectionInventory!.Capture()));
         var manifestPath = GetManifestPath(resolvedPath);
         var temporaryPath = $"{manifestPath}.{Guid.NewGuid():N}.tmp";
         try
@@ -2595,25 +2637,28 @@ public sealed class DatabaseBackupService
             plan.Position = 0;
             if (layout.ArchiveRoots.Count != 0)
             {
-            await using (var output = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, true))
-            {
-                temporaryCreated = true;
-                using var archive = new ZipArchive(output, ZipArchiveMode.Create, leaveOpen: false);
-                foreach (var root in layout.ArchiveRoots)
+                await using (var output = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, true))
                 {
-                    foreach (var filePath in EnumerateFilesSafely(root.Path, layout, cancellationToken))
+                    temporaryCreated = true;
+                    using var archive = new ZipArchive(output, ZipArchiveMode.Create, leaveOpen: false);
+                    foreach (var root in layout.ArchiveRoots)
                     {
-                        cancellationToken.ThrowIfCancellationRequested();
-                        if (layout.IsExcludedPhysicalPath(filePath)) continue;
-                        var entry = archive.CreateEntry(layout.GetArchiveEntryPath(filePath, root.Name), CompressionLevel.Fastest);
-                        await using var source = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 81920, true);
-                        DatabaseBackupArchiveFileHash hash;
-                        await using (var destination = entry.Open())
-                            hash = await DatabaseBackupArchiveHash.CopyAsync(source, destination, cancellationToken);
-                        entry.Comment = DatabaseBackupArchiveHash.ToComment(hash.Sha256);
+                        foreach (var filePath in EnumerateFilesSafely(root.Path, layout, cancellationToken))
+                        {
+                            cancellationToken.ThrowIfCancellationRequested();
+                            if (layout.IsExcludedPhysicalPath(filePath)) continue;
+                            var entry = archive.CreateEntry(layout.GetArchiveEntryPath(filePath, root.Name), CompressionLevel.Fastest);
+                            // Do not accept a writer or deletion while the selected handle is
+                            // being archived. The byte check also detects changes on platforms
+                            // where another process can bypass filesystem sharing rules.
+                            await using var source = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, true);
+                            DatabaseBackupArchiveFileHash hash;
+                            await using (var destination = entry.Open())
+                                hash = await DatabaseBackupArchiveHash.CopyStableAsync(source, destination, cancellationToken);
+                            entry.Comment = DatabaseBackupArchiveHash.ToComment(hash.Sha256);
+                        }
                     }
                 }
-            }
             }
             long bindingSize;
             string bindingHash;
@@ -2749,7 +2794,7 @@ public sealed class DatabaseBackupService
             try { address = PayPlanner.Api.Services.Storage.ConnectedStorageLocator.Parse(reference.Locator!); }
             catch (ArgumentException)
             { return new(PayPlanner.Api.Services.Storage.StorageOperationStatus.Unavailable, reference.Locator!, null, 0); }
-            if (reference.ConnectionId is not null && address.ConnectionId != reference.ConnectionId)
+            if (address.ConnectionId != reference.ConnectionId)
                 throw new InvalidDataException("Соединение реплики не соответствует её адресу.");
             var registry = services.GetRequiredService<PayPlanner.Api.Services.Storage.IStorageProviderRegistry>();
             if (!registry.TryGet(reference.ProviderKey, out var provider))

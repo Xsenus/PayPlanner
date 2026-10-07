@@ -71,4 +71,21 @@ public static class DatabaseBackupArchiveHash
         }
         finally { ArrayPool<byte>.Shared.Return(buffer, clearArray: true); }
     }
+
+    /// <summary>Checks that a seekable file's preflight bytes are exactly those archived.</summary>
+    public static async Task<DatabaseBackupArchiveFileHash> CopyStableAsync(
+        Stream source, Stream destination, CancellationToken cancellationToken)
+    {
+        if (!source.CanRead || !source.CanSeek || source.Position != 0)
+            throw new ArgumentException("Stable archive input must be readable, seekable and positioned at its start.", nameof(source));
+        var length = source.Length;
+        var expected = await CopyAsync(source, Stream.Null, cancellationToken, length);
+        if (expected.SizeBytes != length || source.Length != length)
+            throw new InvalidDataException("Размер документа изменился во время проверки резервной копии.");
+        source.Position = 0;
+        var actual = await CopyAsync(source, destination, cancellationToken, length);
+        if (actual != expected || source.Length != length)
+            throw new InvalidDataException("Документ изменился во время упаковки резервной копии.");
+        return actual;
+    }
 }

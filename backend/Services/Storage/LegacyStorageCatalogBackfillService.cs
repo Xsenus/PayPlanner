@@ -12,11 +12,33 @@ public static class LegacyStorageSources
     public const string InternalChat = "internal-chat";
     public const string MessengerSnapshots = "messenger-snapshots";
     public const string ElectronicSignatures = "electronic-signatures";
+    public const string ElectronicSignatureOriginals = "electronic-signature-originals";
     public const string ProfilePhotos = "profile-photos";
 
     public static readonly IReadOnlySet<string> All = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
-        TaskFiles, CaseDocuments, InternalChat, MessengerSnapshots, ElectronicSignatures, ProfilePhotos,
+        TaskFiles, CaseDocuments, InternalChat, MessengerSnapshots, ElectronicSignatures, ElectronicSignatureOriginals, ProfilePhotos,
+    };
+
+    public static Guid GetObjectId(string source, long sourceId)
+    {
+        var normalized = source.Trim().ToLowerInvariant();
+        if (!All.Contains(normalized) || sourceId <= 0)
+            throw new ArgumentException("Unknown storage source or invalid file id.");
+        var hash = SHA256.HashData(System.Text.Encoding.UTF8.GetBytes($"legacy:{normalized}:{sourceId}"));
+        return new Guid(hash.AsSpan(0, 16));
+    }
+
+    public static string GetDataClass(string source) => source switch
+    {
+        TaskFiles => "task-file",
+        CaseDocuments => "case-document",
+        InternalChat => "chat-attachment",
+        MessengerSnapshots => "messenger-delivery",
+        ElectronicSignatures => "esign-artifact",
+        ElectronicSignatureOriginals => "esign-original",
+        ProfilePhotos => "profile-photo",
+        _ => throw new ArgumentException("Unknown storage source.", nameof(source))
     };
 }
 
@@ -24,7 +46,8 @@ public sealed record LegacyStorageBackfillRequest(
     string Source,
     long AfterId = 0,
     int BatchSize = 100,
-    bool Apply = false);
+    bool Apply = false,
+    long? EndId = null);
 
 public sealed record LegacyStorageBackfillItem(
     long SourceId,
@@ -36,7 +59,11 @@ public sealed record LegacyStorageBackfillItem(
     string? Sha256,
     string? Locator,
     Guid? ObjectId,
-    string? Detail);
+    string? Detail)
+{
+    public string? ContentType { get; init; }
+    public long? CatalogVersion { get; init; }
+}
 
 public sealed record LegacyStorageBackfillReport(
     string Source,
@@ -50,7 +77,10 @@ public sealed record LegacyStorageBackfillReport(
     int Missing,
     int Invalid,
     long BytesVerified,
-    IReadOnlyList<LegacyStorageBackfillItem> Items);
+    IReadOnlyList<LegacyStorageBackfillItem> Items)
+{
+    public long? EndId { get; init; }
+}
 
 public interface ILegacyStorageCatalogBackfillService
 {
@@ -70,8 +100,10 @@ public sealed class LegacyStorageCatalogBackfillService(
         var source = (request.Source ?? string.Empty).Trim().ToLowerInvariant();
         if (!LegacyStorageSources.All.Contains(source))
             throw new ArgumentException($"Unknown legacy storage source '{request.Source}'.", nameof(request));
+        if (request.EndId is < 0 || request.EndId < Math.Max(0, request.AfterId))
+            throw new ArgumentException("End ID must not precede the requested cursor.", nameof(request));
         var batchSize = Math.Clamp(request.BatchSize, 1, 500);
-        var candidates = await LoadCandidatesAsync(source, Math.Max(0, request.AfterId), batchSize + 1, cancellationToken);
+        var candidates = await LoadCandidatesAsync(source, Math.Max(0, request.AfterId), request.EndId, batchSize + 1, cancellationToken);
         var hasMore = candidates.Count > batchSize;
         if (hasMore) candidates.RemoveAt(candidates.Count - 1);
 
@@ -83,16 +115,8 @@ public sealed class LegacyStorageCatalogBackfillService(
         long verifiedBytes = 0;
         var objectIds = candidates.ToDictionary(
             candidate => candidate.SourceId,
-            candidate => DeterministicGuid($"legacy:{source}:{candidate.SourceId}"));
+            candidate => LegacyStorageSources.GetObjectId(source, candidate.SourceId));
         var candidateIds = objectIds.Values.ToArray();
-        var existingObjectIds = candidateIds.Length == 0
-            ? new HashSet<Guid>()
-            : (await db.StorageObjects.AsNoTracking()
-                .Where(item => candidateIds.Contains(item.Id))
-                .Select(item => item.Id)
-                .ToListAsync(cancellationToken))
-                .ToHashSet();
-
         foreach (var candidate in candidates)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -120,24 +144,71 @@ public sealed class LegacyStorageCatalogBackfillService(
 
             var (size, sha256) = await HashFileAsync(fullPath, cancellationToken);
             verifiedBytes += size;
-            var objectId = objectIds[candidate.SourceId];
-            if (existingObjectIds.Contains(objectId))
+            if (candidate.ExpectedChecksum is not null
+                && !string.Equals(candidate.ExpectedChecksum, sha256, StringComparison.OrdinalIgnoreCase))
             {
-                existingCount++;
-                items.Add(ToItem(candidate, "alreadyRegistered", legacyLocator, objectId, sha256,
-                    candidate.ExpectedSize is > 0 && candidate.ExpectedSize != size ? "Stored size differs from the file size." : null, size));
+                invalid++;
+                items.Add(ToItem(candidate, "invalid", legacyLocator, null, sha256,
+                    "File checksum differs from the immutable signature record.", size));
                 continue;
             }
-
+            var objectId = objectIds[candidate.SourceId];
             var sizeDetail = candidate.ExpectedSize is > 0 && candidate.ExpectedSize != size
                 ? $"Stored size {candidate.ExpectedSize} differs from actual size {size}."
                 : null;
+            items.Add(ToItem(candidate, "ready", legacyLocator, objectId, sha256, sizeDetail, size));
+        }
+
+        // Hash the bounded batch first, then read current catalogue authority once.
+        // A deterministic ID alone does not prove that the registered bytes still match.
+        var existing = candidateIds.Length == 0 ? new Dictionary<Guid, ExistingCatalogSnapshot>()
+            : await db.StorageObjects.AsNoTracking().Where(o => candidateIds.Contains(o.Id))
+                .Select(o => new ExistingCatalogSnapshot(o.Id, o.Version, o.DataClass, o.OwnerType, o.OwnerId,
+                    o.LogicalName, o.ContentType, o.IsDeleted,
+                    o.Tombstones.Any(), o.CurrentGeneration,
+                    o.Generations.Where(g => g.Generation == o.CurrentGeneration).Select(g => (long?)g.SizeBytes).FirstOrDefault(),
+                    o.Generations.Where(g => g.Generation == o.CurrentGeneration).Select(g => g.Sha256).FirstOrDefault(),
+                    o.Generations.Where(g => g.Generation == o.CurrentGeneration).SelectMany(g => g.Replicas)
+                        .Count(r => r.ProviderKey == "legacy-local"),
+                    o.Generations.Where(g => g.Generation == o.CurrentGeneration).SelectMany(g => g.Replicas)
+                        .Where(r => r.ProviderKey == "legacy-local").Select(r => r.Locator).FirstOrDefault(),
+                    o.Generations.Where(g => g.Generation == o.CurrentGeneration).SelectMany(g => g.Replicas)
+                        .Any(r => r.ProviderKey == "legacy-local" && r.ConnectionId == null
+                            && r.Status == StorageReplicaStatuses.Available && r.LastVerifiedAt != null
+                            && r.SizeBytes == r.StorageObjectGeneration.SizeBytes
+                            && r.Sha256 != null && r.Sha256.ToLower() == r.StorageObjectGeneration.Sha256.ToLower())))
+                .ToDictionaryAsync(o => o.Id, cancellationToken);
+        for (var index = 0; index < items.Count; index++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var item = items[index];
+            if (item.Status != "ready") continue;
+            var candidate = candidates[index];
+            var objectId = objectIds[candidate.SourceId];
+            if (existing.TryGetValue(objectId, out var entry))
+            {
+                var expectedType = string.IsNullOrWhiteSpace(candidate.ContentType) ? "application/octet-stream" : candidate.ContentType;
+                if (entry.IsDeleted || entry.HasTombstone || entry.CurrentGeneration != 1
+                    || entry.DataClass != candidate.OwnerType || entry.OwnerType != candidate.OwnerType
+                    || entry.OwnerId != candidate.OwnerId || entry.LogicalName != Path.GetFileName(candidate.LogicalName)
+                    || entry.ContentType != expectedType || entry.SizeBytes != item.SizeBytes
+                    || !string.Equals(entry.Sha256, item.Sha256, StringComparison.OrdinalIgnoreCase)
+                    || entry.LegacyReplicaCount != 1 || !entry.VerifiedLegacyReplica || entry.LegacyLocator != item.Locator)
+                {
+                    invalid++;
+                    items[index] = item with { Status = "invalid", Detail = "Legacy source differs from the registered immutable object or its verified replica. Catalogue and source were not changed." };
+                    continue;
+                }
+                existingCount++;
+                items[index] = item with { Status = "alreadyRegistered", CatalogVersion = entry.Version };
+                continue;
+            }
             if (request.Apply)
             {
-                AddCatalogEntry(candidate, objectId, legacyLocator, size, sha256);
+                AddCatalogEntry(candidate, objectId, item.Locator!, item.SizeBytes, item.Sha256!);
                 registered++;
+                items[index] = item with { Status = "registered", CatalogVersion = 1 };
             }
-            items.Add(ToItem(candidate, request.Apply ? "registered" : "ready", legacyLocator, objectId, sha256, sizeDetail, size));
         }
 
         if (request.Apply && registered > 0)
@@ -155,46 +226,53 @@ public sealed class LegacyStorageCatalogBackfillService(
             missing,
             invalid,
             verifiedBytes,
-            items);
+            items)
+        { EndId = request.EndId };
     }
 
     private async Task<List<LegacyCandidate>> LoadCandidatesAsync(
         string source,
         long afterId,
+        long? endId,
         int take,
         CancellationToken cancellationToken)
         => source switch
         {
             LegacyStorageSources.TaskFiles => await db.TaskJournalFiles.IgnoreQueryFilters().AsNoTracking()
-                .Where(item => item.Id > afterId).OrderBy(item => item.Id).Take(take)
+                .Where(item => item.Id > afterId && (!endId.HasValue || item.Id <= endId.Value)).OrderBy(item => item.Id).Take(take)
                 .Select(item => new LegacyCandidate(item.Id, "task-file", item.Id.ToString(), item.OriginalFileName,
-                    item.ContentType, item.SizeBytes, item.StoragePath, null, item.UploadedByUserId, item.UploadedAt))
+                    item.ContentType, item.SizeBytes, item.StoragePath, null, item.UploadedByUserId, item.UploadedAt, null))
                 .ToListAsync(cancellationToken),
             LegacyStorageSources.CaseDocuments => await db.ClientCaseDocuments.IgnoreQueryFilters().AsNoTracking()
-                .Where(item => item.Id > afterId).OrderBy(item => item.Id).Take(take)
+                .Where(item => item.Id > afterId && (!endId.HasValue || item.Id <= endId.Value)).OrderBy(item => item.Id).Take(take)
                 .Select(item => new LegacyCandidate(item.Id, "case-document", item.Id.ToString(), item.OriginalFileName,
-                    item.ContentType, item.SizeBytes, item.StoragePath, null, item.UploadedByUserId, item.UploadedAt))
+                    item.ContentType, item.SizeBytes, item.StoragePath, null, item.UploadedByUserId, item.UploadedAt, null))
                 .ToListAsync(cancellationToken),
             LegacyStorageSources.InternalChat => await db.InternalChatAttachments.AsNoTracking()
-                .Where(item => item.Id > afterId).OrderBy(item => item.Id).Take(take)
+                .Where(item => item.Id > afterId && (!endId.HasValue || item.Id <= endId.Value)).OrderBy(item => item.Id).Take(take)
                 .Select(item => new LegacyCandidate(item.Id, "chat-attachment", item.Id.ToString(), item.FileName,
-                    item.ContentType, item.Size, item.StoredFileName, item.Message.ThreadId, item.UploadedByUserId, item.CreatedAt))
+                    item.ContentType, item.Size, item.StoredFileName, item.Message.ThreadId, item.UploadedByUserId, item.CreatedAt, null))
                 .ToListAsync(cancellationToken),
             LegacyStorageSources.MessengerSnapshots => await db.MessengerDocumentDeliveries.AsNoTracking()
-                .Where(item => item.Id > afterId).OrderBy(item => item.Id).Take(take)
+                .Where(item => item.Id > afterId && (!endId.HasValue || item.Id <= endId.Value)).OrderBy(item => item.Id).Take(take)
                 .Select(item => new LegacyCandidate(item.Id, "messenger-delivery", item.Id.ToString(), item.OriginalFileName,
-                    item.ContentType, item.SizeBytes, item.SnapshotPath, null, item.CreatedByUserId, item.CreatedAt))
+                    item.ContentType, item.SizeBytes, item.SnapshotPath, null, item.CreatedByUserId, item.CreatedAt, null))
                 .ToListAsync(cancellationToken),
             LegacyStorageSources.ElectronicSignatures => await db.ElectronicSignatureArtifacts.AsNoTracking()
-                .Where(item => item.Id > afterId).OrderBy(item => item.Id).Take(take)
+                .Where(item => item.Id > afterId && (!endId.HasValue || item.Id <= endId.Value)).OrderBy(item => item.Id).Take(take)
                 .Select(item => new LegacyCandidate(item.Id, "esign-artifact", item.Id.ToString(), item.FileName,
-                    item.ContentType, item.SizeBytes, item.StoragePath, null, null, item.CreatedAt))
+                    item.ContentType, item.SizeBytes, item.StoragePath, null, null, item.CreatedAt, item.ChecksumSha256))
+                .ToListAsync(cancellationToken),
+            LegacyStorageSources.ElectronicSignatureOriginals => await db.ElectronicSignatureEnvelopes.AsNoTracking()
+                .Where(item => item.Id > afterId && (!endId.HasValue || item.Id <= endId.Value)).OrderBy(item => item.Id).Take(take)
+                .Select(item => new LegacyCandidate(item.Id, "esign-original", item.Id.ToString(), item.OriginalFileName,
+                    "application/pdf", item.SizeBytes, item.SnapshotPath, null, item.CreatedByUserId, item.CreatedAt, item.ChecksumSha256))
                 .ToListAsync(cancellationToken),
             LegacyStorageSources.ProfilePhotos => await db.Users.AsNoTracking()
-                .Where(item => item.Id > afterId && item.PhotoUrl != null && item.PhotoUrl != "")
+                .Where(item => item.Id > afterId && (!endId.HasValue || item.Id <= endId.Value) && item.PhotoUrl != null && item.PhotoUrl != "")
                 .OrderBy(item => item.Id).Take(take)
                 .Select(item => new LegacyCandidate(item.Id, "profile-photo", item.Id.ToString(), item.PhotoUrl!,
-                    "image/*", null, item.PhotoUrl!, null, item.Id, item.UpdatedAt))
+                    "image/*", null, item.PhotoUrl!, null, item.Id, item.UpdatedAt, null))
                 .ToListAsync(cancellationToken),
             _ => throw new InvalidOperationException("Unsupported legacy storage source."),
         };
@@ -209,7 +287,7 @@ public sealed class LegacyStorageCatalogBackfillService(
             "chat-attachment" => SafeCombine(Path.Combine(fileRoot, "internal-chat-files"),
                 Path.Combine(item.ParentId!.Value.ToString(), Path.GetFileName(item.StoredPath))),
             "messenger-delivery" => SafeCombine(Path.Combine(fileRoot, "messenger-document-deliveries"), item.StoredPath),
-            "esign-artifact" => ResolveElectronicSignaturePath(item.StoredPath),
+            "esign-artifact" or "esign-original" => ResolveElectronicSignaturePath(item.StoredPath),
             "profile-photo" => ResolveProfilePhotoPath(item.StoredPath),
             _ => throw new InvalidOperationException("Unsupported legacy owner type."),
         };
@@ -288,7 +366,8 @@ public sealed class LegacyStorageCatalogBackfillService(
         string? detail,
         long? actualSize = null)
         => new(candidate.SourceId, candidate.OwnerType, candidate.OwnerId, Path.GetFileName(candidate.LogicalName),
-            status, actualSize ?? candidate.ExpectedSize ?? 0, sha256, locator, objectId, detail);
+            status, actualSize ?? candidate.ExpectedSize ?? 0, sha256, locator, objectId, detail)
+        { ContentType = string.IsNullOrWhiteSpace(candidate.ContentType) ? "application/octet-stream" : candidate.ContentType };
 
     private static async Task<(long Size, string Sha256)> HashFileAsync(string path, CancellationToken cancellationToken)
     {
@@ -317,6 +396,10 @@ public sealed class LegacyStorageCatalogBackfillService(
         return new Guid(hash.AsSpan(0, 16));
     }
 
+    private sealed record ExistingCatalogSnapshot(Guid Id, long Version, string DataClass, string OwnerType, string OwnerId,
+        string LogicalName, string ContentType, bool IsDeleted, bool HasTombstone, long CurrentGeneration,
+        long? SizeBytes, string? Sha256, int LegacyReplicaCount, string? LegacyLocator, bool VerifiedLegacyReplica);
+
     private sealed record LegacyCandidate(
         long SourceId,
         string OwnerType,
@@ -327,5 +410,6 @@ public sealed class LegacyStorageCatalogBackfillService(
         string StoredPath,
         int? ParentId,
         int? CreatedByUserId,
-        DateTime CreatedAt);
+        DateTime CreatedAt,
+        string? ExpectedChecksum);
 }

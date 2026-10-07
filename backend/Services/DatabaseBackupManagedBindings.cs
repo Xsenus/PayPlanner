@@ -14,8 +14,10 @@ public static class DatabaseBackupManagedBindings
     private sealed record BindingLine(string Kind, DatabaseBackupManagedBinding Binding);
     private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web)
     {
-        PropertyNameCaseInsensitive = false, RespectRequiredConstructorParameters = true,
-        UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow, MaxDepth = 8
+        PropertyNameCaseInsensitive = false,
+        RespectRequiredConstructorParameters = true,
+        UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
+        MaxDepth = 8
     };
 
     public static async Task<long> WriteAsync(Stream inventory, Stream destination, ZipArchive archive,

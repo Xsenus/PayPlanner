@@ -9,6 +9,16 @@ public sealed class StorageOrchestrationOptions
     public bool PolicyDryRunEnabled { get; set; }
     public string LocalRoot { get; set; } = string.Empty;
     public bool WorkerEnabled { get; set; }
+    public bool AutoTaskFilePublicationEnabled { get; set; }
+    public bool AutoCaseDocumentPublicationEnabled { get; set; }
+    public bool MigrationCapacityChecksEnabled { get; set; }
+    public long MigrationMinimumFreeBytes { get; set; } = 64 * 1024 * 1024;
+    public bool RepairCapacityChecksEnabled { get; set; }
+    public long RepairMinimumFreeBytes { get; set; } = 64 * 1024 * 1024;
+    public bool UploadCapacityChecksEnabled { get; set; }
+    public long UploadMinimumFreeBytes { get; set; } = 64 * 1024 * 1024;
+    public List<string> ProductReadEnabledClasses { get; set; } = [];
+    public List<string> ProductWriteEnabledClasses { get; set; } = [];
     public int WorkerBatchSize { get; set; } = 20;
     public int WorkerPollSeconds { get; set; } = 10;
     public int WorkerLeaseSeconds { get; set; } = 120;
@@ -113,8 +123,9 @@ public sealed class StoragePolicyService(
             decisions.Add(new StoragePolicyProviderDecision(providerKey, registered, writeEligible, readEligible, reasons));
         }
 
-        var eligibleWriters = decisions.Where(item => item.EligibleForWrite).Select(item => item.ProviderKey).ToArray();
-        var eligibleReaders = decisions.Where(item => item.EligibleForRead).Select(item => item.ProviderKey).ToArray();
+        var byKey = decisions.ToDictionary(item => item.ProviderKey, StringComparer.OrdinalIgnoreCase);
+        var eligibleWriters = policy.WriteProviders.Where(key => byKey[key].EligibleForWrite).Select(key => byKey[key].ProviderKey).ToArray();
+        var eligibleReaders = policy.ReadProviders.Where(key => byKey[key].EligibleForRead).Select(key => byKey[key].ProviderKey).ToArray();
         if (eligibleWriters.Length < policy.RequiredCopies)
         {
             errors.Add($"Policy requires {policy.RequiredCopies} copies but only {eligibleWriters.Length} eligible write providers are available.");

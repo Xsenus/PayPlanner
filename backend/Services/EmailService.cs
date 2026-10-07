@@ -51,6 +51,7 @@ namespace PayPlanner.Api.Services
             bool throwOnFailure = false,
             EmailSendSettings? overrideSettings = null)
         {
+            RestoredRuntimeIsolation.ThrowIfEnabled(_configuration);
             var settings = overrideSettings is null
                 ? await BuildSmtpSettingsAsync(cancellationToken)
                 : ConvertSettings(overrideSettings);

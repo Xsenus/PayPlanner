@@ -63,7 +63,7 @@ public class UserActivityLoggingFilter : IAsyncActionFilter
         catch (Exception ex)
         {
             stopwatch.Stop();
-            await WriteLogAsync(controllerName, actionName, objectId, metadata, UserActivityStatus.Failure, stopwatch.ElapsedMilliseconds, httpContext.Response?.StatusCode, ex: ex, cancellationToken: httpContext.RequestAborted);
+            await WriteLogAsync(controllerName, actionName, objectId, metadata, UserActivityStatus.Failure, stopwatch.ElapsedMilliseconds, httpContext.Response?.StatusCode, ex: ex);
             throw;
         }
 
@@ -73,7 +73,7 @@ public class UserActivityLoggingFilter : IAsyncActionFilter
             ? UserActivityStatus.Failure
             : DetermineStatusByCode(executedContext.HttpContext.Response?.StatusCode);
 
-        await WriteLogAsync(controllerName, actionName, objectId, metadata, status, stopwatch.ElapsedMilliseconds, executedContext.HttpContext.Response?.StatusCode, executedContext.Exception, httpContext.RequestAborted);
+        await WriteLogAsync(controllerName, actionName, objectId, metadata, status, stopwatch.ElapsedMilliseconds, executedContext.HttpContext.Response?.StatusCode, executedContext.Exception);
     }
 
     private async Task WriteLogAsync(
@@ -84,11 +84,13 @@ public class UserActivityLoggingFilter : IAsyncActionFilter
         UserActivityStatus status,
         long durationMs,
         int? httpStatusCode,
-        Exception? ex = null,
-        CancellationToken cancellationToken = default)
+        Exception? ex = null)
     {
         try
         {
+            // Closing a browser request after the action must not erase its
+            // audit. Give the completed action a separate, bounded write window.
+            using var auditDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             var description = BuildDescription(controllerName, actionName, objectId, httpStatusCode, ex);
             await _activityService.TryWriteAsync(new ActivityLogEntry
             {
@@ -102,7 +104,7 @@ public class UserActivityLoggingFilter : IAsyncActionFilter
                 DurationMs = durationMs,
                 HttpStatusCode = httpStatusCode,
                 Metadata = metadata
-            }, cancellationToken);
+            }, auditDeadline.Token);
         }
         catch (Exception logEx)
         {

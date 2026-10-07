@@ -130,7 +130,7 @@ public sealed class TelegramNotificationService : ITelegramNotificationService
 
         try
         {
-            using var client = TelegramBotApiHttpClientFactory.Create(_httpClientFactory, connection);
+            using var client = TelegramBotApiHttpClientFactory.Create(_httpClientFactory, connection, _configuration);
             using var response = await client.PostAsync(
                 $"https://api.telegram.org/bot{botToken.Trim()}/sendMessage",
                 new FormUrlEncodedContent(new Dictionary<string, string>

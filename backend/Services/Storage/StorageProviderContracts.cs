@@ -61,14 +61,40 @@ public sealed record StorageDeleteResult(
     string Locator,
     string? Error = null);
 
+// Describes where destination bytes consume capacity. Unknown adapters cannot
+// certify a native-volume budget merely because their key looks like a cloud.
+public enum StorageCapacityDomain { Unknown, Native, Remote }
+
 public interface IStorageProvider
 {
     string Key { get; }
+    StorageCapacityDomain CapacityDomain => StorageCapacityDomain.Unknown;
     StorageProviderCapabilities Capabilities { get; }
     Task<StorageWriteResult> PutAsync(StorageWriteRequest request, CancellationToken cancellationToken);
     Task<StorageObjectMetadata> HeadAsync(string locator, CancellationToken cancellationToken);
     Task<StorageReadResult> OpenReadAsync(string locator, CancellationToken cancellationToken);
     Task<StorageDeleteResult> DeleteAsync(string locator, CancellationToken cancellationToken);
+}
+
+// Providers own locator syntax. Recovery uses a durable, isolated destination instead
+// of overwriting damaged bytes; its identity must be stable across queue retries.
+public interface IStorageRepairDestinationProvider
+{
+    string CreateRepairLocator(string originalLocator, Guid generationId, string idempotencyKey);
+}
+
+// Connected adapters route by the locator, not by the queue's ConnectionId.
+// Reject mismatched catalog metadata before any provider I/O.
+public interface IStorageConnectedLocatorProvider
+{
+    bool TryGetConnectionId(string locator, out string connectionId);
+}
+
+internal static class StorageRepairDestination
+{
+    public static string Path(Guid generationId, string idempotencyKey)
+        => $"recovery/{generationId:N}/{Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(idempotencyKey))).ToLowerInvariant()}.bin";
 }
 
 public interface IStorageProviderRegistry

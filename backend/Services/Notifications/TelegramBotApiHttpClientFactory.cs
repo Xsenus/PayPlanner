@@ -4,8 +4,10 @@ namespace PayPlanner.Api.Services.Notifications;
 
 internal static class TelegramBotApiHttpClientFactory
 {
-    public static HttpClient Create(IHttpClientFactory httpClientFactory, TelegramBotConnectionSettings? connection)
+    public static HttpClient Create(IHttpClientFactory httpClientFactory, TelegramBotConnectionSettings? connection,
+        IConfiguration? configuration = null)
     {
+        RestoredRuntimeIsolation.ThrowIfEnabled(configuration);
         if (string.IsNullOrWhiteSpace(connection?.ProxyUrl))
         {
             return httpClientFactory.CreateClient();

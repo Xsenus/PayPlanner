@@ -308,6 +308,7 @@ public class WebPushNotificationService : IWebPushNotificationService
         string privateKey,
         CancellationToken cancellationToken)
     {
+        RestoredRuntimeIsolation.ThrowIfEnabled(_configuration);
         var pushSubscription = new PushSubscription(subscription.Endpoint, subscription.P256dh, subscription.Auth);
         var vapidDetails = new VapidDetails(subject, publicKey, privateKey);
         using var client = new WebPushClient();

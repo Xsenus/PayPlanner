@@ -1,12 +1,14 @@
 using System.Data;
 using System.Globalization;
 using System.Net;
+using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
@@ -16,6 +18,7 @@ using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.Documents;
 using PayPlanner.Api.Services.Invoices;
 using PayPlanner.Api.Services.Notifications;
+using PayPlanner.Api.Services.Storage;
 
 namespace PayPlanner.Api.Controllers;
 
@@ -130,6 +133,11 @@ public class TasksController : ControllerBase
     private readonly ISystemJobRunStateService? _systemJobRunState;
     private readonly IRealtimeNotificationPublisher _realtimePublisher;
     private readonly string _taskFilesRoot;
+    private readonly IProductStorageReader? _productStorageReader;
+    private readonly IManagedTaskFileUploadService? _managedTaskUploads;
+    private readonly IProductStorageDeletionService? _productStorageDeletion;
+    private readonly ITaskFilePublicationAuthorizationService _taskFilePublicationAuthorization;
+    private readonly ITaskFileUploadStatusReader? _taskFileUploadStatusReader;
 
     public TasksController(
         PaymentContext db,
@@ -142,9 +150,19 @@ public class TasksController : ControllerBase
         IConfiguration? configuration = null,
         CaseInactivityAutomationMutationGate? caseInactivityAutomationMutationGate = null,
         ISystemJobRunStateService? systemJobRunState = null,
-        IRealtimeNotificationPublisher? realtimePublisher = null)
+        IRealtimeNotificationPublisher? realtimePublisher = null,
+        IProductStorageReader? productStorageReader = null,
+        IManagedTaskFileUploadService? managedTaskUploads = null,
+        IProductStorageDeletionService? productStorageDeletion = null,
+        ITaskFilePublicationAuthorizationService? taskFilePublicationAuthorization = null,
+        ITaskFileUploadStatusReader? taskFileUploadStatusReader = null)
     {
         _db = db;
+        _productStorageReader = productStorageReader;
+        _managedTaskUploads = managedTaskUploads;
+        _productStorageDeletion = productStorageDeletion;
+        _taskFilePublicationAuthorization = taskFilePublicationAuthorization ?? new TaskFilePublicationAuthorizationService(db);
+        _taskFileUploadStatusReader = taskFileUploadStatusReader;
         _notificationService = notificationService;
         _caseDocumentStorage = caseDocumentStorage ?? new LocalCaseDocumentStorage(environment, configuration);
         _pdfService = pdfService;
@@ -2301,18 +2319,18 @@ public class TasksController : ControllerBase
     [HttpGet("{id:int}")]
     public async Task<ActionResult<TaskJournalItemDto>> GetTask(int id, CancellationToken ct)
     {
-        var access = await GetTaskAccessAsync(ct);
+        var access = await GetTaskReadAccessAsync(ct);
         if (access is null)
         {
             return Unauthorized();
         }
 
-        if (!access.IsAdmin && access.Permission?.CanView != true)
+        if (!access.Visibility.IsAdmin && access.Permission?.CanView != true)
         {
             return Forbid();
         }
 
-        var task = await ProjectTaskReadItems(BuildVisibleTaskBaseQuery(access)
+        var task = await ProjectTaskReadItems(_db.TaskJournalItems.ApplyTaskVisibility(access.Visibility)
             .AsNoTracking()
             .Where(item => item.Id == id))
             .FirstOrDefaultAsync(ct);
@@ -2846,6 +2864,36 @@ public class TasksController : ControllerBase
         return Ok(MapFiles(files, caseDocumentIds));
     }
 
+    [HttpGet("{id:int}/files/uploads")]
+    public async Task<ActionResult<IReadOnlyList<TaskFileUploadState>>> GetFileUploads(int id, CancellationToken ct,
+        [FromQuery] Guid[]? uploadKeys = null, [FromQuery] bool pendingOnly = false, [FromQuery] int page = 1,
+        [FromQuery] bool includePageInfo = false, [FromQuery] Guid? after = null)
+    {
+        Response.Headers.CacheControl = "no-store";
+        if (page is < 1 or > 10000 || uploadKeys is { Length: > 50 } || uploadKeys?.Contains(Guid.Empty) == true)
+            return BadRequest(new { message = "Некорректные параметры просмотра загрузок." });
+        if (!int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var actorId) || actorId <= 0) return Unauthorized();
+        if (_taskFileUploadStatusReader is null) return StatusCode(503);
+        if (includePageInfo)
+        {
+            if (!pendingOnly || page != 1 || uploadKeys is { Length: > 0 } || after == Guid.Empty)
+                return BadRequest(new { message = "Некорректные параметры просмотра загрузок." });
+            try
+            {
+                var result = await _taskFileUploadStatusReader.ListPageAsync(id, actorId, ct, after);
+                return result is null ? Forbid() : Ok(result);
+            }
+            catch (ArgumentException)
+            {
+                return BadRequest(new { message = "Позиция в списке загрузок больше не доступна. Обновите загрузки." });
+            }
+        }
+        if (after.HasValue) return BadRequest(new { message = "Некорректные параметры просмотра загрузок." });
+        var states = await _taskFileUploadStatusReader.ListAsync(id, actorId, ct,
+            uploadKeys is { Length: > 0 } ? uploadKeys : null, pendingOnly, page);
+        return states is null ? Forbid() : Ok(states);
+    }
+
     [HttpPost("{id:int}/files")]
     [RequestSizeLimit(MaxTaskFileBytes)]
     public async Task<ActionResult<TaskJournalFileDto>> UploadFile(
@@ -2865,7 +2913,9 @@ public class TasksController : ControllerBase
             return Forbid();
         }
 
-        var entity = await BuildVisibleTasksQuery(access).FirstOrDefaultAsync(item => item.Id == id, ct);
+        var entity = await BuildVisibleTaskBaseQuery(access)
+            .Include(task => task.Participants)
+            .FirstOrDefaultAsync(item => item.Id == id, ct);
         if (entity is null)
         {
             return NotFound();
@@ -2899,6 +2949,42 @@ public class TasksController : ControllerBase
             return BadRequest(new { message = "Некорректный ключ документа." });
         }
 
+        if (_managedTaskUploads?.Enabled == true)
+        {
+            var uploadHeader = Request.Headers["X-Upload-Key"];
+            var uploadKey = Guid.NewGuid();
+            if (uploadHeader.Count > 0 && (uploadHeader.Count != 1 || !Guid.TryParse(uploadHeader[0], out uploadKey) || uploadKey == Guid.Empty))
+                return BadRequest(new { message = "Некорректный идентификатор загрузки." });
+            async Task<bool> AuthorizePublication(CancellationToken token)
+            {
+                return await _taskFilePublicationAuthorization.CanPublishAsync(access.UserId, id, token);
+            }
+            var managed = await _managedTaskUploads.UploadAsync(new(id, access.UserId, access.DisplayName, uploadKey,
+                uploadFile, SanitizeFileName(uploadFile.FileName), normalizedDocumentKey, AuthorizePublication), ct);
+            if (managed.Status == "uploaded" && managed.FileId.HasValue)
+            {
+                var savedFile = await _db.TaskJournalFiles.AsNoTracking()
+                    .SingleOrDefaultAsync(f => f.Id == managed.FileId && f.TaskJournalItemId == id, ct);
+                if (savedFile is null) return NotFound();
+                var latest = !await _db.TaskJournalFiles.AsNoTracking().AnyAsync(f => f.TaskJournalItemId == id
+                    && f.DocumentKey == savedFile.DocumentKey && f.Version > savedFile.Version, ct);
+                await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
+                return Created($"/api/tasks/{id}/files/{savedFile.Id}", MapFile(savedFile, latest, managed.CaseFileId));
+            }
+            if (managed.Status == "notFound") return NotFound();
+            if (managed.Status == "forbidden") return Forbid();
+            if (managed.Status == "invalid") return BadRequest(new { message = "Проверьте размер файла (до 25 МБ) и версию документа." });
+            if (managed.Status == "conflict") return Conflict(new { message = "Задача, документ или содержимое загрузки изменились. Обновите карточку перед новой загрузкой." });
+            Response.Headers["Retry-After"] = "5";
+            if (managed.Status == "pending")
+                return StatusCode(503, new
+                {
+                    code = "task_file_copies_pending", taskId = id, uploadKey, fileId = (int?)null,
+                    message = "Файл сохранён, обязательные копии ещё не готовы. Вложение пока не добавлено; повторная отправка файла не требуется.",
+                });
+            return StatusCode(503, new { message = "Обязательные копии файла ещё не готовы или загрузка временно отключена. Вложение пока не добавлено; повторите отправку того же файла позже." });
+        }
+
         var isNewDocument = normalizedDocumentKey is null;
         if (isNewDocument)
         {
@@ -2923,12 +3009,17 @@ public class TasksController : ControllerBase
         var fullPath = ResolveTaskFilePath(relativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
         string? caseDocumentStoragePath = null;
+        Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction? uploadTransaction = null;
+        var commitStarted = false;
+        var taskFileCreated = false;
+        var caseFileSaved = false;
 
         try
         {
             await using (var stream = new FileStream(fullPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
             {
-                await uploadFile.CopyToAsync(stream, ct);
+                taskFileCreated = true;
+                await UploadValidationHelper.CopyValidatedAsync(uploadFile, stream, MaxTaskFileBytes, ct);
             }
 
             var taskFile = new TaskJournalFile
@@ -2956,9 +3047,10 @@ public class TasksController : ControllerBase
                 var caseDocumentVersion = latestCaseVersion + 1;
                 var caseStoredFileName = BuildStoredFileName(caseDocumentKey, caseDocumentVersion, safeFileName);
                 caseDocumentStoragePath = _caseDocumentStorage.BuildRelativePath(entity.ClientCaseId.Value, caseStoredFileName);
-                await using (var caseStream = uploadFile.OpenReadStream())
+                await using (var caseStream = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.Read))
                 {
                     await _caseDocumentStorage.SaveAsync(caseDocumentStoragePath, caseStream, ct);
+                    caseFileSaved = true;
                 }
 
                 var caseDocument = new ClientCaseDocument
@@ -2978,6 +3070,7 @@ public class TasksController : ControllerBase
                     UploadedAt = taskFile.UploadedAt,
                 };
                 _db.ClientCaseDocuments.Add(caseDocument);
+                taskFile.ClientCaseDocument = caseDocument;
             }
 
             entity.UpdatedAt = DateTime.UtcNow;
@@ -2989,24 +3082,43 @@ public class TasksController : ControllerBase
                     : $"Загружена новая версия файла: {safeFileName} (v{version}).",
                 new { fileName = safeFileName, documentKey = normalizedDocumentKey, version });
 
+            uploadTransaction = await _db.Database.BeginTransactionAsync(ct);
             await _db.SaveChangesAsync(ct);
+            commitStarted = true;
+            await uploadTransaction.CommitAsync(ct);
             await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
 
             var caseDocumentIds = await ResolveTaskCaseDocumentIdsAsync(entity.ClientCaseId, [taskFile], ct);
             return Created($"/api/tasks/{entity.Id}/files/{taskFile.Id}", MapFile(
                 taskFile,
                 true,
-                caseDocumentIds.GetValueOrDefault(BuildTaskCaseDocumentLookupKey(taskFile.DocumentKey, taskFile.Version))));
+                caseDocumentIds.TryGetValue(taskFile.Id, out var caseId) ? caseId : null));
         }
-        catch
+        catch (Exception ex)
         {
-            TryDeletePhysicalFile(fullPath);
-            if (caseDocumentStoragePath is not null)
+            // A commit acknowledgement or a realtime failure must not delete
+            // bytes already referenced by committed task/case records.
+            if (!commitStarted)
             {
-                _caseDocumentStorage.DeleteIfExists(caseDocumentStoragePath);
+                if (uploadTransaction is not null)
+                {
+                    using var rollbackTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                    await uploadTransaction.RollbackAsync(rollbackTimeout.Token);
+                }
+                if (taskFileCreated) TryDeletePhysicalFile(fullPath);
+                if (caseFileSaved && caseDocumentStoragePath is not null)
+                {
+                    _caseDocumentStorage.DeleteIfExists(caseDocumentStoragePath);
+                }
             }
 
+            if (ex is InvalidDataException && uploadTransaction is null)
+                return BadRequest(new { message = "Файл повреждён или его размер неверен. Допустимый размер — до 25 МБ." });
             throw;
+        }
+        finally
+        {
+            if (uploadTransaction is not null) await uploadTransaction.DisposeAsync();
         }
     }
 
@@ -3036,6 +3148,22 @@ public class TasksController : ControllerBase
         if (taskFile is null)
         {
             return NotFound();
+        }
+
+        if (_productStorageReader is not null)
+        {
+            var managed = await _productStorageReader.OpenReadAsync(LegacyStorageSources.TaskFiles, taskFile.Id,
+                taskFile.OriginalFileName, taskFile.ContentType, ct);
+            if (managed.Status == ProductStorageReadStatus.Available && managed.File is { } file)
+                return new FileStreamResult(file.Content, taskFile.ContentType)
+                {
+                    FileDownloadName = taskFile.OriginalFileName,
+                    EnableRangeProcessing = true,
+                };
+            if (managed.Status == ProductStorageReadStatus.Deleted) return NotFound();
+            if (managed.Status != ProductStorageReadStatus.Legacy)
+                return StatusCode(StatusCodes.Status503ServiceUnavailable,
+                    new { message = "Проверенная копия файла временно недоступна. Повторите скачивание позже." });
         }
 
         var fullPath = ResolveTaskFilePath(taskFile.StoragePath);
@@ -3085,6 +3213,16 @@ public class TasksController : ControllerBase
         }
 
         var fullPath = ResolveTaskFilePath(taskFile.StoragePath);
+        await using var deleteTransaction = await _db.Database.BeginTransactionAsync(ct);
+        if (await _db.TaskJournalItems.Where(t => t.Id == id).ExecuteUpdateAsync(s => s.SetProperty(t => t.UpdatedAt, t => t.UpdatedAt), ct) != 1)
+            return NotFound();
+        await _db.Entry(taskFile).ReloadAsync(ct);
+        if (_db.Entry(taskFile).State == EntityState.Detached) return NotFound();
+        fullPath = ResolveTaskFilePath(taskFile.StoragePath);
+        var deletion = _productStorageDeletion is null ? "legacy" : await _productStorageDeletion.DeleteAsync(
+            LegacyStorageSources.TaskFiles, taskFile.Id, taskFile.OriginalFileName, taskFile.ContentType, fullPath, access.UserId, ct);
+        if (deletion is not ("legacy" or "deleted"))
+            return StatusCode(deletion == "conflict" ? 409 : 503, new { message = "Не удалось безопасно удалить файл. Запись сохранена." });
         _db.TaskJournalFiles.Remove(taskFile);
         entity.UpdatedAt = DateTime.UtcNow;
         AddTaskHistory(
@@ -3093,7 +3231,8 @@ public class TasksController : ControllerBase
             $"Удален файл: {taskFile.OriginalFileName} (v{taskFile.Version}).",
             new { fileName = taskFile.OriginalFileName, taskFile.DocumentKey, taskFile.Version });
         await _db.SaveChangesAsync(ct);
-        TryDeletePhysicalFile(fullPath);
+        await deleteTransaction.CommitAsync(ct);
+        if (deletion == "legacy") TryDeletePhysicalFile(fullPath);
         await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
 
         return NoContent();
@@ -4375,6 +4514,10 @@ public class TasksController : ControllerBase
         }
 
         var settings = await GetTaskJournalSettingsAsync(ct);
+        await using var deleteTransaction = await _db.Database.BeginTransactionAsync(ct);
+        var visibleIds = await BuildVisibleTasksQuery(access).Where(task => ids.Contains(task.Id)).Select(t => t.Id).ToListAsync(ct);
+        await _db.TaskJournalItems.Where(task => visibleIds.Contains(task.Id))
+            .ExecuteUpdateAsync(s => s.SetProperty(t => t.UpdatedAt, t => t.UpdatedAt), ct);
         var entities = await BuildVisibleTasksQuery(access)
             .Where(task => ids.Contains(task.Id))
             .ToListAsync(ct);
@@ -4387,6 +4530,14 @@ public class TasksController : ControllerBase
                 continue;
             }
 
+            toDelete.Add(entity);
+        }
+
+        if (await PrepareTaskStorageDeletionAsync(toDelete.Select(t => t.Id).ToArray(), access.UserId, ct) is { } storageFailure)
+            return storageFailure;
+
+        foreach (var entity in toDelete)
+        {
             if (_externalCalendarSyncCoordinator is not null)
             {
                 try
@@ -4402,19 +4553,28 @@ public class TasksController : ControllerBase
                 }
             }
 
-            toDelete.Add(entity);
         }
 
-        foreach (var entity in toDelete)
+        var cascadeTiming = _db.ChangeTracker.CascadeDeleteTiming;
+        try
         {
-            await _notificationService.NotifyTaskCancelledAsync(entity, access.DisplayName, access.UserId, "Удалена", ct);
-            _db.TaskJournalItems.Remove(entity);
-        }
+            if (_db.UseObjectAuditModel) _db.ChangeTracker.CascadeDeleteTiming = CascadeTiming.OnSaveChanges;
+            foreach (var entity in toDelete)
+            {
+                await _notificationService.NotifyTaskCancelledAsync(entity, access.DisplayName, access.UserId, "Удалена", ct);
+                _db.TaskJournalItems.Remove(entity);
+            }
 
-        if (toDelete.Count > 0)
+            if (toDelete.Count > 0)
+            {
+                await _db.SaveChangesAsync(ct);
+                await deleteTransaction.CommitAsync(ct);
+                await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
+            }
+        }
+        finally
         {
-            await _db.SaveChangesAsync(ct);
-            await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
+            _db.ChangeTracker.CascadeDeleteTiming = cascadeTiming;
         }
 
         return Ok(new
@@ -4600,6 +4760,11 @@ public class TasksController : ControllerBase
             return Forbid();
         }
 
+        await using var deleteTransaction = await _db.Database.BeginTransactionAsync(ct);
+        if (!await BuildVisibleTasksQuery(access).AnyAsync(t => t.Id == id, ct)) return NotFound();
+        if (await _db.TaskJournalItems.Where(t => t.Id == id)
+            .ExecuteUpdateAsync(s => s.SetProperty(t => t.UpdatedAt, t => t.UpdatedAt), ct) != 1)
+            return NotFound();
         var entity = await BuildVisibleTasksQuery(access).FirstOrDefaultAsync(item => item.Id == id, ct);
         if (entity is null)
         {
@@ -4610,6 +4775,9 @@ public class TasksController : ControllerBase
         {
             return Forbid();
         }
+
+        if (await PrepareTaskStorageDeletionAsync([id], access.UserId, ct) is { } storageFailure)
+            return storageFailure;
 
         if (_externalCalendarSyncCoordinator is not null)
         {
@@ -4627,10 +4795,44 @@ public class TasksController : ControllerBase
         }
 
         await _notificationService.NotifyTaskCancelledAsync(entity, access.DisplayName, access.UserId, "Удалена", ct);
-        _db.TaskJournalItems.Remove(entity);
-        await _db.SaveChangesAsync(ct);
+        var cascadeTiming = _db.ChangeTracker.CascadeDeleteTiming;
+        try
+        {
+            if (_db.UseObjectAuditModel) _db.ChangeTracker.CascadeDeleteTiming = CascadeTiming.OnSaveChanges;
+            _db.TaskJournalItems.Remove(entity);
+            await _db.SaveChangesAsync(ct);
+        }
+        finally
+        {
+            _db.ChangeTracker.CascadeDeleteTiming = cascadeTiming;
+        }
+        await deleteTransaction.CommitAsync(ct);
         await _realtimePublisher.PublishTaskJournalChangedAsync(ct);
         return NoContent();
+    }
+
+    private async Task<ObjectResult?> PrepareTaskStorageDeletionAsync(int[] taskIds, int actorId, CancellationToken ct)
+    {
+        // Normal deletion is recoverable soft deletion. Its documents must
+        // survive restoration; only a hard-deleted parent tombstones its files.
+        if (_db.UseObjectAuditModel || _productStorageDeletion is null || taskIds.Length == 0) return null;
+        var lastId = 0;
+        while (true)
+        {
+            var files = await _db.TaskJournalFiles.AsNoTracking()
+                .Where(f => taskIds.Contains(f.TaskJournalItemId) && f.Id > lastId)
+                .OrderBy(f => f.Id).Take(128).ToListAsync(ct);
+            if (files.Count == 0) return null;
+            foreach (var file in files)
+            {
+                var deletion = await _productStorageDeletion.DeleteAsync(LegacyStorageSources.TaskFiles,
+                    file.Id, file.OriginalFileName, file.ContentType, ResolveTaskFilePath(file.StoragePath), actorId, ct);
+                if (deletion is not ("legacy" or "deleted"))
+                    return StatusCode(deletion == "conflict" ? 409 : 503,
+                        new { message = "Не удалось безопасно удалить вложения. Задачи сохранены." });
+                lastId = file.Id;
+            }
+        }
     }
 
     private async Task NotifyTaskScheduleConflictIfNeededAsync(TaskJournalItem entity, TaskAccess access, CancellationToken ct)
@@ -5508,6 +5710,25 @@ public class TasksController : ControllerBase
     private IQueryable<TaskJournalItem> BuildVisibleTaskBaseQuery(TaskAccess access)
         => _db.TaskJournalItems.ApplyTaskVisibility(access.Visibility);
 
+    private async Task<SectionAccessContext?> GetTaskReadAccessAsync(CancellationToken ct)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue) return null;
+        ct.ThrowIfCancellationRequested();
+
+        var access = await _db.ResolveSectionAccessAsync(User, RolePermissionCatalog.Tasks, ct);
+        if (access is not null) return access;
+
+        // Preserve the existing bootstrap fallback only while the user table is empty.
+        // An absent, inactive or denied user in a populated database remains unauthorized.
+        if (await _db.Users.AsNoTracking().AnyAsync(ct)) return null;
+        var isAdmin = User.IsInRole("admin");
+        return new SectionAccessContext(
+            new DataVisibilityAccess(userId.Value, isAdmin, RolePermissionCatalog.Tasks,
+                isAdmin ? DataVisibilityScope.All : DataVisibilityScope.Own, new[] { userId.Value }),
+            null);
+    }
+
     private async Task<TaskAccess?> GetTaskAccessAsync(CancellationToken ct, string section = RolePermissionCatalog.Tasks)
     {
         var userId = User.GetUserId();
@@ -5516,6 +5737,7 @@ public class TasksController : ControllerBase
             return null;
         }
 
+        ct.ThrowIfCancellationRequested();
         var visibility = await _db.ResolveDataVisibilityAsync(User, section, ct);
         if (visibility is null)
         {
@@ -7916,7 +8138,7 @@ public class TasksController : ControllerBase
             UpdatedAt = request.UpdatedAt.HasValue ? ToIso(request.UpdatedAt.Value) : null,
         };
 
-    private async Task<Dictionary<string, int>> ResolveTaskCaseDocumentIdsAsync(
+    private async Task<Dictionary<int, int>> ResolveTaskCaseDocumentIdsAsync(
         int? clientCaseId,
         IReadOnlyCollection<TaskJournalFile> files,
         CancellationToken ct)
@@ -7926,30 +8148,31 @@ public class TasksController : ControllerBase
             return [];
         }
 
-        var caseDocumentKeys = files
-            .Select(file => BuildTaskCaseDocumentKey(file.TaskJournalItemId, file.DocumentKey))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
+        var exactIds = files.Where(file => file.ClientCaseDocumentId.HasValue)
+            .Select(file => file.ClientCaseDocumentId!.Value).Distinct().ToArray();
+        if (exactIds.Length == 0) return [];
 
-        return await _db.ClientCaseDocuments
+        var candidates = await _db.ClientCaseDocuments
             .AsNoTracking()
-            .Where(item => item.ClientCaseId == clientCaseId.Value && caseDocumentKeys.Contains(item.DocumentKey))
-            .Select(item => new
+            .Where(item => item.ClientCaseId == clientCaseId.Value
+                && exactIds.Contains(item.Id))
+            .Select(item => item.Id)
+            .ToListAsync(ct);
+        var available = candidates.ToHashSet();
+        var result = new Dictionary<int, int>();
+        foreach (var file in files)
+        {
+            if (file.ClientCaseDocumentId is { } exactId)
             {
-                item.Id,
-                item.DocumentKey,
-                item.Version,
-            })
-            .ToDictionaryAsync(
-                item => BuildTaskCaseDocumentLookupKey(item.DocumentKey, item.Version),
-                item => item.Id,
-                StringComparer.OrdinalIgnoreCase,
-                ct);
+                if (available.Contains(exactId)) result[file.Id] = exactId;
+            }
+        }
+        return result;
     }
 
     private static IReadOnlyList<TaskJournalFileDto> MapFiles(
         IReadOnlyCollection<TaskJournalFile> files,
-        IReadOnlyDictionary<string, int>? caseDocumentIds = null)
+        IReadOnlyDictionary<int, int>? caseDocumentIds = null)
     {
         var latestVersions = files
             .GroupBy(file => file.DocumentKey, StringComparer.OrdinalIgnoreCase)
@@ -7962,7 +8185,7 @@ public class TasksController : ControllerBase
             .Select(file => MapFile(
                 file,
                 latestVersions.TryGetValue(file.DocumentKey, out var latest) && file.Version == latest,
-                caseDocumentIds?.GetValueOrDefault(BuildTaskCaseDocumentLookupKey(file.DocumentKey, file.Version))))
+                caseDocumentIds is not null && caseDocumentIds.TryGetValue(file.Id, out var caseId) ? caseId : null))
             .ToList();
     }
 
@@ -8053,9 +8276,6 @@ public class TasksController : ControllerBase
 
         return prefix + suffix;
     }
-
-    private static string BuildTaskCaseDocumentLookupKey(string documentKey, int version)
-        => $"{documentKey}:{version.ToString(CultureInfo.InvariantCulture)}";
 
     private string ResolveTaskFilePath(string storagePath)
     {
@@ -8386,24 +8606,10 @@ public class TasksController : ControllerBase
            && string.Equals(nextStatus, "done", StringComparison.OrdinalIgnoreCase);
 
     private static bool CanPostTaskComment(TaskJournalItem entity, TaskAccess access)
-    {
-        if (access.IsAdmin
-            || (access.Permission?.CanEdit == true
-                && (access.Visibility.SeesAll
-                    || string.Equals(access.Visibility.ViewScope, DataVisibilityScope.Department, StringComparison.OrdinalIgnoreCase))))
-        {
-            return true;
-        }
-
-        if (entity.AuthorUserId == access.UserId || entity.AssigneeUserId == access.UserId)
-        {
-            return true;
-        }
-
-        return entity.Participants.Any(participant =>
-            participant.UserId == access.UserId &&
-            !string.Equals(participant.Role, "observer", StringComparison.OrdinalIgnoreCase));
-    }
+        => TaskCollaborationPermission.CanContribute(access.Visibility, access.Permission?.CanEdit == true,
+            entity.AuthorUserId == access.UserId, entity.AssigneeUserId == access.UserId,
+            entity.Participants.Any(participant => participant.UserId == access.UserId
+                && !string.Equals(participant.Role, "observer", StringComparison.OrdinalIgnoreCase)));
 
     private bool ReplacePrimaryAssignee(TaskJournalItem entity, User assignee, DateTime nowUtc)
     {

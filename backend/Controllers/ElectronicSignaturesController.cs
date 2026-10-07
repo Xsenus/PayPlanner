@@ -186,14 +186,10 @@ public sealed class ElectronicSignaturesController(
         {
             var package = await service.CreateEvidencePackageAsync(publicId, ct);
             if (package is null) return NotFound();
-            Response.OnCompleted(() =>
-            {
-                try { if (System.IO.File.Exists(package.FullPath)) System.IO.File.Delete(package.FullPath); }
-                catch (IOException) { }
-                catch (UnauthorizedAccessException) { }
-                return Task.CompletedTask;
-            });
-            return PhysicalFile(package.FullPath, "application/zip", package.FileName, enableRangeProcessing: false);
+            var stream = await package.OpenReadAsync(ct);
+            // MVC disposes the verified stream after sending or aborting the
+            // response. Cleanup stays attached to the original native object.
+            return File(stream, "application/zip", package.FileName, enableRangeProcessing: false);
         }
         catch (InvalidOperationException ex)
         {

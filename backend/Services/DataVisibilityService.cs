@@ -46,12 +46,14 @@ public static class DataVisibilityService
     /// <param name="principal">Текущий аутентифицированный пользователь.</param>
     /// <param name="section">Раздел из <see cref="RolePermissionCatalog"/>.</param>
     /// <param name="ct">Токен отмены запроса.</param>
+    /// <param name="requireApprovedUser">Проверять одобрение сотрудника в том же свежем запросе доступа.</param>
     /// <returns>Снимок доступа или <see langword="null"/>, если доступ не подтверждён.</returns>
     public static async Task<SectionAccessContext?> ResolveSectionAccessAsync(
         this PaymentContext db,
         ClaimsPrincipal? principal,
         string section,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        bool requireApprovedUser = false)
     {
         var userId = principal?.GetUserId();
         if (!userId.HasValue)
@@ -66,7 +68,7 @@ public static class DataVisibilityService
                     .Where(permission => permission.Section == section)
                 on item.RoleId equals configuredPermission.RoleId into configuredPermissions
             from configuredPermission in configuredPermissions.DefaultIfEmpty()
-            where item.Id == userId.Value && item.IsActive
+            where item.Id == userId.Value && item.IsActive && (!requireApprovedUser || item.IsApproved)
             select new
             {
                 item.Id,

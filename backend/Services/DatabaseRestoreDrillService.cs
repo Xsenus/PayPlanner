@@ -9,6 +9,7 @@ using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Options;
 using Npgsql;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Services.Storage;
 
 namespace PayPlanner.Api.Services;
 
@@ -210,7 +211,8 @@ public sealed class DatabaseRestoreDrillService(
         // A drill must never clean or overwrite an already populated database, even if its name is allowlisted.
         await EnsureEmptyPostgreSqlTargetAsync(target.ConnectionString, cancellationToken);
 
-        var executable = string.Equals(manifest.BackupFormat, "sql", StringComparison.OrdinalIgnoreCase)
+        var sqlFormat = string.Equals(manifest.BackupFormat, "sql", StringComparison.OrdinalIgnoreCase);
+        var executable = sqlFormat
             ? (string.IsNullOrWhiteSpace(settings.PsqlPath) ? "psql" : settings.PsqlPath)
             : (string.IsNullOrWhiteSpace(settings.PgRestorePath) ? "pg_restore" : settings.PgRestorePath);
         var startInfo = new ProcessStartInfo(executable)
@@ -218,21 +220,24 @@ public sealed class DatabaseRestoreDrillService(
             UseShellExecute = false,
             RedirectStandardError = true,
             RedirectStandardOutput = true,
+            RedirectStandardInput = sqlFormat,
             CreateNoWindow = true,
         };
         startInfo.ArgumentList.Add("--host"); startInfo.ArgumentList.Add(target.Host ?? string.Empty);
         startInfo.ArgumentList.Add("--port"); startInfo.ArgumentList.Add(target.Port.ToString());
         startInfo.ArgumentList.Add("--username"); startInfo.ArgumentList.Add(target.Username ?? string.Empty);
         startInfo.ArgumentList.Add("--dbname"); startInfo.ArgumentList.Add(target.Database);
-        if (string.Equals(manifest.BackupFormat, "sql", StringComparison.OrdinalIgnoreCase))
+        if (sqlFormat)
         {
-            startInfo.ArgumentList.Add("--file"); startInfo.ArgumentList.Add(backupPath);
+            // psql canonicalizes Windows path separators and loses the extended prefix.
+            // Read the verified file with .NET and preserve its exact bytes on stdin.
+            startInfo.ArgumentList.Add("--file"); startInfo.ArgumentList.Add("-");
             startInfo.ArgumentList.Add("--set"); startInfo.ArgumentList.Add("ON_ERROR_STOP=on");
         }
         else
         {
             startInfo.ArgumentList.Add("--no-owner"); startInfo.ArgumentList.Add("--no-privileges");
-            startInfo.ArgumentList.Add(backupPath);
+            startInfo.ArgumentList.Add(WindowsStoragePath.ForNativeCall(backupPath));
         }
         if (!string.IsNullOrWhiteSpace(target.Password)) startInfo.Environment["PGPASSWORD"] = target.Password;
 
@@ -241,6 +246,7 @@ public sealed class DatabaseRestoreDrillService(
         using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Не удалось запустить PostgreSQL restore tool.");
         var errorTask = process.StandardError.ReadToEndAsync();
         var outputTask = process.StandardOutput.ReadToEndAsync();
+        var inputTask = sqlFormat ? CopySqlToRestoreInputAsync(process, backupPath, timeout.Token) : Task.CompletedTask;
         try
         {
             await process.WaitForExitAsync(timeout.Token);
@@ -254,10 +260,18 @@ public sealed class DatabaseRestoreDrillService(
                 using var stopTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
                 await process.WaitForExitAsync(stopTimeout.Token);
             }
+            // Killing the owned child releases a blocked pipe writer. Observe the
+            // transfer task before disposing its process and keep caller cancellation.
+            try { await inputTask; }
+            catch (Exception exception) when (exception is OperationCanceledException or IOException or ObjectDisposedException) { }
+            _ = await errorTask;
+            _ = await outputTask;
             throw;
         }
         var error = (await errorTask).Trim();
         _ = await outputTask;
+        try { await inputTask; }
+        catch (IOException) when (process.ExitCode != 0) { /* Prefer the native SQL error over its closed input pipe. */ }
         if (process.ExitCode != 0) throw new InvalidOperationException(string.IsNullOrWhiteSpace(error) ? $"Restore tool exit code: {process.ExitCode}." : error);
 
         await using var connection = new NpgsqlConnection(target.ConnectionString);
@@ -283,6 +297,19 @@ public sealed class DatabaseRestoreDrillService(
             Path.GetFileName(targetDirectory), "restored", manifest.BackupId, manifest.BackupRelativePath,
             manifest.DatabaseProvider, manifest.BackupFormat, $"{target.Host}:{target.Port}/{target.Database}", tableCount, 0,
             "restore completed; outbound email disabled and queued email isolated", started, DateTime.UtcNow, stopwatch.ElapsedMilliseconds, string.Empty);
+    }
+
+    private static async Task CopySqlToRestoreInputAsync(Process process, string backupPath, CancellationToken token)
+    {
+        try
+        {
+            await using var source = new FileStream(backupPath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, true);
+            await source.CopyToAsync(process.StandardInput.BaseStream, 81920, token);
+        }
+        finally
+        {
+            process.StandardInput.Close();
+        }
     }
 
     private async Task PrepareLocalRuntimeAsync(DatabaseBackupManifest manifest, string targetDirectory,
@@ -311,6 +338,8 @@ public sealed class DatabaseRestoreDrillService(
         await DatabaseRestoreManagedReplicas.PrepareAsync(restored, mapping, mappingPart, references.Sha256,
             Path.Combine(targetDirectory, "files"), token);
         await IsolateRuntimeNotificationsAsync(connection, transaction.GetDbTransaction(), token);
+        var runtimeInstanceId = Guid.NewGuid();
+        await RestoredRuntimeDatabaseIdentity.StampAsync(connection, transaction.GetDbTransaction(), runtimeInstanceId, token);
         // Storage paths only: this artifact is deliberately not an application launch configuration.
         var settingsPath = Path.Combine(targetDirectory, "restored-storage-paths.json");
         var settingsCreated = false;
@@ -322,7 +351,11 @@ public sealed class DatabaseRestoreDrillService(
                 settingsCreated = true;
                 await JsonSerializer.SerializeAsync(settingsOutput, new
                 {
-                    formatVersion = 1, completeRuntimeConfiguration = false, storageSettings,
+                    formatVersion = 1,
+                    completeRuntimeConfiguration = false,
+                    runtimeInstanceId = runtimeInstanceId.ToString("N"),
+                    storageSettings,
+                    dataProtectionRecovery = manifest.DataProtectionRecovery,
                 }, JsonOptions, token);
             }
             await transaction.CommitAsync(token);

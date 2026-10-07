@@ -1,12 +1,14 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Storage;
 
 namespace PayPlanner.Api.Controllers;
 
@@ -20,19 +22,25 @@ public class ProfileController : ControllerBase
     private readonly PaymentContext _db;
     private readonly IWebHostEnvironment _environment;
     private readonly IConfiguration _configuration;
+    private readonly IManagedProfilePhotoUploadService? _managedPhotos;
+    private readonly ILogger<ProfileController> _logger;
 
     public ProfileController(
         AuthService authService,
         ExternalAuthService externalAuthService,
         PaymentContext db,
         IWebHostEnvironment environment,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        IManagedProfilePhotoUploadService? managedPhotos = null,
+        ILogger<ProfileController>? logger = null)
     {
         _authService = authService;
         _externalAuthService = externalAuthService;
         _db = db;
         _environment = environment;
         _configuration = configuration;
+        _managedPhotos = managedPhotos;
+        _logger = logger ?? NullLogger<ProfileController>.Instance;
     }
 
     [HttpGet]
@@ -203,6 +211,34 @@ public class ProfileController : ControllerBase
             return NotFound();
         }
 
+        if (_managedPhotos?.Enabled == true)
+        {
+            var uploadKey = Request.Headers["X-Upload-Key"];
+            var uploadId = Guid.NewGuid();
+            if (uploadKey.Count > 0 && (uploadKey.Count != 1 || !Guid.TryParse(uploadKey[0], out uploadId) || uploadId == Guid.Empty))
+            {
+                return Problem(title: "ProfilePhotoUploadKeyInvalid", detail: "Идентификатор загрузки неверен.", statusCode: 400);
+            }
+
+            var result = await _managedPhotos.UploadAsync(userId.Value, uploadId, file, GetRequestBaseUrl(), cancellationToken);
+            return result.Status switch
+            {
+                "uploaded" => Ok(await _authService.GetUserByIdAsync(userId.Value)),
+                "notFound" => NotFound(),
+                "invalid" => Problem(title: "ProfilePhotoInvalid", detail: "Проверьте формат и размер изображения (до 4 МБ).", statusCode: 400),
+                "conflict" => Problem(title: "ProfilePhotoConflict", detail: "Фото уже изменилось или идентификатор использован для другого файла. Обновите профиль перед новой загрузкой.", statusCode: 409),
+                _ => Problem(title: "ProfilePhotoNotReady", detail: "Нужные копии фото ещё не готовы. Прежнее фото сохранено; повторите загрузку позже.", statusCode: 503),
+            };
+        }
+
+        // Never replace a managed pointer through the legacy writer when its
+        // feature flag is disabled. That would leave the URL and binding at odds.
+        if (await _db.StorageProductBindings.AsNoTracking().AnyAsync(
+            binding => binding.Source == LegacyStorageSources.ProfilePhotos && binding.SourceId == userId.Value, cancellationToken))
+        {
+            return Problem(title: "ProfilePhotoWriteDisabled", detail: "Замена фото временно отключена. Прежнее фото сохранено.", statusCode: 503);
+        }
+
         var photoStorageRoot = UserPhotoStoragePaths.ResolveRoot(_environment, _configuration);
         var userPhotoDirectory = Path.Combine(photoStorageRoot, userId.Value.ToString());
         Directory.CreateDirectory(userPhotoDirectory);
@@ -210,40 +246,35 @@ public class ProfileController : ControllerBase
         var fileName = $"{DateTime.UtcNow:yyyyMMddHHmmss}-{Guid.NewGuid():N}{extension}";
         var physicalPath = Path.Combine(userPhotoDirectory, fileName);
 
-        await using (var stream = System.IO.File.Create(physicalPath))
-        {
-            await file.CopyToAsync(stream, cancellationToken);
-        }
+        await ExclusiveUploadFileWriter.WriteNewAsync(physicalPath,
+            (stream, token) => file.CopyToAsync(stream, token), cancellationToken);
 
         var relativePath = $"/user-photos/{userId.Value}/{fileName}";
         var publicUrl = $"{GetRequestBaseUrl()}{relativePath}";
 
+        // A thrown SaveChanges can occur after the database committed. Keep the
+        // newly written bytes when the outcome is ambiguous rather than break
+        // a possible live PhotoUrl reference.
+        var updatedUser = await _authService.UpdateProfilePhotoAsync(userId.Value, publicUrl, cancellationToken);
+        if (updatedUser is null)
+        {
+            System.IO.File.Delete(physicalPath);
+            return NotFound();
+        }
         try
         {
-            var updatedUser = await _authService.UpdateProfilePhotoAsync(userId.Value, publicUrl, cancellationToken);
-            if (updatedUser is null)
-            {
-                System.IO.File.Delete(physicalPath);
-                return NotFound();
-            }
-
             DeletePreviousUploadedPhoto(currentUser.PhotoUrl, publicUrl, photoStorageRoot);
             var legacyPhotoRoot = UserPhotoStoragePaths.ResolveLegacyRoot(_environment);
             if (!string.Equals(photoStorageRoot, legacyPhotoRoot, StringComparison.OrdinalIgnoreCase))
             {
                 DeletePreviousUploadedPhoto(currentUser.PhotoUrl, publicUrl, legacyPhotoRoot);
             }
-            return Ok(updatedUser);
         }
-        catch
+        catch (Exception ex)
         {
-            if (System.IO.File.Exists(physicalPath))
-            {
-                System.IO.File.Delete(physicalPath);
-            }
-
-            throw;
+            _logger.LogWarning(ex, "Could not remove previous profile photo for user {UserId} after the new photo was saved.", userId.Value);
         }
+        return Ok(updatedUser);
     }
 
     [HttpDelete("external/{provider}")]

@@ -14,7 +14,7 @@ using PayPlanner.Api.Services.LegalIntegrations;
 
 namespace PayPlanner.Api.Services.Notifications;
 
-public sealed class NotificationService : INotificationService
+public sealed class NotificationService : INotificationService, ICaseDocumentNotificationLiveDispatcher
 {
     public const string CourtEventLeaderUserIdSettingKey = "notifications.courtEventLeaderUserId";
     private static readonly SemaphoreSlim SmsRateLimitGate = new(1, 1);
@@ -4787,6 +4787,20 @@ public sealed class NotificationService : INotificationService
                 type,
                 NotificationChannels.Toast,
                 cancellationToken);
+        if (type == UserNotificationTypes.CaseDocument && _context.Database.CurrentTransaction is not null)
+        {
+            var now = _timeProvider.GetUtcNow().UtcDateTime;
+            _context.CaseDocumentNotificationDispatches.Add(new CaseDocumentNotificationDispatch
+            {
+                UserNotificationId = notification.Id,
+                Channel = "realtime",
+                ToastEnabled = toastEnabled,
+                CreatedAt = now,
+                NextAttemptAt = now
+            });
+            await _context.SaveChangesAsync(cancellationToken);
+            return true;
+        }
         await _realtimePublisher.PublishUserNotificationAsync(notification, toastEnabled, cancellationToken);
 
         var webPushEnabled = resolvedNotificationChannels is not null
@@ -4803,6 +4817,43 @@ public sealed class NotificationService : INotificationService
         }
 
         return true;
+    }
+
+    public async Task<string> DispatchCaseDocumentAsync(int notificationId, string channel, bool toastEnabled, Func<CancellationToken, Task<bool>> ownsLease, CancellationToken ct)
+    {
+        if (_context.Database.CurrentTransaction is not null)
+            throw new InvalidOperationException("Case notification delivery requires a committed context.");
+        // CaseDocument is silent in the notification catalog: only update the CRM inbox.
+        if (channel != "realtime") return "skipped";
+        var notification = await _context.UserNotifications.AsNoTracking()
+            .SingleOrDefaultAsync(n => n.Id == notificationId && n.Type == UserNotificationTypes.CaseDocument
+                && n.ObjectType == "case" && n.DeletedAt == null && !n.IsArchived, ct);
+        if (notification?.ObjectId is not > 0) return "skipped";
+        int documentId;
+        string? action;
+        try
+        {
+            using var payload = JsonDocument.Parse(notification.MetadataJson);
+            var root = payload.RootElement;
+            if (root.ValueKind != JsonValueKind.Object
+                || !root.TryGetProperty("clientCaseId", out var caseValue) || caseValue.ValueKind != JsonValueKind.Number || !caseValue.TryGetInt32(out var caseId) || caseId != notification.ObjectId
+                || !root.TryGetProperty("clientCaseDocumentId", out var idValue) || idValue.ValueKind != JsonValueKind.Number || !idValue.TryGetInt32(out documentId) || documentId <= 0)
+                return "skipped";
+            action = root.TryGetProperty("action", out var actionValue) && actionValue.ValueKind == JsonValueKind.String ? actionValue.GetString() : null;
+        }
+        catch (JsonException) { return "skipped"; }
+        if (action != "deleted" && !await _context.ClientCaseDocuments.AsNoTracking()
+                .AnyAsync(d => d.Id == documentId && d.ClientCaseId == notification.ObjectId, ct)) return "skipped";
+        if (!await _context.Users.AsNoTracking().AnyAsync(u => u.Id == notification.RecipientUserId && u.IsActive && u.IsApproved, ct)) return "skipped";
+        var envelope = new NotificationEventEnvelope(notification.RecipientUserId, notification.Type, notification.EventKey,
+            notification.Title, notification.BodyPreview, notification.ObjectType, notification.ObjectId, null, notification.Tone);
+        if (!await CanRecipientSeeNotificationObjectAsync(envelope, notification.Type, ct)
+            || !await IsUserNotificationChannelEnabledAsync(notification.RecipientUserId, notification.Type, NotificationChannels.InApp, ct)) return "skipped";
+        var toast = toastEnabled && await IsUserNotificationChannelEnabledAsync(notification.RecipientUserId, notification.Type, NotificationChannels.Toast, ct);
+        if (!await ownsLease(ct)) return "failed";
+        ct.ThrowIfCancellationRequested();
+        await _realtimePublisher.PublishUserNotificationAsync(notification, toast, ct);
+        return "completed";
     }
 
     private async Task QueueMaxNotificationIfAvailableAsync(UserNotification notification, CancellationToken cancellationToken)
