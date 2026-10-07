@@ -21,7 +21,18 @@
 
   <ItemGroup>
     <ProjectReference Include="..\\PayPlanner.Api.csproj" />
+    <ProjectReference Include="../../tests/PayPlanner.StorageStageWriterProbe/PayPlanner.StorageStageWriterProbe.csproj"
+                      ReferenceOutputAssembly="false" />
   </ItemGroup>
+
+  <Target Name="CopyStorageStageWriterProbe" AfterTargets="Build">
+    <MSBuild Projects="../../tests/PayPlanner.StorageStageWriterProbe/PayPlanner.StorageStageWriterProbe.csproj"
+             Targets="GetTargetPath" BuildInParallel="false">
+      <Output TaskParameter="TargetOutputs" ItemName="StageWriterProbeOutput" />
+    </MSBuild>
+    <Copy SourceFiles="@(StageWriterProbeOutput);@(StageWriterProbeOutput->'%(RootDir)%(Directory)%(Filename).deps.json');@(StageWriterProbeOutput->'%(RootDir)%(Directory)%(Filename).runtimeconfig.json')"
+          DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
+  </Target>
 
   <ItemGroup>
     <Compile Remove=".codex-build\\**\\*.cs" />

@@ -81,11 +81,12 @@ public sealed class LegalFeatureFlagCiGateTests
         AssertInOrder(
             workflow,
             [
-                "dotnet restore",
+                "dotnet restore \"${{ env.BE_SLN }}\" --force -p:PayPlannerReleaseAudit=true",
                 "dotnet format",
-                "dotnet list",
-                "dotnet test backend/PayPlanner.Api.Tests/PayPlanner.Api.Tests.csproj --no-restore",
                 "npm ci",
+                "npx playwright install --with-deps chromium chrome",
+                "npm install --global @playwright/cli@0.1.22",
+                "dotnet test backend/PayPlanner.Api.Tests/PayPlanner.Api.Tests.csproj --no-restore",
                 "npm run lint",
                 "npx tsc -p tsconfig.app.json --noEmit",
                 "npm run audit:dates:test",
@@ -204,7 +205,7 @@ public sealed class LegalFeatureFlagCiGateTests
 
     private static string FindRepositoryRoot()
     {
-        var current = new DirectoryInfo(AppContext.BaseDirectory);
+        var current = TestRepository.FindDirectory();
 
         while (current is not null)
         {

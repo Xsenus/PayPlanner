@@ -31,7 +31,7 @@ public class BatchOperationAuditCoverageTests
             .OrderBy(item => item, StringComparer.Ordinal)
             .ToList();
 
-        Assert.Equal(29, operations.Count);
+        Assert.Equal(102, operations.Count);
         foreach (var operation in operations)
         {
             Assert.Contains(operation, document, StringComparison.Ordinal);
@@ -40,7 +40,7 @@ public class BatchOperationAuditCoverageTests
 
     private static string FindRepositoryRoot()
     {
-        var current = new DirectoryInfo(AppContext.BaseDirectory);
+        var current = TestRepository.FindDirectory();
 
         while (current is not null)
         {

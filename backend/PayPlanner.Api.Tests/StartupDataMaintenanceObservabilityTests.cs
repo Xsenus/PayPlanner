@@ -33,7 +33,7 @@ public class StartupDataMaintenanceObservabilityTests
 
     private static string FindRepositoryRoot()
     {
-        var current = new DirectoryInfo(AppContext.BaseDirectory);
+        var current = TestRepository.FindDirectory();
 
         while (current is not null)
         {

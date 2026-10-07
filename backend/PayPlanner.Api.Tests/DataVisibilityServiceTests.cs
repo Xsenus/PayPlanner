@@ -17,6 +17,31 @@ public class DataVisibilityServiceTests
     private const string PostgreSqlEnvironmentVariable = "PAYPLANNER_TEST_POSTGRES";
     private const string PostgreSqlDatabasePrefix = "payplanner_section_access_test_";
 
+    [Theory]
+    [InlineData(false, false, true)]
+    [InlineData(false, true, false)]
+    [InlineData(true, false, true)]
+    [InlineData(true, true, true)]
+    public async Task SectionAccessChecksApprovalOnlyWhenRequestedInItsSingleFreshQuery(
+        bool approved, bool requireApproved, bool expected)
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+        var role = new Role { Name = "admin", Description = "approval-query" };
+        db.Roles.Add(role);
+        await db.SaveChangesAsync();
+        var user = CreateUser("approval-query@example.test", "Сотрудник", role.Id);
+        user.IsApproved = approved;
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+        interceptor.ReaderCommands.Clear();
+
+        var access = await db.ResolveSectionAccessAsync(CreatePrincipal(user.Id), RolePermissionCatalog.Tasks,
+            requireApprovedUser: requireApproved);
+        Assert.Equal(expected, access is not null);
+        Assert.Single(interceptor.ReaderCommands);
+    }
+
     [Fact]
     public async Task ResolveSectionAccessAsync_ReturnsPermissionAndOwnVisibilityInOneQuery()
     {
@@ -224,6 +249,15 @@ public class DataVisibilityServiceTests
             Assert.Equal(new[] { user.Id }, access.Visibility.VisibleUserIds);
             var sql = Assert.Single(interceptor.ReaderCommands);
             Assert.InRange(CountOccurrences(sql, "RolePermissions"), 1, 2);
+            interceptor.ReaderCommands.Clear();
+            Assert.NotNull(await db.ResolveSectionAccessAsync(CreatePrincipal(user.Id), RolePermissionCatalog.Cases,
+                requireApprovedUser: true));
+            Assert.Single(interceptor.ReaderCommands);
+            await db.Users.Where(item => item.Id == user.Id).ExecuteUpdateAsync(setters => setters.SetProperty(item => item.IsApproved, false));
+            interceptor.ReaderCommands.Clear();
+            Assert.Null(await db.ResolveSectionAccessAsync(CreatePrincipal(user.Id), RolePermissionCatalog.Cases,
+                requireApprovedUser: true));
+            Assert.Single(interceptor.ReaderCommands);
         }
         finally
         {

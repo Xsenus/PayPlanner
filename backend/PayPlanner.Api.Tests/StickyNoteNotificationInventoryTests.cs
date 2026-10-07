@@ -151,7 +151,7 @@ public class StickyNoteNotificationInventoryTests
 
     private static string ResolveRepositoryRoot()
     {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        var directory = TestRepository.FindDirectory();
         while (directory is not null)
         {
             if (File.Exists(Path.Combine(directory.FullName, "backend", "PayPlanner.Api.csproj")))
