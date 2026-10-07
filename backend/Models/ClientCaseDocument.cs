@@ -4,12 +4,14 @@ namespace PayPlanner.Api.Models;
 
 public class ClientCaseDocument
 {
+    public const int MaxDocumentKeyLength = 73;
+
     public int Id { get; set; }
 
     public int ClientCaseId { get; set; }
     public ClientCase ClientCase { get; set; } = null!;
 
-    [Required, MaxLength(64)]
+    [Required, MaxLength(MaxDocumentKeyLength)]
     public string DocumentKey { get; set; } = string.Empty;
 
     public int Version { get; set; } = 1;

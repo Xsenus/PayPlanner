@@ -9,6 +9,8 @@ public static class StorageReplicaStatuses
     public const string Suspect = "suspect";
     public const string Missing = "missing";
     public const string Corrupt = "corrupt";
+    public const string RepairPending = "repairPending";
+    public const string RetainedCorrupt = "retainedCorrupt";
     public const string DeletePending = "deletePending";
     public const string Deleted = "deleted";
 }
@@ -29,6 +31,59 @@ public static class StorageOperationTypes
     public const string Verify = "verify";
     public const string Delete = "delete";
     public const string Repair = "repair";
+    public const string PublishTaskFile = "publishTaskFile";
+    public const string PublishCaseDocument = "publishCaseDocument";
+    public const string NotifyTaskFilePublication = "notifyTaskFilePublication";
+}
+
+public static class StorageCapacityReservationStatuses
+{
+    public const string Pending = "pending";
+    public const string Released = "released";
+}
+
+// The singleton version changes whenever a participating reservation is created
+// or released. A capacity observation is valid only against that same epoch.
+public sealed class StorageCapacityEpoch
+{
+    public int Id { get; set; } = 1;
+    public long Version { get; set; }
+}
+
+// One idempotent upload reserves one row per physical resource. Pending rows are
+// durable debt; a crash must not silently free space that might contain bytes.
+public sealed class StorageCapacityReservation
+{
+    [MaxLength(160)] public string IdempotencyKey { get; set; } = string.Empty;
+    [MaxLength(512)] public string ResourceKey { get; set; } = string.Empty;
+    [MaxLength(128)] public string GroupId { get; set; } = string.Empty;
+    [MaxLength(64)] public string BindingHash { get; set; } = string.Empty;
+    [MaxLength(32)] public string Status { get; set; } = StorageCapacityReservationStatuses.Pending;
+    public long Bytes { get; set; }
+    public Guid ObjectId { get; set; }
+    // Only new staged admissions set this. A writer must atomically clear it
+    // while holding the row lock before it can receive a write ticket.
+    public bool StageWriterAdmissionPending { get; set; }
+    // Separate from product intent and final-size confirmation. Null means no
+    // durable file proof; recovery must never infer deletion authority from it.
+    [MaxLength(1024)] public string? StageFileReceiptJson { get; set; }
+    // Captured from the original CreateNew marker descriptor, never backfilled from a path.
+    [MaxLength(160)] public string? StageWriterMarkerIdentity { get; set; }
+    [MaxLength(160)] public string? StageRootIdentity { get; set; }
+    [MaxLength(2048)] public string LocalLocator { get; set; } = string.Empty;
+    // Only the local resource row carries the exact product intent. Its hash alone
+    // cannot reconstruct metadata after a provider ACK is lost before catalog commit.
+    [MaxLength(65536)] public string? ProductContextJson { get; set; }
+    // Recovery of a trusted generated intent before there is a catalog object.
+    // Keep its lease separate from capacity accounting and the later publication lease.
+    public Guid? GeneratedRecoveryLeaseToken { get; set; }
+    public DateTime? GeneratedRecoveryLeaseExpiresAt { get; set; }
+    public DateTime GeneratedRecoveryNextAttemptAt { get; set; } = new(2000, 1, 1);
+    public int GeneratedRecoveryAttemptCount { get; set; }
+    [MaxLength(32)] public string? GeneratedRecoveryLastStatus { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? ReleasedAt { get; set; }
 }
 
 public sealed class StorageObject
@@ -62,6 +117,17 @@ public sealed class StorageObjectGeneration
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public ICollection<StorageReplica> Replicas { get; set; } = new List<StorageReplica>();
     public ICollection<StorageOperation> Operations { get; set; } = new List<StorageOperation>();
+}
+
+// Current product pointer; immutable bytes and older objects remain in the catalog.
+public sealed class StorageProductBinding
+{
+    [MaxLength(64)] public string Source { get; set; } = string.Empty;
+    public long SourceId { get; set; }
+    public Guid StorageObjectId { get; set; }
+    public StorageObject StorageObject { get; set; } = null!;
+    public long Version { get; set; }
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
 
 public sealed class StorageReplica

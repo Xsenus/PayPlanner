@@ -87,6 +87,10 @@ public class InternalChatMessage
     [MaxLength(8000)]
     public string Text { get; set; } = string.Empty;
 
+    public Guid? ClientRequestId { get; set; }
+    public bool NotificationDispatchPending { get; set; }
+    public DateTime? LastNotificationDispatchAttemptAt { get; set; }
+
     public int? ReplyToMessageId { get; set; }
     public InternalChatMessage? ReplyToMessage { get; set; }
     public int? CreatedTaskJournalItemId { get; set; }

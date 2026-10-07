@@ -36,6 +36,11 @@ public class ClientCaseProceduralDeadline
     [MaxLength(64)]
     public string SourceType { get; set; } = "manual";
 
+    // Court identity exists before the printable summary is published and
+    // survives removal of its optional document link.
+    [MaxLength(64)]
+    public string? SourceDocumentKey { get; set; }
+
     public int? SourceId { get; set; }
 
     [MaxLength(1000)]

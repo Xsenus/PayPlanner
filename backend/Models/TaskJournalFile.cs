@@ -9,6 +9,9 @@ public class TaskJournalFile
     public int TaskJournalItemId { get; set; }
     public TaskJournalItem TaskJournalItem { get; set; } = null!;
 
+    public int? ClientCaseDocumentId { get; set; }
+    public ClientCaseDocument? ClientCaseDocument { get; set; }
+
     [Required, MaxLength(64)]
     public string DocumentKey { get; set; } = string.Empty;
 

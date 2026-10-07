@@ -182,6 +182,30 @@ public class PaymentContext : DbContext
     private readonly IHttpContextAccessor? _httpContextAccessor;
     private readonly IClientPassportEncryptionDualWriteService? _clientPassportEncryption;
     private string? _auditReason;
+    private AuditActorScope? _acceptedAuditActor;
+
+    // Only trusted publication code may enter this scope, after validating its
+    // durable source. Never alter the shared HTTP principal for background work.
+    internal IDisposable UseAcceptedAuditActor(int actorId, string actorName)
+    {
+        if (Database.CurrentTransaction is null || actorId <= 0 || string.IsNullOrWhiteSpace(actorName)
+            || actorName.Length > 256 || _acceptedAuditActor is not null)
+            throw new InvalidOperationException("Accepted audit actor requires a publication transaction and an unnested scope.");
+        return _acceptedAuditActor = new AuditActorScope(this, actorId, actorName, _auditReason);
+    }
+
+    private sealed class AuditActorScope(PaymentContext owner, int actorId, string actorName, string? originalReason) : IDisposable
+    {
+        public (int? UserId, string? UserName) Actor => (actorId, actorName);
+        private bool disposed;
+        public void Dispose()
+        {
+            if (disposed) return;
+            owner._acceptedAuditActor = null;
+            owner._auditReason = originalReason;
+            disposed = true;
+        }
+    }
 
     internal bool UseObjectAuditModel { get; }
 
@@ -1442,7 +1466,7 @@ public class PaymentContext : DbContext
         modelBuilder.Entity<ClientCaseDocument>(entity =>
         {
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.DocumentKey).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.DocumentKey).HasMaxLength(ClientCaseDocument.MaxDocumentKeyLength).IsRequired();
             entity.Property(e => e.DocumentType).HasMaxLength(120).IsRequired();
             entity.Property(e => e.Status).HasMaxLength(120).IsRequired();
             entity.Property(e => e.OriginalFileName).HasMaxLength(260).IsRequired();
@@ -1737,6 +1761,122 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.TaskJournalItemId).HasDatabaseName("IX_ClientCaseProceduralDeadlines_TaskJournalItemId");
             entity.HasIndex(e => e.ClientCaseDocumentId).HasDatabaseName("IX_ClientCaseProceduralDeadlines_DocumentId");
             entity.HasIndex(e => new { e.ClientCaseId, e.Status, e.DueAt }).HasDatabaseName("IX_ClientCaseProceduralDeadlines_Case_Status_DueAt");
+            entity.HasIndex(e => new { e.ClientCaseId, e.SourceType, e.SourceDocumentKey, e.DeadlineType })
+                .IsUnique().HasFilter("\"SourceDocumentKey\" IS NOT NULL")
+                .HasDatabaseName("IX_CaseDeadlines_CourtSourceIdentity");
+        });
+
+        modelBuilder.Entity<GeneratedFinancialNumberScope>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedNever();
+            entity.HasData(new GeneratedFinancialNumberScope { Id = 1 }, new GeneratedFinancialNumberScope { Id = 2 }, new GeneratedFinancialNumberScope { Id = 3 });
+            entity.ToTable(t => t.HasCheckConstraint("CK_GeneratedFinancialNumberScopes_Id", "\"Id\" IN (1, 2, 3) AND \"Version\" = 0"));
+        });
+        modelBuilder.Entity<GeneratedFinancialNumberClaim>(entity =>
+        {
+            entity.HasKey(e => e.AttemptId);
+            entity.Property(e => e.Kind).HasMaxLength(16).IsRequired();
+            entity.Property(e => e.DateKey).HasMaxLength(10).IsRequired();
+            entity.Property(e => e.Number).HasMaxLength(120).IsRequired();
+            entity.HasIndex(e => new { e.Kind, e.DateKey, e.Number }).IsUnique();
+            entity.HasOne(e => e.Attempt).WithOne().HasForeignKey<GeneratedFinancialNumberClaim>(e => e.AttemptId).OnDelete(DeleteBehavior.Cascade);
+            entity.ToTable(t => t.HasCheckConstraint("CK_GeneratedFinancialNumberClaims_Identity", "\"Kind\" IN ('invoice', 'act', 'contract') AND length(\"DateKey\") = 10 AND length(\"Number\") BETWEEN 1 AND 120"));
+        });
+        modelBuilder.Entity<GeneratedFinancialActLineClaim>(entity =>
+        {
+            entity.HasKey(e => new { e.AttemptId, e.WorkOrderItemId });
+            entity.Property(e => e.SourceKey).HasMaxLength(128).IsRequired();
+            entity.HasIndex(e => e.SourceKey);
+            entity.HasOne(e => e.Attempt).WithMany().HasForeignKey(e => e.AttemptId).OnDelete(DeleteBehavior.Cascade);
+            entity.ToTable(t => t.HasCheckConstraint("CK_GeneratedFinancialActLineClaims_Identity", "\"WorkOrderItemId\" > 0 AND length(\"SourceKey\") BETWEEN 1 AND 128"));
+        });
+
+        modelBuilder.Entity<GeneratedFinancialDocumentAttempt>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.ActorName).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.Kind).HasMaxLength(16).IsRequired();
+            entity.Property(e => e.RequestSha256).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.FrozenDomainJson).HasColumnType("text").IsRequired();
+            entity.Property(e => e.FrozenDomainSha256).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.ContentSha256).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.RecoveryNextAttemptAt).HasDefaultValue(new DateTime(2000, 1, 1));
+            entity.Property(e => e.RecoveryAttemptCount).HasDefaultValue(0);
+            entity.Property(e => e.RecoveryLastStatus).HasMaxLength(32);
+            entity.Property(e => e.UploadKeyText).HasMaxLength(32).IsRequired()
+                .HasComputedColumnSql("lower(replace(CAST(\"UploadKey\" AS TEXT), '-', ''))", stored: Database.IsNpgsql());
+            entity.HasIndex(e => new { e.ClientCaseId, e.ActorId, e.UploadKey }).IsUnique();
+            entity.HasIndex(e => new { e.ClientCaseId, e.ActorId, e.PublishedDocumentId, e.UploadKeyText });
+            entity.HasIndex(e => new { e.ClientCaseId, e.WorkOrderId, e.Kind, e.PublishedDocumentId });
+            entity.HasIndex(e => new { e.PublishedDocumentId, e.RecoveryNextAttemptAt, e.Id })
+                .HasDatabaseName("IX_GeneratedFinancialAttempts_Recovery");
+            // Internal proof and number claims survive soft deletion. Resolve
+            // current case access explicitly instead of an implicitly filtered
+            // required navigation; keep the relational foreign key intact.
+            entity.HasOne<ClientCase>().WithMany().HasForeignKey(e => e.ClientCaseId).OnDelete(DeleteBehavior.Cascade);
+            entity.ToTable(t => t.HasCheckConstraint("CK_GeneratedFinancialAttempts_Proof",
+                "\"WorkOrderId\" > 0 AND \"ActorId\" > 0 AND \"EntityId\" > 0 AND \"Kind\" IN ('invoice', 'act', 'contract') "
+                + "AND ((\"Kind\" = 'invoice' AND \"InvoiceEntityId\" IS NOT NULL AND \"InvoiceEntityId\" > 0) OR (\"Kind\" <> 'invoice' AND \"InvoiceEntityId\" IS NULL)) "
+                + "AND length(\"RequestSha256\") = 64 AND length(\"FrozenDomainSha256\") = 64 AND length(\"ContentSha256\") = 64 "
+                + "AND length(\"FrozenDomainJson\") BETWEEN 1 AND 16777216 AND \"ContentSizeBytes\" BETWEEN 1 AND 26214400"));
+        });
+        modelBuilder.Entity<GeneratedFinancialDocumentContent>(entity =>
+        {
+            entity.HasKey(e => e.AttemptId);
+            entity.Property(e => e.Bytes).IsRequired();
+            entity.HasOne(e => e.Attempt).WithOne().HasForeignKey<GeneratedFinancialDocumentContent>(e => e.AttemptId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.ToTable(t => t.HasCheckConstraint("CK_GeneratedFinancialContents_Bytes", "length(\"Bytes\") BETWEEN 1 AND 26214400"));
+        });
+
+        modelBuilder.Entity<CourtDocumentSourceScope>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasAlternateKey(e => new { e.Id, e.ClientCaseId });
+            entity.Property(e => e.BindingUrl).HasMaxLength(1000).IsRequired();
+            entity.Property(e => e.BindingSha256).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.InputSha256).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.LastActorName).HasMaxLength(256).IsRequired();
+            entity.HasIndex(e => new { e.ClientCaseId, e.BindingSha256 }).IsUnique();
+            // Court evidence is retained independently of product visibility.
+            // Publication checks the current case and actor explicitly.
+            entity.HasOne<ClientCase>().WithMany().HasForeignKey(e => e.ClientCaseId).OnDelete(DeleteBehavior.Cascade);
+            entity.ToTable(t => t.HasCheckConstraint("CK_CourtSourceScopes_Proof",
+                "\"Version\" > 0 AND \"LastActorId\" > 0 AND length(\"BindingSha256\") = 64 AND length(\"InputSha256\") = 64"));
+        });
+        modelBuilder.Entity<CourtDocumentSource>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.DocumentKey).HasMaxLength(64).IsRequired();
+            entity.HasIndex(e => new { e.ClientCaseId, e.DocumentKey }).IsUnique();
+            entity.HasOne(e => e.Scope).WithMany().HasForeignKey(e => new { e.ScopeId, e.ClientCaseId })
+                .HasPrincipalKey(e => new { e.Id, e.ClientCaseId }).OnDelete(DeleteBehavior.Cascade);
+            entity.ToTable(t => t.HasCheckConstraint("CK_CourtSources_Identity",
+                "\"AcceptedScopeVersion\" > 0 AND \"CurrentAttemptVersion\" > 0 AND length(\"DocumentKey\") = 42 AND \"DocumentKey\" LIKE 'sudrf-act-%'"));
+        });
+        modelBuilder.Entity<CourtDocumentSourceAttempt>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.ActorName).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.FrozenSnapshotJson).HasColumnType("text").IsRequired();
+            entity.Property(e => e.FrozenSnapshotSha256).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.RequestSha256).HasMaxLength(64).IsRequired();
+            entity.HasIndex(e => new { e.SourceId, e.Version }).IsUnique();
+            entity.HasOne(e => e.Source).WithMany().HasForeignKey(e => e.SourceId).OnDelete(DeleteBehavior.Cascade);
+            entity.ToTable(t => t.HasCheckConstraint("CK_CourtSourceAttempts_Proof",
+                "\"Version\" > 0 AND \"ActorId\" > 0 AND length(\"FrozenSnapshotJson\") BETWEEN 1 AND 48000 AND length(\"FrozenSnapshotSha256\") = 64 AND length(\"RequestSha256\") = 64"));
+        });
+
+        modelBuilder.Entity<CourtDocumentSourceContent>(entity =>
+        {
+            entity.HasKey(e => e.AttemptId);
+            entity.Property(e => e.Bytes).IsRequired();
+            entity.Property(e => e.Sha256).HasMaxLength(64).IsRequired();
+            entity.HasOne(e => e.Attempt).WithOne().HasForeignKey<CourtDocumentSourceContent>(e => e.AttemptId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.ToTable(t => t.HasCheckConstraint("CK_CourtSourceContents_Bytes",
+                "\"SizeBytes\" BETWEEN 1 AND 26214400 AND length(\"Bytes\") = \"SizeBytes\" AND length(\"Sha256\") = 64"));
         });
 
         // ------------------ ClientCaseCourtEvent ------------------
@@ -3166,6 +3306,7 @@ public class PaymentContext : DbContext
             entity.HasKey(item => item.Id);
             entity.Property(item => item.Kind).HasMaxLength(24).HasDefaultValue(InternalChatMessageKinds.User).IsRequired();
             entity.Property(item => item.Text).HasMaxLength(8000);
+            entity.Property(item => item.NotificationDispatchPending).HasDefaultValue(false);
             entity.Property(item => item.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.HasOne(item => item.Thread).WithMany(thread => thread.Messages).HasForeignKey(item => item.ThreadId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne(item => item.AuthorUser).WithMany().HasForeignKey(item => item.AuthorUserId).OnDelete(DeleteBehavior.SetNull);
@@ -3173,10 +3314,62 @@ public class PaymentContext : DbContext
             entity.HasOne(item => item.CreatedTaskJournalItem).WithMany().HasForeignKey(item => item.CreatedTaskJournalItemId).OnDelete(DeleteBehavior.SetNull);
             entity.HasOne(item => item.PinnedByUser).WithMany().HasForeignKey(item => item.PinnedByUserId).OnDelete(DeleteBehavior.SetNull);
             entity.HasIndex(item => new { item.ThreadId, item.Id }).HasDatabaseName("IX_InternalChatMessages_Thread_Id");
+            entity.HasIndex(item => new { item.ThreadId, item.AuthorUserId, item.ClientRequestId }).IsUnique()
+                .HasDatabaseName("IX_InternalChatMessages_SendRequest");
+            entity.HasIndex(item => new { item.NotificationDispatchPending, item.LastNotificationDispatchAttemptAt, item.Id })
+                .HasDatabaseName("IX_InternalChatMessages_NotificationPending_Attempt_Id");
             entity.HasIndex(item => item.NextNoReplyReminderAt).HasDatabaseName("IX_InternalChatMessages_NextNoReplyReminderAt");
             entity.HasIndex(item => new { item.ThreadId, item.IsPinned, item.PinnedAt }).HasDatabaseName("IX_InternalChatMessages_Thread_Pinned");
             entity.HasIndex(item => item.AuthorUserId).HasDatabaseName("IX_InternalChatMessages_AuthorUserId");
             entity.HasIndex(item => item.CreatedTaskJournalItemId).HasDatabaseName("IX_InternalChatMessages_CreatedTaskJournalItemId");
+        });
+
+        modelBuilder.Entity<InternalChatSendAttempt>(entity =>
+        {
+            entity.HasKey(item => item.Id);
+            entity.Property(item => item.Text).HasMaxLength(8000).IsRequired();
+            entity.Property(item => item.RequestSha256).HasMaxLength(64).IsRequired();
+            entity.Property(item => item.RecoveryLastStatus).HasMaxLength(32);
+            entity.Property(item => item.RecoveryNextAttemptAt).HasDefaultValue(new DateTime(2000, 1, 1));
+            entity.Property(item => item.RecoveryAttemptCount).HasDefaultValue(0);
+            entity.Property(item => item.Version).HasDefaultValue(1L);
+            entity.HasOne<InternalChatThread>().WithMany().HasForeignKey(item => item.ThreadId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(item => new { item.ThreadId, item.ActorId, item.ClientRequestId }).IsUnique();
+            entity.HasIndex(item => new { item.ThreadId, item.ActorId, item.CreatedAt, item.Id });
+            entity.HasIndex(item => new { item.PublishedMessageId, item.RecoveryNextAttemptAt, item.Id })
+                .HasDatabaseName("IX_InternalChatSendAttempts_Recovery");
+            entity.ToTable(table => table.HasCheckConstraint("CK_InternalChatSendAttempts_Proof",
+                "\"ActorId\" > 0 AND \"FileCount\" BETWEEN 1 AND 10 AND \"TotalSizeBytes\" BETWEEN 1 AND 209715200 "
+                + "AND length(\"Text\") <= 8000 AND length(\"RequestSha256\") = 64 AND \"Version\" > 0 "
+                + "AND (\"ReplyToMessageId\" IS NULL OR \"ReplyToMessageId\" > 0) "
+                + "AND (\"PublishedMessageId\" IS NULL OR \"PublishedMessageId\" > 0) AND \"RecoveryAttemptCount\" >= 0 "
+                + "AND (\"PublishedMessageId\" IS NULL OR \"AcceptedAt\" IS NOT NULL) "
+                + "AND CAST(\"ClientRequestId\" AS TEXT) <> '00000000-0000-0000-0000-000000000000' "
+                + "AND ((\"RecoveryLeaseToken\" IS NULL AND \"RecoveryLeaseExpiresAt\" IS NULL) "
+                + "OR (\"RecoveryLeaseToken\" IS NOT NULL AND \"RecoveryLeaseExpiresAt\" IS NOT NULL))"));
+        });
+
+        modelBuilder.Entity<InternalChatSendAttemptFile>(entity =>
+        {
+            entity.HasKey(item => new { item.AttemptId, item.Index });
+            entity.Property(item => item.FileName).HasMaxLength(260).IsRequired();
+            entity.Property(item => item.ContentType).HasMaxLength(160).IsRequired();
+            entity.Property(item => item.Sha256).HasMaxLength(64).IsRequired();
+            entity.HasOne(item => item.Attempt).WithMany(item => item.Files).HasForeignKey(item => item.AttemptId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(item => item.StorageObjectId);
+            entity.ToTable(table => table.HasCheckConstraint("CK_InternalChatSendAttemptFiles_Proof",
+                "\"Index\" BETWEEN 0 AND 9 AND length(\"FileName\") BETWEEN 1 AND 260 "
+                + "AND length(\"ContentType\") BETWEEN 1 AND 160 AND length(\"Sha256\") = 64 "
+                + "AND \"SizeBytes\" BETWEEN 1 AND 20971520 "
+                + "AND ((\"StorageObjectId\" IS NULL AND \"StorageGeneration\" IS NULL) "
+                + "OR (\"StorageObjectId\" IS NOT NULL AND \"StorageGeneration\" IS NOT NULL AND \"StorageGeneration\" > 0))"));
+        });
+
+        modelBuilder.Entity<InternalChatSendAttemptMention>(entity =>
+        {
+            entity.HasKey(item => new { item.AttemptId, item.UserId });
+            entity.HasOne(item => item.Attempt).WithMany(item => item.Mentions).HasForeignKey(item => item.AttemptId).OnDelete(DeleteBehavior.Cascade);
+            entity.ToTable(table => table.HasCheckConstraint("CK_InternalChatSendAttemptMentions_User", "\"UserId\" > 0"));
         });
 
         modelBuilder.Entity<InternalChatAttachment>(entity =>
@@ -3444,6 +3637,10 @@ public class PaymentContext : DbContext
         modelBuilder.Entity<TaskJournalFile>(entity =>
         {
             entity.HasKey(e => e.Id);
+            entity.HasOne(e => e.ClientCaseDocument)
+                .WithMany()
+                .HasForeignKey(e => e.ClientCaseDocumentId)
+                .OnDelete(DeleteBehavior.SetNull);
             entity.Property(e => e.DocumentKey).HasMaxLength(64).IsRequired();
             entity.Property(e => e.OriginalFileName).HasMaxLength(260).IsRequired();
             entity.Property(e => e.StoredFileName).HasMaxLength(260).IsRequired();
@@ -3467,6 +3664,20 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => new { e.TaskJournalItemId, e.DocumentKey, e.Version })
                 .IsUnique()
                 .HasDatabaseName("IX_TaskJournalFiles_Task_Document_Version");
+        });
+
+        modelBuilder.Entity<CaseDocumentNotificationDispatch>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedNever();
+            entity.Property(e => e.Channel).HasMaxLength(32).IsRequired();
+            entity.Property(e => e.Status).HasMaxLength(32).IsRequired();
+            entity.Property(e => e.LeaseOwner).HasMaxLength(64);
+            entity.Property(e => e.LastError).HasMaxLength(1024);
+            entity.HasOne(e => e.UserNotification).WithMany().HasForeignKey(e => e.UserNotificationId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(e => new { e.UserNotificationId, e.Channel }).IsUnique();
+            entity.HasIndex(e => new { e.Status, e.NextAttemptAt, e.Id });
+            entity.HasIndex(e => new { e.Status, e.LeaseExpiresAt, e.Id });
         });
 
         modelBuilder.Entity<NotificationDelivery>(entity =>
@@ -3822,6 +4033,44 @@ public class PaymentContext : DbContext
             entity.HasIndex(item => new { item.OwnerType, item.OwnerId, item.DataClass });
             entity.HasIndex(item => new { item.DataClass, item.IsDeleted, item.UpdatedAt });
         });
+        modelBuilder.Entity<CaseDocumentUploadRetirement>(entity =>
+        {
+            entity.HasKey(item => new { item.CaseId, item.ActorId, item.UploadKey });
+            entity.HasIndex(item => item.StorageObjectId);
+        });
+        modelBuilder.Entity<StorageCapacityEpoch>(entity =>
+        {
+            entity.HasKey(item => item.Id);
+            entity.Property(item => item.Version).IsConcurrencyToken();
+            entity.HasData(new StorageCapacityEpoch { Id = 1, Version = 0 });
+            entity.ToTable(table =>
+            {
+                table.HasCheckConstraint("CK_StorageCapacityEpochs_Singleton", "\"Id\" = 1");
+                table.HasCheckConstraint("CK_StorageCapacityEpochs_Version", "\"Version\" >= 0");
+            });
+        });
+        modelBuilder.Entity<StorageCapacityReservation>(entity =>
+        {
+            entity.HasKey(item => new { item.IdempotencyKey, item.ResourceKey });
+            entity.Property(item => item.StageWriterAdmissionPending).HasDefaultValue(false);
+            entity.Property(item => item.GeneratedRecoveryNextAttemptAt).HasDefaultValue(new DateTime(2000, 1, 1));
+            entity.Property(item => item.GeneratedRecoveryAttemptCount).HasDefaultValue(0);
+            entity.HasIndex(item => new { item.ResourceKey, item.Status, item.GeneratedRecoveryNextAttemptAt })
+                .HasDatabaseName("IX_StorageCapacityReservations_GeneratedRecoveryWindow");
+            if (Database.IsNpgsql())
+            {
+                entity.HasIndex(item => item.IdempotencyKey, "IX_StorageCapacityReservations_PendingIntentPrefix")
+                    .HasOperators("varchar_pattern_ops")
+                    .HasFilter("\"Status\" = 'pending' AND \"ProductContextJson\" IS NOT NULL");
+            }
+            entity.HasIndex(item => new { item.Status, item.ResourceKey });
+            entity.HasIndex(item => item.ObjectId);
+            entity.ToTable(table =>
+            {
+                table.HasCheckConstraint("CK_StorageCapacityReservations_Bytes", "\"Bytes\" >= 0");
+                table.HasCheckConstraint("CK_StorageCapacityReservations_Status", "\"Status\" IN ('pending', 'released')");
+            });
+        });
         modelBuilder.Entity<DatabaseBackupAttempt>(entity =>
         {
             entity.HasKey(item => item.Id);
@@ -3846,6 +4095,15 @@ public class PaymentContext : DbContext
                 .WithMany(item => item.Copies)
                 .HasForeignKey(item => item.BackupSetId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<StorageProductBinding>(entity =>
+        {
+            entity.HasKey(item => new { item.Source, item.SourceId });
+            entity.Property(item => item.Version).IsConcurrencyToken();
+            entity.HasOne(item => item.StorageObject)
+                .WithMany()
+                .HasForeignKey(item => item.StorageObjectId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<StorageObjectGeneration>(entity =>
         {
@@ -3876,7 +4134,17 @@ public class PaymentContext : DbContext
         modelBuilder.Entity<StorageOperation>(entity =>
         {
             entity.HasKey(item => item.Id);
+            entity.HasIndex(item => new { item.OperationType, item.CreatedAt, item.Id })
+                .IsDescending(false, true, true);
+            entity.HasIndex(item => new { item.OperationType, item.Status, item.CreatedAt, item.Id })
+                .IsDescending(false, false, true, true);
             entity.HasIndex(item => item.IdempotencyKey).IsUnique();
+            if (Database.IsNpgsql())
+            {
+                // Locale-aware unique equality does not index LIKE prefix discovery.
+                entity.HasIndex(item => item.IdempotencyKey, "IX_StorageOperations_CommitIdempotencyPrefix")
+                    .HasOperators("varchar_pattern_ops").HasFilter("\"OperationType\" = 'commit'");
+            }
             entity.HasIndex(item => new { item.Status, item.NextAttemptAt });
             entity.HasIndex(item => new { item.ProviderKey, item.Status, item.NextAttemptAt });
             entity.HasOne(item => item.StorageObject)
@@ -4412,6 +4680,7 @@ public class PaymentContext : DbContext
 
     private (int? UserId, string? UserName) GetCurrentAuditActor()
     {
+        if (_acceptedAuditActor is { } accepted) return accepted.Actor;
         var user = _httpContextAccessor?.HttpContext?.User;
         if (user?.Identity?.IsAuthenticated != true)
         {
@@ -4535,6 +4804,15 @@ public class PaymentContext : DbContext
     public DbSet<ClientPortalAuditEvent> ClientPortalAuditEvents { get; set; }
 
     public DbSet<ClientCaseProceduralDeadline> ClientCaseProceduralDeadlines { get; set; }
+    public DbSet<GeneratedFinancialNumberScope> GeneratedFinancialNumberScopes { get; set; }
+    public DbSet<GeneratedFinancialNumberClaim> GeneratedFinancialNumberClaims { get; set; }
+    public DbSet<GeneratedFinancialActLineClaim> GeneratedFinancialActLineClaims { get; set; }
+    public DbSet<GeneratedFinancialDocumentAttempt> GeneratedFinancialDocumentAttempts { get; set; }
+    public DbSet<GeneratedFinancialDocumentContent> GeneratedFinancialDocumentContents { get; set; }
+    public DbSet<CourtDocumentSourceScope> CourtDocumentSourceScopes { get; set; }
+    public DbSet<CourtDocumentSource> CourtDocumentSources { get; set; }
+    public DbSet<CourtDocumentSourceAttempt> CourtDocumentSourceAttempts { get; set; }
+    public DbSet<CourtDocumentSourceContent> CourtDocumentSourceContents { get; set; }
 
     public DbSet<ClientCaseCourtEvent> ClientCaseCourtEvents { get; set; }
 
@@ -4670,6 +4948,9 @@ public class PaymentContext : DbContext
     public DbSet<InternalChatMember> InternalChatMembers { get; set; }
     public DbSet<InternalChatMessage> InternalChatMessages { get; set; }
     public DbSet<InternalChatAttachment> InternalChatAttachments { get; set; }
+    public DbSet<InternalChatSendAttempt> InternalChatSendAttempts { get; set; }
+    public DbSet<InternalChatSendAttemptFile> InternalChatSendAttemptFiles { get; set; }
+    public DbSet<InternalChatSendAttemptMention> InternalChatSendAttemptMentions { get; set; }
     public DbSet<InternalChatReaction> InternalChatReactions { get; set; }
     public DbSet<InternalChatMention> InternalChatMentions { get; set; }
     public DbSet<MessengerRecipientBinding> MessengerRecipientBindings { get; set; }
@@ -4688,6 +4969,7 @@ public class PaymentContext : DbContext
     public DbSet<CasePositionTemplate> CasePositionTemplates { get; set; }
     public DbSet<TaskJournalTemplateParticipant> TaskJournalTemplateParticipants { get; set; }
     public DbSet<NotificationDelivery> NotificationDeliveries { get; set; }
+    public DbSet<CaseDocumentNotificationDispatch> CaseDocumentNotificationDispatches { get; set; }
     public DbSet<UserNotification> UserNotifications { get; set; }
     public DbSet<NotificationSender> NotificationSenders { get; set; }
     public DbSet<NotificationBotSubscription> NotificationBotSubscriptions { get; set; }
@@ -4721,6 +5003,10 @@ public class PaymentContext : DbContext
     public DbSet<YandexCalendarSyncLog> YandexCalendarSyncLogs { get; set; }
     public DbSet<ExternalCalendarTaskSyncRequest> ExternalCalendarTaskSyncRequests { get; set; }
     public DbSet<StorageObject> StorageObjects { get; set; }
+    public DbSet<StorageCapacityEpoch> StorageCapacityEpochs { get; set; }
+    public DbSet<StorageCapacityReservation> StorageCapacityReservations { get; set; }
+    public DbSet<CaseDocumentUploadRetirement> CaseDocumentUploadRetirements { get; set; }
+    public DbSet<StorageProductBinding> StorageProductBindings { get; set; }
     public DbSet<DatabaseBackupSet> DatabaseBackupSets { get; set; }
     public DbSet<DatabaseBackupAttempt> DatabaseBackupAttempts { get; set; }
     public DbSet<DatabaseBackupCopy> DatabaseBackupCopies { get; set; }
