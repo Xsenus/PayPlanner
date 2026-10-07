@@ -24,6 +24,7 @@ using PayPlanner.Api.Services.Invoices;
 using PayPlanner.Api.Services.LegalIntegrations;
 using PayPlanner.Api.Services.LegalIntegrations.Models;
 using PayPlanner.Api.Services.Notifications;
+using PayPlanner.Api.Services.Storage;
 using Xunit;
 
 namespace PayPlanner.Api.Tests;
@@ -7565,6 +7566,130 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task DeleteDocument_ManagedFailureKeepsDomainRowAndUsesItsTransaction()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "delete-managed@example.test", "Владелец");
+        var client = new Client { Name = "Клиент", IsActive = true, ResponsibleUserId = owner.Id };
+        var clientCase = new ClientCase { Client = client, Title = "Дело", Status = ClientCaseStatus.Open };
+        var document = new ClientCaseDocument
+        {
+            ClientCase = clientCase,
+            DocumentKey = "delete",
+            OriginalFileName = "document.txt",
+            StoredFileName = "document.txt",
+            StoragePath = "safe/document.txt",
+            ContentType = "text/plain",
+            SizeBytes = 4,
+        };
+        db.ClientCaseDocuments.Add(document);
+        await db.SaveChangesAsync();
+        var deletion = new RecordingCaseProductDeletion(db);
+        var controller = CreateController(db, owner, productStorageDeletion: deletion);
+        foreach (var status in new[] { "conflict", "unavailable" })
+        {
+            deletion.Status = status;
+            var result = Assert.IsType<ObjectResult>(await controller.DeleteDocument(clientCase.Id, document.Id, CancellationToken.None));
+            Assert.Equal(status == "conflict" ? 409 : 503, result.StatusCode);
+            Assert.True(await db.ClientCaseDocuments.AnyAsync(d => d.Id == document.Id));
+        }
+        deletion.Status = "deleted";
+        Assert.IsType<NoContentResult>(await controller.DeleteDocument(clientCase.Id, document.Id, CancellationToken.None));
+        Assert.False(await db.ClientCaseDocuments.AnyAsync(d => d.Id == document.Id));
+        Assert.Equal(3, deletion.Calls);
+    }
+
+    private sealed class RecordingCaseProductDeletion(PaymentContext db) : IProductStorageDeletionService
+    {
+        public string Status { get; set; } = "deleted";
+        public int Calls { get; private set; }
+        public int? FailureAt { get; init; }
+        public bool RecordWrites { get; init; }
+        public async Task<string> DeleteAsync(string source, long id, string name, string type, string path, int? actor, CancellationToken ct)
+        {
+            Assert.NotNull(db.Database.CurrentTransaction);
+            Assert.Equal(LegacyStorageSources.CaseDocuments, source);
+            Assert.True(id > 0);
+            Assert.NotNull(actor);
+            Calls++;
+            var status = FailureAt.HasValue && Calls != FailureAt ? "deleted" : Status;
+            if (RecordWrites && status == "deleted")
+            {
+                var marker = new StorageObject { DataClass = "case-document", OwnerType = "case-document", OwnerId = id.ToString(), LogicalName = name, IsDeleted = true };
+                db.StorageTombstones.Add(new() { StorageObject = marker, Generation = 1, DeletedAt = DateTime.UtcNow });
+                await db.SaveChangesAsync(ct);
+            }
+            return status;
+        }
+    }
+
+    [Theory]
+    [InlineData("conflict")]
+    [InlineData("unavailable")]
+    public async Task HardCaseDeletionFailureRollsBackDocumentsAndPaymentLinks(string status)
+    {
+        await using var db = await CreateContextAsync(useObjectAuditModel: false);
+        var owner = await CreateUserAsync(db, "case-delete-failure@example.test", "Владелец");
+        var client = new Client { Name = "Клиент", ResponsibleUserId = owner.Id };
+        var clientCase = new ClientCase { Client = client, Title = "Дело" };
+        foreach (var name in new[] { "first", "second" }) db.ClientCaseDocuments.Add(new()
+        {
+            ClientCase = clientCase,
+            DocumentKey = name,
+            OriginalFileName = name + ".txt",
+            StoredFileName = name + ".txt",
+            StoragePath = name + ".txt",
+            ContentType = "text/plain",
+            SizeBytes = 4,
+        });
+        var payment = new Payment { ClientCase = clientCase, Client = client, Type = PaymentType.Income, Status = PaymentStatus.Pending, Amount = 15 };
+        db.Payments.Add(payment);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        var deletion = new RecordingCaseProductDeletion(db) { Status = status, FailureAt = 2, RecordWrites = true };
+        var result = await CreateController(db, owner, productStorageDeletion: deletion).Delete(clientCase.Id, CancellationToken.None);
+        Assert.Equal(status == "conflict" ? 409 : 503, Assert.IsType<ObjectResult>(result).StatusCode);
+        Assert.Equal(2, deletion.Calls);
+        Assert.True(await db.ClientCases.AsNoTracking().AnyAsync(c => c.Id == clientCase.Id));
+        Assert.Equal(2, await db.ClientCaseDocuments.AsNoTracking().CountAsync());
+        Assert.Equal(clientCase.Id, await db.Payments.AsNoTracking().Where(p => p.Id == payment.Id).Select(p => p.ClientCaseId).SingleAsync());
+        Assert.Empty(await db.StorageTombstones.AsNoTracking().ToListAsync());
+        Assert.Empty(await db.StorageObjects.AsNoTracking().ToListAsync());
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task CaseDeletionSaveFailureDoesNotDetachPayment(bool soft)
+    {
+        var fault = new CaseParentDeleteFault();
+        await using var db = await CreateContextAsync(fault, soft);
+        var owner = await CreateUserAsync(db, "case-delete-atomic@example.test", "Владелец");
+        var client = new Client { Name = "Клиент", ResponsibleUserId = owner.Id };
+        var clientCase = new ClientCase { Client = client, Title = "Дело" };
+        var payment = new Payment { ClientCase = clientCase, Client = client, Type = PaymentType.Income, Status = PaymentStatus.Pending, Amount = 15 };
+        db.Payments.Add(payment);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        fault.Armed = true;
+        await Assert.ThrowsAsync<IOException>(() => CreateController(db, owner).Delete(clientCase.Id, CancellationToken.None));
+        Assert.True(await db.ClientCases.AsNoTracking().AnyAsync(c => c.Id == clientCase.Id));
+        Assert.Equal(clientCase.Id, await db.Payments.AsNoTracking().Where(p => p.Id == payment.Id).Select(p => p.ClientCaseId).SingleAsync());
+    }
+
+    private sealed class CaseParentDeleteFault : SaveChangesInterceptor
+    {
+        public bool Armed { get; set; }
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(DbContextEventData eventData, InterceptionResult<int> result, CancellationToken ct = default)
+        {
+            if (Armed && eventData.Context!.ChangeTracker.Entries<ClientCase>().Any(e => e.State == EntityState.Deleted
+                || e.Metadata.FindProperty("IsDeleted") is not null && e.Property("IsDeleted").CurrentValue is true))
+                throw new IOException("Injected case deletion save failure.");
+            return ValueTask.FromResult(result);
+        }
+    }
+
+    [Fact]
     public async Task Documents_UploadsVersionsListsAndDeletesVisibleCaseFiles()
     {
         await using var db = await CreateContextAsync();
@@ -7766,6 +7891,20 @@ public class CasesV2ControllerTests
     [InlineData(false, 3)]
     [InlineData(true, 3)]
     public async Task DocumentWriteFailure_IsAtomicOnDisposablePostgreSqlDatabase(bool failAfterCommit, int source)
+        => await AssertDocumentWriteFailureOnPostgreSqlAsync(failAfterCommit, source);
+
+    [Theory]
+    [MemberData(nameof(DocumentFailureBoundaries))]
+    public async Task DocumentWriteFailure_ContextRecoveryOnDisposablePostgreSqlDatabase(int source, string stage)
+        => await AssertDocumentWriteFailureOnPostgreSqlAsync(stage == "lost-commit", source, stage);
+
+    public static IEnumerable<object[]> DocumentFailureBoundaries()
+    {
+        foreach (var stage in new[] { "before-save", "after-save", "audit-save", "before-commit", "lost-commit", "rollback" })
+            for (var source = 0; source < 4; source++) yield return [source, stage];
+    }
+
+    private static async Task AssertDocumentWriteFailureOnPostgreSqlAsync(bool failAfterCommit, int source, string? stage = null)
     {
         var raw = Environment.GetEnvironmentVariable("PAYPLANNER_TEST_POSTGRES");
         if (string.IsNullOrWhiteSpace(raw))
@@ -7777,6 +7916,7 @@ public class CasesV2ControllerTests
         var settings = new NpgsqlConnectionStringBuilder(raw) { Pooling = false };
         Assert.Contains(settings.Host, new[] { "127.0.0.1", "localhost" });
         var name = "payplanner_document_atomicity_" + Guid.NewGuid().ToString("N");
+        Console.WriteLine($"Owned case document database: {name}");
         var adminSettings = new NpgsqlConnectionStringBuilder(raw) { Database = "postgres", Pooling = false };
         await using var admin = new NpgsqlConnection(adminSettings.ConnectionString);
         await admin.OpenAsync();
@@ -7787,20 +7927,67 @@ public class CasesV2ControllerTests
             settings.Database = name;
             var interceptor = new FailingDocumentAuditInterceptor();
             var options = new DbContextOptionsBuilder<PostgreSqlPaymentContext>()
-                .UseNpgsql(settings.ConnectionString).AddInterceptors(interceptor).Options;
-            await using var db = new PostgreSqlPaymentContext(options);
+                .UseNpgsql(settings.ConnectionString).AddInterceptors(interceptor);
+            var saveInterceptor = stage is null ? null : new FailingDocumentSaveInterceptor(stage);
+            if (saveInterceptor is not null)
+                options.AddInterceptors(saveInterceptor, new FailingDocumentTransactionInterceptor(saveInterceptor));
+            await using var db = new PostgreSqlPaymentContext(options.Options);
             await db.Database.EnsureCreatedAsync();
-            await AssertDocumentWriteFailureAsync(db, interceptor, failAfterCommit, source);
+            await AssertDocumentWriteFailureAsync(db, interceptor, failAfterCommit, source, saveInterceptor);
         }
         finally
         {
-            await using var drop = new NpgsqlCommand($"DROP DATABASE IF EXISTS \"{name}\" WITH (FORCE)", admin);
+            await using var sessions = new NpgsqlCommand("SELECT count(*) FROM pg_stat_activity WHERE datname = @database", admin);
+            sessions.Parameters.AddWithValue("database", name);
+            var deadline = DateTime.UtcNow.AddSeconds(5);
+            long remainingSessions;
+            do
+            {
+                remainingSessions = (long)(await sessions.ExecuteScalarAsync())!;
+                if (remainingSessions == 0) break;
+                await Task.Delay(50);
+            } while (DateTime.UtcNow < deadline);
+            Assert.Equal(0L, remainingSessions);
+            await using var drop = new NpgsqlCommand($"DROP DATABASE IF EXISTS \"{name}\"", admin);
             await drop.ExecuteNonQueryAsync();
         }
     }
 
+    [Theory]
+    [InlineData(0, "before-save")]
+    [InlineData(1, "before-save")]
+    [InlineData(2, "before-save")]
+    [InlineData(3, "before-save")]
+    [InlineData(0, "after-save")]
+    [InlineData(1, "after-save")]
+    [InlineData(2, "after-save")]
+    [InlineData(3, "after-save")]
+    [InlineData(0, "audit-save")]
+    [InlineData(1, "audit-save")]
+    [InlineData(2, "audit-save")]
+    [InlineData(3, "audit-save")]
+    [InlineData(0, "before-commit")]
+    [InlineData(1, "before-commit")]
+    [InlineData(2, "before-commit")]
+    [InlineData(3, "before-commit")]
+    [InlineData(0, "lost-commit")]
+    [InlineData(1, "lost-commit")]
+    [InlineData(2, "lost-commit")]
+    [InlineData(3, "lost-commit")]
+    [InlineData(0, "rollback")]
+    [InlineData(1, "rollback")]
+    [InlineData(2, "rollback")]
+    [InlineData(3, "rollback")]
+    public async Task DocumentWriteFailure_DoesNotResurrectOnContextReuse(int source, string stage)
+    {
+        var interceptor = new FailingDocumentSaveInterceptor(stage);
+        await using var db = await CreateContextAsync(interceptor, additionalInterceptors: [new FailingDocumentTransactionInterceptor(interceptor)]);
+        await AssertDocumentWriteFailureAsync(db, new FailingDocumentAuditInterceptor(), stage == "lost-commit", source, interceptor);
+    }
+
     private static async Task AssertDocumentWriteFailureAsync(PaymentContext db,
-        FailingDocumentAuditInterceptor interceptor, bool failAfterCommit, int source)
+        FailingDocumentAuditInterceptor interceptor, bool failAfterCommit, int source,
+        FailingDocumentSaveInterceptor? saveInterceptor = null)
     {
         var owner = await CreateUserAsync(db, "upload-atomicity@example.local", "Владелец");
         await GrantSectionPermissionAsync(db, owner, RolePermissionCatalog.Accounts);
@@ -7836,9 +8023,22 @@ public class CasesV2ControllerTests
                 preservedDocumentId = Assert.IsType<ClientCaseDocumentDto>(Assert.IsType<CreatedResult>(first.Result).Value).Id;
                 originalHistory = clientCase.EventHistory;
             }
+            var originalNotifications = await db.UserNotifications.AsNoTracking().CountAsync();
             var controller = CreateController(db, owner, root,
-                realtimePublisher: failAfterCommit ? new FailingDocumentRealtimePublisher() : null);
-            interceptor.Enabled = !failAfterCommit;
+                realtimePublisher: failAfterCommit && saveInterceptor is null ? new FailingDocumentRealtimePublisher() : null);
+            UserSetting? pendingAdded = null;
+            UserSetting? pendingModified = null;
+            if (saveInterceptor is not null)
+            {
+                pendingModified = new UserSetting { UserId = owner.Id, Key = "case-uow-existing", Value = "original" };
+                db.UserSettings.Add(pendingModified);
+                await db.SaveChangesAsync();
+                pendingModified.Value = "pending change";
+                pendingAdded = new UserSetting { UserId = owner.Id, Key = "case-uow-new", Value = "pending insert", User = owner };
+                db.UserSettings.Add(pendingAdded);
+            }
+            interceptor.Enabled = !failAfterCommit && saveInterceptor is null;
+            if (saveInterceptor is not null) saveInterceptor.Enabled = true;
             async Task WriteDocument()
             {
                 if (source == 0)
@@ -7854,10 +8054,39 @@ public class CasesV2ControllerTests
                     await controller.UploadDocumentVersionById(preservedDocumentId!.Value,
                         CreateFormFile("document bytes", "evidence-v2.txt"), "Документ", "Подготовлен", CancellationToken.None);
             }
-            await Assert.ThrowsAnyAsync<Exception>(WriteDocument);
+            var failure = await Assert.ThrowsAnyAsync<Exception>(WriteDocument);
+            if (saveInterceptor?.Stage == "rollback")
+            {
+                Assert.Equal("Simulated document failure before save.", failure.Message);
+                Assert.IsType<InvalidOperationException>(failure.Data["CaseDocumentRollbackFailure"]);
+            }
             interceptor.Enabled = false;
-            db.ChangeTracker.Clear();
-            var allDocuments = await db.ClientCaseDocuments.Where(item => item.ClientCaseId == caseId).ToListAsync();
+            if (saveInterceptor is not null) saveInterceptor.Enabled = false;
+            if (pendingModified is not null && pendingAdded is not null)
+            {
+                Assert.Equal(failAfterCommit ? "pending change" : "original",
+                    await db.UserSettings.AsNoTracking().Where(item => item.Id == pendingModified.Id).Select(item => item.Value).SingleAsync());
+                if (!failAfterCommit)
+                {
+                    Assert.Equal(EntityState.Added, db.Entry(pendingAdded).State);
+                    Assert.Equal(EntityState.Modified, db.Entry(pendingModified).State);
+                }
+                await db.SaveChangesAsync();
+                Assert.Equal("pending change", await db.UserSettings.AsNoTracking()
+                    .Where(item => item.Id == pendingModified.Id).Select(item => item.Value).SingleAsync());
+                Assert.Single(await db.UserSettings.AsNoTracking().Where(item => item.Key == "case-uow-new").ToListAsync());
+            }
+            if (!failAfterCommit)
+            {
+                // Reusing the context must not publish audit/notification rows or
+                // file references left over from the rolled-back document attempt.
+                await db.SaveChangesAsync();
+                Assert.Equal(preservedDocumentId is null ? 0 : 1,
+                    await db.ObjectAuditEvents.AsNoTracking().CountAsync(item => item.ObjectType == "client-case-document"));
+                Assert.Equal(originalHistory, (await db.ClientCases.AsNoTracking().SingleAsync(item => item.Id == caseId)).EventHistory);
+                Assert.Equal(originalNotifications, await db.UserNotifications.AsNoTracking().CountAsync());
+            }
+            var allDocuments = await db.ClientCaseDocuments.AsNoTracking().Where(item => item.ClientCaseId == caseId).ToListAsync();
             var documents = allDocuments.Where(item => item.Id != preservedDocumentId).ToList();
             if (preservedDocumentId is not null)
             {
@@ -7874,19 +8103,80 @@ public class CasesV2ControllerTests
                 Assert.Equal(document.SizeBytes, bytes.LongLength);
                 if (source is 0 or 3) Assert.Equal("document bytes", Encoding.UTF8.GetString(bytes));
                 Assert.Single(await db.ObjectAuditEvents.Where(item => item.ObjectType == "client-case-document" && item.ObjectId == document.Id).ToListAsync());
+                Assert.Equal(originalNotifications + 1, await db.UserNotifications.AsNoTracking().CountAsync());
             }
             else
             {
                 Assert.Empty(documents);
-                Assert.Equal(originalHistory, (await db.ClientCases.SingleAsync(item => item.Id == caseId)).EventHistory);
+                Assert.Equal(originalHistory, (await db.ClientCases.AsNoTracking().SingleAsync(item => item.Id == caseId)).EventHistory);
                 Assert.Equal(preservedDocumentId is null ? 0 : 1,
                     await db.ObjectAuditEvents.CountAsync(item => item.ObjectType == "client-case-document"));
-                Assert.Equal(preservedDocumentId is null ? 0 : 1, Directory.GetFiles(root, "*", SearchOption.AllDirectories).Length);
+                var retainedFailedFile = saveInterceptor?.Stage is "before-commit" or "rollback" ? 1 : 0;
+                Assert.Equal((preservedDocumentId is null ? 0 : 1) + retainedFailedFile,
+                    Directory.GetFiles(root, "*", SearchOption.AllDirectories).Length);
+                if (saveInterceptor is not null)
+                {
+                    // Retry through the same controller/context, without clearing tracked state.
+                    await WriteDocument();
+                    var retryDocument = await db.ClientCaseDocuments.AsNoTracking()
+                        .Where(item => item.ClientCaseId == caseId && item.Id != preservedDocumentId).SingleAsync();
+                    var storage = new LocalCaseDocumentStorage(new TestWebHostEnvironment { ContentRootPath = root });
+                    Assert.Equal(retryDocument.SizeBytes, new FileInfo(storage.ResolvePath(retryDocument.StoragePath)).Length);
+                    Assert.Equal(originalNotifications + 1, await db.UserNotifications.AsNoTracking().CountAsync());
+                    Assert.Single(await db.ObjectAuditEvents.AsNoTracking().Where(item =>
+                        item.ObjectType == "client-case-document" && item.ObjectId == retryDocument.Id).ToListAsync());
+                }
             }
         }
         finally
         {
             if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    private sealed class FailingDocumentSaveInterceptor(string stage = "before-save") : SaveChangesInterceptor
+    {
+        public string Stage => stage;
+        public bool Enabled { get; set; }
+        private int _saveCount;
+
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(DbContextEventData eventData,
+            InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            if (Enabled && (++_saveCount == 1 && Stage is "before-save" or "rollback" || _saveCount == 3 && Stage == "audit-save"))
+                throw new InvalidOperationException("Simulated document failure before save.");
+            return ValueTask.FromResult(result);
+        }
+
+        public override ValueTask<int> SavedChangesAsync(SaveChangesCompletedEventData eventData, int result,
+            CancellationToken cancellationToken = default)
+        {
+            if (Enabled && Stage == "after-save") throw new InvalidOperationException("Simulated document lost save acknowledgement.");
+            return ValueTask.FromResult(result);
+        }
+    }
+
+    private sealed class FailingDocumentTransactionInterceptor(FailingDocumentSaveInterceptor fault) : DbTransactionInterceptor
+    {
+        public override ValueTask<InterceptionResult> TransactionCommittingAsync(DbTransaction transaction,
+            TransactionEventData eventData, InterceptionResult result, CancellationToken cancellationToken = default)
+        {
+            if (fault.Enabled && fault.Stage == "before-commit") throw new InvalidOperationException("Simulated document pre-commit failure.");
+            return ValueTask.FromResult(result);
+        }
+
+        public override Task TransactionCommittedAsync(DbTransaction transaction, TransactionEndEventData eventData,
+            CancellationToken cancellationToken = default)
+        {
+            if (fault.Enabled && fault.Stage == "lost-commit") throw new InvalidOperationException("Simulated document lost commit acknowledgement.");
+            return Task.CompletedTask;
+        }
+
+        public override ValueTask<InterceptionResult> TransactionRollingBackAsync(DbTransaction transaction,
+            TransactionEventData eventData, InterceptionResult result, CancellationToken cancellationToken = default)
+        {
+            if (fault.Enabled && fault.Stage == "rollback") throw new InvalidOperationException("Simulated document unconfirmed rollback.");
+            return ValueTask.FromResult(result);
         }
     }
 
@@ -7953,7 +8243,8 @@ public class CasesV2ControllerTests
         db.ClientCaseDocuments.Add(document);
         await db.SaveChangesAsync();
 
-        var controller = CreateController(db, viewer);
+        var reader = new RecordingCaseProductReader(ProductStorageReadStatus.Available);
+        var controller = CreateController(db, viewer, productStorageReader: reader);
 
         var listResult = await controller.GetDocuments(clientCase.Id, CancellationToken.None);
         var documentResult = await controller.GetDocumentById(document.Id, CancellationToken.None);
@@ -7964,6 +8255,7 @@ public class CasesV2ControllerTests
         Assert.IsType<ForbidResult>(documentResult.Result);
         Assert.IsType<ForbidResult>(downloadByIdResult);
         Assert.IsType<ForbidResult>(scopedDownloadResult);
+        Assert.Equal(0, reader.Calls);
     }
 
     [Fact]
@@ -8705,6 +8997,78 @@ public class CasesV2ControllerTests
         Assert.Contains("Z\"", JsonSerializer.Serialize(item), StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(false, ProductStorageReadStatus.Available)]
+    [InlineData(true, ProductStorageReadStatus.Available)]
+    [InlineData(false, ProductStorageReadStatus.Unavailable)]
+    [InlineData(true, ProductStorageReadStatus.Unavailable)]
+    [InlineData(false, ProductStorageReadStatus.Deleted)]
+    [InlineData(true, ProductStorageReadStatus.Deleted)]
+    public async Task DownloadDocument_UsesManagedCopiesAndPreservesAudit(bool scoped, ProductStorageReadStatus status)
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "managed-case@example.com", "Владелец");
+        var client = new Client { Name = "Клиент", IsActive = true, ResponsibleUserId = owner.Id };
+        var clientCase = new ClientCase { Client = client, Title = "Дело", Status = ClientCaseStatus.Open, ResponsibleUserId = owner.Id };
+        var document = new ClientCaseDocument
+        {
+            ClientCase = clientCase,
+            DocumentKey = "managed-case",
+            Version = 1,
+            DocumentType = "Иск",
+            Status = "Подготовлен",
+            OriginalFileName = "managed.txt",
+            StoredFileName = "managed.txt",
+            StoragePath = "missing/managed.txt",
+            ContentType = "text/plain",
+            SizeBytes = 3,
+            UploadedByName = owner.FullName,
+        };
+        db.ClientCaseDocuments.Add(document);
+        await db.SaveChangesAsync();
+        var reader = new RecordingCaseProductReader(status);
+        var controller = CreateController(db, owner, productStorageReader: reader);
+        var result = scoped ? await controller.DownloadDocument(clientCase.Id, document.Id, CancellationToken.None)
+            : await controller.DownloadDocumentById(document.Id, CancellationToken.None);
+        Assert.Equal(1, reader.Calls);
+        Assert.Equal(document.Id, reader.FileId);
+        if (status == ProductStorageReadStatus.Available)
+        {
+            var download = Assert.IsType<FileStreamResult>(result);
+            Assert.Equal(document.OriginalFileName, download.FileDownloadName);
+            Assert.True(download.EnableRangeProcessing);
+            await using var stream = download.FileStream;
+            using var memory = new MemoryStream();
+            await stream.CopyToAsync(memory);
+            Assert.Equal(new byte[] { 1, 2, 3 }, memory.ToArray());
+            var audit = Assert.Single(await db.ObjectAuditEvents.Where(item => item.ObjectType == "client-case-document").ToListAsync());
+            Assert.Equal("Downloaded", audit.Action);
+            Assert.Equal(document.Id, audit.ObjectId);
+        }
+        else
+        {
+            if (status == ProductStorageReadStatus.Deleted) Assert.IsType<NotFoundResult>(result);
+            else Assert.Equal(503, Assert.IsType<ObjectResult>(result).StatusCode);
+            Assert.False(await db.ObjectAuditEvents.AnyAsync(item => item.ObjectType == "client-case-document"));
+        }
+    }
+
+    private sealed class RecordingCaseProductReader(ProductStorageReadStatus status) : IProductStorageReader
+    {
+        public int Calls { get; private set; }
+        public long FileId { get; private set; }
+        public Task<ProductStorageReadResult> OpenReadAsync(string source, long fileId, string logicalName,
+            string contentType, CancellationToken cancellationToken)
+        {
+            Calls++;
+            FileId = fileId;
+            Assert.Equal(LegacyStorageSources.CaseDocuments, source);
+            return Task.FromResult(new ProductStorageReadResult(status, status == ProductStorageReadStatus.Available
+                ? new(LegacyStorageSources.GetObjectId(source, fileId), 1, contentType, logicalName, 3, new MemoryStream([1, 2, 3]), "mirror")
+                : null));
+        }
+    }
+
     [Fact]
     public async Task DownloadDocumentById_ReturnsFileWhenCaseIsVisible()
     {
@@ -8812,13 +9176,17 @@ public class CasesV2ControllerTests
         db.ClientCases.Add(hiddenCase);
         db.ClientCaseDocuments.Add(document);
         await db.SaveChangesAsync();
-        var controller = CreateController(db, viewer);
+        var reader = new RecordingCaseProductReader(ProductStorageReadStatus.Available);
+        var controller = CreateController(db, viewer, productStorageReader: reader);
 
         var getResult = await controller.GetDocumentById(document.Id, CancellationToken.None);
         var downloadResult = await controller.DownloadDocumentById(document.Id, CancellationToken.None);
+        var scopedResult = await controller.DownloadDocument(hiddenCase.Id, document.Id, CancellationToken.None);
 
         Assert.IsType<NotFoundResult>(getResult.Result);
         Assert.IsType<NotFoundResult>(downloadResult);
+        Assert.IsType<NotFoundResult>(scopedResult);
+        Assert.Equal(0, reader.Calls);
         Assert.False(await db.ObjectAuditEvents.AnyAsync(item =>
             item.ObjectType == "client-case-document"
             && item.ObjectId == document.Id
@@ -13924,6 +14292,104 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task Conversation_RealtimeFailureAfterCommitKeepsDocumentBytes()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "pp_case_conversation_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            await using var db = await CreateContextAsync();
+            var owner = await CreateUserAsync(db, "conversation-commit@example.test", "Автор");
+            var client = new Client { Name = "Клиент переписки", IsActive = true, ResponsibleUserId = owner.Id };
+            var clientCase = new ClientCase { Client = client, Title = "Дело с вложением", Status = ClientCaseStatus.Open };
+            db.ClientCases.Add(clientCase);
+            await db.SaveChangesAsync();
+            var controller = CreateController(db, owner, contentRootPath: root,
+                realtimePublisher: new RejectConversationRealtime());
+
+            await Assert.ThrowsAsync<IOException>(() => controller.AddConversationEntryWithAttachments(
+                clientCase.Id,
+                new CasesV2Controller.AddClientCaseConversationEntryFormRequest
+                {
+                    Text = "Прикрепил скан.",
+                    Files = [CreateFormFile("document bytes", "scan.pdf", "application/pdf")],
+                }, CancellationToken.None));
+
+            var document = await db.ClientCaseDocuments.AsNoTracking().SingleAsync();
+            var path = Path.Combine(root, "App_Data", "case-documents", document.StoragePath);
+            Assert.Equal("document bytes", await File.ReadAllTextAsync(path));
+            await db.Entry(clientCase).ReloadAsync();
+            Assert.Contains($"Вложения: {document.Id}.", clientCase.EventHistory, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Assert.Equal(Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar), Path.GetDirectoryName(Path.GetFullPath(root)));
+            Assert.StartsWith("pp_case_conversation_", Path.GetFileName(root), StringComparison.Ordinal);
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    private sealed class RejectConversationRealtime : IRealtimeNotificationPublisher
+    {
+        public Task PublishUserNotificationAsync(UserNotification notification, bool toastEnabled = true,
+            CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task PublishTaskJournalChangedAsync(CancellationToken cancellationToken = default)
+            => throw new IOException("Owned synthetic realtime failure.");
+    }
+
+    [Fact]
+    public async Task Conversation_SecondAttachmentFailureRemovesFirstFileWithoutPublishingMessage()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "pp_case_copy_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            await using var db = await CreateContextAsync();
+            var owner = await CreateUserAsync(db, "conversation-copy@example.test", "Автор");
+            var clientCase = new ClientCase
+            {
+                Client = new Client { Name = "Клиент переписки", IsActive = true, ResponsibleUserId = owner.Id },
+                Title = "Дело с вложением",
+                Status = ClientCaseStatus.Open
+            };
+            db.ClientCases.Add(clientCase);
+            await db.SaveChangesAsync();
+            var controller = CreateController(db, owner, contentRootPath: root);
+
+            await Assert.ThrowsAsync<IOException>(() => controller.AddConversationEntryWithAttachments(clientCase.Id,
+                new CasesV2Controller.AddClientCaseConversationEntryFormRequest
+                {
+                    Text = "Два файла",
+                    Files = [CreateFormFile("first bytes", "first.txt", "text/plain"), new FaultingConversationFile()],
+                }, CancellationToken.None));
+
+            Assert.Empty(await db.ClientCaseDocuments.AsNoTracking().ToListAsync());
+            await db.Entry(clientCase).ReloadAsync();
+            Assert.DoesNotContain("Два файла", clientCase.EventHistory ?? string.Empty, StringComparison.Ordinal);
+            var directory = Path.Combine(root, "App_Data", "case-documents", clientCase.Id.ToString());
+            Assert.Empty(Directory.Exists(directory) ? Directory.EnumerateFiles(directory) : Array.Empty<string>());
+        }
+        finally
+        {
+            Assert.Equal(Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar), Path.GetDirectoryName(Path.GetFullPath(root)));
+            Assert.StartsWith("pp_case_copy_", Path.GetFileName(root), StringComparison.Ordinal);
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    private sealed class FaultingConversationFile : IFormFile
+    {
+        public string ContentType { get; set; } = "text/plain";
+        public string ContentDisposition { get; set; } = string.Empty;
+        public IHeaderDictionary Headers { get; set; } = new HeaderDictionary();
+        public long Length => 3;
+        public string Name => "file";
+        public string FileName => "second.txt";
+        public Stream OpenReadStream() => throw new IOException("Owned synthetic source failure.");
+        public void CopyTo(Stream target) => throw new IOException("Owned synthetic source failure.");
+        public Task CopyToAsync(Stream target, CancellationToken cancellationToken = default)
+            => throw new IOException("Owned synthetic source failure.");
+    }
+
+    [Fact]
     public async Task Conversation_NotifiesVisibleCaseParticipantsAboutNewMessage()
     {
         await using var db = await CreateContextAsync();
@@ -14171,11 +14637,13 @@ public class CasesV2ControllerTests
         bool includeAdminRoleClaim = false,
         CourtSyncMetrics? courtSyncMetrics = null,
         IExternalWorkOrderApprovalService? externalWorkOrderApprovalService = null,
-        IRealtimeNotificationPublisher? realtimePublisher = null)
+        IRealtimeNotificationPublisher? realtimePublisher = null,
+        IProductStorageReader? productStorageReader = null,
+        IProductStorageDeletionService? productStorageDeletion = null)
         => new(db, new TestWebHostEnvironment
         {
             ContentRootPath = contentRootPath ?? Path.Combine(Path.GetTempPath(), "payplanner-case-documents", Guid.NewGuid().ToString("N")),
-        }, sudrfCourtSyncService: sudrfCourtSyncService, pdfService: pdfService, courtSyncProviderRegistry: courtSyncProviderRegistry, configuration: configuration, featureFlags: featureFlags, notificationService: notificationService, courtSyncMetrics: courtSyncMetrics, externalWorkOrderApprovalService: externalWorkOrderApprovalService, realtimePublisher: realtimePublisher)
+        }, sudrfCourtSyncService: sudrfCourtSyncService, pdfService: pdfService, courtSyncProviderRegistry: courtSyncProviderRegistry, configuration: configuration, featureFlags: featureFlags, notificationService: notificationService, courtSyncMetrics: courtSyncMetrics, externalWorkOrderApprovalService: externalWorkOrderApprovalService, realtimePublisher: realtimePublisher, productStorageReader: productStorageReader, productStorageDeletion: productStorageDeletion)
         {
             ControllerContext = new ControllerContext
             {
@@ -14465,7 +14933,8 @@ public class CasesV2ControllerTests
         await db.SaveChangesAsync();
     }
 
-    private static async Task<PaymentContext> CreateContextAsync(DbCommandInterceptor? interceptor = null)
+    private static async Task<PaymentContext> CreateContextAsync(IInterceptor? interceptor = null, bool useObjectAuditModel = true,
+        params IInterceptor[] additionalInterceptors)
     {
         var connection = new SqliteConnection("DataSource=:memory:");
         await connection.OpenAsync();
@@ -14475,9 +14944,10 @@ public class CasesV2ControllerTests
         {
             optionsBuilder.AddInterceptors(interceptor);
         }
+        optionsBuilder.AddInterceptors(additionalInterceptors);
 
         var options = optionsBuilder.Options;
-        var db = new PaymentContext(options);
+        var db = new PaymentContext(options, useObjectAuditModel: useObjectAuditModel);
         await db.Database.EnsureCreatedAsync();
         return db;
     }

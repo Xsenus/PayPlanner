@@ -5,22 +5,410 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.Notifications;
+using PayPlanner.Api.Services.Storage;
 using System.Data.Common;
 using Xunit;
 
 namespace PayPlanner.Api.Tests;
 
-public sealed class MessengerDocumentDeliveryServiceTests
+public sealed partial class MessengerDocumentDeliveryServiceTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ManagedPreparationPublishesExactSnapshotAndReplaysWithoutNewObject(bool generated)
+    {
+        await using var fixture = await Fixture.CreateAsync(enabled: true);
+        var binding = await fixture.CreateBindingAsync();
+        var runtime = fixture.CreateManagedRuntime(fixture.Db);
+        var prepared = await PrepareAsync(runtime.Service);
+        var pointer = await fixture.Db.StorageProductBindings.AsNoTracking().SingleAsync();
+        Assert.Equal(LegacyStorageSources.MessengerSnapshots, pointer.Source);
+        Assert.Equal(prepared.Delivery.Id, pointer.SourceId);
+        Assert.Equal(prepared.Delivery.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            (await fixture.Db.StorageObjects.AsNoTracking().SingleAsync()).OwnerId);
+        Assert.Equal(1, runtime.Provider.PutCalls);
+        var replay = await PrepareAsync(runtime.Service);
+        Assert.Equal(prepared.Delivery.Id, replay.Delivery.Id);
+        Assert.Equal(1, runtime.Provider.PutCalls);
+        Assert.Single(await fixture.Db.StorageObjects.AsNoTracking().ToArrayAsync());
+        // The managed endpoint remains readable after loss of the compatibility copy.
+        File.Delete(Path.Combine(fixture.Configuration["FileStorage:RootPath"]!,
+            "messenger-document-deliveries", prepared.Delivery.SnapshotPath));
+        var download = await runtime.Service.ConsumeDownloadAsync(replay.Delivery.PublicId, replay.Token!, CancellationToken.None);
+        Assert.NotNull(download);
+        using var content = new MemoryStream();
+        await download!.Content!.CopyToAsync(content);
+        await download.Content.DisposeAsync();
+        Assert.Equal(prepared.Delivery.SizeBytes, content.Length);
+        Assert.Equal(prepared.Delivery.ChecksumSha256,
+            Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(content.ToArray())), ignoreCase: true);
+
+        Task<PreparedMessengerDocumentDelivery> PrepareAsync(MessengerDocumentDeliveryService service)
+        {
+            byte[] pdf = System.Text.Encoding.ASCII.GetBytes("%PDF-1.7 owned managed snapshot");
+            return generated ? service.PrepareGeneratedDocumentAsync(fixture.UserId, "invoice", 77, 1,
+                fixture.ClientId, "invoice.pdf", "application/pdf", new MemoryStream(pdf), pdf.Length,
+                binding.Id, null, CancellationToken.None)
+                : service.PrepareCaseDocumentAsync(fixture.UserId, fixture.DocumentId, binding.Id, null, CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task ManagedUnknownResultCannotPublishAndRetryUsesVerifiedReceiptWithoutAnotherPut()
+    {
+        await using var fixture = await Fixture.CreateAsync(enabled: true);
+        var binding = await fixture.CreateBindingAsync();
+        var runtime = fixture.CreateManagedRuntime(fixture.Db, loseAcknowledgement: true);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => PrepareAsync());
+        Assert.Empty(await fixture.Db.MessengerDocumentDeliveries.AsNoTracking().ToArrayAsync());
+        Assert.Empty(await fixture.Db.StorageProductBindings.AsNoTracking().ToArrayAsync());
+        Assert.Empty(await fixture.Db.StorageObjects.AsNoTracking().ToArrayAsync());
+        Assert.Single(await fixture.Db.StorageCapacityReservations.AsNoTracking().Where(row => !row.IdempotencyKey.StartsWith("stage:")).ToArrayAsync());
+        Assert.Equal(1, runtime.Provider.PutCalls);
+        runtime.Provider.LoseAcknowledgement = false;
+        await runtime.Worker.ProcessBatchAsync("owned-messenger-recovery", CancellationToken.None);
+        var prepared = await PrepareAsync();
+        Assert.Equal(1, runtime.Provider.PutCalls);
+        Assert.Equal(prepared.Delivery.Id, (await fixture.Db.StorageProductBindings.AsNoTracking().SingleAsync()).SourceId);
+        Assert.Single(await fixture.Db.StorageObjects.AsNoTracking().ToArrayAsync());
+
+        Task<PreparedMessengerDocumentDelivery> PrepareAsync() => runtime.Service.PrepareCaseDocumentAsync(
+            fixture.UserId, fixture.DocumentId, binding.Id, null, CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task ManagedDomainRollbackLeavesUnpublishedIntentThatCanBeRetried()
+    {
+        await using var fixture = await Fixture.CreateAsync(enabled: true);
+        var binding = await fixture.CreateBindingAsync();
+        await using (var failing = fixture.CreateIndependentContext(new RejectDeliverySave()))
+        {
+            var runtime = fixture.CreateManagedRuntime(failing);
+            await Assert.ThrowsAsync<IOException>(() => runtime.Service.PrepareCaseDocumentAsync(
+                fixture.UserId, fixture.DocumentId, binding.Id, null, CancellationToken.None));
+            await failing.SaveChangesAsync();
+        }
+        Assert.Empty(await fixture.Db.MessengerDocumentDeliveries.AsNoTracking().ToArrayAsync());
+        Assert.Empty(await fixture.Db.StorageProductBindings.AsNoTracking().ToArrayAsync());
+        var pending = await fixture.Db.StorageObjects.AsNoTracking().SingleAsync();
+        Assert.StartsWith("upload:messenger:", pending.OwnerId, StringComparison.Ordinal);
+        var resumed = fixture.CreateManagedRuntime(fixture.Db);
+        var prepared = await resumed.Service.PrepareCaseDocumentAsync(fixture.UserId, fixture.DocumentId, binding.Id, null, CancellationToken.None);
+        Assert.Equal(0, resumed.Provider.PutCalls);
+        Assert.Equal(pending.Id, (await fixture.Db.StorageProductBindings.AsNoTracking().SingleAsync()).StorageObjectId);
+        Assert.Equal(prepared.Delivery.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            (await fixture.Db.StorageObjects.AsNoTracking().SingleAsync()).OwnerId);
+    }
+
+    [Fact]
+    public async Task DisabledManagedSnapshotWriterKeepsLegacyPathWithoutCatalogWrites()
+    {
+        await using var fixture = await Fixture.CreateAsync(enabled: true);
+        var binding = await fixture.CreateBindingAsync();
+        var runtime = fixture.CreateManagedRuntime(fixture.Db);
+        runtime.Options.CurrentValue.ProductWriteEnabledClasses.Clear();
+        var prepared = await runtime.Service.PrepareCaseDocumentAsync(fixture.UserId, fixture.DocumentId, binding.Id, null, CancellationToken.None);
+        Assert.True(prepared.Delivery.Id > 0);
+        Assert.Empty(await fixture.Db.StorageObjects.AsNoTracking().ToArrayAsync());
+        Assert.Equal(0, runtime.Provider.PutCalls);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ManagedPreparationPreservesSnapshotWhenCommitOrRollbackCannotBeConfirmed(bool rollbackFailure)
+    {
+        await using var fixture = await Fixture.CreateAsync(enabled: true);
+        var binding = await fixture.CreateBindingAsync();
+        var fault = new DeliveryTransactionFault(rollbackFailure);
+        var interceptors = rollbackFailure ? new IInterceptor[] { new RejectDeliverySave(), fault } : [fault];
+        await using (var failing = fixture.CreateIndependentContext(interceptors))
+        {
+            var runtime = fixture.CreateManagedRuntime(failing);
+            await Assert.ThrowsAsync<IOException>(() => runtime.Service.PrepareCaseDocumentAsync(
+                fixture.UserId, fixture.DocumentId, binding.Id, null, CancellationToken.None));
+            if (rollbackFailure) await failing.SaveChangesAsync();
+        }
+        var snapshots = Path.Combine(fixture.Configuration["FileStorage:RootPath"]!, "messenger-document-deliveries");
+        var path = Assert.Single(Directory.EnumerateFiles(snapshots, "*.snapshot", SearchOption.AllDirectories));
+        Assert.Equal(await File.ReadAllBytesAsync(fixture.SourceFullPath), await File.ReadAllBytesAsync(path));
+        if (rollbackFailure)
+        {
+            Assert.Empty(await fixture.Db.MessengerDocumentDeliveries.AsNoTracking().ToArrayAsync());
+            Assert.Empty(await fixture.Db.StorageProductBindings.AsNoTracking().ToArrayAsync());
+        }
+        else
+        {
+            var original = await fixture.Db.MessengerDocumentDeliveries.AsNoTracking().SingleAsync();
+            var runtime = fixture.CreateManagedRuntime(fixture.Db);
+            var replay = await runtime.Service.PrepareCaseDocumentAsync(fixture.UserId, fixture.DocumentId, binding.Id, null, CancellationToken.None);
+            Assert.Equal(original.Id, replay.Delivery.Id);
+            Assert.Equal(0, runtime.Provider.PutCalls);
+            Assert.Equal(original.Id, (await fixture.Db.StorageProductBindings.AsNoTracking().SingleAsync()).SourceId);
+        }
+    }
+
+    private sealed class DeliveryTransactionFault(bool rollbackFailure) : DbTransactionInterceptor
+    {
+        public override Task TransactionCommittedAsync(DbTransaction transaction, TransactionEndEventData eventData,
+            CancellationToken cancellationToken = default)
+        {
+            if (!rollbackFailure && eventData.Context?.ChangeTracker.Entries<MessengerDocumentDelivery>().Any() == true)
+                throw new IOException("Owned lost domain commit acknowledgement");
+            return Task.CompletedTask;
+        }
+        public override ValueTask<InterceptionResult> TransactionRollingBackAsync(DbTransaction transaction, TransactionEventData eventData,
+            InterceptionResult result, CancellationToken cancellationToken = default)
+        {
+            if (rollbackFailure && eventData.Context?.ChangeTracker.Entries<MessengerDocumentDelivery>().Any() == true)
+                throw new IOException("Owned unconfirmed rollback");
+            return ValueTask.FromResult(result);
+        }
+    }
+
+    [Theory]
+    [InlineData("unknown")]
+    [InlineData("checksum")]
+    [InlineData("size")]
+    public async Task ManagedRetryCannotOverwriteUncertainOrMismatchedReservedFile(string mismatch)
+    {
+        await using var fixture = await Fixture.CreateAsync(enabled: true);
+        var binding = await fixture.CreateBindingAsync();
+        var runtime = fixture.CreateManagedRuntime(fixture.Db, loseAcknowledgement: true);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => PrepareAsync());
+        runtime.Provider.LoseAcknowledgement = false;
+        runtime.Provider.RewriteHead = result => mismatch switch
+        {
+            "unknown" => result with { Status = StorageOperationStatus.Unknown },
+            "checksum" => result with { Sha256 = new string('0', 64) },
+            _ => result with { SizeBytes = result.SizeBytes + 1 }
+        };
+        await Assert.ThrowsAsync<InvalidOperationException>(() => PrepareAsync());
+        Assert.Equal(1, runtime.Provider.PutCalls);
+        Assert.Empty(await fixture.Db.MessengerDocumentDeliveries.AsNoTracking().ToArrayAsync());
+        Assert.Empty(await fixture.Db.StorageProductBindings.AsNoTracking().ToArrayAsync());
+        Assert.Single(await fixture.Db.StorageCapacityReservations.AsNoTracking().Where(row => !row.IdempotencyKey.StartsWith("stage:")).ToArrayAsync());
+
+        Task<PreparedMessengerDocumentDelivery> PrepareAsync() => runtime.Service.PrepareCaseDocumentAsync(
+            fixture.UserId, fixture.DocumentId, binding.Id, null, CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task ManagedPreparationRequiresDurableReservationBeforeProviderIo()
+    {
+        await using var fixture = await Fixture.CreateAsync(enabled: true);
+        var binding = await fixture.CreateBindingAsync();
+        var runtime = fixture.CreateManagedRuntime(fixture.Db);
+        runtime.Options.CurrentValue.UploadCapacityChecksEnabled = false;
+        await Assert.ThrowsAsync<InvalidOperationException>(() => runtime.Service.PrepareCaseDocumentAsync(
+            fixture.UserId, fixture.DocumentId, binding.Id, null, CancellationToken.None));
+        Assert.Equal(0, runtime.Provider.PutCalls);
+        Assert.Empty(await fixture.Db.MessengerDocumentDeliveries.AsNoTracking().ToArrayAsync());
+        Assert.Empty(await fixture.Db.StorageObjects.AsNoTracking().ToArrayAsync());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FailedSnapshotRegistrationDoesNotLeaveUnlinkedFile(bool generated)
+    {
+        await using var fixture = await Fixture.CreateAsync(enabled: true);
+        var binding = await fixture.CreateBindingAsync();
+        await using var db = fixture.CreateIndependentContext(new RejectDeliverySave());
+        var service = fixture.CreateIndependentService(db);
+        if (generated)
+        {
+            var pdf = System.Text.Encoding.ASCII.GetBytes("%PDF-1.7 generated");
+            await Assert.ThrowsAsync<IOException>(() => service.PrepareGeneratedDocumentAsync(
+                fixture.UserId, "invoice", 77, 1, fixture.ClientId, "invoice.pdf", "application/pdf",
+                new MemoryStream(pdf), pdf.Length, binding.Id, null, CancellationToken.None));
+        }
+        else
+        {
+            await Assert.ThrowsAsync<IOException>(() => service.PrepareCaseDocumentAsync(
+                fixture.UserId, fixture.DocumentId, binding.Id, null, CancellationToken.None));
+        }
+
+        Assert.Empty(await fixture.Db.MessengerDocumentDeliveries.AsNoTracking().ToArrayAsync());
+        var snapshotRoot = Path.Combine(fixture.Configuration["FileStorage:RootPath"]!, "messenger-document-deliveries");
+        Assert.Empty(Directory.Exists(snapshotRoot)
+            ? Directory.EnumerateFiles(snapshotRoot, "*", SearchOption.AllDirectories) : []);
+    }
+
+    [Fact]
+    public async Task ManagedPreparationWaitsForAllRequiredCopiesBeforePublishingLink()
+    {
+        await using var fixture = await Fixture.CreateAsync(enabled: true);
+        var binding = await fixture.CreateBindingAsync();
+        var runtime = fixture.CreateManagedRuntime(fixture.Db, requiredCopies: 2);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => PrepareAsync());
+        Assert.Empty(await fixture.Db.MessengerDocumentDeliveries.AsNoTracking().ToArrayAsync());
+        Assert.Empty(await fixture.Db.StorageProductBindings.AsNoTracking().ToArrayAsync());
+        Assert.Equal(1, await fixture.Db.StorageReplicas.AsNoTracking().CountAsync(r => r.Status == StorageReplicaStatuses.Available));
+        await runtime.Worker.ProcessBatchAsync("owned-messenger-mirror", CancellationToken.None);
+        var prepared = await PrepareAsync();
+        Assert.Equal(prepared.Delivery.Id, (await fixture.Db.StorageProductBindings.AsNoTracking().SingleAsync()).SourceId);
+        Assert.Equal(2, await fixture.Db.StorageReplicas.AsNoTracking().CountAsync(r => r.Status == StorageReplicaStatuses.Available));
+        Assert.Equal(1, runtime.Provider.PutCalls);
+
+        Task<PreparedMessengerDocumentDelivery> PrepareAsync() => runtime.Service.PrepareCaseDocumentAsync(
+            fixture.UserId, fixture.DocumentId, binding.Id, null, CancellationToken.None);
+    }
+
+    private sealed class RejectDeliverySave : SaveChangesInterceptor
+    {
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            if (eventData.Context?.ChangeTracker.Entries<MessengerDocumentDelivery>()
+                .Any(entry => entry.State == EntityState.Added) == true)
+                throw new IOException("Owned synthetic delivery registration failure.");
+            return ValueTask.FromResult(result);
+        }
+    }
+
+    [Theory]
+    [InlineData("available")]
+    [InlineData("unavailable")]
+    [InlineData("wrongChecksum")]
+    [InlineData("wrongSize")]
+    [InlineData("expiresDuringRead")]
+    [InlineData("cancelledDuringRead")]
+    [InlineData("invalidToken")]
+    public async Task ManagedDownload_VerifiesSnapshotBeforeConsumingLink(string scenario)
+    {
+        await using var fixture = await Fixture.CreateAsync(enabled: true);
+        var binding = await fixture.CreateBindingAsync();
+        var prepared = await fixture.Service.PrepareCaseDocumentAsync(fixture.UserId, fixture.DocumentId, binding.Id, null, CancellationToken.None);
+        var bytes = System.Text.Encoding.UTF8.GetBytes(fixture.ExpectedContent);
+        var reader = new ManagedSnapshotReader(bytes, fixture.ExpectedChecksum)
+        {
+            Unavailable = scenario == "unavailable",
+            WrongChecksum = scenario == "wrongChecksum",
+            WrongSize = scenario == "wrongSize",
+        };
+        if (scenario == "expiresDuringRead")
+            reader.BeforeRead = async () =>
+            {
+                await fixture.Db.MessengerDocumentDeliveries.Where(item => item.Id == prepared.Delivery.Id)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.LinkExpiresAt, DateTime.UtcNow.AddMinutes(-1)));
+            };
+        if (scenario == "cancelledDuringRead")
+            reader.BeforeRead = async () =>
+            {
+                await fixture.Db.MessengerDocumentDeliveries.Where(item => item.Id == prepared.Delivery.Id)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.CancelledAt, DateTime.UtcNow));
+            };
+        var service = fixture.CreateIndependentService(fixture.Db, reader);
+        var controller = new PublicMessengerDocumentDeliveriesController(service, fixture.Db, fixture.Configuration)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
+        };
+        var result = await controller.DownloadSecurely(prepared.Delivery.PublicId,
+            new MessengerDocumentDownloadRequest { Token = scenario == "invalidToken" ? "wrong-token" : prepared.Token! }, CancellationToken.None);
+        var stored = await fixture.Db.MessengerDocumentDeliveries.AsNoTracking().SingleAsync(item => item.Id == prepared.Delivery.Id);
+        if (scenario == "available")
+        {
+            var download = Assert.IsType<FileStreamResult>(result);
+            Assert.False(download.EnableRangeProcessing);
+            Assert.Equal("no-store, private", controller.Response.Headers.CacheControl);
+            Assert.Equal("no-referrer", controller.Response.Headers["Referrer-Policy"]);
+            Assert.Equal("noindex, nofollow, noarchive", controller.Response.Headers["X-Robots-Tag"]);
+            await using var stream = download.FileStream;
+            using var memory = new MemoryStream();
+            await stream.CopyToAsync(memory);
+            Assert.Equal(bytes, memory.ToArray());
+            Assert.Equal(1, stored.DownloadCount);
+            Assert.Null(await service.ConsumeDownloadAsync(prepared.Delivery.PublicId, prepared.Token!, CancellationToken.None));
+            Assert.Equal(1, reader.Calls);
+        }
+        else
+        {
+            Assert.IsType<NotFoundResult>(result);
+            Assert.Equal(0, stored.DownloadCount);
+            Assert.Null(stored.ReadAt);
+            Assert.Equal(scenario == "invalidToken" ? 0 : 1, reader.Calls);
+            Assert.All(reader.Streams, stream => Assert.True(stream.Disposed));
+            if (scenario is "unavailable" or "wrongChecksum" or "wrongSize")
+            {
+                reader.Unavailable = reader.WrongChecksum = reader.WrongSize = false;
+                await using var recovered = await service.ConsumeDownloadAsync(prepared.Delivery.PublicId, prepared.Token!, CancellationToken.None);
+                Assert.NotNull(recovered);
+                Assert.NotNull(recovered.Content);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task ManagedParallelDownload_ConsumesOnceAndClosesLosingStream()
+    {
+        await using var fixture = await Fixture.CreateAsync(enabled: true);
+        var binding = await fixture.CreateBindingAsync();
+        var prepared = await fixture.Service.PrepareCaseDocumentAsync(fixture.UserId, fixture.DocumentId, binding.Id, null, CancellationToken.None);
+        await using var firstDb = fixture.CreateIndependentContext();
+        await using var secondDb = fixture.CreateIndependentContext();
+        var bytes = System.Text.Encoding.UTF8.GetBytes(fixture.ExpectedContent);
+        var bothReaders = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var readsStarted = 0;
+        var firstReader = new ManagedSnapshotReader(bytes, fixture.ExpectedChecksum) { BeforeRead = WaitForBothReadersAsync };
+        var secondReader = new ManagedSnapshotReader(bytes, fixture.ExpectedChecksum) { BeforeRead = WaitForBothReadersAsync };
+        var results = await Task.WhenAll(
+            fixture.CreateIndependentService(firstDb, firstReader).ConsumeDownloadAsync(prepared.Delivery.PublicId, prepared.Token!, CancellationToken.None),
+            fixture.CreateIndependentService(secondDb, secondReader).ConsumeDownloadAsync(prepared.Delivery.PublicId, prepared.Token!, CancellationToken.None));
+        var winner = Assert.Single(results, item => item is not null)!;
+        Assert.Equal(1, firstReader.Calls);
+        Assert.Equal(1, secondReader.Calls);
+        Assert.Single(firstReader.Streams.Concat(secondReader.Streams), stream => stream.Disposed);
+        await winner.DisposeAsync();
+        Assert.All(firstReader.Streams.Concat(secondReader.Streams), stream => Assert.True(stream.Disposed));
+        await using var verification = fixture.CreateIndependentContext();
+        Assert.Equal(1, (await verification.MessengerDocumentDeliveries.AsNoTracking().SingleAsync()).DownloadCount);
+        async Task WaitForBothReadersAsync()
+        {
+            if (Interlocked.Increment(ref readsStarted) == 2) bothReaders.TrySetResult();
+            await bothReaders.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+    }
+
+    private sealed class TrackedReadStream(byte[] bytes) : MemoryStream(bytes, false)
+    {
+        public bool Disposed { get; private set; }
+        protected override void Dispose(bool disposing) { Disposed = true; base.Dispose(disposing); }
+    }
+
+    private sealed class ManagedSnapshotReader(byte[] bytes, string checksum) : IProductStorageReader
+    {
+        public int Calls { get; private set; }
+        public bool Unavailable { get; set; }
+        public bool WrongChecksum { get; set; }
+        public bool WrongSize { get; set; }
+        public Func<Task>? BeforeRead { get; set; }
+        public List<TrackedReadStream> Streams { get; } = [];
+        public async Task<ProductStorageReadResult> OpenReadAsync(string source, long fileId, string logicalName, string contentType, CancellationToken cancellationToken)
+        {
+            Calls++;
+            Assert.Equal(LegacyStorageSources.MessengerSnapshots, source);
+            if (BeforeRead is not null) await BeforeRead();
+            if (Unavailable) return new(ProductStorageReadStatus.Unavailable);
+            var stream = new TrackedReadStream(bytes);
+            Streams.Add(stream);
+            return new(ProductStorageReadStatus.Available, new(LegacyStorageSources.GetObjectId(source, fileId), 1,
+                contentType, logicalName, WrongSize ? bytes.Length + 1 : bytes.Length, stream, "mirror",
+                WrongChecksum ? new string('0', 64) : checksum.ToLowerInvariant()));
+        }
+    }
     [Fact]
     public void DirectAttachmentsRemainDisabledWithoutAntivirusAndProviderLimit()
     {
@@ -495,7 +883,7 @@ public sealed class MessengerDocumentDeliveryServiceTests
             _databaseConnectionString = databaseConnectionString;
         }
 
-        public static async Task<Fixture> CreateAsync(bool enabled)
+        public static async Task<Fixture> CreateAsync(bool enabled, bool separateStorageRoot = false)
         {
             var root = Path.Combine(Path.GetTempPath(), $"payplanner-messenger-delivery-{Guid.NewGuid():N}");
             Directory.CreateDirectory(root);
@@ -523,7 +911,7 @@ public sealed class MessengerDocumentDeliveryServiceTests
             var configuration = new ConfigurationBuilder()
                 .AddInMemoryCollection(new Dictionary<string, string?>
                 {
-                    ["FileStorage:RootPath"] = root,
+                    ["FileStorage:RootPath"] = separateStorageRoot ? Path.Combine(root, "files") : root,
                     ["MessengerDocumentDelivery:Enabled"] = enabled.ToString(),
                     ["MessengerDocumentDelivery:LinkLifetimeHours"] = "24",
                     ["MessengerDocumentDelivery:PublicBaseUrl"] = "https://crm.example.test",
@@ -570,7 +958,7 @@ public sealed class MessengerDocumentDeliveryServiceTests
             return new PaymentContext(options, useObjectAuditModel: false);
         }
 
-        public MessengerDocumentDeliveryService CreateIndependentService(PaymentContext db)
+        public MessengerDocumentDeliveryService CreateIndependentService(PaymentContext db, IProductStorageReader? productStorageReader = null)
         {
             var environment = new TestEnvironment(_root);
             var storage = new LocalCaseDocumentStorage(environment, Configuration);
@@ -579,7 +967,41 @@ public sealed class MessengerDocumentDeliveryServiceTests
                 storage,
                 DataProtectionProvider,
                 environment,
-                Configuration);
+                Configuration, productStorageReader);
+        }
+
+        public (MessengerDocumentDeliveryService Service, StorageOperationProcessor Worker, CountingLocalProvider Provider,
+            TestStorageOptions Options) CreateManagedRuntime(PaymentContext db, bool loseAcknowledgement = false, int requiredCopies = 1)
+        {
+            var environment = new TestEnvironment(_root);
+            var provider = new CountingLocalProvider(new LocalStorageProvider(environment, Configuration))
+            { LoseAcknowledgement = loseAcknowledgement };
+            var mirrorConfiguration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+            { ["StorageOrchestration:LocalRoot"] = Path.Combine(_root, "managed-mirror") }).Build();
+            var mirror = new CountingLocalProvider(new LocalStorageProvider(environment, mirrorConfiguration), "mirror");
+            var registry = new StorageProviderRegistry(requiredCopies == 1 ? [provider, new LegacyLocalStorageProvider(environment, Configuration)] : [provider, mirror, new LegacyLocalStorageProvider(environment, Configuration)]);
+            var options = new TestStorageOptions(new()
+            {
+                Enabled = true,
+                UploadCapacityChecksEnabled = true,
+                ProductWriteEnabledClasses = ["messenger-delivery"],
+                ProductReadEnabledClasses = ["messenger-delivery"],
+                WorkerEnabled = true,
+                ProviderConnections = new() { ["mirror"] = "owned" },
+                DefaultPolicy = new()
+                {
+                    RequiredCopies = requiredCopies,
+                    WriteProviders = requiredCopies == 1 ? ["local"] : ["local", "mirror"],
+                    ReadProviders = requiredCopies == 1 ? ["local"] : ["local", "mirror"]
+                }
+            });
+            var policy = new StoragePolicyService(options, registry);
+            var storage = new StorageObjectService(db, policy, registry, options);
+            var reader = new ProductStorageReader(db, storage, options);
+            var service = new MessengerDocumentDeliveryService(db, new LocalCaseDocumentStorage(environment, Configuration),
+                DataProtectionProvider, environment, Configuration, reader, managedStorage: storage,
+                storagePublisher: new ProductStorageBindingService(db, policy), storageOptions: options, stageCapacity: new StorageStageCapacityService(db, registry, options, environment, Configuration));
+            return (service, new(db, registry, options, TimeProvider.System, NullLogger<StorageOperationProcessor>.Instance), provider, options);
         }
 
         public Task<MessengerRecipientBinding> CreateBindingAsync()
@@ -605,6 +1027,39 @@ public sealed class MessengerDocumentDeliveryServiceTests
                 Directory.Delete(_root, recursive: true);
             }
         }
+    }
+
+    private sealed class TestStorageOptions(StorageOrchestrationOptions value) : IOptionsMonitor<StorageOrchestrationOptions>
+    {
+        public StorageOrchestrationOptions CurrentValue => value;
+        public StorageOrchestrationOptions Get(string? name) => value;
+        public IDisposable? OnChange(Action<StorageOrchestrationOptions, string?> listener) => null;
+    }
+
+    private sealed class CountingLocalProvider(IStorageProvider inner, string? key = null) : IStorageProvider, IStorageCapacityProvider
+    {
+        public int PutCalls { get; private set; }
+        public bool LoseAcknowledgement { get; set; }
+        public Func<StorageObjectMetadata, StorageObjectMetadata>? RewriteHead { get; set; }
+        public string Key => key ?? inner.Key;
+        public StorageProviderCapabilities Capabilities => inner.Capabilities;
+        public Task<StorageCapacityResource> ObserveCapacityAsync(string resourceKey, string? connectionId, long minimumFreeBytes, CancellationToken ct)
+            => ((IStorageCapacityProvider)inner).ObserveCapacityAsync(resourceKey, key is null ? connectionId : null, minimumFreeBytes, ct);
+        public async Task<StorageWriteResult> PutAsync(StorageWriteRequest request, CancellationToken ct)
+        {
+            PutCalls++;
+            var result = await inner.PutAsync(request, ct);
+            if (LoseAcknowledgement && result.Status == StorageOperationStatus.Succeeded)
+                return result with { Status = StorageOperationStatus.Unknown, Error = "Owned lost acknowledgement" };
+            return result;
+        }
+        public async Task<StorageObjectMetadata> HeadAsync(string locator, CancellationToken ct)
+        {
+            var result = await inner.HeadAsync(locator, ct);
+            return RewriteHead?.Invoke(result) ?? result;
+        }
+        public Task<StorageReadResult> OpenReadAsync(string locator, CancellationToken ct) => inner.OpenReadAsync(locator, ct);
+        public Task<StorageDeleteResult> DeleteAsync(string locator, CancellationToken ct) => inner.DeleteAsync(locator, ct);
     }
 
     private sealed class ParallelSelectBarrier : DbCommandInterceptor

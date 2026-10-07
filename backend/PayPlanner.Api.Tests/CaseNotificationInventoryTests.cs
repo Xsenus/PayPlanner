@@ -106,11 +106,12 @@ public class CaseNotificationInventoryTests
             "NotifyCourtSyncFailedForCaseAsync",
             "ClientCaseStageClassifier.IsPretrial",
             "NotifyCourtSyncFailedAsync");
-        AssertMethodContains(
-            source,
-            "AddCaseDocumentUserNotificationsAsync",
-            "ResolveCaseNotificationRecipientIdsAsync",
-            "NotifyCaseDocumentAsync");
+        AssertMethodContains(source, "AddCaseDocumentUserNotificationsAsync", "CreateCaseDocumentNotifications().NotifyAsync");
+        var documentNotifications = ReadSourceFile("backend", "Services", "Cases", "CaseDocumentNotificationService.cs");
+        AssertMethodContains(documentNotifications, "NotifyAsync", "CaseNotificationRecipients.ResolveAsync", "NotifyCaseDocumentAsync");
+        var publicationRecords = ReadSourceFile("backend", "Services", "Cases", "CaseDocumentPublicationRecords.cs");
+        AssertMethodContains(source, "UploadDocumentVersionCore", "PersistUploadAsync");
+        AssertMethodContains(publicationRecords, "PersistUploadAsync", "CurrentTransaction", "AddAuditEvent", "notifications.NotifyAsync");
         AssertMethodContains(
             source,
             "UploadDocumentVersionCore",
@@ -119,12 +120,9 @@ public class CaseNotificationInventoryTests
             source,
             "UpdateDocumentCore",
             "AddCaseDocumentUserNotificationsAsync");
-        AssertMethodContains(
-            source,
-            "ResolveCaseNotificationRecipientIdsAsync",
-            "ResolveDataVisibilitiesForUsersAsync",
-            "visibility.SeesAll",
-            "visibility.CanSeeUser");
+        AssertMethodContains(source, "ResolveCaseNotificationRecipientIdsAsync", "CaseNotificationRecipients.ResolveAsync");
+        var recipients = ReadSourceFile("backend", "Services", "Cases", "CaseNotificationRecipients.cs");
+        AssertMethodContains(recipients, "ResolveAsync", "ResolveDataVisibilitiesForUsersAsync", "visibility.SeesAll", "visibility.CanSeeUser");
     }
 
     [Fact]
@@ -255,6 +253,13 @@ public class CaseNotificationInventoryTests
         Assert.True(methodMatch.Success, $"Method {methodName} was not found.");
 
         var bodyStart = source.IndexOf('{', methodMatch.Index + methodMatch.Length);
+        var arrowStart = source.IndexOf("=>", methodMatch.Index + methodMatch.Length, StringComparison.Ordinal);
+        if (arrowStart >= 0 && (bodyStart < 0 || arrowStart < bodyStart))
+        {
+            var end = source.IndexOf(';', arrowStart);
+            Assert.True(end >= 0, $"Method {methodName} expression end was not found.");
+            return source[arrowStart..(end + 1)];
+        }
         Assert.True(bodyStart >= 0, $"Method {methodName} body start was not found.");
 
         var depth = 0;
@@ -282,7 +287,7 @@ public class CaseNotificationInventoryTests
 
     private static string ResolveRepositoryRoot()
     {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        var directory = TestRepository.FindDirectory();
         while (directory is not null)
         {
             if (File.Exists(Path.Combine(directory.FullName, "backend", "PayPlanner.Api.csproj")))

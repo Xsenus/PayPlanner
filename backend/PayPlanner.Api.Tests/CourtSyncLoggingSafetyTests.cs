@@ -37,7 +37,7 @@ public sealed class CourtSyncLoggingSafetyTests
 
     private static string ResolveRepositoryFile(params string[] pathParts)
     {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        var directory = TestRepository.FindDirectory();
         while (directory is not null)
         {
             var candidate = Path.Combine([directory.FullName, .. pathParts]);
