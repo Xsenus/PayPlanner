@@ -53,16 +53,10 @@ jobs:
           dotnet-version: "9.0.x"
 
       - name: Restore backend
-        run: dotnet restore "${{ env.BE_SLN }}"
+        run: dotnet restore "${{ env.BE_SLN }}" --force -p:PayPlannerReleaseAudit=true
 
       - name: Verify backend formatting
         run: dotnet format "${{ env.BE_SLN }}" --verify-no-changes --no-restore --verbosity minimal
-
-      - name: Audit backend packages
-        run: |
-          dotnet list "${{ env.BE_SLN }}" package --vulnerable --include-transitive || {
-            echo "Backend package audit reported advisories or could not complete; continuing deploy after reporting."
-          }
 
       - name: Install PostgreSQL 17 client for restore drill
         run: |
@@ -75,16 +69,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y postgresql-client-17
 
-      - name: Test backend
-        env:
-          PAYPLANNER_TEST_POSTGRES: Host=127.0.0.1;Port=5432;Database=postgres;Username=postgres;Password=postgres;Pooling=false
-          PAYPLANNER_TEST_PG_DUMP: /usr/lib/postgresql/17/bin/pg_dump
-          PAYPLANNER_TEST_PSQL: /usr/lib/postgresql/17/bin/psql
-        run: dotnet test backend/PayPlanner.Api.Tests/PayPlanner.Api.Tests.csproj --no-restore
-
-      - name: Test deploy backup retention
-        run: bash scripts/prune-deploy-backups.test.sh
-
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
@@ -94,6 +78,37 @@ jobs:
 
       - name: Install FE deps
         run: npm ci
+
+      - name: Install browsers for writable and restored CRM verification
+        run: npx playwright install --with-deps chromium chrome
+
+      - name: Install pinned Playwright CLI for writable CRM verification
+        run: |
+          npm install --global @playwright/cli@0.1.22
+          printf 'PAYPLANNER_TEST_PLAYWRIGHT_CLI=%s/@playwright/cli/playwright-cli.js\n' "$(npm root --global)" >> "$GITHUB_ENV"
+          printf 'PAYPLANNER_TEST_BROWSER=chrome\n' >> "$GITHUB_ENV"
+
+      - name: Test backend
+        env:
+          BackgroundServices__Enabled: "false"
+          Email__Enabled: "false"
+          PAYPLANNER_TEST_POSTGRES: Host=127.0.0.1;Port=5432;Database=postgres;Username=postgres;Password=postgres;Pooling=false
+          PAYPLANNER_TEST_PG_DUMP: /usr/lib/postgresql/17/bin/pg_dump
+          PAYPLANNER_TEST_PSQL: /usr/lib/postgresql/17/bin/psql
+        run: dotnet test backend/PayPlanner.Api.Tests/PayPlanner.Api.Tests.csproj --no-restore
+
+      - name: Test deploy backup retention
+        run: bash scripts/prune-deploy-backups.test.sh
+
+      - name: Verify restored CRM through HTTP and browser
+        env:
+          PAYPLANNER_TEST_RESTORED_BROWSER: "true"
+          BackgroundServices__Enabled: "false"
+          Email__Enabled: "false"
+          PAYPLANNER_TEST_POSTGRES: Host=127.0.0.1;Port=5432;Database=postgres;Username=postgres;Password=postgres;Pooling=false
+          PAYPLANNER_TEST_PG_DUMP: /usr/lib/postgresql/17/bin/pg_dump
+          PAYPLANNER_TEST_PSQL: /usr/lib/postgresql/17/bin/psql
+        run: dotnet test backend/PayPlanner.Api.Tests/PayPlanner.Api.Tests.csproj --no-build --no-restore --filter 'FullyQualifiedName~RestoredFullModelQualifiesProtectedSettingsWithCopiedKeysWithoutSourceRing|FullyQualifiedName~FullModelBackupRestoresReadableManagedGenerationsWithoutSource'
 
       - name: Lint FE
         run: npm run lint
@@ -125,7 +140,7 @@ jobs:
         run: npm run test:legal-flags:strict -- --warn-on-feature-flags-summary-failure
 
       - name: Publish backend
-        run: dotnet publish "${{ env.BE_CSPROJ }}" -c Release -o "${{ env.OUT_DIR }}/be"
+        run: dotnet publish "${{ env.BE_CSPROJ }}" -c Release --no-restore -o "${{ env.OUT_DIR }}/be"
 
       - name: Build FE
         env:

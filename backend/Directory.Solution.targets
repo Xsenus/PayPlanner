@@ -1,0 +1,14 @@
+<Project>
+  <Target Name="PayPlannerRequireNuGetAuditCoverage"
+          AfterTargets="Restore"
+          Condition="'$(PayPlannerReleaseAudit)' == 'true'">
+    <Error Condition="!$([System.Text.RegularExpressions.Regex]::IsMatch('$(RestoreProjectCount)', '^[0-9]+$')) Or !$([System.Text.RegularExpressions.Regex]::IsMatch('$(RestoreProjectsAuditedCount)', '^[0-9]+$')) Or !$([System.Text.RegularExpressions.Regex]::IsMatch('$(RestoreSkippedCount)', '^[0-9]+$'))"
+           Text="PP_NUGET_AUDIT_COUNTERS: restore did not provide valid audit coverage counters." />
+    <Error Condition="'$(RestoreProjectCount)' &lt;= '0'"
+           Text="PP_NUGET_AUDIT_EMPTY: no projects were audited." />
+    <Error Condition="'$(RestoreProjectsAuditedCount)' != '$(RestoreProjectCount)' Or '$(RestoreSkippedCount)' != '0'"
+           Text="PP_NUGET_AUDIT_INCOMPLETE: restore must audit every project without skipping any. Projects=$(RestoreProjectCount); audited=$(RestoreProjectsAuditedCount); skipped=$(RestoreSkippedCount)." />
+    <Message Importance="high"
+             Text="PP_NUGET_AUDIT_COMPLETE: projects=$(RestoreProjectCount); audited=$(RestoreProjectsAuditedCount); skipped=$(RestoreSkippedCount)." />
+  </Target>
+</Project>
