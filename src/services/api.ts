@@ -1,13 +1,84 @@
+import { createClientRequestId } from '../utils/clientRequestId';
 import { API_BASE_URL } from './apiBaseUrl';
+import { apiFetch as fetch } from './apiTransport';
 import { authService } from './authService';
+import { TaskFileUploadAcceptedError } from './taskFileUploadReceipt';
+import { beginCaseDocumentUpload, beginCaseDocumentGeneration, confirmCaseDocumentUpload, confirmPublishedCaseDocumentUploads,
+  confirmRetiredCaseDocumentUpload, confirmCompletedCaseDocumentUpload, isCaseDocumentUploadActorCurrent,
+  getUnconfirmedCaseDocumentUploadKeys } from './caseDocumentUploadAttempts';
 import type { TaskStickerStyles } from '../utils/taskStickerStyles';
 
 export const AUTH_SESSION_EXPIRED_EVENT = 'payplanner:auth-session-expired';
+export interface TaskFileUploadState {
+  uploadKey: string;
+  fileName: string;
+  status: 'uploaded' | 'waiting' | 'retrying' | 'paused' | 'failed' | 'manualRetry';
+  fileId: number | null;
+  message: string;
+}
+export interface TaskFileUploadPage {
+  items: TaskFileUploadState[];
+  nextCursor: string | null;
+}
+export interface CaseDocumentGenerationState {
+  kind: string;
+  requestSha256: string;
+  templateKey: string | null;
+  documentType: string | null;
+  status: string | null;
+  sourceVerified: boolean;
+  financialKind?: 'invoice' | 'act' | 'contract' | null;
+}
+export interface CaseDocumentUploadState {
+  uploadKey: string;
+  fileName: string | null;
+  status: 'uploaded' | 'waiting' | 'retrying' | 'manualRetry' | 'paused' | 'failed' | 'unknown' | 'retired';
+  documentId: number | null;
+  version: number | null;
+  sha256: string | null;
+  contentType: string | null;
+  requestedDocumentKey: string | null;
+  documentKey: string | null;
+  documentType: string | null;
+  requestedStatus: string | null;
+  message: string;
+  generation?: CaseDocumentGenerationState | null;
+}
+export interface CaseDocumentUploadPage {
+  items: CaseDocumentUploadState[];
+  nextCursor: string | null;
+}
+export type StorageOperationStatus = 'pending' | 'running' | 'unknown' | 'succeeded' | 'failed' | 'deadLetter';
+export interface StorageCasePublicationOperationDto {
+  id: string;
+  storageObjectId: string;
+  fileName: string;
+  status: StorageOperationStatus;
+  attemptCount: number;
+  nextAttemptAt?: string | null;
+  leaseExpiresAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string | null;
+  canRetry: boolean;
+  isRetired?: boolean;
+}
+export interface StorageCasePublicationPageDto {
+  items: StorageCasePublicationOperationDto[];
+  nextCursor: string | null;
+}
+class ApiHttpFailure extends Error {
+  constructor(public readonly status: number, message: string) { super(message); }
+}
 const AUTH_SESSION_EXPIRED_MESSAGE = 'Сессия истекла. Войдите снова.';
 const AUTH_TOKEN_STORAGE_KEYS = ['pp_token', 'auth_token', 'pp.jwt'];
 
 type ApiRequestOptions = RequestInit & {
   suppressAuthSessionExpired?: boolean;
+  expectedStatus?: number;
+  caseGenerationKey?: string;
+  caseUploadActorToken?: string | null;
+  taskUploadReceipt?: { taskId: number; uploadKey: string; actorToken: string | null };
 };
 
 export function getApiBaseUrl(): string {
@@ -1503,6 +1574,46 @@ export interface DatabaseStatusDto {
   supportsSqliteFileImport: boolean;
 }
 
+export interface StorageCapacityHealthDto {
+  status: 'healthy' | 'degraded';
+  pendingCapacityReservations: number;
+  oldestCapacityReservationAt?: string | null;
+  pendingStageCapacityReservations: number;
+  oldestStageCapacityReservationAt?: string | null;
+}
+
+export interface StorageStageRecoveryItemDto {
+  key: string;
+  status: 'eligible' | 'settled' | 'incompleteFile' | 'unavailableFile'
+    | 'invalidAuthority' | 'changedVolume' | 'unsafeFile'
+    | 'writerNotProvenStopped' | 'eligibleMissingStage' | 'releasedMissingStage'
+    | 'eligibleReleasedMarker' | 'releasedMarkerRemoved' | 'markerRetained'
+    | 'markerAlreadyAbsent' | 'markerNotProvenStopped' | 'changedAuthority';
+  relativePath?: string | null;
+  expectedBytes: number;
+  observedBytes?: number | null;
+  updatedAt: string;
+}
+
+export interface StorageStageRecoveryReportDto {
+  inspected: number;
+  eligible: number;
+  settled: number;
+  retained: number;
+  hasMore: boolean;
+  nextAfterKey?: string | null;
+  items: StorageStageRecoveryItemDto[];
+}
+
+export interface StorageStageWriterMarkerRecoveryReportDto {
+  inspected: number;
+  eligible: number;
+  removed: number;
+  hasMore: boolean;
+  nextAfterKey?: string | null;
+  items: StorageStageRecoveryItemDto[];
+}
+
 export interface DatabaseBackupFileDto {
   fileName: string;
   relativePath: string;
@@ -2759,16 +2870,24 @@ export async function extractResponseErrorMessage(response: Response): Promise<s
 }
 
 export class ApiService {
+  private readonly taskUploadKeys = new WeakMap<File, Map<string, string>>();
   private taskJournalSettingsRequest: Promise<TaskJournalSettingsDto> | null = null;
 
   private async fetchWithSessionRefresh(
     url: string,
     options: RequestInit,
     suppressAuthSessionExpired = false,
+    caseUploadActorToken?: string | null,
   ): Promise<{ response: Response; sessionRefreshed: boolean }> {
     let token = await authService.ensureFreshSession().catch(() => getAuthToken());
 
     const execute = (authToken: string | null) => {
+      if (caseUploadActorToken !== undefined) {
+        if (options.signal?.aborted) throw new DOMException('Запрос отменён.', 'AbortError');
+        if (!isCaseDocumentUploadActorCurrent(caseUploadActorToken, authToken)
+          || !isCaseDocumentUploadActorCurrent(caseUploadActorToken, getAuthToken()))
+          throw new ApiHttpFailure(403, 'HTTP 403: сессия изменилась. Обновите состояние загрузок.');
+      }
       const headers: Record<string, string> = {
         ...(options.headers as Record<string, string> | undefined),
       };
@@ -2780,6 +2899,8 @@ export class ApiService {
     };
 
     let response = await execute(token);
+    if (caseUploadActorToken !== undefined && !isCaseDocumentUploadActorCurrent(caseUploadActorToken, getAuthToken()))
+      throw new ApiHttpFailure(403, 'HTTP 403: сессия изменилась. Обновите состояние загрузок.');
     let sessionRefreshed = false;
 
     if (response.status === 401 && token && !suppressAuthSessionExpired) {
@@ -2794,11 +2915,13 @@ export class ApiService {
       }
     }
 
+    if (caseUploadActorToken !== undefined && !isCaseDocumentUploadActorCurrent(caseUploadActorToken, getAuthToken()))
+      throw new ApiHttpFailure(403, 'HTTP 403: сессия изменилась. Обновите состояние загрузок.');
     return { response, sessionRefreshed };
   }
 
   private async request<T>(endpoint: string, options?: ApiRequestOptions): Promise<T> {
-    const { suppressAuthSessionExpired = false, ...fetchOptions } = options ?? {};
+    const { suppressAuthSessionExpired = false, expectedStatus, caseGenerationKey, caseUploadActorToken, taskUploadReceipt, ...fetchOptions } = options ?? {};
     const url = `${API_BASE_URL}${endpoint}`;
     const isFormData = typeof FormData !== 'undefined' && fetchOptions.body instanceof FormData;
     const headers: Record<string, string> = {
@@ -2809,20 +2932,41 @@ export class ApiService {
     const { response, sessionRefreshed } = await this.fetchWithSessionRefresh(url, {
       ...fetchOptions,
       headers,
-    }, suppressAuthSessionExpired);
+    }, suppressAuthSessionExpired, caseUploadActorToken);
 
     if (!response.ok) {
+      if (response.status === 503 && taskUploadReceipt
+        && response.headers.get('content-type')?.includes('application/json')
+        && isCaseDocumentUploadActorCurrent(taskUploadReceipt.actorToken, getAuthToken())) {
+        let receipt: unknown;
+        try { receipt = await response.clone().json(); }
+        catch { /* An unreadable error response is not an acknowledgement. */ }
+        if (receipt && typeof receipt === 'object' && !Array.isArray(receipt)) {
+          const value = receipt as Record<string, unknown>;
+          if (value.code === 'task_file_copies_pending' && value.taskId === taskUploadReceipt.taskId
+            && typeof value.uploadKey === 'string' && value.uploadKey.toLowerCase() === taskUploadReceipt.uploadKey.toLowerCase()
+            && (value.fileId === null || value.fileId === undefined)
+            && isCaseDocumentUploadActorCurrent(taskUploadReceipt.actorToken, getAuthToken()))
+            throw new TaskFileUploadAcceptedError(taskUploadReceipt.taskId, taskUploadReceipt.uploadKey);
+        }
+      }
       if (response.status === 401 && !suppressAuthSessionExpired && !sessionRefreshed) {
         notifyAuthSessionExpired();
-        throw new Error(`HTTP 401 Unauthorized at ${url} - ${AUTH_SESSION_EXPIRED_MESSAGE}`);
+        throw new ApiHttpFailure(401, `HTTP 401 Unauthorized at ${url} - ${AUTH_SESSION_EXPIRED_MESSAGE}`);
       }
 
       const text = await extractResponseErrorMessage(response);
-      throw new Error(
+      throw new ApiHttpFailure(response.status,
         `HTTP ${response.status} ${response.statusText} at ${url} ${text ? `- ${text}` : ''}`,
       );
     }
 
+    if (expectedStatus !== undefined && response.status !== expectedStatus) {
+      throw new ApiHttpFailure(response.status, `HTTP ${response.status}: результат операции ещё не подтверждён.`);
+    }
+    const acknowledgedGeneration = response.headers.get("X-Upload-Key");
+    if (caseGenerationKey && acknowledgedGeneration !== null && acknowledgedGeneration.toLowerCase() !== caseGenerationKey.toLowerCase())
+      throw new ApiHttpFailure(409, "Ответ относится к другой попытке формирования документа. Повторите исходный запрос.");
     if (response.status === 204) {
       return undefined as T;
     }
@@ -3876,6 +4020,44 @@ export class ApiService {
 
   async getDatabaseStatus() {
     return this.request<DatabaseStatusDto>('/database/status');
+  }
+
+  async getStorageCapacityHealth() {
+    return this.request<StorageCapacityHealthDto>('/storage/health');
+  }
+
+  async getStorageCasePublicationQueue(params: { status?: StorageOperationStatus | null; after?: string | null; signal?: AbortSignal } = {}) {
+    const query = new URLSearchParams({ limit: '50' });
+    if (params.status) query.set('status', params.status);
+    if (params.after != null) query.set('after', params.after);
+    return this.request<StorageCasePublicationPageDto>(`/storage/operations/case-documents?${query}`, {
+      signal: params.signal, cache: 'no-store',
+    });
+  }
+
+  async retryStorageCasePublication(id: string, signal?: AbortSignal) {
+    return this.request<{ id: string; status: 'pending' }>(`/storage/operations/${encodeURIComponent(id)}/retry`, {
+      method: 'POST', signal, cache: 'no-store',
+    });
+  }
+
+  async reconcileStorageStages(params: { apply?: boolean; afterKey?: string | null; limit?: number }) {
+    const query = new URLSearchParams({
+      apply: String(params.apply ?? false),
+      limit: String(params.limit ?? 50),
+    });
+    if (params.afterKey) query.set('afterKey', params.afterKey);
+    return this.request<StorageStageRecoveryReportDto>(`/storage/capacity/stages/reconcile?${query}`, {
+      method: 'POST',
+    });
+  }
+
+  async reconcileStorageStageMarkers(params: { apply?: boolean; afterKey?: string | null; limit?: number }) {
+    const query = new URLSearchParams({ apply: String(params.apply ?? false), limit: String(params.limit ?? 50) });
+    if (params.afterKey) query.set('afterKey', params.afterKey);
+    return this.request<StorageStageWriterMarkerRecoveryReportDto>(`/storage/capacity/stages/markers/reconcile?${query}`, {
+      method: 'POST', cache: 'no-store',
+    });
   }
 
   async getDatabaseBackupOverview() {
@@ -5264,17 +5446,47 @@ export class ApiService {
     return this.request<TaskJournalFile[]>(`/tasks/${id}/files${query}`);
   }
 
+  async getTaskFileUploadStates(id: number, signal?: AbortSignal, options: { uploadKeys?: string[]; pendingOnly?: boolean; page?: number } = {}) {
+    const query = new URLSearchParams();
+    options.uploadKeys?.forEach((key) => query.append('uploadKeys', key));
+    if (options.pendingOnly) query.set('pendingOnly', 'true');
+    if (options.page !== undefined) query.set('page', String(options.page));
+    const suffix = query.size > 0 ? `?${query}` : '';
+    return this.request<TaskFileUploadState[]>(`/tasks/${id}/files/uploads${suffix}`, {
+      signal,
+      cache: 'no-store',
+    });
+  }
+
   async uploadTaskJournalFile(id: number, file: File, documentKey?: string) {
     const form = new FormData();
     form.append('file', file);
     if (documentKey) {
       form.append('documentKey', documentKey);
     }
+    const scope = `${id}:${documentKey ?? ''}`;
+    const keys = this.taskUploadKeys.get(file) ?? new Map<string, string>();
+    const uploadKey = keys.get(scope) ?? createClientRequestId();
+    keys.set(scope, uploadKey);
+    this.taskUploadKeys.set(file, keys);
 
     return this.request<TaskJournalFile>(`/tasks/${id}/files`, {
       method: 'POST',
       body: form,
+      headers: { 'X-Upload-Key': uploadKey },
+      taskUploadReceipt: { taskId: id, uploadKey, actorToken: getAuthToken() },
     });
+  }
+
+  async getTaskFileUploadPage(id: number, signal?: AbortSignal, after?: string) {
+    const query = new URLSearchParams({ pendingOnly: 'true', includePageInfo: 'true' });
+    if (after) query.set('after', after);
+    const page = await this.request<TaskFileUploadPage>(`/tasks/${id}/files/uploads?${query}`, { signal, cache: 'no-store' });
+    return { ...page, nextCursor: page.nextCursor ?? null };
+  }
+
+  getTaskFileUploadKey(id: number, file: File, documentKey?: string) {
+    return this.taskUploadKeys.get(file)?.get(`${id}:${documentKey ?? ''}`);
   }
 
   async downloadTaskJournalFile(taskId: number, fileId: number) {
@@ -6338,8 +6550,8 @@ export class ApiService {
     return this.request<void>(`/v2/cases/${caseId}/court-recoveries/${paymentId}`, { method: 'DELETE' });
   }
 
-  async getCaseWorkOrder(caseId: number) {
-    return this.request<ClientCaseWorkOrder>(`/v2/cases/${caseId}/work-order`);
+  async getCaseWorkOrder(caseId: number, signal?: AbortSignal) {
+    return this.request<ClientCaseWorkOrder>(`/v2/cases/${caseId}/work-order`, { signal });
   }
 
   async createCaseWorkOrder(caseId: number, payload: {
@@ -6411,10 +6623,7 @@ export class ApiService {
     dueDate?: string | null;
     description?: string;
   } = {}) {
-    return this.request<ClientCaseWorkOrderInvoice>(`/v2/cases/${caseId}/work-order/create-invoice`, {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
+    return this.createFinancialWorkOrderDocument<ClientCaseWorkOrderInvoice>(caseId, 'invoice', payload);
   }
 
   async createCaseWorkOrderAct(caseId: number, payload: {
@@ -6423,10 +6632,7 @@ export class ApiService {
     title?: string;
     comment?: string;
   } = {}) {
-    return this.request<ClientCaseWorkOrderAct>(`/v2/cases/${caseId}/work-order/create-act`, {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
+    return this.createFinancialWorkOrderDocument<ClientCaseWorkOrderAct>(caseId, 'act', payload);
   }
 
   async createCaseWorkOrderContract(caseId: number, payload: {
@@ -6438,10 +6644,37 @@ export class ApiService {
     title?: string;
     description?: string;
   } = {}) {
-    return this.request<ClientCaseWorkOrderContract>(`/v2/cases/${caseId}/work-order/create-contract`, {
-      method: 'POST',
-      body: JSON.stringify(payload),
+    return this.createFinancialWorkOrderDocument<ClientCaseWorkOrderContract>(caseId, 'contract', payload);
+  }
+
+  private async createFinancialWorkOrderDocument<T extends ClientCaseWorkOrderInvoice | ClientCaseWorkOrderAct | ClientCaseWorkOrderContract>(
+    caseId: number, kind: 'invoice' | 'act' | 'contract', payload: object,
+  ): Promise<T> {
+    const token = getAuthToken();
+    const body = JSON.stringify(payload, Object.keys(payload).sort());
+    // Keep the tab registry bounded even when a description is long. This is a
+    // retry fingerprint; only the server's frozen source proves publication.
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(body));
+    const fingerprint = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+    const attempt = beginCaseDocumentGeneration(JSON.stringify(['financial', API_BASE_URL, caseId, kind, fingerprint]), token);
+    const saved = await this.request<T>(`/v2/cases/${caseId}/work-order/create-${kind}`, {
+      method: 'POST', body, headers: { 'X-Upload-Key': attempt.key }, expectedStatus: 201,
+      caseGenerationKey: attempt.key, caseUploadActorToken: token ?? undefined,
     });
+    const entityId = saved && typeof saved === 'object' ? (kind === 'invoice' && 'paymentId' in saved ? saved.paymentId
+      : kind === 'act' && 'actId' in saved ? saved.actId : kind === 'contract' && 'contractId' in saved ? saved.contractId : null) : null;
+    if (!saved || !Number.isSafeInteger(entityId) || entityId! <= 0
+      || !Number.isSafeInteger(saved.documentId) || saved.documentId! <= 0
+      || !Number.isFinite(saved.amount) || saved.amount! <= 0 || !saved.number?.trim()
+      || typeof saved.date !== 'string' || !Number.isFinite(Date.parse(saved.date))
+      || !Number.isSafeInteger(saved.workOrder?.id) || saved.workOrder.id! <= 0 || saved.workOrder.clientCaseId !== caseId
+      || (kind === 'invoice' && (!('invoiceEntityId' in saved) || !Number.isSafeInteger(saved.invoiceEntityId) || saved.invoiceEntityId! <= 0
+        || !('dueDate' in saved) || typeof saved.dueDate !== 'string' || !Number.isFinite(Date.parse(saved.dueDate))))
+      || (kind === 'act' && (!('lineItemCount' in saved) || !Number.isSafeInteger(saved.lineItemCount) || saved.lineItemCount <= 0))
+      || (kind === 'contract' && (!('startDate' in saved) || typeof saved.startDate !== 'string' || !Number.isFinite(Date.parse(saved.startDate)))))
+      throw new Error('Финансовая запись и документ ещё не подтверждены. Повторите исходную попытку.');
+    confirmCaseDocumentUpload(attempt);
+    return saved;
   }
 
   async submitCaseWorkOrderApproval(caseId: number, payload: { comment?: string } = {}) {
@@ -6660,9 +6893,18 @@ export class ApiService {
   }
 
   async generateCaseWorkOrderDocument(caseId: number) {
-    return this.request<ClientCaseDocument>(`/v2/cases/${caseId}/work-order/generate-document`, {
-      method: 'POST',
+    const token = getAuthToken();
+    const attempt = beginCaseDocumentGeneration(JSON.stringify(['work-order', API_BASE_URL, caseId]), token);
+    const saved = await this.request<ClientCaseDocument>(`/v2/cases/${caseId}/work-order/generate-document`, {
+      method: 'POST', headers: { 'X-Upload-Key': attempt.key }, expectedStatus: 201,
+      caseGenerationKey: attempt.key, caseUploadActorToken: token ?? undefined,
     });
+    if (!saved || !Number.isSafeInteger(saved.id) || saved.id <= 0 || saved.clientCaseId !== caseId
+      || !Number.isSafeInteger(saved.version) || saved.version <= 0 || !/^work-order-[1-9]\d*$/.test(saved.documentKey ?? '')
+      || saved.documentType !== 'Заказ-наряд' || !['Подготовлен', 'Согласован'].includes(saved.status))
+      throw new Error('Результат формирования заказ-наряда ещё не подтверждён. Повторите исходный запрос.');
+    confirmCaseDocumentUpload(attempt);
+    return saved;
   }
 
   async runCaseCourtSync(caseId: number, payload?: ClientCaseCourtSyncRunRequest) {
@@ -6867,8 +7109,8 @@ export class ApiService {
     return this.request<void>(`/v2/cases/${caseId}/related-parties/${relatedPartyId}`, { method: 'DELETE' });
   }
 
-  async getCaseDocuments(caseId: number) {
-    return this.request<ClientCaseDocument[]>(`/v2/cases/${caseId}/documents`);
+  async getCaseDocuments(caseId: number, signal?: AbortSignal) {
+    return this.request<ClientCaseDocument[]>(`/v2/cases/${caseId}/documents`, { signal, cache: 'no-store' });
   }
 
   async getCaseDocumentRegistry(params?: {
@@ -7077,8 +7319,8 @@ export class ApiService {
     });
   }
 
-  async getCaseDocument(documentId: number) {
-    return this.request<ClientCaseDocument>(`/case-documents/${documentId}`);
+  async getCaseDocument(documentId: number, signal?: AbortSignal) {
+    return this.request<ClientCaseDocument>(`/case-documents/${documentId}`, signal ? { signal, cache: 'no-store' } : undefined);
   }
 
   async getMessengerDocumentDeliveryConfiguration() {
@@ -7258,13 +7500,165 @@ export class ApiService {
       form.append('documentKey', payload.documentKey);
     }
 
-    return this.request<ClientCaseDocument>(`/v2/cases/${caseId}/documents`, {
-      method: 'POST',
-      body: form,
-    });
+    const attempt = beginCaseDocumentUpload(JSON.stringify(['case', API_BASE_URL, caseId, payload?.documentKey ?? '',
+      payload?.documentType?.trim() || 'Документ', payload?.status?.trim() || 'Подготовлен']), file, getAuthToken());
+    let saved: ClientCaseDocument;
+    try {
+      saved = await this.request<ClientCaseDocument>(`/v2/cases/${caseId}/documents`, {
+        method: 'POST', body: form, headers: { 'X-Upload-Key': attempt.key },
+      });
+    } catch (error) {
+      const recovered = await this.recoverCaseDocumentUpload(caseId, attempt.key, file, error, {
+        documentKey: payload?.documentKey?.trim() || null,
+        documentType: payload?.documentType?.trim() || 'Документ', status: payload?.status?.trim() || 'Подготовлен',
+      });
+      if (!recovered) throw error;
+      saved = recovered;
+    }
+    confirmCaseDocumentUpload(attempt);
+    return saved;
   }
 
-  async uploadCaseDocumentVersion(documentId: number, file: File, payload?: { documentType?: string; status?: string }) {
+  async retireCaseDocumentUpload(caseId: number, uploadKey: string, signal?: AbortSignal,
+    requestToken: string | null = getAuthToken()): Promise<CaseDocumentUploadState> {
+    if (!Number.isSafeInteger(caseId) || caseId <= 0 || !/^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(uploadKey))
+      throw new Error('Некорректный идентификатор попытки загрузки.');
+    const guard = () => {
+      if (signal?.aborted) throw new DOMException('Запрос отменён.', 'AbortError');
+      if (!isCaseDocumentUploadActorCurrent(requestToken, getAuthToken()))
+        throw new ApiHttpFailure(403, 'HTTP 403: сессия изменилась. Обновите состояние загрузок.');
+    };
+    guard();
+    const perform = async <T>(path: string, method: 'POST' | 'GET', timeoutMs: number): Promise<T> => {
+      const controller = new AbortController();
+      const relay = () => controller.abort();
+      signal?.addEventListener('abort', relay, { once: true });
+      const timeout = globalThis.setTimeout(relay, timeoutMs);
+      let rejectAbort!: () => void;
+      const aborted = new Promise<never>((_resolve, reject) => {
+        rejectAbort = () => reject(new DOMException('Проверка результата прервана.', 'AbortError'));
+        controller.signal.addEventListener('abort', rejectAbort, { once: true });
+      });
+      try {
+        guard();
+        const result = await Promise.race([this.request<T>(path, { method, signal: controller.signal, cache: 'no-store',
+          expectedStatus: 200, caseUploadActorToken: requestToken }), aborted]);
+        guard();
+        if (controller.signal.aborted) throw new DOMException('Проверка результата прервана.', 'AbortError');
+        return result;
+      } finally {
+        globalThis.clearTimeout(timeout); signal?.removeEventListener('abort', relay);
+        controller.signal.removeEventListener('abort', rejectAbort);
+      }
+    };
+    let state: CaseDocumentUploadState;
+    try {
+      state = await perform(`/v2/cases/${caseId}/documents/uploads/${encodeURIComponent(uploadKey)}/retire`, 'POST', 10000);
+    } catch (cause) {
+      guard();
+      // Lost ACK/temporary failure can be proved by one read; never replay POST
+      // automatically. A definitive denial leaves the old identity intact.
+      if (cause instanceof ApiHttpFailure && cause.status < 500 && cause.status !== 202) throw cause;
+      const query = new URLSearchParams({ uploadKeys: uploadKey });
+      const states = await perform<CaseDocumentUploadState[]>(`/v2/cases/${caseId}/documents/uploads?${query}`, 'GET', 5000);
+      if (!Array.isArray(states) || states.length !== 1) throw new Error('Результат прекращения не подтверждён. Обновите загрузки.');
+      state = states[0];
+    }
+    guard();
+    if (!state || typeof state.uploadKey !== 'string' || state.uploadKey.toLowerCase() !== uploadKey.toLowerCase()
+      || (state.status !== 'retired' && state.status !== 'uploaded')
+      || (state.status === 'uploaded' && (!Number.isSafeInteger(state.documentId) || state.documentId! <= 0
+        || !Number.isSafeInteger(state.version) || state.version! <= 0 || !state.sha256?.match(/^[a-f0-9]{64}$/i)
+        || !state.documentKey))) throw new Error('Результат прекращения не подтверждён. Обновите загрузки.');
+    const released = state.status === 'retired'
+      ? confirmRetiredCaseDocumentUpload(caseId, API_BASE_URL, state, requestToken, getAuthToken())
+      : confirmCompletedCaseDocumentUpload(caseId, API_BASE_URL, state, requestToken, getAuthToken());
+    if (!released) throw new Error('Результат прежней попытки подтверждён, но данные вкладки недоступны. Восстановите доступ и повторите проверку перед новой загрузкой.');
+    return state;
+  }
+
+  async getPendingCaseDocumentUploads(caseId: number, after?: string | null, signal?: AbortSignal)
+    : Promise<CaseDocumentUploadPage & { localPublicationConfirmed?: boolean }> {
+    const requestToken = getAuthToken();
+    const query = new URLSearchParams();
+    if (after != null) query.set('after', after);
+    const page = await this.request<CaseDocumentUploadPage>(`/v2/cases/${caseId}/documents/uploads/pending${query.size ? `?${query}` : ''}`,
+      { signal, cache: 'no-store' });
+    if (requestToken !== getAuthToken() && !isCaseDocumentUploadActorCurrent(requestToken, getAuthToken()))
+      throw new ApiHttpFailure(403, 'HTTP 403: сессия изменилась. Обновите состояние загрузок.');
+    if (!signal?.aborted) confirmPublishedCaseDocumentUploads(caseId, API_BASE_URL, page.items, requestToken, getAuthToken());
+    let localPublicationConfirmed = false;
+    if (after == null && !signal?.aborted) {
+      const keys = getUnconfirmedCaseDocumentUploadKeys(caseId, API_BASE_URL, requestToken, page.items.map((item) => item.uploadKey));
+      // The registry contains at most 64 attempts. Read at most two bounded
+      // batches, never upload again or turn discovery into published history.
+      for (let offset = 0; offset < keys.length; offset += 50) {
+        if (signal?.aborted) return page;
+        if (requestToken !== getAuthToken() && !isCaseDocumentUploadActorCurrent(requestToken, getAuthToken()))
+          throw new ApiHttpFailure(403, 'HTTP 403: сессия изменилась. Обновите состояние загрузок.');
+        const batch = keys.slice(offset, offset + 50);
+        const requested = new Set(batch);
+        const receipts = await this.getCaseDocumentUploadStates(caseId, batch, signal);
+        if (signal?.aborted) return page;
+        if (requestToken !== getAuthToken() && !isCaseDocumentUploadActorCurrent(requestToken, getAuthToken()))
+          throw new ApiHttpFailure(403, 'HTTP 403: сессия изменилась. Обновите состояние загрузок.');
+        for (const receipt of receipts) {
+          if (typeof receipt.uploadKey !== 'string' || !requested.has(receipt.uploadKey.toLowerCase())
+            || receipt.status !== 'uploaded' || !receipt.sha256?.match(/^[a-f0-9]{64}$/i)
+            || typeof receipt.documentKey !== 'string' || !receipt.documentKey.trim()) continue;
+          if (confirmCompletedCaseDocumentUpload(caseId, API_BASE_URL, receipt, requestToken, getAuthToken()))
+            localPublicationConfirmed = true;
+        }
+      }
+    }
+    if (localPublicationConfirmed) return { ...page, localPublicationConfirmed: true };
+    return page;
+  }
+
+  async getCaseDocumentUploadStates(caseId: number, uploadKeys: string[], signal?: AbortSignal,
+    options?: { acknowledgePublishedAttempts?: boolean }) {
+    if (uploadKeys.length < 1 || uploadKeys.length > 50) throw new Error('Укажите от 1 до 50 идентификаторов загрузки.');
+    const query = new URLSearchParams();
+    [...new Set(uploadKeys)].forEach((key) => query.append('uploadKeys', key));
+    const requestToken = getAuthToken();
+    const states = await this.request<CaseDocumentUploadState[]>(`/v2/cases/${caseId}/documents/uploads?${query}`, { signal, cache: 'no-store' });
+    if (requestToken !== getAuthToken() && !isCaseDocumentUploadActorCurrent(requestToken, getAuthToken()))
+      throw new ApiHttpFailure(403, 'HTTP 403: сессия изменилась. Обновите состояние загрузок.');
+    if (options?.acknowledgePublishedAttempts && !signal?.aborted) {
+      const requested = new Set(uploadKeys.map((key) => key.toLowerCase()));
+      confirmPublishedCaseDocumentUploads(caseId, API_BASE_URL,
+        states.filter((item) => requested.has(item.uploadKey.toLowerCase())), requestToken, getAuthToken());
+    }
+    return states;
+  }
+
+  private async recoverCaseDocumentUpload(caseId: number | undefined, uploadKey: string, file: File, error: unknown,
+    expected: { documentKey: string | null; documentType: string; status: string } | null) {
+    // A definitive rejection must never turn into success for an earlier file
+    // with the same browser metadata. Unknown outcomes require an exact byte proof.
+    if (!caseId || !expected || file.size > 25 * 1024 * 1024 || (error instanceof ApiHttpFailure && error.status < 500)) return null;
+    const controller = new AbortController();
+    const timeout = globalThis.setTimeout(() => controller.abort(), 5000);
+    try {
+      const states = await this.getCaseDocumentUploadStates(caseId, [uploadKey], controller.signal);
+      if (!Array.isArray(states)) return null;
+      const state = states.find((item) => item.uploadKey.toLowerCase() === uploadKey.toLowerCase());
+      if (state?.status !== 'uploaded' || state.generation != null || !state.documentId || !state.version || !state.sha256?.match(/^[a-f0-9]{64}$/i)) return null;
+      if (state.requestedDocumentKey !== expected.documentKey || state.documentType !== expected.documentType
+        || state.requestedStatus !== expected.status || state.fileName !== file.name
+        || state.contentType !== (file.type.trim() || 'application/octet-stream') || !state.documentKey) return null;
+      const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
+      const sha = Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, '0')).join('');
+      if (controller.signal.aborted || sha !== state.sha256.toLowerCase()) return null;
+      const document = await this.getCaseDocument(state.documentId, controller.signal);
+      return document.id === state.documentId && document.clientCaseId === caseId
+        && document.documentKey === state.documentKey && document.version === state.version && document.sizeBytes === file.size ? document : null;
+    } catch { return null; } // Retain the original error and unresolved identity if status/receipt cannot be proved.
+    finally { globalThis.clearTimeout(timeout); }
+  }
+
+  async uploadCaseDocumentVersion(documentId: number, file: File,
+    payload?: { documentType?: string; status?: string; clientCaseId?: number; documentKey?: string }) {
     const form = new FormData();
     form.append('file', file);
     if (payload?.documentType) {
@@ -7274,17 +7668,44 @@ export class ApiService {
       form.append('status', payload.status);
     }
 
-    return this.request<ClientCaseDocument>(`/case-documents/${documentId}/versions`, {
-      method: 'POST',
-      body: form,
-    });
+    const attempt = beginCaseDocumentUpload(JSON.stringify(['version', API_BASE_URL, documentId,
+      payload?.documentType?.trim() ?? '', payload?.status?.trim() ?? '']), file, getAuthToken());
+    let saved: ClientCaseDocument;
+    try {
+      saved = await this.request<ClientCaseDocument>(`/case-documents/${documentId}/versions`, {
+        method: 'POST', body: form, headers: { 'X-Upload-Key': attempt.key },
+      });
+    } catch (error) {
+      const recovered = await this.recoverCaseDocumentUpload(payload?.clientCaseId, attempt.key, file, error,
+        payload?.documentKey && payload.documentType && payload.status ? {
+          documentKey: payload.documentKey.trim(), documentType: payload.documentType.trim(), status: payload.status.trim(),
+        } : null);
+      if (!recovered) throw error;
+      saved = recovered;
+    }
+    confirmCaseDocumentUpload(attempt);
+    return saved;
   }
 
   async generateCaseDocumentTemplate(caseId: number, payload: { templateKey?: string; documentType?: string; status?: string }) {
-    return this.request<ClientCaseDocument>(`/v2/cases/${caseId}/documents/generate-template`, {
-      method: 'POST',
-      body: JSON.stringify(payload),
+    const normalized = {
+      templateKey: payload.templateKey?.trim() || undefined,
+      documentType: payload.documentType?.trim() || undefined,
+      status: payload.status?.trim() || 'Подготовлен',
+    };
+    const token = getAuthToken();
+    const attempt = beginCaseDocumentGeneration(JSON.stringify(['template', API_BASE_URL, caseId,
+      normalized.templateKey ?? '', normalized.documentType ?? '', normalized.status]), token);
+    const saved = await this.request<ClientCaseDocument>(`/v2/cases/${caseId}/documents/generate-template`, {
+      method: 'POST', body: JSON.stringify(normalized), headers: { 'X-Upload-Key': attempt.key },
+      expectedStatus: 201, caseGenerationKey: attempt.key, caseUploadActorToken: token ?? undefined,
     });
+    if (!saved || !Number.isSafeInteger(saved.id) || saved.id <= 0 || saved.clientCaseId !== caseId
+      || !Number.isSafeInteger(saved.version) || saved.version <= 0 || !saved.documentKey?.startsWith('template-')
+      || saved.status !== normalized.status || (normalized.documentType && saved.documentType !== normalized.documentType))
+      throw new Error('Результат формирования документа ещё не подтверждён. Повторите исходный запрос.');
+    confirmCaseDocumentUpload(attempt);
+    return saved;
   }
 
   async downloadCaseDocument(caseId: number, documentId: number) {

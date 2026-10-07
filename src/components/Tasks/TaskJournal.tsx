@@ -1,7 +1,9 @@
 import { SystemCheckbox } from '../ui/SystemCheckbox';
+import { TaskUploadStatusPanel } from './TaskUploadStatusPanel';
+import { submitTaskFileUpload, TaskFileUploadWaitingError } from '../../services/taskFileUpload';
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import {
   AlarmClock,
   ArrowDown,
@@ -54,6 +56,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDialog } from '../../hooks/useDialog';
+import { useModalFocusTrap } from '../../hooks/useModalFocusTrap';
 import { useClients } from '../../hooks/useClients';
 import { useClientCases } from '../../hooks/useClientCases';
 import { useLegalEntities } from '../../hooks/useLegalEntities';
@@ -922,8 +925,14 @@ function formatFileSize(bytes: number) {
 }
 
 async function uploadTaskCompletionFiles(taskId: number, files: readonly File[]) {
+  // A retry with several published attachments needs one fresh files read, not one per file.
+  let publishedFiles: Promise<TaskJournalFile[]> | undefined;
+  const readPublishedFiles = () => publishedFiles ??= apiService.getTaskJournalFiles(taskId);
   for (const file of files) {
-    await apiService.uploadTaskJournalFile(taskId, file);
+    const result = await submitTaskFileUpload(taskId, file, undefined, readPublishedFiles);
+    if (result.status === 'waiting') {
+      throw new TaskFileUploadWaitingError(result.state);
+    }
   }
 }
 
@@ -2506,14 +2515,6 @@ export function TaskJournal({
   const [offlineCalendarEnabled, setOfflineCalendarEnabled] = useState(false);
   const [offlineCalendarSnapshot, setOfflineCalendarSnapshot] = useState<OfflineCalendarSnapshot | null>(null);
   const [offlineCalendarTrustedDevice, setOfflineCalendarTrustedDeviceState] = useState(false);
-  const taskTableLayoutSettings = usePersistedTableSettings<TaskTableColumnKey>({
-    storageKey: `pp.task_journal.table_settings.v1.user:${currentUserId ?? 'guest'}`,
-    settingsKey: TASK_JOURNAL_TABLE_SETTINGS_KEY,
-    columns: TASK_JOURNAL_TABLE_COLUMNS,
-    defaultPageSize: 25,
-    minColumnWidth: 96,
-    enabled: currentUserId !== null,
-  });
   const [currentTimeZoneId, setCurrentTimeZoneId] = useState(() => normalizeUserTimeZoneId());
   const isAdminUser = isAdmin();
   const permissions = useRolePermissions(user?.role?.id);
@@ -2539,6 +2540,7 @@ export function TaskJournal({
     || taskCalendarViewScope === 'all'
     || taskCalendarViewScope === 'specific';
   const isApprovalsMode = mode === 'approvals';
+  const isRouteTaskPage = !isApprovalsMode && Boolean(routeTaskId && routeTaskId > 0);
   const untriagedOnly = mode === 'untriaged';
   const taskContextDefaults = useMemo<Partial<TaskJournalUpsertPayload>>(() => {
     if (!contextFilter) {
@@ -2589,6 +2591,8 @@ export function TaskJournal({
   const [caseCalendarLoading, setCaseCalendarLoading] = useState(false);
   const [caseCalendarExporting, setCaseCalendarExporting] = useState(false);
   const [taskSettings, setTaskSettings] = useState<TaskJournalSettingsDto>(DEFAULT_TASK_JOURNAL_SETTINGS);
+  const [taskSettingsReady, setTaskSettingsReady] = useState(false);
+  const [taskSettingsLoadError, setTaskSettingsLoadError] = useState(false);
   const requireCompletionResult = taskSettings.requireCompletionResult !== false;
   const [completedTaskCalendarAction, setCompletedTaskCalendarAction] = useState<'color' | 'hide'>('color');
   const [taskNotificationDefaults, setTaskNotificationDefaults] = useState<TaskNotificationDefaults>(DEFAULT_TASK_NOTIFICATION_DEFAULTS);
@@ -2607,6 +2611,24 @@ export function TaskJournal({
   const [creatingAutomationCaseId, setCreatingAutomationCaseId] = useState<number | null>(null);
   const [creatingAutomationAll, setCreatingAutomationAll] = useState(false);
   const automationCandidatesRequestRef = useRef(0);
+  const pendingAutomationReadsRef = useRef(new Set<AbortController>());
+  const pendingTaskListReadsRef = useRef(new Set<AbortController>());
+  const automationReadScopeRef = useRef({ isRouteTaskPage, currentUserId });
+  // Observe the committed route before passive cleanup retires a journal read.
+  useLayoutEffect(() => {
+    automationReadScopeRef.current = { isRouteTaskPage, currentUserId };
+  }, [isRouteTaskPage, currentUserId]);
+  useEffect(() => {
+    const pending = pendingAutomationReadsRef.current;
+    const pendingLists = pendingTaskListReadsRef.current;
+    return () => {
+      // An employee change or leaving this component must still release its reads.
+      for (const controller of pending) controller.abort();
+      pending.clear();
+      for (const controller of pendingLists) controller.abort();
+      pendingLists.clear();
+    };
+  }, [currentUserId]);
   const automationCandidatesInitializedRef = useRef(false);
   const automationCandidatesRequestKeyRef = useRef<string | null>(null);
   const automationSummaryRequestKeyRef = useRef<string | null>(null);
@@ -2671,6 +2693,7 @@ export function TaskJournal({
   const [completionPromptTask, setCompletionPromptTask] = useState<TaskJournalItem | null>(null);
   const [completionPromptResult, setCompletionPromptResult] = useState('');
   const [completionPromptError, setCompletionPromptError] = useState<string | null>(null);
+  const [externalUploadStatusRevision, setExternalUploadStatusRevision] = useState(0);
   const [completionPromptSaving, setCompletionPromptSaving] = useState(false);
   const [quickApprovalPromptTask, setQuickApprovalPromptTask] = useState<TaskJournalItem | null>(null);
   const [quickApprovalPromptResult, setQuickApprovalPromptResult] = useState('');
@@ -2705,7 +2728,9 @@ export function TaskJournal({
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [templatesPanelOpen, setTemplatesPanelOpen] = useState(false);
   const routeTaskRequestRef = useRef(0);
+  const pendingRouteTaskReadRef = useRef<{ taskId: number; userId: number | null; requestId: number } | null>(null);
   const taskListRequestRef = useRef<AbortController | null>(null);
+  const taskMetadataRequestRef = useRef(0);
   const taskListLoadedRef = useRef(false);
   const lastOpenedRouteTaskIdRef = useRef<number | null>(null);
   const processedDeadlineChangeRequestIdsRef = useRef<Set<number>>(new Set());
@@ -2932,6 +2957,78 @@ export function TaskJournal({
     [onRouteTaskChange],
   );
 
+  useEffect(() => {
+    if (!(routeTaskId && routeTaskId > 0)) {
+      routeTaskRequestRef.current += 1;
+      pendingRouteTaskReadRef.current = null;
+      lastOpenedRouteTaskIdRef.current = null;
+      return;
+    }
+
+    if (lastOpenedRouteTaskIdRef.current === routeTaskId) {
+      return;
+    }
+
+    const showTask = (task: TaskJournalItem) => {
+      openTaskEditor(task, { syncRoute: false });
+      lastOpenedRouteTaskIdRef.current = routeTaskId;
+    };
+
+    const existingTask = tasks.find((task) => task.id === routeTaskId);
+    if (existingTask) {
+      routeTaskRequestRef.current += 1;
+      pendingRouteTaskReadRef.current = null;
+      if (!isTaskJournalActive(existingTask.status)) {
+        setTasks((previous) => previous.filter((item) => item.id !== existingTask.id));
+      }
+
+      showTask(existingTask);
+      return;
+    }
+
+    const pendingRead = pendingRouteTaskReadRef.current;
+    if (pendingRead?.taskId === routeTaskId && pendingRead.userId === currentUserId) {
+      return;
+    }
+
+    const requestId = routeTaskRequestRef.current + 1;
+    routeTaskRequestRef.current = requestId;
+    pendingRouteTaskReadRef.current = { taskId: routeTaskId, userId: currentUserId, requestId };
+
+    void (async () => {
+      try {
+        const task = await apiService.getTaskJournalItem(routeTaskId);
+        if (routeTaskRequestRef.current !== requestId) {
+          return;
+        }
+
+        if (isTaskJournalActive(task.status)) {
+          setTasks((previous) => (previous.some((item) => item.id === task.id) ? previous : [task, ...previous]));
+        }
+        showTask(task);
+      } catch {
+        if (routeTaskRequestRef.current !== requestId) {
+          return;
+        }
+
+        toast.error('Задача из уведомления не найдена или уже удалена.', 'Журнал задач');
+        onRouteTaskChange?.(null);
+      } finally {
+        if (pendingRouteTaskReadRef.current?.requestId === requestId) {
+          pendingRouteTaskReadRef.current = null;
+        }
+      }
+    })();
+  }, [currentUserId, onRouteTaskChange, openTaskEditor, routeTaskId, tasks, toast]);
+
+  const taskTableLayoutSettings = usePersistedTableSettings<TaskTableColumnKey>({
+    storageKey: `pp.task_journal.table_settings.v1.user:${currentUserId ?? 'guest'}`,
+    settingsKey: TASK_JOURNAL_TABLE_SETTINGS_KEY,
+    columns: TASK_JOURNAL_TABLE_COLUMNS,
+    defaultPageSize: 25,
+    minColumnWidth: 96,
+    enabled: currentUserId !== null,
+  });
   const openTaskCreate = useCallback(() => {
     if (!canCreateTasks) {
       toast.error('У роли нет права на создание задач.', 'Журнал задач');
@@ -3155,81 +3252,71 @@ export function TaskJournal({
   // Загружает редко меняющиеся справочники и настройки отдельно от списка задач,
   // чтобы создание или редактирование задачи не повторяло эти запросы.
   const refreshTaskMetadata = useCallback(async () => {
+    const requestId = ++taskMetadataRequestRef.current;
+    const isCurrent = () => taskMetadataRequestRef.current === requestId;
+    setTaskSettingsReady(false);
+    setTaskSettingsLoadError(false);
+    automationCandidatesInitializedRef.current = false;
+    automationCandidatesRequestKeyRef.current = null;
+    automationSummaryRequestKeyRef.current = null;
     try {
-      const settingsPromise = apiService.getTaskJournalSettings();
+      const settingsPromise = apiService.getTaskJournalSettings().then((settingsResponse) => {
+        if (isCurrent()) {
+          setTaskSettings({
+            ...settingsResponse,
+            stickerStyles: normalizeTaskStickerStyles(settingsResponse.stickerStyles),
+          });
+          setTaskSettingsReady(true);
+        }
+        return settingsResponse;
+      }).catch((error) => {
+        if (isCurrent()) setTaskSettingsLoadError(true);
+        throw error;
+      });
       const featureFlagsPromise = apiService.getFeatureFlags().catch(() => null);
       const trustedDevicePromise = currentUserId
         ? getOfflineCalendarTrustedDevice(currentUserId).catch(() => false)
         : Promise.resolve(false);
-      const automationPromise = settingsPromise.then(async (settingsResponse) => {
-        try {
-          return {
-            ...await loadAutomationCandidates(settingsResponse, 'all', ''),
-            error: null,
-          };
-        } catch {
-          return {
-            items: [] as TaskJournalCaseAutomationCandidate[],
-            summary: null,
-            summaryError: null,
-            error: AUTOMATION_LOAD_ERROR_MESSAGE,
-          };
-        }
-      });
-      const [assigneeResponse, settingsResponse, notificationDefaultsResponse, timeZoneResponse, calendarSyncSettingsResponse, automationResponse, featureFlagsResponse, trustedDevice] = await Promise.all([
+      const [assigneeResponse, , notificationDefaultsResponse, timeZoneResponse, calendarSyncSettingsResponse, featureFlagsResponse, trustedDevice] = await Promise.all([
         apiService.getTaskJournalAssignees({ calendarView: shouldUseCalendarVisibility }),
         settingsPromise,
         apiService.getUserSetting(TASK_NOTIFICATION_DEFAULTS_SETTING_KEY).catch(() => null),
         apiService.getUserSetting(USER_TIME_ZONE_SETTING_KEY).catch(() => null),
         apiService.getCalendarSyncSettings().catch(() => null),
-        automationPromise,
         featureFlagsPromise,
         trustedDevicePromise,
       ]);
+      if (!isCurrent()) return;
       setOfflineCalendarTrustedDeviceState(trustedDevice);
       const offlineEnabled = featureFlagsResponse?.legal.offlineCalendarReadOnly === true;
       setOfflineCalendarEnabled(offlineEnabled);
       if (!offlineEnabled && currentUserId) {
         await clearOfflineCalendarSnapshot(currentUserId).catch(() => undefined);
       }
+      if (!isCurrent()) return;
       setAssignees(assigneeResponse);
-      setAutomationCandidates(automationResponse.items);
-      setAutomationSummary(automationResponse.summary ?? summarizeAutomationCandidates(automationResponse.items));
-      setAutomationLoadError(automationResponse.error);
-      setAutomationSummaryLoadError(automationResponse.summaryError);
-      if (!automationResponse.error) {
-        markAutomationCandidatesRefreshed();
-      }
-      setAutomationStateFilter('all');
-      setAutomationSearch('');
-      setAutomationPageLoading(false);
-      automationCandidatesRequestKeyRef.current = buildAutomationCandidatesRequestKey(settingsResponse, 'all', '');
-      automationSummaryRequestKeyRef.current = automationResponse.summary
-        ? buildAutomationSummaryRequestKey(settingsResponse, '')
-        : null;
-      automationCandidatesInitializedRef.current = true;
-      setTaskSettings({
-        ...settingsResponse,
-        stickerStyles: normalizeTaskStickerStyles(settingsResponse.stickerStyles),
-      });
       setTaskNotificationDefaults(parseTaskNotificationDefaults(notificationDefaultsResponse?.value));
       setCurrentTimeZoneId(normalizeUserTimeZoneId(timeZoneResponse?.value));
       setCompletedTaskCalendarAction(calendarSyncSettingsResponse?.completedTaskCalendarAction === 'hide' ? 'hide' : 'color');
     } catch {
-      toast.error('Не удалось загрузить настройки журнала задач.', 'Журнал задач');
+      if (isCurrent()) toast.error('Не удалось загрузить настройки журнала задач.', 'Журнал задач');
     }
-  }, [currentUserId, loadAutomationCandidates, markAutomationCandidatesRefreshed, shouldUseCalendarVisibility, toast]);
+  }, [currentUserId, shouldUseCalendarVisibility, toast]);
 
   useEffect(() => {
     void refreshTaskMetadata();
+    return () => { taskMetadataRequestRef.current += 1; };
   }, [refreshTaskMetadata]);
 
   // В режиме списка читает только текущую страницу и компактную сводку параллельно.
   // Календарь и доска сохраняют полную выборку, поскольку им нужны все события периода.
   const refreshTasks = useCallback(async () => {
     taskListRequestRef.current?.abort();
+    if (isRouteTaskPage) return;
     const controller = new AbortController();
     taskListRequestRef.current = controller;
+    if (viewMode === 'list') pendingTaskListReadsRef.current.add(controller);
+    const isCurrent = () => !controller.signal.aborted && taskListRequestRef.current === controller;
     if (!taskListLoadedRef.current) {
       setLoading(true);
     }
@@ -3247,7 +3334,7 @@ export function TaskJournal({
           apiService.getTaskJournalItems(pageParams, { signal: controller.signal }),
           apiService.getTaskJournalSummary(summaryParams, { signal: controller.signal }),
         ]);
-        if (controller.signal.aborted) return;
+        if (!isCurrent()) return;
         const lastPage = Math.max(1, Math.ceil(response.total / (response.pageSize || taskTableLayoutSettings.pageSize)));
         if (taskPage > lastPage) {
           setTaskPageState({ filterKey: listFilterKey, page: lastPage });
@@ -3267,7 +3354,7 @@ export function TaskJournal({
           sortDir,
           true,
         );
-        if (controller.signal.aborted) return;
+        if (!isCurrent()) return;
         setTasks(taskItems);
         taskListLoadedRef.current = true;
         setTaskListTotal(taskItems.length);
@@ -3275,10 +3362,11 @@ export function TaskJournal({
         setOfflineCalendarSnapshot(null);
       }
     } catch (error) {
-      if (controller.signal.aborted) return;
+      if (!isCurrent()) return;
       const snapshot = viewMode !== 'list' && currentUserId && shouldUseOfflineCalendarRef.current
         ? await loadOfflineCalendarSnapshot(currentUserId).catch(() => null)
         : null;
+      if (!isCurrent()) return;
       if (snapshot) {
         setTasks(snapshot.items);
         taskListLoadedRef.current = true;
@@ -3294,6 +3382,7 @@ export function TaskJournal({
         toast.error('Не удалось загрузить журнал задач.', 'Журнал задач');
       }
     } finally {
+      pendingTaskListReadsRef.current.delete(controller);
       if (taskListRequestRef.current === controller) {
         taskListRequestRef.current = null;
         setLoading(false);
@@ -3302,6 +3391,7 @@ export function TaskJournal({
   }, [
     contextFilter,
     currentUserId,
+    isRouteTaskPage,
     listFilterParams,
     listFilterKey,
     shouldUseCalendarVisibility,
@@ -3315,6 +3405,7 @@ export function TaskJournal({
   ]);
 
   useEffect(() => {
+    if (isRouteTaskPage) return;
     void refreshTasks();
     let realtimeRefreshTimer: number | null = null;
     const refresh = (event: Event) => {
@@ -3350,7 +3441,12 @@ export function TaskJournal({
     window.addEventListener(USER_NOTIFICATIONS_EVENT, refreshFromRealtime);
     window.addEventListener(TASK_JOURNAL_REALTIME_EVENT, scheduleRealtimeRefresh);
     return () => {
-      taskListRequestRef.current?.abort();
+      const controller = taskListRequestRef.current;
+      taskListRequestRef.current = null;
+      const scope = automationReadScopeRef.current;
+      // Only the already started finite list read may finish on a same-user card route.
+      // Its detached controller prevents both success and failure from changing the UI.
+      if (viewMode !== 'list' || !scope.isRouteTaskPage || scope.currentUserId !== currentUserId) controller?.abort();
       if (realtimeRefreshTimer !== null) {
         window.clearTimeout(realtimeRefreshTimer);
       }
@@ -3358,7 +3454,7 @@ export function TaskJournal({
       window.removeEventListener(USER_NOTIFICATIONS_EVENT, refreshFromRealtime);
       window.removeEventListener(TASK_JOURNAL_REALTIME_EVENT, scheduleRealtimeRefresh);
     };
-  }, [refreshTasks]);
+  }, [currentUserId, isRouteTaskPage, refreshTasks, viewMode]);
 
   useEffect(() => {
     if (!offlineCalendarEnabled
@@ -3402,7 +3498,13 @@ export function TaskJournal({
   }, [isApprovalsMode]);
 
   useEffect(() => {
-    if (!automationCandidatesInitializedRef.current) {
+    if (isRouteTaskPage) {
+      automationCandidatesInitializedRef.current = false;
+      automationCandidatesRequestKeyRef.current = null;
+      automationSummaryRequestKeyRef.current = null;
+      return;
+    }
+    if (!taskSettingsReady) {
       return;
     }
 
@@ -3428,6 +3530,7 @@ export function TaskJournal({
     setAutomationPageLoading(true);
     setAutomationLoadingMore(false);
     const controller = new AbortController();
+    pendingAutomationReadsRef.current.add(controller);
     const shouldRefreshSummary = automationSummaryRequestKeyRef.current !== summaryRequestKey;
     void loadAutomationCandidates(
       taskSettings,
@@ -3438,6 +3541,7 @@ export function TaskJournal({
     )
       .then((response) => {
         if (!controller.signal.aborted && automationCandidatesRequestRef.current === requestId) {
+          automationCandidatesInitializedRef.current = true;
           automationCandidatesRequestKeyRef.current = requestKey;
           setAutomationCandidates(response.items);
           setAutomationLoadError(null);
@@ -3455,6 +3559,7 @@ export function TaskJournal({
       })
       .catch(() => {
         if (!controller.signal.aborted && automationCandidatesRequestRef.current === requestId) {
+          automationCandidatesInitializedRef.current = true;
           if (!preserveCandidates) {
             setAutomationCandidates([]);
             if (shouldRefreshSummary) {
@@ -3466,15 +3571,22 @@ export function TaskJournal({
           setAutomationLoadError(preserveCandidates ? AUTOMATION_REFRESH_ERROR_MESSAGE : AUTOMATION_LOAD_ERROR_MESSAGE);
           setAutomationPageLoading(false);
         }
-      });
+      })
+      .finally(() => { pendingAutomationReadsRef.current.delete(controller); });
 
     return () => {
-      controller.abort();
+      if (automationCandidatesRequestRef.current === requestId) automationCandidatesRequestRef.current += 1;
+      const scope = automationReadScopeRef.current;
+      // The same component now shows a card: finish the finite read, ignoring its result.
+      // Other invalidations retain transport cancellation and its original resource limits.
+      if (!scope.isRouteTaskPage || scope.currentUserId !== currentUserId) controller.abort();
     };
-  }, [automationReloadVersion, automationStateFilter, debouncedAutomationSearch, loadAutomationCandidates, markAutomationCandidatesRefreshed, taskSettings]);
+  }, [automationReloadVersion, automationStateFilter, currentUserId, debouncedAutomationSearch, isRouteTaskPage, loadAutomationCandidates, markAutomationCandidatesRefreshed, taskSettings, taskSettingsReady]);
 
   useEffect(() => {
+    if (isRouteTaskPage) return;
     let controller: AbortController | null = null;
+    let disposed = false;
     let realtimeRefreshTimer: number | null = null;
     const refreshCandidates = () => {
       if (!automationCandidatesInitializedRef.current) {
@@ -3484,6 +3596,7 @@ export function TaskJournal({
       controller?.abort();
       const nextController = new AbortController();
       controller = nextController;
+      pendingAutomationReadsRef.current.add(nextController);
       const requestId = automationCandidatesRequestRef.current + 1;
       automationCandidatesRequestRef.current = requestId;
       automationLoadMoreRequestRef.current += 1;
@@ -3497,7 +3610,7 @@ export function TaskJournal({
         true,
       )
         .then((response) => {
-          if (!nextController.signal.aborted && automationCandidatesRequestRef.current === requestId) {
+          if (!disposed && !nextController.signal.aborted && automationCandidatesRequestRef.current === requestId) {
             setAutomationCandidates(response.items);
             setAutomationLoadError(null);
             if (response.summary) {
@@ -3512,11 +3625,12 @@ export function TaskJournal({
           }
         })
         .catch(() => {
-          if (!nextController.signal.aborted && automationCandidatesRequestRef.current === requestId) {
+          if (!disposed && !nextController.signal.aborted && automationCandidatesRequestRef.current === requestId) {
             setAutomationLoadError(AUTOMATION_REFRESH_ERROR_MESSAGE);
             setAutomationSummaryLoadError(null);
           }
-        });
+        })
+        .finally(() => { pendingAutomationReadsRef.current.delete(nextController); });
     };
     const scheduleRealtimeRefresh = () => {
       if (realtimeRefreshTimer !== null) {
@@ -3545,7 +3659,9 @@ export function TaskJournal({
     window.addEventListener(USER_NOTIFICATIONS_EVENT, refreshFromRealtime);
     window.addEventListener(TASK_JOURNAL_REALTIME_EVENT, scheduleRealtimeRefresh);
     return () => {
-      controller?.abort();
+      disposed = true;
+      const scope = automationReadScopeRef.current;
+      if (!scope.isRouteTaskPage || scope.currentUserId !== currentUserId) controller?.abort();
       if (realtimeRefreshTimer !== null) {
         window.clearTimeout(realtimeRefreshTimer);
       }
@@ -3553,9 +3669,10 @@ export function TaskJournal({
       window.removeEventListener(USER_NOTIFICATIONS_EVENT, refreshFromRealtime);
       window.removeEventListener(TASK_JOURNAL_REALTIME_EVENT, scheduleRealtimeRefresh);
     };
-  }, [automationStateFilter, debouncedAutomationSearch, loadAutomationCandidates, markAutomationCandidatesRefreshed, taskSettings]);
+  }, [automationStateFilter, currentUserId, debouncedAutomationSearch, isRouteTaskPage, loadAutomationCandidates, markAutomationCandidatesRefreshed, taskSettings]);
 
   useEffect(() => {
+    if (isRouteTaskPage) return;
     const nextStateChangeAt = automationSummary.nextStateChangeAt;
     if (!nextStateChangeAt) {
       return;
@@ -3583,10 +3700,10 @@ export function TaskJournal({
         window.clearTimeout(timeoutId);
       }
     };
-  }, [automationSummary.nextStateChangeAt, requestAutomationCandidatesReload]);
+  }, [automationSummary.nextStateChangeAt, isRouteTaskPage, requestAutomationCandidatesReload]);
 
   useEffect(() => {
-    if (embedded || underControlOnly || isApprovalsMode || !canCreateTasks || !canViewCases || !taskSettings.caseInactivityAutomationEnabled) {
+    if (isRouteTaskPage || embedded || underControlOnly || isApprovalsMode || !canCreateTasks || !canViewCases || !taskSettings.caseInactivityAutomationEnabled) {
       return;
     }
 
@@ -3615,6 +3732,7 @@ export function TaskJournal({
     canViewCases,
     embedded,
     isApprovalsMode,
+    isRouteTaskPage,
     requestAutomationCandidatesReload,
     taskSettings.caseInactivityAutomationEnabled,
     underControlOnly,
@@ -4002,57 +4120,6 @@ export function TaskJournal({
     refreshTasks,
     toast,
   ]);
-
-  useEffect(() => {
-    if (!(routeTaskId && routeTaskId > 0)) {
-      routeTaskRequestRef.current += 1;
-      lastOpenedRouteTaskIdRef.current = null;
-      return;
-    }
-
-    if (lastOpenedRouteTaskIdRef.current === routeTaskId) {
-      return;
-    }
-
-    const showTask = (task: TaskJournalItem) => {
-      openTaskEditor(task, { syncRoute: false });
-      lastOpenedRouteTaskIdRef.current = routeTaskId;
-    };
-
-    const existingTask = tasks.find((task) => task.id === routeTaskId);
-    if (existingTask) {
-      if (!isTaskJournalActive(existingTask.status)) {
-        setTasks((previous) => previous.filter((item) => item.id !== existingTask.id));
-      }
-
-      showTask(existingTask);
-      return;
-    }
-
-    const requestId = routeTaskRequestRef.current + 1;
-    routeTaskRequestRef.current = requestId;
-
-    void (async () => {
-      try {
-        const task = await apiService.getTaskJournalItem(routeTaskId);
-        if (routeTaskRequestRef.current !== requestId) {
-          return;
-        }
-
-        if (isTaskJournalActive(task.status)) {
-          setTasks((previous) => (previous.some((item) => item.id === task.id) ? previous : [task, ...previous]));
-        }
-        showTask(task);
-      } catch {
-        if (routeTaskRequestRef.current !== requestId) {
-          return;
-        }
-
-        toast.error('Задача из уведомления не найдена или уже удалена.', 'Журнал задач');
-        onRouteTaskChange?.(null);
-      }
-    })();
-  }, [onRouteTaskChange, openTaskEditor, routeTaskId, tasks, toast]);
 
   const counterpartyOptions = useMemo<LookupSelectOption[]>(
     () =>
@@ -4788,43 +4855,43 @@ export function TaskJournal({
     }
   };
 
-  const handleSave = async (form: TaskForm, taskId?: number, creationMaterials?: TaskCreationMaterials) => {
+  const handleSave = async (form: TaskForm, taskId?: number, creationMaterials?: TaskCreationMaterials): Promise<boolean> => {
     if (!taskId && !canCreateTasks) {
       toast.error('У роли нет права на создание задач.', 'Журнал задач');
-      return;
+      return false;
     }
 
     if (!form.isInternal && !form.clientId && !form.legalEntityId) {
       toast.error('Укажите контрагента задачи.', 'Журнал задач');
-      return;
+      return false;
     }
     if (!form.title.trim()) {
       toast.error('Укажите наименование задачи.', 'Журнал задач');
-      return;
+      return false;
     }
     if (form.contractorPaymentEnabled) {
       const selectedAssignee = assignees.find((assignee) => assignee.id === form.assigneeUserId);
       if (!selectedAssignee?.isExternalContractor) {
         toast.error('Для оплаты исполнителю выберите пользователя с признаком привлеченного исполнителя.', 'Журнал задач');
-        return;
+        return false;
       }
       if (!form.contractorPaymentAmount || Number(form.contractorPaymentAmount) <= 0) {
         toast.error('Укажите сумму оплаты исполнителю.', 'Журнал задач');
-        return;
+        return false;
       }
       if (form.contractorPaymentOnResult && form.contractorPaymentDueDate) {
         toast.error('Укажите либо точную дату оплаты, либо оплату по результату. Одновременно эти поля заполнять нельзя.', 'Журнал задач');
-        return;
+        return false;
       }
       if (form.contractorPaymentOnResult) {
         const delayDays = Number(form.contractorPaymentResultDelayDays);
         if (form.contractorPaymentResultDelayDays === null || form.contractorPaymentResultDelayDays === undefined || !Number.isFinite(delayDays) || delayDays < 0 || delayDays > 365) {
           toast.error('Укажите количество дней для оплаты по результату от 0 до 365.', 'Журнал задач');
-          return;
+          return false;
         }
       } else if (!form.contractorPaymentDueDate) {
         toast.error('Укажите дату оплаты исполнителю или включите оплату по результату.', 'Журнал задач');
-        return;
+        return false;
       }
     }
 
@@ -4872,10 +4939,11 @@ export function TaskJournal({
 
     if (normalized.status === 'revision' && !isFutureDateTime(normalized.dueAt)) {
       toast.error('Для статуса «На доработке» укажите новый срок позже текущего времени.', 'Журнал задач');
-      return;
+      return false;
     }
 
     try {
+      let retainedCreatedCard = false;
       if (taskId) {
         const updated = await apiService.updateTaskJournalItem(taskId, normalized);
         toast.success('Задача обновлена.', 'Журнал задач');
@@ -4889,6 +4957,7 @@ export function TaskJournal({
         const created = await apiService.createTaskJournalItem(normalized);
         const materialOperations: Promise<unknown>[] = [];
         const materialLabels: string[] = [];
+        const waitingMaterials: string[] = [];
         const initialComment = creationMaterials?.commentText.trim();
         if (initialComment) {
           materialOperations.push(apiService.createTaskJournalComment(
@@ -4899,7 +4968,9 @@ export function TaskJournal({
           materialLabels.push('комментарий');
         }
         for (const file of creationMaterials?.files ?? []) {
-          materialOperations.push(apiService.uploadTaskJournalFile(created.id, file));
+          materialOperations.push(submitTaskFileUpload(created.id, file).then((result) => {
+            if (result.status === 'waiting') waitingMaterials.push(file.name);
+          }));
           materialLabels.push(file.name);
         }
 
@@ -4909,10 +4980,15 @@ export function TaskJournal({
           const failedNames = failedMaterials.slice(0, 2).join(', ');
           const more = failedMaterials.length > 2 ? ` и ещё ${failedMaterials.length - 2}` : '';
           toast.error(
-            `Задача создана, но не удалось добавить: ${failedNames}${more}. Карточка открыта — повторите добавление здесь.`,
+            `Задача создана, но не удалось добавить: ${failedNames}${more}. Карточка открыта — повторите добавление здесь.${waitingMaterials.length ? ` Ещё ${waitingMaterials.length} файл(ов) ожидают прикрепления; их повторно отправлять пока не нужно.` : ''}`,
             'Журнал задач',
           );
           openTaskEditor(created);
+          retainedCreatedCard = true;
+        } else if (waitingMaterials.length > 0) {
+          toast.info(`Задача создана. Файлы ещё ожидают прикрепления: ${waitingMaterials.slice(0, 2).join(', ')}${waitingMaterials.length > 2 ? ` и ещё ${waitingMaterials.length - 2}` : ''}. Их состояние показано в открытой карточке; повторно отправлять эти файлы пока не нужно.`, 'Журнал задач');
+          openTaskEditor(created);
+          retainedCreatedCard = true;
         } else if (materialOperations.length > 0) {
           toast.success('Задача создана вместе с комментарием и файлами.', 'Журнал задач');
           closeTaskModal();
@@ -4921,11 +4997,15 @@ export function TaskJournal({
           closeTaskModal();
         }
       }
-      await refreshTasks();
+      // A retained new card has already requested its route. Do not start a
+      // journal read with the previous render's callback just before unmounting it.
+      if (!retainedCreatedCard || !onRouteTaskChange || isApprovalsMode) await refreshTasks();
       emitTaskChange();
     } catch (error) {
       toast.error(extractDisplayErrorMessage(error, 'Не удалось сохранить задачу.'), 'Журнал задач');
+      return false;
     }
+    return true;
   };
 
   const handleBillingUpdated = async (updated: TaskJournalItem) => {
@@ -4986,11 +5066,11 @@ export function TaskJournal({
     }
   };
 
-  const handleResultSave = async (task: TaskJournalItem, status: TaskJournalStatus, result: string) => {
+  const handleResultSave = async (task: TaskJournalItem, status: TaskJournalStatus, result: string): Promise<boolean> => {
     const normalizedResult = result.trim();
     if (status === 'done' && requireCompletionResult && !normalizedResult) {
       toast.error(TASK_COMPLETION_RESULT_REQUIRED_MESSAGE, 'Журнал задач');
-      return;
+      return false;
     }
 
     try {
@@ -5006,7 +5086,9 @@ export function TaskJournal({
       emitTaskChange();
     } catch (error) {
       toast.error(extractDisplayErrorMessage(error, 'Не удалось сохранить результат по задаче.'), 'Журнал задач');
+      return false;
     }
+    return true;
   };
 
   const closeCompletionPrompt = () => {
@@ -5056,6 +5138,7 @@ export function TaskJournal({
       emitTaskChange();
     } catch (error) {
       setCompletionPromptError(extractDisplayErrorMessage(error, 'Не удалось прикрепить файл или завершить задачу.'));
+      if (error instanceof TaskFileUploadWaitingError) setExternalUploadStatusRevision((value) => value + 1);
     } finally {
       setCompletionPromptSaving(false);
     }
@@ -5082,6 +5165,7 @@ export function TaskJournal({
       emitTaskChange();
     } catch (error) {
       setQuickApprovalPromptError(extractDisplayErrorMessage(error, 'Не удалось прикрепить файл или отправить задачу на согласование.'));
+      if (error instanceof TaskFileUploadWaitingError) setExternalUploadStatusRevision((value) => value + 1);
     } finally {
       setQuickApprovalPromptSaving(false);
     }
@@ -5698,9 +5782,17 @@ export function TaskJournal({
     : contextTitle
       ? 'Задачи, связанные с этим клиентом: исполнитель, срок, результат и напоминания в одном списке.'
     : 'Задачи по контрагентам, делам, платежам, звонкам и документам: исполнитель, срок, результат и напоминания в одном рабочем журнале.';
-  const isRouteTaskPage = !isApprovalsMode && Boolean(routeTaskId && routeTaskId > 0);
   const routeTaskState = isRouteTaskPage && modal?.task?.id === routeTaskId ? modal : null;
   const TaskCardComponent = taskSettings.taskCardWindowMode === 'modern' ? ModernTaskModal : TaskModal;
+
+  if (isRouteTaskPage && routeTaskState && !taskSettingsReady) {
+    return (
+      <div className="min-h-screen bg-slate-50 p-3">
+        <TaskCardSettingsGate presentation="page" failed={taskSettingsLoadError}
+          onRetry={() => void refreshTaskMetadata()} onClose={closeTaskModal} />
+      </div>
+    );
+  }
 
   if (isRouteTaskPage) {
     return (
@@ -5708,7 +5800,7 @@ export function TaskJournal({
         <div className="min-h-screen bg-slate-50">
         {routeTaskState ? (
           <TaskCardComponent
-            key={`page-${routeTaskState.task!.id}-${routeTaskState.mode}`}
+            key={`page-${routeTaskState.task!.id}-${routeTaskState.mode}-${currentUserId}`}
             presentation="page"
             state={routeTaskState}
             calendarView={shouldUseCalendarVisibility}
@@ -5727,6 +5819,7 @@ export function TaskJournal({
             canDeleteTask={canDeleteModalTask}
             canDuplicateTask={canCreateTasks}
             canSendFilesToYandexDisk={canSendTaskFilesToYandexDisk}
+            externalUploadStatusRevision={externalUploadStatusRevision}
             onOpenClient={onOpenClient}
             onOpenCase={onOpenCase}
             onOpenLegalEntity={onOpenLegalEntity}
@@ -6631,9 +6724,9 @@ export function TaskJournal({
         )}
       </div>
 
-      {modal ? (
+      {modal && taskSettingsReady ? (
         <TaskCardComponent
-          key={modal.task ? `edit-${modal.task.id}` : 'create'}
+          key={`${modal.task ? `edit-${modal.task.id}` : 'create'}-${currentUserId}`}
           presentation="modal"
           state={modal}
           calendarView={shouldUseCalendarVisibility}
@@ -6652,6 +6745,7 @@ export function TaskJournal({
           canDeleteTask={canDeleteModalTask}
           canDuplicateTask={canCreateTasks}
           canSendFilesToYandexDisk={canSendTaskFilesToYandexDisk}
+          externalUploadStatusRevision={externalUploadStatusRevision}
           onOpenClient={onOpenClient}
           onOpenCase={onOpenCase}
           onOpenLegalEntity={onOpenLegalEntity}
@@ -6672,6 +6766,9 @@ export function TaskJournal({
           onDelete={handleDelete}
           onDuplicate={handleDuplicateTask}
         />
+      ) : modal ? (
+        <TaskCardSettingsGate presentation="modal" failed={taskSettingsLoadError}
+          onRetry={() => void refreshTaskMetadata()} onClose={closeTaskModal} />
       ) : null}
 
       {creationWizard ? (
@@ -10674,6 +10771,7 @@ type TaskModalProps = {
   presentation?: 'modal' | 'page';
   chrome?: TaskCardChrome;
   calendarView?: boolean;
+  externalUploadStatusRevision?: number;
   state: ModalState;
   assignees: TaskJournalAssignee[];
   clients: Client[];
@@ -10692,12 +10790,12 @@ type TaskModalProps = {
   canSendFilesToYandexDisk: boolean;
   onClose: () => void;
   onEnableEdit: () => void;
-  onSave: (form: TaskForm, taskId?: number, creationMaterials?: TaskCreationMaterials) => void | Promise<void>;
+  onSave: (form: TaskForm, taskId?: number, creationMaterials?: TaskCreationMaterials) => Promise<boolean>;
   onBillingUpdated: (task: TaskJournalItem) => void | Promise<void>;
   onOpenClient?: (clientId: number, caseId?: number | null) => void | Promise<void>;
   onOpenCase?: (caseId: number, clientId?: number | null) => void | Promise<void>;
   onOpenLegalEntity?: (legalEntityId: number) => void | Promise<void>;
-  onResultSave: (task: TaskJournalItem, status: TaskJournalStatus, result: string) => void | Promise<void>;
+  onResultSave: (task: TaskJournalItem, status: TaskJournalStatus, result: string) => Promise<boolean>;
   onApprovalDecision: (
     taskId: number,
     decision: 'approved' | 'revisionRequested',
@@ -10712,6 +10810,44 @@ type TaskModalProps = {
   onDuplicate: (task: TaskJournalItem) => boolean | Promise<boolean>;
 };
 
+function TaskCardSettingsGate({ presentation, failed, onRetry, onClose }: {
+  presentation: 'page' | 'modal';
+  failed: boolean;
+  onRetry: () => void;
+  onClose: () => void;
+}) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const isModal = presentation === 'modal';
+  const handleKeyDown = useModalFocusTrap(dialogRef, isModal, onClose, closeButtonRef);
+  const content = (
+    <div ref={dialogRef} data-testid="task-card-settings-gate" tabIndex={-1}
+      role={isModal ? 'dialog' : undefined} aria-modal={isModal || undefined}
+      aria-label={isModal ? 'Открытие карточки задачи' : undefined}
+      onKeyDown={isModal ? handleKeyDown : undefined}
+      className="mx-auto w-full max-w-md rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+      <div className="flex items-center gap-2">
+        {failed ? <ShieldAlert className="h-4 w-4 text-amber-600" aria-hidden="true" />
+          : <Loader2 className="h-4 w-4 animate-spin text-slate-500" aria-hidden="true" />}
+        <p role={failed ? 'alert' : 'status'} className="text-sm text-slate-700">
+          {failed ? 'Не удалось загрузить настройки карточки задачи.' : 'Загружаем настройки карточки задачи...'}
+        </p>
+      </div>
+      <div className="mt-3 flex justify-end gap-2">
+        {failed ? <button type="button" onClick={() => { closeButtonRef.current?.focus(); onRetry(); }}
+          className="rounded-lg bg-slate-900 px-3 py-1.5 text-sm text-white">Повторить загрузку</button> : null}
+        <button ref={closeButtonRef} type="button" onClick={onClose}
+          className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-700">
+          {isModal ? 'Закрыть' : 'К журналу'}
+        </button>
+      </div>
+    </div>
+  );
+  return isModal ? (
+    <div className="fixed inset-0 z-[2400] flex items-center justify-center bg-slate-950/45 p-3">{content}</div>
+  ) : content;
+}
+
 function ModernTaskModal(props: TaskModalProps) {
   return <TaskModal {...props} chrome="modern" />;
 }
@@ -10720,6 +10856,7 @@ function TaskModal({
   presentation = 'modal',
   chrome = 'legacy',
   calendarView = false,
+  externalUploadStatusRevision = 0,
   state,
   assignees,
   clients,
@@ -10873,9 +11010,15 @@ function TaskModal({
   const [deadlineRequestReasonError, setDeadlineRequestReasonError] = useState<string | null>(null);
   const [deadlineRequestSaving, setDeadlineRequestSaving] = useState(false);
   const [files, setFiles] = useState<TaskJournalFile[]>([]);
+  const [filesReload, setFilesReload] = useState(0);
+  const fileListAuthority = useRef({ taskId, currentUserId, revision: 0 });
+  if (fileListAuthority.current.taskId !== taskId || fileListAuthority.current.currentUserId !== currentUserId) {
+    fileListAuthority.current = { taskId, currentUserId, revision: 0 };
+  }
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [filesLoading, setFilesLoading] = useState(false);
   const [uploadingDocumentKey, setUploadingDocumentKey] = useState<string | null>(null);
+  const [uploadStatusRevision, setUploadStatusRevision] = useState(0);
   const [sendingYandexFileId, setSendingYandexFileId] = useState<number | null>(null);
   const [activeDetailsTab, setActiveDetailsTab] = useState<'comments' | 'chat' | 'files' | 'timer' | 'activity'>('comments');
   const [legacyChatOpen, setLegacyChatOpen] = useState(false);
@@ -11315,16 +11458,19 @@ function TaskModal({
         }
         await uploadTaskCompletionFiles(existingTaskId, files);
       }
-      if (isReadOnly && state?.task) {
-        await onResultSave(state.task, nextForm.status, nextForm.result);
-      } else {
-        await onSave(nextForm, approvalResultPrompt.taskId, getCreationMaterials());
+      const saved = isReadOnly && state?.task
+        ? await onResultSave(state.task, nextForm.status, nextForm.result)
+        : await onSave(nextForm, approvalResultPrompt.taskId, getCreationMaterials());
+      if (!saved) {
+        setApprovalResultPromptError('Не удалось подтвердить сохранение результата задачи. Введённый текст и выбранные файлы остаются в окне; повторите действие позже.');
+        return;
       }
       setApprovalResultPrompt(null);
       setApprovalResultPromptResult('');
       setApprovalResultPromptError(null);
     } catch (error) {
       setApprovalResultPromptError(extractDisplayErrorMessage(error, 'Не удалось прикрепить файл или сохранить результат задачи.'));
+      if (error instanceof TaskFileUploadWaitingError) setUploadStatusRevision((value) => value + 1);
     } finally {
       setApprovalResultPromptSaving(false);
     }
@@ -11698,20 +11844,32 @@ function TaskModal({
     }
 
     let active = true;
+    const authority = fileListAuthority.current;
+    const revision = authority.revision;
     setFilesLoading(true);
     apiService.getTaskJournalFiles(taskId)
       .then((items) => {
-        if (active) {
+        if (active && fileListAuthority.current === authority) {
+          if (revision !== authority.revision) {
+            // A confirmed mutation overtook this snapshot. Read the complete
+            // current list instead of losing earlier files or reviving deletions.
+            setFilesReload((value) => value + 1);
+            return;
+          }
           setFiles(items);
         }
       })
       .catch((error) => {
-        if (active) {
+        if (active && fileListAuthority.current === authority) {
+          if (revision !== authority.revision) {
+            setFilesReload((value) => value + 1);
+            return;
+          }
           toast.error(extractDisplayErrorMessage(error, 'Не удалось загрузить файлы задачи.'), 'Журнал задач');
         }
       })
       .finally(() => {
-        if (active) {
+        if (active && fileListAuthority.current === authority) {
           setFilesLoading(false);
         }
       });
@@ -11719,7 +11877,7 @@ function TaskModal({
     return () => {
       active = false;
     };
-  }, [taskId, toast]);
+  }, [taskId, currentUserId, toast, filesReload]);
 
   const handleAddComment = async () => {
     const text = commentText.trim();
@@ -11816,17 +11974,28 @@ function TaskModal({
     const file = selectedFiles[0];
 
     const uploadKey = documentKey ?? '__new';
+    const authority = fileListAuthority.current;
     setUploadingDocumentKey(uploadKey);
     try {
-      const uploaded = await apiService.uploadTaskJournalFile(taskId, file, documentKey);
+      const attempt = await submitTaskFileUpload(taskId, file, documentKey);
+      if (fileListAuthority.current !== authority) return;
+      if (attempt.status === 'waiting') {
+        setUploadStatusRevision((value) => value + 1);
+        toast.info(attempt.state.message, 'Журнал задач');
+        return;
+      }
+      const uploaded = attempt.file;
+      authority.revision += 1;
       setFiles((previous) => [uploaded, ...previous]);
       toast.success(documentKey ? 'Новая версия файла загружена.' : 'Файл добавлен к задаче.', 'Журнал задач');
       const historyItems = await apiService.getTaskJournalComments(taskId);
-      setComments(historyItems);
+      if (fileListAuthority.current === authority) setComments(historyItems);
     } catch (error) {
+      if (fileListAuthority.current !== authority) return;
+      setUploadStatusRevision((value) => value + 1);
       toast.error(extractDisplayErrorMessage(error, 'Не удалось загрузить файл.'), 'Журнал задач');
     } finally {
-      setUploadingDocumentKey(null);
+      if (fileListAuthority.current === authority) setUploadingDocumentKey(null);
     }
   };
 
@@ -11861,6 +12030,7 @@ function TaskModal({
 
   const handleDeleteFile = async (file: TaskJournalFile) => {
     if (!taskId || isReadOnly) return;
+    const authority = fileListAuthority.current;
 
     const accepted = await confirm({
       title: 'Удалить файл?',
@@ -11869,15 +12039,18 @@ function TaskModal({
       cancelLabel: 'Отмена',
       variant: 'danger',
     });
-    if (!accepted) return;
+    if (!accepted || fileListAuthority.current !== authority) return;
 
     try {
       await apiService.deleteTaskJournalFile(taskId, file.id);
+      if (fileListAuthority.current !== authority) return;
+      authority.revision += 1;
       setFiles((previous) => previous.filter((item) => item.id !== file.id));
       toast.success('Файл удален из задачи.', 'Журнал задач');
       const historyItems = await apiService.getTaskJournalComments(taskId);
-      setComments(historyItems);
+      if (fileListAuthority.current === authority) setComments(historyItems);
     } catch (error) {
+      if (fileListAuthority.current !== authority) return;
       toast.error(extractDisplayErrorMessage(error, 'Не удалось удалить файл.'), 'Журнал задач');
     }
   };
@@ -12447,6 +12620,23 @@ function TaskModal({
     </div>
   ) : null;
 
+  const refreshPublishedUploads = async (signal: AbortSignal) => {
+    if (!taskId) return;
+    const authority = fileListAuthority.current;
+    const revision = authority.revision;
+    const [nextFiles, nextComments] = await Promise.all([apiService.getTaskJournalFiles(taskId), apiService.getTaskJournalComments(taskId)]);
+    if (!signal.aborted && fileListAuthority.current === authority) {
+      if (revision !== authority.revision) {
+        setFilesReload((value) => value + 1);
+        return;
+      }
+      authority.revision += 1;
+      setFiles(nextFiles);
+      setComments(nextComments);
+      // The durable result notification owns the toast; this refresh must not duplicate it.
+    }
+  };
+
   if (isModernChrome) {
     const TypeIcon = typeOption.icon;
     const titleText = state?.mode === 'view'
@@ -12711,6 +12901,8 @@ function TaskModal({
 
               {deadlineChangeRequestsSection}
 
+              {taskId && canUploadFiles ? <TaskUploadStatusPanel key={taskId} taskId={taskId} revision={uploadStatusRevision + externalUploadStatusRevision} onPublished={refreshPublishedUploads} /> : null}
+
               <section className="rounded-xl border border-blue-200 bg-white shadow-sm">
                 <div className="flex flex-wrap items-center gap-1 border-b border-slate-200 px-3 py-2 text-sm" role="tablist" aria-label="Материалы задачи">
                   <button type="button" role="tab" aria-selected={activeDetailsTab === 'comments'} onClick={() => setActiveDetailsTab('comments')} className={`rounded-lg px-3 py-1.5 font-semibold transition ${activeDetailsTab === 'comments' ? 'bg-blue-50 text-blue-700' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800'}`}>
@@ -12831,7 +13023,10 @@ function TaskModal({
                                   <FileText className="h-5 w-5 shrink-0 text-indigo-600" />
                                   <div className="min-w-0 flex-1">
                                     <div className="truncate text-sm font-semibold text-slate-800">{group.latest.originalFileName}</div>
-                                    <div className="text-xs text-slate-500">{group.versions.length} {group.versions.length === 1 ? 'версия' : 'версии'} · {formatFileSize(group.latest.sizeBytes)}</div>
+                                    <div className="text-xs text-slate-500">
+                                      {group.versions.length} {group.versions.length === 1 ? 'версия' : 'версии'} · {formatFileSize(group.latest.sizeBytes)}
+                                      {group.latest.clientCaseDocumentId ? ` · Документ дела #${group.latest.clientCaseDocumentId}` : ''}
+                                    </div>
                                   </div>
                                   <input
                                     ref={(node) => {
@@ -14136,6 +14331,8 @@ function TaskModal({
             </div>
           ) : null}
 
+          {taskId && canUploadFiles ? <TaskUploadStatusPanel key={taskId} taskId={taskId} revision={uploadStatusRevision + externalUploadStatusRevision} onPublished={refreshPublishedUploads} /> : null}
+
           <section className="mt-5 rounded-2xl border border-slate-200 bg-white p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
@@ -14469,7 +14666,13 @@ function TaskModal({
         .form-input:focus,
         .form-textarea:focus {
           border-color: var(--pp-primary);
-          box-shadow: 0 0 0 2px color-mix(in srgb, var(--pp-primary) 24%, transparent);
+          box-shadow: 0 0 0 2px var(--pp-primary-soft);
+        }
+        @supports (color: color-mix(in srgb, red, blue)) {
+          .form-input:focus,
+          .form-textarea:focus {
+            box-shadow: 0 0 0 2px color-mix(in srgb, var(--pp-primary) 24%, transparent);
+          }
         }
         .form-input:disabled,
         .form-textarea:disabled {

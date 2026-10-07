@@ -14,6 +14,9 @@ const chatApiMock = vi.hoisted(() => ({
   getMessages: vi.fn(),
   markRead: vi.fn(),
   sendMessage: vi.fn(),
+  getPendingSends: vi.fn(),
+  getSendStatus: vi.fn(),
+  resumeSend: vi.fn(),
   editMessage: vi.fn(),
   deleteMessage: vi.fn(),
   toggleReaction: vi.fn(),
@@ -94,6 +97,121 @@ describe('InternalMessenger', () => {
     chatApiMock.setPersonalState.mockResolvedValue(undefined);
     chatApiMock.updateTaskGuests.mockResolvedValue(undefined);
     chatApiMock.sendMessage.mockResolvedValue({ ...message, id: 23, authorUserId: 7, authorName: 'Я', text: 'Готово' });
+    chatApiMock.getPendingSends.mockResolvedValue({ status: 'pending', items: [] });
+    chatApiMock.getSendStatus.mockRejectedValue(new Error('Отправка не найдена.'));
+  });
+
+  it.each(['confirmed', 'wrong-key', 'legacy'] as const)('keeps lost-response identity only after owned status confirmation: %s', async (outcome) => {
+    const key = '9914bb8f-e85a-4cc8-a4a1-b6d8eef2cc1c';
+    sessionStorage.setItem('payplanner.chatDraft.v1.7.12', 'Сохранённый ответ');
+    sessionStorage.setItem('payplanner.chatSend.v1.7.12', JSON.stringify({ id: key, text: 'Сохранённый ответ',
+      replyToId: null, files: [{ name: 'proof.txt', size: 8, lastModified: 1 }] }));
+    if (outcome === 'legacy') chatApiMock.getSendStatus.mockRejectedValue(new Error('Отправка не найдена.'));
+    else chatApiMock.getSendStatus.mockResolvedValue({ clientRequestId: outcome === 'confirmed' ? key.toUpperCase()
+      : '6edb5c44-84dc-41aa-bde8-e14bdc1c7238', status: 'needsInput', automaticRecovery: false,
+      description: 'Нужны исходные файлы.' });
+    const { container } = render(<InternalMessenger />);
+    await screen.findByText('документ');
+    await act(async () => { await Promise.resolve(); });
+    const stored = JSON.parse(sessionStorage.getItem('payplanner.chatSend.v1.7.12')!);
+    expect(stored.managed).toBe(outcome === 'confirmed' ? true : undefined);
+    fireEvent.change(container.querySelector('input[type=file]')!, { target: { files: [new File(['original'], 'proof.txt', { lastModified: 2 })] } });
+    fireEvent.click(screen.getByRole('button', { name: 'Отправить' }));
+    await waitFor(() => expect(chatApiMock.sendMessage).toHaveBeenCalledTimes(1));
+    if (outcome === 'confirmed') expect(chatApiMock.sendMessage.mock.calls[0][5]).toBe(key);
+    else expect(chatApiMock.sendMessage.mock.calls[0][5]).not.toBe(key);
+  });
+
+  it('does not promote another pending key when an old status response arrives', async () => {
+    const key = '9914bb8f-e85a-4cc8-a4a1-b6d8eef2cc1c';
+    const replacement = '6edb5c44-84dc-41aa-bde8-e14bdc1c7238';
+    const pending = { id: key, text: 'Сохранённый ответ', replyToId: null, files: [] };
+    sessionStorage.setItem('payplanner.chatSend.v1.7.12', JSON.stringify(pending));
+    let finish: (value: unknown) => void = () => undefined;
+    chatApiMock.getSendStatus.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    render(<InternalMessenger />);
+    await waitFor(() => expect(chatApiMock.getSendStatus).toHaveBeenCalled());
+    sessionStorage.setItem('payplanner.chatSend.v1.7.12', JSON.stringify({ ...pending, id: replacement }));
+    await act(async () => { finish({ clientRequestId: key, status: 'paused', automaticRecovery: false, description: 'Ожидание.' }); });
+    expect(JSON.parse(sessionStorage.getItem('payplanner.chatSend.v1.7.12')!)).toEqual({ ...pending, id: replacement });
+  });
+
+  it('confirms a lost pending response before files are reselected in the same open chat', async () => {
+    chatApiMock.sendMessage.mockRejectedValueOnce(new Error('Связь прервана'));
+    chatApiMock.getSendStatus.mockImplementation(async (_thread, key) => ({ clientRequestId: key, status: 'needsInput',
+      automaticRecovery: false, description: 'Нужны исходные файлы.' }));
+    const { container } = render(<InternalMessenger />);
+    await screen.findByText('документ');
+    fireEvent.change(screen.getByPlaceholderText('Напишите сообщение…'), { target: { value: 'Сохранённый ответ' } });
+    const input = container.querySelector('input[type=file]')!;
+    fireEvent.change(input, { target: { files: [new File(['original'], 'proof.txt', { lastModified: 1 })] } });
+    fireEvent.click(screen.getByRole('button', { name: 'Отправить' }));
+    await waitFor(() => expect(toastMock.error).toHaveBeenCalled());
+    const key = chatApiMock.sendMessage.mock.calls[0][5];
+    await screen.findByText('Нужны исходные файлы.');
+    fireEvent.change(input, { target: { files: [new File(['original'], 'proof.txt', { lastModified: 2 })] } });
+    fireEvent.click(screen.getByRole('button', { name: 'Отправить' }));
+    await waitFor(() => expect(chatApiMock.sendMessage).toHaveBeenCalledTimes(2));
+    expect(chatApiMock.sendMessage.mock.calls[1][5]).toBe(key);
+  });
+
+  it('acknowledges a lost published response in the same open chat without another send', async () => {
+    chatApiMock.sendMessage.mockRejectedValueOnce(new Error('Связь прервана'));
+    chatApiMock.getSendStatus.mockImplementation(async (_thread, key) => ({ clientRequestId: key, status: 'published',
+      automaticRecovery: false, description: 'Сообщение отправлено.',
+      message: { ...message, id: 23, authorUserId: 7, text: 'Сохранённый ответ' } }));
+    render(<InternalMessenger />);
+    await screen.findByText('документ');
+    fireEvent.change(screen.getByPlaceholderText('Напишите сообщение…'), { target: { value: 'Сохранённый ответ' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Отправить' }));
+    await waitFor(() => expect(chatApiMock.getSendStatus).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(sessionStorage.getItem('payplanner.chatSend.v1.7.12')).toBeNull());
+    expect((screen.getByPlaceholderText('Напишите сообщение…') as HTMLTextAreaElement).value).toBe('');
+    expect(chatApiMock.sendMessage).toHaveBeenCalledTimes(1);
+    expect(chatApiMock.resumeSend).not.toHaveBeenCalled();
+  });
+
+  it('keeps a newer draft when a failed send is acknowledged by a late status read', async () => {
+    chatApiMock.sendMessage.mockRejectedValueOnce(new Error('Связь прервана'));
+    let finish: (value: unknown) => void = () => undefined;
+    chatApiMock.getSendStatus.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    render(<InternalMessenger />);
+    await screen.findByText('документ');
+    fireEvent.change(screen.getByPlaceholderText('Напишите сообщение…'), { target: { value: 'Сохранённый ответ' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Отправить' }));
+    await waitFor(() => expect(chatApiMock.getSendStatus).toHaveBeenCalledTimes(1));
+    const key = chatApiMock.sendMessage.mock.calls[0][5];
+    fireEvent.change(screen.getByPlaceholderText('Напишите сообщение…'), { target: { value: 'Новый черновик' } });
+    await act(async () => { finish({ clientRequestId: key, status: 'published', automaticRecovery: false,
+      description: 'Сообщение отправлено.', message: { ...message, id: 23, authorUserId: 7, text: 'Сохранённый ответ' } }); });
+    expect(sessionStorage.getItem('payplanner.chatSend.v1.7.12')).toBeNull();
+    expect((screen.getByPlaceholderText('Напишите сообщение…') as HTMLTextAreaElement).value).toBe('Новый черновик');
+    expect(chatApiMock.sendMessage).toHaveBeenCalledTimes(1);
+    expect(chatApiMock.resumeSend).not.toHaveBeenCalled();
+  });
+
+  it('keeps confirmed managed identity in memory when updating the tab store fails', async () => {
+    const key = '9914bb8f-e85a-4cc8-a4a1-b6d8eef2cc1c';
+    sessionStorage.setItem('payplanner.chatDraft.v1.7.12', 'Сохранённый ответ');
+    const pending = { id: key, text: 'Сохранённый ответ', replyToId: null,
+      files: [{ name: 'proof.txt', size: 8, lastModified: 1 }] };
+    sessionStorage.setItem('payplanner.chatSend.v1.7.12', JSON.stringify(pending));
+    chatApiMock.getSendStatus.mockResolvedValue({ clientRequestId: key, status: 'needsInput', automaticRecovery: false,
+      description: 'Нужны исходные файлы.' });
+    const originalSet = Storage.prototype.setItem;
+    const failure = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, name: string, value: string) {
+      if (name === 'payplanner.chatSend.v1.7.12') throw new DOMException('quota', 'QuotaExceededError');
+      originalSet.call(this, name, value);
+    });
+    try {
+      const { container } = render(<InternalMessenger />);
+      await screen.findByText('Нужны исходные файлы.');
+      expect(JSON.parse(sessionStorage.getItem('payplanner.chatSend.v1.7.12')!)).toEqual(pending);
+      fireEvent.change(container.querySelector('input[type=file]')!, { target: { files: [new File(['original'], 'proof.txt', { lastModified: 2 })] } });
+      fireEvent.click(screen.getByRole('button', { name: 'Отправить' }));
+      await waitFor(() => expect(chatApiMock.sendMessage).toHaveBeenCalledTimes(1));
+      expect(chatApiMock.sendMessage.mock.calls[0][5]).toBe(key);
+    } finally { failure.mockRestore(); }
   });
 
   it('shows threads, messages and sends a new message', async () => {
@@ -104,8 +222,150 @@ describe('InternalMessenger', () => {
     fireEvent.change(screen.getByPlaceholderText('Напишите сообщение…'), { target: { value: 'Готово' } });
     fireEvent.click(screen.getByRole('button', { name: 'Отправить' }));
 
-    await waitFor(() => expect(chatApiMock.sendMessage).toHaveBeenCalledWith(12, 'Готово', [], undefined));
+    await waitFor(() => expect(chatApiMock.sendMessage).toHaveBeenCalledWith(12, 'Готово', [], null, [], expect.any(String)));
     expect(await screen.findByText('Готово')).toBeTruthy();
+  });
+
+  it('keeps reply, text, files and identity while copies wait, including a failed exact retry', async () => {
+    chatApiMock.sendMessage.mockImplementationOnce(async (...args) => ({ clientRequestId: args[5], status: 'waiting',
+      automaticRecovery: true, description: 'Подготавливаются копии файлов.' }));
+    const { container } = render(<InternalMessenger />);
+    await screen.findByText('документ');
+    fireEvent.click(screen.getByRole('button', { name: 'Действия' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Ответить' }));
+    const editor = screen.getByPlaceholderText('Напишите сообщение…');
+    fireEvent.change(editor, { target: { value: 'Проверено @[8]' } });
+    const input = container.querySelector('input[type=file]')!;
+    const first = new File(['original'], 'proof.txt', { type: 'text/plain', lastModified: 1 });
+    fireEvent.change(input, { target: { files: [first] } });
+    fireEvent.click(screen.getByRole('button', { name: 'Отправить' }));
+    expect((await screen.findByRole('status')).textContent).toContain('Подготавливаются копии файлов.');
+    expect(screen.getByDisplayValue('Проверено @[8]')).toBeTruthy();
+    expect(screen.getByText('proof.txt')).toBeTruthy();
+    const key = chatApiMock.sendMessage.mock.calls[0][5];
+    expect(chatApiMock.sendMessage.mock.calls[0][3]).toBe(22);
+    expect(JSON.parse(sessionStorage.getItem('payplanner.chatSend.v1.7.12')!).managed).toBe(true);
+    chatApiMock.sendMessage.mockRejectedValueOnce(new Error('Связь прервана'));
+    const reselected = new File(['original'], 'proof.txt', { type: 'text/plain', lastModified: 2 });
+    fireEvent.change(input, { target: { files: [reselected] } });
+    fireEvent.click(screen.getByRole('button', { name: 'Отправить' }));
+    await waitFor(() => expect(toastMock.error).toHaveBeenCalled());
+    expect(chatApiMock.sendMessage.mock.calls[1][5]).toBe(key);
+    expect(JSON.parse(sessionStorage.getItem('payplanner.chatSend.v1.7.12')!).managed).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Отправить' }));
+    await waitFor(() => expect(sessionStorage.getItem('payplanner.chatSend.v1.7.12')).toBeNull());
+    expect(chatApiMock.sendMessage.mock.calls[2][5]).toBe(key);
+    expect((editor as HTMLTextAreaElement).value).toBe('');
+    expect(screen.queryByText('proof.txt')).toBeNull();
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('does not erase a new draft or replacement file when the previous send completes late', async () => {
+    let finish!: (value: typeof message) => void;
+    chatApiMock.sendMessage.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    const { container } = render(<InternalMessenger />);
+    await screen.findByText('документ');
+    const editor = screen.getByPlaceholderText('Напишите сообщение…');
+    const input = container.querySelector('input[type=file]')!;
+    fireEvent.change(editor, { target: { value: 'Первый текст' } });
+    fireEvent.change(input, { target: { files: [new File(['first'], 'first.txt')] } });
+    fireEvent.click(screen.getByRole('button', { name: 'Отправить' }));
+    await waitFor(() => expect(chatApiMock.sendMessage).toHaveBeenCalledTimes(1));
+    fireEvent.change(editor, { target: { value: 'Новый текст' } });
+    fireEvent.change(input, { target: { files: [new File(['next'], 'next.txt')] } });
+    fireEvent.click(screen.getByRole('button', { name: 'Действия' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Ответить' }));
+    await act(async () => { finish({ ...message, id: 23, text: 'Первый текст' }); });
+    expect(screen.getByDisplayValue('Новый текст')).toBeTruthy();
+    expect(screen.getByText('next.txt')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Отправить' }));
+    await waitFor(() => expect(chatApiMock.sendMessage).toHaveBeenCalledTimes(2));
+    expect(chatApiMock.sendMessage.mock.calls[1][3]).toBe(22);
+    expect(chatApiMock.sendMessage.mock.calls[1][5]).not.toBe(chatApiMock.sendMessage.mock.calls[0][5]);
+  });
+
+  it('keeps the draft when the server returns another send identity', async () => {
+    chatApiMock.sendMessage.mockResolvedValueOnce({ clientRequestId: '9914bb8f-e85a-4cc8-a4a1-b6d8eef2cc1c',
+      status: 'published', message: { ...message, id: 23 }, description: 'Отправлено.' });
+    render(<InternalMessenger />);
+    const editor = await screen.findByPlaceholderText('Напишите сообщение…');
+    fireEvent.change(editor, { target: { value: 'Не терять' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Отправить' }));
+    await waitFor(() => expect(toastMock.error).toHaveBeenCalledWith(expect.stringContaining('идентификатор')));
+    expect(screen.getByDisplayValue('Не терять')).toBeTruthy();
+    expect(sessionStorage.getItem('payplanner.chatSend.v1.7.12')).not.toBeNull();
+  });
+
+  it('continues a saved send after reopening without reselecting files', async () => {
+    const key = '9914bb8f-e85a-4cc8-a4a1-b6d8eef2cc1c';
+    sessionStorage.setItem('payplanner.chatDraft.v1.7.12', 'Сохранённый текст');
+    sessionStorage.setItem('payplanner.chatSend.v1.7.12', JSON.stringify({ id: key, text: 'Сохранённый текст',
+      replyToId: null, files: [{ name: 'proof.txt', size: 8, lastModified: 1 }], managed: true }));
+    chatApiMock.getSendStatus.mockResolvedValue({ clientRequestId: key, status: 'paused', automaticRecovery: false,
+      description: 'Автоматическая отправка приостановлена.' });
+    chatApiMock.resumeSend.mockResolvedValue({ clientRequestId: key, status: 'published', automaticRecovery: false,
+      message: { ...message, id: 23, authorUserId: 7 }, description: 'Отправлено.' });
+    render(<InternalMessenger />);
+    expect(await screen.findByDisplayValue('Сохранённый текст')).toBeTruthy();
+    fireEvent.click(await screen.findByText('Продолжить отправку'));
+    await waitFor(() => expect(sessionStorage.getItem('payplanner.chatSend.v1.7.12')).toBeNull());
+    expect((screen.getByPlaceholderText('Напишите сообщение…') as HTMLTextAreaElement).value).toBe('');
+    expect(chatApiMock.sendMessage).not.toHaveBeenCalled();
+    expect(chatApiMock.resumeSend).toHaveBeenCalledWith(12, key, expect.any(AbortSignal));
+  });
+
+  it('preserves a changed draft when a saved send publishes during recovery', async () => {
+    const key = '9914bb8f-e85a-4cc8-a4a1-b6d8eef2cc1c';
+    sessionStorage.setItem('payplanner.chatDraft.v1.7.12', 'Новый текст');
+    sessionStorage.setItem('payplanner.chatSend.v1.7.12', JSON.stringify({ id: key, text: 'Прежний текст',
+      replyToId: null, files: [], managed: true }));
+    chatApiMock.getSendStatus.mockResolvedValue({ clientRequestId: key, status: 'published', automaticRecovery: false,
+      message: { ...message, id: 23, authorUserId: 7 }, description: 'Отправлено.' });
+    render(<InternalMessenger />);
+    await waitFor(() => expect(sessionStorage.getItem('payplanner.chatSend.v1.7.12')).toBeNull());
+    expect(screen.getByDisplayValue('Новый текст')).toBeTruthy();
+    expect(chatApiMock.sendMessage).not.toHaveBeenCalled();
+    expect(chatApiMock.resumeSend).not.toHaveBeenCalled();
+  });
+
+  it('restores the frozen reply identity when missing originals must be reselected after reopening', async () => {
+    const key = '9914bb8f-e85a-4cc8-a4a1-b6d8eef2cc1c';
+    sessionStorage.setItem('payplanner.chatDraft.v1.7.12', 'Сохранённый ответ');
+    sessionStorage.setItem('payplanner.chatSend.v1.7.12', JSON.stringify({ id: key, text: 'Сохранённый ответ',
+      replyToId: 15, files: [{ name: 'proof.txt', size: 8, lastModified: 1 }] }));
+    chatApiMock.getSendStatus.mockResolvedValue({ clientRequestId: key, status: 'needsInput', automaticRecovery: false,
+      description: 'Нужны исходные файлы.' });
+    const { container } = render(<InternalMessenger />);
+    expect(await screen.findByText('Ответ на сообщение №15 · сохранённый черновик')).toBeTruthy();
+    await screen.findByText('Нужны исходные файлы.');
+    fireEvent.change(container.querySelector('input[type=file]')!, { target: { files: [new File(['original'], 'proof.txt', { lastModified: 2 })] } });
+    fireEvent.click(screen.getByRole('button', { name: 'Отправить' }));
+    await waitFor(() => expect(chatApiMock.sendMessage).toHaveBeenCalledWith(12, 'Сохранённый ответ', expect.any(Array), 15, [], key));
+  });
+
+  it('reuses the same send key after a failed response and starts a new key for another draft', async () => {
+    chatApiMock.sendMessage.mockRejectedValueOnce(new Error('Связь прервана'));
+    const view = render(<InternalMessenger />);
+    await screen.findByText('документ');
+    const editor = screen.getByPlaceholderText('Напишите сообщение…');
+    fireEvent.change(editor, { target: { value: 'Готово' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Отправить' }));
+    await waitFor(() => expect(toastMock.error).toHaveBeenCalled());
+    const firstKey = chatApiMock.sendMessage.mock.calls[0][5] as string;
+    expect(firstKey).toMatch(/^[0-9a-f-]{36}$/i);
+    view.unmount();
+    render(<InternalMessenger />);
+    expect(await screen.findByDisplayValue('Готово')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Отправить' }));
+    await waitFor(() => expect(chatApiMock.sendMessage).toHaveBeenCalledTimes(2));
+    expect(chatApiMock.sendMessage.mock.calls[1][5]).toBe(firstKey);
+    await screen.findByText('Готово');
+
+    fireEvent.change(screen.getByPlaceholderText('Напишите сообщение…'), { target: { value: 'Другое сообщение' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Отправить' }));
+    await waitFor(() => expect(chatApiMock.sendMessage).toHaveBeenCalledTimes(3));
+    expect(chatApiMock.sendMessage.mock.calls[2][5]).not.toBe(firstKey);
   });
 
   it('shows a newly created conversation when a colleague sends its first message', async () => {
@@ -391,7 +651,7 @@ describe('InternalMessenger', () => {
     expect(chatApiMock.markRead).not.toHaveBeenCalled();
     fireEvent.change(screen.getByPlaceholderText('Напишите сообщение…'), { target: { value: 'Ответ из середины истории' } });
     fireEvent.click(screen.getByRole('button', { name: 'Отправить' }));
-    await waitFor(() => expect(chatApiMock.sendMessage).toHaveBeenCalledWith(12, 'Ответ из середины истории', [], undefined));
+    await waitFor(() => expect(chatApiMock.sendMessage).toHaveBeenCalledWith(12, 'Ответ из середины истории', [], null, [], expect.any(String)));
     expect(screen.queryByText('Готово')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Показать более новые' }));
     await waitFor(() => expect(chatApiMock.getMessages).toHaveBeenCalledWith(12, expect.objectContaining({ afterId: 5 })));

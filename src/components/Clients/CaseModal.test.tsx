@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { CaseModal } from './CaseModal';
@@ -15,8 +15,12 @@ vi.mock('../../hooks/useDialog', () => ({
 }));
 
 vi.mock('../../services/api', () => ({
+  getAuthToken: () => 'owned-form-session',
   apiService: {
+    retireCaseDocumentUpload: vi.fn(),
     getCaseDocuments: vi.fn(),
+    getPendingCaseDocumentUploads: vi.fn(),
+    getCaseDocumentUploadStates: vi.fn(),
     getCaseHearingPreparation: vi.fn(),
     updateCaseHearingPreparation: vi.fn(),
     reviewCasePosition: vi.fn(),
@@ -61,7 +65,46 @@ function createCase(overrides: Partial<ClientCase> = {}): ClientCase {
 }
 
 describe('CaseModal', () => {
+  it.each(['retired', 'uploaded'] as const)('handles explicit %s proof without resetting unsaved position or transmitting a file', async (outcome) => {
+    const pending = { uploadKey: '11111111-1111-4111-8111-111111111111', fileName: 'own.pdf', status: 'waiting' as const,
+      documentId: null, version: null, sha256: null, contentType: null, requestedDocumentKey: null, documentKey: null,
+      documentType: null, requestedStatus: null, message: 'Ожидаем копии.' };
+    const terminal = { ...pending, status: outcome, documentId: outcome === 'uploaded' ? 601 : null, version: outcome === 'uploaded' ? 2 : null };
+    vi.mocked(apiService.getPendingCaseDocumentUploads).mockResolvedValueOnce({ items: [pending], nextCursor: null })
+      .mockResolvedValue({ items: [terminal], nextCursor: null });
+    vi.mocked(apiService.retireCaseDocumentUpload).mockResolvedValue(terminal);
+    const onSave = vi.fn(); render(<CaseModal isOpen onClose={vi.fn()} caseData={createCase({ strategy: 'Исходная позиция' })} onSave={onSave} />);
+    const button = await screen.findByRole('button', { name: 'Подготовить новую загрузку' });
+    fireEvent.change(screen.getByLabelText('Стратегия и план действий'), { target: { value: 'Несохранённая новая позиция' } });
+    const reads = vi.mocked(apiService.getCaseDocuments).mock.calls.length;
+    fireEvent.click(button);
+    await screen.findByText(outcome === 'uploaded' ? /Прежняя попытка уже добавила документ/ : /Прежняя попытка прекращена\. Новый файл/);
+    await waitFor(() => expect(apiService.getCaseDocuments).toHaveBeenCalledTimes(reads + (outcome === 'uploaded' ? 1 : 0)));
+    expect((screen.getByLabelText('Стратегия и план действий') as HTMLTextAreaElement).value).toBe('Несохранённая новая позиция');
+    expect(apiService.retireCaseDocumentUpload).toHaveBeenCalledExactlyOnceWith(1, pending.uploadKey, expect.any(AbortSignal), 'owned-form-session');
+    expect(apiService.uploadCaseDocument).not.toHaveBeenCalled(); expect(onSave).not.toHaveBeenCalled();
+  });
+  it('refreshes confirmed documents without resetting unsaved position or sending another upload', async () => {
+    let finish!: (page: Awaited<ReturnType<typeof apiService.getPendingCaseDocumentUploads>>) => void;
+    vi.mocked(apiService.getPendingCaseDocumentUploads).mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    render(<CaseModal isOpen onClose={vi.fn()} caseData={createCase({ strategy: 'Исходная позиция' })} onSave={vi.fn()} />);
+    await waitFor(() => expect(apiService.getPendingCaseDocumentUploads).toHaveBeenCalledTimes(1));
+    fireEvent.change(screen.getByLabelText('Стратегия и план действий'), { target: { value: 'Несохранённая позиция' } });
+    const reads = vi.mocked(apiService.getCaseDocuments).mock.calls.length;
+    await act(async () => finish({ items: [{ uploadKey: 'receipt', fileName: 'ready.pdf', status: 'uploaded', documentId: 601,
+      version: 2, sha256: null, contentType: null, requestedDocumentKey: null, documentKey: null, documentType: null,
+      requestedStatus: null, message: 'Документ добавлен.' }], nextCursor: null }));
+    await waitFor(() => expect(apiService.getCaseDocuments).toHaveBeenCalledTimes(reads + 1));
+    expect((screen.getByLabelText('Стратегия и план действий') as HTMLTextAreaElement).value).toBe('Несохранённая позиция');
+    expect(apiService.getCaseDocuments).toHaveBeenLastCalledWith(1, expect.any(AbortSignal));
+    expect(apiService.uploadCaseDocument).not.toHaveBeenCalled();
+  });
   beforeEach(() => {
+    vi.mocked(apiService.retireCaseDocumentUpload).mockReset();
+    vi.mocked(apiService.getPendingCaseDocumentUploads).mockReset();
+    vi.mocked(apiService.getPendingCaseDocumentUploads).mockResolvedValue({ items: [], nextCursor: null });
+    vi.mocked(apiService.getCaseDocumentUploadStates).mockReset();
+    vi.mocked(apiService.getCaseDocumentUploadStates).mockResolvedValue([]);
     dialogMock.confirm.mockReset();
     dialogMock.confirm.mockResolvedValue(true);
     dialogMock.prompt.mockReset();

@@ -1,5 +1,5 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { useState } from 'react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { StrictMode, useState } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { TaskJournal } from './TaskJournal';
@@ -55,6 +55,9 @@ const apiMock = vi.hoisted(() => ({
   approveTaskJournalDeadlineChangeRequest: vi.fn(),
   rejectTaskJournalDeadlineChangeRequest: vi.fn(),
   getTaskJournalFiles: vi.fn(),
+  getTaskFileUploadStates: vi.fn(),
+  getTaskFileUploadPage: vi.fn(),
+  getTaskFileUploadKey: vi.fn(),
   uploadTaskJournalFile: vi.fn(),
   downloadTaskJournalFile: vi.fn(),
   uploadTaskJournalFileToYandexDisk: vi.fn(),
@@ -377,6 +380,7 @@ async function renderJournal(
     onOpenLegalEntity?: (legalEntityId: number) => void;
     onCreateInvoiceDraft?: (draft: unknown) => void;
     settings?: Partial<TaskJournalSettingsDto>;
+    settingsDelay?: Promise<void>;
     underControlOnly?: boolean;
     overdueFilterSignal?: number;
   } = {},
@@ -416,24 +420,27 @@ async function renderJournal(
   apiMock.getTaskJournalAssignees.mockResolvedValue(options.assignees ?? [
     { id: 7, name: 'Администратор', email: 'admin@example.com' },
   ]);
-  apiMock.getTaskJournalSettings.mockResolvedValue({
-    restrictExecutorEditing: true,
-    allowExecutorDeadlineChangeRequests: true,
-    executorCompletionAllowedUserIds: [],
-    requireCompletionResult: true,
-    dailyOverdueReminderEnabled: true,
-    allowAdminCompleteAnyTask: true,
-    approvalDueDays: 5,
-    taskCardWindowMode: 'legacy',
-    approvalQuickActionMode: 'completionButton',
-    caseInactivityAutomationEnabled: true,
-    caseInactivityDays: 14,
-    caseInactivityLimit: 25,
-    caseInactivityDefaultAssigneeUserId: null,
-    caseInactivityEscalationDays: 30,
-    caseInactivityEscalationUserId: null,
-    stickerStyles: cloneDefaultTaskStickerStyles(),
-    ...options.settings,
+  apiMock.getTaskJournalSettings.mockImplementation(async () => {
+    await options.settingsDelay;
+    return {
+      restrictExecutorEditing: true,
+      allowExecutorDeadlineChangeRequests: true,
+      executorCompletionAllowedUserIds: [],
+      requireCompletionResult: true,
+      dailyOverdueReminderEnabled: true,
+      allowAdminCompleteAnyTask: true,
+      approvalDueDays: 5,
+      taskCardWindowMode: 'legacy',
+      approvalQuickActionMode: 'completionButton',
+      caseInactivityAutomationEnabled: true,
+      caseInactivityDays: 14,
+      caseInactivityLimit: 25,
+      caseInactivityDefaultAssigneeUserId: null,
+      caseInactivityEscalationDays: 30,
+      caseInactivityEscalationUserId: null,
+      stickerStyles: cloneDefaultTaskStickerStyles(),
+      ...options.settings,
+    };
   });
   const currentUserId = authState.user.id;
   const filterStorageKey = options.mode && options.mode !== 'journal'
@@ -468,7 +475,7 @@ async function renderJournal(
     );
   }
 
-  render(options.withRoute ? (
+  const result = render(options.withRoute ? (
     <RoutedJournal />
   ) : (
     <TaskJournal
@@ -493,6 +500,7 @@ async function renderJournal(
       { timeout: 10000 },
     );
   }
+  return result;
 }
 
 async function openFirstTaskForEdit() {
@@ -672,6 +680,9 @@ describe('TaskJournal', () => {
     apiMock.approveTaskJournalDeadlineChangeRequest.mockResolvedValue(createTask());
     apiMock.rejectTaskJournalDeadlineChangeRequest.mockResolvedValue(createTask());
     apiMock.getTaskJournalFiles.mockResolvedValue([]);
+    apiMock.getTaskFileUploadStates.mockResolvedValue([]);
+    apiMock.getTaskFileUploadPage.mockImplementation(async () => ({ items: await apiMock.getTaskFileUploadStates(), nextCursor: null }));
+    apiMock.getTaskFileUploadKey.mockReturnValue(undefined);
     apiMock.uploadTaskJournalFile.mockResolvedValue({
       id: 601,
       taskJournalItemId: 101,
@@ -1146,6 +1157,115 @@ describe('TaskJournal', () => {
     ));
   });
 
+  it.each([
+    ['legacy', 'assignees', 'pending'], ['modern', 'assignees', 'pending'],
+    ['legacy', 'automation', 'pending'], ['modern', 'automation', 'pending'],
+    ['legacy', 'assignees', 'failed'], ['modern', 'assignees', 'failed'],
+    ['legacy', 'automation', 'failed'], ['modern', 'automation', 'failed'],
+  ] as const)('ancillary regression: %s card with %s %s', async (mode, dependency, outcome) => {
+    let release: (() => void) | undefined;
+    const delayed = new Promise<never>((_resolve, reject) => {
+      release = () => reject(new Error('Synthetic ancillary metadata unavailable'));
+    });
+    const dependencyMock = dependency === 'assignees'
+      ? apiMock.getTaskJournalAssignees : apiMock.getTaskJournalCaseAutomationCandidates;
+    dependencyMock.mockImplementationOnce(() => delayed);
+    if (outcome === 'failed') release?.();
+    try {
+      await renderJournal([createTask()], { settings: { taskCardWindowMode: mode } });
+      fireEvent.click(screen.getAllByTitle('Просмотр')[0]);
+      expect(await screen.findByTestId(`task-${mode}-card-window`)).toBeTruthy();
+      expect(screen.queryByTestId(`task-${mode === 'modern' ? 'legacy' : 'modern'}-card-window`)).toBeNull();
+      expect(apiMock.getTaskJournalSettings).toHaveBeenCalledTimes(1);
+      expect(apiMock.getTaskJournalAssignees).toHaveBeenCalledTimes(1);
+    } finally {
+      if (outcome === 'pending') release?.();
+    }
+  });
+  it.each([
+    ['legacy', false], ['modern', false], ['legacy', true], ['modern', true],
+  ] as const)('settings readiness: %s card stays unopened until settings arrive, routed=%s', async (mode, withRoute) => {
+    let release: (() => void) | undefined;
+    const settingsDelay = new Promise<void>(resolve => { release = resolve; });
+    try {
+      await renderJournal([createTask()], { settings: { taskCardWindowMode: mode }, settingsDelay, withRoute });
+      fireEvent.click(screen.getAllByTitle('Просмотр')[0]);
+      expect(screen.queryByTestId('task-legacy-card-window')).toBeNull();
+      expect(screen.queryByTestId('task-modern-card-window')).toBeNull();
+      expect(await screen.findByText('Загружаем настройки карточки задачи...')).toBeTruthy();
+      release?.();
+      expect(await screen.findByTestId(`task-${mode}-card-window`)).toBeTruthy();
+      expect(apiMock.getTaskJournalSettings).toHaveBeenCalledTimes(1);
+    } finally {
+      release?.();
+    }
+  });
+  it.each([
+    ['legacy', false], ['modern', false], ['legacy', true], ['modern', true],
+  ] as const)('settings retry: %s card never uses defaults after a settings failure, routed=%s', async (mode, withRoute) => {
+    apiMock.getTaskJournalSettings.mockRejectedValueOnce(new Error('Synthetic initial settings failure'));
+    await renderJournal([createTask()], { settings: { taskCardWindowMode: mode }, withRoute });
+    fireEvent.click(screen.getAllByTitle('Просмотр')[0]);
+    expect(await screen.findByText('Не удалось загрузить настройки карточки задачи.')).toBeTruthy();
+    expect(screen.queryByTestId('task-legacy-card-window')).toBeNull();
+    expect(screen.queryByTestId('task-modern-card-window')).toBeNull();
+    fireEvent.click(within(screen.getByTestId('task-card-settings-gate')).getByRole('button', { name: 'Повторить загрузку' }));
+    expect(await screen.findByTestId(`task-${mode}-card-window`)).toBeTruthy();
+    expect(apiMock.getTaskJournalSettings).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ['legacy', false], ['modern', false], ['legacy', true], ['modern', true],
+  ] as const)('settings close: %s card stays closed when delayed settings arrive, routed=%s', async (mode, withRoute) => {
+    let release: (() => void) | undefined;
+    const settingsDelay = new Promise<void>(resolve => { release = resolve; });
+    try {
+      await renderJournal([createTask()], { settings: { taskCardWindowMode: mode }, settingsDelay, withRoute });
+      fireEvent.click(screen.getAllByTitle('Просмотр')[0]);
+      const gate = await screen.findByTestId('task-card-settings-gate');
+      fireEvent.click(within(gate).getByRole('button', { name: withRoute ? 'К журналу' : 'Закрыть' }));
+      await act(async () => { release?.(); });
+      expect(screen.queryByTestId('task-card-settings-gate')).toBeNull();
+      expect(screen.queryByTestId('task-legacy-card-window')).toBeNull();
+      expect(screen.queryByTestId('task-modern-card-window')).toBeNull();
+    } finally { release?.(); }
+  });
+
+  it.each(['legacy', 'modern'] as const)('settings focus: %s waiting dialog focuses close and supports Escape', async mode => {
+    let release: (() => void) | undefined;
+    const settingsDelay = new Promise<void>(resolve => { release = resolve; });
+    try {
+      await renderJournal([createTask()], { settings: { taskCardWindowMode: mode }, settingsDelay });
+      fireEvent.click(screen.getAllByTitle('Просмотр')[0]);
+      const gate = await screen.findByRole('dialog', { name: 'Открытие карточки задачи' });
+      expect(document.activeElement).toBe(within(gate).getByRole('button', { name: 'Закрыть' }));
+      fireEvent.keyDown(gate, { key: 'Escape' });
+      await act(async () => { release?.(); });
+      expect(screen.queryByTestId('task-card-settings-gate')).toBeNull();
+      expect(screen.queryByTestId('task-legacy-card-window')).toBeNull();
+      expect(screen.queryByTestId('task-modern-card-window')).toBeNull();
+    } finally { release?.(); }
+  });
+  it.each(['legacy', 'modern'] as const)('settings retry focus: %s dialog keeps keyboard focus while retry is pending', async mode => {
+    let release: (() => void) | undefined;
+    const settingsDelay = new Promise<void>(resolve => { release = resolve; });
+    apiMock.getTaskJournalSettings.mockRejectedValueOnce(new Error('Synthetic initial settings failure'));
+    try {
+      await renderJournal([createTask()], { settings: { taskCardWindowMode: mode }, settingsDelay });
+      fireEvent.click(screen.getAllByTitle('Просмотр')[0]);
+      const gate = await screen.findByRole('dialog', { name: 'Открытие карточки задачи' });
+      const retry = within(gate).getByRole('button', { name: 'Повторить загрузку' });
+      retry.focus();
+      fireEvent.click(retry);
+      expect(await within(gate).findByText('Загружаем настройки карточки задачи...')).toBeTruthy();
+      expect(document.activeElement).toBe(within(gate).getByRole('button', { name: 'Закрыть' }));
+      fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+      await act(async () => { release?.(); });
+      expect(screen.queryByTestId('task-card-settings-gate')).toBeNull();
+      expect(screen.queryByTestId('task-legacy-card-window')).toBeNull();
+      expect(screen.queryByTestId('task-modern-card-window')).toBeNull();
+    } finally { release?.(); }
+  });
   it('opens the modern task card when the global setting is enabled', async () => {
     await renderJournal([createTask()], {
       settings: { taskCardWindowMode: 'modern' },
@@ -1180,6 +1300,39 @@ describe('TaskJournal', () => {
     card = await screen.findByTestId('task-modern-card-window');
     expect(within(card).getByTestId('task-modern-layout').getAttribute('data-layout-mode')).toBe('expanded');
   });
+
+  it.each(['legacy', 'modern'] as const)('restores pending server uploads in the %s task card', async (taskCardWindowMode) => {
+    apiMock.getTaskFileUploadStates.mockResolvedValue([{ uploadKey: 'pending-1', fileName: 'ожидающий.pdf',
+      status: 'waiting', fileId: null, message: 'Система завершит загрузку автоматически.' }]);
+    await renderJournal([createTask()], { settings: { taskCardWindowMode } });
+    await openFirstTaskForEdit();
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    await waitFor(() => expect(within(card).getByRole('region', { name: 'Состояние ваших загрузок' })).toBeTruthy());
+    expect(within(card).getByText('ожидающий.pdf')).toBeTruthy();
+    expect(within(card).getByText('Система завершит загрузку автоматически.')).toBeTruthy();
+    expect(apiMock.getTaskFileUploadPage).toHaveBeenCalledWith(101, expect.any(AbortSignal), undefined);
+    cleanup();
+  });
+
+  it.each(['legacy', 'modern'] as const)('refreshes published files without a second result toast in the %s card', async (taskCardWindowMode) => {
+    apiMock.getTaskFileUploadStates.mockResolvedValue([{ uploadKey: 'pending-1', fileName: 'готовый.pdf',
+      status: 'waiting', fileId: null, message: 'Ожидание загрузки.' }]);
+    await renderJournal([createTask()], { settings: { taskCardWindowMode } });
+    await openFirstTaskForEdit();
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    expect(await within(card).findByText('Ожидание загрузки.')).toBeTruthy();
+    const readsBeforePublication = apiMock.getTaskJournalFiles.mock.calls.length;
+    apiMock.getTaskJournalFiles.mockResolvedValue([{ id: 601, taskJournalItemId: 101, documentKey: 'doc-1', version: 1,
+      originalFileName: 'готовый.pdf', contentType: 'application/pdf', sizeBytes: 9,
+      uploadedByName: 'Исполнитель', uploadedAt: todayAt(10), isLatestVersion: true }]);
+    apiMock.getTaskFileUploadStates.mockResolvedValue([{ uploadKey: 'pending-1', fileName: 'готовый.pdf',
+      status: 'uploaded', fileId: 601, message: 'Файл прикреплён к задаче.' }]);
+    await waitFor(() => expect(within(card).getByText('Файл прикреплён к задаче.')).toBeTruthy(), { timeout: 7000 });
+    expect(apiMock.getTaskJournalFiles.mock.calls.length).toBeGreaterThan(readsBeforePublication);
+    expect(apiMock.uploadTaskJournalFile).not.toHaveBeenCalled();
+    expect(toastMock.success).not.toHaveBeenCalledWith('Список файлов обновлён после завершения загрузки.', 'Журнал задач');
+    cleanup();
+  }, 15000);
 
   it('separates comments, files, timer and system activity in the modern task card', async () => {
     apiMock.getTaskJournalComments.mockResolvedValueOnce([
@@ -1283,8 +1436,29 @@ describe('TaskJournal', () => {
 
     await waitFor(() => expect(apiMock.createTaskJournalComment).toHaveBeenCalledWith(101, 'Первый комментарий', true));
     expect(apiMock.uploadTaskJournalFile).toHaveBeenCalledTimes(2);
-    expect(apiMock.uploadTaskJournalFile).toHaveBeenNthCalledWith(1, 101, files[0]);
-    expect(apiMock.uploadTaskJournalFile).toHaveBeenNthCalledWith(2, 101, files[1]);
+    expect(apiMock.uploadTaskJournalFile).toHaveBeenNthCalledWith(1, 101, files[0], undefined);
+    expect(apiMock.uploadTaskJournalFile).toHaveBeenNthCalledWith(2, 101, files[1], undefined);
+  });
+
+  it.each(['legacy', 'modern'] as const)('keeps a newly created task open with accepted pending files in the %s card', async (taskCardWindowMode) => {
+    await renderJournal([], { waitForTitle: null, settings: { taskCardWindowMode } });
+    await openNewTaskFormAsGlobalInternal();
+    apiMock.uploadTaskJournalFile.mockRejectedValueOnce(new Error('HTTP 503 Service Unavailable'));
+    apiMock.getTaskFileUploadKey.mockReturnValue('pending-key');
+    apiMock.getTaskFileUploadStates.mockResolvedValue([{ uploadKey: 'pending-key', fileName: 'первый.pdf',
+      status: 'waiting', fileId: null, message: 'Завершение загрузки выполняется автоматически.' }]);
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    fireEvent.change(within(card).getByTestId('task-title-input'), { target: { value: 'Задача с ожидающим файлом' } });
+    const file = new File(['document'], 'первый.pdf', { type: 'application/pdf' });
+    fireEvent.change(card.querySelector('input[type="file"]') as HTMLInputElement, { target: { files: [file] } });
+    fireEvent.click(within(card).getByRole('button', { name: 'Создать задачу' }));
+    await waitFor(() => expect(toastMock.info).toHaveBeenCalledWith(expect.stringContaining('Задача создана. Файлы ещё ожидают прикрепления'), 'Журнал задач'));
+    expect(apiMock.createTaskJournalItem).toHaveBeenCalledTimes(1);
+    expect(apiMock.uploadTaskJournalFile).toHaveBeenCalledTimes(1);
+    expect(apiMock.getTaskFileUploadStates).toHaveBeenCalledWith(101, undefined, { uploadKeys: ['pending-key'] });
+    expect(await screen.findByRole('region', { name: 'Состояние ваших загрузок' })).toBeTruthy();
+    expect(toastMock.error).not.toHaveBeenCalled();
+    cleanup();
   });
 
   it.each(['legacy', 'modern'] as const)('keeps the created task open when its first file fails in the %s card', async (taskCardWindowMode) => {
@@ -1579,6 +1753,40 @@ describe('TaskJournal', () => {
   });
 
   it.each([
+    ['legacy', 'done', false], ['modern', 'done', false],
+    ['legacy', 'onApproval', false], ['modern', 'onApproval', false],
+    ['legacy', 'onApproval', true], ['modern', 'onApproval', true],
+  ] as const)('retains the result after status-save failure in the %s card for %s (editable: %s) without uploading twice', async (taskCardWindowMode, targetStatus, editable) => {
+    authState.isAdmin = editable;
+    authState.user = { id: 7, fullName: 'Исполнитель', email: 'assignee@example.com' };
+    await renderJournal([createTask({ assigneeUserId: 7, authorUserId: 8, result: '',
+      participants: [{ userId: 7, role: 'assignee', displayName: 'Исполнитель', approvalStatus: 'pending' }] })],
+      { settings: { taskCardWindowMode, executorCompletionAllowedUserIds: targetStatus === 'done' ? [7] : [] } });
+    if (editable) await openFirstTaskForEdit();
+    else fireEvent.click(screen.getByTitle('Просмотр'));
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    const actionName = targetStatus === 'done' ? 'Завершить задачу' : 'Отправить на согласование';
+    fireEvent.click(within(card).getAllByRole('button', { name: targetStatus === 'done' ? 'Завершить' : actionName }).at(-1)!);
+    await screen.findByRole('heading', { name: 'Добавить результат по задаче' });
+    const file = new File(['Результат'], 'итог.txt', { type: 'text/plain' });
+    fireEvent.change(screen.getByTestId('task-completion-file-input'), { target: { files: [file] } });
+    fireEvent.change(document.getElementById('task-completion-result')!, { target: { value: 'Результат не должен исчезнуть.' } });
+    const saveRequest = editable ? apiMock.updateTaskJournalItem : apiMock.updateTaskJournalStatus;
+    saveRequest.mockRejectedValueOnce(new Error('Сохранение статуса недоступно.'));
+    fireEvent.click(screen.getAllByRole('button', { name: actionName }).at(-1)!);
+    expect(await screen.findByText(/Не удалось подтвердить сохранение результата задачи/)).toBeTruthy();
+    expect(saveRequest).toHaveBeenCalledTimes(1);
+    expect(await screen.findByRole('heading', { name: 'Добавить результат по задаче' })).toBeTruthy();
+    expect((document.getElementById('task-completion-result') as HTMLTextAreaElement).value).toBe('Результат не должен исчезнуть.');
+    expect(screen.getByTitle('итог.txt')).toBeTruthy();
+    const savedFile = await apiMock.uploadTaskJournalFile.mock.results.at(-1)!.value;
+    apiMock.getTaskJournalFiles.mockResolvedValue([savedFile]);
+    fireEvent.click(screen.getAllByRole('button', { name: actionName }).at(-1)!);
+    await waitFor(() => expect(saveRequest).toHaveBeenCalledTimes(2));
+    expect(apiMock.uploadTaskJournalFile).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
     { taskCardWindowMode: 'legacy' as const, legalEntity: false, caseId: null },
     { taskCardWindowMode: 'modern' as const, legalEntity: false, caseId: '100' },
     { taskCardWindowMode: 'legacy' as const, legalEntity: true, caseId: null },
@@ -1847,6 +2055,317 @@ describe('TaskJournal', () => {
     await waitFor(() => expect(apiMock.updateTaskJournalItem).toHaveBeenCalledWith(101, expect.objectContaining({
       authorUserId: 9,
     })));
+  });
+
+  it.each(['legacy', 'modern'] as const)('starts routed task data before ancillary metadata in the %s card', async (taskCardWindowMode) => {
+    const setup = await renderJournal([createTask()], { settings: { taskCardWindowMode } });
+    setup.unmount();
+    vi.clearAllMocks();
+    apiMock.getTaskJournalAssignees.mockImplementationOnce(() => new Promise(() => {}));
+
+    render(<StrictMode><TaskJournal routeTaskId={101} /></StrictMode>);
+
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    expect(card).toBeTruthy();
+    expect(screen.queryByTestId(`task-${taskCardWindowMode === 'modern' ? 'legacy' : 'modern'}-card-window`)).toBeNull();
+    expect(apiMock.getTaskJournalItem).toHaveBeenCalledTimes(1);
+    for (const metadataRead of [apiMock.getTaskJournalSettings, apiMock.getTaskJournalAssignees,
+      apiMock.getUserSetting, apiMock.getCalendarSyncSettings, apiMock.getFeatureFlags]) {
+      expect(metadataRead).toHaveBeenCalled();
+      expect(apiMock.getTaskJournalItem.mock.invocationCallOrder[0]).toBeLessThan(metadataRead.mock.invocationCallOrder[0]);
+    }
+  });
+
+  it.each(['legacy', 'modern'] as const)('loads journal reads only when returning from the routed %s card', async (taskCardWindowMode) => {
+    const setup = await renderJournal([createTask()], { settings: { taskCardWindowMode } });
+    setup.unmount();
+    vi.clearAllMocks();
+    apiMock.getTaskFileUploadPage.mockResolvedValue({ items: [{ uploadKey: 'pending-route', fileName: 'копия.pdf',
+      status: 'waiting', fileId: null, message: 'Ожидание обязательных копий.' }], nextCursor: null });
+    const view = render(<StrictMode><TaskJournal routeTaskId={101} /></StrictMode>);
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    expect(await within(card).findByText('Ожидание обязательных копий.')).toBeTruthy();
+    expect(apiMock.getTaskJournalItem).toHaveBeenCalledTimes(1);
+    expect(apiMock.getTaskJournalSettings).toHaveBeenCalled();
+    expect(apiMock.getTaskJournalItems).not.toHaveBeenCalled();
+    expect(apiMock.getTaskJournalSummary).not.toHaveBeenCalled();
+    expect(apiMock.getTaskJournalCaseAutomationCandidates).not.toHaveBeenCalled();
+    expect(apiMock.getTaskJournalCaseAutomationSummary).not.toHaveBeenCalled();
+    await act(async () => { window.dispatchEvent(new Event(TASK_JOURNAL_REALTIME_EVENT)); });
+    // Let the existing real-time debounce elapse; a hidden journal must remain idle.
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
+    expect(apiMock.getTaskJournalItems).not.toHaveBeenCalled();
+    expect(apiMock.getTaskJournalCaseAutomationCandidates).not.toHaveBeenCalled();
+
+    view.rerender(<StrictMode><TaskJournal routeTaskId={null} /></StrictMode>);
+    expect(await screen.findByTestId('task-table')).toBeTruthy();
+    await waitFor(() => expect(apiMock.getTaskJournalCaseAutomationSummary).toHaveBeenCalledTimes(1));
+    expect(apiMock.getTaskJournalItems).toHaveBeenCalledTimes(1);
+    expect(apiMock.getTaskJournalSummary).toHaveBeenCalledTimes(1);
+    expect(apiMock.getTaskJournalCaseAutomationCandidates).toHaveBeenCalledTimes(1);
+    await act(async () => { window.dispatchEvent(new Event(TASK_JOURNAL_REALTIME_EVENT)); });
+    await waitFor(() => expect(apiMock.getTaskJournalItems).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(apiMock.getTaskJournalCaseAutomationCandidates).toHaveBeenCalledTimes(2));
+  });
+
+  describe('in-flight list route transition', () => {
+    async function pendingList(mode: 'legacy' | 'modern') {
+      const setup = await renderJournal([createTask()], { settings: { taskCardWindowMode: mode } });
+      setup.unmount();
+      apiMock.getTaskJournalItems.mockClear();
+      apiMock.getTaskJournalSummary.mockClear();
+      const obsolete = { items: [createTask({ title: 'Устаревший список задач' })], total: 1, page: 1, pageSize: 100 };
+      const summary = { active: 99, overdue: 99, today: 99, highPriority: 99 };
+      let finishItems!: (value: typeof obsolete) => void;
+      let failItems!: (error: Error) => void;
+      let finishSummary!: (value: typeof summary) => void;
+      const signals: AbortSignal[] = [];
+      apiMock.getTaskJournalItems.mockImplementationOnce((_params, options) => {
+        signals.push(options.signal);
+        return new Promise<typeof obsolete>((resolve, reject) => { finishItems = resolve; failItems = reject; });
+      });
+      apiMock.getTaskJournalSummary.mockImplementationOnce((_params, options) => {
+        signals.push(options.signal);
+        return new Promise<typeof summary>((resolve) => { finishSummary = resolve; });
+      });
+      const view = render(<TaskJournal />);
+      await waitFor(() => expect(signals).toHaveLength(2));
+      return { view, signals, fail: async () => {
+        await act(async () => { failItems(new Error('Synthetic obsolete list failure')); finishSummary(summary); });
+      }, finish: async () => {
+        await act(async () => { finishItems(obsolete); finishSummary(summary); });
+      } };
+    }
+
+    it.each(['legacy', 'modern'] as const)('retires the list read when opening the %s card without applying a stale result on return', async mode => {
+      const { view, signals, finish } = await pendingList(mode);
+      view.rerender(<TaskJournal routeTaskId={101} />);
+      await screen.findByTestId(`task-${mode}-card-window`);
+      expect(signals.every(signal => !signal.aborted)).toBe(true);
+      expect(apiMock.getTaskJournalItems).toHaveBeenCalledTimes(1);
+      view.rerender(<TaskJournal routeTaskId={null} />);
+      await waitFor(() => expect(apiMock.getTaskJournalItems).toHaveBeenCalledTimes(2));
+      await finish();
+      expect(screen.queryByText('Устаревший список задач')).toBeNull();
+      expect(apiMock.getTaskJournalSummary).toHaveBeenCalledTimes(2);
+    });
+
+    it.each(['legacy', 'modern'] as const)('aborts a retained list read on unmount from the %s card', async mode => {
+      const { view, signals, finish } = await pendingList(mode);
+      view.rerender(<TaskJournal routeTaskId={101} />);
+      await screen.findByTestId(`task-${mode}-card-window`);
+      expect(signals.every(signal => !signal.aborted)).toBe(true);
+      view.unmount();
+      expect(signals.every(signal => signal.aborted)).toBe(true);
+      await finish();
+    });
+
+    it.each(['legacy', 'modern'] as const)('aborts a retained list read when the employee changes in the %s card', async mode => {
+      const { view, signals, finish } = await pendingList(mode);
+      view.rerender(<TaskJournal routeTaskId={101} />);
+      await screen.findByTestId(`task-${mode}-card-window`);
+      expect(signals.every(signal => !signal.aborted)).toBe(true);
+      authState.user = { ...authState.user, id: 8 };
+      view.rerender(<TaskJournal routeTaskId={101} />);
+      await waitFor(() => expect(signals.every(signal => signal.aborted)).toBe(true));
+      await finish();
+      expect(screen.queryByText('Устаревший список задач')).toBeNull();
+    });
+  });
+
+  describe('in-flight list invalidation', () => {
+    it.each(['legacy', 'modern'] as const)('still cancels the pending list when the filter changes in the %s journal', async mode => {
+      const view = await renderJournal([createTask()], { settings: { taskCardWindowMode: mode } });
+      let finish!: (value: unknown) => void;
+      let signal!: AbortSignal;
+      apiMock.getTaskJournalItems.mockImplementationOnce((_params, options) => {
+        signal = options.signal;
+        return new Promise(resolve => { finish = resolve; });
+      });
+      await act(async () => { window.dispatchEvent(new Event(TASK_JOURNAL_REALTIME_EVENT)); });
+      await waitFor(() => expect(signal).toBeTruthy());
+      fireEvent.change(screen.getByTestId('task-priority-filter'), { target: { value: 'urgent' } });
+      await waitFor(() => expect(signal.aborted).toBe(true));
+      await act(async () => { finish({ items: [createTask({ title: 'Устаревший фильтр' })], total: 1, page: 1, pageSize: 100 }); });
+      expect(screen.queryByText('Устаревший фильтр')).toBeNull();
+      view.unmount();
+    });
+  });
+
+  describe('in-flight automation route transition', () => {
+    async function pendingAutomation(taskCardWindowMode: 'legacy' | 'modern', realtime = false) {
+      const setup = await renderJournal([createTask()], { settings: { taskCardWindowMode } });
+      if (!realtime) setup.unmount();
+      apiMock.getTaskJournalCaseAutomationCandidates.mockClear();
+      apiMock.getTaskJournalCaseAutomationSummary.mockClear();
+      const obsolete = [{ clientId: 10, clientName: 'Старый ответ автоконтроля', clientCaseId: 900,
+        clientCaseTitle: 'Устаревшее дело', reason: 'Нет активной задачи', activeTaskCount: 0,
+        completedTaskCount: 2, daysWithoutActiveTask: 20, isEscalated: true, lastTaskAt: todayAt(8),
+        suggestedTitle: 'Старая подсказка', suggestedDescription: '', suggestedDueAt: todayAt(9), suggestedPriority: 'urgent' }];
+      const summary = { totalCount: 99, readyCount: 99, criticalCount: 99, waitingCount: 0, pausedCount: 0 };
+      let finishCandidates!: (value: typeof obsolete) => void;
+      let finishSummary!: (value: typeof summary) => void;
+      const signals: AbortSignal[] = [];
+      apiMock.getTaskJournalCaseAutomationCandidates.mockImplementationOnce((_params, options) => {
+        signals.push(options.signal);
+        return new Promise<typeof obsolete>((resolve) => { finishCandidates = resolve; });
+      });
+      apiMock.getTaskJournalCaseAutomationSummary.mockImplementationOnce((_params, options) => {
+        signals.push(options.signal);
+        return new Promise<typeof summary>((resolve) => { finishSummary = resolve; });
+      });
+      const view = realtime ? setup : render(<TaskJournal />);
+      if (realtime) await act(async () => { window.dispatchEvent(new Event(TASK_JOURNAL_REALTIME_EVENT)); });
+      await waitFor(() => expect(signals).toHaveLength(2));
+      return { view, signals, finish: async () => {
+        await act(async () => { finishCandidates(obsolete); finishSummary(summary); });
+      } };
+    }
+
+    it.each(['legacy', 'modern'] as const)('finishes an already started automation read without applying its obsolete response in the %s card', async (mode) => {
+      const { view, signals, finish } = await pendingAutomation(mode);
+      view.rerender(<TaskJournal routeTaskId={101} />);
+      await screen.findByTestId(`task-${mode}-card-window`);
+      expect(signals.every((signal) => !signal.aborted)).toBe(true);
+      expect(apiMock.getTaskJournalCaseAutomationCandidates).toHaveBeenCalledTimes(1);
+      view.rerender(<TaskJournal routeTaskId={null} />);
+      await waitFor(() => expect(apiMock.getTaskJournalCaseAutomationCandidates).toHaveBeenCalledTimes(2));
+      await finish();
+      expect(screen.queryByText('Устаревшее дело')).toBeNull();
+      expect(screen.queryByText('Старый ответ автоконтроля')).toBeNull();
+      expect(apiMock.getTaskJournalCaseAutomationSummary).toHaveBeenCalledTimes(2);
+    });
+
+    it.each(['legacy', 'modern'] as const)('cancels retained automation on unmount from the %s card', async (mode) => {
+      const { view, signals, finish } = await pendingAutomation(mode);
+      view.rerender(<TaskJournal routeTaskId={101} />);
+      await screen.findByTestId(`task-${mode}-card-window`);
+      expect(signals.every((signal) => !signal.aborted)).toBe(true);
+      view.unmount();
+      expect(signals.every((signal) => signal.aborted)).toBe(true);
+      await finish();
+    });
+
+    it.each(['legacy', 'modern'] as const)('retires a realtime automation refresh safely when opening the %s card', async (mode) => {
+      const { view, signals, finish } = await pendingAutomation(mode, true);
+      view.rerender(<TaskJournal routeTaskId={101} />);
+      await screen.findByTestId(`task-${mode}-card-window`);
+      expect(signals.every((signal) => !signal.aborted)).toBe(true);
+      view.unmount();
+      expect(signals.every((signal) => signal.aborted)).toBe(true);
+      await finish();
+    });
+
+    it.each(['legacy', 'modern'] as const)('cancels retained automation when the employee changes in the %s card', async (mode) => {
+      const { view, signals, finish } = await pendingAutomation(mode);
+      view.rerender(<TaskJournal routeTaskId={101} />);
+      await screen.findByTestId(`task-${mode}-card-window`);
+      expect(signals.every((signal) => !signal.aborted)).toBe(true);
+      authState.user = { ...authState.user, id: 8 };
+      view.rerender(<TaskJournal routeTaskId={101} />);
+      await waitFor(() => expect(signals.every((signal) => signal.aborted)).toBe(true));
+      await finish();
+      view.rerender(<TaskJournal routeTaskId={null} />);
+      await waitFor(() => expect(apiMock.getTaskJournalCaseAutomationCandidates).toHaveBeenCalledTimes(2));
+      expect(screen.queryByText('Устаревшее дело')).toBeNull();
+    });
+
+    it.each(['legacy', 'modern'] as const)('still cancels obsolete automation when its filter changes in the %s journal', async (mode) => {
+      const { view, signals, finish } = await pendingAutomation(mode);
+      fireEvent.click(screen.getByRole('button', { name: 'Пора создать: 0' }));
+      await waitFor(() => expect(signals.every((signal) => signal.aborted)).toBe(true));
+      await waitFor(() => expect(apiMock.getTaskJournalCaseAutomationCandidates).toHaveBeenCalledTimes(2));
+      await finish();
+      expect(screen.queryByText('Устаревшее дело')).toBeNull();
+      view.unmount();
+    });
+  });
+
+  it.each(['legacy', 'modern'] as const)('does not refresh the hidden journal after routed creation with a pending file in the %s card', async (taskCardWindowMode) => {
+    await renderJournal([], { settings: { taskCardWindowMode }, waitForTitle: null, withRoute: true });
+    await openNewTaskFormAsGlobalInternal();
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    fireEvent.change(within(card).getByTestId('task-title-input'), { target: { value: 'Задача с обязательными копиями' } });
+    fireEvent.change(card.querySelector('input[type="file"]') as HTMLInputElement, { target: {
+      files: [new File(['content'], 'очередь.pdf', { type: 'application/pdf' })],
+    } });
+    apiMock.uploadTaskJournalFile.mockRejectedValueOnce(new Error('HTTP 503'));
+    apiMock.getTaskFileUploadKey.mockReturnValue('created-pending');
+    apiMock.getTaskFileUploadStates.mockResolvedValue([{ uploadKey: 'created-pending', fileName: 'очередь.pdf',
+      status: 'waiting', fileId: null, message: 'Ожидание обязательных копий.' }]);
+    vi.clearAllMocks();
+    fireEvent.click(within(card).getByRole('button', { name: 'Создать задачу' }));
+    await waitFor(() => expect(apiMock.createTaskJournalItem).toHaveBeenCalledTimes(1));
+    const saved = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    await waitFor(() => expect(within(saved).queryByRole('button', { name: 'Создать задачу' })).toBeNull());
+    expect(await within(saved).findByText('Ожидание обязательных копий.')).toBeTruthy();
+    expect(screen.queryByTestId('task-table')).toBeNull();
+    expect(apiMock.getTaskJournalItems).not.toHaveBeenCalled();
+    expect(apiMock.getTaskJournalSummary).not.toHaveBeenCalled();
+    expect(apiMock.getTaskJournalCaseAutomationCandidates).not.toHaveBeenCalled();
+  });
+
+  it.each(['legacy', 'modern'] as const)('ignores obsolete card metadata after an employee change while returning to the journal in the %s mode', async (taskCardWindowMode) => {
+    const setup = await renderJournal([createTask()], { settings: { taskCardWindowMode } });
+    setup.unmount();
+    const currentSettings = await apiMock.getTaskJournalSettings();
+    vi.clearAllMocks();
+    let finishOldSettings!: (settings: TaskJournalSettingsDto) => void;
+    apiMock.getTaskJournalSettings.mockImplementationOnce(() => new Promise<TaskJournalSettingsDto>((resolve) => { finishOldSettings = resolve; }));
+    const view = render(<TaskJournal routeTaskId={101} />);
+    await screen.findByTestId('task-card-settings-gate');
+    authState.user = { ...authState.user, id: 8 };
+    view.rerender(<TaskJournal routeTaskId={null} />);
+    await screen.findByTestId('task-table');
+    await waitFor(() => expect(apiMock.getTaskJournalSettings).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(apiMock.getTaskJournalCaseAutomationSummary).toHaveBeenCalledTimes(1));
+    await act(async () => finishOldSettings({ ...currentSettings, taskCardWindowMode: taskCardWindowMode === 'modern' ? 'legacy' : 'modern' }));
+    await openFirstTaskForEdit();
+    expect(await screen.findByTestId(`task-${taskCardWindowMode}-card-window`)).toBeTruthy();
+    expect(screen.queryByTestId(`task-${taskCardWindowMode === 'modern' ? 'legacy' : 'modern'}-card-window`)).toBeNull();
+    expect(apiMock.getTaskJournalCaseAutomationCandidates).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['legacy', 'modern'] as const)('shares only the pending routed task read in the %s card', async (taskCardWindowMode) => {
+    const view = await renderJournal([], { settings: { taskCardWindowMode }, waitForTitle: null });
+    let finishRead!: (task: TaskJournalItem) => void;
+    apiMock.getTaskJournalItem.mockImplementation(() => new Promise<TaskJournalItem>((resolve) => { finishRead = resolve; }));
+
+    view.rerender(<StrictMode><TaskJournal routeTaskId={101} /></StrictMode>);
+    await waitFor(() => expect(apiMock.getTaskJournalItem).toHaveBeenCalled());
+    expect(apiMock.getTaskJournalItem).toHaveBeenCalledTimes(1);
+    await act(async () => finishRead(createTask({ status: 'done', title: 'Завершённая задача из ссылки' })));
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    expect(within(card).getByDisplayValue('Завершённая задача из ссылки')).toBeTruthy();
+    expect(apiMock.getTaskJournalItem).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    { taskCardWindowMode: 'legacy' as const, change: 'task' },
+    { taskCardWindowMode: 'modern' as const, change: 'task' },
+    { taskCardWindowMode: 'legacy' as const, change: 'user' },
+    { taskCardWindowMode: 'modern' as const, change: 'user' },
+  ])('does not reuse or apply a pending routed read after a $change change in the $taskCardWindowMode card', async ({ taskCardWindowMode, change }) => {
+    const view = await renderJournal([], { settings: { taskCardWindowMode }, waitForTitle: null });
+    const reads: { taskId: number; finish: (task: TaskJournalItem) => void }[] = [];
+    apiMock.getTaskJournalItem.mockImplementation((taskId: number) => new Promise<TaskJournalItem>((finish) => { reads.push({ taskId, finish }); }));
+    view.rerender(<StrictMode><TaskJournal routeTaskId={101} /></StrictMode>);
+    await waitFor(() => expect(reads).toHaveLength(1));
+
+    if (change === 'user') authState.user = { ...authState.user, id: 8 };
+    const nextId = change === 'task' ? 102 : 101;
+    view.rerender(<StrictMode><TaskJournal routeTaskId={nextId} /></StrictMode>);
+    await waitFor(() => expect(reads).toHaveLength(2));
+    expect(reads.map((read) => read.taskId)).toEqual([101, nextId]);
+    await act(async () => reads[0].finish(createTask({ status: 'done', title: 'Прежняя карточка' })));
+    expect(screen.queryByDisplayValue('Прежняя карточка')).toBeNull();
+    expect(screen.queryByTestId(`task-${taskCardWindowMode}-card-window`)).toBeNull();
+
+    await act(async () => reads[1].finish(createTask({ id: nextId, status: 'done', title: 'Текущая карточка' })));
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    expect(within(card).getByDisplayValue('Текущая карточка')).toBeTruthy();
+    expect(screen.queryByDisplayValue('Прежняя карточка')).toBeNull();
+    expect(apiMock.getTaskJournalItem).toHaveBeenCalledTimes(2);
   });
 
   it('opens an existing task as a full page when the route is synced', async () => {
@@ -2216,6 +2735,29 @@ describe('TaskJournal', () => {
       'done',
       'Связались со следователем, документы переданы клиенту.',
     ));
+  });
+
+  it('does not complete a task while the result upload is pending and retries the same selected file', async () => {
+    await renderJournal([createTask({ id: 101, title: 'Задача с ожидающим файлом', result: '' })], { waitForTitle: 'Задача с ожидающим файлом' });
+    apiMock.uploadTaskJournalFile.mockRejectedValueOnce(new Error('HTTP 503 Service Unavailable'));
+    apiMock.getTaskFileUploadKey.mockReturnValue('pending-key');
+    apiMock.getTaskFileUploadStates.mockResolvedValue([{ uploadKey: 'pending-key', fileName: 'итог.txt',
+      status: 'waiting', fileId: null, message: 'Файл ожидает обязательных копий.' }]);
+    fireEvent.click(screen.getByTitle('Завершить'));
+    await screen.findByRole('heading', { name: 'Добавить результат по задаче' });
+    const file = new File(['Результат'], 'итог.txt', { type: 'text/plain' });
+    fireEvent.change(screen.getByTestId('task-completion-file-input'), { target: { files: [file] } });
+    fireEvent.change(document.getElementById('task-completion-result')!, { target: { value: 'Работа выполнена.' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Завершить задачу' }));
+    expect(await screen.findByText(/Задача пока не завершена и не отправлена/)).toBeTruthy();
+    expect(apiMock.updateTaskJournalStatus).not.toHaveBeenCalled();
+    apiMock.getTaskFileUploadStates.mockResolvedValue([{ uploadKey: 'pending-key', status: 'uploaded', fileId: 601 }]);
+    apiMock.getTaskJournalFiles.mockResolvedValue([{ id: 601, taskJournalItemId: 101, documentKey: 'doc-1', version: 1,
+      originalFileName: 'итог.txt', contentType: 'text/plain', sizeBytes: 9, uploadedByName: 'Автор', uploadedAt: todayAt(10), isLatestVersion: true }]);
+    fireEvent.click(screen.getByRole('button', { name: 'Завершить задачу' }));
+    await waitFor(() => expect(apiMock.updateTaskJournalStatus).toHaveBeenCalledWith(101, 'done', 'Работа выполнена.'));
+    expect(apiMock.uploadTaskJournalFile).toHaveBeenCalledTimes(1);
+    expect(apiMock.uploadTaskJournalFile).toHaveBeenCalledWith(101, file, undefined);
   });
 
   it('keeps completion prompt open when result file upload fails', async () => {
@@ -6454,6 +6996,93 @@ describe('TaskJournal', () => {
     await waitFor(() => expect(apiMock.createTaskJournalComment).toHaveBeenCalledWith(101, 'Комментарий исполнителя', true));
   });
 
+  it.each([
+    { taskCardWindowMode: 'legacy' as const, lostAcknowledgement: false },
+    { taskCardWindowMode: 'modern' as const, lostAcknowledgement: false },
+    { taskCardWindowMode: 'legacy' as const, lostAcknowledgement: true },
+    { taskCardWindowMode: 'modern' as const, lostAcknowledgement: true },
+  ])('keeps a confirmed attachment after a late initial file list in the $taskCardWindowMode card (lost acknowledgement: $lostAcknowledgement)', async ({ taskCardWindowMode, lostAcknowledgement }) => {
+    let finishInitialRead!: (files: unknown[]) => void;
+    apiMock.getTaskJournalFiles.mockImplementationOnce(() => new Promise<unknown[]>((resolve) => { finishInitialRead = resolve; }));
+    const saved = { id: 601, taskJournalItemId: 101, documentKey: 'doc-1', version: 1,
+      originalFileName: 'document.pdf', contentType: 'application/pdf', sizeBytes: 20,
+      uploadedByUserId: 7, uploadedByName: 'Исполнитель', uploadedAt: todayAt(12), isLatestVersion: true };
+    const earlier = { ...saved, id: 600, documentKey: 'earlier-document', originalFileName: 'earlier.pdf' };
+    authState.isAdmin = false;
+    authState.user = { id: 7, fullName: 'Исполнитель', email: 'assignee@example.com' };
+    await renderJournal([createTask({
+      status: 'inProgress', assigneeUserId: 7, authorUserId: 8,
+      participants: [{ userId: 7, role: 'assignee', displayName: 'Исполнитель', approvalStatus: 'pending' }],
+    })], { settings: { taskCardWindowMode, executorCompletionAllowedUserIds: [] } });
+    fireEvent.click(screen.getByTitle('Просмотр'));
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    await waitFor(() => expect(apiMock.getTaskJournalFiles).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(apiMock.getTaskFileUploadPage).toHaveBeenCalledTimes(1));
+    apiMock.getTaskJournalFiles.mockResolvedValue([earlier, saved]);
+    if (lostAcknowledgement) {
+      apiMock.uploadTaskJournalFile.mockRejectedValueOnce(new Error('HTTP 503 Service Unavailable'));
+      apiMock.getTaskFileUploadKey.mockReturnValue('lost-response-key');
+      apiMock.getTaskFileUploadStates.mockResolvedValue([{ uploadKey: 'lost-response-key', fileName: 'document.pdf',
+        status: 'uploaded', fileId: 601, message: 'Файл добавлен.' }]);
+    } else apiMock.uploadTaskJournalFile.mockResolvedValueOnce(saved);
+    const attach = within(card).getAllByRole('button', { name: /^(Прикрепить файл|Добавить файл)$/ })
+      .find((button) => !(button as HTMLButtonElement).disabled);
+    expect(attach).toBeTruthy();
+    fireEvent.click(attach!);
+    const file = new File(['Confirmed attachment'], 'document.pdf', { type: 'application/pdf' });
+    fireEvent.change(card.querySelector('input[type="file"]') as HTMLInputElement, { target: { files: [file] } });
+    await waitFor(() => expect(toastMock.success).toHaveBeenCalledWith('Файл добавлен к задаче.', 'Журнал задач'));
+    await act(async () => { finishInitialRead([earlier]); });
+    if (taskCardWindowMode === 'modern') fireEvent.click(within(card).getByRole('tab', { name: /^Файлы/ }));
+    await waitFor(() => expect(within(card).getAllByRole('button', { name: 'Скачать файл' })).toHaveLength(2));
+    const articles = within(card).getAllByRole('button', { name: 'Скачать файл' }).map((button) => button.closest('article')?.textContent);
+    expect(articles.some((text) => text?.includes('document.pdf'))).toBe(true);
+    expect(articles.some((text) => text?.includes('earlier.pdf'))).toBe(true);
+    expect(apiMock.getTaskJournalFiles).toHaveBeenCalledTimes(lostAcknowledgement ? 3 : 2);
+    if (lostAcknowledgement) expect(apiMock.getTaskFileUploadStates).toHaveBeenCalledWith(101, undefined, { uploadKeys: ['lost-response-key'] });
+    expect(apiMock.uploadTaskJournalFile).toHaveBeenCalledTimes(1);
+    expect(toastMock.error).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { taskCardWindowMode: 'legacy' as const, change: 'task' },
+    { taskCardWindowMode: 'modern' as const, change: 'task' },
+    { taskCardWindowMode: 'legacy' as const, change: 'user' },
+    { taskCardWindowMode: 'modern' as const, change: 'user' },
+  ])('isolates pending file upload after a $change change in the $taskCardWindowMode card', async ({ taskCardWindowMode, change }) => {
+    const first = createTask({ id: 101, title: 'Первая задача' });
+    const second = createTask({ id: 102, title: 'Вторая задача' });
+    const file = { id: 600, taskJournalItemId: 101, documentKey: 'old-scope', version: 1,
+      originalFileName: 'old-scope.pdf', contentType: 'application/pdf', sizeBytes: 9,
+      uploadedByUserId: 7, uploadedByName: 'Исполнитель', uploadedAt: todayAt(12), isLatestVersion: true };
+    apiMock.getTaskJournalFiles.mockImplementation(async (id: number) => [id === 101 && authState.user.id === 7 ? file
+      : { ...file, id: 602, taskJournalItemId: id, documentKey: 'new-scope', originalFileName: 'new-scope.pdf' }]);
+    let finishUpload!: (value: typeof file) => void;
+    apiMock.uploadTaskJournalFile.mockImplementationOnce(() => new Promise<typeof file>((resolve) => { finishUpload = resolve; }));
+    const view = await renderJournal([first, second], { settings: { taskCardWindowMode } });
+    view.rerender(<TaskJournal routeTaskId={101} />);
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    if (taskCardWindowMode === 'modern') fireEvent.click(within(card).getByRole('tab', { name: /^Файлы/ }));
+    await within(card).findByRole('button', { name: 'Скачать файл' });
+    fireEvent.click(within(card).getByRole('button', { name: 'Добавить файл' }));
+    fireEvent.change(card.querySelector('input[type="file"]') as HTMLInputElement,
+      { target: { files: [new File(['old upload'], 'old-upload.pdf', { type: 'application/pdf' })] } });
+    await waitFor(() => expect(apiMock.uploadTaskJournalFile).toHaveBeenCalledTimes(1));
+    if (change === 'user') authState.user = { id: 8, fullName: 'Другой сотрудник', email: 'other@example.com' };
+    view.rerender(<TaskJournal routeTaskId={change === 'task' ? 102 : 101} />);
+    const next = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    if (taskCardWindowMode === 'modern') fireEvent.click(within(next).getByRole('tab', { name: /^Файлы/ }));
+    await waitFor(() => expect(within(next).getByRole('button', { name: 'Скачать файл' }).closest('article')?.textContent).toContain('new-scope.pdf'));
+    const attach = within(next).getByRole('button', { name: /^(Добавить файл|Загружаем\.\.\.)$/ }) as HTMLButtonElement;
+    const enabledBeforeOldReply = !attach.disabled;
+    await act(async () => { finishUpload({ ...file, id: 601, originalFileName: 'old-upload.pdf' }); });
+    expect(enabledBeforeOldReply).toBe(true);
+    expect((within(next).getByRole('button', { name: 'Добавить файл' }) as HTMLButtonElement).disabled).toBe(false);
+    expect(within(next).queryByText('old-upload.pdf')).toBeNull();
+    expect(within(next).getByRole('button', { name: 'Скачать файл' }).closest('article')?.textContent).toContain('new-scope.pdf');
+    expect(apiMock.uploadTaskJournalFile).toHaveBeenCalledTimes(1);
+  });
+
   it.each(['legacy', 'modern'] as const)('allows executor to upload a file in the %s read-only task card', async (taskCardWindowMode) => {
     authState.isAdmin = false;
     authState.user = { id: 7, fullName: 'Исполнитель', email: 'assignee@example.com' };
@@ -6557,6 +7186,48 @@ describe('TaskJournal', () => {
     expect(within(card).getByTestId('court-preparation-hint').textContent).toContain('Проверьте документы к заседанию');
   });
 
+  it.each([
+    ['legacy', 'onApproval'], ['modern', 'onApproval'], ['legacy', 'done'], ['modern', 'done'],
+  ] as const)('retains the executor result and does not retransmit pending files in the %s card for %s', async (taskCardWindowMode, targetStatus) => {
+    authState.isAdmin = false;
+    authState.user = { id: 7, fullName: 'Исполнитель', email: 'assignee@example.com' };
+    await renderJournal([createTask({ assigneeUserId: 7, assigneeName: 'Исполнитель', authorUserId: 8, authorName: 'Постановщик', result: '',
+      participants: [{ userId: 7, role: 'assignee', displayName: 'Исполнитель', approvalStatus: 'pending' }] })],
+      { settings: { taskCardWindowMode, executorCompletionAllowedUserIds: targetStatus === 'done' ? [7] : [] } });
+    fireEvent.click(screen.getByTitle('Просмотр'));
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    const actionName = targetStatus === 'done' ? 'Завершить задачу' : 'Отправить на согласование';
+    fireEvent.click(within(card).getAllByRole('button', { name: targetStatus === 'done' ? 'Завершить' : actionName }).at(-1)!);
+    await screen.findByRole('heading', { name: 'Добавить результат по задаче' });
+    apiMock.uploadTaskJournalFile.mockRejectedValueOnce(new Error('HTTP 503 Service Unavailable'));
+    apiMock.getTaskFileUploadKey.mockReturnValue('pending-key');
+    apiMock.getTaskFileUploadStates.mockResolvedValue([{ uploadKey: 'pending-key', fileName: 'результат.pdf',
+      status: 'waiting', fileId: null, message: 'Ожидание прикрепления файла.' }]);
+    const file = new File(['Итоговый документ'], 'результат.pdf', { type: 'application/pdf' });
+    fireEvent.change(screen.getByTestId('task-completion-file-input'), { target: { files: [file] } });
+    fireEvent.change(document.getElementById('task-completion-result')!, { target: { value: 'Работа выполнена.' } });
+    fireEvent.click(screen.getAllByRole('button', { name: actionName }).at(-1)!);
+    expect(await screen.findByText(/Задача пока не завершена и не отправлена/)).toBeTruthy();
+    expect(apiMock.updateTaskJournalStatus).not.toHaveBeenCalled();
+    expect(apiMock.updateTaskJournalItem).not.toHaveBeenCalled();
+    expect(await within(card).findByRole('region', { name: 'Состояние ваших загрузок' })).toBeTruthy();
+    apiMock.getTaskFileUploadStates.mockRejectedValue(new Error('Не удалось проверить состояние файла.'));
+    fireEvent.click(screen.getAllByRole('button', { name: actionName }).at(-1)!);
+    expect(await screen.findByText('Не удалось проверить состояние файла.')).toBeTruthy();
+    expect((document.getElementById('task-completion-result') as HTMLTextAreaElement).value).toBe('Работа выполнена.');
+    expect(screen.getByTitle('результат.pdf')).toBeTruthy();
+    expect(apiMock.updateTaskJournalStatus).not.toHaveBeenCalled();
+    expect(apiMock.updateTaskJournalItem).not.toHaveBeenCalled();
+    expect(apiMock.uploadTaskJournalFile).toHaveBeenCalledTimes(1);
+    apiMock.getTaskFileUploadStates.mockResolvedValue([{ uploadKey: 'pending-key', status: 'uploaded', fileId: 601 }]);
+    apiMock.getTaskJournalFiles.mockResolvedValue([{ id: 601, taskJournalItemId: 101, documentKey: 'doc-1', version: 1,
+      originalFileName: 'результат.pdf', contentType: 'application/pdf', sizeBytes: 9, uploadedByName: 'Исполнитель', uploadedAt: todayAt(10), isLatestVersion: true }]);
+    fireEvent.click(screen.getAllByRole('button', { name: actionName }).at(-1)!);
+    await waitFor(() => expect(apiMock.updateTaskJournalStatus).toHaveBeenCalledWith(101, targetStatus, 'Работа выполнена.'));
+    expect(apiMock.uploadTaskJournalFile).toHaveBeenCalledTimes(1);
+    cleanup();
+  });
+
   it.each(['legacy', 'modern'] as const)('sends an executor result to approval from the %s read-only task card', async (taskCardWindowMode) => {
     authState.isAdmin = false;
     authState.user = { id: 7, fullName: 'Исполнитель', email: 'assignee@example.com' };
@@ -6589,7 +7260,7 @@ describe('TaskJournal', () => {
     });
     fireEvent.click(screen.getAllByRole('button', { name: 'Отправить на согласование' }).at(-1)!);
 
-    await waitFor(() => expect(apiMock.uploadTaskJournalFile).toHaveBeenCalledWith(101, resultFile));
+    await waitFor(() => expect(apiMock.uploadTaskJournalFile).toHaveBeenCalledWith(101, resultFile, undefined));
     await waitFor(() => expect(apiMock.updateTaskJournalStatus).toHaveBeenCalledWith(
       101,
       'onApproval',
@@ -7502,6 +8173,35 @@ describe('TaskJournal', () => {
 
     await waitFor(() => expect(apiMock.createTaskJournalComment).toHaveBeenCalledWith(101, 'Комментарий по задаче', false));
     expect(await screen.findAllByText('Комментарий по задаче')).toHaveLength(1);
+  });
+
+  it.each([
+    { taskCardWindowMode: 'legacy' as const, caseDocumentId: 42 },
+    { taskCardWindowMode: 'modern' as const, caseDocumentId: 42 },
+    { taskCardWindowMode: 'legacy' as const, caseDocumentId: null },
+    { taskCardWindowMode: 'modern' as const, caseDocumentId: null },
+  ])('shows only the persisted case document reference in the $taskCardWindowMode card ($caseDocumentId)', async ({ taskCardWindowMode, caseDocumentId }) => {
+    apiMock.getTaskJournalFiles.mockResolvedValueOnce([{
+      id: 600,
+      taskJournalItemId: 101,
+      documentKey: 'late-case-file',
+      version: 2,
+      originalFileName: 'late-case.pdf',
+      contentType: 'application/pdf',
+      sizeBytes: 1024,
+      uploadedByUserId: 7,
+      uploadedByName: 'Автор',
+      uploadedAt: todayAt(10),
+      isLatestVersion: true,
+      clientCaseDocumentId: caseDocumentId,
+    }]);
+    await renderJournal([createTask()], { settings: { taskCardWindowMode } });
+    await openFirstTaskForEdit();
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    if (taskCardWindowMode === 'modern') fireEvent.click(within(card).getByRole('tab', { name: 'Файлы 1' }));
+    expect((await within(card).findAllByText('late-case.pdf')).length).toBeGreaterThan(0);
+    if (caseDocumentId !== null) expect(await within(card).findByText(/Документ дела #42/u)).toBeTruthy();
+    else expect(within(card).queryByText(/Документ дела #/u)).toBeNull();
   });
 
   it('shows task files and uploads a new version', async () => {

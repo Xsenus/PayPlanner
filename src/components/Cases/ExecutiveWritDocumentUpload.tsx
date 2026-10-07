@@ -12,9 +12,10 @@ interface ExecutiveWritDocumentUploadProps {
   canUpload: boolean;
   documents: ClientCaseDocument[];
   onUploaded: () => Promise<void> | void;
+  onAttemptSettled?: () => void;
 }
 
-export function ExecutiveWritDocumentUpload({ caseId, canUpload, documents, onUploaded }: ExecutiveWritDocumentUploadProps) {
+export function ExecutiveWritDocumentUpload({ caseId, canUpload, documents, onUploaded, onAttemptSettled }: ExecutiveWritDocumentUploadProps) {
   const [uploading, setUploading] = useState(false);
   const [downloadingId, setDownloadingId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -60,6 +61,7 @@ export function ExecutiveWritDocumentUpload({ caseId, canUpload, documents, onUp
       setError(extractDisplayErrorMessage(uploadError, 'Не удалось загрузить скан исполнительного листа.'));
       input.value = '';
       setUploading(false);
+      onAttemptSettled?.();
       return;
     }
     try {
@@ -69,6 +71,7 @@ export function ExecutiveWritDocumentUpload({ caseId, canUpload, documents, onUp
     } finally {
       input.value = '';
       setUploading(false);
+      onAttemptSettled?.();
     }
   };
 

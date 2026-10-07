@@ -155,7 +155,7 @@ export function DialogProvider({ children }: { children: ReactNode }) {
                   <h2 className="text-lg font-semibold text-slate-900">{confirmRequest.title}</h2>
                 </div>
                 <div className="px-6 py-4">
-                  {confirmRequest.description ? <p className="text-sm text-slate-600">{confirmRequest.description}</p> : null}
+                  {confirmRequest.description ? <p className="text-sm text-slate-600 [overflow-wrap:anywhere]">{confirmRequest.description}</p> : null}
                 </div>
                 <div className="flex items-center justify-end gap-3 border-t border-slate-200 px-6 py-4">
                   <button

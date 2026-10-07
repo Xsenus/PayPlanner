@@ -7,6 +7,7 @@ import { CaseHearingPreparationChecklist } from '../Cases/CaseHearingPreparation
 import { CasePositionTemplatePicker } from '../Cases/CasePositionTemplatePicker';
 import { CourtRecoveryPanel } from '../Cases/CourtRecoveryPanel';
 import { ExecutiveWritDocumentUpload } from '../Cases/ExecutiveWritDocumentUpload';
+import { CaseDocumentUploadStatusPanel } from '../Cases/CaseDocumentUploadStatusPanel';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Download, ExternalLink, FileText, Link2, Plus, RotateCw, Trash2, Upload, X } from 'lucide-react';
@@ -332,6 +333,7 @@ export function CaseModal({
   const [caseDocuments, setCaseDocuments] = useState<ClientCaseDocument[]>([]);
   const [documentsLoading, setDocumentsLoading] = useState(false);
   const [documentsSaving, setDocumentsSaving] = useState(false);
+  const [uploadRevision, setUploadRevision] = useState(0);
   const [documentsError, setDocumentsError] = useState<string | null>(null);
   const [caseTasks, setCaseTasks] = useState<TaskJournalItem[]>([]);
   const [caseTasksLoading, setCaseTasksLoading] = useState(false);
@@ -883,6 +885,7 @@ export function CaseModal({
       setDocumentsError(e instanceof Error ? e.message : String(e));
     } finally {
       setDocumentsSaving(false);
+      setUploadRevision((value) => value + 1);
     }
   };
 
@@ -914,6 +917,7 @@ export function CaseModal({
       setDocumentsError(e instanceof Error ? e.message : String(e));
     } finally {
       setDocumentsSaving(false);
+      setUploadRevision((value) => value + 1);
     }
   };
 
@@ -1824,7 +1828,7 @@ export function CaseModal({
               onChange={(e) => setExecutiveWritReceivedAt(e.target.value)}
               disabled={saving}
             />
-            <div className="mt-2"><ExecutiveWritDocumentUpload caseId={caseData.id} canUpload={allowEdit} documents={caseDocuments} onUploaded={refreshDocuments} /></div>
+            <div className="mt-2"><ExecutiveWritDocumentUpload caseId={caseData.id} canUpload={allowEdit} documents={caseDocuments} onUploaded={refreshDocuments} onAttemptSettled={() => setUploadRevision((value) => value + 1)} /></div>
           </div>
 
           <div className="rounded-lg border border-blue-100 bg-blue-50/40 p-3">
@@ -1902,6 +1906,11 @@ export function CaseModal({
           </div>
 
           <div className="md:col-span-2 rounded-xl border border-gray-200 bg-gray-50 p-4 space-y-3">
+            {allowEdit && caseData.id > 0 ? <CaseDocumentUploadStatusPanel key={caseData.id} caseId={caseData.id} revision={uploadRevision}
+              onPublished={async (signal) => {
+                const documents = await apiService.getCaseDocuments(caseData.id, signal);
+                if (!signal.aborted) setCaseDocuments(documents);
+              }} /> : null}
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <div className="text-sm font-semibold text-gray-800">Файлы дела</div>

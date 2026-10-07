@@ -151,6 +151,60 @@ describe('RealtimeNotificationToasts', () => {
     expect(openTask).toHaveBeenCalledWith(123);
   });
 
+  it('waits for resolved permissions before replaying a notice with its task action', async () => {
+    const openTask = vi.fn();
+    window.localStorage.setItem('payplanner.realtimeToastLastSeenAt.v1.5', String(Date.now() - 120_000));
+    apiMock.getUserNotifications.mockResolvedValue({
+      items: [{ id: 712, type: 'taskChanged', title: 'Файл прикреплён к задаче',
+        eventKey: 'task-file:712:result', objectType: 'task', objectId: 712, taskId: 712,
+        isRead: false, createdAt: new Date(Date.now() - 60_000).toISOString(),
+      }], total: 1, page: 1, pageSize: 50,
+    });
+    const { rerender } = render(<RealtimeNotificationToasts userId={5} ready={false} />);
+    await flushRealtimeStart();
+    expect(connectionState.start).not.toHaveBeenCalled();
+    expect(apiMock.getUserNotifications).not.toHaveBeenCalled();
+    rerender(<RealtimeNotificationToasts userId={5} ready onOpenTask={openTask} />);
+    await waitFor(() => expect(toastMock.showToast).toHaveBeenCalledWith(
+      expect.objectContaining({ title: 'Файл прикреплён к задаче', actionLabel: 'Открыть задачу' }),
+    ));
+    const options = toastMock.showToast.mock.calls[0][0] as { onAction: () => void };
+    act(() => options.onAction());
+    expect(openTask).toHaveBeenCalledWith(712);
+  });
+
+  it('shows a background upload result with the task card closed and ignores repeat delivery', async () => {
+    const openTask = vi.fn();
+    render(<RealtimeNotificationToasts userId={5} onOpenTask={openTask} />);
+    await waitFor(() => expect(connectionState.start).toHaveBeenCalledTimes(1));
+    const result = {
+      id: 143,
+      recipientUserId: 5,
+      type: 'taskChanged',
+      eventKey: 'task-file-publication-result:00000000000000000000000000000143',
+      title: 'Файл прикреплён к задаче',
+      bodyPreview: 'Загрузка завершена. Файл доступен в карточке задачи.',
+      tone: 'emerald',
+      objectType: 'task',
+      objectId: 223,
+      taskJournalItemId: 223,
+      metadataJson: '{"uploadKey":"00000000-0000-0000-0000-000000000143","result":"uploaded"}',
+      createdAt: '2026-09-29T10:00:00Z',
+    };
+    act(() => {
+      const handler = connectionState.handlers.get(REALTIME_USER_NOTIFICATION_CREATED_EVENT);
+      handler?.(result);
+      handler?.(result);
+    });
+    expect(toastMock.showToast).toHaveBeenCalledTimes(1);
+    expect(toastMock.showToast).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'Файл прикреплён к задаче', actionLabel: 'Открыть задачу', domain: 'task',
+    }));
+    const toastOptions = toastMock.showToast.mock.calls[0][0] as { onAction: () => void };
+    act(() => toastOptions.onAction());
+    expect(openTask).toHaveBeenCalledWith(223);
+  });
+
   it('keeps task completion visible until the author acknowledges it or opens the task', async () => {
     const openTask = vi.fn();
     render(<RealtimeNotificationToasts userId={5} onOpenTask={openTask} />);
@@ -1176,6 +1230,115 @@ describe('RealtimeNotificationToasts', () => {
     vi.useRealTimers();
   });
 
+  it.each(['replay', 'fallback'] as const)('recovers a notification committed while an older empty %s response is pending', async (delivery) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-01T00:00:00Z'));
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const emptySnapshot = { items: [], total: 0, page: 1, pageSize: 50 };
+    let finishSnapshot: (() => void) | undefined;
+    apiMock.getUserNotifications.mockReturnValueOnce(new Promise<typeof emptySnapshot>((resolve) => {
+      finishSnapshot = () => resolve(emptySnapshot);
+    }));
+    if (delivery === 'fallback') connectionState.start.mockRejectedValueOnce(new Error('Owned fallback boundary'));
+    const first = render(<RealtimeNotificationToasts userId={5} />);
+    let second: ReturnType<typeof render> | undefined;
+    try {
+      await flushRealtimeStart();
+      expect(apiMock.getUserNotifications).toHaveBeenCalledTimes(1);
+      // The server snapshot is empty, but its response is delayed. A new row
+      // commits after that snapshot and before the response reaches this tab.
+      vi.setSystemTime(new Date('2026-10-01T00:00:10Z'));
+      const notification = {
+        id: 908, type: 'taskChanged', eventKey: 'task-file:908:result',
+        title: 'Файл прикреплён во время чтения прежнего снимка', objectType: 'task',
+        objectId: 908, taskId: 908, isRead: false, toastEnabled: true,
+        createdAt: new Date().toISOString(),
+      };
+      vi.setSystemTime(new Date('2026-10-01T00:00:20Z'));
+      await act(async () => finishSnapshot?.());
+      first.unmount();
+      toastMock.showToast.mockClear();
+      apiMock.getUserNotifications.mockResolvedValue({ items: [notification], total: 1, page: 1, pageSize: 50 });
+      second = render(<RealtimeNotificationToasts userId={5} />);
+      await flushRealtimeStart();
+      expect(toastMock.showToast).toHaveBeenCalledWith(expect.objectContaining({ title: notification.title }));
+    } finally {
+      first.unmount();
+      second?.unmount();
+      errorSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([false, true])('keeps the live replay boundary at confirmed time rather than later wall time (future timestamp: %s)', async (future) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-01T00:00:00Z'));
+    const first = render(<RealtimeNotificationToasts userId={5} />);
+    try {
+      await flushRealtimeStart();
+      vi.setSystemTime(new Date('2026-10-01T00:00:10Z'));
+      act(() => connectionState.handlers.get(REALTIME_USER_NOTIFICATION_CREATED_EVENT)?.({
+        id: 909, recipientUserId: 5, type: 'taskChanged', eventKey: 'task:909:changed',
+        title: 'Подтверждённое уведомление', objectType: 'task', taskJournalItemId: 909,
+        bodyPreview: '', tone: 'info',
+        createdAt: future ? '2026-10-01T00:01:00Z' : new Date().toISOString(),
+      }));
+      expect(toastMock.showToast).toHaveBeenCalledWith(expect.objectContaining({ title: 'Подтверждённое уведомление' }));
+      vi.setSystemTime(new Date('2026-10-01T00:00:20Z'));
+      first.unmount();
+      expect(Number(window.localStorage.getItem('payplanner.realtimeToastLastSeenAt.v1.5')))
+        .toBe(Date.parse('2026-10-01T00:00:10Z'));
+    } finally {
+      first.unmount();
+      vi.useRealTimers();
+    }
+  });
+
+  it('covers the handshake gap after an earlier empty recovery read without overlapping inbox reads', async () => {
+    window.localStorage.setItem('payplanner.realtimeToastLastSeenAt.v1.5', String(Date.now() - 120_000));
+    let finishConnection: (() => void) | undefined;
+    let finishInitialRead: (() => void) | undefined;
+    connectionState.start.mockImplementation(() => new Promise<void>((resolve) => { finishConnection = resolve; }));
+    apiMock.getUserNotifications.mockImplementationOnce(() => new Promise((resolve) => {
+      finishInitialRead = () => resolve({ items: [], total: 0, page: 1, pageSize: 50 });
+    })).mockResolvedValue({
+      items: [{ id: 907, type: 'taskAssigned', eventKey: 'task:907:assigned',
+        title: 'Задача во время подключения', bodyPreview: 'Новая задача', tone: 'blue',
+        objectType: 'task', taskId: 907, createdAt: new Date().toISOString(),
+      }], total: 1, page: 1, pageSize: 50,
+    });
+    const { unmount } = render(<RealtimeNotificationToasts userId={5} onOpenTask={vi.fn()} />);
+    try {
+      await waitFor(() => expect(apiMock.getUserNotifications).toHaveBeenCalledTimes(1));
+      await act(async () => finishConnection?.());
+      expect(apiMock.getUserNotifications).toHaveBeenCalledTimes(1);
+      await act(async () => finishInitialRead?.());
+      await waitFor(() => expect(toastMock.showToast).toHaveBeenCalledWith(expect.objectContaining({ title: 'Задача во время подключения' })));
+      expect(apiMock.getUserNotifications).toHaveBeenCalledTimes(2);
+      expect(toastMock.showToast).toHaveBeenCalledTimes(1);
+    } finally { unmount(); }
+  });
+  it('replays a published file while the initial realtime connection is still pending', async () => {
+    window.localStorage.setItem('payplanner.realtimeToastLastSeenAt.v1.5', String(Date.now() - 120_000));
+    let finishConnection: (() => void) | undefined;
+    connectionState.start.mockImplementation(() => new Promise<void>((resolve) => { finishConnection = resolve; }));
+    apiMock.getUserNotifications.mockResolvedValue({
+      items: [{
+        id: 906, type: 'taskChanged', eventKey: 'task:906:published',
+        title: 'Файл прикреплён к задаче', bodyPreview: 'Файл доступен в карточке задачи.', tone: 'emerald',
+        objectType: 'task', taskId: 906, metadataJson: JSON.stringify({ result: 'uploaded' }), createdAt: new Date(Date.now() - 30_000).toISOString(),
+      }], total: 1, page: 1, pageSize: 50,
+    });
+    const { unmount } = render(<RealtimeNotificationToasts userId={5} onOpenTask={vi.fn()} />);
+    try {
+      await waitFor(() => expect(toastMock.showToast).toHaveBeenCalledWith(expect.objectContaining({
+        title: 'Файл прикреплён к задаче', actionLabel: 'Открыть задачу',
+      })));
+      expect(getRealtimeNotificationDiagnostics().status).toBe('connecting');
+      await act(async () => finishConnection?.());
+      expect(toastMock.showToast).toHaveBeenCalledTimes(1);
+    } finally { unmount(); }
+  });
   it('recovers an assignment created during the initial connection handshake on a new device', async () => {
     let finishConnection: (() => void) | undefined;
     connectionState.start.mockImplementation(() => new Promise<void>((resolve) => { finishConnection = resolve; }));
@@ -1254,6 +1417,31 @@ describe('RealtimeNotificationToasts', () => {
     }));
     expect(changedEvents.find((item) => item.notificationId === 710)?.unreadDelta).toBeUndefined();
     window.removeEventListener(USER_NOTIFICATIONS_EVENT, listener);
+  });
+
+  it('replays UTC database timestamps without a suffix in a non-UTC browser', async () => {
+    const nativeParse = Date.parse;
+    const parse = vi.spyOn(Date, 'parse').mockImplementation((value) =>
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+$/.test(value)
+        ? nativeParse(`${value}Z`) - 7 * 60 * 60 * 1000
+        : nativeParse(value));
+    try {
+      window.localStorage.setItem('payplanner.realtimeToastLastSeenAt.v1.5', String(Date.now() - 120_000));
+      apiMock.getUserNotifications.mockResolvedValue({
+        items: [{
+          id: 711, type: 'taskChanged', title: 'Файл прикреплён к задаче',
+          bodyPreview: 'Загрузка завершена.', eventKey: 'task-file:711:result',
+          objectType: 'task', objectId: 711, taskId: 711, isRead: false,
+          createdAt: new Date(Date.now() - 60_000).toISOString().replace(/Z$/, ''),
+        }], total: 1, page: 1, pageSize: 50,
+      });
+      render(<RealtimeNotificationToasts userId={5} onOpenTask={vi.fn()} />);
+      await waitFor(() => expect(toastMock.showToast).toHaveBeenCalledWith(
+        expect.objectContaining({ title: 'Файл прикреплён к задаче' }),
+      ));
+    } finally {
+      parse.mockRestore();
+    }
   });
 
   it('shows a link to the inbox when more missed notifications exist than can be replayed', async () => {
@@ -1723,4 +1911,76 @@ describe('RealtimeNotificationToasts', () => {
 
     window.removeEventListener(USER_NOTIFICATIONS_EVENT, handleChanged);
   });
+  it('retains fallback polling after network loss and restores notification delivery on visibility change', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => undefined);
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+    connectionState.start.mockRejectedValue(new TypeError('Failed to fetch'));
+    apiMock.getUserNotifications.mockRejectedValue(new TypeError('Failed to fetch'));
+    const { unmount } = render(<RealtimeNotificationToasts userId={5} />);
+    try {
+      await flushRealtimeStart();
+      await waitFor(() => expect(apiMock.getUserNotifications).toHaveBeenCalled());
+      await waitFor(() => expect(debugSpy).toHaveBeenCalledWith('Notifications are unavailable; polling will retry.', expect.any(TypeError)));
+      expect(errorSpy).not.toHaveBeenCalled();
+      expect(apiMock.markUserNotificationRead).not.toHaveBeenCalled();
+      expect(getRealtimeNotificationDiagnostics()).toMatchObject({ fallbackPollingActive: true });
+      apiMock.getUserNotifications.mockResolvedValue({ items: [{
+        id: 1902, type: 'taskAssigned', eventKey: 'task:1902:assigned', title: 'Восстановленное уведомление',
+        bodyPreview: 'Сохранённое сообщение', tone: 'blue', objectType: 'task', objectId: 1902,
+        taskId: 1902, createdAt: new Date().toISOString(),
+      }] });
+      await act(async () => document.dispatchEvent(new Event('visibilitychange')));
+      await waitFor(() => expect(toastMock.showToast).toHaveBeenCalledWith(expect.objectContaining({ title: 'Восстановленное уведомление' })));
+      expect(apiMock.markUserNotificationRead).not.toHaveBeenCalled();
+    } finally {
+      unmount(); visibility.mockRestore(); errorSpy.mockRestore(); debugSpy.mockRestore();
+    }
+  });
+
+  it.each(['HTTP 403 Forbidden', 'HTTP 500 Failed to fetch', 'HTTP 507 Failed to fetch', 'Invalid notification response'])('keeps a genuine fallback read failure visible: %s', async (message) => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    connectionState.start.mockRejectedValue(new TypeError('Failed to fetch'));
+    apiMock.getUserNotifications.mockRejectedValue(new Error(message));
+    const { unmount } = render(<RealtimeNotificationToasts userId={5} />);
+    try {
+      await flushRealtimeStart();
+      await waitFor(() => expect(errorSpy).toHaveBeenCalledWith('Fallback notifications polling failed.', expect.any(Error)));
+      expect(apiMock.markUserNotificationRead).not.toHaveBeenCalled();
+    } finally { unmount(); errorSpy.mockRestore(); }
+  });
+
+  it('restores missed notification reads after network loss without a false error or acknowledgement', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => undefined);
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+    apiMock.getUserNotifications.mockRejectedValue(new TypeError('Failed to fetch'));
+    const { unmount } = render(<RealtimeNotificationToasts userId={5} />);
+    try {
+      await flushRealtimeStart();
+      await waitFor(() => expect(debugSpy).toHaveBeenCalledWith('Notifications are unavailable; replay will retry.', expect.any(TypeError)));
+      expect(errorSpy).not.toHaveBeenCalled();
+      expect(apiMock.markUserNotificationRead).not.toHaveBeenCalled();
+      apiMock.getUserNotifications.mockResolvedValue({ items: [{
+        id: 1903, type: 'taskAssigned', eventKey: 'task:1903:assigned', title: 'Сообщение после восстановления',
+        bodyPreview: 'Исходное уведомление', tone: 'blue', objectType: 'task', objectId: 1903,
+        taskId: 1903, createdAt: new Date().toISOString(),
+      }] });
+      await act(async () => document.dispatchEvent(new Event('visibilitychange')));
+      await waitFor(() => expect(toastMock.showToast).toHaveBeenCalledWith(expect.objectContaining({ title: 'Сообщение после восстановления' })));
+      expect(apiMock.markUserNotificationRead).not.toHaveBeenCalled();
+    } finally { unmount(); visibility.mockRestore(); errorSpy.mockRestore(); debugSpy.mockRestore(); }
+  });
+
+  it.each(['HTTP 403 Forbidden', 'HTTP 500 Failed to fetch', 'Invalid notification response'])('keeps a genuine missed-notification read failure visible: %s', async (message) => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    apiMock.getUserNotifications.mockRejectedValue(new Error(message));
+    const { unmount } = render(<RealtimeNotificationToasts userId={5} />);
+    try {
+      await flushRealtimeStart();
+      await waitFor(() => expect(errorSpy).toHaveBeenCalledWith('Missed notifications replay failed.', expect.any(Error)));
+      expect(apiMock.markUserNotificationRead).not.toHaveBeenCalled();
+    } finally { unmount(); errorSpy.mockRestore(); }
+  });
+
 });

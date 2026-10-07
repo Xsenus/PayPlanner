@@ -9,6 +9,23 @@ afterEach(() => {
 });
 
 describe('authService', () => {
+  it('reuses the photo upload key after failure without setting the multipart boundary', async () => {
+    const file = new File(['photo'], 'photo.png', { type: 'image/png' });
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ detail: 'Копии не готовы' }), { status: 503 }))
+      .mockImplementation(async () => new Response(JSON.stringify({ id: 1 }), { headers: { 'content-type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(authService.uploadProfilePhoto(file)).rejects.toThrow();
+    await authService.uploadProfilePhoto(file);
+    await authService.uploadProfilePhoto(new File(['new'], 'photo.png', { type: 'image/png' }));
+    const headers = fetchMock.mock.calls.map(([, init]) => init?.headers as Record<string, string>);
+    expect(headers[0]['X-Upload-Key']).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(headers[1]['X-Upload-Key']).toBe(headers[0]['X-Upload-Key']);
+    expect(headers[2]['X-Upload-Key']).not.toBe(headers[0]['X-Upload-Key']);
+    expect(headers[0]['Content-Type']).toBeUndefined();
+    expect(fetchMock.mock.calls[0][1]?.body).toBeInstanceOf(FormData);
+  });
+
   it('loads the current user from the profile endpoint', async () => {
     localStorage.setItem('pp_token', 'token');
     const user = {

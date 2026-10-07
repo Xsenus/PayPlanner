@@ -127,4 +127,14 @@ describe('realtimeNotifications', () => {
     );
     expect(sink.error.mock.calls.flat().join(' ')).not.toContain('secret.jwt.token');
   });
+  it.each([200, 400, 409, 422, 501, 507])('retains explicit HTTP %i failures even with network wording', (status) => {
+    const sink = createConsoleSink();
+    const logger = createNotificationsHubLogger(sink);
+    const message = `Failed to complete negotiation: HTTP ${status} Failed to fetch`;
+    expect(isExpectedRealtimeStartupError(new Error(message))).toBe(false);
+    logger.log(LogLevel.Error, message);
+    expect(sink.error).toHaveBeenCalledWith(message);
+    expect(sink.debug).not.toHaveBeenCalled();
+  });
+
 });

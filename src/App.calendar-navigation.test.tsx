@@ -117,7 +117,7 @@ vi.mock('./components/Notifications/NotificationCenter', () => ({
 }));
 
 vi.mock('./components/Notifications/ForcedTaskRevisionModal', () => ({
-  ForcedTaskRevisionModal: () => null,
+  ForcedTaskRevisionModal: () => <section data-testid="forced-notification-queue" />,
 }));
 
 vi.mock('./components/Reports/Reports', () => ({
@@ -321,6 +321,17 @@ describe('App calendar client navigation', () => {
     });
   });
 
+  it('starts the mandatory notification queue only after current role permissions have loaded', async () => {
+    permissionsState.loaded = false;
+    const rendered = render(<App />);
+    expect(screen.queryByTestId('forced-notification-queue')).toBeNull();
+    permissionsState.loaded = true;
+    rendered.rerender(<App />);
+    await waitFor(() => expect(screen.getByTestId('forced-notification-queue')).toBeTruthy());
+    permissionsState.loaded = false;
+    rendered.rerender(<App />);
+    expect(screen.queryByTestId('forced-notification-queue')).toBeNull();
+  });
   it('keeps a routed invoice page while role permissions are loading', async () => {
     window.history.replaceState({}, '', '/invoices/528');
     window.localStorage.setItem(LAST_TAB_STORAGE_KEY, 'notifications');

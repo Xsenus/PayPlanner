@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { restoredPhotoUrl } from '../../services/restoredRealtime';
 import { Bell, Building2, Info, LogOut, User } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTabNavigation } from '../../contexts/TabContext';
@@ -132,9 +133,9 @@ export default function TopBar({ title, onSignOut, onOpenProfile, onOpenNotifica
               className="flex items-center gap-2 rounded-full border border-slate-200 px-2 py-1.5 text-slate-700 transition-colors hover:border-slate-300"
               aria-label="Меню пользователя"
             >
-              {user?.photoUrl && !avatarLoadFailed ? (
+              {user && restoredPhotoUrl(user.photoUrl) && !avatarLoadFailed ? (
                 <img
-                  src={user.photoUrl}
+                  src={restoredPhotoUrl(user?.photoUrl)}
                   alt={user.fullName ?? 'Профиль'}
                   className="h-8 w-8 rounded-full object-cover"
                   onError={() => setAvatarLoadFailed(true)}

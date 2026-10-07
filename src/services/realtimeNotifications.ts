@@ -6,6 +6,7 @@ import {
   LogLevel,
 } from '@microsoft/signalr';
 import { getApiBaseUrl, getAuthToken } from './api';
+import { restoredRealtimeOptions, restoredResourceUrl } from './restoredRealtime';
 
 export const REALTIME_USER_NOTIFICATION_CREATED_EVENT = 'userNotificationCreated';
 export const REALTIME_TASK_JOURNAL_CHANGED_EVENT = 'taskJournalChanged';
@@ -45,7 +46,7 @@ const EXPECTED_NETWORK_ERROR_PATTERNS = [
   /connection was stopped during negotiation/i,
   /failed to start the httpconnection before stop\(\) was called/i,
 ];
-const VISIBLE_STATUS_ERROR_PATTERN = /\b(401|403|404|429|500|502|503|504)\b|status code/i;
+const VISIBLE_STATUS_ERROR_PATTERN = /\bHTTP\s+[1-5]\d{2}\b|\b[45]\d{2}\b|status code/i;
 const REALTIME_ACCESS_TOKEN_PATTERN = /([?&]access_token=)[^&\s'"`]+/gi;
 const REALTIME_BEARER_TOKEN_PATTERN = /(\bBearer\s+)[A-Za-z0-9._~-]+/gi;
 
@@ -99,9 +100,10 @@ export function createNotificationsHubLogger(sink: RealtimeConsoleSink = console
 
 export function createNotificationsHubConnection(): HubConnection {
   return new HubConnectionBuilder()
-    .withUrl(getNotificationsHubUrl(), {
+    .withUrl(restoredResourceUrl(getNotificationsHubUrl()), {
       accessTokenFactory: () => getAuthToken() ?? '',
       withCredentials: false,
+      ...restoredRealtimeOptions(() => getAuthToken() ?? ''),
     })
     .withAutomaticReconnect([0, 2000, 5000, 10000, 30000])
     .configureLogging(createNotificationsHubLogger())

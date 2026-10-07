@@ -1,3 +1,5 @@
+import { createClientRequestId } from '../../utils/clientRequestId';
+import { restoredPhotoUrl } from '../../services/restoredRealtime';
 import {
   useCallback,
   useEffect,
@@ -42,6 +44,7 @@ import {
   type InternalChatMessage,
   type InternalChatNotificationMode,
   type InternalChatPerson,
+  type InternalChatSendState,
   type InternalChatThread,
 } from '../../services/internalChatApi';
 import {
@@ -51,9 +54,43 @@ import {
   stopNotificationsHubConnection,
 } from '../../services/realtimeNotifications';
 import { localChatDayKey } from '../../utils/chatDateTime';
+import { PendingChatSends } from './PendingChatSends';
 
 const REACTIONS = ['👍', '❤️', '👏', '✅', '👀'];
 const CHAT_DRAFT_PREFIX = 'payplanner.chatDraft.v1';
+const CHAT_SEND_PREFIX = 'payplanner.chatSend.v1';
+
+type PendingChatSend = {
+  id: string;
+  text: string;
+  replyToId: number | null;
+  files: Array<{ name: string; size: number; lastModified: number }>;
+  managed?: boolean;
+};
+
+function pendingChatSendKey(userId: number, threadId: number) {
+  return `${CHAT_SEND_PREFIX}.${userId}.${threadId}`;
+}
+
+function readPendingChatSend(userId: number, threadId: number): PendingChatSend | null {
+  try {
+    const raw = sessionStorage.getItem(pendingChatSendKey(userId, threadId));
+    if (!raw) return null;
+    const candidate = JSON.parse(raw) as PendingChatSend;
+    return /^[0-9a-f-]{36}$/i.test(candidate.id) && typeof candidate.text === 'string'
+      && (candidate.managed === undefined || typeof candidate.managed === 'boolean')
+      && (candidate.replyToId === null || Number.isSafeInteger(candidate.replyToId))
+      && Array.isArray(candidate.files) && candidate.files.every((file) => typeof file.name === 'string'
+        && Number.isSafeInteger(file.size) && Number.isSafeInteger(file.lastModified)) ? candidate : null;
+  } catch { return null; }
+}
+
+function savePendingChatSend(userId: number, threadId: number, pending: PendingChatSend | null) {
+  try {
+    if (pending) sessionStorage.setItem(pendingChatSendKey(userId, threadId), JSON.stringify(pending));
+    else sessionStorage.removeItem(pendingChatSendKey(userId, threadId));
+  } catch { /* An unavailable tab store does not prevent sending. */ }
+}
 
 function chatDraftKey(userId: number, threadId: number) {
   return `${CHAT_DRAFT_PREFIX}.${userId}.${threadId}`;
@@ -212,6 +249,10 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
   const [files, setFiles] = useState<File[]>([]);
   const [sending, setSending] = useState(false);
   const [replyTo, setReplyTo] = useState<InternalChatMessage | null>(null);
+  const [restoredReplyId, setRestoredReplyId] = useState(() => {
+    const pending = readPendingChatSend(currentUserId, thread.id);
+    return pending?.text === readChatDraft(currentUserId, thread.id) ? pending.replyToId : null;
+  });
   const [editing, setEditing] = useState<InternalChatMessage | null>(null);
   const [actionsFor, setActionsFor] = useState<number | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -240,6 +281,10 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
   const initialUnreadCountRef = useRef(thread.unreadCount);
   const firstUnreadMessageIdRef = useRef(thread.firstUnreadMessageId);
   const draftBeforeEditRef = useRef('');
+  const pendingSendRef = useRef<({ threadId: number } & PendingChatSend) | null>(null);
+  const [managedSendState, setManagedSendState] = useState<InternalChatSendState | null>(null);
+  const [initialSendKey, setInitialSendKey] = useState(() => readPendingChatSend(currentUserId, thread.id)?.id ?? null);
+  const [sendStatusRevision, setSendStatusRevision] = useState(0);
   const loadRequestId = useRef(0);
   const threadMemberIdsKey = `${(thread.memberUserIds ?? []).join(',')}|${(thread.guestUserIds ?? []).join(',')}`;
   const peopleById = useMemo(() => new Map(people.map((person) => [person.id, person])), [people]);
@@ -455,25 +500,86 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
     }
     if (!text.trim() && files.length === 0) return;
     setSending(true);
+    let clientRequestId: string | null = null;
     try {
-      const created = await internalChatApi.sendMessage(thread.id, text, files, replyTo?.id);
+      const replyToId = replyTo?.id ?? restoredReplyId;
+      const pending = pendingSendRef.current?.threadId === thread.id
+        ? pendingSendRef.current : readPendingChatSend(currentUserId, thread.id);
+      const sameAttempt = pending?.text === text && pending.replyToId === replyToId
+        && pending.files.length === files.length && pending.files.every((file, index) => file.name === files[index].name
+          && file.size === files[index].size && (pending.managed || file.lastModified === files[index].lastModified));
+      clientRequestId = sameAttempt ? pending.id : createClientRequestId();
+      const nextPending = { id: clientRequestId, text, replyToId, managed: sameAttempt ? pending.managed : undefined,
+        files: files.map((file) => ({ name: file.name, size: file.size, lastModified: file.lastModified })) };
+      pendingSendRef.current = { threadId: thread.id, ...nextPending };
+      savePendingChatSend(currentUserId, thread.id, nextPending);
+      const response = await internalChatApi.sendMessage(thread.id, text, files, replyToId, [], clientRequestId);
+      let created: InternalChatMessage;
+      if ('status' in response) {
+        if (response.clientRequestId.toLowerCase() !== clientRequestId.toLowerCase()) throw new Error('Не удалось подтвердить идентификатор отправки. Обновите её состояние.');
+        if (response.status === 'published' && response.message) created = response.message;
+        else {
+          const durablePending = { ...nextPending, managed: true };
+          pendingSendRef.current = { threadId: thread.id, ...durablePending };
+          savePendingChatSend(currentUserId, thread.id, durablePending);
+          setManagedSendState(response);
+          return;
+        }
+      } else created = response;
+      if (pendingSendRef.current?.id === clientRequestId && pendingSendRef.current.threadId === thread.id) pendingSendRef.current = null;
+      if (readPendingChatSend(currentUserId, thread.id)?.id === clientRequestId) savePendingChatSend(currentUserId, thread.id, null);
+      setManagedSendState((current) => current?.clientRequestId === clientRequestId ? null : current);
       if (hasNewer) {
         toast.success('Сообщение отправлено. Оно появится при переходе к новым сообщениям.');
       } else {
         scrollIntentRef.current = { mode: 'bottom', height: 0, top: 0 };
         setMessages((current) => mergeChatMessages(current, [created]));
       }
-      setText('');
-      setFiles([]);
-      setReplyTo(null);
+      setText((current) => current === text ? '' : current);
+      setFiles((current) => current.length === files.length && current.every((file, index) => file === files[index]) ? [] : current);
+      setReplyTo((current) => (current?.id ?? null) === replyToId ? null : current);
+      setRestoredReplyId((current) => current === replyToId ? null : current);
       onThreadChanged?.();
-    } catch (error) { toast.error(errorMessage(error)); }
+    } catch (error) {
+      toast.error(errorMessage(error));
+      if (clientRequestId && readPendingChatSend(currentUserId, thread.id)?.id === clientRequestId) {
+        setInitialSendKey(clientRequestId);
+        setSendStatusRevision((current) => current + 1);
+      }
+    }
     finally { setSending(false); }
   };
 
   const refreshMessage = async () => {
     await loadMessages();
     onThreadChanged?.();
+  };
+
+  const confirmManagedSend = (key: string) => {
+    const pending = readPendingChatSend(currentUserId, thread.id);
+    if (pending?.id.toLowerCase() !== key.toLowerCase()) return;
+    const confirmed = { ...pending, managed: true };
+    savePendingChatSend(currentUserId, thread.id, confirmed);
+    if (!pendingSendRef.current || (pendingSendRef.current.threadId === thread.id
+      && pendingSendRef.current.id.toLowerCase() === key.toLowerCase())) {
+      pendingSendRef.current = { threadId: thread.id, ...confirmed };
+    }
+  };
+
+  const acknowledgeRecoveredSend = (key: string) => {
+    const pending = readPendingChatSend(currentUserId, thread.id);
+    if (pending?.id.toLowerCase() === key.toLowerCase()) {
+      if (!editing) setText((current) => current === pending.text ? '' : current);
+      setFiles((current) => current.length === pending.files.length && current.every((file, index) =>
+        file.name === pending.files[index].name && file.size === pending.files[index].size
+        && file.lastModified === pending.files[index].lastModified) ? [] : current);
+      setReplyTo((current) => (current?.id ?? null) === pending.replyToId ? null : current);
+      setRestoredReplyId((current) => current === pending.replyToId ? null : current);
+      savePendingChatSend(currentUserId, thread.id, null);
+    }
+    if (pendingSendRef.current?.id.toLowerCase() === key.toLowerCase()) pendingSendRef.current = null;
+    setManagedSendState((current) => current?.clientRequestId.toLowerCase() === key.toLowerCase() ? null : current);
+    void refreshMessage();
   };
 
   const setMode = async (mode: InternalChatNotificationMode) => {
@@ -584,7 +690,7 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
                       <div className={`mt-1 flex items-center justify-end gap-1 text-[10px] ${mine && !deleted ? 'text-blue-100' : 'text-slate-400'}`} title={mine && message.readByUserIds?.length ? `Прочитали: ${message.readByUserIds.map((id) => peopleById.get(id)?.name || `Участник #${id}`).join(', ')}` : undefined}>{message.editedAt ? 'изменено · ' : ''}{formatMessageTime(message.createdAt)}{mine && (message.readByUserIds?.length ?? 0) > 0 ? ` · прочитано: ${message.readByUserIds.length}` : ''}</div>
                       {!deleted ? <button type="button" onClick={() => setActionsFor(actionsFor === message.id ? null : message.id)} className={`absolute -top-2 ${mine ? '-left-8' : '-right-8'} rounded-full bg-white p-1.5 text-slate-500 shadow ring-1 ring-slate-200`} aria-label="Действия"><MoreHorizontal className="h-4 w-4" /></button> : null}
                       {actionsFor === message.id ? <div className={`absolute top-7 z-20 w-52 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 text-xs text-slate-700 shadow-xl ${mine ? 'right-0 sm:right-full sm:mr-2' : 'left-0 sm:left-full sm:ml-2'}`}>
-                        <button type="button" onClick={() => { setReplyTo(message); setActionsFor(null); textareaRef.current?.focus(); }} className="flex w-full items-center gap-2 px-3 py-2 hover:bg-slate-50"><Reply className="h-3.5 w-3.5" />Ответить</button>
+                        <button type="button" onClick={() => { setReplyTo(message); setRestoredReplyId(null); setActionsFor(null); textareaRef.current?.focus(); }} className="flex w-full items-center gap-2 px-3 py-2 hover:bg-slate-50"><Reply className="h-3.5 w-3.5" />Ответить</button>
                         <div className="flex gap-1 border-y border-slate-100 px-2 py-2">{REACTIONS.map((emoji) => <button key={emoji} type="button" onClick={() => void internalChatApi.toggleReaction(message.id, emoji).then(refreshMessage)} className="rounded p-1 hover:bg-slate-100">{emoji}</button>)}</div>
                         <button type="button" onClick={() => void internalChatApi.setPinned(message.id, !message.isPinned).then(refreshMessage).catch((error) => toast.error(errorMessage(error)))} className="flex w-full items-center gap-2 px-3 py-2 hover:bg-slate-50"><Pin className="h-3.5 w-3.5" />{message.isPinned ? 'Открепить' : 'Закрепить'}</button>
                         {mine && message.kind === 'user' ? <button type="button" onClick={() => { setActionsFor(null); void internalChatApi.setNoReplyReminder(message.id, !message.noReplyReminderEnabled).then((updated) => setMessages((current) => current.map((item) => item.id === updated.id ? updated : item))).catch((error) => toast.error(errorMessage(error))); }} className="flex w-full items-center gap-2 px-3 py-2 hover:bg-slate-50" title="Первое напоминание через 24 часа, затем раз в сутки до ответа"><BellRing className="h-3.5 w-3.5" />{message.noReplyReminderEnabled ? 'Отключить напоминание' : 'Напомнить, если нет ответа'}</button> : null}
@@ -604,9 +710,11 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
       </div>
 
       <footer className="border-t border-slate-200 bg-white p-3">
-        {replyTo || editing ? <div className="mb-2 flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600"><Reply className="h-3.5 w-3.5" /><span className="min-w-0 flex-1 truncate">{editing ? 'Редактирование сообщения' : `Ответ на сообщение ${replyTo?.authorName} (виден всем участникам чата): ${replyTo?.text}`}</span><button type="button" onClick={() => { setReplyTo(null); if (editing) { setEditing(null); setText(draftBeforeEditRef.current); } }} aria-label="Отменить ответ или редактирование"><X className="h-4 w-4" /></button></div> : null}
+        {replyTo || restoredReplyId || editing ? <div className="mb-2 flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600"><Reply className="h-3.5 w-3.5" /><span className="min-w-0 flex-1 truncate">{editing ? 'Редактирование сообщения' : replyTo ? `Ответ на сообщение ${replyTo.authorName} (виден всем участникам чата): ${replyTo.text}` : `Ответ на сообщение №${restoredReplyId} · сохранённый черновик`}</span><button type="button" onClick={() => { setReplyTo(null); setRestoredReplyId(null); if (editing) { setEditing(null); setText(draftBeforeEditRef.current); } }} aria-label="Отменить ответ или редактирование"><X className="h-4 w-4" /></button></div> : null}
         {files.length ? <div className="mb-2 flex flex-wrap gap-1.5">{files.map((file, index) => <span key={`${file.name}-${index}`} className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-1 text-xs text-blue-700"><Paperclip className="h-3 w-3" />{file.name}<button type="button" onClick={() => setFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}><X className="h-3 w-3" /></button></span>)}</div> : null}
         <div className="mb-1 flex flex-wrap items-center gap-1 text-xs text-slate-500">
+          <div className="w-full"><PendingChatSends threadId={thread.id} actorId={currentUserId} initialKey={initialSendKey}
+            statusRevision={sendStatusRevision} incoming={managedSendState} onPublished={acknowledgeRecoveredSend} onObserved={confirmManagedSend} /></div>
           <button type="button" onClick={() => insertMarkup('**')} className="rounded px-2 py-1 font-bold hover:bg-slate-100" title="Жирный">B</button>
           <button type="button" onClick={() => insertMarkup('*')} className="rounded px-2 py-1 italic hover:bg-slate-100" title="Курсив">I</button>
           <button type="button" onClick={() => insertMarkup('`')} className="rounded px-2 py-1 font-mono hover:bg-slate-100" title="Код">&lt;/&gt;</button>
@@ -628,7 +736,7 @@ function ChatConversation({ thread, people, currentUserId, compact = false, onBa
           <div className="w-full max-w-sm rounded-2xl bg-white p-4 shadow-xl" onClick={(event) => event.stopPropagation()}>
             <div className="flex items-start justify-between gap-3">
               <div className="flex min-w-0 items-center gap-3">
-                {profilePerson.photoUrl ? <img src={profilePerson.photoUrl} alt="" className="h-11 w-11 shrink-0 rounded-full object-cover" /> : <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-blue-50 text-blue-700"><UserRound className="h-5 w-5" /></span>}
+                {restoredPhotoUrl(profilePerson.photoUrl) ? <img src={restoredPhotoUrl(profilePerson.photoUrl)} alt="" className="h-11 w-11 shrink-0 rounded-full object-cover" /> : <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-blue-50 text-blue-700"><UserRound className="h-5 w-5" /></span>}
                 <div className="min-w-0"><h2 className="truncate font-semibold text-slate-900">{profilePerson.name}</h2><p className="text-xs text-slate-500">Участник чата</p></div>
               </div>
               <button type="button" onClick={() => setProfilePerson(null)} aria-label="Закрыть профиль" className="rounded-lg p-1 text-slate-500 hover:bg-slate-100"><X className="h-5 w-5" /></button>

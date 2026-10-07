@@ -1,7 +1,73 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { webcrypto } from 'node:crypto';
 
 import { AUTH_SESSION_EXPIRED_EVENT, apiService, extractResponseErrorMessage, STICKY_NOTE_REALTIME_EVENT_TYPES } from './api';
 import { resolveApiBaseUrl } from './apiBaseUrl';
+
+describe('financial work order retry identity', () => {
+  const kinds = ['invoice', 'act', 'contract'] as const;
+  const login = () => {
+    localStorage.setItem('pp_token', `header.${btoa(JSON.stringify({ sub: '1', iss: 'owned-fixture' }))}.signature`);
+    vi.stubGlobal('crypto', webcrypto);
+  };
+  const key = (options?: RequestInit) => new Headers(options?.headers).get('X-Upload-Key');
+  const invoke = (kind: typeof kinds[number], payload = {}) => kind === 'invoice'
+    ? apiService.createCaseWorkOrderInvoice(7, payload) : kind === 'act'
+      ? apiService.createCaseWorkOrderAct(7, payload) : apiService.createCaseWorkOrderContract(7, payload);
+  const ready = (kind: typeof kinds[number]) => ({ number: 'OWNED-42', amount: 35, documentId: 101, date: '2026-10-01',
+    workOrder: { id: 42, clientCaseId: 7 }, ...(kind === 'invoice' ? { paymentId: 10, invoiceEntityId: 11, dueDate: '2026-10-01' }
+      : kind === 'act' ? { actId: 10, lineItemCount: 2 } : { contractId: 10, startDate: '2026-10-01' }) });
+  it.each(kinds)('reuses %s after uncertainty and releases it only after a complete result', async (kind) => {
+    login();
+    const request = vi.fn<typeof fetch>().mockResolvedValueOnce(new Response('copies pending', { status: 503 }))
+      .mockImplementation(async (_url, options) => new Response(JSON.stringify(ready(kind)), { status: 201,
+        headers: { 'content-type': 'application/json', 'X-Upload-Key': key(options)! } }));
+    vi.stubGlobal('fetch', request);
+    await expect(invoke(kind)).rejects.toThrow('503');
+    expect(await invoke(kind)).toEqual(ready(kind));
+    expect(key(request.mock.calls[1][1])).toBe(key(request.mock.calls[0][1]));
+    await invoke(kind);
+    expect(key(request.mock.calls[2][1])).not.toBe(key(request.mock.calls[0][1]));
+    expect(request.mock.calls.every(([url, options]) => String(url).endsWith(`create-${kind}`)
+      && options?.method === 'POST' && options.body === '{}')).toBe(true);
+  });
+  it.each(kinds)('retains %s on partial finance without its document', async (kind) => {
+    login();
+    const request = vi.fn<typeof fetch>(async (_url, options) => new Response(JSON.stringify({ ...ready(kind), documentId: null }),
+      { status: 201, headers: { 'content-type': 'application/json', 'X-Upload-Key': key(options)! } }));
+    vi.stubGlobal('fetch', request);
+    await expect(invoke(kind)).rejects.toThrow('ещё не подтверждены');
+    await expect(invoke(kind)).rejects.toThrow('ещё не подтверждены');
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(key(request.mock.calls[1][1])).toBe(key(request.mock.calls[0][1]));
+  });
+  it.each(kinds)('keeps a secure %s retry identity when randomUUID is absent', async kind => {
+    login();
+    vi.stubGlobal('crypto', { getRandomValues: webcrypto.getRandomValues.bind(webcrypto), subtle: webcrypto.subtle });
+    const request = vi.fn<typeof fetch>().mockResolvedValueOnce(new Response('pending', { status: 503 }))
+      .mockImplementation(async (_url, options) => new Response(JSON.stringify(ready(kind)), {
+        status: 201, headers: { 'content-type': 'application/json', 'X-Upload-Key': key(options)! },
+      }));
+    vi.stubGlobal('fetch', request);
+    await expect(invoke(kind)).rejects.toThrow('503');
+    expect(await invoke(kind)).toEqual(ready(kind));
+    const first = key(request.mock.calls[0][1]);
+    expect(first).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(key(request.mock.calls[1][1])).toBe(first);
+  });
+  it('bounds a long financial description and ignores object property order for retry identity', async () => {
+    login();
+    const request = vi.fn<typeof fetch>().mockResolvedValue(new Response('pending', { status: 503 }));
+    vi.stubGlobal('fetch', request);
+    const description = 'Длинное описание'.repeat(1000);
+    await expect(invoke('invoice', { number: '42', description })).rejects.toThrow('503');
+    await expect(invoke('invoice', { description, number: '42' })).rejects.toThrow('503');
+    expect(key(request.mock.calls[1][1])).toBe(key(request.mock.calls[0][1]));
+    const attempts = JSON.parse(sessionStorage.getItem('pp.case-document-upload-attempts.v1')!);
+    expect(attempts).toHaveLength(1); expect(attempts[0].identity.length).toBeLessThan(2048);
+    expect(JSON.parse(request.mock.calls[0][1]!.body as string)).toEqual({ number: '42', description });
+  });
+});
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -20,6 +86,76 @@ describe('apiService backup attempt history', () => {
     expect(String(url)).toContain('/database/backups/attempts?pageSize=10&after=cursor%2Fwith+space');
     expect(options?.method ?? 'GET').toBe('GET');
     expect(options?.body).toBeUndefined();
+  });
+});
+
+describe('apiService pending case document uploads', () => {
+  it('reads a bounded operator page with encoded filter/cursor, abort and no cache', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response('{"items":[],"nextCursor":null}', { headers: { 'content-type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
+    await apiService.getStorageCasePublicationQueue({ status: 'deadLetter', after: 'cursor/next page', signal: controller.signal });
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/storage/operations/case-documents?limit=50&status=deadLetter&after=cursor%2Fnext+page');
+    expect(options?.signal).toBe(controller.signal); expect(options?.cache).toBe('no-store');
+    expect(options?.body).toBeUndefined();
+  });
+  it('retries only the selected operation using the existing endpoint', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response('{"id":"owned","status":"pending"}', { status: 202, headers: { 'content-type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
+    expect(await apiService.retryStorageCasePublication('owned/id', controller.signal)).toEqual({ id: 'owned', status: 'pending' });
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/storage/operations/owned%2Fid/retry');
+    expect(options?.method).toBe('POST'); expect(options?.signal).toBe(controller.signal);
+    expect(options?.body).toBeUndefined();
+  });
+  it('refreshes documents without a cached list and allows aborting a closed card', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response('[]', { headers: { 'content-type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
+    expect(await apiService.getCaseDocuments(42, controller.signal)).toEqual([]);
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(String(url)).toMatch(/\/v2\/cases\/42\/documents$/);
+    expect(options?.signal).toBe(controller.signal);
+    expect(options?.cache).toBe('no-store');
+    expect(options?.body).toBeUndefined();
+  });
+  it('reads one page without caching and preserves the abort signal and encoded cursor', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({ items: [], nextCursor: null }), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
+    expect(await apiService.getPendingCaseDocumentUploads(42, 'cursor/with space', controller.signal))
+      .toEqual({ items: [], nextCursor: null });
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/v2/cases/42/documents/uploads/pending?after=cursor%2Fwith+space');
+    expect(options?.cache).toBe('no-store');
+    expect(options?.signal).toBe(controller.signal);
+    expect(options?.method ?? 'GET').toBe('GET');
+    expect(options?.body).toBeUndefined();
+    await apiService.getPendingCaseDocumentUploads(42);
+    expect(String(fetchMock.mock.calls[1][0])).toMatch(/\/v2\/cases\/42\/documents\/uploads\/pending$/);
+  });
+});
+
+describe('apiService storage stage recovery', () => {
+  it('previews by default and sends an encoded cursor for explicit apply', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+      inspected: 0, eligible: 0, settled: 0, retained: 0,
+      hasMore: false, nextAfterKey: null, items: [],
+    }), { headers: { 'content-type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    await apiService.reconcileStorageStages({ afterKey: 'stage:abc/def', limit: 25 });
+    await apiService.reconcileStorageStages({ apply: true, limit: 25 });
+
+    const [previewUrl, previewOptions] = fetchMock.mock.calls[0];
+    expect(String(previewUrl)).toContain('/storage/capacity/stages/reconcile?apply=false&limit=25&afterKey=stage%3Aabc%2Fdef');
+    expect(previewOptions?.method).toBe('POST');
+    const [applyUrl, applyOptions] = fetchMock.mock.calls[1];
+    expect(String(applyUrl)).toContain('/storage/capacity/stages/reconcile?apply=true&limit=25');
+    expect(applyOptions?.method).toBe('POST');
   });
 });
 
@@ -180,6 +316,141 @@ describe('apiService task journal settings', () => {
 });
 
 describe('apiService task journal files', () => {
+  it('reads the pending page envelope with a cursor, cancellation and no cache', async () => {
+    const page = { items: [], nextCursor: 'next-window' };
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(page), { headers: { 'content-type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
+    expect(await apiService.getTaskFileUploadPage(10, controller.signal, 'older-window')).toEqual(page);
+    const [url, init] = fetchMock.mock.calls[0];
+    const query = new URL(String(url), 'http://localhost').searchParams;
+    expect(query.get('includePageInfo')).toBe('true');
+    expect(query.get('pendingOnly')).toBe('true');
+    expect(query.get('after')).toBe('older-window');
+    expect(query.has('page')).toBe(false);
+    expect(init?.signal).toBe(controller.signal);
+    expect(init?.cache).toBe('no-store');
+    expect(init?.body).toBeUndefined();
+  });
+  it('passes bounded batch keys and pending pagination without losing upload retry keys', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify([]), { headers: { 'content-type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    await apiService.getTaskFileUploadStates(10, undefined, { uploadKeys: ['one', 'two'], pendingOnly: true, page: 2 });
+    const query = new URL(String(fetchMock.mock.calls[0][0]), 'http://localhost').searchParams;
+    expect(query.getAll('uploadKeys')).toEqual(['one', 'two']);
+    expect(query.get('pendingOnly')).toBe('true');
+    expect(query.get('page')).toBe('2');
+    const file = new File(['test'], 'file.txt');
+    expect(apiService.getTaskFileUploadKey(10, file)).toBeUndefined();
+    await apiService.uploadTaskJournalFile(10, file);
+    expect(apiService.getTaskFileUploadKey(10, file)).toBe(new Headers(fetchMock.mock.calls[1][1]?.headers).get('X-Upload-Key'));
+    expect(apiService.getTaskFileUploadKey(11, file)).toBeUndefined();
+  });
+
+  it('reads server upload states without resending files and supports cancellation', async () => {
+    const states = [{ uploadKey: 'test-key', fileName: 'file.txt', status: 'waiting', fileId: null, message: 'Ожидание копий' }];
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(states), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
+    expect(await apiService.getTaskFileUploadStates(404, controller.signal)).toEqual(states);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/tasks/404/files/uploads');
+    expect(init?.signal).toBe(controller.signal);
+    expect(init?.cache).toBe('no-store');
+    expect(init?.body).toBeUndefined();
+  });
+
+  it('keeps upload keys across retries and separates task and document scopes', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({ id: 1 }), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const file = new File(['test'], 'file.txt');
+    await apiService.uploadTaskJournalFile(10, file);
+    await apiService.uploadTaskJournalFile(10, file);
+    await apiService.uploadTaskJournalFile(11, file);
+    await apiService.uploadTaskJournalFile(10, file, 'doc');
+    const keys = fetchMock.mock.calls.map(([, init]) => new Headers(init?.headers).get('X-Upload-Key'));
+    expect(keys[0]).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(keys[1]).toBe(keys[0]);
+    expect(keys[2]).not.toBe(keys[0]);
+    expect(keys[3]).not.toBe(keys[0]);
+    const init = fetchMock.mock.calls[0][1];
+    expect(init?.body).toBeInstanceOf(FormData);
+    expect(new Headers(init?.headers).has('Content-Type')).toBe(false);
+  });
+
+  it.each(['explicitNull', 'omitted', 'nextPage'])('normalizes the pending upload page cursor: %s', async (mode) => {
+    const nextCursor = mode === 'nextPage' ? '00000000-0000-0000-0000-000000000001' : null;
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+      items: [], ...(mode === 'omitted' ? {} : { nextCursor }),
+    }), { status: 200, headers: { 'content-type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    const page = await apiService.getTaskFileUploadPage(10);
+    expect(page).toEqual({ items: [], nextCursor });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['explicitNull', 'omitted'])('recognizes the exact accepted task upload with %s file ID without treating its copies as ready', async (mode) => {
+    localStorage.setItem('pp_token', `header.${btoa(JSON.stringify({ sub: '1', iss: 'owned-fixture' }))}.signature`);
+    const file = new File(['test'], 'file.txt');
+    const fetchMock = vi.fn<typeof fetch>(async (_url, options) => new Response(JSON.stringify({
+      code: 'task_file_copies_pending', taskId: 10,
+      uploadKey: new Headers(options?.headers).get('X-Upload-Key'), fileId: mode === 'omitted' ? undefined : null,
+      message: 'Файл сохранён, обязательные копии ещё не готовы.',
+    }), { status: 503, headers: { 'content-type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(apiService.uploadTaskJournalFile(10, file)).rejects.toMatchObject({
+      name: 'TaskFileUploadAcceptedError', taskId: 10,
+      uploadKey: expect.any(String),
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['wrongTask', 'wrongKey', 'missingCode', 'fileAlreadyPresent', 'malformed', 'nonJson', 'serverError', 'changedActor'])(
+    'does not acknowledge an uncertain task upload: %s', async (mode) => {
+      const token = (id: number) => `header.${btoa(JSON.stringify({ sub: String(id), iss: 'owned-fixture' }))}.signature`;
+      localStorage.setItem('pp_token', token(1));
+      const file = new File(['test'], 'file.txt');
+      vi.stubGlobal('fetch', vi.fn<typeof fetch>(async (_url, options) => {
+        if (mode === 'changedActor') localStorage.setItem('pp_token', token(2));
+        const payload = { code: mode === 'missingCode' ? undefined : 'task_file_copies_pending',
+          taskId: mode === 'wrongTask' ? 999 : 10,
+          uploadKey: mode === 'wrongKey' ? 'foreign-key' : new Headers(options?.headers).get('X-Upload-Key'),
+          fileId: mode === 'fileAlreadyPresent' ? 77 : null };
+        return new Response(mode === 'malformed' ? '{' : JSON.stringify(payload), {
+          status: mode === 'serverError' ? 500 : 503,
+          headers: { 'content-type': mode === 'nonJson' ? 'text/plain' : 'application/json' },
+        });
+      }));
+      const error = await apiService.uploadTaskJournalFile(10, file).catch((cause: unknown) => cause);
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).name).not.toBe('TaskFileUploadAcceptedError');
+      expect((error as Error).message).toContain(mode === 'serverError' ? 'HTTP 500' : 'HTTP 503');
+    });
+
+  it('rejects an accepted receipt when the employee changes while its body is read', async () => {
+    const token = (id: number) => `header.${btoa(JSON.stringify({ sub: String(id), iss: 'owned-fixture' }))}.signature`;
+    localStorage.setItem('pp_token', token(1));
+    const file = new File(['test'], 'file.txt');
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>(async (_url, options) => {
+      const payload = { code: 'task_file_copies_pending', taskId: 10,
+        uploadKey: new Headers(options?.headers).get('X-Upload-Key'), fileId: null };
+      const response = new Response(JSON.stringify(payload), { status: 503, headers: { 'content-type': 'application/json' } });
+      vi.spyOn(response, 'clone').mockReturnValue({ json: async () => {
+        localStorage.setItem('pp_token', token(2));
+        return payload;
+      } } as Response);
+      return response;
+    }));
+    const error = await apiService.uploadTaskJournalFile(10, file).catch((cause: unknown) => cause);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).name).not.toBe('TaskFileUploadAcceptedError');
+  });
+
   it('requests only latest document versions when asked', async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify([]), {
       headers: { 'content-type': 'application/json' },
@@ -3965,5 +4236,86 @@ describe('apiService reports', () => {
     expect(String(url)).toContain('from=2026-05-01');
     expect(String(url)).toContain('to=2026-05-31');
     expect(options?.signal).toBe(controller.signal);
+  });
+});
+
+describe('generated template retry identity', () => {
+  const payload = { templateKey: ' custom ', documentType: ' Иск ', status: ' Подготовлен ' };
+  const document = { id: 101, clientCaseId: 7, documentKey: 'template-custom', version: 1,
+    documentType: 'Иск', status: 'Подготовлен' };
+  const login = () => localStorage.setItem('pp_token', `header.${btoa(JSON.stringify({ sub: '1', iss: 'owned-fixture' }))}.signature`);
+  const key = (options?: RequestInit) => (options?.headers as Record<string, string>)['X-Upload-Key'];
+  it('retains the exact attempt after storage failure and starts a new generation after confirmed success', async () => {
+    login();
+    let count = 0;
+    const request = vi.fn<typeof fetch>(async (_url, options) => ++count === 1
+      ? new Response('{"message":"copies pending"}', { status: 503, headers: { 'content-type': 'application/json' } })
+      : new Response(JSON.stringify(document), { status: 201,
+        headers: { 'content-type': 'application/json', 'X-Upload-Key': key(options) } }));
+    vi.stubGlobal('fetch', request);
+    await expect(apiService.generateCaseDocumentTemplate(7, payload)).rejects.toThrow('503');
+    const first = key(request.mock.calls[0][1]);
+    expect(first).toMatch(/^[a-f0-9-]{36}$/i);
+    expect(await apiService.generateCaseDocumentTemplate(7, payload)).toEqual(document);
+    expect(key(request.mock.calls[1][1])).toBe(first);
+    expect(JSON.parse(String(request.mock.calls[1][1]?.body))).toEqual({ templateKey: 'custom', documentType: 'Иск', status: 'Подготовлен' });
+    await apiService.generateCaseDocumentTemplate(7, payload);
+    expect(key(request.mock.calls[2][1])).not.toBe(first);
+  });
+  it.each(['pending', 'foreign-case', 'foreign-key'])('keeps identity when a %s response does not prove completion', async (failure) => {
+    login();
+    const request = vi.fn<typeof fetch>(async (_url, options) => new Response(JSON.stringify(
+      failure === 'foreign-case' ? { ...document, clientCaseId: 8 } : document), {
+      status: failure === 'pending' ? 202 : 201,
+      headers: { 'content-type': 'application/json', 'X-Upload-Key': failure === 'foreign-key' ? 'foreign' : key(options) },
+    }));
+    vi.stubGlobal('fetch', request);
+    await expect(apiService.generateCaseDocumentTemplate(7, payload)).rejects.toThrow();
+    await expect(apiService.generateCaseDocumentTemplate(7, payload)).rejects.toThrow();
+    expect(key(request.mock.calls[1][1])).toBe(key(request.mock.calls[0][1]));
+  });
+  it('does not send a generation when its retry identity cannot be persisted', async () => {
+    login();
+    const request = vi.fn<typeof fetch>();
+    vi.stubGlobal('fetch', request);
+    const spy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('owned persistence failure'); });
+    try {
+      await expect(apiService.generateCaseDocumentTemplate(7, payload)).rejects.toThrow('попытка не отправлена');
+      expect(request).not.toHaveBeenCalled();
+    } finally { spy.mockRestore(); }
+  });
+});
+
+describe('generated work order retry identity', () => {
+  const document = { id: 101, clientCaseId: 7, documentKey: 'work-order-42', version: 1,
+    documentType: 'Заказ-наряд', status: 'Согласован' };
+  const login = () => localStorage.setItem('pp_token', `header.${btoa(JSON.stringify({ sub: '1', iss: 'owned-fixture' }))}.signature`);
+  const key = (options?: RequestInit) => new Headers(options?.headers).get('X-Upload-Key');
+  it('keeps a failed attempt and starts a new one only after confirmed publication', async () => {
+    login();
+    const request = vi.fn<typeof fetch>().mockResolvedValueOnce(new Response('copies pending', { status: 503 }))
+      .mockImplementation(async (_url, options) => new Response(JSON.stringify(document), { status: 201,
+        headers: { 'content-type': 'application/json', 'X-Upload-Key': key(options)! } }));
+    vi.stubGlobal('fetch', request);
+    await expect(apiService.generateCaseWorkOrderDocument(7)).rejects.toThrow('503');
+    expect(await apiService.generateCaseWorkOrderDocument(7)).toEqual(document);
+    expect(key(request.mock.calls[1][1])).toBe(key(request.mock.calls[0][1]));
+    await apiService.generateCaseWorkOrderDocument(7);
+    expect(key(request.mock.calls[2][1])).not.toBe(key(request.mock.calls[0][1]));
+    expect(request.mock.calls.every((call) => call[1]?.body === undefined && call[1]?.method === 'POST')).toBe(true);
+  });
+  it.each(['pending', 'foreign-case', 'wrong-type', 'foreign-key'])('retains identity on %s without automatic retries', async (failure) => {
+    login();
+    const value = failure === 'foreign-case' ? { ...document, clientCaseId: 8 }
+      : failure === 'wrong-type' ? { ...document, documentType: 'Счёт' } : document;
+    const request = vi.fn<typeof fetch>(async (_url, options) => new Response(JSON.stringify(value), {
+      status: failure === 'pending' ? 202 : 201,
+      headers: { 'content-type': 'application/json', 'X-Upload-Key': failure === 'foreign-key' ? 'foreign' : key(options)! },
+    }));
+    vi.stubGlobal('fetch', request);
+    await expect(apiService.generateCaseWorkOrderDocument(7)).rejects.toThrow();
+    expect(request).toHaveBeenCalledTimes(1);
+    await expect(apiService.generateCaseWorkOrderDocument(7)).rejects.toThrow();
+    expect(key(request.mock.calls[1][1])).toBe(key(request.mock.calls[0][1]));
   });
 });

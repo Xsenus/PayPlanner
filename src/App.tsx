@@ -2003,6 +2003,7 @@ function AppContent() {
       <div className="pp-app-shell min-h-screen bg-gray-50">
         <RealtimeNotificationToasts
           userId={user.id}
+          ready={permissionsLoaded}
           onOpenTask={permissions.tasks.canView ? (taskId) => openTaskDetail(taskId, { returnTo: activeTab }) : undefined}
           onOpenCase={permissions.cases.canView ? openRelatedCase : undefined}
           onOpenCaseDocument={permissions.cases.canView ? (caseId) => openCaseDetailSection(caseId, 'documents') : undefined}
@@ -2014,10 +2015,13 @@ function AppContent() {
           onOpenNotes={permissions.notes.canView ? () => handleTabChange('notes') : undefined}
           onOpenNotifications={handleOpenNotifications}
         />
-        <ForcedTaskRevisionModal
-          onOpenTask={permissions.tasks.canView ? (taskId) => openTaskDetail(taskId, { returnTo: activeTab }) : undefined}
-          onOpenCaseTasks={permissions.cases.canView ? (caseId) => openCaseDetailSection(caseId, 'tasks') : undefined}
-        />
+        {permissionsLoaded && (
+          <ForcedTaskRevisionModal
+            key={user.id}
+            onOpenTask={permissions.tasks.canView ? (taskId) => openTaskDetail(taskId, { returnTo: activeTab }) : undefined}
+            onOpenCaseTasks={permissions.cases.canView ? (caseId) => openCaseDetailSection(caseId, 'tasks') : undefined}
+          />
+        )}
         <DailyOverdueTaskReminder
           userId={user.id}
           enabled={permissionsLoaded && permissions.tasks.canView}

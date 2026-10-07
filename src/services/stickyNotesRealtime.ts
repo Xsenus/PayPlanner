@@ -6,6 +6,7 @@ import {
 } from '@microsoft/signalr';
 import { getApiBaseUrl, getAuthToken, type StickyNoteRealtimeEvent } from './api';
 import { createNotificationsHubLogger, isExpectedRealtimeStartupError } from './realtimeNotifications';
+import { restoredRealtimeOptions, restoredResourceUrl } from './restoredRealtime';
 
 export const STICKY_NOTE_BOARD_CHANGED_EVENT = 'stickyNoteBoardChanged';
 
@@ -20,9 +21,10 @@ export function canStartNotesHubConnection(): boolean {
 
 export function createNotesHubConnection(): HubConnection {
   return new HubConnectionBuilder()
-    .withUrl(getNotesHubUrl(), {
+    .withUrl(restoredResourceUrl(getNotesHubUrl()), {
       accessTokenFactory: () => getAuthToken() ?? '',
       withCredentials: false,
+      ...restoredRealtimeOptions(() => getAuthToken() ?? ''),
     })
     .withAutomaticReconnect([0, 2000, 5000, 10000, 30000])
     .configureLogging(createNotificationsHubLogger())

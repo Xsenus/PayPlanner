@@ -1,7 +1,9 @@
+import { createClientRequestId } from '../utils/clientRequestId';
 // src/services/authService.ts
 
 import type { PagedResult } from './api';
 import { API_BASE_URL } from './apiBaseUrl';
+import { apiFetch as fetch } from './apiTransport';
 
 // ==== storage helpers (bkwd-compat) ====
 const KEY_MAIN = 'pp_token';
@@ -360,6 +362,8 @@ function buildQuery(params: Record<string, string | number | boolean | undefined
 type LoginResponse = { token: string; user?: User };
 
 class AuthApiService {
+  private readonly photoUploadKeys = new WeakMap<File, string>();
+
   private authHeaders(): Record<string, string> {
     const t = readToken();
     return t ? { Authorization: `Bearer ${t}` } : {};
@@ -723,10 +727,13 @@ class AuthApiService {
   public async uploadProfilePhoto(file: File) {
     const formData = new FormData();
     formData.append('file', file);
+    const uploadKey = this.photoUploadKeys.get(file) ?? createClientRequestId();
+    this.photoUploadKeys.set(file, uploadKey);
 
     return this.request<User>('/profile/photo', {
       method: 'POST',
       body: formData,
+      headers: { 'X-Upload-Key': uploadKey },
     });
   }
 

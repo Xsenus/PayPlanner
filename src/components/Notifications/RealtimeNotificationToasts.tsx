@@ -15,6 +15,7 @@ import {
 import type { ToastDomain } from '../../contexts/toastContextCore';
 import { emitUserNotificationsChanged } from '../../utils/userNotifications';
 import { updateRealtimeNotificationDiagnostics } from '../../utils/realtimeNotificationDiagnostics';
+import { parseInstant } from '../../utils/timeZoneDate';
 import {
   getClientCaseDocumentIdFromNotification,
   getClientCaseIdFromNotification,
@@ -34,6 +35,7 @@ const LAST_SEEN_STORAGE_KEY_PREFIX = 'payplanner.realtimeToastLastSeenAt.v1';
 
 type RealtimeNotificationToastsProps = {
   userId: number;
+  ready?: boolean;
   onOpenTask?: (taskId: number) => void;
   onOpenCase?: (caseId: number) => void;
   onOpenCaseDocument?: (caseId: number, documentId?: number) => void;
@@ -445,12 +447,13 @@ function writeLastSeenMs(userId: number, now = Date.now()) {
 }
 
 function parseCreatedAtMs(value: string): number | null {
-  const parsed = Date.parse(value);
+  const parsed = parseInstant(value).getTime();
   return Number.isFinite(parsed) ? parsed : null;
 }
 
 export function RealtimeNotificationToasts({
   userId,
+  ready = true,
   onOpenTask,
   onOpenCase,
   onOpenCaseDocument,
@@ -500,6 +503,7 @@ export function RealtimeNotificationToasts({
   }, [onOpenAct, onOpenCalendar, onOpenCase, onOpenCaseDocument, onOpenContract, onOpenInvoice, onOpenNotes, onOpenNotifications, onOpenPayment, onOpenTask]);
 
   useEffect(() => {
+    if (!ready) return undefined;
     if (!userId || !canStartNotificationsHubConnection()) {
       updateRealtimeNotificationDiagnostics({
         status: 'unavailable',
@@ -520,6 +524,7 @@ export function RealtimeNotificationToasts({
     let missedReplayInFlight = false;
     const mountedAtMs = Date.now();
     const initialMissedSinceMs = readLastSeenMs(userId, mountedAtMs) ?? mountedAtMs;
+    let confirmedSeenThroughMs = initialMissedSinceMs;
     let pendingReplaySinceMs: number | null = initialMissedSinceMs;
     shownNotificationIdsRef.current.clear();
     fallbackKnownNotificationIdsRef.current.clear();
@@ -536,8 +541,10 @@ export function RealtimeNotificationToasts({
       const visibleFrontier = document.visibilityState === 'hidden'
         ? readLastSeenMs(userId, now) ?? initialMissedSinceMs
         : now;
-      // A reload must still replay anything waiting in the queue or in an unfinished inbox request.
-      writeLastSeenMs(userId, Math.min(visibleFrontier, oldestQueuedAt, pendingReplaySinceMs ?? now));
+      // A completed inbox response proves only its request-start boundary: a
+      // newer row may have committed while an older snapshot was in flight.
+      // Reloads also retain anything queued or in an unfinished inbox request.
+      writeLastSeenMs(userId, Math.min(visibleFrontier, confirmedSeenThroughMs, oldestQueuedAt, pendingReplaySinceMs ?? now));
     };
     persistReplayFrontier();
     const connection = createNotificationsHubConnection();
@@ -667,6 +674,10 @@ export function RealtimeNotificationToasts({
         dedupeKey,
         domain: resolveToastDomain(notification),
       });
+      const createdAtMs = parseCreatedAtMs(notification.createdAt);
+      if (createdAtMs !== null) {
+        confirmedSeenThroughMs = Math.max(confirmedSeenThroughMs, Math.min(Date.now(), createdAtMs));
+      }
     };
 
     const flushQueuedToastNotifications = () => {
@@ -754,6 +765,7 @@ export function RealtimeNotificationToasts({
       }
 
       missedReplayInFlight = true;
+      const replayStartedAtMs = Date.now();
       pendingReplaySinceMs = Math.min(pendingReplaySinceMs ?? sinceMs, sinceMs);
       persistReplayFrontier();
       try {
@@ -790,11 +802,16 @@ export function RealtimeNotificationToasts({
               && oldestPageItemMs >= sinceMs - 1000)) {
           showOverflowNotice();
         }
+        confirmedSeenThroughMs = Math.max(confirmedSeenThroughMs, replayStartedAtMs);
         pendingReplaySinceMs = null;
         persistReplayFrontier();
       } catch (error) {
         if (!disposed) {
-          console.error('Missed notifications replay failed.', error);
+          if (isExpectedRealtimeStartupError(error)) {
+            console.debug('Notifications are unavailable; replay will retry.', error);
+          } else {
+            console.error('Missed notifications replay failed.', error);
+          }
         }
       } finally {
         missedReplayInFlight = false;
@@ -876,13 +893,18 @@ export function RealtimeNotificationToasts({
 
         fallbackBaselineReadyRef.current = true;
         lastFallbackPollStartedAtMs = pollStartedAtMs;
+        confirmedSeenThroughMs = Math.max(confirmedSeenThroughMs, pollStartedAtMs);
         if (!missedReplayInFlight) {
           pendingReplaySinceMs = null;
           persistReplayFrontier();
         }
       } catch (error) {
         if (!disposed) {
-          console.error('Fallback notifications polling failed.', error);
+          if (isExpectedRealtimeStartupError(error)) {
+            console.debug('Notifications are unavailable; polling will retry.', error);
+          } else {
+            console.error('Fallback notifications polling failed.', error);
+          }
         }
       } finally {
         fallbackPollInFlight = false;
@@ -959,7 +981,15 @@ export function RealtimeNotificationToasts({
       }
 
       try {
-        await connection.start();
+        let handshakePending = true;
+        const handshake = connection.start().finally(() => { handshakePending = false; });
+        // An already settled connection follows the existing replay/fallback path.
+        // A pending handshake must not delay recovery of stored notifications.
+        const initialReplay = Promise.resolve().then(() => {
+          if (handshakePending && !disposed)
+            return replayMissedNotifications(initialMissedSinceMs, 'missed-replay');
+        });
+        await handshake;
         updateRealtimeNotificationDiagnostics({
           status: 'connected',
           fallbackPollingActive: false,
@@ -968,6 +998,9 @@ export function RealtimeNotificationToasts({
           lastError: null,
         });
         stopFallbackPolling();
+        // Read again after the first snapshot to cover notifications created during the handshake.
+        await initialReplay;
+        if (disposed) return;
         void replayMissedNotifications(initialMissedSinceMs, 'missed-replay');
       } catch (error) {
         if (!disposed) {
@@ -1067,7 +1100,7 @@ export function RealtimeNotificationToasts({
         lastDisconnectedAt: new Date().toISOString(),
       });
     };
-  }, [toast, userId]);
+  }, [ready, toast, userId]);
 
   return null;
 }

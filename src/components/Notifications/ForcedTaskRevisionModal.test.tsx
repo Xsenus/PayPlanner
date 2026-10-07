@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { StrictMode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ForcedTaskRevisionModal } from './ForcedTaskRevisionModal';
@@ -208,6 +209,162 @@ describe('ForcedTaskRevisionModal', () => {
     apiMock.updateTaskJournalApproval.mockResolvedValue({});
   });
 
+  it('coalesces mandatory notification startup reads under StrictMode', async () => {
+    const pending: Array<() => void> = [];
+    apiMock.getUserNotifications.mockImplementation(() => new Promise<PagedResult<UserNotificationDto>>((resolve) => {
+      pending.push(() => resolve(createPage([])));
+    }));
+    const view = render(<StrictMode><ForcedTaskRevisionModal /></StrictMode>);
+    try {
+      expect(apiMock.getUserNotifications).toHaveBeenCalledTimes(2);
+    } finally {
+      // Settle all original loads before the next test, including a failed baseline.
+      for (let round = 0; round < 6; round++) {
+        await act(async () => { pending.splice(0).forEach(finish => finish()); });
+      }
+      view.unmount();
+    }
+  });
+
+  it('coalesces overlapping mandatory notification events into the active load', async () => {
+    const pending: Array<() => void> = [];
+    apiMock.getUserNotifications.mockImplementation(() => new Promise<PagedResult<UserNotificationDto>>((resolve) => {
+      pending.push(() => resolve(createPage([])));
+    }));
+    const view = render(<ForcedTaskRevisionModal />);
+    try {
+      fireEvent(window, new CustomEvent(USER_NOTIFICATIONS_EVENT));
+      fireEvent(window, new CustomEvent(USER_NOTIFICATIONS_EVENT));
+      expect(apiMock.getUserNotifications).toHaveBeenCalledTimes(2);
+    } finally {
+      for (let round = 0; round < 6; round++) {
+        await act(async () => { pending.splice(0).forEach(finish => finish()); });
+      }
+      view.unmount();
+    }
+  });
+
+  it('refreshes fresh mandatory notifications once after overlapping events', async () => {
+    const pending: Array<() => void> = [];
+    let calls = 0;
+    let maximumPending = 0;
+    apiMock.getUserNotifications.mockImplementation((params) => {
+      const refreshed = ++calls > 5;
+      return new Promise<PagedResult<UserNotificationDto>>((resolve) => {
+        pending.push(() => resolve(createPage(refreshed && params.type === 'taskRevisionRequested'
+          ? [createNotification({ title: 'Задача возвращена на доработку: Свежий результат' })] : [])));
+        maximumPending = Math.max(maximumPending, pending.length);
+      });
+    });
+    const view = render(<ForcedTaskRevisionModal />);
+    try {
+      fireEvent(window, new CustomEvent(USER_NOTIFICATIONS_EVENT));
+      fireEvent(window, new CustomEvent(USER_NOTIFICATIONS_EVENT));
+      expect(calls).toBe(2);
+      for (let round = 0; round < 6; round++) {
+        await act(async () => { pending.splice(0).forEach(finish => finish()); });
+      }
+      expect(await screen.findByText('Свежий результат')).toBeTruthy();
+      expect(calls).toBe(10);
+      expect(maximumPending).toBe(2);
+      expect(apiMock.markUserNotificationRead).not.toHaveBeenCalled();
+    } finally { view.unmount(); }
+  });
+
+  it('stops later mandatory notification batches after unmount', async () => {
+    const pending: Array<() => void> = [];
+    apiMock.getUserNotifications.mockImplementation(() => new Promise<PagedResult<UserNotificationDto>>((resolve) => {
+      pending.push(() => resolve(createPage([createNotification()])));
+    }));
+    const view = render(<ForcedTaskRevisionModal />);
+    expect(apiMock.getUserNotifications).toHaveBeenCalledTimes(2);
+    view.unmount();
+    await act(async () => { pending.splice(0).forEach(finish => finish()); });
+    fireEvent(window, new CustomEvent(USER_NOTIFICATIONS_EVENT));
+    expect(apiMock.getUserNotifications).toHaveBeenCalledTimes(2);
+    expect(apiMock.markUserNotificationRead).not.toHaveBeenCalled();
+  });
+
+  it('keeps mandatory notification loads separate across keyed employee changes', async () => {
+    let employee = 'previous';
+    const previous: Array<() => void> = [];
+    const current: Array<() => void> = [];
+    apiMock.getUserNotifications.mockImplementation((params) => {
+      const owner = employee;
+      return new Promise<PagedResult<UserNotificationDto>>((resolve) => {
+        (owner === 'previous' ? previous : current).push(() => resolve(createPage(
+          params.type === 'taskRevisionRequested'
+            ? [createNotification({ title: `Задача возвращена на доработку: ${owner}` })] : [],
+        )));
+      });
+    });
+    const view = render(<ForcedTaskRevisionModal key={7} />);
+    try {
+      employee = 'current';
+      view.rerender(<ForcedTaskRevisionModal key={8} />);
+      expect(apiMock.getUserNotifications).toHaveBeenCalledTimes(4);
+      await act(async () => { previous.splice(0).forEach(finish => finish()); });
+      expect(apiMock.getUserNotifications).toHaveBeenCalledTimes(4);
+      for (let round = 0; round < 3; round++) {
+        await act(async () => { current.splice(0).forEach(finish => finish()); });
+      }
+      expect(await screen.findByText('current')).toBeTruthy();
+      expect(screen.queryByText('previous')).toBeNull();
+      expect(apiMock.getUserNotifications).toHaveBeenCalledTimes(7);
+      expect(apiMock.markUserNotificationRead).not.toHaveBeenCalled();
+    } finally { view.unmount(); }
+  });
+
+  it('finishes a failed mandatory notification batch before refreshing a queued event', async () => {
+    let finishPending!: () => void;
+    let calls = 0;
+    const debug = vi.spyOn(console, 'debug').mockImplementation(() => undefined);
+    apiMock.getUserNotifications.mockImplementation((params) => {
+      calls++;
+      if (calls === 1) return Promise.reject(new TypeError('Failed to fetch'));
+      if (calls === 2) return new Promise<PagedResult<UserNotificationDto>>((resolve) => {
+        finishPending = () => resolve(createPage([]));
+      });
+      return Promise.resolve(createPage(params.type === 'taskRevisionRequested'
+        ? [createNotification({ title: 'Задача возвращена на доработку: После восстановления' })] : []));
+    });
+    const view = render(<ForcedTaskRevisionModal />);
+    try {
+      fireEvent(window, new CustomEvent(USER_NOTIFICATIONS_EVENT));
+      await act(async () => { await Promise.resolve(); });
+      expect(calls).toBe(2);
+      await act(async () => { finishPending(); });
+      expect(await screen.findByText('После восстановления')).toBeTruthy();
+      expect(calls).toBe(7);
+      expect(debug).toHaveBeenCalled();
+      expect(apiMock.markUserNotificationRead).not.toHaveBeenCalled();
+    } finally { view.unmount(); debug.mockRestore(); }
+  });
+
+  it('bounds simultaneous reads while retaining every forced notification type', async () => {
+    const pending: Array<() => void> = [];
+    let maximumPending = 0;
+    apiMock.getUserNotifications.mockImplementation(() => new Promise<PagedResult<UserNotificationDto>>((resolve) => {
+      pending.push(() => resolve(createPage([])));
+      maximumPending = Math.max(maximumPending, pending.length);
+    }));
+    const { unmount } = render(<ForcedTaskRevisionModal onOpenTask={vi.fn()} />);
+    try {
+      for (let completed = 0; completed < 5;) {
+        const batchSize = Math.min(2, 5 - completed);
+        await waitFor(() => expect(pending).toHaveLength(batchSize));
+        expect(apiMock.getUserNotifications).toHaveBeenCalledTimes(completed + batchSize);
+        await act(async () => { pending.splice(0).forEach(finish => finish()); });
+        completed += batchSize;
+      }
+      expect(maximumPending).toBe(2);
+      expect(apiMock.getUserNotifications.mock.calls.map(([params]) => params.type)).toEqual([
+        'courtHearing', 'taskApprovalRequested', 'taskDeadlineChangeRequested', 'taskRevisionRequested', 'taskApproved',
+      ]);
+      for (const [params] of apiMock.getUserNotifications.mock.calls)
+        expect(params).toEqual(expect.objectContaining({ status: 'unread', requiresAction: true, page: 1, pageSize: 25 }));
+    } finally { unmount(); }
+  });
   it('shows unread revision requests as a mandatory modal and acknowledges them', async () => {
     mockNotificationPages([createNotification()]);
 
@@ -684,4 +841,61 @@ describe('ForcedTaskRevisionModal', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(apiMock.markUserNotificationRead).toHaveBeenCalledTimes(1);
   });
+  it('keeps the mandatory inbox during a network outage and restores reads on the notification event', async () => {
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const debugLog = vi.spyOn(console, 'debug').mockImplementation(() => undefined);
+    try {
+      mockNotificationPages([createNotification({ id: 91 })]);
+      render(<ForcedTaskRevisionModal />);
+      expect(await screen.findByRole('dialog')).toBeTruthy();
+      apiMock.getUserNotifications.mockRejectedValue(new TypeError('Failed to fetch'));
+      fireEvent(window, new CustomEvent(USER_NOTIFICATIONS_EVENT));
+      await waitFor(() => expect(debugLog).toHaveBeenCalled());
+      expect(errorLog).not.toHaveBeenCalled();
+      expect(screen.getByRole('dialog')).toBeTruthy();
+      expect(apiMock.markUserNotificationRead).not.toHaveBeenCalled();
+      mockNotificationPages([createNotification({ id: 92, title: 'Задача возвращена на доработку: Новое сообщение' })]);
+      fireEvent(window, new CustomEvent(USER_NOTIFICATIONS_EVENT));
+      expect(await screen.findByText('Новое сообщение')).toBeTruthy();
+      expect(apiMock.markUserNotificationRead).not.toHaveBeenCalled();
+    } finally {
+      errorLog.mockRestore();
+      debugLog.mockRestore();
+    }
+  });
+
+  it('continues loading mandatory messages after an initial network failure without a false error', async () => {
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const debugLog = vi.spyOn(console, 'debug').mockImplementation(() => undefined);
+    try {
+      apiMock.getUserNotifications.mockRejectedValue(new TypeError('Failed to fetch'));
+      render(<ForcedTaskRevisionModal />);
+      await waitFor(() => expect(debugLog).toHaveBeenCalled());
+      expect(errorLog).not.toHaveBeenCalled();
+      expect(screen.queryByRole('dialog')).toBeNull();
+      mockNotificationPages([createNotification({ id: 93 })]);
+      fireEvent(window, new CustomEvent(USER_NOTIFICATIONS_EVENT));
+      expect(await screen.findByRole('dialog')).toBeTruthy();
+      expect(apiMock.markUserNotificationRead).not.toHaveBeenCalled();
+    } finally {
+      errorLog.mockRestore();
+      debugLog.mockRestore();
+    }
+  });
+
+  it.each(['HTTP 500 Failed to fetch', 'HTTP 403 Forbidden', 'HTTP 400 Failed to fetch', 'HTTP 409 Failed to fetch', 'HTTP 422 Failed to fetch', 'HTTP 501 Failed to fetch', 'HTTP 507 Failed to fetch', 'Invalid notification response'])('keeps a genuine inbox failure visible: %s', async (message) => {
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const debugLog = vi.spyOn(console, 'debug').mockImplementation(() => undefined);
+    try {
+      apiMock.getUserNotifications.mockRejectedValue(new Error(message));
+      render(<ForcedTaskRevisionModal />);
+      await waitFor(() => expect(errorLog).toHaveBeenCalledWith('Failed to load forced task action messages.', expect.any(Error)));
+      expect(debugLog).not.toHaveBeenCalled();
+      expect(apiMock.markUserNotificationRead).not.toHaveBeenCalled();
+    } finally {
+      errorLog.mockRestore();
+      debugLog.mockRestore();
+    }
+  });
+
 });

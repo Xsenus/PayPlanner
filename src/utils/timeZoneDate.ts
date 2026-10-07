@@ -6,7 +6,7 @@ type ZonedParts = Record<DateTimePart, number>;
 
 const NAIVE_ISO_DATE_TIME_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?$/;
 
-function parseInstant(value: string | Date): Date {
+export function parseInstant(value: string | Date): Date {
   if (value instanceof Date) return value;
 
   // PostgreSQL `timestamp without time zone` values contain UTC clock time,

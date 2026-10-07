@@ -1,4 +1,5 @@
 import { SystemCheckbox } from '../ui/SystemCheckbox';
+import { restoredPhotoUrl } from '../../services/restoredRealtime';
 import { SystemSelect } from '../ui/SystemSelect';
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -642,8 +643,8 @@ export function UserDetailPage({ userId, onBack, onSaved, initialSection = 'main
                     <div className="mt-1 text-sm text-slate-500">Фото пользователь обновляет сам в личном профиле. Здесь показывается текущий аватар и основные данные карточки.</div>
                   </div>
                   <div className="flex flex-col items-center gap-3 rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-center">
-                    {user?.photoUrl && !avatarLoadFailed ? (
-                      <img src={user.photoUrl} alt={form.fullName || user.email || 'Профиль'} className="h-24 w-24 rounded-3xl object-cover shadow-sm" onError={() => setAvatarLoadFailed(true)} />
+                    {restoredPhotoUrl(user?.photoUrl) && !avatarLoadFailed ? (
+                      <img src={restoredPhotoUrl(user?.photoUrl)} alt={form.fullName || user?.email || 'Профиль'} className="h-24 w-24 rounded-3xl object-cover shadow-sm" onError={() => setAvatarLoadFailed(true)} />
                     ) : (
                       <div className="flex h-24 w-24 items-center justify-center rounded-3xl bg-gradient-to-br from-blue-500 to-slate-900 text-2xl font-semibold text-white shadow-sm">{avatarInitials}</div>
                     )}

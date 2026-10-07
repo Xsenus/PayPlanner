@@ -15,6 +15,7 @@ vi.mock('../services/api', () => ({
 }));
 
 const emptyReport: LegalWorkReport = {
+  hasCompletePaymentVisibility: true,
   from: '2026-07-01T00:00:00',
   to: '2026-07-31T00:00:00',
   statusFilter: '',

@@ -19,6 +19,7 @@ function courtEvent(overrides: Partial<ClientCaseCourtEvent> = {}): ClientCaseCo
     sourceType: 'sudrf',
     createdAt: '2026-09-16T00:00:00Z',
     isOverdue: false,
+    canRecordHearingOutcome: false,
     ...overrides,
   };
 }

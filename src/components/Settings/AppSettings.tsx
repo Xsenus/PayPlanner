@@ -14,6 +14,8 @@ import { formatDateTimeInTimeZone } from '../../utils/timeZoneDate';
 import { TablePagination } from '../ui/TablePagination';
 import { BankDirectorySettings } from './BankDirectorySettings';
 import { DatabaseMaintenanceSettings } from './DatabaseMaintenanceSettings';
+import { StorageCapacityRecoverySettings } from './StorageCapacityRecoverySettings';
+import { StorageCasePublicationQueueSettings } from './StorageCasePublicationQueueSettings';
 import { CaseDocumentTemplateSettings } from './CaseDocumentTemplateSettings';
 import { CalendarSyncProviderSettings } from './CalendarSyncProviderSettings';
 import { ContractDocumentTemplateSettings } from './ContractDocumentTemplateSettings';
@@ -70,6 +72,7 @@ type SettingsSection =
   | 'app-releases'
   | 'auth-providers'
   | 'db-maintenance'
+  | 'storage-capacity'
   | 'db-import'
   | 'db-operations'
   | 'form-requirements';
@@ -98,6 +101,7 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
   'app-releases',
   'auth-providers',
   'db-maintenance',
+  'storage-capacity',
   'db-import',
   'db-operations',
   'form-requirements',
@@ -259,6 +263,7 @@ export function AppSettings({ initialSection, onOpenCase }: AppSettingsProps = {
     if (activeSection === 'app-releases') return 'Версия приложения и обновления';
     if (activeSection === 'auth-providers') return 'Внешняя авторизация';
     if (activeSection === 'db-maintenance') return 'Обслуживание базы данных';
+    if (activeSection === 'storage-capacity') return 'Хранилище файлов';
     if (activeSection === 'db-import') return 'Импорт данных';
     if (activeSection === 'db-operations') return 'Операции по разделам БД';
     if (activeSection === 'form-requirements') return 'Правила заполнения форм';
@@ -1008,6 +1013,13 @@ export function AppSettings({ initialSection, onOpenCase }: AppSettingsProps = {
                   </button>
                   <button
                     type="button"
+                    onClick={() => selectSection('storage-capacity')}
+                    className={settingsNavItemClass(activeSection === 'storage-capacity')}
+                  >
+                    Хранилище файлов
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => selectSection('db-import')}
                     className={settingsNavItemClass(activeSection === 'db-import')}
                   >
@@ -1403,6 +1415,7 @@ export function AppSettings({ initialSection, onOpenCase }: AppSettingsProps = {
             {activeSection === 's3-storage' && canViewS3StorageSettings && <S3Storage embedded />}
 
             {activeSection === 'db-maintenance' && canViewMaintenanceSettings && <DatabaseMaintenanceSettings />}
+            {activeSection === 'storage-capacity' && isAdminRole && <div className="space-y-3"><StorageCasePublicationQueueSettings /><StorageCapacityRecoverySettings /><StorageCapacityRecoverySettings releasedMarkers /></div>}
 
             {activeSection === 'db-import' && !restrictedSettingsMode && (
               <Suspense fallback={<SettingsPanelLoading />}>

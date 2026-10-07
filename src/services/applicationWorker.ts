@@ -1,3 +1,5 @@
+import { parseRestoredRuntimeMode } from '../utils/restoredRuntimeSafety';
+
 export const PAYPLANNER_APPLICATION_WORKER_PATH = '/payplanner-worker.js';
 export const PAYPLANNER_APPLICATION_WORKER_SCOPE = '/';
 const PAYPLANNER_APPLICATION_WORKER_READY_TIMEOUT_MS = 4_000;
@@ -7,6 +9,7 @@ export function isApplicationWorkerSupported() {
 }
 
 export async function registerPayPlannerApplicationWorker() {
+  if (parseRestoredRuntimeMode(import.meta.env.VITE_RESTORED_RUNTIME_ISOLATION)) return null;
   if (!isApplicationWorkerSupported()) {
     return null;
   }

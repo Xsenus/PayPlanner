@@ -1,4 +1,5 @@
 import { getApiBaseUrl, getAuthToken } from './api';
+import { apiFetch as fetch } from './apiTransport';
 
 export type InternalChatThreadKind = 'task' | 'channel' | 'direct';
 export type InternalChatNotificationMode = 'all' | 'mentions' | 'muted';
@@ -72,6 +73,30 @@ export interface InternalChatMessagePage {
 
 type RequestOptions = RequestInit & { body?: BodyInit | null };
 
+export interface InternalChatSendState {
+  clientRequestId: string;
+  status: 'waiting' | 'processing' | 'retrying' | 'paused' | 'needsInput' | 'failed' | 'conflict' | 'deleted' | 'published';
+  automaticRecovery: boolean;
+  retryAfter?: string | null;
+  message?: InternalChatMessage | null;
+  description: string;
+}
+
+export interface InternalChatPendingSend {
+  attemptId: string;
+  clientRequestId: string;
+  createdAt: string;
+  fileCount: number;
+  totalSizeBytes: number;
+  lastStatus?: string | null;
+}
+
+export interface InternalChatPendingSendPage {
+  status: 'pending';
+  items: InternalChatPendingSend[];
+  nextAfterAttemptId?: string | null;
+}
+
 async function chatRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const token = getAuthToken();
   const headers = new Headers(options.headers);
@@ -96,6 +121,16 @@ async function chatRequest<T>(path: string, options: RequestOptions = {}): Promi
 }
 
 export const internalChatApi = {
+  getSendStatus: (threadId: number, clientRequestId: string, signal?: AbortSignal) =>
+    chatRequest<InternalChatSendState>(`/threads/${threadId}/sends/${encodeURIComponent(clientRequestId)}`, { cache: 'no-store', signal }),
+  getPendingSends: (threadId: number, params: { limit?: number; afterAttemptId?: string; signal?: AbortSignal } = {}) => {
+    const query = new URLSearchParams();
+    if (params.limit !== undefined) query.set('limit', String(params.limit));
+    if (params.afterAttemptId) query.set('afterAttemptId', params.afterAttemptId);
+    return chatRequest<InternalChatPendingSendPage>(`/threads/${threadId}/sends${query.size ? `?${query}` : ''}`, { cache: 'no-store', signal: params.signal });
+  },
+  resumeSend: (threadId: number, clientRequestId: string, signal?: AbortSignal) =>
+    chatRequest<InternalChatSendState>(`/threads/${threadId}/sends/${encodeURIComponent(clientRequestId)}/resume`, { method: 'POST', signal }),
   getThreads: () => chatRequest<InternalChatThread[]>('/threads'),
   getPeople: () => chatRequest<InternalChatPerson[]>('/people'),
   createChannel: (name: string, memberUserIds: number[]) => chatRequest<InternalChatThread>('/channels', {
@@ -123,13 +158,14 @@ export const internalChatApi = {
     if (params.mentionedMe) query.set('mentionedMe', 'true');
     return chatRequest<InternalChatMessagePage>(`/threads/${threadId}/messages${query.size ? `?${query}` : ''}`);
   },
-  sendMessage: (threadId: number, text: string, files: File[], replyToMessageId?: number | null, mentionUserIds: number[] = []) => {
+  sendMessage: (threadId: number, text: string, files: File[], replyToMessageId?: number | null, mentionUserIds: number[] = [], clientRequestId?: string) => {
     const body = new FormData();
     body.append('text', text);
+    if (clientRequestId) body.append('clientRequestId', clientRequestId);
     if (replyToMessageId) body.append('replyToMessageId', String(replyToMessageId));
     mentionUserIds.forEach((id) => body.append('mentionUserIds', String(id)));
     files.forEach((file) => body.append('files', file));
-    return chatRequest<InternalChatMessage>(`/threads/${threadId}/messages`, { method: 'POST', body });
+    return chatRequest<InternalChatMessage | InternalChatSendState>(`/threads/${threadId}/messages`, { method: 'POST', body });
   },
   editMessage: (messageId: number, text: string, mentionUserIds: number[] = []) => chatRequest<InternalChatMessage>(`/messages/${messageId}`, {
     method: 'PUT', body: JSON.stringify({ text, mentionUserIds }),

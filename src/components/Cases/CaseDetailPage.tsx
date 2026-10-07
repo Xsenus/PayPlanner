@@ -8,6 +8,7 @@ import { CaseHearingPreparationChecklist } from './CaseHearingPreparationCheckli
 import { CasePositionTemplatePicker } from './CasePositionTemplatePicker';
 import { CourtRecoveryPanel } from './CourtRecoveryPanel';
 import { ExecutiveWritDocumentUpload } from './ExecutiveWritDocumentUpload';
+import { CaseDocumentUploadStatusPanel } from './CaseDocumentUploadStatusPanel';
 import { MessengerDocumentDeliveryModal } from './MessengerDocumentDeliveryModal';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -485,6 +486,7 @@ function buildCourtSyncOverviewMessage(result: ClientCaseCourtSyncRun) {
   if (result.status !== 'external-sync-completed') {
     return result.message;
   }
+  if ((result.conflictItems?.length ?? 0) > 0) return result.message;
 
   const parts = [
     [result.createdCourtEvents ?? 0, ['событие', 'события', 'событий'] as const],
@@ -495,6 +497,9 @@ function buildCourtSyncOverviewMessage(result: ClientCaseCourtSyncRun) {
     .filter(([count]) => Number(count) > 0)
     .map(([count, forms]) => formatRussianCount(Number(count), forms as readonly [string, string, string]));
   const checkedAt = formatRuDateTime(result.checkedAt);
+  if ((result.pendingCourtActDocuments ?? 0) > 0) {
+    parts.push(`сводки ожидают обязательных копий: ${result.pendingCourtActDocuments}; сроки и напоминания сохранены`);
+  }
 
   if (parts.length === 0) {
     return `Судебный источник проверен: новых изменений не найдено${checkedAt ? `. Проверено ${checkedAt}` : ''}.`;
@@ -1514,6 +1519,8 @@ export function CaseDetailPage({
   const [conversation, setConversation] = useState<ClientCaseConversationEntry[]>([]);
   const [financeDetail, setFinanceDetail] = useState<ClientCaseFinanceDetail | null>(null);
   const [workOrder, setWorkOrder] = useState<ClientCaseWorkOrder | null>(null);
+  const workOrderReadSequence = useRef(0);
+  const workOrderPublicationRead = useRef<AbortController | null>(null);
   const [participantClients, setParticipantClients] = useState<Client[]>([]);
   const [participantLegalEntities, setParticipantLegalEntities] = useState<LegalEntitySummary[]>([]);
   const [participantContacts, setParticipantContacts] = useState<ContactDirectoryItemDto[]>([]);
@@ -1554,6 +1561,7 @@ export function CaseDetailPage({
   const [requestingAccess, setRequestingAccess] = useState(false);
   const [generatingDocument, setGeneratingDocument] = useState(false);
   const [uploadingDocument, setUploadingDocument] = useState(false);
+  const [uploadRevision, setUploadRevision] = useState(0);
   const [uploadingDocumentVersionId, setUploadingDocumentVersionId] = useState<number | null>(null);
   const [downloadingDocumentId, setDownloadingDocumentId] = useState<number | null>(null);
   const [previewingDocumentId, setPreviewingDocumentId] = useState<number | null>(null);
@@ -1705,6 +1713,8 @@ export function CaseDetailPage({
     setDocumentSourceId('');
     setDocumentSourceStage('');
     setWorkOrder(null);
+    setEditPageOpen(false);
+    setCaseEditDraft(null);
     setCourtEvents([]);
     setCourtEventsLoading(true);
     setCourtEventsError(null);
@@ -2286,14 +2296,18 @@ export function CaseDetailPage({
     };
   }, [activeTab, canViewFinance, caseId, reloadToken]);
 
+  useEffect(() => () => { workOrderPublicationRead.current?.abort(); }, [caseId]);
+
   useEffect(() => {
     if (activeTab !== 'workOrder' && activeTab !== 'documents') return;
 
     let cancelled = false;
+    const sequence = ++workOrderReadSequence.current;
+    workOrderPublicationRead.current?.abort();
     setWorkOrderLoading(true);
     apiService.getCaseWorkOrder(caseId)
       .then((loadedWorkOrder) => {
-        if (cancelled) return;
+        if (cancelled || sequence !== workOrderReadSequence.current) return;
         setWorkOrder(loadedWorkOrder);
         setWorkOrderDraft(buildWorkOrderHeaderDraft(loadedWorkOrder?.id ? loadedWorkOrder : null));
         setWorkOrderItemDrafts(Object.fromEntries(
@@ -2301,13 +2315,13 @@ export function CaseDetailPage({
         ));
       })
       .catch(() => {
-        if (cancelled) return;
+        if (cancelled || sequence !== workOrderReadSequence.current) return;
         setWorkOrder(null);
         setWorkOrderDraft(buildWorkOrderHeaderDraft(null));
         setWorkOrderItemDrafts({});
       })
       .finally(() => {
-        if (!cancelled) setWorkOrderLoading(false);
+        if (!cancelled && sequence === workOrderReadSequence.current) setWorkOrderLoading(false);
       });
 
     apiService.getFeatureFlags()
@@ -2642,6 +2656,7 @@ export function CaseDetailPage({
       setError(extractDisplayErrorMessage(err, 'Не удалось сформировать документ по делу.'));
     } finally {
       setGeneratingDocument(false);
+      setUploadRevision((value) => value + 1);
     }
   };
 
@@ -2684,6 +2699,7 @@ export function CaseDetailPage({
       setError(extractDisplayErrorMessage(err, 'Не удалось загрузить документ по делу.'));
     } finally {
       setUploadingDocument(false);
+      setUploadRevision((value) => value + 1);
     }
   };
 
@@ -2788,6 +2804,8 @@ export function CaseDetailPage({
     setNotice(null);
     try {
       await apiService.uploadCaseDocumentVersion(caseDocument.id, file, {
+        clientCaseId: caseDocument.clientCaseId,
+        documentKey: caseDocument.documentKey,
         documentType: caseDocument.documentType,
         status: caseDocument.status,
       });
@@ -2797,6 +2815,7 @@ export function CaseDetailPage({
       setError(err instanceof Error ? err.message : 'Не удалось загрузить новую версию документа по делу.');
     } finally {
       setUploadingDocumentVersionId(null);
+      setUploadRevision((value) => value + 1);
     }
   };
 
@@ -3566,6 +3585,7 @@ export function CaseDetailPage({
       setError(err instanceof Error ? err.message : 'Не удалось создать счет на основе заказ-наряда.');
     } finally {
       setCreatingWorkOrderInvoice(false);
+      setUploadRevision((value) => value + 1);
     }
   };
 
@@ -3584,6 +3604,7 @@ export function CaseDetailPage({
       setError(err instanceof Error ? err.message : 'Не удалось создать акт на основе заказ-наряда.');
     } finally {
       setCreatingWorkOrderAct(false);
+      setUploadRevision((value) => value + 1);
     }
   };
 
@@ -3602,6 +3623,7 @@ export function CaseDetailPage({
       setError(err instanceof Error ? err.message : 'Не удалось создать договор на основе заказ-наряда.');
     } finally {
       setCreatingWorkOrderContract(false);
+      setUploadRevision((value) => value + 1);
     }
   };
 
@@ -3648,6 +3670,7 @@ export function CaseDetailPage({
       setError(err instanceof Error ? err.message : 'Не удалось сохранить заказ-наряд в документы дела.');
     } finally {
       setGeneratingWorkOrderDocument(false);
+      setUploadRevision((value) => value + 1);
     }
   };
 
@@ -3881,6 +3904,36 @@ export function CaseDetailPage({
         onChange={setCaseEditDraft}
         onSave={() => void saveCaseFromPage()}
         onWritUploaded={async () => setDocuments(await apiService.getCaseDocuments(caseItem.id))}
+        uploadRevision={uploadRevision}
+        onUploadAttemptSettled={() => setUploadRevision((value) => value + 1)}
+        onUploadPublished={async (signal) => {
+          if (signal.aborted) return;
+          // Start the parent-owned order refresh before the edit panel can
+          // cancel its document read. Closing edit must retain publication.
+          if (activeTab === 'workOrder') {
+            const sequence = ++workOrderReadSequence.current;
+          workOrderPublicationRead.current?.abort();
+          const controller = new AbortController();
+          workOrderPublicationRead.current = controller;
+          setWorkOrderLoading(true);
+          try {
+            const updated = await apiService.getCaseWorkOrder(caseItem.id, controller.signal);
+            if (controller.signal.aborted || sequence !== workOrderReadSequence.current) return;
+            if (!workOrder?.id) {
+              applyLoadedWorkOrder(updated);
+            } else {
+              setWorkOrder(updated);
+              setWorkOrderDraft((draft) => draft.status === workOrder.status
+                ? { ...draft, status: updated.status } : draft);
+            }
+          } finally {
+            if (sequence === workOrderReadSequence.current) setWorkOrderLoading(false);
+          }
+          }
+          if (signal.aborted) return;
+          const items = await apiService.getCaseDocuments(caseItem.id, signal);
+          if (!signal.aborted) setDocuments(items);
+        }}
       />
     );
   }
@@ -4593,6 +4646,11 @@ export function CaseDetailPage({
                   </div>
                 </section>
               ) : null}
+              {canManageDocuments ? <CaseDocumentUploadStatusPanel key={caseItem.id} caseId={caseItem.id} revision={uploadRevision}
+                onPublished={async (signal) => {
+                  const items = await apiService.getCaseDocuments(caseItem.id, signal);
+                  if (!signal.aborted) setDocuments(items);
+                }} /> : null}
               {documentsLoading ? (
                 <LoadingBlock label="Загрузка документов дела..." />
               ) : (
@@ -4761,6 +4819,9 @@ function CaseEditPage({
   onChange,
   onSave,
   onWritUploaded,
+  uploadRevision,
+  onUploadAttemptSettled,
+  onUploadPublished,
 }: {
   caseItem: ClientCase;
   draft: CaseEditDraft;
@@ -4773,6 +4834,9 @@ function CaseEditPage({
   onChange: (draft: CaseEditDraft) => void;
   onSave: () => void;
   onWritUploaded: () => Promise<void>;
+  uploadRevision: number;
+  onUploadAttemptSettled: () => void;
+  onUploadPublished: (signal: AbortSignal) => Promise<void>;
 }) {
   const setField = <K extends keyof CaseEditDraft>(key: K, value: CaseEditDraft[K]) => {
     onChange({ ...draft, [key]: value });
@@ -5012,7 +5076,8 @@ function CaseEditPage({
             <label className="text-sm font-medium text-slate-700">Зарегистрирован судом<SystemDateInput aria-label="Дата регистрации в суде" type="date" value={draft.courtRegisteredAt} onChange={(event) => setField('courtRegisteredAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /></label>
             <label className="text-sm font-medium text-slate-700">Решение суда<SystemDateInput type="date" value={draft.courtDecisionAt} onChange={(event) => setField('courtDecisionAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /></label>
             <label className="text-sm font-medium text-slate-700">Решение вступило в силу<SystemDateInput aria-label="Дата вступления решения в силу" type="date" value={draft.courtDecisionEffectiveAt} onChange={(event) => setField('courtDecisionEffectiveAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /><span className="mt-1 block text-xs font-normal text-slate-500">Дата указывается вручную; CRM её не рассчитывает.</span></label>
-            <div><label className="text-sm font-medium text-slate-700">Исполнительный лист получен<SystemDateInput aria-label="Дата получения исполнительного листа" type="date" value={draft.executiveWritReceivedAt} onChange={(event) => setField('executiveWritReceivedAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /></label><div className="mt-2"><ExecutiveWritDocumentUpload caseId={caseItem.id} canUpload documents={documents} onUploaded={onWritUploaded} /></div></div>
+            <div><label className="text-sm font-medium text-slate-700">Исполнительный лист получен<SystemDateInput aria-label="Дата получения исполнительного листа" type="date" value={draft.executiveWritReceivedAt} onChange={(event) => setField('executiveWritReceivedAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /></label><div className="mt-2"><ExecutiveWritDocumentUpload caseId={caseItem.id} canUpload documents={documents} onUploaded={onWritUploaded} onAttemptSettled={onUploadAttemptSettled} /></div></div>
+            <div className="md:col-span-2"><CaseDocumentUploadStatusPanel key={caseItem.id} caseId={caseItem.id} revision={uploadRevision} onPublished={onUploadPublished} /></div>
             <div className="rounded-lg border border-blue-100 bg-blue-50/40 p-3">
               <label className="text-sm font-medium text-slate-700">Исполнительный лист подан<SystemDateInput aria-label="Дата подачи исполнительного листа" type="date" value={draft.executiveWritSubmittedAt} onChange={(event) => setField('executiveWritSubmittedAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /></label>
               <label className="mt-2 block text-sm font-medium text-slate-700">Куда подан<select aria-label="Куда подан исполнительный лист" value={draft.executiveWritSubmittedTo} onChange={(event) => setField('executiveWritSubmittedTo', event.target.value as 'fssp' | 'bank' | '')} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm"><option value="">Выберите адресата</option><option value="fssp">ФССП</option><option value="bank">Банк</option></select></label>
@@ -7213,9 +7278,22 @@ function CourtPanel({
     },
   ].filter((group) => group.items.length > 0);
 
+  const syncResultNotice = lastCourtSyncResult?.message ? (
+    <div className={`flex items-start gap-2 rounded-xl border p-3 text-sm ${lastCourtSyncResult.status === 'external-sync-error'
+      ? 'border-rose-200 bg-rose-50 text-rose-800'
+      : (lastCourtSyncResult.pendingCourtActDocuments ?? 0) > 0 || (lastCourtSyncResult.conflictItems?.length ?? 0) > 0
+        ? 'border-amber-200 bg-amber-50 text-amber-900'
+        : 'border-emerald-200 bg-emerald-50 text-emerald-800'}`}>
+      {(lastCourtSyncResult.pendingCourtActDocuments ?? 0) > 0
+        ? <Clock3 className="mt-0.5 h-4 w-4 shrink-0" /> : <Check className="mt-0.5 h-4 w-4 shrink-0" />}
+      <span>{buildCourtSyncOverviewMessage(lastCourtSyncResult)}</span>
+    </div>
+  ) : null;
+
   if (showPretrialSafeMode) {
     return (
       <div className="space-y-4">
+        {syncResultNotice}
         <section className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-950">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div className="min-w-0">
@@ -7315,7 +7393,7 @@ function CourtPanel({
           </div>
         </section>
 
-        {lastCourtSyncResult?.message ? <div className={`flex items-start gap-2 rounded-xl border p-3 text-sm ${lastCourtSyncResult.status === 'external-sync-error' ? 'border-rose-200 bg-rose-50 text-rose-800' : 'border-emerald-200 bg-emerald-50 text-emerald-800'}`}><Check className="mt-0.5 h-4 w-4 shrink-0" /><span>{buildCourtSyncOverviewMessage(lastCourtSyncResult)}</span></div> : null}
+        {syncResultNotice}
 
         <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -7484,6 +7562,7 @@ function CourtPanel({
 
   return (
     <div className="space-y-4">
+      {syncResultNotice}
       <div className="flex items-center justify-between rounded-xl border border-blue-200 bg-blue-50 p-3"><div><div className="text-sm font-semibold text-blue-900">Режим редактирования судебных данных</div><div className="text-xs text-blue-700">Здесь доступны привязка источника, ручные события, стороны, жалобы и процессуальные сроки.</div></div><button type="button" onClick={() => changeCourtEditMode(false)} className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100">Вернуться к обзору</button></div>
       <div className="rounded-lg border border-slate-200 bg-white p-3 text-xs text-slate-700">
         <span className="font-semibold">Следующее заседание: </span>{formatRuDateTime(caseItem.nextHearingAt) || 'не назначено'}.{' '}
@@ -7549,7 +7628,7 @@ function CourtPanel({
               ))}
             </div>
           </section>
-        ) : (
+        ) : (lastCourtSyncResult.pendingCourtActDocuments ?? 0) > 0 ? null : (
           <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm font-medium text-emerald-800">
             Судебный источник проверен: новых изменений и конфликтов нет.
           </div>

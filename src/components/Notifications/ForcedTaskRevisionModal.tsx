@@ -1,7 +1,8 @@
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Clock3, Download, ExternalLink, FileText, Loader2, TimerReset, XCircle } from 'lucide-react';
-import { apiService, type UserNotificationDto } from '../../services/api';
+import { apiService, type PagedResult, type UserNotificationDto } from '../../services/api';
+import { isExpectedRealtimeStartupError } from '../../services/realtimeNotifications';
 import { emitUserNotificationsChanged, USER_NOTIFICATIONS_EVENT } from '../../utils/userNotifications';
 import { parseUserNotificationMetadata } from '../../utils/userNotificationMetadata';
 import { extractDisplayErrorMessage, isHttpErrorStatus } from '../../utils/errorUtils';
@@ -344,51 +345,83 @@ export function ForcedTaskRevisionModal({ onOpenTask, onOpenCaseTasks }: ForcedT
   const [approvalError, setApprovalError] = useState<string | null>(null);
   const [approvalSaving, setApprovalSaving] = useState<'approve' | 'approveComplete' | 'approveReturn' | 'revision' | null>(null);
   const acknowledgedIdsRef = useRef<Set<number>>(new Set());
+  const loadStateRef = useRef({ mounted: false, running: false, refreshRequested: false });
 
-  const loadItems = useCallback(async () => {
+  const loadItems = useCallback(async (refreshIfRunning = true) => {
+    const state = loadStateRef.current;
+    if (!state.mounted) return;
+    if (state.running) {
+      state.refreshRequested ||= refreshIfRunning;
+      return;
+    }
+    state.running = true;
     setLoading(true);
     try {
-      const pages = await Promise.all(FORCED_TASK_NOTIFICATION_RULES.map((rule) =>
-        apiService.getUserNotifications({
-          status: 'unread',
-          type: rule.type,
-          requiresAction: true,
-          page: 1,
-          pageSize: FORCED_TASK_QUEUE_PAGE_SIZE,
-        })));
-
-      const nextItems = new Map<number, ForcedTaskQueueItem>();
-      pages.forEach((page, index) => {
-        const rule = FORCED_TASK_NOTIFICATION_RULES[index];
-        page.items.forEach((notification) => {
-          if (notification.isRead || acknowledgedIdsRef.current.has(notification.id)) {
-            return;
+      do {
+        state.refreshRequested = false;
+        try {
+          const pages: PagedResult<UserNotificationDto>[] = [];
+          // Leave room for other startup reads, including recovery of stored toasts.
+          // Each rule keeps its own page and filters; queue ordering is unchanged.
+          for (let offset = 0; offset < FORCED_TASK_NOTIFICATION_RULES.length; offset += 2) {
+            if (!state.mounted) return;
+            const batch = await Promise.allSettled(FORCED_TASK_NOTIFICATION_RULES.slice(offset, offset + 2).map((rule) =>
+              apiService.getUserNotifications({
+                status: 'unread',
+                type: rule.type,
+                requiresAction: true,
+                page: 1,
+                pageSize: FORCED_TASK_QUEUE_PAGE_SIZE,
+              })));
+            if (!state.mounted) return;
+            // Finish the whole batch before retrying, even if one read failed early.
+            const failure = batch.find(result => result.status === 'rejected');
+            if (failure?.status === 'rejected') throw failure.reason;
+            for (const result of batch) {
+              if (result.status === 'fulfilled') pages.push(result.value);
+            }
           }
 
-          const queueItem = buildForcedTaskQueueItem(notification, rule);
-          if (!queueItem) {
-            return;
-          }
+          const nextItems = new Map<number, ForcedTaskQueueItem>();
+          pages.forEach((page, index) => {
+            const rule = FORCED_TASK_NOTIFICATION_RULES[index];
+            page.items.forEach((notification) => {
+              if (notification.isRead || acknowledgedIdsRef.current.has(notification.id)) {
+                return;
+              }
 
-          const notificationKey = getForcedTaskNotificationSnoozeKey(notification.id);
-          const actionKey = getQueueItemActionSnoozeKey(queueItem);
-          const notificationSnoozed = isForcedTaskActionSnoozed(notificationKey);
-          if (notificationSnoozed) {
-            shareForcedTaskSnooze(notificationKey, actionKey);
-          }
-          if (notificationSnoozed || (actionKey && isForcedTaskActionSnoozed(actionKey))) {
-            return;
-          }
+              const queueItem = buildForcedTaskQueueItem(notification, rule);
+              if (!queueItem) {
+                return;
+              }
 
-          nextItems.set(notification.id, queueItem);
-        });
-      });
+              const notificationKey = getForcedTaskNotificationSnoozeKey(notification.id);
+              const actionKey = getQueueItemActionSnoozeKey(queueItem);
+              const notificationSnoozed = isForcedTaskActionSnoozed(notificationKey);
+              if (notificationSnoozed) {
+                shareForcedTaskSnooze(notificationKey, actionKey);
+              }
+              if (notificationSnoozed || (actionKey && isForcedTaskActionSnoozed(actionKey))) {
+                return;
+              }
 
-      setItems([...nextItems.values()].sort(sortQueueItems));
-    } catch (error) {
-      console.error('Failed to load forced task action messages.', error);
+              nextItems.set(notification.id, queueItem);
+            });
+          });
+
+          setItems([...nextItems.values()].sort(sortQueueItems));
+        } catch (error) {
+          if (!state.mounted) return;
+          if (isExpectedRealtimeStartupError(error)) {
+            console.debug('Mandatory task messages are unavailable; polling will retry.', error);
+          } else {
+            console.error('Failed to load forced task action messages.', error);
+          }
+        }
+      } while (state.mounted && state.refreshRequested);
     } finally {
-      setLoading(false);
+      state.running = false;
+      if (state.mounted) setLoading(false);
     }
   }, []);
 
@@ -409,7 +442,10 @@ export function ForcedTaskRevisionModal({ onOpenTask, onOpenCaseTasks }: ForcedT
   }, []);
 
   useEffect(() => {
-    void loadItems();
+    const state = loadStateRef.current;
+    state.mounted = true;
+    // StrictMode's second setup shares this component's finite startup read.
+    void loadItems(false);
 
     const handleNotificationsChanged = () => {
       void loadItems();
@@ -418,6 +454,8 @@ export function ForcedTaskRevisionModal({ onOpenTask, onOpenCaseTasks }: ForcedT
     window.addEventListener(USER_NOTIFICATIONS_EVENT, handleNotificationsChanged);
 
     return () => {
+      state.mounted = false;
+      state.refreshRequested = false;
       window.clearInterval(intervalId);
       window.removeEventListener(USER_NOTIFICATIONS_EVENT, handleNotificationsChanged);
     };

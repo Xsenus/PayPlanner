@@ -62,6 +62,13 @@ vi.mock('./DatabaseMaintenanceSettings', () => ({
   DatabaseMaintenanceSettings: () => <div>Обслуживание базы данных mock</div>,
 }));
 
+vi.mock('./StorageCapacityRecoverySettings', () => ({
+  StorageCapacityRecoverySettings: ({ releasedMarkers }: { releasedMarkers?: boolean }) => <div>{releasedMarkers ? 'Очистка маркеров mock' : 'Сверка резервов mock'}</div>,
+}));
+vi.mock('./StorageCasePublicationQueueSettings', () => ({
+  StorageCasePublicationQueueSettings: () => <div>Очередь документов mock</div>,
+}));
+
 vi.mock('../YandexDisk/YandexDisk', () => ({
   YandexDisk: () => <div>Я.Диск mock</div>,
 }));
@@ -149,6 +156,14 @@ describe('AppSettings', () => {
     expect(screen.getByTestId('settings-content').className).toContain('space-y-3');
   });
 
+  it('shows storage recovery only to administrators', () => {
+    render(<AppSettings initialSection="storage-capacity" />);
+    expect(screen.getByRole('button', { name: 'Хранилище файлов' })).toBeTruthy();
+    expect(screen.getByText('Сверка резервов mock')).toBeTruthy();
+    expect(screen.getByText('Очистка маркеров mock')).toBeTruthy();
+    expect(screen.getByText('Очередь документов mock')).toBeTruthy();
+  });
+
   it('uses the selected CRM theme for every settings menu group', () => {
     const { container } = render(<AppSettings initialSection="companies" />);
 
@@ -210,7 +225,7 @@ describe('AppSettings', () => {
       },
     });
 
-    render(<AppSettings initialSection="integrations" />);
+    render(<AppSettings initialSection="storage-capacity" />);
 
     expect(await screen.findByText('Обслуживание базы данных mock')).toBeTruthy();
     expect(screen.getByRole('button', { name: /Обслуживание/i })).toBeTruthy();
@@ -219,6 +234,10 @@ describe('AppSettings', () => {
     expect(screen.queryByRole('button', { name: /Я\.Диск/i })).toBeNull();
     expect(screen.queryByRole('button', { name: /S3-хранилища/i })).toBeNull();
     expect(screen.queryByRole('button', { name: /Версия и обновления/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Хранилище файлов/i })).toBeNull();
+    expect(screen.queryByText('Очередь документов mock')).toBeNull();
+    expect(screen.queryByText('Сверка резервов mock')).toBeNull();
+    expect(screen.queryByText('Очистка маркеров mock')).toBeNull();
     expect(screen.queryByText('Настройки уведомлений mock')).toBeNull();
     expect(screen.queryByText('Я.Диск mock')).toBeNull();
     expect(screen.queryByText('S3 mock')).toBeNull();

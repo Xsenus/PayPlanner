@@ -529,7 +529,7 @@ export function DatabaseMaintenanceSettings() {
     setDatabaseBackupError(null);
     setDatabaseBackupMessage(null);
     try {
-      if (databaseBackupOverview?.s3UploadResults.find((result) => result.id === uploadResultId)?.status === 'pending') {
+      if (databaseBackupOverview?.s3UploadResults?.find((result) => result.id === uploadResultId)?.status === 'pending') {
         const approved = await confirm({
           title: 'Повторить неподтверждённую отправку',
           description: 'Сервер дождётся окончания действующей операции и проверит локальный комплект перед повторной отправкой. Если прежняя отправка уже подтверждена, повтор не выполняется.',
@@ -553,7 +553,7 @@ export function DatabaseMaintenanceSettings() {
     setDatabaseBackupError(null);
     setDatabaseBackupMessage(null);
     try {
-      if (databaseBackupOverview?.yandexDiskUploadResults.find((result) => result.id === uploadResultId)?.status === 'pending') {
+      if (databaseBackupOverview?.yandexDiskUploadResults?.find((result) => result.id === uploadResultId)?.status === 'pending') {
         const approved = await confirm({
           title: 'Повторить неподтверждённую отправку',
           description: 'Сервер дождётся окончания действующей операции и проверит локальный комплект перед повторной отправкой. Если прежняя отправка уже подтверждена, повтор не выполняется.',

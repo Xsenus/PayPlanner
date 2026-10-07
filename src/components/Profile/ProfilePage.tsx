@@ -1,4 +1,5 @@
 import { SystemDateInput } from '../ui/SystemDateInput';
+import { restoredPhotoUrl } from '../../services/restoredRealtime';
 import { SystemSelect } from '../ui/SystemSelect';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { KeyRound, Link2, Loader2, RefreshCw, Save, ShieldCheck, Unlink2, Upload } from 'lucide-react';
@@ -918,9 +919,9 @@ export function ProfilePage() {
                 </div>
 
                 <div className="flex items-start gap-4 self-start rounded-3xl border border-slate-200 bg-slate-50 px-4 py-4">
-                  {profile?.photoUrl && !profilePhotoFailed ? (
+                  {profile && restoredPhotoUrl(profile.photoUrl) && !profilePhotoFailed ? (
                     <img
-                      src={profile.photoUrl}
+                      src={restoredPhotoUrl(profile?.photoUrl)}
                       alt={profile.fullName ?? 'Профиль'}
                       className="h-24 w-24 rounded-full object-cover shadow-sm ring-2 ring-white"
                       onError={() => setProfilePhotoFailed(true)}
