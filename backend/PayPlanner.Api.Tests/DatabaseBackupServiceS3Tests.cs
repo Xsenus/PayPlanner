@@ -8,6 +8,8 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Options;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Identity;
+using System.Net.Http.Json;
 using System.IO.Compression;
 using System.Text.Json;
 using PayPlanner.Api.Data;
@@ -22,6 +24,186 @@ namespace PayPlanner.Api.Tests;
 
 public sealed class DatabaseBackupServiceS3Tests
 {
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("foreign")]
+    public async Task ManagedBackupRejectsMissingOrMismatchedCloudConnectionBeforeRead(string? connectionId)
+    {
+        await using var scope = await CreateScopeAsync();
+        byte[] bytes = [1, 2, 3, 4];
+        await scope.S3.UploadAsync("conn", "guard.bin", new MemoryStream(bytes), "application/octet-stream", false);
+        await using (var db = await scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContextAsync())
+        {
+            var generation = new StorageObjectGeneration
+            {
+                Generation = 1,
+                SizeBytes = bytes.Length,
+                Sha256 = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)),
+                StorageObject = new() { CurrentGeneration = 1, DataClass = "document", OwnerType = "test", OwnerId = "owned", LogicalName = "guard.bin" }
+            };
+            generation.Replicas.Add(new()
+            {
+                ProviderKey = "s3",
+                ConnectionId = connectionId,
+                Locator = "conn/guard.bin",
+                Status = StorageReplicaStatuses.Available,
+                SizeBytes = bytes.Length,
+                Sha256 = generation.Sha256
+            });
+            db.StorageObjectGenerations.Add(generation); await db.SaveChangesAsync();
+        }
+        await Assert.ThrowsAsync<InvalidDataException>(() => scope.Provider.GetRequiredService<DatabaseBackupService>().CreateManualBackupAsync());
+        Assert.Equal(0, scope.S3.ReadCalls);
+        await using var after = await scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContextAsync();
+        Assert.Equal(StorageReplicaStatuses.Available, (await after.StorageReplicas.SingleAsync()).Status);
+        Assert.DoesNotContain(await after.DatabaseBackupCopies.ToListAsync(), c => c.Status == DatabaseBackupCopyStatuses.Verified);
+    }
+
+    [Fact]
+    public async Task RestoredFullModelQualifiesProtectedSettingsWithCopiedKeysWithoutSourceRing()
+    {
+        await using var scope = await CreateScopeAsync();
+        var sourceProtector = scope.Provider.GetRequiredService<IDataProtectionProvider>().CreateProtector("PayPlanner.S3Storage.Secrets.v1");
+        var password = Guid.NewGuid().ToString("N");
+        var sourceConfiguration = scope.Provider.GetRequiredService<IConfiguration>();
+        var sourceEnvironment = scope.Provider.GetRequiredService<IWebHostEnvironment>();
+        var photoPath = Path.Combine(UserPhotoStoragePaths.ResolveRoot(sourceEnvironment, sourceConfiguration), "http.png");
+        var documentPath = Path.Combine(ApplicationFileStoragePaths.ResolveRoot(sourceEnvironment, sourceConfiguration), "case-documents", "http-case.txt");
+        var photoBytes = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII=");
+        var documentBytes = "Восстановленный документ через настоящий HTTP — Ω"u8.ToArray();
+        Directory.CreateDirectory(Path.GetDirectoryName(photoPath)!);
+        Directory.CreateDirectory(Path.GetDirectoryName(documentPath)!);
+        await File.WriteAllBytesAsync(photoPath, photoBytes);
+        await File.WriteAllBytesAsync(documentPath, documentBytes);
+        int documentId;
+        int caseId;
+        await using (var db = await scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContextAsync())
+        {
+            db.SystemSettings.Add(new SystemSetting
+            {
+                Key = "integrations.s3.connections",
+                Value = JsonSerializer.Serialize(new[] { new { secretAccessKey = "protected:v1:" + sourceProtector.Protect("synthetic-source-secret") } })
+            });
+            db.SystemSettings.Add(new SystemSetting { Key = "notifications.email.enabled", Value = "false" });
+            var user = new User
+            {
+                Email = "restored-http@example.test",
+                FullName = "Synthetic restore operator",
+                IsApproved = true,
+                PhotoUrl = UserPhotoStoragePaths.RequestPath + "/http.png",
+                Role = new Role { Name = "admin", Permissions = [new RolePermission { Section = "cases", CanView = true, ViewScope = "all" }] },
+            };
+            user.PasswordHash = new PasswordHasher<User>().HashPassword(user, password);
+            var clientCase = new ClientCase { Client = new Client { Name = "Synthetic HTTP case" } };
+            var document = new ClientCaseDocument
+            {
+                ClientCase = clientCase,
+                DocumentKey = "http-fixture",
+                OriginalFileName = "http-case.txt",
+                ContentType = "text/plain",
+                StoragePath = "http-case.txt",
+                SizeBytes = documentBytes.Length,
+            };
+            db.AddRange(user, document);
+            await db.SaveChangesAsync();
+            documentId = document.Id;
+            caseId = clientCase.Id;
+        }
+        scope.Provider.GetRequiredService<IOptionsMonitor<DatabaseRestoreDrillOptions>>().CurrentValue.PrepareLocalRuntime = true;
+        var created = await scope.Provider.GetRequiredService<DatabaseBackupService>().CreateManualBackupAsync();
+        var report = await scope.Provider.GetRequiredService<DatabaseRestoreDrillService>()
+            .RunAsync(created.Backup.RelativePath, false, null, CancellationToken.None);
+        Assert.True(report.Status == "restored", JsonSerializer.Serialize(report));
+        File.Delete(photoPath);
+        File.Delete(documentPath);
+        var artifact = Path.Combine(Path.GetDirectoryName(report.ReportPath)!, "restored-storage-paths.json");
+        using var json = JsonDocument.Parse(await File.ReadAllTextAsync(artifact));
+        var keys = Path.Combine(Path.GetDirectoryName(artifact)!, "recovery-keys");
+        Directory.CreateDirectory(keys);
+        var sourceKeys = Path.Combine(scope.Root, "fixture-keys");
+        foreach (var file in Directory.GetFiles(sourceKeys, "key-*.xml")) File.Copy(file, Path.Combine(keys, Path.GetFileName(file)));
+        Directory.Move(sourceKeys, Path.Combine(scope.Root, "detached-source-keys"));
+        Assert.False(Directory.Exists(sourceKeys));
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            [RestoredRuntimeIsolation.EnabledKey] = "true",
+            [RestoredRuntimeDatabaseIdentity.ConfigurationKey] = json.RootElement.GetProperty("runtimeInstanceId").GetString(),
+            [RestoredRuntimeDataProtection.ArtifactPathKey] = artifact,
+            [RestoredRuntimeDataProtection.KeysPathKey] = keys,
+        }).Build();
+        var recovery = RestoredRuntimeDataProtection.ReadConfiguration(configuration)!;
+        var services = new ServiceCollection().AddLogging();
+        services.AddDataProtection().SetApplicationName(recovery.Expected.ApplicationDiscriminator!)
+            .PersistKeysToFileSystem(new DirectoryInfo(keys)).DisableAutomaticKeyGeneration();
+        services.AddSingleton<DataProtectionRecoveryInventory>();
+        using var restoredProvider = services.BuildServiceProvider();
+        var databaseHash = System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(report.Target));
+        Assert.Equal(1, await RestoredRuntimeDataProtection.VerifyAsync(restoredProvider, configuration,
+            new DatabaseProviderInfo(DatabaseProviderKind.Sqlite, $"Data Source={report.Target};Pooling=False"), recovery, CancellationToken.None));
+        Assert.Equal(databaseHash, System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(report.Target)));
+        await using (var isolated = new PaymentContext(new DbContextOptionsBuilder<PaymentContext>().UseSqlite($"Data Source={report.Target};Pooling=False").Options))
+        {
+            Assert.Equal("false", (await isolated.SystemSettings.SingleAsync(row => row.Key == "notifications.email.enabled")).Value);
+            Assert.Empty(await isolated.NotificationSenders.Where(row => row.Channel == "email" && row.IsEnabled).ToListAsync());
+        }
+        await using var backend = await RestoredBackendProcess.StartAsync(artifact, report.Target, keys);
+        using var identity = await backend.Client.GetAsync(RestoredRuntimeRequestGuard.IdentityPath);
+        identity.EnsureSuccessStatusCode();
+        using var health = await backend.Client.GetAsync("/api/health");
+        health.EnsureSuccessStatusCode();
+        using var login = await backend.Client.PostAsJsonAsync("/api/auth/login", new { email = "restored-http@example.test", password });
+        login.EnsureSuccessStatusCode();
+        var session = await login.Content.ReadFromJsonAsync<PayPlanner.Api.Models.Responses.LoginResponse>();
+        Assert.NotNull(session);
+        Assert.NotEmpty(session!.Token);
+        backend.Client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", session.Token);
+        Assert.Equal(photoBytes, await backend.Client.GetByteArrayAsync(session.User.PhotoUrl));
+        Assert.Equal(documentBytes, await backend.Client.GetByteArrayAsync($"/api/case-documents/{documentId}/download"));
+        // Browser dependencies are installed in the dedicated mandatory CI integration step.
+        if (Environment.GetEnvironmentVariable("PAYPLANNER_TEST_RESTORED_BROWSER") == "true")
+            await backend.CheckBrowserAsync(json.RootElement.GetProperty("runtimeInstanceId").GetString()!, "restored-http@example.test", password, caseId, "http-case.txt", documentBytes);
+        backend.AssertNoServerErrors();
+    }
+
+    [Fact]
+    public async Task CreatedBackupPersistsPublicKeyInventoryAndRejectsMalformedMetadata()
+    {
+        await using var scope = await CreateScopeAsync();
+        var protector = scope.Provider.GetRequiredService<IDataProtectionProvider>().CreateProtector("synthetic-backup-secret");
+        var ciphertext = protector.Protect("synthetic-only-secret");
+        var inventory = scope.Provider.GetRequiredService<DataProtectionRecoveryInventory>().Capture();
+        Assert.NotEmpty(inventory.KeyIds);
+        var backups = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        var created = await backups.CreateManualBackupAsync();
+        var path = backups.ResolveBackupPath(created.Backup.RelativePath) + ".manifest.json";
+        var json = await File.ReadAllTextAsync(path);
+        var jsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        var manifest = JsonSerializer.Deserialize<DatabaseBackupManifest>(json, jsonOptions)!;
+        var recorded = Assert.IsType<DataProtectionRecoveryMetadata>(manifest.DataProtectionRecovery);
+        Assert.Equal(inventory.ApplicationDiscriminator, recorded.ApplicationDiscriminator);
+        Assert.Equal(inventory.KeyIds, recorded.KeyIds);
+        Assert.False(recorded.ContainsKeyMaterial);
+        Assert.False(recorded.DecryptionVerified);
+        Assert.DoesNotContain("synthetic-only-secret", json);
+        Assert.DoesNotContain(ciphertext, json);
+        Assert.DoesNotContain("masterKey", json, StringComparison.OrdinalIgnoreCase);
+        Assert.True((await backups.VerifyBackupAsync(created.Backup.RelativePath)).Verified);
+
+        await File.WriteAllTextAsync(path, JsonSerializer.Serialize(manifest with
+        {
+            DataProtectionRecovery = recorded with { KeyIds = [Guid.Empty] }
+        }, jsonOptions));
+        var malformed = await backups.VerifyBackupAsync(created.Backup.RelativePath);
+        Assert.False(malformed.Verified);
+        Assert.Equal("invalidManifest", malformed.Status);
+
+        // Existing backups remain verifiable but cannot claim key-recovery compatibility.
+        await File.WriteAllTextAsync(path, JsonSerializer.Serialize(manifest with { DataProtectionRecovery = null }, jsonOptions));
+        Assert.True((await backups.VerifyBackupAsync(created.Backup.RelativePath)).Verified);
+        Assert.Throws<InvalidDataException>(() => DataProtectionRecoveryInventory.RequireCompatible(null, inventory));
+    }
+
     [Theory]
     [InlineData(false, "none")]
     [InlineData(true, "none")]
@@ -114,7 +296,7 @@ public sealed class DatabaseBackupServiceS3Tests
         var drill = new DatabaseRestoreDrillService(scope.Provider.GetRequiredService<DatabaseBackupService>(),
             scope.Provider.GetRequiredService<DatabaseProviderInfo>(), sourceEnvironment, options, NullLogger<DatabaseRestoreDrillService>.Instance);
         var report = await drill.RunAsync(created.Backup.RelativePath, false, null, CancellationToken.None);
-        Assert.Equal(2, options.ReadCount);
+        Assert.True(options.ReadCount == 2, $"Expected preparation option read; actual {options.ReadCount}. Restore report: {JsonSerializer.Serialize(report)}");
         if (failure != "none")
         {
             Assert.Equal("failed", report.Status);
@@ -122,7 +304,7 @@ public sealed class DatabaseBackupServiceS3Tests
                 Assert.Equal("keep existing artifact", await File.ReadAllTextAsync(Path.Combine(report.Target, "restored-storage-paths.json")));
             else Assert.False(File.Exists(Path.Combine(report.Target, "restored-storage-paths.json")));
             await using var failedDb = new PaymentContext(new DbContextOptionsBuilder<PaymentContext>()
-                .UseSqlite($"Data Source={Path.Combine(report.Target, "restored.sqlite")}").Options);
+                .UseSqlite($"Data Source={Path.Combine(report.Target, "restored.sqlite")};Pooling=False").Options);
             Assert.Equal(signaturePath, (await failedDb.ElectronicSignatureEnvelopes.SingleAsync()).SnapshotPath);
             Assert.Equal(artifactPath, (await failedDb.ElectronicSignatureArtifacts.SingleAsync()).StoragePath);
             Assert.Equal("https://old-host.example.test/user-photos/photo.png", (await failedDb.Users.SingleAsync()).PhotoUrl);
@@ -133,9 +315,11 @@ public sealed class DatabaseBackupServiceS3Tests
         var restoredRoot = Path.GetDirectoryName(report.ReportPath)!;
         using var settings = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(restoredRoot, "restored-storage-paths.json")));
         Assert.False(settings.RootElement.GetProperty("completeRuntimeConfiguration").GetBoolean());
+        Assert.False(settings.RootElement.GetProperty("dataProtectionRecovery").GetProperty("containsKeyMaterial").GetBoolean());
+        Assert.False(settings.RootElement.GetProperty("dataProtectionRecovery").GetProperty("decryptionVerified").GetBoolean());
         var restoredConfig = new ConfigurationBuilder().AddInMemoryCollection(settings.RootElement.GetProperty("storageSettings")
             .EnumerateObject().ToDictionary(item => item.Name, item => item.Value.GetString())).Build();
-        await using var restored = new PaymentContext(new DbContextOptionsBuilder<PaymentContext>().UseSqlite($"Data Source={report.Target}").Options);
+        await using var restored = new PaymentContext(new DbContextOptionsBuilder<PaymentContext>().UseSqlite($"Data Source={report.Target};Pooling=False").Options);
         var environment = new TestWebHostEnvironment(restoredRoot);
         var signatures = new ElectronicSignatureService(restored, restoredConfig, new EphemeralDataProtectionProvider(), environment);
         var package = await signatures.CreateEvidencePackageAsync(publicId, CancellationToken.None);
@@ -249,7 +433,7 @@ public sealed class DatabaseBackupServiceS3Tests
         var registry = new StorageProviderRegistry([local]);
         var monitor = new RestoreStorageOptions(new StorageOrchestrationOptions());
         await using var restoredDb = new PaymentContext(new DbContextOptionsBuilder<PaymentContext>()
-            .UseSqlite($"Data Source={report.Target}").Options);
+            .UseSqlite($"Data Source={report.Target};Pooling=False").Options);
         var service = new StorageObjectService(restoredDb, new StoragePolicyService(monitor, registry), registry, monitor);
         await using var read = await service.OpenReadAsync(objectId, CancellationToken.None);
         if (deleted) Assert.Null(read);
@@ -320,6 +504,42 @@ public sealed class DatabaseBackupServiceS3Tests
         Assert.DoesNotContain(paths, path => path.EndsWith(".manifest.json", StringComparison.Ordinal));
         await using var db = await scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContextAsync();
         Assert.DoesNotContain(await db.DatabaseBackupCopies.ToListAsync(),
+            copy => copy.ProviderKey != "local" && copy.Status == DatabaseBackupCopyStatuses.Verified);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CloudUploadCannotVerifyCopyAfterCatalogManifestChanges(bool yandex)
+    {
+        await using var scope = await CreateScopeAsync();
+        var service = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        await service.UpdateSettingsAsync(true, "03:00", 14, "sqlite", s3UploadEnabled: !yandex,
+            s3ConnectionIds: yandex ? [] : ["s3-main"], yandexDiskUploadEnabled: yandex);
+        var changed = false;
+        void ChangeCatalog()
+        {
+            if (changed) return;
+            changed = true;
+            using var db = scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContext();
+            db.DatabaseBackupSets.ExecuteUpdate(setters => setters.SetProperty(item => item.ManifestSha256,
+                new string('0', 64)));
+        }
+        scope.S3.OnUpload = ChangeCatalog;
+        scope.YandexDisk.OnUpload = ChangeCatalog;
+
+        var created = await service.CreateManualBackupAsync();
+
+        Assert.True(changed);
+        Assert.Equal("failed", yandex ? Assert.Single(created.YandexDiskUploadResults).Status
+            : Assert.Single(created.S3UploadResults).Status);
+        var stored = await service.GetOverviewAsync();
+        Assert.Equal("failed", yandex ? Assert.Single(stored.YandexDiskUploadResults).Status
+            : Assert.Single(stored.S3UploadResults).Status);
+        await using var verify = await scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContextAsync();
+        Assert.Contains(await verify.DatabaseBackupCopies.ToListAsync(),
+            copy => copy.ProviderKey == "local" && copy.Status == DatabaseBackupCopyStatuses.Verified);
+        Assert.DoesNotContain(await verify.DatabaseBackupCopies.ToListAsync(),
             copy => copy.ProviderKey != "local" && copy.Status == DatabaseBackupCopyStatuses.Verified);
     }
 
@@ -708,6 +928,83 @@ public sealed class DatabaseBackupServiceS3Tests
         }
         await using var original = await scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContextAsync();
         Assert.Equal("/user-photos/photo.png", (await original.Users.SingleAsync()).PhotoUrl);
+    }
+
+    [Fact]
+    public async Task NativePhotoRemovedAfterDatabaseSnapshotRejectsNewSetAndKeepsEarlierBackup()
+    {
+        var reader = new FaultingBackupDirectoryReader();
+        await using var scope = await CreateScopeAsync(reader);
+        var photoDirectory = Path.Combine(scope.Root, "files", "user-photos");
+        Directory.CreateDirectory(photoDirectory);
+        var photoPath = Path.Combine(photoDirectory, "photo.png");
+        await File.WriteAllTextAsync(photoPath, "photo evidence");
+        await using (var db = await scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContextAsync())
+        {
+            db.Users.Add(new User
+            {
+                Email = "photo-concurrent@local.test",
+                PasswordHash = "test",
+                Role = new Role { Name = "photo-concurrent" },
+                PhotoUrl = "/user-photos/photo.png"
+            });
+            await db.SaveChangesAsync();
+        }
+        var backups = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        var earlier = await backups.CreateManualBackupAsync();
+        Assert.True((await backups.VerifyBackupAsync(earlier.Backup.RelativePath)).Verified);
+        var removedDuringArchive = false;
+        reader.OnFilesRead = directory =>
+        {
+            if (removedDuringArchive || !string.Equals(directory, photoDirectory, StringComparison.OrdinalIgnoreCase)) return;
+            File.Delete(photoPath);
+            removedDuringArchive = true;
+        };
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => backups.CreateManualBackupAsync());
+
+        Assert.True(removedDuringArchive);
+        Assert.True((await backups.VerifyBackupAsync(earlier.Backup.RelativePath)).Verified);
+        Assert.Single((await backups.GetOverviewAsync()).Items);
+        Assert.Single(Directory.EnumerateFiles(Path.Combine(scope.Root, "backups"), "*.references", SearchOption.AllDirectories));
+    }
+
+    [Fact]
+    public async Task NativePhotoOpenForMutationRejectsNewSetAndKeepsEarlierBackup()
+    {
+        await using var scope = await CreateScopeAsync();
+        var photoDirectory = Path.Combine(scope.Root, "files", "user-photos");
+        Directory.CreateDirectory(photoDirectory);
+        var photoPath = Path.Combine(photoDirectory, "photo.png");
+        byte[] bytes = [1, 2, 3, 4];
+        await File.WriteAllBytesAsync(photoPath, bytes);
+        await using (var db = await scope.Provider.GetRequiredService<IDbContextFactory<PaymentContext>>().CreateDbContextAsync())
+        {
+            db.Users.Add(new User
+            {
+                Email = "photo-mutation@local.test",
+                PasswordHash = "test",
+                Role = new Role { Name = "photo-mutation" },
+                PhotoUrl = "/user-photos/photo.png"
+            });
+            await db.SaveChangesAsync();
+        }
+        var backups = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        var earlier = await backups.CreateManualBackupAsync();
+        // Windows enforces write/delete sharing independently. On Unix, an
+        // exclusive .NET handle exercises the supported sharing conflict;
+        // native Unix writers still require separate qualification.
+        var writerSharing = OperatingSystem.IsWindows() ? FileShare.ReadWrite | FileShare.Delete : FileShare.None;
+        await using (var writer = new FileStream(photoPath, FileMode.Open, FileAccess.ReadWrite, writerSharing))
+            await Assert.ThrowsAsync<IOException>(() => backups.CreateManualBackupAsync());
+
+        Assert.Equal(bytes, await File.ReadAllBytesAsync(photoPath));
+        Assert.True((await backups.VerifyBackupAsync(earlier.Backup.RelativePath)).Verified);
+        Assert.Single((await backups.GetOverviewAsync()).Items);
+        Assert.Single(Directory.EnumerateFiles(Path.Combine(scope.Root, "backups"), "*.fileset", SearchOption.AllDirectories));
+        Assert.Empty(Directory.EnumerateFiles(Path.Combine(scope.Root, "backups"), "*.tmp", SearchOption.AllDirectories));
+        var retry = await backups.CreateManualBackupAsync();
+        Assert.True((await backups.VerifyBackupAsync(retry.Backup.RelativePath)).Verified);
     }
 
     [Theory]
@@ -2681,25 +2978,52 @@ public sealed class DatabaseBackupServiceS3Tests
         var backupRoot = Path.Combine(scope.Root, "backups");
         var externalLock = await BackupDirectoryLease.AcquireAsync(
             backupRoot, TimeSpan.FromSeconds(2), CancellationToken.None);
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        long leaseHoldMilliseconds = -1;
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        Task<int>? firstAttempt = null, secondAttempt = null;
         Task<int[]> pending;
         try
         {
-            pending = Task.WhenAll(
-                first.EnsureScheduledBackupsAsync(timeout.Token),
-                second.EnsureScheduledBackupsAsync(timeout.Token));
+            firstAttempt = first.EnsureScheduledBackupsAsync(timeout.Token);
+            secondAttempt = second.EnsureScheduledBackupsAsync(timeout.Token);
+            pending = Task.WhenAll(firstAttempt, secondAttempt);
             await Task.Delay(250, timeout.Token);
             Assert.False(pending.IsCompleted);
         }
         finally
         {
             await externalLock.DisposeAsync();
+            leaseHoldMilliseconds = clock.ElapsedMilliseconds;
+            WriteSlotBoundary("external-released");
         }
 
-        var counts = await pending;
+        int[] counts;
+        try { counts = await pending; }
+        catch
+        {
+            WriteSlotBoundary("pending-await-failed");
+            throw;
+        }
         Assert.Equal(1, counts.Sum());
         var automatic = Assert.Single((await first.GetOverviewAsync()).Items, item => item.Trigger == "auto");
         Assert.True((await first.VerifyBackupAsync(automatic.RelativePath)).Verified);
+        WriteSlotBoundary("verified");
+
+        void WriteSlotBoundary(string phase)
+        {
+            // Test-only bounded timing/status fields; no paths, settings,
+            // backup contents, identifiers or exception text are serialized.
+            Console.WriteLine("PP_BACKUP_SLOT_BOUNDARY " + JsonSerializer.Serialize(new
+            {
+                Phase = phase,
+                ElapsedMilliseconds = Math.Min(clock.ElapsedMilliseconds, 3_600_000),
+                LeaseHoldMilliseconds = Math.Min(leaseHoldMilliseconds, 3_600_000),
+                TimeoutCancelled = timeout.IsCancellationRequested,
+                FirstTaskStatus = firstAttempt is null ? -1 : (int)firstAttempt.Status,
+                SecondTaskStatus = secondAttempt is null ? -1 : (int)secondAttempt.Status,
+            }));
+        }
     }
 
     [Fact]
@@ -2934,11 +3258,21 @@ public sealed class DatabaseBackupServiceS3Tests
         var backupDirectory = Path.Combine(root, "backups");
         var fileStorageDirectory = Path.Combine(root, "files");
         Directory.CreateDirectory(fileStorageDirectory);
-        var connectionString = $"Data Source={dbPath}";
-        var providerInfo = new DatabaseProviderInfo(DatabaseProviderKind.Sqlite, DatabaseProviderResolver.NormalizeSqliteConnection(connectionString));
+        // Disposable fixture databases must not keep pooled file handles alive or
+        // clear pools owned by unrelated parallel tests during cleanup.
+        var connectionString = $"Data Source={dbPath};Pooling=False";
+        // The production normalizer deliberately enables pooling; override it
+        // afterwards for this disposable fixture, not in the product defaults.
+        var fixtureConnection = new SqliteConnectionStringBuilder(DatabaseProviderResolver.NormalizeSqliteConnection(connectionString)) { Pooling = false };
+        Assert.False(fixtureConnection.Pooling);
+        var providerInfo = new DatabaseProviderInfo(DatabaseProviderKind.Sqlite, fixtureConnection.ConnectionString);
         var s3 = new FakeS3StorageService();
         var yandexDisk = new FakeYandexDiskService();
         var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddDataProtection().SetApplicationName("PayPlanner.BackupSyntheticFixture")
+            .PersistKeysToFileSystem(new DirectoryInfo(Path.Combine(root, "fixture-keys")));
+        services.AddSingleton<DataProtectionRecoveryInventory>();
         services.AddSingleton(providerInfo);
         if (directoryReader is not null) services.AddSingleton(directoryReader);
         services.AddSingleton<IConfiguration>(new ConfigurationBuilder()
@@ -2986,6 +3320,7 @@ public sealed class DatabaseBackupServiceS3Tests
         private readonly Dictionary<string, byte[]> _objects = new(StringComparer.Ordinal);
         public List<string> UploadedPaths { get; } = [];
         public long UploadedBytes { get; private set; }
+        public int ReadCalls { get; private set; }
 
         public Task<S3StorageConnectionsOverviewDto> GetOverviewAsync(CancellationToken cancellationToken = default)
             => Task.FromResult(new S3StorageConnectionsOverviewDto());
@@ -3033,6 +3368,7 @@ public sealed class DatabaseBackupServiceS3Tests
 
         public Task<S3StorageStreamDownloadResult> OpenReadAsync(string id, string? path, CancellationToken cancellationToken = default)
         {
+            ReadCalls++;
             if (!_objects.TryGetValue(path ?? string.Empty, out var stored)) throw new FileNotFoundException();
             var bytes = stored.ToArray();
             if (bytes.Length > 0 && TruncateReadPathSuffix is not null
@@ -3171,10 +3507,27 @@ public sealed class DatabaseBackupServiceS3Tests
         public async ValueTask DisposeAsync()
         {
             await Provider.DisposeAsync();
-            SqliteConnection.ClearAllPools();
             if (Directory.Exists(Root))
             {
-                Directory.Delete(Root, recursive: true);
+                var fullRoot = Path.GetFullPath(Root);
+                if (!string.Equals(Path.GetDirectoryName(fullRoot), Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase)
+                    || !System.Text.RegularExpressions.Regex.IsMatch(Path.GetFileName(fullRoot), "^payplanner-backup-s3-[a-f0-9]{32}$"))
+                    throw new InvalidOperationException("Refusing to delete a directory not owned by the backup fixture.");
+                // Windows can release SQLite WAL sidecar handles shortly after the
+                // restored backend process exits. Retry only this owned fixture root.
+                for (var attempt = 0; ; attempt++)
+                {
+                    if (!Directory.Exists(Root)) break;
+                    try
+                    {
+                        Directory.Delete(Root, recursive: true);
+                        break;
+                    }
+                    catch (Exception ex) when ((ex is IOException or UnauthorizedAccessException) && attempt < 20)
+                    {
+                        await Task.Delay(100);
+                    }
+                }
             }
         }
     }

@@ -151,15 +151,17 @@ public sealed class DatabaseBackupPostgreSqlCancellationTests
             restoreInfo.ArgumentList.Add("--data-only");
             restoreInfo.ArgumentList.Add("--table=Users");
             restoreInfo.ArgumentList.Add("--file=-");
-            restoreInfo.ArgumentList.Add(backups.ResolveBackupPath(retried.Backup.RelativePath)!);
+            var archivePath = backups.ResolveBackupPath(retried.Backup.RelativePath)!;
+            restoreInfo.ArgumentList.Add(OperatingSystem.IsWindows() ? "\\\\?\\" + Path.GetFullPath(archivePath) : archivePath);
             using (var restore = Process.Start(restoreInfo)!)
             {
                 var stdout = restore.StandardOutput.ReadToEndAsync();
                 var stderr = restore.StandardError.ReadToEndAsync();
                 try { await restore.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(30)); }
                 finally { if (!restore.HasExited) restore.Kill(entireProcessTree: true); }
-                Assert.Equal(0, restore.ExitCode);
-                Assert.Empty((await stderr).Trim());
+                var restoreError = (await stderr).Trim();
+                Assert.True(restore.ExitCode == 0, $"pg_restore exit {restore.ExitCode}: {restoreError}");
+                Assert.Empty(restoreError);
                 var restoredSql = await stdout;
                 Assert.Contains("https://external.example.test/original.png", restoredSql, StringComparison.Ordinal);
                 Assert.DoesNotContain("https://external.example.test/new.png", restoredSql, StringComparison.Ordinal);

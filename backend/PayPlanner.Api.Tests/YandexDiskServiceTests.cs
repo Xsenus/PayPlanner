@@ -10,6 +10,7 @@ using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Storage;
 using Xunit;
 
 namespace PayPlanner.Api.Tests;
@@ -18,6 +19,110 @@ public sealed class YandexDiskServiceTests
 {
     private static readonly IDataProtectionProvider TestDataProtectionProvider =
         DataProtectionProvider.Create(new DirectoryInfo(Path.Combine(Path.GetTempPath(), "pp-yandex-disk-tests")));
+
+    [Theory]
+    [InlineData(1000L, 200L, 800L)]
+    [InlineData(1000L, 1000L, 0L)]
+    [InlineData(1000L, 1200L, 0L)]
+    [InlineData(long.MaxValue, 0L, long.MaxValue)]
+    public async Task CapacityUsesLiveAccountQuotaAndGroupsConnectionAliases(long total, long used, long available)
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var requests = 0;
+        using var client = new HttpClient(new FakeYandexDiskHandler(request =>
+        {
+            requests++;
+            Assert.Equal(HttpMethod.Get, request.Method);
+            Assert.Equal("https://cloud-api.yandex.net/v1/disk?fields=total_space,used_space,user.uid", request.RequestUri!.AbsoluteUri);
+            Assert.Equal("OAuth", request.Headers.Authorization!.Scheme);
+            Assert.Equal("owned-capacity-token", request.Headers.Authorization.Parameter);
+            return JsonResponse(JsonSerializer.Serialize(new
+            {
+                total_space = total,
+                used_space = used,
+                trash_size = 100,
+                user = new { uid = "128280859" }
+            }));
+        }));
+        var service = new YandexDiskService(scope.Db, client);
+        var connectionIds = new List<string>();
+        foreach (var name in new[] { "first", "second" })
+            connectionIds.Add((await service.UpsertConnectionAsync(new UpsertYandexDiskConnectionRequest
+            { Name = name, OAuthToken = "owned-capacity-token", RootPath = "/" + name, IsEnabled = true })).Id);
+        var provider = new YandexDiskStorageProvider(service);
+        var before = DateTimeOffset.UtcNow;
+        var first = await provider.ObserveCapacityAsync("first-resource", connectionIds[0], 50, CancellationToken.None);
+        var second = await provider.ObserveCapacityAsync("second-resource", connectionIds[1], 60, CancellationToken.None);
+        Assert.Equal(available, first.AvailableBytes);
+        Assert.Equal("first-resource", first.Key);
+        Assert.Equal(50, first.MinimumFreeBytes);
+        Assert.InRange(first.ObservedAt, before, DateTimeOffset.UtcNow);
+        Assert.Equal("yandex-disk-account:128280859", first.GroupId);
+        Assert.Equal(first.GroupId, second.GroupId);
+        Assert.Equal(2, requests); // Fresh observations, no stale quota cache.
+        var budget = StorageCapacityBudget.Evaluate([first, second], [],
+            [new("first-resource", 500, "first-write"), new("second-resource", 500, "second-write")],
+            DateTimeOffset.UtcNow, TimeSpan.FromMinutes(1));
+        Assert.Single(budget.Groups);
+        Assert.Equal(1000, budget.Groups[0].AdditionalBytes);
+        if (available == 800) Assert.False(budget.CanSchedule);
+    }
+
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("null")]
+    [InlineData("[]")]
+    [InlineData("not-json")]
+    [InlineData("{\"total_space\":1000,\"used_space\":0,\"user\":{\"uid\":\"\"}}")]
+    [InlineData("{\"total_space\":1000,\"used_space\":0,\"user\":{\"uid\":\"wrong/account\"}}")]
+    [InlineData("{\"total_space\":-1,\"used_space\":0,\"user\":{\"uid\":\"1\"}}")]
+    [InlineData("{\"total_space\":1000,\"used_space\":-1,\"user\":{\"uid\":\"1\"}}")]
+    [InlineData("{\"total_space\":1000,\"user\":{\"uid\":\"1\"}}")]
+    [InlineData("{\"total_space\":1000,\"used_space\":0.5,\"user\":{\"uid\":\"1\"}}")]
+    [InlineData("{\"total_space\":9223372036854775808,\"used_space\":0,\"user\":{\"uid\":\"1\"}}")]
+    public async Task CapacityMalformedResponseRemainsUnknown(string json)
+    {
+        await using var scope = await CreateDbScopeAsync();
+        using var client = new HttpClient(new FakeYandexDiskHandler(_ => JsonResponse(json)));
+        var service = new YandexDiskService(scope.Db, client);
+        await service.UpdateSettingsAsync(new() { OAuthToken = "owned-capacity-token" });
+        var observation = await new YandexDiskStorageProvider(service).ObserveCapacityAsync("resource", "default", 50, CancellationToken.None);
+        Assert.Null(observation.AvailableBytes);
+        Assert.Empty(observation.GroupId);
+        Assert.False(StorageCapacityBudget.Evaluate([observation], [], [new("resource", 1, "write")],
+            DateTimeOffset.UtcNow, TimeSpan.FromMinutes(1)).CanSchedule);
+    }
+
+    [Theory]
+    [InlineData(401)]
+    [InlineData(403)]
+    [InlineData(429)]
+    [InlineData(503)]
+    public async Task CapacityHttpErrorsRemainUnknown(int status)
+    {
+        await using var scope = await CreateDbScopeAsync();
+        using var client = new HttpClient(new FakeYandexDiskHandler(_ => new((HttpStatusCode)status)
+        { Content = new StringContent("{\"message\":\"owned unavailable\"}") }));
+        var service = new YandexDiskService(scope.Db, client);
+        await service.UpdateSettingsAsync(new() { OAuthToken = "owned-capacity-token" });
+        Assert.Null((await new YandexDiskStorageProvider(service).ObserveCapacityAsync("resource", "default", 50, CancellationToken.None)).AvailableBytes);
+    }
+
+    [Fact]
+    public async Task CapacityDisabledMissingConnectionAndCallerCancellationDoNotContactCloud()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var requests = 0;
+        using var client = new HttpClient(new FakeYandexDiskHandler(_ => { requests++; return JsonResponse("{}"); }));
+        var service = new YandexDiskService(scope.Db, client);
+        var disabled = await service.UpsertConnectionAsync(new() { Name = "disabled", OAuthToken = "owned-capacity-token", IsEnabled = false });
+        var provider = new YandexDiskStorageProvider(service);
+        foreach (var id in new string?[] { null, "missing", disabled.Id })
+            Assert.Null((await provider.ObserveCapacityAsync("resource", id, 50, CancellationToken.None)).AvailableBytes);
+        using var cts = new CancellationTokenSource(); cts.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => provider.ObserveCapacityAsync("resource", disabled.Id, 50, cts.Token));
+        Assert.Equal(0, requests);
+    }
 
     [Fact]
     public async Task UpdateSettings_NormalizesRootPathAndDoesNotReturnToken()

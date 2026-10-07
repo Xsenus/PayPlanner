@@ -11,6 +11,31 @@ namespace PayPlanner.Api.Tests;
 public sealed class ClientPassportEncryptionBackfillServiceTests
 {
     [Fact]
+    public async Task BackfillPreservesOldCiphertextAndIndexAfterActiveKeyRotation()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var db = CreateContext(connection);
+        await db.Database.EnsureCreatedAsync();
+        var passport = await AddPassportAsync(db);
+        var keys = new RotatingKeys();
+        var encryptor = new AeadFieldEncryptor(keys);
+        passport.SeriesEncrypted = await encryptor.EncryptAsync(passport.Series!, $"ClientPassport:Series:{passport.Id}", CancellationToken.None);
+        passport.SeriesBlindIndex = await encryptor.ComputeBlindIndexAsync(passport.Series!, "ClientPassport:Series", CancellationToken.None);
+        await db.SaveChangesAsync();
+        var originalCiphertext = passport.SeriesEncrypted;
+        var originalIndex = passport.SeriesBlindIndex;
+        keys.Active = "new";
+        var service = new ClientPassportEncryptionBackfillService(db, encryptor, Configuration(enabled: true, backfillEnabled: true));
+        var result = await service.RunBatchAsync(CancellationToken.None);
+        Assert.Equal(1, result.Updated);
+        var stored = await db.ClientPassports.AsNoTracking().SingleAsync();
+        Assert.Equal(originalCiphertext, stored.SeriesEncrypted);
+        Assert.Equal(originalIndex, stored.SeriesBlindIndex);
+        Assert.Equal(passport.Series, await encryptor.DecryptAsync(stored.SeriesEncrypted!, $"ClientPassport:Series:{passport.Id}", CancellationToken.None));
+    }
+
+    [Fact]
     public async Task DisabledBackfillDoesNotTouchDatabaseOrEncryptor()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
@@ -147,6 +172,19 @@ public sealed class ClientPassportEncryptionBackfillServiceTests
                 keyId,
                 Enumerable.Repeat((byte)17, 32).ToArray(),
                 Enumerable.Repeat((byte)29, 32).ToArray()));
+        }
+    }
+
+    private sealed class RotatingKeys : IFieldEncryptionKeyStore
+    {
+        public string Active = "old";
+        public ValueTask<FieldEncryptionKeyMaterial> GetActiveKeyAsync(CancellationToken ct) => GetKeyAsync(Active, ct);
+        public ValueTask<FieldEncryptionKeyMaterial> GetKeyAsync(string keyId, CancellationToken ct)
+        {
+            ct.ThrowIfCancellationRequested();
+            var seed = keyId switch { "old" => (byte)17, "new" => (byte)37, _ => throw new InvalidOperationException() };
+            return ValueTask.FromResult(new FieldEncryptionKeyMaterial(keyId,
+                Enumerable.Repeat(seed, 32).ToArray(), Enumerable.Repeat((byte)(seed + 1), 32).ToArray()));
         }
     }
 

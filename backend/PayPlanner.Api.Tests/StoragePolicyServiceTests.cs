@@ -7,6 +7,26 @@ namespace PayPlanner.Api.Tests;
 public sealed class StoragePolicyServiceTests
 {
     [Fact]
+    public void EvaluatePreservesConfiguredPriorityAfterNormalizationAndCapabilityFiltering()
+    {
+        var options = new StorageOrchestrationOptions
+        {
+            DefaultPolicy = new()
+            {
+                WriteProviders = [" mirror ", "local", "MIRROR", "limited", "missing"],
+                ReadProviders = ["missing", "z-recovery", "mirror", "local", "limited", "Z-RECOVERY"],
+                RequireConditionalCreate = true,
+                RequireRangeReads = true
+            }
+        };
+        var result = CreateService(options, new FakeProvider("mirror", true, true), new FakeProvider("z-recovery", true, true),
+            new FakeProvider("limited", false, false)).Evaluate("document");
+        Assert.Equal(["mirror", "local"], result.WriteProviders);
+        Assert.Equal(["z-recovery", "mirror", "local"], result.ReadProviders);
+        Assert.Equal(["limited", "local", "mirror", "missing", "z-recovery"], result.Providers.Select(p => p.ProviderKey));
+    }
+
+    [Fact]
     public void Evaluate_DefaultsToValidLocalOnlyDryRunWithoutEnablingRouting()
     {
         var result = CreateService(new StorageOrchestrationOptions { PolicyDryRunEnabled = true }).Evaluate("document");

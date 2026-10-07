@@ -2,6 +2,8 @@ using System.Diagnostics;
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Net.Http.Json;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
@@ -27,6 +29,15 @@ public sealed class DatabaseRestoreDrillEndToEndPostgreSqlTests
     [InlineData(false, true)]
     [InlineData(true, true)]
     public async Task FullModelBackupRestoresReadableManagedGenerationsWithoutSource(bool deleted, bool withNative)
+        => await RestoreFullModelAsync(deleted, withNative, "sql", longBackupDirectory: false);
+
+    [Theory]
+    [InlineData("backup")]
+    [InlineData("sql")]
+    public async Task RealBackupAndRestoreServicesSupportLongNativeFilePaths(string format)
+        => await RestoreFullModelAsync(deleted: false, withNative: false, format: format, longBackupDirectory: true);
+
+    private static async Task RestoreFullModelAsync(bool deleted, bool withNative, string format, bool longBackupDirectory)
     {
         var configured = Environment.GetEnvironmentVariable("PAYPLANNER_TEST_POSTGRES");
         if (string.IsNullOrWhiteSpace(configured))
@@ -40,7 +51,7 @@ public sealed class DatabaseRestoreDrillEndToEndPostgreSqlTests
         var sourceName = "pp_runtime_source_" + Guid.NewGuid().ToString("N");
         var targetName = "pp_runtime_target_" + Guid.NewGuid().ToString("N");
         var sourceBuilder = new NpgsqlConnectionStringBuilder(adminBuilder.ConnectionString) { Database = sourceName };
-        var targetBuilder = new NpgsqlConnectionStringBuilder(adminBuilder.ConnectionString) { Database = targetName };
+        var targetBuilder = new NpgsqlConnectionStringBuilder(adminBuilder.ConnectionString) { Database = targetName, Host = "127.0.0.1" };
         var root = Path.Combine(Path.GetTempPath(), "payplanner-runtime-e2e-" + Guid.NewGuid().ToString("N"));
         var sourceCreated = false;
         var targetCreated = false;
@@ -53,16 +64,25 @@ public sealed class DatabaseRestoreDrillEndToEndPostgreSqlTests
             sourceCreated = true;
             await CreateDatabaseAsync(admin, targetName);
             targetCreated = true;
+            var backupDirectory = longBackupDirectory
+                ? Path.Combine(root, "backups", new string('a', 60), new string('b', 60), new string('c', 60), new string('d', 60))
+                : Path.Combine(root, "backups");
+            if (longBackupDirectory) Assert.True(Path.GetFullPath(backupDirectory).Length > 260);
             var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["DatabaseBackup:Directory"] = Path.Combine(root, "backups"),
-                ["DatabaseBackup:Format"] = "sql",
+                ["DatabaseBackup:Directory"] = backupDirectory,
+                ["DatabaseBackup:Format"] = format,
                 ["DatabaseBackup:PgDumpPath"] = Environment.GetEnvironmentVariable("PAYPLANNER_TEST_PG_DUMP"),
                 [ApplicationFileStoragePaths.RootPathConfigurationKey] = Path.Combine(root, "files"),
                 ["Email:Enabled"] = "false",
                 ["BackgroundServices:Enabled"] = "false",
             }).Build();
             var services = new ServiceCollection();
+            services.AddLogging();
+            var sourceKeys = Path.Combine(root, "source-keys");
+            services.AddDataProtection().SetApplicationName("PayPlanner.PostgresRecoveryFixture")
+                .PersistKeysToFileSystem(new DirectoryInfo(sourceKeys));
+            services.AddSingleton<DataProtectionRecoveryInventory>();
             services.AddSingleton<IConfiguration>(config);
             services.AddSingleton(new DatabaseProviderInfo(DatabaseProviderKind.PostgreSql, sourceBuilder.ConnectionString));
             services.AddDbContextFactory<PaymentContext>(options => options.UseNpgsql(sourceBuilder.ConnectionString));
@@ -77,12 +97,19 @@ public sealed class DatabaseRestoreDrillEndToEndPostgreSqlTests
                 options.AllowedPostgreSqlDatabases = [targetName];
                 options.ConfirmationToken = "disposable-runtime-test";
                 options.PsqlPath = Environment.GetEnvironmentVariable("PAYPLANNER_TEST_PSQL") ?? "psql";
+                var dumpDirectory = Path.GetDirectoryName(Environment.GetEnvironmentVariable("PAYPLANNER_TEST_PG_DUMP"));
+                var restoreFileName = OperatingSystem.IsWindows() ? "pg_restore.exe" : "pg_restore";
+                options.PgRestorePath = string.IsNullOrEmpty(dumpDirectory) ? restoreFileName : Path.Combine(dumpDirectory, restoreFileName);
                 options.PrepareLocalRuntime = true;
             });
             services.AddSingleton<DatabaseBackupService>();
             services.AddSingleton<DatabaseRestoreDrillService>();
             await using var provider = services.BuildServiceProvider();
             var factory = provider.GetRequiredService<IDbContextFactory<PaymentContext>>();
+            var protection = provider.GetRequiredService<IDataProtectionProvider>();
+            using var sourceFieldKeys = new SyntheticFieldKeys();
+            var recoveredFieldMaterial = sourceFieldKeys.CopyMaterial();
+            var sourceFieldEncryptor = new AeadFieldEncryptor(sourceFieldKeys);
             var objectId = Guid.NewGuid();
             var payloads = new[] { "удержанная предыдущая версия"u8.ToArray(), "текущий документ"u8.ToArray() };
             var signaturePath = Path.Combine(root, "files", "electronic-signatures", "original.pdf");
@@ -91,6 +118,8 @@ public sealed class DatabaseRestoreDrillEndToEndPostgreSqlTests
             var casePath = Path.Combine(root, "files", "case-documents", "case.pdf");
             var nativePaths = new[] { signaturePath, artifactPath, photoPath, casePath };
             Guid signaturePublicId = Guid.Empty;
+            var password = Guid.NewGuid().ToString("N");
+            var photoBytes = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII=");
             string[] sourceMigrations = [];
             await using (var source = await factory.CreateDbContextAsync())
             {
@@ -103,6 +132,18 @@ public sealed class DatabaseRestoreDrillEndToEndPostgreSqlTests
                     Assert.NotEmpty(sourceMigrations);
                 }
                 else await source.Database.EnsureCreatedAsync();
+                var protectedSettings = new Dictionary<string, string>
+                {
+                    ["integrations.s3.connections"] = JsonSerializer.Serialize(new[] { new { secretAccessKey = "protected:v1:" + protection.CreateProtector("PayPlanner.S3Storage.Secrets.v1").Protect("synthetic-postgres-s3") } }),
+                    ["integrations.yandexDisk.connections"] = JsonSerializer.Serialize(new[] { new { oAuthToken = "protected:v1:" + protection.CreateProtector("PayPlanner.YandexDisk.Tokens.v1").Protect("synthetic-postgres-yandex") } }),
+                    ["integrations.yandexDisk.oauthToken"] = "protected:v1:" + protection.CreateProtector("PayPlanner.YandexDisk.Tokens.v1").Protect("synthetic-postgres-legacy-yandex"),
+                };
+                foreach (var (key, value) in protectedSettings)
+                {
+                    var setting = await source.SystemSettings.SingleOrDefaultAsync(row => row.Key == key);
+                    if (setting is null) source.SystemSettings.Add(new SystemSetting { Key = key, Value = value });
+                    else setting.Value = value;
+                }
                 var emailSetting = await source.SystemSettings.SingleOrDefaultAsync(row => row.Key == "notifications.email.enabled");
                 if (emailSetting is null) source.SystemSettings.Add(new SystemSetting { Key = "notifications.email.enabled", Value = "false" });
                 else emailSetting.Value = "false";
@@ -149,16 +190,65 @@ public sealed class DatabaseRestoreDrillEndToEndPostgreSqlTests
                         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
                         await File.WriteAllBytesAsync(path, payloads[1]);
                     }
+                    await File.WriteAllBytesAsync(photoPath, photoBytes);
                     var user = new User
                     {
                         Email = "native-runtime@example.test",
-                        PasswordHash = "test",
-                        Role = new Role { Name = "native-runtime" },
+                        FullName = "Synthetic restore operator",
+                        IsApproved = true,
+                        Role = new Role { Name = "admin", Permissions = [new RolePermission { Section = "cases", CanView = true, ViewScope = "all" }] },
                         PhotoUrl = "https://old-host.example.test/user-photos/photo.png",
                     };
+                    user.PasswordHash = new PasswordHasher<User>().HashPassword(user, password);
                     var clientCase = new ClientCase { Client = new Client { Name = "Native runtime" } };
                     source.AddRange(user, clientCase);
                     await source.SaveChangesAsync();
+                    var passport = new ClientPassport
+                    {
+                        ClientId = clientCase.ClientId!.Value,
+                        Series = "4510",
+                        Number = "123456",
+                        IssuedBy = "Синтетический орган Ω",
+                        IssuedAt = new DateTime(2020, 1, 2, 0, 0, 0, DateTimeKind.Utc),
+                        DepartmentCode = "540-001",
+                        BirthPlacePassport = "Синтетическое место Ω",
+                        BirthPlaceFias = "synthetic-fias",
+                    };
+                    source.ClientPassports.Add(passport);
+                    await source.SaveChangesAsync();
+                    var passportConfig = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+                    {
+                        ["FieldEncryption:Enabled"] = "true",
+                        ["FieldEncryption:ClientPassportDualWriteEnabled"] = "true",
+                    }).Build();
+                    await new ClientPassportEncryptionDualWriteService(sourceFieldEncryptor, passportConfig)
+                        .ProtectAsync(passport, null, CancellationToken.None);
+                    await source.SaveChangesAsync();
+                    source.GoogleCalendarConnections.Add(new GoogleCalendarConnection
+                    {
+                        UserId = user.Id,
+                        IsEnabled = false,
+                        SyncEnabled = false,
+                        AccessTokenProtected = protection.CreateProtector("PayPlanner.GoogleCalendar.Tokens.v1").Protect("synthetic-access"),
+                        RefreshTokenProtected = protection.CreateProtector("PayPlanner.GoogleCalendar.Tokens.v1").Protect("synthetic-refresh"),
+                    });
+                    source.YandexCalendarConnections.Add(new YandexCalendarConnection
+                    {
+                        UserId = user.Id,
+                        IsEnabled = false,
+                        SyncEnabled = false,
+                        AccessTokenProtected = protection.CreateProtector("PayPlanner.YandexCalendar.Tokens.v1").Protect("synthetic-access"),
+                        RefreshTokenProtected = protection.CreateProtector("PayPlanner.YandexCalendar.Tokens.v1").Protect("synthetic-refresh"),
+                    });
+                    source.MessengerRecipientBindings.Add(new MessengerRecipientBinding
+                    {
+                        ClientId = clientCase.ClientId,
+                        Channel = "telegram",
+                        Provider = "synthetic",
+                        ProtectedAddress = protection.CreateProtector("PayPlanner.MessengerDocumentDelivery.Address.v1").Protect("synthetic-recipient"),
+                        AddressHash = "synthetic-recipient",
+                        MaskedAddress = "synthetic",
+                    });
                     var envelope = new ElectronicSignatureEnvelope
                     {
                         CreatedByUserId = user.Id,
@@ -173,11 +263,18 @@ public sealed class DatabaseRestoreDrillEndToEndPostgreSqlTests
                         FileName = "artifact.pdf",
                         ChecksumSha256 = envelope.ChecksumSha256,
                     });
+                    envelope.Signers.Add(new ElectronicSignatureSigner
+                    {
+                        DisplayName = "Synthetic signer",
+                        ProtectedContact = protection.CreateProtector("PayPlanner.ElectronicSignature.Contact.v1").Protect("Синтетический контакт Ω"),
+                        MaskedContact = "synthetic",
+                    });
                     source.AddRange(envelope, new ClientCaseDocument
                     {
                         ClientCase = clientCase,
                         DocumentKey = "native-runtime",
                         StoragePath = "case.pdf",
+                        OriginalFileName = "case.pdf",
                         SizeBytes = payloads[1].Length,
                     });
                     await source.SaveChangesAsync();
@@ -186,6 +283,9 @@ public sealed class DatabaseRestoreDrillEndToEndPostgreSqlTests
             }
             var backups = provider.GetRequiredService<DatabaseBackupService>();
             var created = await backups.CreateManualBackupAsync();
+            if (longBackupDirectory) Assert.True(backups.ResolveBackupPath(created.Backup.RelativePath)!.Length > 260);
+            sourceFieldKeys.Dispose();
+            Assert.Throws<InvalidOperationException>(() => sourceFieldKeys.GetKeyAsync("synthetic-restore", CancellationToken.None));
             for (var index = 0; index < payloads.Length; index++) File.Delete(Path.Combine(root, "files", $"version-{index}.bin"));
             if (withNative) foreach (var path in nativePaths) File.Delete(path);
             var report = await provider.GetRequiredService<DatabaseRestoreDrillService>()
@@ -194,6 +294,8 @@ public sealed class DatabaseRestoreDrillEndToEndPostgreSqlTests
             var restoredRoot = Path.GetDirectoryName(report.ReportPath)!;
             using var settings = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(restoredRoot, "restored-storage-paths.json")));
             Assert.False(settings.RootElement.GetProperty("completeRuntimeConfiguration").GetBoolean());
+            var runtimeInstanceId = Guid.ParseExact(settings.RootElement.GetProperty("runtimeInstanceId").GetString()!, "N");
+            Assert.NotEqual(Guid.Empty, runtimeInstanceId);
             var restoredConfig = new ConfigurationBuilder().AddInMemoryCollection(settings.RootElement.GetProperty("storageSettings")
                 .EnumerateObject().ToDictionary(item => item.Name, item => item.Value.GetString())).Build();
             var local = new LocalStorageProvider(new TestEnvironment(restoredRoot), restoredConfig);
@@ -201,6 +303,84 @@ public sealed class DatabaseRestoreDrillEndToEndPostgreSqlTests
             var storageOptions = new FixedStorageOptions(new StorageOrchestrationOptions());
             await using var restored = new PaymentContext(new DbContextOptionsBuilder<PaymentContext>()
                 .UseNpgsql(targetBuilder.ConnectionString).Options);
+            Assert.Equal(runtimeInstanceId.ToString("N"),
+                (await restored.SystemSettings.SingleAsync(row => row.Key == RestoredRuntimeDatabaseIdentity.SettingKey)).Value);
+            restoredConfig[RestoredRuntimeIsolation.EnabledKey] = "true";
+            restoredConfig[RestoredRuntimeDatabaseIdentity.ConfigurationKey] = runtimeInstanceId.ToString("N");
+            await RestoredRuntimeDatabaseIdentity.VerifyAsync(restoredConfig,
+                new DatabaseProviderInfo(DatabaseProviderKind.PostgreSql, targetBuilder.ConnectionString), CancellationToken.None);
+            var keyDirectory = Path.Combine(restoredRoot, "recovery-keys");
+            Directory.CreateDirectory(keyDirectory);
+            foreach (var file in Directory.GetFiles(sourceKeys, "key-*.xml")) File.Copy(file, Path.Combine(keyDirectory, Path.GetFileName(file)));
+            Directory.Move(sourceKeys, Path.Combine(root, "detached-source-keys"));
+            Assert.False(Directory.Exists(sourceKeys));
+            restoredConfig[RestoredRuntimeDataProtection.ArtifactPathKey] = Path.Combine(restoredRoot, "restored-storage-paths.json");
+            restoredConfig[RestoredRuntimeDataProtection.KeysPathKey] = keyDirectory;
+            var recovery = RestoredRuntimeDataProtection.ReadConfiguration(restoredConfig)!;
+            var recoveredServices = new ServiceCollection().AddLogging();
+            recoveredServices.AddDataProtection().SetApplicationName(recovery.Expected.ApplicationDiscriminator!)
+                .PersistKeysToFileSystem(new DirectoryInfo(keyDirectory)).DisableAutomaticKeyGeneration();
+            recoveredServices.AddSingleton<DataProtectionRecoveryInventory>();
+            using var restoredFieldKeys = new SyntheticFieldKeys(recoveredFieldMaterial);
+            if (withNative) recoveredServices.AddSingleton<IFieldEncryptor>(new AeadFieldEncryptor(restoredFieldKeys));
+            using var recoveredProvider = recoveredServices.BuildServiceProvider();
+            var keyHashes = Directory.GetFiles(keyDirectory).Order(StringComparer.Ordinal)
+                .Select(path => Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path)))).ToArray();
+            var protectedSettingBefore = await restored.SystemSettings.AsNoTracking().Where(row => row.Key == "integrations.s3.connections")
+                .Select(row => row.Value).SingleAsync();
+            var expectedProtectedCount = withNative ? 16 : 3;
+            var restoredDatabase = new DatabaseProviderInfo(DatabaseProviderKind.PostgreSql, targetBuilder.ConnectionString);
+            Assert.Equal(expectedProtectedCount, await RestoredRuntimeDataProtection.VerifyAsync(recoveredProvider,
+                restoredConfig, restoredDatabase, recovery, CancellationToken.None));
+            if (withNative)
+            {
+                var passportBefore = JsonSerializer.Serialize(await restored.ClientPassports.AsNoTracking().SingleAsync());
+                using var wrongKeys = new SyntheticFieldKeys();
+                using var wrongProvider = new ServiceCollection().AddSingleton<IFieldEncryptor>(new AeadFieldEncryptor(wrongKeys)).BuildServiceProvider();
+                await using var readOnly = new NpgsqlConnection(targetBuilder.ConnectionString);
+                await readOnly.OpenAsync();
+                await using var transaction = await readOnly.BeginTransactionAsync(System.Data.IsolationLevel.RepeatableRead);
+                await using (var setReadOnly = new NpgsqlCommand("SET TRANSACTION READ ONLY", readOnly, transaction))
+                    await setReadOnly.ExecuteNonQueryAsync();
+                var fieldError = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                    RestoredRuntimeFieldEncryption.VerifyConnectionAsync(readOnly, wrongProvider, CancellationToken.None));
+                Assert.Null(fieldError.InnerException);
+                Assert.DoesNotContain("synthetic", fieldError.ToString());
+                Assert.Equal(passportBefore, JsonSerializer.Serialize(await restored.ClientPassports.AsNoTracking().SingleAsync()));
+                await transaction.RollbackAsync();
+                var wrongMaterial = wrongKeys.CopyMaterial();
+                try
+                {
+                    var startupError = await Assert.ThrowsAnyAsync<Xunit.Sdk.XunitException>(async () =>
+                    {
+                        await using var rejected = await RestoredBackendProcess.StartAsync(
+                            Path.Combine(restoredRoot, "restored-storage-paths.json"), targetBuilder.ConnectionString,
+                            keyDirectory, DatabaseProviderKind.PostgreSql, wrongMaterial);
+                    });
+                    Assert.Contains("Не подтверждено чтение защищённых данных восстановленной CRM", startupError.Message);
+                    Assert.DoesNotContain(Convert.ToBase64String(wrongMaterial.MasterKey), startupError.ToString());
+                    Assert.DoesNotContain(Convert.ToBase64String(wrongMaterial.BlindIndexKey), startupError.ToString());
+                    Assert.Equal(passportBefore, JsonSerializer.Serialize(await restored.ClientPassports.AsNoTracking().SingleAsync()));
+                }
+                finally
+                {
+                    CryptographicOperations.ZeroMemory(wrongMaterial.MasterKey);
+                    CryptographicOperations.ZeroMemory(wrongMaterial.BlindIndexKey);
+                }
+            }
+            Assert.Equal(protectedSettingBefore, await restored.SystemSettings.AsNoTracking().Where(row => row.Key == "integrations.s3.connections")
+                .Select(row => row.Value).SingleAsync());
+            var corrupted = JsonSerializer.Serialize(new[] { new { secretAccessKey = "protected:v1:synthetic-corrupt-value" } });
+            await restored.Database.ExecuteSqlInterpolatedAsync($"UPDATE \"SystemSettings\" SET \"Value\" = {corrupted} WHERE \"Key\" = 'integrations.s3.connections'");
+            var error = await Assert.ThrowsAsync<InvalidOperationException>(() => RestoredRuntimeDataProtection.VerifyAsync(
+                recoveredProvider, restoredConfig, restoredDatabase, recovery, CancellationToken.None));
+            Assert.DoesNotContain("synthetic-corrupt-value", error.ToString());
+            Assert.Null(error.InnerException);
+            Assert.Equal(corrupted, await restored.SystemSettings.AsNoTracking().Where(row => row.Key == "integrations.s3.connections")
+                .Select(row => row.Value).SingleAsync());
+            Assert.Equal(keyHashes, Directory.GetFiles(keyDirectory).Order(StringComparer.Ordinal)
+                .Select(path => Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path)))).ToArray());
+            await restored.Database.ExecuteSqlInterpolatedAsync($"UPDATE \"SystemSettings\" SET \"Value\" = {protectedSettingBefore} WHERE \"Key\" = 'integrations.s3.connections'");
             var reader = new StorageObjectService(restored, new StoragePolicyService(storageOptions, registry), registry, storageOptions);
             await using var read = await reader.OpenReadAsync(objectId, CancellationToken.None);
             if (deleted) Assert.Null(read);
@@ -230,7 +410,8 @@ public sealed class DatabaseRestoreDrillEndToEndPostgreSqlTests
                     .UseNpgsql(targetBuilder.ConnectionString).Options);
                 Assert.Equal(sourceMigrations, (await migratedTarget.Database.GetAppliedMigrationsAsync()).ToArray());
                 var environment = new TestEnvironment(restoredRoot);
-                var signatures = new ElectronicSignatureService(restored, restoredConfig, new EphemeralDataProtectionProvider(), environment);
+                var signatures = new ElectronicSignatureService(restored, restoredConfig,
+                    recoveredProvider.GetRequiredService<IDataProtectionProvider>(), environment);
                 var package = await signatures.CreateEvidencePackageAsync(signaturePublicId, CancellationToken.None);
                 Assert.NotNull(package);
                 using (var archive = ZipFile.OpenRead(package!.FullPath))
@@ -243,10 +424,32 @@ public sealed class DatabaseRestoreDrillEndToEndPostgreSqlTests
                     }
                 var photo = (await restored.Users.SingleAsync()).PhotoUrl;
                 Assert.StartsWith(UserPhotoStoragePaths.RequestPath + "/", photo);
-                Assert.Equal(payloads[1], await File.ReadAllBytesAsync(UserPhotoStoragePaths.ResolvePhotoPath(
+                Assert.Equal(photoBytes, await File.ReadAllBytesAsync(UserPhotoStoragePaths.ResolvePhotoPath(
                     UserPhotoStoragePaths.ResolveRoot(environment, restoredConfig), photo)!));
                 var caseStorage = new LocalCaseDocumentStorage(environment, restoredConfig);
                 Assert.Equal(payloads[1], await File.ReadAllBytesAsync(caseStorage.ResolvePath((await restored.ClientCaseDocuments.SingleAsync()).StoragePath)));
+                Assert.Empty(await restored.NotificationSenders.Where(row => row.Channel == "email" && row.IsEnabled).ToListAsync());
+                await using var backend = await RestoredBackendProcess.StartAsync(
+                    Path.Combine(restoredRoot, "restored-storage-paths.json"), targetBuilder.ConnectionString, keyDirectory,
+                    DatabaseProviderKind.PostgreSql, recoveredFieldMaterial, connectionDiagnostics: true);
+                using var health = await backend.Client.GetAsync("/api/health");
+                health.EnsureSuccessStatusCode();
+                using var login = await backend.Client.PostAsJsonAsync("/api/auth/login", new { email = "native-runtime@example.test", password });
+                login.EnsureSuccessStatusCode();
+                var session = await login.Content.ReadFromJsonAsync<PayPlanner.Api.Models.Responses.LoginResponse>();
+                Assert.NotNull(session);
+                Assert.NotEmpty(session!.Token);
+                backend.Client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", session.Token);
+                Assert.Equal(photoBytes, await backend.Client.GetByteArrayAsync(session.User.PhotoUrl));
+                var restoredDocument = await restored.ClientCaseDocuments.SingleAsync();
+                Assert.Equal(payloads[1], await backend.Client.GetByteArrayAsync($"/api/case-documents/{restoredDocument.Id}/download"));
+                if (Environment.GetEnvironmentVariable("PAYPLANNER_TEST_RESTORED_BROWSER") == "true")
+                    await backend.CheckBrowserAsync(runtimeInstanceId.ToString("N"), "native-runtime@example.test", password,
+                        restoredDocument.ClientCaseId, "case.pdf", payloads[1]);
+                backend.AssertNoServerErrors();
+                Assert.Equal(sourceMigrations, (await migratedTarget.Database.GetAppliedMigrationsAsync()).ToArray());
+                Assert.Equal(keyHashes, Directory.GetFiles(keyDirectory).Order(StringComparer.Ordinal)
+                    .Select(path => Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path)))).ToArray());
             }
             await using var original = await factory.CreateDbContextAsync();
             Assert.Equal(2, await original.StorageReplicas.CountAsync(row => row.ProviderKey == "legacy-local"));
@@ -274,6 +477,34 @@ public sealed class DatabaseRestoreDrillEndToEndPostgreSqlTests
         public StorageOrchestrationOptions CurrentValue => value;
         public StorageOrchestrationOptions Get(string? name) => value;
         public IDisposable? OnChange(Action<StorageOrchestrationOptions, string?> listener) => null;
+    }
+
+    private sealed class SyntheticFieldKeys : IFieldEncryptionKeyStore, IDisposable
+    {
+        private readonly FieldEncryptionKeyMaterial _material;
+        private bool _disposed;
+        public SyntheticFieldKeys(FieldEncryptionKeyMaterial? material = null)
+            => _material = material is null
+                ? new("synthetic-restore", RandomNumberGenerator.GetBytes(32), RandomNumberGenerator.GetBytes(32))
+                : new(material.KeyId, (byte[])material.MasterKey.Clone(), (byte[])material.BlindIndexKey.Clone());
+        public FieldEncryptionKeyMaterial CopyMaterial()
+        {
+            if (_disposed) throw new InvalidOperationException();
+            return new(_material.KeyId, (byte[])_material.MasterKey.Clone(), (byte[])_material.BlindIndexKey.Clone());
+        }
+        public ValueTask<FieldEncryptionKeyMaterial> GetActiveKeyAsync(CancellationToken ct) => GetKeyAsync(_material.KeyId, ct);
+        public ValueTask<FieldEncryptionKeyMaterial> GetKeyAsync(string keyId, CancellationToken ct)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (keyId != _material.KeyId) throw new InvalidOperationException();
+            return ValueTask.FromResult(CopyMaterial());
+        }
+        public void Dispose()
+        {
+            _disposed = true;
+            CryptographicOperations.ZeroMemory(_material.MasterKey);
+            CryptographicOperations.ZeroMemory(_material.BlindIndexKey);
+        }
     }
 
     private static async Task DropOwnedRuntimeDatabaseAsync(NpgsqlConnection admin, string name, string prefix)

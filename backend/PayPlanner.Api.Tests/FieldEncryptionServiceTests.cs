@@ -64,6 +64,40 @@ public sealed class FieldEncryptionServiceTests
     }
 
     [Fact]
+    public async Task HistoricalIndexUsesCiphertextKeyAfterRotation()
+    {
+        var store = new RotatingMemoryKeyStore();
+        var encryptor = new AeadFieldEncryptor(store);
+        var ciphertext = await encryptor.EncryptAsync(" 4510 ", "ClientPassport:Series:42", CancellationToken.None);
+        var oldIndex = await encryptor.ComputeBlindIndexAsync(" 4510 ", "ClientPassport:Series", CancellationToken.None);
+        store.ActiveKeyId = "key-2";
+        var newIndex = await encryptor.ComputeBlindIndexAsync("4510", "ClientPassport:Series", CancellationToken.None);
+        Assert.NotEqual(oldIndex, newIndex);
+        Assert.Equal(oldIndex, await encryptor.ComputeBlindIndexForCiphertextAsync(ciphertext, "4510", "ClientPassport:Series", CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task MissingIndexRepairKeepsHistoricalCiphertextAndKey()
+    {
+        var store = new RotatingMemoryKeyStore();
+        var encryptor = new AeadFieldEncryptor(store);
+        var passport = new PayPlanner.Api.Models.ClientPassport { Id = 42, Series = "4510" };
+        passport.SeriesEncrypted = await encryptor.EncryptAsync("4510", "ClientPassport:Series:42", CancellationToken.None);
+        var original = passport.SeriesEncrypted;
+        var oldIndex = await encryptor.ComputeBlindIndexAsync("4510", "ClientPassport:Series", CancellationToken.None);
+        store.ActiveKeyId = "key-2";
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["FieldEncryption:Enabled"] = "true",
+            ["FieldEncryption:ClientPassportDualWriteEnabled"] = "true",
+        }).Build();
+        var writer = new ClientPassportEncryptionDualWriteService(encryptor, configuration);
+        await writer.ProtectAsync(passport, new HashSet<string>(), CancellationToken.None);
+        Assert.Equal(original, passport.SeriesEncrypted);
+        Assert.Equal(oldIndex, passport.SeriesBlindIndex);
+    }
+
+    [Fact]
     public async Task EnvironmentKeyStoreIsDisabledByDefault()
     {
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
