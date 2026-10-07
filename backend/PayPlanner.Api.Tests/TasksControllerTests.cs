@@ -22,12 +22,57 @@ using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.Documents;
 using PayPlanner.Api.Services.Invoices;
 using PayPlanner.Api.Services.Notifications;
+using PayPlanner.Api.Services.Storage;
 using Xunit;
 
 namespace PayPlanner.Api.Tests;
 
 public class TasksControllerTests
 {
+    [Theory]
+    [InlineData("list")]
+    [InlineData("candidates")]
+    [InlineData("candidate-summary")]
+    [InlineData("detail")]
+    public async Task AlreadyCanceledTaskReadDoesNotAttemptDatabaseConnection(string endpoint)
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:;Pooling=False");
+        var openings = new TaskAccessConnectionOpeningCounter();
+        var options = new DbContextOptionsBuilder<PaymentContext>().UseSqlite(connection).AddInterceptors(openings).Options;
+        await using var db = new PaymentContext(options);
+        var controller = CreateController(db, new RecordingNotificationService(), new User
+        {
+            Id = 1,
+            FullName = "Synthetic canceled reader",
+            Email = "canceled-reader@payplanner.local"
+        });
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        Func<Task> read = endpoint switch
+        {
+            "list" => () => controller.GetTasks(null, null, null, null, null, null, ct: cancellation.Token),
+            "candidates" => () => controller.GetAutomationCaseCandidates(ct: cancellation.Token),
+            "candidate-summary" => () => controller.GetAutomationCaseCandidatesSummary(ct: cancellation.Token),
+            "detail" => () => controller.GetTask(1, cancellation.Token),
+            _ => throw new InvalidOperationException("Unknown synthetic read endpoint.")
+        };
+        var error = await Assert.ThrowsAnyAsync<OperationCanceledException>(read);
+        Assert.Equal(cancellation.Token, error.CancellationToken);
+        Assert.Equal(0, openings.Attempts);
+        Assert.Equal(System.Data.ConnectionState.Closed, connection.State);
+    }
+
+    private sealed class TaskAccessConnectionOpeningCounter : DbConnectionInterceptor
+    {
+        public int Attempts { get; private set; }
+        public override ValueTask<InterceptionResult> ConnectionOpeningAsync(DbConnection connection,
+            ConnectionEventData eventData, InterceptionResult result, CancellationToken cancellationToken = default)
+        {
+            Attempts++;
+            return base.ConnectionOpeningAsync(connection, eventData, result, cancellationToken);
+        }
+    }
+
     [Fact]
     public async Task TaskTemplateCrud_PersistsAndReplacesParticipants()
     {
@@ -4537,6 +4582,92 @@ public class TasksControllerTests
         }
     }
 
+    [Theory]
+    [InlineData("admin")]
+    [InlineData("own")]
+    [InlineData("department")]
+    public async Task GetTask_ReadsLiveSectionAccessOnce(string scope)
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+        var current = scope == "admin"
+            ? await CreateAdminUserAsync(db, "access-read@example.test", "Reader")
+            : await CreateTaskUserAsync(db, "access-read@example.test", "Reader", canEdit: false,
+                viewScope: scope == "department" ? DataVisibilityScope.Department : DataVisibilityScope.Own);
+        current.Department = "Read test department";
+        await db.SaveChangesAsync();
+        var task = await CreateTaskAsync(db, current.Id, null);
+        var controller = CreateController(db, new RecordingNotificationService(), current);
+        db.ChangeTracker.Clear();
+        interceptor.Commands.Clear();
+
+        var response = await controller.GetTask(task.Id, CancellationToken.None);
+
+        Assert.Equal(task.Id, Assert.IsType<TaskJournalItemDto>(Assert.IsType<OkObjectResult>(response.Result).Value).Id);
+        Assert.Single(interceptor.Commands, command => command.Contains("RolePermissions", StringComparison.Ordinal));
+        Assert.Empty(db.ChangeTracker.Entries<RolePermission>());
+        AssertTaskReadQueriesAreMinimal(interceptor.Commands);
+    }
+
+    [Theory]
+    [InlineData("deny")]
+    [InlineData("remove")]
+    [InlineData("role")]
+    [InlineData("inactive")]
+    public async Task GetTask_RechecksSectionAccessAfterDatabaseChange(string change)
+    {
+        await using var db = await CreateContextAsync();
+        var current = await CreateTaskUserAsync(db, "access-live@example.test", "Reader", canEdit: false);
+        var task = await CreateTaskAsync(db, current.Id, null);
+        var controller = CreateController(db, new RecordingNotificationService(), current);
+        Assert.IsType<OkObjectResult>((await controller.GetTask(task.Id, CancellationToken.None)).Result);
+
+        var permission = await db.RolePermissions.SingleAsync(item => item.RoleId == current.RoleId);
+        if (change == "deny") permission.CanView = false;
+        else if (change == "remove") db.RolePermissions.Remove(permission);
+        else if (change == "role") current.Role = new Role { Name = "no-task-access" };
+        else current.IsActive = false;
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var response = await controller.GetTask(task.Id, CancellationToken.None);
+
+        if (change is "deny" or "inactive") Assert.IsType<UnauthorizedResult>(response.Result);
+        else Assert.IsType<ForbidResult>(response.Result);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task GetTask_PreservesEmptyDatabaseFallback(bool adminClaim)
+    {
+        await using var db = await CreateContextAsync();
+        var current = new User { Id = 901, Email = "bootstrap@example.test", FullName = "Bootstrap" };
+        var controller = CreateController(db, new RecordingNotificationService(), current);
+        if (adminClaim) ((ClaimsIdentity)controller.User.Identity!).AddClaim(new Claim(ClaimTypes.Role, "admin"));
+
+        var response = await controller.GetTask(1, CancellationToken.None);
+
+        if (adminClaim) Assert.IsType<NotFoundResult>(response.Result);
+        else Assert.IsType<ForbidResult>(response.Result);
+    }
+
+    [Fact]
+    public async Task GetTask_DoesNotTrustAdminClaimAfterRoleDowngrade()
+    {
+        await using var db = await CreateContextAsync();
+        var current = await CreateAdminUserAsync(db, "downgrade@example.test", "Reader");
+        var task = await CreateTaskAsync(db, current.Id, null);
+        var controller = CreateController(db, new RecordingNotificationService(), current);
+        ((ClaimsIdentity)controller.User.Identity!).AddClaim(new Claim(ClaimTypes.Role, "admin"));
+        Assert.IsType<OkObjectResult>((await controller.GetTask(task.Id, CancellationToken.None)).Result);
+        current.Role = new Role { Name = "downgraded" };
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        Assert.IsType<ForbidResult>((await controller.GetTask(task.Id, CancellationToken.None)).Result);
+    }
+
     private static void AssertTaskReadQueriesAreMinimal(IEnumerable<string> commands)
     {
         var taskQueries = commands
@@ -8800,6 +8931,342 @@ public class TasksControllerTests
         Assert.Empty(await db.TaskJournalFiles.Where(item => item.TaskJournalItemId == task.Id).ToListAsync());
     }
 
+    [Theory]
+    [InlineData("pending", 503)]
+    [InlineData("unavailable", 503)]
+    [InlineData("disabled", 503)]
+    [InlineData("conflict", 409)]
+    [InlineData("invalid", 400)]
+    [InlineData("notFound", 404)]
+    public async Task UploadFile_ManagedResultKeepsActorAndRequestKey(string status, int expected)
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "managed-author@example.test", "Автор");
+        var client = await CreateClientAsync(db, "Клиент");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, author.Id);
+        var service = new RecordingManagedTaskUpload(new(status));
+        var controller = CreateController(db, new RecordingNotificationService(), author, managedTaskUploads: service);
+        var key = Guid.NewGuid();
+        controller.Request.Headers["X-Upload-Key"] = key.ToString();
+        var result = await controller.UploadFile(task.Id, CreateFormFile("test", "file.txt"), null, CancellationToken.None);
+        Assert.Equal(expected, result.Result is ObjectResult body ? body.StatusCode : Assert.IsType<NotFoundResult>(result.Result).StatusCode);
+        var request = Assert.Single(service.Requests);
+        Assert.Equal(key, request.UploadKey);
+        Assert.Equal(author.Id, request.ActorId);
+        Assert.Equal(task.Id, request.TaskId);
+        Assert.Null(request.DocumentKey);
+        Assert.Empty(await db.TaskJournalFiles.AsNoTracking().ToListAsync());
+        if (expected == 503)
+        {
+            var response = Assert.IsType<ObjectResult>(result.Result);
+            using var payload = System.Text.Json.JsonDocument.Parse(System.Text.Json.JsonSerializer.Serialize(response.Value));
+            if (status == "pending")
+            {
+                Assert.Equal("task_file_copies_pending", payload.RootElement.GetProperty("code").GetString());
+                Assert.Equal(task.Id, payload.RootElement.GetProperty("taskId").GetInt32());
+                Assert.Equal(key, payload.RootElement.GetProperty("uploadKey").GetGuid());
+                Assert.Equal(System.Text.Json.JsonValueKind.Null, payload.RootElement.GetProperty("fileId").ValueKind);
+            }
+            else Assert.False(payload.RootElement.TryGetProperty("code", out _));
+        }
+    }
+
+    [Theory]
+    [InlineData(QuerySplittingBehavior.SingleQuery)]
+    [InlineData(QuerySplittingBehavior.SplitQuery)]
+    public async Task UploadFile_DoesNotReadUnrelatedTaskRecords(QuerySplittingBehavior splitting)
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var connection = new SqliteConnection("DataSource=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<PaymentContext>()
+            .UseSqlite(connection, sqlite => sqlite.UseQuerySplittingBehavior(splitting))
+            .AddInterceptors(interceptor).Options;
+        await using var db = new PaymentContext(options);
+        await db.Database.EnsureCreatedAsync();
+        var author = await CreateAdminUserAsync(db, "upload-scope@payplanner.local", "Synthetic upload author");
+        var client = await CreateClientAsync(db, "Synthetic linked client");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, author.Id);
+        var service = new RecordingManagedTaskUpload(new("pending"));
+        var controller = CreateController(db, new RecordingNotificationService(), author, managedTaskUploads: service);
+        var key = Guid.NewGuid();
+        controller.Request.Headers["X-Upload-Key"] = key.ToString();
+        db.ChangeTracker.Clear();
+        interceptor.Commands.Clear();
+
+        var result = await controller.UploadFile(task.Id, CreateFormFile("Synthetic upload bytes", "file.txt"), null, CancellationToken.None);
+
+        Assert.Equal(503, Assert.IsType<ObjectResult>(result.Result).StatusCode);
+        var request = Assert.Single(service.Requests);
+        Assert.Equal(task.Id, request.TaskId);
+        Assert.Equal(author.Id, request.ActorId);
+        Assert.Equal(key, request.UploadKey);
+        AssertTaskReadQueriesAreMinimal(interceptor.Commands);
+        Assert.Empty(db.ChangeTracker.Entries<Client>());
+        var readTask = Assert.Single(db.ChangeTracker.Entries<TaskJournalItem>()).Entity;
+        Assert.Equal(client.Id, readTask.ClientId);
+        Assert.Null(readTask.Client);
+        Assert.Null(readTask.LegalEntity);
+        Assert.Null(readTask.ClientCase);
+        Assert.Null(readTask.BillingContract);
+        Assert.Null(readTask.BillingInvoice);
+        Assert.Null(readTask.ContractorPayment);
+    }
+
+    [Fact]
+    public async Task UploadFile_ManagedOldVersionRetryDoesNotClaimLatestVersion()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "managed-retry@example.test", "Автор");
+        var client = await CreateClientAsync(db, "Клиент");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, author.Id);
+        var first = new TaskJournalFile
+        {
+            TaskJournalItemId = task.Id,
+            DocumentKey = "doc",
+            Version = 1,
+            OriginalFileName = "file.txt",
+            StoredFileName = "first",
+            StoragePath = "first",
+            UploadedByName = author.FullName
+        };
+        var second = new TaskJournalFile
+        {
+            TaskJournalItemId = task.Id,
+            DocumentKey = "doc",
+            Version = 2,
+            OriginalFileName = "file.txt",
+            StoredFileName = "second",
+            StoragePath = "second",
+            UploadedByName = author.FullName
+        };
+        db.TaskJournalFiles.AddRange(first, second); await db.SaveChangesAsync();
+        var service = new RecordingManagedTaskUpload(new("uploaded", first.Id, true));
+        var controller = CreateController(db, new RecordingNotificationService(), author, managedTaskUploads: service);
+        var result = await controller.UploadFile(task.Id, CreateFormFile("test", "file.txt"), null, CancellationToken.None);
+        var created = Assert.IsType<CreatedResult>(result.Result);
+        var file = Assert.IsType<TaskJournalFileDto>(created.Value);
+        Assert.Equal(first.Id, file.Id);
+        Assert.False(file.IsLatestVersion);
+        Assert.Equal(2, await db.TaskJournalFiles.CountAsync());
+    }
+
+    [Fact]
+    public async Task UploadFile_ManagedStorageNotCalledForObserverOrInvalidKey()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "managed-admin@example.test", "Автор");
+        var observer = await CreateTaskUserAsync(db, "managed-observer@example.test", "Наблюдатель", canEdit: false);
+        var client = await CreateClientAsync(db, "Клиент");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, author.Id);
+        task.Participants.Add(new TaskJournalParticipant { UserId = observer.Id, Role = "observer", DisplayName = observer.FullName });
+        await db.SaveChangesAsync();
+        var service = new RecordingManagedTaskUpload(new("pending"));
+        var observerController = CreateController(db, new RecordingNotificationService(), observer, managedTaskUploads: service);
+        Assert.IsType<ForbidResult>((await observerController.UploadFile(task.Id, CreateFormFile("test", "file.txt"), null, CancellationToken.None)).Result);
+        var authorController = CreateController(db, new RecordingNotificationService(), author, managedTaskUploads: service);
+        authorController.Request.Headers["X-Upload-Key"] = "bad-key";
+        Assert.IsType<BadRequestObjectResult>((await authorController.UploadFile(task.Id, CreateFormFile("test", "file.txt"), null, CancellationToken.None)).Result);
+        Assert.Empty(service.Requests);
+    }
+
+    private sealed class RecordingManagedTaskUpload(ManagedTaskFileUploadResult result) : IManagedTaskFileUploadService
+    {
+        public Task<ManagedTaskFileUploadResult> VerifyPublishedAsync(Guid operationId, CancellationToken ct)
+            => throw new NotSupportedException("HTTP upload tests do not read worker receipts.");
+        public bool Enabled => true;
+        public List<ManagedTaskFileUploadRequest> Requests { get; } = [];
+        public Task<ManagedTaskFileUploadResult> ResumeAsync(Guid operationId,
+            Func<int, int, CancellationToken, Task<bool>> authorizePublication, CancellationToken ct)
+            => throw new NotSupportedException("HTTP upload tests do not run background publication.");
+        public Task<ManagedTaskFileUploadResult> UploadAsync(ManagedTaskFileUploadRequest request, CancellationToken ct)
+        { Requests.Add(request); return Task.FromResult(result); }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task UploadFile_ValidatesStreamOnceAndCopiesExactlyThoseBytesToCase(bool invalidLength)
+    {
+        var root = Path.Combine(Path.GetTempPath(), "pp-task-stream-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            await using var db = await CreateContextAsync();
+            var author = await CreateAdminUserAsync(db, "stream@example.test", "Автор");
+            var client = await CreateClientAsync(db, "Клиент");
+            var clientCase = await CreateCaseAsync(db, client.Id, "Дело");
+            var task = await CreateTaskAsync(db, author.Id, client.Id, author.Id, clientCaseId: clientCase.Id);
+            var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+            { ["FileStorage:RootPath"] = root }).Build();
+            var controller = CreateController(db, new RecordingNotificationService(), author, configuration: config);
+            var input = new SingleReadUpload(invalidLength ? 3 : 4);
+            var response = await controller.UploadFile(task.Id, input, null, CancellationToken.None);
+            Assert.Equal(1, input.OpenCount);
+            if (invalidLength)
+            {
+                Assert.IsType<BadRequestObjectResult>(response.Result);
+                Assert.Empty(await db.TaskJournalFiles.AsNoTracking().ToListAsync());
+                Assert.Empty(await db.ClientCaseDocuments.AsNoTracking().ToListAsync());
+                Assert.Empty(Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories));
+            }
+            else
+            {
+                Assert.IsType<CreatedResult>(response.Result);
+                var file = await db.TaskJournalFiles.AsNoTracking().SingleAsync();
+                var document = await db.ClientCaseDocuments.AsNoTracking().SingleAsync();
+                var download = Assert.IsType<PhysicalFileResult>(await controller.DownloadFile(task.Id, file.Id, CancellationToken.None));
+                Assert.Equal(new byte[] { 1, 2, 3, 4 }, await File.ReadAllBytesAsync(download.FileName));
+                var caseStorage = new LocalCaseDocumentStorage(configuration: config);
+                Assert.Equal(new byte[] { 1, 2, 3, 4 }, await File.ReadAllBytesAsync(caseStorage.ResolvePath(document.StoragePath)));
+            }
+        }
+        finally
+        {
+            Assert.StartsWith("pp-task-stream-", Path.GetFileName(root), StringComparison.Ordinal);
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    private sealed class SingleReadUpload(long length) : IFormFile
+    {
+        public int OpenCount { get; private set; }
+        public string ContentType => "application/octet-stream";
+        public string ContentDisposition => "";
+        public IHeaderDictionary Headers { get; set; } = new HeaderDictionary();
+        public long Length => length;
+        public string Name => "file";
+        public string FileName => "file.bin";
+        public Stream OpenReadStream() => ++OpenCount == 1 ? new MemoryStream([1, 2, 3, 4]) : new MemoryStream([9, 9, 9, 9]);
+        public void CopyTo(Stream target) => throw new InvalidOperationException("Unsafe copy.");
+        public Task CopyToAsync(Stream target, CancellationToken ct = default) => throw new InvalidOperationException("Unsafe copy.");
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task UploadFile_FailurePreservesCommittedBytesOrRollsBackAllReferences(int failureMode)
+    {
+        var root = Path.Combine(Path.GetTempPath(), "pp-task-upload-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var insertFailure = new UploadInsertFailure();
+            var commitFailure = new UploadCommitFailure();
+            await using var db = await CreateContextAsync(failureMode == 2 ? commitFailure : insertFailure);
+            var author = await CreateAdminUserAsync(db, "upload-fault@example.test", "Автор");
+            var client = await CreateClientAsync(db, "Клиент загрузки");
+            var clientCase = await CreateCaseAsync(db, client.Id, "Дело загрузки");
+            var task = await CreateTaskAsync(db, author.Id, client.Id, author.Id, clientCaseId: clientCase.Id);
+            var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+            { ["FileStorage:RootPath"] = root }).Build();
+            var publisher = new RecordingRealtimeNotificationPublisher { FailTaskJournalChange = failureMode == 1 };
+            var controller = CreateController(db, new RecordingNotificationService(), author,
+                realtimePublisher: publisher, configuration: configuration);
+            var failAfterCommit = failureMode != 0;
+            insertFailure.Enabled = failureMode == 0;
+            commitFailure.Enabled = failureMode == 2;
+            await Assert.ThrowsAsync(failAfterCommit ? typeof(IOException) : typeof(DbUpdateException), () => controller.UploadFile(task.Id,
+                CreateFormFile("сохранённый документ", "document.txt"), null, CancellationToken.None));
+            if (failAfterCommit)
+            {
+                var file = await db.TaskJournalFiles.AsNoTracking().SingleAsync();
+                var document = await db.ClientCaseDocuments.AsNoTracking().SingleAsync();
+                var download = Assert.IsType<PhysicalFileResult>(await controller.DownloadFile(task.Id, file.Id, CancellationToken.None));
+                Assert.Equal("сохранённый документ", await File.ReadAllTextAsync(download.FileName));
+                var caseStorage = new LocalCaseDocumentStorage(configuration: configuration);
+                Assert.Equal("сохранённый документ", await File.ReadAllTextAsync(caseStorage.ResolvePath(document.StoragePath)));
+                Assert.Equal(failureMode == 1 ? 1 : 0, publisher.TaskJournalChangeCount);
+            }
+            else
+            {
+                Assert.Empty(await db.TaskJournalFiles.AsNoTracking().ToListAsync());
+                Assert.Empty(await db.ClientCaseDocuments.AsNoTracking().ToListAsync());
+                Assert.Empty(Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories));
+                Assert.Equal(0, publisher.TaskJournalChangeCount);
+            }
+        }
+        finally
+        {
+            Assert.StartsWith("pp-task-upload-", Path.GetFileName(root), StringComparison.Ordinal);
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    private sealed class UploadInsertFailure : DbCommandInterceptor
+    {
+        public bool Enabled { get; set; }
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(DbCommand command,
+            CommandEventData eventData, InterceptionResult<DbDataReader> result, CancellationToken cancellationToken = default)
+        {
+            if (Enabled && command.CommandText.StartsWith("INSERT INTO \"TaskJournalFiles\"", StringComparison.Ordinal))
+                throw new IOException("Injected file record failure.");
+            return ValueTask.FromResult(result);
+        }
+    }
+
+    private sealed class UploadCommitFailure : DbTransactionInterceptor
+    {
+        public bool Enabled { get; set; }
+        public override Task TransactionCommittedAsync(DbTransaction transaction, TransactionEndEventData eventData,
+            CancellationToken cancellationToken = default)
+        {
+            if (Enabled)
+            {
+                Enabled = false;
+                throw new IOException("Injected lost commit acknowledgement.");
+            }
+            return Task.CompletedTask;
+        }
+    }
+
+    [Fact]
+    public async Task UploadFile_PersistsExactCaseLinkWhenTaskIsLinkedAfterItsFirstVersion()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "late-case@example.test", "Автор");
+        var client = await CreateClientAsync(db, "Клиент");
+        var clientCase = await CreateCaseAsync(db, client.Id, "Дело");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, author.Id);
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+        var firstResult = await controller.UploadFile(task.Id, CreateFormFile("первая версия", "Документ.txt"), null, CancellationToken.None);
+        var first = Assert.IsType<TaskJournalFileDto>(Assert.IsType<CreatedResult>(firstResult.Result).Value);
+        Assert.Null(first.ClientCaseDocumentId);
+        task.ClientCaseId = clientCase.Id;
+        await db.SaveChangesAsync();
+        var secondResult = await controller.UploadFile(task.Id, CreateFormFile("вторая версия", "Документ.txt"), first.DocumentKey, CancellationToken.None);
+        var second = Assert.IsType<TaskJournalFileDto>(Assert.IsType<CreatedResult>(secondResult.Result).Value);
+        Assert.Equal(2, second.Version);
+        var caseDocument = await db.ClientCaseDocuments.SingleAsync();
+        Assert.Equal(1, caseDocument.Version);
+        Assert.Equal(caseDocument.Id, second.ClientCaseDocumentId);
+        var stored = await db.TaskJournalFiles.SingleAsync(file => file.Id == second.Id);
+        Assert.Equal(caseDocument.Id, stored.ClientCaseDocumentId);
+        var listing = await controller.GetFiles(task.Id, CancellationToken.None);
+        var files = Assert.IsAssignableFrom<IReadOnlyList<TaskJournalFileDto>>(Assert.IsType<OkObjectResult>(listing.Result).Value);
+        Assert.Null(Assert.Single(files, file => file.Id == first.Id).ClientCaseDocumentId);
+        Assert.Equal(caseDocument.Id, Assert.Single(files, file => file.Id == second.Id).ClientCaseDocumentId);
+        // Backfill is done once by the migration. A missing/deleted link must
+        // never be guessed again from names or version numbers during reading.
+        stored.ClientCaseDocument = null;
+        stored.ClientCaseDocumentId = null;
+        await db.SaveChangesAsync();
+        listing = await controller.GetFiles(task.Id, CancellationToken.None);
+        files = Assert.IsAssignableFrom<IReadOnlyList<TaskJournalFileDto>>(Assert.IsType<OkObjectResult>(listing.Result).Value);
+        Assert.Null(Assert.Single(files, file => file.Id == second.Id).ClientCaseDocumentId);
+        stored.ClientCaseDocumentId = caseDocument.Id;
+        var differentCase = await CreateCaseAsync(db, client.Id, "Другое дело");
+        task.ClientCaseId = differentCase.Id;
+        await db.SaveChangesAsync();
+        listing = await controller.GetFiles(task.Id, CancellationToken.None);
+        files = Assert.IsAssignableFrom<IReadOnlyList<TaskJournalFileDto>>(Assert.IsType<OkObjectResult>(listing.Result).Value);
+        Assert.All(files, file => Assert.Null(file.ClientCaseDocumentId));
+        task.ClientCaseId = null;
+        await db.SaveChangesAsync();
+        listing = await controller.GetFiles(task.Id, CancellationToken.None);
+        files = Assert.IsAssignableFrom<IReadOnlyList<TaskJournalFileDto>>(Assert.IsType<OkObjectResult>(listing.Result).Value);
+        Assert.All(files, file => Assert.Null(file.ClientCaseDocumentId));
+    }
+
     [Fact]
     public async Task UploadFile_CreatesDocumentVersionsAndHistory()
     {
@@ -8975,6 +9442,65 @@ public class TasksControllerTests
         Assert.DoesNotContain("..", stored.StoragePath, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(ProductStorageReadStatus.Available)]
+    [InlineData(ProductStorageReadStatus.Unavailable)]
+    [InlineData(ProductStorageReadStatus.Deleted)]
+    public async Task DownloadFile_UsesManagedReaderAfterAuthorization(ProductStorageReadStatus status)
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "managed-author@example.com", "Автор");
+        var client = await CreateClientAsync(db, "Клиент");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, author.Id);
+        var file = new TaskJournalFile
+        {
+            TaskJournalItemId = task.Id,
+            DocumentKey = "managed-test",
+            Version = 1,
+            OriginalFileName = "managed.txt",
+            StoredFileName = "managed.txt",
+            StoragePath = "nonexistent/managed.txt",
+            ContentType = "text/plain",
+            SizeBytes = 3,
+            UploadedByUserId = author.Id,
+        };
+        db.TaskJournalFiles.Add(file);
+        await db.SaveChangesAsync();
+        var reader = new RecordingProductReader(status);
+        var controller = CreateController(db, new RecordingNotificationService(), author, productStorageReader: reader);
+        var result = await controller.DownloadFile(task.Id, file.Id, CancellationToken.None);
+        Assert.Equal(1, reader.Calls);
+        Assert.Equal(file.Id, reader.FileId);
+        if (status == ProductStorageReadStatus.Available)
+        {
+            var download = Assert.IsType<FileStreamResult>(result);
+            Assert.Equal(file.OriginalFileName, download.FileDownloadName);
+            Assert.True(download.EnableRangeProcessing);
+            await using var stream = download.FileStream;
+            using var memory = new MemoryStream();
+            await stream.CopyToAsync(memory);
+            Assert.Equal(new byte[] { 1, 2, 3 }, memory.ToArray());
+        }
+        else if (status == ProductStorageReadStatus.Deleted) Assert.IsType<NotFoundResult>(result);
+        else Assert.Equal(503, Assert.IsType<ObjectResult>(result).StatusCode);
+    }
+
+    private sealed class RecordingProductReader(ProductStorageReadStatus status) : IProductStorageReader
+    {
+        public int Calls { get; private set; }
+        public long FileId { get; private set; }
+        public Task<ProductStorageReadResult> OpenReadAsync(string source, long fileId, string logicalName,
+            string contentType, CancellationToken cancellationToken)
+        {
+            Calls++;
+            FileId = fileId;
+            Assert.Equal(LegacyStorageSources.TaskFiles, source);
+            return Task.FromResult(new ProductStorageReadResult(status, status == ProductStorageReadStatus.Available
+                ? new(LegacyStorageSources.GetObjectId(source, fileId), 1, contentType, logicalName, 3, new MemoryStream([1, 2, 3]), "mirror")
+                : null));
+        }
+    }
+
     [Fact]
     public async Task DownloadFile_ReturnsNotFoundForMissingPhysicalFile()
     {
@@ -9015,7 +9541,8 @@ public class TasksControllerTests
         var secondTask = await CreateTaskAsync(db, author.Id, client.Id, author.Id);
         secondTask.Title = "Вторая задача";
         await db.SaveChangesAsync();
-        var controller = CreateController(db, new RecordingNotificationService(), author);
+        var reader = new RecordingProductReader(ProductStorageReadStatus.Available);
+        var controller = CreateController(db, new RecordingNotificationService(), author, productStorageReader: reader);
         var upload = await controller.UploadFile(
             firstTask.Id,
             CreateFormFile("task file", "document.txt"),
@@ -9027,6 +9554,7 @@ public class TasksControllerTests
         var result = await controller.DownloadFile(secondTask.Id, file.Id, CancellationToken.None);
 
         Assert.IsType<NotFoundResult>(result);
+        Assert.Equal(0, reader.Calls);
     }
 
     [Fact]
@@ -9053,7 +9581,8 @@ public class TasksControllerTests
         };
         db.TaskJournalFiles.Add(hiddenFile);
         await db.SaveChangesAsync();
-        var controller = CreateController(db, new RecordingNotificationService(), current);
+        var reader = new RecordingProductReader(ProductStorageReadStatus.Available);
+        var controller = CreateController(db, new RecordingNotificationService(), current, productStorageReader: reader);
 
         var filesResult = await controller.GetFiles(hiddenTask.Id, CancellationToken.None);
         var uploadResult = await controller.UploadFile(
@@ -9062,6 +9591,7 @@ public class TasksControllerTests
             null,
             CancellationToken.None);
         var downloadResult = await controller.DownloadFile(hiddenTask.Id, hiddenFile.Id, CancellationToken.None);
+        Assert.Equal(0, reader.Calls);
         var deleteResult = await controller.DeleteFile(hiddenTask.Id, hiddenFile.Id, CancellationToken.None);
 
         Assert.IsType<NotFoundResult>(filesResult.Result);
@@ -9708,6 +10238,127 @@ public class TasksControllerTests
         Assert.True(deletedTaskIsDeleted);
     }
 
+    [Theory]
+    [InlineData(true, false, false)]
+    [InlineData(true, true, false)]
+    [InlineData(true, false, true)]
+    [InlineData(true, true, true)]
+    [InlineData(false, false, false)]
+    [InlineData(false, true, false)]
+    public async Task ParentDeletionPreservesRecoverableFilesAndTombstonesOnlyHardDeletion(bool soft, bool bulk, bool loaded)
+    {
+        await using var db = await CreateContextAsync(useObjectAuditModel: soft);
+        var author = await CreateAdminUserAsync(db, "parent-delete@example.test", "Автор");
+        var task = await CreateTaskAsync(db, author.Id, null, author.Id);
+        db.TaskJournalFiles.Add(new TaskJournalFile
+        {
+            TaskJournalItemId = task.Id,
+            DocumentKey = "parent",
+            OriginalFileName = "parent.txt",
+            StoredFileName = "parent.txt",
+            StoragePath = "parent.txt",
+            SizeBytes = 4,
+        });
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        if (loaded) await db.TaskJournalFiles.ToListAsync();
+        var deletion = new RecordingParentStorageDeletion(db);
+        var controller = CreateController(db, new RecordingNotificationService(), author, productStorageDeletion: deletion);
+        if (bulk)
+            Assert.IsType<OkObjectResult>((await controller.BulkDeleteTasks(new() { Ids = [task.Id] }, CancellationToken.None)).Result);
+        else Assert.IsType<NoContentResult>(await controller.DeleteTask(task.Id, CancellationToken.None));
+        Assert.False(await db.TaskJournalItems.AnyAsync(t => t.Id == task.Id));
+        Assert.False(await db.TaskJournalFiles.AnyAsync());
+        Assert.Equal(soft ? 0 : 1, deletion.Calls);
+        Assert.Equal(soft ? 1 : 0, await db.TaskJournalFiles.IgnoreQueryFilters().CountAsync());
+        Assert.Equal(soft ? 0 : 1, await db.StorageTombstones.CountAsync());
+    }
+
+    [Theory]
+    [InlineData(false, "conflict")]
+    [InlineData(false, "unavailable")]
+    [InlineData(true, "conflict")]
+    [InlineData(true, "unavailable")]
+    public async Task HardParentDeletionFailureRollsBackEveryFileAndDoesNotNotify(bool bulk, string status)
+    {
+        await using var db = await CreateContextAsync(useObjectAuditModel: false);
+        var author = await CreateAdminUserAsync(db, "parent-failure@example.test", "Автор");
+        var first = await CreateTaskAsync(db, author.Id, null, author.Id);
+        var second = await CreateTaskAsync(db, author.Id, null, author.Id);
+        foreach (var task in new[] { first, second }) db.TaskJournalFiles.Add(new TaskJournalFile
+        {
+            TaskJournalItemId = task.Id,
+            DocumentKey = "failure",
+            OriginalFileName = "failure.txt",
+            StoredFileName = "failure.txt",
+            StoragePath = "failure.txt",
+            SizeBytes = 4,
+        });
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        var deletion = new RecordingParentStorageDeletion(db) { FailureAt = bulk ? 2 : 1, FailureStatus = status };
+        var notifications = new RecordingNotificationService();
+        var controller = CreateController(db, notifications, author, productStorageDeletion: deletion);
+        var result = bulk
+            ? (await controller.BulkDeleteTasks(new() { Ids = [first.Id, second.Id] }, CancellationToken.None)).Result
+            : await controller.DeleteTask(first.Id, CancellationToken.None);
+        Assert.Equal(status == "conflict" ? 409 : 503, Assert.IsType<ObjectResult>(result).StatusCode);
+        Assert.Equal(2, await db.TaskJournalItems.AsNoTracking().CountAsync());
+        Assert.Equal(2, await db.TaskJournalFiles.AsNoTracking().CountAsync());
+        Assert.Empty(await db.StorageTombstones.AsNoTracking().ToListAsync());
+        Assert.Empty(await db.StorageObjects.AsNoTracking().ToListAsync());
+        Assert.Empty(notifications.CancelledTaskIds);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task HardParentDeletionPagesFilesWithoutTouchingOtherTask(bool bulk)
+    {
+        await using var db = await CreateContextAsync(useObjectAuditModel: false);
+        var author = await CreateAdminUserAsync(db, "paged-delete@example.test", "Автор");
+        var selected = await CreateTaskAsync(db, author.Id, null, author.Id);
+        var untouched = await CreateTaskAsync(db, author.Id, null, author.Id);
+        for (var index = 0; index < 130; index++) db.TaskJournalFiles.Add(new()
+        {
+            TaskJournalItemId = index == 129 ? untouched.Id : selected.Id,
+            DocumentKey = index.ToString(),
+            OriginalFileName = "paged.txt",
+            StoredFileName = "paged.txt",
+            StoragePath = "paged.txt",
+        });
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        var deletion = new RecordingParentStorageDeletion(db);
+        var controller = CreateController(db, new RecordingNotificationService(), author, productStorageDeletion: deletion);
+        if (bulk)
+            Assert.IsType<OkObjectResult>((await controller.BulkDeleteTasks(new() { Ids = [selected.Id] }, CancellationToken.None)).Result);
+        else Assert.IsType<NoContentResult>(await controller.DeleteTask(selected.Id, CancellationToken.None));
+        Assert.Equal(129, deletion.Calls);
+        Assert.Equal(129, await db.StorageTombstones.CountAsync());
+        Assert.Equal(untouched.Id, (await db.TaskJournalFiles.SingleAsync()).TaskJournalItemId);
+        Assert.True(await db.TaskJournalItems.AnyAsync(t => t.Id == untouched.Id));
+    }
+
+    private sealed class RecordingParentStorageDeletion(PaymentContext db) : IProductStorageDeletionService
+    {
+        public int Calls { get; private set; }
+        public int FailureAt { get; init; } = int.MaxValue;
+        public string FailureStatus { get; init; } = "conflict";
+        public async Task<string> DeleteAsync(string source, long id, string name, string type, string path, int? actor, CancellationToken ct)
+        {
+            Assert.NotNull(db.Database.CurrentTransaction);
+            Assert.Equal(LegacyStorageSources.TaskFiles, source);
+            Assert.True(id > 0);
+            Assert.NotNull(actor);
+            if (++Calls == FailureAt) return FailureStatus;
+            var marker = new StorageObject { DataClass = "task-file", OwnerType = "task-file", OwnerId = id.ToString(), LogicalName = name, IsDeleted = true };
+            db.StorageTombstones.Add(new() { StorageObject = marker, Generation = 1, DeletedAt = DateTime.UtcNow });
+            await db.SaveChangesAsync(ct);
+            return "deleted";
+        }
+    }
+
     [Fact]
     public async Task BulkDeleteTasks_AppliesTaskVisibilityScope()
     {
@@ -10083,7 +10734,11 @@ public class TasksControllerTests
         IExternalCalendarSyncCoordinator? externalCalendarSyncCoordinator = null,
         IExternalCalendarTaskSyncOutbox? externalCalendarTaskSyncOutbox = null,
         CaseInactivityAutomationMutationGate? caseInactivityAutomationMutationGate = null,
-        IRealtimeNotificationPublisher? realtimePublisher = null)
+        IRealtimeNotificationPublisher? realtimePublisher = null,
+        IProductStorageReader? productStorageReader = null,
+        IConfiguration? configuration = null,
+        IManagedTaskFileUploadService? managedTaskUploads = null,
+        IProductStorageDeletionService? productStorageDeletion = null)
         => new(
             db,
             notificationService,
@@ -10091,7 +10746,11 @@ public class TasksControllerTests
             externalCalendarSyncCoordinator: externalCalendarSyncCoordinator,
             externalCalendarTaskSyncOutbox: externalCalendarTaskSyncOutbox,
             caseInactivityAutomationMutationGate: caseInactivityAutomationMutationGate,
-            realtimePublisher: realtimePublisher)
+            realtimePublisher: realtimePublisher,
+            productStorageReader: productStorageReader,
+            configuration: configuration,
+            managedTaskUploads: managedTaskUploads,
+            productStorageDeletion: productStorageDeletion)
         {
             ControllerContext = new ControllerContext
             {
@@ -10107,7 +10766,7 @@ public class TasksControllerTests
             },
         };
 
-    private static async Task<PaymentContext> CreateContextAsync(DbCommandInterceptor? interceptor = null)
+    private static async Task<PaymentContext> CreateContextAsync(IInterceptor? interceptor = null, bool useObjectAuditModel = true)
     {
         var connection = new SqliteConnection("DataSource=:memory:");
         await connection.OpenAsync();
@@ -10124,7 +10783,7 @@ public class TasksControllerTests
         }
 
         var options = optionsBuilder.Options;
-        var db = new PaymentContext(options);
+        var db = new PaymentContext(options, useObjectAuditModel: useObjectAuditModel);
         await db.Database.EnsureCreatedAsync();
         return db;
     }
@@ -10534,6 +11193,7 @@ public class TasksControllerTests
     private sealed class RecordingRealtimeNotificationPublisher : IRealtimeNotificationPublisher
     {
         public int TaskJournalChangeCount { get; private set; }
+        public bool FailTaskJournalChange { get; init; }
 
         public Task PublishUserNotificationAsync(
             UserNotification notification,
@@ -10544,6 +11204,7 @@ public class TasksControllerTests
         public Task PublishTaskJournalChangedAsync(CancellationToken cancellationToken = default)
         {
             TaskJournalChangeCount++;
+            if (FailTaskJournalChange) throw new IOException("Injected realtime failure.");
             return Task.CompletedTask;
         }
     }
