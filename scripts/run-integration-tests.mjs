@@ -25,7 +25,12 @@ function collectIntegrationTests(dir) {
   return files;
 }
 
-const files = collectIntegrationTests(srcDir).sort();
+// Root-level Vite integration tests are also excluded from the unit gate.
+// Inspect only root files here, without traversing dependencies or build artifacts.
+const rootFiles = readdirSync(rootDir, { withFileTypes: true })
+  .filter(entry => entry.isFile() && integrationTestPattern.test(entry.name))
+  .map(entry => entry.name);
+const files = [...collectIntegrationTests(srcDir), ...rootFiles].sort();
 
 if (files.length === 0) {
   console.error('No integration tests found.');

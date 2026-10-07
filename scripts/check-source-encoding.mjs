@@ -77,10 +77,13 @@ function buildWindows1251ReverseMap() {
 }
 
 function getTrackedTextFiles() {
-  const output = execFileSync('git', ['ls-files', '-z']);
+  const deleted = new Set(execFileSync('git', ['ls-files', '--deleted', '-z'])
+    .toString('utf8').split('\0').filter(Boolean));
+  const output = execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '-z']);
   return output.toString('utf8')
     .split('\0')
     .filter(Boolean)
+    .filter((fileName) => !deleted.has(fileName))
     .filter((fileName) => textExtensions.has(extname(fileName).toLowerCase()));
 }
 
@@ -119,7 +122,7 @@ function runAudit() {
     return;
   }
 
-  console.log(`Source encoding audit passed: ${files.length} tracked text files.`);
+  console.log(`Source encoding audit passed: ${files.length} working-tree text files.`);
 }
 
 if (process.argv.includes('--self-test')) runSelfTest();
