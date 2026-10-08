@@ -180,6 +180,12 @@ try {
   console.log('TASK_UPLOAD_STAGE_VITE_CREATED');
   await vite.listen();
   console.log('TASK_UPLOAD_STAGE_VITE_LISTENING');
+  // Compile the actual entry before starting the browser navigation clock.
+  // The enclosing 90-second scenario budget still includes this preparation.
+  console.log('TASK_UPLOAD_STAGE_VITE_ENTRY_PREPARING');
+  const entry = await vite.transformRequest('/src/main.tsx');
+  assert.ok(entry?.code, 'The synthetic task UI entry module must compile successfully.');
+  console.log('TASK_UPLOAD_STAGE_VITE_ENTRY_READY');
   for (const channel of ['msedge', 'chrome', undefined]) {
     console.log(`TASK_UPLOAD_STAGE_BROWSER_STARTING_${channel ?? 'bundled'}`);
     try { browser = await chromium.launch({ headless: true, channel }); break; }
@@ -188,6 +194,16 @@ try {
   assert.ok(browser, 'An installed Chromium-compatible browser is required.');
   console.log('TASK_UPLOAD_STAGE_BROWSER_READY');
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, timezoneId: 'Asia/Novosibirsk' });
+  if (completionFlow) {
+    const completionUserId = Number(process.env.TASK_UPLOAD_COMPLETION_USER_ID);
+    assert.ok(Number.isSafeInteger(completionUserId) && completionUserId > 0);
+    // Only this fresh owned browser gets filters that keep its completed task visible.
+    await context.addInitScript(({ origin, userId }) => {
+      if (window.location.origin !== origin) return;
+      window.localStorage.setItem(`pp.task_journal.filters.v1.user:${userId}`,
+        JSON.stringify({ statusFilter: 'all', periodMode: 'all' }));
+    }, { origin: ui, userId: completionUserId });
+  }
   page = await context.newPage();
   page.setDefaultTimeout(25_000);
   page.on('request', request => {
@@ -441,7 +457,32 @@ try {
     if (completionSaveFailure) assert.equal(statusSaveCount, 2);
     assert.equal(postCount, 1);
     assert.ok(recoveryKeys.includes(uploadKey));
-    // Reopen the completed task and verify its published attachment, not just the success notice.
+    // Use the journal's own navigation first: its cleanup cancels pending refresh
+    // timers and retains already-started same-user reads until they finish.
+    recordTaskReadBoundary('completion-journal');
+    const completedTaskLink = page.getByTestId(`task-title-link-${taskId}`);
+    await expect(completedTaskLink).toBeVisible();
+    const precedingRequests = new Set(pendingRequests.keys());
+    const pendingPage = page.waitForResponse(response => {
+      const request = response.request();
+      const url = new URL(response.url());
+      return !precedingRequests.has(request) && request.method() === 'GET' && url.origin === api.origin
+        && url.pathname === `/api/tasks/${taskId}/files/uploads`
+        && url.searchParams.get('pendingOnly') === 'true' && url.searchParams.get('includePageInfo') === 'true';
+    });
+    recordTaskReadBoundary('completion-spa-reopen');
+    const [pendingResponse] = await Promise.all([pendingPage, completedTaskLink.click()]);
+    assert.equal(pendingResponse.status(), 200);
+    assert.equal(await pendingResponse.finished(), null);
+    const pendingBody = await pendingResponse.json();
+    assert.deepEqual(pendingBody.items, [], 'The completed upload must not schedule card polling or publication callbacks.');
+    assert.equal(pendingBody.nextCursor ?? null, null);
+    await expect(card).toBeVisible();
+    if (mode === 'modern') await card.getByRole('tab', { name: /^Файлы \d+$/ }).click();
+    await expect(card.locator('article').filter({ hasText: fileName })
+      .filter({ has: page.getByRole('button', { name: /Скачать/ }) })).toBeVisible();
+    recordTaskReadBoundary('completion-spa-card-ready');
+    // Keep the original hard reload and verification of its published attachment.
     recordTaskReadBoundary('completion-reopen');
     await waitForCardReadsBeforeLeaving();
     recordTaskReadBoundary('completion-reopen-after-drain');

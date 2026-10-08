@@ -202,14 +202,33 @@ internal sealed class RestoredBackendProcess : IAsyncDisposable
         {
             await process.WaitForExitAsync(timeout.Token);
             // Forward only bounded counters, never the browser's raw output or restored credentials.
+            const string browserPhasePattern =
+                "\\APP_RESTORED_BROWSER_PHASE \\{\"Phase\":\"(?:ui-build|preview-listen|launch-msedge|launch-chrome|launch-chromium|browser-context|new-page"
+                + "|login-navigation|login-email|login-password|login-submit|login-complete|user-menu|user-name|avatar"
+                + "|document-button|document-download|download-read|activity-drain|notification-drain|final-assertions|browser-close|vite-close|done)\",\"Event\":\"(?:enter|failed|attempt-failed)\","
+                + "\"ElapsedMs\":(?:0|[1-9][0-9]{0,8}),\"ProcessUptimeMs\":(?:0|[1-9][0-9]{0,8}),"
+                + "\"BrowserErrors\":(?:0|[1-9][0-9]{0,8}),\"OutsideRequests\":(?:0|[1-9][0-9]{0,8}),"
+                + "\"FailedRequests\":(?:0|[1-9][0-9]{0,8}),\"PendingNotifications\":(?:0|[1-9][0-9]{0,8}),"
+                + "\"ErrorKind\":\"(?:none|timeout|assertion|error|unknown)\"\\}\\z";
+            var forwardedBrowserPhases = 0;
             foreach (var line in (await stdout).Split('\n'))
             {
                 var diagnostic = line.Trim();
                 if (diagnostic.Length <= 300 && System.Text.RegularExpressions.Regex.IsMatch(diagnostic,
                     "^PP_RESTORED_NOTIFICATION_LIFECYCLE \\{\\\"Started\\\":\\d{1,4},\\\"Finished\\\":\\d{1,4},\\\"FailedBeforeClose\\\":\\d{1,4},\\\"FailedDuringClose\\\":\\d{1,4},\\\"PendingBeforeClose\\\":\\d{1,4}\\}$"))
                     Console.WriteLine(diagnostic);
+                if (forwardedBrowserPhases < 64 && diagnostic.Length <= 400
+                    && Regex.IsMatch(diagnostic, browserPhasePattern, RegexOptions.CultureInvariant))
+                {
+                    forwardedBrowserPhases++;
+                    // Optional diagnostics must not fail because the output sink closed.
+                    try { Console.WriteLine(diagnostic); }
+                    catch (IOException) { }
+                    catch (ObjectDisposedException) { }
+                }
             }
-            Assert.True(process.ExitCode == 0, await stderr);
+            Assert.True(process.ExitCode == 0, await stderr + (process.ExitCode == 0 ? string.Empty
+                : Environment.NewLine + _errors.FailureSummary()));
             Assert.Contains("RESTORED_BROWSER_OK", await stdout);
         }
         catch (OperationCanceledException exception) when (timeout.IsCancellationRequested)
@@ -220,7 +239,7 @@ internal sealed class RestoredBackendProcess : IAsyncDisposable
                 using var cleanupTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
                 await process.WaitForExitAsync(cleanupTimeout.Token);
             }
-            throw new TimeoutException($"Restored browser verification exceeded 60 seconds.{Environment.NewLine}{await stderr}{Environment.NewLine}{await stdout}", exception);
+            throw new TimeoutException($"Restored browser verification exceeded 60 seconds.{Environment.NewLine}{await stderr}{Environment.NewLine}{await stdout}{Environment.NewLine}{_errors.FailureSummary()}", exception);
         }
         finally
         {

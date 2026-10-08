@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { chromium } from '@playwright/test';
-import { createServer } from 'vite';
+import { build, preview } from 'vite';
+import { mkdir } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
+import { writeSync } from 'node:fs';
 
 const api = new URL(process.env.RESTORED_SMOKE_API);
 assert.equal(api.hostname, '127.0.0.1');
@@ -25,22 +27,60 @@ let phase = 'startup';
 const notificationRequests = new Set();
 const notificationLifecycle = { Started: 0, Finished: 0, FailedBeforeClose: 0, FailedDuringClose: 0, PendingBeforeClose: 0 };
 let closingBrowser = false;
+// Fixed categories and counters only: never environment, URLs, paths or page content.
+const browserStarted = performance.now();
+const browserPhases = new Set([
+  'ui-build', 'preview-listen', 'launch-msedge', 'launch-chrome', 'launch-chromium',
+  'browser-context', 'new-page', 'login-navigation', 'login-email', 'login-password', 'login-submit',
+  'login-complete', 'user-menu', 'user-name', 'avatar', 'document-button', 'document-download',
+  'download-read', 'activity-drain', 'notification-drain', 'final-assertions', 'browser-close', 'vite-close', 'done',
+]);
+let browserPhase = 'ui-build';
+const recordBrowserPhase = (nextPhase, event = 'enter', error) => {
+  // Diagnostics never create a test gate or replace an existing failure.
+  try {
+    if (!browserPhases.has(nextPhase) || !['enter', 'failed', 'attempt-failed'].includes(event)) return;
+    browserPhase = nextPhase;
+    const errorKind = event === 'enter' ? 'none' : error instanceof Error
+      ? error.name === 'TimeoutError' ? 'timeout' : error.name === 'AssertionError' ? 'assertion' : 'error'
+      : 'unknown';
+    // Emit before the next await; keep every diagnostic operation inside this guard.
+    writeSync(1, `PP_RESTORED_BROWSER_PHASE ${JSON.stringify({
+      Phase: browserPhase, Event: event, ElapsedMs: Math.round(performance.now() - browserStarted),
+      ProcessUptimeMs: Math.round(process.uptime() * 1000),
+      BrowserErrors: errors.length, OutsideRequests: outside.length, FailedRequests: failedRequests.length,
+      PendingNotifications: notificationRequests.size, ErrorKind: errorKind,
+    })}\n`);
+  } catch { /* Best-effort diagnostics only; preserve the existing test/cleanup outcome. */ }
+};
 const isNotificationRequest = (request) => {
   const url = new URL(request.url());
   return url.origin === api.origin && url.pathname === '/api/notifications/inbox' && request.method() === 'GET';
 };
 try {
-  vite = await createServer({ envDir: runtimeRoot, cacheDir: join(runtimeRoot, 'vite-browser-cache'), server: { host: '127.0.0.1', port, strictPort: true }, logLevel: 'error' });
-  await vite.listen();
-  // Prepare the real entry module before starting the browser navigation clock.
-  // The enclosing 60-second verification budget still covers this preparation.
-  const entry = await vite.transformRequest('/src/main.tsx');
-  assert.ok(entry?.code, 'The restored UI entry module must compile successfully.');
+  recordBrowserPhase('ui-build');
+  // Build this owned instance with its exact isolated API and instance identity.
+  // Refuse an existing output directory; never clean the restored runtime.
+  const outDir = join(runtimeRoot, 'browser-ui-dist');
+  await mkdir(outDir);
+  const uiConfig = { envDir: runtimeRoot, cacheDir: join(runtimeRoot, 'vite-browser-cache'),
+    build: { outDir, emptyOutDir: false }, logLevel: 'error' };
+  // Both build and preview remain inside the original 60-second browser budget.
+  const built = await build(uiConfig);
+  assert.ok((Array.isArray(built) ? built : [built]).some(output =>
+    output.output?.some(chunk => chunk.type === 'chunk' && chunk.isEntry && chunk.code.length > 0)),
+  'The restored UI entry module must compile successfully.');
+  recordBrowserPhase('preview-listen');
+  vite = await preview({ ...uiConfig, preview: { host: '127.0.0.1', port, strictPort: true } });
   for (const channel of ['msedge', 'chrome', undefined]) {
-    try { browser = await chromium.launch({ headless: true, channel }); break; } catch { /* Never download a browser. */ }
+    recordBrowserPhase(`launch-${channel ?? 'chromium'}`);
+    try { browser = await chromium.launch({ headless: true, channel }); break; }
+    catch (error) { recordBrowserPhase(browserPhase, 'attempt-failed', error); /* Never download a browser. */ }
   }
   assert.ok(browser, 'An installed Chromium-compatible browser is required.');
+  recordBrowserPhase('browser-context');
   const context = await browser.newContext();
+  recordBrowserPhase('new-page');
   page = await context.newPage();
   page.on('request', (request) => {
     if (isNotificationRequest(request)) { notificationLifecycle.Started += 1; notificationRequests.add(request); }
@@ -91,15 +131,23 @@ try {
   phase = 'login';
   // Authenticate at the real document deep link. A forced full navigation
   // immediately after login aborts the newly mounted CRM's background reads.
+  recordBrowserPhase('login-navigation');
   await page.goto(`${ui}/cases/${caseId}?ppCaseTab=documents`, { waitUntil: 'domcontentloaded' });
+  recordBrowserPhase('login-email');
   await page.locator('input[type="email"]').fill(process.env.RESTORED_SMOKE_EMAIL);
+  recordBrowserPhase('login-password');
   await page.locator('input[type="password"]').fill(process.env.RESTORED_SMOKE_PASSWORD);
   // Observe existing activity responses throughout login and loading. Start the
   // completion budget when the required document is ready, not before login.
+  recordBrowserPhase('login-submit');
   await page.getByRole('button', { name: 'Войти', exact: true }).click();
+  recordBrowserPhase('login-complete');
   await page.locator('input[type="email"]').waitFor({ state: 'hidden' });
+  recordBrowserPhase('user-menu');
   await page.getByRole('button', { name: 'Меню пользователя', exact: true }).click();
+  recordBrowserPhase('user-name');
   await page.getByText('Synthetic restore operator', { exact: true }).first().waitFor();
+  recordBrowserPhase('avatar');
   await page.waitForFunction(() => [...document.images].some((image) => image.src.includes('/user-photos/') && image.naturalWidth > 0));
   // The avatar above and the document action below prove the required UI data.
   // Continuous CRM requests are not a document-readiness signal.
@@ -107,16 +155,20 @@ try {
   const documentName = process.env.RESTORED_SMOKE_DOCUMENT_NAME;
   assert.ok(documentName);
   const downloadButton = page.getByRole('button', { name: `Скачать документ ${documentName}`, exact: true });
+  recordBrowserPhase('document-button');
   await downloadButton.waitFor();
+  recordBrowserPhase('document-download');
   const [download] = await Promise.all([page.waitForEvent('download'), downloadButton.click()]);
   assert.equal(download.suggestedFilename(), documentName);
   assert.equal(await download.failure(), null);
+  recordBrowserPhase('download-read');
   const stream = await download.createReadStream();
   assert.ok(stream);
   const chunks = [];
   for await (const chunk of stream) chunks.push(chunk);
   assert.deepEqual(Buffer.concat(chunks), Buffer.from(process.env.RESTORED_SMOKE_DOCUMENT_BASE64, 'base64'));
   assert.ok(activityStarted > 0, 'The real case page must begin its existing activity request.');
+  recordBrowserPhase('activity-drain');
   if (activityRequests.size) {
     await new Promise((resolveActivity, rejectActivity) => {
       const cleanup = () => {
@@ -145,6 +197,7 @@ try {
   // Closing the browser aborts existing CRM reads. Complete the reads it has
   // actually begun, including chained startup batches, before destroying it.
   // This is part of the original enclosing 60-second browser budget.
+  recordBrowserPhase('notification-drain');
   let notificationTimer;
   try {
     await Promise.race([
@@ -169,6 +222,7 @@ try {
   } finally {
     clearTimeout(notificationTimer);
   }
+  recordBrowserPhase('final-assertions');
   assert.equal(notificationRequests.size, 0, 'The browser smoke must finish notification reads before closing.');
   assert.deepEqual(outside, [], 'The restored UI attempted an outside request.');
   assert.deepEqual(errors, [], 'The restored UI reported browser errors.');
@@ -176,12 +230,16 @@ try {
   assert.equal(activityRequests.size, 0, 'The browser smoke reaches success while its case activity request is unfinished.');
   console.log('RESTORED_BROWSER_OK');
 } catch (error) {
-  console.error(JSON.stringify({ browserErrors: errors, outsideOrigins: outside, failedRequests, visibleText: page ? (await page.locator('body').innerText()).slice(0, 3000) : '' }));
+  // Report the failed boundary immediately; page inspection must not hide the primary error.
+  recordBrowserPhase(browserPhase, 'failed', error);
   throw error;
 } finally {
   notificationLifecycle.PendingBeforeClose = notificationRequests.size;
   closingBrowser = true;
+  recordBrowserPhase('browser-close');
   if (browser) await browser.close();
   console.log(`PP_RESTORED_NOTIFICATION_LIFECYCLE ${JSON.stringify(notificationLifecycle)}`);
+  recordBrowserPhase('vite-close');
   if (vite) await vite.close();
+  recordBrowserPhase('done');
 }

@@ -68,6 +68,10 @@ const settings = JSON.stringify({ api: api.origin, ui, threadId, email: process.
 try {
   vite = await createServer({ envDir: root, cacheDir: join(root, 'vite-chat-cache'), server: { host: '127.0.0.1', port, strictPort: true }, logLevel: 'error' });
   await vite.listen();
+  // Compile the actual entry before starting the browser navigation clock.
+  // The existing enclosing three-minute scenario budget includes this preparation.
+  const entry = await vite.transformRequest('/src/main.tsx');
+  assert.ok(entry?.code, 'The synthetic chat UI entry module must compile successfully.');
   await cli('open', 'about:blank', '--browser', channel); opened = true;
   await cli('snapshot');
   const pending = await cli('run-code', String.raw`async (page) => {

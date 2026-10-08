@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { mkdir, lstat, open } from 'node:fs/promises';
+import { writeSync } from 'node:fs';
 import { resolve, basename, join } from 'node:path';
 import { chromium, expect } from '@playwright/test';
 import { createServer } from 'vite';
@@ -31,20 +32,60 @@ let vite;
 let browser;
 const browserErrors = [];
 const externalRequests = [];
+const phaseStartedAt = performance.now();
+const phaseNames = new Set([
+  'module-ready', 'create-server', 'vite-listen', 'entry-transform',
+  'launch-msedge', 'launch-chrome', 'launch-chromium', 'browser-context', 'new-page',
+  'fixture-navigation', 'preview-assertions', 'screenshots-directory',
+  'viewport-1280', 'screenshot-1280', 'viewport-390', 'screenshot-390',
+  'writer-create', 'apply-click', 'apply-response', 'apply-json', 'apply-view',
+  'final-assertions', 'browser-close', 'vite-close', 'done',
+]);
+let phase = 'module-ready';
+let phaseEvents = 0;
+let screenshots = 0;
+function recordPhase(event = 'enter', error = null) {
+  try {
+    if (phaseEvents >= 64 || !phaseNames.has(phase)
+      || !['enter', 'failed', 'attempt-failed'].includes(event)) return;
+    const values = [Math.round(performance.now() - phaseStartedAt), Math.round(process.uptime() * 1000),
+      browserErrors.length, externalRequests.length, screenshots];
+    if (!values.every(value => Number.isSafeInteger(value) && value >= 0 && value <= 999_999_999)) return;
+    const name = error instanceof Error ? error.name : null;
+    const errorKind = error === null ? 'none' : name === 'TimeoutError' ? 'timeout'
+      : name === 'AssertionError' ? 'assertion' : name === null ? 'unknown' : 'error';
+    const marker = { Phase: phase, Event: event, ElapsedMs: values[0], ProcessUptimeMs: values[1],
+      BrowserErrors: values[2], OutsideRequests: values[3], Screenshots: values[4], ErrorKind: errorKind };
+    phaseEvents++;
+    writeSync(1, `PP_STORAGE_CAPACITY_BROWSER_PHASE ${JSON.stringify(marker)}\n`);
+  } catch { /* Optional diagnostics must never replace the scenario failure. */ }
+}
+function enterPhase(next) { phase = next; recordPhase(); }
+recordPhase();
 
 try {
+  enterPhase('create-server');
   vite = await createServer({
     envDir: resolve('scripts'),
     server: { host: '127.0.0.1', port, strictPort: true },
     logLevel: 'error',
   });
+  enterPhase('vite-listen');
   await vite.listen();
+  // Prepare this HTML fixture's entry, not the unused full application.
+  // Keep that work inside the existing parent scenario budget.
+  enterPhase('entry-transform');
+  const entry = await vite.transformRequest('/src/components/Settings/StorageCapacityRecoverySettings.visual.tsx');
+  assert.ok(entry?.code, 'The synthetic storage-capacity UI entry module must compile successfully.');
   for (const channel of ['msedge', 'chrome', undefined]) {
+    enterPhase(`launch-${channel ?? 'chromium'}`);
     try { browser = await chromium.launch({ headless: true, channel }); break; }
-    catch { /* Do not download a browser. */ }
+    catch (error) { recordPhase('attempt-failed', error); /* Do not download a browser. */ }
   }
   assert.ok(browser, 'An installed Chromium browser is required.');
+  enterPhase('browser-context');
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, timezoneId: 'Asia/Novosibirsk' });
+  enterPhase('new-page');
   const page = await context.newPage();
   if (liveToken) await page.addInitScript(token => localStorage.setItem('pp_token', token), liveToken);
   page.on('pageerror', error => browserErrors.push(error.message));
@@ -94,7 +135,9 @@ try {
     }
     await route.continue();
   });
+  enterPhase('fixture-navigation');
   await page.goto(`${origin}/scripts/fixtures/storage-capacity-visual.html${releasedMarkers ? '?markers=true' : ''}`, { waitUntil: 'domcontentloaded' });
+  enterPhase('preview-assertions');
   if (!releasedMarkers) await expect(page.getByText('Файл неполный — резерв сохранён')).toBeVisible();
   if (releasedMarkers) {
     await expect(page.getByText('Резерв освобождён — служебный маркер можно удалить')).toBeVisible();
@@ -109,17 +152,22 @@ try {
     await expect(page.getByText('Путь требует разбора — резерв сохранён')).toBeVisible();
     await expect(page.getByText('Полный файл — можно подтвердить')).toBeVisible();
   }
+  enterPhase('screenshots-directory');
   await mkdir('.codex-build', { recursive: true });
   for (const width of [1280, 390]) {
+    enterPhase(`viewport-${width}`);
     await page.setViewportSize({ width, height: 900 });
     if (releasedMarkers) await expect(page.getByRole('heading', { name: 'Очистка служебных маркеров' })).toBeVisible();
     else await expect(page.getByText('Из них для временных файлов:')).toBeVisible();
     const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth);
     assert.equal(horizontalOverflow, false, `Horizontal overflow at ${width}px.`);
+    enterPhase(`screenshot-${width}`);
     await page.screenshot({ path: `.codex-build/storage-capacity-${releasedMarkers ? 'released-markers-' : writerRoot ? 'writer-' : ''}${width}.png`, fullPage: true });
+    screenshots++;
   }
   if (liveApi) {
     if (writerRoot) {
+      enterPhase('writer-create');
       const file = await open(join(writerRoot, 'objects', '.task-uploads', 'changed.tmp'), 'wx');
       try { await file.writeFile(Buffer.from([3, 4])); await file.sync(); }
       finally { await file.close(); }
@@ -127,38 +175,50 @@ try {
     const appliedResponse = page.waitForResponse(response =>
       new URL(response.url()).pathname === `/api/storage/capacity/stages/${releasedMarkers ? 'markers/' : ''}reconcile`
       && new URL(response.url()).searchParams.get('apply') === 'true');
+    enterPhase('apply-click');
     await page.getByRole('button', { name: releasedMarkers ? /Очистить маркеры/ : /Подтвердить восстановление/ }).click();
+    enterPhase('apply-response');
     const applied = await appliedResponse;
     assert.equal(applied.status(), 200);
     if (releasedMarkers) {
+      enterPhase('apply-json');
       const report = await applied.json();
       assert.equal(report.removed, 1);
       assert.equal(report.items.filter(item => item.status === 'releasedMarkerRemoved').length, 1);
       assert.equal(report.items.filter(item => item.status === 'markerNotProvenStopped').length, 2);
+      enterPhase('apply-view');
       await expect(page.getByText('Служебного маркера нет')).toBeVisible();
       await expect(page.getByText('Резерв освобождён — служебный маркер можно удалить')).toHaveCount(0);
       await expect(page.getByRole('button', { name: /Очистить маркеры/ })).toBeDisabled();
     } else if (writerRoot) {
+      enterPhase('apply-json');
       const report = await applied.json();
       assert.equal(report.settled, 1);
       assert.equal(report.items.filter(item => item.status === 'releasedMissingStage').length, 1);
       assert.equal(report.items.filter(item => item.status === 'writerNotProvenStopped').length, 1);
       assert.equal(report.items.filter(item => item.status === 'incompleteFile').length, 2);
+      enterPhase('apply-view');
       await expect(page.getByText('Файл отсутствует, запись остановлена — резерв можно освободить')).toHaveCount(0);
       await expect(page.getByText('Файл неполный — резерв сохранён')).toHaveCount(2);
       await expect(page.getByText('Запись файла может продолжаться — резерв сохранён')).toBeVisible();
       await expect(page.getByRole('button', { name: /Подтвердить восстановление/ })).toBeDisabled();
     }
     if (!releasedMarkers) {
+      enterPhase('apply-view');
       await expect(page.getByText('Полный файл — можно подтвердить')).toHaveCount(0, { timeout: 15_000 });
       await expect.poll(async () => page.locator('section').first().innerText(), { timeout: 15_000 })
         .toContain(`Ожидающих резервов всех загрузок: ${writerRoot ? 3 : 2}`);
     }
   }
+  enterPhase('final-assertions');
   assert.deepEqual(browserErrors, []);
   assert.deepEqual(externalRequests, []);
   console.log(`Storage capacity ${liveApi ? 'owned backend' : 'visual'} browser check passed at 1280px and 390px; no console errors or external requests.`);
+} catch (error) {
+  recordPhase('failed', error);
+  throw error;
 } finally {
-  if (browser) await browser.close();
-  if (vite) await vite.close();
+  if (browser) { enterPhase('browser-close'); await browser.close(); }
+  if (vite) { enterPhase('vite-close'); await vite.close(); }
 }
+enterPhase('done');

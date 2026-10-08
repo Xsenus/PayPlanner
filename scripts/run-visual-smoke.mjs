@@ -285,22 +285,74 @@ async function prepareAuth(context, frontendUrl, token, email, password, timeout
   return false;
 }
 
-async function checkPage({ page, frontendUrl, route, viewportName, themeName, timeoutMs, artifactDir, toastPreview, selectionPreview }) {
+export function safeResourceUrl(value) {
+  try {
+    const url = new URL(value);
+    const pathname = url.pathname.replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, ':id')
+      .replace(/\/\d+(?=\/|$)/g, '/:id');
+    return `${url.origin}${pathname}`;
+  } catch {
+    return '<invalid-resource-url>';
+  }
+}
+
+export async function withRouteDiagnostics(page, inspect) {
   const consoleErrors = [];
   const pageErrors = [];
-
-  page.on('console', (message) => {
-    if (message.type() !== 'error') return;
-
-    const text = message.text();
-    if (!isIgnoredConsoleMessage(text)) {
+  const networkErrors = [];
+  const expectedNavigationAborts = [];
+  const observedRequests = new WeakSet();
+  let navigationStartedAt;
+  let navigationPending = false;
+  const requestLabel = request => `${request.method()} ${safeResourceUrl(request.url())}`;
+  const listeners = {
+    console(message) {
+      if (message.type() !== 'error' || isIgnoredConsoleMessage(message.text())) return;
       const locationUrl = message.location().url;
-      consoleErrors.push(locationUrl ? `${text} (${locationUrl})` : text);
-    }
-  });
-  page.on('pageerror', (error) => {
-    pageErrors.push(error.message);
-  });
+      consoleErrors.push(locationUrl ? `${message.text()} (${safeResourceUrl(locationUrl)})` : message.text());
+    },
+    pageerror(error) { pageErrors.push(error.message); },
+    request(request) { observedRequests.add(request); },
+    response(response) {
+      if (response.status() >= 400)
+        networkErrors.push(`HTTP ${response.status()}: ${requestLabel(response.request())}`);
+    },
+    requestfailed(request) {
+      const rawReason = request.failure()?.errorText ?? '';
+      const reason = /^(net::ERR_[A-Z0-9_]+|NS_ERROR_[A-Z0-9_]+)$/.test(rawReason) ? rawReason : 'unknown-transport-error';
+      let startedAt;
+      try { startedAt = request.timing().startTime; } catch { /* Missing timing cannot qualify an expected abort. */ }
+      // Only an older request cancelled during our explicit next-document
+      // navigation is an expected teardown. New/current requests still fail.
+      if (navigationPending && !observedRequests.has(request) && reason === 'net::ERR_ABORTED'
+        && Number.isFinite(startedAt) && startedAt > 0 && startedAt < navigationStartedAt) {
+        expectedNavigationAborts.push(requestLabel(request));
+        return;
+      }
+      networkErrors.push(`requestfailed: ${requestLabel(request)} (${reason})`);
+    },
+  };
+  for (const [event, listener] of Object.entries(listeners)) page.on(event, listener);
+  try {
+    return await inspect({ consoleErrors, pageErrors, networkErrors, expectedNavigationAborts,
+      beginNavigation() { navigationStartedAt = Date.now(); navigationPending = true; },
+      endNavigation() { navigationPending = false; },
+    });
+  } catch (error) {
+    console.error('Visual route diagnostics: ' + JSON.stringify({ consoleErrors, pageErrors, networkErrors,
+      expectedNavigationAbortCount: expectedNavigationAborts.length }));
+    throw error;
+  } finally {
+    for (const [event, listener] of Object.entries(listeners)) page.off(event, listener);
+  }
+}
+
+async function checkPage(options) {
+  return withRouteDiagnostics(options.page, diagnostics => checkObservedPage({ ...options, diagnostics }));
+}
+
+async function checkObservedPage({ page, frontendUrl, route, viewportName, themeName, timeoutMs, artifactDir, toastPreview, selectionPreview, diagnostics }) {
+  const { consoleErrors, pageErrors, networkErrors, expectedNavigationAborts } = diagnostics;
 
   await page.evaluate(() => {
     try {
@@ -310,8 +362,16 @@ async function checkPage({ page, frontendUrl, route, viewportName, themeName, ti
     }
   }).catch(() => undefined);
 
-  await page.goto(buildUrl(frontendUrl, route.path, toastPreview), { waitUntil: 'domcontentloaded', timeout: timeoutMs });
+  diagnostics.beginNavigation();
+  try {
+    await page.goto(buildUrl(frontendUrl, route.path, toastPreview), { waitUntil: 'domcontentloaded', timeout: timeoutMs });
+  } finally {
+    diagnostics.endNavigation();
+  }
   await page.waitForLoadState('load', { timeout: Math.min(timeoutMs, 3_000) }).catch(() => undefined);
+  // Lazy route chunks and their API reads can start after the document load event.
+  // Capture only after those requests settle, within the existing page timeout.
+  await page.waitForLoadState('networkidle', { timeout: timeoutMs });
   await page.locator('body').waitFor({ state: 'visible', timeout: timeoutMs });
   await page.waitForTimeout(500);
   await page.waitForFunction(() => {
@@ -655,6 +715,9 @@ async function checkPage({ page, frontendUrl, route, viewportName, themeName, ti
   for (const text of pageErrors) {
     failures.push(`pageerror: ${text}`);
   }
+  failures.push(...networkErrors);
+  if (expectedNavigationAborts.length > 0)
+    console.log(`Expected prior-page navigation aborts [${viewportName}] ${route.name}: ${expectedNavigationAborts.length}`);
 
   return {
     route: route.name,

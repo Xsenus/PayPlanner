@@ -109,7 +109,8 @@ public sealed class TaskFileQueueWireIntegrationTests
         else
         {
             if (live is not null) await live.AssertAuthenticationAsync(authentication.Token, taskId);
-            await runtime.CheckUploadBrowserAsync(taskId, cardMode, CompleteQueueAsync, flow, live?.Address, delayCardSettings);
+            await runtime.CheckUploadBrowserAsync(taskId, cardMode, CompleteQueueAsync, flow, live?.Address, delayCardSettings,
+                completionUserId: flow is "completion" or "completionSaveFailure" ? authentication.User.Id : null);
         }
 
         async Task CompleteQueueAsync()

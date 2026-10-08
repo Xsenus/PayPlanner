@@ -1,5 +1,7 @@
+// @vitest-environment node
+
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import { test } from 'vitest';
 import { runTaskUploadRoute } from './task-upload-route-lifecycle.mjs';
 
 test('returns the real route result', async () => {

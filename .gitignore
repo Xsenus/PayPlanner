@@ -21,6 +21,8 @@ coverage/
 .cypress/
 .playwright/
 .codex-build/
+.playwright-cli/
+output/
 
 # Editor / OS
 .DS_Store

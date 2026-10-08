@@ -365,27 +365,77 @@ internal sealed class SyntheticWritableBackendProcess : IAsyncDisposable
             start.Environment["STORAGE_CAPACITY_WRITER_ROOT"] = Root;
         }
         using var process = Process.Start(start) ?? throw new InvalidOperationException("Browser fixture could not start.");
-        var output = process.StandardOutput.ReadToEndAsync();
+        var phases = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        var receivedPhases = 0;
+        var output = ReadOutputAsync();
         var errors = process.StandardError.ReadToEndAsync();
+        var pipes = Task.WhenAll(output, errors);
+        ObservePipeFailure(output);
+        ObservePipeFailure(errors);
+        ObservePipeFailure(pipes);
+        Exception? primaryFailure = null;
         try
         {
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(90));
             await process.WaitForExitAsync(timeout.Token);
-            Assert.True(process.ExitCode == 0, await errors);
-            Assert.Contains("Storage capacity owned backend browser check passed", await output);
+            await pipes.WaitAsync(timeout.Token);
+            Assert.True(process.ExitCode == 0, "Storage capacity browser exited unsuccessfully. " + PhaseSummary());
+            Assert.True((await output).Contains("Storage capacity owned backend browser check passed", StringComparison.Ordinal),
+                "Storage capacity browser did not report its required success marker. " + PhaseSummary());
+        }
+        catch (OperationCanceledException error)
+        {
+            primaryFailure = new TimeoutException("Storage capacity browser exceeded its existing 90-second limit. " + PhaseSummary(), error);
+            throw primaryFailure;
+        }
+        catch (Exception error)
+        {
+            primaryFailure = error;
+            throw;
         }
         finally
         {
-            if (!process.HasExited)
+            using var cleanupTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            try
             {
-                process.Kill(entireProcessTree: true);
-                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-                await process.WaitForExitAsync(timeout.Token);
+                if (!process.HasExited) process.Kill(entireProcessTree: true);
+                await process.WaitForExitAsync(cleanupTimeout.Token);
+                await pipes.WaitAsync(cleanupTimeout.Token);
+            }
+            catch (Exception) when (primaryFailure is not null)
+            {
+                // Keep the scenario failure. Pipe faults are observed even if
+                // a killed process cannot finish draining in the cleanup budget.
             }
         }
+
+        string PhaseSummary()
+            => phases.IsEmpty ? "No validated phase markers were received."
+                : "Validated browser phases:" + Environment.NewLine + string.Join(Environment.NewLine, phases.ToArray());
+
+        async Task<string> ReadOutputAsync()
+        {
+            var captured = new System.Text.StringBuilder();
+            while (await process.StandardOutput.ReadLineAsync() is { } line)
+            {
+                captured.AppendLine(line);
+                if (line.Length <= 400 && IsSafePhase(line) && Interlocked.Increment(ref receivedPhases) <= 64)
+                    phases.Enqueue(line);
+            }
+            return captured.ToString();
+        }
+
+        static void ObservePipeFailure(Task task)
+            => _ = task.ContinueWith(static completed => { _ = completed.Exception; }, CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+
+        static bool IsSafePhase(string line)
+            => Regex.IsMatch(line,
+                @"\APP_STORAGE_CAPACITY_BROWSER_PHASE \{""Phase"":""(?:module-ready|create-server|vite-listen|entry-transform|launch-msedge|launch-chrome|launch-chromium|browser-context|new-page|fixture-navigation|preview-assertions|screenshots-directory|viewport-1280|screenshot-1280|viewport-390|screenshot-390|writer-create|apply-click|apply-response|apply-json|apply-view|final-assertions|browser-close|vite-close|done)"",""Event"":""(?:enter|failed|attempt-failed)"",""ElapsedMs"":[0-9]{1,9},""ProcessUptimeMs"":[0-9]{1,9},""BrowserErrors"":[0-9]{1,9},""OutsideRequests"":[0-9]{1,9},""Screenshots"":[0-9]{1,9},""ErrorKind"":""(?:none|timeout|assertion|error|unknown)""\}\z",
+                RegexOptions.CultureInvariant);
     }
 
-    public async Task CheckUploadBrowserAsync(int taskId, string cardMode, Func<Task>? completeQueue = null, string flow = "replay", Uri? apiAddress = null, bool delayCardSettings = false)
+    public async Task CheckUploadBrowserAsync(int taskId, string cardMode, Func<Task>? completeQueue = null, string flow = "replay", Uri? apiAddress = null, bool delayCardSettings = false, int? completionUserId = null)
     {
         var repository = FindRepositoryDirectory();
         var start = new ProcessStartInfo("node")
@@ -415,6 +465,12 @@ internal sealed class SyntheticWritableBackendProcess : IAsyncDisposable
         start.Environment["TASK_UPLOAD_QUEUE_REPLAY"] = completeQueue is not null ? "true" : "false";
         start.Environment["TASK_UPLOAD_FLOW"] = flow;
         start.Environment["TASK_UPLOAD_DELAY_CARD_SETTINGS"] = delayCardSettings ? "true" : "false";
+        if (flow is "completion" or "completionSaveFailure")
+        {
+            Assert.True(completionUserId is > 0, "Completion preferences require the authenticated synthetic user.");
+            start.Environment["TASK_UPLOAD_COMPLETION_USER_ID"] = completionUserId.GetValueOrDefault()
+                .ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
         using var process = Process.Start(start) ?? throw new InvalidOperationException("Browser fixture could not start.");
         var stderr = process.StandardError.ReadToEndAsync();
         var latestStage = "starting";

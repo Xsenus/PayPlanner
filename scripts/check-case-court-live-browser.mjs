@@ -90,6 +90,9 @@ try {
   }
   vite = await createServer({ envDir: root, cacheDir: join(root, 'vite-court-cache'), server: { host: '127.0.0.1', port, strictPort: true }, logLevel: 'error' });
   await vite.listen();
+  // Prepare the real entry within the existing scenario budget before browser navigation.
+  const entry = await vite.transformRequest('/src/main.tsx');
+  assert.ok(entry?.code, 'The synthetic court UI entry module must compile successfully.');
   await cli('open', ui + '/cases/' + caseId, '--browser', browser); opened = true;
   await cli('snapshot');
   const settings = JSON.stringify({ api: api.origin, ui, caseId, flow, controlUrl, downloadPath: join(root, 'court-browser-download.html'),

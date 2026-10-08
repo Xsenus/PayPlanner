@@ -100,6 +100,9 @@ try {
   }
   vite = await createServer({ envDir: root, cacheDir: join(root, 'vite-browser-cache'), server: { host: '127.0.0.1', port, strictPort: true }, logLevel: 'error' });
   await vite.listen();
+  // Prepare the real entry within the existing scenario budget before browser navigation.
+  const entry = await vite.transformRequest('/src/main.tsx');
+  assert.ok(entry?.code, 'The synthetic case-document UI entry module must compile successfully.');
   await cli('open', ui + '/cases/' + caseId, '--browser', browser);
   opened = true;
   await cli('snapshot');

@@ -66,6 +66,9 @@ let vite; let opened = false;
 try {
   vite = await createServer({ envDir: root, cacheDir: join(root, 'vite-generated-cache'), server: { host: '127.0.0.1', port, strictPort: true }, logLevel: 'error' });
   await vite.listen();
+  // Prepare the real entry within the existing scenario budget before browser navigation.
+  const entry = await vite.transformRequest('/src/main.tsx');
+  assert.ok(entry?.code, 'The synthetic generated-document UI entry module must compile successfully.');
   await cli('open', ui + (flow === 'generated-modal' ? '/clients/' + clientId : '/cases/' + caseId), '--browser', browser); opened = true;
   await cli('snapshot');
   const settings = JSON.stringify({ api: api.origin, ui, caseId, clientId, flow, email: process.env.CASE_RETIREMENT_EMAIL, password: process.env.CASE_RETIREMENT_PASSWORD });
