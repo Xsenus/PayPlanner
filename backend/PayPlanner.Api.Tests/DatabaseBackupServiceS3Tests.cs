@@ -2950,9 +2950,22 @@ public sealed class DatabaseBackupServiceS3Tests
             backupRoot, TimeSpan.FromSeconds(2), CancellationToken.None);
         try
         {
+            var cancellationClock = System.Diagnostics.Stopwatch.StartNew();
             using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
-            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-                BackupDirectoryLease.AcquireAsync(backupRoot, TimeSpan.FromSeconds(2), cancellation.Token));
+            try
+            {
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                    BackupDirectoryLease.AcquireAsync(backupRoot, TimeSpan.FromSeconds(2), cancellation.Token));
+            }
+            catch
+            {
+                Console.WriteLine("PP_BACKUP_LEASE_CANCELLATION " + JsonSerializer.Serialize(new
+                {
+                    CancellationRequested = cancellation.IsCancellationRequested,
+                    ElapsedMilliseconds = cancellationClock.ElapsedMilliseconds
+                }));
+                throw;
+            }
             await Assert.ThrowsAsync<IOException>(() =>
                 BackupDirectoryLease.AcquireAsync(backupRoot, TimeSpan.FromMilliseconds(50), CancellationToken.None));
         }

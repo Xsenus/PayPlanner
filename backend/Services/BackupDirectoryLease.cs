@@ -31,6 +31,7 @@ public static class BackupDirectoryLease
             }
             catch (IOException ex)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 throw new IOException("Не удалось получить блокировку каталога резервных копий до истечения времени ожидания.", ex);
             }
         }
