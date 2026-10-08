@@ -116,7 +116,8 @@ public sealed partial class StorageStageCapacityServiceTests
     }
 
     private static (StorageStageCapacityService Stages, StorageOriginalReadStagingService Reader,
-        StorageOrchestrationOptions Policy, string Root) CreateSharedBudgetServices(WriterProcessFixture f)
+        StorageOrchestrationOptions Policy, string Root) CreateSharedBudgetServices(WriterProcessFixture f,
+            Func<LocalStorageProvider, IStorageProvider>? localProvider = null)
     {
         var root = Path.Combine(f.Root, "objects");
         Directory.CreateDirectory(root);
@@ -129,8 +130,9 @@ public sealed partial class StorageStageCapacityServiceTests
         var environment = new TestEnvironment(f.Root);
         var policy = new StorageOrchestrationOptions { Enabled = true, UploadCapacityChecksEnabled = true, UploadMinimumFreeBytes = 0 };
         var monitor = new StaticOptions(policy);
+        var native = new LocalStorageProvider(environment, configuration);
         var stages = new StorageStageCapacityService(f.Db,
-            new StorageProviderRegistry([new LocalStorageProvider(environment, configuration)]), monitor, environment, configuration);
+            new StorageProviderRegistry([localProvider?.Invoke(native) ?? native]), monitor, environment, configuration);
         return (stages, new(stages, environment, configuration, monitor, NullLogger<StorageOriginalReadStagingService>.Instance), policy, root);
     }
 

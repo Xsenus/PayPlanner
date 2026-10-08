@@ -20,7 +20,10 @@ public sealed partial class StorageStageCapacityServiceTests
         var sql = new OriginalCopyBudgetMetrics();
         var commits = new CheckpointCommitFault();
         await using var f = await WriterProcessFixture.CreateAsync(postgres, sql, commits);
-        var (_, service, policy, root) = CreateSharedBudgetServices(f);
+        const long availableBound = 64L * 1024 * 1024;
+        var (_, service, policy, root) = CreateSharedBudgetServices(f,
+            local => new OriginalCopyBudgetNativeProvider(local, availableBound));
+        RequireNativeCapacity();
         const long copyBytes = 8L * 1024 * 1024;
         var operation = await AddOwnedCopyBudgetOperationAsync(f, copyBytes, StorageOperationStatuses.Pending, "local");
         var bytes = new byte[StorageStageFileReceipt.MaximumBlockBytes + 4];
@@ -35,9 +38,9 @@ public sealed partial class StorageStageCapacityServiceTests
             Assert.Equal(1, receipt!.Sequence);
             Assert.Equal(StorageStageFileReceipt.MaximumBlockBytes, receipt.PlannedBytes);
             Assert.Equal(StorageStageFileReceipt.MaximumBlockBytes, new FileInfo(Path.Combine(root, row.LocalLocator)).Length);
-            var free = Assert.IsType<long>(LocalStorageCapacityProbe.Observe(root, "owned-native", 0).AvailableBytes);
+            RequireNativeCapacity();
             var headroom = copyBytes * 2 + 4 + (denyTail ? -1 : 1) * 1024 * 1024;
-            policy.UploadMinimumFreeBytes = free - headroom;
+            policy.UploadMinimumFreeBytes = availableBound - headroom;
             Assert.True(headroom > 4); // Its own unwritten tail still fits.
             if (!denyTail) Assert.True(headroom < copyBytes * 2 + bytes.LongLength);
         });
@@ -87,6 +90,16 @@ public sealed partial class StorageStageCapacityServiceTests
         }
         finally { if (result is not null) await result.DisposeAsync(); }
         if (!denyTail) Assert.Empty(Directory.EnumerateFiles(Path.Combine(root, ".original-read-staging"), "*.tmp"));
+
+        void RequireNativeCapacity()
+        {
+            var native = LocalStorageCapacityProbe.Observe(root, "owned-native", 0);
+            var spool = LocalStorageCapacityProbe.Observe(Path.GetTempPath(), "owned-spool", 0);
+            Assert.False(string.IsNullOrWhiteSpace(native.GroupId));
+            Assert.Equal(native.GroupId, spool.GroupId);
+            Assert.True(native.AvailableBytes >= availableBound && spool.AvailableBytes >= availableBound,
+                $"Copy-budget fixture requires at least {availableBound} native bytes; root={native.AvailableBytes}, spool={spool.AvailableBytes}.");
+        }
     }
 
     [Theory]
@@ -170,6 +183,29 @@ public sealed partial class StorageStageCapacityServiceTests
         Assert.Equal(copyBytes, await f.Db.StorageObjectGenerations.Where(g => g.Id == generation.Id).Select(g => g.SizeBytes).SingleAsync());
         Assert.Empty(Directory.EnumerateFiles(Path.Combine(root, ".original-read-staging"), "*.tmp"));
         Assert.Equal(1, await f.Db.StorageObjects.CountAsync());
+    }
+
+    // Cap only this fixture's destination budget; root/spool and native identity remain real.
+    // A loss of actual capacity below the cap must still reach the production guard.
+    private sealed class OriginalCopyBudgetNativeProvider(LocalStorageProvider inner, long availableBound)
+        : IStorageProvider, IStorageCapacityProvider
+    {
+        public string Key => inner.Key;
+        public StorageCapacityDomain CapacityDomain => inner.CapacityDomain;
+        public StorageProviderCapabilities Capabilities => inner.Capabilities;
+        public async Task<StorageCapacityResource> ObserveCapacityAsync(string key, string? connection,
+            long minimum, CancellationToken ct)
+        {
+            var physical = await inner.ObserveCapacityAsync(key, connection, minimum, ct);
+            return physical with
+            {
+                AvailableBytes = physical.AvailableBytes is { } actual ? Math.Min(actual, availableBound) : null
+            };
+        }
+        public Task<StorageWriteResult> PutAsync(StorageWriteRequest request, CancellationToken ct) => inner.PutAsync(request, ct);
+        public Task<StorageObjectMetadata> HeadAsync(string locator, CancellationToken ct) => inner.HeadAsync(locator, ct);
+        public Task<StorageReadResult> OpenReadAsync(string locator, CancellationToken ct) => inner.OpenReadAsync(locator, ct);
+        public Task<StorageDeleteResult> DeleteAsync(string locator, CancellationToken ct) => inner.DeleteAsync(locator, ct);
     }
 
     private sealed class OriginalCopyBudgetMeasuredSource(byte[] bytes, Func<Task> afterPrefix) : MemoryStream(bytes, writable: false)
